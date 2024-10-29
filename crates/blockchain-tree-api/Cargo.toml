@@ -1,0 +1,23 @@
+[package]
+name = "reth-blockchain-tree-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+reth-consensus.workspace = true
+reth-execution-errors.workspace = true
+reth-primitives.workspace = true
+reth-storage-errors.workspace = true
+
+# alloy
+alloy-primitives.workspace = true
+
+# misc
+thiserror.workspace = true

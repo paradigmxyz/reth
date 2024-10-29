@@ -1,53 +1,52 @@
-#[cfg(any(feature = "arbitrary", feature = "zstd-codec"))]
-use crate::compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR};
-use crate::{keccak256, Address, BlockHashOrNumber, Bytes, TxHash, TxKind, B256, U256};
+//! Transaction types.
 
-use alloy_eips::eip2718::Eip2718Error;
-use alloy_rlp::{
-    Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
+use crate::BlockHashOrNumber;
+#[cfg(any(test, feature = "reth-codec"))]
+use alloy_consensus::constants::{EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID};
+use alloy_consensus::{
+    SignableTransaction, Transaction as _, TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy,
 };
-use bytes::Buf;
+use alloy_eips::{
+    eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
+    eip2930::AccessList,
+    eip7702::SignedAuthorization,
+};
+use alloy_primitives::{keccak256, Address, Bytes, ChainId, TxHash, TxKind, B256, U256};
+use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
+use core::mem;
 use derive_more::{AsRef, Deref};
-use once_cell::sync::Lazy;
+use once_cell as _;
+#[cfg(not(feature = "std"))]
+use once_cell::sync::Lazy as LazyLock;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
-use reth_codecs::{add_arbitrary_tests, derive_arbitrary, Compact};
-use reth_rpc_types::ConversionError;
 use serde::{Deserialize, Serialize};
-use std::mem;
-
-pub use access_list::{AccessList, AccessListItem};
-pub use eip1559::TxEip1559;
-pub use eip2930::TxEip2930;
-pub use eip4844::TxEip4844;
+use signature::{decode_with_eip155_chain_id, with_eip155_parity};
+#[cfg(feature = "std")]
+use std::sync::LazyLock;
 
 pub use error::{
     InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
 };
-pub use legacy::TxLegacy;
 pub use meta::TransactionMeta;
-#[cfg(feature = "c-kzg")]
 pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
 #[cfg(all(feature = "c-kzg", any(test, feature = "arbitrary")))]
 pub use sidecar::generate_blob_sidecar;
 #[cfg(feature = "c-kzg")]
-pub use sidecar::{BlobTransaction, BlobTransactionSidecar, BlobTransactionValidationError};
+pub use sidecar::BlobTransactionValidationError;
+pub use sidecar::{BlobTransaction, BlobTransactionSidecar};
 
-pub use signature::Signature;
-pub use tx_type::{
-    TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
+pub use compat::FillTxEnv;
+pub use signature::{
+    extract_chain_id, legacy_parity, recover_signer, recover_signer_unchecked, Signature,
 };
+pub use tx_type::TxType;
 pub use variant::TransactionSignedVariant;
 
-mod access_list;
-mod eip1559;
-mod eip2930;
-mod eip4844;
+pub(crate) mod access_list;
+mod compat;
 mod error;
-mod legacy;
 mod meta;
-#[cfg(feature = "c-kzg")]
 mod pooled;
-#[cfg(feature = "c-kzg")]
 mod sidecar;
 mod signature;
 mod tx_type;
@@ -55,42 +54,37 @@ pub(crate) mod util;
 mod variant;
 
 #[cfg(feature = "optimism")]
-mod optimism;
-
-#[cfg(feature = "optimism")]
-pub use optimism::TxDeposit;
+use op_alloy_consensus::TxDeposit;
 #[cfg(feature = "optimism")]
 pub use tx_type::DEPOSIT_TX_TYPE_ID;
+#[cfg(any(test, feature = "reth-codec"))]
+use tx_type::{
+    COMPACT_EXTENDED_IDENTIFIER_FLAG, COMPACT_IDENTIFIER_EIP1559, COMPACT_IDENTIFIER_EIP2930,
+    COMPACT_IDENTIFIER_LEGACY,
+};
+
+#[cfg(test)]
+use reth_codecs::Compact;
+
+use alloc::vec::Vec;
 
 /// Either a transaction hash or number.
 pub type TxHashOrNumber = BlockHashOrNumber;
 
 // Expected number of transactions where we can expect a speed-up by recovering the senders in
 // parallel.
-pub(crate) static PARALLEL_SENDER_RECOVERY_THRESHOLD: Lazy<usize> =
-    Lazy::new(|| match rayon::current_num_threads() {
+pub(crate) static PARALLEL_SENDER_RECOVERY_THRESHOLD: LazyLock<usize> =
+    LazyLock::new(|| match rayon::current_num_threads() {
         0..=1 => usize::MAX,
         2..=8 => 10,
         _ => 5,
     });
 
-/// Minimum length of a rlp-encoded legacy transaction.
-pub const MIN_LENGTH_LEGACY_TX_ENCODED: usize = 10;
-/// Minimum length of a rlp-encoded eip2930 transaction.
-pub const MIN_LENGTH_EIP2930_TX_ENCODED: usize = 14;
-/// Minimum length of a rlp-encoded eip1559 transaction.
-pub const MIN_LENGTH_EIP1559_TX_ENCODED: usize = 15;
-/// Minimum length of a rlp-encoded eip4844 transaction.
-pub const MIN_LENGTH_EIP4844_TX_ENCODED: usize = 17;
-/// Minimum length of a rlp-encoded deposit transaction.
-#[cfg(feature = "optimism")]
-pub const MIN_LENGTH_DEPOSIT_TX_ENCODED: usize = 65;
-
 /// A raw transaction.
 ///
 /// Transaction types were introduced in [EIP-2718](https://eips.ethereum.org/EIPS/eip-2718).
-#[derive_arbitrary(compact)]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, derive_more::From)]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 pub enum Transaction {
     /// Legacy transaction (type `0x0`).
     ///
@@ -131,9 +125,56 @@ pub enum Transaction {
     /// EIP-4844, also known as proto-danksharding, implements the framework and logic of
     /// danksharding, introducing new transaction formats and verification rules.
     Eip4844(TxEip4844),
+    /// EOA Set Code Transactions ([EIP-7702](https://eips.ethereum.org/EIPS/eip-7702)), type `0x4`.
+    ///
+    /// EOA Set Code Transactions give the ability to temporarily set contract code for an
+    /// EOA for a single transaction. This allows for temporarily adding smart contract
+    /// functionality to the EOA.
+    Eip7702(TxEip7702),
     /// Optimism deposit transaction.
     #[cfg(feature = "optimism")]
     Deposit(TxDeposit),
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a> arbitrary::Arbitrary<'a> for Transaction {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let mut tx = match TxType::arbitrary(u)? {
+            TxType::Legacy => {
+                let tx = TxLegacy::arbitrary(u)?;
+                Self::Legacy(tx)
+            }
+            TxType::Eip2930 => {
+                let tx = TxEip2930::arbitrary(u)?;
+                Self::Eip2930(tx)
+            }
+            TxType::Eip1559 => {
+                let tx = TxEip1559::arbitrary(u)?;
+                Self::Eip1559(tx)
+            }
+            TxType::Eip4844 => {
+                let tx = TxEip4844::arbitrary(u)?;
+                Self::Eip4844(tx)
+            }
+
+            TxType::Eip7702 => {
+                let tx = TxEip7702::arbitrary(u)?;
+                Self::Eip7702(tx)
+            }
+            #[cfg(feature = "optimism")]
+            TxType::Deposit => {
+                let tx = TxDeposit::arbitrary(u)?;
+                Self::Deposit(tx)
+            }
+        };
+
+        // Otherwise we might overflow when calculating `v` on `recalculate_hash`
+        if let Some(chain_id) = tx.chain_id() {
+            tx.set_chain_id(chain_id % (u64::MAX / 2 - 36));
+        }
+
+        Ok(tx)
+    }
 }
 
 // === impl Transaction ===
@@ -143,49 +184,41 @@ impl Transaction {
     /// It is only for signature signing or signer recovery.
     pub fn signature_hash(&self) -> B256 {
         match self {
-            Transaction::Legacy(tx) => tx.signature_hash(),
-            Transaction::Eip2930(tx) => tx.signature_hash(),
-            Transaction::Eip1559(tx) => tx.signature_hash(),
-            Transaction::Eip4844(tx) => tx.signature_hash(),
+            Self::Legacy(tx) => tx.signature_hash(),
+            Self::Eip2930(tx) => tx.signature_hash(),
+            Self::Eip1559(tx) => tx.signature_hash(),
+            Self::Eip4844(tx) => tx.signature_hash(),
+            Self::Eip7702(tx) => tx.signature_hash(),
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => B256::ZERO,
-        }
-    }
-
-    /// Get chain_id.
-    pub fn chain_id(&self) -> Option<u64> {
-        match self {
-            Transaction::Legacy(TxLegacy { chain_id, .. }) => *chain_id,
-            Transaction::Eip2930(TxEip2930 { chain_id, .. }) |
-            Transaction::Eip1559(TxEip1559 { chain_id, .. }) |
-            Transaction::Eip4844(TxEip4844 { chain_id, .. }) => Some(*chain_id),
-            #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => None,
+            Self::Deposit(_) => B256::ZERO,
         }
     }
 
     /// Sets the transaction's chain id to the provided value.
     pub fn set_chain_id(&mut self, chain_id: u64) {
         match self {
-            Transaction::Legacy(TxLegacy { chain_id: ref mut c, .. }) => *c = Some(chain_id),
-            Transaction::Eip2930(TxEip2930 { chain_id: ref mut c, .. }) |
-            Transaction::Eip1559(TxEip1559 { chain_id: ref mut c, .. }) |
-            Transaction::Eip4844(TxEip4844 { chain_id: ref mut c, .. }) => *c = chain_id,
+            Self::Legacy(TxLegacy { chain_id: ref mut c, .. }) => *c = Some(chain_id),
+            Self::Eip2930(TxEip2930 { chain_id: ref mut c, .. }) |
+            Self::Eip1559(TxEip1559 { chain_id: ref mut c, .. }) |
+            Self::Eip4844(TxEip4844 { chain_id: ref mut c, .. }) |
+            Self::Eip7702(TxEip7702 { chain_id: ref mut c, .. }) => *c = chain_id,
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => { /* noop */ }
+            Self::Deposit(_) => { /* noop */ }
         }
     }
 
     /// Gets the transaction's [`TxKind`], which is the address of the recipient or
     /// [`TxKind::Create`] if the transaction is a contract creation.
-    pub fn kind(&self) -> &TxKind {
+    pub const fn kind(&self) -> TxKind {
         match self {
-            Transaction::Legacy(TxLegacy { to, .. }) |
-            Transaction::Eip2930(TxEip2930 { to, .. }) |
-            Transaction::Eip1559(TxEip1559 { to, .. }) |
-            Transaction::Eip4844(TxEip4844 { to, .. }) => to,
+            Self::Legacy(TxLegacy { to, .. }) |
+            Self::Eip2930(TxEip2930 { to, .. }) |
+            Self::Eip1559(TxEip1559 { to, .. }) => *to,
+            Self::Eip4844(TxEip4844 { to, .. }) | Self::Eip7702(TxEip7702 { to, .. }) => {
+                TxKind::Call(*to)
+            }
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(TxDeposit { to, .. }) => to,
+            Self::Deposit(TxDeposit { to, .. }) => *to,
         }
     }
 
@@ -198,136 +231,65 @@ impl Transaction {
     }
 
     /// Get the transaction's type
-    pub fn tx_type(&self) -> TxType {
+    pub const fn tx_type(&self) -> TxType {
         match self {
-            Transaction::Legacy(legacy_tx) => legacy_tx.tx_type(),
-            Transaction::Eip2930(access_list_tx) => access_list_tx.tx_type(),
-            Transaction::Eip1559(dynamic_fee_tx) => dynamic_fee_tx.tx_type(),
-            Transaction::Eip4844(blob_tx) => blob_tx.tx_type(),
+            Self::Legacy(_) => TxType::Legacy,
+            Self::Eip2930(_) => TxType::Eip2930,
+            Self::Eip1559(_) => TxType::Eip1559,
+            Self::Eip4844(_) => TxType::Eip4844,
+            Self::Eip7702(_) => TxType::Eip7702,
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(deposit_tx) => deposit_tx.tx_type(),
+            Self::Deposit(_) => TxType::Deposit,
         }
     }
 
-    /// Gets the transaction's value field.
-    pub fn value(&self) -> U256 {
-        *match self {
-            Transaction::Legacy(TxLegacy { value, .. }) |
-            Transaction::Eip2930(TxEip2930 { value, .. }) |
-            Transaction::Eip1559(TxEip1559 { value, .. }) |
-            Transaction::Eip4844(TxEip4844 { value, .. }) => value,
-            #[cfg(feature = "optimism")]
-            Transaction::Deposit(TxDeposit { value, .. }) => value,
-        }
-    }
-
-    /// Get the transaction's nonce.
-    pub fn nonce(&self) -> u64 {
-        match self {
-            Transaction::Legacy(TxLegacy { nonce, .. }) |
-            Transaction::Eip2930(TxEip2930 { nonce, .. }) |
-            Transaction::Eip1559(TxEip1559 { nonce, .. }) |
-            Transaction::Eip4844(TxEip4844 { nonce, .. }) => *nonce,
-            // Deposit transactions do not have nonces.
-            #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => 0,
-        }
-    }
-
-    /// Returns the [AccessList] of the transaction.
+    /// Returns the [`AccessList`] of the transaction.
     ///
     /// Returns `None` for legacy transactions.
-    pub fn access_list(&self) -> Option<&AccessList> {
+    pub const fn access_list(&self) -> Option<&AccessList> {
         match self {
-            Transaction::Legacy(_) => None,
-            Transaction::Eip2930(tx) => Some(&tx.access_list),
-            Transaction::Eip1559(tx) => Some(&tx.access_list),
-            Transaction::Eip4844(tx) => Some(&tx.access_list),
+            Self::Legacy(_) => None,
+            Self::Eip2930(tx) => Some(&tx.access_list),
+            Self::Eip1559(tx) => Some(&tx.access_list),
+            Self::Eip4844(tx) => Some(&tx.access_list),
+            Self::Eip7702(tx) => Some(&tx.access_list),
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => None,
+            Self::Deposit(_) => None,
         }
     }
 
-    /// Get the gas limit of the transaction.
-    pub fn gas_limit(&self) -> u64 {
+    /// Returns the [`SignedAuthorization`] list of the transaction.
+    ///
+    /// Returns `None` if this transaction is not EIP-7702.
+    pub fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
         match self {
-            Transaction::Legacy(TxLegacy { gas_limit, .. }) |
-            Transaction::Eip2930(TxEip2930 { gas_limit, .. }) |
-            Transaction::Eip1559(TxEip1559 { gas_limit, .. }) |
-            Transaction::Eip4844(TxEip4844 { gas_limit, .. }) => *gas_limit,
-            #[cfg(feature = "optimism")]
-            Transaction::Deposit(TxDeposit { gas_limit, .. }) => *gas_limit,
+            Self::Eip7702(tx) => Some(&tx.authorization_list),
+            _ => None,
         }
     }
 
     /// Returns true if the tx supports dynamic fees
-    pub fn is_dynamic_fee(&self) -> bool {
+    pub const fn is_dynamic_fee(&self) -> bool {
         match self {
-            Transaction::Legacy(_) | Transaction::Eip2930(_) => false,
-            Transaction::Eip1559(_) | Transaction::Eip4844(_) => true,
+            Self::Legacy(_) | Self::Eip2930(_) => false,
+            Self::Eip1559(_) | Self::Eip4844(_) | Self::Eip7702(_) => true,
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => false,
+            Self::Deposit(_) => false,
         }
     }
 
-    /// Max fee per gas for eip1559 transaction, for legacy transactions this is gas_price.
-    ///
-    /// This is also commonly referred to as the "Gas Fee Cap" (`GasFeeCap`).
-    pub fn max_fee_per_gas(&self) -> u128 {
-        match self {
-            Transaction::Legacy(TxLegacy { gas_price, .. }) |
-            Transaction::Eip2930(TxEip2930 { gas_price, .. }) => *gas_price,
-            Transaction::Eip1559(TxEip1559 { max_fee_per_gas, .. }) |
-            Transaction::Eip4844(TxEip4844 { max_fee_per_gas, .. }) => *max_fee_per_gas,
-            // Deposit transactions buy their L2 gas on L1 and, as such, the L2 gas is not
-            // refundable.
-            #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => 0,
-        }
-    }
-
-    /// Max priority fee per gas for eip1559 transaction, for legacy and eip2930 transactions this
-    /// is `None`
-    ///
-    /// This is also commonly referred to as the "Gas Tip Cap" (`GasTipCap`).
-    pub fn max_priority_fee_per_gas(&self) -> Option<u128> {
-        match self {
-            Transaction::Legacy(_) | Transaction::Eip2930(_) => None,
-            Transaction::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. }) |
-            Transaction::Eip4844(TxEip4844 { max_priority_fee_per_gas, .. }) => {
-                Some(*max_priority_fee_per_gas)
-            }
-            #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => None,
-        }
-    }
-
-    /// Blob versioned hashes for eip4844 transaction, for legacy,eip1559 and eip2930 transactions
-    /// this is `None`
+    /// Blob versioned hashes for eip4844 transaction, for legacy, eip1559, eip2930 and eip7702
+    /// transactions this is `None`
     ///
     /// This is also commonly referred to as the "blob versioned hashes" (`BlobVersionedHashes`).
     pub fn blob_versioned_hashes(&self) -> Option<Vec<B256>> {
         match self {
-            Transaction::Legacy(_) | Transaction::Eip2930(_) | Transaction::Eip1559(_) => None,
-            Transaction::Eip4844(TxEip4844 { blob_versioned_hashes, .. }) => {
-                Some(blob_versioned_hashes.to_vec())
+            Self::Legacy(_) | Self::Eip2930(_) | Self::Eip1559(_) | Self::Eip7702(_) => None,
+            Self::Eip4844(TxEip4844 { blob_versioned_hashes, .. }) => {
+                Some(blob_versioned_hashes.clone())
             }
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => None,
-        }
-    }
-
-    /// Max fee per blob gas for eip4844 transaction [TxEip4844].
-    ///
-    /// Returns `None` for non-eip4844 transactions.
-    ///
-    /// This is also commonly referred to as the "Blob Gas Fee Cap" (`BlobGasFeeCap`).
-    pub fn max_fee_per_blob_gas(&self) -> Option<u128> {
-        match self {
-            Transaction::Eip4844(TxEip4844 { max_fee_per_blob_gas, .. }) => {
-                Some(*max_fee_per_blob_gas)
-            }
-            _ => None,
+            Self::Deposit(_) => None,
         }
     }
 
@@ -335,42 +297,23 @@ impl Transaction {
     /// transaction.
     ///
     /// This is the number of blobs times the
-    /// [DATA_GAS_PER_BLOB](crate::constants::eip4844::DATA_GAS_PER_BLOB) a single blob consumes.
+    /// [`DATA_GAS_PER_BLOB`](alloy_eips::eip4844::DATA_GAS_PER_BLOB) a single blob consumes.
     pub fn blob_gas_used(&self) -> Option<u64> {
         self.as_eip4844().map(TxEip4844::blob_gas)
-    }
-
-    /// Return the max priority fee per gas if the transaction is an EIP-1559 transaction, and
-    /// otherwise return the gas price.
-    ///
-    /// # Warning
-    ///
-    /// This is different than the `max_priority_fee_per_gas` method, which returns `None` for
-    /// non-EIP-1559 transactions.
-    pub fn priority_fee_or_price(&self) -> u128 {
-        match self {
-            Transaction::Legacy(TxLegacy { gas_price, .. }) |
-            Transaction::Eip2930(TxEip2930 { gas_price, .. }) => *gas_price,
-            Transaction::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. }) |
-            Transaction::Eip4844(TxEip4844 { max_priority_fee_per_gas, .. }) => {
-                *max_priority_fee_per_gas
-            }
-            #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => 0,
-        }
     }
 
     /// Returns the effective gas price for the given base fee.
     ///
     /// If the transaction is a legacy or EIP2930 transaction, the gas price is returned.
-    pub fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+    pub const fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
         match self {
-            Transaction::Legacy(tx) => tx.gas_price,
-            Transaction::Eip2930(tx) => tx.gas_price,
-            Transaction::Eip1559(dynamic_tx) => dynamic_tx.effective_gas_price(base_fee),
-            Transaction::Eip4844(dynamic_tx) => dynamic_tx.effective_gas_price(base_fee),
+            Self::Legacy(tx) => tx.gas_price,
+            Self::Eip2930(tx) => tx.gas_price,
+            Self::Eip1559(dynamic_tx) => dynamic_tx.effective_gas_price(base_fee),
+            Self::Eip4844(dynamic_tx) => dynamic_tx.effective_gas_price(base_fee),
+            Self::Eip7702(dynamic_tx) => dynamic_tx.effective_gas_price(base_fee),
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => 0,
+            Self::Deposit(_) => 0,
         }
     }
 
@@ -380,7 +323,7 @@ impl Transaction {
     /// If the base fee is `None`, the `max_priority_fee_per_gas`, or gas price for non-EIP1559
     /// transactions is returned.
     ///
-    /// Returns `None` if the basefee is higher than the [Transaction::max_fee_per_gas].
+    /// Returns `None` if the basefee is higher than the [`Transaction::max_fee_per_gas`].
     pub fn effective_tip_per_gas(&self, base_fee: Option<u64>) -> Option<u128> {
         let base_fee = match base_fee {
             Some(base_fee) => base_fee as u128,
@@ -406,23 +349,24 @@ impl Transaction {
     }
 
     /// Get the transaction's input field.
-    pub fn input(&self) -> &Bytes {
+    pub const fn input(&self) -> &Bytes {
         match self {
-            Transaction::Legacy(TxLegacy { input, .. }) |
-            Transaction::Eip2930(TxEip2930 { input, .. }) |
-            Transaction::Eip1559(TxEip1559 { input, .. }) |
-            Transaction::Eip4844(TxEip4844 { input, .. }) => input,
+            Self::Legacy(TxLegacy { input, .. }) |
+            Self::Eip2930(TxEip2930 { input, .. }) |
+            Self::Eip1559(TxEip1559 { input, .. }) |
+            Self::Eip4844(TxEip4844 { input, .. }) |
+            Self::Eip7702(TxEip7702 { input, .. }) => input,
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(TxDeposit { input, .. }) => input,
+            Self::Deposit(TxDeposit { input, .. }) => input,
         }
     }
 
     /// Returns the source hash of the transaction, which uniquely identifies its source.
     /// If not a deposit transaction, this will always return `None`.
     #[cfg(feature = "optimism")]
-    pub fn source_hash(&self) -> Option<B256> {
+    pub const fn source_hash(&self) -> Option<B256> {
         match self {
-            Transaction::Deposit(TxDeposit { source_hash, .. }) => Some(*source_hash),
+            Self::Deposit(TxDeposit { source_hash, .. }) => Some(*source_hash),
             _ => None,
         }
     }
@@ -430,9 +374,9 @@ impl Transaction {
     /// Returns the amount of ETH locked up on L1 that will be minted on L2. If the transaction
     /// is not a deposit transaction, this will always return `None`.
     #[cfg(feature = "optimism")]
-    pub fn mint(&self) -> Option<u128> {
+    pub const fn mint(&self) -> Option<u128> {
         match self {
-            Transaction::Deposit(TxDeposit { mint, .. }) => *mint,
+            Self::Deposit(TxDeposit { mint, .. }) => *mint,
             _ => None,
         }
     }
@@ -440,17 +384,17 @@ impl Transaction {
     /// Returns whether or not the transaction is a system transaction. If the transaction
     /// is not a deposit transaction, this will always return `false`.
     #[cfg(feature = "optimism")]
-    pub fn is_system_transaction(&self) -> bool {
+    pub const fn is_system_transaction(&self) -> bool {
         match self {
-            Transaction::Deposit(TxDeposit { is_system_transaction, .. }) => *is_system_transaction,
+            Self::Deposit(TxDeposit { is_system_transaction, .. }) => *is_system_transaction,
             _ => false,
         }
     }
 
     /// Returns whether or not the transaction is an Optimism Deposited transaction.
     #[cfg(feature = "optimism")]
-    pub fn is_deposit(&self) -> bool {
-        matches!(self, Transaction::Deposit(_))
+    pub const fn is_deposit(&self) -> bool {
+        matches!(self, Self::Deposit(_))
     }
 
     /// This encodes the transaction _without_ the signature, and is only suitable for creating a
@@ -468,57 +412,77 @@ impl Transaction {
         with_header: bool,
     ) {
         match self {
-            Transaction::Legacy(legacy_tx) => {
+            Self::Legacy(legacy_tx) => {
                 // do nothing w/ with_header
-                legacy_tx.encode_with_signature(signature, out)
+                legacy_tx.encode_with_signature_fields(
+                    &with_eip155_parity(signature, legacy_tx.chain_id),
+                    out,
+                )
             }
-            Transaction::Eip2930(access_list_tx) => {
+            Self::Eip2930(access_list_tx) => {
                 access_list_tx.encode_with_signature(signature, out, with_header)
             }
-            Transaction::Eip1559(dynamic_fee_tx) => {
+            Self::Eip1559(dynamic_fee_tx) => {
                 dynamic_fee_tx.encode_with_signature(signature, out, with_header)
             }
-            Transaction::Eip4844(blob_tx) => {
-                blob_tx.encode_with_signature(signature, out, with_header)
+            Self::Eip4844(blob_tx) => blob_tx.encode_with_signature(signature, out, with_header),
+            Self::Eip7702(set_code_tx) => {
+                set_code_tx.encode_with_signature(signature, out, with_header)
             }
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(deposit_tx) => deposit_tx.encode(out, with_header),
+            Self::Deposit(deposit_tx) => deposit_tx.encode_inner(out, with_header),
+        }
+    }
+
+    /// This sets the transaction's gas limit.
+    pub fn set_gas_limit(&mut self, gas_limit: u64) {
+        match self {
+            Self::Legacy(tx) => tx.gas_limit = gas_limit,
+            Self::Eip2930(tx) => tx.gas_limit = gas_limit,
+            Self::Eip1559(tx) => tx.gas_limit = gas_limit,
+            Self::Eip4844(tx) => tx.gas_limit = gas_limit,
+            Self::Eip7702(tx) => tx.gas_limit = gas_limit,
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.gas_limit = gas_limit,
         }
     }
 
     /// This sets the transaction's nonce.
     pub fn set_nonce(&mut self, nonce: u64) {
         match self {
-            Transaction::Legacy(tx) => tx.nonce = nonce,
-            Transaction::Eip2930(tx) => tx.nonce = nonce,
-            Transaction::Eip1559(tx) => tx.nonce = nonce,
-            Transaction::Eip4844(tx) => tx.nonce = nonce,
+            Self::Legacy(tx) => tx.nonce = nonce,
+            Self::Eip2930(tx) => tx.nonce = nonce,
+            Self::Eip1559(tx) => tx.nonce = nonce,
+            Self::Eip4844(tx) => tx.nonce = nonce,
+            Self::Eip7702(tx) => tx.nonce = nonce,
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => { /* noop */ }
+            Self::Deposit(_) => { /* noop */ }
         }
     }
 
     /// This sets the transaction's value.
     pub fn set_value(&mut self, value: U256) {
         match self {
-            Transaction::Legacy(tx) => tx.value = value,
-            Transaction::Eip2930(tx) => tx.value = value,
-            Transaction::Eip1559(tx) => tx.value = value,
-            Transaction::Eip4844(tx) => tx.value = value,
+            Self::Legacy(tx) => tx.value = value,
+            Self::Eip2930(tx) => tx.value = value,
+            Self::Eip1559(tx) => tx.value = value,
+            Self::Eip4844(tx) => tx.value = value,
+            Self::Eip7702(tx) => tx.value = value,
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(tx) => tx.value = value,
+            Self::Deposit(tx) => tx.value = value,
         }
     }
 
     /// This sets the transaction's input field.
     pub fn set_input(&mut self, input: Bytes) {
         match self {
-            Transaction::Legacy(tx) => tx.input = input,
-            Transaction::Eip2930(tx) => tx.input = input,
-            Transaction::Eip1559(tx) => tx.input = input,
-            Transaction::Eip4844(tx) => tx.input = input,
+            Self::Legacy(tx) => tx.input = input,
+            Self::Eip2930(tx) => tx.input = input,
+            Self::Eip1559(tx) => tx.input = input,
+            Self::Eip4844(tx) => tx.input = input,
+            Self::Eip7702(tx) => tx.input = input,
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(tx) => tx.input = input,
+            Self::Deposit(tx) => tx.input = input,
         }
     }
 
@@ -526,219 +490,114 @@ impl Transaction {
     #[inline]
     pub fn size(&self) -> usize {
         match self {
-            Transaction::Legacy(tx) => tx.size(),
-            Transaction::Eip2930(tx) => tx.size(),
-            Transaction::Eip1559(tx) => tx.size(),
-            Transaction::Eip4844(tx) => tx.size(),
+            Self::Legacy(tx) => tx.size(),
+            Self::Eip2930(tx) => tx.size(),
+            Self::Eip1559(tx) => tx.size(),
+            Self::Eip4844(tx) => tx.size(),
+            Self::Eip7702(tx) => tx.size(),
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(tx) => tx.size(),
+            Self::Deposit(tx) => tx.size(),
         }
     }
 
     /// Returns true if the transaction is a legacy transaction.
     #[inline]
     pub const fn is_legacy(&self) -> bool {
-        matches!(self, Transaction::Legacy(_))
+        matches!(self, Self::Legacy(_))
     }
 
     /// Returns true if the transaction is an EIP-2930 transaction.
     #[inline]
     pub const fn is_eip2930(&self) -> bool {
-        matches!(self, Transaction::Eip2930(_))
+        matches!(self, Self::Eip2930(_))
     }
 
     /// Returns true if the transaction is an EIP-1559 transaction.
     #[inline]
     pub const fn is_eip1559(&self) -> bool {
-        matches!(self, Transaction::Eip1559(_))
+        matches!(self, Self::Eip1559(_))
     }
 
     /// Returns true if the transaction is an EIP-4844 transaction.
     #[inline]
     pub const fn is_eip4844(&self) -> bool {
-        matches!(self, Transaction::Eip4844(_))
+        matches!(self, Self::Eip4844(_))
     }
 
-    /// Returns the [TxLegacy] variant if the transaction is a legacy transaction.
-    pub fn as_legacy(&self) -> Option<&TxLegacy> {
+    /// Returns true if the transaction is an EIP-7702 transaction.
+    #[inline]
+    pub const fn is_eip7702(&self) -> bool {
+        matches!(self, Self::Eip7702(_))
+    }
+
+    /// Returns the [`TxLegacy`] variant if the transaction is a legacy transaction.
+    pub const fn as_legacy(&self) -> Option<&TxLegacy> {
         match self {
-            Transaction::Legacy(tx) => Some(tx),
+            Self::Legacy(tx) => Some(tx),
             _ => None,
         }
     }
 
-    /// Returns the [TxEip2930] variant if the transaction is an EIP-2930 transaction.
-    pub fn as_eip2930(&self) -> Option<&TxEip2930> {
+    /// Returns the [`TxEip2930`] variant if the transaction is an EIP-2930 transaction.
+    pub const fn as_eip2930(&self) -> Option<&TxEip2930> {
         match self {
-            Transaction::Eip2930(tx) => Some(tx),
+            Self::Eip2930(tx) => Some(tx),
             _ => None,
         }
     }
 
-    /// Returns the [TxEip1559] variant if the transaction is an EIP-1559 transaction.
-    pub fn as_eip1559(&self) -> Option<&TxEip1559> {
+    /// Returns the [`TxEip1559`] variant if the transaction is an EIP-1559 transaction.
+    pub const fn as_eip1559(&self) -> Option<&TxEip1559> {
         match self {
-            Transaction::Eip1559(tx) => Some(tx),
+            Self::Eip1559(tx) => Some(tx),
             _ => None,
         }
     }
 
-    /// Returns the [TxEip4844] variant if the transaction is an EIP-4844 transaction.
-    pub fn as_eip4844(&self) -> Option<&TxEip4844> {
+    /// Returns the [`TxEip4844`] variant if the transaction is an EIP-4844 transaction.
+    pub const fn as_eip4844(&self) -> Option<&TxEip4844> {
         match self {
-            Transaction::Eip4844(tx) => Some(tx),
+            Self::Eip4844(tx) => Some(tx),
+            _ => None,
+        }
+    }
+
+    /// Returns the [`TxEip7702`] variant if the transaction is an EIP-7702 transaction.
+    pub const fn as_eip7702(&self) -> Option<&TxEip7702> {
+        match self {
+            Self::Eip7702(tx) => Some(tx),
             _ => None,
         }
     }
 }
 
-impl From<TxLegacy> for Transaction {
-    fn from(tx: TxLegacy) -> Self {
-        Transaction::Legacy(tx)
-    }
-}
-
-impl From<TxEip2930> for Transaction {
-    fn from(tx: TxEip2930) -> Self {
-        Transaction::Eip2930(tx)
-    }
-}
-
-impl From<TxEip1559> for Transaction {
-    fn from(tx: TxEip1559) -> Self {
-        Transaction::Eip1559(tx)
-    }
-}
-
-impl From<TxEip4844> for Transaction {
-    fn from(tx: TxEip4844) -> Self {
-        Transaction::Eip4844(tx)
-    }
-}
-
-impl TryFrom<reth_rpc_types::Transaction> for Transaction {
-    type Error = ConversionError;
-
-    fn try_from(tx: reth_rpc_types::Transaction) -> Result<Self, Self::Error> {
-        match tx.transaction_type.map(TryInto::try_into).transpose().map_err(|_| {
-            ConversionError::Eip2718Error(Eip2718Error::UnexpectedType(
-                tx.transaction_type.unwrap(),
-            ))
-        })? {
-            None | Some(TxType::Legacy) => {
-                // legacy
-                if tx.max_fee_per_gas.is_some() || tx.max_priority_fee_per_gas.is_some() {
-                    return Err(ConversionError::Eip2718Error(
-                        RlpError::Custom("EIP-1559 fields are present in a legacy transaction")
-                            .into(),
-                    ))
-                }
-                Ok(Transaction::Legacy(TxLegacy {
-                    chain_id: tx.chain_id,
-                    nonce: tx.nonce,
-                    gas_price: tx.gas_price.ok_or(ConversionError::MissingGasPrice)?,
-                    gas_limit: tx
-                        .gas
-                        .try_into()
-                        .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
-                    to: tx.to.map_or(TxKind::Create, TxKind::Call),
-                    value: tx.value,
-                    input: tx.input,
-                }))
-            }
-            Some(TxType::Eip2930) => {
-                // eip2930
-                Ok(Transaction::Eip2930(TxEip2930 {
-                    chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
-                    nonce: tx.nonce,
-                    gas_limit: tx
-                        .gas
-                        .try_into()
-                        .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
-                    to: tx.to.map_or(TxKind::Create, TxKind::Call),
-                    value: tx.value,
-                    input: tx.input,
-                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,
-                    gas_price: tx.gas_price.ok_or(ConversionError::MissingGasPrice)?,
-                }))
-            }
-            Some(TxType::Eip1559) => {
-                // EIP-1559
-                Ok(Transaction::Eip1559(TxEip1559 {
-                    chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
-                    nonce: tx.nonce,
-                    max_priority_fee_per_gas: tx
-                        .max_priority_fee_per_gas
-                        .ok_or(ConversionError::MissingMaxPriorityFeePerGas)?,
-                    max_fee_per_gas: tx
-                        .max_fee_per_gas
-                        .ok_or(ConversionError::MissingMaxFeePerGas)?,
-                    gas_limit: tx
-                        .gas
-                        .try_into()
-                        .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
-                    to: tx.to.map_or(TxKind::Create, TxKind::Call),
-                    value: tx.value,
-                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,
-                    input: tx.input,
-                }))
-            }
-            Some(TxType::Eip4844) => {
-                // EIP-4844
-                Ok(Transaction::Eip4844(TxEip4844 {
-                    chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
-                    nonce: tx.nonce,
-                    max_priority_fee_per_gas: tx
-                        .max_priority_fee_per_gas
-                        .ok_or(ConversionError::MissingMaxPriorityFeePerGas)?,
-                    max_fee_per_gas: tx
-                        .max_fee_per_gas
-                        .ok_or(ConversionError::MissingMaxFeePerGas)?,
-                    gas_limit: tx
-                        .gas
-                        .try_into()
-                        .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
-                    to: tx.to.map_or(TxKind::Create, TxKind::Call),
-                    value: tx.value,
-                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,
-                    input: tx.input,
-                    blob_versioned_hashes: tx
-                        .blob_versioned_hashes
-                        .ok_or(ConversionError::MissingBlobVersionedHashes)?,
-                    max_fee_per_blob_gas: tx
-                        .max_fee_per_blob_gas
-                        .ok_or(ConversionError::MissingMaxFeePerBlobGas)?,
-                }))
-            }
-            #[cfg(feature = "optimism")]
-            Some(TxType::Deposit) => todo!(),
-        }
-    }
-}
-
-impl Compact for Transaction {
+#[cfg(any(test, feature = "reth-codec"))]
+impl reth_codecs::Compact for Transaction {
     // Serializes the TxType to the buffer if necessary, returning 2 bits of the type as an
     // identifier instead of the length.
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
         let identifier = self.tx_type().to_compact(buf);
         match self {
-            Transaction::Legacy(tx) => {
+            Self::Legacy(tx) => {
                 tx.to_compact(buf);
             }
-            Transaction::Eip2930(tx) => {
+            Self::Eip2930(tx) => {
                 tx.to_compact(buf);
             }
-            Transaction::Eip1559(tx) => {
+            Self::Eip1559(tx) => {
                 tx.to_compact(buf);
             }
-            Transaction::Eip4844(tx) => {
+            Self::Eip4844(tx) => {
+                tx.to_compact(buf);
+            }
+            Self::Eip7702(tx) => {
                 tx.to_compact(buf);
             }
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(tx) => {
+            Self::Deposit(tx) => {
                 tx.to_compact(buf);
             }
         }
@@ -746,43 +605,56 @@ impl Compact for Transaction {
     }
 
     // For backwards compatibility purposes, only 2 bits of the type are encoded in the identifier
-    // parameter. In the case of a 3, the full transaction type is read from the buffer as a
-    // single byte.
+    // parameter. In the case of a [`COMPACT_EXTENDED_IDENTIFIER_FLAG`], the full transaction type
+    // is read from the buffer as a single byte.
+    //
+    // # Panics
+    //
+    // A panic will be triggered if an identifier larger than 3 is passed from the database. For
+    // optimism a identifier with value [`DEPOSIT_TX_TYPE_ID`] is allowed.
     fn from_compact(mut buf: &[u8], identifier: usize) -> (Self, &[u8]) {
+        use bytes::Buf;
+
         match identifier {
-            0 => {
+            COMPACT_IDENTIFIER_LEGACY => {
                 let (tx, buf) = TxLegacy::from_compact(buf, buf.len());
-                (Transaction::Legacy(tx), buf)
+                (Self::Legacy(tx), buf)
             }
-            1 => {
+            COMPACT_IDENTIFIER_EIP2930 => {
                 let (tx, buf) = TxEip2930::from_compact(buf, buf.len());
-                (Transaction::Eip2930(tx), buf)
+                (Self::Eip2930(tx), buf)
             }
-            2 => {
+            COMPACT_IDENTIFIER_EIP1559 => {
                 let (tx, buf) = TxEip1559::from_compact(buf, buf.len());
-                (Transaction::Eip1559(tx), buf)
+                (Self::Eip1559(tx), buf)
             }
-            3 => {
+            COMPACT_EXTENDED_IDENTIFIER_FLAG => {
                 // An identifier of 3 indicates that the transaction type did not fit into
                 // the backwards compatible 2 bit identifier, their transaction types are
                 // larger than 2 bits (eg. 4844 and Deposit Transactions). In this case,
                 // we need to read the concrete transaction type from the buffer by
                 // reading the full 8 bits (single byte) and match on this transaction type.
-                let identifier = buf.get_u8() as usize;
+                let identifier = buf.get_u8();
                 match identifier {
-                    3 => {
+                    EIP4844_TX_TYPE_ID => {
                         let (tx, buf) = TxEip4844::from_compact(buf, buf.len());
-                        (Transaction::Eip4844(tx), buf)
+                        (Self::Eip4844(tx), buf)
+                    }
+                    EIP7702_TX_TYPE_ID => {
+                        let (tx, buf) = TxEip7702::from_compact(buf, buf.len());
+                        (Self::Eip7702(tx), buf)
                     }
                     #[cfg(feature = "optimism")]
-                    126 => {
+                    DEPOSIT_TX_TYPE_ID => {
                         let (tx, buf) = TxDeposit::from_compact(buf, buf.len());
-                        (Transaction::Deposit(tx), buf)
+                        (Self::Deposit(tx), buf)
                     }
-                    _ => unreachable!("Junk data in database: unknown Transaction variant"),
+                    _ => unreachable!(
+                        "Junk data in database: unknown Transaction variant: {identifier}"
+                    ),
                 }
             }
-            _ => unreachable!("Junk data in database: unknown Transaction variant"),
+            _ => unreachable!("Junk data in database: unknown Transaction variant: {identifier}"),
         }
     }
 }
@@ -798,33 +670,219 @@ impl Encodable for Transaction {
     /// hash intended for signing.
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         match self {
-            Transaction::Legacy(legacy_tx) => {
+            Self::Legacy(legacy_tx) => {
                 legacy_tx.encode_for_signing(out);
             }
-            Transaction::Eip2930(access_list_tx) => {
+            Self::Eip2930(access_list_tx) => {
                 access_list_tx.encode_for_signing(out);
             }
-            Transaction::Eip1559(dynamic_fee_tx) => {
+            Self::Eip1559(dynamic_fee_tx) => {
                 dynamic_fee_tx.encode_for_signing(out);
             }
-            Transaction::Eip4844(blob_tx) => {
+            Self::Eip4844(blob_tx) => {
                 blob_tx.encode_for_signing(out);
             }
+            Self::Eip7702(set_code_tx) => {
+                set_code_tx.encode_for_signing(out);
+            }
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(deposit_tx) => {
-                deposit_tx.encode(out, true);
+            Self::Deposit(deposit_tx) => {
+                deposit_tx.encode_inner(out, true);
             }
         }
     }
 
     fn length(&self) -> usize {
         match self {
-            Transaction::Legacy(legacy_tx) => legacy_tx.payload_len_for_signature(),
-            Transaction::Eip2930(access_list_tx) => access_list_tx.payload_len_for_signature(),
-            Transaction::Eip1559(dynamic_fee_tx) => dynamic_fee_tx.payload_len_for_signature(),
-            Transaction::Eip4844(blob_tx) => blob_tx.payload_len_for_signature(),
+            Self::Legacy(legacy_tx) => legacy_tx.payload_len_for_signature(),
+            Self::Eip2930(access_list_tx) => access_list_tx.payload_len_for_signature(),
+            Self::Eip1559(dynamic_fee_tx) => dynamic_fee_tx.payload_len_for_signature(),
+            Self::Eip4844(blob_tx) => blob_tx.payload_len_for_signature(),
+            Self::Eip7702(set_code_tx) => set_code_tx.payload_len_for_signature(),
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(deposit_tx) => deposit_tx.payload_len(),
+            Self::Deposit(deposit_tx) => deposit_tx.encoded_len(true),
+        }
+    }
+}
+
+impl alloy_consensus::Transaction for Transaction {
+    fn chain_id(&self) -> Option<ChainId> {
+        match self {
+            Self::Legacy(tx) => tx.chain_id(),
+            Self::Eip2930(tx) => tx.chain_id(),
+            Self::Eip1559(tx) => tx.chain_id(),
+            Self::Eip4844(tx) => tx.chain_id(),
+            Self::Eip7702(tx) => tx.chain_id(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.chain_id(),
+        }
+    }
+
+    fn nonce(&self) -> u64 {
+        match self {
+            Self::Legacy(tx) => tx.nonce(),
+            Self::Eip2930(tx) => tx.nonce(),
+            Self::Eip1559(tx) => tx.nonce(),
+            Self::Eip4844(tx) => tx.nonce(),
+            Self::Eip7702(tx) => tx.nonce(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.nonce(),
+        }
+    }
+
+    fn gas_limit(&self) -> u64 {
+        match self {
+            Self::Legacy(tx) => tx.gas_limit(),
+            Self::Eip2930(tx) => tx.gas_limit(),
+            Self::Eip1559(tx) => tx.gas_limit(),
+            Self::Eip4844(tx) => tx.gas_limit(),
+            Self::Eip7702(tx) => tx.gas_limit(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.gas_limit(),
+        }
+    }
+
+    fn gas_price(&self) -> Option<u128> {
+        match self {
+            Self::Legacy(tx) => tx.gas_price(),
+            Self::Eip2930(tx) => tx.gas_price(),
+            Self::Eip1559(tx) => tx.gas_price(),
+            Self::Eip4844(tx) => tx.gas_price(),
+            Self::Eip7702(tx) => tx.gas_price(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.gas_price(),
+        }
+    }
+
+    fn max_fee_per_gas(&self) -> u128 {
+        match self {
+            Self::Legacy(tx) => tx.max_fee_per_gas(),
+            Self::Eip2930(tx) => tx.max_fee_per_gas(),
+            Self::Eip1559(tx) => tx.max_fee_per_gas(),
+            Self::Eip4844(tx) => tx.max_fee_per_gas(),
+            Self::Eip7702(tx) => tx.max_fee_per_gas(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.max_fee_per_gas(),
+        }
+    }
+
+    fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        match self {
+            Self::Legacy(tx) => tx.max_priority_fee_per_gas(),
+            Self::Eip2930(tx) => tx.max_priority_fee_per_gas(),
+            Self::Eip1559(tx) => tx.max_priority_fee_per_gas(),
+            Self::Eip4844(tx) => tx.max_priority_fee_per_gas(),
+            Self::Eip7702(tx) => tx.max_priority_fee_per_gas(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.max_priority_fee_per_gas(),
+        }
+    }
+
+    fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        match self {
+            Self::Legacy(tx) => tx.max_fee_per_blob_gas(),
+            Self::Eip2930(tx) => tx.max_fee_per_blob_gas(),
+            Self::Eip1559(tx) => tx.max_fee_per_blob_gas(),
+            Self::Eip4844(tx) => tx.max_fee_per_blob_gas(),
+            Self::Eip7702(tx) => tx.max_fee_per_blob_gas(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.max_fee_per_blob_gas(),
+        }
+    }
+
+    fn priority_fee_or_price(&self) -> u128 {
+        match self {
+            Self::Legacy(tx) => tx.priority_fee_or_price(),
+            Self::Eip2930(tx) => tx.priority_fee_or_price(),
+            Self::Eip1559(tx) => tx.priority_fee_or_price(),
+            Self::Eip4844(tx) => tx.priority_fee_or_price(),
+            Self::Eip7702(tx) => tx.priority_fee_or_price(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.priority_fee_or_price(),
+        }
+    }
+
+    fn value(&self) -> U256 {
+        match self {
+            Self::Legacy(tx) => tx.value(),
+            Self::Eip2930(tx) => tx.value(),
+            Self::Eip1559(tx) => tx.value(),
+            Self::Eip4844(tx) => tx.value(),
+            Self::Eip7702(tx) => tx.value(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.value(),
+        }
+    }
+
+    fn input(&self) -> &Bytes {
+        match self {
+            Self::Legacy(tx) => tx.input(),
+            Self::Eip2930(tx) => tx.input(),
+            Self::Eip1559(tx) => tx.input(),
+            Self::Eip4844(tx) => tx.input(),
+            Self::Eip7702(tx) => tx.input(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.input(),
+        }
+    }
+
+    fn ty(&self) -> u8 {
+        match self {
+            Self::Legacy(tx) => tx.ty(),
+            Self::Eip2930(tx) => tx.ty(),
+            Self::Eip1559(tx) => tx.ty(),
+            Self::Eip4844(tx) => tx.ty(),
+            Self::Eip7702(tx) => tx.ty(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.ty(),
+        }
+    }
+
+    fn access_list(&self) -> Option<&AccessList> {
+        match self {
+            Self::Legacy(tx) => tx.access_list(),
+            Self::Eip2930(tx) => tx.access_list(),
+            Self::Eip1559(tx) => tx.access_list(),
+            Self::Eip4844(tx) => tx.access_list(),
+            Self::Eip7702(tx) => tx.access_list(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.access_list(),
+        }
+    }
+
+    fn blob_versioned_hashes(&self) -> Option<&[B256]> {
+        match self {
+            Self::Legacy(tx) => tx.blob_versioned_hashes(),
+            Self::Eip2930(tx) => tx.blob_versioned_hashes(),
+            Self::Eip1559(tx) => tx.blob_versioned_hashes(),
+            Self::Eip4844(tx) => tx.blob_versioned_hashes(),
+            Self::Eip7702(tx) => tx.blob_versioned_hashes(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.blob_versioned_hashes(),
+        }
+    }
+
+    fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
+        match self {
+            Self::Legacy(tx) => tx.authorization_list(),
+            Self::Eip2930(tx) => tx.authorization_list(),
+            Self::Eip1559(tx) => tx.authorization_list(),
+            Self::Eip4844(tx) => tx.authorization_list(),
+            Self::Eip7702(tx) => tx.authorization_list(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.authorization_list(),
+        }
+    }
+
+    fn kind(&self) -> TxKind {
+        match self {
+            Self::Legacy(tx) => tx.kind(),
+            Self::Eip2930(tx) => tx.kind(),
+            Self::Eip1559(tx) => tx.kind(),
+            Self::Eip4844(tx) => tx.kind(),
+            Self::Eip7702(tx) => tx.kind(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.kind(),
         }
     }
 }
@@ -832,8 +890,8 @@ impl Encodable for Transaction {
 /// Signed transaction without its Hash. Used type for inserting into the DB.
 ///
 /// This can by converted to [`TransactionSigned`] by calling [`TransactionSignedNoHash::hash`].
-#[derive_arbitrary(compact)]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 pub struct TransactionSignedNoHash {
     /// The transaction signature values
     pub signature: Signature,
@@ -855,7 +913,7 @@ impl TransactionSignedNoHash {
 
     /// Recover signer from signature and hash.
     ///
-    /// Returns `None` if the transaction's signature is invalid, see also [Self::recover_signer].
+    /// Returns `None` if the transaction's signature is invalid, see also [`Self::recover_signer`].
     pub fn recover_signer(&self) -> Option<Address> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
@@ -865,21 +923,21 @@ impl TransactionSignedNoHash {
         }
 
         let signature_hash = self.signature_hash();
-        self.signature.recover_signer(signature_hash)
+        recover_signer(&self.signature, signature_hash)
     }
 
     /// Recover signer from signature and hash _without ensuring that the signature has a low `s`
     /// value_.
     ///
-    /// Re-uses a given buffer to avoid numerous reallocations when recovering batches. **Clears the
+    /// Reuses a given buffer to avoid numerous reallocations when recovering batches. **Clears the
     /// buffer before use.**
     ///
     /// Returns `None` if the transaction's signature is invalid, see also
-    /// [Signature::recover_signer_unchecked].
+    /// [`recover_signer_unchecked`].
     ///
     /// # Optimism
     ///
-    /// For optimism this will return [Address::ZERO] if the Signature is empty, this is because pre bedrock (on OP mainnet), relay messages to the L2 Cross Domain Messenger were sent as legacy transactions from the zero address with an empty signature, e.g.: <https://optimistic.etherscan.io/tx/0x1bb352ff9215efe5a4c102f45d730bae323c3288d2636672eb61543ddd47abad>
+    /// For optimism this will return [`Address::ZERO`] if the Signature is empty, this is because pre bedrock (on OP mainnet), relay messages to the L2 Cross Domain Messenger were sent as legacy transactions from the zero address with an empty signature, e.g.: <https://optimistic.etherscan.io/tx/0x1bb352ff9215efe5a4c102f45d730bae323c3288d2636672eb61543ddd47abad>
     /// This makes it possible to import pre bedrock transactions via the sender recovery stage.
     pub fn encode_and_recover_unchecked(&self, buffer: &mut Vec<u8>) -> Option<Address> {
         buffer.clear();
@@ -897,12 +955,12 @@ impl TransactionSignedNoHash {
             // transactions with an empty signature
             //
             // NOTE: this is very hacky and only relevant for op-mainnet pre bedrock
-            if self.is_legacy() && self.signature == Signature::optimism_deposit_tx_signature() {
+            if self.is_legacy() && self.signature == TxDeposit::signature() {
                 return Some(Address::ZERO)
             }
         }
 
-        self.signature.recover_signer_unchecked(keccak256(buffer))
+        recover_signer_unchecked(&self.signature, keccak256(buffer))
     }
 
     /// Converts into a transaction type with its hash: [`TransactionSigned`].
@@ -917,7 +975,7 @@ impl TransactionSignedNoHash {
     /// Recovers a list of signers from a transaction list iterator
     ///
     /// Returns `None`, if some transaction's signature is invalid, see also
-    /// [Self::recover_signer].
+    /// [`Self::recover_signer`].
     pub fn recover_signers<'a, T>(txes: T, num_txes: usize) -> Option<Vec<Address>>
     where
         T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self> + Send,
@@ -930,9 +988,24 @@ impl TransactionSignedNoHash {
     }
 }
 
-#[cfg(feature = "zstd-codec")]
-impl Compact for TransactionSignedNoHash {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+impl Default for TransactionSignedNoHash {
+    fn default() -> Self {
+        Self { signature: Signature::test_signature(), transaction: Default::default() }
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a> arbitrary::Arbitrary<'a> for TransactionSignedNoHash {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let tx_signed = TransactionSigned::arbitrary(u)?;
+
+        Ok(Self { signature: tx_signed.signature, transaction: tx_signed.transaction })
+    }
+}
+
+#[cfg(any(test, feature = "reth-codec"))]
+impl reth_codecs::Compact for TransactionSignedNoHash {
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -946,14 +1019,20 @@ impl Compact for TransactionSignedNoHash {
         let zstd_bit = self.transaction.input().len() >= 32;
 
         let tx_bits = if zstd_bit {
-            TRANSACTION_COMPRESSOR.with(|compressor| {
-                let mut compressor = compressor.borrow_mut();
-                let mut tmp = bytes::BytesMut::with_capacity(200);
+            let mut tmp = Vec::with_capacity(256);
+            if cfg!(feature = "std") {
+                crate::compression::TRANSACTION_COMPRESSOR.with(|compressor| {
+                    let mut compressor = compressor.borrow_mut();
+                    let tx_bits = self.transaction.to_compact(&mut tmp);
+                    buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
+                    tx_bits as u8
+                })
+            } else {
+                let mut compressor = crate::compression::create_tx_compressor();
                 let tx_bits = self.transaction.to_compact(&mut tmp);
-
                 buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
                 tx_bits as u8
-            })
+            }
         } else {
             self.transaction.to_compact(buf) as u8
         };
@@ -965,90 +1044,47 @@ impl Compact for TransactionSignedNoHash {
     }
 
     fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
+        use bytes::Buf;
+
         // The first byte uses 4 bits as flags: IsCompressed[1], TxType[2], Signature[1]
         let bitflags = buf.get_u8() as usize;
 
         let sig_bit = bitflags & 1;
-        let (signature, buf) = Signature::from_compact(buf, sig_bit);
+        let (mut signature, buf) = Signature::from_compact(buf, sig_bit);
 
         let zstd_bit = bitflags >> 3;
         let (transaction, buf) = if zstd_bit != 0 {
-            TRANSACTION_DECOMPRESSOR.with(|decompressor| {
-                let mut decompressor = decompressor.borrow_mut();
+            if cfg!(feature = "std") {
+                crate::compression::TRANSACTION_DECOMPRESSOR.with(|decompressor| {
+                    let mut decompressor = decompressor.borrow_mut();
 
-                // TODO: enforce that zstd is only present at a "top" level type
+                    // TODO: enforce that zstd is only present at a "top" level type
 
+                    let transaction_type = (bitflags & 0b110) >> 1;
+                    let (transaction, _) =
+                        Transaction::from_compact(decompressor.decompress(buf), transaction_type);
+
+                    (transaction, buf)
+                })
+            } else {
+                let mut decompressor = crate::compression::create_tx_decompressor();
                 let transaction_type = (bitflags & 0b110) >> 1;
                 let (transaction, _) =
                     Transaction::from_compact(decompressor.decompress(buf), transaction_type);
 
                 (transaction, buf)
-            })
+            }
         } else {
             let transaction_type = bitflags >> 1;
             Transaction::from_compact(buf, transaction_type)
         };
 
-        (TransactionSignedNoHash { signature, transaction }, buf)
+        if matches!(transaction, Transaction::Legacy(_)) {
+            signature = signature.with_parity(legacy_parity(&signature, transaction.chain_id()))
+        }
+
+        (Self { signature, transaction }, buf)
     }
-}
-
-#[cfg(not(feature = "zstd-codec"))]
-impl Compact for TransactionSignedNoHash {
-    fn to_compact<B>(self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
-        to_compact_ztd_unaware(self, buf)
-    }
-
-    fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
-        from_compact_zstd_unaware(buf, _len)
-    }
-}
-
-// Allowing dead code, as this function is extracted from behind feature, so it can be tested
-#[allow(dead_code)]
-fn to_compact_ztd_unaware<B>(transaction: TransactionSignedNoHash, buf: &mut B) -> usize
-where
-    B: bytes::BufMut + AsMut<[u8]>,
-{
-    let start = buf.as_mut().len();
-
-    // Placeholder for bitflags.
-    // The first byte uses 4 bits as flags: IsCompressed[1bit], TxType[2bits], Signature[1bit]
-    buf.put_u8(0);
-
-    let sig_bit = transaction.signature.to_compact(buf) as u8;
-    let zstd_bit = false;
-    let tx_bits = transaction.transaction.to_compact(buf) as u8;
-
-    // Replace bitflags with the actual values
-    buf.as_mut()[start] = sig_bit | (tx_bits << 1) | ((zstd_bit as u8) << 3);
-
-    buf.as_mut().len() - start
-}
-
-// Allowing dead code, as this function is extracted from behind feature, so it can be tested
-#[allow(dead_code)]
-fn from_compact_zstd_unaware(mut buf: &[u8], _len: usize) -> (TransactionSignedNoHash, &[u8]) {
-    // The first byte uses 4 bits as flags: IsCompressed[1], TxType[2], Signature[1]
-    let bitflags = buf.get_u8() as usize;
-
-    let sig_bit = bitflags & 1;
-    let (signature, buf) = Signature::from_compact(buf, sig_bit);
-
-    let zstd_bit = bitflags >> 3;
-    if zstd_bit != 0 {
-        panic!(
-            "zstd-codec feature is not enabled, cannot decode `TransactionSignedNoHash` with zstd flag"
-        )
-    }
-
-    let transaction_type = bitflags >> 1;
-    let (transaction, buf) = Transaction::from_compact(buf, transaction_type);
-
-    (TransactionSignedNoHash { signature, transaction }, buf)
 }
 
 impl From<TransactionSignedNoHash> for TransactionSigned {
@@ -1059,13 +1095,13 @@ impl From<TransactionSignedNoHash> for TransactionSigned {
 
 impl From<TransactionSigned> for TransactionSignedNoHash {
     fn from(tx: TransactionSigned) -> Self {
-        TransactionSignedNoHash { signature: tx.signature, transaction: tx.transaction }
+        Self { signature: tx.signature, transaction: tx.transaction }
     }
 }
 
 /// Signed transaction.
-#[add_arbitrary_tests(rlp)]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Serialize, Deserialize)]
 pub struct TransactionSigned {
     /// Transaction hash
     pub hash: TxHash,
@@ -1075,6 +1111,16 @@ pub struct TransactionSigned {
     #[deref]
     #[as_ref]
     pub transaction: Transaction,
+}
+
+impl Default for TransactionSigned {
+    fn default() -> Self {
+        Self {
+            hash: Default::default(),
+            signature: Signature::test_signature(),
+            transaction: Default::default(),
+        }
+    }
 }
 
 impl AsRef<Self> for TransactionSigned {
@@ -1087,29 +1133,29 @@ impl AsRef<Self> for TransactionSigned {
 
 impl TransactionSigned {
     /// Transaction signature.
-    pub fn signature(&self) -> &Signature {
+    pub const fn signature(&self) -> &Signature {
         &self.signature
     }
 
     /// Transaction hash. Used to identify transaction.
-    pub fn hash(&self) -> TxHash {
+    pub const fn hash(&self) -> TxHash {
         self.hash
     }
 
     /// Reference to transaction hash. Used to identify transaction.
-    pub fn hash_ref(&self) -> &TxHash {
+    pub const fn hash_ref(&self) -> &TxHash {
         &self.hash
     }
 
     /// Recover signer from signature and hash.
     ///
-    /// Returns `None` if the transaction's signature is invalid following [EIP-2](https://eips.ethereum.org/EIPS/eip-2), see also [Signature::recover_signer].
+    /// Returns `None` if the transaction's signature is invalid following [EIP-2](https://eips.ethereum.org/EIPS/eip-2), see also [`recover_signer`].
     ///
     /// Note:
     ///
     /// This can fail for some early ethereum mainnet transactions pre EIP-2, use
-    /// [Self::recover_signer_unchecked] if you want to recover the signer without ensuring that the
-    /// signature has a low `s` value.
+    /// [`Self::recover_signer_unchecked`] if you want to recover the signer without ensuring that
+    /// the signature has a low `s` value.
     pub fn recover_signer(&self) -> Option<Address> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
@@ -1118,14 +1164,14 @@ impl TransactionSigned {
             return Some(from)
         }
         let signature_hash = self.signature_hash();
-        self.signature.recover_signer(signature_hash)
+        recover_signer(&self.signature, signature_hash)
     }
 
     /// Recover signer from signature and hash _without ensuring that the signature has a low `s`
     /// value_.
     ///
     /// Returns `None` if the transaction's signature is invalid, see also
-    /// [Signature::recover_signer_unchecked].
+    /// [`recover_signer_unchecked`].
     pub fn recover_signer_unchecked(&self) -> Option<Address> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
@@ -1134,13 +1180,13 @@ impl TransactionSigned {
             return Some(from)
         }
         let signature_hash = self.signature_hash();
-        self.signature.recover_signer_unchecked(signature_hash)
+        recover_signer_unchecked(&self.signature, signature_hash)
     }
 
     /// Recovers a list of signers from a transaction list iterator.
     ///
     /// Returns `None`, if some transaction's signature is invalid, see also
-    /// [Self::recover_signer].
+    /// [`Self::recover_signer`].
     pub fn recover_signers<'a, T>(txes: T, num_txes: usize) -> Option<Vec<Address>>
     where
         T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self> + Send,
@@ -1156,7 +1202,7 @@ impl TransactionSigned {
     /// signature has a low `s` value_.
     ///
     /// Returns `None`, if some transaction's signature is invalid, see also
-    /// [Self::recover_signer_unchecked].
+    /// [`Self::recover_signer_unchecked`].
     pub fn recover_signers_unchecked<'a, T>(txes: T, num_txes: usize) -> Option<Vec<Address>>
     where
         T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self>,
@@ -1168,7 +1214,7 @@ impl TransactionSigned {
         }
     }
 
-    /// Returns the [TransactionSignedEcRecovered] transaction with the given sender.
+    /// Returns the [`TransactionSignedEcRecovered`] transaction with the given sender.
     #[inline]
     pub const fn with_signer(self, signer: Address) -> TransactionSignedEcRecovered {
         TransactionSignedEcRecovered::from_signed_transaction(self, signer)
@@ -1176,7 +1222,7 @@ impl TransactionSigned {
 
     /// Consumes the type, recover signer and return [`TransactionSignedEcRecovered`]
     ///
-    /// Returns `None` if the transaction's signature is invalid, see also [Self::recover_signer].
+    /// Returns `None` if the transaction's signature is invalid, see also [`Self::recover_signer`].
     pub fn into_ecrecovered(self) -> Option<TransactionSignedEcRecovered> {
         let signer = self.recover_signer()?;
         Some(TransactionSignedEcRecovered { signed_transaction: self, signer })
@@ -1186,7 +1232,7 @@ impl TransactionSigned {
     /// ensuring that the signature has a low `s` value_ (EIP-2).
     ///
     /// Returns `None` if the transaction's signature is invalid, see also
-    /// [Self::recover_signer_unchecked].
+    /// [`Self::recover_signer_unchecked`].
     pub fn into_ecrecovered_unchecked(self) -> Option<TransactionSignedEcRecovered> {
         let signer = self.recover_signer_unchecked()?;
         Some(TransactionSignedEcRecovered { signed_transaction: self, signer })
@@ -1201,7 +1247,7 @@ impl TransactionSigned {
     /// Tries to recover signer and return [`TransactionSignedEcRecovered`].
     ///
     /// Returns `Err(Self)` if the transaction's signature is invalid, see also
-    /// [Self::recover_signer].
+    /// [`Self::recover_signer`].
     pub fn try_into_ecrecovered(self) -> Result<TransactionSignedEcRecovered, Self> {
         match self.recover_signer() {
             None => Err(self),
@@ -1213,7 +1259,7 @@ impl TransactionSigned {
     /// the signature has a low `s` value_ (EIP-2).
     ///
     /// Returns `Err(Self)` if the transaction's signature is invalid, see also
-    /// [Self::recover_signer_unchecked].
+    /// [`Self::recover_signer_unchecked`].
     pub fn try_into_ecrecovered_unchecked(self) -> Result<TransactionSignedEcRecovered, Self> {
         match self.recover_signer_unchecked() {
             None => Err(self),
@@ -1221,55 +1267,10 @@ impl TransactionSigned {
         }
     }
 
-    /// Returns the enveloped encoded transactions.
-    ///
-    /// See also [TransactionSigned::encode_enveloped]
-    pub fn envelope_encoded(&self) -> Bytes {
-        let mut buf = Vec::new();
-        self.encode_enveloped(&mut buf);
-        buf.into()
-    }
-
-    /// Encodes the transaction into the "raw" format (e.g. `eth_sendRawTransaction`).
-    /// This format is also referred to as "binary" encoding.
-    ///
-    /// For legacy transactions, it encodes the RLP of the transaction into the buffer:
-    /// `rlp(tx-data)`
-    /// For EIP-2718 typed it encodes the type of the transaction followed by the rlp of the
-    /// transaction: `tx-type || rlp(tx-data)`
-    pub fn encode_enveloped(&self, out: &mut dyn bytes::BufMut) {
-        self.encode_inner(out, false)
-    }
-
-    /// Inner encoding function that is used for both rlp [`Encodable`] trait and for calculating
-    /// hash that for eip2718 does not require rlp header
-    pub(crate) fn encode_inner(&self, out: &mut dyn bytes::BufMut, with_header: bool) {
-        self.transaction.encode_with_signature(&self.signature, out, with_header);
-    }
-
-    /// Output the length of the encode_inner(out, true). Note to assume that `with_header` is only
-    /// `true`.
-    pub(crate) fn payload_len_inner(&self) -> usize {
-        match &self.transaction {
-            Transaction::Legacy(legacy_tx) => legacy_tx.payload_len_with_signature(&self.signature),
-            Transaction::Eip2930(access_list_tx) => {
-                access_list_tx.payload_len_with_signature(&self.signature)
-            }
-            Transaction::Eip1559(dynamic_fee_tx) => {
-                dynamic_fee_tx.payload_len_with_signature(&self.signature)
-            }
-            Transaction::Eip4844(blob_tx) => blob_tx.payload_len_with_signature(&self.signature),
-            #[cfg(feature = "optimism")]
-            Transaction::Deposit(deposit_tx) => deposit_tx.payload_len(),
-        }
-    }
-
     /// Calculate transaction hash, eip2728 transaction does not contain rlp header and start with
     /// tx type.
     pub fn recalculate_hash(&self) -> B256 {
-        let mut buf = Vec::new();
-        self.encode_inner(&mut buf, false);
-        keccak256(&buf)
+        keccak256(self.encoded_2718())
     }
 
     /// Create a new signed transaction from a transaction and its signature.
@@ -1281,17 +1282,17 @@ impl TransactionSigned {
         initial_tx
     }
 
-    /// Calculate a heuristic for the in-memory size of the [TransactionSigned].
+    /// Calculate a heuristic for the in-memory size of the [`TransactionSigned`].
     #[inline]
     pub fn size(&self) -> usize {
-        mem::size_of::<TxHash>() + self.transaction.size() + self.signature.size()
+        mem::size_of::<TxHash>() + self.transaction.size() + mem::size_of::<Signature>()
     }
 
     /// Decodes legacy transaction from the data buffer into a tuple.
     ///
     /// This expects `rlp(legacy_tx)`
     ///
-    /// Refer to the docs for [Self::decode_rlp_legacy_transaction] for details on the exact
+    /// Refer to the docs for [`Self::decode_rlp_legacy_transaction`] for details on the exact
     /// format expected.
     pub(crate) fn decode_rlp_legacy_transaction_tuple(
         data: &mut &[u8],
@@ -1317,7 +1318,7 @@ impl TransactionSigned {
             input: Decodable::decode(data)?,
             chain_id: None,
         };
-        let (signature, extracted_id) = Signature::decode_with_eip155_chain_id(data)?;
+        let (signature, extracted_id) = decode_with_eip155_chain_id(data)?;
         transaction.chain_id = extracted_id;
 
         // check the new length, compared to the original length and the header length
@@ -1342,123 +1343,72 @@ impl TransactionSigned {
     /// This expects `rlp(legacy_tx)`
     // TODO: make buf advancement semantics consistent with `decode_enveloped_typed_transaction`,
     // so decoding methods do not need to manually advance the buffer
-    pub fn decode_rlp_legacy_transaction(data: &mut &[u8]) -> alloy_rlp::Result<TransactionSigned> {
-        let (transaction, hash, signature) =
-            TransactionSigned::decode_rlp_legacy_transaction_tuple(data)?;
-        let signed =
-            TransactionSigned { transaction: Transaction::Legacy(transaction), hash, signature };
+    pub fn decode_rlp_legacy_transaction(data: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let (transaction, hash, signature) = Self::decode_rlp_legacy_transaction_tuple(data)?;
+        let signed = Self { transaction: Transaction::Legacy(transaction), hash, signature };
         Ok(signed)
     }
+}
 
-    /// Decodes en enveloped EIP-2718 typed transaction.
-    ///
-    /// This should be used _only_ be used internally in general transaction decoding methods,
-    /// which have already ensured that the input is a typed transaction with the following format:
-    /// `tx-type || rlp(tx-data)`
-    ///
-    /// Note that this format does not start with any RLP header, and instead starts with a single
-    /// byte indicating the transaction type.
-    ///
-    /// CAUTION: this expects that `data` is `tx-type || rlp(tx-data)`
-    pub fn decode_enveloped_typed_transaction(
-        data: &mut &[u8],
-    ) -> alloy_rlp::Result<TransactionSigned> {
-        // keep this around so we can use it to calculate the hash
-        let original_encoding_without_header = *data;
-
-        let tx_type = *data.first().ok_or(RlpError::InputTooShort)?;
-        data.advance(1);
-
-        // decode the list header for the rest of the transaction
-        let header = Header::decode(data)?;
-        if !header.list {
-            return Err(RlpError::Custom("typed tx fields must be encoded as a list"))
-        }
-
-        let remaining_len = data.len();
-
-        // length of tx encoding = tx type byte (size = 1) + length of header + payload length
-        let tx_length = 1 + header.length() + header.payload_length;
-
-        // decode common fields
-        let Ok(tx_type) = TxType::try_from(tx_type) else {
-            return Err(RlpError::Custom("unsupported typed transaction type"))
-        };
-
-        let transaction = match tx_type {
-            TxType::Eip2930 => Transaction::Eip2930(TxEip2930::decode_inner(data)?),
-            TxType::Eip1559 => Transaction::Eip1559(TxEip1559::decode_inner(data)?),
-            TxType::Eip4844 => Transaction::Eip4844(TxEip4844::decode_inner(data)?),
-            #[cfg(feature = "optimism")]
-            TxType::Deposit => Transaction::Deposit(TxDeposit::decode_inner(data)?),
-            TxType::Legacy => return Err(RlpError::Custom("unexpected legacy tx type")),
-        };
-
-        #[cfg(not(feature = "optimism"))]
-        let signature = Signature::decode(data)?;
-
-        #[cfg(feature = "optimism")]
-        let signature = if tx_type == TxType::Deposit {
-            Signature::optimism_deposit_tx_signature()
-        } else {
-            Signature::decode(data)?
-        };
-
-        let bytes_consumed = remaining_len - data.len();
-        if bytes_consumed != header.payload_length {
-            return Err(RlpError::UnexpectedLength)
-        }
-
-        let hash = keccak256(&original_encoding_without_header[..tx_length]);
-        let signed = TransactionSigned { transaction, hash, signature };
-        Ok(signed)
+impl alloy_consensus::Transaction for TransactionSigned {
+    fn chain_id(&self) -> Option<ChainId> {
+        self.deref().chain_id()
     }
 
-    /// Decodes the "raw" format of transaction (similar to `eth_sendRawTransaction`).
-    ///
-    /// This should be used for any RPC method that accepts a raw transaction.
-    /// Currently, this includes:
-    /// * `eth_sendRawTransaction`.
-    /// * All versions of `engine_newPayload`, in the `transactions` field.
-    ///
-    /// A raw transaction is either a legacy transaction or EIP-2718 typed transaction.
-    ///
-    /// For legacy transactions, the format is encoded as: `rlp(tx-data)`. This format will start
-    /// with a RLP list header.
-    ///
-    /// For EIP-2718 typed transactions, the format is encoded as the type of the transaction
-    /// followed by the rlp of the transaction: `type || rlp(tx-data)`.
-    pub fn decode_enveloped(data: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        if data.is_empty() {
-            return Err(RlpError::InputTooShort)
-        }
-
-        // Check if the tx is a list
-        if data[0] >= EMPTY_LIST_CODE {
-            // decode as legacy transaction
-            TransactionSigned::decode_rlp_legacy_transaction(data)
-        } else {
-            TransactionSigned::decode_enveloped_typed_transaction(data)
-        }
+    fn nonce(&self) -> u64 {
+        self.deref().nonce()
     }
 
-    /// Returns the length without an RLP header - this is used for eth/68 sizes.
-    pub fn length_without_header(&self) -> usize {
-        // method computes the payload len without a RLP header
-        match &self.transaction {
-            Transaction::Legacy(legacy_tx) => legacy_tx.payload_len_with_signature(&self.signature),
-            Transaction::Eip2930(access_list_tx) => {
-                access_list_tx.payload_len_with_signature_without_header(&self.signature)
-            }
-            Transaction::Eip1559(dynamic_fee_tx) => {
-                dynamic_fee_tx.payload_len_with_signature_without_header(&self.signature)
-            }
-            Transaction::Eip4844(blob_tx) => {
-                blob_tx.payload_len_with_signature_without_header(&self.signature)
-            }
-            #[cfg(feature = "optimism")]
-            Transaction::Deposit(deposit_tx) => deposit_tx.payload_len_without_header(),
-        }
+    fn gas_limit(&self) -> u64 {
+        self.deref().gas_limit()
+    }
+
+    fn gas_price(&self) -> Option<u128> {
+        self.deref().gas_price()
+    }
+
+    fn max_fee_per_gas(&self) -> u128 {
+        self.deref().max_fee_per_gas()
+    }
+
+    fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        self.deref().max_priority_fee_per_gas()
+    }
+
+    fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        self.deref().max_fee_per_blob_gas()
+    }
+
+    fn priority_fee_or_price(&self) -> u128 {
+        self.deref().priority_fee_or_price()
+    }
+
+    fn value(&self) -> U256 {
+        self.deref().value()
+    }
+
+    fn input(&self) -> &Bytes {
+        self.deref().input()
+    }
+
+    fn ty(&self) -> u8 {
+        self.deref().ty()
+    }
+
+    fn access_list(&self) -> Option<&AccessList> {
+        self.deref().access_list()
+    }
+
+    fn blob_versioned_hashes(&self) -> Option<&[B256]> {
+        alloy_consensus::Transaction::blob_versioned_hashes(self.deref())
+    }
+
+    fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
+        self.deref().authorization_list()
+    }
+
+    fn kind(&self) -> TxKind {
+        self.deref().kind()
     }
 }
 
@@ -1478,11 +1428,16 @@ impl Encodable for TransactionSigned {
     /// transaction:
     /// `rlp(tx-type || rlp(tx-data))`
     fn encode(&self, out: &mut dyn bytes::BufMut) {
-        self.encode_inner(out, true);
+        self.network_encode(out);
     }
 
     fn length(&self) -> usize {
-        self.payload_len_inner()
+        let mut payload_length = self.encode_2718_len();
+        if !self.is_legacy() {
+            payload_length += Header { list: false, payload_length }.length();
+        }
+
+        payload_length
     }
 }
 
@@ -1502,105 +1457,132 @@ impl Decodable for TransactionSigned {
     /// This can be used for decoding all signed transactions in p2p `BlockBodies` responses.
     ///
     /// This cannot be used for decoding EIP-4844 transactions in p2p `PooledTransactions`, since
-    /// the EIP-4844 variant of [TransactionSigned] does not include the blob sidecar.
+    /// the EIP-4844 variant of [`TransactionSigned`] does not include the blob sidecar.
     ///
-    /// For a method suitable for decoding pooled transactions, see [PooledTransactionsElement].
+    /// For a method suitable for decoding pooled transactions, see [`PooledTransactionsElement`].
     ///
-    /// CAUTION: Due to a quirk in [Header::decode], this method will succeed even if a typed
+    /// CAUTION: Due to a quirk in [`Header::decode`], this method will succeed even if a typed
     /// transaction is encoded in this format, and does not start with a RLP header:
     /// `tx-type || rlp(tx-data)`.
     ///
-    /// This is because [Header::decode] does not advance the buffer, and returns a length-1 string
-    /// header if the first byte is less than `0xf7`.
+    /// This is because [`Header::decode`] does not advance the buffer, and returns a length-1
+    /// string header if the first byte is less than `0xf7`.
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        if buf.is_empty() {
-            return Err(RlpError::InputTooShort);
-        }
-
-        // decode header
-        let mut original_encoding = *buf;
-        let header = Header::decode(buf)?;
-
-        let remaining_len = buf.len();
-
-        // if the transaction is encoded as a string then it is a typed transaction
-        if !header.list {
-            let tx = TransactionSigned::decode_enveloped_typed_transaction(buf)?;
-
-            let bytes_consumed = remaining_len - buf.len();
-            // because Header::decode works for single bytes (including the tx type), returning a
-            // string Header with payload_length of 1, we need to make sure this check is only
-            // performed for transactions with a string header
-            if bytes_consumed != header.payload_length && original_encoding[0] > EMPTY_STRING_CODE {
-                return Err(RlpError::UnexpectedLength)
-            }
-
-            Ok(tx)
-        } else {
-            let tx = TransactionSigned::decode_rlp_legacy_transaction(&mut original_encoding)?;
-
-            // advance the buffer based on how far `decode_rlp_legacy_transaction` advanced the
-            // buffer
-            *buf = original_encoding;
-            Ok(tx)
-        }
+        Self::network_decode(buf).map_err(Into::into)
     }
 }
 
-#[cfg(any(test, feature = "arbitrary"))]
-impl proptest::arbitrary::Arbitrary for TransactionSigned {
-    type Parameters = ();
-    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        use proptest::prelude::{any, Strategy};
-
-        any::<(Transaction, Signature)>()
-            .prop_map(move |(mut transaction, sig)| {
-                if let Some(chain_id) = transaction.chain_id() {
-                    // Otherwise we might overflow when calculating `v` on `recalculate_hash`
-                    transaction.set_chain_id(chain_id % (u64::MAX / 2 - 36));
-                }
-
-                #[cfg(feature = "optimism")]
-                let sig = transaction
-                    .is_deposit()
-                    .then(Signature::optimism_deposit_tx_signature)
-                    .unwrap_or(sig);
-
-                let mut tx =
-                    TransactionSigned { hash: Default::default(), signature: sig, transaction };
-                tx.hash = tx.recalculate_hash();
-                tx
-            })
-            .boxed()
+impl Encodable2718 for TransactionSigned {
+    fn type_flag(&self) -> Option<u8> {
+        match self.transaction.tx_type() {
+            TxType::Legacy => None,
+            tx_type => Some(tx_type as u8),
+        }
     }
 
-    type Strategy = proptest::strategy::BoxedStrategy<TransactionSigned>;
+    fn encode_2718_len(&self) -> usize {
+        match &self.transaction {
+            Transaction::Legacy(legacy_tx) => legacy_tx.encoded_len_with_signature(
+                &with_eip155_parity(&self.signature, legacy_tx.chain_id),
+            ),
+            Transaction::Eip2930(access_list_tx) => {
+                access_list_tx.encoded_len_with_signature(&self.signature, false)
+            }
+            Transaction::Eip1559(dynamic_fee_tx) => {
+                dynamic_fee_tx.encoded_len_with_signature(&self.signature, false)
+            }
+            Transaction::Eip4844(blob_tx) => {
+                blob_tx.encoded_len_with_signature(&self.signature, false)
+            }
+            Transaction::Eip7702(set_code_tx) => {
+                set_code_tx.encoded_len_with_signature(&self.signature, false)
+            }
+            #[cfg(feature = "optimism")]
+            Transaction::Deposit(deposit_tx) => deposit_tx.encoded_len(false),
+        }
+    }
+
+    fn encode_2718(&self, out: &mut dyn alloy_rlp::BufMut) {
+        self.transaction.encode_with_signature(&self.signature, out, false)
+    }
+}
+
+impl Decodable2718 for TransactionSigned {
+    fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
+        match ty.try_into().map_err(|_| Eip2718Error::UnexpectedType(ty))? {
+            TxType::Legacy => Err(Eip2718Error::UnexpectedType(0)),
+            TxType::Eip2930 => {
+                let (tx, signature, hash) = TxEip2930::decode_signed_fields(buf)?.into_parts();
+                Ok(Self { transaction: Transaction::Eip2930(tx), signature, hash })
+            }
+            TxType::Eip1559 => {
+                let (tx, signature, hash) = TxEip1559::decode_signed_fields(buf)?.into_parts();
+                Ok(Self { transaction: Transaction::Eip1559(tx), signature, hash })
+            }
+            TxType::Eip7702 => {
+                let (tx, signature, hash) = TxEip7702::decode_signed_fields(buf)?.into_parts();
+                Ok(Self { transaction: Transaction::Eip7702(tx), signature, hash })
+            }
+            TxType::Eip4844 => {
+                let (tx, signature, hash) = TxEip4844::decode_signed_fields(buf)?.into_parts();
+                Ok(Self { transaction: Transaction::Eip4844(tx), signature, hash })
+            }
+            #[cfg(feature = "optimism")]
+            TxType::Deposit => Ok(Self::from_transaction_and_signature(
+                Transaction::Deposit(TxDeposit::decode(buf)?),
+                TxDeposit::signature(),
+            )),
+        }
+    }
+
+    fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
+        Ok(Self::decode_rlp_legacy_transaction(buf)?)
+    }
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        #[allow(unused_mut)]
         let mut transaction = Transaction::arbitrary(u)?;
-        if let Some(chain_id) = transaction.chain_id() {
-            // Otherwise we might overflow when calculating `v` on `recalculate_hash`
-            transaction.set_chain_id(chain_id % (u64::MAX / 2 - 36));
-        }
 
-        let signature = Signature::arbitrary(u)?;
+        let secp = secp256k1::Secp256k1::new();
+        let key_pair = secp256k1::Keypair::new(&secp, &mut rand::thread_rng());
+        let mut signature = crate::sign_message(
+            B256::from_slice(&key_pair.secret_bytes()[..]),
+            transaction.signature_hash(),
+        )
+        .unwrap();
 
-        #[cfg(feature = "optimism")]
-        let signature = if transaction.is_deposit() {
-            Signature::optimism_deposit_tx_signature()
+        signature = if matches!(transaction, Transaction::Legacy(_)) {
+            if let Some(chain_id) = transaction.chain_id() {
+                signature.with_chain_id(chain_id)
+            } else {
+                signature.with_parity(alloy_primitives::Parity::NonEip155(bool::arbitrary(u)?))
+            }
         } else {
-            signature
+            signature.with_parity_bool()
         };
 
-        Ok(TransactionSigned::from_transaction_and_signature(transaction, signature))
+        #[cfg(feature = "optimism")]
+        // Both `Some(0)` and `None` values are encoded as empty string byte. This introduces
+        // ambiguity in roundtrip tests. Patch the mint value of deposit transaction here, so that
+        // it's `None` if zero.
+        if let Transaction::Deposit(ref mut tx_deposit) = transaction {
+            if tx_deposit.mint == Some(0) {
+                tx_deposit.mint = None;
+            }
+        }
+
+        #[cfg(feature = "optimism")]
+        let signature = if transaction.is_deposit() { TxDeposit::signature() } else { signature };
+
+        Ok(Self::from_transaction_and_signature(transaction, signature))
     }
 }
 
 /// Signed transaction with recovered signer.
-#[derive(Debug, Clone, PartialEq, Hash, Eq, AsRef, Deref, Default)]
+#[derive(Debug, Clone, PartialEq, Hash, Eq, AsRef, Deref)]
 pub struct TransactionSignedEcRecovered {
     /// Signer of the transaction
     signer: Address,
@@ -1614,8 +1596,13 @@ pub struct TransactionSignedEcRecovered {
 
 impl TransactionSignedEcRecovered {
     /// Signer of transaction recovered from signature
-    pub fn signer(&self) -> Address {
+    pub const fn signer(&self) -> Address {
         self.signer
+    }
+
+    /// Returns a reference to [`TransactionSigned`]
+    pub const fn as_signed(&self) -> &TransactionSigned {
+        &self.signed_transaction
     }
 
     /// Transform back to [`TransactionSigned`]
@@ -1642,7 +1629,7 @@ impl TransactionSignedEcRecovered {
 impl Encodable for TransactionSignedEcRecovered {
     /// This encodes the transaction _with_ the signature, and an rlp header.
     ///
-    /// Refer to docs for [TransactionSigned::encode] for details on the exact format.
+    /// Refer to docs for [`TransactionSigned::encode`] for details on the exact format.
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         self.signed_transaction.encode(out)
     }
@@ -1658,104 +1645,283 @@ impl Decodable for TransactionSignedEcRecovered {
         let signer = signed_transaction
             .recover_signer()
             .ok_or(RlpError::Custom("Unable to recover decoded transaction signer."))?;
-        Ok(TransactionSignedEcRecovered { signer, signed_transaction })
+        Ok(Self { signer, signed_transaction })
     }
 }
 
-/// A transaction type that can be created from a [`TransactionSignedEcRecovered`] transaction.
-///
-/// This is a conversion trait that'll ensure transactions received via P2P can be converted to the
-/// transaction type that the transaction pool uses.
-pub trait TryFromRecoveredTransaction {
-    /// The error type returned by the transaction.
-    type Error;
-    /// Converts to this type from the given [`TransactionSignedEcRecovered`].
-    fn try_from_recovered_transaction(
-        tx: TransactionSignedEcRecovered,
-    ) -> Result<Self, Self::Error>
-    where
-        Self: Sized;
+/// Generic wrapper with encoded Bytes, such as transaction data.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WithEncoded<T>(Bytes, pub T);
+
+impl<T> From<(Bytes, T)> for WithEncoded<T> {
+    fn from(value: (Bytes, T)) -> Self {
+        Self(value.0, value.1)
+    }
 }
 
-// Noop conversion
-impl TryFromRecoveredTransaction for TransactionSignedEcRecovered {
-    type Error = TryFromRecoveredTransactionError;
+impl<T> WithEncoded<T> {
+    /// Wraps the value with the bytes.
+    pub const fn new(bytes: Bytes, value: T) -> Self {
+        Self(bytes, value)
+    }
 
-    #[inline]
-    fn try_from_recovered_transaction(
-        tx: TransactionSignedEcRecovered,
-    ) -> Result<Self, Self::Error> {
-        if tx.is_eip4844() {
-            Err(TryFromRecoveredTransactionError::BlobSidecarMissing)
-        } else {
-            Ok(tx)
+    /// Get the encoded bytes
+    pub fn encoded_bytes(&self) -> Bytes {
+        self.0.clone()
+    }
+
+    /// Get the underlying value
+    pub const fn value(&self) -> &T {
+        &self.1
+    }
+
+    /// Returns ownership of the underlying value.
+    pub fn into_value(self) -> T {
+        self.1
+    }
+
+    /// Transform the value
+    pub fn transform<F: From<T>>(self) -> WithEncoded<F> {
+        WithEncoded(self.0, self.1.into())
+    }
+
+    /// Split the wrapper into [`Bytes`] and value tuple
+    pub fn split(self) -> (Bytes, T) {
+        (self.0, self.1)
+    }
+
+    /// Maps the inner value to a new value using the given function.
+    pub fn map<U, F: FnOnce(T) -> U>(self, op: F) -> WithEncoded<U> {
+        WithEncoded(self.0, op(self.1))
+    }
+}
+
+impl<T> WithEncoded<Option<T>> {
+    /// returns `None` if the inner value is `None`, otherwise returns `Some(WithEncoded<T>)`.
+    pub fn transpose(self) -> Option<WithEncoded<T>> {
+        self.1.map(|v| WithEncoded(self.0, v))
+    }
+}
+
+/// Bincode-compatible transaction type serde implementations.
+#[cfg(feature = "serde-bincode-compat")]
+pub mod serde_bincode_compat {
+    use alloc::borrow::Cow;
+    use alloy_consensus::{
+        transaction::serde_bincode_compat::{TxEip1559, TxEip2930, TxEip7702, TxLegacy},
+        TxEip4844,
+    };
+    use alloy_primitives::{Signature, TxHash};
+    #[cfg(feature = "optimism")]
+    use op_alloy_consensus::serde_bincode_compat::TxDeposit;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde_with::{DeserializeAs, SerializeAs};
+
+    /// Bincode-compatible [`super::Transaction`] serde implementation.
+    ///
+    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
+    /// ```rust
+    /// use reth_primitives::{serde_bincode_compat, Transaction};
+    /// use serde::{Deserialize, Serialize};
+    /// use serde_with::serde_as;
+    ///
+    /// #[serde_as]
+    /// #[derive(Serialize, Deserialize)]
+    /// struct Data {
+    ///     #[serde_as(as = "serde_bincode_compat::transaction::Transaction")]
+    ///     transaction: Transaction,
+    /// }
+    /// ```
+    #[derive(Debug, Serialize, Deserialize)]
+    #[allow(missing_docs)]
+    pub enum Transaction<'a> {
+        Legacy(TxLegacy<'a>),
+        Eip2930(TxEip2930<'a>),
+        Eip1559(TxEip1559<'a>),
+        Eip4844(Cow<'a, TxEip4844>),
+        Eip7702(TxEip7702<'a>),
+        #[cfg(feature = "optimism")]
+        #[cfg(feature = "optimism")]
+        Deposit(TxDeposit<'a>),
+    }
+
+    impl<'a> From<&'a super::Transaction> for Transaction<'a> {
+        fn from(value: &'a super::Transaction) -> Self {
+            match value {
+                super::Transaction::Legacy(tx) => Self::Legacy(TxLegacy::from(tx)),
+                super::Transaction::Eip2930(tx) => Self::Eip2930(TxEip2930::from(tx)),
+                super::Transaction::Eip1559(tx) => Self::Eip1559(TxEip1559::from(tx)),
+                super::Transaction::Eip4844(tx) => Self::Eip4844(Cow::Borrowed(tx)),
+                super::Transaction::Eip7702(tx) => Self::Eip7702(TxEip7702::from(tx)),
+                #[cfg(feature = "optimism")]
+                super::Transaction::Deposit(tx) => Self::Deposit(TxDeposit::from(tx)),
+            }
         }
     }
-}
 
-/// A transaction type that can be created from a [`PooledTransactionsElementEcRecovered`]
-/// transaction.
-///
-/// This is a conversion trait that'll ensure transactions received via P2P can be converted to the
-/// transaction type that the transaction pool uses.
-#[cfg(feature = "c-kzg")]
-pub trait FromRecoveredPooledTransaction {
-    /// Converts to this type from the given [`PooledTransactionsElementEcRecovered`].
-    fn from_recovered_pooled_transaction(tx: PooledTransactionsElementEcRecovered) -> Self;
-}
-
-/// The inverse of [TryFromRecoveredTransaction] that ensure the transaction can be sent over the
-/// network
-pub trait IntoRecoveredTransaction {
-    /// Converts to this type into a [`TransactionSignedEcRecovered`].
-    ///
-    /// Note: this takes `&self` since indented usage is via `Arc<Self>`.
-    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered;
-}
-
-impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
-    #[inline]
-    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
-        self.clone()
+    impl<'a> From<Transaction<'a>> for super::Transaction {
+        fn from(value: Transaction<'a>) -> Self {
+            match value {
+                Transaction::Legacy(tx) => Self::Legacy(tx.into()),
+                Transaction::Eip2930(tx) => Self::Eip2930(tx.into()),
+                Transaction::Eip1559(tx) => Self::Eip1559(tx.into()),
+                Transaction::Eip4844(tx) => Self::Eip4844(tx.into_owned()),
+                Transaction::Eip7702(tx) => Self::Eip7702(tx.into()),
+                #[cfg(feature = "optimism")]
+                Transaction::Deposit(tx) => Self::Deposit(tx.into()),
+            }
+        }
     }
-}
 
-impl TryFrom<reth_rpc_types::Transaction> for TransactionSignedEcRecovered {
-    type Error = ConversionError;
+    impl SerializeAs<super::Transaction> for Transaction<'_> {
+        fn serialize_as<S>(source: &super::Transaction, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            Transaction::from(source).serialize(serializer)
+        }
+    }
 
-    fn try_from(tx: reth_rpc_types::Transaction) -> Result<Self, Self::Error> {
-        let signature = tx.signature.ok_or(ConversionError::MissingSignature)?;
+    impl<'de> DeserializeAs<'de, super::Transaction> for Transaction<'de> {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::Transaction, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            Transaction::deserialize(deserializer).map(Into::into)
+        }
+    }
 
-        TransactionSigned::from_transaction_and_signature(
-            tx.try_into()?,
-            Signature {
-                r: signature.r,
-                s: signature.s,
-                odd_y_parity: signature.y_parity.ok_or(ConversionError::MissingYParity)?.0,
-            },
-        )
-        .try_into_ecrecovered()
-        .map_err(|_| ConversionError::InvalidSignature)
+    /// Bincode-compatible [`super::TransactionSigned`] serde implementation.
+    ///
+    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
+    /// ```rust
+    /// use reth_primitives::{serde_bincode_compat, TransactionSigned};
+    /// use serde::{Deserialize, Serialize};
+    /// use serde_with::serde_as;
+    ///
+    /// #[serde_as]
+    /// #[derive(Serialize, Deserialize)]
+    /// struct Data {
+    ///     #[serde_as(as = "serde_bincode_compat::transaction::TransactionSigned")]
+    ///     transaction: TransactionSigned,
+    /// }
+    /// ```
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct TransactionSigned<'a> {
+        hash: TxHash,
+        signature: Signature,
+        transaction: Transaction<'a>,
+    }
+
+    impl<'a> From<&'a super::TransactionSigned> for TransactionSigned<'a> {
+        fn from(value: &'a super::TransactionSigned) -> Self {
+            Self {
+                hash: value.hash,
+                signature: value.signature,
+                transaction: Transaction::from(&value.transaction),
+            }
+        }
+    }
+
+    impl<'a> From<TransactionSigned<'a>> for super::TransactionSigned {
+        fn from(value: TransactionSigned<'a>) -> Self {
+            Self {
+                hash: value.hash,
+                signature: value.signature,
+                transaction: value.transaction.into(),
+            }
+        }
+    }
+
+    impl SerializeAs<super::TransactionSigned> for TransactionSigned<'_> {
+        fn serialize_as<S>(
+            source: &super::TransactionSigned,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            TransactionSigned::from(source).serialize(serializer)
+        }
+    }
+
+    impl<'de> DeserializeAs<'de, super::TransactionSigned> for TransactionSigned<'de> {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::TransactionSigned, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            TransactionSigned::deserialize(deserializer).map(Into::into)
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::super::{serde_bincode_compat, Transaction, TransactionSigned};
+
+        use arbitrary::Arbitrary;
+        use rand::Rng;
+        use reth_testing_utils::generators;
+        use serde::{Deserialize, Serialize};
+        use serde_with::serde_as;
+
+        #[test]
+        fn test_transaction_bincode_roundtrip() {
+            #[serde_as]
+            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+            struct Data {
+                #[serde_as(as = "serde_bincode_compat::Transaction")]
+                transaction: Transaction,
+            }
+
+            let mut bytes = [0u8; 1024];
+            generators::rng().fill(bytes.as_mut_slice());
+            let data = Data {
+                transaction: Transaction::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
+                    .unwrap(),
+            };
+
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+        }
+
+        #[test]
+        fn test_transaction_signed_bincode_roundtrip() {
+            #[serde_as]
+            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+            struct Data {
+                #[serde_as(as = "serde_bincode_compat::TransactionSigned")]
+                transaction: TransactionSigned,
+            }
+
+            let mut bytes = [0u8; 1024];
+            generators::rng().fill(bytes.as_mut_slice());
+            let data = Data {
+                transaction: TransactionSigned::arbitrary(&mut arbitrary::Unstructured::new(
+                    &bytes,
+                ))
+                .unwrap(),
+            };
+
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
-        hex, sign_message,
-        transaction::{
-            from_compact_zstd_unaware, signature::Signature, to_compact_ztd_unaware, TxEip1559,
-            TxKind, TxLegacy, MIN_LENGTH_EIP1559_TX_ENCODED, MIN_LENGTH_EIP2930_TX_ENCODED,
-            MIN_LENGTH_EIP4844_TX_ENCODED, MIN_LENGTH_LEGACY_TX_ENCODED,
-            PARALLEL_SENDER_RECOVERY_THRESHOLD,
-        },
-        Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered,
-        TransactionSignedNoHash, TxEip2930, TxEip4844, B256, U256,
+        transaction::{signature::Signature, TxEip1559, TxKind, TxLegacy},
+        Transaction, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
     };
-    use alloy_primitives::{address, b256, bytes};
+    use alloy_consensus::Transaction as _;
+    use alloy_eips::eip2718::{Decodable2718, Encodable2718};
+    use alloy_primitives::{address, b256, bytes, hex, Address, Bytes, Parity, B256, U256};
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
+    use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_codecs::Compact;
-    use secp256k1::{KeyPair, Secp256k1};
     use std::str::FromStr;
 
     #[test]
@@ -1793,7 +1959,7 @@ mod tests {
         // random mainnet tx <https://etherscan.io/tx/0x86718885c4b4218c6af87d3d0b0d83e3cc465df2a05c048aa4db9f1a6f9de91f>
         let tx_bytes = hex!("02f872018307910d808507204d2cb1827d0094388c818ca8b9251b393131c08a736a67ccb19297880320d04823e2701c80c001a0cf024f4815304df2867a1a74e9d2707b6abda0337d2d54a4438d453f4160f190a07ac0e6b3bc9395b5b9c8b9e6d77204a236577a5b18467b9175c01de4faa208d9");
 
-        let decoded = TransactionSigned::decode_enveloped(&mut &tx_bytes[..]).unwrap();
+        let decoded = TransactionSigned::decode_2718(&mut &tx_bytes[..]).unwrap();
         assert_eq!(
             decoded.recover_signer(),
             Some(Address::from_str("0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe5").unwrap())
@@ -1809,7 +1975,7 @@ mod tests {
 
         // https://sepolia.etherscan.io/getRawTx?tx=0x9a22ccb0029bc8b0ddd073be1a1d923b7ae2b2ea52100bae0db4424f9107e9c0
         let raw_tx = alloy_primitives::hex::decode("0x03f9011d83aa36a7820fa28477359400852e90edd0008252089411e9ca82a3a762b4b5bd264d4173a242e7a770648080c08504a817c800f8a5a0012ec3d6f66766bedb002a190126b3549fce0047de0d4c25cffce0dc1c57921aa00152d8e24762ff22b1cfd9f8c0683786a7ca63ba49973818b3d1e9512cd2cec4a0013b98c6c83e066d5b14af2b85199e3d4fc7d1e778dd53130d180f5077e2d1c7a001148b495d6e859114e670ca54fb6e2657f0cbae5b08063605093a4b3dc9f8f1a0011ac212f13c5dff2b2c6b600a79635103d6f580a4221079951181b25c7e654901a0c8de4cced43169f9aa3d36506363b2d2c44f6c49fc1fd91ea114c86f3757077ea01e11fdd0d1934eda0492606ee0bb80a7bf8f35cc5f86ec60fe5031ba48bfd544").unwrap();
-        let decoded = TransactionSigned::decode_enveloped(&mut raw_tx.as_slice()).unwrap();
+        let decoded = TransactionSigned::decode_2718(&mut raw_tx.as_slice()).unwrap();
         assert_eq!(decoded.tx_type(), TxType::Eip4844);
 
         let from = decoded.recover_signer();
@@ -1851,19 +2017,17 @@ mod tests {
             nonce: 2,
             gas_price: 1000000000,
             gas_limit: 100000,
-            to: TxKind::Call(
-                Address::from_str("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap(),
-            ),
+            to: Address::from_str("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap().into(),
             value: U256::from(1000000000000000u64),
             input: Bytes::default(),
         });
-        let signature = Signature {
-            odd_y_parity: false,
-            r: U256::from_str("0xeb96ca19e8a77102767a41fc85a36afd5c61ccb09911cec5d3e86e193d9c5ae")
+        let signature = Signature::new(
+            U256::from_str("0xeb96ca19e8a77102767a41fc85a36afd5c61ccb09911cec5d3e86e193d9c5ae")
                 .unwrap(),
-            s: U256::from_str("0x3a456401896b1b6055311536bf00a718568c744d8c1f9df59879e8350220ca18")
+            U256::from_str("0x3a456401896b1b6055311536bf00a718568c744d8c1f9df59879e8350220ca18")
                 .unwrap(),
-        };
+            Parity::Eip155(43),
+        );
         let hash = b256!("a517b206d2223278f860ea017d3626cacad4f52ff51030dc9a96b432f17f8d34");
         test_decode_and_encode(&bytes, transaction, signature, Some(hash));
 
@@ -1872,20 +2036,18 @@ mod tests {
             chain_id: Some(4),
             nonce: 1u64,
             gas_price: 1000000000,
-            gas_limit: 100000u64,
-            to: TxKind::Call(Address::from_slice(
-                &hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046")[..],
-            )),
+            gas_limit: 100000,
+            to: Address::from_slice(&hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046")[..]).into(),
             value: U256::from(693361000000000u64),
             input: Default::default(),
         });
-        let signature = Signature {
-            odd_y_parity: false,
-            r: U256::from_str("0xe24d8bd32ad906d6f8b8d7741e08d1959df021698b19ee232feba15361587d0a")
+        let signature = Signature::new(
+            U256::from_str("0xe24d8bd32ad906d6f8b8d7741e08d1959df021698b19ee232feba15361587d0a")
                 .unwrap(),
-            s: U256::from_str("0x5406ad177223213df262cb66ccbb2f46bfdccfdfbbb5ffdda9e2c02d977631da")
+            U256::from_str("0x5406ad177223213df262cb66ccbb2f46bfdccfdfbbb5ffdda9e2c02d977631da")
                 .unwrap(),
-        };
+            Parity::Eip155(43),
+        );
         test_decode_and_encode(&bytes, transaction, signature, None);
 
         let bytes = hex!("f86b0384773594008398968094d3e8763675e4c425df46cc3b5c0f6cbdac39604687038d7ea4c68000802ba0ce6834447c0a4193c40382e6c57ae33b241379c5418caac9cdc18d786fd12071a03ca3ae86580e94550d7c071e3a02eadb5a77830947c9225165cf9100901bee88");
@@ -1894,19 +2056,17 @@ mod tests {
             nonce: 3,
             gas_price: 2000000000,
             gas_limit: 10000000,
-            to: TxKind::Call(Address::from_slice(
-                &hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046")[..],
-            )),
+            to: Address::from_slice(&hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046")[..]).into(),
             value: U256::from(1000000000000000u64),
             input: Bytes::default(),
         });
-        let signature = Signature {
-            odd_y_parity: false,
-            r: U256::from_str("0xce6834447c0a4193c40382e6c57ae33b241379c5418caac9cdc18d786fd12071")
+        let signature = Signature::new(
+            U256::from_str("0xce6834447c0a4193c40382e6c57ae33b241379c5418caac9cdc18d786fd12071")
                 .unwrap(),
-            s: U256::from_str("0x3ca3ae86580e94550d7c071e3a02eadb5a77830947c9225165cf9100901bee88")
+            U256::from_str("0x3ca3ae86580e94550d7c071e3a02eadb5a77830947c9225165cf9100901bee88")
                 .unwrap(),
-        };
+            Parity::Eip155(43),
+        );
         test_decode_and_encode(&bytes, transaction, signature, None);
 
         let bytes = hex!("b87502f872041a8459682f008459682f0d8252089461815774383099e24810ab832a5b2a5425c154d58829a2241af62c000080c001a059e6b67f48fb32e7e570dfb11e042b5ad2e55e3ce3ce9cd989c7e06e07feeafda0016b83f4f980694ed2eee4d10667242b1f40dc406901b34125b008d334d47469");
@@ -1915,21 +2075,19 @@ mod tests {
             nonce: 26,
             max_priority_fee_per_gas: 1500000000,
             max_fee_per_gas: 1500000013,
-            gas_limit: 21000,
-            to: TxKind::Call(Address::from_slice(
-                &hex!("61815774383099e24810ab832a5b2a5425c154d5")[..],
-            )),
+            gas_limit: MIN_TRANSACTION_GAS,
+            to: Address::from_slice(&hex!("61815774383099e24810ab832a5b2a5425c154d5")[..]).into(),
             value: U256::from(3000000000000000000u64),
             input: Default::default(),
             access_list: Default::default(),
         });
-        let signature = Signature {
-            odd_y_parity: true,
-            r: U256::from_str("0x59e6b67f48fb32e7e570dfb11e042b5ad2e55e3ce3ce9cd989c7e06e07feeafd")
+        let signature = Signature::new(
+            U256::from_str("0x59e6b67f48fb32e7e570dfb11e042b5ad2e55e3ce3ce9cd989c7e06e07feeafd")
                 .unwrap(),
-            s: U256::from_str("0x016b83f4f980694ed2eee4d10667242b1f40dc406901b34125b008d334d47469")
+            U256::from_str("0x016b83f4f980694ed2eee4d10667242b1f40dc406901b34125b008d334d47469")
                 .unwrap(),
-        };
+            Parity::Parity(true),
+        );
         test_decode_and_encode(&bytes, transaction, signature, None);
 
         let bytes = hex!("f8650f84832156008287fb94cf7f9e66af820a19257a2108375b180b0ec491678204d2802ca035b7bfeb9ad9ece2cbafaaf8e202e706b4cfaeb233f46198f00b44d4a566a981a0612638fb29427ca33b9a3be2a0a561beecfe0269655be160d35e72d366a6a860");
@@ -1938,19 +2096,17 @@ mod tests {
             nonce: 15,
             gas_price: 2200000000,
             gas_limit: 34811,
-            to: TxKind::Call(Address::from_slice(
-                &hex!("cf7f9e66af820a19257a2108375b180b0ec49167")[..],
-            )),
+            to: Address::from_slice(&hex!("cf7f9e66af820a19257a2108375b180b0ec49167")[..]).into(),
             value: U256::from(1234),
             input: Bytes::default(),
         });
-        let signature = Signature {
-            odd_y_parity: true,
-            r: U256::from_str("0x35b7bfeb9ad9ece2cbafaaf8e202e706b4cfaeb233f46198f00b44d4a566a981")
+        let signature = Signature::new(
+            U256::from_str("0x35b7bfeb9ad9ece2cbafaaf8e202e706b4cfaeb233f46198f00b44d4a566a981")
                 .unwrap(),
-            s: U256::from_str("0x612638fb29427ca33b9a3be2a0a561beecfe0269655be160d35e72d366a6a860")
+            U256::from_str("0x612638fb29427ca33b9a3be2a0a561beecfe0269655be160d35e72d366a6a860")
                 .unwrap(),
-        };
+            Parity::Eip155(44),
+        );
         test_decode_and_encode(&bytes, transaction, signature, None);
     }
 
@@ -1973,7 +2129,7 @@ mod tests {
 
     #[test]
     fn decode_raw_tx_and_recover_signer() {
-        use crate::hex_literal::hex;
+        use alloy_primitives::hex_literal::hex;
         // transaction is from ropsten
 
         let hash: B256 =
@@ -1993,7 +2149,7 @@ mod tests {
         let input = hex!("02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598d76");
         let decoded = TransactionSigned::decode(&mut &input[..]).unwrap();
 
-        let encoded = decoded.envelope_encoded();
+        let encoded = decoded.encoded_2718();
         assert_eq!(encoded[..], input);
     }
 
@@ -2001,9 +2157,9 @@ mod tests {
     fn test_envelop_decode() {
         // random tx: <https://etherscan.io/getRawTx?tx=0x9448608d36e721ef403c53b00546068a6474d6cbab6816c3926de449898e7bce>
         let input = bytes!("02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598d76");
-        let decoded = TransactionSigned::decode_enveloped(&mut input.as_ref()).unwrap();
+        let decoded = TransactionSigned::decode_2718(&mut input.as_ref()).unwrap();
 
-        let encoded = decoded.envelope_encoded();
+        let encoded = decoded.encoded_2718();
         assert_eq!(encoded, input);
     }
 
@@ -2024,34 +2180,38 @@ mod tests {
         // some random transactions pulled from hive tests
         let data = hex!("b86f02f86c0705843b9aca008506fc23ac00830124f89400000000000000000000000000000000000003160180c001a00293c713e2f1eab91c366621ff2f867e05ad7e99d4aa5d069aafeb9e1e8c9b6aa05ec6c0605ff20b57c90a6484ec3b0509e5923733d06f9b69bee9a2dabe4f1352");
         let tx = TransactionSigned::decode(&mut data.as_slice()).unwrap();
-        let mut b = Vec::new();
+        let mut b = Vec::with_capacity(data.len());
         tx.encode(&mut b);
         assert_eq!(data.as_slice(), b.as_slice());
 
         let data = hex!("f865048506fc23ac00830124f8940000000000000000000000000000000000000316018032a06b8fdfdcb84790816b7af85b19305f493665fe8b4e7c51ffdd7cc144cd776a60a028a09ab55def7b8d6602ba1c97a0ebbafe64ffc9c8e89520cec97a8edfb2ebe9");
         let tx = TransactionSigned::decode(&mut data.as_slice()).unwrap();
-        let mut b = Vec::new();
+        let mut b = Vec::with_capacity(data.len());
         tx.encode(&mut b);
         assert_eq!(data.as_slice(), b.as_slice());
     }
 
+    #[cfg(feature = "secp256k1")]
     proptest::proptest! {
         #![proptest_config(proptest::prelude::ProptestConfig::with_cases(1))]
 
         #[test]
-        fn test_parallel_recovery_order(txes in proptest::collection::vec(proptest::prelude::any::<Transaction>(), *PARALLEL_SENDER_RECOVERY_THRESHOLD * 5)) {
+        fn test_parallel_recovery_order(txes in proptest::collection::vec(
+            proptest_arbitrary_interop::arb::<Transaction>(),
+            *crate::transaction::PARALLEL_SENDER_RECOVERY_THRESHOLD * 5
+        )) {
             let mut rng =rand::thread_rng();
-            let secp = Secp256k1::new();
+            let secp = secp256k1::Secp256k1::new();
             let txes: Vec<TransactionSigned> = txes.into_iter().map(|mut tx| {
                  if let Some(chain_id) = tx.chain_id() {
                     // Otherwise we might overflow when calculating `v` on `recalculate_hash`
                     tx.set_chain_id(chain_id % (u64::MAX / 2 - 36));
                 }
 
-                let key_pair = KeyPair::new(&secp, &mut rng);
+                let key_pair = secp256k1::Keypair::new(&secp, &mut rng);
 
                 let signature =
-                    sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
+                    crate::sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
 
                 TransactionSigned::from_transaction_and_signature(tx, signature)
             }).collect();
@@ -2078,13 +2238,13 @@ mod tests {
     #[test]
     fn recover_enveloped() {
         let data = hex!("02f86f0102843b9aca0085029e7822d68298f094d9e1459a7a482635700cbc20bbaf52d495ab9c9680841b55ba3ac080a0c199674fcb29f353693dd779c017823b954b3c69dffa3cd6b2a6ff7888798039a028ca912de909e7e6cdef9cdcaf24c54dd8c1032946dfa1d85c206b32a9064fe8");
-        let tx = TransactionSigned::decode_enveloped(&mut data.as_slice()).unwrap();
+        let tx = TransactionSigned::decode_2718(&mut data.as_slice()).unwrap();
         let sender = tx.recover_signer().unwrap();
         assert_eq!(sender, address!("001e2b7dE757bA469a57bF6b23d982458a07eFcE"));
         assert_eq!(tx.to(), Some(address!("D9e1459A7A482635700cBc20BBAF52D495Ab9C96")));
         assert_eq!(tx.input().as_ref(), hex!("1b55ba3a"));
-        let encoded = tx.envelope_encoded();
-        assert_eq!(encoded.as_ref(), data.as_slice());
+        let encoded = tx.encoded_2718();
+        assert_eq!(encoded.as_ref(), data.to_vec());
     }
 
     // <https://github.com/paradigmxyz/reth/issues/7750>
@@ -2092,7 +2252,7 @@ mod tests {
     #[test]
     fn recover_pre_eip2() {
         let data = hex!("f8ea0c850ba43b7400832dc6c0942935aa0a2d2fbb791622c29eb1c117b65b7a908580b884590528a9000000000000000000000001878ace42092b7f1ae1f28d16c1272b1aa80ca4670000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000d02ab486cedc0000000000000000000000000000000000000000000000000000557fe293cabc08cf1ca05bfaf3fda0a56b49cc78b22125feb5ae6a99d2b4781f00507d8b02c173771c85a0b5da0dbe6c5bc53740d0071fc83eb17ba0f709e49e9ae7df60dee625ef51afc5");
-        let tx = TransactionSigned::decode_enveloped(&mut data.as_slice()).unwrap();
+        let tx = TransactionSigned::decode_2718(&mut data.as_slice()).unwrap();
         let sender = tx.recover_signer();
         assert!(sender.is_none());
         let sender = tx.recover_signer_unchecked().unwrap();
@@ -2101,113 +2261,16 @@ mod tests {
     }
 
     #[test]
-    fn min_length_encoded_legacy_transaction() {
-        let transaction = TxLegacy::default();
-        let signature = Signature::default();
-
-        let signed_tx = TransactionSigned::from_transaction_and_signature(
-            Transaction::Legacy(transaction),
-            signature,
-        );
-
-        let encoded = &alloy_rlp::encode(signed_tx);
-        assert_eq!(
-            if cfg!(feature = "optimism") {
-                hex!("c9808080808080808080")
-            } else {
-                hex!("c98080808080801b8080")
-            },
-            &encoded[..]
-        );
-        assert_eq!(MIN_LENGTH_LEGACY_TX_ENCODED, encoded.len());
-
-        TransactionSigned::decode(&mut &encoded[..]).unwrap();
-    }
-
-    #[test]
-    fn min_length_encoded_eip2930_transaction() {
-        let transaction = TxEip2930::default();
-        let signature = Signature::default();
-
-        let signed_tx = TransactionSigned::from_transaction_and_signature(
-            Transaction::Eip2930(transaction),
-            signature,
-        );
-
-        let encoded = &alloy_rlp::encode(signed_tx);
-        assert_eq!(hex!("8d01cb80808080808080c0808080"), encoded[..]);
-        assert_eq!(MIN_LENGTH_EIP2930_TX_ENCODED, encoded.len());
-
-        TransactionSigned::decode(&mut &encoded[..]).unwrap();
-    }
-
-    #[test]
-    fn min_length_encoded_eip1559_transaction() {
-        let transaction = TxEip1559::default();
-        let signature = Signature::default();
-
-        let signed_tx = TransactionSigned::from_transaction_and_signature(
-            Transaction::Eip1559(transaction),
-            signature,
-        );
-
-        let encoded = &alloy_rlp::encode(signed_tx);
-        assert_eq!(hex!("8e02cc8080808080808080c0808080"), encoded[..]);
-        assert_eq!(MIN_LENGTH_EIP1559_TX_ENCODED, encoded.len());
-
-        TransactionSigned::decode(&mut &encoded[..]).unwrap();
-    }
-
-    #[test]
-    fn min_length_encoded_eip4844_transaction() {
-        let transaction = TxEip4844::default();
-        let signature = Signature::default();
-
-        let signed_tx = TransactionSigned::from_transaction_and_signature(
-            Transaction::Eip4844(transaction),
-            signature,
-        );
-
-        let encoded = alloy_rlp::encode(signed_tx);
-        assert_eq!(hex!("9003ce8080808080808080c080c0808080"), encoded[..]);
-        assert_eq!(MIN_LENGTH_EIP4844_TX_ENCODED, encoded.len());
-
-        TransactionSigned::decode(&mut &encoded[..]).unwrap();
-    }
-
-    #[cfg(feature = "optimism")]
-    #[test]
-    fn min_length_encoded_deposit_transaction() {
-        use super::MIN_LENGTH_DEPOSIT_TX_ENCODED;
-        use crate::TxDeposit;
-
-        let transaction = TxDeposit::default();
-        let signature = Signature::default();
-
-        let signed_tx = TransactionSigned::from_transaction_and_signature(
-            Transaction::Deposit(transaction),
-            signature,
-        );
-
-        let encoded = &alloy_rlp::encode(signed_tx);
-
-        assert_eq!(b"\xb8?~\xf8<\xa0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x94\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x80\x80\x80\x80\x80\x80", &encoded[..]);
-        assert_eq!(MIN_LENGTH_DEPOSIT_TX_ENCODED, encoded.len());
-
-        TransactionSigned::decode(&mut &encoded[..]).unwrap();
-    }
-
-    #[test]
     fn transaction_signed_no_hash_zstd_codec() {
         // will use same signature everywhere.
         // We don't need signature to match tx, just decoded to the same signature
-        let signature = Signature {
-            odd_y_parity: false,
-            r: U256::from_str("0xeb96ca19e8a77102767a41fc85a36afd5c61ccb09911cec5d3e86e193d9c5ae")
+        let signature = Signature::new(
+            U256::from_str("0xeb96ca19e8a77102767a41fc85a36afd5c61ccb09911cec5d3e86e193d9c5ae")
                 .unwrap(),
-            s: U256::from_str("0x3a456401896b1b6055311536bf00a718568c744d8c1f9df59879e8350220ca18")
+            U256::from_str("0x3a456401896b1b6055311536bf00a718568c744d8c1f9df59879e8350220ca18")
                 .unwrap(),
-        };
+            Parity::Eip155(43),
+        );
 
         let inputs: Vec<Vec<u8>> = vec![
             vec![],
@@ -2227,9 +2290,7 @@ mod tests {
                 nonce: 2,
                 gas_price: 1000000000,
                 gas_limit: 100000,
-                to: TxKind::Call(
-                    Address::from_str("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap(),
-                ),
+                to: Address::from_str("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap().into(),
                 value: U256::from(1000000000000000u64),
                 input: Bytes::from(input),
             });
@@ -2242,50 +2303,17 @@ mod tests {
     fn test_transaction_signed_to_from_compact(tx_signed_no_hash: TransactionSignedNoHash) {
         // zstd aware `to_compact`
         let mut buff: Vec<u8> = Vec::new();
-        let written_bytes = tx_signed_no_hash.clone().to_compact(&mut buff);
-        let (decoded, _) = TransactionSignedNoHash::from_compact(&buff, written_bytes);
-        assert_eq!(tx_signed_no_hash, decoded);
-
-        // zstd unaware `to_compact`/`from_compact`
-        let mut buff: Vec<u8> = Vec::new();
-        let written_bytes = to_compact_ztd_unaware(tx_signed_no_hash.clone(), &mut buff);
-        let (decoded_no_zstd, _something) = from_compact_zstd_unaware(&buff, written_bytes);
-        assert_eq!(tx_signed_no_hash, decoded_no_zstd);
-
-        // zstd unaware `to_compact`, but decode with zstd awareness
-        let mut buff: Vec<u8> = Vec::new();
-        let written_bytes = to_compact_ztd_unaware(tx_signed_no_hash.clone(), &mut buff);
+        let written_bytes = tx_signed_no_hash.to_compact(&mut buff);
         let (decoded, _) = TransactionSignedNoHash::from_compact(&buff, written_bytes);
         assert_eq!(tx_signed_no_hash, decoded);
     }
 
     #[test]
-    #[should_panic(
-        expected = "zstd-codec feature is not enabled, cannot decode `TransactionSignedNoHash` with zstd flag"
-    )]
-    fn transaction_signed_zstd_encoded_no_zstd_decode() {
-        let signature = Signature {
-            odd_y_parity: false,
-            r: U256::from_str("0xeb96ca19e8a77102767a41fc85a36afd5c61ccb09911cec5d3e86e193d9c5ae")
-                .unwrap(),
-            s: U256::from_str("0x3a456401896b1b6055311536bf00a718568c744d8c1f9df59879e8350220ca18")
-                .unwrap(),
-        };
-        let transaction = Transaction::Legacy(TxLegacy {
-            chain_id: Some(4u64),
-            nonce: 2,
-            gas_price: 1000000000,
-            gas_limit: 100000,
-            to: TxKind::Call(
-                Address::from_str("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap(),
-            ),
-            value: U256::from(1000000000000000u64),
-            input: Bytes::from(vec![3u8; 64]),
-        });
-        let tx_signed_no_hash = TransactionSignedNoHash { signature, transaction };
+    fn create_txs_disallowed_for_eip4844() {
+        let data =
+            [3, 208, 128, 128, 123, 128, 120, 128, 129, 129, 128, 192, 129, 129, 192, 128, 128, 9];
+        let res = TransactionSigned::decode_2718(&mut &data[..]);
 
-        let mut buff: Vec<u8> = Vec::new();
-        let written_bytes = tx_signed_no_hash.to_compact(&mut buff);
-        from_compact_zstd_unaware(&buff, written_bytes);
+        assert!(res.is_err());
     }
 }

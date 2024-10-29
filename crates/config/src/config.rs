@@ -1,14 +1,21 @@
 //! Configuration files.
 
-use reth_discv4::Discv4Config;
-use reth_network::{NetworkConfigBuilder, PeersConfig, SessionsConfig};
-use reth_primitives::PruneModes;
-use secp256k1::SecretKey;
+use eyre::eyre;
+use reth_network_types::{PeersConfig, SessionsConfig};
+use reth_prune_types::PruneModes;
+use reth_stages_types::ExecutionStageThresholds;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::{
+    ffi::OsStr,
+    fs,
     path::{Path, PathBuf},
     time::Duration,
 };
+
+const EXTENSION: &str = "toml";
+
+/// The default prune block interval
+pub const DEFAULT_BLOCK_INTERVAL: usize = 5;
 
 /// Configuration for the reth node.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq, Serialize)]
@@ -27,25 +34,63 @@ pub struct Config {
 }
 
 impl Config {
-    /// Initializes network config from read data
-    pub fn network_config(
+    /// Load a [`Config`] from a specified path.
+    ///
+    /// A new configuration file is created with default values if none
+    /// exists.
+    pub fn from_path(path: impl AsRef<Path>) -> eyre::Result<Self> {
+        let path = path.as_ref();
+        match fs::read_to_string(path) {
+            Ok(cfg_string) => {
+                toml::from_str(&cfg_string).map_err(|e| eyre!("Failed to parse TOML: {e}"))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent)
+                        .map_err(|e| eyre!("Failed to create directory: {e}"))?;
+                }
+                let cfg = Self::default();
+                let s = toml::to_string_pretty(&cfg)
+                    .map_err(|e| eyre!("Failed to serialize to TOML: {e}"))?;
+                fs::write(path, s).map_err(|e| eyre!("Failed to write configuration file: {e}"))?;
+                Ok(cfg)
+            }
+            Err(e) => Err(eyre!("Failed to load configuration: {e}")),
+        }
+    }
+
+    /// Returns the [`PeersConfig`] for the node.
+    ///
+    /// If a peers file is provided, the basic nodes from the file are added to the configuration.
+    pub fn peers_config_with_basic_nodes_from_file(
         &self,
-        nat_resolution_method: reth_net_nat::NatResolver,
-        peers_file: Option<PathBuf>,
-        secret_key: SecretKey,
-    ) -> NetworkConfigBuilder {
-        let peer_config = self
-            .peers
+        peers_file: Option<&Path>,
+    ) -> PeersConfig {
+        self.peers
             .clone()
             .with_basic_nodes_from_file(peers_file)
-            .unwrap_or_else(|_| self.peers.clone());
+            .unwrap_or_else(|_| self.peers.clone())
+    }
 
-        let discv4 =
-            Discv4Config::builder().external_ip_resolver(Some(nat_resolution_method)).clone();
-        NetworkConfigBuilder::new(secret_key)
-            .sessions_config(self.sessions.clone())
-            .peer_config(peer_config)
-            .discovery(discv4)
+    /// Save the configuration to toml file.
+    pub fn save(&self, path: &Path) -> Result<(), std::io::Error> {
+        if path.extension() != Some(OsStr::new(EXTENSION)) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("reth config file extension must be '{EXTENSION}'"),
+            ));
+        }
+
+        std::fs::write(
+            path,
+            toml::to_string(self)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?,
+        )
+    }
+
+    /// Sets the pruning configuration.
+    pub fn update_prune_config(&mut self, prune_config: PruneConfig) {
+        self.prune = Some(prune_config);
     }
 }
 
@@ -61,6 +106,8 @@ pub struct StageConfig {
     pub sender_recovery: SenderRecoveryConfig,
     /// Execution stage configuration.
     pub execution: ExecutionConfig,
+    /// Prune stage configuration.
+    pub prune: PruneStageConfig,
     /// Account Hashing stage configuration.
     pub account_hashing: HashingConfig,
     /// Storage Hashing stage configuration.
@@ -75,6 +122,19 @@ pub struct StageConfig {
     pub index_storage_history: IndexHistoryConfig,
     /// Common ETL related configuration.
     pub etl: EtlConfig,
+}
+
+impl StageConfig {
+    /// The highest threshold (in number of blocks) for switching between incremental and full
+    /// calculations across `MerkleStage`, `AccountHashingStage` and `StorageHashingStage`. This is
+    /// required to figure out if can prune or not changesets on subsequent pipeline runs during
+    /// `ExecutionStage`
+    pub fn execution_external_clean_threshold(&self) -> u64 {
+        self.merkle
+            .clean_threshold
+            .max(self.account_hashing.clean_threshold)
+            .max(self.storage_hashing.clean_threshold)
+    }
 }
 
 /// Header stage configuration.
@@ -120,7 +180,7 @@ pub struct BodiesConfig {
     pub downloader_request_limit: u64,
     /// The maximum number of block bodies returned at once from the stream
     ///
-    /// Default: 1_000
+    /// Default: `1_000`
     pub downloader_stream_batch_size: usize,
     /// The size of the internal block buffer in bytes.
     ///
@@ -194,6 +254,31 @@ impl Default for ExecutionConfig {
     }
 }
 
+impl From<ExecutionConfig> for ExecutionStageThresholds {
+    fn from(config: ExecutionConfig) -> Self {
+        Self {
+            max_blocks: config.max_blocks,
+            max_changes: config.max_changes,
+            max_cumulative_gas: config.max_cumulative_gas,
+            max_duration: config.max_duration,
+        }
+    }
+}
+
+/// Prune stage configuration.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(default)]
+pub struct PruneStageConfig {
+    /// The maximum number of entries to prune before committing progress to the database.
+    pub commit_threshold: usize,
+}
+
+impl Default for PruneStageConfig {
+    fn default() -> Self {
+        Self { commit_threshold: 1_000_000 }
+    }
+}
+
 /// Hashing stage configuration.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(default)]
@@ -258,7 +343,7 @@ impl Default for EtlConfig {
 
 impl EtlConfig {
     /// Creates an ETL configuration
-    pub fn new(dir: Option<PathBuf>, file_size: usize) -> Self {
+    pub const fn new(dir: Option<PathBuf>, file_size: usize) -> Self {
         Self { dir, file_size }
     }
 
@@ -301,7 +386,48 @@ pub struct PruneConfig {
 
 impl Default for PruneConfig {
     fn default() -> Self {
-        Self { block_interval: 5, segments: PruneModes::none() }
+        Self { block_interval: DEFAULT_BLOCK_INTERVAL, segments: PruneModes::none() }
+    }
+}
+
+impl PruneConfig {
+    /// Returns whether there is any kind of receipt pruning configuration.
+    pub fn has_receipts_pruning(&self) -> bool {
+        self.segments.receipts.is_some() || !self.segments.receipts_log_filter.is_empty()
+    }
+
+    /// Merges another `PruneConfig` into this one, taking values from the other config if and only
+    /// if the corresponding value in this config is not set.
+    pub fn merge(&mut self, other: Option<Self>) {
+        let Some(other) = other else { return };
+        let Self {
+            block_interval,
+            segments:
+                PruneModes {
+                    sender_recovery,
+                    transaction_lookup,
+                    receipts,
+                    account_history,
+                    storage_history,
+                    receipts_log_filter,
+                },
+        } = other;
+
+        // Merge block_interval, only update if it's the default interval
+        if self.block_interval == DEFAULT_BLOCK_INTERVAL {
+            self.block_interval = block_interval;
+        }
+
+        // Merge the various segment prune modes
+        self.segments.sender_recovery = self.segments.sender_recovery.or(sender_recovery);
+        self.segments.transaction_lookup = self.segments.transaction_lookup.or(transaction_lookup);
+        self.segments.receipts = self.segments.receipts.or(receipts);
+        self.segments.account_history = self.segments.account_history.or(account_history);
+        self.segments.storage_history = self.segments.storage_history.or(storage_history);
+
+        if self.segments.receipts_log_filter.0.is_empty() && !receipts_log_filter.0.is_empty() {
+            self.segments.receipts_log_filter = receipts_log_filter;
+        }
     }
 }
 
@@ -325,10 +451,12 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::Config;
-    use std::time::Duration;
-
-    const EXTENSION: &str = "toml";
+    use super::{Config, EXTENSION};
+    use crate::PruneConfig;
+    use alloy_primitives::Address;
+    use reth_network_peers::TrustedPeer;
+    use reth_prune_types::{PruneMode, PruneModes, ReceiptsLogPruneConfig};
+    use std::{collections::BTreeMap, path::Path, str::FromStr, time::Duration};
 
     fn with_tempdir(filename: &str, proc: fn(&std::path::Path)) {
         let temp_dir = tempfile::tempdir().unwrap();
@@ -339,11 +467,99 @@ mod tests {
         temp_dir.close().unwrap()
     }
 
+    /// Run a test function with a temporary config path as fixture.
+    fn with_config_path(test_fn: fn(&Path)) {
+        // Create a temporary directory for the config file
+        let config_dir = tempfile::tempdir().expect("creating test fixture failed");
+        // Create the config file path
+        let config_path =
+            config_dir.path().join("example-app").join("example-config").with_extension("toml");
+        // Run the test function with the config path
+        test_fn(&config_path);
+        config_dir.close().expect("removing test fixture failed");
+    }
+
+    #[test]
+    fn test_load_path_works() {
+        with_config_path(|path| {
+            let config = Config::from_path(path).expect("load_path failed");
+            assert_eq!(config, Config::default());
+        })
+    }
+
+    #[test]
+    fn test_load_path_reads_existing_config() {
+        with_config_path(|path| {
+            let config = Config::default();
+
+            // Create the parent directory if it doesn't exist
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).expect("Failed to create directories");
+            }
+
+            // Write the config to the file
+            std::fs::write(path, toml::to_string(&config).unwrap())
+                .expect("Failed to write config");
+
+            // Load the config from the file and compare it
+            let loaded = Config::from_path(path).expect("load_path failed");
+            assert_eq!(config, loaded);
+        })
+    }
+
+    #[test]
+    fn test_load_path_fails_on_invalid_toml() {
+        with_config_path(|path| {
+            let invalid_toml = "invalid toml data";
+
+            // Create the parent directory if it doesn't exist
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).expect("Failed to create directories");
+            }
+
+            // Write invalid TOML data to the file
+            std::fs::write(path, invalid_toml).expect("Failed to write invalid TOML");
+
+            // Attempt to load the config should fail
+            let result = Config::from_path(path);
+            assert!(result.is_err());
+        })
+    }
+
+    #[test]
+    fn test_load_path_creates_directory_if_not_exists() {
+        with_config_path(|path| {
+            // Ensure the directory does not exist
+            let parent = path.parent().unwrap();
+            assert!(!parent.exists());
+
+            // Load the configuration, which should create the directory and a default config file
+            let config = Config::from_path(path).expect("load_path failed");
+            assert_eq!(config, Config::default());
+
+            // The directory and file should now exist
+            assert!(parent.exists());
+            assert!(path.exists());
+        });
+    }
+
     #[test]
     fn test_store_config() {
         with_tempdir("config-store-test", |config_path| {
             let config = Config::default();
-            confy::store_path(config_path, config).expect("Failed to store config");
+            std::fs::write(
+                config_path,
+                toml::to_string(&config).expect("Failed to serialize config"),
+            )
+            .expect("Failed to write config file");
+        })
+    }
+
+    #[test]
+    fn test_store_config_method() {
+        with_tempdir("config-store-test-method", |config_path| {
+            let config = Config::default();
+            config.save(config_path).expect("Failed to store config");
         })
     }
 
@@ -351,9 +567,18 @@ mod tests {
     fn test_load_config() {
         with_tempdir("config-load-test", |config_path| {
             let config = Config::default();
-            confy::store_path(config_path, &config).unwrap();
 
-            let loaded_config: Config = confy::load_path(config_path).unwrap();
+            // Write the config to a file
+            std::fs::write(
+                config_path,
+                toml::to_string(&config).expect("Failed to serialize config"),
+            )
+            .expect("Failed to write config file");
+
+            // Load the config from the file
+            let loaded_config = Config::from_path(config_path).unwrap();
+
+            // Compare the loaded config with the original config
             assert_eq!(config, loaded_config);
         })
     }
@@ -363,9 +588,18 @@ mod tests {
         with_tempdir("config-load-test", |config_path| {
             let mut config = Config::default();
             config.stages.execution.max_duration = Some(Duration::from_secs(10 * 60));
-            confy::store_path(config_path, &config).unwrap();
 
-            let loaded_config: Config = confy::load_path(config_path).unwrap();
+            // Write the config to a file
+            std::fs::write(
+                config_path,
+                toml::to_string(&config).expect("Failed to serialize config"),
+            )
+            .expect("Failed to write config file");
+
+            // Load the config from the file
+            let loaded_config = Config::from_path(config_path).unwrap();
+
+            // Compare the loaded config with the original config
             assert_eq!(config, loaded_config);
         })
     }
@@ -672,6 +906,79 @@ nanos = 0
         let _conf: Config = toml::from_str(alpha_0_0_19).unwrap();
     }
 
+    // ensures prune config deserialization is backwards compatible
+    #[test]
+    fn test_backwards_compatibility_prune_full() {
+        let s = r"#
+[prune]
+block_interval = 5
+
+[prune.segments]
+sender_recovery = { distance = 16384 }
+transaction_lookup = 'full'
+receipts = { distance = 16384 }
+#";
+        let _conf: Config = toml::from_str(s).unwrap();
+
+        let s = r"#
+[prune]
+block_interval = 5
+
+[prune.segments]
+sender_recovery = { distance = 16384 }
+transaction_lookup = 'full'
+receipts = 'full'
+#";
+        let err = toml::from_str::<Config>(s).unwrap_err().to_string();
+        assert!(err.contains("invalid value: string \"full\""), "{}", err);
+    }
+
+    #[test]
+    fn test_prune_config_merge() {
+        let mut config1 = PruneConfig {
+            block_interval: 5,
+            segments: PruneModes {
+                sender_recovery: Some(PruneMode::Full),
+                transaction_lookup: None,
+                receipts: Some(PruneMode::Distance(1000)),
+                account_history: None,
+                storage_history: Some(PruneMode::Before(5000)),
+                receipts_log_filter: ReceiptsLogPruneConfig(BTreeMap::from([(
+                    Address::random(),
+                    PruneMode::Full,
+                )])),
+            },
+        };
+
+        let config2 = PruneConfig {
+            block_interval: 10,
+            segments: PruneModes {
+                sender_recovery: Some(PruneMode::Distance(500)),
+                transaction_lookup: Some(PruneMode::Full),
+                receipts: Some(PruneMode::Full),
+                account_history: Some(PruneMode::Distance(2000)),
+                storage_history: Some(PruneMode::Distance(3000)),
+                receipts_log_filter: ReceiptsLogPruneConfig(BTreeMap::from([
+                    (Address::random(), PruneMode::Distance(1000)),
+                    (Address::random(), PruneMode::Before(2000)),
+                ])),
+            },
+        };
+
+        let original_filter = config1.segments.receipts_log_filter.clone();
+        config1.merge(Some(config2));
+
+        // Check that the configuration has been merged. Any configuration present in config1
+        // should not be overwritten by config2
+        assert_eq!(config1.block_interval, 10);
+        assert_eq!(config1.segments.sender_recovery, Some(PruneMode::Full));
+        assert_eq!(config1.segments.transaction_lookup, Some(PruneMode::Full));
+        assert_eq!(config1.segments.receipts, Some(PruneMode::Distance(1000)));
+        assert_eq!(config1.segments.account_history, Some(PruneMode::Distance(2000)));
+        assert_eq!(config1.segments.storage_history, Some(PruneMode::Before(5000)));
+        assert_eq!(config1.segments.receipts_log_filter, original_filter);
+    }
+
     #[test]
     fn test_conf_trust_nodes_only() {
         let trusted_nodes_only = r"#
@@ -687,5 +994,29 @@ connect_trusted_nodes_only = true
 #";
         let conf: Config = toml::from_str(trusted_nodes_only).unwrap();
         assert!(conf.peers.trusted_nodes_only);
+    }
+
+    #[test]
+    fn test_can_support_dns_in_trusted_nodes() {
+        let reth_toml = r#"
+    [peers]
+    trusted_nodes = [
+        "enode://0401e494dbd0c84c5c0f72adac5985d2f2525e08b68d448958aae218f5ac8198a80d1498e0ebec2ce38b1b18d6750f6e61a56b4614c5a6c6cf0981c39aed47dc@34.159.32.127:30303",
+        "enode://e9675164b5e17b9d9edf0cc2bd79e6b6f487200c74d1331c220abb5b8ee80c2eefbf18213989585e9d0960683e819542e11d4eefb5f2b4019e1e49f9fd8fff18@berav2-bootnode.staketab.org:30303"
+    ]
+    "#;
+
+        let conf: Config = toml::from_str(reth_toml).unwrap();
+        assert_eq!(conf.peers.trusted_nodes.len(), 2);
+
+        let expected_enodes = vec![
+        "enode://0401e494dbd0c84c5c0f72adac5985d2f2525e08b68d448958aae218f5ac8198a80d1498e0ebec2ce38b1b18d6750f6e61a56b4614c5a6c6cf0981c39aed47dc@34.159.32.127:30303",
+        "enode://e9675164b5e17b9d9edf0cc2bd79e6b6f487200c74d1331c220abb5b8ee80c2eefbf18213989585e9d0960683e819542e11d4eefb5f2b4019e1e49f9fd8fff18@berav2-bootnode.staketab.org:30303",
+    ];
+
+        for enode in expected_enodes {
+            let node = TrustedPeer::from_str(enode).unwrap();
+            assert!(conf.peers.trusted_nodes.contains(&node));
+        }
     }
 }

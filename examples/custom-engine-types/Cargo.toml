@@ -1,0 +1,26 @@
+[package]
+name = "example-custom-engine-types"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reth.workspace = true
+reth-chainspec.workspace = true
+reth-node-api.workspace = true
+reth-node-core.workspace = true
+reth-primitives.workspace = true
+reth-payload-builder.workspace = true
+reth-basic-payload-builder.workspace = true
+reth-ethereum-payload-builder.workspace = true
+reth-node-ethereum = { workspace = true, features = ["test-utils"] }
+reth-tracing.workspace = true
+alloy-genesis.workspace = true
+alloy-rpc-types = { workspace = true, features = ["engine"] }
+alloy-primitives.workspace = true
+
+eyre.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+serde.workspace = true

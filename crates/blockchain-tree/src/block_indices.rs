@@ -1,10 +1,12 @@
 //! Implementation of [`BlockIndices`] related to [`super::BlockchainTree`]
 
-use super::state::BlockChainId;
+use super::state::SidechainId;
 use crate::canonical_chain::CanonicalChain;
+use alloy_eips::BlockNumHash;
+use alloy_primitives::{BlockHash, BlockNumber};
 use linked_hash_set::LinkedHashSet;
-use reth_primitives::{BlockHash, BlockNumHash, BlockNumber, SealedBlockWithSenders};
-use reth_provider::Chain;
+use reth_execution_types::Chain;
+use reth_primitives::SealedBlockWithSenders;
 use std::collections::{btree_map, hash_map, BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// Internal indices of the blocks and chains.
@@ -17,15 +19,15 @@ use std::collections::{btree_map, hash_map, BTreeMap, BTreeSet, HashMap, HashSet
 pub struct BlockIndices {
     /// Last finalized block.
     last_finalized_block: BlockNumber,
-    /// Canonical chain. Contains N number (depends on `finalization_depth`) of blocks.
-    /// These blocks are found in fork_to_child but not inside `blocks_to_chain` or
-    /// `number_to_block` as those are chain specific indices.
+    /// Non-finalized canonical chain. Contains N number (depends on `finalization_depth`) of
+    /// blocks. These blocks are found in `fork_to_child` but not inside `blocks_to_chain` or
+    /// `number_to_block` as those are sidechain specific indices.
     canonical_chain: CanonicalChain,
     /// Index needed when discarding the chain, so we can remove connected chains from tree.
     ///
     /// This maintains insertion order for all child blocks, so
-    /// [BlockIndices::pending_block_num_hash] returns always the same block: the first child block
-    /// we inserted.
+    /// [`BlockIndices::pending_block_num_hash`] returns always the same block: the first child
+    /// block we inserted.
     ///
     /// NOTE: It contains just blocks that are forks as a key and not all blocks.
     fork_to_child: HashMap<BlockHash, LinkedHashSet<BlockHash>>,
@@ -38,8 +40,8 @@ pub struct BlockIndices {
     /// Note: This is a bijection: at all times `blocks_to_chain` and this map contain the block
     /// hashes.
     block_number_to_block_hashes: BTreeMap<BlockNumber, HashSet<BlockHash>>,
-    /// Block hashes and side chain they belong
-    blocks_to_chain: HashMap<BlockHash, BlockChainId>,
+    /// Block hashes to the sidechain IDs they belong to.
+    blocks_to_chain: HashMap<BlockHash, SidechainId>,
 }
 
 impl BlockIndices {
@@ -57,21 +59,14 @@ impl BlockIndices {
         }
     }
 
-    /// Return internal index that maps all pending block number to their hashes.
-    ///
-    /// This essentially contains all possible branches. Given a parent block, then the child block
-    /// number as the key has all possible block hashes as the value.
-    pub fn block_number_to_block_hashes(&self) -> &BTreeMap<BlockNumber, HashSet<BlockHash>> {
-        &self.block_number_to_block_hashes
-    }
-
     /// Return fork to child indices
-    pub fn fork_to_child(&self) -> &HashMap<BlockHash, LinkedHashSet<BlockHash>> {
+    pub const fn fork_to_child(&self) -> &HashMap<BlockHash, LinkedHashSet<BlockHash>> {
         &self.fork_to_child
     }
 
-    /// Return block to chain id
-    pub fn blocks_to_chain(&self) -> &HashMap<BlockHash, BlockChainId> {
+    /// Return block to sidechain id
+    #[allow(dead_code)]
+    pub(crate) const fn blocks_to_chain(&self) -> &HashMap<BlockHash, SidechainId> {
         &self.blocks_to_chain
     }
 
@@ -101,16 +96,8 @@ impl BlockIndices {
         (canonical_tip.number + 1, pending_blocks)
     }
 
-    /// Returns the block number of the canonical block with the given hash.
-    ///
-    /// Returns `None` if no block could be found in the canonical chain.
-    #[inline]
-    pub(crate) fn get_canonical_block_number(&self, block_hash: &BlockHash) -> Option<BlockNumber> {
-        self.canonical_chain.get_canonical_block_number(self.last_finalized_block, block_hash)
-    }
-
     /// Last finalized block
-    pub fn last_finalized_block(&self) -> BlockNumber {
+    pub const fn last_finalized_block(&self) -> BlockNumber {
         self.last_finalized_block
     }
 
@@ -119,15 +106,15 @@ impl BlockIndices {
         &mut self,
         block_number: BlockNumber,
         block_hash: BlockHash,
-        chain_id: BlockChainId,
+        chain_id: SidechainId,
     ) {
         self.block_number_to_block_hashes.entry(block_number).or_default().insert(block_hash);
         self.blocks_to_chain.insert(block_hash, chain_id);
     }
 
     /// Insert block to chain and fork child indices of the new chain
-    pub(crate) fn insert_chain(&mut self, chain_id: BlockChainId, chain: &Chain) {
-        for (number, block) in chain.blocks().iter() {
+    pub(crate) fn insert_chain(&mut self, chain_id: SidechainId, chain: &Chain) {
+        for (number, block) in chain.blocks() {
             // add block -> chain_id index
             self.blocks_to_chain.insert(block.hash(), chain_id);
             // add number -> block
@@ -138,9 +125,9 @@ impl BlockIndices {
         self.fork_to_child.entry(first.parent_hash).or_default().insert_if_absent(first.hash());
     }
 
-    /// Get the chain ID the block belongs to
-    pub(crate) fn get_blocks_chain_id(&self, block: &BlockHash) -> Option<BlockChainId> {
-        self.blocks_to_chain.get(block).cloned()
+    /// Get the [`SidechainId`] for the given block hash if it exists.
+    pub(crate) fn get_side_chain_id(&self, block: &BlockHash) -> Option<SidechainId> {
+        self.blocks_to_chain.get(block).copied()
     }
 
     /// Update all block hashes. iterate over present and new list of canonical hashes and compare
@@ -149,7 +136,7 @@ impl BlockIndices {
     pub(crate) fn update_block_hashes(
         &mut self,
         hashes: BTreeMap<u64, BlockHash>,
-    ) -> (BTreeSet<BlockChainId>, Vec<BlockNumHash>) {
+    ) -> (BTreeSet<SidechainId>, Vec<BlockNumHash>) {
         // set new canonical hashes.
         self.canonical_chain.replace(hashes.clone());
 
@@ -193,7 +180,7 @@ impl BlockIndices {
                     if new_block_value.1 != old_block_value.1 {
                         // remove block hash as it is different
                         removed.push(old_block_value);
-                        added.push(new_block_value.into());
+                        added.push(new_block_value.into())
                     }
                     new_hash = new_hashes.next();
                     old_hash = old_hashes.next();
@@ -218,7 +205,7 @@ impl BlockIndices {
 
     /// Remove chain from indices and return dependent chains that need to be removed.
     /// Does the cleaning of the tree and removing blocks from the chain.
-    pub fn remove_chain(&mut self, chain: &Chain) -> BTreeSet<BlockChainId> {
+    pub(crate) fn remove_chain(&mut self, chain: &Chain) -> BTreeSet<SidechainId> {
         chain
             .blocks()
             .iter()
@@ -234,7 +221,7 @@ impl BlockIndices {
         &mut self,
         block_number: BlockNumber,
         block_hash: BlockHash,
-    ) -> BTreeSet<BlockChainId> {
+    ) -> BTreeSet<SidechainId> {
         // rm number -> block
         if let btree_map::Entry::Occupied(mut entry) =
             self.block_number_to_block_hashes.entry(block_number)
@@ -327,7 +314,7 @@ impl BlockIndices {
         &mut self,
         finalized_block: BlockNumber,
         num_of_additional_canonical_hashes_to_retain: u64,
-    ) -> BTreeSet<BlockChainId> {
+    ) -> BTreeSet<SidechainId> {
         // get finalized chains. blocks between [self.last_finalized,finalized_block).
         // Dont remove finalized_block, as sidechain can point to it.
         let finalized_blocks: Vec<BlockHash> = self
@@ -344,7 +331,7 @@ impl BlockIndices {
 
         let mut lose_chains = BTreeSet::new();
 
-        for block_hash in finalized_blocks.into_iter() {
+        for block_hash in finalized_blocks {
             // there is a fork block.
             if let Some(fork_blocks) = self.fork_to_child.remove(&block_hash) {
                 lose_chains = fork_blocks.into_iter().fold(lose_chains, |mut fold, fork_child| {
@@ -370,7 +357,7 @@ impl BlockIndices {
 
     /// Returns the block number of the canonical block with the given hash.
     #[inline]
-    pub fn canonical_number(&self, block_hash: BlockHash) -> Option<BlockNumber> {
+    pub fn canonical_number(&self, block_hash: &BlockHash) -> Option<BlockNumber> {
         self.canonical_chain.canonical_number(block_hash)
     }
 
@@ -382,7 +369,251 @@ impl BlockIndices {
 
     /// Canonical chain needed for execution of EVM. It should contain last 256 block hashes.
     #[inline]
-    pub(crate) fn canonical_chain(&self) -> &CanonicalChain {
+    pub(crate) const fn canonical_chain(&self) -> &CanonicalChain {
         &self.canonical_chain
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::B256;
+    use reth_primitives::{Header, SealedBlock, SealedHeader};
+
+    #[test]
+    fn pending_block_num_hash_returns_none_if_no_fork() {
+        // Create a new canonical chain with a single block (represented by its number and hash).
+        let canonical_chain = BTreeMap::from([(0, B256::from_slice(&[1; 32]))]);
+
+        let block_indices = BlockIndices::new(0, canonical_chain);
+
+        // No fork to child blocks, so there is no pending block.
+        assert_eq!(block_indices.pending_block_num_hash(), None);
+    }
+
+    #[test]
+    fn pending_block_num_hash_works() {
+        // Create a canonical chain with multiple blocks at heights 1, 2, and 3.
+        let canonical_chain = BTreeMap::from([
+            (1, B256::from_slice(&[1; 32])),
+            (2, B256::from_slice(&[2; 32])),
+            (3, B256::from_slice(&[3; 32])),
+        ]);
+
+        let mut block_indices = BlockIndices::new(3, canonical_chain);
+
+        // Define the hash of the parent block (the block at height 3 in the canonical chain).
+        let parent_hash = B256::from_slice(&[3; 32]);
+
+        // Define the hashes of two child blocks that extend the canonical chain.
+        let child_hash_1 = B256::from_slice(&[2; 32]);
+        let child_hash_2 = B256::from_slice(&[3; 32]);
+
+        // Create a set to store both child block hashes.
+        let mut child_set = LinkedHashSet::new();
+        child_set.insert(child_hash_1);
+        child_set.insert(child_hash_2);
+
+        // Associate the parent block hash with its children in the fork_to_child mapping.
+        block_indices.fork_to_child.insert(parent_hash, child_set);
+
+        // Pending block should be the first child block.
+        assert_eq!(
+            block_indices.pending_block_num_hash(),
+            Some(BlockNumHash { number: 4, hash: child_hash_1 })
+        );
+    }
+
+    #[test]
+    fn pending_blocks_returns_empty_if_no_fork() {
+        // Create a canonical chain with a single block at height 10.
+        let canonical_chain = BTreeMap::from([(10, B256::from_slice(&[1; 32]))]);
+        let block_indices = BlockIndices::new(0, canonical_chain);
+
+        // No child blocks are associated with the canonical tip.
+        assert_eq!(block_indices.pending_blocks(), (11, Vec::new()));
+    }
+
+    #[test]
+    fn pending_blocks_returns_multiple_children() {
+        // Define the hash of the parent block (the block at height 5 in the canonical chain).
+        let parent_hash = B256::from_slice(&[3; 32]);
+
+        // Create a canonical chain with a block at height 5.
+        let canonical_chain = BTreeMap::from([(5, parent_hash)]);
+        let mut block_indices = BlockIndices::new(0, canonical_chain);
+
+        // Define the hashes of two child blocks.
+        let child_hash_1 = B256::from_slice(&[4; 32]);
+        let child_hash_2 = B256::from_slice(&[5; 32]);
+
+        // Create a set to store both child block hashes.
+        let mut child_set = LinkedHashSet::new();
+        child_set.insert(child_hash_1);
+        child_set.insert(child_hash_2);
+
+        // Associate the parent block hash with its children.
+        block_indices.fork_to_child.insert(parent_hash, child_set);
+
+        // Pending blocks should be the two child blocks.
+        assert_eq!(block_indices.pending_blocks(), (6, vec![child_hash_1, child_hash_2]));
+    }
+
+    #[test]
+    fn pending_blocks_with_multiple_forked_chains() {
+        // Define hashes for parent blocks and child blocks.
+        let parent_hash_1 = B256::from_slice(&[6; 32]);
+        let parent_hash_2 = B256::from_slice(&[7; 32]);
+
+        // Create a canonical chain with blocks at heights 1 and 2.
+        let canonical_chain = BTreeMap::from([(1, parent_hash_1), (2, parent_hash_2)]);
+
+        let mut block_indices = BlockIndices::new(2, canonical_chain);
+
+        // Define hashes for child blocks.
+        let child_hash_1 = B256::from_slice(&[8; 32]);
+        let child_hash_2 = B256::from_slice(&[9; 32]);
+
+        // Create sets to store child blocks for each parent block.
+        let mut child_set_1 = LinkedHashSet::new();
+        let mut child_set_2 = LinkedHashSet::new();
+        child_set_1.insert(child_hash_1);
+        child_set_2.insert(child_hash_2);
+
+        // Associate parent block hashes with their child blocks.
+        block_indices.fork_to_child.insert(parent_hash_1, child_set_1);
+        block_indices.fork_to_child.insert(parent_hash_2, child_set_2);
+
+        // Check that the pending blocks are only those extending the canonical tip.
+        assert_eq!(block_indices.pending_blocks(), (3, vec![child_hash_2]));
+    }
+
+    #[test]
+    fn insert_non_fork_block_adds_block_correctly() {
+        // Create a new BlockIndices instance with an empty state.
+        let mut block_indices = BlockIndices::new(0, BTreeMap::new());
+
+        // Define test parameters.
+        let block_number = 1;
+        let block_hash = B256::from_slice(&[1; 32]);
+        let chain_id = SidechainId::from(42);
+
+        // Insert the block into the BlockIndices instance.
+        block_indices.insert_non_fork_block(block_number, block_hash, chain_id);
+
+        // Check that the block number to block hashes mapping includes the new block hash.
+        assert_eq!(
+            block_indices.block_number_to_block_hashes.get(&block_number),
+            Some(&HashSet::from([block_hash]))
+        );
+
+        // Check that the block hash to chain ID mapping includes the new entry.
+        assert_eq!(block_indices.blocks_to_chain.get(&block_hash), Some(&chain_id));
+    }
+
+    #[test]
+    fn insert_non_fork_block_combined_tests() {
+        // Create a new BlockIndices instance with an empty state.
+        let mut block_indices = BlockIndices::new(0, BTreeMap::new());
+
+        // Define test parameters.
+        let block_number_1 = 2;
+        let block_hash_1 = B256::from_slice(&[1; 32]);
+        let block_hash_2 = B256::from_slice(&[2; 32]);
+        let chain_id_1 = SidechainId::from(84);
+
+        let block_number_2 = 4;
+        let block_hash_3 = B256::from_slice(&[3; 32]);
+        let chain_id_2 = SidechainId::from(200);
+
+        // Insert multiple hashes for the same block number.
+        block_indices.insert_non_fork_block(block_number_1, block_hash_1, chain_id_1);
+        block_indices.insert_non_fork_block(block_number_1, block_hash_2, chain_id_1);
+
+        // Insert blocks with different numbers.
+        block_indices.insert_non_fork_block(block_number_2, block_hash_3, chain_id_2);
+
+        // Block number 1 should have two block hashes associated with it.
+        let mut expected_hashes_for_block_1 = HashSet::default();
+        expected_hashes_for_block_1.insert(block_hash_1);
+        expected_hashes_for_block_1.insert(block_hash_2);
+        assert_eq!(
+            block_indices.block_number_to_block_hashes.get(&block_number_1),
+            Some(&expected_hashes_for_block_1)
+        );
+
+        // Check that the block hashes for block_number_1 are associated with the correct chain ID.
+        assert_eq!(block_indices.blocks_to_chain.get(&block_hash_1), Some(&chain_id_1));
+        assert_eq!(block_indices.blocks_to_chain.get(&block_hash_2), Some(&chain_id_1));
+
+        // Block number 2 should have a single block hash associated with it.
+        assert_eq!(
+            block_indices.block_number_to_block_hashes.get(&block_number_2),
+            Some(&HashSet::from([block_hash_3]))
+        );
+
+        // Block hash 3 should be associated with the correct chain ID.
+        assert_eq!(block_indices.blocks_to_chain.get(&block_hash_3), Some(&chain_id_2));
+    }
+
+    #[test]
+    fn insert_chain_validates_insertion() {
+        // Create a new BlockIndices instance with an empty state.
+        let mut block_indices = BlockIndices::new(0, BTreeMap::new());
+
+        // Define test parameters.
+        let chain_id = SidechainId::from(42);
+
+        // Define some example blocks and their hashes.
+        let block_hash_1 = B256::from_slice(&[1; 32]);
+        let block_hash_2 = B256::from_slice(&[2; 32]);
+        let parent_hash = B256::from_slice(&[0; 32]);
+
+        // Define blocks with their numbers and parent hashes.
+        let block_1 = SealedBlockWithSenders {
+            block: SealedBlock {
+                header: SealedHeader::new(
+                    Header { parent_hash, number: 1, ..Default::default() },
+                    block_hash_1,
+                ),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let block_2 = SealedBlockWithSenders {
+            block: SealedBlock {
+                header: SealedHeader::new(
+                    Header { parent_hash: block_hash_1, number: 2, ..Default::default() },
+                    block_hash_2,
+                ),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        // Define a chain containing the blocks.
+        let chain = Chain::new(vec![block_1, block_2], Default::default(), Default::default());
+
+        // Insert the chain into the BlockIndices.
+        block_indices.insert_chain(chain_id, &chain);
+
+        // Check that the blocks are correctly mapped to the chain ID.
+        assert_eq!(block_indices.blocks_to_chain.get(&block_hash_1), Some(&chain_id));
+        assert_eq!(block_indices.blocks_to_chain.get(&block_hash_2), Some(&chain_id));
+
+        // Check that block numbers map to their respective hashes.
+        let mut expected_hashes_1 = HashSet::default();
+        expected_hashes_1.insert(block_hash_1);
+        assert_eq!(block_indices.block_number_to_block_hashes.get(&1), Some(&expected_hashes_1));
+
+        let mut expected_hashes_2 = HashSet::default();
+        expected_hashes_2.insert(block_hash_2);
+        assert_eq!(block_indices.block_number_to_block_hashes.get(&2), Some(&expected_hashes_2));
+
+        // Check that the fork_to_child mapping contains the correct parent-child relationship.
+        // We take the first block of the chain.
+        let mut expected_children = LinkedHashSet::new();
+        expected_children.insert(block_hash_1);
+        assert_eq!(block_indices.fork_to_child.get(&parent_hash), Some(&expected_children));
     }
 }

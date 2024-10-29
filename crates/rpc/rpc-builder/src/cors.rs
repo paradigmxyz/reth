@@ -1,16 +1,25 @@
-use hyper::{http::HeaderValue, Method};
+use http::{HeaderValue, Method};
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
 /// Error thrown when parsing cors domains went wrong
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum CorsDomainError {
+pub enum CorsDomainError {
+    /// Represents an invalid header value for a domain
     #[error("{domain} is an invalid header value")]
-    InvalidHeader { domain: String },
+    InvalidHeader {
+        /// The domain that caused the invalid header
+        domain: String,
+    },
+
+    /// Indicates that a wildcard origin was used incorrectly in a list
     #[error("wildcard origin (`*`) cannot be passed as part of a list: {input}")]
-    WildCardNotAllowed { input: String },
+    WildCardNotAllowed {
+        /// The input string containing the incorrectly used wildcard
+        input: String,
+    },
 }
 
-/// Creates a [CorsLayer] from the given domains
+/// Creates a [`CorsLayer`] from the given domains
 pub(crate) fn create_cors_layer(http_cors_domains: &str) -> Result<CorsLayer, CorsDomainError> {
     let cors = match http_cors_domains.trim() {
         "*" => CorsLayer::new()

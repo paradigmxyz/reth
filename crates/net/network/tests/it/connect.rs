@@ -1,26 +1,31 @@
 //! Connection tests
 
+use std::{net::SocketAddr, time::Duration};
+
 use alloy_node_bindings::Geth;
-use alloy_provider::{admin::AdminApi, ProviderBuilder};
+use alloy_primitives::map::HashSet;
+use alloy_provider::{ext::AdminApi, ProviderBuilder};
 use futures::StreamExt;
+use reth_chainspec::MAINNET;
 use reth_discv4::Discv4Config;
-use reth_eth_wire::DisconnectReason;
-use reth_interfaces::{
-    p2p::headers::client::{HeadersClient, HeadersRequest},
-    sync::{NetworkSyncUpdater, SyncState},
-};
-use reth_net_common::ban_list::BanList;
+use reth_eth_wire::{DisconnectReason, HeadersDirection};
+use reth_net_banlist::BanList;
 use reth_network::{
     test_utils::{enr_to_peer_id, NetworkEventStream, PeerConfig, Testnet, GETH_TIMEOUT},
-    NetworkConfigBuilder, NetworkEvent, NetworkEvents, NetworkManager, PeersConfig,
+    BlockDownloaderProvider, NetworkConfigBuilder, NetworkEvent, NetworkEventListenerProvider,
+    NetworkManager, PeersConfig,
 };
 use reth_network_api::{NetworkInfo, Peers, PeersInfo};
-use reth_primitives::{mainnet_nodes, HeadersDirection, NodeRecord};
+use reth_network_p2p::{
+    headers::client::{HeadersClient, HeadersRequest},
+    sync::{NetworkSyncUpdater, SyncState},
+};
+use reth_network_peers::{mainnet_nodes, NodeRecord, TrustedPeer};
 use reth_provider::test_utils::NoopProvider;
 use reth_transaction_pool::test_utils::testing_pool;
 use secp256k1::SecretKey;
-use std::{collections::HashSet, net::SocketAddr, time::Duration};
 use tokio::task;
+use url::Host;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_establish_connections() {
@@ -54,7 +59,7 @@ async fn test_establish_connections() {
         let mut established = listener0.take(4);
         while let Some(ev) = established.next().await {
             match ev {
-                NetworkEvent::SessionClosed { .. } => {
+                NetworkEvent::SessionClosed { .. } | NetworkEvent::PeerRemoved(_) => {
                     panic!("unexpected event")
                 }
                 NetworkEvent::SessionEstablished { peer_id, .. } => {
@@ -62,9 +67,6 @@ async fn test_establish_connections() {
                 }
                 NetworkEvent::PeerAdded(peer_id) => {
                     assert!(expected_peers.remove(&peer_id))
-                }
-                NetworkEvent::PeerRemoved(_) => {
-                    panic!("unexpected event")
                 }
             }
         }
@@ -320,15 +322,14 @@ async fn test_incoming_node_id_blacklist() {
         let geth = Geth::new().data_dir(temp_dir).disable_discovery().authrpc_port(0).spawn();
         let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port());
 
-        let provider = ProviderBuilder::new()
-            .on_http(format!("http://{geth_endpoint}").parse().unwrap())
-            .unwrap();
+        let provider =
+            ProviderBuilder::new().on_http(format!("http://{geth_endpoint}").parse().unwrap());
 
         // get the peer id we should be expecting
         let enr = provider.node_info().await.unwrap().enr;
         let geth_peer_id = enr_to_peer_id(enr.parse().unwrap());
 
-        let ban_list = BanList::new(vec![geth_peer_id], HashSet::new());
+        let ban_list = BanList::new(vec![geth_peer_id], vec![]);
         let peer_config = PeersConfig::default().with_ban_list(ban_list);
 
         let config = NetworkConfigBuilder::new(secret_key)
@@ -375,9 +376,8 @@ async fn test_incoming_connect_with_single_geth() {
         let temp_dir = tempfile::tempdir().unwrap().into_path();
         let geth = Geth::new().data_dir(temp_dir).disable_discovery().authrpc_port(0).spawn();
         let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port());
-        let provider = ProviderBuilder::new()
-            .on_http(format!("http://{geth_endpoint}").parse().unwrap())
-            .unwrap();
+        let provider =
+            ProviderBuilder::new().on_http(format!("http://{geth_endpoint}").parse().unwrap());
 
         // get the peer id we should be expecting
         let enr = provider.node_info().await.unwrap().enr;
@@ -438,9 +438,8 @@ async fn test_outgoing_connect_with_single_geth() {
         let geth_socket = SocketAddr::new([127, 0, 0, 1].into(), geth_p2p_port);
         let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port()).to_string();
 
-        let provider = ProviderBuilder::new()
-            .on_http(format!("http://{geth_endpoint}").parse().unwrap())
-            .unwrap();
+        let provider =
+            ProviderBuilder::new().on_http(format!("http://{geth_endpoint}").parse().unwrap());
 
         // get the peer id we should be expecting
         let enr = provider.node_info().await.unwrap().enr;
@@ -485,9 +484,8 @@ async fn test_geth_disconnect() {
         let geth_socket = SocketAddr::new([127, 0, 0, 1].into(), geth_p2p_port);
         let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port()).to_string();
 
-        let provider = ProviderBuilder::new()
-            .on_http(format!("http://{geth_endpoint}").parse().unwrap())
-            .unwrap();
+        let provider =
+            ProviderBuilder::new().on_http(format!("http://{geth_endpoint}").parse().unwrap());
 
         // get the peer id we should be expecting
         let enr = provider.node_info().await.unwrap().enr;
@@ -601,13 +599,18 @@ async fn test_disconnect_incoming_when_exceeded_incoming_connections() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_always_accept_incoming_connections_from_trusted_peers() {
     reth_tracing::init_test_tracing();
-    let peer1 = new_random_peer(10, HashSet::new()).await;
-    let peer2 = new_random_peer(0, HashSet::new()).await;
+    let peer1 = new_random_peer(10, vec![]).await;
+    let peer2 = new_random_peer(0, vec![]).await;
 
     //  setup the peer with max_inbound = 1, and add other_peer_3 as trust nodes
-    let peer =
-        new_random_peer(0, HashSet::from([NodeRecord::new(peer2.local_addr(), *peer2.peer_id())]))
-            .await;
+    let trusted_peer2 = TrustedPeer {
+        host: Host::Ipv4(peer2.local_addr().ip().to_string().parse().unwrap()),
+        tcp_port: peer2.local_addr().port(),
+        udp_port: peer2.local_addr().port(),
+        id: *peer2.peer_id(),
+    };
+
+    let peer = new_random_peer(0, vec![trusted_peer2.clone()]).await;
 
     let handle = peer.handle().clone();
     let peer1_handle = peer1.handle().clone();
@@ -641,11 +644,11 @@ async fn test_always_accept_incoming_connections_from_trusted_peers() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_rejected_by_already_connect() {
     reth_tracing::init_test_tracing();
-    let other_peer1 = new_random_peer(10, HashSet::new()).await;
-    let other_peer2 = new_random_peer(10, HashSet::new()).await;
+    let other_peer1 = new_random_peer(10, vec![]).await;
+    let other_peer2 = new_random_peer(10, vec![]).await;
 
     //  setup the peer with max_inbound = 2
-    let peer = new_random_peer(2, HashSet::new()).await;
+    let peer = new_random_peer(2, vec![]).await;
 
     let handle = peer.handle().clone();
     let other_peer_handle1 = other_peer1.handle().clone();
@@ -678,10 +681,7 @@ async fn test_rejected_by_already_connect() {
     assert_eq!(handle.num_connected_peers(), 2);
 }
 
-async fn new_random_peer(
-    max_in_bound: usize,
-    trusted_nodes: HashSet<NodeRecord>,
-) -> NetworkManager<NoopProvider> {
+async fn new_random_peer(max_in_bound: usize, trusted_nodes: Vec<TrustedPeer>) -> NetworkManager {
     let secret_key = SecretKey::new(&mut rand::thread_rng());
     let peers_config =
         PeersConfig::default().with_max_inbound(max_in_bound).with_trusted_nodes(trusted_nodes);
@@ -690,7 +690,7 @@ async fn new_random_peer(
         .listener_port(0)
         .disable_discovery()
         .peer_config(peers_config)
-        .build(NoopProvider::default());
+        .build_with_noop_provider(MAINNET.clone());
 
     NetworkManager::new(config).await.unwrap()
 }
@@ -711,4 +711,34 @@ async fn test_connect_many() {
     for peer in handle.peers() {
         assert_eq!(peer.network().num_connected_peers(), 4);
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_disconnect_then_connect() {
+    reth_tracing::init_test_tracing();
+
+    let net = Testnet::create(2).await;
+
+    net.for_each(|peer| assert_eq!(0, peer.num_peers()));
+
+    let mut handles = net.handles();
+    let handle0 = handles.next().unwrap();
+    let handle1 = handles.next().unwrap();
+
+    drop(handles);
+    let _handle = net.spawn();
+
+    let mut listener0 = NetworkEventStream::new(handle0.event_listener());
+    handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
+    let peer = listener0.next_session_established().await.unwrap();
+    assert_eq!(peer, *handle1.peer_id());
+
+    handle0.disconnect_peer(*handle1.peer_id());
+
+    let (peer, _) = listener0.next_session_closed().await.unwrap();
+    assert_eq!(peer, *handle1.peer_id());
+
+    handle0.connect_peer(*handle1.peer_id(), handle1.local_addr());
+    let peer = listener0.next_session_established().await.unwrap();
+    assert_eq!(peer, *handle1.peer_id());
 }

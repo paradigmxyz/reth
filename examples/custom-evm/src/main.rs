@@ -2,32 +2,57 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use alloy_genesis::Genesis;
+use alloy_primitives::{address, Address, Bytes, U256};
 use reth::{
-    builder::{node::NodeTypes, NodeBuilder},
-    primitives::{
-        address,
-        revm_primitives::{CfgEnvWithHandlerCfg, Env, PrecompileResult, TxEnv},
-        Address, Bytes, U256,
+    builder::{
+        components::{ExecutorBuilder, PayloadServiceBuilder},
+        BuilderContext, NodeBuilder,
     },
+    payload::{EthBuiltPayload, EthPayloadBuilderAttributes},
+    primitives::revm_primitives::{Env, PrecompileResult},
     revm::{
         handler::register::EvmHandler,
         inspector_handle_register,
-        precompile::{Precompile, PrecompileSpecId, Precompiles},
-        Database, Evm, EvmBuilder, GetInspector,
+        precompile::{Precompile, PrecompileOutput, PrecompileSpecId},
+        primitives::BlockEnv,
+        ContextPrecompiles, Database, Evm, EvmBuilder, GetInspector,
     },
+    rpc::types::engine::PayloadAttributes,
     tasks::TaskManager,
+    transaction_pool::TransactionPool,
 };
-use reth_node_api::{ConfigureEvm, ConfigureEvmEnv};
+use reth_chainspec::{Chain, ChainSpec};
+use reth_evm_ethereum::EthEvmConfig;
+use reth_node_api::{
+    ConfigureEvm, ConfigureEvmEnv, FullNodeTypes, NextBlockEnvAttributes, NodeTypes,
+    NodeTypesWithEngine, PayloadTypes,
+};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
-use reth_node_ethereum::{EthEngineTypes, EthEvmConfig, EthereumNode};
-use reth_primitives::{Chain, ChainSpec, Genesis, Header, Transaction};
+use reth_node_ethereum::{
+    node::{EthereumAddOns, EthereumPayloadBuilder},
+    BasicBlockExecutorProvider, EthExecutionStrategyFactory, EthereumNode,
+};
+use reth_primitives::{
+    revm_primitives::{CfgEnvWithHandlerCfg, TxEnv},
+    Header, TransactionSigned,
+};
 use reth_tracing::{RethTracer, Tracer};
 use std::sync::Arc;
 
 /// Custom EVM configuration
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
-pub struct MyEvmConfig;
+pub struct MyEvmConfig {
+    /// Wrapper around mainnet configuration
+    inner: EthEvmConfig,
+}
+
+impl MyEvmConfig {
+    pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
+        Self { inner: EthEvmConfig::new(chain_spec) }
+    }
+}
 
 impl MyEvmConfig {
     /// Sets the precompiles to the EVM handler
@@ -45,43 +70,60 @@ impl MyEvmConfig {
 
         // install the precompiles
         handler.pre_execution.load_precompiles = Arc::new(move || {
-            let mut precompiles = Precompiles::new(PrecompileSpecId::from_spec_id(spec_id)).clone();
-            precompiles.inner.insert(
+            let mut precompiles = ContextPrecompiles::new(PrecompileSpecId::from_spec_id(spec_id));
+            precompiles.extend([(
                 address!("0000000000000000000000000000000000000999"),
-                Precompile::Env(Self::my_precompile),
-            );
-            precompiles.into()
+                Precompile::Env(Self::my_precompile).into(),
+            )]);
+            precompiles
         });
     }
 
     /// A custom precompile that does nothing
     fn my_precompile(_data: &Bytes, _gas: u64, _env: &Env) -> PrecompileResult {
-        Ok((0, Bytes::new()))
+        Ok(PrecompileOutput::new(0, Bytes::new()))
     }
 }
 
 impl ConfigureEvmEnv for MyEvmConfig {
-    type TxMeta = ();
+    type Header = Header;
 
-    fn fill_tx_env<T>(tx_env: &mut TxEnv, transaction: T, sender: Address, meta: Self::TxMeta)
-    where
-        T: AsRef<Transaction>,
-    {
-        EthEvmConfig::fill_tx_env(tx_env, transaction, sender, meta)
+    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
+        self.inner.fill_tx_env(tx_env, transaction, sender);
+    }
+
+    fn fill_tx_env_system_contract_call(
+        &self,
+        env: &mut Env,
+        caller: Address,
+        contract: Address,
+        data: Bytes,
+    ) {
+        self.inner.fill_tx_env_system_contract_call(env, caller, contract, data);
     }
 
     fn fill_cfg_env(
+        &self,
         cfg_env: &mut CfgEnvWithHandlerCfg,
-        chain_spec: &ChainSpec,
-        header: &Header,
+        header: &Self::Header,
         total_difficulty: U256,
     ) {
-        EthEvmConfig::fill_cfg_env(cfg_env, chain_spec, header, total_difficulty)
+        self.inner.fill_cfg_env(cfg_env, header, total_difficulty);
+    }
+
+    fn next_cfg_and_block_env(
+        &self,
+        parent: &Self::Header,
+        attributes: NextBlockEnvAttributes,
+    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+        self.inner.next_cfg_and_block_env(parent, attributes)
     }
 }
 
 impl ConfigureEvm for MyEvmConfig {
-    fn evm<'a, DB: Database + 'a>(&self, db: DB) -> Evm<'a, (), DB> {
+    type DefaultExternalContext<'a> = ();
+
+    fn evm<DB: Database>(&self, db: DB) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
         EvmBuilder::default()
             .with_db(db)
             // add additional precompiles
@@ -89,9 +131,9 @@ impl ConfigureEvm for MyEvmConfig {
             .build()
     }
 
-    fn evm_with_inspector<'a, DB, I>(&self, db: DB, inspector: I) -> Evm<'a, I, DB>
+    fn evm_with_inspector<DB, I>(&self, db: DB, inspector: I) -> Evm<'_, I, DB>
     where
-        DB: Database + 'a,
+        DB: Database,
         I: GetInspector<DB>,
     {
         EvmBuilder::default()
@@ -102,30 +144,69 @@ impl ConfigureEvm for MyEvmConfig {
             .append_handler_register(inspector_handle_register)
             .build()
     }
+
+    fn default_external_context<'a>(&self) -> Self::DefaultExternalContext<'a> {}
 }
 
-#[derive(Debug, Clone, Default)]
+/// Builds a regular ethereum block executor that uses the custom EVM.
+#[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
-struct MyCustomNode;
+pub struct MyExecutorBuilder;
 
-/// Configure the node types
-impl NodeTypes for MyCustomNode {
-    type Primitives = ();
-    type Engine = EthEngineTypes;
-    type Evm = MyEvmConfig;
+impl<Node> ExecutorBuilder<Node> for MyExecutorBuilder
+where
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
+{
+    type EVM = MyEvmConfig;
+    type Executor = BasicBlockExecutorProvider<EthExecutionStrategyFactory<Self::EVM>>;
 
-    fn evm_config(&self) -> Self::Evm {
-        Self::Evm::default()
+    async fn build_evm(
+        self,
+        ctx: &BuilderContext<Node>,
+    ) -> eyre::Result<(Self::EVM, Self::Executor)> {
+        Ok((
+            MyEvmConfig::new(ctx.chain_spec()),
+            BasicBlockExecutorProvider::new(EthExecutionStrategyFactory::new(
+                ctx.chain_spec(),
+                MyEvmConfig::new(ctx.chain_spec()),
+            )),
+        ))
     }
 }
 
+/// Builds a regular ethereum block executor that uses the custom EVM.
+#[derive(Debug, Default, Clone)]
+#[non_exhaustive]
+pub struct MyPayloadBuilder {
+    inner: EthereumPayloadBuilder,
+}
+
+impl<Types, Node, Pool> PayloadServiceBuilder<Node, Pool> for MyPayloadBuilder
+where
+    Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
+    Node: FullNodeTypes<Types = Types>,
+    Pool: TransactionPool + Unpin + 'static,
+    Types::Engine: PayloadTypes<
+        BuiltPayload = EthBuiltPayload,
+        PayloadAttributes = PayloadAttributes,
+        PayloadBuilderAttributes = EthPayloadBuilderAttributes,
+    >,
+{
+    async fn spawn_payload_service(
+        self,
+        ctx: &BuilderContext<Node>,
+        pool: Pool,
+    ) -> eyre::Result<reth::payload::PayloadBuilderHandle<Types::Engine>> {
+        self.inner.spawn(MyEvmConfig::new(ctx.chain_spec()), ctx, pool)
+    }
+}
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     let _guard = RethTracer::new().init()?;
 
     let tasks = TaskManager::current();
 
-    // create optimism genesis with canyon at block 2
+    // create a custom chain spec
     let spec = ChainSpec::builder()
         .chain(Chain::mainnet())
         .genesis(Genesis::default())
@@ -140,8 +221,15 @@ async fn main() -> eyre::Result<()> {
 
     let handle = NodeBuilder::new(node_config)
         .testing_node(tasks.executor())
-        .with_types(MyCustomNode::default())
-        .with_components(EthereumNode::components())
+        // configure the node with regular ethereum types
+        .with_types::<EthereumNode>()
+        // use default ethereum components but with our executor
+        .with_components(
+            EthereumNode::components()
+                .executor(MyExecutorBuilder::default())
+                .payload(MyPayloadBuilder::default()),
+        )
+        .with_add_ons(EthereumAddOns::default())
         .launch()
         .await
         .unwrap();

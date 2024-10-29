@@ -3,7 +3,8 @@ use reth::{
     providers::StateProviderFactory, tasks::TaskSpawner, transaction_pool::TransactionPool,
 };
 use reth_basic_payload_builder::{PayloadBuilder, PayloadConfig};
-use reth_payload_builder::{error::PayloadBuilderError, KeepPayloadJobAlive, PayloadJob};
+use reth_node_api::PayloadKind;
+use reth_payload_builder::{KeepPayloadJobAlive, PayloadBuilderError, PayloadJob};
 
 use std::{
     pin::Pin,
@@ -26,7 +27,7 @@ where
     /// The type responsible for building payloads.
     ///
     /// See [PayloadBuilder]
-    pub(crate) _builder: Builder,
+    pub(crate) builder: Builder,
 }
 
 impl<Client, Pool, Tasks, Builder> PayloadJob for EmptyBlockPayloadJob<Client, Pool, Tasks, Builder>
@@ -44,7 +45,7 @@ where
     type BuiltPayload = Builder::BuiltPayload;
 
     fn best_payload(&self) -> Result<Self::BuiltPayload, PayloadBuilderError> {
-        let payload = Builder::build_empty_payload(&self.client, self.config.clone())?;
+        let payload = self.builder.build_empty_payload(&self.client, self.config.clone())?;
         Ok(payload)
     }
 
@@ -52,7 +53,10 @@ where
         Ok(self.config.attributes.clone())
     }
 
-    fn resolve(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
+    fn resolve_kind(
+        &mut self,
+        _kind: PayloadKind,
+    ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
         let payload = self.best_payload();
         (futures_util::future::ready(payload), KeepPayloadJobAlive::No)
     }

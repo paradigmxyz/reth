@@ -11,24 +11,35 @@ env:
 
 jobs:
   clippy-binaries:
-    name: clippy / ${{ matrix.network }}
+    name: clippy binaries / ${{ matrix.type }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       matrix:
         include:
-          - binary: reth
-            network: ethereum
-          - binary: op-reth
-            network: optimism
+          - type: ethereum
+            args: --bin reth --workspace --locked
+            features: "ethereum asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
+          - type: optimism
+            args: --bin op-reth --workspace --locked
+            features: "optimism asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
+          - type: book
+            args: --manifest-path book/sources/Cargo.toml --workspace --bins
+            features: ""
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@clippy
+        with:
+          components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run:
-          cargo clippy --bin "${{ matrix.binary }}" --workspace --features "${{ matrix.network }} asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
+      - if: "${{ matrix.type == 'book' }}"
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Run clippy on binaries
+        run: cargo clippy ${{ matrix.args }} --features "${{ matrix.features }}"
         env:
           RUSTFLAGS: -D warnings
 
@@ -38,13 +49,31 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@clippy
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
       - run: cargo clippy --workspace --lib --examples --tests --benches --all-features --locked
         env:
           RUSTFLAGS: -D warnings
+
+  wasm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          target: wasm32-wasip1
+      - uses: taiki-e/install-action@cargo-hack
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - uses: dcarbone/install-jq-action@v2
+      - name: Run Wasm checks
+        run: .github/assets/check_wasm.sh
 
   crate-checks:
     runs-on: ubuntu-latest
@@ -56,7 +85,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: cargo hack check
+      - run: cargo hack check --workspace --exclude op-reth
+      - run: cargo check -p op-reth --features "optimism"
 
   msrv:
     name: MSRV / ${{ matrix.network }}
@@ -73,7 +103,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.76" # MSRV
+          toolchain: "1.82" # MSRV
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
@@ -95,9 +125,7 @@ jobs:
         env:
           # Keep in sync with ./book.yml:jobs.build
           # This should only add `-D warnings`
-          RUSTDOCFLAGS:
-            --cfg docsrs --show-type-layout --generate-link-to-definition --enable-index-page
-            -Zunstable-options -D warnings
+          RUSTDOCFLAGS: --cfg docsrs --show-type-layout --generate-link-to-definition --enable-index-page -Zunstable-options -D warnings
 
   fmt:
     name: fmt
@@ -108,13 +136,52 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt
-      - run: cargo fmt --all --check
+      - name: Run fmt
+        run: cargo fmt --all --check
+      - name: Run fmt on book sources
+        run: cargo fmt --manifest-path book/sources/Cargo.toml --all --check
+
+  udeps:
+    name: udeps
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - uses: taiki-e/install-action@cargo-udeps
+      - run: cargo udeps --workspace --lib --examples --tests --benches --all-features --locked
+
+  book:
+    name: book
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.82" # MSRV
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - run: cargo build --bin reth --workspace --features ethereum
+        env:
+          RUSTFLAGS: -D warnings
+      - run: ./book/cli/update.sh target/debug/reth
+      - name: Check book changes
+        run: git diff --exit-code
 
   codespell:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - uses: actions/checkout@v4
       - uses: codespell-project/actions-codespell@v2
+        with:
+          skip: "*.json"
 
   grafana:
     runs-on: ubuntu-latest
@@ -126,11 +193,66 @@ jobs:
         with:
           cmd: jq empty etc/grafana/dashboards/overview.json
 
+  no-test-deps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Ensure no arbitrary or proptest dependency on default build
+        run: cargo tree --package reth -e=features,no-dev | grep -Eq "arbitrary|proptest" && exit 1 || exit 0
+
+  # Checks that selected rates can compile with power set of features
+  features:
+    name: features
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - name: cargo install cargo-hack
+        uses: taiki-e/install-action@cargo-hack
+      - run: make check-features
+        env:
+          RUSTFLAGS: -D warnings
+
+  # Check crates correctly propagate features
+  feature-propagation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: fetch deps
+        run: |
+          # Eagerly pull dependencies
+          time cargo metadata --format-version=1 --locked > /dev/null
+      - name: run zepter
+        run: |
+          cargo install zepter -f --locked
+          zepter --version
+          time zepter run check
+
   lint-success:
     name: lint success
     runs-on: ubuntu-latest
     if: always()
-    needs: [clippy-binaries, clippy, crate-checks, docs, fmt, codespell, grafana]
+    needs:
+      - clippy-binaries
+      - clippy
+      - wasm
+      - crate-checks
+      - docs
+      - fmt
+      - udeps
+      - book
+      - codespell
+      - grafana
+      - no-test-deps
+      - features
+      - feature-propagation
     timeout-minutes: 30
     steps:
       - name: Decide whether the needed jobs succeeded or failed

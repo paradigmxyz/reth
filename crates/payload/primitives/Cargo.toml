@@ -1,0 +1,37 @@
+[package]
+name = "reth-payload-primitives"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-chainspec.workspace = true
+reth-errors.workspace = true
+reth-primitives.workspace = true
+reth-transaction-pool.workspace = true
+reth-chain-state.workspace = true
+
+# alloy
+alloy-eips.workspace = true
+alloy-primitives.workspace = true
+alloy-rpc-types = { workspace = true, features = ["engine"] }
+op-alloy-rpc-types-engine.workspace = true
+
+# async
+async-trait.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+tokio-stream.workspace = true
+pin-project.workspace = true
+
+# misc
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true

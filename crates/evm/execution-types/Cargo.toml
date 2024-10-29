@@ -1,0 +1,56 @@
+[package]
+name = "reth-execution-types"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+reth-primitives.workspace = true
+reth-execution-errors.workspace = true
+reth-trie.workspace = true
+
+revm.workspace = true
+
+# alloy
+alloy-primitives.workspace = true
+alloy-eips.workspace = true
+
+serde = { workspace = true, optional = true }
+serde_with = { workspace = true, optional = true }
+
+[dev-dependencies]
+arbitrary.workspace = true
+bincode.workspace = true
+rand.workspace = true
+reth-primitives = { workspace = true, features = ["arbitrary", "test-utils"] }
+
+[features]
+default = ["std"]
+optimism = ["reth-primitives/optimism", "revm/optimism"]
+serde = [
+	"dep:serde",
+	"reth-trie/serde",
+	"revm/serde",
+	"alloy-eips/serde",
+	"alloy-primitives/serde",
+	"rand/serde"
+]
+serde-bincode-compat = [
+	"reth-primitives/serde-bincode-compat",
+	"reth-trie/serde-bincode-compat",
+	"serde_with",
+	"alloy-eips/serde-bincode-compat"
+]
+std = [
+	"reth-primitives/std",
+	"alloy-eips/std",
+	"alloy-primitives/std",
+	"revm/std",
+	"serde?/std"
+]

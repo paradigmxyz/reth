@@ -19,8 +19,10 @@ Generally reth is composed of a few components, with supporting crates. The main
   - [RPC](#rpc)
     - [Transports](#transports)
     - [Common](#common-1)
+    - [Utilities Crates](#utilities-crates)
   - [Payloads](#payloads)
   - [Primitives](#primitives)
+  - [Optimism](#optimism)
   - [Misc](#misc)
 
 The supporting crates are split into two categories: [primitives](#primitives) and [miscellaneous](#misc).
@@ -56,7 +58,7 @@ The networking component mainly lives in [`net/network`](../../crates/net/networ
 
 #### Common
 
-- [`net/common`](../../crates/net/common): Shared types used across multiple networking crates.
+- [`net/banlist`](../../crates/net/banlist): A simple peer banlist that can be used to ban peers or IP addresses.
   - Contains: Peer banlist.
 - [`net/network-api`](../../crates/net/network-api): Contains traits that define the networking component as a whole. Other components that interface with the network stack only need to depend on this crate for the relevant types.
 - [`net/nat`](../../crates/net/nat): A small helper crate that resolves the external IP of the running node using various methods (such as a manually provided IP, using UPnP etc.)
@@ -68,8 +70,8 @@ The networking component mainly lives in [`net/network`](../../crates/net/networ
 
 #### Protocol
 
-- [`net/eth-wire`](../../crates/net/eth-wire): Implements the `eth` wire protocol and the RLPx networking stack.
-- [`net/ecies`](../../crates/net/ecies): Implementation of the Elliptic Curve Integrated Encryption Scheme used in the RLPx handshake.
+- [`net/eth-wire`](../../crates/net/eth-wire): Implements the `eth` wire protocol and the ``RLPx`` networking stack.
+- [`net/ecies`](../../crates/net/ecies): Implementation of the Elliptic Curve Integrated Encryption Scheme used in the ``RLPx`` handshake.
 
 #### Downloaders
 
@@ -87,7 +89,10 @@ Different consensus mechanisms.
 
 Crates related to transaction execution.
 
-- [`revm`](../../crates/revm): An implementation of an executor using `revm`
+- [`revm`](../../crates/revm): Revm utils and implementations specific to reth.
+- [`evm`](../../crates/evm): Traits for configuring an EVM specifics.
+- [`execution-types`](../../crates/evm/execution-types): Commonly used types for (EVM) block execution.
+- [`execution-errors`](../../crates/evm/execution-errors): Commonly used error types used when doing block execution.
 
 ### Sync
 
@@ -110,13 +115,15 @@ The RPC component mainly lives in [`rpc/rpc`](../../crates/rpc/rpc), which imple
 - `txpool_`
 - `web3_`
 
+These RPC interface is defined in [`rpc/rpc-api`](../../crates/rpc/rpc-api).
+
 The engine API ([`engine_`][engine-spec]) lives in [`rpc/rpc-engine-api`](../../crates/rpc/rpc-engine-api) (this is *not* an interface crate despite the confusing name).
 
 There is also a crate to easily configure an RPC server: [`rpc/rpc-builder`](../../crates/rpc/rpc-builder).
 
 #### Transports
 
-The RPC component is based on the `jsonrpsee` crate which provides JSONRPC over WebSockets and HTTP.
+The RPC component is based on the [`jsonrpsee`][jsonrpsee] crate which provides JSONRPC over WebSockets and HTTP.
 
 The IPC transport lives in [`rpc/ipc`](../../crates/rpc/ipc).
 
@@ -125,7 +132,15 @@ The IPC transport lives in [`rpc/ipc`](../../crates/rpc/ipc).
 - [`rpc/rpc-api`](../../crates/rpc/rpc-api): RPC traits
   - Supported transports: HTTP, WS, IPC
   - Supported namespaces: `eth_`, `engine_`, `debug_`
-- [`rpc/rpc-types`](../../crates/rpc/rpc-types): Types relevant for the RPC endpoints above, grouped by namespace
+- [`rpc/rpc-eth-api`](../../crates/rpc/rpc-eth-api/): Reth RPC 'eth' namespace API (including interface and implementation), this crate is re-exported by `rpc/rpc-api`
+- [`rpc/rpc-eth-types`](../../crates/rpc/rpc-eth-types/): Types `supporting implementation` of 'eth' namespace RPC server API
+- [`rpc/rpc-server-types`](../../crates/rpc/rpc-server-types/): RPC server types and constants
+
+#### Utilities Crates
+
+- [`rpc/rpc-types-compat`](../../crates/rpc/rpc-types-compat): This crate various helper functions to convert between reth primitive types and rpc types.
+- [`rpc/layer`](../../crates/rpc/rpc-layer/): Some RPC middleware layers (e.g. `AuthValidator`, `JwtAuthValidator`)
+- [`rpc/rpc-testing-util`](../../crates/rpc/rpc-testing-util/): Reth RPC testing helpers
 
 ### Payloads
 
@@ -137,25 +152,25 @@ Crates related to building and validating payloads (blocks).
 
 ### Primitives
 
-These crates define primitive types or algorithms such as RLP.
+These crates define primitive types or algorithms.
 
 - [`primitives`](../../crates/primitives): Commonly used types in Reth.
-- [`rlp`](../../crates/rlp): An implementation of RLP, forked from an earlier Apache-licensed version of [`fastrlp`][fastrlp]
-- [`rlp/rlp-derive`](../../crates/rlp/rlp-derive): Forked from an earlier Apache licenced version of the [`fastrlp-derive`][fastrlp-derive] crate, before it changed licence to GPL.
+- [`primitives-traits`](../../crates/primitives-traits/): Common abstracted types in reth.
 - [`trie`](../../crates/trie): An implementation of a Merkle Patricia Trie used for various roots (e.g. the state root) in Ethereum.
+
+### Optimism
+
+Crates related to the Optimism rollup are lives in [optimism](../../crates/optimism/).
 
 ### Misc
 
 Small utility crates.
 
-- [`interfaces`](../../crates/interfaces): Traits containing common abstractions across the components used in the system. For ease of unit testing, each crate importing the interface is recommended to create mock/in-memory implementations of each trait.
 - [`tasks`](../../crates/tasks): An executor-agnostic task abstraction, used to spawn tasks on different async executors. Supports blocking tasks and handles panics gracefully. A tokio implementation is provided by default.
-- [`metrics/common`](../../crates/metrics/common): Common metrics types (e.g. metered channels)
-- [`metrics/metrics-derive`](../../crates/metrics/metrics-derive): A derive-style API for creating metrics
+- [`metrics/common`](../../crates/metrics/src/common): Common metrics types (e.g. metered channels)
+- [`metrics/metrics-derive`](https://github.com/rkrasiuk/metrics-derive): A derive-style API for creating metrics
 - [`tracing`](../../crates/tracing): A small utility crate to install a uniform [`tracing`][tracing] subscriber
 
-[fastrlp]: https://crates.io/crates/fastrlp
-[fastrlp-derive]: https://crates.io/crates/fastrlp-derive
 [libmdbx-rs]: https://crates.io/crates/libmdbx
 [discv4]: https://github.com/ethereum/devp2p/blob/master/discv4.md
 [jsonrpsee]: https://github.com/paritytech/jsonrpsee/

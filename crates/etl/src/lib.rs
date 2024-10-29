@@ -21,8 +21,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// Key len and Value len encode use [`usize::to_be_bytes()`] the length is 8.
+const KV_LEN: usize = 8;
+
 use rayon::prelude::*;
-use reth_db::table::{Compress, Encode, Key, Value};
+use reth_db_api::table::{Compress, Encode, Key, Value};
 use tempfile::{NamedTempFile, TempDir};
 
 /// An ETL (extract, transform, load) data collector.
@@ -64,7 +67,7 @@ where
     /// Create a new collector with some capacity.
     ///
     /// Once the capacity (in bytes) is reached, the data is sorted and flushed to disk.
-    pub fn new(buffer_capacity_bytes: usize, parent_dir: Option<PathBuf>) -> Self {
+    pub const fn new(buffer_capacity_bytes: usize, parent_dir: Option<PathBuf>) -> Self {
         Self {
             parent_dir,
             dir: None,
@@ -77,12 +80,12 @@ where
     }
 
     /// Returns number of elements currently in the collector.
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.len
     }
 
     /// Returns `true` if there are currently no elements in the collector.
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.len == 0
     }
 
@@ -164,6 +167,14 @@ where
     }
 }
 
+/// Type alias for the items stored in the heap of [`EtlIter`].
+///
+/// Each item in the heap is a tuple containing:
+/// - A `Reverse` tuple of a key-value pair (`Vec<u8>, Vec<u8>`), used to maintain the heap in
+///   ascending order of keys.
+/// - An index (`usize`) representing the source file from which the key-value pair was read.
+type HeapItem = (Reverse<(Vec<u8>, Vec<u8>)>, usize);
+
 /// `EtlIter` is an iterator for traversing through sorted key-value pairs in a collection of ETL
 /// files. These files are created using the [`Collector`] and contain data where keys are encoded
 /// and values are compressed.
@@ -174,20 +185,19 @@ where
 #[derive(Debug)]
 pub struct EtlIter<'a> {
     /// Heap managing the next items to be iterated.
-    #[allow(clippy::type_complexity)]
-    heap: BinaryHeap<(Reverse<(Vec<u8>, Vec<u8>)>, usize)>,
+    heap: BinaryHeap<HeapItem>,
     /// Reference to the vector of ETL files being iterated over.
     files: &'a mut Vec<EtlFile>,
 }
 
-impl<'a> EtlIter<'a> {
+impl EtlIter<'_> {
     /// Peeks into the next element
     pub fn peek(&self) -> Option<&(Vec<u8>, Vec<u8>)> {
         self.heap.peek().map(|(Reverse(entry), _)| entry)
     }
 }
 
-impl<'a> Iterator for EtlIter<'a> {
+impl Iterator for EtlIter<'_> {
     type Item = std::io::Result<(Vec<u8>, Vec<u8>)>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -249,8 +259,8 @@ impl EtlFile {
             return Ok(None)
         }
 
-        let mut buffer_key_length = [0; 8];
-        let mut buffer_value_length = [0; 8];
+        let mut buffer_key_length = [0; KV_LEN];
+        let mut buffer_value_length = [0; KV_LEN];
 
         self.file.read_exact(&mut buffer_key_length)?;
         self.file.read_exact(&mut buffer_value_length)?;
@@ -271,7 +281,7 @@ impl EtlFile {
 
 #[cfg(test)]
 mod tests {
-    use reth_primitives::{TxHash, TxNumber};
+    use alloy_primitives::{TxHash, TxNumber};
 
     use super::*;
 
@@ -292,7 +302,7 @@ mod tests {
             let expected = entries[id];
             assert_eq!(
                 entry.unwrap(),
-                (expected.0.encode().to_vec(), expected.1.compress().to_vec())
+                (expected.0.encode().to_vec(), expected.1.compress().clone())
             );
         }
 

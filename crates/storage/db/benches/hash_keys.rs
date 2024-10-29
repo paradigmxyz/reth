@@ -1,4 +1,7 @@
 #![allow(missing_docs)]
+
+use std::{collections::HashSet, path::Path, sync::Arc};
+
 use criterion::{
     black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
@@ -9,8 +12,17 @@ use proptest::{
     strategy::{Strategy, ValueTree},
     test_runner::TestRunner,
 };
-use reth_db::{cursor::DbCursorRW, TransactionHashNumbers};
-use std::collections::HashSet;
+use reth_db::{test_utils::create_test_rw_db_with_path, DatabaseEnv, TransactionHashNumbers};
+use reth_db_api::{
+    cursor::DbCursorRW,
+    database::Database,
+    table::{Table, TableRow},
+    transaction::DbTxMut,
+};
+use reth_fs_util as fs;
+
+mod utils;
+use utils::*;
 
 criterion_group! {
     name = benches;
@@ -26,7 +38,7 @@ criterion_main!(benches);
 /// * `put_sorted`: Table is preloaded with rows (same as batch size). Sorts during benchmark.
 /// * `put_unsorted`: Table is preloaded with rows (same as batch size).
 ///
-/// It does the above steps with different batches of rows. 10_000, 100_000, 1_000_000. In the
+/// It does the above steps with different batches of rows. `10_000`, `100_000`, `1_000_000`. In the
 /// end, the table statistics are shown (eg. number of pages, table size...)
 pub fn hash_keys(c: &mut Criterion) {
     let mut group = c.benchmark_group("Hash-Keys Table Insertion");
@@ -129,7 +141,6 @@ where
 
 /// Generates two batches. The first is to be inserted into the database before running the
 /// benchmark. The second is to be benchmarked with.
-#[allow(clippy::type_complexity)]
 fn generate_batches<T>(size: usize) -> (Vec<TableRow<T>>, Vec<TableRow<T>>)
 where
     T: Table,
@@ -150,7 +161,7 @@ where
     let mut preload = strategy.new_tree(&mut runner).unwrap().current();
     let mut input = strategy.new_tree(&mut runner).unwrap().current();
 
-    let mut unique_keys = HashSet::new();
+    let mut unique_keys = HashSet::with_capacity(preload.len() + input.len());
     preload.retain(|(k, _)| unique_keys.insert(k.clone()));
     input.retain(|(k, _)| unique_keys.insert(k.clone()));
 
@@ -252,5 +263,3 @@ where
     })
     .unwrap();
 }
-
-include!("./utils.rs");

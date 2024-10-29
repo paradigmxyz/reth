@@ -4,6 +4,7 @@ use super::*;
 /// their potential presence.
 pub(crate) fn generate_flag_struct(
     ident: &Ident,
+    has_lifetime: bool,
     fields: &FieldList,
     is_zstd: bool,
 ) -> TokenStream2 {
@@ -36,7 +37,7 @@ pub(crate) fn generate_flag_struct(
     };
 
     if total_bits == 0 {
-        return placeholder_flag_struct(&flags_ident)
+        return placeholder_flag_struct(ident, &flags_ident)
     }
 
     let (total_bytes, unused_bits) = pad_flag_struct(total_bits, &mut field_flags);
@@ -51,9 +52,39 @@ pub(crate) fn generate_flag_struct(
 
     let docs =
         format!("Fieldset that facilitates compacting the parent type. Used bytes: {total_bytes} | Unused bits: {unused_bits}");
+    let bitflag_encoded_bytes = format!("Used bytes by [`{flags_ident}`]");
+    let bitflag_unused_bits = format!("Unused bits for new fields by [`{flags_ident}`]");
+    let impl_bitflag_encoded_bytes = if has_lifetime {
+        quote! {
+            impl<'a> #ident<'a> {
+                #[doc = #bitflag_encoded_bytes]
+                pub const fn bitflag_encoded_bytes() -> usize {
+                    #total_bytes as usize
+                }
+                #[doc = #bitflag_unused_bits]
+                pub const fn bitflag_unused_bits() -> usize {
+                    #unused_bits as usize
+                }
+           }
+        }
+    } else {
+        quote! {
+            impl #ident {
+                #[doc = #bitflag_encoded_bytes]
+                pub const fn bitflag_encoded_bytes() -> usize {
+                    #total_bytes as usize
+                }
+                #[doc = #bitflag_unused_bits]
+                pub const fn bitflag_unused_bits() -> usize {
+                    #unused_bits as usize
+                }
+           }
+        }
+    };
 
     // Generate the flag struct.
     quote! {
+        #impl_bitflag_encoded_bytes
         pub use #mod_flags_ident::#flags_ident;
         #[allow(non_snake_case)]
         mod #mod_flags_ident {
@@ -133,21 +164,35 @@ fn build_struct_field_flags(
 /// Returns the total number of bytes used by the flags struct and how many unused bits.
 fn pad_flag_struct(total_bits: u8, field_flags: &mut Vec<TokenStream2>) -> (u8, u8) {
     let remaining = 8 - total_bits % 8;
-    if remaining != 8 {
+    if remaining == 8 {
+        (total_bits / 8, 0)
+    } else {
         let bsize = format_ident!("B{remaining}");
         field_flags.push(quote! {
             #[skip]
             unused: #bsize ,
         });
         ((total_bits + remaining) / 8, remaining)
-    } else {
-        (total_bits / 8, 0)
     }
 }
 
 /// Placeholder struct for when there are no bitfields to be added.
-fn placeholder_flag_struct(flags: &Ident) -> TokenStream2 {
+fn placeholder_flag_struct(ident: &Ident, flags: &Ident) -> TokenStream2 {
+    let bitflag_encoded_bytes = format!("Used bytes by [`{flags}`]");
+    let bitflag_unused_bits = format!("Unused bits for new fields by [`{flags}`]");
     quote! {
+        impl #ident {
+            #[doc = #bitflag_encoded_bytes]
+            pub const fn bitflag_encoded_bytes() -> usize {
+                0
+            }
+
+            #[doc = #bitflag_unused_bits]
+            pub const fn bitflag_unused_bits() -> usize {
+                0
+            }
+        }
+
         /// Placeholder struct for when there is no need for a fieldset. Doesn't actually write or read any data.
         #[derive(Debug, Default)]
         pub struct #flags {

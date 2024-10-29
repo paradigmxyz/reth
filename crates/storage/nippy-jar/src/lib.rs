@@ -1,4 +1,8 @@
 //! Immutable data store format.
+//!
+//! *Warning*: The `NippyJar` encoding format and its implementations are
+//! designed for storing and retrieving data internally. They are not hardened
+//! to safely read potentially malicious data.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -6,7 +10,6 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![allow(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use memmap2::Mmap;
@@ -17,18 +20,28 @@ use std::{
     ops::Range,
     path::{Path, PathBuf},
 };
-use sucds::{int_vectors::PrefixSummedEliasFano, Serializable};
+
+// Windows specific extension for std::fs
+#[cfg(windows)]
+use std::os::windows::prelude::OpenOptionsExt;
+
 use tracing::*;
 
-pub mod filter;
-use filter::{Cuckoo, InclusionFilter, InclusionFilters};
-
+/// Compression algorithms supported by `NippyJar`.
 pub mod compression;
-use compression::{Compression, Compressors};
+#[cfg(test)]
+use compression::Compression;
+use compression::Compressors;
 
-pub mod phf;
-pub use phf::PHFKey;
-use phf::{Fmph, Functions, GoFmph, PerfectHashingFunction};
+/// empty enum for backwards compatibility
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
+pub enum Functions {}
+
+/// empty enum for backwards compatibility
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
+pub enum InclusionFilters {}
 
 mod error;
 pub use error::NippyJarError;
@@ -39,11 +52,17 @@ pub use cursor::NippyJarCursor;
 mod writer;
 pub use writer::NippyJarWriter;
 
-const NIPPY_JAR_VERSION: usize = 1;
+mod consistency;
+pub use consistency::NippyJarChecker;
 
+/// The version number of the Nippy Jar format.
+const NIPPY_JAR_VERSION: usize = 1;
+/// The file extension used for index files.
 const INDEX_FILE_EXTENSION: &str = "idx";
+/// The file extension used for offsets files.
 const OFFSETS_FILE_EXTENSION: &str = "off";
-const CONFIG_FILE_EXTENSION: &str = "conf";
+/// The file extension used for configuration files.
+pub const CONFIG_FILE_EXTENSION: &str = "conf";
 
 /// A [`RefRow`] is a list of column value slices pointing to either an internal buffer or a
 /// memory-mapped file.
@@ -52,7 +71,7 @@ type RefRow<'a> = Vec<&'a [u8]>;
 /// Alias type for a column value wrapped in `Result`.
 pub type ColumnResult<T> = Result<T, Box<dyn StdError + Send + Sync>>;
 
-/// A trait for the user-defined header of [NippyJar].
+/// A trait for the user-defined header of [`NippyJar`].
 pub trait NippyJarHeader:
     Send + Sync + Serialize + for<'b> Deserialize<'b> + std::fmt::Debug + 'static
 {
@@ -68,30 +87,10 @@ impl<T> NippyJarHeader for T where
 ///
 /// Data is organized into a columnar format, enabling column-based compression. Data retrieval
 /// entails consulting an offset list and fetching the data from file via `mmap`.
-///
-/// PHF & Filters:
-/// For data membership verification, the `filter` field can be configured with algorithms like
-/// Bloom or Cuckoo filters. While these filters enable rapid membership checks, it's important to
-/// note that **they may yield false positives but not false negatives**. Therefore, they serve as
-/// preliminary checks (eg. in `by_hash` queries) and should be followed by data verification on
-/// retrieval.
-///
-/// The `phf` (Perfect Hashing Function) and `offsets_index` fields facilitate the data retrieval
-/// process in for example `by_hash` queries. Specifically, the PHF converts a query, such as a
-/// block hash, into a unique integer. This integer is then used as an index in `offsets_index`,
-/// which maps to the actual data location in the `offsets` list. Similar to the `filter`, the PHF
-/// may also produce false positives but not false negatives, necessitating subsequent data
-/// verification.
-///
-/// Note: that the key (eg. BlockHash) passed to a filter and phf does not need to actually be
-/// stored.
-///
-/// Ultimately, the `freeze` function yields two files: a data file containing both the data and its
-/// configuration, and an index file that houses the offsets and offsets_index.
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct NippyJar<H = ()> {
-    /// The version of the NippyJar format.
+    /// The version of the `NippyJar` format.
     version: usize,
     /// User-defined header data.
     /// Default: zero-sized unit type: no header data
@@ -103,14 +102,11 @@ pub struct NippyJar<H = ()> {
     /// Optional compression algorithm applied to the data.
     compressor: Option<Compressors>,
     #[serde(skip)]
-    /// Optional filter function for data membership checks.
+    /// Optional field for backwards compatibility
     filter: Option<InclusionFilters>,
     #[serde(skip)]
-    /// Optional Perfect Hashing Function (PHF) for unique offset mapping.
+    /// Optional field for backwards compatibility
     phf: Option<Functions>,
-    /// Index mapping PHF output to value offsets in `offsets`.
-    #[serde(skip)]
-    offsets_index: PrefixSummedEliasFano,
     /// Maximum uncompressed row size of the set. This will enable decompression without any
     /// resizing of the output buffer.
     max_row_size: usize,
@@ -129,8 +125,6 @@ impl<H: NippyJarHeader> std::fmt::Debug for NippyJar<H> {
             .field("compressor", &self.compressor)
             .field("filter", &self.filter)
             .field("phf", &self.phf)
-            .field("offsets_index (len)", &self.offsets_index.len())
-            .field("offsets_index (size in bytes)", &self.offsets_index.size_in_bytes())
             .field("path", &self.path)
             .field("max_row_size", &self.max_row_size)
             .finish_non_exhaustive()
@@ -140,24 +134,19 @@ impl<H: NippyJarHeader> std::fmt::Debug for NippyJar<H> {
 impl NippyJar<()> {
     /// Creates a new [`NippyJar`] without an user-defined header data.
     pub fn new_without_header(columns: usize, path: &Path) -> Self {
-        NippyJar::<()>::new(columns, path, ())
+        Self::new(columns, path, ())
     }
 
     /// Loads the file configuration and returns [`Self`] on a jar without user-defined header data.
     pub fn load_without_header(path: &Path) -> Result<Self, NippyJarError> {
-        NippyJar::<()>::load(path)
-    }
-
-    /// Whether this [`NippyJar`] uses a [`InclusionFilters`] and [`Functions`].
-    pub fn uses_filters(&self) -> bool {
-        self.filter.is_some() && self.phf.is_some()
+        Self::load(path)
     }
 }
 
 impl<H: NippyJarHeader> NippyJar<H> {
     /// Creates a new [`NippyJar`] with a user-defined header data.
     pub fn new(columns: usize, path: &Path, user_header: H) -> Self {
-        NippyJar {
+        Self {
             version: NIPPY_JAR_VERSION,
             user_header,
             columns,
@@ -166,7 +155,6 @@ impl<H: NippyJarHeader> NippyJar<H> {
             compressor: None,
             filter: None,
             phf: None,
-            offsets_index: PrefixSummedEliasFano::default(),
             path: path.to_path_buf(),
         }
     }
@@ -184,51 +172,23 @@ impl<H: NippyJarHeader> NippyJar<H> {
         self
     }
 
-    /// Adds [`filter::Cuckoo`] filter.
-    pub fn with_cuckoo_filter(mut self, max_capacity: usize) -> Self {
-        self.filter = Some(InclusionFilters::Cuckoo(Cuckoo::new(max_capacity)));
-        self
-    }
-
-    /// Adds [`phf::Fmph`] perfect hashing function.
-    pub fn with_fmph(mut self) -> Self {
-        self.phf = Some(Functions::Fmph(Fmph::new()));
-        self
-    }
-
-    /// Adds [`phf::GoFmph`] perfect hashing function.
-    pub fn with_gofmph(mut self) -> Self {
-        self.phf = Some(Functions::GoFmph(GoFmph::new()));
-        self
-    }
-
     /// Gets a reference to the user header.
-    pub fn user_header(&self) -> &H {
+    pub const fn user_header(&self) -> &H {
         &self.user_header
     }
 
     /// Gets total columns in jar.
-    pub fn columns(&self) -> usize {
+    pub const fn columns(&self) -> usize {
         self.columns
     }
 
     /// Gets total rows in jar.
-    pub fn rows(&self) -> usize {
+    pub const fn rows(&self) -> usize {
         self.rows
     }
 
-    /// Returns the size of inclusion filter
-    pub fn filter_size(&self) -> usize {
-        self.size()
-    }
-
-    /// Returns the size of offsets index
-    pub fn offsets_index_size(&self) -> usize {
-        self.offsets_index.size_in_bytes()
-    }
-
     /// Gets a reference to the compressor.
-    pub fn compressor(&self) -> Option<&Compressors> {
+    pub const fn compressor(&self) -> Option<&Compressors> {
         self.compressor.as_ref()
     }
 
@@ -237,29 +197,18 @@ impl<H: NippyJarHeader> NippyJar<H> {
         self.compressor.as_mut()
     }
 
-    /// Loads the file configuration and returns [`Self`] without deserializing filters related
-    /// structures or the offset list.
+    /// Loads the file configuration and returns [`Self`].
     ///
     /// **The user must ensure the header type matches the one used during the jar's creation.**
     pub fn load(path: &Path) -> Result<Self, NippyJarError> {
         // Read [`Self`] located at the data file.
         let config_path = path.with_extension(CONFIG_FILE_EXTENSION);
         let config_file = File::open(&config_path)
-            .map_err(|err| reth_primitives::fs::FsPathError::open(err, config_path))?;
+            .map_err(|err| reth_fs_util::FsPathError::open(err, config_path))?;
 
         let mut obj: Self = bincode::deserialize_from(&config_file)?;
         obj.path = path.to_path_buf();
         Ok(obj)
-    }
-
-    /// Loads filters into memory.
-    pub fn load_filters(&mut self) -> Result<(), NippyJarError> {
-        // Read the offsets lists located at the index file.
-        let mut offsets_file = File::open(self.index_path())?;
-        self.offsets_index = PrefixSummedEliasFano::deserialize_from(&mut offsets_file)?;
-        self.phf = bincode::deserialize_from(&mut offsets_file)?;
-        self.filter = bincode::deserialize_from(&mut offsets_file)?;
-        Ok(())
     }
 
     /// Returns the path for the data file
@@ -290,7 +239,7 @@ impl<H: NippyJarHeader> NippyJar<H> {
             [self.data_path().into(), self.index_path(), self.offsets_path(), self.config_path()]
         {
             if path.exists() {
-                reth_primitives::fs::remove_file(path)?;
+                reth_fs_util::remove_file(path)?;
             }
         }
 
@@ -302,6 +251,16 @@ impl<H: NippyJarHeader> NippyJar<H> {
         DataReader::new(self.data_path())
     }
 
+    /// Writes all necessary configuration to file.
+    fn freeze_config(&self) -> Result<(), NippyJarError> {
+        Ok(reth_fs_util::atomic_write_file(&self.config_path(), |file| {
+            bincode::serialize_into(file, &self)
+        })?)
+    }
+}
+
+#[cfg(test)]
+impl<H: NippyJarHeader> NippyJar<H> {
     /// If required, prepares any compression algorithm to an early pass of the data.
     pub fn prepare_compression(
         &mut self,
@@ -315,67 +274,15 @@ impl<H: NippyJarHeader> NippyJar<H> {
         Ok(())
     }
 
-    /// Prepares beforehand the offsets index for querying rows based on `values` (eg. transaction
-    /// hash). Expects `values` to be sorted in the same way as the data that is going to be
-    /// later on inserted.
-    ///
-    /// Currently collecting all items before acting on them.
-    pub fn prepare_index<T: PHFKey>(
-        &mut self,
-        values: impl IntoIterator<Item = ColumnResult<T>>,
-        row_count: usize,
-    ) -> Result<(), NippyJarError> {
-        debug!(target: "nippy-jar", ?row_count, "Preparing index.");
-
-        let values = values.into_iter().collect::<Result<Vec<_>, _>>()?;
-
-        debug_assert!(
-            row_count == values.len(),
-            "Row count ({row_count}) differs from value list count ({}).",
-            values.len()
-        );
-
-        let mut offsets_index = vec![0; row_count];
-
-        // Builds perfect hashing function from the values
-        if let Some(phf) = self.phf.as_mut() {
-            debug!(target: "nippy-jar", ?row_count, values_count = ?values.len(), "Setting keys for perfect hashing function.");
-            phf.set_keys(&values)?;
-        }
-
-        if self.filter.is_some() || self.phf.is_some() {
-            debug!(target: "nippy-jar", ?row_count, "Creating filter and offsets_index.");
-
-            for (row_num, v) in values.into_iter().enumerate() {
-                if let Some(filter) = self.filter.as_mut() {
-                    filter.add(v.as_ref())?;
-                }
-
-                if let Some(phf) = self.phf.as_mut() {
-                    // Points to the first column value offset of the row.
-                    let index = phf.get_index(v.as_ref())?.expect("initialized") as usize;
-                    let _ = std::mem::replace(&mut offsets_index[index], row_num as u64);
-                }
-            }
-        }
-
-        debug!(target: "nippy-jar", ?row_count, "Encoding offsets index list.");
-        self.offsets_index = PrefixSummedEliasFano::from_slice(&offsets_index)?;
-        Ok(())
-    }
-
     /// Writes all data and configuration to a file and the offset index to another.
     pub fn freeze(
-        mut self,
+        self,
         columns: Vec<impl IntoIterator<Item = ColumnResult<Vec<u8>>>>,
         total_rows: u64,
     ) -> Result<Self, NippyJarError> {
         self.check_before_freeze(&columns)?;
 
         debug!(target: "nippy-jar", path=?self.data_path(), "Opening data file.");
-
-        // Write phf, filter and offset index to file
-        self.freeze_filters()?;
 
         // Creates the writer, data and offsets file
         let mut writer = NippyJarWriter::new(self)?;
@@ -391,21 +298,9 @@ impl<H: NippyJarHeader> NippyJar<H> {
         Ok(writer.into_jar())
     }
 
-    /// Freezes [`PerfectHashingFunction`], [`InclusionFilter`] and the offset index to file.
-    fn freeze_filters(&mut self) -> Result<(), NippyJarError> {
-        debug!(target: "nippy-jar", path=?self.index_path(), "Writing offsets and offsets index to file.");
-
-        let mut file = File::create(self.index_path())?;
-        self.offsets_index.serialize_into(&mut file)?;
-        bincode::serialize_into(&mut file, &self.phf)?;
-        bincode::serialize_into(&mut file, &self.filter)?;
-
-        Ok(())
-    }
-
     /// Safety checks before creating and returning a [`File`] handle to write data to.
     fn check_before_freeze(
-        &mut self,
+        &self,
         columns: &[impl IntoIterator<Item = ColumnResult<Vec<u8>>>],
     ) -> Result<(), NippyJarError> {
         if columns.len() != self.columns {
@@ -418,47 +313,13 @@ impl<H: NippyJarHeader> NippyJar<H> {
             }
         }
 
-        // Check `prepare_index` was called.
-        if let Some(phf) = &self.phf {
-            let _ = phf.get_index(&[])?;
-        }
-
         Ok(())
-    }
-
-    /// Writes all necessary configuration to file.
-    fn freeze_config(&mut self) -> Result<(), NippyJarError> {
-        Ok(bincode::serialize_into(File::create(self.config_path())?, &self)?)
-    }
-}
-
-impl<H: NippyJarHeader> InclusionFilter for NippyJar<H> {
-    fn add(&mut self, element: &[u8]) -> Result<(), NippyJarError> {
-        self.filter.as_mut().ok_or(NippyJarError::FilterMissing)?.add(element)
-    }
-
-    fn contains(&self, element: &[u8]) -> Result<bool, NippyJarError> {
-        self.filter.as_ref().ok_or(NippyJarError::FilterMissing)?.contains(element)
-    }
-
-    fn size(&self) -> usize {
-        self.filter.as_ref().map(|f| f.size()).unwrap_or(0)
-    }
-}
-
-impl<H: NippyJarHeader> PerfectHashingFunction for NippyJar<H> {
-    fn set_keys<T: PHFKey>(&mut self, keys: &[T]) -> Result<(), NippyJarError> {
-        self.phf.as_mut().ok_or(NippyJarError::PHFMissing)?.set_keys(keys)
-    }
-
-    fn get_index(&self, key: &[u8]) -> Result<Option<u64>, NippyJarError> {
-        self.phf.as_ref().ok_or(NippyJarError::PHFMissing)?.get_index(key)
     }
 }
 
 /// Manages the reading of static file data using memory-mapped files.
 ///
-/// Holds file and mmap descriptors of the data and offsets files of a static_file.
+/// Holds file and mmap descriptors of the data and offsets files of a `static_file`.
 #[derive(Debug)]
 pub struct DataReader {
     /// Data file descriptor. Needs to be kept alive as long as `data_mmap` handle.
@@ -472,7 +333,7 @@ pub struct DataReader {
     /// Mmap handle for offsets.
     offset_mmap: Mmap,
     /// Number of bytes that represent one offset.
-    offset_size: u64,
+    offset_size: u8,
 }
 
 impl DataReader {
@@ -486,18 +347,21 @@ impl DataReader {
         // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
         let offset_mmap = unsafe { Mmap::map(&offset_file)? };
 
-        Ok(Self {
-            data_file,
-            data_mmap,
-            offset_file,
-            // First byte is the size of one offset in bytes
-            offset_size: offset_mmap[0] as u64,
-            offset_mmap,
-        })
+        // First byte is the size of one offset in bytes
+        let offset_size = offset_mmap[0];
+
+        // Ensure that the size of an offset is at most 8 bytes.
+        if offset_size > 8 {
+            return Err(NippyJarError::OffsetSizeTooBig { offset_size })
+        } else if offset_size == 0 {
+            return Err(NippyJarError::OffsetSizeTooSmall { offset_size })
+        }
+
+        Ok(Self { data_file, data_mmap, offset_file, offset_size, offset_mmap })
     }
 
     /// Returns the offset for the requested data index
-    pub fn offset(&self, index: usize) -> u64 {
+    pub fn offset(&self, index: usize) -> Result<u64, NippyJarError> {
         // + 1 represents the offset_len u8 which is in the beginning of the file
         let from = index * self.offset_size as usize + 1;
 
@@ -511,7 +375,7 @@ impl DataReader {
         if offsets_file_size > 1 {
             let from = offsets_file_size - self.offset_size as usize * (index + 1);
 
-            Ok(self.offset_at(from))
+            self.offset_at(from)
         } else {
             Ok(0)
         }
@@ -520,19 +384,25 @@ impl DataReader {
     /// Returns total number of offsets in the file.
     /// The size of one offset is determined by the file itself.
     pub fn offsets_count(&self) -> Result<usize, NippyJarError> {
-        Ok((self.offset_file.metadata()?.len().saturating_sub(1) / self.offset_size) as usize)
+        Ok((self.offset_file.metadata()?.len().saturating_sub(1) / self.offset_size as u64)
+            as usize)
     }
 
     /// Reads one offset-sized (determined by the offset file) u64 at the provided index.
-    fn offset_at(&self, index: usize) -> u64 {
+    fn offset_at(&self, index: usize) -> Result<u64, NippyJarError> {
         let mut buffer: [u8; 8] = [0; 8];
-        buffer[..self.offset_size as usize]
-            .copy_from_slice(&self.offset_mmap[index..(index + self.offset_size as usize)]);
-        u64::from_le_bytes(buffer)
+
+        let offset_end = index.saturating_add(self.offset_size as usize);
+        if offset_end > self.offset_mmap.len() {
+            return Err(NippyJarError::OffsetOutOfBounds { index })
+        }
+
+        buffer[..self.offset_size as usize].copy_from_slice(&self.offset_mmap[index..offset_end]);
+        Ok(u64::from_le_bytes(buffer))
     }
 
     /// Returns number of bytes that represent one offset.
-    pub fn offset_size(&self) -> u64 {
+    pub const fn offset_size(&self) -> u8 {
         self.offset_size
     }
 
@@ -550,8 +420,9 @@ impl DataReader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use compression::Compression;
     use rand::{rngs::SmallRng, seq::SliceRandom, RngCore, SeedableRng};
-    use std::{collections::HashSet, fs::OpenOptions};
+    use std::{fs::OpenOptions, io::Read};
 
     type ColumnResults<T> = Vec<ColumnResult<T>>;
     type ColumnValues = Vec<Vec<u8>>;
@@ -580,102 +451,30 @@ mod tests {
     }
 
     #[test]
-    fn test_phf() {
-        let (col1, col2) = test_data(None);
-        let num_columns = 2;
-        let num_rows = col1.len() as u64;
-        let file_path = tempfile::NamedTempFile::new().unwrap();
+    fn test_config_serialization() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let jar = NippyJar::new_without_header(23, file.path()).with_lz4();
+        jar.freeze_config().unwrap();
 
-        let create_nippy = || -> NippyJar<()> {
-            let mut nippy = NippyJar::new_without_header(num_columns, file_path.path());
-            assert!(matches!(
-                NippyJar::set_keys(&mut nippy, &col1),
-                Err(NippyJarError::PHFMissing)
-            ));
-            nippy
-        };
+        let mut config_file = OpenOptions::new().read(true).open(jar.config_path()).unwrap();
+        let config_file_len = config_file.metadata().unwrap().len();
+        assert_eq!(config_file_len, 37);
 
-        let check_phf = |mut nippy: NippyJar<_>| {
-            assert!(matches!(
-                NippyJar::get_index(&nippy, &col1[0]),
-                Err(NippyJarError::PHFMissingKeys)
-            ));
-            assert!(NippyJar::set_keys(&mut nippy, &col1).is_ok());
+        let mut buf = Vec::with_capacity(config_file_len as usize);
+        config_file.read_to_end(&mut buf).unwrap();
 
-            let collect_indexes = |nippy: &NippyJar<_>| -> Vec<u64> {
-                col1.iter()
-                    .map(|value| NippyJar::get_index(nippy, value.as_slice()).unwrap().unwrap())
-                    .collect()
-            };
+        assert_eq!(
+            vec![
+                1, 0, 0, 0, 0, 0, 0, 0, 23, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+            ],
+            buf
+        );
 
-            // Ensure all indexes are unique
-            let indexes = collect_indexes(&nippy);
-            assert_eq!(indexes.iter().collect::<HashSet<_>>().len(), indexes.len());
-
-            // Ensure reproducibility
-            assert!(NippyJar::set_keys(&mut nippy, &col1).is_ok());
-            assert_eq!(indexes, collect_indexes(&nippy));
-
-            // Ensure that loaded phf provides the same function outputs
-            nippy.prepare_index(clone_with_result(&col1), col1.len()).unwrap();
-            nippy
-                .freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows)
-                .unwrap();
-            let mut loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
-            loaded_nippy.load_filters().unwrap();
-            assert_eq!(indexes, collect_indexes(&loaded_nippy));
-        };
-
-        // fmph bytes size for 100 values of 32 bytes: 54
-        check_phf(create_nippy().with_fmph());
-
-        // fmph bytes size for 100 values of 32 bytes: 46
-        check_phf(create_nippy().with_gofmph());
-    }
-
-    #[test]
-    fn test_filter() {
-        let (col1, col2) = test_data(Some(1));
-        let num_columns = 2;
-        let num_rows = col1.len() as u64;
-        let file_path = tempfile::NamedTempFile::new().unwrap();
-
-        let mut nippy = NippyJar::new_without_header(num_columns, file_path.path());
-
-        assert!(matches!(
-            InclusionFilter::add(&mut nippy, &col1[0]),
-            Err(NippyJarError::FilterMissing)
-        ));
-
-        nippy = nippy.with_cuckoo_filter(4);
-
-        // Add col1[0]
-        assert!(!InclusionFilter::contains(&nippy, &col1[0]).unwrap());
-        assert!(InclusionFilter::add(&mut nippy, &col1[0]).is_ok());
-        assert!(InclusionFilter::contains(&nippy, &col1[0]).unwrap());
-
-        // Add col1[1]
-        assert!(!InclusionFilter::contains(&nippy, &col1[1]).unwrap());
-        assert!(InclusionFilter::add(&mut nippy, &col1[1]).is_ok());
-        assert!(InclusionFilter::contains(&nippy, &col1[1]).unwrap());
-
-        // // Add more columns until max_capacity
-        assert!(InclusionFilter::add(&mut nippy, &col1[2]).is_ok());
-        assert!(InclusionFilter::add(&mut nippy, &col1[3]).is_ok());
-
-        let nippy = nippy
-            .freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows)
-            .unwrap();
-        let mut loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
-        loaded_nippy.load_filters().unwrap();
-
-        assert_eq!(nippy, loaded_nippy);
-
-        assert!(InclusionFilter::contains(&loaded_nippy, &col1[0]).unwrap());
-        assert!(InclusionFilter::contains(&loaded_nippy, &col1[1]).unwrap());
-        assert!(InclusionFilter::contains(&loaded_nippy, &col1[2]).unwrap());
-        assert!(InclusionFilter::contains(&loaded_nippy, &col1[3]).unwrap());
-        assert!(!InclusionFilter::contains(&loaded_nippy, &col1[4]).unwrap());
+        let mut read_jar = bincode::deserialize_from::<_, NippyJar>(&buf[..]).unwrap();
+        // Path is not ser/de
+        read_jar.path = file.path().to_path_buf();
+        assert_eq!(jar, read_jar);
     }
 
     #[test]
@@ -726,13 +525,11 @@ mod tests {
             .freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows)
             .unwrap();
 
-        let mut loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
-        loaded_nippy.load_filters().unwrap();
+        let loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
         assert_eq!(nippy.version, loaded_nippy.version);
         assert_eq!(nippy.columns, loaded_nippy.columns);
         assert_eq!(nippy.filter, loaded_nippy.filter);
         assert_eq!(nippy.phf, loaded_nippy.phf);
-        assert_eq!(nippy.offsets_index, loaded_nippy.offsets_index);
         assert_eq!(nippy.max_row_size, loaded_nippy.max_row_size);
         assert_eq!(nippy.path, loaded_nippy.path);
 
@@ -771,8 +568,7 @@ mod tests {
             .freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows)
             .unwrap();
 
-        let mut loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
-        loaded_nippy.load_filters().unwrap();
+        let loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
         assert_eq!(nippy, loaded_nippy);
 
         if let Some(Compressors::Lz4(_)) = loaded_nippy.compressor() {
@@ -810,8 +606,7 @@ mod tests {
             .freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows)
             .unwrap();
 
-        let mut loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
-        loaded_nippy.load_filters().unwrap();
+        let loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
         assert_eq!(nippy, loaded_nippy);
 
         if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor() {
@@ -833,7 +628,7 @@ mod tests {
         }
     }
 
-    /// Tests NippyJar with everything enabled: compression, filter, offset list and offset index.
+    /// Tests `NippyJar` with everything enabled.
     #[test]
     fn test_full_nippy_jar() {
         let (col1, col2) = test_data(None);
@@ -853,12 +648,9 @@ mod tests {
         {
             let mut nippy =
                 NippyJar::new(num_columns, file_path.path(), BlockJarHeader { block_start })
-                    .with_zstd(true, 5000)
-                    .with_cuckoo_filter(col1.len())
-                    .with_fmph();
+                    .with_zstd(true, 5000);
 
             nippy.prepare_compression(data.clone()).unwrap();
-            nippy.prepare_index(clone_with_result(&col1), col1.len()).unwrap();
             nippy
                 .freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows)
                 .unwrap();
@@ -866,12 +658,9 @@ mod tests {
 
         // Read file
         {
-            let mut loaded_nippy = NippyJar::<BlockJarHeader>::load(file_path.path()).unwrap();
-            loaded_nippy.load_filters().unwrap();
+            let loaded_nippy = NippyJar::<BlockJarHeader>::load(file_path.path()).unwrap();
 
             assert!(loaded_nippy.compressor().is_some());
-            assert!(loaded_nippy.filter.is_some());
-            assert!(loaded_nippy.phf.is_some());
             assert_eq!(loaded_nippy.user_header().block_start, block_start);
 
             if let Some(Compressors::Zstd(_zstd)) = loaded_nippy.compressor() {
@@ -892,22 +681,9 @@ mod tests {
                 data.shuffle(&mut rand::thread_rng());
 
                 for (row_num, (v0, v1)) in data {
-                    // Simulates `by_hash` queries by iterating col1 values, which were used to
-                    // create the inner index.
-                    {
-                        let row_by_value = cursor
-                            .row_by_key(v0)
-                            .unwrap()
-                            .unwrap()
-                            .iter()
-                            .map(|a| a.to_vec())
-                            .collect::<Vec<_>>();
-                        assert_eq!((&row_by_value[0], &row_by_value[1]), (v0, v1));
-
-                        // Simulates `by_number` queries
-                        let row_by_num = cursor.row_by_number(row_num).unwrap().unwrap();
-                        assert_eq!(row_by_value, row_by_num);
-                    }
+                    // Simulates `by_number` queries
+                    let row_by_num = cursor.row_by_number(row_num).unwrap().unwrap();
+                    assert_eq!((&row_by_num[0].to_vec(), &row_by_num[1].to_vec()), (v0, v1));
                 }
             }
         }
@@ -923,13 +699,9 @@ mod tests {
 
         // Create file
         {
-            let mut nippy = NippyJar::new_without_header(num_columns, file_path.path())
-                .with_zstd(true, 5000)
-                .with_cuckoo_filter(col1.len())
-                .with_fmph();
-
+            let mut nippy =
+                NippyJar::new_without_header(num_columns, file_path.path()).with_zstd(true, 5000);
             nippy.prepare_compression(data).unwrap();
-            nippy.prepare_index(clone_with_result(&col1), col1.len()).unwrap();
             nippy
                 .freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows)
                 .unwrap();
@@ -937,8 +709,7 @@ mod tests {
 
         // Read file
         {
-            let mut loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
-            loaded_nippy.load_filters().unwrap();
+            let loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
 
             if let Some(Compressors::Zstd(_zstd)) = loaded_nippy.compressor() {
                 let mut cursor = NippyJarCursor::new(&loaded_nippy).unwrap();
@@ -952,84 +723,41 @@ mod tests {
 
                 // Read both columns
                 for (row_num, (v0, v1)) in &data {
-                    // Simulates `by_hash` queries by iterating col1 values, which were used to
-                    // create the inner index.
-                    let row_by_value = cursor
-                        .row_by_key_with_cols(v0, BLOCKS_FULL_MASK)
-                        .unwrap()
-                        .unwrap()
-                        .iter()
-                        .map(|a| a.to_vec())
-                        .collect::<Vec<_>>();
-                    assert_eq!((&row_by_value[0], &row_by_value[1]), (*v0, *v1));
-
                     // Simulates `by_number` queries
                     let row_by_num = cursor
                         .row_by_number_with_cols(*row_num, BLOCKS_FULL_MASK)
                         .unwrap()
                         .unwrap();
-                    assert_eq!(row_by_value, row_by_num);
+                    assert_eq!((&row_by_num[0].to_vec(), &row_by_num[1].to_vec()), (*v0, *v1));
                 }
 
                 // Read first column only: `Block`
                 const BLOCKS_BLOCK_MASK: usize = 0b01;
                 for (row_num, (v0, _)) in &data {
-                    // Simulates `by_hash` queries by iterating col1 values, which were used to
-                    // create the inner index.
-                    let row_by_value = cursor
-                        .row_by_key_with_cols(v0, BLOCKS_BLOCK_MASK)
-                        .unwrap()
-                        .unwrap()
-                        .iter()
-                        .map(|a| a.to_vec())
-                        .collect::<Vec<_>>();
-                    assert_eq!(row_by_value.len(), 1);
-                    assert_eq!(&row_by_value[0], *v0);
-
                     // Simulates `by_number` queries
                     let row_by_num = cursor
                         .row_by_number_with_cols(*row_num, BLOCKS_BLOCK_MASK)
                         .unwrap()
                         .unwrap();
                     assert_eq!(row_by_num.len(), 1);
-                    assert_eq!(row_by_value, row_by_num);
+                    assert_eq!(&row_by_num[0].to_vec(), *v0);
                 }
 
                 // Read second column only: `Block`
                 const BLOCKS_WITHDRAWAL_MASK: usize = 0b10;
-                for (row_num, (v0, v1)) in &data {
-                    // Simulates `by_hash` queries by iterating col1 values, which were used to
-                    // create the inner index.
-                    let row_by_value = cursor
-                        .row_by_key_with_cols(v0, BLOCKS_WITHDRAWAL_MASK)
-                        .unwrap()
-                        .unwrap()
-                        .iter()
-                        .map(|a| a.to_vec())
-                        .collect::<Vec<_>>();
-                    assert_eq!(row_by_value.len(), 1);
-                    assert_eq!(&row_by_value[0], *v1);
-
+                for (row_num, (_, v1)) in &data {
                     // Simulates `by_number` queries
                     let row_by_num = cursor
                         .row_by_number_with_cols(*row_num, BLOCKS_WITHDRAWAL_MASK)
                         .unwrap()
                         .unwrap();
                     assert_eq!(row_by_num.len(), 1);
-                    assert_eq!(row_by_value, row_by_num);
+                    assert_eq!(&row_by_num[0].to_vec(), *v1);
                 }
 
                 // Read nothing
                 const BLOCKS_EMPTY_MASK: usize = 0b00;
-                for (row_num, (v0, _)) in &data {
-                    // Simulates `by_hash` queries by iterating col1 values, which were used to
-                    // create the inner index.
-                    assert!(cursor
-                        .row_by_key_with_cols(v0, BLOCKS_EMPTY_MASK)
-                        .unwrap()
-                        .unwrap()
-                        .is_empty());
-
+                for (row_num, _) in &data {
                     // Simulates `by_number` queries
                     assert!(cursor
                         .row_by_number_with_cols(*row_num, BLOCKS_EMPTY_MASK)
@@ -1194,7 +922,7 @@ mod tests {
     fn append_two_rows(num_columns: usize, file_path: &Path, col1: &[Vec<u8>], col2: &[Vec<u8>]) {
         // Create and add 1 row
         {
-            let mut nippy = NippyJar::new_without_header(num_columns, file_path);
+            let nippy = NippyJar::new_without_header(num_columns, file_path);
             nippy.freeze_config().unwrap();
             assert_eq!(nippy.max_row_size, 0);
             assert_eq!(nippy.rows, 0);
@@ -1204,8 +932,10 @@ mod tests {
 
             writer.append_column(Some(Ok(&col1[0]))).unwrap();
             assert_eq!(writer.column(), 1);
+            assert!(writer.is_dirty());
 
             writer.append_column(Some(Ok(&col2[0]))).unwrap();
+            assert!(writer.is_dirty());
 
             // Adding last column of a row resets writer and updates jar config
             assert_eq!(writer.column(), 0);
@@ -1214,6 +944,7 @@ mod tests {
             assert_eq!(writer.offsets().len(), 3);
             let expected_data_file_size = *writer.offsets().last().unwrap();
             writer.commit().unwrap();
+            assert!(!writer.is_dirty());
 
             assert_eq!(writer.max_row_size(), col1[0].len() + col2[0].len());
             assert_eq!(writer.rows(), 1);
@@ -1270,6 +1001,7 @@ mod tests {
         // Appends a third row, so we have an offset list in memory, which is not flushed to disk
         writer.append_column(Some(Ok(&col1[2]))).unwrap();
         writer.append_column(Some(Ok(&col2[2]))).unwrap();
+        assert!(writer.is_dirty());
 
         // This should prune from the on-memory offset list and ondisk offset list
         writer.prune_rows(2).unwrap();
@@ -1291,12 +1023,14 @@ mod tests {
             let data_reader = nippy.open_data_reader().unwrap();
             // there are only two valid offsets. so index 2 actually represents the expected file
             // data size.
-            assert_eq!(data_reader.offset(2), expected_data_size as u64);
+            assert_eq!(data_reader.offset(2).unwrap(), expected_data_size as u64);
         }
 
         // This should prune from the ondisk offset list and clear the jar.
         let mut writer = NippyJarWriter::new(nippy).unwrap();
         writer.prune_rows(1).unwrap();
+        assert!(writer.is_dirty());
+
         assert_eq!(writer.rows(), 0);
         assert_eq!(writer.max_row_size(), 0);
         assert_eq!(File::open(writer.data_path()).unwrap().metadata().unwrap().len() as usize, 0);
@@ -1305,6 +1039,8 @@ mod tests {
             File::open(writer.offsets_path()).unwrap().metadata().unwrap().len() as usize,
             1
         );
+        writer.commit().unwrap();
+        assert!(!writer.is_dirty());
     }
 
     fn simulate_interrupted_prune(

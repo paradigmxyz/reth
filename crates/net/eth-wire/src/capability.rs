@@ -5,18 +5,15 @@ use crate::{
     p2pstream::MAX_RESERVED_MESSAGE_ID,
     protocol::{ProtoVersion, Protocol},
     version::ParseVersionError,
-    EthMessage, EthMessageID, EthVersion,
+    Capability, EthMessage, EthMessageID, EthVersion,
 };
-use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
+use alloy_primitives::bytes::Bytes;
 use derive_more::{Deref, DerefMut};
-use reth_codecs::add_arbitrary_tests;
-use reth_primitives::bytes::{BufMut, Bytes};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{
     borrow::Cow,
     collections::{BTreeSet, HashMap},
-    fmt,
 };
 
 /// A Capability message consisting of the message-id and the payload
@@ -38,189 +35,6 @@ pub enum CapabilityMessage {
     Eth(EthMessage),
     /// Any other capability message.
     Other(RawCapabilityMessage),
-}
-
-/// A message indicating a supported capability and capability version.
-#[add_arbitrary_tests(rlp)]
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Capability {
-    /// The name of the subprotocol
-    pub name: Cow<'static, str>,
-    /// The version of the subprotocol
-    pub version: usize,
-}
-
-impl Capability {
-    /// Create a new `Capability` with the given name and version.
-    pub fn new(name: String, version: usize) -> Self {
-        Self { name: Cow::Owned(name), version }
-    }
-
-    /// Create a new `Capability` with the given static name and version.
-    pub const fn new_static(name: &'static str, version: usize) -> Self {
-        Self { name: Cow::Borrowed(name), version }
-    }
-
-    /// Returns the corresponding eth capability for the given version.
-    pub const fn eth(version: EthVersion) -> Self {
-        Self::new_static("eth", version as usize)
-    }
-
-    /// Returns the [EthVersion::Eth66] capability.
-    pub const fn eth_66() -> Self {
-        Self::eth(EthVersion::Eth66)
-    }
-
-    /// Returns the [EthVersion::Eth67] capability.
-    pub const fn eth_67() -> Self {
-        Self::eth(EthVersion::Eth67)
-    }
-
-    /// Returns the [EthVersion::Eth68] capability.
-    pub const fn eth_68() -> Self {
-        Self::eth(EthVersion::Eth68)
-    }
-
-    /// Whether this is eth v66 protocol.
-    #[inline]
-    pub fn is_eth_v66(&self) -> bool {
-        self.name == "eth" && self.version == 66
-    }
-
-    /// Whether this is eth v67.
-    #[inline]
-    pub fn is_eth_v67(&self) -> bool {
-        self.name == "eth" && self.version == 67
-    }
-
-    /// Whether this is eth v68.
-    #[inline]
-    pub fn is_eth_v68(&self) -> bool {
-        self.name == "eth" && self.version == 68
-    }
-
-    /// Whether this is any eth version.
-    #[inline]
-    pub fn is_eth(&self) -> bool {
-        self.is_eth_v66() || self.is_eth_v67() || self.is_eth_v68()
-    }
-}
-
-impl fmt::Display for Capability {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}/{}", self.name, self.version)
-    }
-}
-
-impl From<EthVersion> for Capability {
-    #[inline]
-    fn from(value: EthVersion) -> Self {
-        Capability::eth(value)
-    }
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl<'a> arbitrary::Arbitrary<'a> for Capability {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let version = u.int_in_range(0..=32)?; // TODO: What's the max?
-        let name = String::arbitrary(u)?; // TODO: what possible values?
-        Ok(Self::new(name, version))
-    }
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl proptest::arbitrary::Arbitrary for Capability {
-    type Parameters = proptest::arbitrary::ParamsFor<String>;
-    fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
-        use proptest::strategy::Strategy;
-        proptest::arbitrary::any_with::<String>(args) // TODO: what possible values?
-            .prop_flat_map(move |name| {
-                proptest::arbitrary::any_with::<usize>(()) // TODO: What's the max?
-                    .prop_map(move |version| Capability::new(name.clone(), version))
-            })
-            .boxed()
-    }
-
-    type Strategy = proptest::strategy::BoxedStrategy<Capability>;
-}
-
-/// Represents all capabilities of a node.
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct Capabilities {
-    /// All Capabilities and their versions
-    inner: Vec<Capability>,
-    eth_66: bool,
-    eth_67: bool,
-    eth_68: bool,
-}
-
-impl Capabilities {
-    /// Returns all capabilities.
-    #[inline]
-    pub fn capabilities(&self) -> &[Capability] {
-        &self.inner
-    }
-
-    /// Consumes the type and returns the all capabilities.
-    #[inline]
-    pub fn into_inner(self) -> Vec<Capability> {
-        self.inner
-    }
-
-    /// Whether the peer supports `eth` sub-protocol.
-    #[inline]
-    pub fn supports_eth(&self) -> bool {
-        self.eth_68 || self.eth_67 || self.eth_66
-    }
-
-    /// Whether this peer supports eth v66 protocol.
-    #[inline]
-    pub fn supports_eth_v66(&self) -> bool {
-        self.eth_66
-    }
-
-    /// Whether this peer supports eth v67 protocol.
-    #[inline]
-    pub fn supports_eth_v67(&self) -> bool {
-        self.eth_67
-    }
-
-    /// Whether this peer supports eth v68 protocol.
-    #[inline]
-    pub fn supports_eth_v68(&self) -> bool {
-        self.eth_68
-    }
-}
-
-impl From<Vec<Capability>> for Capabilities {
-    fn from(value: Vec<Capability>) -> Self {
-        Self {
-            eth_66: value.iter().any(Capability::is_eth_v66),
-            eth_67: value.iter().any(Capability::is_eth_v67),
-            eth_68: value.iter().any(Capability::is_eth_v68),
-            inner: value,
-        }
-    }
-}
-
-impl Encodable for Capabilities {
-    fn encode(&self, out: &mut dyn BufMut) {
-        self.inner.encode(out)
-    }
-}
-
-impl Decodable for Capabilities {
-    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let inner = Vec::<Capability>::decode(buf)?;
-
-        Ok(Self {
-            eth_66: inner.iter().any(Capability::is_eth_v66),
-            eth_67: inner.iter().any(Capability::is_eth_v67),
-            eth_68: inner.iter().any(Capability::is_eth_v68),
-            inner,
-        })
-    }
 }
 
 /// This represents a shared capability, its version, and its message id offset.
@@ -287,10 +101,10 @@ impl SharedCapability {
     }
 
     /// Returns the capability.
-    pub fn capability(&self) -> Cow<'_, Capability> {
+    pub const fn capability(&self) -> Cow<'_, Capability> {
         match self {
-            SharedCapability::Eth { version, .. } => Cow::Owned(Capability::eth(*version)),
-            SharedCapability::UnknownCapability { cap, .. } => Cow::Borrowed(cap),
+            Self::Eth { version, .. } => Cow::Owned(Capability::eth(*version)),
+            Self::UnknownCapability { cap, .. } => Cow::Borrowed(cap),
         }
     }
 
@@ -298,29 +112,29 @@ impl SharedCapability {
     #[inline]
     pub fn name(&self) -> &str {
         match self {
-            SharedCapability::Eth { .. } => "eth",
-            SharedCapability::UnknownCapability { cap, .. } => cap.name.as_ref(),
+            Self::Eth { .. } => "eth",
+            Self::UnknownCapability { cap, .. } => cap.name.as_ref(),
         }
     }
 
     /// Returns true if the capability is eth.
     #[inline]
-    pub fn is_eth(&self) -> bool {
-        matches!(self, SharedCapability::Eth { .. })
+    pub const fn is_eth(&self) -> bool {
+        matches!(self, Self::Eth { .. })
     }
 
     /// Returns the version of the capability.
-    pub fn version(&self) -> u8 {
+    pub const fn version(&self) -> u8 {
         match self {
-            SharedCapability::Eth { version, .. } => *version as u8,
-            SharedCapability::UnknownCapability { cap, .. } => cap.version as u8,
+            Self::Eth { version, .. } => *version as u8,
+            Self::UnknownCapability { cap, .. } => cap.version as u8,
         }
     }
 
     /// Returns the eth version if it's the `eth` capability.
-    pub fn eth_version(&self) -> Option<EthVersion> {
+    pub const fn eth_version(&self) -> Option<EthVersion> {
         match self {
-            SharedCapability::Eth { version, .. } => Some(*version),
+            Self::Eth { version, .. } => Some(*version),
             _ => None,
         }
     }
@@ -329,24 +143,23 @@ impl SharedCapability {
     ///
     /// This represents the message ID offset for the first message of the eth capability in the
     /// message id space.
-    pub fn message_id_offset(&self) -> u8 {
+    pub const fn message_id_offset(&self) -> u8 {
         match self {
-            SharedCapability::Eth { offset, .. } => *offset,
-            SharedCapability::UnknownCapability { offset, .. } => *offset,
+            Self::Eth { offset, .. } | Self::UnknownCapability { offset, .. } => *offset,
         }
     }
 
     /// Returns the message ID offset of the current capability relative to the start of the
     /// reserved message id space: [`MAX_RESERVED_MESSAGE_ID`].
-    pub fn relative_message_id_offset(&self) -> u8 {
+    pub const fn relative_message_id_offset(&self) -> u8 {
         self.message_id_offset() - MAX_RESERVED_MESSAGE_ID - 1
     }
 
     /// Returns the number of protocol messages supported by this capability.
-    pub fn num_messages(&self) -> u8 {
+    pub const fn num_messages(&self) -> u8 {
         match self {
-            SharedCapability::Eth { version: _version, .. } => EthMessageID::max() + 1,
-            SharedCapability::UnknownCapability { messages, .. } => *messages,
+            Self::Eth { version: _version, .. } => EthMessageID::max() + 1,
+            Self::UnknownCapability { messages, .. } => *messages,
         }
     }
 }
@@ -478,7 +291,7 @@ pub fn shared_capability_offsets(
         local_protocols.into_iter().map(Protocol::split).collect::<HashMap<_, _>>();
 
     // map of capability name to version
-    let mut shared_capabilities: HashMap<_, ProtoVersion> = HashMap::new();
+    let mut shared_capabilities: HashMap<_, ProtoVersion> = HashMap::default();
 
     // The `Ord` implementation for capability names should be equivalent to geth (and every other
     // client), since geth uses golang's default string comparison, which orders strings
@@ -550,8 +363,8 @@ pub enum SharedCapabilityError {
     /// Unsupported `eth` version.
     #[error(transparent)]
     UnsupportedVersion(#[from] ParseVersionError),
-    /// Thrown when the message id for a [SharedCapability] overlaps with the reserved p2p message
-    /// id space [`MAX_RESERVED_MESSAGE_ID`].
+    /// Thrown when the message id for a [`SharedCapability`] overlaps with the reserved p2p
+    /// message id space [`MAX_RESERVED_MESSAGE_ID`].
     #[error("message id offset `{0}` is reserved")]
     ReservedMessageIdOffset(u8),
 }
@@ -566,6 +379,7 @@ pub struct UnsupportedCapabilityError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{Capabilities, Capability};
 
     #[test]
     fn from_eth_68() {

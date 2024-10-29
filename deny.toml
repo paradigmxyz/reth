@@ -2,8 +2,11 @@
 # More documentation for the advisories section can be found here:
 # https://embarkstudios.github.io/cargo-deny/checks/advisories/cfg.html
 [advisories]
-version = 2
 yanked = "warn"
+ignore = [
+    # proc-macro-error 1.0.4 unmaintained https://rustsec.org/advisories/RUSTSEC-2024-0370
+    "RUSTSEC-2024-0370"
+]
 
 # This section is considered when running `cargo deny check bans`.
 # More documentation about the 'bans' section can be found here:
@@ -38,10 +41,13 @@ allow = [
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
     "BSD-3-Clause",
+    "0BSD",
+    "CC0-1.0",
     "ISC",
     "Unicode-DFS-2016",
     "Unlicense",
     "Unicode-3.0",
+    "Zlib",
     # https://github.com/briansmith/ring/issues/902
     "LicenseRef-ring",
     # https://github.com/rustls/webpki/blob/main/LICENSE ISC Style
@@ -51,17 +57,8 @@ allow = [
 # Allow 1 or more licenses on a per-crate basis, so that particular licenses
 # aren't accepted for every possible crate as with the normal allow list
 exceptions = [
-    # CC0 is a permissive license but somewhat unclear status for source code
-    # so we prefer to not have dependencies using it
-    # https://tldrlegal.com/license/creative-commons-cc0-1.0-universal
-    { allow = ["CC0-1.0"], name = "secp256k1" },
-    { allow = ["CC0-1.0"], name = "secp256k1-sys" },
-    { allow = ["CC0-1.0"], name = "tiny-keccak" },
-    { allow = ["CC0-1.0"], name = "more-asserts" },
-    { allow = ["CC0-1.0"], name = "aurora-engine-modexp" },
     # TODO: decide on MPL-2.0 handling
     # These dependencies are grandfathered in in https://github.com/paradigmxyz/reth/pull/6980
-    { allow = ["MPL-2.0"], name = "attohttpc" },
     { allow = ["MPL-2.0"], name = "option-ext" },
     { allow = ["MPL-2.0"], name = "webpki-roots" },
 ]
@@ -87,8 +84,9 @@ unknown-registry = "warn"
 # in the allow list is encountered
 unknown-git = "deny"
 allow-git = [
-    # TODO: remove, see ./Cargo.toml
+    # TODO: Please avoid adding new entries to this list.
     "https://github.com/alloy-rs/alloy",
-    "https://github.com/paradigmxyz/evm-inspectors",
-    "https://github.com/sigp/discv5",
+    "https://github.com/foundry-rs/block-explorers",
+    "https://github.com/bluealloy/revm",
+    "https://github.com/paradigmxyz/revm-inspectors",
 ]

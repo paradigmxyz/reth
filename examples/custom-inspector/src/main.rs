@@ -10,37 +10,37 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use alloy_primitives::Address;
+use alloy_rpc_types::state::EvmOverrides;
 use clap::Parser;
 use futures_util::StreamExt;
 use reth::{
     builder::NodeHandle,
+    chainspec::EthereumChainSpecParser,
     cli::Cli,
-    primitives::{Address, BlockNumberOrTag, IntoRecoveredTransaction},
+    primitives::BlockNumberOrTag,
     revm::{
         inspector_handle_register,
         interpreter::{Interpreter, OpCode},
         Database, Evm, EvmContext, Inspector,
     },
-    rpc::{
-        compat::transaction::transaction_to_call_request,
-        eth::{revm_utils::EvmOverrides, EthTransactions},
-    },
+    rpc::{api::eth::helpers::Call, compat::transaction::transaction_to_call_request},
     transaction_pool::TransactionPool,
 };
 use reth_node_ethereum::node::EthereumNode;
 
 fn main() {
-    Cli::<RethCliTxpoolExt>::parse()
+    Cli::<EthereumChainSpecParser, RethCliTxpoolExt>::parse()
         .run(|builder, args| async move {
             // launch the node
-            let NodeHandle { mut node, node_exit_future } =
+            let NodeHandle { node, node_exit_future } =
                 builder.node(EthereumNode::default()).launch().await?;
 
             // create a new subscription to pending transactions
             let mut pending_transactions = node.pool.new_pending_pool_transactions_listener();
 
             // get an instance of the `trace_` API handler
-            let eth_api = node.rpc_registry.eth_api();
+            let eth_api = node.rpc_registry.eth_api().clone();
 
             println!("Spawning trace task!");
 

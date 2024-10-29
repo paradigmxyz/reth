@@ -1,7 +1,13 @@
 #![allow(unreachable_pub)]
 //! Testing gossiping of transactions.
 
-use crate::multiplex::proto::{PingPongProtoMessage, PingPongProtoMessageKind};
+use std::{
+    net::SocketAddr,
+    pin::Pin,
+    task::{ready, Context, Poll},
+};
+
+use alloy_primitives::bytes::BytesMut;
 use futures::{Stream, StreamExt};
 use reth_eth_wire::{
     capability::SharedCapabilities, multiplex::ProtocolConnection, protocol::Protocol,
@@ -10,23 +16,18 @@ use reth_network::{
     protocol::{ConnectionHandler, OnNotSupported, ProtocolHandler},
     test_utils::Testnet,
 };
-use reth_network_api::Direction;
-use reth_primitives::BytesMut;
+use reth_network_api::{Direction, PeerId};
 use reth_provider::test_utils::MockEthProvider;
-use reth_rpc_types::PeerId;
-use std::{
-    net::SocketAddr,
-    pin::Pin,
-    task::{ready, Context, Poll},
-};
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-/// A simple Rplx subprotocol for
+use crate::multiplex::proto::{PingPongProtoMessage, PingPongProtoMessageKind};
+
+/// A simple Rlpx subprotocol that sends pings and pongs
 mod proto {
     use super::*;
-    use reth_eth_wire::capability::Capability;
-    use reth_primitives::{Buf, BufMut};
+    use alloy_primitives::bytes::{Buf, BufMut};
+    use reth_eth_wire::Capability;
 
     #[repr(u8)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,17 +55,17 @@ mod proto {
 
     impl PingPongProtoMessage {
         /// Returns the capability for the `ping` protocol.
-        pub fn capability() -> Capability {
+        pub const fn capability() -> Capability {
             Capability::new_static("ping", 1)
         }
 
         /// Returns the protocol for the `test` protocol.
-        pub fn protocol() -> Protocol {
+        pub const fn protocol() -> Protocol {
             Protocol::new(Self::capability(), 4)
         }
 
         /// Creates a ping message
-        pub fn ping() -> Self {
+        pub const fn ping() -> Self {
             Self {
                 message_type: PingPongProtoMessageId::Ping,
                 message: PingPongProtoMessageKind::Ping,
@@ -72,7 +73,7 @@ mod proto {
         }
 
         /// Creates a pong message
-        pub fn pong() -> Self {
+        pub const fn pong() -> Self {
             Self {
                 message_type: PingPongProtoMessageId::Pong,
                 message: PingPongProtoMessageKind::Pong,
@@ -99,11 +100,8 @@ mod proto {
             let mut buf = BytesMut::new();
             buf.put_u8(self.message_type as u8);
             match &self.message {
-                PingPongProtoMessageKind::Ping => {}
-                PingPongProtoMessageKind::Pong => {}
-                PingPongProtoMessageKind::PingMessage(msg) => {
-                    buf.put(msg.as_bytes());
-                }
+                PingPongProtoMessageKind::Ping | PingPongProtoMessageKind::Pong => {}
+                PingPongProtoMessageKind::PingMessage(msg) |
                 PingPongProtoMessageKind::PongMessage(msg) => {
                     buf.put(msg.as_bytes());
                 }

@@ -10,9 +10,8 @@
 
 //! Entrypoint for running commands.
 
-use futures::pin_mut;
 use reth_tasks::{TaskExecutor, TaskManager};
-use std::future::Future;
+use std::{future::Future, pin::pin, sync::mpsc, time::Duration};
 use tracing::{debug, error, trace};
 
 /// Executes CLI commands.
@@ -28,8 +27,8 @@ impl CliRunner {
     /// Executes the given _async_ command on the tokio runtime until the command future resolves or
     /// until the process receives a `SIGINT` or `SIGTERM` signal.
     ///
-    /// Tasks spawned by the command via the [TaskExecutor] are shut down and an attempt is made to
-    /// drive their shutdown to completion after the command has finished.
+    /// Tasks spawned by the command via the [`TaskExecutor`] are shut down and an attempt is made
+    /// to drive their shutdown to completion after the command has finished.
     pub fn run_command_until_exit<F, E>(
         self,
         command: impl FnOnce(CliContext) -> F,
@@ -53,13 +52,25 @@ impl CliRunner {
             // after the command has finished or exit signal was received we shutdown the task
             // manager which fires the shutdown signal to all tasks spawned via the task
             // executor and awaiting on tasks spawned with graceful shutdown
-            task_manager.graceful_shutdown_with_timeout(std::time::Duration::from_secs(10));
+            task_manager.graceful_shutdown_with_timeout(Duration::from_secs(5));
         }
 
-        // drop the tokio runtime on a separate thread because drop blocks until its pools
-        // (including blocking pool) are shutdown. In other words `drop(tokio_runtime)` would block
-        // the current thread but we want to exit right away.
-        std::thread::spawn(move || drop(tokio_runtime));
+        // `drop(tokio_runtime)` would block the current thread until its pools
+        // (including blocking pool) are shutdown. Since we want to exit as soon as possible, drop
+        // it on a separate thread and wait for up to 5 seconds for this operation to
+        // complete.
+        let (tx, rx) = mpsc::channel();
+        std::thread::Builder::new()
+            .name("tokio-runtime-shutdown".to_string())
+            .spawn(move || {
+                drop(tokio_runtime);
+                let _ = tx.send(());
+            })
+            .unwrap();
+
+        let _ = rx.recv_timeout(Duration::from_secs(5)).inspect_err(|err| {
+            debug!(target: "reth::cli", %err, "tokio runtime shutdown timed out");
+        });
 
         command_res
     }
@@ -78,7 +89,7 @@ impl CliRunner {
     /// Executes a regular future as a spawned blocking task until completion or until external
     /// signal received.
     ///
-    /// See [Runtime::spawn_blocking](tokio::runtime::Runtime::spawn_blocking) .
+    /// See [`Runtime::spawn_blocking`](tokio::runtime::Runtime::spawn_blocking) .
     pub fn run_blocking_until_ctrl_c<F, E>(self, fut: F) -> Result<(), E>
     where
         F: Future<Output = Result<(), E>> + Send + 'static,
@@ -93,13 +104,16 @@ impl CliRunner {
         // drop the tokio runtime on a separate thread because drop blocks until its pools
         // (including blocking pool) are shutdown. In other words `drop(tokio_runtime)` would block
         // the current thread but we want to exit right away.
-        std::thread::spawn(move || drop(tokio_runtime));
+        std::thread::Builder::new()
+            .name("tokio-runtime-shutdown".to_string())
+            .spawn(move || drop(tokio_runtime))
+            .unwrap();
 
         Ok(())
     }
 }
 
-/// [CliRunner] configuration when executing commands asynchronously
+/// [`CliRunner`] configuration when executing commands asynchronously
 struct AsyncCliRunner {
     context: CliContext,
     task_manager: TaskManager,
@@ -119,7 +133,7 @@ impl AsyncCliRunner {
     }
 }
 
-/// Additional context provided by the [CliRunner] when executing commands
+/// Additional context provided by the [`CliRunner`] when executing commands
 #[derive(Debug)]
 pub struct CliContext {
     /// Used to execute/spawn tasks
@@ -141,7 +155,7 @@ where
     E: Send + Sync + From<reth_tasks::PanickedTaskError> + 'static,
 {
     {
-        pin_mut!(fut);
+        let fut = pin!(fut);
         tokio::select! {
             err = tasks => {
                 return Err(err.into())
@@ -166,7 +180,9 @@ where
     {
         let mut stream = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
         let sigterm = stream.recv();
-        pin_mut!(sigterm, ctrl_c, fut);
+        let sigterm = pin!(sigterm);
+        let ctrl_c = pin!(ctrl_c);
+        let fut = pin!(fut);
 
         tokio::select! {
             _ = ctrl_c => {
@@ -181,7 +197,8 @@ where
 
     #[cfg(not(unix))]
     {
-        pin_mut!(ctrl_c, fut);
+        let ctrl_c = pin!(ctrl_c);
+        let fut = pin!(fut);
 
         tokio::select! {
             _ = ctrl_c => {

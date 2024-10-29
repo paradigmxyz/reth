@@ -16,7 +16,7 @@ use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit, Semaphore};
 /// `debug_traceTransaction` as well as `eth_getProof` because they can consume a lot of
 /// memory and CPU.
 ///
-/// This types serves as an entry guard for the [BlockingTaskPool] and is used to rate limit
+/// This types serves as an entry guard for the [`BlockingTaskPool`] and is used to rate limit
 /// parallel blocking tasks in the pool.
 #[derive(Clone, Debug)]
 pub struct BlockingTaskGuard(Arc<Semaphore>);
@@ -28,12 +28,12 @@ impl BlockingTaskGuard {
         Self(Arc::new(Semaphore::new(max_blocking_tasks)))
     }
 
-    /// See also [Semaphore::acquire_owned]
+    /// See also [`Semaphore::acquire_owned`]
     pub async fn acquire_owned(self) -> Result<OwnedSemaphorePermit, AcquireError> {
         self.0.acquire_owned().await
     }
 
-    /// See also [Semaphore::acquire_many_owned]
+    /// See also [`Semaphore::acquire_many_owned`]
     pub async fn acquire_many_owned(self, n: u32) -> Result<OwnedSemaphorePermit, AcquireError> {
         self.0.acquire_many_owned(n).await
     }
@@ -43,7 +43,8 @@ impl BlockingTaskGuard {
 ///
 /// This is a dedicated threadpool for blocking tasks which are CPU bound.
 /// RPC calls that perform blocking IO (disk lookups) are not executed on this pool but on the tokio
-/// runtime's blocking pool, which performs poorly with CPU bound tasks. Once the tokio blocking
+/// runtime's blocking pool, which performs poorly with CPU bound tasks (see
+/// <https://ryhl.io/blog/async-what-is-blocking/>). Once the tokio blocking
 /// pool is saturated it is converted into a queue, blocking tasks could then interfere with the
 /// queue and block other RPC calls.
 ///

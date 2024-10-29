@@ -1,0 +1,47 @@
+[package]
+name = "reth-prune"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Pruning implementation"
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-chainspec.workspace = true
+reth-exex-types.workspace = true
+reth-db.workspace = true
+reth-db-api.workspace = true
+reth-errors.workspace = true
+reth-provider.workspace = true
+reth-tokio-util.workspace = true
+reth-config.workspace = true
+reth-prune-types.workspace = true
+reth-static-file-types.workspace = true
+
+# metrics
+reth-metrics.workspace = true
+metrics.workspace = true
+alloy-primitives.workspace = true
+
+# misc
+tracing.workspace = true
+thiserror.workspace = true
+itertools.workspace = true
+rayon.workspace = true
+tokio.workspace = true
+rustc-hash.workspace = true
+
+[dev-dependencies]
+# reth
+reth-db = { workspace = true, features = ["test-utils"] }
+reth-stages = { workspace = true, features = ["test-utils"] }
+reth-testing-utils.workspace = true
+reth-tracing.workspace = true
+
+assert_matches.workspace = true

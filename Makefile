@@ -1,6 +1,7 @@
 # Heavily inspired by Lighthouse: https://github.com/sigp/lighthouse/blob/693886b94176faa4cb450f024696cb69cda2fe58/Makefile
 .DEFAULT_GOAL := help
 
+GIT_SHA ?= $(shell git rev-parse HEAD)
 GIT_TAG ?= $(shell git describe --tags --abbrev=0)
 BIN_DIR = "dist/bin"
 
@@ -8,14 +9,14 @@ MDBX_PATH = "crates/storage/libmdbx-rs/mdbx-sys/libmdbx"
 DB_TOOLS_DIR = "db-tools"
 FULL_DB_TOOLS_DIR := $(shell pwd)/$(DB_TOOLS_DIR)/
 
-BUILD_PATH = "target"
+CARGO_TARGET_DIR ?= target
 
 # List of features to use when building. Can be overridden via the environment.
 # No jemalloc on Windows
 ifeq ($(OS),Windows_NT)
-    FEATURES ?=
+    FEATURES ?= asm-keccak min-debug-logs
 else
-    FEATURES ?= jemalloc asm-keccak
+    FEATURES ?= jemalloc asm-keccak min-debug-logs
 endif
 
 # Cargo profile for builds. Default is for local builds, CI uses an override.
@@ -52,25 +53,39 @@ install: ## Build and install the reth binary under `~/.cargo/bin`.
 
 .PHONY: install-op
 install-op: ## Build and install the op-reth binary under `~/.cargo/bin`.
-	cargo install --path bin/reth --bin op-reth --force --locked \
-		--features "optimism,$(FEATURES)" \
+	cargo install --path crates/optimism/bin --bin op-reth --force --locked \
+		--features "optimism $(FEATURES)" \
 		--profile "$(PROFILE)" \
 		$(CARGO_INSTALL_EXTRA_FLAGS)
 
 .PHONY: build
 build: ## Build the reth binary into `target` directory.
-	$(MAKE) build-native-$(shell rustc -Vv | grep host | cut -d ' ' -f2)
+	cargo build --bin reth --features "$(FEATURES)" --profile "$(PROFILE)"
+
+SOURCE_DATE_EPOCH := $(shell git log -1 --pretty=%ct)
+.PHONY: reproducible
+reproducible: ## Build the reth binary into `target` directory with reproducible builds. Only works for x86_64-unknown-linux-gnu currently
+	SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) \
+	CARGO_INCREMENTAL=0 \
+	LC_ALL=C \
+	TZ=UTC \
+	RUSTFLAGS="-C target-feature=+crt-static -C link-arg=-Wl,--build-id=none -Clink-arg=-static-libgcc -C metadata='' --remap-path-prefix $$(pwd)=." \
+	cargo build --bin reth --features "$(FEATURES)" --profile "reproducible" --locked --target x86_64-unknown-linux-gnu
+
+.PHONY: build-debug
+build-debug: ## Build the reth binary into `target/debug` directory.
+	cargo build --bin reth --features "$(FEATURES)"
 
 .PHONY: build-op
 build-op: ## Build the op-reth binary into `target` directory.
-	$(MAKE) op-build-native-$(shell rustc -Vv | grep host | cut -d ' ' -f2)
+	cargo build --bin op-reth --features "optimism $(FEATURES)" --profile "$(PROFILE)" --manifest-path crates/optimism/bin/Cargo.toml
 
 # Builds the reth binary natively.
 build-native-%:
 	cargo build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
 
 op-build-native-%:
-	cargo build --bin op-reth --target $* --features "optimism,$(FEATURES)" --profile "$(PROFILE)"
+	cargo build --bin op-reth --target $* --features "optimism $(FEATURES)" --profile "$(PROFILE)" --manifest-path crates/optimism/bin/Cargo.toml
 
 # The following commands use `cross` to build a cross-compile.
 #
@@ -82,19 +97,17 @@ op-build-native-%:
 #
 # The resulting binaries will be created in the `target/` directory.
 
-# For aarch64, disable asm-keccak optimizations and set the page size for
-# jemalloc. When cross compiling, we must compile jemalloc with a large page
-# size, otherwise it will use the current system's page size which may not work
+# For aarch64, set the page size for jemalloc.
+# When cross compiling, we must compile jemalloc with a large page size,
+# otherwise it will use the current system's page size which may not work
 # on other systems. JEMALLOC_SYS_WITH_LG_PAGE=16 tells jemalloc to use 64-KiB
 # pages. See: https://github.com/paradigmxyz/reth/issues/6742
-build-aarch64-unknown-linux-gnu: FEATURES := $(filter-out asm-keccak,$(FEATURES))
 build-aarch64-unknown-linux-gnu: export JEMALLOC_SYS_WITH_LG_PAGE=16
-
-op-build-aarch64-unknown-linux-gnu: FEATURES := $(filter-out asm-keccak,$(FEATURES))
 op-build-aarch64-unknown-linux-gnu: export JEMALLOC_SYS_WITH_LG_PAGE=16
 
 # No jemalloc on Windows
 build-x86_64-pc-windows-gnu: FEATURES := $(filter-out jemalloc jemalloc-prof,$(FEATURES))
+op-build-x86_64-pc-windows-gnu: FEATURES := $(filter-out jemalloc jemalloc-prof,$(FEATURES))
 
 # Note: The additional rustc compiler flags are for intrinsics needed by MDBX.
 # See: https://github.com/cross-rs/cross/wiki/FAQ#undefined-reference-with-build-std
@@ -104,7 +117,7 @@ build-%:
 
 op-build-%:
 	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc" \
-		cross build --bin op-reth --target $* --features "optimism,$(FEATURES)" --profile "$(PROFILE)"
+		cross build --bin op-reth --target $* --features "optimism $(FEATURES)" --profile "$(PROFILE)" --manifest-path crates/optimism/bin/Cargo.toml
 
 # Unfortunately we can't easily use cross to build for Darwin because of licensing issues.
 # If we wanted to, we would need to build a custom Docker image with the SDK available.
@@ -116,10 +129,14 @@ build-x86_64-apple-darwin:
 	$(MAKE) build-native-x86_64-apple-darwin
 build-aarch64-apple-darwin:
 	$(MAKE) build-native-aarch64-apple-darwin
+op-build-x86_64-apple-darwin:
+	$(MAKE) op-build-native-x86_64-apple-darwin
+op-build-aarch64-apple-darwin:
+	$(MAKE) op-build-native-aarch64-apple-darwin
 
 # Create a `.tar.gz` containing a binary for a specific target.
 define tarball_release_binary
-	cp $(BUILD_PATH)/$(1)/$(PROFILE)/$(2) $(BIN_DIR)/$(2)
+	cp $(CARGO_TARGET_DIR)/$(1)/$(PROFILE)/$(2) $(BIN_DIR)/$(2)
 	cd $(BIN_DIR) && \
 		tar -czf reth-$(GIT_TAG)-$(1)$(3).tar.gz $(2) && \
 		rm $(2)
@@ -197,6 +214,14 @@ docker-build-push: ## Build and push a cross-arch Docker image tagged with the l
 #
 # `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
 # `docker buildx create --use --driver docker-container --name cross-builder`
+.PHONY: docker-build-push-git-sha
+docker-build-push-git-sha: ## Build and push a cross-arch Docker image tagged with the latest git sha.
+	$(call docker_build_push,$(GIT_SHA),$(GIT_SHA))
+
+# Note: This requires a buildx builder with emulation support. For example:
+#
+# `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
+# `docker buildx create --use --driver docker-container --name cross-builder`
 .PHONY: docker-build-push-latest
 docker-build-push-latest: ## Build and push a cross-arch Docker image tagged with the latest git tag and `latest`.
 	$(call docker_build_push,$(GIT_TAG),latest)
@@ -213,13 +238,65 @@ docker-build-push-nightly: ## Build and push cross-arch Docker image tagged with
 define docker_build_push
 	$(MAKE) build-x86_64-unknown-linux-gnu
 	mkdir -p $(BIN_DIR)/amd64
-	cp $(BUILD_PATH)/x86_64-unknown-linux-gnu/$(PROFILE)/reth $(BIN_DIR)/amd64/reth
+	cp $(CARGO_TARGET_DIR)/x86_64-unknown-linux-gnu/$(PROFILE)/reth $(BIN_DIR)/amd64/reth
 
 	$(MAKE) build-aarch64-unknown-linux-gnu
 	mkdir -p $(BIN_DIR)/arm64
-	cp $(BUILD_PATH)/aarch64-unknown-linux-gnu/$(PROFILE)/reth $(BIN_DIR)/arm64/reth
+	cp $(CARGO_TARGET_DIR)/aarch64-unknown-linux-gnu/$(PROFILE)/reth $(BIN_DIR)/arm64/reth
 
 	docker buildx build --file ./Dockerfile.cross . \
+		--platform linux/amd64,linux/arm64 \
+		--tag $(DOCKER_IMAGE_NAME):$(1) \
+		--tag $(DOCKER_IMAGE_NAME):$(2) \
+		--provenance=false \
+		--push
+endef
+
+##@ Optimism docker
+
+# Note: This requires a buildx builder with emulation support. For example:
+#
+# `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
+# `docker buildx create --use --driver docker-container --name cross-builder`
+.PHONY: op-docker-build-push
+op-docker-build-push: ## Build and push a cross-arch Docker image tagged with the latest git tag.
+	$(call op_docker_build_push,$(GIT_TAG),$(GIT_TAG))
+
+# Note: This requires a buildx builder with emulation support. For example:
+#
+# `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
+# `docker buildx create --use --driver docker-container --name cross-builder`
+.PHONY: op-docker-build-push-git-sha
+op-docker-build-push-git-sha: ## Build and push a cross-arch Docker image tagged with the latest git sha.
+	$(call op_docker_build_push,$(GIT_SHA),$(GIT_SHA))
+
+# Note: This requires a buildx builder with emulation support. For example:
+#
+# `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
+# `docker buildx create --use --driver docker-container --name cross-builder`
+.PHONY: op-docker-build-push-latest
+op-docker-build-push-latest: ## Build and push a cross-arch Docker image tagged with the latest git tag and `latest`.
+	$(call op_docker_build_push,$(GIT_TAG),latest)
+
+# Note: This requires a buildx builder with emulation support. For example:
+#
+# `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
+# `docker buildx create --use --name cross-builder`
+.PHONY: op-docker-build-push-nightly
+op-docker-build-push-nightly: ## Build and push cross-arch Docker image tagged with the latest git tag with a `-nightly` suffix, and `latest-nightly`.
+	$(call op_docker_build_push,$(GIT_TAG)-nightly,latest-nightly)
+
+# Create a cross-arch Docker image with the given tags and push it
+define op_docker_build_push
+	$(MAKE) op-build-x86_64-unknown-linux-gnu
+	mkdir -p $(BIN_DIR)/amd64
+	cp $(CARGO_TARGET_DIR)/x86_64-unknown-linux-gnu/$(PROFILE)/op-reth $(BIN_DIR)/amd64/op-reth
+
+	$(MAKE) op-build-aarch64-unknown-linux-gnu
+	mkdir -p $(BIN_DIR)/arm64
+	cp $(CARGO_TARGET_DIR)/aarch64-unknown-linux-gnu/$(PROFILE)/op-reth $(BIN_DIR)/arm64/op-reth
+
+	docker buildx build --file ./DockerfileOp.cross . \
 		--platform linux/amd64,linux/arm64 \
 		--tag $(DOCKER_IMAGE_NAME):$(1) \
 		--tag $(DOCKER_IMAGE_NAME):$(2) \
@@ -254,14 +331,17 @@ db-tools: ## Compile MDBX debugging tools.
 	@echo "Run \"$(DB_TOOLS_DIR)/mdbx_chk\" for the MDBX db file integrity check."
 
 .PHONY: update-book-cli
-update-book-cli: ## Update book cli documentation.
-	cargo build --bin reth --features "$(FEATURES)" --profile "$(PROFILE)"
+update-book-cli: build-debug ## Update book cli documentation.
 	@echo "Updating book cli doc..."
-	@./book/cli/update.sh $(BUILD_PATH)/$(PROFILE)/reth
+	@./book/cli/update.sh $(CARGO_TARGET_DIR)/debug/reth
 
 .PHONY: maxperf
 maxperf: ## Builds `reth` with the most aggressive optimisations.
 	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc,asm-keccak
+
+.PHONY: maxperf-op
+maxperf-op: ## Builds `op-reth` with the most aggressive optimisations.
+	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc,asm-keccak,optimism --bin op-reth --manifest-path crates/optimism/bin/Cargo.toml
 
 .PHONY: maxperf-no-asm
 maxperf-no-asm: ## Builds `reth` with the most aggressive optimisations, minus the "asm-keccak" feature.
@@ -304,7 +384,7 @@ lint-other-targets:
 	-- -D warnings
 
 lint-codespell: ensure-codespell
-	codespell
+	codespell --skip "*.json"
 
 ensure-codespell:
 	@if ! command -v codespell &> /dev/null; then \
@@ -361,9 +441,9 @@ fix-lint-other-targets:
 	-- -D warnings
 
 fix-lint:
-	make lint-reth && \
-	make lint-op-reth && \
-	make lint-other-targets && \
+	make fix-lint-reth && \
+	make fix-lint-op-reth && \
+	make fix-lint-other-targets && \
 	make fmt
 
 .PHONY: rustdocs
@@ -415,7 +495,14 @@ test:
 	make test-other-targets
 
 pr:
-	make fmt && \
 	make lint && \
-	make docs && \
+	make update-book-cli && \
+	cargo docs --document-private-items && \
 	make test
+
+check-features:
+	cargo hack check \
+		--package reth-codecs \
+		--package reth-primitives-traits \
+		--package reth-primitives \
+		--feature-powerset

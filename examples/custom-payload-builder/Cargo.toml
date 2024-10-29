@@ -1,5 +1,5 @@
 [package]
-name = "custom-payload-builder"
+name = "example-custom-payload-builder"
 version = "0.0.0"
 publish = false
 edition.workspace = true
@@ -7,12 +7,15 @@ license.workspace = true
 
 [dependencies]
 reth.workspace = true
+reth-chainspec.workspace = true
 reth-primitives.workspace = true
 reth-node-api.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-payload-builder.workspace = true
 reth-node-ethereum.workspace = true
 reth-ethereum-payload-builder.workspace = true
+
+alloy-primitives.workspace = true
 
 tracing.workspace = true
 futures-util.workspace = true

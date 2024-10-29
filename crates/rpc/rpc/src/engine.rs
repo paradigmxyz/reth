@@ -1,11 +1,15 @@
+use alloy_primitives::{Address, Bytes, B256, U256, U64};
+use alloy_rpc_types::{
+    state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, Log, SyncStatus,
+};
+use alloy_rpc_types_eth::transaction::TransactionRequest;
+use alloy_serde::JsonStorageKey;
 use jsonrpsee::core::RpcResult as Result;
-use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256, U256, U64};
+use reth_primitives::{BlockId, BlockNumberOrTag};
 use reth_rpc_api::{EngineEthApiServer, EthApiServer, EthFilterApiServer};
 /// Re-export for convenience
 pub use reth_rpc_engine_api::EngineApi;
-use reth_rpc_types::{
-    state::StateOverride, BlockOverrides, Filter, Log, RichBlock, SyncStatus, TransactionRequest,
-};
+use reth_rpc_eth_api::{FullEthApiTypes, RpcBlock, RpcReceipt, RpcTransaction};
 use tracing_futures::Instrument;
 
 macro_rules! engine_span {
@@ -24,16 +28,21 @@ pub struct EngineEthApi<Eth, EthFilter> {
 
 impl<Eth, EthFilter> EngineEthApi<Eth, EthFilter> {
     /// Create a new `EngineEthApi` instance.
-    pub fn new(eth: Eth, eth_filter: EthFilter) -> Self {
+    pub const fn new(eth: Eth, eth_filter: EthFilter) -> Self {
         Self { eth, eth_filter }
     }
 }
 
 #[async_trait::async_trait]
-impl<Eth, EthFilter> EngineEthApiServer for EngineEthApi<Eth, EthFilter>
+impl<Eth, EthFilter> EngineEthApiServer<RpcBlock<Eth::NetworkTypes>>
+    for EngineEthApi<Eth, EthFilter>
 where
-    Eth: EthApiServer,
-    EthFilter: EthFilterApiServer,
+    Eth: EthApiServer<
+            RpcTransaction<Eth::NetworkTypes>,
+            RpcBlock<Eth::NetworkTypes>,
+            RpcReceipt<Eth::NetworkTypes>,
+        > + FullEthApiTypes,
+    EthFilter: EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>>,
 {
     /// Handler for: `eth_syncing`
     fn syncing(&self) -> Result<SyncStatus> {
@@ -60,23 +69,27 @@ where
     async fn call(
         &self,
         request: TransactionRequest,
-        block_number: Option<BlockId>,
+        block_id: Option<BlockId>,
         state_overrides: Option<StateOverride>,
         block_overrides: Option<Box<BlockOverrides>>,
     ) -> Result<Bytes> {
         self.eth
-            .call(request, block_number, state_overrides, block_overrides)
+            .call(request, block_id, state_overrides, block_overrides)
             .instrument(engine_span!())
             .await
     }
 
     /// Handler for: `eth_getCode`
-    async fn get_code(&self, address: Address, block_number: Option<BlockId>) -> Result<Bytes> {
-        self.eth.get_code(address, block_number).instrument(engine_span!()).await
+    async fn get_code(&self, address: Address, block_id: Option<BlockId>) -> Result<Bytes> {
+        self.eth.get_code(address, block_id).instrument(engine_span!()).await
     }
 
     /// Handler for: `eth_getBlockByHash`
-    async fn block_by_hash(&self, hash: B256, full: bool) -> Result<Option<RichBlock>> {
+    async fn block_by_hash(
+        &self,
+        hash: B256,
+        full: bool,
+    ) -> Result<Option<RpcBlock<Eth::NetworkTypes>>> {
         self.eth.block_by_hash(hash, full).instrument(engine_span!()).await
     }
 
@@ -85,7 +98,7 @@ where
         &self,
         number: BlockNumberOrTag,
         full: bool,
-    ) -> Result<Option<RichBlock>> {
+    ) -> Result<Option<RpcBlock<Eth::NetworkTypes>>> {
         self.eth.block_by_number(number, full).instrument(engine_span!()).await
     }
 
@@ -97,5 +110,15 @@ where
     /// Handler for `eth_getLogs`
     async fn logs(&self, filter: Filter) -> Result<Vec<Log>> {
         self.eth_filter.logs(filter).instrument(engine_span!()).await
+    }
+
+    /// Handler for `eth_getProof`
+    async fn get_proof(
+        &self,
+        address: Address,
+        keys: Vec<JsonStorageKey>,
+        block_number: Option<BlockId>,
+    ) -> Result<EIP1186AccountProofResponse> {
+        self.eth.get_proof(address, keys, block_number).instrument(engine_span!()).await
     }
 }

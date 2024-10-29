@@ -1,21 +1,26 @@
 //! Helper provider traits to encapsulate all provider traits for simplicity.
 
 use crate::{
-    AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
-    DatabaseProviderFactory, EvmEnvProvider, StageCheckpointReader, StateProviderFactory,
+    AccountReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
+    EvmEnvProvider, HeaderProvider, StageCheckpointReader, StateProviderFactory,
+    StaticFileProviderFactory, TransactionsProvider,
 };
-use reth_db::database::Database;
+use reth_chain_state::{CanonStateSubscriptions, ForkChoiceSubscriptions};
+use reth_chainspec::EthereumHardforks;
+use reth_node_types::NodeTypesWithDB;
 
 /// Helper trait to unify all provider traits for simplicity.
-pub trait FullProvider<DB: Database>:
-    DatabaseProviderFactory<DB>
+pub trait FullProvider<N: NodeTypesWithDB>:
+    DatabaseProviderFactory<DB = N::DB>
+    + StaticFileProviderFactory
     + BlockReaderIdExt
     + AccountReader
     + StateProviderFactory
     + EvmEnvProvider
-    + ChainSpecProvider
+    + ChainSpecProvider<ChainSpec = N::ChainSpec>
     + ChangeSetReader
     + CanonStateSubscriptions
+    + ForkChoiceSubscriptions
     + StageCheckpointReader
     + Clone
     + Unpin
@@ -23,15 +28,47 @@ pub trait FullProvider<DB: Database>:
 {
 }
 
-impl<T, DB: Database> FullProvider<DB> for T where
-    T: DatabaseProviderFactory<DB>
+impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
+    T: DatabaseProviderFactory<DB = N::DB>
+        + StaticFileProviderFactory
         + BlockReaderIdExt
         + AccountReader
         + StateProviderFactory
         + EvmEnvProvider
-        + ChainSpecProvider
+        + ChainSpecProvider<ChainSpec = N::ChainSpec>
         + ChangeSetReader
         + CanonStateSubscriptions
+        + ForkChoiceSubscriptions
+        + StageCheckpointReader
+        + Clone
+        + Unpin
+        + 'static
+{
+}
+
+/// Helper trait to unify all provider traits required to support `eth` RPC server behaviour, for
+/// simplicity.
+pub trait FullRpcProvider:
+    StateProviderFactory
+    + EvmEnvProvider
+    + ChainSpecProvider<ChainSpec: EthereumHardforks>
+    + BlockReaderIdExt
+    + HeaderProvider
+    + TransactionsProvider
+    + StageCheckpointReader
+    + Clone
+    + Unpin
+    + 'static
+{
+}
+
+impl<T> FullRpcProvider for T where
+    T: StateProviderFactory
+        + EvmEnvProvider
+        + ChainSpecProvider<ChainSpec: EthereumHardforks>
+        + BlockReaderIdExt
+        + HeaderProvider
+        + TransactionsProvider
         + StageCheckpointReader
         + Clone
         + Unpin

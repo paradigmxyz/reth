@@ -1,22 +1,27 @@
-use crate::{capability::Capability, EthVersion, ProtocolVersion};
+use crate::{Capability, EthVersion, ProtocolVersion};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
-use reth_codecs::derive_arbitrary;
-use reth_discv4::DEFAULT_DISCOVERY_PORT;
-use reth_primitives::{constants::RETH_CLIENT_VERSION, PeerId};
+use reth_codecs::add_arbitrary_tests;
+use reth_network_peers::PeerId;
+use reth_primitives::constants::RETH_CLIENT_VERSION;
+
+/// The default tcp port for p2p.
+///
+/// Note: this is the same as discovery port: `DEFAULT_DISCOVERY_PORT`
+pub(crate) const DEFAULT_TCP_PORT: u16 = 30303;
 
 use crate::protocol::Protocol;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// This is a superset of [HelloMessage] that provides additional protocol [Protocol] information
+/// This is a superset of [`HelloMessage`] that provides additional protocol [Protocol] information
 /// about the number of messages used by each capability in order to do proper message ID
 /// multiplexing.
 ///
-/// This type is required for the `p2p` handshake because the [HelloMessage] does not share the
+/// This type is required for the `p2p` handshake because the [`HelloMessage`] does not share the
 /// number of messages used by each capability.
 ///
-/// To get the encodable [HelloMessage] without the additional protocol information, use the
-/// [HelloMessageWithProtocols::message].
+/// To get the encodable [`HelloMessage`] without the additional protocol information, use the
+/// [`HelloMessageWithProtocols::message`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct HelloMessageWithProtocols {
@@ -28,6 +33,8 @@ pub struct HelloMessageWithProtocols {
     /// The list of supported capabilities and their versions.
     pub protocols: Vec<Protocol>,
     /// The port that the client is listening on, zero indicates the client is not listening.
+    ///
+    /// By default this is `30303` which is the same as the default discovery port.
     pub port: u16,
     /// The secp256k1 public key corresponding to the node's private key.
     pub id: PeerId,
@@ -38,17 +45,17 @@ impl HelloMessageWithProtocols {
     ///
     /// ```
     /// use reth_eth_wire::HelloMessageWithProtocols;
-    /// use reth_primitives::pk2id;
+    /// use reth_network_peers::pk2id;
     /// use secp256k1::{SecretKey, SECP256K1};
     /// let secret_key = SecretKey::new(&mut rand::thread_rng());
     /// let id = pk2id(&secret_key.public_key(SECP256K1));
     /// let status = HelloMessageWithProtocols::builder(id).build();
     /// ```
-    pub fn builder(id: PeerId) -> HelloMessageBuilder {
+    pub const fn builder(id: PeerId) -> HelloMessageBuilder {
         HelloMessageBuilder::new(id)
     }
 
-    /// Returns the raw [HelloMessage] without the additional protocol information.
+    /// Returns the raw [`HelloMessage`] without the additional protocol information.
     #[inline]
     pub fn message(&self) -> HelloMessage {
         HelloMessage {
@@ -60,7 +67,7 @@ impl HelloMessageWithProtocols {
         }
     }
 
-    /// Converts the type into a [HelloMessage] without the additional protocol information.
+    /// Converts the type into a [`HelloMessage`] without the additional protocol information.
     pub fn into_message(self) -> HelloMessage {
         HelloMessage {
             protocol_version: self.protocol_version,
@@ -96,9 +103,10 @@ impl HelloMessageWithProtocols {
 /// supported RLPx protocol version and capabilities.
 ///
 /// See also <https://github.com/ethereum/devp2p/blob/master/rlpx.md#hello-0x00>
-#[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
 pub struct HelloMessage {
     /// The version of the `p2p` protocol.
     pub protocol_version: ProtocolVersion,
@@ -120,13 +128,13 @@ impl HelloMessage {
     ///
     /// ```
     /// use reth_eth_wire::HelloMessage;
-    /// use reth_primitives::pk2id;
+    /// use reth_network_peers::pk2id;
     /// use secp256k1::{SecretKey, SECP256K1};
     /// let secret_key = SecretKey::new(&mut rand::thread_rng());
     /// let id = pk2id(&secret_key.public_key(SECP256K1));
     /// let status = HelloMessage::builder(id).build();
     /// ```
-    pub fn builder(id: PeerId) -> HelloMessageBuilder {
+    pub const fn builder(id: PeerId) -> HelloMessageBuilder {
         HelloMessageBuilder::new(id)
     }
 }
@@ -151,12 +159,12 @@ pub struct HelloMessageBuilder {
 
 impl HelloMessageBuilder {
     /// Create a new builder to configure a [`HelloMessage`]
-    pub fn new(id: PeerId) -> Self {
+    pub const fn new(id: PeerId) -> Self {
         Self { protocol_version: None, client_version: None, protocols: None, port: None, id }
     }
 
     /// Sets the port the client is listening on
-    pub fn port(mut self, port: u16) -> Self {
+    pub const fn port(mut self, port: u16) -> Self {
         self.port = Some(port);
         self
     }
@@ -180,7 +188,7 @@ impl HelloMessageBuilder {
     }
 
     /// Sets protocol version.
-    pub fn protocol_version(mut self, protocol_version: ProtocolVersion) -> Self {
+    pub const fn protocol_version(mut self, protocol_version: ProtocolVersion) -> Self {
         self.protocol_version = Some(protocol_version);
         self
     }
@@ -190,7 +198,7 @@ impl HelloMessageBuilder {
     /// Unset fields will be set to their default values:
     /// - `protocol_version`: [`ProtocolVersion::V5`]
     /// - `client_version`: [`RETH_CLIENT_VERSION`]
-    /// - `capabilities`: All [EthVersion]
+    /// - `capabilities`: All [`EthVersion`]
     pub fn build(self) -> HelloMessageWithProtocols {
         let Self { protocol_version, client_version, protocols, port, id } = self;
         HelloMessageWithProtocols {
@@ -199,7 +207,7 @@ impl HelloMessageBuilder {
             protocols: protocols.unwrap_or_else(|| {
                 vec![EthVersion::Eth68.into(), EthVersion::Eth67.into(), EthVersion::Eth66.into()]
             }),
-            port: port.unwrap_or(DEFAULT_DISCOVERY_PORT),
+            port: port.unwrap_or(DEFAULT_TCP_PORT),
             id,
         }
     }
@@ -207,14 +215,10 @@ impl HelloMessageBuilder {
 
 #[cfg(test)]
 mod tests {
+    use crate::{p2pstream::P2PMessage, Capability, EthVersion, HelloMessage, ProtocolVersion};
     use alloy_rlp::{Decodable, Encodable, EMPTY_STRING_CODE};
-    use reth_discv4::DEFAULT_DISCOVERY_PORT;
-    use reth_primitives::pk2id;
+    use reth_network_peers::pk2id;
     use secp256k1::{SecretKey, SECP256K1};
-
-    use crate::{
-        capability::Capability, p2pstream::P2PMessage, EthVersion, HelloMessage, ProtocolVersion,
-    };
 
     #[test]
     fn test_hello_encoding_round_trip() {
@@ -224,7 +228,7 @@ mod tests {
             protocol_version: ProtocolVersion::V5,
             client_version: "reth/0.1.0".to_string(),
             capabilities: vec![Capability::new_static("eth", EthVersion::Eth67 as usize)],
-            port: DEFAULT_DISCOVERY_PORT,
+            port: 30303,
             id,
         });
 
@@ -244,7 +248,7 @@ mod tests {
             protocol_version: ProtocolVersion::V5,
             client_version: "reth/0.1.0".to_string(),
             capabilities: vec![Capability::new_static("eth", EthVersion::Eth67 as usize)],
-            port: DEFAULT_DISCOVERY_PORT,
+            port: 30303,
             id,
         });
 
@@ -263,7 +267,7 @@ mod tests {
             protocol_version: ProtocolVersion::V5,
             client_version: "reth/0.1.0".to_string(),
             capabilities: vec![Capability::new_static("eth", EthVersion::Eth67 as usize)],
-            port: DEFAULT_DISCOVERY_PORT,
+            port: 30303,
             id,
         });
 

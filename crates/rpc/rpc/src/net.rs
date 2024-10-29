@@ -1,9 +1,8 @@
-use crate::eth::EthApiSpec;
+use alloy_primitives::U64;
 use jsonrpsee::core::RpcResult as Result;
 use reth_network_api::PeersInfo;
-use reth_primitives::U64;
 use reth_rpc_api::NetApiServer;
-use reth_rpc_types::PeerCount;
+use reth_rpc_eth_api::helpers::EthApiSpec;
 
 /// `Net` API implementation.
 ///
@@ -19,7 +18,7 @@ pub struct NetApi<Net, Eth> {
 
 impl<Net, Eth> NetApi<Net, Eth> {
     /// Returns a new instance with the given network and eth interface implementations
-    pub fn new(network: Net, eth: Eth) -> Self {
+    pub const fn new(network: Net, eth: Eth) -> Self {
         Self { network, eth }
     }
 }
@@ -37,8 +36,8 @@ where
     }
 
     /// Handler for `net_peerCount`
-    fn peer_count(&self) -> Result<PeerCount> {
-        Ok(PeerCount::Hex(U64::from(self.network.num_connected_peers())))
+    fn peer_count(&self) -> Result<U64> {
+        Ok(U64::from(self.network.num_connected_peers()))
     }
 
     /// Handler for `net_listening`

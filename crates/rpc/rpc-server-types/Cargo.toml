@@ -1,0 +1,30 @@
+[package]
+name = "reth-rpc-server-types"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "RPC server types and constants"
+
+[lints]
+workspace = true
+
+[dependencies]
+reth-errors.workspace = true
+reth-network-api.workspace = true
+reth-primitives.workspace = true
+
+# ethereum
+alloy-primitives.workspace = true
+alloy-rpc-types-engine.workspace = true
+
+# rpc
+jsonrpsee-core.workspace = true
+jsonrpsee-types.workspace = true
+
+# misc
+strum = { workspace = true, features = ["derive"] }
+serde = { workspace = true, features = ["derive"] }
+

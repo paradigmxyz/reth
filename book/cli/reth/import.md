@@ -4,45 +4,51 @@ This syncs RLP encoded blocks from a file
 
 ```bash
 $ reth import --help
+```
+```txt
 Usage: reth import [OPTIONS] <IMPORT_PATH>
 
 Options:
-      --config <FILE>
-          The path to the configuration file to use.
-
-      --datadir <DATA_DIR>
-          The path to the data dir for all reth files and subdirectories.
-          
-          Defaults to the OS-specific data directory:
-          
-          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-          - Windows: `{FOLDERID_RoamingAppData}/reth/`
-          - macOS: `$HOME/Library/Application Support/reth/`
-          
-          [default: default]
-
-      --chain <CHAIN_OR_PATH>
-          The chain this node is running.
-          Possible values are either a built-in chain or the path to a chain specification file.
-          
-          Built-in chains:
-              mainnet, sepolia, goerli, holesky, dev
-          
-          [default: mainnet]
-
       --instance <INSTANCE>
           Add a new instance of a node.
-          
+
           Configures the ports of the node to avoid conflicts with the defaults. This is useful for running multiple nodes on the same machine.
-          
+
           Max number of instances is 200. It is chosen in a way so that it's not possible to have port numbers that conflict with each other.
-          
-          Changes to the following port numbers: - DISCOVERY_PORT: default + `instance` - 1 - AUTH_PORT: default + `instance` * 100 - 100 - HTTP_RPC_PORT: default - `instance` + 1 - WS_RPC_PORT: default + `instance` * 2 - 2
-          
+
+          Changes to the following port numbers: - `DISCOVERY_PORT`: default + `instance` - 1 - `AUTH_PORT`: default + `instance` * 100 - 100 - `HTTP_RPC_PORT`: default - `instance` + 1 - `WS_RPC_PORT`: default + `instance` * 2 - 2
+
           [default: 1]
 
   -h, --help
           Print help (see a summary with '-h')
+
+Datadir:
+      --datadir <DATA_DIR>
+          The path to the data dir for all reth files and subdirectories.
+
+          Defaults to the OS-specific data directory:
+
+          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
+          - Windows: `{FOLDERID_RoamingAppData}/reth/`
+          - macOS: `$HOME/Library/Application Support/reth/`
+
+          [default: default]
+
+      --datadir.static-files <PATH>
+          The absolute path to store static files in.
+
+      --config <FILE>
+          The path to the configuration file to use
+
+      --chain <CHAIN_OR_PATH>
+          The chain this node is running.
+          Possible values are either a built-in chain or the path to a chain specification file.
+
+          Built-in chains:
+              mainnet, sepolia, holesky, dev
+
+          [default: mainnet]
 
 Database:
       --db.log-level <LOG_LEVEL>
@@ -60,19 +66,34 @@ Database:
 
       --db.exclusive <EXCLUSIVE>
           Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an NFS volume
-          
+
           [possible values: true, false]
+
+      --db.max-size <MAX_SIZE>
+          Maximum database size (e.g., 4TB, 8MB)
+
+      --db.growth-step <GROWTH_STEP>
+          Database growth step (e.g., 4GB, 4KB)
+
+      --db.read-transaction-timeout <READ_TRANSACTION_TIMEOUT>
+          Read transaction timeout in seconds, 0 means no timeout
+
+      --no-state
+          Disables stages that require state.
+
+      --chunk-len <CHUNK_LEN>
+          Chunk byte length to read from file.
 
   <IMPORT_PATH>
           The path to a block file for import.
-          
+
           The online stages (headers and bodies) are replaced by a file import, after which the
           remaining stages are executed.
 
 Logging:
       --log.stdout.format <FORMAT>
           The format to use for logs written to stdout
-          
+
           [default: terminal]
 
           Possible values:
@@ -82,12 +103,12 @@ Logging:
 
       --log.stdout.filter <FILTER>
           The filter to use for logs written to stdout
-          
+
           [default: ]
 
       --log.file.format <FORMAT>
           The format to use for logs written to the log file
-          
+
           [default: terminal]
 
           Possible values:
@@ -97,22 +118,22 @@ Logging:
 
       --log.file.filter <FILTER>
           The filter to use for logs written to the log file
-          
+
           [default: debug]
 
       --log.file.directory <PATH>
           The path to put log files in
-          
+
           [default: <CACHE_DIR>/logs]
 
       --log.file.max-size <SIZE>
           The maximum size (in MB) of one log file
-          
+
           [default: 200]
 
       --log.file.max-files <COUNT>
           The maximum amount of log files that will be stored. If set to 0, background file logging is disabled
-          
+
           [default: 5]
 
       --log.journald
@@ -120,12 +141,12 @@ Logging:
 
       --log.journald.filter <FILTER>
           The filter to use for logs written to journald
-          
+
           [default: error]
 
       --color <COLOR>
           Sets whether or not the formatter emits ANSI terminal escape codes for colors and other text formatting
-          
+
           [default: always]
 
           Possible values:
@@ -136,7 +157,7 @@ Logging:
 Display:
   -v, --verbosity...
           Set the minimum log level.
-          
+
           -v      Errors
           -vv     Warnings
           -vvv    Info

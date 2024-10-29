@@ -1,0 +1,85 @@
+[package]
+name = "reth-db-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Database abstraction used in reth."
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-codecs.workspace = true
+reth-db-models.workspace = true
+reth-primitives = { workspace = true, features = ["reth-codec"] }
+reth-primitives-traits.workspace = true
+reth-prune-types.workspace = true
+reth-stages-types.workspace = true
+reth-storage-errors.workspace = true
+reth-trie-common.workspace = true
+
+# ethereum
+alloy-primitives.workspace = true
+alloy-genesis.workspace = true
+
+# codecs
+modular-bitfield.workspace = true
+parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
+serde = { workspace = true, default-features = false }
+
+# metrics
+metrics.workspace = true
+
+# misc
+derive_more.workspace = true
+bytes.workspace = true
+
+# arbitrary utils
+arbitrary = { workspace = true, features = ["derive"], optional = true }
+proptest = { workspace = true, optional = true }
+
+[dev-dependencies]
+# reth libs with arbitrary
+reth-primitives = { workspace = true, features = ["arbitrary"] }
+reth-codecs = { workspace = true, features = ["test-utils"] }
+
+rand.workspace = true
+
+test-fuzz.workspace = true
+
+arbitrary = { workspace = true, features = ["derive"] }
+proptest.workspace = true
+proptest-arbitrary-interop.workspace = true
+
+[features]
+test-utils = [
+	"arbitrary",
+	"reth-primitives/test-utils",
+	"reth-primitives-traits/test-utils",
+	"reth-codecs/test-utils",
+	"reth-db-models/test-utils",
+	"reth-trie-common/test-utils",
+	"reth-prune-types/test-utils",
+	"reth-stages-types/test-utils"
+]
+arbitrary = [
+	"reth-primitives/arbitrary",
+	"reth-db-models/arbitrary",
+	"dep:arbitrary",
+	"dep:proptest",
+	"reth-primitives-traits/arbitrary",
+	"reth-trie-common/arbitrary",
+	"alloy-primitives/arbitrary",
+	"parity-scale-codec/arbitrary",
+	"reth-codecs/arbitrary",
+	"reth-prune-types/arbitrary",
+	"reth-stages-types/arbitrary"
+]
+optimism = [
+	"reth-primitives/optimism",
+	"reth-codecs/optimism"
+]

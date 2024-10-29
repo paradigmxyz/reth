@@ -1,14 +1,13 @@
 use crate::{mode::MiningMode, Storage};
+use alloy_rpc_types_engine::ForkchoiceState;
 use futures_util::{future::BoxFuture, FutureExt};
 use reth_beacon_consensus::{BeaconEngineMessage, ForkchoiceStatus};
-use reth_engine_primitives::EngineTypes;
-use reth_evm::ConfigureEvm;
-use reth_primitives::{
-    Block, ChainSpec, IntoRecoveredTransaction, SealedBlockWithSenders, Withdrawals,
-};
-use reth_provider::{CanonChainTracker, CanonStateNotificationSender, Chain, StateProviderFactory};
-use reth_rpc_types::engine::ForkchoiceState;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_engine_primitives::{EngineApiMessageVersion, EngineTypes};
+use reth_evm::execute::BlockExecutorProvider;
+use reth_provider::{CanonChainTracker, StateProviderFactory};
 use reth_stages_api::PipelineEvent;
+use reth_tokio_util::EventStream;
 use reth_transaction_pool::{TransactionPool, ValidPoolTransaction};
 use std::{
     collections::VecDeque,
@@ -18,11 +17,10 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
-use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, error, warn};
 
 /// A Future that listens for new ready transactions and puts new blocks into storage
-pub struct MiningTask<Client, Pool: TransactionPool, EvmConfig, Engine: EngineTypes> {
+pub struct MiningTask<Client, Pool: TransactionPool, Executor, Engine: EngineTypes, ChainSpec> {
     /// The configured chain spec
     chain_spec: Arc<ChainSpec>,
     /// The client used to interact with the state
@@ -30,7 +28,7 @@ pub struct MiningTask<Client, Pool: TransactionPool, EvmConfig, Engine: EngineTy
     /// The active miner
     miner: MiningMode,
     /// Single active future that inserts a new block into `storage`
-    insert_task: Option<BoxFuture<'static, Option<UnboundedReceiverStream<PipelineEvent>>>>,
+    insert_task: Option<BoxFuture<'static, Option<EventStream<PipelineEvent>>>>,
     /// Shared storage to insert new blocks
     storage: Storage,
     /// Pool where transactions are stored
@@ -39,18 +37,16 @@ pub struct MiningTask<Client, Pool: TransactionPool, EvmConfig, Engine: EngineTy
     queued: VecDeque<Vec<Arc<ValidPoolTransaction<<Pool as TransactionPool>::Transaction>>>>,
     // TODO: ideally this would just be a sender of hashes
     to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
-    /// Used to notify consumers of new blocks
-    canon_state_notification: CanonStateNotificationSender,
     /// The pipeline events to listen on
-    pipe_line_events: Option<UnboundedReceiverStream<PipelineEvent>>,
-    /// The type that defines how to configure the EVM.
-    evm_config: EvmConfig,
+    pipe_line_events: Option<EventStream<PipelineEvent>>,
+    /// The type used for block execution
+    block_executor: Executor,
 }
 
 // === impl MiningTask ===
 
-impl<EvmConfig, Client, Pool: TransactionPool, Engine: EngineTypes>
-    MiningTask<Client, Pool, EvmConfig, Engine>
+impl<Executor, Client, Pool: TransactionPool, Engine: EngineTypes, ChainSpec>
+    MiningTask<Client, Pool, Executor, Engine, ChainSpec>
 {
     /// Creates a new instance of the task
     #[allow(clippy::too_many_arguments)]
@@ -58,11 +54,10 @@ impl<EvmConfig, Client, Pool: TransactionPool, Engine: EngineTypes>
         chain_spec: Arc<ChainSpec>,
         miner: MiningMode,
         to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
-        canon_state_notification: CanonStateNotificationSender,
         storage: Storage,
         client: Client,
         pool: Pool,
-        evm_config: EvmConfig,
+        block_executor: Executor,
     ) -> Self {
         Self {
             chain_spec,
@@ -72,26 +67,26 @@ impl<EvmConfig, Client, Pool: TransactionPool, Engine: EngineTypes>
             storage,
             pool,
             to_engine,
-            canon_state_notification,
             queued: Default::default(),
             pipe_line_events: None,
-            evm_config,
+            block_executor,
         }
     }
 
     /// Sets the pipeline events to listen on.
-    pub fn set_pipeline_events(&mut self, events: UnboundedReceiverStream<PipelineEvent>) {
+    pub fn set_pipeline_events(&mut self, events: EventStream<PipelineEvent>) {
         self.pipe_line_events = Some(events);
     }
 }
 
-impl<EvmConfig, Client, Pool, Engine> Future for MiningTask<Client, Pool, EvmConfig, Engine>
+impl<Executor, Client, Pool, Engine, ChainSpec> Future
+    for MiningTask<Client, Pool, Executor, Engine, ChainSpec>
 where
     Client: StateProviderFactory + CanonChainTracker + Clone + Unpin + 'static,
     Pool: TransactionPool + Unpin + 'static,
-    <Pool as TransactionPool>::Transaction: IntoRecoveredTransaction,
-    Engine: EngineTypes + 'static,
-    EvmConfig: ConfigureEvm + Clone + Unpin + Send + Sync + 'static,
+    Engine: EngineTypes,
+    Executor: BlockExecutorProvider,
+    ChainSpec: EthChainSpec + EthereumHardforks + 'static,
 {
     type Output = ();
 
@@ -118,41 +113,31 @@ where
                 let to_engine = this.to_engine.clone();
                 let client = this.client.clone();
                 let chain_spec = Arc::clone(&this.chain_spec);
-                let pool = this.pool.clone();
                 let events = this.pipe_line_events.take();
-                let canon_state_notification = this.canon_state_notification.clone();
-                let evm_config = this.evm_config.clone();
+                let executor = this.block_executor.clone();
 
                 // Create the mining future that creates a block, notifies the engine that drives
                 // the pipeline
                 this.insert_task = Some(Box::pin(async move {
                     let mut storage = storage.write().await;
 
-                    let (transactions, senders): (Vec<_>, Vec<_>) = transactions
+                    let transactions: Vec<_> = transactions
                         .into_iter()
                         .map(|tx| {
                             let recovered = tx.to_recovered_transaction();
-                            let signer = recovered.signer();
-                            (recovered.into_signed(), signer)
+                            recovered.into_signed()
                         })
-                        .unzip();
+                        .collect();
                     let ommers = vec![];
-                    let withdrawals = Some(Withdrawals::default());
 
                     match storage.build_and_execute(
                         transactions.clone(),
                         ommers.clone(),
-                        withdrawals.clone(),
                         &client,
                         chain_spec,
-                        evm_config,
+                        &executor,
                     ) {
-                        Ok((new_header, bundle_state)) => {
-                            // clear all transactions from pool
-                            pool.remove_transactions(
-                                transactions.iter().map(|tx| tx.hash()).collect(),
-                            );
-
+                        Ok((new_header, _bundle_state)) => {
                             let state = ForkchoiceState {
                                 head_block_hash: new_header.hash(),
                                 finalized_block_hash: new_header.hash(),
@@ -170,6 +155,7 @@ where
                                     state,
                                     payload_attrs: None,
                                     tx,
+                                    version: EngineApiMessageVersion::default(),
                                 });
                                 debug!(target: "consensus::auto", ?state, "Sent fork choice update");
 
@@ -195,35 +181,10 @@ where
                                 }
                             }
 
-                            // seal the block
-                            let block = Block {
-                                header: new_header.clone().unseal(),
-                                body: transactions,
-                                ommers,
-                                withdrawals,
-                            };
-                            let sealed_block = block.seal_slow();
-
-                            let sealed_block_with_senders =
-                                SealedBlockWithSenders::new(sealed_block, senders)
-                                    .expect("senders are valid");
-
                             // update canon chain for rpc
                             client.set_canonical_head(new_header.clone());
                             client.set_safe(new_header.clone());
                             client.set_finalized(new_header.clone());
-
-                            debug!(target: "consensus::auto", header=?sealed_block_with_senders.hash(), "sending block notification");
-
-                            let chain = Arc::new(Chain::new(
-                                vec![sealed_block_with_senders],
-                                bundle_state,
-                                None,
-                            ));
-
-                            // send block notification
-                            let _ = canon_state_notification
-                                .send(reth_provider::CanonStateNotification::Commit { new: chain });
                         }
                         Err(err) => {
                             warn!(target: "consensus::auto", %err, "failed to execute block")
@@ -251,8 +212,8 @@ where
     }
 }
 
-impl<Client, Pool: TransactionPool, EvmConfig: std::fmt::Debug, Engine: EngineTypes> std::fmt::Debug
-    for MiningTask<Client, Pool, EvmConfig, Engine>
+impl<Client, Pool: TransactionPool, EvmConfig: std::fmt::Debug, Engine: EngineTypes, ChainSpec>
+    std::fmt::Debug for MiningTask<Client, Pool, EvmConfig, Engine, ChainSpec>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MiningTask").finish_non_exhaustive()

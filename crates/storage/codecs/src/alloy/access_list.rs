@@ -1,19 +1,21 @@
+//! Compact implementation for [`AccessList`]
+
 use crate::Compact;
+use alloc::vec::Vec;
 use alloy_eips::eip2930::{AccessList, AccessListItem};
 use alloy_primitives::Address;
 
 /// Implement `Compact` for `AccessListItem` and `AccessList`.
 impl Compact for AccessListItem {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        let mut buffer = bytes::BytesMut::new();
+        let mut buffer = Vec::new();
         self.address.to_compact(&mut buffer);
         self.storage_keys.specialized_to_compact(&mut buffer);
-        let total_length = buffer.len();
-        buf.put(buffer);
-        total_length
+        buf.put(&buffer[..]);
+        buffer.len()
     }
 
     fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
@@ -21,27 +23,26 @@ impl Compact for AccessListItem {
         buf = new_buf;
         let (storage_keys, new_buf) = Vec::specialized_from_compact(buf, buf.len());
         buf = new_buf;
-        let access_list_item = AccessListItem { address, storage_keys };
+        let access_list_item = Self { address, storage_keys };
         (access_list_item, buf)
     }
 }
 
 impl Compact for AccessList {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        let mut buffer = bytes::BytesMut::new();
+        let mut buffer = Vec::new();
         self.0.to_compact(&mut buffer);
-        let total_length = buffer.len();
-        buf.put(buffer);
-        total_length
+        buf.put(&buffer[..]);
+        buffer.len()
     }
 
     fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
         let (access_list_items, new_buf) = Vec::from_compact(buf, buf.len());
         buf = new_buf;
-        let access_list = AccessList(access_list_items);
+        let access_list = Self(access_list_items);
         (access_list, buf)
     }
 }
@@ -51,13 +52,14 @@ mod tests {
     use super::*;
     use alloy_primitives::Bytes;
     use proptest::proptest;
+    use proptest_arbitrary_interop::arb;
     use serde::Deserialize;
 
     proptest! {
         #[test]
-        fn test_roundtrip_compact_access_list_item(access_list_item: AccessListItem) {
+        fn test_roundtrip_compact_access_list_item(access_list_item in arb::<AccessListItem>()) {
             let mut compacted_access_list_item = Vec::<u8>::new();
-            let len = access_list_item.clone().to_compact(&mut compacted_access_list_item);
+            let len = access_list_item.to_compact(&mut compacted_access_list_item);
 
             let (decoded_access_list_item, _) = AccessListItem::from_compact(&compacted_access_list_item, len);
             assert_eq!(access_list_item, decoded_access_list_item);
@@ -66,9 +68,9 @@ mod tests {
 
     proptest! {
         #[test]
-        fn test_roundtrip_compact_access_list(access_list: AccessList) {
+        fn test_roundtrip_compact_access_list(access_list in arb::<AccessList>()) {
             let mut compacted_access_list = Vec::<u8>::new();
-            let len = access_list.clone().to_compact(&mut compacted_access_list);
+            let len = access_list.to_compact(&mut compacted_access_list);
 
             let (decoded_access_list, _) = AccessList::from_compact(&compacted_access_list, len);
             assert_eq!(access_list, decoded_access_list);

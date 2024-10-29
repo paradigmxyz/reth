@@ -1,0 +1,71 @@
+[package]
+name = "reth-optimism-rpc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Ethereum RPC implementation for optimism."
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-evm.workspace = true
+reth-primitives.workspace = true
+reth-provider.workspace = true
+reth-rpc-eth-api.workspace = true
+reth-rpc-eth-types.workspace = true
+reth-rpc-server-types.workspace = true
+reth-tasks = { workspace = true, features = ["rayon"] }
+reth-transaction-pool.workspace = true
+reth-rpc.workspace = true
+reth-node-api.workspace = true
+reth-network-api.workspace = true
+reth-node-builder.workspace = true
+reth-chainspec.workspace = true
+
+# op-reth
+reth-optimism-chainspec.workspace = true
+reth-optimism-consensus.workspace = true
+reth-optimism-evm.workspace = true
+reth-optimism-forks.workspace = true
+
+# ethereum
+alloy-eips.workspace = true
+alloy-primitives.workspace = true
+alloy-rpc-types-eth.workspace = true
+alloy-rpc-types.workspace = true
+alloy-consensus.workspace = true
+op-alloy-network.workspace = true
+op-alloy-rpc-types.workspace = true
+op-alloy-consensus.workspace = true
+revm.workspace = true
+
+# async
+parking_lot.workspace = true
+tokio.workspace = true
+reqwest = { workspace = true, features = ["rustls-tls-native-roots"] }
+
+# rpc
+jsonrpsee-types.workspace = true
+serde_json.workspace = true
+
+# misc
+thiserror.workspace = true
+tracing.workspace = true
+derive_more = { workspace = true, features = ["constructor", "deref"] }
+
+[dev-dependencies]
+reth-optimism-chainspec.workspace = true
+
+[features]
+optimism = [
+	"reth-optimism-evm/optimism",
+	"reth-primitives/optimism",
+	"reth-provider/optimism",
+	"revm/optimism",
+	"reth-optimism-consensus/optimism"
+]

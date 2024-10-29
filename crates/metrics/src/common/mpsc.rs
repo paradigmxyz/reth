@@ -1,9 +1,9 @@
 //! Support for metering senders. Facilitates debugging by exposing metrics for number of messages
 //! sent, number of errors, etc.
 
+use crate::Metrics;
 use futures::Stream;
 use metrics::Counter;
-use reth_metrics_derive::Metrics;
 use std::{
     pin::Pin,
     task::{ready, Context, Poll},
@@ -15,7 +15,7 @@ use tokio::sync::mpsc::{
 };
 use tokio_util::sync::{PollSendError, PollSender};
 
-/// Wrapper around [mpsc::unbounded_channel] that returns a new unbounded metered channel.
+/// Wrapper around [`mpsc::unbounded_channel`] that returns a new unbounded metered channel.
 pub fn metered_unbounded_channel<T>(
     scope: &'static str,
 ) -> (UnboundedMeteredSender<T>, UnboundedMeteredReceiver<T>) {
@@ -23,7 +23,7 @@ pub fn metered_unbounded_channel<T>(
     (UnboundedMeteredSender::new(tx, scope), UnboundedMeteredReceiver::new(rx, scope))
 }
 
-/// Wrapper around [mpsc::channel] that returns a new bounded metered channel with the given
+/// Wrapper around [`mpsc::channel`] that returns a new bounded metered channel with the given
 /// buffer size.
 pub fn metered_channel<T>(
     buffer: usize,
@@ -33,10 +33,10 @@ pub fn metered_channel<T>(
     (MeteredSender::new(tx, scope), MeteredReceiver::new(rx, scope))
 }
 
-/// A wrapper type around [UnboundedSender](mpsc::UnboundedSender) that updates metrics on send.
+/// A wrapper type around [`UnboundedSender`](mpsc::UnboundedSender) that updates metrics on send.
 #[derive(Debug)]
 pub struct UnboundedMeteredSender<T> {
-    /// The [UnboundedSender](mpsc::UnboundedSender) that this wraps around
+    /// The [`UnboundedSender`](mpsc::UnboundedSender) that this wraps around
     sender: mpsc::UnboundedSender<T>,
     /// Holds metrics for this type
     metrics: MeteredSenderMetrics,
@@ -55,11 +55,11 @@ impl<T> UnboundedMeteredSender<T> {
     pub fn send(&self, message: T) -> Result<(), SendError<T>> {
         match self.sender.send(message) {
             Ok(()) => {
-                self.metrics.messages_sent.increment(1);
+                self.metrics.messages_sent_total.increment(1);
                 Ok(())
             }
             Err(error) => {
-                self.metrics.send_errors.increment(1);
+                self.metrics.send_errors_total.increment(1);
                 Err(error)
             }
         }
@@ -84,7 +84,7 @@ pub struct UnboundedMeteredReceiver<T> {
 // === impl MeteredReceiver ===
 
 impl<T> UnboundedMeteredReceiver<T> {
-    /// Creates a new [UnboundedMeteredReceiver] wrapping around the provided
+    /// Creates a new [`UnboundedMeteredReceiver`] wrapping around the provided
     /// [Receiver](mpsc::UnboundedReceiver)
     pub fn new(receiver: mpsc::UnboundedReceiver<T>, scope: &'static str) -> Self {
         Self { receiver, metrics: MeteredReceiverMetrics::new(scope) }
@@ -94,7 +94,7 @@ impl<T> UnboundedMeteredReceiver<T> {
     pub async fn recv(&mut self) -> Option<T> {
         let msg = self.receiver.recv().await;
         if msg.is_some() {
-            self.metrics.messages_received.increment(1);
+            self.metrics.messages_received_total.increment(1);
         }
         msg
     }
@@ -102,7 +102,7 @@ impl<T> UnboundedMeteredReceiver<T> {
     /// Tries to receive the next value for this receiver.
     pub fn try_recv(&mut self) -> Result<T, TryRecvError> {
         let msg = self.receiver.try_recv()?;
-        self.metrics.messages_received.increment(1);
+        self.metrics.messages_received_total.increment(1);
         Ok(msg)
     }
 
@@ -115,7 +115,7 @@ impl<T> UnboundedMeteredReceiver<T> {
     pub fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<T>> {
         let msg = ready!(self.receiver.poll_recv(cx));
         if msg.is_some() {
-            self.metrics.messages_received.increment(1);
+            self.metrics.messages_received_total.increment(1);
         }
         Poll::Ready(msg)
     }
@@ -152,7 +152,7 @@ impl<T> MeteredSender<T> {
     }
 
     /// Returns the underlying [Sender](mpsc::Sender).
-    pub fn inner(&self) -> &mpsc::Sender<T> {
+    pub const fn inner(&self) -> &mpsc::Sender<T> {
         &self.sender
     }
 
@@ -161,11 +161,11 @@ impl<T> MeteredSender<T> {
     pub fn try_send(&self, message: T) -> Result<(), TrySendError<T>> {
         match self.sender.try_send(message) {
             Ok(()) => {
-                self.metrics.messages_sent.increment(1);
+                self.metrics.messages_sent_total.increment(1);
                 Ok(())
             }
             Err(error) => {
-                self.metrics.send_errors.increment(1);
+                self.metrics.send_errors_total.increment(1);
                 Err(error)
             }
         }
@@ -173,14 +173,14 @@ impl<T> MeteredSender<T> {
 
     /// Calls the underlying [Sender](mpsc::Sender)'s `send`, incrementing the appropriate
     /// metrics depending on the result.
-    pub async fn send(&mut self, value: T) -> Result<(), SendError<T>> {
+    pub async fn send(&self, value: T) -> Result<(), SendError<T>> {
         match self.sender.send(value).await {
             Ok(()) => {
-                self.metrics.messages_sent.increment(1);
+                self.metrics.messages_sent_total.increment(1);
                 Ok(())
             }
             Err(error) => {
-                self.metrics.send_errors.increment(1);
+                self.metrics.send_errors_total.increment(1);
                 Err(error)
             }
         }
@@ -214,7 +214,7 @@ impl<T> MeteredReceiver<T> {
     pub async fn recv(&mut self) -> Option<T> {
         let msg = self.receiver.recv().await;
         if msg.is_some() {
-            self.metrics.messages_received.increment(1);
+            self.metrics.messages_received_total.increment(1);
         }
         msg
     }
@@ -222,7 +222,7 @@ impl<T> MeteredReceiver<T> {
     /// Tries to receive the next value for this receiver.
     pub fn try_recv(&mut self) -> Result<T, TryRecvError> {
         let msg = self.receiver.try_recv()?;
-        self.metrics.messages_received.increment(1);
+        self.metrics.messages_received_total.increment(1);
         Ok(msg)
     }
 
@@ -235,7 +235,7 @@ impl<T> MeteredReceiver<T> {
     pub fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<T>> {
         let msg = ready!(self.receiver.poll_recv(cx));
         if msg.is_some() {
-            self.metrics.messages_received.increment(1);
+            self.metrics.messages_received_total.increment(1);
         }
         Poll::Ready(msg)
     }
@@ -249,63 +249,63 @@ impl<T> Stream for MeteredReceiver<T> {
     }
 }
 
-/// Throughput metrics for [MeteredSender]
+/// Throughput metrics for [`MeteredSender`]
 #[derive(Clone, Metrics)]
 #[metrics(dynamic = true)]
 struct MeteredSenderMetrics {
     /// Number of messages sent
-    messages_sent: Counter,
+    messages_sent_total: Counter,
     /// Number of failed message deliveries
-    send_errors: Counter,
+    send_errors_total: Counter,
 }
 
-/// Throughput metrics for [MeteredReceiver]
+/// Throughput metrics for [`MeteredReceiver`]
 #[derive(Clone, Metrics)]
 #[metrics(dynamic = true)]
 struct MeteredReceiverMetrics {
     /// Number of messages received
-    messages_received: Counter,
+    messages_received_total: Counter,
 }
 
-/// A wrapper type around [PollSender] that updates metrics on send.
+/// A wrapper type around [`PollSender`] that updates metrics on send.
 #[derive(Debug)]
 pub struct MeteredPollSender<T> {
-    /// The [PollSender] that this wraps around.
+    /// The [`PollSender`] that this wraps around.
     sender: PollSender<T>,
     /// Holds metrics for this type.
     metrics: MeteredPollSenderMetrics,
 }
 
 impl<T: Send + 'static> MeteredPollSender<T> {
-    /// Creates a new [`MeteredPollSender`] wrapping around the provided [PollSender].
+    /// Creates a new [`MeteredPollSender`] wrapping around the provided [`PollSender`].
     pub fn new(sender: PollSender<T>, scope: &'static str) -> Self {
         Self { sender, metrics: MeteredPollSenderMetrics::new(scope) }
     }
 
-    /// Returns the underlying [PollSender].
-    pub fn inner(&self) -> &PollSender<T> {
+    /// Returns the underlying [`PollSender`].
+    pub const fn inner(&self) -> &PollSender<T> {
         &self.sender
     }
 
-    /// Calls the underlying [PollSender]'s `poll_reserve`, incrementing the appropriate
+    /// Calls the underlying [`PollSender`]'s `poll_reserve`, incrementing the appropriate
     /// metrics depending on the result.
     pub fn poll_reserve(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), PollSendError<T>>> {
         match self.sender.poll_reserve(cx) {
             Poll::Ready(Ok(permit)) => Poll::Ready(Ok(permit)),
             Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
             Poll::Pending => {
-                self.metrics.back_pressure.increment(1);
+                self.metrics.back_pressure_total.increment(1);
                 Poll::Pending
             }
         }
     }
 
-    /// Calls the underlying [PollSender]'s `send_item`, incrementing the appropriate
+    /// Calls the underlying [`PollSender`]'s `send_item`, incrementing the appropriate
     /// metrics depending on the result.
     pub fn send_item(&mut self, item: T) -> Result<(), PollSendError<T>> {
         match self.sender.send_item(item) {
             Ok(()) => {
-                self.metrics.messages_sent.increment(1);
+                self.metrics.messages_sent_total.increment(1);
                 Ok(())
             }
             Err(error) => Err(error),
@@ -319,12 +319,12 @@ impl<T> Clone for MeteredPollSender<T> {
     }
 }
 
-/// Throughput metrics for [MeteredPollSender]
+/// Throughput metrics for [`MeteredPollSender`]
 #[derive(Clone, Metrics)]
 #[metrics(dynamic = true)]
 struct MeteredPollSenderMetrics {
     /// Number of messages sent
-    messages_sent: Counter,
+    messages_sent_total: Counter,
     /// Number of delayed message deliveries caused by a full channel
-    back_pressure: Counter,
+    back_pressure_total: Counter,
 }

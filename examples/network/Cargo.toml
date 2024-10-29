@@ -1,0 +1,13 @@
+[package]
+name = "example-network"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reth-network.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
+futures.workspace = true
+tokio.workspace = true
+eyre.workspace = true

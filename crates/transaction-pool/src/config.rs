@@ -1,6 +1,12 @@
-use crate::{PoolSize, TransactionOrigin};
-use reth_primitives::{Address, EIP4844_TX_TYPE_ID};
-use std::collections::HashSet;
+use crate::{
+    pool::{NEW_TX_LISTENER_BUFFER_SIZE, PENDING_TX_LISTENER_BUFFER_SIZE},
+    PoolSize, TransactionOrigin,
+};
+use alloy_consensus::constants::EIP4844_TX_TYPE_ID;
+use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE};
+use alloy_primitives::Address;
+use std::{collections::HashSet, ops::Mul};
+
 /// Guarantees max transactions for one sender, compatible with geth/erigon
 pub const TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER: usize = 16;
 
@@ -9,6 +15,9 @@ pub const TXPOOL_SUBPOOL_MAX_TXS_DEFAULT: usize = 10_000;
 
 /// The default maximum allowed size of the given subpool.
 pub const TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT: usize = 20;
+
+/// The default additional validation tasks size.
+pub const DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS: usize = 1;
 
 /// Default price bump (in %) for the transaction pool underpriced check.
 pub const DEFAULT_PRICE_BUMP: u128 = 10;
@@ -33,13 +42,21 @@ pub struct PoolConfig {
     pub max_account_slots: usize,
     /// Price bump (in %) for the transaction pool underpriced check.
     pub price_bumps: PriceBumpConfig,
+    /// Minimum base fee required by the protocol.
+    pub minimal_protocol_basefee: u64,
+    /// The max gas limit for transactions in the pool
+    pub gas_limit: u64,
     /// How to handle locally received transactions:
-    /// [TransactionOrigin::Local](crate::TransactionOrigin).
+    /// [`TransactionOrigin::Local`](TransactionOrigin).
     pub local_transactions_config: LocalTransactionConfig,
+    /// Bound on number of pending transactions from `reth_network::TransactionsManager` to buffer.
+    pub pending_tx_listener_buffer_size: usize,
+    /// Bound on number of new transactions from `reth_network::TransactionsManager` to buffer.
+    pub new_tx_listener_buffer_size: usize,
 }
 
 impl PoolConfig {
-    /// Returns whether or not the size and amount constraints in any sub-pools are exceeded.
+    /// Returns whether the size and amount constraints in any sub-pools are exceeded.
     #[inline]
     pub const fn is_exceeded(&self, pool_size: PoolSize) -> bool {
         self.blob_limit.is_exceeded(pool_size.blob, pool_size.blob_size) ||
@@ -58,7 +75,11 @@ impl Default for PoolConfig {
             blob_limit: Default::default(),
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             price_bumps: Default::default(),
+            minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
+            gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             local_transactions_config: Default::default(),
+            pending_tx_listener_buffer_size: PENDING_TX_LISTENER_BUFFER_SIZE,
+            new_tx_listener_buffer_size: NEW_TX_LISTENER_BUFFER_SIZE,
         }
     }
 }
@@ -82,6 +103,15 @@ impl SubPoolLimit {
     #[inline]
     pub const fn is_exceeded(&self, txs: usize, size: usize) -> bool {
         self.max_txs < txs || self.max_size < size
+    }
+}
+
+impl Mul<usize> for SubPoolLimit {
+    type Output = Self;
+
+    fn mul(self, rhs: usize) -> Self::Output {
+        let Self { max_txs, max_size } = self;
+        Self { max_txs: max_txs * rhs, max_size: max_size * rhs }
     }
 }
 
@@ -125,17 +155,17 @@ impl Default for PriceBumpConfig {
 }
 
 /// Configuration options for the locally received transactions:
-/// [TransactionOrigin::Local](crate::TransactionOrigin)
+/// [`TransactionOrigin::Local`](TransactionOrigin)
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct LocalTransactionConfig {
     /// Apply no exemptions to the locally received transactions.
     ///
     /// This includes:
-    ///   - available slots are limited to the configured `max_account_slots` of [PoolConfig]
+    ///   - available slots are limited to the configured `max_account_slots` of [`PoolConfig`]
     ///   - no price exemptions
     ///   - no eviction exemptions
     pub no_exemptions: bool,
-    /// Addresses that will be considered as local . Above exemptions apply
+    /// Addresses that will be considered as local. Above exemptions apply.
     pub local_addresses: HashSet<Address>,
     /// Flag indicating whether local transactions should be propagated.
     pub propagate_local_transactions: bool,
@@ -176,11 +206,11 @@ impl LocalTransactionConfig {
     }
 
     /// Sets toggle to propagate transactions received locally by this client (e.g
-    /// transactions from eth_sendTransaction to this nodes' RPC server)
+    /// transactions from `eth_sendTransaction` to this nodes' RPC server)
     ///
     /// If set to false, only transactions received by network peers (via
     /// p2p) will be marked as propagated in the local transaction pool and returned on a
-    /// GetPooledTransactions p2p request
+    /// `GetPooledTransactions` p2p request
     pub const fn set_propagate_local_transactions(mut self, propagate_local_txs: bool) -> Self {
         self.propagate_local_transactions = propagate_local_txs;
         self
@@ -224,5 +254,86 @@ mod tests {
 
         // now this should be above the limits
         assert!(config.is_exceeded(pool_size));
+    }
+
+    #[test]
+    fn test_default_config() {
+        let config = LocalTransactionConfig::default();
+
+        assert!(!config.no_exemptions);
+        assert!(config.local_addresses.is_empty());
+        assert!(config.propagate_local_transactions);
+    }
+
+    #[test]
+    fn test_no_local_exemptions() {
+        let config = LocalTransactionConfig { no_exemptions: true, ..Default::default() };
+        assert!(config.no_local_exemptions());
+    }
+
+    #[test]
+    fn test_contains_local_address() {
+        let address = Address::new([1; 20]);
+        let mut local_addresses = HashSet::default();
+        local_addresses.insert(address);
+
+        let config = LocalTransactionConfig { local_addresses, ..Default::default() };
+
+        // Should contain the inserted address
+        assert!(config.contains_local_address(address));
+
+        // Should not contain another random address
+        assert!(!config.contains_local_address(Address::new([2; 20])));
+    }
+
+    #[test]
+    fn test_is_local_with_no_exemptions() {
+        let address = Address::new([1; 20]);
+        let config = LocalTransactionConfig {
+            no_exemptions: true,
+            local_addresses: HashSet::default(),
+            ..Default::default()
+        };
+
+        // Should return false as no exemptions is set to true
+        assert!(!config.is_local(TransactionOrigin::Local, address));
+    }
+
+    #[test]
+    fn test_is_local_without_no_exemptions() {
+        let address = Address::new([1; 20]);
+        let mut local_addresses = HashSet::default();
+        local_addresses.insert(address);
+
+        let config =
+            LocalTransactionConfig { no_exemptions: false, local_addresses, ..Default::default() };
+
+        // Should return true as the transaction origin is local
+        assert!(config.is_local(TransactionOrigin::Local, Address::new([2; 20])));
+        assert!(config.is_local(TransactionOrigin::Local, address));
+
+        // Should return true as the address is in the local_addresses set
+        assert!(config.is_local(TransactionOrigin::External, address));
+        // Should return false as the address is not in the local_addresses set
+        assert!(!config.is_local(TransactionOrigin::External, Address::new([2; 20])));
+    }
+
+    #[test]
+    fn test_set_propagate_local_transactions() {
+        let config = LocalTransactionConfig::default();
+        assert!(config.propagate_local_transactions);
+
+        let new_config = config.set_propagate_local_transactions(false);
+        assert!(!new_config.propagate_local_transactions);
+    }
+
+    #[test]
+    fn scale_pool_limit() {
+        let limit = SubPoolLimit::default();
+        let double = limit * 2;
+        assert_eq!(
+            double,
+            SubPoolLimit { max_txs: limit.max_txs * 2, max_size: limit.max_size * 2 }
+        )
     }
 }

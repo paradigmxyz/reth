@@ -1,8 +1,11 @@
 //! Support for representing the version of the `eth`
 
-use std::str::FromStr;
+use std::{fmt, str::FromStr};
 
+use alloy_rlp::{Decodable, Encodable, Error as RlpError};
+use bytes::BufMut;
 use derive_more::Display;
+use reth_codecs_derive::add_arbitrary_tests;
 
 /// Error thrown when failed to parse a valid [`EthVersion`].
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -25,13 +28,13 @@ pub enum EthVersion {
 
 impl EthVersion {
     /// The latest known eth version
-    pub const LATEST: EthVersion = EthVersion::Eth68;
+    pub const LATEST: Self = Self::Eth68;
 
     /// Returns the total number of messages the protocol version supports.
     pub const fn total_messages(&self) -> u8 {
         match self {
-            EthVersion::Eth66 => 15,
-            EthVersion::Eth67 | EthVersion::Eth68 => {
+            Self::Eth66 => 15,
+            Self::Eth67 | Self::Eth68 => {
                 // eth/67,68 are eth/66 minus GetNodeData and NodeData messages
                 13
             }
@@ -40,17 +43,17 @@ impl EthVersion {
 
     /// Returns true if the version is eth/66
     pub const fn is_eth66(&self) -> bool {
-        matches!(self, EthVersion::Eth66)
+        matches!(self, Self::Eth66)
     }
 
     /// Returns true if the version is eth/67
     pub const fn is_eth67(&self) -> bool {
-        matches!(self, EthVersion::Eth67)
+        matches!(self, Self::Eth67)
     }
 
     /// Returns true if the version is eth/68
     pub const fn is_eth68(&self) -> bool {
-        matches!(self, EthVersion::Eth68)
+        matches!(self, Self::Eth68)
     }
 }
 
@@ -69,9 +72,9 @@ impl TryFrom<&str> for EthVersion {
     #[inline]
     fn try_from(s: &str) -> Result<Self, Self::Error> {
         match s {
-            "66" => Ok(EthVersion::Eth66),
-            "67" => Ok(EthVersion::Eth67),
-            "68" => Ok(EthVersion::Eth68),
+            "66" => Ok(Self::Eth66),
+            "67" => Ok(Self::Eth67),
+            "68" => Ok(Self::Eth68),
             _ => Err(ParseVersionError(s.to_string())),
         }
     }
@@ -92,9 +95,9 @@ impl TryFrom<u8> for EthVersion {
     #[inline]
     fn try_from(u: u8) -> Result<Self, Self::Error> {
         match u {
-            66 => Ok(EthVersion::Eth66),
-            67 => Ok(EthVersion::Eth67),
-            68 => Ok(EthVersion::Eth68),
+            66 => Ok(Self::Eth66),
+            67 => Ok(Self::Eth67),
+            68 => Ok(Self::Eth68),
             _ => Err(ParseVersionError(u.to_string())),
         }
     }
@@ -105,14 +108,14 @@ impl FromStr for EthVersion {
 
     #[inline]
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        EthVersion::try_from(s)
+        Self::try_from(s)
     }
 }
 
 impl From<EthVersion> for u8 {
     #[inline]
-    fn from(v: EthVersion) -> u8 {
-        v as u8
+    fn from(v: EthVersion) -> Self {
+        v as Self
     }
 }
 
@@ -123,6 +126,46 @@ impl From<EthVersion> for &'static str {
             EthVersion::Eth66 => "66",
             EthVersion::Eth67 => "67",
             EthVersion::Eth68 => "68",
+        }
+    }
+}
+
+/// RLPx `p2p` protocol version
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
+pub enum ProtocolVersion {
+    /// `p2p` version 4
+    V4 = 4,
+    /// `p2p` version 5
+    #[default]
+    V5 = 5,
+}
+
+impl fmt::Display for ProtocolVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "v{}", *self as u8)
+    }
+}
+
+impl Encodable for ProtocolVersion {
+    fn encode(&self, out: &mut dyn BufMut) {
+        (*self as u8).encode(out)
+    }
+    fn length(&self) -> usize {
+        // the version should be a single byte
+        (*self as u8).length()
+    }
+}
+
+impl Decodable for ProtocolVersion {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let version = u8::decode(buf)?;
+        match version {
+            4 => Ok(Self::V4),
+            5 => Ok(Self::V5),
+            _ => Err(RlpError::Custom("unknown p2p protocol version")),
         }
     }
 }

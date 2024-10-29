@@ -18,8 +18,8 @@ pub(crate) struct PolledHook {
 /// Manages hooks under the control of the engine.
 ///
 /// This type polls the initialized hooks one by one, respecting the DB access level
-/// (i.e. [crate::hooks::EngineHookDBAccessLevel::ReadWrite] that enforces running at most one such
-/// hook).
+/// (i.e. [`crate::hooks::EngineHookDBAccessLevel::ReadWrite`] that enforces running at most one
+/// such hook).
 pub(crate) struct EngineHooksController {
     /// Collection of hooks.
     ///
@@ -68,10 +68,10 @@ impl EngineHooksController {
                     "Polled running hook with db write access"
                 );
 
-                if !result.event.is_finished() {
-                    self.active_db_write_hook = Some(hook);
-                } else {
+                if result.event.is_finished() {
                     self.hooks.push_back(hook);
+                } else {
+                    self.active_db_write_hook = Some(hook);
                 }
 
                 return Poll::Ready(Ok(result))
@@ -124,16 +124,22 @@ impl EngineHooksController {
     }
 
     fn poll_next_hook_inner(
-        &mut self,
+        &self,
         cx: &mut Context<'_>,
         hook: &mut Box<dyn EngineHook>,
         args: EngineHookContext,
         db_write_active: bool,
     ) -> Poll<Result<PolledHook, EngineHookError>> {
-        // Hook with DB write access level is not allowed to run due to already running hook with DB
-        // write access level or active DB write according to passed argument
+        // Hook with DB write access level is not allowed to run due to any of the following
+        // reasons:
+        // - An already running hook with DB write access level
+        // - Active DB write according to passed argument
+        // - Missing a finalized block number. We might be on an optimistic sync scenario where we
+        // cannot skip the FCU with the finalized hash, otherwise CL might misbehave.
         if hook.db_access_level().is_read_write() &&
-            (self.active_db_write_hook.is_some() || db_write_active)
+            (self.active_db_write_hook.is_some() ||
+                db_write_active ||
+                args.finalized_block_number.is_none())
         {
             return Poll::Pending
         }
@@ -150,9 +156,8 @@ impl EngineHooksController {
             );
 
             return Poll::Ready(Ok(result))
-        } else {
-            debug!(target: "consensus::engine::hooks", hook = hook.name(), "Next hook is not ready");
         }
+        debug!(target: "consensus::engine::hooks", hook = hook.name(), "Next hook is not ready");
 
         Poll::Pending
     }
@@ -170,7 +175,7 @@ mod tests {
         EngineHooksController,
     };
     use futures::poll;
-    use reth_interfaces::{RethError, RethResult};
+    use reth_errors::{RethError, RethResult};
     use std::{
         collections::VecDeque,
         future::poll_fn,
@@ -324,7 +329,7 @@ mod tests {
         let hook_ro_name = "read-only";
         let mut hook_ro = TestHook::new_ro(hook_ro_name);
         hook_ro.add_result(Ok(EngineHookEvent::Started));
-        hook_ro.add_result(Err(RethError::Custom("something went wrong".to_string())));
+        hook_ro.add_result(Err(RethError::msg("something went wrong")));
 
         let mut hooks = EngineHooks::new();
         hooks.add(hook_rw_1);

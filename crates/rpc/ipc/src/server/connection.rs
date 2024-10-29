@@ -1,84 +1,22 @@
 //! A IPC connection.
 
 use crate::stream_codec::StreamCodec;
-use futures::{ready, stream::FuturesUnordered, FutureExt, Sink, Stream, StreamExt};
+use futures::{stream::FuturesUnordered, FutureExt, Sink, Stream};
 use std::{
     collections::VecDeque,
     future::Future,
     io,
-    marker::PhantomData,
     pin::Pin,
     task::{Context, Poll},
 };
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::codec::Framed;
 use tower::Service;
 
 pub(crate) type JsonRpcStream<T> = Framed<T, StreamCodec>;
 
-/// Wraps a stream of incoming connections.
 #[pin_project::pin_project]
-pub(crate) struct Incoming<T, Item> {
-    #[pin]
-    inner: T,
-    _marker: PhantomData<Item>,
-}
-impl<T, Item> Incoming<T, Item>
-where
-    T: Stream<Item = io::Result<Item>> + Unpin + 'static,
-    Item: AsyncRead + AsyncWrite,
-{
-    /// Create a new instance.
-    pub(crate) fn new(inner: T) -> Self {
-        Self { inner, _marker: Default::default() }
-    }
-
-    /// Polls to accept a new incoming connection to the endpoint.
-    pub(crate) fn poll_accept(&mut self, cx: &mut Context<'_>) -> Poll<<Self as Stream>::Item> {
-        Poll::Ready(ready!(self.poll_next_unpin(cx)).map_or(
-            Err(io::Error::new(io::ErrorKind::ConnectionAborted, "ipc connection closed")),
-            |conn| conn,
-        ))
-    }
-}
-
-impl<T, Item> Stream for Incoming<T, Item>
-where
-    T: Stream<Item = io::Result<Item>> + 'static,
-    Item: AsyncRead + AsyncWrite,
-{
-    type Item = io::Result<IpcConn<JsonRpcStream<Item>>>;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.project();
-        let res = match ready!(this.inner.poll_next(cx)) {
-            Some(Ok(item)) => {
-                let framed = IpcConn(tokio_util::codec::Decoder::framed(
-                    StreamCodec::stream_incoming(),
-                    item,
-                ));
-                Ok(framed)
-            }
-            Some(Err(err)) => Err(err),
-            None => return Poll::Ready(None),
-        };
-        Poll::Ready(Some(res))
-    }
-}
-
-#[pin_project::pin_project]
-pub(crate) struct IpcConn<T>(#[pin] T);
-
-impl<T> IpcConn<JsonRpcStream<T>>
-where
-    T: AsyncRead + AsyncWrite + Unpin,
-{
-    /// Create a response for when the server is busy and can't accept more requests.
-    pub(crate) async fn reject_connection(self) {
-        let mut parts = self.0.into_parts();
-        let _ = parts.io.write_all(b"Too many connections. Please try again later.").await;
-    }
-}
+pub(crate) struct IpcConn<T>(#[pin] pub(crate) T);
 
 impl<T> Stream for IpcConn<JsonRpcStream<T>>
 where
@@ -144,7 +82,7 @@ impl<T, S, Fut> IpcConnDriver<T, S, Fut> {
 impl<T, S> Future for IpcConnDriver<T, S, S::Future>
 where
     S: Service<String, Response = Option<String>> + Send + 'static,
-    S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    S::Error: Into<Box<dyn core::error::Error + Send + Sync>>,
     S::Future: Send + Unpin,
     T: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
@@ -180,9 +118,10 @@ where
             }
 
             'inner: loop {
-                let mut drained = false;
                 // drain all calls that are ready and put them in the output item queue
-                if !this.pending_calls.is_empty() {
+                let drained = if this.pending_calls.is_empty() {
+                    false
+                } else {
                     if let Poll::Ready(Some(res)) = this.pending_calls.as_mut().poll_next(cx) {
                         let item = match res {
                             Ok(Some(resp)) => resp,
@@ -190,11 +129,10 @@ where
                             Err(err) => err.into().to_string(),
                         };
                         this.items.push_back(item);
-                        continue 'outer
-                    } else {
-                        drained = true;
+                        continue 'outer;
                     }
-                }
+                    true
+                };
 
                 // read from the stream
                 match this.conn.as_mut().poll_next(cx) {
@@ -217,7 +155,8 @@ where
                             }
                         }
                         Some(Err(err)) => {
-                            tracing::warn!("IPC request failed: {:?}", err);
+                            // this can happen if the client closes the connection
+                            tracing::debug!("IPC request failed: {:?}", err);
                             return Poll::Ready(())
                         }
                         None => return Poll::Ready(()),

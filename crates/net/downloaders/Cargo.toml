@@ -13,18 +13,29 @@ workspace = true
 
 [dependencies]
 # reth
-reth-interfaces.workspace = true
-reth-primitives.workspace = true
-reth-tasks.workspace = true
-reth-provider.workspace = true
 reth-config.workspace = true
 reth-consensus.workspace = true
+reth-network-p2p.workspace = true
+reth-network-peers.workspace = true
+reth-primitives.workspace = true
+reth-storage-api.workspace = true
+reth-tasks.workspace = true
+
+# optional deps for the test-utils feature
+reth-db = { workspace = true, optional = true }
+reth-db-api = { workspace = true, optional = true }
+reth-testing-utils = { workspace = true, optional = true }
+
+# ethereum
+alloy-eips.workspace = true
+alloy-primitives.workspace = true
+alloy-rlp.workspace = true
 
 # async
 futures.workspace = true
 futures-util.workspace = true
 pin-project.workspace = true
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync", "fs", "io-util"] }
 tokio-stream.workspace = true
 tokio-util = { workspace = true, features = ["codec"] }
 
@@ -37,17 +48,17 @@ tracing.workspace = true
 rayon.workspace = true
 thiserror.workspace = true
 
-# optional deps for the test-utils feature
-reth-db = { workspace = true, optional = true }
-alloy-rlp.workspace = true
 tempfile = { workspace = true, optional = true }
 itertools.workspace = true
 
 [dev-dependencies]
+reth-chainspec.workspace = true
 reth-db = { workspace = true, features = ["test-utils"] }
+reth-db-api.workspace = true
 reth-consensus = { workspace = true, features = ["test-utils"] }
-reth-interfaces = { workspace = true, features = ["test-utils"] }
+reth-network-p2p = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-testing-utils.workspace = true
 reth-tracing.workspace = true
 
 assert_matches.workspace = true
@@ -59,5 +70,15 @@ rand.workspace = true
 tempfile.workspace = true
 
 [features]
-test-utils = ["dep:tempfile", "reth-db/test-utils", "reth-consensus/test-utils", "reth-interfaces/test-utils"]
-
+test-utils = [
+	"dep:tempfile",
+	"dep:reth-db-api",
+	"reth-db/test-utils",
+	"reth-consensus/test-utils",
+	"reth-network-p2p/test-utils",
+	"reth-testing-utils",
+	"reth-chainspec/test-utils",
+	"reth-primitives/test-utils",
+	"reth-db-api?/test-utils",
+	"reth-provider/test-utils"
+]

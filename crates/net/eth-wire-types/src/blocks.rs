@@ -1,17 +1,12 @@
 //! Implements the `GetBlockHeaders`, `GetBlockBodies`, `BlockHeaders`, and `BlockBodies` message
 //! types.
 
+use crate::HeadersDirection;
+use alloy_eips::BlockHashOrNumber;
+use alloy_primitives::B256;
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
-use reth_codecs::{add_arbitrary_tests, derive_arbitrary};
-use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection, B256};
-
-#[cfg(any(test, feature = "arbitrary"))]
-use proptest::{collection::vec, prelude::*};
-#[cfg(any(test, feature = "arbitrary"))]
-use reth_primitives::{generate_valid_header, valid_header_strategy};
-
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
+use reth_codecs_derive::add_arbitrary_tests;
+use reth_primitives::{BlockBody, Header};
 
 /// A request for a peer to return block headers starting at the requested block.
 /// The peer must return at most [`limit`](#structfield.limit) headers.
@@ -22,9 +17,10 @@ use serde::{Deserialize, Serialize};
 ///
 /// If the [`skip`](#structfield.skip) field is non-zero, the peer must skip that amount of headers
 /// in the direction specified by [`reverse`](#structfield.reverse).
-#[derive_arbitrary(rlp)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, RlpEncodable, RlpDecodable)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
 pub struct GetBlockHeaders {
     /// The block number or hash that the peer should start returning headers from.
     pub start_block: BlockHashOrNumber,
@@ -44,24 +40,12 @@ pub struct GetBlockHeaders {
 
 /// The response to [`GetBlockHeaders`], containing headers if any headers were found.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[add_arbitrary_tests(rlp, 10)]
 pub struct BlockHeaders(
     /// The requested headers.
     pub Vec<Header>,
 );
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl proptest::arbitrary::Arbitrary for BlockHeaders {
-    type Parameters = ();
-    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        let headers_strategy = vec(valid_header_strategy(), 0..10); // Adjust the range as needed
-
-        headers_strategy.prop_map(BlockHeaders).boxed()
-    }
-
-    type Strategy = proptest::prelude::BoxedStrategy<Self>;
-}
 
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for BlockHeaders {
@@ -70,7 +54,7 @@ impl<'a> arbitrary::Arbitrary<'a> for BlockHeaders {
         let mut headers = Vec::with_capacity(headers_count);
 
         for _ in 0..headers_count {
-            headers.push(generate_valid_header(
+            headers.push(reth_primitives::generate_valid_header(
                 u.arbitrary()?,
                 u.arbitrary()?,
                 u.arbitrary()?,
@@ -79,20 +63,21 @@ impl<'a> arbitrary::Arbitrary<'a> for BlockHeaders {
             ))
         }
 
-        Ok(BlockHeaders(headers))
+        Ok(Self(headers))
     }
 }
 
 impl From<Vec<Header>> for BlockHeaders {
     fn from(headers: Vec<Header>) -> Self {
-        BlockHeaders(headers)
+        Self(headers)
     }
 }
 
 /// A request for a peer to return block bodies for the given block hashes.
-#[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
 pub struct GetBlockBodies(
     /// The block hashes to request bodies for.
     pub Vec<B256>,
@@ -100,40 +85,37 @@ pub struct GetBlockBodies(
 
 impl From<Vec<B256>> for GetBlockBodies {
     fn from(hashes: Vec<B256>) -> Self {
-        GetBlockBodies(hashes)
+        Self(hashes)
     }
 }
 
 /// The response to [`GetBlockBodies`], containing the block bodies that the peer knows about if
 /// any were found.
-#[derive_arbitrary(rlp, 16)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp, 16)]
 pub struct BlockBodies(
     /// The requested block bodies, each of which should correspond to a hash in the request.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(
-            strategy = "proptest::collection::vec(proptest::arbitrary::any::<BlockBody>(), 0..=20)"
-        )
-    )]
     pub Vec<BlockBody>,
 );
 
 impl From<Vec<BlockBody>> for BlockBodies {
     fn from(bodies: Vec<BlockBody>) -> Self {
-        BlockBodies(bodies)
+        Self(bodies)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{message::RequestPair, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders};
-    use alloy_rlp::{Decodable, Encodable};
-    use reth_primitives::{
-        hex, BlockHashOrNumber, Header, HeadersDirection, Signature, Transaction,
-        TransactionSigned, TxKind, TxLegacy, U256,
+    use crate::{
+        message::RequestPair, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
+        HeadersDirection,
     };
+    use alloy_consensus::TxLegacy;
+    use alloy_primitives::{hex, Parity, TxKind, U256};
+    use alloy_rlp::{Decodable, Encodable};
+    use reth_primitives::{BlockHashOrNumber, Header, Signature, Transaction, TransactionSigned};
     use std::str::FromStr;
 
     use super::BlockBody;
@@ -172,9 +154,10 @@ mod tests {
         // 0xa1 = 0x80 (start of string) + 0x21 (33, length of string)
         let long_rlp = hex!("a1ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
         let decode_result = BlockHashOrNumber::decode(&mut &long_rlp[..]);
-        if decode_result.is_ok() {
-            panic!("Decoding a bytestring longer than 32 bytes should not decode successfully");
-        }
+        assert!(
+            decode_result.is_err(),
+            "Decoding a bytestring longer than 32 bytes should not decode successfully"
+        );
     }
 
     #[test]
@@ -183,9 +166,7 @@ mod tests {
         // 0x89 = 0x80 (start of string) + 0x09 (9, length of string)
         let long_number = hex!("89ffffffffffffffffff");
         let decode_result = BlockHashOrNumber::decode(&mut &long_number[..]);
-        if decode_result.is_ok() {
-            panic!("Decoding a number longer than 64 bits (but not exactly 32 bytes) should not decode successfully");
-        }
+        assert!(decode_result.is_err(), "Decoding a number longer than 64 bits (but not exactly 32 bytes) should not decode successfully");
     }
 
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
@@ -285,17 +266,18 @@ mod tests {
                     logs_bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
                     difficulty: U256::from(0x8aeu64),
                     number: 0xd05u64,
-                    gas_limit: 0x115cu64,
-                    gas_used: 0x15b3u64,
+                    gas_limit: 0x115c,
+                    gas_used: 0x15b3,
                     timestamp: 0x1a0au64,
                     extra_data: hex!("7788")[..].into(),
                     mix_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
-                    nonce: 0x0000000000000000u64,
+                    nonce: 0x0000000000000000u64.into(),
                     base_fee_per_gas: None,
                     withdrawals_root: None,
                     blob_gas_used: None,
                     excess_blob_gas: None,
                     parent_beacon_block_root: None,
+                    requests_hash: None
                 },
             ]),
         }.encode(&mut data);
@@ -319,17 +301,18 @@ mod tests {
                     logs_bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
                     difficulty: U256::from(0x8aeu64),
                     number: 0xd05u64,
-                    gas_limit: 0x115cu64,
-                    gas_used: 0x15b3u64,
+                    gas_limit: 0x115c,
+                    gas_used: 0x15b3,
                     timestamp: 0x1a0au64,
                     extra_data: hex!("7788")[..].into(),
                     mix_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
-                    nonce: 0x0000000000000000u64,
+                    nonce: 0x0000000000000000u64.into(),
                     base_fee_per_gas: None,
                     withdrawals_root: None,
                     blob_gas_used: None,
                     excess_blob_gas: None,
                     parent_beacon_block_root: None,
+                    requests_hash: None
                 },
             ]),
         };
@@ -382,30 +365,29 @@ mod tests {
                             chain_id: Some(1),
                             nonce: 0x8u64,
                             gas_price: 0x4a817c808,
-                            gas_limit: 0x2e248u64,
+                            gas_limit: 0x2e248,
                             to: TxKind::Call(hex!("3535353535353535353535353535353535353535").into()),
                             value: U256::from(0x200u64),
                             input: Default::default(),
-                        }),
-                        Signature {
-                                odd_y_parity: false,
-                                r: U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12").unwrap(),
-                                s: U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10").unwrap(),
-                            }
+                        }), Signature::new(
+                                U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12").unwrap(),
+                                U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10").unwrap(),
+                                Parity::Parity(false),
+                            ),
                         ),
                         TransactionSigned::from_transaction_and_signature(Transaction::Legacy(TxLegacy {
                             chain_id: Some(1),
                             nonce: 0x9u64,
                             gas_price: 0x4a817c809,
-                            gas_limit: 0x33450u64,
+                            gas_limit: 0x33450,
                             to: TxKind::Call(hex!("3535353535353535353535353535353535353535").into()),
                             value: U256::from(0x2d9u64),
                             input: Default::default(),
-                        }), Signature {
-                                odd_y_parity: false,
-                                r: U256::from_str("0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
-                                s: U256::from_str("0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
-                            },
+                        }), Signature::new(
+                                U256::from_str("0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
+                                U256::from_str("0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
+                                Parity::Parity(false),
+                            ),
                         ),
                     ],
                     ommers: vec![
@@ -419,17 +401,18 @@ mod tests {
                             logs_bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
                             difficulty: U256::from(0x8aeu64),
                             number: 0xd05u64,
-                            gas_limit: 0x115cu64,
-                            gas_used: 0x15b3u64,
+                            gas_limit: 0x115c,
+                            gas_used: 0x15b3,
                             timestamp: 0x1a0au64,
                             extra_data: hex!("7788")[..].into(),
                             mix_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
-                            nonce: 0x0000000000000000u64,
+                            nonce: 0x0000000000000000u64.into(),
                             base_fee_per_gas: None,
                             withdrawals_root: None,
                             blob_gas_used: None,
                             excess_blob_gas: None,
                             parent_beacon_block_root: None,
+                            requests_hash: None
                         },
                     ],
                     withdrawals: None,
@@ -454,32 +437,32 @@ mod tests {
                                 chain_id: Some(1),
                                 nonce: 0x8u64,
                                 gas_price: 0x4a817c808,
-                                gas_limit: 0x2e248u64,
+                                gas_limit: 0x2e248,
                                 to: TxKind::Call(hex!("3535353535353535353535353535353535353535").into()),
                                 value: U256::from(0x200u64),
                                 input: Default::default(),
                             }),
-                            Signature {
-                                odd_y_parity: false,
-                                r: U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12").unwrap(),
-                                s: U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10").unwrap(),
-                            }
+                            Signature::new(
+                                U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12").unwrap(),
+                                U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10").unwrap(),
+                                Parity::Eip155(37),
+                            ),
                         ),
                         TransactionSigned::from_transaction_and_signature(
                             Transaction::Legacy(TxLegacy {
                                 chain_id: Some(1),
                                 nonce: 0x9u64,
                                 gas_price: 0x4a817c809,
-                                gas_limit: 0x33450u64,
+                                gas_limit: 0x33450,
                                 to: TxKind::Call(hex!("3535353535353535353535353535353535353535").into()),
                                 value: U256::from(0x2d9u64),
                                 input: Default::default(),
                             }),
-                            Signature {
-                                odd_y_parity: false,
-                                r: U256::from_str("0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
-                                s: U256::from_str("0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
-                            }
+                            Signature::new(
+                                U256::from_str("0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
+                                U256::from_str("0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
+                                Parity::Eip155(37),
+                            ),
                         ),
                     ],
                     ommers: vec![
@@ -493,17 +476,18 @@ mod tests {
                             logs_bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
                             difficulty: U256::from(0x8aeu64),
                             number: 0xd05u64,
-                            gas_limit: 0x115cu64,
-                            gas_used: 0x15b3u64,
+                            gas_limit: 0x115c,
+                            gas_used: 0x15b3,
                             timestamp: 0x1a0au64,
                             extra_data: hex!("7788")[..].into(),
                             mix_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
-                            nonce: 0x0000000000000000u64,
+                            nonce: 0x0000000000000000u64.into(),
                             base_fee_per_gas: None,
                             withdrawals_root: None,
                             blob_gas_used: None,
                             excess_blob_gas: None,
                             parent_beacon_block_root: None,
+                            requests_hash: None
                         },
                     ],
                     withdrawals: None,
@@ -512,5 +496,14 @@ mod tests {
         };
         let result = RequestPair::decode(&mut &data[..]).unwrap();
         assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn empty_block_bodies_rlp() {
+        let body = BlockBodies::default();
+        let mut buf = Vec::new();
+        body.encode(&mut buf);
+        let decoded = BlockBodies::decode(&mut buf.as_slice()).unwrap();
+        assert_eq!(body, decoded);
     }
 }

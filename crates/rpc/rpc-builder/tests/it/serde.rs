@@ -1,12 +1,12 @@
 //! various serde test
 
 use crate::utils::launch_http;
+use alloy_primitives::U256;
 use jsonrpsee::{
     core::{client::ClientT, traits::ToRpcParams},
     types::Request,
 };
-use reth_primitives::U256;
-use reth_rpc_builder::RethRpcModule;
+use reth_rpc_server_types::RethRpcModule;
 use serde_json::value::RawValue;
 
 struct RawRpcParams(Box<RawValue>);

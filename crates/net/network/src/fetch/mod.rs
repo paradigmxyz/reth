@@ -1,15 +1,9 @@
 //! Fetch data from the network.
 
-use crate::{message::BlockRequest, peers::PeersHandle};
-use futures::StreamExt;
-use reth_eth_wire::{GetBlockBodies, GetBlockHeaders};
-use reth_interfaces::p2p::{
-    error::{EthResponseValidator, PeerRequestResult, RequestError, RequestResult},
-    headers::client::HeadersRequest,
-    priority::Priority,
-};
-use reth_network_api::ReputationChangeKind;
-use reth_primitives::{BlockBody, Header, PeerId, B256};
+mod client;
+
+pub use client::FetchClient;
+
 use std::{
     collections::{HashMap, VecDeque},
     sync::{
@@ -18,11 +12,23 @@ use std::{
     },
     task::{Context, Poll},
 };
+
+use alloy_primitives::B256;
+use futures::StreamExt;
+use reth_eth_wire::{GetBlockBodies, GetBlockHeaders};
+use reth_network_api::test_utils::PeersHandle;
+use reth_network_p2p::{
+    error::{EthResponseValidator, PeerRequestResult, RequestError, RequestResult},
+    headers::client::HeadersRequest,
+    priority::Priority,
+};
+use reth_network_peers::PeerId;
+use reth_network_types::ReputationChangeKind;
+use reth_primitives::{BlockBody, Header};
 use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-mod client;
-pub use client::FetchClient;
+use crate::message::BlockRequest;
 
 /// Manages data fetching operations.
 ///
@@ -129,7 +135,7 @@ impl StateFetcher {
     /// Returns the _next_ idle peer that's ready to accept a request,
     /// prioritizing those with the lowest timeout/latency and those that recently responded with
     /// adequate data.
-    fn next_best_peer(&mut self) -> Option<PeerId> {
+    fn next_best_peer(&self) -> Option<PeerId> {
         let mut idle = self.peers.iter().filter(|(_, peer)| peer.state.is_idle());
 
         let mut best_peer = idle.next()?;
@@ -248,9 +254,9 @@ impl StateFetcher {
 
     /// Called on a `GetBlockHeaders` response from a peer.
     ///
-    /// This delegates the response and returns a [BlockResponseOutcome] to either queue in a direct
-    /// followup request or get the peer reported if the response was a
-    /// [EthResponseValidator::reputation_change_err]
+    /// This delegates the response and returns a [`BlockResponseOutcome`] to either queue in a
+    /// direct followup request or get the peer reported if the response was a
+    /// [`EthResponseValidator::reputation_change_err`]
     pub(crate) fn on_block_headers_response(
         &mut self,
         peer_id: PeerId,
@@ -261,10 +267,8 @@ impl StateFetcher {
 
         let resp = self.inflight_headers_requests.remove(&peer_id);
 
-        let is_likely_bad_response = resp
-            .as_ref()
-            .map(|r| res.is_likely_bad_headers_response(&r.request))
-            .unwrap_or_default();
+        let is_likely_bad_response =
+            resp.as_ref().is_some_and(|r| res.is_likely_bad_headers_response(&r.request));
 
         if let Some(resp) = resp {
             // delegate the response
@@ -370,8 +374,8 @@ enum PeerState {
 
 impl PeerState {
     /// Returns true if the peer is currently idle.
-    fn is_idle(&self) -> bool {
-        matches!(self, PeerState::Idle)
+    const fn is_idle(&self) -> bool {
+        matches!(self, Self::Idle)
     }
 
     /// Resets the state on a received response.
@@ -380,8 +384,8 @@ impl PeerState {
     ///
     /// Returns `true` if the peer is ready for another request.
     fn on_request_finished(&mut self) -> bool {
-        if !matches!(self, PeerState::Closing) {
-            *self = PeerState::Idle;
+        if !matches!(self, Self::Closing) {
+            *self = Self::Idle;
             return true
         }
         false
@@ -420,23 +424,24 @@ pub(crate) enum DownloadRequest {
 
 impl DownloadRequest {
     /// Returns the corresponding state for a peer that handles the request.
-    fn peer_state(&self) -> PeerState {
+    const fn peer_state(&self) -> PeerState {
         match self {
-            DownloadRequest::GetBlockHeaders { .. } => PeerState::GetBlockHeaders,
-            DownloadRequest::GetBlockBodies { .. } => PeerState::GetBlockBodies,
+            Self::GetBlockHeaders { .. } => PeerState::GetBlockHeaders,
+            Self::GetBlockBodies { .. } => PeerState::GetBlockBodies,
         }
     }
 
     /// Returns the requested priority of this request
-    fn get_priority(&self) -> &Priority {
+    const fn get_priority(&self) -> &Priority {
         match self {
-            DownloadRequest::GetBlockHeaders { priority, .. } => priority,
-            DownloadRequest::GetBlockBodies { priority, .. } => priority,
+            Self::GetBlockHeaders { priority, .. } | Self::GetBlockBodies { priority, .. } => {
+                priority
+            }
         }
     }
 
     /// Returns `true` if this request is normal priority.
-    fn is_normal_priority(&self) -> bool {
+    const fn is_normal_priority(&self) -> bool {
         self.get_priority().is_normal()
     }
 }
@@ -467,7 +472,8 @@ pub(crate) enum BlockResponseOutcome {
 mod tests {
     use super::*;
     use crate::{peers::PeersManager, PeersConfig};
-    use reth_primitives::{SealedHeader, B512};
+    use alloy_primitives::B512;
+    use reth_primitives::SealedHeader;
     use std::future::poll_fn;
 
     #[tokio::test(flavor = "multi_thread")]

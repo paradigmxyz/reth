@@ -1,19 +1,17 @@
 use crate::metrics::BlockBufferMetrics;
-use lru::LruCache;
-use reth_primitives::{BlockHash, BlockNumber, SealedBlockWithSenders};
-use std::{
-    collections::{btree_map, hash_map, BTreeMap, HashMap, HashSet},
-    num::NonZeroUsize,
-};
+use alloy_primitives::{BlockHash, BlockNumber};
+use reth_network::cache::LruCache;
+use reth_primitives::SealedBlockWithSenders;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Contains the tree of pending blocks that cannot be executed due to missing parent.
 /// It allows to store unconnected blocks for potential future inclusion.
 ///
 /// The buffer has three main functionalities:
-/// * [BlockBuffer::insert_block] for inserting blocks inside the buffer.
-/// * [BlockBuffer::remove_block_with_children] for connecting blocks if the parent gets received
+/// * [`BlockBuffer::insert_block`] for inserting blocks inside the buffer.
+/// * [`BlockBuffer::remove_block_with_children`] for connecting blocks if the parent gets received
 ///   and inserted.
-/// * [BlockBuffer::remove_old_blocks] to remove old blocks that precede the finalized number.
+/// * [`BlockBuffer::remove_old_blocks`] to remove old blocks that precede the finalized number.
 ///
 /// Note: Buffer is limited by number of blocks that it can contain and eviction of the block
 /// is done by last recently used block.
@@ -25,32 +23,32 @@ pub struct BlockBuffer {
     /// to the buffered children.
     /// Allows connecting buffered blocks by parent.
     pub(crate) parent_to_child: HashMap<BlockHash, HashSet<BlockHash>>,
-    /// BTreeMap tracking the earliest blocks by block number.
+    /// `BTreeMap` tracking the earliest blocks by block number.
     /// Used for removal of old blocks that precede finalization.
     pub(crate) earliest_blocks: BTreeMap<BlockNumber, HashSet<BlockHash>>,
     /// LRU used for tracing oldest inserted blocks that are going to be
     /// first in line for evicting if `max_blocks` limit is hit.
     ///
     /// Used as counter of amount of blocks inside buffer.
-    pub(crate) lru: LruCache<BlockHash, ()>,
+    pub(crate) lru: LruCache<BlockHash>,
     /// Various metrics for the block buffer.
     pub(crate) metrics: BlockBufferMetrics,
 }
 
 impl BlockBuffer {
     /// Create new buffer with max limit of blocks
-    pub fn new(limit: usize) -> Self {
+    pub fn new(limit: u32) -> Self {
         Self {
             blocks: Default::default(),
             parent_to_child: Default::default(),
             earliest_blocks: Default::default(),
-            lru: LruCache::new(NonZeroUsize::new(limit).unwrap()),
+            lru: LruCache::new(limit),
             metrics: Default::default(),
         }
     }
 
     /// Return reference to buffered blocks
-    pub fn blocks(&self) -> &HashMap<BlockHash, SealedBlockWithSenders> {
+    pub const fn blocks(&self) -> &HashMap<BlockHash, SealedBlockWithSenders> {
         &self.blocks
     }
 
@@ -76,7 +74,7 @@ impl BlockBuffer {
         self.earliest_blocks.entry(block.number).or_default().insert(hash);
         self.blocks.insert(hash, block);
 
-        if let Some((evicted_hash, _)) = self.lru.push(hash, ()).filter(|(b, _)| *b != hash) {
+        if let (_, Some(evicted_hash)) = self.lru.insert_and_get_evicted(hash) {
             // evict the block if limit is hit
             if let Some(evicted_block) = self.remove_block(&evicted_hash) {
                 // evict the block if limit is hit
@@ -96,21 +94,22 @@ impl BlockBuffer {
         &mut self,
         parent_hash: &BlockHash,
     ) -> Vec<SealedBlockWithSenders> {
-        // remove parent block if present
-        let mut removed = self.remove_block(parent_hash).into_iter().collect::<Vec<_>>();
-
-        removed.extend(self.remove_children(vec![*parent_hash]));
+        let removed = self
+            .remove_block(parent_hash)
+            .into_iter()
+            .chain(self.remove_children(vec![*parent_hash]))
+            .collect();
         self.metrics.blocks.set(self.blocks.len() as f64);
         removed
     }
 
-    /// Discard all blocks that precede finalized block number from the buffer.
-    pub fn remove_old_blocks(&mut self, finalized_number: BlockNumber) {
+    /// Discard all blocks that precede block number from the buffer.
+    pub fn remove_old_blocks(&mut self, block_number: BlockNumber) {
         let mut block_hashes_to_remove = Vec::new();
 
         // discard all blocks that are before the finalized number.
         while let Some(entry) = self.earliest_blocks.first_entry() {
-            if *entry.key() > finalized_number {
+            if *entry.key() > block_number {
                 break
             }
             let block_hashes = entry.remove();
@@ -129,10 +128,10 @@ impl BlockBuffer {
 
     /// Remove block entry
     fn remove_from_earliest_blocks(&mut self, number: BlockNumber, hash: &BlockHash) {
-        if let btree_map::Entry::Occupied(mut entry) = self.earliest_blocks.entry(number) {
-            entry.get_mut().remove(hash);
-            if entry.get().is_empty() {
-                entry.remove();
+        if let Some(entry) = self.earliest_blocks.get_mut(&number) {
+            entry.remove(hash);
+            if entry.is_empty() {
+                self.earliest_blocks.remove(&number);
             }
         }
     }
@@ -140,13 +139,13 @@ impl BlockBuffer {
     /// Remove from parent child connection. This method does not remove children.
     fn remove_from_parent(&mut self, parent_hash: BlockHash, hash: &BlockHash) {
         // remove from parent to child connection, but only for this block parent.
-        if let hash_map::Entry::Occupied(mut entry) = self.parent_to_child.entry(parent_hash) {
-            entry.get_mut().remove(hash);
+        if let Some(entry) = self.parent_to_child.get_mut(&parent_hash) {
+            entry.remove(hash);
             // if set is empty remove block entry.
-            if entry.get().is_empty() {
-                entry.remove();
+            if entry.is_empty() {
+                self.parent_to_child.remove(&parent_hash);
             }
-        };
+        }
     }
 
     /// Removes block from inner collections.
@@ -157,7 +156,7 @@ impl BlockBuffer {
         let block = self.blocks.remove(hash)?;
         self.remove_from_earliest_blocks(block.number, hash);
         self.remove_from_parent(block.parent_hash, hash);
-        self.lru.pop(hash);
+        self.lru.remove(hash);
         Some(block)
     }
 
@@ -171,7 +170,7 @@ impl BlockBuffer {
             // get this child blocks children and add them to the remove list.
             if let Some(parent_children) = self.parent_to_child.remove(&parent_hash) {
                 // remove child from buffer
-                for child_hash in parent_children.iter() {
+                for child_hash in &parent_children {
                     if let Some(block) = self.remove_block(child_hash) {
                         removed_blocks.push(block);
                     }
@@ -186,16 +185,16 @@ impl BlockBuffer {
 #[cfg(test)]
 mod tests {
     use crate::BlockBuffer;
-    use reth_interfaces::test_utils::{
-        generators,
-        generators::{random_block, Rng},
-    };
-    use reth_primitives::{BlockHash, BlockNumHash, SealedBlockWithSenders};
+    use alloy_eips::BlockNumHash;
+    use alloy_primitives::BlockHash;
+    use reth_primitives::SealedBlockWithSenders;
+    use reth_testing_utils::generators::{self, random_block, BlockParams, Rng};
     use std::collections::HashMap;
 
     /// Create random block with specified number and parent hash.
     fn create_block<R: Rng>(rng: &mut R, number: u64, parent: BlockHash) -> SealedBlockWithSenders {
-        let block = random_block(rng, number, Some(parent), None, None);
+        let block =
+            random_block(rng, number, BlockParams { parent: Some(parent), ..Default::default() });
         block.seal_with_senders().unwrap()
     }
 

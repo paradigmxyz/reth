@@ -13,16 +13,16 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives.workspace = true
+reth-chainspec.workspace = true
+reth-ethereum-forks.workspace = true
 reth-metrics.workspace = true
+reth-network-peers = { workspace = true, features = ["secp256k1"] }
 
 # ethereum
+alloy-primitives.workspace = true
 alloy-rlp.workspace = true
-rlp = "0.5.2"
 discv5 = { workspace = true, features = ["libp2p"] }
-enr = { workspace = true, default-features = false, features = ["rust-secp256k1"] }
-multiaddr = { version = "0.18", default-features = false }
-libp2p-identity = "0.2"
+enr.workspace = true
 secp256k1.workspace = true
 
 # async/futures

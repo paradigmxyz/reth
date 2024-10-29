@@ -1,0 +1,21 @@
+[package]
+name = "example-beacon-api-sidecar-fetcher"
+version = "0.1.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reth.workspace = true
+reth-node-ethereum.workspace = true
+
+alloy-rpc-types-beacon.workspace = true
+alloy-primitives.workspace = true
+
+clap.workspace = true
+eyre.workspace = true
+futures-util.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+thiserror.workspace = true

@@ -1,6 +1,6 @@
-//! A Protocol defines a P2P subprotocol in a RLPx connection
+//! A Protocol defines a P2P subprotocol in a `RLPx` connection
 
-use crate::{capability::Capability, EthMessageID, EthVersion};
+use crate::{Capability, EthMessageID, EthVersion};
 
 /// Type that represents a [Capability] and the number of messages it uses.
 ///
@@ -30,17 +30,17 @@ impl Protocol {
         Self::new(cap, messages)
     }
 
-    /// Returns the [EthVersion::Eth66] capability.
+    /// Returns the [`EthVersion::Eth66`] capability.
     pub const fn eth_66() -> Self {
         Self::eth(EthVersion::Eth66)
     }
 
-    /// Returns the [EthVersion::Eth67] capability.
+    /// Returns the [`EthVersion::Eth67`] capability.
     pub const fn eth_67() -> Self {
         Self::eth(EthVersion::Eth67)
     }
 
-    /// Returns the [EthVersion::Eth68] capability.
+    /// Returns the [`EthVersion::Eth68`] capability.
     pub const fn eth_68() -> Self {
         Self::eth(EthVersion::Eth68)
     }

@@ -1,0 +1,39 @@
+[package]
+name = "reth-network-peers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Network peer types and utils"
+
+[lints]
+workspace = true
+
+[dependencies]
+
+# eth
+alloy-primitives = { workspace = true, features = ["rlp"] }
+alloy-rlp = { workspace = true, features = ["derive"] }
+enr.workspace = true
+
+# crypto
+
+secp256k1 = { workspace = true, optional = true }
+# misc
+serde_with.workspace = true
+thiserror.workspace = true
+url.workspace = true
+tokio = { workspace = true, optional = true }
+
+[dev-dependencies]
+alloy-primitives = { workspace = true, features = ["rand"] }
+rand.workspace = true
+secp256k1 = { workspace = true, features = ["rand"] }
+serde_json.workspace = true
+tokio = { workspace = true, features = ["net", "macros", "rt"] }
+
+[features]
+secp256k1 = ["dep:secp256k1", "enr/secp256k1"]
+net = ["dep:tokio", "tokio?/net"]

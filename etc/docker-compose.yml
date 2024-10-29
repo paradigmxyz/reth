@@ -46,7 +46,7 @@ services:
 
   grafana:
     restart: unless-stopped
-    image: grafana/grafana:10.3.3
+    image: grafana/grafana:latest
     depends_on:
       - reth
       - prometheus
@@ -65,7 +65,7 @@ services:
       sh -c "cp -r /etc/grafana/provisioning_temp/dashboards/. /etc/grafana/provisioning/dashboards &&
              find /etc/grafana/provisioning/dashboards/ -name '*.json' -exec sed -i 's/$${DS_PROMETHEUS}/Prometheus/g' {} \+ &&
              /run.sh"
-    
+
 volumes:
   mainnet_data:
     driver: local

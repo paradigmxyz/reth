@@ -1,18 +1,22 @@
 use futures_util::StreamExt;
-use reth::network::{NetworkEvent, NetworkEvents, NetworkHandle, PeersInfo};
-use reth_primitives::NodeRecord;
+use reth::network::{NetworkEvent, NetworkEventListenerProvider, PeersHandleProvider, PeersInfo};
+use reth_network_peers::{NodeRecord, PeerId};
+use reth_tokio_util::EventStream;
 use reth_tracing::tracing::info;
-use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// Helper for network operations
-pub struct NetworkTestContext {
-    network_events: UnboundedReceiverStream<NetworkEvent>,
-    network: NetworkHandle,
+#[derive(Debug)]
+pub struct NetworkTestContext<Network> {
+    network_events: EventStream<NetworkEvent>,
+    network: Network,
 }
 
-impl NetworkTestContext {
+impl<Network> NetworkTestContext<Network>
+where
+    Network: NetworkEventListenerProvider + PeersInfo + PeersHandleProvider,
+{
     /// Creates a new network helper
-    pub fn new(network: NetworkHandle) -> Self {
+    pub fn new(network: Network) -> Self {
         let network_events = network.event_listener();
         Self { network_events, network }
     }
@@ -23,7 +27,7 @@ impl NetworkTestContext {
 
         match self.network_events.next().await {
             Some(NetworkEvent::PeerAdded(_)) => (),
-            _ => panic!("Expected a peer added event"),
+            ev => panic!("Expected a peer added event, got: {ev:?}"),
         }
     }
 
@@ -32,13 +36,17 @@ impl NetworkTestContext {
         self.network.local_node_record()
     }
 
-    /// Expects a session to be established
-    pub async fn expect_session(&mut self) {
-        match self.network_events.next().await {
-            Some(NetworkEvent::SessionEstablished { remote_addr, .. }) => {
-                info!(?remote_addr, "Session established")
+    /// Awaits the next event for an established session.
+    pub async fn next_session_established(&mut self) -> Option<PeerId> {
+        while let Some(ev) = self.network_events.next().await {
+            match ev {
+                NetworkEvent::SessionEstablished { peer_id, .. } => {
+                    info!("Session established with peer: {:?}", peer_id);
+                    return Some(peer_id)
+                }
+                _ => continue,
             }
-            _ => panic!("Expected session established event"),
         }
+        None
     }
 }

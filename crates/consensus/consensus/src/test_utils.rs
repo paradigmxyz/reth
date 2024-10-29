@@ -1,6 +1,7 @@
-use crate::{Consensus, ConsensusError};
-use reth_primitives::{Header, SealedBlock, SealedHeader, U256};
-use std::sync::atomic::{AtomicBool, Ordering};
+use crate::{Consensus, ConsensusError, PostExecutionInput};
+use alloy_primitives::U256;
+use core::sync::atomic::{AtomicBool, Ordering};
+use reth_primitives::{BlockWithSenders, Header, SealedBlock, SealedHeader};
 
 /// Consensus engine implementation for testing
 #[derive(Debug)]
@@ -60,7 +61,19 @@ impl Consensus for TestConsensus {
         }
     }
 
-    fn validate_block(&self, _block: &SealedBlock) -> Result<(), ConsensusError> {
+    fn validate_block_pre_execution(&self, _block: &SealedBlock) -> Result<(), ConsensusError> {
+        if self.fail_validation() {
+            Err(ConsensusError::BaseFeeMissing)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn validate_block_post_execution(
+        &self,
+        _block: &BlockWithSenders,
+        _input: PostExecutionInput<'_>,
+    ) -> Result<(), ConsensusError> {
         if self.fail_validation() {
             Err(ConsensusError::BaseFeeMissing)
         } else {

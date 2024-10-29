@@ -40,6 +40,6 @@ pub enum Discv4Error {
 
 impl<T> From<SendError<T>> for Discv4Error {
     fn from(_: SendError<T>) -> Self {
-        Discv4Error::Send
+        Self::Send
     }
 }

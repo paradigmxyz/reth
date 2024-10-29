@@ -1,13 +1,13 @@
 //! Contains connection-oriented interfaces.
 
-use futures::{ready, Stream};
-
 use std::{
     io,
     net::SocketAddr,
     pin::Pin,
     task::{Context, Poll},
 };
+
+use futures::{ready, Stream};
 use tokio::net::{TcpListener, TcpStream};
 
 /// A tcp connection listener.
@@ -33,7 +33,7 @@ impl ConnectionListener {
     }
 
     /// Creates a new connection listener stream.
-    pub(crate) fn new(listener: TcpListener, local_address: SocketAddr) -> Self {
+    pub(crate) const fn new(listener: TcpListener, local_address: SocketAddr) -> Self {
         Self { local_address, incoming: TcpListenerStream { inner: listener } }
     }
 
@@ -55,7 +55,7 @@ impl ConnectionListener {
     }
 
     /// Returns the socket address this listener listens on.
-    pub fn local_address(&self) -> SocketAddr {
+    pub const fn local_address(&self) -> SocketAddr {
         self.local_address
     }
 }
@@ -104,8 +104,10 @@ impl Stream for TcpListenerStream {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures::pin_mut;
-    use std::net::{Ipv4Addr, SocketAddrV4};
+    use std::{
+        net::{Ipv4Addr, SocketAddrV4},
+        pin::pin,
+    };
     use tokio::macros::support::poll_fn;
 
     #[tokio::test(flavor = "multi_thread")]
@@ -117,7 +119,7 @@ mod tests {
         let local_addr = listener.local_address();
 
         tokio::task::spawn(async move {
-            pin_mut!(listener);
+            let mut listener = pin!(listener);
             match poll_fn(|cx| listener.as_mut().poll(cx)).await {
                 ListenerEvent::Incoming { .. } => {}
                 _ => {

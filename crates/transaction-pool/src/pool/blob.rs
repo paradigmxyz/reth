@@ -11,7 +11,7 @@ use std::{
 
 /// A set of validated blob transactions in the pool that are __not pending__.
 ///
-/// The purpose of this pool is keep track of blob transactions that are queued and to evict the
+/// The purpose of this pool is to keep track of blob transactions that are queued and to evict the
 /// worst blob transactions once the sub-pool is full.
 ///
 /// This expects that certain constraints are met:
@@ -168,7 +168,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         transactions
     }
 
-    /// Resorts the transactions in the pool based on the pool's current [PendingFees].
+    /// Resorts the transactions in the pool based on the pool's current [`PendingFees`].
     pub(crate) fn reprioritize(&mut self) {
         // mem::take to modify without allocating, then collect to rebuild the BTreeSet
         self.all = std::mem::take(&mut self.all)
@@ -190,7 +190,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
     ///  * have a `max_fee_per_blob_gas` greater than or equal to the given `blob_fee`, _and_
     ///  * have a `max_fee_per_gas` greater than or equal to the given `base_fee`
     ///
-    /// This also sets the [PendingFees] for the pool, resorting transactions based on their
+    /// This also sets the [`PendingFees`] for the pool, resorting transactions based on their
     /// updated priority.
     ///
     /// Note: the transactions are not returned in a particular order.
@@ -198,24 +198,23 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         &mut self,
         pending_fees: &PendingFees,
     ) -> Vec<Arc<ValidPoolTransaction<T>>> {
-        let to_remove = self.satisfy_pending_fee_ids(pending_fees);
+        let removed = self
+            .satisfy_pending_fee_ids(pending_fees)
+            .into_iter()
+            .map(|id| self.remove_transaction(&id).expect("transaction exists"))
+            .collect();
 
-        let mut removed = Vec::with_capacity(to_remove.len());
-        for id in to_remove {
-            removed.push(self.remove_transaction(&id).expect("transaction exists"));
-        }
-
-        // set pending fees and reprioritize / resort
+        // Update pending fees and reprioritize
         self.pending_fees = pending_fees.clone();
         self.reprioritize();
 
         removed
     }
 
-    /// Removes transactions until the pool satisfies its [SubPoolLimit].
+    /// Removes transactions until the pool satisfies its [`SubPoolLimit`].
     ///
     /// This is done by removing transactions according to their ordering in the pool, defined by
-    /// the [BlobOrd] struct.
+    /// the [`BlobOrd`] struct.
     ///
     /// Removed transactions are returned in the order they were removed.
     pub(crate) fn truncate_pool(
@@ -407,7 +406,7 @@ pub fn blob_tx_priority(
 /// A struct used to determine the ordering for a specific blob transaction in the pool. This uses
 /// a `priority` value to determine the ordering, and uses the `submission_id` to break ties.
 ///
-/// The `priority` value is calculated using the [blob_tx_priority] function, and should be
+/// The `priority` value is calculated using the [`blob_tx_priority`] function, and should be
 /// re-calculated on each block.
 #[derive(Debug, Clone)]
 struct BlobOrd {
@@ -645,7 +644,7 @@ mod tests {
                 })
                 .collect::<Vec<_>>();
 
-            for tx in txs.iter() {
+            for tx in &txs {
                 pool.add_transaction(factory.validated_arc(tx.clone()));
             }
 

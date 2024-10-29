@@ -5,12 +5,13 @@
 use std::{fmt, fmt::Display, mem};
 
 use crate::metrics::{AnnouncedTxTypesMetrics, TxTypesCounter};
+use alloy_primitives::{Signature, TxHash};
 use derive_more::{Deref, DerefMut};
 use reth_eth_wire::{
     DedupPayload, Eth68TxMetadata, HandleMempoolData, PartiallyValidData, ValidAnnouncementData,
     MAX_MESSAGE_SIZE,
 };
-use reth_primitives::{Signature, TxHash, TxType};
+use reth_primitives::TxType;
 use tracing::trace;
 
 /// The size of a decoded signature in bytes.
@@ -88,10 +89,10 @@ pub trait PartiallyFilterMessage {
         let partially_valid_data = msg.dedup();
 
         (
-            if partially_valid_data.len() != original_len {
-                FilterOutcome::ReportPeer
-            } else {
+            if partially_valid_data.len() == original_len {
                 FilterOutcome::Ok
+            } else {
+                FilterOutcome::ReportPeer
             },
             partially_valid_data,
         )
@@ -244,7 +245,7 @@ impl ValidateTx68 for EthMessageFilter {
     fn max_encoded_tx_length(&self, ty: TxType) -> Option<usize> {
         // the biggest transaction so far is a blob transaction, which is currently max 2^17,
         // encoded length, nonetheless, the blob tx may become bigger in the future.
-        #[allow(unreachable_patterns)]
+        #[allow(unreachable_patterns, clippy::match_same_arms)]
         match ty {
             TxType::Legacy | TxType::Eip2930 | TxType::Eip1559 => Some(MAX_MESSAGE_SIZE),
             TxType::Eip4844 => None,
@@ -331,12 +332,13 @@ impl FilterAnnouncement for EthMessageFilter {
     }
 }
 
+// TODO(eip7702): update tests as needed
 #[cfg(test)]
 mod test {
     use super::*;
 
+    use alloy_primitives::B256;
     use reth_eth_wire::{NewPooledTransactionHashes66, NewPooledTransactionHashes68};
-    use reth_primitives::B256;
     use std::{collections::HashMap, str::FromStr};
 
     #[test]
@@ -384,7 +386,7 @@ mod test {
 
         assert_eq!(outcome, FilterOutcome::ReportPeer);
 
-        let mut expected_data = HashMap::new();
+        let mut expected_data = HashMap::default();
         expected_data.insert(hashes[1], Some((types[1], sizes[1])));
 
         assert_eq!(expected_data, valid_data.into_data())
@@ -424,7 +426,7 @@ mod test {
 
         assert_eq!(outcome, FilterOutcome::Ok);
 
-        let mut expected_data = HashMap::new();
+        let mut expected_data = HashMap::default();
         expected_data.insert(hashes[2], Some((types[2], sizes[2])));
 
         assert_eq!(expected_data, valid_data.into_data())
@@ -463,7 +465,7 @@ mod test {
 
         assert_eq!(outcome, FilterOutcome::ReportPeer);
 
-        let mut expected_data = HashMap::new();
+        let mut expected_data = HashMap::default();
         expected_data.insert(hashes[3], Some((types[3], sizes[3])));
         expected_data.insert(hashes[0], Some((types[0], sizes[0])));
 
@@ -507,7 +509,7 @@ mod test {
 
         assert_eq!(outcome, FilterOutcome::ReportPeer);
 
-        let mut expected_data = HashMap::new();
+        let mut expected_data = HashMap::default();
         expected_data.insert(hashes[1], None);
         expected_data.insert(hashes[0], None);
 

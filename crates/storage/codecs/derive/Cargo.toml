@@ -23,6 +23,3 @@ syn.workspace = true
 [dev-dependencies]
 similar-asserts.workspace = true
 syn = { workspace = true, features = ["full", "extra-traits"] }
-
-[features]
-optimism = []

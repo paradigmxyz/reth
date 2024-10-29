@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  prepare:
+  prepare-reth:
     if: github.repository == 'paradigmxyz/reth'
     timeout-minutes: 45
     runs-on:
@@ -24,20 +24,39 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: mkdir artifacts
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - name: Build reth
+        run: |
+          cargo build --features asm-keccak --profile hivetests --bin reth --locked
+          mkdir dist && cp ./target/hivetests/reth ./dist/reth
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Build and export reth image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
+          file: .github/assets/hive/Dockerfile
           tags: ghcr.io/paradigmxyz/reth:latest
-          build-args: |
-            BUILD_PROFILE=hivetests
-            FEATURES=asm-keccak
           outputs: type=docker,dest=./artifacts/reth_image.tar
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Upload reth image
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts
+          path: ./artifacts
+
+  prepare-hive:
+    if: github.repository == 'paradigmxyz/reth'
+    timeout-minutes: 45
+    runs-on:
+      group: Reth
+    steps:
+      - uses: actions/checkout@v4
       - name: Checkout hive tests
         uses: actions/checkout@v4
         with:
@@ -49,25 +68,26 @@ jobs:
         with:
           go-version: "^1.13.1"
       - run: go version
-      - name: Build hive tool
-        run: |
-          cd hivetests
-          go build .
-          mv ./hive ../artifacts/
 
-      - name: Upload artifacts
+      - name: Build hive assets
+        run: .github/assets/hive/build_simulators.sh
+
+      - name: Upload hive assets
         uses: actions/upload-artifact@v4
         with:
-          name: artifacts
-          path: ./artifacts
-
+          name: hive_assets
+          path: ./hive_assets
   test:
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        sim: [ethereum/rpc, smoke/genesis, smoke/network, ethereum/sync]
-        include:
+        # ethereum/rpc to be deprecated:
+        # https://github.com/ethereum/hive/pull/1117
+        scenario:
+          - sim: smoke/genesis
+          - sim: smoke/network
+          - sim: ethereum/sync
           - sim: devp2p
             limit: discv4
           - sim: devp2p
@@ -98,12 +118,10 @@ jobs:
           - sim: ethereum/engine
             limit: engine-auth
           - sim: ethereum/engine
-            limit: engine-transition
-          - sim: ethereum/engine
             limit: engine-api
           - sim: ethereum/engine
             limit: cancun
-            # eth_ rpc methods
+          # eth_ rpc methods
           - sim: ethereum/rpc-compat
             include:
               - eth_blockNumber
@@ -123,59 +141,70 @@ jobs:
               - eth_getTransactionReceipt
               - eth_sendRawTransaction
               - eth_syncing
-            # debug_ rpc methods
-          - sim: ethereum/rpc-compat
-            include: [debug_]
+              # debug_ rpc methods
+              - debug_
           # Pyspec cancun jobs
-          - sim: pyspec
-            include: [cancun/eip4844]
-          - sim: pyspec
-            include: [cancun/eip4788]
-          - sim: pyspec
-            include: [cancun/eip6780]
-          - sim: pyspec
-            include: [cancun/eip5656]
-          - sim: pyspec
-            include: [cancun/eip1153]
-          - sim: pyspec
-            include: [cancun/eip7516]
+          # TODO: uncomment when https://github.com/ethereum/hive/issues/1147 is fixed
+          #- sim: pyspec
+          #  include: [cancun/eip4844]
+          #- sim: pyspec
+          #  include: [cancun/eip4788]
+          #- sim: pyspec
+          #  include: [cancun/eip6780]
+          #- sim: pyspec
+          #  include: [cancun/eip5656]
+          #- sim: pyspec
+          #  include: [cancun/eip1153]
+          #- sim: pyspec
+          #  include: [cancun/eip7516]
           # Pyspec shanghai jobs
-          - sim: pyspec
-            include: [shanghai/eip3651]
-          - sim: pyspec
-            include: [shanghai/eip3855]
-          - sim: pyspec
-            include: [shanghai/eip3860]
-          - sim: pyspec
-            include: [shanghai/eip4895]
+          #- sim: pyspec
+          #  include: [shanghai/eip3651]
+          #- sim: pyspec
+          #  include: [shanghai/eip3855]
+          #- sim: pyspec
+          #  include: [shanghai/eip3860]
+          #- sim: pyspec
+          #  include: [shanghai/eip4895]
           # Pyspec merge and earlier jobs
-          - sim: pyspec
-            include: [merge/]
-          - sim: pyspec
-            include: [berlin/]
-          - sim: pyspec
-            include: [istanbul/]
-          - sim: pyspec
-            include: [homestead/]
-          - sim: pyspec
-            include: [frontier/]
-    needs: prepare
-    name: run
+          #- sim: pyspec
+          #  include: [merge/]
+          #- sim: pyspec
+          #  include: [berlin/]
+          #- sim: pyspec
+          #  include: [istanbul/]
+          #- sim: pyspec
+          #  include: [homestead/]
+          #- sim: pyspec
+          #  include: [frontier/]
+    needs:
+      - prepare-reth
+      - prepare-hive
+    name: run ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
     runs-on:
       group: Reth
     permissions:
       issues: write
     steps:
-      - name: Download artifacts
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download hive assets
+        uses: actions/download-artifact@v4
+        with:
+          name: hive_assets
+          path: /tmp
+
+      - name: Download reth image
         uses: actions/download-artifact@v4
         with:
           name: artifacts
           path: /tmp
 
-      - name: Load Docker image
-        run: |
-          docker load --input /tmp/reth_image.tar
-          docker image ls -a
+      - name: Load Docker images
+        run: .github/assets/hive/load_images.sh
+
       - name: Move hive binary
         run: |
           mv /tmp/hive /usr/local/bin
@@ -188,33 +217,26 @@ jobs:
           ref: master
           path: hivetests
 
-      - name: Run ${{ matrix.sim }} simulator
+      - name: Run simulator
         run: |
-          cd hivetests
-          hive --sim "${{ matrix.sim }}$" --sim.limit "${{matrix.limit}}/${{join(matrix.include, '|')}}" --client reth
-
-      - name: Create github issue if sim failed
-        env:
-          GH_TOKEN: ${{ github.token }}
-        if: ${{ failure() }}
-        run: |
-          echo "Simulator failed, creating issue"
-          # Check if issue already exists
-          # get all issues with the label C-hivetest, loop over each page and check if the issue already exists
-
-          existing_issues=$(gh api /repos/paradigmxyz/reth/issues -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" -F "labels=C-hivetest" --method GET | jq '.[].title')
-          if [[ $existing_issues == *"Hive Test Failure: ${{ matrix.sim }}"* ]]; then
-            echo "Issue already exists"
-            exit 0
+          LIMIT="${{ matrix.scenario.limit }}"
+          TESTS="${{ join(matrix.scenario.include, '|') }}"
+          if [ -n "$LIMIT" ] && [ -n "$TESTS" ]; then
+            FILTER="$LIMIT/$TESTS"
+          elif [ -n "$LIMIT" ]; then
+            FILTER="$LIMIT"
+          elif [ -n "$TESTS" ]; then
+            FILTER="/$TESTS"
+          else
+            FILTER="/"
           fi
-          gh api \
-            --method POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            /repos/${{ github.repository }}/issues \
-            -f title='Hive Test Failure: ${{ matrix.sim }}' \
-            -f body="!!!!!!! This is an automated issue created by the hive test failure !!!!!!!<br /><br />The hive test for ${{ matrix.sim }} failed. Please investigate and fix the issue.<br /><br />[Link to the failed run](https://github.com/paradigmxyz/reth/actions/runs/${{ github.run_id }})" \
-            -f "labels[]=C-hivetest"
+          echo "filter: $FILTER"
+          .github/assets/hive/run_simulator.sh "${{ matrix.scenario.sim }}" "$FILTER"
+
+      - name: Parse hive output
+        run: |
+          find hivetests/workspace/logs -type f -name "*.json" ! -name "hive.json" | xargs -I {} python .github/assets/hive/parse.py {} --exclusion .github/assets/hive/expected_failures.yaml
+
       - name: Print simulator output
         if: ${{ failure() }}
         run: |
@@ -224,3 +246,15 @@ jobs:
         if: ${{ failure() }}
         run: |
           cat hivetests/workspace/logs/reth/client-*.log
+  notify-on-error:
+    needs: test
+    if: failure()
+    runs-on:
+      group: Reth
+    steps:
+      - name: Slack Webhook Action
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_COLOR: ${{ job.status }}
+          SLACK_MESSAGE: "Failed run: https://github.com/paradigmxyz/reth/actions/runs/${{ github.run_id }}"
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}

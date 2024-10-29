@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Install Geth
-        run: .github/scripts/install_geth.sh
+        run: .github/assets/install_geth.sh
       - uses: taiki-e/install-action@nextest
       - uses: Swatinem/rust-cache@v2
         with:
@@ -41,42 +41,13 @@ jobs:
         run: |
           cargo nextest run \
             --locked --features "asm-keccak ${{ matrix.network }}" \
-            --workspace --exclude examples --exclude ef-tests \
+            --workspace --exclude ef-tests \
             -E "kind(test)"
       - if: matrix.network == 'optimism'
         name: Run tests
         run: |
           cargo nextest run \
-            --locked -p reth-node-optimism --features "optimism"
-
-  sync:
-    name: sync / 100k blocks
-    # Only run sync tests in merge groups
-    if: github.event_name == 'merge_group'
-    runs-on:
-      group: Reth
-    env:
-      RUST_LOG: info,sync=error
-      RUST_BACKTRACE: 1
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-      - name: Run sync
-        run: |
-          cargo run --release --features asm-keccak,jemalloc,min-error-logs --bin reth \
-            -- node \
-            --debug.tip 0x91c90676cab257a59cd956d7cb0bceb9b1a71d79755c23c7277a0697ccfaf8c4 \
-            --debug.max-block 100000 \
-            --debug.terminate
-      - name: Verify the target block hash
-        run: |
-          cargo run --release --bin reth \
-            -- db get static-file headers 100000 \
-            | grep 0x91c90676cab257a59cd956d7cb0bceb9b1a71d79755c23c7277a0697ccfaf8c4
+            --locked -p reth-optimism-node --features "optimism"
 
   integration-success:
     name: integration success

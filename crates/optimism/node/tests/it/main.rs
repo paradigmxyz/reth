@@ -1,4 +1,6 @@
+#![allow(missing_docs)]
+
 #[cfg(feature = "optimism")]
 mod builder;
 
-fn main() {}
+const fn main() {}

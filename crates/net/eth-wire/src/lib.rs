@@ -11,8 +11,6 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-// TODO: remove when https://github.com/proptest-rs/proptest/pull/427 is merged
-#![allow(unknown_lints, non_local_definitions)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 pub mod capability;
@@ -21,7 +19,6 @@ pub mod errors;
 mod ethstream;
 mod hello;
 pub mod multiplex;
-pub mod muxdemux;
 mod p2pstream;
 mod pinger;
 pub mod protocol;
@@ -35,15 +32,14 @@ pub use tokio_util::codec::{
 };
 
 pub use crate::{
-    capability::Capability,
-    disconnect::{CanDisconnect, DisconnectReason},
+    disconnect::CanDisconnect,
     ethstream::{EthStream, UnauthedEthStream, MAX_MESSAGE_SIZE},
     hello::{HelloMessage, HelloMessageBuilder, HelloMessageWithProtocols},
-    muxdemux::{MuxDemuxStream, StreamClone},
     p2pstream::{
-        DisconnectP2P, P2PMessage, P2PMessageID, P2PStream, ProtocolVersion, UnauthedP2PStream,
+        DisconnectP2P, P2PMessage, P2PMessageID, P2PStream, UnauthedP2PStream,
         MAX_RESERVED_MESSAGE_ID,
     },
+    Capability, ProtocolVersion,
 };
 
 // Re-export wire types

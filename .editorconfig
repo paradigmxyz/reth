@@ -15,6 +15,9 @@ indent_size = 4
 [*.rs]
 max_line_length = 100
 
+[*.{yml,yaml}]
+indent_size = 2
+
 [*.md]
 # double whitespace at end of line
 # denotes a line break in Markdown

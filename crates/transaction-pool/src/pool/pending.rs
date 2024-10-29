@@ -50,8 +50,8 @@ pub struct PendingPool<T: TransactionOrdering> {
     ///
     /// See also [`PoolTransaction::size`](crate::traits::PoolTransaction::size).
     size_of: SizeTracker,
-    /// Used to broadcast new transactions that have been added to the PendingPool to existing
-    /// static_files of this pool.
+    /// Used to broadcast new transactions that have been added to the `PendingPool` to existing
+    /// `static_files` of this pool.
     new_transaction_notifier: broadcast::Sender<PendingTransaction<T>>,
 }
 
@@ -89,12 +89,12 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
     /// Returns an iterator over all transactions that are _currently_ ready.
     ///
-    /// 1. The iterator _always_ returns transaction in order: It never returns a transaction with
-    /// an unsatisfied dependency and only returns them if dependency transaction were yielded
-    /// previously. In other words: The nonces of transactions with the same sender will _always_
-    /// increase by exactly 1.
+    /// 1. The iterator _always_ returns transactions in order: it never returns a transaction with
+    ///    an unsatisfied dependency and only returns them if dependency transaction were yielded
+    ///    previously. In other words: the nonces of transactions with the same sender will _always_
+    ///    increase by exactly 1.
     ///
-    /// The order of transactions which satisfy (1.) is determent by their computed priority: A
+    /// The order of transactions which satisfy (1.) is determined by their computed priority: a
     /// transaction with a higher priority is returned before a transaction with a lower priority.
     ///
     /// If two transactions have the same priority score, then the transactions which spent more
@@ -126,7 +126,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
     /// Same as `best` but also includes the given unlocked transactions.
     ///
-    /// This mimics the [Self::add_transaction] method, but does not insert the transactions into
+    /// This mimics the [`Self::add_transaction`] method, but does not insert the transactions into
     /// pool but only into the returned iterator.
     ///
     /// Note: this does not insert the unlocked transactions into the pool.
@@ -197,7 +197,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 }
             } else {
                 self.size_of += tx.transaction.size();
-                self.update_independents_and_highest_nonces(&tx, &id);
+                self.update_independents_and_highest_nonces(&tx);
                 self.all.insert(tx.clone());
                 self.by_id.insert(id, tx);
             }
@@ -243,7 +243,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 tx.priority = self.ordering.priority(&tx.transaction.transaction, base_fee);
 
                 self.size_of += tx.transaction.size();
-                self.update_independents_and_highest_nonces(&tx, &id);
+                self.update_independents_and_highest_nonces(&tx);
                 self.all.insert(tx.clone());
                 self.by_id.insert(id, tx);
             }
@@ -254,12 +254,8 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
     /// Updates the independent transaction and highest nonces set, assuming the given transaction
     /// is being _added_ to the pool.
-    fn update_independents_and_highest_nonces(
-        &mut self,
-        tx: &PendingTransaction<T>,
-        tx_id: &TransactionId,
-    ) {
-        let ancestor_id = tx_id.unchecked_ancestor();
+    fn update_independents_and_highest_nonces(&mut self, tx: &PendingTransaction<T>) {
+        let ancestor_id = tx.transaction.id().unchecked_ancestor();
         if let Some(ancestor) = ancestor_id.and_then(|id| self.by_id.get(&id)) {
             // the transaction already has an ancestor, so we only need to ensure that the
             // highest nonces set actually contains the highest nonce for that sender
@@ -305,7 +301,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         let priority = self.ordering.priority(&tx.transaction, base_fee);
         let tx = PendingTransaction { submission_id, transaction: tx, priority };
 
-        self.update_independents_and_highest_nonces(&tx, &tx_id);
+        self.update_independents_and_highest_nonces(&tx);
         self.all.insert(tx.clone());
 
         // send the new transaction to any existing pendingpool static file iterators
@@ -403,7 +399,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             removed.clear();
 
             // loop through the highest nonces set, removing transactions until we reach the limit
-            for tx in self.highest_nonces.iter() {
+            for tx in &self.highest_nonces {
                 // return early if the pool is under limits
                 if !limit.is_exceeded(original_length - total_removed, original_size - total_size) ||
                     non_local_senders == 0
@@ -443,12 +439,12 @@ impl<T: TransactionOrdering> PendingPool<T> {
         }
     }
 
-    /// Truncates the pool to the given [SubPoolLimit], removing transactions until the subpool
+    /// Truncates the pool to the given [`SubPoolLimit`], removing transactions until the subpool
     /// limits are met.
     ///
     /// This attempts to remove transactions by roughly the same amount for each sender. For more
     /// information on this exact process see docs for
-    /// [remove_to_limit](PendingPool::remove_to_limit).
+    /// [`remove_to_limit`](PendingPool::remove_to_limit).
     ///
     /// This first truncates all of the non-local transactions in the pool. If the subpool is still
     /// not under the limit, this truncates the entire pool, including non-local transactions. The
@@ -597,7 +593,8 @@ mod tests {
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory, MockTransactionSet},
         PoolTransaction,
     };
-    use reth_primitives::{address, TxType};
+    use alloy_primitives::address;
+    use reth_primitives::TxType;
     use std::collections::HashSet;
 
     #[test]

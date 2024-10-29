@@ -1,0 +1,38 @@
+[package]
+name = "reth-cli-util"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-fs-util.workspace = true
+
+# eth
+alloy-primitives.workspace = true
+alloy-eips.workspace = true
+
+# misc
+cfg-if.workspace = true
+eyre.workspace = true
+rand.workspace = true
+secp256k1 = { workspace = true, features = ["rand"] }
+thiserror.workspace = true
+
+tracy-client = { workspace = true, optional = true, features = ["demangle"] }
+
+[target.'cfg(unix)'.dependencies]
+tikv-jemallocator = { workspace = true, optional = true }
+libc = "0.2"
+
+[features]
+jemalloc = ["dep:tikv-jemallocator"]
+jemalloc-prof = ["jemalloc", "tikv-jemallocator?/profiling"]
+
+tracy-allocator = ["dep:tracy-client"]

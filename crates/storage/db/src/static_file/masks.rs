@@ -2,10 +2,11 @@ use super::{ReceiptMask, TransactionMask};
 use crate::{
     add_static_file_mask,
     static_file::mask::{ColumnSelectorOne, ColumnSelectorTwo, HeaderMask},
-    table::Table,
     HeaderTerminalDifficulties, RawValue, Receipts, Transactions,
 };
-use reth_primitives::{BlockHash, Header};
+use alloy_primitives::BlockHash;
+use reth_db_api::table::Table;
+use reth_primitives::Header;
 
 // HEADER MASKS
 add_static_file_mask!(HeaderMask, Header, 0b001);

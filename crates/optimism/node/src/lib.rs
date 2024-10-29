@@ -12,7 +12,7 @@
 /// CLI argument parsing for the optimism node.
 pub mod args;
 
-/// Exports optimism-specific implementations of the [EngineTypes](reth_node_api::EngineTypes)
+/// Exports optimism-specific implementations of the [`EngineTypes`](reth_node_api::EngineTypes)
 /// trait.
 pub mod engine;
 pub use engine::OptimismEngineTypes;
@@ -22,10 +22,8 @@ pub use node::OptimismNode;
 
 pub mod txpool;
 
-pub mod rpc;
-
 pub use reth_optimism_payload_builder::{
     OptimismBuiltPayload, OptimismPayloadBuilder, OptimismPayloadBuilderAttributes,
 };
 
-pub use reth_evm_optimism::*;
+pub use reth_optimism_evm::*;

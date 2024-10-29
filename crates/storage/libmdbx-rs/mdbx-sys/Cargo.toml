@@ -1,20 +1,13 @@
 [package]
 name = "reth-mdbx-sys"
+description = "Raw bindings for libmdbx"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license = "Apache-2.0"
-description = "Rust bindings for libmdbx with good licence."
 homepage.workspace = true
 repository.workspace = true
 
-[lib]
-name = "reth_mdbx_sys"
-
-[dependencies]
-libc = "0.2"
-
 [build-dependencies]
-## temp pin <https://github.com/rust-lang/cc-rs/issues/963>
-cc = "=1.0.83"
-bindgen = { version = "0.69", default-features = false, features = ["runtime"] }
+cc = "1.0"
+bindgen = { version = "0.70", default-features = false, features = ["runtime"] }

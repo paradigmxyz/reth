@@ -7,7 +7,7 @@ use crate::{
     tree::{DnsEntry, LinkEntry, TreeRootEntry},
 };
 use enr::EnrKeyUnambiguous;
-use reth_net_common::ratelimit::{Rate, RateLimit};
+use reth_tokio_util::ratelimit::{Rate, RateLimit};
 use std::{
     collections::VecDeque,
     future::Future,
@@ -62,7 +62,7 @@ impl<R: Resolver, K: EnrKeyUnambiguous> QueryPool<R, K> {
         self.queued_queries.push_back(Query::Root(Box::pin(resolve_root(resolver, link, timeout))))
     }
 
-    /// Resolves the [DnsEntry] for `<hash.domain>`
+    /// Resolves the [`DnsEntry`] for `<hash.domain>`
     pub(crate) fn resolve_entry(&mut self, link: LinkEntry<K>, hash: String, kind: ResolveKind) {
         let resolver = Arc::clone(&self.resolver);
         let timeout = self.lookup_timeout;
@@ -135,11 +135,11 @@ impl<K: EnrKeyUnambiguous> Query<K> {
     /// Advances the query
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<QueryOutcome<K>> {
         match self {
-            Query::Root(ref mut query) => {
+            Self::Root(ref mut query) => {
                 let outcome = ready!(query.as_mut().poll(cx));
                 Poll::Ready(QueryOutcome::Root(outcome))
             }
-            Query::Entry(ref mut query) => {
+            Self::Entry(ref mut query) => {
                 let outcome = ready!(query.as_mut().poll(cx));
                 Poll::Ready(QueryOutcome::Entry(outcome))
             }
@@ -153,7 +153,7 @@ pub(crate) enum QueryOutcome<K: EnrKeyUnambiguous> {
     Entry(ResolveEntryResult<K>),
 }
 
-/// Retrieves the [DnsEntry]
+/// Retrieves the [`DnsEntry`]
 async fn resolve_entry<K: EnrKeyUnambiguous, R: Resolver>(
     resolver: Arc<R>,
     link: LinkEntry<K>,

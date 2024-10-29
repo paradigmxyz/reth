@@ -1,55 +1,64 @@
+use std::collections::BTreeMap;
+
+use alloy_consensus::Transaction;
+use alloy_primitives::Address;
+use alloy_rpc_types_txpool::{
+    TxpoolContent, TxpoolContentFrom, TxpoolInspect, TxpoolInspectSummary, TxpoolStatus,
+};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
-use reth_primitives::Address;
+use reth_primitives::TransactionSignedEcRecovered;
 use reth_rpc_api::TxPoolApiServer;
-use reth_rpc_types::{
-    txpool::{TxpoolContent, TxpoolContentFrom, TxpoolInspect, TxpoolInspectSummary, TxpoolStatus},
-    Transaction,
-};
+use reth_rpc_types_compat::{transaction::from_recovered, TransactionCompat};
 use reth_transaction_pool::{AllPoolTransactions, PoolTransaction, TransactionPool};
-use std::collections::BTreeMap;
 use tracing::trace;
 
 /// `txpool` API implementation.
 ///
 /// This type provides the functionality for handling `txpool` related requests.
 #[derive(Clone)]
-pub struct TxPoolApi<Pool> {
+pub struct TxPoolApi<Pool, Eth> {
     /// An interface to interact with the pool
     pool: Pool,
+    tx_resp_builder: Eth,
 }
 
-impl<Pool> TxPoolApi<Pool> {
+impl<Pool, Eth> TxPoolApi<Pool, Eth> {
     /// Creates a new instance of `TxpoolApi`.
-    pub fn new(pool: Pool) -> Self {
-        TxPoolApi { pool }
+    pub const fn new(pool: Pool, tx_resp_builder: Eth) -> Self {
+        Self { pool, tx_resp_builder }
     }
 }
 
-impl<Pool> TxPoolApi<Pool>
+impl<Pool, Eth> TxPoolApi<Pool, Eth>
 where
     Pool: TransactionPool + 'static,
+    Eth: TransactionCompat,
 {
-    fn content(&self) -> TxpoolContent {
+    fn content(&self) -> TxpoolContent<Eth::Transaction> {
         #[inline]
-        fn insert<T: PoolTransaction>(
-            tx: &T,
-            content: &mut BTreeMap<Address, BTreeMap<String, Transaction>>,
-        ) {
+        fn insert<Tx, RpcTxB>(
+            tx: &Tx,
+            content: &mut BTreeMap<Address, BTreeMap<String, RpcTxB::Transaction>>,
+            resp_builder: &RpcTxB,
+        ) where
+            Tx: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
+            RpcTxB: TransactionCompat,
+        {
             content.entry(tx.sender()).or_default().insert(
                 tx.nonce().to_string(),
-                reth_rpc_types_compat::transaction::from_recovered(tx.to_recovered_transaction()),
+                from_recovered(tx.clone().into_consensus().into(), resp_builder),
             );
         }
 
         let AllPoolTransactions { pending, queued } = self.pool.all_transactions();
 
-        let mut content = TxpoolContent::default();
+        let mut content = TxpoolContent { pending: BTreeMap::new(), queued: BTreeMap::new() };
         for pending in pending {
-            insert(&pending.transaction, &mut content.pending);
+            insert::<_, Eth>(&pending.transaction, &mut content.pending, &self.tx_resp_builder);
         }
         for queued in queued {
-            insert(&queued.transaction, &mut content.queued);
+            insert::<_, Eth>(&queued.transaction, &mut content.queued, &self.tx_resp_builder);
         }
 
         content
@@ -57,9 +66,10 @@ where
 }
 
 #[async_trait]
-impl<Pool> TxPoolApiServer for TxPoolApi<Pool>
+impl<Pool, Eth> TxPoolApiServer<Eth::Transaction> for TxPoolApi<Pool, Eth>
 where
     Pool: TransactionPool + 'static,
+    Eth: TransactionCompat + 'static,
 {
     /// Returns the number of transactions currently pending for inclusion in the next block(s), as
     /// well as the ones that are being scheduled for future execution only.
@@ -82,15 +92,14 @@ where
         trace!(target: "rpc::eth", "Serving txpool_inspect");
 
         #[inline]
-        fn insert<T: PoolTransaction>(
+        fn insert<T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>>(
             tx: &T,
             inspect: &mut BTreeMap<Address, BTreeMap<String, TxpoolInspectSummary>>,
         ) {
             let entry = inspect.entry(tx.sender()).or_default();
-            let key = tx.nonce().to_string();
-            let tx = tx.to_recovered_transaction();
+            let tx: TransactionSignedEcRecovered = tx.clone().into_consensus().into();
             entry.insert(
-                key,
+                tx.nonce().to_string(),
                 TxpoolInspectSummary {
                     to: tx.to(),
                     value: tx.value(),
@@ -100,17 +109,18 @@ where
             );
         }
 
-        let mut inspect = TxpoolInspect::default();
         let AllPoolTransactions { pending, queued } = self.pool.all_transactions();
 
-        for pending in pending {
-            insert(&pending.transaction, &mut inspect.pending);
-        }
-        for queued in queued {
-            insert(&queued.transaction, &mut inspect.queued);
-        }
-
-        Ok(inspect)
+        Ok(TxpoolInspect {
+            pending: pending.iter().fold(Default::default(), |mut acc, tx| {
+                insert(&tx.transaction, &mut acc);
+                acc
+            }),
+            queued: queued.iter().fold(Default::default(), |mut acc, tx| {
+                insert(&tx.transaction, &mut acc);
+                acc
+            }),
+        })
     }
 
     /// Retrieves the transactions contained within the txpool, returning pending as well as queued
@@ -118,7 +128,10 @@ where
     ///
     /// See [here](https://geth.ethereum.org/docs/rpc/ns-txpool#txpool_contentFrom) for more details
     /// Handler for `txpool_contentFrom`
-    async fn txpool_content_from(&self, from: Address) -> Result<TxpoolContentFrom> {
+    async fn txpool_content_from(
+        &self,
+        from: Address,
+    ) -> Result<TxpoolContentFrom<Eth::Transaction>> {
         trace!(target: "rpc::eth", ?from, "Serving txpool_contentFrom");
         Ok(self.content().remove_from(&from))
     }
@@ -127,14 +140,14 @@ where
     /// block(s), as well as the ones that are being scheduled for future execution only.
     ///
     /// See [here](https://geth.ethereum.org/docs/rpc/ns-txpool#txpool_content) for more details
-    /// Handler for `txpool_inspect`
-    async fn txpool_content(&self) -> Result<TxpoolContent> {
-        trace!(target: "rpc::eth", "Serving txpool_inspect");
+    /// Handler for `txpool_content`
+    async fn txpool_content(&self) -> Result<TxpoolContent<Eth::Transaction>> {
+        trace!(target: "rpc::eth", "Serving txpool_content");
         Ok(self.content())
     }
 }
 
-impl<Pool> std::fmt::Debug for TxPoolApi<Pool> {
+impl<Pool, Eth> std::fmt::Debug for TxPoolApi<Pool, Eth> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TxpoolApi").finish_non_exhaustive()
     }

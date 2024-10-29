@@ -1,15 +1,15 @@
-use reth_interfaces::p2p::error::DownloadError;
 use reth_metrics::{
     metrics::{Counter, Gauge},
     Metrics,
 };
+use reth_network_p2p::error::DownloadError;
 
 /// Common body downloader metrics.
 ///
 /// These metrics will be initialized with the `downloaders.bodies` scope.
 /// ```
 /// use reth_downloaders::metrics::BodyDownloaderMetrics;
-/// use reth_interfaces::p2p::error::DownloadError;
+/// use reth_network_p2p::error::DownloadError;
 ///
 /// // Initialize metrics.
 /// let metrics = BodyDownloaderMetrics::default();
@@ -80,7 +80,7 @@ pub struct ResponseMetrics {
 /// These metrics will be initialized with the `downloaders.headers` scope.
 /// ```
 /// use reth_downloaders::metrics::HeaderDownloaderMetrics;
-/// use reth_interfaces::p2p::error::DownloadError;
+/// use reth_network_p2p::error::DownloadError;
 ///
 /// // Initialize metrics.
 /// let metrics = HeaderDownloaderMetrics::default();

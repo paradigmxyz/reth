@@ -6,15 +6,15 @@ use crate::{
     to_range, BlockHashReader, BlockNumReader, HeaderProvider, ReceiptProvider,
     TransactionsProvider,
 };
-use reth_db::{
-    codecs::CompactU256,
-    static_file::{HeaderMask, ReceiptMask, StaticFileCursor, TransactionMask},
-};
-use reth_interfaces::provider::{ProviderError, ProviderResult};
+use alloy_eips::BlockHashOrNumber;
+use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
+use reth_chainspec::ChainInfo;
+use reth_db::static_file::{HeaderMask, ReceiptMask, StaticFileCursor, TransactionMask};
+use reth_db_api::models::CompactU256;
 use reth_primitives::{
-    Address, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, Header, Receipt, SealedHeader,
-    TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, B256, U256,
+    Header, Receipt, SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
 };
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     ops::{Deref, RangeBounds},
     sync::Arc,
@@ -63,7 +63,7 @@ impl<'a> StaticFileJarProvider<'a> {
     }
 
     /// Adds a new auxiliary static file to help query data from the main one
-    pub fn with_auxiliary(mut self, auxiliary_jar: StaticFileJarProvider<'a>) -> Self {
+    pub fn with_auxiliary(mut self, auxiliary_jar: Self) -> Self {
         self.auxiliary_jar = Some(Box::new(auxiliary_jar));
         self
     }
@@ -75,7 +75,7 @@ impl<'a> StaticFileJarProvider<'a> {
     }
 }
 
-impl<'a> HeaderProvider for StaticFileJarProvider<'a> {
+impl HeaderProvider for StaticFileJarProvider<'_> {
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
         Ok(self
             .cursor()?
@@ -106,7 +106,7 @@ impl<'a> HeaderProvider for StaticFileJarProvider<'a> {
         let mut cursor = self.cursor()?;
         let mut headers = Vec::with_capacity((range.end - range.start) as usize);
 
-        for num in range.start..range.end {
+        for num in range {
             if let Some(header) = cursor.get_one::<HeaderMask<Header>>(num.into())? {
                 headers.push(header);
             }
@@ -119,7 +119,7 @@ impl<'a> HeaderProvider for StaticFileJarProvider<'a> {
         Ok(self
             .cursor()?
             .get_two::<HeaderMask<Header, BlockHash>>(number.into())?
-            .map(|(header, hash)| header.seal(hash)))
+            .map(|(header, hash)| SealedHeader::new(header, hash)))
     }
 
     fn sealed_headers_while(
@@ -132,11 +132,11 @@ impl<'a> HeaderProvider for StaticFileJarProvider<'a> {
         let mut cursor = self.cursor()?;
         let mut headers = Vec::with_capacity((range.end - range.start) as usize);
 
-        for number in range.start..range.end {
+        for number in range {
             if let Some((header, hash)) =
                 cursor.get_two::<HeaderMask<Header, BlockHash>>(number.into())?
             {
-                let sealed = header.seal(hash);
+                let sealed = SealedHeader::new(header, hash);
                 if !predicate(&sealed) {
                     break
                 }
@@ -147,7 +147,7 @@ impl<'a> HeaderProvider for StaticFileJarProvider<'a> {
     }
 }
 
-impl<'a> BlockHashReader for StaticFileJarProvider<'a> {
+impl BlockHashReader for StaticFileJarProvider<'_> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.cursor()?.get_one::<HeaderMask<BlockHash>>(number.into())
     }
@@ -169,7 +169,7 @@ impl<'a> BlockHashReader for StaticFileJarProvider<'a> {
     }
 }
 
-impl<'a> BlockNumReader for StaticFileJarProvider<'a> {
+impl BlockNumReader for StaticFileJarProvider<'_> {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
         // Information on live database
         Err(ProviderError::UnsupportedProvider)
@@ -194,7 +194,7 @@ impl<'a> BlockNumReader for StaticFileJarProvider<'a> {
     }
 }
 
-impl<'a> TransactionsProvider for StaticFileJarProvider<'a> {
+impl TransactionsProvider for StaticFileJarProvider<'_> {
     fn transaction_id(&self, hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         let mut cursor = self.cursor()?;
 
@@ -290,7 +290,7 @@ impl<'a> TransactionsProvider for StaticFileJarProvider<'a> {
     }
 }
 
-impl<'a> ReceiptProvider for StaticFileJarProvider<'a> {
+impl ReceiptProvider for StaticFileJarProvider<'_> {
     fn receipt(&self, num: TxNumber) -> ProviderResult<Option<Receipt>> {
         self.cursor()?.get_one::<ReceiptMask<Receipt>>(num.into())
     }

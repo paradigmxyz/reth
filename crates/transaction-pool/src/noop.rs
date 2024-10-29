@@ -11,13 +11,15 @@ use crate::{
         TransactionListenerKind,
     },
     validate::ValidTransaction,
-    AllPoolTransactions, AllTransactionsEvents, BestTransactions, BlockInfo, EthPooledTransaction,
-    NewTransactionEvent, PoolResult, PoolSize, PoolTransaction, PooledTransactionsElement,
-    PropagatedTransactions, TransactionEvents, TransactionOrigin, TransactionPool,
-    TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
+    AllPoolTransactions, AllTransactionsEvents, BestTransactions, BlockInfo, EthPoolTransaction,
+    EthPooledTransaction, NewTransactionEvent, PoolResult, PoolSize, PoolTransaction,
+    PooledTransactionsElement, PropagatedTransactions, TransactionEvents, TransactionOrigin,
+    TransactionPool, TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
 };
-use reth_eth_wire::HandleMempoolData;
-use reth_primitives::{Address, BlobTransactionSidecar, TxHash, U256};
+use alloy_eips::{eip1559::ETHEREUM_BLOCK_GAS_LIMIT, eip4844::BlobAndProofV1};
+use alloy_primitives::{Address, TxHash, B256, U256};
+use reth_eth_wire_types::HandleMempoolData;
+use reth_primitives::BlobTransactionSidecar;
 use std::{collections::HashSet, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
 
@@ -38,6 +40,7 @@ impl TransactionPool for NoopTransactionPool {
 
     fn block_info(&self) -> BlockInfo {
         BlockInfo {
+            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             last_seen_block_hash: Default::default(),
             last_seen_block_number: 0,
             pending_basefee: 0,
@@ -180,6 +183,20 @@ impl TransactionPool for NoopTransactionPool {
         vec![]
     }
 
+    fn remove_transactions_and_descendants(
+        &self,
+        _hashes: Vec<TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        vec![]
+    }
+
+    fn remove_transactions_by_sender(
+        &self,
+        _sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        vec![]
+    }
+
     fn retain_unknown<A>(&self, _announcement: &mut A)
     where
         A: HandleMempoolData,
@@ -203,7 +220,36 @@ impl TransactionPool for NoopTransactionPool {
         vec![]
     }
 
-    fn get_transactions_by_sender_and_nonce(
+    fn get_pending_transactions_by_sender(
+        &self,
+        _sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        vec![]
+    }
+
+    fn get_queued_transactions_by_sender(
+        &self,
+        _sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        vec![]
+    }
+
+    fn get_highest_transaction_by_sender(
+        &self,
+        _sender: Address,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        None
+    }
+
+    fn get_highest_consecutive_transaction_by_sender(
+        &self,
+        _sender: Address,
+        _on_chain_nonce: u64,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        None
+    }
+
+    fn get_transaction_by_sender_and_nonce(
         &self,
         _sender: Address,
         _nonce: u64,
@@ -212,6 +258,13 @@ impl TransactionPool for NoopTransactionPool {
     }
 
     fn get_transactions_by_origin(
+        &self,
+        _origin: TransactionOrigin,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        vec![]
+    }
+
+    fn get_pending_transactions_by_origin(
         &self,
         _origin: TransactionOrigin,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
@@ -242,6 +295,13 @@ impl TransactionPool for NoopTransactionPool {
         }
         Err(BlobStoreError::MissingSidecar(tx_hashes[0]))
     }
+
+    fn get_blobs_for_versioned_hashes(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
+        Ok(vec![None; versioned_hashes.len()])
+    }
 }
 
 /// A [`TransactionValidator`] that does nothing.
@@ -252,20 +312,21 @@ pub struct MockTransactionValidator<T> {
     _marker: PhantomData<T>,
 }
 
-impl<T: PoolTransaction> TransactionValidator for MockTransactionValidator<T> {
+impl<T: EthPoolTransaction> TransactionValidator for MockTransactionValidator<T> {
     type Transaction = T;
 
     async fn validate_transaction(
         &self,
         origin: TransactionOrigin,
-        transaction: Self::Transaction,
+        mut transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
+        let maybe_sidecar = transaction.take_blob().maybe_sidecar().cloned();
         // we return `balance: U256::MAX` to simulate a valid transaction which will never go into
         // overdraft
         TransactionValidationOutcome::Valid {
             balance: U256::MAX,
             state_nonce: 0,
-            transaction: ValidTransaction::Valid(transaction),
+            transaction: ValidTransaction::new(transaction, maybe_sidecar),
             propagate: match origin {
                 TransactionOrigin::External => true,
                 TransactionOrigin::Local => self.propagate_local,
@@ -285,7 +346,7 @@ impl<T> MockTransactionValidator<T> {
 
 impl<T> Default for MockTransactionValidator<T> {
     fn default() -> Self {
-        MockTransactionValidator { propagate_local: true, _marker: Default::default() }
+        Self { propagate_local: true, _marker: Default::default() }
     }
 }
 

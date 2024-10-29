@@ -31,6 +31,6 @@ impl SubAssign<usize> for SizeTracker {
 
 impl From<SizeTracker> for usize {
     fn from(value: SizeTracker) -> Self {
-        value.0 as usize
+        value.0 as Self
     }
 }

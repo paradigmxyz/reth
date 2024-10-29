@@ -23,8 +23,7 @@ impl<'a> StructHandler<'a> {
     pub fn generate_to(mut self) -> Vec<TokenStream2> {
         while let Some(field) = self.next_field() {
             match field {
-                FieldTypes::EnumVariant(_) => unreachable!(),
-                FieldTypes::EnumUnnamedField(_) => unreachable!(),
+                FieldTypes::EnumVariant(_) | FieldTypes::EnumUnnamedField(_) => unreachable!(),
                 FieldTypes::StructField(field_descriptor) => self.to(field_descriptor),
             }
         }
@@ -34,8 +33,7 @@ impl<'a> StructHandler<'a> {
     pub fn generate_from(&mut self, known_types: &[&str]) -> Vec<TokenStream2> {
         while let Some(field) = self.next_field() {
             match field {
-                FieldTypes::EnumVariant(_) => unreachable!(),
-                FieldTypes::EnumUnnamedField(_) => unreachable!(),
+                FieldTypes::EnumVariant(_) | FieldTypes::EnumUnnamedField(_) => unreachable!(),
                 FieldTypes::StructField(field_descriptor) => {
                     self.from(field_descriptor, known_types)
                 }
@@ -48,10 +46,10 @@ impl<'a> StructHandler<'a> {
     fn to(&mut self, field_descriptor: &StructFieldDescriptor) {
         let (name, ftype, is_compact, use_alt_impl) = field_descriptor;
 
-        let to_compact_ident = if !use_alt_impl {
-            format_ident!("to_compact")
-        } else {
+        let to_compact_ident = if *use_alt_impl {
             format_ident!("specialized_to_compact")
+        } else {
+            format_ident!("to_compact")
         };
 
         // Should only happen on wrapper structs like `Struct(pub Field)`
@@ -110,10 +108,10 @@ impl<'a> StructHandler<'a> {
             (format_ident!("{name}"), format_ident!("{name}_len"))
         };
 
-        let from_compact_ident = if !use_alt_impl {
-            format_ident!("from_compact")
-        } else {
+        let from_compact_ident = if *use_alt_impl {
             format_ident!("specialized_from_compact")
+        } else {
+            format_ident!("from_compact")
         };
 
         // ! Be careful before changing the following assert ! Especially if the type does not

@@ -7,16 +7,16 @@ use crate::{
     ECIESError,
 };
 use aes::{cipher::StreamCipher, Aes128, Aes256};
+use alloy_primitives::{
+    bytes::{BufMut, Bytes, BytesMut},
+    B128, B256, B512 as PeerId,
+};
 use alloy_rlp::{Encodable, Rlp, RlpEncodable, RlpMaxEncodedLen};
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
 use ctr::Ctr64BE;
 use digest::{crypto_common::KeyIvInit, Digest};
-use educe::Educe;
 use rand::{thread_rng, Rng};
-use reth_primitives::{
-    bytes::{BufMut, Bytes, BytesMut},
-    id2pk, pk2id, B128, B256, B512 as PeerId,
-};
+use reth_network_peers::{id2pk, pk2id};
 use secp256k1::{
     ecdsa::{RecoverableSignature, RecoveryId},
     PublicKey, SecretKey, SECP256K1,
@@ -44,23 +44,19 @@ fn ecdh_x(public_key: &PublicKey, secret_key: &SecretKey) -> B256 {
 /// # Panics
 /// * If the `dest` is empty
 /// * If the `dest` len is greater than or equal to the hash output len * the max counter value. In
-/// this case, the hash output len is 32 bytes, and the max counter value is 2^32 - 1. So the dest
-/// cannot have a len greater than 32 * 2^32 - 1.
+///   this case, the hash output len is 32 bytes, and the max counter value is 2^32 - 1. So the dest
+///   cannot have a len greater than 32 * 2^32 - 1.
 fn kdf(secret: B256, s1: &[u8], dest: &mut [u8]) {
     concat_kdf::derive_key_into::<Sha256>(secret.as_slice(), s1, dest).unwrap();
 }
 
-#[derive(Educe)]
-#[educe(Debug)]
 pub struct ECIES {
-    #[educe(Debug(ignore))]
     secret_key: SecretKey,
     public_key: PublicKey,
     remote_public_key: Option<PublicKey>,
 
     pub(crate) remote_id: Option<PeerId>,
 
-    #[educe(Debug(ignore))]
     ephemeral_secret_key: SecretKey,
     ephemeral_public_key: PublicKey,
     ephemeral_shared_secret: Option<B256>,
@@ -69,9 +65,7 @@ pub struct ECIES {
     nonce: B256,
     remote_nonce: Option<B256>,
 
-    #[educe(Debug(ignore))]
     ingress_aes: Option<Ctr64BE<Aes256>>,
-    #[educe(Debug(ignore))]
     egress_aes: Option<Ctr64BE<Aes256>>,
     ingress_mac: Option<MAC>,
     egress_mac: Option<MAC>,
@@ -82,6 +76,27 @@ pub struct ECIES {
     body_size: Option<usize>,
 }
 
+impl core::fmt::Debug for ECIES {
+    #[inline]
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ECIES")
+            .field("public_key", &self.public_key)
+            .field("remote_public_key", &self.remote_public_key)
+            .field("remote_id", &self.remote_id)
+            .field("ephemeral_public_key", &self.ephemeral_public_key)
+            .field("ephemeral_shared_secret", &self.ephemeral_shared_secret)
+            .field("remote_ephemeral_public_key", &self.remote_ephemeral_public_key)
+            .field("nonce", &self.nonce)
+            .field("remote_nonce", &self.remote_nonce)
+            .field("ingress_mac", &self.ingress_mac)
+            .field("egress_mac", &self.egress_mac)
+            .field("init_msg", &self.init_msg)
+            .field("remote_init_msg", &self.remote_init_msg)
+            .field("body_size", &self.body_size)
+            .finish()
+    }
+}
+
 fn split_at_mut<T>(arr: &mut [T], idx: usize) -> Result<(&mut [T], &mut [T]), ECIESError> {
     if idx > arr.len() {
         return Err(ECIESErrorImpl::OutOfBounds { idx, len: arr.len() }.into())
@@ -89,7 +104,7 @@ fn split_at_mut<T>(arr: &mut [T], idx: usize) -> Result<(&mut [T], &mut [T]), EC
     Ok(arr.split_at_mut(idx))
 }
 
-/// A parsed RLPx encrypted message
+/// A parsed `RLPx` encrypted message
 ///
 /// From the devp2p spec, this should help perform the following operations:
 ///
@@ -102,9 +117,9 @@ fn split_at_mut<T>(arr: &mut [T], idx: usize) -> Result<(&mut [T], &mut [T]), EC
 pub struct EncryptedMessage<'a> {
     /// The auth data, used when checking the `tag` with HMAC-SHA256.
     ///
-    /// This is not mentioned in the RLPx spec, but included in implementations.
+    /// This is not mentioned in the `RLPx` spec, but included in implementations.
     ///
-    /// See source comments of [Self::check_integrity] for more information.
+    /// See source comments of [`Self::check_integrity`] for more information.
     auth_data: [u8; 2],
     /// The remote secp256k1 public key
     public_key: PublicKey,
@@ -117,7 +132,7 @@ pub struct EncryptedMessage<'a> {
 }
 
 impl<'a> EncryptedMessage<'a> {
-    /// Parse the given `data` into an [EncryptedMessage].
+    /// Parse the given `data` into an [`EncryptedMessage`].
     ///
     /// If the data is not long enough to contain the expected fields, this returns an error.
     pub fn parse(data: &mut [u8]) -> Result<EncryptedMessage<'_>, ECIESError> {
@@ -399,7 +414,7 @@ impl ECIES {
         let msg = x ^ self.nonce;
         let (rec_id, sig) = SECP256K1
             .sign_ecdsa_recoverable(
-                &secp256k1::Message::from_slice(msg.as_slice()).unwrap(),
+                &secp256k1::Message::from_digest(msg.0),
                 &self.ephemeral_secret_key,
             )
             .serialize_compact();
@@ -473,7 +488,7 @@ impl ECIES {
 
         let x = ecdh_x(&self.remote_public_key.unwrap(), &self.secret_key);
         self.remote_ephemeral_public_key = Some(SECP256K1.recover_ecdsa(
-            &secp256k1::Message::from_slice((x ^ self.remote_nonce.unwrap()).as_ref()).unwrap(),
+            &secp256k1::Message::from_digest((x ^ self.remote_nonce.unwrap()).0),
             &signature,
         )?);
         self.ephemeral_shared_secret =
@@ -490,7 +505,7 @@ impl ECIES {
         self.parse_auth_unencrypted(unencrypted)
     }
 
-    /// Create an `ack` message using the internal nonce, local ephemeral public key, and RLPx
+    /// Create an `ack` message using the internal nonce, local ephemeral public key, and `RLPx`
     /// ECIES protocol version.
     fn create_ack_unencrypted(&self) -> impl AsRef<[u8]> {
         #[derive(RlpEncodable, RlpMaxEncodedLen)]
@@ -630,11 +645,12 @@ impl ECIES {
         self.egress_mac.as_mut().unwrap().update_header(&header);
         let tag = self.egress_mac.as_mut().unwrap().digest();
 
-        out.reserve(ECIES::header_len());
-        out.extend_from_slice(&header);
+        out.reserve(Self::header_len());
+        out.extend_from_slice(&header[..]);
         out.extend_from_slice(tag.as_slice());
     }
 
+    /// Extracts the header from slice and returns the body size.
     pub fn read_header(&mut self, data: &mut [u8]) -> Result<usize, ECIESError> {
         // If the data is not large enough to fit the header and mac bytes, return an error
         //
@@ -662,7 +678,7 @@ impl ECIES {
 
         self.body_size = Some(body_size);
 
-        Ok(self.body_size.unwrap())
+        Ok(body_size)
     }
 
     pub const fn header_len() -> usize {
@@ -720,7 +736,7 @@ impl ECIES {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{b256, hex};
+    use alloy_primitives::{b256, hex};
 
     #[test]
     fn ecdh() {
@@ -849,7 +865,7 @@ mod tests {
     }
 
     #[test]
-    /// Test vectors from https://eips.ethereum.org/EIPS/eip-8
+    /// Test vectors from <https://eips.ethereum.org/EIPS/eip-8>
     fn eip8_test() {
         // EIP-8 format with version 4 and no additional list elements
         let auth2 = hex!(

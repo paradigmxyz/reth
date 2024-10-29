@@ -1,4 +1,4 @@
-//! Reth network interface definitions.
+//! Reth interface definitions and commonly used types for the reth-network crate.
 //!
 //! Provides abstractions for the reth-network crate.
 //!
@@ -13,24 +13,61 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use reth_eth_wire::{DisconnectReason, EthVersion, Status};
-use reth_primitives::{NodeRecord, PeerId};
-use std::{future::Future, net::SocketAddr, sync::Arc, time::Instant};
-
-pub use error::NetworkError;
-pub use reputation::{Reputation, ReputationChangeKind};
-use reth_eth_wire::capability::Capabilities;
-use reth_rpc_types::NetworkStatus;
-
+pub mod downloaders;
 /// Network Error
 pub mod error;
-/// Reputation score
-pub mod reputation;
-
+pub mod events;
 /// Implementation of network traits for that does nothing.
 pub mod noop;
+pub mod test_utils;
+
+pub use alloy_rpc_types_admin::EthProtocolInfo;
+use reth_network_p2p::sync::NetworkSyncUpdater;
+pub use reth_network_p2p::BlockClient;
+pub use reth_network_types::{PeerKind, Reputation, ReputationChangeKind};
+
+pub use downloaders::BlockDownloaderProvider;
+pub use error::NetworkError;
+pub use events::{
+    DiscoveredEvent, DiscoveryEvent, NetworkEvent, NetworkEventListenerProvider, PeerRequest,
+    PeerRequestSender,
+};
+
+use std::{future::Future, net::SocketAddr, sync::Arc, time::Instant};
+
+use reth_eth_wire_types::{capability::Capabilities, DisconnectReason, EthVersion, Status};
+use reth_network_peers::NodeRecord;
+
+/// The `PeerId` type.
+pub type PeerId = alloy_primitives::B512;
+
+/// Helper trait that unifies network API needed to launch node.
+pub trait FullNetwork:
+    BlockDownloaderProvider
+    + NetworkSyncUpdater
+    + NetworkInfo
+    + NetworkEventListenerProvider
+    + PeersInfo
+    + Peers
+    + Clone
+    + 'static
+{
+}
+
+impl<T> FullNetwork for T where
+    T: BlockDownloaderProvider
+        + NetworkSyncUpdater
+        + NetworkInfo
+        + NetworkEventListenerProvider
+        + PeersInfo
+        + Peers
+        + Clone
+        + 'static
+{
+}
 
 /// Provides general purpose information about the network.
+#[auto_impl::auto_impl(&, Arc)]
 pub trait NetworkInfo: Send + Sync {
     /// Returns the [`SocketAddr`] that listens for incoming connections.
     fn local_addr(&self) -> SocketAddr;
@@ -49,6 +86,7 @@ pub trait NetworkInfo: Send + Sync {
 }
 
 /// Provides general purpose information about Peers in the network.
+#[auto_impl::auto_impl(&, Arc)]
 pub trait PeersInfo: Send + Sync {
     /// Returns how many peers the network is currently connected to.
     ///
@@ -63,47 +101,64 @@ pub trait PeersInfo: Send + Sync {
 }
 
 /// Provides an API for managing the peers of the network.
+#[auto_impl::auto_impl(&, Arc)]
 pub trait Peers: PeersInfo {
-    /// Adds a peer to the peer set.
-    fn add_peer(&self, peer: PeerId, addr: SocketAddr) {
-        self.add_peer_kind(peer, PeerKind::Basic, addr);
+    /// Adds a peer to the peer set with TCP `SocketAddr`.
+    fn add_peer(&self, peer: PeerId, tcp_addr: SocketAddr) {
+        self.add_peer_kind(peer, PeerKind::Static, tcp_addr, None);
     }
 
-    /// Adds a trusted [PeerId] to the peer set.
+    /// Adds a peer to the peer set with TCP and UDP `SocketAddr`.
+    fn add_peer_with_udp(&self, peer: PeerId, tcp_addr: SocketAddr, udp_addr: SocketAddr) {
+        self.add_peer_kind(peer, PeerKind::Static, tcp_addr, Some(udp_addr));
+    }
+
+    /// Adds a trusted [`PeerId`] to the peer set.
     ///
     /// This allows marking a peer as trusted without having to know the peer's address.
     fn add_trusted_peer_id(&self, peer: PeerId);
 
-    /// Adds a trusted peer to the peer set.
-    fn add_trusted_peer(&self, peer: PeerId, addr: SocketAddr) {
-        self.add_peer_kind(peer, PeerKind::Trusted, addr);
+    /// Adds a trusted peer to the peer set with TCP `SocketAddr`.
+    fn add_trusted_peer(&self, peer: PeerId, tcp_addr: SocketAddr) {
+        self.add_peer_kind(peer, PeerKind::Trusted, tcp_addr, None);
+    }
+
+    /// Adds a trusted peer with TCP and UDP `SocketAddr` to the peer set.
+    fn add_trusted_peer_with_udp(&self, peer: PeerId, tcp_addr: SocketAddr, udp_addr: SocketAddr) {
+        self.add_peer_kind(peer, PeerKind::Trusted, tcp_addr, Some(udp_addr));
     }
 
     /// Adds a peer to the known peer set, with the given kind.
-    fn add_peer_kind(&self, peer: PeerId, kind: PeerKind, addr: SocketAddr);
+    fn add_peer_kind(
+        &self,
+        peer: PeerId,
+        kind: PeerKind,
+        tcp_addr: SocketAddr,
+        udp_addr: Option<SocketAddr>,
+    );
 
-    /// Returns the rpc [PeerInfo] for all connected [PeerKind::Trusted] peers.
+    /// Returns the rpc [`PeerInfo`] for all connected [`PeerKind::Trusted`] peers.
     fn get_trusted_peers(
         &self,
     ) -> impl Future<Output = Result<Vec<PeerInfo>, NetworkError>> + Send {
         self.get_peers_by_kind(PeerKind::Trusted)
     }
 
-    /// Returns the rpc [PeerInfo] for all connected [PeerKind::Basic] peers.
+    /// Returns the rpc [`PeerInfo`] for all connected [`PeerKind::Basic`] peers.
     fn get_basic_peers(&self) -> impl Future<Output = Result<Vec<PeerInfo>, NetworkError>> + Send {
         self.get_peers_by_kind(PeerKind::Basic)
     }
 
-    /// Returns the rpc [PeerInfo] for all connected peers with the given kind.
+    /// Returns the rpc [`PeerInfo`] for all connected peers with the given kind.
     fn get_peers_by_kind(
         &self,
         kind: PeerKind,
     ) -> impl Future<Output = Result<Vec<PeerInfo>, NetworkError>> + Send;
 
-    /// Returns the rpc [PeerInfo] for all connected peers.
+    /// Returns the rpc [`PeerInfo`] for all connected peers.
     fn get_all_peers(&self) -> impl Future<Output = Result<Vec<PeerInfo>, NetworkError>> + Send;
 
-    /// Returns the rpc [PeerInfo] for the given peer id.
+    /// Returns the rpc [`PeerInfo`] for the given peer id.
     ///
     /// Returns `None` if the peer is not connected.
     fn get_peer_by_id(
@@ -111,7 +166,7 @@ pub trait Peers: PeersInfo {
         peer_id: PeerId,
     ) -> impl Future<Output = Result<Option<PeerInfo>, NetworkError>> + Send;
 
-    /// Returns the rpc [PeerInfo] for the given peers if they are connected.
+    /// Returns the rpc [`PeerInfo`] for the given peers if they are connected.
     ///
     /// Note: This only returns peers that are connected, unconnected peers are ignored but keeping
     /// the order in which they were requested.
@@ -129,6 +184,21 @@ pub trait Peers: PeersInfo {
     /// Disconnect an existing connection to the given peer using the provided reason
     fn disconnect_peer_with_reason(&self, peer: PeerId, reason: DisconnectReason);
 
+    /// Connect to the given peer. NOTE: if the maximum number out outbound sessions is reached,
+    /// this won't do anything. See `reth_network::SessionManager::dial_outbound`.
+    fn connect_peer(&self, peer: PeerId, tcp_addr: SocketAddr) {
+        self.connect_peer_kind(peer, PeerKind::Static, tcp_addr, None)
+    }
+
+    /// Connects a peer to the known peer set, with the given kind.
+    fn connect_peer_kind(
+        &self,
+        peer: PeerId,
+        kind: PeerKind,
+        tcp_addr: SocketAddr,
+        udp_addr: Option<SocketAddr>,
+    );
+
     /// Send a reputation change for the given peer.
     fn reputation_change(&self, peer_id: PeerId, kind: ReputationChangeKind);
 
@@ -137,28 +207,6 @@ pub trait Peers: PeersInfo {
         &self,
         peer_id: PeerId,
     ) -> impl Future<Output = Result<Option<Reputation>, NetworkError>> + Send;
-}
-
-/// Represents the kind of peer
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
-pub enum PeerKind {
-    /// Basic peer kind.
-    #[default]
-    Basic,
-    /// Trusted peer.
-    Trusted,
-}
-
-impl PeerKind {
-    /// Returns `true` if the peer is trusted.
-    pub const fn is_trusted(&self) -> bool {
-        matches!(self, PeerKind::Trusted)
-    }
-
-    /// Returns `true` if the peer is basic.
-    pub const fn is_basic(&self) -> bool {
-        matches!(self, PeerKind::Basic)
-    }
 }
 
 /// Info about an active peer session.
@@ -170,6 +218,10 @@ pub struct PeerInfo {
     pub remote_id: PeerId,
     /// The client's name and version
     pub client_version: Arc<str>,
+    /// The peer's enode
+    pub enode: String,
+    /// The peer's enr
+    pub enr: Option<String>,
     /// The peer's address we're connected to
     pub remote_addr: SocketAddr,
     /// The local address of the connection
@@ -182,6 +234,8 @@ pub struct PeerInfo {
     pub status: Arc<Status>,
     /// The timestamp when the session to that peer has been established.
     pub session_established: Instant,
+    /// The peer's connection kind
+    pub kind: PeerKind,
 }
 
 /// The direction of the connection.
@@ -195,21 +249,33 @@ pub enum Direction {
 
 impl Direction {
     /// Returns `true` if this an incoming connection.
-    pub fn is_incoming(&self) -> bool {
-        matches!(self, Direction::Incoming)
+    pub const fn is_incoming(&self) -> bool {
+        matches!(self, Self::Incoming)
     }
 
     /// Returns `true` if this an outgoing connection.
-    pub fn is_outgoing(&self) -> bool {
-        matches!(self, Direction::Outgoing(_))
+    pub const fn is_outgoing(&self) -> bool {
+        matches!(self, Self::Outgoing(_))
     }
 }
 
 impl std::fmt::Display for Direction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Direction::Incoming => write!(f, "incoming"),
-            Direction::Outgoing(_) => write!(f, "outgoing"),
+            Self::Incoming => write!(f, "incoming"),
+            Self::Outgoing(_) => write!(f, "outgoing"),
         }
     }
+}
+
+/// The status of the network being ran by the local node.
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct NetworkStatus {
+    /// The local node client version.
+    pub client_version: String,
+    /// The current ethereum protocol version
+    pub protocol_version: u64,
+    /// Information about the Ethereum Wire Protocol.
+    pub eth_protocol_info: EthProtocolInfo,
 }

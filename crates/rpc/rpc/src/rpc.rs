@@ -1,7 +1,8 @@
+use alloy_primitives::map::HashMap;
+use alloy_rpc_types::RpcModules;
 use jsonrpsee::core::RpcResult;
 use reth_rpc_api::RpcApiServer;
-use reth_rpc_types::RpcModules;
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 /// `rpc` API implementation.
 ///
@@ -13,9 +14,9 @@ pub struct RPCApi {
 }
 
 impl RPCApi {
-    /// Return a new RPCApi struct, with given module_map
+    /// Return a new `RPCApi` struct, with given `module_map`
     pub fn new(module_map: HashMap<String, String>) -> Self {
-        RPCApi { rpc_modules: Arc::new(RpcModules::new(module_map)) }
+        Self { rpc_modules: Arc::new(RpcModules::new(module_map)) }
     }
 }
 

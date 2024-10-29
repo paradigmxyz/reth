@@ -1,0 +1,30 @@
+[package]
+name = "example-bsc-p2p"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+reth-chainspec.workspace = true
+reth-discv4 = { workspace = true, features = ["test-utils"] }
+reth-network = { workspace = true, features = ["test-utils"] }
+reth-network-api.workspace = true
+reth-network-peers.workspace = true
+reth-primitives.workspace = true
+reth-tracing.workspace = true
+
+secp256k1 = { workspace = true, features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
+
+tokio.workspace = true
+tokio-stream.workspace = true
+
+serde_json.workspace = true
+
+alloy-primitives.workspace = true

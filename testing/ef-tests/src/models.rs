@@ -1,15 +1,15 @@
 //! Shared models for <https://github.com/ethereum/tests>
 
 use crate::{assert::assert_equal, Error};
-use reth_db::{
+use alloy_primitives::{keccak256, Address, Bloom, Bytes, B256, B64, U256};
+use reth_chainspec::{ChainSpec, ChainSpecBuilder};
+use reth_db::tables;
+use reth_db_api::{
     cursor::DbDupCursorRO,
-    tables,
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{
-    keccak256, Account as RethAccount, Address, Bloom, Bytecode, Bytes, ChainSpec,
-    ChainSpecBuilder, Header as RethHeader, SealedHeader, StorageEntry, Withdrawals, B256, B64,
-    U256,
+    Account as RethAccount, Bytecode, Header as RethHeader, SealedHeader, StorageEntry, Withdrawals,
 };
 use serde::Deserialize;
 use std::{collections::BTreeMap, ops::Deref};
@@ -41,7 +41,7 @@ pub struct BlockchainTest {
 }
 
 /// A block header in an Ethereum blockchain test.
-#[derive(Debug, PartialEq, Eq, Clone, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Header {
     /// Bloom filter.
@@ -86,6 +86,8 @@ pub struct Header {
     pub excess_blob_gas: Option<U256>,
     /// Parent beacon block root.
     pub parent_beacon_block_root: Option<B256>,
+    /// Requests root.
+    pub requests_hash: Option<B256>,
 }
 
 impl From<Header> for SealedHeader {
@@ -98,7 +100,7 @@ impl From<Header> for SealedHeader {
             gas_limit: value.gas_limit.to::<u64>(),
             gas_used: value.gas_used.to::<u64>(),
             mix_hash: value.mix_hash,
-            nonce: u64::from_be_bytes(value.nonce.0),
+            nonce: u64::from_be_bytes(value.nonce.0).into(),
             number: value.number.to::<u64>(),
             timestamp: value.timestamp.to::<u64>(),
             transactions_root: value.transactions_trie,
@@ -111,13 +113,14 @@ impl From<Header> for SealedHeader {
             blob_gas_used: value.blob_gas_used.map(|v| v.to::<u64>()),
             excess_blob_gas: value.excess_blob_gas.map(|v| v.to::<u64>()),
             parent_beacon_block_root: value.parent_beacon_block_root,
+            requests_hash: value.requests_hash,
         };
-        header.seal(value.hash)
+        Self::new(header, value.hash)
     }
 }
 
 /// A block in an Ethereum blockchain test.
-#[derive(Debug, PartialEq, Eq, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Block {
     /// Block header.
@@ -135,7 +138,7 @@ pub struct Block {
 }
 
 /// Transaction sequence in block
-#[derive(Debug, PartialEq, Eq, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionSequence {
@@ -145,13 +148,13 @@ pub struct TransactionSequence {
 }
 
 /// Ethereum blockchain test data state.
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Default)]
 pub struct State(BTreeMap<Address, Account>);
 
 impl State {
     /// Write the state to the database.
     pub fn write_to_db(&self, tx: &impl DbTxMut) -> Result<(), Error> {
-        for (&address, account) in self.0.iter() {
+        for (&address, account) in &self.0 {
             let hashed_address = keccak256(address);
             let has_code = !account.code.is_empty();
             let code_hash = has_code.then(|| keccak256(&account.code));
@@ -191,7 +194,7 @@ impl Deref for State {
 }
 
 /// An account.
-#[derive(Debug, PartialEq, Eq, Deserialize, Clone)]
+#[derive(Debug, PartialEq, Eq, Deserialize, Clone, Default)]
 #[serde(deny_unknown_fields)]
 pub struct Account {
     /// Balance.
@@ -227,7 +230,7 @@ impl Account {
         }
 
         let mut storage_cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
-        for (slot, value) in self.storage.iter() {
+        for (slot, value) in &self.storage {
             if let Some(entry) =
                 storage_cursor.seek_by_key_subkey(address, B256::new(slot.to_be_bytes()))?
             {
@@ -254,7 +257,7 @@ impl Account {
 }
 
 /// Fork specification.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Hash, Ord, Clone, Deserialize)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Hash, Ord, Clone, Copy, Deserialize)]
 pub enum ForkSpec {
     /// Frontier
     Frontier,
@@ -330,9 +333,9 @@ impl From<ForkSpec> for ChainSpec {
             ForkSpec::Istanbul => spec_builder.istanbul_activated(),
             ForkSpec::Berlin => spec_builder.berlin_activated(),
             ForkSpec::London | ForkSpec::BerlinToLondonAt5 => spec_builder.london_activated(),
-            ForkSpec::Merge => spec_builder.paris_activated(),
-            ForkSpec::MergeEOF => spec_builder.paris_activated(),
-            ForkSpec::MergeMeterInitCode => spec_builder.paris_activated(),
+            ForkSpec::Merge |
+            ForkSpec::MergeEOF |
+            ForkSpec::MergeMeterInitCode |
             ForkSpec::MergePush0 => spec_builder.paris_activated(),
             ForkSpec::Shanghai => spec_builder.shanghai_activated(),
             ForkSpec::Cancun => spec_builder.cancun_activated(),

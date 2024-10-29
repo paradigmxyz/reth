@@ -13,8 +13,14 @@ workspace = true
 
 [dependencies]
 # reth
-reth-codecs.workspace = true
+reth-chainspec.workspace = true
+reth-codecs-derive.workspace = true
 reth-primitives.workspace = true
+
+# ethereum
+alloy-chains = { workspace = true, features = ["rlp"] }
+alloy-eips.workspace = true
+alloy-primitives.workspace = true
 alloy-rlp = { workspace = true, features = ["derive"] }
 
 bytes.workspace = true
@@ -25,34 +31,36 @@ serde = { workspace = true, optional = true }
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
-proptest-derive = { workspace = true, optional = true }
+proptest-arbitrary-interop = { workspace = true, optional = true }
 
 [dev-dependencies]
-reth-net-common.workspace = true
 reth-primitives = { workspace = true, features = ["arbitrary"] }
-reth-tracing.workspace = true
-
-test-fuzz.workspace = true
-tokio-util = { workspace = true, features = ["io", "codec"] }
-rand.workspace = true
-secp256k1 = { workspace = true, features = [
-    "global-context",
-    "rand-std",
-    "recovery",
-] }
-
+alloy-genesis.workspace = true
+alloy-chains = { workspace = true, features = ["arbitrary"] }
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
-proptest-derive.workspace = true
-async-stream.workspace = true
+proptest-arbitrary-interop.workspace = true
+rand.workspace = true
+alloy-consensus.workspace = true
 
 [features]
-default = ["serde"]
-serde = ["dep:serde"]
 arbitrary = [
-    "reth-primitives/arbitrary",
-    "dep:arbitrary",
-    "dep:proptest",
-    "dep:proptest-derive",
+	"reth-primitives/arbitrary",
+	"alloy-chains/arbitrary",
+	"dep:arbitrary",
+	"dep:proptest",
+	"dep:proptest-arbitrary-interop",
+	"reth-chainspec/arbitrary",
+	"alloy-consensus/arbitrary",
+	"alloy-eips/arbitrary",
+	"alloy-primitives/arbitrary"
 ]
-optimism = ["reth-primitives/optimism"]
+serde = [
+	"dep:serde",
+	"alloy-chains/serde",
+	"alloy-consensus/serde",
+	"alloy-eips/serde",
+	"alloy-primitives/serde",
+	"bytes/serde",
+	"rand/serde"
+]

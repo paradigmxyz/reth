@@ -1,8 +1,9 @@
 #![allow(missing_docs)]
+use alloy_primitives::hex_literal::hex;
 use alloy_rlp::Decodable;
 use criterion::{criterion_group, criterion_main, Criterion};
 use pprof::criterion::{Output, PProfProfiler};
-use reth_primitives::{hex_literal::hex, TransactionSigned};
+use reth_primitives::TransactionSigned;
 
 /// Benchmarks the recovery of the public key from the ECDSA message using criterion.
 pub fn criterion_benchmark(c: &mut Criterion) {

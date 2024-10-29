@@ -3,7 +3,7 @@
 Reth exposes a number of metrics, which are listed [here][metrics]. We can serve them from an HTTP endpoint by adding the `--metrics` flag:
 
 ```bash
-RUST_LOG=info reth node --metrics 127.0.0.1:9001
+reth node --metrics 127.0.0.1:9001
 ```
 
 Now, as the node is running, you can `curl` the endpoint you provided to the `--metrics` flag to get a text dump of the metrics at that time:
@@ -55,7 +55,7 @@ Depending on your installation you may find the config for your Prometheus servi
 
 Next, open up "localhost:3000" in your browser, which is the default URL for Grafana. Here, "admin" is the default for both the username and password.
 
-Once you've logged in, click on the gear icon in the lower left, and select "Data Sources". Click on "Add data source", and select "Prometheus" as the type. In the HTTP URL field, enter `http://localhost:9090`. Finally, click "Save & Test".
+Once you've logged in, click on "Connections" in the left side panel and select "Data Sources". Click on "Add data source", and select "Prometheus" as the type. In the HTTP URL field, enter http://localhost:9090. Finally, click "Save & Test".
 
 As this might be a point of confusion, `localhost:9001`, which we supplied to `--metrics`, is the endpoint that Reth exposes, from which Prometheus collects metrics. Prometheus then exposes `localhost:9090` (by default) for other services (such as Grafana) to consume Prometheus metrics.
 

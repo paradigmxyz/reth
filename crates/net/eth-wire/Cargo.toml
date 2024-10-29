@@ -13,22 +13,25 @@ workspace = true
 
 [dependencies]
 # reth
+reth-chainspec.workspace = true
 reth-codecs.workspace = true
 reth-primitives.workspace = true
 reth-ecies.workspace = true
 alloy-rlp = { workspace = true, features = ["derive"] }
-reth-discv4.workspace = true
 reth-eth-wire-types.workspace = true
+reth-network-peers.workspace = true
+
+# ethereum
+alloy-primitives.workspace = true
 
 # metrics
 reth-metrics.workspace = true
-metrics.workspace = true
 
 bytes.workspace = true
 derive_more.workspace = true
 thiserror.workspace = true
 serde = { workspace = true, optional = true }
-tokio = { workspace = true, features = ["full"] }
+tokio = { workspace = true, features = ["macros", "net", "sync", "time"] }
 tokio-util = { workspace = true, features = ["io", "codec"] }
 futures.workspace = true
 tokio-stream.workspace = true
@@ -38,15 +41,14 @@ snap = "1.0.5"
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
-proptest = { workspace = true, optional = true }
-proptest-derive = { workspace = true, optional = true }
 
 [dev-dependencies]
-reth-net-common.workspace = true
 reth-primitives = { workspace = true, features = ["arbitrary"] }
+reth-eth-wire-types = { workspace = true, features = ["arbitrary"] }
 reth-tracing.workspace = true
 
 test-fuzz.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 tokio-util = { workspace = true, features = ["io", "codec"] }
 rand.workspace = true
 secp256k1 = { workspace = true, features = [
@@ -57,19 +59,31 @@ secp256k1 = { workspace = true, features = [
 
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
-proptest-derive.workspace = true
+proptest-arbitrary-interop.workspace = true
 async-stream.workspace = true
+serde.workspace = true
+alloy-eips.workspace = true
 
 [features]
-default = ["serde"]
-serde = ["dep:serde"]
 arbitrary = [
-    "reth-primitives/arbitrary",
-    "dep:arbitrary",
-    "dep:proptest",
-    "dep:proptest-derive",
+	"reth-primitives/arbitrary",
+	"reth-eth-wire-types/arbitrary",
+	"dep:arbitrary",
+	"reth-chainspec/arbitrary",
+	"alloy-eips/arbitrary",
+	"alloy-primitives/arbitrary",
+	"reth-codecs/arbitrary"
 ]
-optimism = ["reth-primitives/optimism"]
+serde = [
+	"dep:serde",
+	"reth-eth-wire-types/serde",
+	"alloy-eips/serde",
+	"alloy-primitives/serde",
+	"bytes/serde",
+	"rand/serde",
+	"secp256k1/serde",
+	"reth-codecs/serde"
+]
 
 [[test]]
 name = "fuzz_roundtrip"

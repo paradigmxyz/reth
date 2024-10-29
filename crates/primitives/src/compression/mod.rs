@@ -1,4 +1,5 @@
-use std::{cell::RefCell, thread_local};
+use alloc::vec::Vec;
+use core::cell::RefCell;
 use zstd::bulk::{Compressor, Decompressor};
 
 /// Compression/Decompression dictionary for `Receipt`.
@@ -8,7 +9,8 @@ pub static TRANSACTION_DICTIONARY: &[u8] = include_bytes!("./transaction_diction
 
 // We use `thread_local` compressors and decompressors because dictionaries can be quite big, and
 // zstd-rs recommends to use one context/compressor per thread
-thread_local! {
+#[cfg(feature = "std")]
+std::thread_local! {
     /// Thread Transaction compressor.
     pub static TRANSACTION_COMPRESSOR: RefCell<Compressor<'static>> = RefCell::new(
         Compressor::with_dictionary(0, TRANSACTION_DICTIONARY)
@@ -36,6 +38,33 @@ thread_local! {
         ));
 }
 
+/// Fn creates tx [`Compressor`]
+pub fn create_tx_compressor() -> Compressor<'static> {
+    Compressor::with_dictionary(0, RECEIPT_DICTIONARY).expect("Failed to instantiate tx compressor")
+}
+
+/// Fn creates tx [`Decompressor`]
+pub fn create_tx_decompressor() -> ReusableDecompressor {
+    ReusableDecompressor::new(
+        Decompressor::with_dictionary(TRANSACTION_DICTIONARY)
+            .expect("Failed to instantiate tx decompressor"),
+    )
+}
+
+/// Fn creates receipt [`Compressor`]
+pub fn create_receipt_compressor() -> Compressor<'static> {
+    Compressor::with_dictionary(0, RECEIPT_DICTIONARY)
+        .expect("Failed to instantiate receipt compressor")
+}
+
+/// Fn creates receipt [`Decompressor`]
+pub fn create_receipt_decompressor() -> ReusableDecompressor {
+    ReusableDecompressor::new(
+        Decompressor::with_dictionary(RECEIPT_DICTIONARY)
+            .expect("Failed to instantiate receipt decompressor"),
+    )
+}
+
 /// Reusable decompressor that uses its own internal buffer.
 #[allow(missing_debug_implementations)]
 pub struct ReusableDecompressor {
@@ -57,9 +86,11 @@ impl ReusableDecompressor {
         let mut reserved_upper_bound = false;
         while let Err(err) = self.decompressor.decompress_to_buffer(src, &mut self.buf) {
             let err = err.to_string();
-            if !err.contains("Destination buffer is too small") {
-                panic!("Failed to decompress {} bytes: {err}", src.len());
-            }
+            assert!(
+                err.contains("Destination buffer is too small"),
+                "Failed to decompress {} bytes: {err}",
+                src.len()
+            );
 
             let additional = 'b: {
                 // Try to get the upper bound of the decompression for the given source.
@@ -69,7 +100,7 @@ impl ReusableDecompressor {
                     reserved_upper_bound = true;
                     if let Some(upper_bound) = Decompressor::upper_bound(src) {
                         if let Some(additional) = upper_bound.checked_sub(self.buf.capacity()) {
-                            break 'b additional;
+                            break 'b additional
                         }
                     }
                 }

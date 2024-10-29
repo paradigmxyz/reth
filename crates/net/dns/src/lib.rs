@@ -21,8 +21,9 @@ use crate::{
 };
 pub use config::DnsDiscoveryConfig;
 use enr::Enr;
-use error::ParseDnsEntryError;
-use reth_primitives::{pk2id, ForkId, NodeRecord};
+pub use error::ParseDnsEntryError;
+use reth_ethereum_forks::{EnrForkIdEntry, ForkId};
+use reth_network_peers::{pk2id, NodeRecord};
 use schnellru::{ByLength, LruMap};
 use secp256k1::SecretKey;
 use std::{
@@ -55,7 +56,7 @@ pub mod resolver;
 mod sync;
 pub mod tree;
 
-/// [DnsDiscoveryService] front-end.
+/// [`DnsDiscoveryService`] front-end.
 #[derive(Clone, Debug)]
 pub struct DnsDiscoveryHandle {
     /// Channel for sending commands to the service.
@@ -66,13 +67,13 @@ pub struct DnsDiscoveryHandle {
 
 impl DnsDiscoveryHandle {
     /// Starts syncing the given link to a tree.
-    pub fn sync_tree(&mut self, link: &str) -> Result<(), ParseDnsEntryError> {
+    pub fn sync_tree(&self, link: &str) -> Result<(), ParseDnsEntryError> {
         self.sync_tree_with_link(link.parse()?);
         Ok(())
     }
 
     /// Starts syncing the given link to a tree.
-    pub fn sync_tree_with_link(&mut self, link: LinkEntry) {
+    pub fn sync_tree_with_link(&self, link: LinkEntry) {
         let _ = self.to_service.send(DnsDiscoveryCommand::SyncTree(link));
     }
 
@@ -95,7 +96,7 @@ pub struct DnsDiscoveryService<R: Resolver = DnsResolver> {
     command_tx: UnboundedSender<DnsDiscoveryCommand>,
     /// Receiver half of the command channel.
     command_rx: UnboundedReceiverStream<DnsDiscoveryCommand>,
-    /// All subscribers for resolved [NodeRecord]s.
+    /// All subscribers for resolved [`NodeRecord`]s.
     node_record_listeners: Vec<mpsc::Sender<DnsNodeRecordUpdate>>,
     /// All the trees that can be synced.
     trees: HashMap<LinkEntry, SyncTree>,
@@ -114,7 +115,7 @@ pub struct DnsDiscoveryService<R: Resolver = DnsResolver> {
 // === impl DnsDiscoveryService ===
 
 impl<R: Resolver> DnsDiscoveryService<R> {
-    /// Creates a new instance of the [DnsDiscoveryService] using the given settings.
+    /// Creates a new instance of the [`DnsDiscoveryService`] using the given settings.
     ///
     /// ```
     /// use reth_dns_discovery::{DnsDiscoveryService, DnsResolver};
@@ -169,7 +170,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
         }
     }
 
-    /// Same as [DnsDiscoveryService::new] but also returns a new handle that's connected to the
+    /// Same as [`DnsDiscoveryService::new`] but also returns a new handle that's connected to the
     /// service
     pub fn new_pair(resolver: Arc<R>, config: DnsDiscoveryConfig) -> (Self, DnsDiscoveryHandle) {
         let service = Self::new(resolver, config);
@@ -376,7 +377,7 @@ pub struct DnsNodeRecordUpdate {
     pub enr: Enr<SecretKey>,
 }
 
-/// Commands sent from [DnsDiscoveryHandle] to [DnsDiscoveryService]
+/// Commands sent from [`DnsDiscoveryHandle`] to [`DnsDiscoveryService`]
 enum DnsDiscoveryCommand {
     /// Sync a tree
     SyncTree(LinkEntry),
@@ -390,10 +391,8 @@ pub enum DnsDiscoveryEvent {
     Enr(Enr<SecretKey>),
 }
 
-/// Converts an [Enr] into a [NodeRecord]
+/// Converts an [Enr] into a [`NodeRecord`]
 fn convert_enr_node_record(enr: &Enr<SecretKey>) -> Option<DnsNodeRecordUpdate> {
-    use alloy_rlp::Decodable;
-
     let node_record = NodeRecord {
         address: enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from))?,
         tcp_port: enr.tcp4().or_else(|| enr.tcp6())?,
@@ -402,8 +401,8 @@ fn convert_enr_node_record(enr: &Enr<SecretKey>) -> Option<DnsNodeRecordUpdate> 
     }
     .into_ipv4_mapped();
 
-    let mut maybe_fork_id = enr.get(b"eth")?;
-    let fork_id = ForkId::decode(&mut maybe_fork_id).ok();
+    let fork_id =
+        enr.get_decodable::<EnrForkIdEntry>(b"eth").transpose().ok().flatten().map(Into::into);
 
     Some(DnsNodeRecordUpdate { node_record, fork_id, enr: enr.clone() })
 }
@@ -412,11 +411,64 @@ fn convert_enr_node_record(enr: &Enr<SecretKey>) -> Option<DnsNodeRecordUpdate> 
 mod tests {
     use super::*;
     use crate::tree::TreeRootEntry;
-    use alloy_rlp::Encodable;
+    use alloy_chains::Chain;
+    use alloy_rlp::{Decodable, Encodable};
     use enr::EnrKey;
-    use reth_primitives::{Chain, Hardfork, MAINNET};
+    use reth_chainspec::MAINNET;
+    use reth_ethereum_forks::{EthereumHardfork, ForkHash};
     use secp256k1::rand::thread_rng;
     use std::{future::poll_fn, net::Ipv4Addr};
+
+    #[test]
+    fn test_convert_enr_node_record() {
+        // rig
+        let secret_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
+        let enr = Enr::builder()
+            .ip("127.0.0.1".parse().unwrap())
+            .udp4(9000)
+            .tcp4(30303)
+            .add_value(b"eth", &EnrForkIdEntry::from(MAINNET.latest_fork_id()))
+            .build(&secret_key)
+            .unwrap();
+
+        // test
+        let node_record_update = convert_enr_node_record(&enr).unwrap();
+
+        assert_eq!(node_record_update.node_record.address, "127.0.0.1".parse::<IpAddr>().unwrap());
+        assert_eq!(node_record_update.node_record.tcp_port, 30303);
+        assert_eq!(node_record_update.node_record.udp_port, 9000);
+        assert_eq!(node_record_update.fork_id, Some(MAINNET.latest_fork_id()));
+        assert_eq!(node_record_update.enr, enr);
+    }
+
+    #[test]
+    fn test_decode_and_convert_enr_node_record() {
+        // rig
+
+        let secret_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
+        let enr = Enr::builder()
+            .ip("127.0.0.1".parse().unwrap())
+            .udp4(9000)
+            .tcp4(30303)
+            .add_value(b"eth", &EnrForkIdEntry::from(MAINNET.latest_fork_id()))
+            .add_value(b"opstack", &ForkId { hash: ForkHash(rand::random()), next: rand::random() })
+            .build(&secret_key)
+            .unwrap();
+
+        let mut encoded_enr = vec![];
+        enr.encode(&mut encoded_enr);
+
+        // test
+        let decoded_enr = Enr::decode(&mut &encoded_enr[..]).unwrap();
+
+        let node_record_update = convert_enr_node_record(&decoded_enr).unwrap();
+
+        assert_eq!(node_record_update.node_record.address, "127.0.0.1".parse::<IpAddr>().unwrap());
+        assert_eq!(node_record_update.node_record.tcp_port, 30303);
+        assert_eq!(node_record_update.node_record.udp_port, 9000);
+        assert_eq!(node_record_update.fork_id, Some(MAINNET.latest_fork_id()));
+        assert_eq!(node_record_update.enr, enr);
+    }
 
     #[tokio::test]
     async fn test_start_root_sync() {
@@ -461,10 +513,12 @@ mod tests {
         resolver.insert(link.domain.clone(), root.to_string());
 
         let mut builder = Enr::builder();
-        let mut buf = Vec::new();
-        let fork_id = MAINNET.hardfork_fork_id(Hardfork::Frontier).unwrap();
-        fork_id.encode(&mut buf);
-        builder.ip4(Ipv4Addr::LOCALHOST).udp4(30303).tcp4(30303).add_value(b"eth", &buf);
+        let fork_id = MAINNET.hardfork_fork_id(EthereumHardfork::Frontier).unwrap();
+        builder
+            .ip4(Ipv4Addr::LOCALHOST)
+            .udp4(30303)
+            .tcp4(30303)
+            .add_value(b"eth", &EnrForkIdEntry::from(fork_id));
         let enr = builder.build(&secret_key).unwrap();
 
         resolver.insert(format!("{}.{}", root.enr_root.clone(), link.domain), enr.to_base64());

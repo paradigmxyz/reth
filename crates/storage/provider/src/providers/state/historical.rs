@@ -2,21 +2,31 @@ use crate::{
     providers::{state::macros::delegate_provider_impls, StaticFileProvider},
     AccountReader, BlockHashReader, ProviderError, StateProvider, StateRootProvider,
 };
-use reth_db::{
+use alloy_eips::merge::EPOCH_SLOTS;
+use alloy_primitives::{
+    map::{HashMap, HashSet},
+    Address, BlockNumber, Bytes, StorageKey, StorageValue, B256,
+};
+use reth_db::{tables, BlockNumberList};
+use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     models::{storage_sharded_key::StorageShardedKey, ShardedKey},
     table::Table,
-    tables,
     transaction::DbTx,
-    BlockNumberList,
 };
-use reth_interfaces::provider::ProviderResult;
-use reth_primitives::{
-    constants::EPOCH_SLOTS, trie::AccountProof, Account, Address, BlockNumber, Bytecode,
-    StaticFileSegment, StorageKey, StorageValue, B256,
+use reth_primitives::{Account, Bytecode, StaticFileSegment};
+use reth_storage_api::{StateProofProvider, StorageRootProvider};
+use reth_storage_errors::provider::ProviderResult;
+use reth_trie::{
+    proof::{Proof, StorageProof},
+    updates::TrieUpdates,
+    witness::TrieWitness,
+    AccountProof, HashedPostState, HashedStorage, MultiProof, StateRoot, StorageRoot, TrieInput,
 };
-use reth_trie::{updates::TrieUpdates, HashedPostState};
-use revm::db::BundleState;
+use reth_trie_db::{
+    DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot,
+    DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness,
+};
 use std::fmt::Debug;
 
 /// State provider for a given block number which takes a tx reference.
@@ -25,11 +35,11 @@ use std::fmt::Debug;
 /// It means that all changes made in the provided block number are not included.
 ///
 /// Historical state provider reads the following tables:
-/// - [tables::AccountsHistory]
-/// - [tables::Bytecodes]
-/// - [tables::StoragesHistory]
-/// - [tables::AccountChangeSets]
-/// - [tables::StorageChangeSets]
+/// - [`tables::AccountsHistory`]
+/// - [`tables::Bytecodes`]
+/// - [`tables::StoragesHistory`]
+/// - [`tables::AccountChangeSets`]
+/// - [`tables::StorageChangeSets`]
 #[derive(Debug)]
 pub struct HistoricalStateProviderRef<'b, TX: DbTx> {
     /// Transaction
@@ -51,7 +61,7 @@ pub enum HistoryInfo {
 }
 
 impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
-    /// Create new StateProvider for historical block number
+    /// Create new `StateProvider` for historical block number
     pub fn new(
         tx: &'b TX,
         block_number: BlockNumber,
@@ -60,9 +70,9 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
         Self { tx, block_number, lowest_available_blocks: Default::default(), static_file_provider }
     }
 
-    /// Create new StateProvider for historical block number and lowest block numbers at which
+    /// Create new `StateProvider` for historical block number and lowest block numbers at which
     /// account & storage histories are available.
-    pub fn new_with_lowest_available_blocks(
+    pub const fn new_with_lowest_available_blocks(
         tx: &'b TX,
         block_number: BlockNumber,
         lowest_available_blocks: LowestAvailableBlocks,
@@ -71,7 +81,7 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
         Self { tx, block_number, lowest_available_blocks, static_file_provider }
     }
 
-    /// Lookup an account in the AccountsHistory table
+    /// Lookup an account in the `AccountsHistory` table
     pub fn account_history_lookup(&self, address: Address) -> ProviderResult<HistoryInfo> {
         if !self.lowest_available_blocks.is_account_history_available(self.block_number) {
             return Err(ProviderError::StateAtBlockPruned(self.block_number))
@@ -86,7 +96,7 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
         )
     }
 
-    /// Lookup a storage key in the StoragesHistory table
+    /// Lookup a storage key in the `StoragesHistory` table
     pub fn storage_history_lookup(
         &self,
         address: Address,
@@ -105,14 +115,8 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
         )
     }
 
-    /// Retrieve revert hashed state for this history provider.
-    fn revert_state(&self) -> ProviderResult<HashedPostState> {
-        if !self.lowest_available_blocks.is_account_history_available(self.block_number) ||
-            !self.lowest_available_blocks.is_storage_history_available(self.block_number)
-        {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number))
-        }
-
+    /// Checks and returns `true` if distance to historical block exceeds the provided limit.
+    fn check_distance_against_limit(&self, limit: u64) -> ProviderResult<bool> {
         let tip = self
             .tx
             .cursor_read::<tables::CanonicalHeaders>()?
@@ -123,15 +127,43 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
             })
             .ok_or(ProviderError::BestBlockNotFound)?;
 
-        if tip.saturating_sub(self.block_number) > EPOCH_SLOTS {
+        Ok(tip.saturating_sub(self.block_number) > limit)
+    }
+
+    /// Retrieve revert hashed state for this history provider.
+    fn revert_state(&self) -> ProviderResult<HashedPostState> {
+        if !self.lowest_available_blocks.is_account_history_available(self.block_number) ||
+            !self.lowest_available_blocks.is_storage_history_available(self.block_number)
+        {
+            return Err(ProviderError::StateAtBlockPruned(self.block_number))
+        }
+
+        if self.check_distance_against_limit(EPOCH_SLOTS)? {
             tracing::warn!(
                 target: "provider::historical_sp",
                 target = self.block_number,
-                "Attempt to calculate state root for an old block might result in OOM, treat carefully"
+                "Attempt to calculate state root for an old block might result in OOM"
             );
         }
 
-        Ok(HashedPostState::from_revert_range(self.tx, self.block_number..=tip)?)
+        Ok(HashedPostState::from_reverts(self.tx, self.block_number)?)
+    }
+
+    /// Retrieve revert hashed storage for this history provider and target address.
+    fn revert_storage(&self, address: Address) -> ProviderResult<HashedStorage> {
+        if !self.lowest_available_blocks.is_storage_history_available(self.block_number) {
+            return Err(ProviderError::StateAtBlockPruned(self.block_number))
+        }
+
+        if self.check_distance_against_limit(EPOCH_SLOTS * 10)? {
+            tracing::warn!(
+                target: "provider::historical_sp",
+                target = self.block_number,
+                "Attempt to calculate storage root for an old block might result in OOM"
+            );
+        }
+
+        Ok(HashedStorage::from_reverts(self.tx, address, self.block_number)?)
     }
 
     fn history_info<T, K>(
@@ -196,9 +228,27 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
             Ok(HistoryInfo::NotYetWritten)
         }
     }
+
+    /// Set the lowest block number at which the account history is available.
+    pub const fn with_lowest_available_account_history_block_number(
+        mut self,
+        block_number: BlockNumber,
+    ) -> Self {
+        self.lowest_available_blocks.account_history_block_number = Some(block_number);
+        self
+    }
+
+    /// Set the lowest block number at which the storage history is available.
+    pub const fn with_lowest_available_storage_history_block_number(
+        mut self,
+        block_number: BlockNumber,
+    ) -> Self {
+        self.lowest_available_blocks.storage_history_block_number = Some(block_number);
+        self
+    }
 }
 
-impl<'b, TX: DbTx> AccountReader for HistoricalStateProviderRef<'b, TX> {
+impl<TX: DbTx> AccountReader for HistoricalStateProviderRef<'_, TX> {
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
         match self.account_history_lookup(address)? {
@@ -220,7 +270,7 @@ impl<'b, TX: DbTx> AccountReader for HistoricalStateProviderRef<'b, TX> {
     }
 }
 
-impl<'b, TX: DbTx> BlockHashReader for HistoricalStateProviderRef<'b, TX> {
+impl<TX: DbTx> BlockHashReader for HistoricalStateProviderRef<'_, TX> {
     /// Get block hash by number.
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.static_file_provider.get_with_static_file_or_database(
@@ -256,23 +306,98 @@ impl<'b, TX: DbTx> BlockHashReader for HistoricalStateProviderRef<'b, TX> {
     }
 }
 
-impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
-    fn state_root(&self, state: &BundleState) -> ProviderResult<B256> {
+impl<TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'_, TX> {
+    fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         let mut revert_state = self.revert_state()?;
-        revert_state.extend(HashedPostState::from_bundle_state(&state.state));
-        revert_state.state_root(self.tx).map_err(|err| ProviderError::Database(err.into()))
+        revert_state.extend(hashed_state);
+        StateRoot::overlay_root(self.tx, revert_state)
+            .map_err(|err| ProviderError::Database(err.into()))
     }
 
-    fn state_root_with_updates(&self, state: &BundleState) -> ProviderResult<(B256, TrieUpdates)> {
+    fn state_root_from_nodes(&self, mut input: TrieInput) -> ProviderResult<B256> {
+        input.prepend(self.revert_state()?);
+        StateRoot::overlay_root_from_nodes(self.tx, input)
+            .map_err(|err| ProviderError::Database(err.into()))
+    }
+
+    fn state_root_with_updates(
+        &self,
+        hashed_state: HashedPostState,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
         let mut revert_state = self.revert_state()?;
-        revert_state.extend(HashedPostState::from_bundle_state(&state.state));
-        revert_state
-            .state_root_with_updates(self.tx)
+        revert_state.extend(hashed_state);
+        StateRoot::overlay_root_with_updates(self.tx, revert_state)
+            .map_err(|err| ProviderError::Database(err.into()))
+    }
+
+    fn state_root_from_nodes_with_updates(
+        &self,
+        mut input: TrieInput,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        input.prepend(self.revert_state()?);
+        StateRoot::overlay_root_from_nodes_with_updates(self.tx, input)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 }
 
-impl<'b, TX: DbTx> StateProvider for HistoricalStateProviderRef<'b, TX> {
+impl<TX: DbTx> StorageRootProvider for HistoricalStateProviderRef<'_, TX> {
+    fn storage_root(
+        &self,
+        address: Address,
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<B256> {
+        let mut revert_storage = self.revert_storage(address)?;
+        revert_storage.extend(&hashed_storage);
+        StorageRoot::overlay_root(self.tx, address, revert_storage)
+            .map_err(|err| ProviderError::Database(err.into()))
+    }
+
+    fn storage_proof(
+        &self,
+        address: Address,
+        slot: B256,
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<reth_trie::StorageProof> {
+        let mut revert_storage = self.revert_storage(address)?;
+        revert_storage.extend(&hashed_storage);
+        StorageProof::overlay_storage_proof(self.tx, address, slot, revert_storage)
+            .map_err(Into::<ProviderError>::into)
+    }
+}
+
+impl<TX: DbTx> StateProofProvider for HistoricalStateProviderRef<'_, TX> {
+    /// Get account and storage proofs.
+    fn proof(
+        &self,
+        mut input: TrieInput,
+        address: Address,
+        slots: &[B256],
+    ) -> ProviderResult<AccountProof> {
+        input.prepend(self.revert_state()?);
+        Proof::overlay_account_proof(self.tx, input, address, slots)
+            .map_err(Into::<ProviderError>::into)
+    }
+
+    fn multiproof(
+        &self,
+        mut input: TrieInput,
+        targets: HashMap<B256, HashSet<B256>>,
+    ) -> ProviderResult<MultiProof> {
+        input.prepend(self.revert_state()?);
+        Proof::overlay_multiproof(self.tx, input, targets).map_err(Into::<ProviderError>::into)
+    }
+
+    fn witness(
+        &self,
+        mut input: TrieInput,
+        target: HashedPostState,
+    ) -> ProviderResult<HashMap<B256, Bytes>> {
+        input.prepend(self.revert_state()?);
+        TrieWitness::overlay_witness(self.tx, input, target).map_err(Into::<ProviderError>::into)
+    }
+}
+
+impl<TX: DbTx> StateProvider for HistoricalStateProviderRef<'_, TX> {
     /// Get storage.
     fn storage(
         &self,
@@ -307,15 +432,10 @@ impl<'b, TX: DbTx> StateProvider for HistoricalStateProviderRef<'b, TX> {
     fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
         self.tx.get::<tables::Bytecodes>(code_hash).map_err(Into::into)
     }
-
-    /// Get account and storage proofs.
-    fn proof(&self, _address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
-        Err(ProviderError::StateRootNotAvailableForHistoricalBlock)
-    }
 }
 
 /// State provider for a given block number.
-/// For more detailed description, see [HistoricalStateProviderRef].
+/// For more detailed description, see [`HistoricalStateProviderRef`].
 #[derive(Debug)]
 pub struct HistoricalStateProvider<TX: DbTx> {
     /// Database transaction
@@ -329,7 +449,7 @@ pub struct HistoricalStateProvider<TX: DbTx> {
 }
 
 impl<TX: DbTx> HistoricalStateProvider<TX> {
-    /// Create new StateProvider for historical block number
+    /// Create new `StateProvider` for historical block number
     pub fn new(
         tx: TX,
         block_number: BlockNumber,
@@ -339,7 +459,7 @@ impl<TX: DbTx> HistoricalStateProvider<TX> {
     }
 
     /// Set the lowest block number at which the account history is available.
-    pub fn with_lowest_available_account_history_block_number(
+    pub const fn with_lowest_available_account_history_block_number(
         mut self,
         block_number: BlockNumber,
     ) -> Self {
@@ -348,7 +468,7 @@ impl<TX: DbTx> HistoricalStateProvider<TX> {
     }
 
     /// Set the lowest block number at which the storage history is available.
-    pub fn with_lowest_available_storage_history_block_number(
+    pub const fn with_lowest_available_storage_history_block_number(
         mut self,
         block_number: BlockNumber,
     ) -> Self {
@@ -376,12 +496,12 @@ delegate_provider_impls!(HistoricalStateProvider<TX> where [TX: DbTx]);
 #[derive(Clone, Copy, Debug, Default)]
 pub struct LowestAvailableBlocks {
     /// Lowest block number at which the account history is available. It may not be available if
-    /// [reth_primitives::PruneSegment::AccountHistory] was pruned.
-    /// [Option::None] means all history is available.
+    /// [`reth_prune_types::PruneSegment::AccountHistory`] was pruned.
+    /// [`Option::None`] means all history is available.
     pub account_history_block_number: Option<BlockNumber>,
     /// Lowest block number at which the storage history is available. It may not be available if
-    /// [reth_primitives::PruneSegment::StorageHistory] was pruned.
-    /// [Option::None] means all history is available.
+    /// [`reth_prune_types::PruneSegment::StorageHistory`] was pruned.
+    /// [`Option::None`] means all history is available.
     pub storage_history_block_number: Option<BlockNumber>,
 }
 
@@ -405,23 +525,24 @@ mod tests {
         providers::state::historical::{HistoryInfo, LowestAvailableBlocks},
         test_utils::create_test_provider_factory,
         AccountReader, HistoricalStateProvider, HistoricalStateProviderRef, StateProvider,
+        StaticFileProviderFactory,
     };
-    use reth_db::{
+    use alloy_primitives::{address, b256, Address, B256, U256};
+    use reth_db::{tables, BlockNumberList};
+    use reth_db_api::{
         models::{storage_sharded_key::StorageShardedKey, AccountBeforeTx, ShardedKey},
-        tables,
         transaction::{DbTx, DbTxMut},
-        BlockNumberList,
     };
-    use reth_interfaces::provider::ProviderError;
-    use reth_primitives::{address, b256, Account, Address, StorageEntry, B256, U256};
+    use reth_primitives::{Account, StorageEntry};
+    use reth_storage_errors::provider::ProviderError;
 
     const ADDRESS: Address = address!("0000000000000000000000000000000000000001");
     const HIGHER_ADDRESS: Address = address!("0000000000000000000000000000000000000005");
     const STORAGE: B256 = b256!("0000000000000000000000000000000000000000000000000000000000000001");
 
-    fn assert_state_provider<T: StateProvider>() {}
+    const fn assert_state_provider<T: StateProvider>() {}
     #[allow(dead_code)]
-    fn assert_historical_state_provider<T: DbTx>() {
+    const fn assert_historical_state_provider<T: DbTx>() {
         assert_state_provider::<HistoricalStateProvider<T>>();
     }
 

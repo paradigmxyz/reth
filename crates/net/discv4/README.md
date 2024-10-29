@@ -14,7 +14,7 @@ This is inspired by the [discv5](https://github.com/sigp/discv5) crate and reuse
 The discovery service continuously attempts to connect to other nodes on the network until it has found enough peers.
 If UPnP (Universal Plug and Play) is supported by the router the service is running on, it will also accept connections
 from external nodes. In the discovery protocol, nodes exchange information about where the node can be reached to
-eventually establish RLPx sessions.
+eventually establish ``RLPx`` sessions.
 
 ## Trouble Shooting
 

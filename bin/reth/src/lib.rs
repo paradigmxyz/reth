@@ -18,24 +18,31 @@
 //!   calls to the logging component is made.
 //! - `min-debug-logs`: Disables all logs below `debug` level.
 //! - `min-trace-logs`: Disables all logs below `trace` level.
-//! - `optimism`: Enables [OP-Stack](https://stack.optimism.io/) support for the node. Note that
-//!   this breaks compatibility with the Ethereum mainnet as a new deposit transaction type is
-//!   introduced as well as gas cost changes.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 pub mod cli;
 pub mod commands;
-pub mod utils;
+
+/// Re-exported utils.
+pub mod utils {
+    pub use reth_db::open_db_read_only;
+
+    /// Re-exported from `reth_node_core`, also to prevent a breaking change. See the comment
+    /// on the `reth_node_core::args` re-export for more details.
+    pub use reth_node_core::utils::*;
+}
 
 /// Re-exported payload related types
 pub mod payload {
     pub use reth_payload_builder::*;
+    pub use reth_payload_primitives::*;
     pub use reth_payload_validator::ExecutionPayloadValidator;
 }
 
@@ -49,9 +56,9 @@ pub mod core {
     pub use reth_node_core::*;
 }
 
-/// Re-exported from `reth_node_core`.
+/// Re-exported from `reth_node_metrics`.
 pub mod prometheus_exporter {
-    pub use reth_node_core::prometheus_exporter::*;
+    pub use reth_node_metrics::recorder::*;
 }
 
 /// Re-export of the `reth_node_core` types specifically in the `args` module.
@@ -80,6 +87,12 @@ pub mod dirs {
     pub use reth_node_core::dirs::*;
 }
 
+/// Re-exported from `reth_chainspec`
+pub mod chainspec {
+    pub use reth_chainspec::*;
+    pub use reth_ethereum_cli::chainspec::*;
+}
+
 /// Re-exported from `reth_provider`.
 pub mod providers {
     pub use reth_provider::*;
@@ -97,6 +110,11 @@ pub mod beacon_consensus {
 /// Re-exported from `reth_blockchain_tree`.
 pub mod blockchain_tree {
     pub use reth_blockchain_tree::*;
+}
+
+/// Re-exported from `reth_consensus`.
+pub mod consensus {
+    pub use reth_consensus::*;
 }
 
 /// Re-exported from `reth_consensus_common`.
@@ -117,7 +135,9 @@ pub mod tasks {
 /// Re-exported from `reth_network`.
 pub mod network {
     pub use reth_network::*;
-    pub use reth_network_api::{noop, reputation, NetworkInfo, PeerKind, Peers, PeersInfo};
+    pub use reth_network_api::{
+        noop, test_utils::PeersHandleProvider, NetworkInfo, Peers, PeersInfo,
+    };
 }
 
 /// Re-exported from `reth_transaction_pool`.
@@ -127,15 +147,23 @@ pub mod transaction_pool {
 
 /// Re-export of `reth_rpc_*` crates.
 pub mod rpc {
-
     /// Re-exported from `reth_rpc_builder`.
     pub mod builder {
         pub use reth_rpc_builder::*;
     }
 
-    /// Re-exported from `reth_rpc_types`.
+    /// Re-exported from `alloy_rpc_types`.
     pub mod types {
-        pub use reth_rpc_types::*;
+        pub use alloy_rpc_types::*;
+    }
+
+    /// Re-exported from `reth_rpc_server_types`.
+    pub mod server_types {
+        pub use reth_rpc_server_types::*;
+        /// Re-exported from `reth_rpc_eth_types`.
+        pub mod eth {
+            pub use reth_rpc_eth_types::*;
+        }
     }
 
     /// Re-exported from `reth_rpc_api`.
@@ -149,10 +177,10 @@ pub mod rpc {
 
     /// Re-exported from `reth_rpc::rpc`.
     pub mod result {
-        pub use reth_rpc::result::*;
+        pub use reth_rpc_server_types::result::*;
     }
 
-    /// Re-exported from `reth_rpc::eth`.
+    /// Re-exported from `reth_rpc_types_compat`.
     pub mod compat {
         pub use reth_rpc_types_compat::*;
     }
@@ -161,21 +189,6 @@ pub mod rpc {
 // re-export for convenience
 #[doc(inline)]
 pub use reth_cli_runner::{tokio_runtime, CliContext, CliRunner};
-
-#[cfg(all(unix, any(target_env = "gnu", target_os = "macos")))]
-pub mod sigsegv_handler;
-
-/// Signal handler to extract a backtrace from stack overflow.
-///
-/// This is a no-op because this platform doesn't support our signal handler's requirements.
-#[cfg(not(all(unix, any(target_env = "gnu", target_os = "macos"))))]
-pub mod sigsegv_handler {
-    /// No-op function.
-    pub fn install() {}
-}
-
-#[cfg(all(feature = "jemalloc", unix))]
-use tikv_jemallocator as _;
 
 // for rendering diagrams
 use aquamarine as _;

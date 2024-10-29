@@ -1,0 +1,22 @@
+[package]
+name = "example-stateful-precompile"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reth.workspace = true
+reth-chainspec.workspace = true
+reth-node-api.workspace = true
+reth-node-core.workspace = true
+reth-primitives.workspace = true
+reth-node-ethereum = { workspace = true, features = ["test-utils"] }
+reth-tracing.workspace = true
+alloy-genesis.workspace = true
+alloy-primitives.workspace = true
+
+eyre.workspace = true
+parking_lot.workspace = true
+schnellru.workspace = true
+tokio.workspace = true

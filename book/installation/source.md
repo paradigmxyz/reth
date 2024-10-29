@@ -32,6 +32,9 @@ operating system:
 
 These are needed to build bindings for Reth's database.
 
+The Minimum Supported Rust Version (MSRV) of this project is 1.80.0. If you already have a version of Rust installed,
+you can check your version by running `rustc --version`. To update your version of Rust, run `rustup update`.
+
 ## Build Reth
 
 With Rust and the dependencies installed, you're ready to build Reth. First, clone the repository:

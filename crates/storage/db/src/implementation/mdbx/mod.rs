@@ -1,26 +1,29 @@
 //! Module that interacts with MDBX.
 
 use crate::{
-    cursor::{DbCursorRO, DbCursorRW},
-    database::Database,
-    database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
+    lockfile::StorageLock,
     metrics::DatabaseEnvMetrics,
-    models::client_version::ClientVersion,
     tables::{self, TableType, Tables},
-    transaction::{DbTx, DbTxMut},
     utils::default_page_size,
     DatabaseError,
 };
 use eyre::Context;
 use metrics::{gauge, Label};
-use reth_interfaces::db::LogLevel;
-use reth_libmdbx::{
-    DatabaseFlags, Environment, EnvironmentFlags, Geometry, MaxReadTransactionDuration, Mode,
-    PageSize, SyncMode, RO, RW,
+use reth_db_api::{
+    cursor::{DbCursorRO, DbCursorRW},
+    database::Database,
+    database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
+    models::ClientVersion,
+    transaction::{DbTx, DbTxMut},
 };
+use reth_libmdbx::{
+    ffi, DatabaseFlags, Environment, EnvironmentFlags, Geometry, HandleSlowReadersReturnCode,
+    MaxReadTransactionDuration, Mode, PageSize, SyncMode, RO, RW,
+};
+use reth_storage_errors::db::LogLevel;
 use reth_tracing::tracing::error;
 use std::{
-    ops::Deref,
+    ops::{Deref, Range},
     path::Path,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
@@ -30,15 +33,20 @@ use tx::Tx;
 pub mod cursor;
 pub mod tx;
 
-const GIGABYTE: usize = 1024 * 1024 * 1024;
-const TERABYTE: usize = GIGABYTE * 1024;
+/// 1 KB in bytes
+pub const KILOBYTE: usize = 1024;
+/// 1 MB in bytes
+pub const MEGABYTE: usize = KILOBYTE * 1024;
+/// 1 GB in bytes
+pub const GIGABYTE: usize = MEGABYTE * 1024;
+/// 1 TB in bytes
+pub const TERABYTE: usize = GIGABYTE * 1024;
 
 /// MDBX allows up to 32767 readers (`MDBX_READERS_LIMIT`), but we limit it to slightly below that
 const DEFAULT_MAX_READERS: u64 = 32_000;
 
 /// Space that a read-only transaction can occupy until the warning is emitted.
-/// See [reth_libmdbx::EnvironmentBuilder::set_handle_slow_readers] for more information.
-#[cfg(not(windows))]
+/// See [`reth_libmdbx::EnvironmentBuilder::set_handle_slow_readers`] for more information.
 const MAX_SAFE_READER_SPACE: usize = 10 * GIGABYTE;
 
 /// Environment used when opening a MDBX environment. RO/RW.
@@ -52,7 +60,7 @@ pub enum DatabaseEnvKind {
 
 impl DatabaseEnvKind {
     /// Returns `true` if the environment is read-write.
-    pub fn is_rw(&self) -> bool {
+    pub const fn is_rw(&self) -> bool {
         matches!(self, Self::RW)
     }
 }
@@ -62,6 +70,8 @@ impl DatabaseEnvKind {
 pub struct DatabaseArguments {
     /// Client version that accesses the database.
     client_version: ClientVersion,
+    /// Database geometry settings.
+    geometry: Geometry<Range<usize>>,
     /// Database log level. If [None], the default value is used.
     log_level: Option<LogLevel>,
     /// Maximum duration of a read transaction. If [None], the default value is used.
@@ -94,20 +104,42 @@ impl DatabaseArguments {
     pub fn new(client_version: ClientVersion) -> Self {
         Self {
             client_version,
+            geometry: Geometry {
+                size: Some(0..(4 * TERABYTE)),
+                growth_step: Some(4 * GIGABYTE as isize),
+                shrink_threshold: Some(0),
+                page_size: Some(PageSize::Set(default_page_size())),
+            },
             log_level: None,
             max_read_transaction_duration: None,
             exclusive: None,
         }
     }
 
+    /// Set the geometry.
+    ///
+    /// # Arguments
+    ///
+    /// * `max_size` - Maximum database size in bytes
+    /// * `growth_step` - Database growth step in bytes
+    pub fn with_geometry(mut self, max_size: Option<usize>, growth_step: Option<usize>) -> Self {
+        self.geometry = Geometry {
+            size: max_size.map(|size| 0..size),
+            growth_step: growth_step.map(|growth_step| growth_step as isize),
+            shrink_threshold: Some(0),
+            page_size: Some(PageSize::Set(default_page_size())),
+        };
+        self
+    }
+
     /// Set the log level.
-    pub fn with_log_level(mut self, log_level: Option<LogLevel>) -> Self {
+    pub const fn with_log_level(mut self, log_level: Option<LogLevel>) -> Self {
         self.log_level = log_level;
         self
     }
 
     /// Set the maximum duration of a read transaction.
-    pub fn with_max_read_transaction_duration(
+    pub const fn with_max_read_transaction_duration(
         mut self,
         max_read_transaction_duration: Option<MaxReadTransactionDuration>,
     ) -> Self {
@@ -116,13 +148,13 @@ impl DatabaseArguments {
     }
 
     /// Set the mdbx exclusive flag.
-    pub fn with_exclusive(mut self, exclusive: Option<bool>) -> Self {
+    pub const fn with_exclusive(mut self, exclusive: Option<bool>) -> Self {
         self.exclusive = exclusive;
         self
     }
 
     /// Returns the client version if any.
-    pub fn client_version(&self) -> &ClientVersion {
+    pub const fn client_version(&self) -> &ClientVersion {
         &self.client_version
     }
 }
@@ -134,6 +166,8 @@ pub struct DatabaseEnv {
     inner: Environment,
     /// Cache for metric handles. If `None`, metrics are not recorded.
     metrics: Option<Arc<DatabaseEnvMetrics>>,
+    /// Write lock for when dealing with a read-write environment.
+    _lock_file: Option<StorageLock>,
 }
 
 impl Database for DatabaseEnv {
@@ -143,7 +177,7 @@ impl Database for DatabaseEnv {
     fn tx(&self) -> Result<Self::TX, DatabaseError> {
         Tx::new_with_metrics(
             self.inner.begin_ro_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
-            self.metrics.as_ref().cloned(),
+            self.metrics.clone(),
         )
         .map_err(|e| DatabaseError::InitTx(e.into()))
     }
@@ -151,7 +185,7 @@ impl Database for DatabaseEnv {
     fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
         Tx::new_with_metrics(
             self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
-            self.metrics.as_ref().cloned(),
+            self.metrics.clone(),
         )
         .map_err(|e| DatabaseError::InitTx(e.into()))
     }
@@ -160,7 +194,7 @@ impl Database for DatabaseEnv {
 impl DatabaseMetrics for DatabaseEnv {
     fn report_metrics(&self) {
         for (name, value, labels) in self.gauge_metrics() {
-            gauge!(name, value, labels);
+            gauge!(name, labels).set(value);
         }
     }
 
@@ -250,7 +284,15 @@ impl DatabaseEnv {
         path: &Path,
         kind: DatabaseEnvKind,
         args: DatabaseArguments,
-    ) -> Result<DatabaseEnv, DatabaseError> {
+    ) -> Result<Self, DatabaseError> {
+        let _lock_file = if kind.is_rw() {
+            StorageLock::try_acquire(path)
+                .map_err(|err| DatabaseError::Other(err.to_string()))?
+                .into()
+        } else {
+            None
+        };
+
         let mut inner_env = Environment::builder();
 
         let mode = match kind {
@@ -266,51 +308,53 @@ impl DatabaseEnv {
         // environment creation.
         debug_assert!(Tables::ALL.len() <= 256, "number of tables exceed max dbs");
         inner_env.set_max_dbs(256);
-        inner_env.set_geometry(Geometry {
-            // Maximum database size of 4 terabytes
-            size: Some(0..(4 * TERABYTE)),
-            // We grow the database in increments of 4 gigabytes
-            growth_step: Some(4 * GIGABYTE as isize),
-            // The database never shrinks
-            shrink_threshold: None,
-            page_size: Some(PageSize::Set(default_page_size())),
-        });
-        #[cfg(not(windows))]
-        {
-            fn is_current_process(id: u32) -> bool {
-                #[cfg(unix)]
-                {
-                    id == std::os::unix::process::parent_id() || id == std::process::id()
-                }
+        inner_env.set_geometry(args.geometry);
 
-                #[cfg(not(unix))]
-                {
-                    id == std::process::id()
-                }
+        fn is_current_process(id: u32) -> bool {
+            #[cfg(unix)]
+            {
+                id == std::os::unix::process::parent_id() || id == std::process::id()
             }
-            inner_env.set_handle_slow_readers(
-                |process_id: u32, thread_id: u32, read_txn_id: u64, gap: usize, space: usize, retry: isize| {
-                    if space > MAX_SAFE_READER_SPACE {
-                        let message = if is_current_process(process_id) {
-                            "Current process has a long-lived database transaction that grows the database file."
-                        } else {
-                            "External process has a long-lived database transaction that grows the database file. Use shorter-lived read transactions or shut down the node."
-                        };
-                        reth_tracing::tracing::warn!(
-                            target: "storage::db::mdbx",
-                            ?process_id,
-                            ?thread_id,
-                            ?read_txn_id,
-                            ?gap,
-                            ?space,
-                            ?retry,
-                            message
-                        )
-                    }
 
-                    reth_libmdbx::HandleSlowReadersReturnCode::ProceedWithoutKillingReader
-                });
+            #[cfg(not(unix))]
+            {
+                id == std::process::id()
+            }
         }
+
+        extern "C" fn handle_slow_readers(
+            _env: *const ffi::MDBX_env,
+            _txn: *const ffi::MDBX_txn,
+            process_id: ffi::mdbx_pid_t,
+            thread_id: ffi::mdbx_tid_t,
+            read_txn_id: u64,
+            gap: std::ffi::c_uint,
+            space: usize,
+            retry: std::ffi::c_int,
+        ) -> HandleSlowReadersReturnCode {
+            if space > MAX_SAFE_READER_SPACE {
+                let message = if is_current_process(process_id as u32) {
+                    "Current process has a long-lived database transaction that grows the database file."
+                } else {
+                    "External process has a long-lived database transaction that grows the database file. \
+                     Use shorter-lived read transactions or shut down the node."
+                };
+                reth_tracing::tracing::warn!(
+                    target: "storage::db::mdbx",
+                    ?process_id,
+                    ?thread_id,
+                    ?read_txn_id,
+                    ?gap,
+                    ?space,
+                    ?retry,
+                    "{message}"
+                )
+            }
+
+            reth_libmdbx::HandleSlowReadersReturnCode::ProceedWithoutKillingReader
+        }
+        inner_env.set_handle_slow_readers(handle_slow_readers);
+
         inner_env.set_flags(EnvironmentFlags {
             mode,
             // We disable readahead because it improves performance for linear scans, but
@@ -379,9 +423,10 @@ impl DatabaseEnv {
             inner_env.set_max_read_transaction_duration(max_read_transaction_duration);
         }
 
-        let env = DatabaseEnv {
+        let env = Self {
             inner: inner_env.open(path).map_err(|e| DatabaseError::Open(e.into()))?,
             metrics: None,
+            _lock_file,
         };
 
         Ok(env)
@@ -446,18 +491,22 @@ impl Deref for DatabaseEnv {
 mod tests {
     use super::*;
     use crate::{
-        abstraction::table::{Encode, Table},
-        cursor::{DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
-        models::{AccountBeforeTx, ShardedKey},
         tables::{
             AccountsHistory, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState,
         },
         test_utils::*,
         AccountChangeSets,
     };
-    use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
+    use alloy_primitives::{Address, B256, U256};
+    use reth_db_api::{
+        cursor::{DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
+        models::{AccountBeforeTx, ShardedKey},
+        table::{Encode, Table},
+    };
     use reth_libmdbx::Error;
-    use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, B256, U256};
+    use reth_primitives::{Account, Header, StorageEntry};
+    use reth_primitives_traits::IntegerList;
+    use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
     use std::str::FromStr;
     use tempfile::TempDir;
 
@@ -1291,7 +1340,7 @@ mod tests {
 
         for i in 1..5 {
             let key = ShardedKey::new(real_key, i * 100);
-            let list: IntegerList = vec![i * 100u64].into();
+            let list = IntegerList::new_pre_sorted([i * 100u64]);
 
             db.update(|tx| tx.put::<AccountsHistory>(key.clone(), list.clone()).expect(""))
                 .unwrap();
@@ -1312,7 +1361,7 @@ mod tests {
                 .expect("should be able to retrieve it.");
 
             assert_eq!(ShardedKey::new(real_key, 200), key);
-            let list200: IntegerList = vec![200u64].into();
+            let list200 = IntegerList::new_pre_sorted([200u64]);
             assert_eq!(list200, list);
         }
         // Seek greatest index
@@ -1329,7 +1378,7 @@ mod tests {
                 .expect("should be able to retrieve it.");
 
             assert_eq!(ShardedKey::new(real_key, 400), key);
-            let list400: IntegerList = vec![400u64].into();
+            let list400 = IntegerList::new_pre_sorted([400u64]);
             assert_eq!(list400, list);
         }
     }

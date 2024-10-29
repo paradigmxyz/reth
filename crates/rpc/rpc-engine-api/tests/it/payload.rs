@@ -1,57 +1,57 @@
 //! Some payload tests
 
+use alloy_primitives::{Bytes, Sealable, U256};
 use alloy_rlp::{Decodable, Error as RlpError};
+use alloy_rpc_types_engine::{
+    ExecutionPayload, ExecutionPayloadBodyV1, ExecutionPayloadSidecar, ExecutionPayloadV1,
+    PayloadError,
+};
 use assert_matches::assert_matches;
-use reth_interfaces::test_utils::generators::{
-    self, random_block, random_block_range, random_header, Rng,
-};
-use reth_primitives::{
-    bytes::{Bytes, BytesMut},
-    proofs, Block, SealedBlock, TransactionSigned, Withdrawals, B256, U256,
-};
-use reth_rpc_types::engine::{
-    ExecutionPayload, ExecutionPayloadBodyV1, ExecutionPayloadV1, PayloadError,
-};
+use reth_primitives::{proofs, Block, SealedBlock, SealedHeader, TransactionSigned, Withdrawals};
 use reth_rpc_types_compat::engine::payload::{
-    convert_standalone_withdraw_to_withdrawal, convert_to_payload_body_v1, try_block_to_payload,
-    try_block_to_payload_v1, try_into_sealed_block, try_payload_v1_to_block,
+    block_to_payload, block_to_payload_v1, convert_to_payload_body_v1, try_into_sealed_block,
+    try_payload_v1_to_block,
+};
+use reth_testing_utils::generators::{
+    self, random_block, random_block_range, random_header, BlockParams, BlockRangeParams, Rng,
 };
 
 fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> ExecutionPayload {
     let unsealed = src.unseal();
     let mut transformed: Block = f(unsealed);
     // Recalculate roots
-    transformed.header.transactions_root = proofs::calculate_transaction_root(&transformed.body);
-    transformed.header.ommers_hash = proofs::calculate_ommers_root(&transformed.ommers);
-    try_block_to_payload(SealedBlock {
-        header: transformed.header.seal_slow(),
+    transformed.header.transactions_root =
+        proofs::calculate_transaction_root(&transformed.body.transactions);
+    transformed.header.ommers_hash = proofs::calculate_ommers_root(&transformed.body.ommers);
+    let sealed = transformed.header.seal_slow();
+    let (header, seal) = sealed.into_parts();
+    block_to_payload(SealedBlock {
+        header: SealedHeader::new(header, seal),
         body: transformed.body,
-        ommers: transformed.ommers,
-        withdrawals: transformed.withdrawals,
     })
 }
 
 #[test]
 fn payload_body_roundtrip() {
     let mut rng = generators::rng();
-    for block in random_block_range(&mut rng, 0..=99, B256::default(), 0..2) {
+    for block in random_block_range(
+        &mut rng,
+        0..=99,
+        BlockRangeParams { tx_count: 0..2, ..Default::default() },
+    ) {
         let unsealed = block.clone().unseal();
         let payload_body: ExecutionPayloadBodyV1 = convert_to_payload_body_v1(unsealed);
 
         assert_eq!(
-            Ok(block.body),
+            Ok(block.body.transactions),
             payload_body
                 .transactions
                 .iter()
                 .map(|x| TransactionSigned::decode(&mut &x[..]))
                 .collect::<Result<Vec<_>, _>>(),
         );
-        let withdraw = payload_body.withdrawals.map(|withdrawals| {
-            Withdrawals::new(
-                withdrawals.into_iter().map(convert_standalone_withdraw_to_withdrawal).collect(),
-            )
-        });
-        assert_eq!(block.withdrawals, withdraw);
+        let withdraw = payload_body.withdrawals.map(Withdrawals::new);
+        assert_eq!(block.body.withdrawals, withdraw);
     }
 }
 
@@ -59,25 +59,36 @@ fn payload_body_roundtrip() {
 fn payload_validation() {
     let mut rng = generators::rng();
     let parent = rng.gen();
-    let block = random_block(&mut rng, 100, Some(parent), Some(3), Some(0));
+    let block = random_block(
+        &mut rng,
+        100,
+        BlockParams {
+            parent: Some(parent),
+            tx_count: Some(3),
+            ommers_count: Some(0),
+            ..Default::default()
+        },
+    );
 
     // Valid extra data
     let block_with_valid_extra_data = transform_block(block.clone(), |mut b| {
-        b.header.extra_data = BytesMut::zeroed(32).freeze().into();
+        b.header.extra_data = Bytes::from_static(&[0; 32]);
         b
     });
 
-    assert_matches!(try_into_sealed_block(block_with_valid_extra_data, None), Ok(_));
+    assert_matches!(
+        try_into_sealed_block(block_with_valid_extra_data, &ExecutionPayloadSidecar::none()),
+        Ok(_)
+    );
 
     // Invalid extra data
-    let block_with_invalid_extra_data: Bytes = BytesMut::zeroed(33).freeze();
+    let block_with_invalid_extra_data = Bytes::from_static(&[0; 33]);
     let invalid_extra_data_block = transform_block(block.clone(), |mut b| {
-        b.header.extra_data = block_with_invalid_extra_data.clone().into();
+        b.header.extra_data = block_with_invalid_extra_data.clone();
         b
     });
     assert_matches!(
-
-        try_into_sealed_block(invalid_extra_data_block,None),
+        try_into_sealed_block(invalid_extra_data_block, &ExecutionPayloadSidecar::none()),
         Err(PayloadError::ExtraData(data)) if data == block_with_invalid_extra_data
     );
 
@@ -87,28 +98,26 @@ fn payload_validation() {
         b
     });
     assert_matches!(
-
-        try_into_sealed_block(block_with_zero_base_fee,None),
+        try_into_sealed_block(block_with_zero_base_fee, &ExecutionPayloadSidecar::none()),
         Err(PayloadError::BaseFee(val)) if val.is_zero()
     );
 
     // Invalid encoded transactions
-    let mut payload_with_invalid_txs: ExecutionPayloadV1 = try_block_to_payload_v1(block.clone());
+    let mut payload_with_invalid_txs: ExecutionPayloadV1 = block_to_payload_v1(block.clone());
 
     payload_with_invalid_txs.transactions.iter_mut().for_each(|tx| {
-        *tx = Bytes::new().into();
+        *tx = Bytes::new();
     });
     let payload_with_invalid_txs = try_payload_v1_to_block(payload_with_invalid_txs);
     assert_matches!(payload_with_invalid_txs, Err(PayloadError::Decode(RlpError::InputTooShort)));
 
     // Non empty ommers
     let block_with_ommers = transform_block(block.clone(), |mut b| {
-        b.ommers.push(random_header(&mut rng, 100, None).unseal());
+        b.body.ommers.push(random_header(&mut rng, 100, None).unseal());
         b
     });
     assert_matches!(
-        try_into_sealed_block(block_with_ommers.clone(),None),
-
+        try_into_sealed_block(block_with_ommers.clone(), &ExecutionPayloadSidecar::none()),
         Err(PayloadError::BlockHash { consensus, .. })
             if consensus == block_with_ommers.block_hash()
     );
@@ -119,20 +128,18 @@ fn payload_validation() {
         b
     });
     assert_matches!(
-        try_into_sealed_block(block_with_difficulty.clone(),None),
+        try_into_sealed_block(block_with_difficulty.clone(), &ExecutionPayloadSidecar::none()),
         Err(PayloadError::BlockHash { consensus, .. }) if consensus == block_with_difficulty.block_hash()
-
     );
 
     // None zero nonce
     let block_with_nonce = transform_block(block.clone(), |mut b| {
-        b.header.nonce = 1;
+        b.header.nonce = 1u64.into();
         b
     });
     assert_matches!(
-        try_into_sealed_block(block_with_nonce.clone(),None),
+        try_into_sealed_block(block_with_nonce.clone(), &ExecutionPayloadSidecar::none()),
         Err(PayloadError::BlockHash { consensus, .. }) if consensus == block_with_nonce.block_hash()
-
     );
 
     // Valid block

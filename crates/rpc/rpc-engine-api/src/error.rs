@@ -1,11 +1,9 @@
+use alloy_primitives::{B256, U256};
 use jsonrpsee_types::error::{
     INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE, INVALID_PARAMS_MSG, SERVER_ERROR_MSG,
 };
 use reth_beacon_consensus::{BeaconForkChoiceUpdateError, BeaconOnNewPayloadError};
-use reth_engine_primitives::EngineObjectValidationError;
-use reth_payload_builder::error::PayloadBuilderError;
-use reth_primitives::{B256, U256};
-use reth_rpc_types::ToRpcError;
+use reth_payload_primitives::{EngineObjectValidationError, PayloadBuilderError};
 use thiserror::Error;
 
 /// The Engine API result type
@@ -42,7 +40,13 @@ pub enum EngineApiError {
         /// The length that was requested.
         len: u64,
     },
-    /// Thrown if engine_getPayloadBodiesByRangeV1 contains an invalid range
+    /// Too many requested versioned hashes for blobs request
+    #[error("requested blob count too large: {len}")]
+    BlobRequestTooLarge {
+        /// The length that was requested.
+        len: usize,
+    },
+    /// Thrown if `engine_getPayloadBodiesByRangeV1` contains an invalid range
     #[error("invalid start ({start}) or count ({count})")]
     InvalidBodiesRange {
         /// Start of the range
@@ -80,22 +84,22 @@ pub enum EngineApiError {
     NewPayload(#[from] BeaconOnNewPayloadError),
     /// Encountered an internal error.
     #[error(transparent)]
-    Internal(#[from] Box<dyn std::error::Error + Send + Sync>),
+    Internal(#[from] Box<dyn core::error::Error + Send + Sync>),
     /// Fetching the payload failed
     #[error(transparent)]
     GetPayloadError(#[from] PayloadBuilderError),
     /// The payload or attributes are known to be malformed before processing.
     #[error(transparent)]
     EngineObjectValidationError(#[from] EngineObjectValidationError),
-    /// Any other error
+    /// Any other rpc error
     #[error("{0}")]
-    Other(Box<dyn ToRpcError>),
+    Other(jsonrpsee_types::ErrorObject<'static>),
 }
 
 impl EngineApiError {
-    /// Crates a new [EngineApiError::Other] variant.
-    pub fn other<E: ToRpcError>(err: E) -> Self {
-        Self::Other(Box::new(err))
+    /// Crates a new [`EngineApiError::Other`] variant.
+    pub const fn other(err: jsonrpsee_types::ErrorObject<'static>) -> Self {
+        Self::Other(err)
     }
 }
 
@@ -117,10 +121,8 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
     fn from(error: EngineApiError) -> Self {
         match error {
             EngineApiError::InvalidBodiesRange { .. } |
-            EngineApiError::EngineObjectValidationError(EngineObjectValidationError::Payload(
-                _,
-            )) |
             EngineApiError::EngineObjectValidationError(
+                EngineObjectValidationError::Payload(_) |
                 EngineObjectValidationError::InvalidParams(_),
             ) => {
                 // Note: the data field is not required by the spec, but is also included by other
@@ -147,7 +149,8 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 error.to_string(),
                 None::<()>,
             ),
-            EngineApiError::PayloadRequestTooLarge { .. } => {
+            EngineApiError::PayloadRequestTooLarge { .. } |
+            EngineApiError::BlobRequestTooLarge { .. } => {
                 jsonrpsee_types::error::ErrorObject::owned(
                     REQUEST_TOO_LARGE_CODE,
                     REQUEST_TOO_LARGE_MESSAGE,
@@ -173,37 +176,17 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                     )
                 }
             },
-            EngineApiError::NewPayload(ref err) => match err {
-                BeaconOnNewPayloadError::Internal(_) => jsonrpsee_types::error::ErrorObject::owned(
-                    INTERNAL_ERROR_CODE,
-                    SERVER_ERROR_MSG,
-                    Some(ErrorData::new(error)),
-                ),
-                BeaconOnNewPayloadError::PreCancunBlockWithBlobTransactions => {
-                    jsonrpsee_types::error::ErrorObject::owned(
-                        INVALID_PARAMS_CODE,
-                        INVALID_PARAMS_MSG,
-                        Some(ErrorData::new(error)),
-                    )
-                }
-                BeaconOnNewPayloadError::EngineUnavailable => {
-                    jsonrpsee_types::error::ErrorObject::owned(
-                        INTERNAL_ERROR_CODE,
-                        SERVER_ERROR_MSG,
-                        Some(ErrorData::new(error)),
-                    )
-                }
-            },
             // Any other server error
             EngineApiError::TerminalTD { .. } |
             EngineApiError::TerminalBlockHash { .. } |
+            EngineApiError::NewPayload(_) |
             EngineApiError::Internal(_) |
             EngineApiError::GetPayloadError(_) => jsonrpsee_types::error::ErrorObject::owned(
                 INTERNAL_ERROR_CODE,
                 SERVER_ERROR_MSG,
                 Some(ErrorData::new(error)),
             ),
-            EngineApiError::Other(err) => err.to_rpc_error(),
+            EngineApiError::Other(err) => err,
         }
     }
 }
@@ -211,7 +194,7 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_rpc_types::engine::ForkchoiceUpdateError;
+    use alloy_rpc_types_engine::ForkchoiceUpdateError;
 
     #[track_caller]
     fn ensure_engine_rpc_error(

@@ -39,8 +39,8 @@ pub mod tx_manager {
 
     /// Default limit for number of transactions to keep track of for a single peer.
     ///
-    /// Default is 10 KiB.
-    pub const DEFAULT_CAPACITY_CACHE_SEEN_BY_PEER: usize = 10 * 1024;
+    /// Default is 320 transaction hashes.
+    pub const DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER: u32 = 10 * 1024 / 32;
 
     /// Default maximum pending pool imports to tolerate.
     ///
@@ -51,15 +51,15 @@ pub mod tx_manager {
 
     /// Default limit for number of bad imports to keep track of.
     ///
-    /// Default is 10 KiB.
-    pub const DEFAULT_CAPACITY_CACHE_BAD_IMPORTS: usize = 100 * 1024;
+    /// Default is 100 KiB, i.e. 3 200 transaction hashes.
+    pub const DEFAULT_MAX_COUNT_BAD_IMPORTS: u32 = 100 * 1024 / 32;
 }
 
 /// Constants used by [`TransactionFetcher`](super::TransactionFetcher).
 pub mod tx_fetcher {
-    use crate::{
-        peers::{DEFAULT_MAX_COUNT_PEERS_INBOUND, DEFAULT_MAX_COUNT_PEERS_OUTBOUND},
-        transactions::fetcher::TransactionFetcherInfo,
+    use crate::transactions::fetcher::TransactionFetcherInfo;
+    use reth_network_types::peers::config::{
+        DEFAULT_MAX_COUNT_PEERS_INBOUND, DEFAULT_MAX_COUNT_PEERS_OUTBOUND,
     };
 
     use super::{
@@ -81,8 +81,8 @@ pub mod tx_fetcher {
 
     /* ==================== RETRIES ==================== */
 
-    /// Default maximum request retires per [`TxHash`](reth_primitives::TxHash). Note, this is
-    /// reset should the [`TxHash`](reth_primitives::TxHash) re-appear in an announcement after it
+    /// Default maximum request retires per [`TxHash`](alloy_primitives::TxHash). Note, this is
+    /// reset should the [`TxHash`](alloy_primitives::TxHash) re-appear in an announcement after it
     /// has been evicted from the hashes pending fetch cache, i.e. the counter is restarted. If
     /// this happens, it is likely a very popular transaction, that should and can indeed be
     /// fetched hence this behaviour is favourable.
@@ -129,23 +129,24 @@ pub mod tx_fetcher {
     ///
     /// Default is 100 times the [`SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST`],
     /// which defaults to 256 hashes, so 25 600 hashes.
-    pub const DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH: usize =
-        100 * SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST;
+    pub const DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH: u32 =
+        100 * SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST as u32;
 
     /// Default max size for cache of inflight and pending transactions fetch.
     ///
     /// Default is [`DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH`] +
     /// [`DEFAULT_MAX_COUNT_INFLIGHT_REQUESTS_ON_FETCH_PENDING_HASHES`], which is 25600 hashes and
     /// 65 requests, so it is 25665 hashes.
-    pub const DEFAULT_MAX_CAPACITY_CACHE_INFLIGHT_AND_PENDING_FETCH: usize =
+    pub const DEFAULT_MAX_CAPACITY_CACHE_INFLIGHT_AND_PENDING_FETCH: u32 =
         DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH +
-            DEFAULT_MAX_COUNT_INFLIGHT_REQUESTS_ON_FETCH_PENDING_HASHES;
+            DEFAULT_MAX_COUNT_INFLIGHT_REQUESTS_ON_FETCH_PENDING_HASHES as u32;
 
     /// Default maximum number of hashes pending fetch to tolerate at any time.
     ///
     /// Default is half of [`DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH`], which defaults to 25 600
     /// hashes, so 12 800 hashes.
-    pub const DEFAULT_MAX_COUNT_PENDING_FETCH: usize = DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH / 2;
+    pub const DEFAULT_MAX_COUNT_PENDING_FETCH: usize =
+        DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH as usize / 2;
 
     /* ====== LIMITED CAPACITY ON FETCH PENDING HASHES ====== */
 
@@ -153,19 +154,20 @@ pub mod tx_fetcher {
     /// search is budget constrained.
     ///
     /// Default is a sixth of [`DEFAULT_MAX_COUNT_PENDING_FETCH`], which defaults to 12 800 hashes
-    /// (the breadth of the search), divided by [`DEFAULT_MAX_COUNT_FALLBACK_PEERS`], which
-    /// defaults to 3 peers (the depth of the search), so the 711 lru hashes in the pending hashes
-    /// cache.
+    /// (the ideal max number of hashes pending fetch), divided by
+    /// [`DEFAULT_MAX_COUNT_FALLBACK_PEERS`], which defaults to 3 peers (the depth of the search),
+    /// so a search breadth of 711 lru hashes in the pending hashes cache.
     pub const DEFAULT_BUDGET_FIND_IDLE_FALLBACK_PEER: usize =
         DEFAULT_MAX_COUNT_PENDING_FETCH / 6 / DEFAULT_MAX_COUNT_FALLBACK_PEERS as usize;
 
     /// Default budget for finding hashes in the intersection of transactions announced by a peer
     /// and in the cache of hashes pending fetch, when said search is budget constrained.
     ///
-    /// Default is a sixth of [`DEFAULT_MAX_COUNT_PENDING_FETCH`], which defaults to 12 800 hashes
-    /// (the breadth of the search), so 2133 lru hashes in the pending hashes cache.
+    /// Default is an eight of [`DEFAULT_MAX_COUNT_PENDING_FETCH`], which defaults to 12 800 hashes
+    /// (the ideal max number of hashes pending fetch), so a search breadth of 1 600 lru hashes in
+    /// the pending hashes cache.
     pub const DEFAULT_BUDGET_FIND_INTERSECTION_ANNOUNCED_BY_PEER_AND_PENDING_FETCH: usize =
-        DEFAULT_MAX_COUNT_PENDING_FETCH / 6;
+        DEFAULT_MAX_COUNT_PENDING_FETCH / 8;
 
     /* ====== SCALARS FOR USE ON FETCH PENDING HASHES ====== */
 
@@ -209,8 +211,8 @@ pub mod tx_fetcher {
     /// for the intersection of hashes announced by a peer and hashes pending fetch. The max
     /// inflight requests is configured in [`TransactionFetcherInfo`].
     ///
-    /// Default is 2 requests.
-    pub const DEFAULT_DIVISOR_MAX_COUNT_INFLIGHT_REQUESTS_ON_FIND_INTERSECTION: usize = 2;
+    /// Default is 3 requests.
+    pub const DEFAULT_DIVISOR_MAX_COUNT_INFLIGHT_REQUESTS_ON_FIND_INTERSECTION: usize = 3;
 
     // Default divisor to the max pending pool imports when calculating search breadth of the
     /// search for any idle peer to which to send a request filled with hashes pending fetch.
@@ -225,8 +227,8 @@ pub mod tx_fetcher {
     /// The max pending pool imports is configured in
     /// [`PendingPoolImportsInfo`](crate::transactions::PendingPoolImportsInfo).
     ///
-    /// Default is 3 requests.
-    pub const DEFAULT_DIVISOR_MAX_COUNT_PENDING_POOL_IMPORTS_ON_FIND_INTERSECTION: usize = 3;
+    /// Default is 4 requests.
+    pub const DEFAULT_DIVISOR_MAX_COUNT_PENDING_POOL_IMPORTS_ON_FIND_INTERSECTION: usize = 4;
 
     /* ================== ROUGH MEASURES ================== */
 

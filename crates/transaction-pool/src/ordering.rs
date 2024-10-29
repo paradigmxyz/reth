@@ -1,5 +1,5 @@
 use crate::traits::PoolTransaction;
-use reth_primitives::U256;
+use alloy_primitives::U256;
 use std::{fmt, marker::PhantomData};
 
 /// Priority of the transaction that can be missing.
@@ -15,7 +15,7 @@ pub enum Priority<T: Ord + Clone> {
 
 impl<T: Ord + Clone> From<Option<T>> for Priority<T> {
     fn from(value: Option<T>) -> Self {
-        value.map_or(Priority::None, Priority::Value)
+        value.map_or(Self::None, Priority::Value)
     }
 }
 

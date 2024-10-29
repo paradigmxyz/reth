@@ -1,10 +1,15 @@
 //! Utilities for testing p2p protocol.
 
+#![allow(missing_docs)]
+
 use crate::{
-    EthVersion, HelloMessageWithProtocols, P2PStream, ProtocolVersion, Status, UnauthedP2PStream,
+    hello::DEFAULT_TCP_PORT, EthVersion, HelloMessageWithProtocols, P2PStream, ProtocolVersion,
+    Status, UnauthedP2PStream,
 };
-use reth_discv4::DEFAULT_DISCOVERY_PORT;
-use reth_primitives::{pk2id, Chain, ForkFilter, Head, B256, U256};
+use alloy_primitives::{B256, U256};
+use reth_chainspec::Chain;
+use reth_network_peers::pk2id;
+use reth_primitives::{ForkFilter, Head};
 use secp256k1::{SecretKey, SECP256K1};
 use std::net::SocketAddr;
 use tokio::net::TcpStream;
@@ -20,7 +25,7 @@ pub fn eth_hello() -> (HelloMessageWithProtocols, SecretKey) {
         protocol_version: ProtocolVersion::V5,
         client_version: "eth/1.0.0".to_string(),
         protocols,
-        port: DEFAULT_DISCOVERY_PORT,
+        port: DEFAULT_TCP_PORT,
         id: pk2id(&server_key.public_key(SECP256K1)),
     };
     (hello, server_key)
@@ -58,7 +63,7 @@ pub async fn connect_passthrough(
 /// A Rplx subprotocol for testing
 pub mod proto {
     use super::*;
-    use crate::{capability::Capability, protocol::Protocol};
+    use crate::{protocol::Protocol, Capability};
     use bytes::{Buf, BufMut, BytesMut};
 
     /// Returns a new testing `HelloMessage` with eth and the test protocol
@@ -92,22 +97,22 @@ pub mod proto {
 
     impl TestProtoMessage {
         /// Returns the capability for the `test` protocol.
-        pub fn capability() -> Capability {
+        pub const fn capability() -> Capability {
             Capability::new_static("test", 1)
         }
 
         /// Returns the protocol for the `test` protocol.
-        pub fn protocol() -> Protocol {
+        pub const fn protocol() -> Protocol {
             Protocol::new(Self::capability(), 3)
         }
 
         /// Creates a ping message
-        pub fn ping() -> Self {
+        pub const fn ping() -> Self {
             Self { message_type: TestProtoMessageId::Ping, message: TestProtoMessageKind::Ping }
         }
 
         /// Creates a pong message
-        pub fn pong() -> Self {
+        pub const fn pong() -> Self {
             Self { message_type: TestProtoMessageId::Pong, message: TestProtoMessageKind::Pong }
         }
 
@@ -124,8 +129,7 @@ pub mod proto {
             let mut buf = BytesMut::new();
             buf.put_u8(self.message_type as u8);
             match &self.message {
-                TestProtoMessageKind::Ping => {}
-                TestProtoMessageKind::Pong => {}
+                TestProtoMessageKind::Ping | TestProtoMessageKind::Pong => {}
                 TestProtoMessageKind::Message(msg) => {
                     buf.put(msg.as_bytes());
                 }

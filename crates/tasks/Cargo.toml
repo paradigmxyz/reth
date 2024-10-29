@@ -23,6 +23,7 @@ reth-metrics.workspace = true
 metrics.workspace = true
 
 # misc
+auto_impl.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 dyn-clone.workspace = true 
