@@ -1,10 +1,9 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
-    AccountReader, BlockExecutionReader, BlockHashReader, BlockIdReader, BlockNumReader,
-    BlockReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader, DatabaseProvider,
-    EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt, StateProvider, StateProviderBox,
-    StateProviderFactory, StateReader, StateRootProvider, TransactionVariant, TransactionsProvider,
-    WithdrawalsProvider,
+    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
+    ChainSpecProvider, ChangeSetReader, DatabaseProvider, EvmEnvProvider, HeaderProvider,
+    ReceiptProviderIdExt, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
+    StateRootProvider, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_consensus::constants::EMPTY_ROOT_HASH;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
@@ -19,7 +18,7 @@ use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_db::mock::{DatabaseMock, TxMock};
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
-use reth_execution_types::{Chain, ExecutionOutcome};
+use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
     Account, Block, BlockWithSenders, Bytecode, GotExpected, Header, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
@@ -815,15 +814,6 @@ impl ChangeSetReader for MockEthProvider {
         _block_number: BlockNumber,
     ) -> ProviderResult<Vec<AccountBeforeTx>> {
         Ok(Vec::default())
-    }
-}
-
-impl BlockExecutionReader for MockEthProvider {
-    fn get_block_and_execution_range(
-        &self,
-        _range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Chain> {
-        Ok(Chain::default())
     }
 }
 

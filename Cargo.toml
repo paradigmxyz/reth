@@ -527,11 +527,11 @@ url = "2.3"
 zstd = "0.13"
 
 # metrics
-metrics = "0.23.0"
+metrics = "0.24.0"
 metrics-derive = "0.1"
-metrics-exporter-prometheus = { version = "0.15.0", default-features = false }
+metrics-exporter-prometheus = { version = "0.16.0", default-features = false }
 metrics-process = "2.1.0"
-metrics-util = { default-features = false, version = "0.17.0" }
+metrics-util = { default-features = false, version = "0.18.0" }
 
 # proc-macros
 proc-macro2 = "1.0"

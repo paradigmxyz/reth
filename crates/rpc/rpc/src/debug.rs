@@ -27,8 +27,8 @@ use reth_provider::{
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{
-    helpers::{Call, EthApiSpec, EthTransactions, LoadState, TraceExt},
-    EthApiTypes, FromEthApiError,
+    helpers::{EthApiSpec, EthTransactions, TraceExt},
+    EthApiTypes, FromEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
@@ -120,7 +120,8 @@ where
                         env: Env::boxed(
                             cfg.cfg_env.clone(),
                             block_env.clone(),
-                            Call::evm_config(this.eth_api()).tx_env(tx.as_signed(), tx.signer()),
+                            RpcNodeCore::evm_config(this.eth_api())
+                                .tx_env(tx.as_signed(), tx.signer()),
                         ),
                         handler_cfg: cfg.handler_cfg,
                     };
@@ -263,8 +264,8 @@ where
 
                 // apply relevant system calls
                 let mut system_caller = SystemCaller::new(
-                    Call::evm_config(this.eth_api()).clone(),
-                    LoadState::provider(this.eth_api()).chain_spec(),
+                    RpcNodeCore::evm_config(this.eth_api()).clone(),
+                    RpcNodeCore::provider(this.eth_api()).chain_spec(),
                 );
 
                 system_caller
@@ -293,7 +294,7 @@ where
                     env: Env::boxed(
                         cfg.cfg_env.clone(),
                         block_env,
-                        Call::evm_config(this.eth_api()).tx_env(tx.as_signed(), tx.signer()),
+                        RpcNodeCore::evm_config(this.eth_api()).tx_env(tx.as_signed(), tx.signer()),
                     ),
                     handler_cfg: cfg.handler_cfg,
                 };
@@ -562,7 +563,7 @@ where
                             env: Env::boxed(
                                 cfg.cfg_env.clone(),
                                 block_env.clone(),
-                                Call::evm_config(this.eth_api()).tx_env(tx, *signer),
+                                RpcNodeCore::evm_config(this.eth_api()).tx_env(tx, *signer),
                             ),
                             handler_cfg: cfg.handler_cfg,
                         };
@@ -939,7 +940,7 @@ where
             .to_rpc_result()?
             .unwrap_or_default()
             .into_iter()
-            .map(|receipt| receipt.with_bloom().envelope_encoded())
+            .map(|receipt| receipt.with_bloom().encoded_2718().into())
             .collect())
     }
 

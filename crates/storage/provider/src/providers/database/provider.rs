@@ -6,15 +6,14 @@ use crate::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
     },
     writer::UnifiedStorageWriter,
-    AccountReader, BlockExecutionReader, BlockExecutionWriter, BlockHashReader, BlockNumReader,
-    BlockReader, BlockWriter, BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter,
-    DBProvider, EvmEnvProvider, HashingWriter, HeaderProvider, HeaderSyncGap,
-    HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter,
-    LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError,
-    PruneCheckpointReader, PruneCheckpointWriter, RevertsInit, StageCheckpointReader,
-    StateChangeWriter, StateProviderBox, StateReader, StateWriter, StaticFileProviderFactory,
-    StatsReader, StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
-    TransactionsProviderExt, TrieWriter, WithdrawalsProvider,
+    AccountReader, BlockExecutionWriter, BlockHashReader, BlockNumReader, BlockReader, BlockWriter,
+    BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter, DBProvider, EvmEnvProvider,
+    HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HistoricalStateProvider,
+    HistoricalStateProviderRef, HistoryWriter, LatestStateProvider, LatestStateProviderRef,
+    OriginalValuesKnown, ProviderError, PruneCheckpointReader, PruneCheckpointWriter, RevertsInit,
+    StageCheckpointReader, StateChangeWriter, StateProviderBox, StateReader, StateWriter,
+    StaticFileProviderFactory, StatsReader, StorageReader, StorageTrieWriter, TransactionVariant,
+    TransactionsProvider, TransactionsProviderExt, TrieWriter, WithdrawalsProvider,
 };
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
@@ -682,152 +681,6 @@ impl<TX: DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
 
             assemble_block(header, body, ommers, withdrawals, senders)
         })
-    }
-
-    /// Get requested blocks transaction with senders
-    pub(crate) fn get_block_transaction_range(
-        &self,
-        range: impl RangeBounds<BlockNumber> + Clone,
-    ) -> ProviderResult<Vec<(BlockNumber, Vec<TransactionSignedEcRecovered>)>> {
-        // Raad range of block bodies to get all transactions id's of this range.
-        let block_bodies = self.get::<tables::BlockBodyIndices>(range)?;
-
-        if block_bodies.is_empty() {
-            return Ok(Vec::new())
-        }
-
-        // Compute the first and last tx ID in the range
-        let first_transaction = block_bodies.first().expect("If we have headers").1.first_tx_num();
-        let last_transaction = block_bodies.last().expect("Not empty").1.last_tx_num();
-
-        // If this is the case then all of the blocks in the range are empty
-        if last_transaction < first_transaction {
-            return Ok(block_bodies.into_iter().map(|(n, _)| (n, Vec::new())).collect())
-        }
-
-        // Get transactions and senders
-        let transactions = self
-            .get::<tables::Transactions>(first_transaction..=last_transaction)?
-            .into_iter()
-            .map(|(id, tx)| (id, tx.into()))
-            .collect::<Vec<(u64, TransactionSigned)>>();
-
-        let mut senders =
-            self.get::<tables::TransactionSenders>(first_transaction..=last_transaction)?;
-
-        recover_block_senders(&mut senders, &transactions, first_transaction, last_transaction)?;
-
-        // Merge transaction into blocks
-        let mut block_tx = Vec::with_capacity(block_bodies.len());
-        let mut senders = senders.into_iter();
-        let mut transactions = transactions.into_iter();
-        for (block_number, block_body) in block_bodies {
-            let mut one_block_tx = Vec::with_capacity(block_body.tx_count as usize);
-            for _ in block_body.tx_num_range() {
-                let tx = transactions.next();
-                let sender = senders.next();
-
-                let recovered = match (tx, sender) {
-                    (Some((tx_id, tx)), Some((sender_tx_id, sender))) => {
-                        if tx_id == sender_tx_id {
-                            Ok(TransactionSignedEcRecovered::from_signed_transaction(tx, sender))
-                        } else {
-                            Err(ProviderError::MismatchOfTransactionAndSenderId { tx_id })
-                        }
-                    }
-                    (Some((tx_id, _)), _) | (_, Some((tx_id, _))) => {
-                        Err(ProviderError::MismatchOfTransactionAndSenderId { tx_id })
-                    }
-                    (None, None) => Err(ProviderError::BlockBodyTransactionCount),
-                }?;
-                one_block_tx.push(recovered)
-            }
-            block_tx.push((block_number, one_block_tx));
-        }
-
-        Ok(block_tx)
-    }
-
-    /// Get the given range of blocks.
-    pub fn get_block_range(
-        &self,
-        range: impl RangeBounds<BlockNumber> + Clone,
-    ) -> ProviderResult<Vec<SealedBlockWithSenders>>
-    where
-        Spec: EthereumHardforks,
-    {
-        // For blocks we need:
-        //
-        // - Headers
-        // - Bodies (transactions)
-        // - Uncles/ommers
-        // - Withdrawals
-        // - Signers
-
-        let block_headers = self.get::<tables::Headers>(range.clone())?;
-        if block_headers.is_empty() {
-            return Ok(Vec::new())
-        }
-
-        let block_header_hashes = self.get::<tables::CanonicalHeaders>(range.clone())?;
-        let block_ommers = self.get::<tables::BlockOmmers>(range.clone())?;
-        let block_withdrawals = self.get::<tables::BlockWithdrawals>(range.clone())?;
-
-        let block_tx = self.get_block_transaction_range(range)?;
-        let mut blocks = Vec::with_capacity(block_headers.len());
-
-        // merge all into block
-        let block_header_iter = block_headers.into_iter();
-        let block_header_hashes_iter = block_header_hashes.into_iter();
-        let block_tx_iter = block_tx.into_iter();
-
-        // Ommers can be empty for some blocks
-        let mut block_ommers_iter = block_ommers.into_iter();
-        let mut block_withdrawals_iter = block_withdrawals.into_iter();
-        let mut block_ommers = block_ommers_iter.next();
-        let mut block_withdrawals = block_withdrawals_iter.next();
-
-        for ((main_block_number, header), (_, header_hash), (_, tx)) in
-            izip!(block_header_iter, block_header_hashes_iter, block_tx_iter)
-        {
-            let header = SealedHeader::new(header, header_hash);
-
-            let (transactions, senders) = tx.into_iter().map(|tx| tx.to_components()).unzip();
-
-            // Ommers can be missing
-            let mut ommers = Vec::new();
-            if let Some((block_number, _)) = block_ommers.as_ref() {
-                if *block_number == main_block_number {
-                    ommers = block_ommers.take().unwrap().1.ommers;
-                    block_ommers = block_ommers_iter.next();
-                }
-            };
-
-            // withdrawal can be missing
-            let shanghai_is_active =
-                self.chain_spec.is_shanghai_active_at_timestamp(header.timestamp);
-            let mut withdrawals = Some(Withdrawals::default());
-            if shanghai_is_active {
-                if let Some((block_number, _)) = block_withdrawals.as_ref() {
-                    if *block_number == main_block_number {
-                        withdrawals = Some(block_withdrawals.take().unwrap().1.withdrawals);
-                        block_withdrawals = block_withdrawals_iter.next();
-                    }
-                }
-            } else {
-                withdrawals = None
-            }
-
-            blocks.push(SealedBlockWithSenders {
-                block: SealedBlock {
-                    header,
-                    body: BlockBody { transactions, ommers, withdrawals },
-                },
-                senders,
-            })
-        }
-
-        Ok(blocks)
     }
 
     /// Return the last N blocks of state, recreating the [`ExecutionOutcome`].
@@ -2786,19 +2639,17 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> StorageTrieWriter for DatabaseProvid
 }
 
 impl<TX: DbTxMut + DbTx, Spec: Send + Sync> HashingWriter for DatabaseProvider<TX, Spec> {
-    fn unwind_account_hashing(
+    fn unwind_account_hashing<'a>(
         &self,
-        range: RangeInclusive<BlockNumber>,
+        changesets: impl Iterator<Item = &'a (BlockNumber, AccountBeforeTx)>,
     ) -> ProviderResult<BTreeMap<B256, Option<Account>>> {
         // Aggregate all block changesets and make a list of accounts that have been changed.
         // Note that collecting and then reversing the order is necessary to ensure that the
         // changes are applied in the correct order.
-        let hashed_accounts = self
-            .tx
-            .cursor_read::<tables::AccountChangeSets>()?
-            .walk_range(range)?
-            .map(|entry| entry.map(|(_, e)| (keccak256(e.address), e.info)))
-            .collect::<Result<Vec<_>, _>>()?
+        let hashed_accounts = changesets
+            .into_iter()
+            .map(|(_, e)| (keccak256(e.address), e.info))
+            .collect::<Vec<_>>()
             .into_iter()
             .rev()
             .collect::<BTreeMap<_, _>>();
@@ -2816,13 +2667,25 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> HashingWriter for DatabaseProvider<T
         Ok(hashed_accounts)
     }
 
+    fn unwind_account_hashing_range(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<BTreeMap<B256, Option<Account>>> {
+        let changesets = self
+            .tx
+            .cursor_read::<tables::AccountChangeSets>()?
+            .walk_range(range)?
+            .collect::<Result<Vec<_>, _>>()?;
+        self.unwind_account_hashing(changesets.iter())
+    }
+
     fn insert_account_for_hashing(
         &self,
-        accounts: impl IntoIterator<Item = (Address, Option<Account>)>,
+        changesets: impl IntoIterator<Item = (Address, Option<Account>)>,
     ) -> ProviderResult<BTreeMap<B256, Option<Account>>> {
         let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccounts>()?;
         let hashed_accounts =
-            accounts.into_iter().map(|(ad, ac)| (keccak256(ad), ac)).collect::<BTreeMap<_, _>>();
+            changesets.into_iter().map(|(ad, ac)| (keccak256(ad), ac)).collect::<BTreeMap<_, _>>();
         for (hashed_address, account) in &hashed_accounts {
             if let Some(account) = account {
                 hashed_accounts_cursor.upsert(*hashed_address, *account)?;
@@ -2835,18 +2698,15 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> HashingWriter for DatabaseProvider<T
 
     fn unwind_storage_hashing(
         &self,
-        range: Range<BlockNumberAddress>,
+        changesets: impl Iterator<Item = (BlockNumberAddress, StorageEntry)>,
     ) -> ProviderResult<HashMap<B256, BTreeSet<B256>>> {
         // Aggregate all block changesets and make list of accounts that have been changed.
-        let mut changesets = self.tx.cursor_read::<tables::StorageChangeSets>()?;
         let mut hashed_storages = changesets
-            .walk_range(range)?
-            .map(|entry| {
-                entry.map(|(BlockNumberAddress((_, address)), storage_entry)| {
-                    (keccak256(address), keccak256(storage_entry.key), storage_entry.value)
-                })
+            .into_iter()
+            .map(|(BlockNumberAddress((_, address)), storage_entry)| {
+                (keccak256(address), keccak256(storage_entry.key), storage_entry.value)
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Vec<_>>();
         hashed_storages.sort_by_key(|(ha, hk, _)| (*ha, *hk));
 
         // Apply values to HashedState, and remove the account if it's None.
@@ -2869,6 +2729,18 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> HashingWriter for DatabaseProvider<T
             }
         }
         Ok(hashed_storage_keys)
+    }
+
+    fn unwind_storage_hashing_range(
+        &self,
+        range: impl RangeBounds<BlockNumberAddress>,
+    ) -> ProviderResult<HashMap<B256, BTreeSet<B256>>> {
+        let changesets = self
+            .tx
+            .cursor_read::<tables::StorageChangeSets>()?
+            .walk_range(range)?
+            .collect::<Result<Vec<_>, _>>()?;
+        self.unwind_storage_hashing(changesets.into_iter())
     }
 
     fn insert_storage_for_hashing(
@@ -2992,16 +2864,14 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> HashingWriter for DatabaseProvider<T
 }
 
 impl<TX: DbTxMut + DbTx, Spec: Send + Sync> HistoryWriter for DatabaseProvider<TX, Spec> {
-    fn unwind_account_history_indices(
+    fn unwind_account_history_indices<'a>(
         &self,
-        range: RangeInclusive<BlockNumber>,
+        changesets: impl Iterator<Item = &'a (BlockNumber, AccountBeforeTx)>,
     ) -> ProviderResult<usize> {
-        let mut last_indices = self
-            .tx
-            .cursor_read::<tables::AccountChangeSets>()?
-            .walk_range(range)?
-            .map(|entry| entry.map(|(index, account)| (account.address, index)))
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut last_indices = changesets
+            .into_iter()
+            .map(|(index, account)| (account.address, *index))
+            .collect::<Vec<_>>();
         last_indices.sort_by_key(|(a, _)| *a);
 
         // Unwind the account history index.
@@ -3028,6 +2898,18 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> HistoryWriter for DatabaseProvider<T
         Ok(changesets)
     }
 
+    fn unwind_account_history_indices_range(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<usize> {
+        let changesets = self
+            .tx
+            .cursor_read::<tables::AccountChangeSets>()?
+            .walk_range(range)?
+            .collect::<Result<Vec<_>, _>>()?;
+        self.unwind_account_history_indices(changesets.iter())
+    }
+
     fn insert_account_history_index(
         &self,
         account_transitions: impl IntoIterator<Item = (Address, impl IntoIterator<Item = u64>)>,
@@ -3040,16 +2922,12 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> HistoryWriter for DatabaseProvider<T
 
     fn unwind_storage_history_indices(
         &self,
-        range: Range<BlockNumberAddress>,
+        changesets: impl Iterator<Item = (BlockNumberAddress, StorageEntry)>,
     ) -> ProviderResult<usize> {
-        let mut storage_changesets = self
-            .tx
-            .cursor_read::<tables::StorageChangeSets>()?
-            .walk_range(range)?
-            .map(|entry| {
-                entry.map(|(BlockNumberAddress((bn, address)), storage)| (address, storage.key, bn))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut storage_changesets = changesets
+            .into_iter()
+            .map(|(BlockNumberAddress((bn, address)), storage)| (address, storage.key, bn))
+            .collect::<Vec<_>>();
         storage_changesets.sort_by_key(|(address, key, _)| (*address, *key));
 
         let mut cursor = self.tx.cursor_write::<tables::StoragesHistory>()?;
@@ -3076,6 +2954,18 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> HistoryWriter for DatabaseProvider<T
 
         let changesets = storage_changesets.len();
         Ok(changesets)
+    }
+
+    fn unwind_storage_history_indices_range(
+        &self,
+        range: impl RangeBounds<BlockNumberAddress>,
+    ) -> ProviderResult<usize> {
+        let changesets = self
+            .tx
+            .cursor_read::<tables::StorageChangeSets>()?
+            .walk_range(range)?
+            .collect::<Result<Vec<_>, _>>()?;
+        self.unwind_storage_history_indices(changesets.into_iter())
     }
 
     fn insert_storage_history_index(
@@ -3107,23 +2997,6 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> HistoryWriter for DatabaseProvider<T
     }
 }
 
-impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> BlockExecutionReader
-    for DatabaseProvider<TX, Spec>
-{
-    fn get_block_and_execution_range(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Chain> {
-        // get blocks
-        let blocks = self.get_block_range(range.clone())?;
-
-        // get execution res
-        let execution_state = self.get_state(range)?.unwrap_or_default();
-
-        Ok(Chain::new(blocks, execution_state, None))
-    }
-}
-
 impl<TX: DbTx, Spec: Send + Sync> StateReader for DatabaseProvider<TX, Spec> {
     fn get_state(&self, block: BlockNumber) -> ProviderResult<Option<ExecutionOutcome>> {
         self.get_state(block..=block)
@@ -3137,10 +3010,14 @@ impl<TX: DbTxMut + DbTx + 'static, Spec: Send + Sync + EthereumHardforks + 'stat
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Chain> {
-        let storage_range = BlockNumberAddress::range(range.clone());
+        let changed_accounts = self
+            .tx
+            .cursor_read::<tables::AccountChangeSets>()?
+            .walk_range(range.clone())?
+            .collect::<Result<Vec<_>, _>>()?;
 
         // Unwind account hashes. Add changed accounts to account prefix set.
-        let hashed_addresses = self.unwind_account_hashing(range.clone())?;
+        let hashed_addresses = self.unwind_account_hashing(changed_accounts.iter())?;
         let mut account_prefix_set = PrefixSetMut::with_capacity(hashed_addresses.len());
         let mut destroyed_accounts = HashSet::default();
         for (hashed_address, account) in hashed_addresses {
@@ -3151,12 +3028,19 @@ impl<TX: DbTxMut + DbTx + 'static, Spec: Send + Sync + EthereumHardforks + 'stat
         }
 
         // Unwind account history indices.
-        self.unwind_account_history_indices(range.clone())?;
+        self.unwind_account_history_indices(changed_accounts.iter())?;
+        let storage_range = BlockNumberAddress::range(range.clone());
+
+        let changed_storages = self
+            .tx
+            .cursor_read::<tables::StorageChangeSets>()?
+            .walk_range(storage_range)?
+            .collect::<Result<Vec<_>, _>>()?;
 
         // Unwind storage hashes. Add changed account and storage keys to corresponding prefix
         // sets.
         let mut storage_prefix_sets = HashMap::<B256, PrefixSet>::default();
-        let storage_entries = self.unwind_storage_hashing(storage_range.clone())?;
+        let storage_entries = self.unwind_storage_hashing(changed_storages.iter().copied())?;
         for (hashed_address, hashed_slots) in storage_entries {
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
             let mut storage_prefix_set = PrefixSetMut::with_capacity(hashed_slots.len());
@@ -3167,7 +3051,7 @@ impl<TX: DbTxMut + DbTx + 'static, Spec: Send + Sync + EthereumHardforks + 'stat
         }
 
         // Unwind storage history indices.
-        self.unwind_storage_history_indices(storage_range)?;
+        self.unwind_storage_history_indices(changed_storages.iter().copied())?;
 
         // Calculate the reverted merkle root.
         // This is the same as `StateRoot::incremental_root_with_updates`, only the prefix sets
@@ -3225,10 +3109,14 @@ impl<TX: DbTxMut + DbTx + 'static, Spec: Send + Sync + EthereumHardforks + 'stat
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()> {
-        let storage_range = BlockNumberAddress::range(range.clone());
+        let changed_accounts = self
+            .tx
+            .cursor_read::<tables::AccountChangeSets>()?
+            .walk_range(range.clone())?
+            .collect::<Result<Vec<_>, _>>()?;
 
         // Unwind account hashes. Add changed accounts to account prefix set.
-        let hashed_addresses = self.unwind_account_hashing(range.clone())?;
+        let hashed_addresses = self.unwind_account_hashing(changed_accounts.iter())?;
         let mut account_prefix_set = PrefixSetMut::with_capacity(hashed_addresses.len());
         let mut destroyed_accounts = HashSet::default();
         for (hashed_address, account) in hashed_addresses {
@@ -3239,12 +3127,19 @@ impl<TX: DbTxMut + DbTx + 'static, Spec: Send + Sync + EthereumHardforks + 'stat
         }
 
         // Unwind account history indices.
-        self.unwind_account_history_indices(range.clone())?;
+        self.unwind_account_history_indices(changed_accounts.iter())?;
+
+        let storage_range = BlockNumberAddress::range(range.clone());
+        let changed_storages = self
+            .tx
+            .cursor_read::<tables::StorageChangeSets>()?
+            .walk_range(storage_range)?
+            .collect::<Result<Vec<_>, _>>()?;
 
         // Unwind storage hashes. Add changed account and storage keys to corresponding prefix
         // sets.
         let mut storage_prefix_sets = HashMap::<B256, PrefixSet>::default();
-        let storage_entries = self.unwind_storage_hashing(storage_range.clone())?;
+        let storage_entries = self.unwind_storage_hashing(changed_storages.iter().copied())?;
         for (hashed_address, hashed_slots) in storage_entries {
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
             let mut storage_prefix_set = PrefixSetMut::with_capacity(hashed_slots.len());
@@ -3255,7 +3150,7 @@ impl<TX: DbTxMut + DbTx + 'static, Spec: Send + Sync + EthereumHardforks + 'stat
         }
 
         // Unwind storage history indices.
-        self.unwind_storage_history_indices(storage_range)?;
+        self.unwind_storage_history_indices(changed_storages.iter().copied())?;
 
         // Calculate the reverted merkle root.
         // This is the same as `StateRoot::incremental_root_with_updates`, only the prefix sets
