@@ -130,7 +130,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// This sets the [`PruneModes`] to [`None`], because they should only be relevant for writing
     /// data.
     #[track_caller]
-    pub fn provider(&self) -> ProviderResult<DatabaseProviderRO<N::DB, N::ChainSpec>> {
+    pub fn provider(&self) -> ProviderResult<DatabaseProviderRO<N::DB, N>> {
         Ok(DatabaseProvider::new(
             self.db.tx()?,
             self.chain_spec.clone(),
@@ -144,7 +144,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// [`BlockHashReader`].  This may fail if the inner read/write database transaction fails to
     /// open.
     #[track_caller]
-    pub fn provider_rw(&self) -> ProviderResult<DatabaseProviderRW<N::DB, N::ChainSpec>> {
+    pub fn provider_rw(&self) -> ProviderResult<DatabaseProviderRW<N::DB, N>> {
         Ok(DatabaseProviderRW(DatabaseProvider::new_rw(
             self.db.tx_mut()?,
             self.chain_spec.clone(),
@@ -186,8 +186,8 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
 
 impl<N: ProviderNodeTypes> DatabaseProviderFactory for ProviderFactory<N> {
     type DB = N::DB;
-    type Provider = DatabaseProvider<<N::DB as Database>::TX, N::ChainSpec>;
-    type ProviderRW = DatabaseProvider<<N::DB as Database>::TXMut, N::ChainSpec>;
+    type Provider = DatabaseProvider<<N::DB as Database>::TX, N>;
+    type ProviderRW = DatabaseProvider<<N::DB as Database>::TXMut, N>;
 
     fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
         self.provider()

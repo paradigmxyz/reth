@@ -19,6 +19,7 @@ use reth_db::mock::{DatabaseMock, TxMock};
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::ExecutionOutcome;
+use reth_node_types::NodeTypes;
 use reth_primitives::{
     Account, Block, BlockWithSenders, Bytecode, GotExpected, Header, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
@@ -149,10 +150,19 @@ impl MockEthProvider {
     }
 }
 
+/// Mock node.
+#[derive(Debug)]
+pub struct MockNode;
+
+impl NodeTypes for MockNode {
+    type Primitives = ();
+    type ChainSpec = ChainSpec;
+}
+
 impl DatabaseProviderFactory for MockEthProvider {
     type DB = DatabaseMock;
-    type Provider = DatabaseProvider<TxMock, ChainSpec>;
-    type ProviderRW = DatabaseProvider<TxMock, ChainSpec>;
+    type Provider = DatabaseProvider<TxMock, MockNode>;
+    type ProviderRW = DatabaseProvider<TxMock, MockNode>;
 
     fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
         Err(ConsistentViewError::Syncing { best_block: GotExpected::new(0, 0) }.into())

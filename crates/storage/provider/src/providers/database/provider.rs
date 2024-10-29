@@ -38,6 +38,7 @@ use reth_db_api::{
 use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_network_p2p::headers::downloader::SyncTarget;
+use reth_node_types::NodeTypes;
 use reth_primitives::{
     Account, Block, BlockBody, BlockWithSenders, Bytecode, GotExpected, Header, Receipt,
     SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, StorageEntry,
@@ -70,40 +71,40 @@ use tokio::sync::watch;
 use tracing::{debug, error, trace, warn};
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
-pub type DatabaseProviderRO<DB, Spec> = DatabaseProvider<<DB as Database>::TX, Spec>;
+pub type DatabaseProviderRO<DB, N> = DatabaseProvider<<DB as Database>::TX, N>;
 
 /// A [`DatabaseProvider`] that holds a read-write database transaction.
 ///
 /// Ideally this would be an alias type. However, there's some weird compiler error (<https://github.com/rust-lang/rust/issues/102211>), that forces us to wrap this in a struct instead.
 /// Once that issue is solved, we can probably revert back to being an alias type.
 #[derive(Debug)]
-pub struct DatabaseProviderRW<DB: Database, Spec>(
-    pub DatabaseProvider<<DB as Database>::TXMut, Spec>,
+pub struct DatabaseProviderRW<DB: Database, N: NodeTypes>(
+    pub DatabaseProvider<<DB as Database>::TXMut, N>,
 );
 
-impl<DB: Database, Spec> Deref for DatabaseProviderRW<DB, Spec> {
-    type Target = DatabaseProvider<<DB as Database>::TXMut, Spec>;
+impl<DB: Database, N: NodeTypes> Deref for DatabaseProviderRW<DB, N> {
+    type Target = DatabaseProvider<<DB as Database>::TXMut, N>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl<DB: Database, Spec> DerefMut for DatabaseProviderRW<DB, Spec> {
+impl<DB: Database, N: NodeTypes> DerefMut for DatabaseProviderRW<DB, N> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-impl<DB: Database, Spec> AsRef<DatabaseProvider<<DB as Database>::TXMut, Spec>>
-    for DatabaseProviderRW<DB, Spec>
+impl<DB: Database, N: NodeTypes> AsRef<DatabaseProvider<<DB as Database>::TXMut, N>>
+    for DatabaseProviderRW<DB, N>
 {
-    fn as_ref(&self) -> &DatabaseProvider<<DB as Database>::TXMut, Spec> {
+    fn as_ref(&self) -> &DatabaseProvider<<DB as Database>::TXMut, N> {
         &self.0
     }
 }
 
-impl<DB: Database, Spec: Send + Sync + 'static> DatabaseProviderRW<DB, Spec> {
+impl<DB: Database, N: NodeTypes + 'static> DatabaseProviderRW<DB, N> {
     /// Commit database transaction and static file if it exists.
     pub fn commit(self) -> ProviderResult<bool> {
         self.0.commit()
@@ -115,10 +116,10 @@ impl<DB: Database, Spec: Send + Sync + 'static> DatabaseProviderRW<DB, Spec> {
     }
 }
 
-impl<DB: Database, Spec> From<DatabaseProviderRW<DB, Spec>>
-    for DatabaseProvider<<DB as Database>::TXMut, Spec>
+impl<DB: Database, N: NodeTypes> From<DatabaseProviderRW<DB, N>>
+    for DatabaseProvider<<DB as Database>::TXMut, N>
 {
-    fn from(provider: DatabaseProviderRW<DB, Spec>) -> Self {
+    fn from(provider: DatabaseProviderRW<DB, N>) -> Self {
         provider.0
     }
 }
@@ -126,25 +127,25 @@ impl<DB: Database, Spec> From<DatabaseProviderRW<DB, Spec>>
 /// A provider struct that fetches data from the database.
 /// Wrapper around [`DbTx`] and [`DbTxMut`]. Example: [`HeaderProvider`] [`BlockHashReader`]
 #[derive(Debug)]
-pub struct DatabaseProvider<TX, Spec> {
+pub struct DatabaseProvider<TX, N: NodeTypes> {
     /// Database transaction.
     tx: TX,
     /// Chain spec
-    chain_spec: Arc<Spec>,
+    chain_spec: Arc<N::ChainSpec>,
     /// Static File provider
     static_file_provider: StaticFileProvider,
     /// Pruning configuration
     prune_modes: PruneModes,
 }
 
-impl<TX, Spec> DatabaseProvider<TX, Spec> {
+impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Returns reference to prune modes.
     pub const fn prune_modes_ref(&self) -> &PruneModes {
         &self.prune_modes
     }
 }
 
-impl<TX: DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
+impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
     /// State provider for latest block
     pub fn latest<'a>(&'a self) -> ProviderResult<Box<dyn StateProvider + 'a>> {
         trace!(target: "providers::db", "Returning latest state provider");
@@ -202,28 +203,28 @@ impl<TX: DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
     }
 }
 
-impl<TX, Spec> StaticFileProviderFactory for DatabaseProvider<TX, Spec> {
+impl<TX, N: NodeTypes> StaticFileProviderFactory for DatabaseProvider<TX, N> {
     /// Returns a static file provider
     fn static_file_provider(&self) -> StaticFileProvider {
         self.static_file_provider.clone()
     }
 }
 
-impl<TX: Send + Sync, Spec: EthChainSpec + 'static> ChainSpecProvider
-    for DatabaseProvider<TX, Spec>
+impl<TX: Send + Sync, N: NodeTypes<ChainSpec: EthChainSpec + 'static>> ChainSpecProvider
+    for DatabaseProvider<TX, N>
 {
-    type ChainSpec = Spec;
+    type ChainSpec = N::ChainSpec;
 
     fn chain_spec(&self) -> Arc<Self::ChainSpec> {
         self.chain_spec.clone()
     }
 }
 
-impl<TX: DbTxMut, Spec> DatabaseProvider<TX, Spec> {
+impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Creates a provider with an inner read-write transaction.
     pub const fn new_rw(
         tx: TX,
-        chain_spec: Arc<Spec>,
+        chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider,
         prune_modes: PruneModes,
     ) -> Self {
@@ -231,15 +232,13 @@ impl<TX: DbTxMut, Spec> DatabaseProvider<TX, Spec> {
     }
 }
 
-impl<TX, Spec> AsRef<Self> for DatabaseProvider<TX, Spec> {
+impl<TX, N: NodeTypes> AsRef<Self> for DatabaseProvider<TX, N> {
     fn as_ref(&self) -> &Self {
         self
     }
 }
 
-impl<TX: DbTx + 'static, Spec: Send + Sync> TryIntoHistoricalStateProvider
-    for DatabaseProvider<TX, Spec>
-{
+impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for DatabaseProvider<TX, N> {
     fn try_into_history_at_block(
         self,
         mut block_number: BlockNumber,
@@ -282,8 +281,8 @@ impl<TX: DbTx + 'static, Spec: Send + Sync> TryIntoHistoricalStateProvider
     }
 }
 
-impl<Tx: DbTx + DbTxMut + 'static, Spec: Send + Sync + EthereumHardforks + 'static>
-    DatabaseProvider<Tx, Spec>
+impl<Tx: DbTx + DbTxMut + 'static, N: NodeTypes<ChainSpec: EthereumHardforks> + 'static>
+    DatabaseProvider<Tx, N>
 {
     // TODO: uncomment below, once `reth debug_cmd` has been feature gated with dev.
     // #[cfg(any(test, feature = "test-utils"))]
@@ -365,11 +364,11 @@ where
     Ok(Vec::new())
 }
 
-impl<TX: DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
+impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Creates a provider with an inner read-only transaction.
     pub const fn new(
         tx: TX,
-        chain_spec: Arc<Spec>,
+        chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider,
         prune_modes: PruneModes,
     ) -> Self {
@@ -392,7 +391,7 @@ impl<TX: DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
     }
 
     /// Returns a reference to the chain specification.
-    pub fn chain_spec(&self) -> &Spec {
+    pub fn chain_spec(&self) -> &N::ChainSpec {
         &self.chain_spec
     }
 
@@ -490,7 +489,7 @@ impl<TX: DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
         construct_block: BF,
     ) -> ProviderResult<Option<B>>
     where
-        Spec: EthereumHardforks,
+        N::ChainSpec: EthereumHardforks,
         H: AsRef<Header>,
         HF: FnOnce(BlockNumber) -> ProviderResult<Option<H>>,
         BF: FnOnce(
@@ -556,7 +555,7 @@ impl<TX: DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
         mut assemble_block: F,
     ) -> ProviderResult<Vec<R>>
     where
-        Spec: EthereumHardforks,
+        N::ChainSpec: EthereumHardforks,
         H: AsRef<Header>,
         HF: FnOnce(RangeInclusive<BlockNumber>) -> ProviderResult<Vec<H>>,
         F: FnMut(H, Range<TxNumber>, Vec<Header>, Option<Withdrawals>) -> ProviderResult<R>,
@@ -633,7 +632,7 @@ impl<TX: DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
         assemble_block: BF,
     ) -> ProviderResult<Vec<B>>
     where
-        Spec: EthereumHardforks,
+        N::ChainSpec: EthereumHardforks,
         H: AsRef<Header>,
         HF: Fn(RangeInclusive<BlockNumber>) -> ProviderResult<Vec<H>>,
         BF: Fn(
@@ -853,7 +852,7 @@ impl<TX: DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
     }
 }
 
-impl<TX: DbTxMut + DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
+impl<TX: DbTxMut + DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Commit database transaction.
     pub fn commit(self) -> ProviderResult<bool> {
         Ok(self.tx.commit()?)
@@ -1079,7 +1078,7 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
         range: impl RangeBounds<BlockNumber> + Clone,
     ) -> ProviderResult<Vec<SealedBlockWithSenders>>
     where
-        Spec: EthereumHardforks,
+        N::ChainSpec: EthereumHardforks,
     {
         // For blocks we need:
         //
@@ -1218,13 +1217,13 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
     }
 }
 
-impl<TX: DbTx, Spec: Send + Sync> AccountReader for DatabaseProvider<TX, Spec> {
+impl<TX: DbTx, N: NodeTypes> AccountReader for DatabaseProvider<TX, N> {
     fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
         Ok(self.tx.get::<tables::PlainAccountState>(address)?)
     }
 }
 
-impl<TX: DbTx, Spec: Send + Sync> AccountExtReader for DatabaseProvider<TX, Spec> {
+impl<TX: DbTx, N: NodeTypes> AccountExtReader for DatabaseProvider<TX, N> {
     fn changed_accounts_with_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
@@ -1268,7 +1267,7 @@ impl<TX: DbTx, Spec: Send + Sync> AccountExtReader for DatabaseProvider<TX, Spec
     }
 }
 
-impl<TX: DbTx, Spec: Send + Sync> StorageChangeSetReader for DatabaseProvider<TX, Spec> {
+impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> {
     fn storage_changeset(
         &self,
         block_number: BlockNumber,
@@ -1283,7 +1282,7 @@ impl<TX: DbTx, Spec: Send + Sync> StorageChangeSetReader for DatabaseProvider<TX
     }
 }
 
-impl<TX: DbTx, Spec: Send + Sync> ChangeSetReader for DatabaseProvider<TX, Spec> {
+impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
     fn account_block_changeset(
         &self,
         block_number: BlockNumber,
@@ -1300,7 +1299,7 @@ impl<TX: DbTx, Spec: Send + Sync> ChangeSetReader for DatabaseProvider<TX, Spec>
     }
 }
 
-impl<TX: DbTx, Spec: Send + Sync> HeaderSyncGapProvider for DatabaseProvider<TX, Spec> {
+impl<TX: DbTx, N: NodeTypes> HeaderSyncGapProvider for DatabaseProvider<TX, N> {
     fn sync_gap(
         &self,
         tip: watch::Receiver<B256>,
@@ -1344,8 +1343,8 @@ impl<TX: DbTx, Spec: Send + Sync> HeaderSyncGapProvider for DatabaseProvider<TX,
     }
 }
 
-impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> HeaderProvider
-    for DatabaseProvider<TX, Spec>
+impl<TX: DbTx, N: NodeTypes<ChainSpec: EthereumHardforks>> HeaderProvider
+    for DatabaseProvider<TX, N>
 {
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
         if let Some(num) = self.block_number(*block_hash)? {
@@ -1444,7 +1443,7 @@ impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> HeaderProvider
     }
 }
 
-impl<TX: DbTx, Spec: Send + Sync> BlockHashReader for DatabaseProvider<TX, Spec> {
+impl<TX: DbTx, N: NodeTypes> BlockHashReader for DatabaseProvider<TX, N> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.static_file_provider.get_with_static_file_or_database(
             StaticFileSegment::Headers,
@@ -1471,7 +1470,7 @@ impl<TX: DbTx, Spec: Send + Sync> BlockHashReader for DatabaseProvider<TX, Spec>
     }
 }
 
-impl<TX: DbTx, Spec: Send + Sync> BlockNumReader for DatabaseProvider<TX, Spec> {
+impl<TX: DbTx, N: NodeTypes> BlockNumReader for DatabaseProvider<TX, N> {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
         let best_number = self.best_block_number()?;
         let best_hash = self.block_hash(best_number)?.unwrap_or_default();
@@ -1502,7 +1501,7 @@ impl<TX: DbTx, Spec: Send + Sync> BlockNumReader for DatabaseProvider<TX, Spec> 
     }
 }
 
-impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> BlockReader for DatabaseProvider<TX, Spec> {
+impl<TX: DbTx, N: NodeTypes<ChainSpec: EthereumHardforks>> BlockReader for DatabaseProvider<TX, N> {
     fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> ProviderResult<Option<Block>> {
         if source.is_canonical() {
             self.block(hash.into())
@@ -1677,8 +1676,8 @@ impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> BlockReader for DatabasePr
     }
 }
 
-impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> TransactionsProviderExt
-    for DatabaseProvider<TX, Spec>
+impl<TX: DbTx, N: NodeTypes<ChainSpec: EthereumHardforks>> TransactionsProviderExt
+    for DatabaseProvider<TX, N>
 {
     /// Recovers transaction hashes by walking through `Transactions` table and
     /// calculating them in a parallel manner. Returned unsorted.
@@ -1747,8 +1746,8 @@ impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> TransactionsProviderExt
 }
 
 // Calculates the hash of the given transaction
-impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> TransactionsProvider
-    for DatabaseProvider<TX, Spec>
+impl<TX: DbTx, N: NodeTypes<ChainSpec: EthereumHardforks>> TransactionsProvider
+    for DatabaseProvider<TX, N>
 {
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         Ok(self.tx.get::<tables::TransactionHashNumbers>(tx_hash)?)
@@ -1907,8 +1906,8 @@ impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> TransactionsProvider
     }
 }
 
-impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> ReceiptProvider
-    for DatabaseProvider<TX, Spec>
+impl<TX: DbTx, N: NodeTypes<ChainSpec: EthereumHardforks>> ReceiptProvider
+    for DatabaseProvider<TX, N>
 {
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
         self.static_file_provider.get_with_static_file_or_database(
@@ -1955,8 +1954,8 @@ impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> ReceiptProvider
     }
 }
 
-impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> WithdrawalsProvider
-    for DatabaseProvider<TX, Spec>
+impl<TX: DbTx, N: NodeTypes<ChainSpec: EthereumHardforks>> WithdrawalsProvider
+    for DatabaseProvider<TX, N>
 {
     fn withdrawals_by_block(
         &self,
@@ -1985,8 +1984,8 @@ impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> WithdrawalsProvider
     }
 }
 
-impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> EvmEnvProvider
-    for DatabaseProvider<TX, Spec>
+impl<TX: DbTx, N: NodeTypes<ChainSpec: EthereumHardforks>> EvmEnvProvider
+    for DatabaseProvider<TX, N>
 {
     fn fill_env_at<EvmConfig>(
         &self,
@@ -2051,7 +2050,7 @@ impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> EvmEnvProvider
     }
 }
 
-impl<TX: DbTx, Spec: Send + Sync> StageCheckpointReader for DatabaseProvider<TX, Spec> {
+impl<TX: DbTx, N: NodeTypes> StageCheckpointReader for DatabaseProvider<TX, N> {
     fn get_stage_checkpoint(&self, id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
         Ok(self.tx.get::<tables::StageCheckpoints>(id.to_string())?)
     }
@@ -2070,7 +2069,7 @@ impl<TX: DbTx, Spec: Send + Sync> StageCheckpointReader for DatabaseProvider<TX,
     }
 }
 
-impl<TX: DbTxMut, Spec: Send + Sync> StageCheckpointWriter for DatabaseProvider<TX, Spec> {
+impl<TX: DbTxMut, N: NodeTypes> StageCheckpointWriter for DatabaseProvider<TX, N> {
     /// Save stage checkpoint.
     fn save_stage_checkpoint(
         &self,
@@ -2111,7 +2110,7 @@ impl<TX: DbTxMut, Spec: Send + Sync> StageCheckpointWriter for DatabaseProvider<
     }
 }
 
-impl<TX: DbTx, Spec: Send + Sync> StorageReader for DatabaseProvider<TX, Spec> {
+impl<TX: DbTx, N: NodeTypes> StorageReader for DatabaseProvider<TX, N> {
     fn plain_state_storages(
         &self,
         addresses_with_keys: impl IntoIterator<Item = (Address, impl IntoIterator<Item = B256>)>,
@@ -2174,7 +2173,7 @@ impl<TX: DbTx, Spec: Send + Sync> StorageReader for DatabaseProvider<TX, Spec> {
     }
 }
 
-impl<TX: DbTxMut + DbTx, Spec: Send + Sync> StateChangeWriter for DatabaseProvider<TX, Spec> {
+impl<TX: DbTxMut + DbTx, N: NodeTypes> StateChangeWriter for DatabaseProvider<TX, N> {
     fn write_state_reverts(
         &self,
         reverts: PlainStateReverts,
@@ -2551,7 +2550,7 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> StateChangeWriter for DatabaseProvid
     }
 }
 
-impl<TX: DbTxMut + DbTx, Spec: Send + Sync> TrieWriter for DatabaseProvider<TX, Spec> {
+impl<TX: DbTxMut + DbTx, N: NodeTypes> TrieWriter for DatabaseProvider<TX, N> {
     /// Writes trie updates. Returns the number of entries modified.
     fn write_trie_updates(&self, trie_updates: &TrieUpdates) -> ProviderResult<usize> {
         if trie_updates.is_empty() {
@@ -2601,7 +2600,7 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> TrieWriter for DatabaseProvider<TX, 
     }
 }
 
-impl<TX: DbTxMut + DbTx, Spec: Send + Sync> StorageTrieWriter for DatabaseProvider<TX, Spec> {
+impl<TX: DbTxMut + DbTx, N: NodeTypes> StorageTrieWriter for DatabaseProvider<TX, N> {
     /// Writes storage trie updates from the given storage trie map. First sorts the storage trie
     /// updates by the hashed address, writing in sorted order.
     fn write_storage_trie_updates(
@@ -2638,7 +2637,7 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> StorageTrieWriter for DatabaseProvid
     }
 }
 
-impl<TX: DbTxMut + DbTx, Spec: Send + Sync> HashingWriter for DatabaseProvider<TX, Spec> {
+impl<TX: DbTxMut + DbTx, N: NodeTypes> HashingWriter for DatabaseProvider<TX, N> {
     fn unwind_account_hashing<'a>(
         &self,
         changesets: impl Iterator<Item = &'a (BlockNumber, AccountBeforeTx)>,
@@ -2863,7 +2862,7 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> HashingWriter for DatabaseProvider<T
     }
 }
 
-impl<TX: DbTxMut + DbTx, Spec: Send + Sync> HistoryWriter for DatabaseProvider<TX, Spec> {
+impl<TX: DbTxMut + DbTx, N: NodeTypes> HistoryWriter for DatabaseProvider<TX, N> {
     fn unwind_account_history_indices<'a>(
         &self,
         changesets: impl Iterator<Item = &'a (BlockNumber, AccountBeforeTx)>,
@@ -2997,14 +2996,14 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> HistoryWriter for DatabaseProvider<T
     }
 }
 
-impl<TX: DbTx, Spec: Send + Sync> StateReader for DatabaseProvider<TX, Spec> {
+impl<TX: DbTx, N: NodeTypes> StateReader for DatabaseProvider<TX, N> {
     fn get_state(&self, block: BlockNumber) -> ProviderResult<Option<ExecutionOutcome>> {
         self.get_state(block..=block)
     }
 }
 
-impl<TX: DbTxMut + DbTx + 'static, Spec: Send + Sync + EthereumHardforks + 'static>
-    BlockExecutionWriter for DatabaseProvider<TX, Spec>
+impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks> + 'static>
+    BlockExecutionWriter for DatabaseProvider<TX, N>
 {
     fn take_block_and_execution_range(
         &self,
@@ -3205,8 +3204,8 @@ impl<TX: DbTxMut + DbTx + 'static, Spec: Send + Sync + EthereumHardforks + 'stat
     }
 }
 
-impl<TX: DbTxMut + DbTx + 'static, Spec: Send + Sync + EthereumHardforks + 'static> BlockWriter
-    for DatabaseProvider<TX, Spec>
+impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks> + 'static> BlockWriter
+    for DatabaseProvider<TX, N>
 {
     /// Inserts the block into the database, always modifying the following tables:
     /// * [`CanonicalHeaders`](tables::CanonicalHeaders)
@@ -3418,7 +3417,7 @@ impl<TX: DbTxMut + DbTx + 'static, Spec: Send + Sync + EthereumHardforks + 'stat
     }
 }
 
-impl<TX: DbTx, Spec: Send + Sync> PruneCheckpointReader for DatabaseProvider<TX, Spec> {
+impl<TX: DbTx, N: NodeTypes> PruneCheckpointReader for DatabaseProvider<TX, N> {
     fn get_prune_checkpoint(
         &self,
         segment: PruneSegment,
@@ -3435,7 +3434,7 @@ impl<TX: DbTx, Spec: Send + Sync> PruneCheckpointReader for DatabaseProvider<TX,
     }
 }
 
-impl<TX: DbTxMut, Spec: Send + Sync> PruneCheckpointWriter for DatabaseProvider<TX, Spec> {
+impl<TX: DbTxMut, N: NodeTypes> PruneCheckpointWriter for DatabaseProvider<TX, N> {
     fn save_prune_checkpoint(
         &self,
         segment: PruneSegment,
@@ -3445,7 +3444,7 @@ impl<TX: DbTxMut, Spec: Send + Sync> PruneCheckpointWriter for DatabaseProvider<
     }
 }
 
-impl<TX: DbTx, Spec: Send + Sync> StatsReader for DatabaseProvider<TX, Spec> {
+impl<TX: DbTx, N: NodeTypes> StatsReader for DatabaseProvider<TX, N> {
     fn count_entries<T: Table>(&self) -> ProviderResult<usize> {
         let db_entries = self.tx.entries::<T>()?;
         let static_file_entries = match self.static_file_provider.count_entries::<T>() {
@@ -3458,7 +3457,7 @@ impl<TX: DbTx, Spec: Send + Sync> StatsReader for DatabaseProvider<TX, Spec> {
     }
 }
 
-impl<TX: DbTx, Spec: Send + Sync> ChainStateBlockReader for DatabaseProvider<TX, Spec> {
+impl<TX: DbTx, N: NodeTypes> ChainStateBlockReader for DatabaseProvider<TX, N> {
     fn last_finalized_block_number(&self) -> ProviderResult<Option<BlockNumber>> {
         let mut finalized_blocks = self
             .tx
@@ -3484,7 +3483,7 @@ impl<TX: DbTx, Spec: Send + Sync> ChainStateBlockReader for DatabaseProvider<TX,
     }
 }
 
-impl<TX: DbTxMut, Spec: Send + Sync> ChainStateBlockWriter for DatabaseProvider<TX, Spec> {
+impl<TX: DbTxMut, N: NodeTypes> ChainStateBlockWriter for DatabaseProvider<TX, N> {
     fn save_finalized_block_number(&self, block_number: BlockNumber) -> ProviderResult<()> {
         Ok(self
             .tx
@@ -3498,7 +3497,7 @@ impl<TX: DbTxMut, Spec: Send + Sync> ChainStateBlockWriter for DatabaseProvider<
     }
 }
 
-impl<TX: DbTx + 'static, Spec: Send + Sync + 'static> DBProvider for DatabaseProvider<TX, Spec> {
+impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider<TX, N> {
     type Tx = TX;
 
     fn tx_ref(&self) -> &Self::Tx {
