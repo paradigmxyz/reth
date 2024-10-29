@@ -179,6 +179,17 @@ impl<C: TrieCursor> TrieWalker<C> {
             self.stack[0].set_nibble(key[0] as i8);
         }
 
+        // The current tree mask might have been set incorrectly.
+        // Sanity check that the newly retrieved trie node key is the child of the last item
+        // on the stack. If not, advance to the next sibling instead of adding the node to the
+        // stack.
+        if let Some(subnode) = self.stack.last() {
+            if !key.starts_with(subnode.full_key()) {
+                self.move_to_next_sibling(false)?;
+                return Ok(())
+            }
+        }
+
         // Create a new CursorSubNode and push it to the stack.
         let subnode = CursorSubNode::new(key, Some(node));
         let nibble = subnode.nibble();
