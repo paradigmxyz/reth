@@ -97,6 +97,12 @@ pub enum EthApiError {
     /// Thrown when a bundle is invalid
     #[error("invalid bundle")]
     InvalidBundle,
+    /// Thrown when a bundle simulation times out
+    #[error("bundle simulation timed out")]
+    BundleTimeout,
+    /// Thrown when a transaction is reverted in a bundle
+    #[error("transaction reverted")]
+    TransactionReverted,
     /// Some feature is unsupported
     #[error("unsupported")]
     Unsupported(&'static str),
@@ -164,6 +170,12 @@ impl EthApiError {
 impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
     fn from(error: EthApiError) -> Self {
         match error {
+            EthApiError::TransactionReverted => {
+                internal_rpc_err("transaction reverted".to_string())
+            }
+            EthApiError::BundleTimeout => {
+                internal_rpc_err("bundle simulation timed out".to_string())
+            }
             EthApiError::InvalidBundle => internal_rpc_err("invalid bundle".to_string()),
             EthApiError::FailedToDecodeSignedTransaction |
             EthApiError::InvalidTransactionSignature |
