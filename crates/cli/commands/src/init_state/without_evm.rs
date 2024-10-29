@@ -40,13 +40,7 @@ where
 
     info!(target: "reth::cli", "Appending first valid block.");
 
-    append_first_block(
-        provider_rw,
-        static_file_provider,
-        header.header(),
-        header.hash(),
-        total_difficulty,
-    )?;
+    append_first_block(provider_rw, static_file_provider, &header, total_difficulty)?;
 
     for stage in StageId::ALL {
         provider_rw.save_stage_checkpoint(stage, StageCheckpoint::new(header.number))?;
@@ -64,25 +58,18 @@ where
 fn append_first_block(
     provider_rw: impl BlockWriter,
     sf_provider: &StaticFileProvider,
-    header: &Header,
-    header_hash: B256,
+    header: &SealedHeader,
     total_difficulty: U256,
 ) -> Result<(), eyre::Error> {
     provider_rw.insert_block(
-        SealedBlockWithSenders::new(
-            SealedBlock::new(
-                SealedHeader::new(header.to_owned(), header_hash),
-                BlockBody::default(),
-            ),
-            vec![],
-        )
-        .expect("no senders or txes"),
+        SealedBlockWithSenders::new(SealedBlock::new(header.clone(), BlockBody::default()), vec![])
+            .expect("no senders or txes"),
     )?;
 
     sf_provider.latest_writer(StaticFileSegment::Headers)?.append_header(
         header,
         total_difficulty,
-        &header_hash,
+        &header.hash(),
     )?;
 
     sf_provider.latest_writer(StaticFileSegment::Receipts)?.increment_block(header.number)?;

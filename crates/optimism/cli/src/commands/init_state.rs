@@ -55,7 +55,7 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> InitStateCommandOp<C> {
                 reth_cli_commands::init_state::without_evm::setup_without_evm(
                     &provider_rw,
                     &static_file_provider,
-                    SealedHeader::new(BEDROCK_HEADER.clone(), BEDROCK_HEADER_HASH),
+                    SealedHeader::new(BEDROCK_HEADER, BEDROCK_HEADER_HASH),
                     BEDROCK_HEADER_TTD,
                 )?;
 
