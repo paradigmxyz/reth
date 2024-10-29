@@ -45,12 +45,6 @@ Database:
 
           [possible values: true, false]
 
-      --db.max-size <MAX_SIZE>
-          Maximum database size (e.g., 4TB, 8MB)
-
-      --db.growth-step <GROWTH_STEP>
-          Database growth step (e.g., 4GB, 4KB)
-
       --db.read-transaction-timeout <READ_TRANSACTION_TIMEOUT>
           Read transaction timeout in seconds, 0 means no timeout
 
