@@ -1,5 +1,8 @@
+use alloy_consensus::{BlobTransactionValidationError, EnvKzgSettings, Transaction};
 use alloy_eips::eip4844::kzg_to_versioned_hash;
-use alloy_rpc_types::engine::{CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar};
+use alloy_rpc_types::engine::{
+    BlobsBundleV1, CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar,
+};
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequest, BuilderBlockValidationRequestV2,
 };
@@ -37,6 +40,10 @@ pub enum ValidationApiError {
     MissingLatestBlock,
     #[error("could not verify proposer payment")]
     ProposerPayment,
+    #[error("invalid blobs bundle")]
+    InvalidBlobsBundle,
+    #[error(transparent)]
+    Blob(#[from] BlobTransactionValidationError),
     #[error(transparent)]
     Consensus(#[from] ConsensusError),
     #[error(transparent)]
@@ -57,6 +64,8 @@ pub struct ValidationApiInner<Provider: ChainSpecProvider, E> {
     executor_provider: E,
     /// Whether to exclude withdrawals when validating proposer payment.
     exclude_withdrawals: bool,
+    /// Whether to try verifying profit through fee receipient balance difference.
+    use_balance_diff_profit: bool,
 }
 
 /// The type that implements the `validation` rpc namespace trait
@@ -79,6 +88,7 @@ where
             payload_validator,
             executor_provider,
             exclude_withdrawals: false,
+            use_balance_diff_profit: true,
         });
         Self { inner }
     }
@@ -182,32 +192,82 @@ where
         output: &BlockExecutionOutput<Receipt>,
         message: &BidTrace,
     ) -> Result<(), ValidationApiError> {
-        let (balance_before, balance_after) =
-            if let Some(acc) = output.state.state.get(&message.proposer_fee_recipient) {
-                let mut balance_before =
-                    acc.original_info.as_ref().map(|i| i.balance).unwrap_or_default();
-                let balance_after = acc.info.as_ref().map(|i| i.balance).unwrap_or_default();
+        if self.use_balance_diff_profit {
+            let (mut balance_before, balance_after) =
+                if let Some(acc) = output.state.state.get(&message.proposer_fee_recipient) {
+                    let balance_before =
+                        acc.original_info.as_ref().map(|i| i.balance).unwrap_or_default();
+                    let balance_after = acc.info.as_ref().map(|i| i.balance).unwrap_or_default();
 
-                if self.exclude_withdrawals {
-                    if let Some(withdrawals) = &block.body.withdrawals {
-                        for withdrawal in withdrawals {
-                            if withdrawal.address == message.proposer_fee_recipient {
-                                balance_before += withdrawal.amount_wei();
-                            }
+                    (balance_before, balance_after)
+                } else {
+                    // account might have balance but considering it zero is fine as long as we know
+                    // that balance have not changed
+                    (U256::ZERO, U256::ZERO)
+                };
+
+            if self.exclude_withdrawals {
+                if let Some(withdrawals) = &block.body.withdrawals {
+                    for withdrawal in withdrawals {
+                        if withdrawal.address == message.proposer_fee_recipient {
+                            balance_before += withdrawal.amount_wei();
                         }
                     }
                 }
+            }
 
-                (balance_before, balance_after)
-            } else {
-                (U256::ZERO, U256::ZERO)
-            };
+            if balance_after >= balance_before + message.value {
+                return Ok(())
+            }
+        }
 
-        if balance_after < balance_before + message.value {
+        let (receipt, tx) = output
+            .receipts
+            .last()
+            .zip(block.body.transactions.last())
+            .ok_or(ValidationApiError::ProposerPayment)?;
+
+        if !receipt.success {
+            return Err(ValidationApiError::ProposerPayment)
+        }
+
+        if tx.to() != Some(message.proposer_fee_recipient) {
+            return Err(ValidationApiError::ProposerPayment)
+        }
+
+        if tx.value() != message.value {
+            return Err(ValidationApiError::ProposerPayment)
+        }
+
+        if !tx.input().is_empty() {
             return Err(ValidationApiError::ProposerPayment)
         }
 
         Ok(())
+    }
+
+    /// Validates the given [`BlobsBundleV1`] and returns versioned hashes for blobs.
+    pub fn validate_blobs_bundle(
+        &self,
+        mut blobs_bundle: BlobsBundleV1,
+    ) -> Result<Vec<B256>, ValidationApiError> {
+        if blobs_bundle.commitments.len() != blobs_bundle.proofs.len() ||
+            blobs_bundle.commitments.len() != blobs_bundle.blobs.len()
+        {
+            return Err(ValidationApiError::InvalidBlobsBundle)
+        }
+
+        let versioned_hashes = blobs_bundle
+            .commitments
+            .iter()
+            .map(|c| kzg_to_versioned_hash(c.as_slice()))
+            .collect::<Vec<_>>();
+
+        let sidecar = blobs_bundle.pop_sidecar(blobs_bundle.blobs.len());
+
+        sidecar.validate(&versioned_hashes, EnvKzgSettings::default().get())?;
+
+        Ok(versioned_hashes)
     }
 }
 
@@ -249,13 +309,10 @@ where
                 ExecutionPayload::V3(request.request.execution_payload),
                 ExecutionPayloadSidecar::v3(CancunPayloadFields {
                     parent_beacon_block_root: request.parent_beacon_block_root,
-                    versioned_hashes: request
-                        .request
-                        .blobs_bundle
-                        .commitments
-                        .iter()
-                        .map(|c| kzg_to_versioned_hash(c.as_slice()))
-                        .collect(),
+                    versioned_hashes: self
+                        .validate_blobs_bundle(request.request.blobs_bundle)
+                        .map_err(|e| RethError::Other(e.into()))
+                        .to_rpc_result()?,
                 }),
             )
             .to_rpc_result()?
