@@ -75,7 +75,7 @@ macro_rules! define_exex {
             futures::future::BoxFuture<'static, eyre::Result<()>>,
         > {
             futures::FutureExt::boxed(async move {
-                Box::pin(async move { exex(ctx).await })
+                Box::pin(async move { $user_fn(ctx).await })
                     as futures::future::BoxFuture<'static, eyre::Result<()>>
             })
         }
