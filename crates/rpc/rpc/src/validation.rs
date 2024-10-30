@@ -24,8 +24,16 @@ use reth_rpc_api::{BlockSubmissionValidationApiServer, BuilderBlockValidationReq
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_trie::HashedPostState;
-use revm_primitives::{B256, U256};
-use std::sync::Arc;
+use revm_primitives::{Address, B256, U256};
+use serde::{Deserialize, Serialize};
+use std::{collections::HashSet, sync::Arc};
+
+/// Configuration for validation API.
+#[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ValidationApiConfig {
+    /// Path to the file containing the list of blacklisted addresses.
+    pub blacklist: HashSet<Address>,
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ValidationApiError {
@@ -43,6 +51,8 @@ pub enum ValidationApiError {
     ProposerPayment,
     #[error("invalid blobs bundle")]
     InvalidBlobsBundle,
+    #[error("block accesses blacklisted address: {_0}")]
+    Blacklist(Address),
     #[error(transparent)]
     Blob(#[from] BlobTransactionValidationError),
     #[error(transparent)]
@@ -63,8 +73,8 @@ pub struct ValidationApiInner<Provider: ChainSpecProvider, E> {
     payload_validator: ExecutionPayloadValidator<Provider::ChainSpec>,
     /// Block executor factory.
     executor_provider: E,
-    /// Whether to exclude withdrawals when validating proposer payment.
-    exclude_withdrawals: bool,
+    /// Set of blacklisted addresses
+    blacklist: HashSet<Address>,
 }
 
 /// The type that implements the `validation` rpc namespace trait
@@ -79,15 +89,23 @@ where
     Provider: ChainSpecProvider,
 {
     /// Create a new instance of the [`ValidationApi`]
-    pub fn new(provider: Provider, consensus: Arc<dyn Consensus>, executor_provider: E) -> Self {
+    pub fn new(
+        provider: Provider,
+        consensus: Arc<dyn Consensus>,
+        executor_provider: E,
+        config: ValidationApiConfig,
+    ) -> Self {
+        let ValidationApiConfig { blacklist } = config;
+
         let payload_validator = ExecutionPayloadValidator::new(provider.chain_spec());
         let inner = Arc::new(ValidationApiInner {
             provider,
             consensus,
             payload_validator,
             executor_provider,
-            exclude_withdrawals: false,
+            blacklist,
         });
+
         Self { inner }
     }
 }
@@ -117,6 +135,25 @@ where
         self.consensus.validate_header(&block.header)?;
         self.consensus.validate_block_pre_execution(&block)?;
 
+        if !self.blacklist.is_empty() {
+            if self.blacklist.contains(&block.beneficiary) {
+                return Err(ValidationApiError::Blacklist(block.beneficiary))
+            }
+            if self.blacklist.contains(&message.proposer_fee_recipient) {
+                return Err(ValidationApiError::Blacklist(message.proposer_fee_recipient))
+            }
+            for (sender, tx) in block.senders.iter().zip(block.transactions()) {
+                if self.blacklist.contains(sender) {
+                    return Err(ValidationApiError::Blacklist(*sender))
+                }
+                if let Some(to) = tx.to() {
+                    if self.blacklist.contains(&to) {
+                        return Err(ValidationApiError::Blacklist(to))
+                    }
+                }
+            }
+        }
+
         let latest_header =
             self.provider.latest_header()?.ok_or_else(|| ValidationApiError::MissingLatestBlock)?;
 
@@ -134,7 +171,23 @@ where
         let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
 
         let block = block.unseal();
-        let output = executor.execute(BlockExecutionInput::new(&block, U256::MAX))?;
+        let mut accessed_blacklisted = None;
+        let output = executor.execute_with_state_closure(
+            BlockExecutionInput::new(&block, U256::MAX),
+            |state| {
+                if !self.blacklist.is_empty() {
+                    for account in state.cache.accounts.keys() {
+                        if self.blacklist.contains(account) {
+                            accessed_blacklisted = Some(*account);
+                        }
+                    }
+                }
+            },
+        )?;
+
+        if let Some(account) = accessed_blacklisted {
+            return Err(ValidationApiError::Blacklist(account))
+        }
 
         self.consensus.validate_block_post_execution(
             &block,
@@ -238,12 +291,10 @@ where
             (U256::ZERO, U256::ZERO)
         };
 
-        if self.exclude_withdrawals {
-            if let Some(withdrawals) = &block.body.withdrawals {
-                for withdrawal in withdrawals {
-                    if withdrawal.address == message.proposer_fee_recipient {
-                        balance_before += withdrawal.amount_wei();
-                    }
+        if let Some(withdrawals) = &block.body.withdrawals {
+            for withdrawal in withdrawals {
+                if withdrawal.address == message.proposer_fee_recipient {
+                    balance_before += withdrawal.amount_wei();
                 }
             }
         }

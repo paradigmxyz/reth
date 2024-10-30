@@ -6695,6 +6695,7 @@ dependencies = [
  "rand 0.8.5",
  "reth-fs-util",
  "secp256k1",
+ "serde",
  "thiserror",
  "tikv-jemallocator",
  "tracy-client",

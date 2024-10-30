@@ -189,7 +189,7 @@ use reth_provider::{
 };
 use reth_rpc::{
     AdminApi, DebugApi, EngineEthApi, EthBundle, NetApi, OtterscanApi, RPCApi, RethApi, TraceApi,
-    TxPoolApi, ValidationApi, Web3Api,
+    TxPoolApi, ValidationApi, ValidationApiConfig, Web3Api,
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_api::{
@@ -798,6 +798,8 @@ impl Default for RpcModuleBuilder<(), (), (), (), (), (), (), ()> {
 pub struct RpcModuleConfig {
     /// `eth` namespace settings
     eth: EthConfig,
+    /// `flashbots` namespace settings
+    flashbots: ValidationApiConfig,
 }
 
 // === impl RpcModuleConfig ===
@@ -809,8 +811,8 @@ impl RpcModuleConfig {
     }
 
     /// Returns a new RPC module config given the eth namespace config
-    pub const fn new(eth: EthConfig) -> Self {
-        Self { eth }
+    pub const fn new(eth: EthConfig, flashbots: ValidationApiConfig) -> Self {
+        Self { eth, flashbots }
     }
 
     /// Get a reference to the eth namespace config
@@ -828,6 +830,7 @@ impl RpcModuleConfig {
 #[derive(Clone, Debug, Default)]
 pub struct RpcModuleConfigBuilder {
     eth: Option<EthConfig>,
+    flashbots: Option<ValidationApiConfig>,
 }
 
 // === impl RpcModuleConfigBuilder ===
@@ -839,10 +842,16 @@ impl RpcModuleConfigBuilder {
         self
     }
 
+    /// Configures a custom flashbots namespace config
+    pub fn flashbots(mut self, flashbots: ValidationApiConfig) -> Self {
+        self.flashbots = Some(flashbots);
+        self
+    }
+
     /// Consumes the type and creates the [`RpcModuleConfig`]
     pub fn build(self) -> RpcModuleConfig {
-        let Self { eth } = self;
-        RpcModuleConfig { eth: eth.unwrap_or_default() }
+        let Self { eth, flashbots } = self;
+        RpcModuleConfig { eth: eth.unwrap_or_default(), flashbots: flashbots.unwrap_or_default() }
     }
 
     /// Get a reference to the eth namespace config, if any
@@ -880,6 +889,8 @@ pub struct RpcRegistryInner<
     events: Events,
     block_executor: BlockExecutor,
     consensus: Consensus,
+    /// Holds the configuration for the RPC modules
+    config: RpcModuleConfig,
     /// Holds a all `eth_` namespace handlers
     eth: EthHandlers<Provider, Pool, Network, Events, EthApi>,
     /// to put trace calls behind semaphore
@@ -946,6 +957,7 @@ where
             eth,
             executor,
             consensus,
+            config,
             modules: Default::default(),
             blocking_pool_guard,
             events,
@@ -1247,6 +1259,7 @@ where
             self.provider.clone(),
             Arc::new(self.consensus.clone()),
             self.block_executor.clone(),
+            self.config.flashbots.clone(),
         )
     }
 }
@@ -1410,6 +1423,7 @@ where
                             self.provider.clone(),
                             Arc::new(self.consensus.clone()),
                             self.block_executor.clone(),
+                            self.config.flashbots.clone(),
                         )
                         .into_rpc()
                         .into(),
@@ -1870,7 +1884,7 @@ impl TransportRpcModuleConfig {
     }
 
     /// Sets a custom [`RpcModuleConfig`] for the configured modules.
-    pub const fn with_config(mut self, config: RpcModuleConfig) -> Self {
+    pub fn with_config(mut self, config: RpcModuleConfig) -> Self {
         self.config = Some(config);
         self
     }
