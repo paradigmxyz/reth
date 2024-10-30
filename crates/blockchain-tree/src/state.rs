@@ -410,7 +410,8 @@ mod tests {
                     .iter()
                     .map(|receipt| Some(receipt.clone()))
                     .collect::<Vec<_>>()
-                    .into()..Default::default(),
+                    .into(),
+                ..Default::default()
             },
             Default::default(),
         ));
