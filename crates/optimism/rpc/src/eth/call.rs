@@ -1,15 +1,13 @@
 use alloy_primitives::{Bytes, TxKind, U256};
 use alloy_rpc_types_eth::transaction::TransactionRequest;
-use reth_chainspec::EthereumHardforks;
 use reth_evm::ConfigureEvm;
-use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_primitives::{
     revm_primitives::{BlockEnv, OptimismFields, TxEnv},
     Header,
 };
 use reth_rpc_eth_api::{
-    helpers::{Call, EthCall, LoadState, SpawnBlocking},
-    FromEthApiError, IntoEthApiError,
+    helpers::{Call, EthCall, LoadPendingBlock, LoadState, SpawnBlocking},
+    FromEthApiError, IntoEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{revm_utils::CallFees, RpcInvalidTransactionError};
 
@@ -17,16 +15,16 @@ use crate::{OpEthApi, OpEthApiError};
 
 impl<N> EthCall for OpEthApi<N>
 where
-    Self: Call,
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
+    Self: Call + LoadPendingBlock,
+    N: RpcNodeCore,
 {
 }
 
 impl<N> Call for OpEthApi<N>
 where
-    Self: LoadState + SpawnBlocking,
+    Self: LoadState<Evm: ConfigureEvm<Header = Header>> + SpawnBlocking,
     Self::Error: From<OpEthApiError>,
-    N: FullNodeComponents,
+    N: RpcNodeCore,
 {
     #[inline]
     fn call_gas_limit(&self) -> u64 {
@@ -36,11 +34,6 @@ where
     #[inline]
     fn max_simulate_blocks(&self) -> u64 {
         self.inner.max_simulate_blocks()
-    }
-
-    #[inline]
-    fn evm_config(&self) -> &impl ConfigureEvm<Header = Header> {
-        self.inner.evm_config()
     }
 
     fn create_txn_env(

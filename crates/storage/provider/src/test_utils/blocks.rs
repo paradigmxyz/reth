@@ -8,6 +8,7 @@ use alloy_primitives::{
 
 use reth_db::tables;
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
+use reth_node_types::NodeTypes;
 use reth_primitives::{
     Account, BlockBody, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
     Signature, Transaction, TransactionSigned, TxType, Withdrawal, Withdrawals,
@@ -17,8 +18,8 @@ use revm::{db::BundleState, primitives::AccountInfo};
 use std::{str::FromStr, sync::LazyLock};
 
 /// Assert genesis block
-pub fn assert_genesis_block<DB: Database, Spec: Send + Sync>(
-    provider: &DatabaseProviderRW<DB, Spec>,
+pub fn assert_genesis_block<DB: Database, N: NodeTypes>(
+    provider: &DatabaseProviderRW<DB, N>,
     g: SealedBlock,
 ) {
     let n = g.number;

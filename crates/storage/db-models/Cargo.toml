@@ -48,5 +48,6 @@ arbitrary = [
 	"reth-primitives/arbitrary",
 	"dep:arbitrary",
 	"dep:proptest",
-	"alloy-primitives/arbitrary"
+	"alloy-primitives/arbitrary",
+	"reth-codecs/arbitrary"
 ]
