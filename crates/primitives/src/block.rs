@@ -11,6 +11,7 @@ use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
 pub use reth_primitives_traits::test_utils::{generate_valid_header, valid_header_strategy};
+use reth_primitives_traits::HeuristicSize;
 use serde::{Deserialize, Serialize};
 
 /// Ethereum full block.
@@ -89,10 +90,12 @@ impl Block {
         let senders = self.senders()?;
         Some(BlockWithSenders { block: self, senders })
     }
+}
 
+impl HeuristicSize for Block {
     /// Calculates a heuristic for the in-memory size of the [`Block`].
     #[inline]
-    pub fn size(&self) -> usize {
+    fn size(&self) -> usize {
         self.header.size() + self.body.size()
     }
 }
@@ -380,12 +383,6 @@ impl SealedBlock {
         Block { header: self.header.unseal(), body: self.body }
     }
 
-    /// Calculates a heuristic for the in-memory size of the [`SealedBlock`].
-    #[inline]
-    pub fn size(&self) -> usize {
-        self.header.size() + self.body.size()
-    }
-
     /// Calculates the total gas used by blob transactions in the sealed block.
     pub fn blob_gas_used(&self) -> u64 {
         self.blob_transactions().iter().filter_map(|tx| tx.blob_gas_used()).sum()
@@ -432,6 +429,14 @@ impl SealedBlock {
     /// [`alloy_eips::eip2718::Encodable2718::encoded_2718`].
     pub fn raw_transactions(&self) -> Vec<Bytes> {
         self.body.transactions().map(|tx| tx.encoded_2718().into()).collect()
+    }
+}
+
+impl HeuristicSize for SealedBlock {
+    /// Calculates a heuristic for the in-memory size of the [`SealedBlock`].
+    #[inline]
+    fn size(&self) -> usize {
+        self.header.size() + self.body.size()
     }
 }
 
@@ -608,10 +613,12 @@ impl BlockBody {
     pub fn transactions(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
         self.transactions.iter()
     }
+}
 
+impl HeuristicSize for BlockBody {
     /// Calculates a heuristic for the in-memory size of the [`BlockBody`].
     #[inline]
-    pub fn size(&self) -> usize {
+    fn size(&self) -> usize {
         self.transactions.iter().map(TransactionSigned::size).sum::<usize>() +
             self.transactions.capacity() * core::mem::size_of::<TransactionSigned>() +
             self.ommers.iter().map(Header::size).sum::<usize>() +

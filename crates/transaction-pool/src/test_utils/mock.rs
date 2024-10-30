@@ -23,8 +23,10 @@ use reth_primitives::{
     BlobTransactionValidationError, PooledTransactionsElementEcRecovered, Signature, Transaction,
     TransactionSigned, TransactionSignedEcRecovered, TxType,
 };
-
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
+
+#[cfg(any(test, feature = "arbitrary"))]
+use reth_primitives_traits::HeuristicSize;
 
 /// A transaction pool implementation using [`MockOrdering`] for transaction ordering.
 ///

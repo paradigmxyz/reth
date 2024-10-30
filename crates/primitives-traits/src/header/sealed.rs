@@ -1,3 +1,5 @@
+use crate::HeuristicSize;
+
 use super::Header;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{keccak256, BlockHash, Sealable};
@@ -58,10 +60,12 @@ impl SealedHeader {
     pub fn num_hash(&self) -> BlockNumHash {
         BlockNumHash::new(self.number, self.hash)
     }
+}
 
+impl HeuristicSize for SealedHeader {
     /// Calculates a heuristic for the in-memory size of the [`SealedHeader`].
     #[inline]
-    pub fn size(&self) -> usize {
+    fn size(&self) -> usize {
         self.header.size() + mem::size_of::<BlockHash>()
     }
 }

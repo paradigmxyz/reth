@@ -4,13 +4,14 @@ use crate::{
     PrunerError,
 };
 use reth_db::{tables, transaction::DbTxMut};
+#[allow(unused_imports)]
+use reth_primitives_traits::HeuristicSize;
 use reth_provider::{BlockReader, DBProvider, PruneCheckpointWriter, TransactionsProvider};
 use reth_prune_types::{
     PruneCheckpoint, PruneMode, PruneProgress, PrunePurpose, PruneSegment, ReceiptsLogPruneConfig,
     SegmentOutput, MINIMUM_PRUNING_DISTANCE,
 };
 use tracing::{instrument, trace};
-
 #[derive(Debug)]
 pub struct ReceiptsByLogs {
     config: ReceiptsLogPruneConfig,
@@ -223,6 +224,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db::tables;
     use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
+    use reth_primitives_traits::HeuristicSize;
     use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader, TransactionsProvider};
     use reth_prune_types::{PruneLimiter, PruneMode, PruneSegment, ReceiptsLogPruneConfig};
     use reth_stages::test_utils::{StorageKind, TestStageDB};

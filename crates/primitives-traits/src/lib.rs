@@ -61,3 +61,7 @@ pub use header::{BlockHeader, Header, HeaderError, SealedHeader};
 pub mod serde_bincode_compat {
     pub use super::header::{serde_bincode_compat as header, serde_bincode_compat::*};
 }
+
+/// Heuristic size trait
+pub mod size;
+pub use size::HeuristicSize;
