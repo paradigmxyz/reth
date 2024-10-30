@@ -12,69 +12,14 @@ use reth_provider::test_utils::create_test_provider_factory;
 use reth_trie::{
     test_utils::{state_root_prehashed, storage_root_prehashed},
     trie_cursor::InMemoryTrieCursorFactory,
-    updates::{StorageTrieUpdates, TrieUpdates},
-    BranchNodeCompact, HashedPostState, HashedStorage, Nibbles, StateRoot, StorageRoot,
+    updates::TrieUpdates,
+    HashedPostState, HashedStorage, StateRoot, StorageRoot,
 };
 use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot, DatabaseTrieCursorFactory};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::BTreeMap;
 
-trait VerifiableTrieUpdates {
-    fn nodes_ref(&self) -> &HashMap<Nibbles, BranchNodeCompact>;
-    fn removed_nodes_ref(&self) -> &HashSet<Nibbles>;
-}
-
-impl VerifiableTrieUpdates for StorageTrieUpdates {
-    fn nodes_ref(&self) -> &HashMap<Nibbles, BranchNodeCompact> {
-        self.storage_nodes_ref()
-    }
-
-    fn removed_nodes_ref(&self) -> &HashSet<Nibbles> {
-        self.removed_nodes_ref()
-    }
-}
-
-impl VerifiableTrieUpdates for TrieUpdates {
-    fn nodes_ref(&self) -> &HashMap<Nibbles, BranchNodeCompact> {
-        self.account_nodes_ref()
-    }
-
-    fn removed_nodes_ref(&self) -> &HashSet<Nibbles> {
-        self.removed_nodes_ref()
-    }
-}
-
-const fn is_bit_set(mask: u16, position: u8) -> bool {
-    (mask & (1 << position)) != 0
-}
-
-fn get_child_paths(path: &Nibbles, tree_mask: u16) -> Vec<Nibbles> {
-    (0..16)
-        .filter(|&pos| is_bit_set(tree_mask, pos as u8))
-        .map(|pos| {
-            let mut child_path = path.clone();
-            child_path.push(pos as u8);
-            child_path
-        })
-        .collect()
-}
-
-fn verify_storage_trie_tree_mask_invariant<V: VerifiableTrieUpdates>(trie_updates: &V) -> bool {
-    for (path, branch_node) in trie_updates.nodes_ref() {
-        let child_paths = get_child_paths(path, branch_node.tree_mask.get());
-
-        // for each child path indicated by the tree mask, verify that a corresponding
-        // branch node exists in the trie updates
-        for child_path in child_paths {
-            if !trie_updates.nodes_ref().contains_key(&child_path) &&
-                !trie_updates.removed_nodes_ref().contains(&child_path)
-            {
-                println!("missing child node at path: {:?} for parent: {:?}", child_path, path);
-                return false;
-            }
-        }
-    }
-    true
-}
+mod common;
+use common::verify_tree_mask_invariant;
 
 proptest! {
     #![proptest_config(ProptestConfig {
@@ -98,7 +43,7 @@ proptest! {
             .unwrap();
 
         // verify initial tree mask invariant
-        assert!(verify_storage_trie_tree_mask_invariant(&trie_nodes));
+        assert!(verify_tree_mask_invariant(&trie_nodes.account_nodes_ref(), &trie_nodes.removed_nodes_ref()));
 
         let mut state = init_state;
         for state_update in state_updates {
@@ -134,7 +79,7 @@ proptest! {
             assert_eq!(expected_root, state_root);
         }
         // verify tree mask invariant after updates
-        assert!(verify_storage_trie_tree_mask_invariant(&trie_nodes));
+        assert!(verify_tree_mask_invariant(&trie_nodes.account_nodes_ref(), &trie_nodes.removed_nodes_ref()));
     }
 
     #[test]
@@ -157,7 +102,7 @@ proptest! {
             StorageRoot::from_tx_hashed(provider.tx_ref(), hashed_address).root_with_updates().unwrap();
 
         // verify initial tree mask invariant
-        assert!(verify_storage_trie_tree_mask_invariant(&storage_trie_nodes));
+        assert!(verify_tree_mask_invariant(&storage_trie_nodes.storage_nodes_ref(), &storage_trie_nodes.removed_nodes_ref()));
 
         let mut storage = init_storage;
         for (is_deleted, mut storage_update) in storage_updates {
@@ -198,6 +143,6 @@ proptest! {
         }
 
         // verify tree mask invariant after updates
-        assert!(verify_storage_trie_tree_mask_invariant(&storage_trie_nodes));
+        assert!(verify_tree_mask_invariant(&storage_trie_nodes.storage_nodes_ref(), &storage_trie_nodes.removed_nodes_ref()));
     }
 }

@@ -4,43 +4,12 @@ use alloy_primitives::{B256, U256};
 use reth_db::{cursor::DbCursorRW, tables, transaction::DbTxMut};
 use reth_primitives::Account;
 use reth_provider::test_utils::create_test_provider_factory;
-use reth_trie::{trie_cursor::InMemoryTrieCursorFactory, HashedPostState, Nibbles, StateRoot};
-use reth_trie_common::BranchNodeCompact;
+use reth_trie::{trie_cursor::InMemoryTrieCursorFactory, HashedPostState, StateRoot};
 use reth_trie_db::{DatabaseStateRoot, DatabaseTrieCursorFactory};
-use std::{
-    collections::{BTreeMap, HashMap, HashSet},
-    str::FromStr,
-};
+use std::{collections::BTreeMap, str::FromStr};
 
-/// Helper function to verify tree mask invariant similar to the fuzzer
-fn verify_tree_mask_invariant(
-    nodes: &HashMap<Nibbles, BranchNodeCompact>,
-    removed: &HashSet<Nibbles>,
-) -> bool {
-    for (path, branch_node) in nodes {
-        let child_paths = (0..16)
-            .filter(|&pos| (branch_node.tree_mask.get() & (1 << pos)) != 0)
-            .map(|pos| {
-                let mut child_path = path.clone();
-                child_path.push(pos as u8);
-                child_path
-            })
-            .collect::<Vec<_>>();
-
-        for child_path in child_paths {
-            if !nodes.contains_key(&child_path) && !removed.contains(&child_path) {
-                println!(
-                    "Missing child node at path: {:?} for parent: {:?} with mask: {:016b}",
-                    child_path,
-                    path,
-                    branch_node.tree_mask.get()
-                );
-                return false;
-            }
-        }
-    }
-    true
-}
+mod common;
+use common::verify_tree_mask_invariant;
 
 #[test]
 fn test_tree_mask_invariant_regression() {
