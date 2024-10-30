@@ -31,19 +31,19 @@ pub mod l1;
 pub use l1::*;
 
 mod error;
-pub use error::OptimismBlockExecutionError;
+pub use error::OpBlockExecutionError;
 use revm_primitives::{
-    BlobExcessGasAndPrice, BlockEnv, Bytes, CfgEnv, Env, HandlerCfg, OptimismFields, SpecId, TxKind,
+    BlobExcessGasAndPrice, BlockEnv, Bytes, CfgEnv, Env, HandlerCfg, OpFields, SpecId, TxKind,
 };
 
 /// Optimism-related EVM configuration.
 #[derive(Debug, Clone)]
-pub struct OptimismEvmConfig {
+pub struct OpEvmConfig {
     chain_spec: Arc<OpChainSpec>,
 }
 
-impl OptimismEvmConfig {
-    /// Creates a new [`OptimismEvmConfig`] with the given chain spec.
+impl OpEvmConfig {
+    /// Creates a new [`OpEvmConfig`] with the given chain spec.
     pub const fn new(chain_spec: Arc<OpChainSpec>) -> Self {
         Self { chain_spec }
     }
@@ -54,7 +54,7 @@ impl OptimismEvmConfig {
     }
 }
 
-impl ConfigureEvmEnv for OptimismEvmConfig {
+impl ConfigureEvmEnv for OpEvmConfig {
     type Header = Header;
     type Error = DecodeError;
 
@@ -90,7 +90,7 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
             blob_hashes: Vec::new(),
             max_fee_per_blob_gas: None,
             authorization_list: None,
-            optimism: OptimismFields {
+            optimism: OpFields {
                 source_hash: None,
                 mint: None,
                 is_system_transaction: Some(false),
@@ -174,7 +174,7 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
     }
 }
 
-impl ConfigureEvm for OptimismEvmConfig {
+impl ConfigureEvm for OpEvmConfig {
     type DefaultExternalContext<'a> = ();
 
     fn evm<DB: Database>(&self, db: DB) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
@@ -226,8 +226,8 @@ mod tests {
         sync::Arc,
     };
 
-    fn test_evm_config() -> OptimismEvmConfig {
-        OptimismEvmConfig::new(BASE_MAINNET.clone())
+    fn test_evm_config() -> OpEvmConfig {
+        OpEvmConfig::new(BASE_MAINNET.clone())
     }
 
     #[test]
@@ -254,9 +254,9 @@ mod tests {
         // Define the total difficulty as zero (default)
         let total_difficulty = U256::ZERO;
 
-        // Use the `OptimismEvmConfig` to fill the `cfg_env` and `block_env` based on the ChainSpec,
+        // Use the `OpEvmConfig` to fill the `cfg_env` and `block_env` based on the ChainSpec,
         // Header, and total difficulty
-        OptimismEvmConfig::new(Arc::new(OpChainSpec { inner: chain_spec.clone() }))
+        OpEvmConfig::new(Arc::new(OpChainSpec { inner: chain_spec.clone() }))
             .fill_cfg_and_block_env(&mut cfg_env, &mut block_env, &header, total_difficulty);
 
         // Assert that the chain ID in the `cfg_env` is correctly set to the chain ID of the
@@ -266,7 +266,7 @@ mod tests {
 
     #[test]
     fn test_evm_configure() {
-        // Create a default `OptimismEvmConfig`
+        // Create a default `OpEvmConfig`
         let evm_config = test_evm_config();
 
         // Initialize an empty database wrapped in CacheDB

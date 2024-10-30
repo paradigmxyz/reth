@@ -13,7 +13,7 @@ use std::{fmt, sync::Arc};
 
 use alloy_primitives::U256;
 use derive_more::Deref;
-use op_alloy_network::Optimism;
+use op_alloy_network::Op;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
@@ -105,7 +105,7 @@ where
     N: RpcNodeCore,
 {
     type Error = OpEthApiError;
-    type NetworkTypes = Optimism;
+    type NetworkTypes = Op;
     type TransactionCompat = Self;
 
     fn tx_resp_builder(&self) -> &Self::TransactionCompat {

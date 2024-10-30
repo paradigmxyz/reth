@@ -7,7 +7,7 @@ use alloy_eips::eip7685::Requests;
 use alloy_sol_macro::sol;
 use alloy_sol_types::SolCall;
 #[cfg(feature = "optimism")]
-use reth::revm::primitives::OptimismFields;
+use reth::revm::primitives::OpFields;
 use reth::{
     api::{ConfigureEvm, ConfigureEvmEnv, NodeTypesWithEngine},
     builder::{components::ExecutorBuilder, BuilderContext, FullNodeTypes},
@@ -275,7 +275,7 @@ fn fill_tx_env_with_system_contract_call(
         max_fee_per_blob_gas: None,
         authorization_list: None,
         #[cfg(feature = "optimism")]
-        optimism: OptimismFields::default(),
+        optimism: OpFields::default(),
     };
 
     // ensure the block gas limit is >= the tx

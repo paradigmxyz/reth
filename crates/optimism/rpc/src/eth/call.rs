@@ -2,7 +2,7 @@ use alloy_primitives::{Bytes, TxKind, U256};
 use alloy_rpc_types_eth::transaction::TransactionRequest;
 use reth_evm::ConfigureEvm;
 use reth_primitives::{
-    revm_primitives::{BlockEnv, OptimismFields, TxEnv},
+    revm_primitives::{BlockEnv, OpFields, TxEnv},
     Header,
 };
 use reth_rpc_eth_api::{
@@ -96,7 +96,7 @@ where
             blob_hashes: blob_versioned_hashes.unwrap_or_default(),
             max_fee_per_blob_gas,
             authorization_list: authorization_list.map(Into::into),
-            optimism: OptimismFields { enveloped_tx: Some(Bytes::new()), ..Default::default() },
+            optimism: OpFields { enveloped_tx: Some(Bytes::new()), ..Default::default() },
         };
 
         Ok(env)

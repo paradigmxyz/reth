@@ -101,7 +101,7 @@ impl FillTxEnv for TransactionSigned {
                 tx_env.nonce = None;
                 tx_env.authorization_list = None;
 
-                tx_env.optimism = revm_primitives::OptimismFields {
+                tx_env.optimism = revm_primitives::OpFields {
                     source_hash: Some(tx.source_hash),
                     mint: tx.mint,
                     is_system_transaction: Some(tx.is_system_transaction),
@@ -113,7 +113,7 @@ impl FillTxEnv for TransactionSigned {
 
         #[cfg(feature = "optimism")]
         if !self.is_deposit() {
-            tx_env.optimism = revm_primitives::OptimismFields {
+            tx_env.optimism = revm_primitives::OpFields {
                 source_hash: None,
                 mint: None,
                 is_system_transaction: Some(false),

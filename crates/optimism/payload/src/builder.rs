@@ -11,7 +11,7 @@ use reth_evm::{system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, NextBl
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
-use reth_optimism_forks::{OptimismHardfork, OptimismHardforks};
+use reth_optimism_forks::{OpHardfork, OpHardforks};
 use reth_payload_primitives::{PayloadBuilderAttributes, PayloadBuilderError};
 use reth_primitives::{
     proofs,
@@ -32,14 +32,14 @@ use revm::{
 use tracing::{debug, trace, warn};
 
 use crate::{
-    error::OptimismPayloadBuilderError,
-    payload::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes},
+    error::OpPayloadBuilderError,
+    payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
 };
 use op_alloy_consensus::DepositTransaction;
 
 /// Optimism's payload builder
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OptimismPayloadBuilder<EvmConfig> {
+pub struct OpPayloadBuilder<EvmConfig> {
     /// The rollup's compute pending block configuration option.
     // TODO(clabby): Implement this feature.
     pub compute_pending_block: bool,
@@ -47,8 +47,8 @@ pub struct OptimismPayloadBuilder<EvmConfig> {
     pub evm_config: EvmConfig,
 }
 
-impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
-    /// `OptimismPayloadBuilder` constructor.
+impl<EvmConfig> OpPayloadBuilder<EvmConfig> {
+    /// `OpPayloadBuilder` constructor.
     pub const fn new(evm_config: EvmConfig) -> Self {
         Self { compute_pending_block: true, evm_config }
     }
@@ -69,7 +69,7 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
         self.compute_pending_block
     }
 }
-impl<EvmConfig> OptimismPayloadBuilder<EvmConfig>
+impl<EvmConfig> OpPayloadBuilder<EvmConfig>
 where
     EvmConfig: ConfigureEvmEnv<Header = Header>,
 {
@@ -77,7 +77,7 @@ where
     /// (that has the `parent` as its parent).
     pub fn cfg_and_block_env(
         &self,
-        config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
+        config: &PayloadConfig<OpPayloadBuilderAttributes>,
         parent: &Header,
     ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), EvmConfig::Error> {
         let next_attributes = NextBlockEnvAttributes {
@@ -89,20 +89,20 @@ where
     }
 }
 
-/// Implementation of the [`PayloadBuilder`] trait for [`OptimismPayloadBuilder`].
-impl<Pool, Client, EvmConfig> PayloadBuilder<Pool, Client> for OptimismPayloadBuilder<EvmConfig>
+/// Implementation of the [`PayloadBuilder`] trait for [`OpPayloadBuilder`].
+impl<Pool, Client, EvmConfig> PayloadBuilder<Pool, Client> for OpPayloadBuilder<EvmConfig>
 where
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
     Pool: TransactionPool,
     EvmConfig: ConfigureEvm<Header = Header>,
 {
-    type Attributes = OptimismPayloadBuilderAttributes;
-    type BuiltPayload = OptimismBuiltPayload;
+    type Attributes = OpPayloadBuilderAttributes;
+    type BuiltPayload = OpBuiltPayload;
 
     fn try_build(
         &self,
-        args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
-    ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError> {
+        args: BuildArguments<Pool, Client, OpPayloadBuilderAttributes, OpBuiltPayload>,
+    ) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError> {
         let (cfg_env, block_env) = self
             .cfg_and_block_env(&args.config, &args.config.parent_header)
             .map_err(PayloadBuilderError::other)?;
@@ -111,7 +111,7 @@ where
 
     fn on_missing_payload(
         &self,
-        _args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
+        _args: BuildArguments<Pool, Client, OpPayloadBuilderAttributes, OpBuiltPayload>,
     ) -> MissingPayloadBehaviour<Self::BuiltPayload> {
         // we want to await the job that's already in progress because that should be returned as
         // is, there's no benefit in racing another job
@@ -124,7 +124,7 @@ where
         &self,
         client: &Client,
         config: PayloadConfig<Self::Attributes>,
-    ) -> Result<OptimismBuiltPayload, PayloadBuilderError> {
+    ) -> Result<OpBuiltPayload, PayloadBuilderError> {
         let args = BuildArguments {
             client,
             config,
@@ -154,11 +154,11 @@ where
 #[inline]
 pub(crate) fn optimism_payload<EvmConfig, Pool, Client>(
     evm_config: &EvmConfig,
-    args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
+    args: BuildArguments<Pool, Client, OpPayloadBuilderAttributes, OpBuiltPayload>,
     initialized_cfg: CfgEnvWithHandlerCfg,
     initialized_block_env: BlockEnv,
     _compute_pending_block: bool,
-) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError>
+) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
@@ -193,10 +193,8 @@ where
 
     let block_number = initialized_block_env.number.to::<u64>();
 
-    let is_regolith = chain_spec.is_fork_active_at_timestamp(
-        OptimismHardfork::Regolith,
-        attributes.payload_attributes.timestamp,
-    );
+    let is_regolith = chain_spec
+        .is_fork_active_at_timestamp(OpHardfork::Regolith, attributes.payload_attributes.timestamp);
 
     // apply eip-4788 pre block contract call
     let mut system_caller = SystemCaller::new(evm_config.clone(), &chain_spec);
@@ -228,7 +226,7 @@ where
     )
     .map_err(|err| {
         warn!(target: "payload_builder", %err, "missing create2 deployer, skipping block.");
-        PayloadBuilderError::other(OptimismPayloadBuilderError::ForceCreate2DeployerFail)
+        PayloadBuilderError::other(OpPayloadBuilderError::ForceCreate2DeployerFail)
     })?;
 
     let mut receipts = Vec::with_capacity(attributes.transactions.len());
@@ -240,9 +238,7 @@ where
 
         // A sequencer's block should never contain blob transactions.
         if sequencer_tx.value().is_eip4844() {
-            return Err(PayloadBuilderError::other(
-                OptimismPayloadBuilderError::BlobTransactionRejected,
-            ))
+            return Err(PayloadBuilderError::other(OpPayloadBuilderError::BlobTransactionRejected))
         }
 
         // Convert the transaction to a [TransactionSignedEcRecovered]. This is
@@ -250,7 +246,7 @@ where
         // Deposit transactions do not have signatures, so if the tx is a deposit, this
         // will just pull in its `from` address.
         let sequencer_tx = sequencer_tx.value().clone().try_into_ecrecovered().map_err(|_| {
-            PayloadBuilderError::other(OptimismPayloadBuilderError::TransactionEcRecoverFailed)
+            PayloadBuilderError::other(OpPayloadBuilderError::TransactionEcRecoverFailed)
         })?;
 
         // Cache the depositor account prior to the state transition for the deposit nonce.
@@ -265,7 +261,7 @@ where
             })
             .transpose()
             .map_err(|_| {
-                PayloadBuilderError::other(OptimismPayloadBuilderError::AccountLoadFailed(
+                PayloadBuilderError::other(OpPayloadBuilderError::AccountLoadFailed(
                     sequencer_tx.signer(),
                 ))
             })?;
@@ -316,7 +312,7 @@ where
             // ensures this is only set for post-Canyon deposit transactions.
             deposit_receipt_version: chain_spec
                 .is_fork_active_at_timestamp(
-                    OptimismHardfork::Canyon,
+                    OpHardfork::Canyon,
                     attributes.payload_attributes.timestamp,
                 )
                 .then_some(1),
@@ -473,10 +469,8 @@ where
             (None, None)
         };
 
-    let is_holocene = chain_spec.is_fork_active_at_timestamp(
-        OptimismHardfork::Holocene,
-        attributes.payload_attributes.timestamp,
-    );
+    let is_holocene = chain_spec
+        .is_fork_active_at_timestamp(OpHardfork::Holocene, attributes.payload_attributes.timestamp);
 
     if is_holocene {
         extra_data = attributes
@@ -530,7 +524,7 @@ where
 
     let no_tx_pool = attributes.no_tx_pool;
 
-    let payload = OptimismBuiltPayload::new(
+    let payload = OpBuiltPayload::new(
         attributes.payload_attributes.id,
         sealed_block,
         total_fees,
