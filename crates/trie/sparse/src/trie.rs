@@ -4,7 +4,7 @@ use alloy_rlp::Decodable;
 use reth_tracing::tracing::debug;
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut},
-    RlpNode,
+    BranchNodeCompact, RlpNode,
 };
 use reth_trie_common::{
     BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, TrieMask, TrieNode, CHILD_INDEX_RANGE,
@@ -64,7 +64,7 @@ impl SparseTrie {
     }
 
     /// Calculates and returns the trie root if the trie has been revealed.
-    pub fn root(&mut self) -> Option<B256> {
+    pub fn root(&mut self) -> Option<(B256, HashMap<Nibbles, BranchNodeCompact>)> {
         Some(self.as_revealed_mut()?.root())
     }
 }
@@ -555,15 +555,15 @@ impl RevealedSparseTrie {
 
     /// Return the root of the sparse trie.
     /// Updates all remaining dirty nodes before calculating the root.
-    pub fn root(&mut self) -> B256 {
+    pub fn root(&mut self) -> (B256, HashMap<Nibbles, BranchNodeCompact>) {
         // take the current prefix set.
         let mut prefix_set = std::mem::take(&mut self.prefix_set).freeze();
-        let root_rlp = self.rlp_node_allocate(Nibbles::default(), &mut prefix_set);
-        if let Some(root_hash) = root_rlp.as_hash() {
-            root_hash
-        } else {
-            keccak256(root_rlp)
-        }
+        let (root_rlp, updated_branch_nodes) =
+            self.rlp_node_allocate(Nibbles::default(), &mut prefix_set);
+        let root =
+            if let Some(root_hash) = root_rlp.as_hash() { root_hash } else { keccak256(root_rlp) };
+
+        (root, updated_branch_nodes)
     }
 
     /// Update hashes of the nodes that are located at a level deeper than or equal to the provided
@@ -631,12 +631,22 @@ impl RevealedSparseTrie {
         targets
     }
 
-    fn rlp_node_allocate(&mut self, path: Nibbles, prefix_set: &mut PrefixSet) -> RlpNode {
+    fn rlp_node_allocate(
+        &mut self,
+        path: Nibbles,
+        prefix_set: &mut PrefixSet,
+    ) -> (RlpNode, HashMap<Nibbles, BranchNodeCompact>) {
         let mut buffers = RlpNodeBuffers::new_with_path(path);
         self.rlp_node(prefix_set, &mut buffers)
     }
 
-    fn rlp_node(&mut self, prefix_set: &mut PrefixSet, buffers: &mut RlpNodeBuffers) -> RlpNode {
+    fn rlp_node(
+        &mut self,
+        prefix_set: &mut PrefixSet,
+        buffers: &mut RlpNodeBuffers,
+    ) -> (RlpNode, HashMap<Nibbles, BranchNodeCompact>) {
+        let mut updated_branch_nodes = HashMap::<Nibbles, BranchNodeCompact>::default();
+
         'main: while let Some((path, mut is_in_prefix_set)) = buffers.path_stack.pop() {
             // Check if the path is in the prefix set.
             // First, check the cached value. If it's `None`, then check the prefix set, and update
@@ -644,33 +654,33 @@ impl RevealedSparseTrie {
             let mut prefix_set_contains =
                 |path: &Nibbles| *is_in_prefix_set.get_or_insert_with(|| prefix_set.contains(path));
 
-            let rlp_node = match self.nodes.get_mut(&path).unwrap() {
-                SparseNode::Empty => RlpNode::word_rlp(&EMPTY_ROOT_HASH),
-                SparseNode::Hash(hash) => RlpNode::word_rlp(hash),
+            let (rlp_node, calculated) = match self.nodes.get_mut(&path).unwrap() {
+                SparseNode::Empty => (RlpNode::word_rlp(&EMPTY_ROOT_HASH), false),
+                SparseNode::Hash(hash) => (RlpNode::word_rlp(hash), false),
                 SparseNode::Leaf { key, hash } => {
                     self.rlp_buf.clear();
                     let mut path = path.clone();
                     path.extend_from_slice_unchecked(key);
                     if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path)) {
-                        RlpNode::word_rlp(&hash)
+                        (RlpNode::word_rlp(&hash), false)
                     } else {
                         let value = self.values.get(&path).unwrap();
                         let rlp_node = LeafNodeRef { key, value }.rlp(&mut self.rlp_buf);
                         *hash = rlp_node.as_hash();
-                        rlp_node
+                        (rlp_node, true)
                     }
                 }
                 SparseNode::Extension { key, hash } => {
                     let mut child_path = path.clone();
                     child_path.extend_from_slice_unchecked(key);
                     if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path)) {
-                        RlpNode::word_rlp(&hash)
+                        (RlpNode::word_rlp(&hash), false)
                     } else if buffers.rlp_node_stack.last().map_or(false, |e| e.0 == child_path) {
-                        let (_, child) = buffers.rlp_node_stack.pop().unwrap();
+                        let child = buffers.rlp_node_stack.pop().unwrap().1;
                         self.rlp_buf.clear();
                         let rlp_node = ExtensionNodeRef::new(key, &child).rlp(&mut self.rlp_buf);
                         *hash = rlp_node.as_hash();
-                        rlp_node
+                        (rlp_node, true)
                     } else {
                         // need to get rlp node for child first
                         buffers.path_stack.extend([(path, is_in_prefix_set), (child_path, None)]);
@@ -679,13 +689,13 @@ impl RevealedSparseTrie {
                 }
                 SparseNode::Branch { state_mask, hash } => {
                     if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path)) {
-                        buffers.rlp_node_stack.push((path, RlpNode::word_rlp(&hash)));
+                        buffers.rlp_node_stack.push((path, RlpNode::word_rlp(&hash), false));
                         continue
                     }
 
                     buffers.branch_child_buf.clear();
                     // Walk children in a reverse order from `f` to `0`, so we pop the `0` first
-                    // from the stack.
+                    // from the stack and keep walking in the sorted order.
                     for bit in CHILD_INDEX_RANGE.rev() {
                         if state_mask.is_bit_set(bit) {
                             let mut child = path.clone();
@@ -698,13 +708,19 @@ impl RevealedSparseTrie {
                         .branch_value_stack_buf
                         .resize(buffers.branch_child_buf.len(), Default::default());
                     let mut added_children = false;
+
+                    let mut tree_mask = TrieMask::default();
                     for (i, child_path) in buffers.branch_child_buf.iter().enumerate() {
                         if buffers.rlp_node_stack.last().map_or(false, |e| &e.0 == child_path) {
-                            let (_, child) = buffers.rlp_node_stack.pop().unwrap();
-                            // Insert children in the resulting buffer in a normal order, because
-                            // initially we iterated in reverse.
+                            let (_, child, calculated) = buffers.rlp_node_stack.pop().unwrap();
+                            // Insert children in the resulting buffer in a normal order,
+                            // because initially we iterated in reverse.
+                            let nibble = buffers.branch_child_buf.len() - i - 1;
                             buffers.branch_value_stack_buf
                                 [buffers.branch_child_buf.len() - i - 1] = child;
+                            if !calculated {
+                                tree_mask.set_bit(nibble as u8);
+                            }
                             added_children = true;
                         } else {
                             debug_assert!(!added_children);
@@ -720,13 +736,27 @@ impl RevealedSparseTrie {
                     let rlp_node = BranchNodeRef::new(&buffers.branch_value_stack_buf, *state_mask)
                         .rlp(&mut self.rlp_buf);
                     *hash = rlp_node.as_hash();
-                    rlp_node
+
+                    let mut hash_mask = TrieMask::default();
+                    let mut hashes = Vec::new();
+                    for (i, value) in buffers.branch_value_stack_buf.iter().enumerate() {
+                        if let Some(hash) = value.as_hash() {
+                            hash_mask.set_bit(i as u8);
+                            hashes.push(hash);
+                        }
+                    }
+                    let branch_node =
+                        BranchNodeCompact::new(*state_mask, tree_mask, hash_mask, hashes, *hash);
+                    updated_branch_nodes.insert(path.clone(), branch_node);
+
+                    (rlp_node, true)
                 }
             };
-            buffers.rlp_node_stack.push((path, rlp_node));
+            buffers.rlp_node_stack.push((path, rlp_node, calculated));
         }
 
-        buffers.rlp_node_stack.pop().unwrap().1
+        debug_assert_eq!(buffers.rlp_node_stack.len(), 1);
+        (buffers.rlp_node_stack.pop().unwrap().1, updated_branch_nodes)
     }
 }
 
@@ -812,7 +842,7 @@ struct RlpNodeBuffers {
     /// Stack of paths we need rlp nodes for and whether the path is in the prefix set.
     path_stack: Vec<(Nibbles, Option<bool>)>,
     /// Stack of rlp nodes
-    rlp_node_stack: Vec<(Nibbles, RlpNode)>,
+    rlp_node_stack: Vec<(Nibbles, RlpNode, bool)>,
     /// Reusable branch child path
     branch_child_buf: SmallVec<[Nibbles; 16]>,
     /// Reusable branch value stack
