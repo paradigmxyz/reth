@@ -26,18 +26,35 @@ pub trait OpHardforks: EthereumHardforks {
         self.fork(OpHardfork::Bedrock).active_at_block(block_number)
     }
 
+    /// Returns `true` if [`Canyon`](OpHardfork::Canyon) is active at given block timestamp.
+    fn is_canyon_active_at_timestamp(&self, timestamp: u64) -> bool {
+        self.fork(OpHardfork::Canyon).active_at_timestamp(timestamp)
+    }
+
     /// Returns `true` if [`Ecotone`](OpHardfork::Ecotone) is active at given block timestamp.
     fn is_ecotone_active_at_timestamp(&self, timestamp: u64) -> bool {
         self.fork(OpHardfork::Ecotone).active_at_timestamp(timestamp)
     }
 
-    /// Returns `true` if [`Ecotone`](OpHardfork::Ecotone) is active at given block timestamp.
+    /// Returns `true` if [`Fjord`](OpHardfork::Fjord) is active at given block timestamp.
     fn is_fjord_active_at_timestamp(&self, timestamp: u64) -> bool {
-        self.fork(OpHardfork::Ecotone).active_at_timestamp(timestamp)
+        self.fork(OpHardfork::Fjord).active_at_timestamp(timestamp)
     }
 
     /// Returns `true` if [`Granite`](OpHardfork::Granite) is active at given block timestamp.
     fn is_granite_active_at_timestamp(&self, timestamp: u64) -> bool {
         self.fork(OpHardfork::Granite).active_at_timestamp(timestamp)
+    }
+
+    /// Returns `true` if [`Holocene`](OpHardfork::Holocene) is active at given block
+    /// timestamp.
+    fn is_holocene_active_at_timestamp(&self, timestamp: u64) -> bool {
+        self.fork(OpHardfork::Holocene).active_at_timestamp(timestamp)
+    }
+
+    /// Returns `true` if [`Regolith`](OpHardfork::Regolith) is active at given block
+    /// timestamp.
+    fn is_regolith_active_at_timestamp(&self, timestamp: u64) -> bool {
+        self.fork(OpHardfork::Regolith).active_at_timestamp(timestamp)
     }
 }
