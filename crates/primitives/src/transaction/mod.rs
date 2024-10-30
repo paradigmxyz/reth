@@ -21,6 +21,7 @@ use once_cell::sync::Lazy as LazyLock;
 #[cfg(feature = "optimism")]
 use op_alloy_consensus::DepositTransaction;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+use reth_primitives_traits::SignedTransaction;
 use serde::{Deserialize, Serialize};
 use signature::{decode_with_eip155_chain_id, with_eip155_parity};
 #[cfg(feature = "std")]
@@ -1336,6 +1337,38 @@ impl TransactionSigned {
         let (transaction, hash, signature) = Self::decode_rlp_legacy_transaction_tuple(data)?;
         let signed = Self { transaction: Transaction::Legacy(transaction), hash, signature };
         Ok(signed)
+    }
+}
+
+impl SignedTransaction for TransactionSigned {
+    type Transaction = Transaction;
+
+    fn tx_hash(&self) -> &TxHash {
+        &self.hash
+    }
+
+    fn transaction(&self) -> &Self::Transaction {
+        &self.transaction
+    }
+
+    fn signature(&self) -> &Signature {
+        &self.signature
+    }
+
+    fn recover_signer(&self) -> Option<Address> {
+        let signature_hash = self.signature_hash();
+        recover_signer(&self.signature, signature_hash)
+    }
+
+    fn recover_signer_unchecked(&self) -> Option<Address> {
+        let signature_hash = self.signature_hash();
+        recover_signer_unchecked(&self.signature, signature_hash)
+    }
+
+    fn from_transaction_and_signature(transaction: Transaction, signature: Signature) -> Self {
+        let mut initial_tx = Self { transaction, hash: Default::default(), signature };
+        initial_tx.hash = initial_tx.recalculate_hash();
+        initial_tx
     }
 }
 
