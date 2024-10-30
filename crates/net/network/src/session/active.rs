@@ -12,6 +12,7 @@ use std::{
 };
 
 use futures::{stream::Fuse, SinkExt, StreamExt};
+use metrics::Gauge;
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError, P2PStreamError},
     message::{EthBroadcastMessage, RequestPair},
@@ -87,7 +88,7 @@ pub(crate) struct ActiveSession {
     /// All requests that were sent by the remote peer and we're waiting on an internal response
     pub(crate) received_requests_from_remote: Vec<ReceivedRequest>,
     /// Buffered messages that should be handled and sent to the peer.
-    pub(crate) queued_outgoing: VecDeque<OutgoingMessage>,
+    pub(crate) queued_outgoing: QueuedOutgoingMessages,
     /// The maximum time we wait for a response from a peer.
     pub(crate) internal_request_timeout: Arc<AtomicU64>,
     /// Interval when to check for timed out requests.
@@ -757,6 +758,35 @@ fn calculate_new_timeout(current_timeout: Duration, estimated_rtt: Duration) -> 
 
     smoothened_timeout.clamp(MINIMUM_TIMEOUT, MAXIMUM_TIMEOUT)
 }
+
+pub(crate) struct QueuedOutgoingMessages {
+    messages: VecDeque<OutgoingMessage>,
+    count: Gauge,
+}
+
+impl QueuedOutgoingMessages {
+    pub const fn new(metric: Gauge) -> Self {
+        Self { messages: VecDeque::new(), count: metric }
+    }
+
+    pub fn push_back(&mut self, message: OutgoingMessage) {
+        self.messages.push_back(message);
+        self.count.increment(1);
+    }
+
+    pub fn pop_front(&mut self) -> Option<OutgoingMessage> {
+        let message = self.messages.pop_front();
+        if message.is_some() {
+            self.count.decrement(1);
+        }
+        message
+    }
+
+    pub fn shrink_to_fit(&mut self) {
+        self.messages.shrink_to_fit();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -882,7 +912,7 @@ mod tests {
                         internal_request_tx: ReceiverStream::new(messages_rx).fuse(),
                         inflight_requests: Default::default(),
                         conn,
-                        queued_outgoing: Default::default(),
+                        queued_outgoing: QueuedOutgoingMessages::new(Gauge::noop()),
                         received_requests_from_remote: Default::default(),
                         internal_request_timeout_interval: tokio::time::interval(
                             INITIAL_REQUEST_TIMEOUT,
