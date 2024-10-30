@@ -352,6 +352,18 @@ pub trait TransactionPool: Send + Sync + Clone {
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
+    /// Returns all pending transactions sent by a given user
+    fn get_pending_transactions_by_sender(
+        &self,
+        sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns all queued transactions sent by a given user
+    fn get_queued_transactions_by_sender(
+        &self,
+        sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
     /// Returns the highest transaction sent by a given user
     fn get_highest_transaction_by_sender(
         &self,
@@ -764,7 +776,9 @@ pub trait BestTransactions: Iterator + Send {
     /// If called then the iterator will no longer yield blob transactions.
     ///
     /// Note: this will also exclude any transactions that depend on blob transactions.
-    fn skip_blobs(&mut self);
+    fn skip_blobs(&mut self) {
+        self.set_skip_blobs(true);
+    }
 
     /// Controls whether the iterator skips blob transactions or not.
     ///
@@ -1332,7 +1346,7 @@ impl TryFrom<TransactionSignedEcRecovered> for EthPooledTransaction {
             }
             EIP4844_TX_TYPE_ID => {
                 // doesn't have a blob sidecar
-                return Err(TryFromRecoveredTransactionError::BlobSidecarMissing)
+                return Err(TryFromRecoveredTransactionError::BlobSidecarMissing);
             }
             unsupported => {
                 // unsupported transaction type

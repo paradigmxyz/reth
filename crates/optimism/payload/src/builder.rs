@@ -1,10 +1,9 @@
 //! Optimism payload builder implementation.
-
 use std::sync::Arc;
 
 use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
 use alloy_eips::merge::BEACON_NONCE;
-use alloy_primitives::U256;
+use alloy_primitives::{B64, U256};
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::ChainSpecProvider;
@@ -36,6 +35,7 @@ use crate::{
     error::OptimismPayloadBuilderError,
     payload::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes},
 };
+use op_alloy_consensus::DepositTransaction;
 
 /// Optimism's payload builder
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,7 +79,7 @@ where
         &self,
         config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
         parent: &Header,
-    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), EvmConfig::Error> {
         let next_attributes = NextBlockEnvAttributes {
             timestamp: config.attributes.timestamp(),
             suggested_fee_recipient: config.attributes.suggested_fee_recipient(),
@@ -103,7 +103,9 @@ where
         &self,
         args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
     ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError> {
-        let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
+        let (cfg_env, block_env) = self
+            .cfg_and_block_env(&args.config, &args.config.parent_header)
+            .map_err(PayloadBuilderError::other)?;
         optimism_payload(&self.evm_config, args, cfg_env, block_env, self.compute_pending_block)
     }
 
@@ -132,7 +134,9 @@ where
             cancel: Default::default(),
             best_payload: None,
         };
-        let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
+        let (cfg_env, block_env) = self
+            .cfg_and_block_env(&args.config, &args.config.parent_header)
+            .map_err(PayloadBuilderError::other)?;
         optimism_payload(&self.evm_config, args, cfg_env, block_env, false)?
             .into_payload()
             .ok_or_else(|| PayloadBuilderError::MissingPayload)
@@ -163,13 +167,13 @@ where
     let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
 
     let chain_spec = client.chain_spec();
-    let state_provider = client.state_by_block_hash(config.parent_block.hash())?;
+    let state_provider = client.state_by_block_hash(config.parent_header.hash())?;
     let state = StateProviderDatabase::new(state_provider);
     let mut db =
         State::builder().with_database_ref(cached_reads.as_db(state)).with_bundle_update().build();
-    let PayloadConfig { parent_block, attributes, extra_data } = config;
+    let PayloadConfig { parent_header, attributes, mut extra_data } = config;
 
-    debug!(target: "payload_builder", id=%attributes.payload_attributes.payload_id(), parent_hash = ?parent_block.hash(), parent_number = parent_block.number, "building new payload");
+    debug!(target: "payload_builder", id=%attributes.payload_attributes.payload_id(), parent_header = ?parent_header.hash(), parent_number = parent_header.number, "building new payload");
 
     let mut cumulative_gas_used = 0;
     let block_gas_limit: u64 = attributes.gas_limit.unwrap_or_else(|| {
@@ -206,7 +210,7 @@ where
         )
         .map_err(|err| {
             warn!(target: "payload_builder",
-                parent_hash=%parent_block.hash(),
+                parent_header=%parent_header.hash(),
                 %err,
                 "failed to apply beacon root contract call for payload"
             );
@@ -449,7 +453,7 @@ where
         let state_provider = db.database.0.inner.borrow_mut();
         state_provider.db.state_root_with_updates(hashed_state.clone()).inspect_err(|err| {
             warn!(target: "payload_builder",
-                parent_hash=%parent_block.hash(),
+            parent_header=%parent_header.hash(),
                 %err,
                 "failed to calculate state root for payload"
             );
@@ -469,8 +473,21 @@ where
             (None, None)
         };
 
+    let is_holocene = chain_spec.is_fork_active_at_timestamp(
+        OptimismHardfork::Holocene,
+        attributes.payload_attributes.timestamp,
+    );
+
+    if is_holocene {
+        extra_data = attributes
+            .get_holocene_extra_data(
+                chain_spec.base_fee_params_at_timestamp(attributes.payload_attributes.timestamp),
+            )
+            .map_err(PayloadBuilderError::other)?;
+    }
+
     let header = Header {
-        parent_hash: parent_block.hash(),
+        parent_hash: parent_header.hash(),
         ommers_hash: EMPTY_OMMER_ROOT_HASH,
         beneficiary: initialized_block_env.coinbase,
         state_root,
@@ -482,7 +499,7 @@ where
         mix_hash: attributes.payload_attributes.prev_randao,
         nonce: BEACON_NONCE.into(),
         base_fee_per_gas: Some(base_fee),
-        number: parent_block.number + 1,
+        number: parent_header.number + 1,
         gas_limit: block_gas_limit,
         difficulty: U256::ZERO,
         gas_used: cumulative_gas_used,
@@ -530,4 +547,13 @@ where
     } else {
         Ok(BuildOutcome::Better { payload, cached_reads })
     }
+}
+
+/// Extracts the Holocene 1599 parameters from the encoded form:
+/// <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#eip1559params-encoding>
+pub fn decode_eip_1559_params(eip_1559_params: B64) -> (u32, u32) {
+    let denominator: [u8; 4] = eip_1559_params.0[..4].try_into().expect("sufficient length");
+    let elasticity: [u8; 4] = eip_1559_params.0[4..8].try_into().expect("sufficient length");
+
+    (u32::from_be_bytes(elasticity), u32::from_be_bytes(denominator))
 }

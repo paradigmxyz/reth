@@ -167,9 +167,22 @@ pub fn generate_vectors_with(gen: &[fn(&mut TestRunner) -> eyre::Result<()>]) ->
 /// re-encoding.
 pub fn read_vectors_with(read: &[fn() -> eyre::Result<()>]) -> Result<()> {
     fs::create_dir_all(VECTORS_FOLDER)?;
+    let mut errors = None;
 
     for read_fn in read {
-        read_fn()?;
+        if let Err(err) = read_fn() {
+            errors.get_or_insert_with(Vec::new).push(err);
+        }
+    }
+
+    if let Some(err_list) = errors {
+        for error in err_list {
+            eprintln!("{:?}", error);
+        }
+        return Err(eyre::eyre!(
+            "If there are missing types, make sure to run `reth test-vectors compact --write` first.\n
+             If it happened during CI, ignore IF it's a new proposed type that `main` branch does not have."
+        ));
     }
 
     Ok(())
@@ -238,9 +251,8 @@ where
 
     // Read the file where the vectors are stored
     let file_path = format!("{VECTORS_FOLDER}/{}.json", &type_name);
-    let file = File::open(&file_path).wrap_err_with(|| {
-        "Failed to open vector. Make sure to run `reth test-vectors compact --write` first."
-    })?;
+    let file =
+        File::open(&file_path).wrap_err_with(|| format!("Failed to open vector {type_name}."))?;
     let reader = BufReader::new(file);
 
     let stored_values: Vec<String> = serde_json::from_reader(reader)?;

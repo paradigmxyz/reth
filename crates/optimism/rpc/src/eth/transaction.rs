@@ -3,6 +3,7 @@
 use alloy_consensus::Transaction as _;
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types::TransactionInfo;
+use op_alloy_consensus::DepositTransaction;
 use op_alloy_rpc_types::Transaction;
 use reth_node_api::FullNodeComponents;
 use reth_primitives::TransactionSignedEcRecovered;
@@ -12,7 +13,7 @@ use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
     FromEthApiError, FullEthApiTypes, RpcNodeCore, TransactionCompat,
 };
-use reth_rpc_eth_types::{utils::recover_raw_transaction, EthStateCache};
+use reth_rpc_eth_types::utils::recover_raw_transaction;
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
 use crate::{OpEthApi, SequencerClient};
@@ -59,10 +60,6 @@ where
     Self: SpawnBlocking + FullEthApiTypes,
     N: RpcNodeCore<Provider: TransactionsProvider, Pool: TransactionPool>,
 {
-    #[inline]
-    fn cache(&self) -> &EthStateCache {
-        self.inner.cache()
-    }
 }
 
 impl<N> OpEthApi<N>

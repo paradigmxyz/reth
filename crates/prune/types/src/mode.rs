@@ -74,6 +74,11 @@ impl PruneMode {
     pub const fn is_full(&self) -> bool {
         matches!(self, Self::Full)
     }
+
+    /// Returns true if the prune mode is [`PruneMode::Distance`].
+    pub const fn is_distance(&self) -> bool {
+        matches!(self, Self::Distance(_))
+    }
 }
 
 #[cfg(test)]

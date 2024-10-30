@@ -184,7 +184,7 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV4 {
 }
 
 /// Container type for all components required to build a payload.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct EthPayloadBuilderAttributes {
     /// Id of the payload
     pub id: PayloadId,
@@ -237,7 +237,11 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
     /// Creates a new payload builder for the given parent block and the attributes.
     ///
     /// Derives the unique [`PayloadId`] for the given parent and attributes
-    fn try_new(parent: B256, attributes: PayloadAttributes) -> Result<Self, Infallible> {
+    fn try_new(
+        parent: B256,
+        attributes: PayloadAttributes,
+        _version: u8,
+    ) -> Result<Self, Infallible> {
         Ok(Self::new(parent, attributes))
     }
 

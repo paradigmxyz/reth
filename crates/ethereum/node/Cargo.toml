@@ -31,6 +31,7 @@ reth-node-api.workspace = true
 reth-chainspec.workspace = true
 reth-primitives.workspace = true
 reth-revm = { workspace = true, features = ["std"] }
+reth-trie-db.workspace = true
 
 # revm with required ethereum features
 revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
@@ -72,6 +73,7 @@ test-utils = [
 	"reth-db/test-utils",
 	"reth-provider/test-utils",
 	"reth-transaction-pool/test-utils",
+	"reth-trie-db/test-utils",
 	"revm/test-utils",
 	"reth-evm/test-utils"
 ]

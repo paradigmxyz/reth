@@ -13,12 +13,12 @@ use reth_provider::{
     BlockIdReader, BlockNumReader, ChainSpecProvider, StateProvider, StateProviderBox,
     StateProviderFactory,
 };
-use reth_rpc_eth_types::{EthApiError, EthStateCache, PendingBlockEnv, RpcInvalidTransactionError};
+use reth_rpc_eth_types::{EthApiError, PendingBlockEnv, RpcInvalidTransactionError};
 use reth_rpc_types_compat::proof::from_primitive_account_proof;
 use reth_transaction_pool::TransactionPool;
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
 
-use crate::{EthApiTypes, FromEthApiError, RpcNodeCore};
+use crate::{EthApiTypes, FromEthApiError, RpcNodeCore, RpcNodeCoreExt};
 
 use super::{EthApiSpec, LoadPendingBlock, SpawnBlocking};
 
@@ -170,17 +170,12 @@ pub trait EthState: LoadState + SpawnBlocking {
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` state RPC methods.
 pub trait LoadState:
     EthApiTypes
-    + RpcNodeCore<
+    + RpcNodeCoreExt<
         Provider: StateProviderFactory
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>,
         Pool: TransactionPool,
     >
 {
-    /// Returns a handle for reading data from memory.
-    ///
-    /// Data access in default (L1) trait method implementations.
-    fn cache(&self) -> &EthStateCache;
-
     /// Returns the state at the given block number
     fn state_at_hash(&self, block_hash: B256) -> Result<StateProviderBox, Self::Error> {
         self.provider().history_by_block_hash(block_hash).map_err(Self::Error::from_eth_err)

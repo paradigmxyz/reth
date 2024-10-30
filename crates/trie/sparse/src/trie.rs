@@ -77,7 +77,7 @@ impl SparseTrie {
 /// - Each leaf entry in `nodes` collection must have a corresponding entry in `values` collection.
 ///   The opposite is also true.
 /// - All keys in `values` collection are full leaf paths.
-#[derive(PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct RevealedSparseTrie {
     /// All trie nodes.
     nodes: HashMap<Nibbles, SparseNode>,
@@ -558,7 +558,7 @@ impl RevealedSparseTrie {
     pub fn root(&mut self) -> B256 {
         // take the current prefix set.
         let mut prefix_set = std::mem::take(&mut self.prefix_set).freeze();
-        let root_rlp = self.rlp_node(Nibbles::default(), &mut prefix_set);
+        let root_rlp = self.rlp_node_allocate(Nibbles::default(), &mut prefix_set);
         if let Some(root_hash) = root_rlp.as_hash() {
             root_hash
         } else {
@@ -569,27 +569,38 @@ impl RevealedSparseTrie {
     /// Update hashes of the nodes that are located at a level deeper than or equal to the provided
     /// depth. Root node has a level of 0.
     pub fn update_rlp_node_level(&mut self, depth: usize) {
-        let targets = self.get_nodes_at_depth(depth);
         let mut prefix_set = self.prefix_set.clone().freeze();
+        let mut buffers = RlpNodeBuffers::default();
+
+        let targets = self.get_changed_nodes_at_depth(&mut prefix_set, depth);
         for target in targets {
-            self.rlp_node(target, &mut prefix_set);
+            buffers.path_stack.push((target, Some(true)));
+            self.rlp_node(&mut prefix_set, &mut buffers);
         }
     }
 
-    /// Returns a list of paths to the nodes that are located at the provided depth when counting
-    /// from the root node. If there's a leaf at a depth less than the provided depth, it will be
-    /// included in the result.
-    fn get_nodes_at_depth(&self, depth: usize) -> Vec<Nibbles> {
+    /// Returns a list of paths to the nodes that were changed according to the prefix set and are
+    /// located at the provided depth when counting from the root node. If there's a leaf at a
+    /// depth less than the provided depth, it will be included in the result.
+    fn get_changed_nodes_at_depth(&self, prefix_set: &mut PrefixSet, depth: usize) -> Vec<Nibbles> {
         let mut paths = Vec::from([(Nibbles::default(), 0)]);
         let mut targets = Vec::new();
 
         while let Some((mut path, level)) = paths.pop() {
             match self.nodes.get(&path).unwrap() {
                 SparseNode::Empty | SparseNode::Hash(_) => {}
-                SparseNode::Leaf { .. } => {
+                SparseNode::Leaf { hash, .. } => {
+                    if hash.is_some() && !prefix_set.contains(&path) {
+                        continue
+                    }
+
                     targets.push(path);
                 }
-                SparseNode::Extension { key, .. } => {
+                SparseNode::Extension { key, hash } => {
+                    if hash.is_some() && !prefix_set.contains(&path) {
+                        continue
+                    }
+
                     if level >= depth {
                         targets.push(path);
                     } else {
@@ -597,7 +608,11 @@ impl RevealedSparseTrie {
                         paths.push((path, level + 1));
                     }
                 }
-                SparseNode::Branch { state_mask, .. } => {
+                SparseNode::Branch { state_mask, hash } => {
+                    if hash.is_some() && !prefix_set.contains(&path) {
+                        continue
+                    }
+
                     if level >= depth {
                         targets.push(path);
                     } else {
@@ -616,17 +631,19 @@ impl RevealedSparseTrie {
         targets
     }
 
-    fn rlp_node(&mut self, path: Nibbles, prefix_set: &mut PrefixSet) -> RlpNode {
-        // stack of paths we need rlp nodes for
-        let mut path_stack = Vec::from([path]);
-        // stack of rlp nodes
-        let mut rlp_node_stack = Vec::<(Nibbles, RlpNode)>::new();
-        // reusable branch child path
-        let mut branch_child_buf = SmallVec::<[Nibbles; 16]>::new_const();
-        // reusable branch value stack
-        let mut branch_value_stack_buf = SmallVec::<[RlpNode; 16]>::new_const();
+    fn rlp_node_allocate(&mut self, path: Nibbles, prefix_set: &mut PrefixSet) -> RlpNode {
+        let mut buffers = RlpNodeBuffers::new_with_path(path);
+        self.rlp_node(prefix_set, &mut buffers)
+    }
 
-        'main: while let Some(path) = path_stack.pop() {
+    fn rlp_node(&mut self, prefix_set: &mut PrefixSet, buffers: &mut RlpNodeBuffers) -> RlpNode {
+        'main: while let Some((path, mut is_in_prefix_set)) = buffers.path_stack.pop() {
+            // Check if the path is in the prefix set.
+            // First, check the cached value. If it's `None`, then check the prefix set, and update
+            // the cached value.
+            let mut prefix_set_contains =
+                |path: &Nibbles| *is_in_prefix_set.get_or_insert_with(|| prefix_set.contains(path));
+
             let rlp_node = match self.nodes.get_mut(&path).unwrap() {
                 SparseNode::Empty => RlpNode::word_rlp(&EMPTY_ROOT_HASH),
                 SparseNode::Hash(hash) => RlpNode::word_rlp(hash),
@@ -634,7 +651,7 @@ impl RevealedSparseTrie {
                     self.rlp_buf.clear();
                     let mut path = path.clone();
                     path.extend_from_slice_unchecked(key);
-                    if let Some(hash) = hash.filter(|_| !prefix_set.contains(&path)) {
+                    if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path)) {
                         RlpNode::word_rlp(&hash)
                     } else {
                         let value = self.values.get(&path).unwrap();
@@ -646,64 +663,70 @@ impl RevealedSparseTrie {
                 SparseNode::Extension { key, hash } => {
                     let mut child_path = path.clone();
                     child_path.extend_from_slice_unchecked(key);
-                    if let Some(hash) = hash.filter(|_| !prefix_set.contains(&path)) {
+                    if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path)) {
                         RlpNode::word_rlp(&hash)
-                    } else if rlp_node_stack.last().map_or(false, |e| e.0 == child_path) {
-                        let (_, child) = rlp_node_stack.pop().unwrap();
+                    } else if buffers.rlp_node_stack.last().map_or(false, |e| e.0 == child_path) {
+                        let (_, child) = buffers.rlp_node_stack.pop().unwrap();
                         self.rlp_buf.clear();
                         let rlp_node = ExtensionNodeRef::new(key, &child).rlp(&mut self.rlp_buf);
                         *hash = rlp_node.as_hash();
                         rlp_node
                     } else {
-                        path_stack.extend([path, child_path]); // need to get rlp node for child first
+                        // need to get rlp node for child first
+                        buffers.path_stack.extend([(path, is_in_prefix_set), (child_path, None)]);
                         continue
                     }
                 }
                 SparseNode::Branch { state_mask, hash } => {
-                    if let Some(hash) = hash.filter(|_| !prefix_set.contains(&path)) {
-                        rlp_node_stack.push((path, RlpNode::word_rlp(&hash)));
+                    if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path)) {
+                        buffers.rlp_node_stack.push((path, RlpNode::word_rlp(&hash)));
                         continue
                     }
 
-                    branch_child_buf.clear();
+                    buffers.branch_child_buf.clear();
                     // Walk children in a reverse order from `f` to `0`, so we pop the `0` first
                     // from the stack.
                     for bit in CHILD_INDEX_RANGE.rev() {
                         if state_mask.is_bit_set(bit) {
                             let mut child = path.clone();
                             child.push_unchecked(bit);
-                            branch_child_buf.push(child);
+                            buffers.branch_child_buf.push(child);
                         }
                     }
 
-                    branch_value_stack_buf.resize(branch_child_buf.len(), Default::default());
+                    buffers
+                        .branch_value_stack_buf
+                        .resize(buffers.branch_child_buf.len(), Default::default());
                     let mut added_children = false;
-                    for (i, child_path) in branch_child_buf.iter().enumerate() {
-                        if rlp_node_stack.last().map_or(false, |e| &e.0 == child_path) {
-                            let (_, child) = rlp_node_stack.pop().unwrap();
+                    for (i, child_path) in buffers.branch_child_buf.iter().enumerate() {
+                        if buffers.rlp_node_stack.last().map_or(false, |e| &e.0 == child_path) {
+                            let (_, child) = buffers.rlp_node_stack.pop().unwrap();
                             // Insert children in the resulting buffer in a normal order, because
                             // initially we iterated in reverse.
-                            branch_value_stack_buf[branch_child_buf.len() - i - 1] = child;
+                            buffers.branch_value_stack_buf
+                                [buffers.branch_child_buf.len() - i - 1] = child;
                             added_children = true;
                         } else {
                             debug_assert!(!added_children);
-                            path_stack.push(path);
-                            path_stack.extend(branch_child_buf.drain(..));
+                            buffers.path_stack.push((path, is_in_prefix_set));
+                            buffers
+                                .path_stack
+                                .extend(buffers.branch_child_buf.drain(..).map(|p| (p, None)));
                             continue 'main
                         }
                     }
 
                     self.rlp_buf.clear();
-                    let rlp_node = BranchNodeRef::new(&branch_value_stack_buf, *state_mask)
+                    let rlp_node = BranchNodeRef::new(&buffers.branch_value_stack_buf, *state_mask)
                         .rlp(&mut self.rlp_buf);
                     *hash = rlp_node.as_hash();
                     rlp_node
                 }
             };
-            rlp_node_stack.push((path, rlp_node));
+            buffers.rlp_node_stack.push((path, rlp_node));
         }
 
-        rlp_node_stack.pop().unwrap().1
+        buffers.rlp_node_stack.pop().unwrap().1
     }
 }
 
@@ -783,18 +806,42 @@ struct RemovedSparseNode {
     unset_branch_nibble: Option<u8>,
 }
 
+/// Collection of reusable buffers for [`RevealedSparseTrie::rlp_node`].
+#[derive(Debug, Default)]
+struct RlpNodeBuffers {
+    /// Stack of paths we need rlp nodes for and whether the path is in the prefix set.
+    path_stack: Vec<(Nibbles, Option<bool>)>,
+    /// Stack of rlp nodes
+    rlp_node_stack: Vec<(Nibbles, RlpNode)>,
+    /// Reusable branch child path
+    branch_child_buf: SmallVec<[Nibbles; 16]>,
+    /// Reusable branch value stack
+    branch_value_stack_buf: SmallVec<[RlpNode; 16]>,
+}
+
+impl RlpNodeBuffers {
+    /// Creates a new instance of buffers with the given path on the stack.
+    fn new_with_path(path: Nibbles) -> Self {
+        Self {
+            path_stack: vec![(path, None)],
+            rlp_node_stack: Vec::new(),
+            branch_child_buf: SmallVec::<[Nibbles; 16]>::new_const(),
+            branch_value_stack_buf: SmallVec::<[RlpNode; 16]>::new_const(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use alloy_primitives::U256;
+    use alloy_primitives::{map::HashSet, U256};
     use assert_matches::assert_matches;
     use itertools::Itertools;
     use prop::sample::SizeRange;
     use proptest::prelude::*;
     use rand::seq::IteratorRandom;
-    use reth_testing_utils::generators;
     use reth_trie::{BranchNode, ExtensionNode, LeafNode};
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
@@ -1256,6 +1303,7 @@ mod tests {
         );
     }
 
+    #[allow(clippy::type_complexity)]
     #[test]
     fn sparse_trie_fuzz() {
         // Having only the first 3 nibbles set, we narrow down the range of keys
@@ -1263,63 +1311,51 @@ mod tests {
         // to test the sparse trie updates.
         const KEY_NIBBLES_LEN: usize = 3;
 
-        fn test<I, T>(updates: I)
-        where
-            I: IntoIterator<Item = T>,
-            T: IntoIterator<Item = (Nibbles, Vec<u8>)> + Clone,
-        {
-            let mut rng = generators::rng();
+        fn test(updates: Vec<(HashMap<Nibbles, Vec<u8>>, HashSet<Nibbles>)>) {
+            {
+                let mut state = BTreeMap::default();
+                let mut sparse = RevealedSparseTrie::default();
 
-            let mut state = BTreeMap::default();
-            let mut sparse = RevealedSparseTrie::default();
+                for (update, keys_to_delete) in updates {
+                    // Insert state updates into the sparse trie and calculate the root
+                    for (key, value) in update.clone() {
+                        sparse.update_leaf(key, value).unwrap();
+                    }
+                    let sparse_root = sparse.root();
 
-            for update in updates {
-                let mut count = 0;
-                // Insert state updates into the sparse trie and calculate the root
-                for (key, value) in update.clone() {
-                    sparse.update_leaf(key, value).unwrap();
-                    count += 1;
+                    // Insert state updates into the hash builder and calculate the root
+                    state.extend(update);
+                    let (hash_builder_root, hash_builder_proof_nodes) =
+                        hash_builder_root_with_proofs(
+                            state.clone(),
+                            state.keys().cloned().collect::<Vec<_>>(),
+                        );
+
+                    // Assert that the sparse trie root matches the hash builder root
+                    assert_eq!(sparse_root, hash_builder_root);
+                    // Assert that the sparse trie nodes match the hash builder proof nodes
+                    assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
+
+                    // Delete some keys from both the hash builder and the sparse trie and check
+                    // that the sparse trie root still matches the hash builder root
+                    for key in keys_to_delete {
+                        state.remove(&key).unwrap();
+                        sparse.remove_leaf(&key).unwrap();
+                    }
+
+                    let sparse_root = sparse.root();
+
+                    let (hash_builder_root, hash_builder_proof_nodes) =
+                        hash_builder_root_with_proofs(
+                            state.clone(),
+                            state.keys().cloned().collect::<Vec<_>>(),
+                        );
+
+                    // Assert that the sparse trie root matches the hash builder root
+                    assert_eq!(sparse_root, hash_builder_root);
+                    // Assert that the sparse trie nodes match the hash builder proof nodes
+                    assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
                 }
-                let keys_to_delete_len = count / 2;
-                let sparse_root = sparse.root();
-
-                // Insert state updates into the hash builder and calculate the root
-                state.extend(update);
-                let (hash_builder_root, hash_builder_proof_nodes) = hash_builder_root_with_proofs(
-                    state.clone(),
-                    state.keys().cloned().collect::<Vec<_>>(),
-                );
-
-                // Assert that the sparse trie root matches the hash builder root
-                assert_eq!(sparse_root, hash_builder_root);
-                // Assert that the sparse trie nodes match the hash builder proof nodes
-                assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
-
-                // Delete some keys from both the hash builder and the sparse trie and check
-                // that the sparse trie root still matches the hash builder root
-
-                let keys_to_delete = state
-                    .keys()
-                    .choose_multiple(&mut rng, keys_to_delete_len)
-                    .into_iter()
-                    .cloned()
-                    .collect::<Vec<_>>();
-                for key in keys_to_delete {
-                    state.remove(&key).unwrap();
-                    sparse.remove_leaf(&key).unwrap();
-                }
-
-                let sparse_root = sparse.root();
-
-                let (hash_builder_root, hash_builder_proof_nodes) = hash_builder_root_with_proofs(
-                    state.clone(),
-                    state.keys().cloned().collect::<Vec<_>>(),
-                );
-
-                // Assert that the sparse trie root matches the hash builder root
-                assert_eq!(sparse_root, hash_builder_root);
-                // Assert that the sparse trie nodes match the hash builder proof nodes
-                assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
             }
         }
 
@@ -1331,17 +1367,41 @@ mod tests {
             base
         }
 
+        fn transform_updates(
+            updates: Vec<HashMap<Nibbles, Vec<u8>>>,
+            mut rng: impl Rng,
+        ) -> Vec<(HashMap<Nibbles, Vec<u8>>, HashSet<Nibbles>)> {
+            let mut keys = HashSet::new();
+            updates
+                .into_iter()
+                .map(|update| {
+                    keys.extend(update.keys().cloned());
+
+                    let keys_to_delete_len = update.len() / 2;
+                    let keys_to_delete = (0..keys_to_delete_len)
+                        .map(|_| {
+                            let key = keys.iter().choose(&mut rng).unwrap().clone();
+                            keys.take(&key).unwrap()
+                        })
+                        .collect();
+
+                    (update, keys_to_delete)
+                })
+                .collect::<Vec<_>>()
+        }
+
         proptest!(ProptestConfig::with_cases(10), |(
             updates in proptest::collection::vec(
                 proptest::collection::hash_map(
                     any_with::<Nibbles>(SizeRange::new(KEY_NIBBLES_LEN..=KEY_NIBBLES_LEN)).prop_map(pad_nibbles),
                     any::<Vec<u8>>(),
                     1..100,
-                ),
+                ).prop_map(HashMap::from_iter),
                 1..100,
-            )
+            ).prop_perturb(transform_updates)
         )| {
-            test(updates) });
+            test(updates)
+        });
     }
 
     /// We have three leaves that share the same prefix: 0x00, 0x01 and 0x02. Hash builder trie has
@@ -1540,7 +1600,7 @@ mod tests {
     }
 
     #[test]
-    fn sparse_trie_get_nodes_at_depth() {
+    fn sparse_trie_get_changed_nodes_at_depth() {
         let mut sparse = RevealedSparseTrie::default();
 
         let value = alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec();
@@ -1574,10 +1634,16 @@ mod tests {
             .unwrap();
         sparse.update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), value).unwrap();
 
-        assert_eq!(sparse.get_nodes_at_depth(0), vec![Nibbles::default()]);
-        assert_eq!(sparse.get_nodes_at_depth(1), vec![Nibbles::from_nibbles_unchecked([0x5])]);
         assert_eq!(
-            sparse.get_nodes_at_depth(2),
+            sparse.get_changed_nodes_at_depth(&mut PrefixSet::default(), 0),
+            vec![Nibbles::default()]
+        );
+        assert_eq!(
+            sparse.get_changed_nodes_at_depth(&mut PrefixSet::default(), 1),
+            vec![Nibbles::from_nibbles_unchecked([0x5])]
+        );
+        assert_eq!(
+            sparse.get_changed_nodes_at_depth(&mut PrefixSet::default(), 2),
             vec![
                 Nibbles::from_nibbles_unchecked([0x5, 0x0]),
                 Nibbles::from_nibbles_unchecked([0x5, 0x2]),
@@ -1585,7 +1651,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            sparse.get_nodes_at_depth(3),
+            sparse.get_changed_nodes_at_depth(&mut PrefixSet::default(), 3),
             vec![
                 Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3]),
                 Nibbles::from_nibbles_unchecked([0x5, 0x2]),
@@ -1594,7 +1660,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            sparse.get_nodes_at_depth(4),
+            sparse.get_changed_nodes_at_depth(&mut PrefixSet::default(), 4),
             vec![
                 Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3, 0x1]),
                 Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3, 0x3]),

@@ -1,4 +1,5 @@
 #![allow(missing_docs, unreachable_pub)]
+
 use alloy_primitives::{map::HashMap, B256, U256};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use itertools::Itertools;
