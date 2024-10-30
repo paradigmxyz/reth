@@ -1513,9 +1513,8 @@ impl SignedTransaction for TransactionSigned {
                 tx_env.authorization_list =
                     Some(AuthorizationList::Signed(tx.authorization_list.clone()));
             }
-            Transaction::Deposit(tx) => {
-                // Only applicable to Optimism
-            }
+            #[cfg(feature = "optimism")]
+            Transaction::Deposit(_) => {}
         }
     }
 }
