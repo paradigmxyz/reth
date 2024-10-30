@@ -15,4 +15,4 @@ pub mod builder;
 pub use builder::OptimismPayloadBuilder;
 pub mod error;
 pub mod payload;
-pub use payload::{OpPayloadAttributes, OptimismBuiltPayload, OptimismPayloadBuilderAttributes};
+pub use payload::{OpPayloadAttributes, OpPayloadBuilderAttributes, OptimismBuiltPayload};
