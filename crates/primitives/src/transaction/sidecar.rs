@@ -191,35 +191,6 @@ impl BlobTransaction {
     }
 }
 
-/// Generates a [`BlobTransactionSidecar`] structure containing blobs, commitments, and proofs.
-#[cfg(all(feature = "c-kzg", any(test, feature = "arbitrary")))]
-pub fn generate_blob_sidecar(blobs: Vec<c_kzg::Blob>) -> BlobTransactionSidecar {
-    use alloc::vec::Vec;
-    use alloy_eips::eip4844::env_settings::EnvKzgSettings;
-    use c_kzg::{KzgCommitment, KzgProof};
-
-    let kzg_settings = EnvKzgSettings::Default;
-
-    let commitments: Vec<c_kzg::Bytes48> = blobs
-        .iter()
-        .map(|blob| {
-            KzgCommitment::blob_to_kzg_commitment(&blob.clone(), kzg_settings.get()).unwrap()
-        })
-        .map(|commitment| commitment.to_bytes())
-        .collect();
-
-    let proofs: Vec<c_kzg::Bytes48> = blobs
-        .iter()
-        .zip(commitments.iter())
-        .map(|(blob, commitment)| {
-            KzgProof::compute_blob_kzg_proof(blob, commitment, kzg_settings.get()).unwrap()
-        })
-        .map(|proof| proof.to_bytes())
-        .collect();
-
-    BlobTransactionSidecar::from_kzg(blobs, commitments, proofs)
-}
-
 #[cfg(all(test, feature = "c-kzg"))]
 mod tests {
     use super::*;
@@ -251,7 +222,7 @@ mod tests {
         .unwrap()];
 
         // Generate a BlobTransactionSidecar from the blobs
-        let sidecar = generate_blob_sidecar(blobs);
+        let sidecar = BlobTransactionSidecar::try_from_blobs(blobs).unwrap();
 
         // Assert commitment equality
         assert_eq!(
@@ -300,7 +271,7 @@ mod tests {
         }
 
         // Generate a BlobTransactionSidecar from the blobs
-        let sidecar = generate_blob_sidecar(blobs.clone());
+        let sidecar = BlobTransactionSidecar::try_from_blobs(blobs).unwrap();
 
         // Assert sidecar size
         assert_eq!(sidecar.size(), 524672);
@@ -325,7 +296,7 @@ mod tests {
         .unwrap()];
 
         // Generate a BlobTransactionSidecar from the blobs
-        let sidecar = generate_blob_sidecar(blobs);
+        let sidecar = BlobTransactionSidecar::try_from_blobs(blobs).unwrap();
 
         // Create a vector to store the encoded RLP
         let mut encoded_rlp = Vec::new();
@@ -356,7 +327,7 @@ mod tests {
         .unwrap()];
 
         // Generate a BlobTransactionSidecar from the blobs
-        let sidecar = generate_blob_sidecar(blobs);
+        let sidecar = BlobTransactionSidecar::try_from_blobs(blobs).unwrap();
 
         // Create a vector to store the encoded RLP
         let mut encoded_rlp = Vec::new();

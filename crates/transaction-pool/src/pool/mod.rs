@@ -1236,7 +1236,8 @@ mod tests {
         validate::ValidTransaction,
         BlockInfo, PoolConfig, SubPoolLimit, TransactionOrigin, TransactionValidationOutcome, U256,
     };
-    use reth_primitives::{kzg::Blob, transaction::generate_blob_sidecar};
+    use alloy_eips::eip4844::BlobTransactionSidecar;
+    use reth_primitives::kzg::Blob;
     use std::{fs, path::PathBuf};
 
     #[test]
@@ -1271,7 +1272,7 @@ mod tests {
         .unwrap()];
 
         // Generate a BlobTransactionSidecar from the blobs.
-        let sidecar = generate_blob_sidecar(blobs);
+        let sidecar = BlobTransactionSidecar::try_from_blobs(blobs).unwrap();
 
         // Create an in-memory blob store.
         let blob_store = InMemoryBlobStore::default();

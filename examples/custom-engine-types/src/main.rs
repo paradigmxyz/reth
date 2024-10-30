@@ -70,6 +70,7 @@ use reth_payload_builder::{
 };
 use reth_primitives::Withdrawals;
 use reth_tracing::{RethTracer, Tracer};
+use reth_trie_db::MerklePatriciaTrie;
 
 /// A custom payload attributes type.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -228,6 +229,7 @@ struct MyCustomNode;
 impl NodeTypes for MyCustomNode {
     type Primitives = ();
     type ChainSpec = ChainSpec;
+    type StateCommitment = MerklePatriciaTrie;
 }
 
 /// Configure the node types with the custom engine types
@@ -341,7 +343,7 @@ where
         args: BuildArguments<Pool, Client, Self::Attributes, Self::BuiltPayload>,
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
         let BuildArguments { client, pool, cached_reads, config, cancel, best_payload } = args;
-        let PayloadConfig { parent_block, extra_data, attributes } = config;
+        let PayloadConfig { parent_header, extra_data, attributes } = config;
 
         let chain_spec = client.chain_spec();
 
@@ -354,7 +356,7 @@ where
             client,
             pool,
             cached_reads,
-            config: PayloadConfig { parent_block, extra_data, attributes: attributes.0 },
+            config: PayloadConfig { parent_header, extra_data, attributes: attributes.0 },
             cancel,
             best_payload,
         })
@@ -365,10 +367,10 @@ where
         client: &Client,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
-        let PayloadConfig { parent_block, extra_data, attributes } = config;
+        let PayloadConfig { parent_header, extra_data, attributes } = config;
         let chain_spec = client.chain_spec();
         <reth_ethereum_payload_builder::EthereumPayloadBuilder as PayloadBuilder<Pool, Client>>::build_empty_payload(&reth_ethereum_payload_builder::EthereumPayloadBuilder::new(EthEvmConfig::new(chain_spec.clone())),client,
-                                                                                                                     PayloadConfig { parent_block, extra_data, attributes: attributes.0})
+                                                                                                                     PayloadConfig { parent_header, extra_data, attributes: attributes.0})
     }
 }
 
