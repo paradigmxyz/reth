@@ -161,7 +161,7 @@ impl CursorSubNode {
             (true, false) => {
                 self.full_key.pop();
             }
-            (false, false) => (), // No change needed
+            (false, false) => (), 
         }
     }
 }
