@@ -110,7 +110,10 @@ pub trait EngineApi<Engine: EngineTypes> {
     /// Note:
     /// > Provider software MAY stop the corresponding build process after serving this call.
     #[method(name = "getPayloadV1")]
-    async fn get_payload_v1(&self, payload_id: PayloadId) -> RpcResult<Engine::ExecutionPayloadV1>;
+    async fn get_payload_v1(
+        &self,
+        payload_id: PayloadId,
+    ) -> RpcResult<Engine::ExecutionPayloadEnvelopeV1>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#engine_getpayloadv2>
     ///
