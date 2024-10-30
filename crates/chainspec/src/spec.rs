@@ -1,6 +1,6 @@
 pub use alloy_eips::eip1559::BaseFeeParams;
 
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, fmt::Display, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, NamedChain};
 use alloy_consensus::constants::EMPTY_WITHDRAWALS;
 use alloy_eips::{
@@ -393,8 +393,11 @@ impl ChainSpec {
     }
 
     /// Returns the hardfork display helper.
-    pub fn display_hardforks(&self) -> DisplayHardforks {
-        DisplayHardforks::new(&self, self.paris_block_and_final_difficulty.map(|(block, _)| block))
+    pub fn display_hardforks(&self) -> Box<dyn Display> {
+        Box::new(DisplayHardforks::new(
+            &self,
+            self.paris_block_and_final_difficulty.map(|(block, _)| block),
+        ))
     }
 
     /// Get the fork id for the given hardfork.
