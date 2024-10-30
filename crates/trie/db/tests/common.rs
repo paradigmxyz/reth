@@ -3,7 +3,15 @@
 use reth_trie::{BranchNodeCompact, Nibbles};
 use std::collections::{HashMap, HashSet};
 
-/// Helper function to verify tree mask invariant similar to the fuzzer
+/// Helper function to verify tree mask invariant: for each branch node in trie
+/// nodes with path, for each position with 1 in its tree mask, there must be
+/// branch nodes in trie updates at paths path-position.
+///
+/// For instance, for branch node at path 0x01 with tree mask 0100000001010101,
+/// in trie updates we must have branch nodes at paths 0x010, 0x012, 0x014,
+/// 0x016, 0x01e (the mask indicates child nibbles but it goes from the right to
+/// left).
+#[allow(dead_code)]
 pub(crate) fn verify_tree_mask_invariant(
     nodes: &HashMap<Nibbles, BranchNodeCompact>,
     removed: &HashSet<Nibbles>,
