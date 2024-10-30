@@ -11,63 +11,20 @@ use alloy_consensus::{
 };
 use alloy_primitives::{SignatureError, TxKind};
 use alloy_rlp::Error as RlpError;
+use alloy_rpc_types::AnyNetworkHeader;
 use alloy_serde::WithOtherFields;
 use op_alloy_rpc_types as _;
 
-impl TryFrom<alloy_rpc_types::Block<WithOtherFields<alloy_rpc_types::Transaction>>> for Block {
-    type Error = alloy_rpc_types::ConversionError;
-
-    fn try_from(
-        block: alloy_rpc_types::Block<WithOtherFields<alloy_rpc_types::Transaction>>,
-    ) -> Result<Self, Self::Error> {
-        use alloy_rpc_types::ConversionError;
-
-        let transactions = {
-            let transactions: Result<Vec<TransactionSigned>, ConversionError> = match block
-                .transactions
-            {
-                alloy_rpc_types::BlockTransactions::Full(transactions) => {
-                    transactions.into_iter().map(|tx| tx.try_into()).collect()
-                }
-                alloy_rpc_types::BlockTransactions::Hashes(_) |
-                alloy_rpc_types::BlockTransactions::Uncle => {
-                    // alloy deserializes empty blocks into `BlockTransactions::Hashes`, if the tx
-                    // root is the empty root then we can just return an empty vec.
-                    if block.header.transactions_root == EMPTY_TRANSACTIONS {
-                        Ok(Vec::new())
-                    } else {
-                        Err(ConversionError::MissingFullTransactions)
-                    }
-                }
-            };
-            transactions?
-        };
-
-        Ok(Self {
-            header: block.header.inner,
-            body: BlockBody {
-                transactions,
-                ommers: Default::default(),
-                withdrawals: block.withdrawals.map(|w| w.into_inner().into()),
-            },
-        })
-    }
-}
-
 impl
-    TryFrom<
-        alloy_rpc_types::Block<
-            WithOtherFields<alloy_rpc_types::Transaction>,
-            alloy_rpc_types::Header<AnyHeader>,
-        >,
-    > for Block
+    TryFrom<alloy_rpc_types::Block<WithOtherFields<alloy_rpc_types::Transaction>, AnyNetworkHeader>>
+    for Block
 {
     type Error = alloy_rpc_types::ConversionError;
 
     fn try_from(
         block: alloy_rpc_types::Block<
             WithOtherFields<alloy_rpc_types::Transaction>,
-            alloy_rpc_types::Header<AnyHeader>,
+            AnyNetworkHeader,
         >,
     ) -> Result<Self, Self::Error> {
         use alloy_rpc_types::ConversionError;
