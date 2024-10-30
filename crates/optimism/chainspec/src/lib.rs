@@ -20,10 +20,10 @@ mod op_sepolia;
 use alloc::{vec, vec::Vec};
 use alloy_chains::Chain;
 use alloy_genesis::Genesis;
-use alloy_primitives::{B256, U256};
+use alloy_primitives::{Bytes, Parity, Signature, B256, U256};
 pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
-use derive_more::{Constructor, Deref, From, Into};
+use derive_more::{Constructor, Deref, Display, From, Into};
 pub use dev::OP_DEV;
 #[cfg(not(feature = "std"))]
 pub(crate) use once_cell::sync::Lazy as LazyLock;
@@ -159,6 +159,16 @@ impl OpChainSpecBuilder {
         self
     }
 
+    /// Enable Holocene at genesis
+    pub fn holocene_activated(mut self) -> Self {
+        self = self.granite_activated();
+        self.inner = self.inner.with_fork(
+            reth_optimism_forks::OptimismHardfork::Holocene,
+            ForkCondition::Timestamp(0),
+        );
+        self
+    }
+
     /// Build the resulting [`OpChainSpec`].
     ///
     /// # Panics
@@ -175,6 +185,81 @@ impl OpChainSpecBuilder {
 pub struct OpChainSpec {
     /// [`ChainSpec`].
     pub inner: ChainSpec,
+}
+
+impl OpChainSpec {
+    /// Read from parent to determine the base fee for the next block
+    pub fn next_block_base_fee(
+        &self,
+        parent: &Header,
+        timestamp: u64,
+    ) -> Result<U256, DecodeError> {
+        let is_holocene_activated = self.inner.is_fork_active_at_timestamp(
+            reth_optimism_forks::OptimismHardfork::Holocene,
+            timestamp,
+        );
+        // If we are in the Holocene, we need to use the base fee params
+        // from the parent block's extra data.
+        // Else, use the base fee params (default values) from chainspec
+        if is_holocene_activated {
+            let (denominator, elasticity) = decode_holocene_1559_params(parent.extra_data.clone())?;
+            if elasticity == 0 && denominator == 0 {
+                return Ok(U256::from(
+                    parent
+                        .next_block_base_fee(self.base_fee_params_at_timestamp(timestamp))
+                        .unwrap_or_default(),
+                ));
+            }
+            let base_fee_params = BaseFeeParams::new(denominator as u128, elasticity as u128);
+            Ok(U256::from(parent.next_block_base_fee(base_fee_params).unwrap_or_default()))
+        } else {
+            Ok(U256::from(
+                parent
+                    .next_block_base_fee(self.base_fee_params_at_timestamp(timestamp))
+                    .unwrap_or_default(),
+            ))
+        }
+    }
+}
+
+#[derive(Clone, Debug, Display, Eq, PartialEq)]
+/// Error type for decoding Holocene 1559 parameters
+pub enum DecodeError {
+    #[display("Insufficient data to decode")]
+    /// Insufficient data to decode
+    InsufficientData,
+    #[display("Invalid denominator parameter")]
+    /// Invalid denominator parameter
+    InvalidDenominator,
+    #[display("Invalid elasticity parameter")]
+    /// Invalid elasticity parameter
+    InvalidElasticity,
+}
+
+impl core::error::Error for DecodeError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        // None of the errors have sub-errors
+        None
+    }
+}
+
+/// Extracts the Holcene 1599 parameters from the encoded form:
+/// <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#eip1559params-encoding>
+pub fn decode_holocene_1559_params(extra_data: Bytes) -> Result<(u32, u32), DecodeError> {
+    if extra_data.len() < 9 {
+        return Err(DecodeError::InsufficientData);
+    }
+    let denominator: [u8; 4] =
+        extra_data[1..5].try_into().map_err(|_| DecodeError::InvalidDenominator)?;
+    let elasticity: [u8; 4] =
+        extra_data[5..9].try_into().map_err(|_| DecodeError::InvalidElasticity)?;
+    Ok((u32::from_be_bytes(denominator), u32::from_be_bytes(elasticity)))
+}
+
+/// Returns the signature for the optimism deposit transactions, which don't include a
+/// signature.
+pub fn optimism_deposit_tx_signature() -> Signature {
+    Signature::new(U256::ZERO, U256::ZERO, Parity::Parity(false))
 }
 
 impl EthChainSpec for OpChainSpec {
@@ -405,6 +490,8 @@ impl OptimismGenesisInfo {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use alloy_genesis::{ChainConfig, Genesis};
     use alloy_primitives::b256;
     use reth_chainspec::{test_fork_ids, BaseFeeParams, BaseFeeParamsKind};
@@ -918,5 +1005,88 @@ mod tests {
             .zip(hardforks.iter())
             .all(|(expected, actual)| &**expected == *actual));
         assert_eq!(expected_hardforks.len(), hardforks.len());
+    }
+
+    #[test]
+    fn test_get_base_fee_pre_holocene() {
+        let op_chain_spec = &BASE_SEPOLIA;
+        let parent = Header {
+            base_fee_per_gas: Some(1),
+            gas_used: 15763614,
+            gas_limit: 144000000,
+            ..Default::default()
+        };
+        let base_fee = op_chain_spec.next_block_base_fee(&parent, 0);
+        assert_eq!(
+            base_fee.unwrap(),
+            U256::from(
+                parent
+                    .next_block_base_fee(op_chain_spec.base_fee_params_at_timestamp(0))
+                    .unwrap_or_default()
+            )
+        );
+    }
+
+    fn holocene_chainspec() -> Arc<OpChainSpec> {
+        let mut hardforks = OptimismHardfork::base_sepolia();
+        hardforks.insert(OptimismHardfork::Holocene.boxed(), ForkCondition::Timestamp(1800000000));
+        Arc::new(OpChainSpec {
+            inner: ChainSpec {
+                chain: BASE_SEPOLIA.inner.chain,
+                genesis: BASE_SEPOLIA.inner.genesis.clone(),
+                genesis_hash: BASE_SEPOLIA.inner.genesis_hash.clone(),
+                paris_block_and_final_difficulty: Some((0, U256::from(0))),
+                hardforks,
+                base_fee_params: BASE_SEPOLIA.inner.base_fee_params.clone(),
+                max_gas_limit: crate::constants::BASE_SEPOLIA_MAX_GAS_LIMIT,
+                prune_delete_limit: 10000,
+                ..Default::default()
+            },
+        })
+    }
+
+    #[test]
+    fn test_get_base_fee_holocene_nonce_not_set() {
+        let op_chain_spec = holocene_chainspec();
+        let parent = Header {
+            base_fee_per_gas: Some(1),
+            gas_used: 15763614,
+            gas_limit: 144000000,
+            timestamp: 1800000003,
+            extra_data: Bytes::from_static(&[0, 0, 0, 0, 0, 0, 0, 0, 0]),
+            ..Default::default()
+        };
+        let base_fee = op_chain_spec.next_block_base_fee(&parent, 1800000005);
+        assert_eq!(
+            base_fee.unwrap(),
+            U256::from(
+                parent
+                    .next_block_base_fee(op_chain_spec.base_fee_params_at_timestamp(0))
+                    .unwrap_or_default()
+            )
+        );
+    }
+
+    #[test]
+    fn test_get_base_fee_holocene_nonce_set() {
+        let op_chain_spec = holocene_chainspec();
+        let parent = Header {
+            base_fee_per_gas: Some(1),
+            gas_used: 15763614,
+            gas_limit: 144000000,
+            extra_data: Bytes::from_static(&[0, 0, 0, 0, 8, 0, 0, 0, 8]),
+            timestamp: 1800000003,
+            ..Default::default()
+        };
+
+        let base_fee = op_chain_spec.next_block_base_fee(&parent, 1800000005);
+        assert_eq!(
+            base_fee.unwrap(),
+            U256::from(
+                parent
+                    .next_block_base_fee(BaseFeeParams::new(0x00000008, 0x00000008))
+                    .unwrap_or_default()
+            )
+        );
     }
 }
