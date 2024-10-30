@@ -406,8 +406,11 @@ mod tests {
         let chain = AppendableChain::new(Chain::new(
             vec![block.clone()],
             ExecutionOutcome {
-                receipts: receipts.iter().map(|receipt| Some(receipt.clone())).collect::<Vec<_>>().into()
-                ..Default::default()
+                receipts: receipts
+                    .iter()
+                    .map(|receipt| Some(receipt.clone()))
+                    .collect::<Vec<_>>()
+                    .into()..Default::default(),
             },
             Default::default(),
         ));
