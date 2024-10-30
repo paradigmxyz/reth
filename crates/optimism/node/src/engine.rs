@@ -14,7 +14,7 @@ use reth_node_api::{
     validate_version_specific_fields, EngineTypes, EngineValidator,
 };
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_forks::OptimismHardfork;
+use reth_optimism_forks::{OptimismHardfork, OptimismHardforks};
 use reth_optimism_payload_builder::{
     builder::decode_eip_1559_params, OptimismBuiltPayload, OptimismPayloadBuilderAttributes,
 };
@@ -149,10 +149,8 @@ where
             ))
         }
 
-        if self.chain_spec.is_fork_active_at_timestamp(
-            OptimismHardfork::Holocene,
-            attributes.payload_attributes.timestamp,
-        ) {
+        if self.chain_spec.is_holocene_active_at_timestamp(attributes.payload_attributes.timestamp)
+        {
             let Some(eip_1559_params) = attributes.eip_1559_params else {
                 return Err(EngineObjectValidationError::InvalidParams(
                     "MissingEip1559ParamsInPayloadAttributes".to_string().into(),
