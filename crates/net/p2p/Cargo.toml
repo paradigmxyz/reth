@@ -47,11 +47,13 @@ test-utils = [
 	"reth-consensus/test-utils",
 	"parking_lot",
 	"reth-network-types/test-utils",
-	"reth-primitives/test-utils"
+	"reth-primitives/test-utils",
+	"reth-primitives-traits/test-utils"
 ]
 std = [
 	"reth-consensus/std",
 	"reth-primitives/std",
 	"alloy-eips/std",
-	"alloy-primitives/std"
+	"alloy-primitives/std",
+	"reth-primitives-traits/std"
 ]

@@ -95,7 +95,8 @@ test-utils = [
 	"reth-chainspec/test-utils",
 	"reth-primitives/test-utils",
 	"reth-provider/test-utils",
-	"revm/test-utils"
+	"revm/test-utils",
+	"reth-primitives-traits/test-utils"
 ]
 arbitrary = [
 	"proptest",
@@ -108,7 +109,8 @@ arbitrary = [
 	"alloy-primitives/arbitrary",
 	"bitflags/arbitrary",
 	"revm/arbitrary",
-	"smallvec/arbitrary"
+	"smallvec/arbitrary",
+	"reth-primitives-traits/arbitrary"
 ]
 
 [[bench]]
