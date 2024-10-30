@@ -1,5 +1,4 @@
 use crate::{
-    metrics::WalkerMetrics,
     prefix_set::PrefixSet,
     trie_cursor::{CursorSubNode, TrieCursor},
     BranchNodeCompact, Nibbles,
@@ -7,6 +6,9 @@ use crate::{
 use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
 use std::collections::HashSet;
+
+#[cfg(feature = "metrics")]
+use crate::metrics::WalkerMetrics;
 
 /// `TrieWalker` is a structure that enables traversal of a Merkle trie.
 /// It allows moving through the trie in a depth-first manner, skipping certain branches
