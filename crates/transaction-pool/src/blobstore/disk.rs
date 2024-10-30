@@ -497,9 +497,8 @@ pub enum OpenDiskFileBlobStore {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::Ordering;
-
     use super::*;
+    use std::sync::atomic::Ordering;
 
     fn tmp_store() -> (DiskFileBlobStore, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
@@ -530,13 +529,13 @@ mod tests {
         // all cached
         for (tx, blob) in &blobs {
             assert!(store.is_cached(tx));
-            let b = (*(store.get(*tx).unwrap().unwrap())).clone();
+            let b = store.get(*tx).unwrap().map(Arc::unwrap_or_clone).unwrap();
             assert_eq!(b, *blob);
         }
 
         let all = store.get_all(all_hashes.clone()).unwrap();
         for (tx, blob) in all {
-            assert!(blobs.contains(&(tx, (*blob).clone())), "missing blob {tx:?}");
+            assert!(blobs.contains(&(tx, Arc::unwrap_or_clone(blob))), "missing blob {tx:?}");
         }
 
         assert!(store.contains(all_hashes[0]).unwrap());

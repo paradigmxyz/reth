@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::VecDeque,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 use thiserror::Error;
@@ -112,7 +113,7 @@ where
                 actions_to_queue.reserve_exact(txs.len());
                 for ((tx, _), sidecar) in txs.iter().zip(blobs.into_iter()) {
                     let transaction =
-                        BlobTransaction::try_from_signed(tx.clone(), (*sidecar).clone())
+                        BlobTransaction::try_from_signed(tx.clone(), Arc::unwrap_or_clone(sidecar))
                             .expect("should not fail to convert blob tx if it is already eip4844");
 
                     let block_metadata = BlockMetadata {
