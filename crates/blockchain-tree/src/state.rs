@@ -406,7 +406,7 @@ mod tests {
         let chain = AppendableChain::new(Chain::new(
             vec![block.clone()],
             ExecutionOutcome {
-                receipts: receipts.clone().into_iter().map(Option::Some).collect::<Vec<_>>().into(),
+                receipts: receipts.iter().map(|receipt| Some(receipt.clone())).collect::<Vec<_>>().into()
                 ..Default::default()
             },
             Default::default(),
