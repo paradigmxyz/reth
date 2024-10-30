@@ -10,8 +10,6 @@ use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodab
 use bytes::{Buf, BufMut};
 use core::{cmp::Ordering, ops::Deref};
 use derive_more::{DerefMut, From, IntoIterator};
-#[cfg(feature = "reth-codec")]
-use reth_codecs::Compact;
 use serde::{Deserialize, Serialize};
 
 /// Receipt containing result of transaction execution.
@@ -19,6 +17,7 @@ use serde::{Deserialize, Serialize};
     Clone, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable, Serialize, Deserialize,
 )]
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::CompactZstd))]
+#[reth_codecs(crate = "reth_codecs")]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests)]
 #[rlp(trailing)]
 pub struct Receipt {
@@ -26,7 +25,7 @@ pub struct Receipt {
     pub tx_type: TxType,
     /// If transaction is executed successfully.
     ///
-    /// This is the `statusCode`
+    /// This is the statusCode
     pub success: bool,
     /// Gas used
     pub cumulative_gas_used: u64,
@@ -46,19 +45,19 @@ pub struct Receipt {
 }
 
 impl Receipt {
-    /// Calculates [`Log`]'s bloom filter. this is slow operation and [`ReceiptWithBloom`] can
+    /// Calculates [Log]'s bloom filter. this is slow operation and [ReceiptWithBloom] can
     /// be used to cache this value.
     pub fn bloom_slow(&self) -> Bloom {
         alloy_primitives::logs_bloom(self.logs.iter())
     }
 
-    /// Calculates the bloom filter for the receipt and returns the [`ReceiptWithBloom`] container
+    /// Calculates the bloom filter for the receipt and returns the [ReceiptWithBloom] container
     /// type.
     pub fn with_bloom(self) -> ReceiptWithBloom {
         self.into()
     }
 
-    /// Calculates the bloom filter for the receipt and returns the [`ReceiptWithBloomRef`]
+    /// Calculates the bloom filter for the receipt and returns the [ReceiptWithBloomRef]
     /// container type.
     pub fn with_bloom_ref(&self) -> ReceiptWithBloomRef<'_> {
         self.into()
@@ -80,22 +79,22 @@ impl Receipt {
     IntoIterator,
 )]
 pub struct Receipts {
-    /// A two-dimensional vector of optional `Receipt` instances.
+    /// A two-dimensional vector of optional Receipt instances.
     pub receipt_vec: Vec<Vec<Option<Receipt>>>,
 }
 
 impl Receipts {
-    /// Returns the length of the `Receipts` vector.
+    /// Returns the length of the Receipts vector.
     pub fn len(&self) -> usize {
         self.receipt_vec.len()
     }
 
-    /// Returns `true` if the `Receipts` vector is empty.
+    /// Returns true if the Receipts vector is empty.
     pub fn is_empty(&self) -> bool {
         self.receipt_vec.is_empty()
     }
 
-    /// Push a new vector of receipts into the `Receipts` collection.
+    /// Push a new vector of receipts into the Receipts collection.
     pub fn push(&mut self, receipts: Vec<Option<Receipt>>) {
         self.receipt_vec.push(receipts);
     }
@@ -127,11 +126,12 @@ impl From<Receipt> for ReceiptWithBloom {
     }
 }
 
-/// [`Receipt`] with calculated bloom filter.
+/// [Receipt] with calculated bloom filter.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
+#[reth_codecs(crate = "reth_codecs")]
 pub struct ReceiptWithBloom {
     /// Bloom filter build from logs.
     pub bloom: Bloom,
@@ -140,7 +140,7 @@ pub struct ReceiptWithBloom {
 }
 
 impl ReceiptWithBloom {
-    /// Create new [`ReceiptWithBloom`]
+    /// Create new [ReceiptWithBloom]
     pub const fn new(receipt: Receipt, bloom: Bloom) -> Self {
         Self { receipt, bloom }
     }
@@ -207,7 +207,7 @@ impl<'a> arbitrary::Arbitrary<'a> for Receipt {
 impl ReceiptWithBloom {
     /// Returns the enveloped encoded receipt.
     ///
-    /// See also [`ReceiptWithBloom::encode_enveloped`]
+    /// See also [ReceiptWithBloom::encode_enveloped]
     pub fn envelope_encoded(&self) -> Bytes {
         let mut buf = Vec::new();
         self.encode_enveloped(&mut buf);
@@ -218,7 +218,7 @@ impl ReceiptWithBloom {
     /// This format is also referred to as "binary" encoding.
     ///
     /// For legacy receipts, it encodes the RLP of the receipt into the buffer:
-    /// `rlp([status, cumulativeGasUsed, logsBloom, logs])` as per EIP-2718.
+    /// rlp([status, cumulativeGasUsed, logsBloom, logs]) as per EIP-2718.
     /// For EIP-2718 typed transactions, it encodes the type of the transaction followed by the rlp
     /// of the receipt:
     /// - EIP-1559, 2930 and 4844 transactions: `tx-type || rlp([status, cumulativeGasUsed,
@@ -237,7 +237,7 @@ impl ReceiptWithBloom {
         let b = &mut &**buf;
         let rlp_head = alloy_rlp::Header::decode(b)?;
         if !rlp_head.list {
-            return Err(alloy_rlp::Error::UnexpectedString)
+            return Err(alloy_rlp::Error::UnexpectedString);
         }
         let started_len = b.len();
 
@@ -282,7 +282,7 @@ impl ReceiptWithBloom {
             return Err(alloy_rlp::Error::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            })
+            });
         }
         *buf = *b;
         Ok(this)
@@ -347,7 +347,7 @@ impl Decodable for ReceiptWithBloom {
     }
 }
 
-/// [`Receipt`] reference type with calculated bloom filter.
+/// [Receipt] reference type with calculated bloom filter.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReceiptWithBloomRef<'a> {
     /// Bloom filter build from logs.
@@ -357,7 +357,7 @@ pub struct ReceiptWithBloomRef<'a> {
 }
 
 impl<'a> ReceiptWithBloomRef<'a> {
-    /// Create new [`ReceiptWithBloomRef`]
+    /// Create new [ReceiptWithBloomRef]
     pub const fn new(receipt: &'a Receipt, bloom: Bloom) -> Self {
         Self { receipt, bloom }
     }
@@ -439,7 +439,7 @@ impl ReceiptWithBloomEncoder<'_> {
     fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
         if matches!(self.receipt.tx_type, TxType::Legacy) {
             self.encode_fields(out);
-            return
+            return;
         }
 
         let mut payload = Vec::new();
