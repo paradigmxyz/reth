@@ -73,7 +73,7 @@ where
         &self,
         config: &PayloadConfig<EthPayloadBuilderAttributes>,
         parent: &Header,
-    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), EvmConfig::Error> {
         let next_attributes = NextBlockEnvAttributes {
             timestamp: config.attributes.timestamp(),
             suggested_fee_recipient: config.attributes.suggested_fee_recipient(),
@@ -97,7 +97,9 @@ where
         &self,
         args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
     ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
-        let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_header);
+        let (cfg_env, block_env) = self
+            .cfg_and_block_env(&args.config, &args.config.parent_header)
+            .map_err(PayloadBuilderError::other)?;
 
         let pool = args.pool.clone();
         default_ethereum_payload(self.evm_config.clone(), args, cfg_env, block_env, |attributes| {
@@ -120,7 +122,9 @@ where
             None,
         );
 
-        let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_header);
+        let (cfg_env, block_env) = self
+            .cfg_and_block_env(&args.config, &args.config.parent_header)
+            .map_err(PayloadBuilderError::other)?;
 
         let pool = args.pool.clone();
 

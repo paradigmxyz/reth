@@ -116,6 +116,9 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     /// The header type used by the EVM.
     type Header: BlockHeader;
 
+    /// The error type that is returned by [`Self::next_cfg_and_block_env`].
+    type Error: core::error::Error + Send + Sync;
+
     /// Returns a [`TxEnv`] from a [`TransactionSigned`] and [`Address`].
     fn tx_env(&self, transaction: &TransactionSigned, signer: Address) -> TxEnv {
         let mut tx_env = TxEnv::default();
@@ -192,7 +195,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
         &self,
         parent: &Self::Header,
         attributes: NextBlockEnvAttributes,
-    ) -> (CfgEnvWithHandlerCfg, BlockEnv);
+    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), Self::Error>;
 }
 
 /// Represents additional attributes required to configure the next block.
