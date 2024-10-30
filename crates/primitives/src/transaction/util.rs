@@ -63,7 +63,7 @@ mod impl_secp256k1 {
 #[cfg_attr(feature = "secp256k1", allow(unused, unreachable_pub))]
 mod impl_k256 {
     use super::*;
-    use alloy_primitives::{keccak256, B256, U256};
+    use alloy_primitives::{keccak256, B256};
     pub(crate) use k256::ecdsa::Error;
     use k256::ecdsa::{RecoveryId, SigningKey, VerifyingKey};
 
