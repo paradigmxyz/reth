@@ -443,7 +443,10 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Returns the [BlobTransactionSidecar] for the given transaction hash if it exists in the blob
     /// store.
-    fn get_blob(&self, tx_hash: TxHash) -> Result<Option<BlobTransactionSidecar>, BlobStoreError>;
+    fn get_blob(
+        &self,
+        tx_hash: TxHash,
+    ) -> Result<Option<Arc<BlobTransactionSidecar>>, BlobStoreError>;
 
     /// Returns all [BlobTransactionSidecar] for the given transaction hashes if they exists in the
     /// blob store.
@@ -453,7 +456,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     fn get_all_blobs(
         &self,
         tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<(TxHash, BlobTransactionSidecar)>, BlobStoreError>;
+    ) -> Result<Vec<(TxHash, Arc<BlobTransactionSidecar>)>, BlobStoreError>;
 
     /// Returns the exact [BlobTransactionSidecar] for the given transaction hashes in the order
     /// they were requested.
@@ -462,7 +465,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     fn get_all_blobs_exact(
         &self,
         tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError>;
+    ) -> Result<Vec<Arc<BlobTransactionSidecar>>, BlobStoreError>;
 
     /// Return the [`BlobTransactionSidecar`]s for a list of blob versioned hashes.
     fn get_blobs_for_versioned_hashes(
