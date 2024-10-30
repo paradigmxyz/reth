@@ -50,13 +50,13 @@ impl ProtocolMessage {
         let message = match message_type {
             EthMessageID::Status => EthMessage::Status(Status::decode(buf)?),
             EthMessageID::NewBlockHashes => {
-                if EthVersion::is_eth69(&EthVersion::Eth69) {
+                if version.is_eth69() {
                     return Err(MessageError::Invalid(version, EthMessageID::NewBlockHashes));
                 }
                 EthMessage::NewBlockHashes(NewBlockHashes::decode(buf)?)
             }
             EthMessageID::NewBlock => {
-                if EthVersion::is_eth69(&EthVersion::Eth69) {
+                if version.is_eth69() {
                     return Err(MessageError::Invalid(version, EthMessageID::NewBlock));
                 }
                 EthMessage::NewBlock(Box::new(NewBlock::decode(buf)?))
