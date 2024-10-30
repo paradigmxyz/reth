@@ -11,7 +11,7 @@ use reth_evm::{system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, NextBl
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
-use reth_optimism_forks::{OptimismHardfork, OptimismHardforks};
+use reth_optimism_forks::OptimismHardforks;
 use reth_payload_primitives::{PayloadBuilderAttributes, PayloadBuilderError};
 use reth_primitives::{
     proofs,
@@ -193,10 +193,8 @@ where
 
     let block_number = initialized_block_env.number.to::<u64>();
 
-    let is_regolith = chain_spec.is_fork_active_at_timestamp(
-        OptimismHardfork::Regolith,
-        attributes.payload_attributes.timestamp,
-    );
+    let is_regolith =
+        chain_spec.is_regolith_active_at_timestamp(attributes.payload_attributes.timestamp);
 
     // apply eip-4788 pre block contract call
     let mut system_caller = SystemCaller::new(evm_config.clone(), &chain_spec);
@@ -315,10 +313,7 @@ where
             // receipt hashes should be computed when set. The state transition process
             // ensures this is only set for post-Canyon deposit transactions.
             deposit_receipt_version: chain_spec
-                .is_fork_active_at_timestamp(
-                    OptimismHardfork::Canyon,
-                    attributes.payload_attributes.timestamp,
-                )
+                .is_canyon_active_at_timestamp(attributes.payload_attributes.timestamp)
                 .then_some(1),
         }));
 
@@ -473,10 +468,8 @@ where
             (None, None)
         };
 
-    let is_holocene = chain_spec.is_fork_active_at_timestamp(
-        OptimismHardfork::Holocene,
-        attributes.payload_attributes.timestamp,
-    );
+    let is_holocene =
+        chain_spec.is_holocene_active_at_timestamp(attributes.payload_attributes.timestamp);
 
     if is_holocene {
         extra_data = attributes

@@ -27,6 +27,7 @@ use std::{
     collections::HashSet,
     hash::{Hash, Hasher},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 use tokio::sync::oneshot;
 use tracing::{debug, error, info, trace, warn};
@@ -328,6 +329,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                             pool.get_blob(tx.hash)
                                 .ok()
                                 .flatten()
+                                .map(Arc::unwrap_or_clone)
                                 .and_then(|sidecar| {
                                     PooledTransactionsElementEcRecovered::try_from_blob_transaction(
                                         tx, sidecar,

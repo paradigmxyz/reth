@@ -45,6 +45,10 @@ pub use alloy_primitives::{logs_bloom, Log, LogData};
 mod storage;
 pub use storage::StorageEntry;
 
+/// Transaction types
+pub mod tx_type;
+pub use tx_type::TxType;
+
 /// Common header types
 pub mod header;
 #[cfg(any(test, feature = "arbitrary", feature = "test-utils"))]
