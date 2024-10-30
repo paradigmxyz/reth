@@ -230,7 +230,7 @@ where
 
         let parent_header = RpcNodeCore::provider(&self.inner.eth_api)
             .header_by_number(block_env.number.saturating_to::<u64>())
-            .map_err(|e| EthApiError::from_eth_err(e))? // Explicitly map the error
+            .map_err(EthApiError::from_eth_err)? // Explicitly map the error
             .ok_or_else(|| {
                 EthApiError::HeaderNotFound((block_env.number.saturating_to::<u64>()).into())
             })?;
@@ -266,8 +266,8 @@ where
 
         if cfg.handler_cfg.spec_id.is_enabled_in(SpecId::CANCUN) {
             let excess_blob_gas = calc_excess_blob_gas(
-                parent_header.excess_blob_gas.unwrap_or_default().try_into().unwrap(),
-                parent_header.blob_gas_used.unwrap_or_default().try_into().unwrap(),
+                parent_header.excess_blob_gas.unwrap_or_default(),
+                parent_header.blob_gas_used.unwrap_or_default(),
             );
 
             block_env.set_blob_excess_gas_and_price(excess_blob_gas);
@@ -301,9 +301,9 @@ where
 
                 for (i, item) in flattened_bundle.iter().enumerate() {
                     // Check inclusion constraints
-                    let block_number = item.inclusion.block_number() as u64;
+                    let block_number = item.inclusion.block_number();
                     let max_block_number =
-                        item.inclusion.max_block_number().unwrap_or(block_number) as u64;
+                        item.inclusion.max_block_number().unwrap_or(block_number);
 
                     if current_block_number < block_number ||
                         current_block_number > max_block_number
