@@ -188,7 +188,7 @@ pub struct RpcServerArgs {
     /// Path to file containing blacklisted addresses, json-encoded list of strings. Block
     /// validation API will reject blocks containing transactions from these addresses.
     #[arg(long = "flashbots.blacklist", value_name = "PATH", value_parser = reth_cli_util::parsers::read_json_from_file::<HashSet<Address>>)]
-    pub flashbots_blacklist: HashSet<Address>,
+    pub flashbots_blacklist: Option<HashSet<Address>>,
 
     /// State cache configuration.
     #[command(flatten)]
