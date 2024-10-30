@@ -1,9 +1,13 @@
 //! Trait for specifying `eth` network dependent API types.
 
-use std::{error::Error, fmt};
+use std::{
+    error::Error,
+    fmt::{self, Debug},
+};
 
 use alloy_network::Network;
 use alloy_rpc_types::Block;
+use jsonrpsee::core::{DeserializeOwned, Serialize};
 use reth_rpc_types_compat::TransactionCompat;
 
 use crate::{AsEthApiError, FromEthApiError, FromEvmError};
@@ -19,7 +23,18 @@ pub trait EthApiTypes: Send + Sync + Clone {
         + Send
         + Sync;
     /// Blockchain primitive types, specific to network, e.g. block and transaction.
-    type NetworkTypes: Network<HeaderResponse = alloy_rpc_types::Header>;
+    type NetworkTypes: Network<
+        Header: Send
+                    + Sync
+                    + Clone
+                    + Debug
+                    + Unpin
+                    + From<alloy_consensus::Header>
+                    + Serialize
+                    + DeserializeOwned
+                    + 'static,
+        HeaderResponse = alloy_rpc_types::Header<<Self::NetworkTypes as Network>::Header>,
+    >;
     /// Conversion methods for transaction RPC type.
     type TransactionCompat: Send + Sync + Clone + fmt::Debug;
 
@@ -31,7 +46,10 @@ pub trait EthApiTypes: Send + Sync + Clone {
 pub type RpcTransaction<T> = <T as Network>::TransactionResponse;
 
 /// Adapter for network specific block type.
-pub type RpcBlock<T> = Block<RpcTransaction<T>, <T as Network>::HeaderResponse>;
+pub type RpcHeader<T> = <T as Network>::HeaderResponse;
+
+/// Adapter for network specific block type.
+pub type RpcBlock<T> = Block<RpcTransaction<T>, RpcHeader<T>>;
 
 /// Adapter for network specific receipt type.
 pub type RpcReceipt<T> = <T as Network>::ReceiptResponse;

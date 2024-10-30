@@ -109,7 +109,7 @@ impl EthSigner for DevSigner {
 
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::{Bytes, Parity, U256};
+    use alloy_primitives::{Bytes, U256};
     use alloy_rpc_types_eth::TransactionInput;
     use revm_primitives::TxKind;
 
@@ -205,7 +205,7 @@ mod tests {
                 16,
             )
             .unwrap(),
-            Parity::Parity(false),
+            false,
         );
         assert_eq!(sig, expected)
     }
@@ -227,7 +227,7 @@ mod tests {
                 16,
             )
             .unwrap(),
-            Parity::Parity(true),
+            true,
         );
         assert_eq!(sig, expected)
     }

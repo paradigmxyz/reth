@@ -8,8 +8,8 @@ use alloy_rpc_types::{
     serde_helpers::JsonStorageKey,
     simulate::{SimulatePayload, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
-    BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Header,
-    Index, StateContext, SyncStatus, Work,
+    BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Index,
+    StateContext, SyncStatus, Work,
 };
 use alloy_rpc_types_eth::transaction::TransactionRequest;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
@@ -19,6 +19,7 @@ use tracing::trace;
 
 use crate::{
     helpers::{EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthApi},
+    types::RpcHeader,
     RpcBlock, RpcReceipt, RpcTransaction,
 };
 
@@ -28,6 +29,7 @@ pub trait FullEthApiServer:
     EthApiServer<
         RpcTransaction<Self::NetworkTypes>,
         RpcBlock<Self::NetworkTypes>,
+        RpcHeader<Self::NetworkTypes>,
         RpcReceipt<Self::NetworkTypes>,
     > + FullEthApi
     + Clone
@@ -38,6 +40,7 @@ impl<T> FullEthApiServer for T where
     T: EthApiServer<
             RpcTransaction<T::NetworkTypes>,
             RpcBlock<T::NetworkTypes>,
+            RpcHeader<T::NetworkTypes>,
             RpcReceipt<T::NetworkTypes>,
         > + FullEthApi
         + Clone
@@ -47,7 +50,7 @@ impl<T> FullEthApiServer for T where
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
-pub trait EthApi<T: RpcObject, B: RpcObject, R: RpcObject> {
+pub trait EthApi<T: RpcObject, B: RpcObject, H: RpcObject, R: RpcObject> {
     /// Returns the protocol version encoded as a string.
     #[method(name = "protocolVersion")]
     async fn protocol_version(&self) -> RpcResult<U64>;
@@ -201,11 +204,11 @@ pub trait EthApi<T: RpcObject, B: RpcObject, R: RpcObject> {
 
     /// Returns the block's header at given number.
     #[method(name = "getHeaderByNumber")]
-    async fn header_by_number(&self, hash: BlockNumberOrTag) -> RpcResult<Option<Header>>;
+    async fn header_by_number(&self, hash: BlockNumberOrTag) -> RpcResult<Option<H>>;
 
     /// Returns the block's header at given hash.
     #[method(name = "getHeaderByHash")]
-    async fn header_by_hash(&self, hash: B256) -> RpcResult<Option<Header>>;
+    async fn header_by_hash(&self, hash: B256) -> RpcResult<Option<H>>;
 
     /// `eth_simulateV1` executes an arbitrary number of transactions on top of the requested state.
     /// The transactions are packed into individual blocks. Overrides can be provided.
@@ -366,6 +369,7 @@ impl<T>
     EthApiServer<
         RpcTransaction<T::NetworkTypes>,
         RpcBlock<T::NetworkTypes>,
+        RpcHeader<T::NetworkTypes>,
         RpcReceipt<T::NetworkTypes>,
     > for T
 where
@@ -607,13 +611,16 @@ where
     }
 
     /// Handler for: `eth_getHeaderByNumber`
-    async fn header_by_number(&self, block_number: BlockNumberOrTag) -> RpcResult<Option<Header>> {
+    async fn header_by_number(
+        &self,
+        block_number: BlockNumberOrTag,
+    ) -> RpcResult<Option<RpcHeader<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?block_number, "Serving eth_getHeaderByNumber");
         Ok(EthBlocks::rpc_block_header(self, block_number.into()).await?)
     }
 
     /// Handler for: `eth_getHeaderByHash`
-    async fn header_by_hash(&self, hash: B256) -> RpcResult<Option<Header>> {
+    async fn header_by_hash(&self, hash: B256) -> RpcResult<Option<RpcHeader<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getHeaderByHash");
         Ok(EthBlocks::rpc_block_header(self, hash.into()).await?)
     }

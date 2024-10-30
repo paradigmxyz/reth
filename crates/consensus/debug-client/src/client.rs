@@ -191,11 +191,11 @@ pub fn block_to_execution_payload_v3(block: Block) -> ExecutionNewPayload {
         payload_inner: ExecutionPayloadV2 {
             payload_inner: ExecutionPayloadV1 {
                 parent_hash: block.header.parent_hash,
-                fee_recipient: block.header.miner,
+                fee_recipient: block.header.beneficiary,
                 state_root: block.header.state_root,
                 receipts_root: block.header.receipts_root,
                 logs_bloom: block.header.logs_bloom,
-                prev_randao: block.header.mix_hash.unwrap(),
+                prev_randao: block.header.mix_hash,
                 block_number: block.header.number,
                 gas_limit: block.header.gas_limit,
                 gas_used: block.header.gas_used,
@@ -213,7 +213,7 @@ pub fn block_to_execution_payload_v3(block: Block) -> ExecutionNewPayload {
                     })
                     .collect(),
             },
-            withdrawals: block.withdrawals.clone().unwrap_or_default(),
+            withdrawals: block.withdrawals.clone().unwrap_or_default().to_vec(),
         },
         blob_gas_used: block.header.blob_gas_used.unwrap(),
         excess_blob_gas: block.header.excess_blob_gas.unwrap(),

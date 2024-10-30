@@ -9,7 +9,7 @@ use reth_primitives::{BlockId, BlockNumberOrTag};
 use reth_rpc_api::{EngineEthApiServer, EthApiServer, EthFilterApiServer};
 /// Re-export for convenience
 pub use reth_rpc_engine_api::EngineApi;
-use reth_rpc_eth_api::{FullEthApiTypes, RpcBlock, RpcReceipt, RpcTransaction};
+use reth_rpc_eth_api::{types::RpcHeader, FullEthApiTypes, RpcBlock, RpcReceipt, RpcTransaction};
 use tracing_futures::Instrument;
 
 macro_rules! engine_span {
@@ -40,6 +40,7 @@ where
     Eth: EthApiServer<
             RpcTransaction<Eth::NetworkTypes>,
             RpcBlock<Eth::NetworkTypes>,
+            RpcHeader<Eth::NetworkTypes>,
             RpcReceipt<Eth::NetworkTypes>,
         > + FullEthApiTypes,
     EthFilter: EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>>,

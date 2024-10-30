@@ -1,6 +1,7 @@
+use alloy_consensus::transaction::to_eip155_value;
 use alloy_primitives::U256;
 use alloy_rpc_types::{Parity, Signature};
-use reth_primitives::{transaction::legacy_parity, Signature as PrimitiveSignature, TxType};
+use reth_primitives::{Signature as PrimitiveSignature, TxType};
 
 /// Creates a new rpc signature from a legacy [primitive
 /// signature](reth_primitives::Signature), using the give chain id to compute the signature's
@@ -14,7 +15,7 @@ pub fn from_legacy_primitive_signature(
     Signature {
         r: signature.r(),
         s: signature.s(),
-        v: U256::from(legacy_parity(&signature, chain_id).to_u64()),
+        v: U256::from(to_eip155_value(signature.v(), chain_id)),
         y_parity: None,
     }
 }
@@ -26,8 +27,8 @@ pub fn from_typed_primitive_signature(signature: PrimitiveSignature) -> Signatur
     Signature {
         r: signature.r(),
         s: signature.s(),
-        v: U256::from(signature.v().y_parity_byte()),
-        y_parity: Some(Parity(signature.v().y_parity())),
+        v: U256::from(signature.v() as u8),
+        y_parity: Some(Parity(signature.v())),
     }
 }
 

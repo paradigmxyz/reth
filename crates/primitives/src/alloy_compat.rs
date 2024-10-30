@@ -1,14 +1,15 @@
 //! Common conversions from alloy types.
 
 use crate::{
-    transaction::extract_chain_id, Block, BlockBody, Signature, Transaction, TransactionSigned,
-    TransactionSignedEcRecovered, TransactionSignedNoHash, TxType,
+    Block, BlockBody, Signature, Transaction, TransactionSigned, TransactionSignedEcRecovered,
+    TransactionSignedNoHash, TxType,
 };
 use alloc::{string::ToString, vec::Vec};
 use alloy_consensus::{
-    constants::EMPTY_TRANSACTIONS, Transaction as _, TxEip1559, TxEip2930, TxEip4844, TxLegacy,
+    constants::EMPTY_TRANSACTIONS, transaction::from_eip155_value, AnyHeader, Header, TxEip1559,
+    TxEip2930, TxEip4844, TxLegacy,
 };
-use alloy_primitives::{Parity, TxKind};
+use alloy_primitives::{SignatureError, TxKind};
 use alloy_rlp::Error as RlpError;
 use alloy_serde::WithOtherFields;
 use op_alloy_rpc_types as _;
@@ -43,11 +44,107 @@ impl TryFrom<alloy_rpc_types::Block<WithOtherFields<alloy_rpc_types::Transaction
         };
 
         Ok(Self {
-            header: block.header.try_into()?,
+            header: block.header.inner,
             body: BlockBody {
                 transactions,
                 ommers: Default::default(),
-                withdrawals: block.withdrawals.map(Into::into),
+                withdrawals: block.withdrawals.map(|w| w.into_inner().into()),
+            },
+        })
+    }
+}
+
+impl
+    TryFrom<
+        alloy_rpc_types::Block<
+            WithOtherFields<alloy_rpc_types::Transaction>,
+            alloy_rpc_types::Header<AnyHeader>,
+        >,
+    > for Block
+{
+    type Error = alloy_rpc_types::ConversionError;
+
+    fn try_from(
+        block: alloy_rpc_types::Block<
+            WithOtherFields<alloy_rpc_types::Transaction>,
+            alloy_rpc_types::Header<AnyHeader>,
+        >,
+    ) -> Result<Self, Self::Error> {
+        use alloy_rpc_types::ConversionError;
+
+        let transactions = {
+            let transactions: Result<Vec<TransactionSigned>, ConversionError> = match block
+                .transactions
+            {
+                alloy_rpc_types::BlockTransactions::Full(transactions) => {
+                    transactions.into_iter().map(|tx| tx.try_into()).collect()
+                }
+                alloy_rpc_types::BlockTransactions::Hashes(_) |
+                alloy_rpc_types::BlockTransactions::Uncle => {
+                    // alloy deserializes empty blocks into `BlockTransactions::Hashes`, if the tx
+                    // root is the empty root then we can just return an empty vec.
+                    if block.header.transactions_root == EMPTY_TRANSACTIONS {
+                        Ok(Vec::new())
+                    } else {
+                        Err(ConversionError::MissingFullTransactions)
+                    }
+                }
+            };
+            transactions?
+        };
+
+        let AnyHeader {
+            parent_hash,
+            ommers_hash,
+            beneficiary,
+            state_root,
+            transactions_root,
+            receipts_root,
+            logs_bloom,
+            difficulty,
+            number,
+            gas_limit,
+            gas_used,
+            timestamp,
+            extra_data,
+            mix_hash,
+            nonce,
+            base_fee_per_gas,
+            withdrawals_root,
+            blob_gas_used,
+            excess_blob_gas,
+            parent_beacon_block_root,
+            requests_hash,
+        } = block.header.inner;
+
+        Ok(Self {
+            header: Header {
+                parent_hash,
+                ommers_hash,
+                beneficiary,
+                state_root,
+                transactions_root,
+                receipts_root,
+                logs_bloom,
+                difficulty,
+                number,
+                gas_limit,
+                gas_used,
+                timestamp,
+                extra_data,
+                mix_hash: mix_hash.ok_or(ConversionError::Custom("missing mixHash".to_string()))?,
+                nonce: nonce.ok_or(ConversionError::Custom("missing nonce".to_string()))?,
+                base_fee_per_gas,
+                withdrawals_root,
+                blob_gas_used,
+                excess_blob_gas,
+                parent_beacon_block_root,
+                requests_hash,
+            },
+            body: BlockBody {
+                transactions,
+                ommers: Default::default(),
+                withdrawals: block.withdrawals.map(|w| w.into_inner().into()),
             },
         })
     }
@@ -88,8 +185,12 @@ impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for Transaction {
                             // sometimes rpc providers return legacy transactions without a chain id
                             // explicitly in the response, however those transactions may also have
                             // a chain id in the signature from eip155
-                            extract_chain_id(signature.v.to())
-                                .map_err(|err| ConversionError::Eip2718Error(err.into()))?
+                            from_eip155_value(signature.v.to())
+                                .ok_or_else(|| {
+                                    ConversionError::SignatureError(SignatureError::InvalidParity(
+                                        signature.v.to(),
+                                    ))
+                                })?
                                 .1
                         } else {
                             return Err(ConversionError::MissingChainId)
@@ -227,25 +328,21 @@ impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for TransactionSigne
                 // If the transaction type is Legacy, adjust the v component of the
                 // signature according to the Ethereum specification
                 TxType::Legacy => {
-                    extract_chain_id(signature.v.to())
-                        .map_err(|_| ConversionError::InvalidSignature)?
+                    from_eip155_value(signature.v.to())
+                        .ok_or_else(|| {
+                            ConversionError::SignatureError(SignatureError::InvalidParity(
+                                signature.v.to(),
+                            ))
+                        })?
                         .0
                 }
                 _ => !signature.v.is_zero(),
             }
         };
 
-        let mut parity = Parity::Parity(y_parity);
-
-        if matches!(transaction.tx_type(), TxType::Legacy) {
-            if let Some(chain_id) = transaction.chain_id() {
-                parity = parity.with_chain_id(chain_id)
-            }
-        }
-
         Ok(Self::from_transaction_and_signature(
             transaction,
-            Signature::new(signature.r, signature.s, parity),
+            Signature::new(signature.r, signature.s, y_parity),
         ))
     }
 }

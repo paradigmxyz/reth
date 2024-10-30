@@ -939,6 +939,7 @@ where
                     EthApiClient::<
                         alloy_rpc_types::Transaction,
                         alloy_rpc_types::Block,
+                        alloy_rpc_types::Header,
                         alloy_rpc_types::Receipt,
                     >::chain_id(&client)
                     .await
