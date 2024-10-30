@@ -628,8 +628,8 @@ impl<T: TransactionOrdering> TxPool<T> {
                         *transaction.hash(),
                         PoolErrorKind::InvalidTransaction(
                             InvalidPoolTransactionError::ExceedsGasLimit(
-                                block_gas_limit,
                                 tx_gas_limit,
+                                block_gas_limit,
                             ),
                         ),
                     )),
