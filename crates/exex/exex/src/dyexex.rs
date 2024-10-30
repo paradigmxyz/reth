@@ -62,7 +62,7 @@ type ExExFut = BoxFuture<'static, BoxFuture<'static, Result<()>>>;
 /// }
 ///
 /// // Use the macro to generate the entrypoint function
-/// define_exex!(exex_init);
+/// define_exex!(exex);
 /// ```
 #[macro_export]
 macro_rules! define_exex {
