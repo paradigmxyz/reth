@@ -602,7 +602,7 @@ tikv-jemalloc-ctl = "0.6"
 tikv-jemallocator = "0.6"
 tracy-client = "0.17.3"
 
-#[patch.crates-io]
+[patch.crates-io]
 #alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "a971b3a" }
 #alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "a971b3a" }
 #alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "a971b3a" }
@@ -634,3 +634,5 @@ tracy-client = "0.17.3"
 #op-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/op-alloy", rev = "6a042e7681b1" }
 #op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", rev = "6a042e7681b1" }
 #op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", rev = "6a042e7681b1" }
+
+alloy-trie = { path = "/Users/shekhirin/Projects/alloy-trie" }
