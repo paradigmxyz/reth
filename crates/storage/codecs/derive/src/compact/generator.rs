@@ -1,11 +1,13 @@
-//! Code generator for the `Compact` trait.
+//! Code generator for the Compact trait.
 
 use super::*;
 use convert_case::{Case, Casing};
+use syn::{Attribute, LitStr};
 
-/// Generates code to implement the `Compact` trait for a data type.
+/// Generates code to implement the Compact trait for a data type.
 pub fn generate_from_to(
     ident: &Ident,
+    attrs: &[Attribute],
     has_lifetime: bool,
     fields: &FieldList,
     is_zstd: bool,
@@ -20,6 +22,8 @@ pub fn generate_from_to(
     let fuzz = format_ident!("fuzz_test_{snake_case_ident}");
     let test = format_ident!("fuzz_{snake_case_ident}");
 
+    let reth_codecs = parse_reth_codecs_path(attrs);
+
     let lifetime = if has_lifetime {
         quote! { 'a }
     } else {
@@ -28,11 +32,11 @@ pub fn generate_from_to(
 
     let impl_compact = if has_lifetime {
         quote! {
-           impl<#lifetime> Compact for #ident<#lifetime>
+           impl<#lifetime> #reth_codecs::Compact for #ident<#lifetime>
         }
     } else {
         quote! {
-           impl Compact for #ident
+           impl #reth_codecs::Compact for #ident
         }
     };
 
@@ -86,13 +90,13 @@ pub fn generate_from_to(
     }
 }
 
-/// Generates code to implement the `Compact` trait method `to_compact`.
+/// Generates code to implement the Compact trait method to_compact.
 fn generate_from_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> TokenStream2 {
     let mut lines = vec![];
     let mut known_types =
         vec!["B256", "Address", "Bloom", "Vec", "TxHash", "BlockHash", "FixedBytes"];
 
-    // Only types without `Bytes` should be added here. It's currently manually added, since
+    // Only types without Bytes should be added here. It's currently manually added, since
     // it's hard to figure out with derive_macro which types have Bytes fields.
     //
     // This removes the requirement of the field to be placed last in the struct.
@@ -126,7 +130,7 @@ fn generate_from_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> To
                     let ident = format_ident!("{name}");
                     return Some(quote! {
                         #ident: #ident,
-                    })
+                    });
                 }
                 None
             });
@@ -139,7 +143,7 @@ fn generate_from_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> To
         }
     }
 
-    // If the type has compression support, then check the `__zstd` flag. Otherwise, use the default
+    // If the type has compression support, then check the __zstd flag. Otherwise, use the default
     // code branch. However, even if it's a type with compression support, not all values are
     // to be compressed (thus the zstd flag). Ideally only the bigger ones.
     is_zstd
@@ -170,7 +174,7 @@ fn generate_from_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> To
         })
 }
 
-/// Generates code to implement the `Compact` trait method `from_compact`.
+/// Generates code to implement the Compact trait method from_compact.
 fn generate_to_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> Vec<TokenStream2> {
     let mut lines = vec![quote! {
         let mut buffer = bytes::BytesMut::new();
@@ -191,7 +195,7 @@ fn generate_to_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> Vec<
     }
 
     // Just because a type supports compression, doesn't mean all its values are to be compressed.
-    // We skip the smaller ones, and thus require a flag `__zstd` to specify if this value is
+    // We skip the smaller ones, and thus require a flag __zstd to specify if this value is
     // compressed or not.
     if is_zstd {
         lines.push(quote! {
@@ -231,4 +235,27 @@ fn generate_to_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> Vec<
     }
 
     lines
+}
+
+/// Function to extract the crate path from #[reth_codecs(crate = "...")] attribute.
+
+fn parse_reth_codecs_path(attrs: &[Attribute]) -> TokenStream2 {
+    let mut reth_codecs_path = quote::quote!(self);
+    for attr in attrs {
+        if attr.path().is_ident("reth_codecs") {
+            attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("crate") {
+                    let value = meta.value()?;
+                    let s: LitStr = value.parse()?;
+                    reth_codecs_path = s.parse().unwrap();
+                    Ok(())
+                } else {
+                    Err(meta.error("unsupported attribute"))
+                }
+            })
+            .unwrap();
+        }
+    }
+
+    reth_codecs_path
 }
