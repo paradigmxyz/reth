@@ -205,11 +205,14 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                         index: Some(index as u64),
                     };
 
-                    return Ok(Some(from_recovered_with_block_context(
-                        tx.clone().with_signer(*signer),
-                        tx_info,
-                        self.tx_resp_builder(),
-                    )))
+                    return Ok(Some(
+                        from_recovered_with_block_context(
+                            tx.clone().with_signer(*signer),
+                            tx_info,
+                            self.tx_resp_builder(),
+                        )
+                        .expect("fill should be infallible"),
+                    ));
                 }
             }
 
@@ -234,7 +237,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     RpcNodeCore::pool(self).get_transaction_by_sender_and_nonce(sender, nonce)
                 {
                     let transaction = tx.transaction.clone().into_consensus();
-                    return Ok(Some(from_recovered(transaction.into(), self.tx_resp_builder())));
+                    return Ok(Some(
+                        from_recovered(transaction.into(), self.tx_resp_builder())
+                            .expect("fill should be infallible"),
+                    ));
                 }
             }
 
@@ -290,6 +296,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                                 tx_info,
                                 self.tx_resp_builder(),
                             )
+                            .expect("fill should be infallible")
                         })
                 })
                 .ok_or(EthApiError::HeaderNotFound(block_id).into())

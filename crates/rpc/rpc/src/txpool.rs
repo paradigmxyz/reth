@@ -47,7 +47,8 @@ where
         {
             content.entry(tx.sender()).or_default().insert(
                 tx.nonce().to_string(),
-                from_recovered(tx.clone().into_consensus().into(), resp_builder),
+                from_recovered(tx.clone().into_consensus().into(), resp_builder)
+                    .expect("fill should be infallible"),
             );
         }
 

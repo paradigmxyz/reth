@@ -23,8 +23,8 @@ pub fn from_recovered_with_block_context<T: TransactionCompat>(
     tx: TransactionSignedEcRecovered,
     tx_info: TransactionInfo,
     resp_builder: &T,
-) -> T::Transaction {
-    resp_builder.fill(tx, tx_info).unwrap()
+) -> Result<T::Transaction, T::TransactionError> {
+    resp_builder.fill(tx, tx_info)
 }
 
 /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
@@ -32,8 +32,8 @@ pub fn from_recovered_with_block_context<T: TransactionCompat>(
 pub fn from_recovered<T: TransactionCompat>(
     tx: TransactionSignedEcRecovered,
     resp_builder: &T,
-) -> T::Transaction {
-    resp_builder.fill(tx, TransactionInfo::default()).unwrap()
+) -> Result<T::Transaction, T::TransactionError> {
+    resp_builder.fill(tx, TransactionInfo::default())
 }
 
 /// Builds RPC transaction w.r.t. network.

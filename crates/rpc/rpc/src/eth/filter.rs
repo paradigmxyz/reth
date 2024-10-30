@@ -625,10 +625,10 @@ where
         let mut prepared_stream = self.txs_stream.lock().await;
 
         while let Ok(tx) = prepared_stream.try_recv() {
-            pending_txs.push(from_recovered(
-                tx.transaction.to_recovered_transaction(),
-                &self.tx_resp_builder,
-            ))
+            pending_txs.push(
+                from_recovered(tx.transaction.to_recovered_transaction(), &self.tx_resp_builder)
+                    .expect("fill should be infallible"),
+            );
         }
         FilterChanges::Transactions(pending_txs)
     }

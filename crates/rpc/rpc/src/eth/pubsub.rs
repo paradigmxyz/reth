@@ -147,10 +147,13 @@ where
                     Params::Bool(true) => {
                         // full transaction objects requested
                         let stream = pubsub.full_pending_transaction_stream().map(|tx| {
-                            EthSubscriptionResult::FullTransaction(Box::new(from_recovered(
-                                tx.transaction.to_recovered_transaction(),
-                                &tx_resp_builder,
-                            )))
+                            EthSubscriptionResult::FullTransaction(Box::new(
+                                from_recovered(
+                                    tx.transaction.to_recovered_transaction(),
+                                    &tx_resp_builder,
+                                )
+                                .expect("fill should be infallible"),
+                            ))
                         });
                         return pipe_from_stream(accepted_sink, stream).await
                     }
