@@ -45,7 +45,7 @@ pub trait EthApiTypes: Send + Sync + Clone {
 /// Adapter for network specific transaction type.
 pub type RpcTransaction<T> = <T as Network>::TransactionResponse;
 
-/// Adapter for network specific block type.
+/// Adapter for network specific header type.
 pub type RpcHeader<T> = <T as Network>::HeaderResponse;
 
 /// Adapter for network specific block type.
