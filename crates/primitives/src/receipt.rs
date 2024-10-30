@@ -58,7 +58,7 @@ impl Receipt {
         self.into()
     }
 
-    /// Calculates the bloom filter for the receipt and returns the [ReceiptWithBloomRef]
+    /// Calculates the bloom filter for the receipt and returns the [`ReceiptWithBloomRef`]
     /// container type.
     pub fn with_bloom_ref(&self) -> ReceiptWithBloomRef<'_> {
         self.into()
@@ -80,7 +80,7 @@ impl Receipt {
     IntoIterator,
 )]
 pub struct Receipts {
-    /// A two-dimensional vector of optional Receipt instances.
+    /// A two-dimensional vector of optional `Receipt` instances.
     pub receipt_vec: Vec<Vec<Option<Receipt>>>,
 }
 
@@ -464,7 +464,7 @@ impl ReceiptWithBloomEncoder<'_> {
     fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
         if matches!(self.receipt.tx_type, TxType::Legacy) {
             self.encode_fields(out);
-            return;
+            return
         }
 
         let mut payload = Vec::new();
