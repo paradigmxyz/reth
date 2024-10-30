@@ -352,6 +352,14 @@ pub trait TransactionPool: Send + Sync + Clone {
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
+    /// Returns all pending transactions filtered by predicate
+    fn get_pending_transactions_with_predicate(
+        &self,
+        mut predicate: impl FnMut(&ValidPoolTransaction<Self::Transaction>) -> bool,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pending_transactions().into_iter().filter(|i| predicate(i.as_ref())).collect()
+    }
+
     /// Returns all pending transactions sent by a given user
     fn get_pending_transactions_by_sender(
         &self,
