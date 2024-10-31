@@ -920,6 +920,12 @@ mod tests {
         HashBuilder,
     };
 
+    /// Pad nibbles to the length of a B256 hash with zeros on the right.
+    fn pad_nibbles(mut nibbles: Nibbles) -> Nibbles {
+        nibbles.extend_from_slice_unchecked(&vec![0; B256::len_bytes() * 2 - nibbles.len()]);
+        nibbles
+    }
+
     /// Calculate the state root by feeding the provided state to the hash builder and retaining the
     /// proofs for the provided targets.
     ///
@@ -935,12 +941,12 @@ mod tests {
             .with_proof_retainer(ProofRetainer::from_iter(proof_targets));
 
         let mut prefix_set = PrefixSetMut::default();
-        prefix_set.extend_keys(state.clone().into_iter().map(|(address, _)| address));
+        prefix_set.extend_keys(state.clone().into_iter().map(|(nibbles, _)| nibbles));
         let walker = TrieWalker::new(NoopAccountTrieCursor::default(), prefix_set.freeze())
             .with_deletions_retained(true);
         let hashed_post_state = HashedPostState::default()
-            .with_accounts(state.into_iter().map(|(address, account)| {
-                (address.pack().into_inner().unwrap().into(), Some(account))
+            .with_accounts(state.into_iter().map(|(nibbles, account)| {
+                (nibbles.pack().into_inner().unwrap().into(), Some(account))
             }))
             .into_sorted();
         let mut node_iter = TrieNodeIter::new(
@@ -952,15 +958,17 @@ mod tests {
         );
 
         while let Some(node) = node_iter.try_next().unwrap() {
+            println!("node: {node:?}");
             match node {
                 TrieElement::Branch(branch) => {
-                    hash_builder.add_branch(branch.key, branch.value, branch.children_are_in_trie)
+                    hash_builder.add_branch(branch.key, branch.value, branch.children_are_in_trie);
                 }
                 TrieElement::Leaf(key, account) => {
                     let account = TrieAccount::from((account, EMPTY_ROOT_HASH));
                     account.encode(&mut account_rlp);
 
-                    hash_builder.add_leaf(Nibbles::unpack(key), &account_rlp)
+                    hash_builder.add_leaf(Nibbles::unpack(key), &account_rlp);
+                    account_rlp.clear();
                 }
             }
         }
@@ -1020,7 +1028,7 @@ mod tests {
 
     #[test]
     fn sparse_trie_empty_update_one() {
-        let path = Nibbles::unpack(B256::with_last_byte(42));
+        let key = Nibbles::unpack(B256::with_last_byte(42));
         let value = || Account::default();
         let value_encoded = || {
             let mut account_rlp = Vec::new();
@@ -1028,10 +1036,10 @@ mod tests {
             account_rlp
         };
 
-        let mut hash_builder = run_hash_builder([(path.clone(), value())], [path.clone()]);
+        let mut hash_builder = run_hash_builder([(key.clone(), value())], [key.clone()]);
 
         let mut sparse = RevealedSparseTrie::default();
-        sparse.update_leaf(path, value_encoded()).unwrap();
+        sparse.update_leaf(key, value_encoded()).unwrap();
         let (sparse_root, sparse_updates) = sparse.root();
 
         assert_eq!(sparse_root, hash_builder.root());
@@ -1076,8 +1084,6 @@ mod tests {
             TrieAccount::from((value(), EMPTY_ROOT_HASH)).encode(&mut account_rlp);
             account_rlp
         };
-
-        println!("paths: {:?}", paths);
 
         let mut hash_builder = run_hash_builder(
             paths.iter().cloned().zip(std::iter::repeat_with(value)),
@@ -1504,14 +1510,6 @@ mod tests {
             }
         }
 
-        /// Pad nibbles of length [`KEY_NIBBLES_LEN`] with zeros to the length of a B256 hash.
-        fn pad_nibbles(nibbles: Nibbles) -> Nibbles {
-            let mut base =
-                Nibbles::from_nibbles_unchecked([0; { B256::len_bytes() / 2 - KEY_NIBBLES_LEN }]);
-            base.extend_from_slice_unchecked(&nibbles);
-            base
-        }
-
         fn transform_updates(
             updates: Vec<HashMap<Nibbles, Account>>,
             mut rng: impl Rng,
@@ -1562,9 +1560,9 @@ mod tests {
     /// replacing it.
     #[test]
     fn sparse_trie_reveal_node_1() {
-        let key1 = || Nibbles::from_nibbles_unchecked([0x00]);
-        let key2 = || Nibbles::from_nibbles_unchecked([0x01]);
-        let key3 = || Nibbles::from_nibbles_unchecked([0x02]);
+        let key1 = || pad_nibbles(Nibbles::from_nibbles_unchecked([0x00]));
+        let key2 = || pad_nibbles(Nibbles::from_nibbles_unchecked([0x01]));
+        let key3 = || pad_nibbles(Nibbles::from_nibbles_unchecked([0x02]));
         let value = || Account::default();
         let value_encoded = || {
             let mut account_rlp = Vec::new();
@@ -1639,9 +1637,9 @@ mod tests {
     /// into an extension node, so it should ignore this node.
     #[test]
     fn sparse_trie_reveal_node_2() {
-        let key1 = || Nibbles::from_nibbles_unchecked([0x00, 0x00]);
-        let key2 = || Nibbles::from_nibbles_unchecked([0x01, 0x01]);
-        let key3 = || Nibbles::from_nibbles_unchecked([0x01, 0x02]);
+        let key1 = || pad_nibbles(Nibbles::from_nibbles_unchecked([0x00, 0x00]));
+        let key2 = || pad_nibbles(Nibbles::from_nibbles_unchecked([0x01, 0x01]));
+        let key3 = || pad_nibbles(Nibbles::from_nibbles_unchecked([0x01, 0x02]));
         let value = || Account::default();
 
         // Generate the proof for the root node and initialize the sparse trie with it
@@ -1706,9 +1704,9 @@ mod tests {
     ///    overwritten with the extension node from the proof.
     #[test]
     fn sparse_trie_reveal_node_3() {
-        let key1 = || Nibbles::from_nibbles_unchecked([0x00, 0x01]);
-        let key2 = || Nibbles::from_nibbles_unchecked([0x00, 0x02]);
-        let key3 = || Nibbles::from_nibbles_unchecked([0x01, 0x00]);
+        let key1 = || pad_nibbles(Nibbles::from_nibbles_unchecked([0x00, 0x01]));
+        let key2 = || pad_nibbles(Nibbles::from_nibbles_unchecked([0x00, 0x02]));
+        let key3 = || pad_nibbles(Nibbles::from_nibbles_unchecked([0x01, 0x00]));
         let value = || Account::default();
         let value_encoded = || {
             let mut account_rlp = Vec::new();
