@@ -367,6 +367,9 @@ RPC:
 
           [default: 25]
 
+      --builder.disallow <PATH>
+          Path to file containing disallowed addresses, json-encoded list of strings. Block validation API will reject blocks containing transactions from these addresses
+
 RPC State Cache:
       --rpc-cache.max-blocks <MAX_BLOCKS>
           Max number of blocks in cache
