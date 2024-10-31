@@ -23,18 +23,32 @@ impl<'a, K, V> ForwardInMemoryCursor<'a, K, V> {
 
 impl<K, V> ForwardInMemoryCursor<'_, K, V>
 where
-    K: PartialOrd + Clone,
+    K: Ord + Clone,
     V: Clone,
 {
     /// Advances the cursor forward while `comparator` returns `true` or until the collection is
     /// exhausted. Returns the first entry for which `comparator` returns `false` or `None`.
     fn advance_while_false(&mut self, comparator: impl Fn(&K) -> bool) -> Option<(K, V)> {
-        let mut entry = self.entries.get(self.index);
-        while entry.map_or(false, |entry| comparator(&entry.0)) {
-            self.index += 1;
-            entry = self.entries.get(self.index);
+        if self.index >= self.entries.len() {
+            return None;
         }
-        entry.cloned()
+
+        match self.entries[self.index..].binary_search_by(|(k, _)| {
+            if comparator(k) {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Greater
+            }
+        }) {
+            Ok(exact_pos) => {
+                self.index += exact_pos;
+                self.entries.get(self.index).cloned()
+            }
+            Err(insert_pos) => {
+                self.index += insert_pos;
+                self.entries.get(self.index).cloned()
+            }
+        }
     }
 
     /// Returns the first entry from the current cursor position that's greater or equal to the
