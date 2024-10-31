@@ -66,7 +66,7 @@ impl EthVersion {
     }
 }
 
-/// RLP encodes EthVersion as a single byte (66-69).
+/// RLP encodes `EthVersion` as a single byte (66-69).
 impl Encodable for EthVersion {
     fn encode(&self, out: &mut dyn BufMut) {
         (*self as u8).encode(out)
@@ -77,7 +77,7 @@ impl Encodable for EthVersion {
     }
 }
 
-/// RLP decodes a single byte into EthVersion.
+/// RLP decodes a single byte into `EthVersion`.
 /// Returns error if byte is not a valid version (66-69).
 impl Decodable for EthVersion {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
