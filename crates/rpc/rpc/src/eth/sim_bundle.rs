@@ -147,18 +147,12 @@ where
                 if let Some(refund_configs) = &validity.refund_config {
                     let mut total_percent = 0;
                     for refund_config in refund_configs {
-                        let percent = refund_config.percent;
-                        if percent > 100 {
+                        if 100 - total_percent < refund_config.percent {
                             return Err(EthApiError::InvalidParams(
                                 EthSimBundleError::InvalidValidity.to_string(),
                             ));
                         }
                         total_percent += percent;
-                    }
-                    if total_percent > 100 {
-                        return Err(EthApiError::InvalidParams(
-                            EthSimBundleError::InvalidValidity.to_string(),
-                        ));
                     }
                 }
             }
