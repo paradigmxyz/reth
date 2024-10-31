@@ -191,13 +191,15 @@ where
         // we trace on top the block's parent block
         let parent = block.parent_hash;
 
+        // we need the beacon block root for a system call
+        let parent_beacon_block_root = block.parent_beacon_block_root;
+
         // Depending on EIP-2 we need to recover the transactions differently
         let transactions =
             if self.inner.provider.chain_spec().is_homestead_active_at_block(block.number) {
                 block
                     .body
                     .transactions
-                    .clone()
                     .into_iter()
                     .map(|tx| {
                         tx.into_ecrecovered()
@@ -209,7 +211,6 @@ where
                 block
                     .body
                     .transactions
-                    .clone()
                     .into_iter()
                     .map(|tx| {
                         tx.into_ecrecovered_unchecked()
@@ -225,7 +226,7 @@ where
             cfg,
             block_env,
             opts,
-            block.parent_beacon_block_root,
+            parent_beacon_block_root,
         )
         .await
     }
