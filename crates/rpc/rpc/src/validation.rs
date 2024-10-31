@@ -31,8 +31,8 @@ use std::{collections::HashSet, sync::Arc};
 /// Configuration for validation API.
 #[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ValidationApiConfig {
-    /// Path to the file containing the list of blacklisted addresses.
-    pub blacklist: HashSet<Address>,
+    /// Disallowed addresses.
+    pub disallow: HashSet<Address>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -73,8 +73,8 @@ pub struct ValidationApiInner<Provider: ChainSpecProvider, E> {
     payload_validator: ExecutionPayloadValidator<Provider::ChainSpec>,
     /// Block executor factory.
     executor_provider: E,
-    /// Set of blacklisted addresses
-    blacklist: HashSet<Address>,
+    /// Set of disallowed addresses
+    disallow: HashSet<Address>,
 }
 
 /// The type that implements the `validation` rpc namespace trait
@@ -95,7 +95,7 @@ where
         executor_provider: E,
         config: ValidationApiConfig,
     ) -> Self {
-        let ValidationApiConfig { blacklist } = config;
+        let ValidationApiConfig { disallow } = config;
 
         let payload_validator = ExecutionPayloadValidator::new(provider.chain_spec());
         let inner = Arc::new(ValidationApiInner {
@@ -103,7 +103,7 @@ where
             consensus,
             payload_validator,
             executor_provider,
-            blacklist,
+            disallow,
         });
 
         Self { inner }
@@ -135,19 +135,19 @@ where
         self.consensus.validate_header(&block.header)?;
         self.consensus.validate_block_pre_execution(&block)?;
 
-        if !self.blacklist.is_empty() {
-            if self.blacklist.contains(&block.beneficiary) {
+        if !self.disallow.is_empty() {
+            if self.disallow.contains(&block.beneficiary) {
                 return Err(ValidationApiError::Blacklist(block.beneficiary))
             }
-            if self.blacklist.contains(&message.proposer_fee_recipient) {
+            if self.disallow.contains(&message.proposer_fee_recipient) {
                 return Err(ValidationApiError::Blacklist(message.proposer_fee_recipient))
             }
             for (sender, tx) in block.senders.iter().zip(block.transactions()) {
-                if self.blacklist.contains(sender) {
+                if self.disallow.contains(sender) {
                     return Err(ValidationApiError::Blacklist(*sender))
                 }
                 if let Some(to) = tx.to() {
-                    if self.blacklist.contains(&to) {
+                    if self.disallow.contains(&to) {
                         return Err(ValidationApiError::Blacklist(to))
                     }
                 }
@@ -175,9 +175,9 @@ where
         let output = executor.execute_with_state_closure(
             BlockExecutionInput::new(&block, U256::MAX),
             |state| {
-                if !self.blacklist.is_empty() {
+                if !self.disallow.is_empty() {
                     for account in state.cache.accounts.keys() {
-                        if self.blacklist.contains(account) {
+                        if self.disallow.contains(account) {
                             accessed_blacklisted = Some(*account);
                         }
                     }

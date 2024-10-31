@@ -106,7 +106,7 @@ impl RethRpcServerConfig for RpcServerArgs {
     }
 
     fn flashbots_config(&self) -> ValidationApiConfig {
-        ValidationApiConfig { blacklist: self.flashbots_blacklist.clone().unwrap_or_default() }
+        ValidationApiConfig { disallow: self.builder_disallow.clone().unwrap_or_default() }
     }
 
     fn state_cache_config(&self) -> EthStateCacheConfig {

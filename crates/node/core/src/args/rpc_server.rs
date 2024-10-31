@@ -185,10 +185,10 @@ pub struct RpcServerArgs {
     #[arg(long = "rpc.proof-permits", alias = "rpc-proof-permits", value_name = "COUNT", default_value_t = constants::DEFAULT_PROOF_PERMITS)]
     pub rpc_proof_permits: usize,
 
-    /// Path to file containing blacklisted addresses, json-encoded list of strings. Block
+    /// Path to file containing disallowed addresses, json-encoded list of strings. Block
     /// validation API will reject blocks containing transactions from these addresses.
-    #[arg(long = "flashbots.blacklist", value_name = "PATH", value_parser = reth_cli_util::parsers::read_json_from_file::<HashSet<Address>>)]
-    pub flashbots_blacklist: Option<HashSet<Address>>,
+    #[arg(long = "builder.disallow", value_name = "PATH", value_parser = reth_cli_util::parsers::read_json_from_file::<HashSet<Address>>)]
+    pub builder_disallow: Option<HashSet<Address>>,
 
     /// State cache configuration.
     #[command(flatten)]
@@ -331,7 +331,7 @@ impl Default for RpcServerArgs {
             gas_price_oracle: GasPriceOracleArgs::default(),
             rpc_state_cache: RpcStateCacheArgs::default(),
             rpc_proof_permits: constants::DEFAULT_PROOF_PERMITS,
-            flashbots_blacklist: Default::default(),
+            builder_disallow: Default::default(),
         }
     }
 }
