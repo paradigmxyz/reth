@@ -73,9 +73,10 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
         self.compute_pending_block
     }
 }
+
 impl<EvmConfig> OptimismPayloadBuilder<EvmConfig>
 where
-    EvmConfig: ConfigureEvmEnv<Header = Header>,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the targeted payload
     /// (that has the `parent` as its parent).
@@ -91,6 +92,48 @@ where
         };
         self.evm_config.next_cfg_and_block_env(parent, next_attributes)
     }
+
+    fn build_payload<Client, Pool>(&self,  args: BuildArguments<Pool, Client, OpPayloadBuilderAttributes, OpBuiltPayload>) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError>
+    where
+        Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
+        Pool: TransactionPool,
+
+    {
+        let (initialized_cfg, initialized_block_env) = self
+            .cfg_and_block_env(&args.config, &args.config.parent_header)
+            .map_err(PayloadBuilderError::other)?;
+
+        let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
+
+        let ctx = OpPayloadBuilderCtx {
+            evm_config: self.evm_config.clone(),
+            chain_spec: client.chain_spec(),
+            config,
+            initialized_cfg,
+            initialized_block_env,
+            cancel,
+            best_payload,
+        };
+
+        let mut builder = Builder {
+            cached_reads,
+            pool,
+            best: best_txs::<Pool>
+        };
+
+        let state_provider = client.state_by_block_hash(ctx.parent().hash())?;
+        let state = StateProviderDatabase::new(state_provider);
+        let mut db =
+            State::builder().with_database_ref(builder.cached_reads.as_db(state)).with_bundle_update().build();
+
+        // Builder::new().build(Context::new())
+        builder.build2(db, ctx);
+        todo!()
+    }
+}
+
+fn best_txs<Pool: TransactionPool>(pool: Pool, attr: BestTransactionsAttributes) -> BestTransactionsFor<Pool> {
+    pool.best_transactions_with_attributes(attr)
 }
 
 /// Implementation of the [`PayloadBuilder`] trait for [`OptimismPayloadBuilder`].
@@ -110,6 +153,7 @@ where
         let (cfg_env, block_env) = self
             .cfg_and_block_env(&args.config, &args.config.parent_header)
             .map_err(PayloadBuilderError::other)?;
+
 
         // Builder::new().build(Context::new())
 
@@ -180,6 +224,18 @@ where
     Pool: TransactionPool,
     Best: FnOnce(Pool, BestTransactionsAttributes) -> BestTransactionsFor<Pool>,
 {
+    pub fn build2<EvmConfig, DB>(
+        self,
+        mut db: State<DB>,
+        ctx: OpPayloadBuilderCtx<EvmConfig>,
+    ) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError>
+    where
+        EvmConfig: ConfigureEvm<Header = Header>,
+        DB: Database<Error = ProviderError>,
+    {
+       todo!()
+    }
+
     /// Builds the payload on top of the state.
     pub fn build<EvmConfig, DB>(
         self,
@@ -188,7 +244,7 @@ where
     ) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError>
     where
         EvmConfig: ConfigureEvm<Header = Header>,
-        DB: Database<Error = ProviderError> + DatabaseCommit + StateRootProvider,
+        DB: Database<Error = ProviderError> + StateRootProvider,
     {
         let Self { cached_reads, pool, best } = self;
         debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
@@ -555,7 +611,7 @@ where
         db: &mut State<DB>,
     ) -> Result<ExecutionInfo, PayloadBuilderError>
     where
-        DB: Database<Error = ProviderError> + DatabaseCommit,
+        DB: Database<Error = ProviderError>,
     {
         let mut info = ExecutionInfo::with_capacity(self.attributes().transactions.len());
 
@@ -658,7 +714,7 @@ where
         mut best_txs: BestTransactionsFor<Pool>,
     ) -> Result<Option<BuildOutcome<OpBuiltPayload>>, PayloadBuilderError>
     where
-        DB: Database<Error = ProviderError> + DatabaseCommit,
+        DB: Database<Error = ProviderError>,
         Pool: TransactionPool,
     {
         let block_gas_limit = self.block_gas_limit();
