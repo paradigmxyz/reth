@@ -4,7 +4,7 @@ use std::{fmt::Display, sync::Arc};
 
 use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
 use alloy_eips::merge::BEACON_NONCE;
-use alloy_primitives::{Address, Bytes, B256, B64, U256};
+use alloy_primitives::{Address, Bytes, B64, U256};
 use alloy_rpc_types_engine::PayloadId;
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
@@ -20,11 +20,11 @@ use reth_primitives::{
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
     Block, BlockBody, Header, Receipt, SealedHeader, TransactionSigned, TxType,
 };
-use reth_provider::{ProviderError, ProviderResult, StateProviderBox, StateProviderFactory};
+use reth_provider::{ProviderError, StateProviderFactory, StateRootProvider};
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{
     noop::NoopTransactionPool, BestTransactions, BestTransactionsAttributes, BestTransactionsFor,
-    TransactionPool, ValidPoolTransaction,
+    TransactionPool,
 };
 use reth_trie::HashedPostState;
 use revm::{
@@ -39,9 +39,7 @@ use crate::{
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
 };
 use op_alloy_consensus::DepositTransaction;
-use op_alloy_rpc_types_engine::OpPayloadAttributes;
-use reth_payload_builder::database::{CachedReads, CachedReadsDBRef};
-use revm::db::WrapDatabaseRef;
+use reth_payload_builder::database::CachedReads;
 
 /// Optimism's payload builder
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -167,7 +165,10 @@ where
 ///
 /// And finally
 /// 5. build the block: compute all roots (txs, state)
+#[derive(Debug)]
 pub struct Builder<Pool, Best> {
+    /// Cached reads from previous run.
+    cached_reads: CachedReads,
     /// The transaction pool
     pool: Pool,
     /// Yields the best transaction to include if transactions from the mempool are allowed.
@@ -184,12 +185,12 @@ where
         self,
         mut db: State<DB>,
         ctx: OpPayloadBuilderCtx<EvmConfig>,
-    ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError>
+    ) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError>
     where
         EvmConfig: ConfigureEvm<Header = Header>,
-        DB: Database<Error = ProviderError> + DatabaseCommit,
+        DB: Database<Error = ProviderError> + DatabaseCommit + StateRootProvider,
     {
-        let Self { pool, best } = self;
+        let Self { cached_reads, pool, best } = self;
         debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
 
         // 1. apply eip-4788 pre block contract call
@@ -213,8 +214,7 @@ where
             // check if the new payload is even more valuable
             if !ctx.is_better_payload(info.total_fees) {
                 // can skip building the block
-                // TODO need workaround for cached reads here
-                // return Ok(BuildOutcome::Aborted { fees: info.total_fees, cached_reads })
+                return Ok(BuildOutcome::Aborted { fees: info.total_fees, cached_reads })
             }
         }
 
@@ -245,18 +245,17 @@ where
             execution_outcome.block_logs_bloom(block_number).expect("Number is in range");
 
         // // calculate the state root
-        // TODO need a work around to access the underlying state provider
-        // let hashed_state = HashedPostState::from_bundle_state(&execution_outcome.state().state);
-        // let (state_root, trie_output) = {
-        //     let state_provider = db.database.0.inner.borrow_mut();
-        //     state_provider.db.state_root_with_updates(hashed_state.clone()).inspect_err(|err| {
-        //         warn!(target: "payload_builder",
-        //     parent_header=%parent_header.hash(),
-        //         %err,
-        //         "failed to calculate state root for payload"
-        //     );
-        //     })?
-        // };
+        let hashed_state = HashedPostState::from_bundle_state(&execution_outcome.state().state);
+        let (state_root, trie_output) = {
+            let state_provider = db.database;
+            state_provider.state_root_with_updates(hashed_state.clone()).inspect_err(|err| {
+                warn!(target: "payload_builder",
+                parent_header=%ctx.parent().hash(),
+                    %err,
+                    "failed to calculate state root for payload"
+                );
+            })?
+        };
 
         // create the block header
         let transactions_root = proofs::calculate_transaction_root(&info.executed_transactions);
@@ -265,7 +264,7 @@ where
         // https://specs.optimism.io/protocol/exec-engine.html#ecotone-disable-blob-transactions
         // Need [Some] or [None] based on hardfork to match block hash.
         let (excess_blob_gas, blob_gas_used) = ctx.blob_fields();
-        let extradata = ctx.extra_data()?;
+        let extra_data = ctx.extra_data()?;
 
         let header = Header {
             parent_hash: ctx.parent().hash(),
@@ -315,7 +314,7 @@ where
 
         let no_tx_pool = ctx.attributes().no_tx_pool;
 
-        let payload = OptimismBuiltPayload::new(
+        let payload = OpBuiltPayload::new(
             ctx.payload_id(),
             sealed_block,
             info.total_fees,
@@ -332,8 +331,6 @@ where
         } else {
             Ok(BuildOutcome::Better { payload, cached_reads })
         }
-
-        todo!()
     }
 }
 
@@ -381,7 +378,7 @@ pub struct OpPayloadBuilderCtx<EvmConfig> {
     /// Marker to check whether the job has been cancelled.
     pub cancel: Cancelled,
     /// The currently best payload.
-    pub best_payload: Option<OptimismBuiltPayload>,
+    pub best_payload: Option<OpBuiltPayload>,
 }
 
 impl<EvmConfig> OpPayloadBuilderCtx<EvmConfig> {
@@ -659,7 +656,7 @@ where
         info: &mut ExecutionInfo,
         db: &mut State<DB>,
         mut best_txs: BestTransactionsFor<Pool>,
-    ) -> Result<Option<BuildOutcome<OptimismBuiltPayload>>, PayloadBuilderError>
+    ) -> Result<Option<BuildOutcome<OpBuiltPayload>>, PayloadBuilderError>
     where
         DB: Database<Error = ProviderError> + DatabaseCommit,
         Pool: TransactionPool,
