@@ -47,14 +47,14 @@ async fn main() -> eyre::Result<()> {
             if let DiscoveryUpdate::Added(peer) = update {
                 // Boot nodes hard at work, lets not disturb them
                 if MAINNET_BOOT_NODES.contains(&peer) {
-                    return
+                    return;
                 }
 
                 let (p2p_stream, their_hello) = match handshake_p2p(peer, our_key).await {
                     Ok(s) => s,
                     Err(e) => {
                         println!("Failed P2P handshake with peer {}, {}", peer.address, e);
-                        return
+                        return;
                     }
                 };
 
@@ -62,7 +62,7 @@ async fn main() -> eyre::Result<()> {
                     Ok(s) => s,
                     Err(e) => {
                         println!("Failed ETH handshake with peer {}, {}", peer.address, e);
-                        return
+                        return;
                     }
                 };
 
@@ -106,7 +106,8 @@ async fn handshake_eth(p2p_stream: AuthedP2PStream) -> eyre::Result<(AuthedEthSt
         .forkid(MAINNET.hardfork_fork_id(EthereumHardfork::Shanghai).unwrap())
         .build();
 
-    let status = Status { version: p2p_stream.shared_capabilities().eth()?.version(), ..status };
+    let status =
+        Status { version: p2p_stream.shared_capabilities().eth()?.version().try_into()?, ..status };
     let eth_unauthed = UnauthedEthStream::new(p2p_stream);
     Ok(eth_unauthed.handshake(status, fork_filter).await?)
 }
