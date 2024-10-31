@@ -33,7 +33,7 @@ use tracing::{debug, trace, warn};
 
 use crate::{
     error::OptimismPayloadBuilderError,
-    payload::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes},
+    payload::{OpPayloadBuilderAttributes, OptimismBuiltPayload},
 };
 use op_alloy_consensus::DepositTransaction;
 
@@ -77,7 +77,7 @@ where
     /// (that has the `parent` as its parent).
     pub fn cfg_and_block_env(
         &self,
-        config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
+        config: &PayloadConfig<OpPayloadBuilderAttributes>,
         parent: &Header,
     ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), EvmConfig::Error> {
         let next_attributes = NextBlockEnvAttributes {
@@ -96,12 +96,12 @@ where
     Pool: TransactionPool,
     EvmConfig: ConfigureEvm<Header = Header>,
 {
-    type Attributes = OptimismPayloadBuilderAttributes;
+    type Attributes = OpPayloadBuilderAttributes;
     type BuiltPayload = OptimismBuiltPayload;
 
     fn try_build(
         &self,
-        args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
+        args: BuildArguments<Pool, Client, OpPayloadBuilderAttributes, OptimismBuiltPayload>,
     ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError> {
         let (cfg_env, block_env) = self
             .cfg_and_block_env(&args.config, &args.config.parent_header)
@@ -111,7 +111,7 @@ where
 
     fn on_missing_payload(
         &self,
-        _args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
+        _args: BuildArguments<Pool, Client, OpPayloadBuilderAttributes, OptimismBuiltPayload>,
     ) -> MissingPayloadBehaviour<Self::BuiltPayload> {
         // we want to await the job that's already in progress because that should be returned as
         // is, there's no benefit in racing another job
@@ -154,7 +154,7 @@ where
 #[inline]
 pub(crate) fn optimism_payload<EvmConfig, Pool, Client>(
     evm_config: &EvmConfig,
-    args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
+    args: BuildArguments<Pool, Client, OpPayloadBuilderAttributes, OptimismBuiltPayload>,
     initialized_cfg: CfgEnvWithHandlerCfg,
     initialized_block_env: BlockEnv,
     _compute_pending_block: bool,
