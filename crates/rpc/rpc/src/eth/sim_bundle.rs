@@ -2,7 +2,7 @@
 
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::U256;
-use alloy_rpc_types::{calc_excess_blob_gas, BlockId};
+use alloy_rpc_types::BlockId;
 use alloy_rpc_types_mev::{
     BundleItem, Inclusion, Privacy, RefundConfig, SendBundleRequest, SimBundleLogs,
     SimBundleOverrides, SimBundleResponse, Validity,
@@ -268,15 +268,6 @@ where
             }
         }
 
-        if cfg.handler_cfg.spec_id.is_enabled_in(SpecId::CANCUN) {
-            let excess_blob_gas = calc_excess_blob_gas(
-                parent_header.excess_blob_gas.unwrap_or_default(),
-                parent_header.blob_gas_used.unwrap_or_default(),
-            );
-
-            block_env.set_blob_excess_gas_and_price(excess_blob_gas);
-        }
-
         let eth_api = self.inner.eth_api.clone();
 
         let sim_response = self
@@ -374,67 +365,61 @@ where
 
                 // After processing all transactions, process refunds
                 for (i, item) in flattened_bundle.iter().enumerate() {
-                    if let Some(validity) = &item.validity {
-                        if let Some(refunds) = &validity.refund {
-                            for refund in refunds {
-                                if refund.body_idx as usize == i {
-                                    // Get refund configurations
-                                    let refund_configs = if let Some(refund_configs) =
-                                        &validity.refund_config
-                                    {
-                                        refund_configs.clone()
-                                    } else {
-                                        // Default to refunding 100% to the transaction signer
-                                        vec![RefundConfig { address: item.signer, percent: 100 }]
-                                    };
+                    let validity = match &item.validity {
+                        Some(validity) => validity,
+                        None => continue,
+                    };
 
-                                    // Calculate payout transaction fee
-                                    let payout_tx_fee = basefee *
-                                        U256::from(SBUNDLE_PAYOUT_MAX_COST) *
-                                        U256::from(refund_configs.len() as u64);
+                    let refunds = match &validity.refund {
+                        Some(refunds) => refunds,
+                        None => continue,
+                    };
 
-                                    // Add gas used for payout transactions
-                                    total_gas_used +=
-                                        SBUNDLE_PAYOUT_MAX_COST * refund_configs.len() as u64;
+                    for refund in refunds {
+                        if refund.body_idx as usize == i {
+                            // Get refund configurations
+                            let refund_configs =
+                                if let Some(refund_configs) = &validity.refund_config {
+                                    refund_configs.clone()
+                                } else {
+                                    // Default to refunding 100% to the transaction signer
+                                    vec![RefundConfig { address: item.signer, percent: 100 }]
+                                };
 
-                                    // Calculate allocated refundable value (payout value)
-                                    let payout_value = refundable_value *
-                                        U256::from(refund.percent) /
-                                        U256::from(100);
+                            // Calculate payout transaction fee
+                            let payout_tx_fee = basefee *
+                                U256::from(SBUNDLE_PAYOUT_MAX_COST) *
+                                U256::from(refund_configs.len() as u64);
 
-                                    if payout_tx_fee > payout_value {
-                                        return Err(EthApiError::InvalidParams(
-                                            EthSimBundleError::NegativeProfit.to_string(),
-                                        )
-                                        .into());
-                                    }
+                            // Add gas used for payout transactions
+                            total_gas_used += SBUNDLE_PAYOUT_MAX_COST * refund_configs.len() as u64;
 
-                                    // Subtract payout value from total profit
-                                    total_profit = total_profit.checked_sub(payout_value).ok_or(
-                                        EthApiError::InvalidParams(
-                                            EthSimBundleError::NegativeProfit.to_string(),
-                                        ),
-                                    )?;
+                            // Calculate allocated refundable value (payout value)
+                            let payout_value =
+                                refundable_value * U256::from(refund.percent) / U256::from(100);
 
-                                    // Adjust refundable value
-                                    refundable_value = refundable_value
-                                        .checked_sub(payout_value)
-                                        .ok_or(EthApiError::InvalidParams(
-                                        EthSimBundleError::NegativeProfit.to_string(),
-                                    ))?;
-                                }
+                            if payout_tx_fee > payout_value {
+                                return Err(EthApiError::InvalidParams(
+                                    EthSimBundleError::NegativeProfit.to_string(),
+                                )
+                                .into());
                             }
+
+                            // Subtract payout value from total profit
+                            total_profit = total_profit.checked_sub(payout_value).ok_or(
+                                EthApiError::InvalidParams(
+                                    EthSimBundleError::NegativeProfit.to_string(),
+                                ),
+                            )?;
+
+                            // Adjust refundable value
+                            refundable_value = refundable_value.checked_sub(payout_value).ok_or(
+                                EthApiError::InvalidParams(
+                                    EthSimBundleError::NegativeProfit.to_string(),
+                                ),
+                            )?;
                         }
                     }
-                }
-
-                // Ensure total profit is non-negative
-                if total_profit.is_zero() || total_profit < U256::ZERO {
-                    // total_profit = U256::ZERO;
-                    return Err(EthApiError::InvalidParams(
-                        EthSimBundleError::NegativeProfit.to_string(),
-                    )
-                    .into());
                 }
 
                 // Calculate mev gas price
