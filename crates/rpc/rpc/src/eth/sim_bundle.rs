@@ -84,6 +84,10 @@ impl<Eth> EthSimBundle<Eth>
 where
     Eth: EthTransactions + LoadPendingBlock + Call + 'static,
 {
+    /// Flattens a potentially nested bundle into a list of individual transactions in a
+    /// `FlattenedBundleItem` with their associated metadata. This handles recursive bundle
+    /// processing up to `MAX_NESTED_BUNDLE_DEPTH` and `MAX_BUNDLE_BODY_SIZE`, preserving
+    /// inclusion, validity and privacy settings from parent bundles.
     fn parse_and_flatten_bundle(
         &self,
         request: &SendBundleRequest,
