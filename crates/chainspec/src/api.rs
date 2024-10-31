@@ -1,10 +1,10 @@
 use crate::{ChainSpec, DepositContract};
-use alloc::{fmt::Display, vec::Vec};
+use alloc::vec::Vec;
 use alloy_chains::Chain;
 use alloy_eips::eip1559::BaseFeeParams;
 use alloy_genesis::Genesis;
 use alloy_primitives::B256;
-use core::fmt::Debug;
+use core::fmt::{Debug, Display};
 use reth_network_peers::NodeRecord;
 use reth_primitives_traits::Header;
 

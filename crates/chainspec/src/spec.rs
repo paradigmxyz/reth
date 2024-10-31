@@ -1,6 +1,6 @@
 pub use alloy_eips::eip1559::BaseFeeParams;
 
-use alloc::{boxed::Box, fmt::Display, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, NamedChain};
 use alloy_consensus::constants::EMPTY_WITHDRAWALS;
 use alloy_eips::{
@@ -9,6 +9,7 @@ use alloy_eips::{
 };
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
+use core::fmt::Display;
 use derive_more::From;
 
 use alloy_consensus::constants::{DEV_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH};
