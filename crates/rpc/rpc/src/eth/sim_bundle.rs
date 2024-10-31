@@ -98,7 +98,7 @@ where
         while let Some((current_bundle, mut idx, depth)) = stack.pop() {
             // Check max depth
             if depth > MAX_NESTED_BUNDLE_DEPTH {
-                return Err(EthApiError::MaxDepth);
+                return Err(EthApiError::InvalidParams(EthSimBundleError::MaxDepth.to_string()));
             }
 
             // Determine inclusion, validity, and privacy
@@ -111,12 +111,16 @@ where
             let max_block_number = inclusion.max_block_number().unwrap_or(block_number);
 
             if max_block_number < block_number || block_number == 0 {
-                return Err(EthApiError::InvalidInclusion);
+                return Err(EthApiError::InvalidParams(
+                    EthSimBundleError::InvalidInclusion.to_string(),
+                ));
             }
 
             // Validate bundle body size
             if current_bundle.bundle_body.len() > MAX_BUNDLE_BODY_SIZE {
-                return Err(EthApiError::BundleTooLarge);
+                return Err(EthApiError::InvalidParams(
+                    EthSimBundleError::BundleTooLarge.to_string(),
+                ));
             }
 
             // Validate validity and refund config
@@ -132,15 +136,21 @@ where
                     let mut total_percent = 0;
                     for refund in refunds {
                         if refund.body_idx > max_idx as u64 {
-                            return Err(EthApiError::InvalidValidity);
+                            return Err(EthApiError::InvalidParams(
+                                EthSimBundleError::InvalidValidity.to_string(),
+                            ));
                         }
                         if refund.percent > 100 {
-                            return Err(EthApiError::InvalidValidity);
+                            return Err(EthApiError::InvalidParams(
+                                EthSimBundleError::InvalidValidity.to_string(),
+                            ));
                         }
                         total_percent += refund.percent;
                     }
                     if total_percent > 100 {
-                        return Err(EthApiError::InvalidValidity);
+                        return Err(EthApiError::InvalidParams(
+                            EthSimBundleError::InvalidValidity.to_string(),
+                        ));
                     }
                 }
 
@@ -150,12 +160,16 @@ where
                     for refund_config in refund_configs {
                         let percent = refund_config.percent;
                         if percent > 100 {
-                            return Err(EthApiError::InvalidValidity);
+                            return Err(EthApiError::InvalidParams(
+                                EthSimBundleError::InvalidValidity.to_string(),
+                            ));
                         }
                         total_percent += percent;
                     }
                     if total_percent > 100 {
-                        return Err(EthApiError::InvalidValidity);
+                        return Err(EthApiError::InvalidParams(
+                            EthSimBundleError::InvalidValidity.to_string(),
+                        ));
                     }
                 }
             }
@@ -196,7 +210,9 @@ where
                     }
                     BundleItem::Hash { hash: _ } => {
                         // Hash-only items are not allowed
-                        return Err(EthApiError::InvalidBundle);
+                        return Err(EthApiError::InvalidParams(
+                            EthSimBundleError::InvalidBundle.to_string(),
+                        ));
                     }
                 }
             }
@@ -308,7 +324,10 @@ where
                     if current_block_number < block_number ||
                         current_block_number > max_block_number
                     {
-                        return Err(EthApiError::InvalidInclusion.into());
+                        return Err(EthApiError::InvalidParams(
+                            EthSimBundleError::InvalidInclusion.to_string(),
+                        )
+                        .into());
                     }
                     RpcNodeCore::evm_config(&eth_api).fill_tx_env(
                         evm.tx_mut(),
@@ -320,7 +339,10 @@ where
                         evm.transact().map_err(EthApiError::from_eth_err)?;
 
                     if !result.is_success() && !item.can_revert {
-                        return Err(EthApiError::BundleTransactionFailed.into());
+                        return Err(EthApiError::InvalidParams(
+                            EthSimBundleError::BundleTransactionFailed.to_string(),
+                        )
+                        .into());
                     }
 
                     let gas_used = result.gas_used();
@@ -393,18 +415,25 @@ where
                                         U256::from(100);
 
                                     if payout_tx_fee > payout_value {
-                                        return Err(EthApiError::NegativeProfit.into());
+                                        return Err(EthApiError::InvalidParams(
+                                            EthSimBundleError::NegativeProfit.to_string(),
+                                        )
+                                        .into());
                                     }
 
                                     // Subtract payout value from total profit
-                                    total_profit = total_profit
-                                        .checked_sub(payout_value)
-                                        .ok_or(EthApiError::NegativeProfit)?;
+                                    total_profit = total_profit.checked_sub(payout_value).ok_or(
+                                        EthApiError::InvalidParams(
+                                            EthSimBundleError::NegativeProfit.to_string(),
+                                        ),
+                                    )?;
 
                                     // Adjust refundable value
                                     refundable_value = refundable_value
                                         .checked_sub(payout_value)
-                                        .ok_or(EthApiError::NegativeProfit)?;
+                                        .ok_or(EthApiError::InvalidParams(
+                                        EthSimBundleError::NegativeProfit.to_string(),
+                                    ))?;
                                 }
                             }
                         }
@@ -414,7 +443,10 @@ where
                 // Ensure total profit is non-negative
                 if total_profit.is_zero() || total_profit < U256::ZERO {
                     // total_profit = U256::ZERO;
-                    return Err(EthApiError::NegativeProfit.into());
+                    return Err(EthApiError::InvalidParams(
+                        EthSimBundleError::NegativeProfit.to_string(),
+                    )
+                    .into());
                 }
 
                 // Calculate mev gas price
@@ -438,7 +470,9 @@ where
                 })
             })
             .await
-            .map_err(|_| EthApiError::BundleTimeout)?;
+            .map_err(|_| {
+                EthApiError::InvalidParams(EthSimBundleError::BundleTimeout.to_string())
+            })?;
 
         Ok(sim_response)
     }
@@ -466,7 +500,9 @@ where
         let bundle_res =
             tokio::time::timeout(timeout, Self::sim_bundle(self, request, overrides, true))
                 .await
-                .map_err(|_| EthApiError::BundleTimeout)?;
+                .map_err(|_| {
+                EthApiError::InvalidParams(EthSimBundleError::BundleTimeout.to_string())
+            })?;
 
         bundle_res.map_err(Into::into)
     }
@@ -493,4 +529,36 @@ impl<Eth> Clone for EthSimBundle<Eth> {
     fn clone(&self) -> Self {
         Self { inner: Arc::clone(&self.inner) }
     }
+}
+
+/// [`EthSimBundle`] specific errors.
+#[derive(Debug, thiserror::Error)]
+pub enum EthSimBundleError {
+    /// Thrown when max depth is reached
+    #[error("max depth reached")]
+    MaxDepth,
+    /// Thrown when a bundle is unmatched
+    #[error("unmatched bundle")]
+    UnmatchedBundle,
+    /// Thrown when a bundle is too large
+    #[error("bundle too large")]
+    BundleTooLarge,
+    /// Thrown when validity is invalid
+    #[error("invalid validity")]
+    InvalidValidity,
+    /// Thrown when inclusion is invalid
+    #[error("invalid inclusion")]
+    InvalidInclusion,
+    /// Thrown when a bundle is invalid
+    #[error("invalid bundle")]
+    InvalidBundle,
+    /// Thrown when a bundle simulation times out
+    #[error("bundle simulation timed out")]
+    BundleTimeout,
+    /// Thrown when a transaction is reverted in a bundle
+    #[error("bundle transaction failed")]
+    BundleTransactionFailed,
+    /// Thrown when a bundle simulation returns negative profit
+    #[error("bundle simulation returned negative profit")]
+    NegativeProfit,
 }

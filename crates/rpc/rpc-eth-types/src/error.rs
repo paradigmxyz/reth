@@ -94,33 +94,6 @@ pub enum EthApiError {
     /// Thrown when a requested transaction is not found
     #[error("transaction not found")]
     TransactionNotFound,
-    /// Thrown when max depth is reached
-    #[error("max depth reached")]
-    MaxDepth,
-    /// Thrown when a bundle is unmatched
-    #[error("unmatched bundle")]
-    UnmatchedBundle,
-    /// Thrown when a bundle is too large
-    #[error("bundle too large")]
-    BundleTooLarge,
-    /// Thrown when validity is invalid
-    #[error("invalid validity")]
-    InvalidValidity,
-    /// Thrown when inclusion is invalid
-    #[error("invalid inclusion")]
-    InvalidInclusion,
-    /// Thrown when a bundle is invalid
-    #[error("invalid bundle")]
-    InvalidBundle,
-    /// Thrown when a bundle simulation times out
-    #[error("bundle simulation timed out")]
-    BundleTimeout,
-    /// Thrown when a transaction is reverted in a bundle
-    #[error("bundle transaction failed")]
-    BundleTransactionFailed,
-    /// Thrown when a bundle simulation returns negative profit
-    #[error("bundle simulation returned negative profit")]
-    NegativeProfit,
     /// Some feature is unsupported
     #[error("unsupported")]
     Unsupported(&'static str),
@@ -188,17 +161,6 @@ impl EthApiError {
 impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
     fn from(error: EthApiError) -> Self {
         match error {
-            EthApiError::MaxDepth => internal_rpc_err("max depth reached".to_string()),
-            EthApiError::UnmatchedBundle => internal_rpc_err("unmatched bundle".to_string()),
-            EthApiError::BundleTooLarge => internal_rpc_err("bundle too large".to_string()),
-            EthApiError::InvalidValidity => internal_rpc_err("invalid validity".to_string()),
-            EthApiError::InvalidInclusion => internal_rpc_err("invalid inclusion".to_string()),
-            EthApiError::NegativeProfit => internal_rpc_err("negative profit".to_string()),
-            EthApiError::BundleTransactionFailed => internal_rpc_err("tx failed".to_string()),
-            EthApiError::BundleTimeout => {
-                internal_rpc_err("bundle simulation timed out".to_string())
-            }
-            EthApiError::InvalidBundle => internal_rpc_err("invalid bundle".to_string()),
             EthApiError::FailedToDecodeSignedTransaction |
             EthApiError::InvalidTransactionSignature |
             EthApiError::EmptyRawTransactionData |
