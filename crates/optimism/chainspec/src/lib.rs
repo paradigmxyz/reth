@@ -288,7 +288,7 @@ impl EthChainSpec for OpChainSpec {
     }
 
     fn display_hardforks(&self) -> Box<dyn Display> {
-        Box::new(self.inner.display_hardforks())
+        Box::new(ChainSpec::display_hardforks(self))
     }
 
     fn genesis_header(&self) -> &Header {

@@ -9,7 +9,6 @@ use alloy_eips::{
 };
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
-use core::fmt::Display;
 use derive_more::From;
 
 use alloy_consensus::constants::{DEV_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH};
@@ -394,11 +393,8 @@ impl ChainSpec {
     }
 
     /// Returns the hardfork display helper.
-    pub fn display_hardforks(&self) -> Box<dyn Display> {
-        Box::new(DisplayHardforks::new(
-            &self,
-            self.paris_block_and_final_difficulty.map(|(block, _)| block),
-        ))
+    pub fn display_hardforks(&self) -> DisplayHardforks {
+        DisplayHardforks::new(&self, self.paris_block_and_final_difficulty.map(|(block, _)| block))
     }
 
     /// Get the fork id for the given hardfork.
