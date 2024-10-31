@@ -113,24 +113,22 @@ where
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
-                let mut system_caller = SystemCaller::new(
-                    RpcNodeCore::evm_config(this.eth_api()).clone(),
-                    RpcNodeCore::provider(this.eth_api()).chain_spec(),
-                );
-
                 // apply relevant system calls
-                system_caller
-                    .pre_block_beacon_root_contract_call(
-                        &mut db,
-                        &cfg,
-                        &block_env,
-                        parent_beacon_block_root,
+                SystemCaller::new(
+                    this.eth_api().evm_config().clone(),
+                    this.eth_api().provider().chain_spec(),
+                )
+                .pre_block_beacon_root_contract_call(
+                    &mut db,
+                    &cfg,
+                    &block_env,
+                    parent_beacon_block_root,
+                )
+                .map_err(|_| {
+                    EthApiError::EvmCustom(
+                        "failed to apply 4788 beacon root system call".to_string(),
                     )
-                    .map_err(|_| {
-                        EthApiError::EvmCustom(
-                            "failed to apply 4788 beacon root system call".to_string(),
-                        )
-                    })?;
+                })?;
 
                 let mut transactions = transactions.into_iter().enumerate().peekable();
                 let mut inspector = None;
@@ -296,23 +294,21 @@ where
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
                 // apply relevant system calls
-                let mut system_caller = SystemCaller::new(
-                    RpcNodeCore::evm_config(this.eth_api()).clone(),
-                    RpcNodeCore::provider(this.eth_api()).chain_spec(),
-                );
-
-                system_caller
-                    .pre_block_beacon_root_contract_call(
-                        &mut db,
-                        &cfg,
-                        &block_env,
-                        parent_beacon_block_root,
+                SystemCaller::new(
+                    this.eth_api().evm_config().clone(),
+                    this.eth_api().provider().chain_spec(),
+                )
+                .pre_block_beacon_root_contract_call(
+                    &mut db,
+                    &cfg,
+                    &block_env,
+                    parent_beacon_block_root,
+                )
+                .map_err(|_| {
+                    EthApiError::EvmCustom(
+                        "failed to apply 4788 beacon root system call".to_string(),
                     )
-                    .map_err(|_| {
-                        EthApiError::EvmCustom(
-                            "failed to apply 4788 beacon root system call".to_string(),
-                        )
-                    })?;
+                })?;
 
                 // replay all transactions prior to the targeted transaction
                 let index = this.eth_api().replay_transactions_until(
