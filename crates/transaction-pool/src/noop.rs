@@ -150,13 +150,6 @@ impl TransactionPool for NoopTransactionPool {
         Box::new(std::iter::empty())
     }
 
-    fn best_transactions_with_base_fee(
-        &self,
-        _: u64,
-    ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
-        Box::new(std::iter::empty())
-    }
-
     fn best_transactions_with_attributes(
         &self,
         _: BestTransactionsAttributes,
