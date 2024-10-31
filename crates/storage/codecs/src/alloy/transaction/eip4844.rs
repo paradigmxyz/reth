@@ -16,6 +16,7 @@ use reth_codecs_derive::add_arbitrary_tests;
 ///
 /// Notice: Make sure this struct is 1:1 with [`alloy_consensus::TxEip4844`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Compact)]
+#[reth_codecs(crate = "crate")]
 #[cfg_attr(any(test, feature = "test-utils"), derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "test-utils", allow(unreachable_pub), visibility::make(pub))]
 #[add_arbitrary_tests(compact)]

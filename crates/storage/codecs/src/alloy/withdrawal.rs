@@ -13,6 +13,7 @@ use reth_codecs_derive::add_arbitrary_tests;
     any(test, feature = "test-utils"),
     derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize)
 )]
+#[reth_codecs(crate = "crate")]
 #[cfg_attr(feature = "test-utils", allow(unreachable_pub), visibility::make(pub))]
 #[add_arbitrary_tests(compact)]
 pub(crate) struct Withdrawal {

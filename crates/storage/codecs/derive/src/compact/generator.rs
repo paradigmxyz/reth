@@ -238,16 +238,19 @@ fn generate_to_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> Vec<
 }
 
 /// Function to extract the crate path from #[reth_codecs(crate = "...")] attribute.
-
 fn parse_reth_codecs_path(attrs: &[Attribute]) -> TokenStream2 {
-    let mut reth_codecs_path = quote::quote!(self);
+    // let default_crate_path: syn::Path = syn::parse_str("reth-codecs").unwrap();
+    let mut reth_codecs_path = quote! {reth_codecs};
     for attr in attrs {
         if attr.path().is_ident("reth_codecs") {
             attr.parse_nested_meta(|meta| {
                 if meta.path.is_ident("crate") {
                     let value = meta.value()?;
-                    let s: LitStr = value.parse()?;
-                    reth_codecs_path = s.parse().unwrap();
+                    let lit: LitStr = value.parse()?;
+
+                    let specified_path: syn::Path =
+                        syn::parse_str(&lit.value()).expect("Invalid crate path");
+                    reth_codecs_path = quote::quote! {#specified_path};
                     Ok(())
                 } else {
                     Err(meta.error("unsupported attribute"))

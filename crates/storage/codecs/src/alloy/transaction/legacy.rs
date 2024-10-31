@@ -6,6 +6,7 @@ use alloy_primitives::{Bytes, ChainId, TxKind, U256};
 
 /// Legacy transaction.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Compact)]
+#[reth_codecs(crate = "crate")]
 #[cfg_attr(
     any(test, feature = "test-utils"),
     derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize),

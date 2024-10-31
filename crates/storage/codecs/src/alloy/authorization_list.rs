@@ -11,6 +11,7 @@ use reth_codecs_derive::add_arbitrary_tests;
 ///
 /// Notice: Make sure this struct is 1:1 with `alloy_eips::eip7702::Authorization`
 #[derive(Debug, Clone, PartialEq, Eq, Default, Compact)]
+#[reth_codecs(crate = "crate")]
 #[cfg_attr(
     any(test, feature = "test-utils"),
     derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize)

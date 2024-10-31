@@ -16,6 +16,7 @@ use reth_codecs_derive::add_arbitrary_tests;
 ///
 /// Notice: Make sure this struct is 1:1 with [`alloy_consensus::TxEip7702`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Compact)]
+#[reth_codecs(crate = "crate")]
 #[cfg_attr(
     any(test, feature = "test-utils"),
     derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize)

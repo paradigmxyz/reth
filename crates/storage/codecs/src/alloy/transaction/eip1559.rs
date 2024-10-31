@@ -13,6 +13,7 @@ use alloy_primitives::{Bytes, ChainId, TxKind, U256};
 ///
 /// Notice: Make sure this struct is 1:1 with [`alloy_consensus::TxEip1559`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Compact, Default)]
+#[reth_codecs(crate = "crate")]
 #[cfg_attr(
     any(test, feature = "test-utils"),
     derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize)
