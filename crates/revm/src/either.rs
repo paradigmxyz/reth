@@ -24,29 +24,29 @@ where
 
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         match self {
-            Either::Left(db) => db.basic(address),
-            Either::Right(db) => db.basic(address),
+            Self::Left(db) => db.basic(address),
+            Self::Right(db) => db.basic(address),
         }
     }
 
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
         match self {
-            Either::Left(db) => db.code_by_hash(code_hash),
-            Either::Right(db) => db.code_by_hash(code_hash),
+            Self::Left(db) => db.code_by_hash(code_hash),
+            Self::Right(db) => db.code_by_hash(code_hash),
         }
     }
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
         match self {
-            Either::Left(db) => db.storage(address, index),
-            Either::Right(db) => db.storage(address, index),
+            Self::Left(db) => db.storage(address, index),
+            Self::Right(db) => db.storage(address, index),
         }
     }
 
     fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
         match self {
-            Either::Left(db) => db.block_hash(number),
-            Either::Right(db) => db.block_hash(number),
+            Self::Left(db) => db.block_hash(number),
+            Self::Right(db) => db.block_hash(number),
         }
     }
 }
