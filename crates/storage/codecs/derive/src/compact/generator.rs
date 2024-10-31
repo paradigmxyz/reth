@@ -1,4 +1,4 @@
-//! Code generator for the Compact trait.
+//! Code generator for the `Compact` trait.
 
 use super::*;
 use convert_case::{Case, Casing};
