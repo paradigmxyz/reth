@@ -6,7 +6,7 @@ use reth_e2e_test_utils::{
 };
 use reth_optimism_chainspec::OpChainSpecBuilder;
 use reth_optimism_node::{
-    node::OptimismAddOns, OpPayloadBuilderAttributes, OptimismBuiltPayload, OptimismNode,
+    node::OptimismAddOns, OpBuiltPayload, OpPayloadBuilderAttributes, OptimismNode,
 };
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use std::sync::Arc;
@@ -31,7 +31,7 @@ pub(crate) async fn advance_chain(
     length: usize,
     node: &mut OpNode,
     wallet: Arc<Mutex<Wallet>>,
-) -> eyre::Result<Vec<(OptimismBuiltPayload, OpPayloadBuilderAttributes)>> {
+) -> eyre::Result<Vec<(OpBuiltPayload, OpPayloadBuilderAttributes)>> {
     node.advance(length as u64, |_| {
         let wallet = wallet.clone();
         Box::pin(async move {
