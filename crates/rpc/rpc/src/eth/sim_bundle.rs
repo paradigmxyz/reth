@@ -134,17 +134,12 @@ where
                                 EthSimBundleError::InvalidValidity.to_string(),
                             ));
                         }
-                        if refund.percent > 100 {
+                        if 100 - total_percent < refund.percent {
                             return Err(EthApiError::InvalidParams(
                                 EthSimBundleError::InvalidValidity.to_string(),
                             ));
                         }
                         total_percent += refund.percent;
-                    }
-                    if total_percent > 100 {
-                        return Err(EthApiError::InvalidParams(
-                            EthSimBundleError::InvalidValidity.to_string(),
-                        ));
                     }
                 }
 
