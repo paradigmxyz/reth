@@ -1,5 +1,5 @@
 use crate::{ChainSpec, DepositContract};
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 use alloy_chains::Chain;
 use alloy_eips::eip1559::BaseFeeParams;
 use alloy_genesis::Genesis;

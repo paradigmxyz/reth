@@ -17,7 +17,7 @@ mod dev;
 mod op;
 mod op_sepolia;
 
-use alloc::{vec, vec::Vec};
+use alloc::{boxed::Box, vec, vec::Vec};
 use alloy_chains::Chain;
 use alloy_genesis::Genesis;
 use alloy_primitives::{Bytes, Parity, Signature, B256, U256};
