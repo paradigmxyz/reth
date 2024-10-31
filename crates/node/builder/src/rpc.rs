@@ -198,6 +198,7 @@ pub struct RpcRegistry<Node: FullNodeComponents, EthApi: EthApiTypes> {
         Node::Provider,
         EthApi,
         Node::Executor,
+        Node::Consensus,
     >,
 }
 
@@ -214,6 +215,7 @@ where
         Node::Provider,
         EthApi,
         Node::Executor,
+        Node::Consensus,
     >;
 
     fn deref(&self) -> &Self::Target {
@@ -442,6 +444,7 @@ where
             .with_executor(node.task_executor().clone())
             .with_evm_config(node.evm_config().clone())
             .with_block_executor(node.block_executor().clone())
+            .with_consensus(node.consensus().clone())
             .build_with_auth_server(module_config, engine_api, eth_api_builder);
 
         // in dev mode we generate 20 random dev-signer accounts
