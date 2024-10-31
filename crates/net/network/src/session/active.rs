@@ -759,30 +759,27 @@ fn calculate_new_timeout(current_timeout: Duration, estimated_rtt: Duration) -> 
     smoothened_timeout.clamp(MINIMUM_TIMEOUT, MAXIMUM_TIMEOUT)
 }
 
+/// A helper struct that wraps the queue of outgoing messages and a metric to track their count
 pub(crate) struct QueuedOutgoingMessages {
     messages: VecDeque<OutgoingMessage>,
     count: Gauge,
 }
 
 impl QueuedOutgoingMessages {
-    pub const fn new(metric: Gauge) -> Self {
+    pub(crate) const fn new(metric: Gauge) -> Self {
         Self { messages: VecDeque::new(), count: metric }
     }
 
-    pub fn push_back(&mut self, message: OutgoingMessage) {
+    pub(crate) fn push_back(&mut self, message: OutgoingMessage) {
         self.messages.push_back(message);
         self.count.increment(1);
     }
 
-    pub fn pop_front(&mut self) -> Option<OutgoingMessage> {
-        let message = self.messages.pop_front();
-        if message.is_some() {
-            self.count.decrement(1);
-        }
-        message
+    pub(crate) fn pop_front(&mut self) -> Option<OutgoingMessage> {
+        self.messages.pop_front().inspect(|_| self.count.decrement(1))
     }
 
-    pub fn shrink_to_fit(&mut self) {
+    pub(crate) fn shrink_to_fit(&mut self) {
         self.messages.shrink_to_fit();
     }
 }
