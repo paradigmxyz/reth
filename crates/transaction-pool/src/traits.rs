@@ -249,16 +249,6 @@ pub trait TransactionPool: Send + Sync + Clone {
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>>;
 
     /// Returns an iterator that yields transactions that are ready for block production with the
-    /// given base fee.
-    ///
-    /// Consumer: Block production
-    #[deprecated(note = "Use best_transactions_with_attributes instead.")]
-    fn best_transactions_with_base_fee(
-        &self,
-        base_fee: u64,
-    ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>>;
-
-    /// Returns an iterator that yields transactions that are ready for block production with the
     /// given base fee and optional blob fee attributes.
     ///
     /// Consumer: Block production
