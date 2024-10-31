@@ -35,6 +35,7 @@ const MAX_NESTED_BUNDLE_DEPTH: usize = 5;
 
 /// Maximum body size
 const MAX_BUNDLE_BODY_SIZE: usize = 50;
+
 /// Default simulation timeout
 const DEFAULT_SIM_TIMEOUT: Duration = Duration::from_secs(5);
 
