@@ -666,6 +666,12 @@ impl RevealedSparseTrie {
                     } else {
                         let value = self.values.get(&path).unwrap();
                         let rlp_node = LeafNodeRef { key, value }.rlp(&mut self.rlp_buf);
+                        // println!(
+                        //     "path: {path:?}, rlp_node: {rlp_node:?}, hash: {:?}, key: {:?},
+                        // value: {:?}",     rlp_node.as_hash(),
+                        //     key.len(),
+                        //     value.len()
+                        // );
                         *hash = rlp_node.as_hash();
                         (rlp_node, true)
                     }
@@ -718,6 +724,10 @@ impl RevealedSparseTrie {
                             // Insert children in the resulting buffer in a normal order,
                             // because initially we iterated in reverse.
                             tree_mask_values.push(!calculated);
+                            println!(
+                                "i: {i:?}, child_path: {child_path:?}, hash: {:?}",
+                                child.as_hash()
+                            );
                             hash_mask_values.push(child.as_hash().is_some());
                             if let Some(hash) = child.as_hash() {
                                 hashes.push(hash);
@@ -890,12 +900,21 @@ mod tests {
 
     use super::*;
     use alloy_primitives::{map::HashSet, U256};
+    use alloy_rlp::Encodable;
     use assert_matches::assert_matches;
     use itertools::Itertools;
     use prop::sample::SizeRange;
     use proptest::prelude::*;
+    use proptest_arbitrary_interop::arb;
     use rand::seq::IteratorRandom;
-    use reth_trie::{BranchNode, ExtensionNode, LeafNode};
+    use reth_primitives_traits::Account;
+    use reth_trie::{
+        hashed_cursor::{noop::NoopHashedAccountCursor, HashedPostStateAccountCursor},
+        node_iter::{TrieElement, TrieNodeIter},
+        trie_cursor::noop::NoopAccountTrieCursor,
+        walker::TrieWalker,
+        BranchNode, ExtensionNode, HashedPostState, LeafNode, TrieAccount,
+    };
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
         HashBuilder,
@@ -905,17 +924,48 @@ mod tests {
     /// proofs for the provided targets.
     ///
     /// Returns the state root and the retained proof nodes.
-    fn run_hash_builder<V: AsRef<[u8]>>(
-        state: impl IntoIterator<Item = (Nibbles, V)>,
+    fn run_hash_builder(
+        state: impl IntoIterator<Item = (Nibbles, Account)> + Clone,
         proof_targets: impl IntoIterator<Item = Nibbles>,
     ) -> HashBuilder {
+        let mut account_rlp = Vec::new();
+
         let mut hash_builder = HashBuilder::default()
             .with_updates(true)
             .with_proof_retainer(ProofRetainer::from_iter(proof_targets));
-        for (key, value) in state {
-            hash_builder.add_leaf(key, value.as_ref());
+
+        let mut prefix_set = PrefixSetMut::default();
+        prefix_set.extend_keys(state.clone().into_iter().map(|(address, _)| address));
+        let walker = TrieWalker::new(NoopAccountTrieCursor::default(), prefix_set.freeze())
+            .with_deletions_retained(true);
+        let hashed_post_state = HashedPostState::default()
+            .with_accounts(state.into_iter().map(|(address, account)| {
+                (address.pack().into_inner().unwrap().into(), Some(account))
+            }))
+            .into_sorted();
+        let mut node_iter = TrieNodeIter::new(
+            walker,
+            HashedPostStateAccountCursor::new(
+                NoopHashedAccountCursor::default(),
+                hashed_post_state.accounts(),
+            ),
+        );
+
+        while let Some(node) = node_iter.try_next().unwrap() {
+            match node {
+                TrieElement::Branch(branch) => {
+                    hash_builder.add_branch(branch.key, branch.value, branch.children_are_in_trie)
+                }
+                TrieElement::Leaf(key, account) => {
+                    let account = TrieAccount::from((account, EMPTY_ROOT_HASH));
+                    account.encode(&mut account_rlp);
+
+                    hash_builder.add_leaf(Nibbles::unpack(key), &account_rlp)
+                }
+            }
         }
         hash_builder.root();
+
         hash_builder
     }
 
@@ -971,12 +1021,17 @@ mod tests {
     #[test]
     fn sparse_trie_empty_update_one() {
         let path = Nibbles::unpack(B256::with_last_byte(42));
-        let value = alloy_rlp::encode_fixed_size(&U256::from(1));
+        let value = || Account::default();
+        let value_encoded = || {
+            let mut account_rlp = Vec::new();
+            TrieAccount::from((value(), EMPTY_ROOT_HASH)).encode(&mut account_rlp);
+            account_rlp
+        };
 
-        let mut hash_builder = run_hash_builder([(path.clone(), &value)], [path.clone()]);
+        let mut hash_builder = run_hash_builder([(path.clone(), value())], [path.clone()]);
 
         let mut sparse = RevealedSparseTrie::default();
-        sparse.update_leaf(path, value.to_vec()).unwrap();
+        sparse.update_leaf(path, value_encoded()).unwrap();
         let (sparse_root, sparse_updates) = sparse.root();
 
         assert_eq!(sparse_root, hash_builder.root());
@@ -989,16 +1044,21 @@ mod tests {
         reth_tracing::init_test_tracing();
 
         let paths = (0..=16).map(|b| Nibbles::unpack(B256::with_last_byte(b))).collect::<Vec<_>>();
-        let value = alloy_rlp::encode_fixed_size(&U256::from(1));
+        let value = || Account::default();
+        let value_encoded = || {
+            let mut account_rlp = Vec::new();
+            TrieAccount::from((value(), EMPTY_ROOT_HASH)).encode(&mut account_rlp);
+            account_rlp
+        };
 
         let mut hash_builder = run_hash_builder(
-            paths.iter().cloned().zip(std::iter::repeat_with(|| value.clone())),
+            paths.iter().cloned().zip(std::iter::repeat_with(value)),
             paths.clone(),
         );
 
         let mut sparse = RevealedSparseTrie::default();
         for path in &paths {
-            sparse.update_leaf(path.clone(), value.to_vec()).unwrap();
+            sparse.update_leaf(path.clone(), value_encoded()).unwrap();
         }
         let (sparse_root, sparse_updates) = sparse.root();
 
@@ -1010,16 +1070,23 @@ mod tests {
     #[test]
     fn sparse_trie_empty_update_multiple_upper_nibbles() {
         let paths = (239..=255).map(|b| Nibbles::unpack(B256::repeat_byte(b))).collect::<Vec<_>>();
-        let value = alloy_rlp::encode_fixed_size(&U256::from(1));
+        let value = || Account::default();
+        let value_encoded = || {
+            let mut account_rlp = Vec::new();
+            TrieAccount::from((value(), EMPTY_ROOT_HASH)).encode(&mut account_rlp);
+            account_rlp
+        };
+
+        println!("paths: {:?}", paths);
 
         let mut hash_builder = run_hash_builder(
-            paths.iter().cloned().zip(std::iter::repeat_with(|| value.clone())),
+            paths.iter().cloned().zip(std::iter::repeat_with(value)),
             paths.clone(),
         );
 
         let mut sparse = RevealedSparseTrie::default();
         for path in &paths {
-            sparse.update_leaf(path.clone(), value.to_vec()).unwrap();
+            sparse.update_leaf(path.clone(), value_encoded()).unwrap();
         }
         let (sparse_root, sparse_updates) = sparse.root();
 
@@ -1039,16 +1106,21 @@ mod tests {
                 })
             })
             .collect::<Vec<_>>();
-        let value = alloy_rlp::encode_fixed_size(&U256::from(1));
+        let value = || Account::default();
+        let value_encoded = || {
+            let mut account_rlp = Vec::new();
+            TrieAccount::from((value(), EMPTY_ROOT_HASH)).encode(&mut account_rlp);
+            account_rlp
+        };
 
         let mut hash_builder = run_hash_builder(
-            paths.iter().sorted_unstable().cloned().zip(std::iter::repeat_with(|| value.clone())),
+            paths.iter().sorted_unstable().cloned().zip(std::iter::repeat_with(value)),
             paths.clone(),
         );
 
         let mut sparse = RevealedSparseTrie::default();
         for path in &paths {
-            sparse.update_leaf(path.clone(), value.to_vec()).unwrap();
+            sparse.update_leaf(path.clone(), value_encoded()).unwrap();
         }
         let (sparse_root, sparse_updates) = sparse.root();
 
@@ -1060,17 +1132,27 @@ mod tests {
     #[test]
     fn sparse_trie_empty_update_repeated() {
         let paths = (0..=255).map(|b| Nibbles::unpack(B256::repeat_byte(b))).collect::<Vec<_>>();
-        let old_value = alloy_rlp::encode_fixed_size(&U256::from(1));
-        let new_value = alloy_rlp::encode_fixed_size(&U256::from(2));
+        let old_value = Account { nonce: 1, ..Default::default() };
+        let old_value_encoded = {
+            let mut account_rlp = Vec::new();
+            TrieAccount::from((old_value, EMPTY_ROOT_HASH)).encode(&mut account_rlp);
+            account_rlp
+        };
+        let new_value = Account { nonce: 2, ..Default::default() };
+        let new_value_encoded = {
+            let mut account_rlp = Vec::new();
+            TrieAccount::from((new_value, EMPTY_ROOT_HASH)).encode(&mut account_rlp);
+            account_rlp
+        };
 
         let mut hash_builder = run_hash_builder(
-            paths.iter().cloned().zip(std::iter::repeat_with(|| old_value.clone())),
+            paths.iter().cloned().zip(std::iter::repeat_with(|| old_value)),
             paths.clone(),
         );
 
         let mut sparse = RevealedSparseTrie::default();
         for path in &paths {
-            sparse.update_leaf(path.clone(), old_value.to_vec()).unwrap();
+            sparse.update_leaf(path.clone(), old_value_encoded.clone()).unwrap();
         }
         let (sparse_root, sparse_updates) = sparse.root();
 
@@ -1079,12 +1161,12 @@ mod tests {
         assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder.take_proof_nodes());
 
         let mut hash_builder = run_hash_builder(
-            paths.iter().cloned().zip(std::iter::repeat_with(|| new_value.clone())),
+            paths.iter().cloned().zip(std::iter::repeat_with(|| new_value)),
             paths.clone(),
         );
 
         for path in &paths {
-            sparse.update_leaf(path.clone(), new_value.to_vec()).unwrap();
+            sparse.update_leaf(path.clone(), new_value_encoded.clone()).unwrap();
         }
         let (sparse_root, sparse_updates) = sparse.root();
 
@@ -1373,15 +1455,18 @@ mod tests {
         // to test the sparse trie updates.
         const KEY_NIBBLES_LEN: usize = 3;
 
-        fn test(updates: Vec<(HashMap<Nibbles, Vec<u8>>, HashSet<Nibbles>)>) {
+        fn test(updates: Vec<(HashMap<Nibbles, Account>, HashSet<Nibbles>)>) {
             {
                 let mut state = BTreeMap::default();
                 let mut sparse = RevealedSparseTrie::default();
 
                 for (update, keys_to_delete) in updates {
                     // Insert state updates into the sparse trie and calculate the root
-                    for (key, value) in update.clone() {
-                        sparse.update_leaf(key, value).unwrap();
+                    for (key, account) in update.clone() {
+                        let account = TrieAccount::from((account, EMPTY_ROOT_HASH));
+                        let mut account_rlp = Vec::new();
+                        account.encode(&mut account_rlp);
+                        sparse.update_leaf(key, account_rlp).unwrap();
                     }
                     let (sparse_root, sparse_updates) = sparse.root();
 
@@ -1428,9 +1513,9 @@ mod tests {
         }
 
         fn transform_updates(
-            updates: Vec<HashMap<Nibbles, Vec<u8>>>,
+            updates: Vec<HashMap<Nibbles, Account>>,
             mut rng: impl Rng,
-        ) -> Vec<(HashMap<Nibbles, Vec<u8>>, HashSet<Nibbles>)> {
+        ) -> Vec<(HashMap<Nibbles, Account>, HashSet<Nibbles>)> {
             let mut keys = HashSet::new();
             updates
                 .into_iter()
@@ -1454,7 +1539,7 @@ mod tests {
             updates in proptest::collection::vec(
                 proptest::collection::hash_map(
                     any_with::<Nibbles>(SizeRange::new(KEY_NIBBLES_LEN..=KEY_NIBBLES_LEN)).prop_map(pad_nibbles),
-                    any::<Vec<u8>>(),
+                    arb::<Account>(),
                     1..100,
                 ).prop_map(HashMap::from_iter),
                 1..100,
@@ -1480,7 +1565,12 @@ mod tests {
         let key1 = || Nibbles::from_nibbles_unchecked([0x00]);
         let key2 = || Nibbles::from_nibbles_unchecked([0x01]);
         let key3 = || Nibbles::from_nibbles_unchecked([0x02]);
-        let value = || alloy_rlp::encode_fixed_size(&B256::repeat_byte(1));
+        let value = || Account::default();
+        let value_encoded = || {
+            let mut account_rlp = Vec::new();
+            TrieAccount::from((value(), EMPTY_ROOT_HASH)).encode(&mut account_rlp);
+            account_rlp
+        };
 
         // Generate the proof for the root node and initialize the sparse trie with it
         let proof_nodes =
@@ -1505,7 +1595,7 @@ mod tests {
         );
 
         // Insert the leaf for the second key
-        sparse.update_leaf(key2(), value().to_vec()).unwrap();
+        sparse.update_leaf(key2(), value_encoded()).unwrap();
 
         // Check that the branch node was updated and another nibble was set
         assert_eq!(
@@ -1552,7 +1642,7 @@ mod tests {
         let key1 = || Nibbles::from_nibbles_unchecked([0x00, 0x00]);
         let key2 = || Nibbles::from_nibbles_unchecked([0x01, 0x01]);
         let key3 = || Nibbles::from_nibbles_unchecked([0x01, 0x02]);
-        let value = || alloy_rlp::encode_fixed_size(&B256::repeat_byte(1));
+        let value = || Account::default();
 
         // Generate the proof for the root node and initialize the sparse trie with it
         let proof_nodes = run_hash_builder(
@@ -1619,7 +1709,12 @@ mod tests {
         let key1 = || Nibbles::from_nibbles_unchecked([0x00, 0x01]);
         let key2 = || Nibbles::from_nibbles_unchecked([0x00, 0x02]);
         let key3 = || Nibbles::from_nibbles_unchecked([0x01, 0x00]);
-        let value = || alloy_rlp::encode_fixed_size(&B256::repeat_byte(1));
+        let value = || Account::default();
+        let value_encoded = || {
+            let mut account_rlp = Vec::new();
+            TrieAccount::from((value(), EMPTY_ROOT_HASH)).encode(&mut account_rlp);
+            account_rlp
+        };
 
         // Generate the proof for the root node and initialize the sparse trie with it
         let proof_nodes =
@@ -1637,7 +1732,7 @@ mod tests {
         );
 
         // Insert the leaf with a different prefix
-        sparse.update_leaf(key3(), value().to_vec()).unwrap();
+        sparse.update_leaf(key3(), value_encoded()).unwrap();
 
         // Check that the extension node was turned into a branch node
         assert_matches!(
