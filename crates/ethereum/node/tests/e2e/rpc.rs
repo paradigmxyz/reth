@@ -174,16 +174,16 @@ async fn test_flashbots_validate() -> eyre::Result<()> {
         .is_ok());
 
     request.registered_gas_limit -= 1;
-    assert!(!provider
+    assert!(provider
         .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV3".into(), (&request,))
         .await
-        .is_ok());
+        .is_err());
     request.registered_gas_limit += 1;
 
     request.request.execution_payload.payload_inner.payload_inner.state_root = B256::ZERO;
-    assert!(!provider
+    assert!(provider
         .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV3".into(), (&request,))
         .await
-        .is_ok());
+        .is_err());
     Ok(())
 }
