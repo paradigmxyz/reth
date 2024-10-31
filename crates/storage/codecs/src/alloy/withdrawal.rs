@@ -2,7 +2,7 @@
 
 use crate::Compact;
 use alloc::vec::Vec;
-use alloy_eips::eip4895::{Withdrawal as AlloyWithdrawal, Withdrawals as AlloyWithdrawals};
+use alloy_eips::eip4895::{Withdrawal as AlloyWithdrawal, Withdrawals};
 use alloy_primitives::Address;
 use reth_codecs_derive::add_arbitrary_tests;
 
@@ -53,17 +53,7 @@ impl Compact for AlloyWithdrawal {
     }
 }
 
-/// Represents a collection of [`Withdrawals`].
-#[derive(Debug, Clone, PartialEq, Eq, Default, Compact)]
-#[cfg_attr(
-    any(test, feature = "test-utils"),
-    derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize)
-)]
-#[cfg_attr(feature = "test-utils", allow(unreachable_pub), visibility::make(pub))]
-#[add_arbitrary_tests(compact)]
-pub(crate) struct Withdrawals(Vec<Withdrawal>);
-
-impl Compact for AlloyWithdrawals {
+impl Compact for Withdrawals {
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
@@ -95,10 +85,10 @@ mod tests {
         }
 
         #[test]
-        fn roundtrip_withdrawals(withdrawals in arb::<AlloyWithdrawals>()) {
+        fn roundtrip_withdrawals(withdrawals in arb::<Withdrawals>()) {
             let mut compacted_withdrawals = Vec::<u8>::new();
             let len = withdrawals.to_compact(&mut compacted_withdrawals);
-            let (decoded, _) = AlloyWithdrawals::from_compact(&compacted_withdrawals, len);
+            let (decoded, _) = Withdrawals::from_compact(&compacted_withdrawals, len);
             assert_eq!(withdrawals, decoded);
         }
     }
@@ -111,6 +101,5 @@ mod tests {
     #[test]
     fn test_ensure_backwards_compatibility() {
         assert_eq!(Withdrawal::bitflag_encoded_bytes(), 2);
-        assert_eq!(Withdrawals::bitflag_encoded_bytes(), 0);
     }
 }

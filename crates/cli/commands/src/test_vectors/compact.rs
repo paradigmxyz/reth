@@ -1,3 +1,4 @@
+use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::{hex, private::getrandom::getrandom, TxKind};
 use arbitrary::Arbitrary;
 use eyre::{Context, Result};
@@ -13,7 +14,7 @@ use reth_codecs::alloy::{
         eip1559::TxEip1559, eip2930::TxEip2930, eip4844::TxEip4844, eip7702::TxEip7702,
         legacy::TxLegacy,
     },
-    withdrawal::{Withdrawal, Withdrawals},
+    withdrawal::Withdrawal,
 };
 use reth_db::{
     models::{AccountBeforeTx, StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals},
