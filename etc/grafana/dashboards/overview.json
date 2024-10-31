@@ -3016,6 +3016,86 @@
           "legendFormat": "Gas/s",
           "range": true,
           "refId": "A"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+            },
+            "disableTextWrap": false,
+            "editorMode": "builder",
+            "expr": "avg_over_time(reth_sync_execution_gas_per_second{instance=~\"$instance\"}[1m])",
+            "fullMetaSearch": false,
+            "hide": false,
+            "includeNullMetadata": true,
+            "legendFormat": "avg/m",
+            "range": true,
+            "refId": "B",
+            "useBackend": false
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+            },
+            "disableTextWrap": false,
+            "editorMode": "builder",
+            "expr": "avg_over_time(reth_sync_execution_gas_per_second{instance=~\"$instance\"}[5m])",
+            "fullMetaSearch": false,
+            "hide": false,
+            "includeNullMetadata": true,
+            "legendFormat": "avg/5m",
+            "range": true,
+            "refId": "C",
+            "useBackend": false
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+            },
+            "disableTextWrap": false,
+            "editorMode": "builder",
+            "expr": "avg_over_time(reth_sync_execution_gas_per_second{instance=~\"$instance\"}[10m])",
+            "fullMetaSearch": false,
+            "hide": false,
+            "includeNullMetadata": true,
+            "legendFormat": "avg/10m",
+            "range": true,
+            "refId": "D",
+            "useBackend": false
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+            },
+            "disableTextWrap": false,
+            "editorMode": "builder",
+            "expr": "avg_over_time(reth_sync_execution_gas_per_second{instance=~\"$instance\"}[1h])",
+            "fullMetaSearch": false,
+            "hide": false,
+            "includeNullMetadata": true,
+            "legendFormat": "avg/h",
+            "range": true,
+            "refId": "E",
+            "useBackend": false
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+            },
+            "disableTextWrap": false,
+            "editorMode": "builder",
+            "expr": "avg_over_time(reth_sync_execution_gas_per_second{instance=~\"$instance\"}[24h])",
+            "fullMetaSearch": false,
+            "hide": false,
+            "includeNullMetadata": true,
+            "legendFormat": "avg/24h",
+            "range": true,
+            "refId": "F",
+            "useBackend": false
         }
       ],
       "title": "Execution throughput",
