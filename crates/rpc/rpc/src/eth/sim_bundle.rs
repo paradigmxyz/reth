@@ -309,8 +309,8 @@ where
                     let max_block_number =
                         item.inclusion.max_block_number().unwrap_or(block_number);
 
-                    if current_block_number < block_number
-                        || current_block_number > max_block_number
+                    if current_block_number < block_number ||
+                        current_block_number > max_block_number
                     {
                         return Err(EthApiError::InvalidParams(
                             EthSimBundleError::InvalidInclusion.to_string(),
@@ -389,18 +389,18 @@ where
                                     };
 
                                     // Calculate payout transaction fee
-                                    let payout_tx_fee = basefee
-                                        * U256::from(SBUNDLE_PAYOUT_MAX_COST)
-                                        * U256::from(refund_configs.len() as u64);
+                                    let payout_tx_fee = basefee *
+                                        U256::from(SBUNDLE_PAYOUT_MAX_COST) *
+                                        U256::from(refund_configs.len() as u64);
 
                                     // Add gas used for payout transactions
                                     total_gas_used +=
                                         SBUNDLE_PAYOUT_MAX_COST * refund_configs.len() as u64;
 
                                     // Calculate allocated refundable value (payout value)
-                                    let payout_value = refundable_value
-                                        * U256::from(refund.percent)
-                                        / U256::from(100);
+                                    let payout_value = refundable_value *
+                                        U256::from(refund.percent) /
+                                        U256::from(100);
 
                                     if payout_tx_fee > payout_value {
                                         return Err(EthApiError::InvalidParams(
