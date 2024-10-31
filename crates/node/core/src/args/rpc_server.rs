@@ -206,6 +206,12 @@ impl RpcServerArgs {
         self
     }
 
+    /// Configures modules for the HTTP-RPC server.
+    pub fn with_http_api(mut self, http_api: RpcModuleSelection) -> Self {
+        self.http_api = Some(http_api);
+        self
+    }
+
     /// Enables the WS-RPC server.
     pub const fn with_ws(mut self) -> Self {
         self.ws = true;

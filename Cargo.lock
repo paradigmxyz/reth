@@ -7994,6 +7994,7 @@ dependencies = [
  "alloy-genesis",
  "alloy-primitives",
  "alloy-provider",
+ "alloy-rpc-types-beacon",
  "alloy-signer",
  "alloy-sol-types",
  "eyre",
