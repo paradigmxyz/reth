@@ -2,7 +2,8 @@ use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{Address, BlockHash, Bytes, Keccak256, B256, U256};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types::{
-    state::EvmOverrides, Block as RpcBlock, BlockError, Bundle, StateContext, TransactionInfo
+    engine::PayloadAttributes, state::EvmOverrides, Block as RpcBlock, BlockError, Bundle,
+    StateContext, TransactionInfo,
 };
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_eth::transaction::TransactionRequest;
@@ -15,7 +16,9 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthereumHardforks;
 use reth_evm::{
-    execute::{BlockExecutorProvider, Executor}, system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv
+    execute::{BlockExecutorProvider, Executor},
+    system_calls::SystemCaller,
+    ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes,
 };
 use reth_primitives::{Block, BlockId, BlockNumberOrTag, TransactionSignedEcRecovered};
 use reth_provider::{
@@ -34,7 +37,7 @@ use reth_tasks::pool::BlockingTaskGuard;
 use reth_trie::{HashedPostState, HashedStorage};
 use revm::{
     db::{CacheDB, State},
-    primitives::{db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg}
+    primitives::{db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg},
 };
 use revm_inspectors::tracing::{
     FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig, TransactionContext,
@@ -657,9 +660,9 @@ where
     pub async fn debug_execution_witness(
         &self,
         block_id: BlockNumberOrTag,
-    ) -> Result<ExecutionWitness, Eth::Error, > {
-        let block_executor = self.inner.block_executor.clone();
-        let block = self
+    ) -> Result<ExecutionWitness, Eth::Error> {
+        let this = self.clone();
+        let block = this
             .eth_api()
             .block_with_senders(block_id.into())
             .await?
@@ -668,13 +671,13 @@ where
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash.into(), move |state_provider| {
                 let db = StateProviderDatabase::new(&state_provider);
-                let block_executor_provider = block_executor.executor(db);
+                let block_executor = this.inner.block_executor.executor(db);
 
                 let mut hashed_state = HashedPostState::default();
                 let mut keys = HashMap::default();
                 let mut codes = HashMap::default();
 
-                let _ = block_executor_provider
+                let _ = block_executor
                     .execute_with_state_closure(
                         (&(*block).clone().unseal(), block.difficulty).into(),
                         |statedb: &State<_>| {
@@ -731,15 +734,15 @@ where
             .await
     }
 
-
     /// The `debug_executePayload` method allows for execution of a block with the purpose of
     /// generating an execution witness. The witness comprises of a map of all hashed trie nodes
     /// to their preimages that were required during the execution of the block, including during
     /// state root recomputation.
     pub async fn debug_execute_payload(
         &self,
-        txs: Vec<Bytes>,
         parent_block_hash: BlockHash,
+        attributes: PayloadAttributes,
+        txs: Vec<Bytes>,
     ) -> Result<ExecutionWitness, Eth::Error> {
         let transactions = txs
             .into_iter()
@@ -749,8 +752,25 @@ where
             .map(|tx| tx.into_components())
             .collect::<Vec<_>>();
 
+        let parent_block_header = self
+            .eth_api()
+            .block_with_senders(parent_block_hash.into())
+            .await
+            .transpose()
+            .ok_or(EthApiError::HeaderNotFound(parent_block_hash.into()))??;
+
         let eth_api = self.eth_api().clone();
-        let (cfg, block_env, _at) = self.eth_api().evm_env_at(parent_block_hash.into()).await?;
+        let (cfg, block_env) = eth_api
+            .evm_config()
+            .next_cfg_and_block_env(
+                &parent_block_header.header.clone().unseal(),
+                NextBlockEnvAttributes {
+                    prev_randao: attributes.prev_randao,
+                    timestamp: attributes.timestamp,
+                    suggested_fee_recipient: attributes.suggested_fee_recipient,
+                },
+            )
+            .map_err(|err| EthApiError::InvalidParams(err.to_string()))?;
 
         self.eth_api()
             .spawn_with_state_at_block(parent_block_hash.into(), move |state_provider: reth_rpc_eth_types::cache::db::StateProviderTraitObjWrapper<'_>| {
@@ -774,8 +794,6 @@ where
                             // need to apply the state changes of this call before executing the
                             // next call
                             if tx_iter.peek().is_some() {
-                                // need to apply the state changes of this call before executing
-                                // the next call
                                 evm.context.evm.db.commit(state)
                             }
                         }
@@ -1165,10 +1183,15 @@ where
     }
 
     async fn debug_execute_payload(
-        &self, transactions: Vec<Bytes>, parent_block_hash: BlockHash
+        &self,
+        parent_block_hash: BlockHash,
+        attributes: PayloadAttributes,
+        transactions: Vec<Bytes>,
     ) -> RpcResult<ExecutionWitness> {
         let _permit = self.acquire_trace_permit().await;
-        Self::debug_execute_payload(self, transactions, parent_block_hash).await.map_err(Into::into)
+        Self::debug_execute_payload(self, parent_block_hash, attributes, transactions)
+            .await
+            .map_err(Into::into)
     }
 
     async fn debug_backtrace_at(&self, _location: &str) -> RpcResult<()> {

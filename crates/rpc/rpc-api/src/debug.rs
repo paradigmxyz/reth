@@ -1,6 +1,7 @@
 use alloy_primitives::{Address, BlockHash, Bytes, B256};
 use alloy_rpc_types::{Block, Bundle, StateContext};
 use alloy_rpc_types_debug::ExecutionWitness;
+use alloy_rpc_types_engine::PayloadAttributes;
 use alloy_rpc_types_eth::transaction::TransactionRequest;
 use alloy_rpc_types_trace::geth::{
     BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
@@ -151,8 +152,12 @@ pub trait DebugApi {
     /// The first argument is the block number or block hash. The second argument is a boolean
     /// indicating whether to include the preimages of keys in the response.
     #[method(name = "executePayload")]
-    async fn debug_execute_payload(&self, transactions: Vec<Bytes>, parent_block_hash: BlockHash)
-        -> RpcResult<ExecutionWitness>;
+    async fn debug_execute_payload(
+        &self,
+        parent_block_hash: BlockHash,
+        attributes: PayloadAttributes,
+        transactions: Vec<Bytes>,
+    ) -> RpcResult<ExecutionWitness>;
 
     /// Sets the logging backtrace location. When a backtrace location is set and a log message is
     /// emitted at that location, the stack of the goroutine executing the log statement will
