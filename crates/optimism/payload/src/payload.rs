@@ -25,7 +25,7 @@ use std::sync::Arc;
 
 /// Optimism Payload Builder Attributes
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct OptimismPayloadBuilderAttributes {
+pub struct OpPayloadBuilderAttributes {
     /// Inner ethereum payload builder attributes
     pub payload_attributes: EthPayloadBuilderAttributes,
     /// `NoTxPool` option for the generated payload
@@ -39,7 +39,7 @@ pub struct OptimismPayloadBuilderAttributes {
     pub eip_1559_params: Option<B64>,
 }
 
-impl OptimismPayloadBuilderAttributes {
+impl OpPayloadBuilderAttributes {
     /// Extracts the `eip1559` parameters for the payload.
     pub fn get_holocene_extra_data(
         &self,
@@ -73,7 +73,7 @@ impl OptimismPayloadBuilderAttributes {
     }
 }
 
-impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
+impl PayloadBuilderAttributes for OpPayloadBuilderAttributes {
     type RpcPayloadAttributes = OpPayloadAttributes;
     type Error = alloy_rlp::Error;
 
@@ -169,7 +169,7 @@ pub struct OptimismBuiltPayload {
     /// The rollup's chainspec.
     pub(crate) chain_spec: Arc<OpChainSpec>,
     /// The payload attributes.
-    pub(crate) attributes: OptimismPayloadBuilderAttributes,
+    pub(crate) attributes: OpPayloadBuilderAttributes,
 }
 
 // === impl BuiltPayload ===
@@ -181,7 +181,7 @@ impl OptimismBuiltPayload {
         block: SealedBlock,
         fees: U256,
         chain_spec: Arc<OpChainSpec>,
-        attributes: OptimismPayloadBuilderAttributes,
+        attributes: OpPayloadBuilderAttributes,
         executed_block: Option<ExecutedBlock>,
     ) -> Self {
         Self { id, block, executed_block, fees, sidecars: Vec::new(), chain_spec, attributes }
@@ -411,7 +411,7 @@ mod tests {
 
     #[test]
     fn test_get_extra_data_post_holocene() {
-        let attributes = OptimismPayloadBuilderAttributes {
+        let attributes = OpPayloadBuilderAttributes {
             eip_1559_params: Some(B64::from_str("0x0000000800000008").unwrap()),
             ..Default::default()
         };
@@ -421,10 +421,8 @@ mod tests {
 
     #[test]
     fn test_get_extra_data_post_holocene_default() {
-        let attributes = OptimismPayloadBuilderAttributes {
-            eip_1559_params: Some(B64::ZERO),
-            ..Default::default()
-        };
+        let attributes =
+            OpPayloadBuilderAttributes { eip_1559_params: Some(B64::ZERO), ..Default::default() };
         let extra_data = attributes.get_holocene_extra_data(BaseFeeParams::new(80, 60));
         assert_eq!(extra_data.unwrap(), Bytes::copy_from_slice(&[0, 0, 0, 0, 80, 0, 0, 0, 60]));
     }
