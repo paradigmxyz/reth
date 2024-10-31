@@ -7,6 +7,9 @@ use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
 use std::collections::HashSet;
 
+#[cfg(feature = "metrics")]
+use crate::metrics::WalkerMetrics;
+
 /// `TrieWalker` is a structure that enables traversal of a Merkle trie.
 /// It allows moving through the trie in a depth-first manner, skipping certain branches
 /// if they have not changed.
@@ -24,13 +27,23 @@ pub struct TrieWalker<C> {
     pub changes: PrefixSet,
     /// The retained trie node keys that need to be removed.
     removed_keys: Option<HashSet<Nibbles>>,
+    #[cfg(feature = "metrics")]
+    /// Walker metrics.
+    metrics: WalkerMetrics,
 }
 
 impl<C> TrieWalker<C> {
     /// Constructs a new `TrieWalker` from existing stack and a cursor.
     pub fn from_stack(cursor: C, stack: Vec<CursorSubNode>, changes: PrefixSet) -> Self {
-        let mut this =
-            Self { cursor, changes, stack, can_skip_current_node: false, removed_keys: None };
+        let mut this = Self {
+            cursor,
+            changes,
+            stack,
+            can_skip_current_node: false,
+            removed_keys: None,
+            #[cfg(feature = "metrics")]
+            metrics: WalkerMetrics::default(),
+        };
         this.update_skip_node();
         this
     }
@@ -113,6 +126,8 @@ impl<C: TrieCursor> TrieWalker<C> {
             stack: vec![CursorSubNode::default()],
             can_skip_current_node: false,
             removed_keys: None,
+            #[cfg(feature = "metrics")]
+            metrics: WalkerMetrics::default(),
         };
 
         // Set up the root node of the trie in the stack, if it exists.
@@ -185,6 +200,8 @@ impl<C: TrieCursor> TrieWalker<C> {
         // stack.
         if let Some(subnode) = self.stack.last() {
             if !key.starts_with(subnode.full_key()) {
+                #[cfg(feature = "metrics")]
+                self.metrics.inc_out_of_order_subnode(1);
                 self.move_to_next_sibling(false)?;
                 return Ok(())
             }
