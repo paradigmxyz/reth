@@ -149,6 +149,7 @@ where
     }
 
     fn calculate(self, retain_updates: bool) -> Result<StateRootProgress, StateRootError> {
+        println!("in StateRoot::calculate");
         trace!(target: "trie::state_root", "calculating state root");
         let mut tracker = TrieTracker::default();
         let mut trie_updates = TrieUpdates::default();
@@ -158,6 +159,7 @@ where
         let hashed_account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
         let (mut hash_builder, mut account_node_iter) = match self.previous_state {
             Some(state) => {
+                println!("in StateRoot::calculate, there is previous_state");
                 let hash_builder = state.hash_builder.with_updates(retain_updates);
                 let walker = TrieWalker::from_stack(
                     trie_cursor,
@@ -170,6 +172,7 @@ where
                 (hash_builder, node_iter)
             }
             None => {
+                println!("in StateRoot::calculate, no previous_state");
                 let hash_builder = HashBuilder::default().with_updates(retain_updates);
                 let walker = TrieWalker::new(trie_cursor, self.prefix_sets.account_prefix_set)
                     .with_deletions_retained(retain_updates);
@@ -184,10 +187,12 @@ where
         while let Some(node) = account_node_iter.try_next()? {
             match node {
                 TrieElement::Branch(node) => {
+                    println!("in StateRoot::calculate, in iter, branch node {node:?}");
                     tracker.inc_branch();
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
                 TrieElement::Leaf(hashed_address, account) => {
+                    println!("in StateRoot::calculate, in iter, leaf node {hashed_address:?}, {account:?}");
                     tracker.inc_leaf();
                     hashed_entries_walked += 1;
 

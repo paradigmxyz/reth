@@ -43,7 +43,7 @@ proptest! {
             .unwrap();
 
         // verify initial tree mask invariant
-        assert!(verify_tree_mask_invariant(&trie_nodes.account_nodes_ref(), &trie_nodes.removed_nodes_ref()));
+        assert!(verify_tree_mask_invariant(trie_nodes.account_nodes_ref(), trie_nodes.removed_nodes_ref()));
 
         let mut state = init_state;
         for state_update in state_updates {
@@ -79,7 +79,7 @@ proptest! {
             assert_eq!(expected_root, state_root);
         }
         // verify tree mask invariant after updates
-        assert!(verify_tree_mask_invariant(&trie_nodes.account_nodes_ref(), &trie_nodes.removed_nodes_ref()));
+        assert!(verify_tree_mask_invariant(trie_nodes.account_nodes_ref(), trie_nodes.removed_nodes_ref()));
     }
 
     #[test]
@@ -102,7 +102,7 @@ proptest! {
             StorageRoot::from_tx_hashed(provider.tx_ref(), hashed_address).root_with_updates().unwrap();
 
         // verify initial tree mask invariant
-        assert!(verify_tree_mask_invariant(&storage_trie_nodes.storage_nodes_ref(), &storage_trie_nodes.removed_nodes_ref()));
+        assert!(verify_tree_mask_invariant(storage_trie_nodes.storage_nodes_ref(), storage_trie_nodes.removed_nodes_ref()));
 
         let mut storage = init_storage;
         for (is_deleted, mut storage_update) in storage_updates {
@@ -143,6 +143,6 @@ proptest! {
         }
 
         // verify tree mask invariant after updates
-        assert!(verify_tree_mask_invariant(&storage_trie_nodes.storage_nodes_ref(), &storage_trie_nodes.removed_nodes_ref()));
+        assert!(verify_tree_mask_invariant(storage_trie_nodes.storage_nodes_ref(), storage_trie_nodes.removed_nodes_ref()));
     }
 }

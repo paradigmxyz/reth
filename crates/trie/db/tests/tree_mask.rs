@@ -57,6 +57,15 @@ fn test_tree_mask_invariant_regression() {
     // get initial root and updates
     let (_, mut trie_nodes) = StateRoot::from_tx(provider.tx_ref()).root_with_updates().unwrap();
 
+    println!("Node state at failure:");
+    for (path, node) in trie_nodes.account_nodes_ref() {
+        println!("Path: {:?}", path);
+        println!("  State mask: {:016b}", node.state_mask.get());
+        println!("  Tree mask:  {:016b}", node.tree_mask.get());
+        println!("  Hash mask:  {:016b}", node.hash_mask.get());
+        println!("  Hashes: {}", node.hashes.len());
+    }
+
     // verify initial tree mask invariant
     assert!(verify_tree_mask_invariant(
         trie_nodes.account_nodes_ref(),
@@ -120,6 +129,15 @@ fn test_tree_mask_invariant_regression() {
         .unwrap();
 
     trie_nodes.extend(trie_updates);
+
+    println!("Node state at failure:");
+    for (path, node) in trie_nodes.account_nodes_ref() {
+        println!("Path: {:?}", path);
+        println!("  State mask: {:016b}", node.state_mask.get());
+        println!("  Tree mask:  {:016b}", node.tree_mask.get());
+        println!("  Hash mask:  {:016b}", node.hash_mask.get());
+        println!("  Hashes: {}", node.hashes.len());
+    }
 
     assert!(verify_tree_mask_invariant(
         trie_nodes.account_nodes_ref(),
