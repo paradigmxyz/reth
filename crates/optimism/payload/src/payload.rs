@@ -154,7 +154,7 @@ impl PayloadBuilderAttributes for OpPayloadBuilderAttributes {
 
 /// Contains the built payload.
 #[derive(Debug, Clone)]
-pub struct OptimismBuiltPayload {
+pub struct OpBuiltPayload {
     /// Identifier of the payload
     pub(crate) id: PayloadId,
     /// The built block
@@ -174,7 +174,7 @@ pub struct OptimismBuiltPayload {
 
 // === impl BuiltPayload ===
 
-impl OptimismBuiltPayload {
+impl OpBuiltPayload {
     /// Initializes the payload with the given initial block.
     pub const fn new(
         id: PayloadId,
@@ -208,7 +208,7 @@ impl OptimismBuiltPayload {
     }
 }
 
-impl BuiltPayload for OptimismBuiltPayload {
+impl BuiltPayload for OpBuiltPayload {
     fn block(&self) -> &SealedBlock {
         &self.block
     }
@@ -226,7 +226,7 @@ impl BuiltPayload for OptimismBuiltPayload {
     }
 }
 
-impl BuiltPayload for &OptimismBuiltPayload {
+impl BuiltPayload for &OpBuiltPayload {
     fn block(&self) -> &SealedBlock {
         (**self).block()
     }
@@ -245,24 +245,24 @@ impl BuiltPayload for &OptimismBuiltPayload {
 }
 
 // V1 engine_getPayloadV1 response
-impl From<OptimismBuiltPayload> for ExecutionPayloadV1 {
-    fn from(value: OptimismBuiltPayload) -> Self {
+impl From<OpBuiltPayload> for ExecutionPayloadV1 {
+    fn from(value: OpBuiltPayload) -> Self {
         block_to_payload_v1(value.block)
     }
 }
 
 // V2 engine_getPayloadV2 response
-impl From<OptimismBuiltPayload> for ExecutionPayloadEnvelopeV2 {
-    fn from(value: OptimismBuiltPayload) -> Self {
-        let OptimismBuiltPayload { block, fees, .. } = value;
+impl From<OpBuiltPayload> for ExecutionPayloadEnvelopeV2 {
+    fn from(value: OpBuiltPayload) -> Self {
+        let OpBuiltPayload { block, fees, .. } = value;
 
         Self { block_value: fees, execution_payload: convert_block_to_payload_field_v2(block) }
     }
 }
 
-impl From<OptimismBuiltPayload> for OpExecutionPayloadEnvelopeV3 {
-    fn from(value: OptimismBuiltPayload) -> Self {
-        let OptimismBuiltPayload { block, fees, sidecars, chain_spec, attributes, .. } = value;
+impl From<OpBuiltPayload> for OpExecutionPayloadEnvelopeV3 {
+    fn from(value: OpBuiltPayload) -> Self {
+        let OpBuiltPayload { block, fees, sidecars, chain_spec, attributes, .. } = value;
 
         let parent_beacon_block_root =
             if chain_spec.is_cancun_active_at_timestamp(attributes.timestamp()) {
@@ -287,9 +287,9 @@ impl From<OptimismBuiltPayload> for OpExecutionPayloadEnvelopeV3 {
         }
     }
 }
-impl From<OptimismBuiltPayload> for OpExecutionPayloadEnvelopeV4 {
-    fn from(value: OptimismBuiltPayload) -> Self {
-        let OptimismBuiltPayload { block, fees, sidecars, chain_spec, attributes, .. } = value;
+impl From<OpBuiltPayload> for OpExecutionPayloadEnvelopeV4 {
+    fn from(value: OpBuiltPayload) -> Self {
+        let OpBuiltPayload { block, fees, sidecars, chain_spec, attributes, .. } = value;
 
         let parent_beacon_block_root =
             if chain_spec.is_cancun_active_at_timestamp(attributes.timestamp()) {

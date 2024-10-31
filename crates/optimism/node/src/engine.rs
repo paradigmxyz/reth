@@ -16,7 +16,7 @@ use reth_node_api::{
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::{OptimismHardfork, OptimismHardforks};
 use reth_optimism_payload_builder::{
-    builder::decode_eip_1559_params, OpPayloadBuilderAttributes, OptimismBuiltPayload,
+    builder::decode_eip_1559_params, OpBuiltPayload, OpPayloadBuilderAttributes,
 };
 
 /// The types used in the optimism beacon consensus engine.
@@ -51,7 +51,7 @@ where
 pub struct OptimismPayloadTypes;
 
 impl PayloadTypes for OptimismPayloadTypes {
-    type BuiltPayload = OptimismBuiltPayload;
+    type BuiltPayload = OpBuiltPayload;
     type PayloadAttributes = OpPayloadAttributes;
     type PayloadBuilderAttributes = OpPayloadBuilderAttributes;
 }
