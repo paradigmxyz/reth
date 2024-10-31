@@ -39,7 +39,7 @@ use op_alloy_consensus::DepositTransaction;
 
 /// Optimism's payload builder
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OptimismPayloadBuilder<EvmConfig> {
+pub struct OpPayloadBuilder<EvmConfig> {
     /// The rollup's compute pending block configuration option.
     // TODO(clabby): Implement this feature.
     pub compute_pending_block: bool,
@@ -47,8 +47,8 @@ pub struct OptimismPayloadBuilder<EvmConfig> {
     pub evm_config: EvmConfig,
 }
 
-impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
-    /// `OptimismPayloadBuilder` constructor.
+impl<EvmConfig> OpPayloadBuilder<EvmConfig> {
+    /// `OpPayloadBuilder` constructor.
     pub const fn new(evm_config: EvmConfig) -> Self {
         Self { compute_pending_block: true, evm_config }
     }
@@ -69,7 +69,7 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
         self.compute_pending_block
     }
 }
-impl<EvmConfig> OptimismPayloadBuilder<EvmConfig>
+impl<EvmConfig> OpPayloadBuilder<EvmConfig>
 where
     EvmConfig: ConfigureEvmEnv<Header = Header>,
 {
@@ -89,8 +89,8 @@ where
     }
 }
 
-/// Implementation of the [`PayloadBuilder`] trait for [`OptimismPayloadBuilder`].
-impl<Pool, Client, EvmConfig> PayloadBuilder<Pool, Client> for OptimismPayloadBuilder<EvmConfig>
+/// Implementation of the [`PayloadBuilder`] trait for [`OpPayloadBuilder`].
+impl<Pool, Client, EvmConfig> PayloadBuilder<Pool, Client> for OpPayloadBuilder<EvmConfig>
 where
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
     Pool: TransactionPool,
