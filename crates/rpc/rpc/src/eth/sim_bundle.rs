@@ -127,15 +127,9 @@ where
             if let Some(validity) = &current_bundle.validity {
                 // Validate refund entries
                 if let Some(refunds) = &validity.refund {
-                    let max_idx = if current_bundle.bundle_body.is_empty() {
-                        0
-                    } else {
-                        current_bundle.bundle_body.len() - 1
-                    };
-
                     let mut total_percent = 0;
                     for refund in refunds {
-                        if refund.body_idx > max_idx as u64 {
+                        if refund.body_idx >= current_bundle.bundle_body.len()  {
                             return Err(EthApiError::InvalidParams(
                                 EthSimBundleError::InvalidValidity.to_string(),
                             ));
