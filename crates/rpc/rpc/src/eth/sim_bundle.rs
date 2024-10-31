@@ -30,6 +30,20 @@ use revm::{
 use std::{sync::Arc, time::Duration};
 use tracing::info;
 
+/// Maximum bundle depth
+const MAX_NESTED_BUNDLE_DEPTH: usize = 5;
+
+/// Maximum body size
+const MAX_BUNDLE_BODY_SIZE: usize = 50;
+/// Default simulation timeout
+const DEFAULT_SIM_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Maximum simulation timeout
+const MAX_SIM_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Maximum payout cost
+const SBUNDLE_PAYOUT_MAX_COST: u64 = 30_000;
+
 /// A flattened representation of a bundle item containing transaction and associated metadata.
 #[derive(Clone, Debug)]
 pub struct FlattenedBundleItem {
@@ -46,20 +60,6 @@ pub struct FlattenedBundleItem {
     /// Optional privacy settings for the bundle item
     pub privacy: Option<Privacy>,
 }
-
-/// Maximum bundle depth
-const MAX_NESTED_BUNDLE_DEPTH: usize = 5;
-
-/// Maximum body size
-const MAX_BUNDLE_BODY_SIZE: usize = 50;
-/// Default simulation timeout
-const DEFAULT_SIM_TIMEOUT: Duration = Duration::from_secs(5);
-
-/// Maximum simulation timeout
-const MAX_SIM_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// Maximum payout cost
-const SBUNDLE_PAYOUT_MAX_COST: u64 = 30_000;
 
 /// `Eth` sim bundle implementation.
 pub struct EthSimBundle<Eth> {
