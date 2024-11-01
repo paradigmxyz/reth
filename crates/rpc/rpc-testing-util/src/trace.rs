@@ -381,7 +381,7 @@ pub struct TraceBlockStream<'a> {
     stream: Pin<Box<dyn Stream<Item = TraceBlockResult> + 'a>>,
 }
 
-impl<'a> TraceBlockStream<'a> {
+impl TraceBlockStream<'_> {
     /// Returns the next error result of the stream.
     pub async fn next_err(&mut self) -> Option<(RpcError, BlockId)> {
         loop {
