@@ -68,7 +68,7 @@ impl OptimismNode {
         Node,
         OpPoolBuilder,
         OpPayloadBuilder,
-        OptimismNetworkBuilder,
+        OpNetworkBuilder,
         OptimismExecutorBuilder,
         OptimismConsensusBuilder,
     >
@@ -82,7 +82,7 @@ impl OptimismNode {
             .node_types::<Node>()
             .pool(OpPoolBuilder::default())
             .payload(OpPayloadBuilder::new(compute_pending_block))
-            .network(OptimismNetworkBuilder {
+            .network(OpNetworkBuilder {
                 disable_txpool_gossip,
                 disable_discovery_v4: !discovery_v4,
             })
@@ -101,7 +101,7 @@ where
         N,
         OpPoolBuilder,
         OpPayloadBuilder,
-        OptimismNetworkBuilder,
+        OpNetworkBuilder,
         OptimismExecutorBuilder,
         OptimismConsensusBuilder,
     >;
@@ -365,17 +365,17 @@ where
 
 /// A basic optimism network builder.
 #[derive(Debug, Default, Clone)]
-pub struct OptimismNetworkBuilder {
+pub struct OpNetworkBuilder {
     /// Disable transaction pool gossip
     pub disable_txpool_gossip: bool,
     /// Disable discovery v4
     pub disable_discovery_v4: bool,
 }
 
-impl OptimismNetworkBuilder {
+impl OpNetworkBuilder {
     /// Returns the [`NetworkConfig`] that contains the settings to launch the p2p network.
     ///
-    /// This applies the configured [`OptimismNetworkBuilder`] settings.
+    /// This applies the configured [`OpNetworkBuilder`] settings.
     pub fn network_config<Node>(
         &self,
         ctx: &BuilderContext<Node>,
@@ -420,7 +420,7 @@ impl OptimismNetworkBuilder {
     }
 }
 
-impl<Node, Pool> NetworkBuilder<Node, Pool> for OptimismNetworkBuilder
+impl<Node, Pool> NetworkBuilder<Node, Pool> for OpNetworkBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec>>,
     Pool: TransactionPool + Unpin + 'static,
