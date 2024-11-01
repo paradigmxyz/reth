@@ -119,8 +119,8 @@ where
 {
     type Provider = N::Provider;
     type Pool = N::Pool;
-    type Network = <N as RpcNodeCore>::Network;
     type Evm = <N as RpcNodeCore>::Evm;
+    type Network = <N as RpcNodeCore>::Network;
 
     #[inline]
     fn pool(&self) -> &Self::Pool {

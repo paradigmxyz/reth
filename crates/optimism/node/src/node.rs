@@ -66,8 +66,8 @@ impl OptimismNode {
         args: RollupArgs,
     ) -> ComponentsBuilder<
         Node,
-        OptimismPoolBuilder,
-        OptimismPayloadBuilder,
+        OpPoolBuilder,
+        OpPayloadBuilder,
         OptimismNetworkBuilder,
         OptimismExecutorBuilder,
         OptimismConsensusBuilder,
@@ -80,8 +80,8 @@ impl OptimismNode {
         let RollupArgs { disable_txpool_gossip, compute_pending_block, discovery_v4, .. } = args;
         ComponentsBuilder::default()
             .node_types::<Node>()
-            .pool(OptimismPoolBuilder::default())
-            .payload(OptimismPayloadBuilder::new(compute_pending_block))
+            .pool(OpPoolBuilder::default())
+            .payload(OpPayloadBuilder::new(compute_pending_block))
             .network(OptimismNetworkBuilder {
                 disable_txpool_gossip,
                 disable_discovery_v4: !discovery_v4,
@@ -99,8 +99,8 @@ where
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
-        OptimismPoolBuilder,
-        OptimismPayloadBuilder,
+        OpPoolBuilder,
+        OpPayloadBuilder,
         OptimismNetworkBuilder,
         OptimismExecutorBuilder,
         OptimismConsensusBuilder,
@@ -206,12 +206,12 @@ where
 /// This contains various settings that can be configured and take precedence over the node's
 /// config.
 #[derive(Debug, Default, Clone)]
-pub struct OptimismPoolBuilder {
+pub struct OpPoolBuilder {
     /// Enforced overrides that are applied to the pool config.
     pub pool_config_overrides: PoolBuilderConfigOverrides,
 }
 
-impl<Node> PoolBuilder<Node> for OptimismPoolBuilder
+impl<Node> PoolBuilder<Node> for OpPoolBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec>>,
 {
@@ -288,7 +288,7 @@ where
 
 /// A basic optimism payload service builder
 #[derive(Debug, Default, Clone)]
-pub struct OptimismPayloadBuilder {
+pub struct OpPayloadBuilder {
     /// By default the pending block equals the latest block
     /// to save resources and not leak txs from the tx-pool,
     /// this flag enables computing of the pending block
@@ -300,7 +300,7 @@ pub struct OptimismPayloadBuilder {
     pub compute_pending_block: bool,
 }
 
-impl OptimismPayloadBuilder {
+impl OpPayloadBuilder {
     /// Create a new instance with the given `compute_pending_block` flag.
     pub const fn new(compute_pending_block: bool) -> Self {
         Self { compute_pending_block }
@@ -320,9 +320,8 @@ impl OptimismPayloadBuilder {
         Pool: TransactionPool + Unpin + 'static,
         Evm: ConfigureEvm<Header = Header>,
     {
-        let payload_builder =
-            reth_optimism_payload_builder::OptimismPayloadBuilder::new(evm_config)
-                .set_compute_pending_block(self.compute_pending_block);
+        let payload_builder = reth_optimism_payload_builder::OpPayloadBuilder::new(evm_config)
+            .set_compute_pending_block(self.compute_pending_block);
         let conf = ctx.payload_builder_config();
 
         let payload_job_config = BasicPayloadJobGeneratorConfig::default()
@@ -348,7 +347,7 @@ impl OptimismPayloadBuilder {
     }
 }
 
-impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for OptimismPayloadBuilder
+impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for OpPayloadBuilder
 where
     Node: FullNodeTypes<
         Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = OpChainSpec>,
