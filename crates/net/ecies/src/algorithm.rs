@@ -686,7 +686,7 @@ impl ECIES {
 
     pub fn body_len(&self) -> usize {
         let len = self.body_size.unwrap();
-        Self::align_num(len, 16) + 16
+        Self::align_16(len) + 16
     }
 
     #[cfg(test)]
@@ -697,7 +697,7 @@ impl ECIES {
     }
 
     pub fn write_body(&mut self, out: &mut BytesMut, data: &[u8]) {
-        let len = Self::align_num(data.len(), 16);
+        let len = Self::align_16(data.len());
         let old_len = out.len();
         out.resize(old_len + len, 0);
 
@@ -732,9 +732,10 @@ impl ECIES {
     }
 
     /// return num alignment value
+    /// `<https://stackoverflow.com/questions/14561402/how-is-this-size-alignment-working>`
     #[inline]
-    const fn align_num(num: usize, align: usize) -> usize {
-        (num + (align - 1)) & !(align - 1)
+    const fn align_16(num: usize) -> usize {
+        (num + (16 - 1)) & !(16 - 1)
     }
 }
 
