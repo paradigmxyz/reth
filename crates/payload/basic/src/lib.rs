@@ -146,34 +146,28 @@ where
     fn new_payload_job(
         &self,
         attributes: <Self::Job as PayloadJob>::PayloadAttributes,
-    ) -> Result<Self::Job, PayloadBuilderError> {
-        let parent_block = if attributes.parent().is_zero() {
-            // use latest block if parent is zero: genesis block
+    ) -> Result<Self::Job, PayloadBuilderError> {        
+        
+        
+        let parent_header = if attributes.parent().is_zero() {
+            // Use latest header for genesis block case
             self.client
-                .block_by_number_or_tag(BlockNumberOrTag::Latest)?
-                .ok_or_else(|| PayloadBuilderError::MissingParentBlock(attributes.parent()))?
-                .seal_slow()
+                .latest_header()
+                .map_err(Self::Error::from_eth_err)?
+                .ok_or_else(|| PayloadBuilderError::Internal(RethError::Provider(ProviderError::HeaderNotFound(attributes.parent()))))?
         } else {
-            let block = self
-                .client
-                .find_block_by_hash(attributes.parent(), BlockSource::Any)?
-                .ok_or_else(|| PayloadBuilderError::MissingParentBlock(attributes.parent()))?;
-
-            // we already know the hash, so we can seal it
-            block.seal(attributes.parent())
+            // Fetch specific header by hash
+            self.client
+            .sealed_header_by_hash(attributes.parent())
+            .ok_or_else(|| PayloadBuilderError::MissingParentBlock(attributes.parent()))?
         };
-
-        let hash = parent_block.hash();
-        let parent_header = parent_block.header();
-        let header = SealedHeader::new(parent_header.clone(), hash);
-
         let config =
-            PayloadConfig::new(Arc::new(header), self.config.extradata.clone(), attributes);
+            PayloadConfig::new(Arc::new(parent_header), self.config.extradata.clone(), attributes);
 
         let until = self.job_deadline(config.attributes.timestamp());
         let deadline = Box::pin(tokio::time::sleep_until(until));
 
-        let cached_reads = self.maybe_pre_cached(hash);
+        let cached_reads = self.maybe_pre_cached(parent_header.hash());
 
         let mut job = BasicPayloadJob {
             config,
