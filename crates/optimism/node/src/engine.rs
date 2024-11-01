@@ -14,9 +14,9 @@ use reth_node_api::{
     validate_version_specific_fields, EngineTypes, EngineValidator,
 };
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_forks::OptimismHardfork;
+use reth_optimism_forks::{OptimismHardfork, OptimismHardforks};
 use reth_optimism_payload_builder::{
-    builder::decode_eip_1559_params, OptimismBuiltPayload, OptimismPayloadBuilderAttributes,
+    builder::decode_eip_1559_params, OpBuiltPayload, OpPayloadBuilderAttributes,
 };
 
 /// The types used in the optimism beacon consensus engine.
@@ -39,7 +39,7 @@ where
         + TryInto<OpExecutionPayloadEnvelopeV3>
         + TryInto<OpExecutionPayloadEnvelopeV4>,
 {
-    type ExecutionPayloadV1 = ExecutionPayloadV1;
+    type ExecutionPayloadEnvelopeV1 = ExecutionPayloadV1;
     type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadEnvelopeV3 = OpExecutionPayloadEnvelopeV3;
     type ExecutionPayloadEnvelopeV4 = OpExecutionPayloadEnvelopeV4;
@@ -51,9 +51,9 @@ where
 pub struct OptimismPayloadTypes;
 
 impl PayloadTypes for OptimismPayloadTypes {
-    type BuiltPayload = OptimismBuiltPayload;
+    type BuiltPayload = OpBuiltPayload;
     type PayloadAttributes = OpPayloadAttributes;
-    type PayloadBuilderAttributes = OptimismPayloadBuilderAttributes;
+    type PayloadBuilderAttributes = OpPayloadBuilderAttributes;
 }
 
 /// Validator for Optimism engine API.
@@ -149,10 +149,8 @@ where
             ))
         }
 
-        if self.chain_spec.is_fork_active_at_timestamp(
-            OptimismHardfork::Holocene,
-            attributes.payload_attributes.timestamp,
-        ) {
+        if self.chain_spec.is_holocene_active_at_timestamp(attributes.payload_attributes.timestamp)
+        {
             let Some(eip_1559_params) = attributes.eip_1559_params else {
                 return Err(EngineObjectValidationError::InvalidParams(
                     "MissingEip1559ParamsInPayloadAttributes".to_string().into(),

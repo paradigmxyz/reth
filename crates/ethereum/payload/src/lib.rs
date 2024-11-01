@@ -456,7 +456,7 @@ where
         EthBuiltPayload::new(attributes.id, sealed_block, total_fees, Some(executed), requests);
 
     // extend the payload with the blob sidecars from the executed txs
-    payload.extend_sidecars(blob_sidecars);
+    payload.extend_sidecars(blob_sidecars.into_iter().map(Arc::unwrap_or_clone));
 
     Ok(BuildOutcome::Better { payload, cached_reads })
 }

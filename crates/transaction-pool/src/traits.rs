@@ -249,16 +249,6 @@ pub trait TransactionPool: Send + Sync + Clone {
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>>;
 
     /// Returns an iterator that yields transactions that are ready for block production with the
-    /// given base fee.
-    ///
-    /// Consumer: Block production
-    #[deprecated(note = "Use best_transactions_with_attributes instead.")]
-    fn best_transactions_with_base_fee(
-        &self,
-        base_fee: u64,
-    ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>>;
-
-    /// Returns an iterator that yields transactions that are ready for block production with the
     /// given base fee and optional blob fee attributes.
     ///
     /// Consumer: Block production
@@ -449,7 +439,10 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Returns the [BlobTransactionSidecar] for the given transaction hash if it exists in the blob
     /// store.
-    fn get_blob(&self, tx_hash: TxHash) -> Result<Option<BlobTransactionSidecar>, BlobStoreError>;
+    fn get_blob(
+        &self,
+        tx_hash: TxHash,
+    ) -> Result<Option<Arc<BlobTransactionSidecar>>, BlobStoreError>;
 
     /// Returns all [BlobTransactionSidecar] for the given transaction hashes if they exists in the
     /// blob store.
@@ -459,7 +452,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     fn get_all_blobs(
         &self,
         tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<(TxHash, BlobTransactionSidecar)>, BlobStoreError>;
+    ) -> Result<Vec<(TxHash, Arc<BlobTransactionSidecar>)>, BlobStoreError>;
 
     /// Returns the exact [BlobTransactionSidecar] for the given transaction hashes in the order
     /// they were requested.
@@ -468,7 +461,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     fn get_all_blobs_exact(
         &self,
         tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError>;
+    ) -> Result<Vec<Arc<BlobTransactionSidecar>>, BlobStoreError>;
 
     /// Return the [`BlobTransactionSidecar`]s for a list of blob versioned hashes.
     fn get_blobs_for_versioned_hashes(

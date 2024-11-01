@@ -281,7 +281,7 @@ where
     pub async fn get_payload_v1(
         &self,
         payload_id: PayloadId,
-    ) -> EngineApiResult<EngineT::ExecutionPayloadV1> {
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV1> {
         self.inner
             .payload_store
             .resolve(payload_id)
@@ -775,7 +775,7 @@ where
     async fn get_payload_v1(
         &self,
         payload_id: PayloadId,
-    ) -> RpcResult<EngineT::ExecutionPayloadV1> {
+    ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV1> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV1");
         let start = Instant::now();
         let res = Self::get_payload_v1(self, payload_id).await;

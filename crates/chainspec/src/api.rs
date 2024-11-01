@@ -1,11 +1,10 @@
 use crate::{ChainSpec, DepositContract};
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 use alloy_chains::Chain;
 use alloy_eips::eip1559::BaseFeeParams;
 use alloy_genesis::Genesis;
 use alloy_primitives::B256;
-use core::fmt::Debug;
-use reth_ethereum_forks::DisplayHardforks;
+use core::fmt::{Debug, Display};
 use reth_network_peers::NodeRecord;
 use reth_primitives_traits::Header;
 
@@ -39,7 +38,7 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     fn prune_delete_limit(&self) -> usize;
 
     /// Returns a string representation of the hardforks.
-    fn display_hardforks(&self) -> DisplayHardforks;
+    fn display_hardforks(&self) -> Box<dyn Display>;
 
     /// The genesis header.
     fn genesis_header(&self) -> &Header;
@@ -89,8 +88,8 @@ impl EthChainSpec for ChainSpec {
         self.prune_delete_limit
     }
 
-    fn display_hardforks(&self) -> DisplayHardforks {
-        self.display_hardforks()
+    fn display_hardforks(&self) -> Box<dyn Display> {
+        Box::new(Self::display_hardforks(self))
     }
 
     fn genesis_header(&self) -> &Header {

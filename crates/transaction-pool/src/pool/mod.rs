@@ -307,7 +307,9 @@ where
     /// Caution: this assumes the given transaction is eip-4844
     fn get_blob_transaction(&self, transaction: TransactionSigned) -> Option<BlobTransaction> {
         if let Ok(Some(sidecar)) = self.blob_store.get(transaction.hash()) {
-            if let Ok(blob) = BlobTransaction::try_from_signed(transaction, sidecar) {
+            if let Ok(blob) =
+                BlobTransaction::try_from_signed(transaction, Arc::unwrap_or_clone(sidecar))
+            {
                 return Some(blob)
             }
         }

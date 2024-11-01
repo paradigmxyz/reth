@@ -37,7 +37,7 @@ pub fn eth_handshake() -> (Status, ForkFilter) {
     let fork_filter = ForkFilter::new(Head::default(), genesis, 0, Vec::new());
 
     let status = Status {
-        version: EthVersion::Eth67 as u8,
+        version: EthVersion::Eth67,
         chain: Chain::mainnet(),
         total_difficulty: U256::ZERO,
         blockhash: B256::random(),

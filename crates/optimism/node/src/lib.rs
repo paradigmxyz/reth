@@ -23,7 +23,7 @@ pub use node::OptimismNode;
 pub mod txpool;
 
 pub use reth_optimism_payload_builder::{
-    OptimismBuiltPayload, OptimismPayloadBuilder, OptimismPayloadBuilderAttributes,
+    OpBuiltPayload, OpPayloadBuilder, OpPayloadBuilderAttributes,
 };
 
 pub use reth_optimism_evm::*;

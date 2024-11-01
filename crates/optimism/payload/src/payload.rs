@@ -25,7 +25,7 @@ use std::sync::Arc;
 
 /// Optimism Payload Builder Attributes
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct OptimismPayloadBuilderAttributes {
+pub struct OpPayloadBuilderAttributes {
     /// Inner ethereum payload builder attributes
     pub payload_attributes: EthPayloadBuilderAttributes,
     /// `NoTxPool` option for the generated payload
@@ -39,7 +39,7 @@ pub struct OptimismPayloadBuilderAttributes {
     pub eip_1559_params: Option<B64>,
 }
 
-impl OptimismPayloadBuilderAttributes {
+impl OpPayloadBuilderAttributes {
     /// Extracts the `eip1559` parameters for the payload.
     pub fn get_holocene_extra_data(
         &self,
@@ -73,7 +73,7 @@ impl OptimismPayloadBuilderAttributes {
     }
 }
 
-impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
+impl PayloadBuilderAttributes for OpPayloadBuilderAttributes {
     type RpcPayloadAttributes = OpPayloadAttributes;
     type Error = alloy_rlp::Error;
 
@@ -154,7 +154,7 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
 
 /// Contains the built payload.
 #[derive(Debug, Clone)]
-pub struct OptimismBuiltPayload {
+pub struct OpBuiltPayload {
     /// Identifier of the payload
     pub(crate) id: PayloadId,
     /// The built block
@@ -169,19 +169,19 @@ pub struct OptimismBuiltPayload {
     /// The rollup's chainspec.
     pub(crate) chain_spec: Arc<OpChainSpec>,
     /// The payload attributes.
-    pub(crate) attributes: OptimismPayloadBuilderAttributes,
+    pub(crate) attributes: OpPayloadBuilderAttributes,
 }
 
 // === impl BuiltPayload ===
 
-impl OptimismBuiltPayload {
+impl OpBuiltPayload {
     /// Initializes the payload with the given initial block.
     pub const fn new(
         id: PayloadId,
         block: SealedBlock,
         fees: U256,
         chain_spec: Arc<OpChainSpec>,
-        attributes: OptimismPayloadBuilderAttributes,
+        attributes: OpPayloadBuilderAttributes,
         executed_block: Option<ExecutedBlock>,
     ) -> Self {
         Self { id, block, executed_block, fees, sidecars: Vec::new(), chain_spec, attributes }
@@ -208,7 +208,7 @@ impl OptimismBuiltPayload {
     }
 }
 
-impl BuiltPayload for OptimismBuiltPayload {
+impl BuiltPayload for OpBuiltPayload {
     fn block(&self) -> &SealedBlock {
         &self.block
     }
@@ -226,7 +226,7 @@ impl BuiltPayload for OptimismBuiltPayload {
     }
 }
 
-impl BuiltPayload for &OptimismBuiltPayload {
+impl BuiltPayload for &OpBuiltPayload {
     fn block(&self) -> &SealedBlock {
         (**self).block()
     }
@@ -245,24 +245,24 @@ impl BuiltPayload for &OptimismBuiltPayload {
 }
 
 // V1 engine_getPayloadV1 response
-impl From<OptimismBuiltPayload> for ExecutionPayloadV1 {
-    fn from(value: OptimismBuiltPayload) -> Self {
+impl From<OpBuiltPayload> for ExecutionPayloadV1 {
+    fn from(value: OpBuiltPayload) -> Self {
         block_to_payload_v1(value.block)
     }
 }
 
 // V2 engine_getPayloadV2 response
-impl From<OptimismBuiltPayload> for ExecutionPayloadEnvelopeV2 {
-    fn from(value: OptimismBuiltPayload) -> Self {
-        let OptimismBuiltPayload { block, fees, .. } = value;
+impl From<OpBuiltPayload> for ExecutionPayloadEnvelopeV2 {
+    fn from(value: OpBuiltPayload) -> Self {
+        let OpBuiltPayload { block, fees, .. } = value;
 
         Self { block_value: fees, execution_payload: convert_block_to_payload_field_v2(block) }
     }
 }
 
-impl From<OptimismBuiltPayload> for OpExecutionPayloadEnvelopeV3 {
-    fn from(value: OptimismBuiltPayload) -> Self {
-        let OptimismBuiltPayload { block, fees, sidecars, chain_spec, attributes, .. } = value;
+impl From<OpBuiltPayload> for OpExecutionPayloadEnvelopeV3 {
+    fn from(value: OpBuiltPayload) -> Self {
+        let OpBuiltPayload { block, fees, sidecars, chain_spec, attributes, .. } = value;
 
         let parent_beacon_block_root =
             if chain_spec.is_cancun_active_at_timestamp(attributes.timestamp()) {
@@ -287,9 +287,9 @@ impl From<OptimismBuiltPayload> for OpExecutionPayloadEnvelopeV3 {
         }
     }
 }
-impl From<OptimismBuiltPayload> for OpExecutionPayloadEnvelopeV4 {
-    fn from(value: OptimismBuiltPayload) -> Self {
-        let OptimismBuiltPayload { block, fees, sidecars, chain_spec, attributes, .. } = value;
+impl From<OpBuiltPayload> for OpExecutionPayloadEnvelopeV4 {
+    fn from(value: OpBuiltPayload) -> Self {
+        let OpBuiltPayload { block, fees, sidecars, chain_spec, attributes, .. } = value;
 
         let parent_beacon_block_root =
             if chain_spec.is_cancun_active_at_timestamp(attributes.timestamp()) {
@@ -411,7 +411,7 @@ mod tests {
 
     #[test]
     fn test_get_extra_data_post_holocene() {
-        let attributes = OptimismPayloadBuilderAttributes {
+        let attributes = OpPayloadBuilderAttributes {
             eip_1559_params: Some(B64::from_str("0x0000000800000008").unwrap()),
             ..Default::default()
         };
@@ -421,10 +421,8 @@ mod tests {
 
     #[test]
     fn test_get_extra_data_post_holocene_default() {
-        let attributes = OptimismPayloadBuilderAttributes {
-            eip_1559_params: Some(B64::ZERO),
-            ..Default::default()
-        };
+        let attributes =
+            OpPayloadBuilderAttributes { eip_1559_params: Some(B64::ZERO), ..Default::default() };
         let extra_data = attributes.get_holocene_extra_data(BaseFeeParams::new(80, 60));
         assert_eq!(extra_data.unwrap(), Bytes::copy_from_slice(&[0, 0, 0, 0, 80, 0, 0, 0, 60]));
     }
