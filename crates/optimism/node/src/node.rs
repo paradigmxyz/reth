@@ -66,7 +66,7 @@ impl OptimismNode {
         args: RollupArgs,
     ) -> ComponentsBuilder<
         Node,
-        OptimismPoolBuilder,
+        OpPoolBuilder,
         OpPayloadBuilder,
         OptimismNetworkBuilder,
         OptimismExecutorBuilder,
@@ -80,7 +80,7 @@ impl OptimismNode {
         let RollupArgs { disable_txpool_gossip, compute_pending_block, discovery_v4, .. } = args;
         ComponentsBuilder::default()
             .node_types::<Node>()
-            .pool(OptimismPoolBuilder::default())
+            .pool(OpPoolBuilder::default())
             .payload(OpPayloadBuilder::new(compute_pending_block))
             .network(OptimismNetworkBuilder {
                 disable_txpool_gossip,
@@ -99,7 +99,7 @@ where
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
-        OptimismPoolBuilder,
+        OpPoolBuilder,
         OpPayloadBuilder,
         OptimismNetworkBuilder,
         OptimismExecutorBuilder,
@@ -206,12 +206,12 @@ where
 /// This contains various settings that can be configured and take precedence over the node's
 /// config.
 #[derive(Debug, Default, Clone)]
-pub struct OptimismPoolBuilder {
+pub struct OpPoolBuilder {
     /// Enforced overrides that are applied to the pool config.
     pub pool_config_overrides: PoolBuilderConfigOverrides,
 }
 
-impl<Node> PoolBuilder<Node> for OptimismPoolBuilder
+impl<Node> PoolBuilder<Node> for OpPoolBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec>>,
 {
