@@ -1,11 +1,13 @@
 //! Database adapters for payload building.
-use alloy_primitives::{map::HashMap, Address, B256, U256};
+use alloy_primitives::{
+    map::{Entry, HashMap},
+    Address, B256, U256,
+};
 use core::cell::RefCell;
 use reth_primitives::revm_primitives::{
     db::{Database, DatabaseRef},
     AccountInfo, Bytecode,
 };
-use std::collections::hash_map::Entry;
 
 /// A container type that caches reads from an underlying [`DatabaseRef`].
 ///
