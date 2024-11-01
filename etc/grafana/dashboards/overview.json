@@ -3028,7 +3028,7 @@
             "fullMetaSearch": false,
             "hide": false,
             "includeNullMetadata": true,
-            "legendFormat": "avg/m",
+            "legendFormat": "Avg Gas/s (1m)",
             "range": true,
             "refId": "B",
             "useBackend": false
@@ -3044,7 +3044,7 @@
             "fullMetaSearch": false,
             "hide": false,
             "includeNullMetadata": true,
-            "legendFormat": "avg/5m",
+            "legendFormat": "Avg Gas/s (5m)",
             "range": true,
             "refId": "C",
             "useBackend": false
@@ -3060,9 +3060,25 @@
             "fullMetaSearch": false,
             "hide": false,
             "includeNullMetadata": true,
-            "legendFormat": "avg/10m",
+            "legendFormat": "Avg Gas/s (10m)",
             "range": true,
             "refId": "D",
+            "useBackend": false
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+            },
+            "disableTextWrap": false,
+            "editorMode": "builder",
+            "expr": "avg_over_time(reth_sync_execution_gas_per_second{instance=~\"$instance\"}[30m])",
+            "fullMetaSearch": false,
+            "hide": false,
+            "includeNullMetadata": true,
+            "legendFormat": "Avg Gas/s (30m)",
+            "range": true,
+            "refId": "E",
             "useBackend": false
         },
         {
@@ -3076,9 +3092,9 @@
             "fullMetaSearch": false,
             "hide": false,
             "includeNullMetadata": true,
-            "legendFormat": "avg/h",
+            "legendFormat": "Avg Gas/s (1h)",
             "range": true,
-            "refId": "E",
+            "refId": "F",
             "useBackend": false
         },
         {
@@ -3092,9 +3108,9 @@
             "fullMetaSearch": false,
             "hide": false,
             "includeNullMetadata": true,
-            "legendFormat": "avg/24h",
+            "legendFormat": "Avg Gas/s (24h)",
             "range": true,
-            "refId": "F",
+            "refId": "G",
             "useBackend": false
         }
       ],
