@@ -205,16 +205,6 @@ impl<'a> arbitrary::Arbitrary<'a> for Receipt {
     }
 }
 
-impl ReceiptWithBloom {
-    /// Returns the enveloped encoded receipt.
-    ///
-    /// See also [ReceiptWithBloom::encode_enveloped]
-    pub fn envelope_encoded(&self) -> Bytes {
-        let mut buf = Vec::new();
-        self.encode_enveloped(&mut buf);
-        buf.into()
-  }
-}
 impl Encodable2718 for ReceiptWithBloom {
     fn type_flag(&self) -> Option<u8> {
         match self.receipt.tx_type {
