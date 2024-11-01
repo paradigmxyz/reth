@@ -2015,7 +2015,7 @@ impl TransportRpcModules {
         Ok(false)
     }
 
-    /// Merge the given [Methods] in all configured methods.
+    /// Merge the given [`Methods`] in all configured methods.
     ///
     /// Fails if any of the methods in other is present already.
     pub fn merge_configured(
@@ -2106,7 +2106,22 @@ impl TransportRpcModules {
         http_removed || ws_removed || ipc_removed
     }
 
-    /// Replace the given [Methods] in the configured http methods.
+    /// Renames a method in all configured transports by:
+    /// 1. Removing the old method name.
+    /// 2. Adding the new method.
+    pub fn rename(
+        &mut self,
+        old_name: &'static str,
+        new_method: impl Into<Methods>,
+    ) -> Result<(), RegisterMethodError> {
+        // Remove the old method from all configured transports
+        self.remove_method_from_configured(old_name);
+
+        // Merge the new method into the configured transports
+        self.merge_configured(new_method)
+    }
+
+    /// Replace the given [`Methods`] in the configured http methods.
     ///
     /// Fails if any of the methods in other is present already or if the method being removed is
     /// not present
@@ -2476,6 +2491,43 @@ mod tests {
         assert!(modules.http.as_ref().unwrap().method("anything").is_none());
         assert!(modules.ws.as_ref().unwrap().method("anything").is_none());
         assert!(modules.ipc.as_ref().unwrap().method("anything").is_none());
+    }
+
+    #[test]
+    fn test_transport_rpc_module_rename() {
+        let mut modules = TransportRpcModules {
+            http: Some(create_test_module()),
+            ws: Some(create_test_module()),
+            ipc: Some(create_test_module()),
+            ..Default::default()
+        };
+
+        // Verify that the old we want to rename exists at the start
+        assert!(modules.http.as_ref().unwrap().method("anything").is_some());
+        assert!(modules.ws.as_ref().unwrap().method("anything").is_some());
+        assert!(modules.ipc.as_ref().unwrap().method("anything").is_some());
+
+        // Verify that the new method does not exist at the start
+        assert!(modules.http.as_ref().unwrap().method("something").is_none());
+        assert!(modules.ws.as_ref().unwrap().method("something").is_none());
+        assert!(modules.ipc.as_ref().unwrap().method("something").is_none());
+
+        // Create another module
+        let mut other_module = RpcModule::new(());
+        other_module.register_method("something", |_, _, _| "fails").unwrap();
+
+        // Rename the method
+        modules.rename("anything", other_module).expect("rename failed");
+
+        // Verify that the old method was removed from all transports
+        assert!(modules.http.as_ref().unwrap().method("anything").is_none());
+        assert!(modules.ws.as_ref().unwrap().method("anything").is_none());
+        assert!(modules.ipc.as_ref().unwrap().method("anything").is_none());
+
+        // Verify that the new method was added to all transports
+        assert!(modules.http.as_ref().unwrap().method("something").is_some());
+        assert!(modules.ws.as_ref().unwrap().method("something").is_some());
+        assert!(modules.ipc.as_ref().unwrap().method("something").is_some());
     }
 
     #[test]
