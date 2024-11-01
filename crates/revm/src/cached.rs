@@ -22,10 +22,10 @@ use reth_primitives::revm_primitives::{
 ///
 /// fn build_payload<DB: DatabaseRef>(db: DB) {
 ///     let mut cached_reads = CachedReads::default();
-///     let db_ref = cached_reads.as_db(db);
-///     // this is `Database` and can be used to build a payload, it never writes to `CachedReads` or the underlying database, but all reads from the underlying database are cached in `CachedReads`.
+///     let db = cached_reads.as_db_mut(db);
+///     // this is `Database` and can be used to build a payload, it never commits to `CachedReads` or the underlying database, but all reads from the underlying database are cached in `CachedReads`.
 ///     // Subsequent payload build attempts can use cached reads and avoid hitting the underlying database.
-///     let db = State::builder().with_database_ref(db_ref).build();
+///     let state = State::builder().with_database(db).build();
 /// }
 /// ```
 #[derive(Debug, Clone, Default)]
@@ -40,10 +40,11 @@ pub struct CachedReads {
 impl CachedReads {
     /// Gets a [`DatabaseRef`] that will cache reads from the given database.
     pub fn as_db<DB>(&mut self, db: DB) -> CachedReadsDBRef<'_, DB> {
-        CachedReadsDBRef { inner: RefCell::new(self.as_db_mut(db)) }
+        self.as_db_mut(db).into_db()
     }
 
-    fn as_db_mut<DB>(&mut self, db: DB) -> CachedReadsDbMut<'_, DB> {
+    /// Gets a mutable [`Database`] that will cache reads from the underlying database.
+    pub fn as_db_mut<DB>(&mut self, db: DB) -> CachedReadsDbMut<'_, DB> {
         CachedReadsDbMut { cached: self, db }
     }
 
@@ -65,6 +66,19 @@ pub struct CachedReadsDbMut<'a, DB> {
     pub cached: &'a mut CachedReads,
     /// The underlying database.
     pub db: DB,
+}
+
+impl<'a, DB> CachedReadsDbMut<'a, DB> {
+    /// Converts this [`Database`] implementation into a [`DatabaseRef`] that will still cache
+    /// reads.
+    pub const fn into_db(self) -> CachedReadsDBRef<'a, DB> {
+        CachedReadsDBRef { inner: RefCell::new(self) }
+    }
+
+    /// Returns access to wrapped [`DatabaseRef`].
+    pub const fn inner(&self) -> &DB {
+        &self.db
+    }
 }
 
 impl<DB: DatabaseRef> Database for CachedReadsDbMut<'_, DB> {
