@@ -6920,7 +6920,7 @@ dependencies = [
  "proptest",
  "proptest-arbitrary-interop",
  "reth-codecs",
- "reth-primitives",
+ "reth-primitives-traits",
  "serde",
  "test-fuzz",
 ]
