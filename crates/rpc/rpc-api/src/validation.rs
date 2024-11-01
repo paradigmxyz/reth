@@ -1,7 +1,10 @@
 //! API for block submission validation.
 
 use alloy_primitives::B256;
-use alloy_rpc_types_beacon::relay::{BuilderBlockValidationRequest, BuilderBlockValidationRequestV2, SignedBidSubmissionV3, SignedBidSubmissionV4};
+use alloy_rpc_types_beacon::relay::{
+    BuilderBlockValidationRequest, BuilderBlockValidationRequestV2, SignedBidSubmissionV3,
+    SignedBidSubmissionV4,
+};
 use jsonrpsee::proc_macros::rpc;
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};

@@ -3,7 +3,9 @@ use alloy_eips::eip4844::kzg_to_versioned_hash;
 use alloy_rpc_types::engine::{
     BlobsBundleV1, CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar,
 };
-use alloy_rpc_types_beacon::relay::{BidTrace, BuilderBlockValidationRequest, BuilderBlockValidationRequestV2};
+use alloy_rpc_types_beacon::relay::{
+    BidTrace, BuilderBlockValidationRequest, BuilderBlockValidationRequestV2,
+};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
@@ -18,7 +20,10 @@ use reth_provider::{
     StateProviderFactory, WithdrawalsProvider,
 };
 use reth_revm::database::StateProviderDatabase;
-use reth_rpc_api::{BlockSubmissionValidationApiServer, BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4};
+use reth_rpc_api::{
+    BlockSubmissionValidationApiServer, BuilderBlockValidationRequestV3,
+    BuilderBlockValidationRequestV4,
+};
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_trie::HashedPostState;
@@ -423,13 +428,16 @@ where
             .payload_validator
             .ensure_well_formed_payload(
                 ExecutionPayload::V3(request.request.execution_payload),
-                ExecutionPayloadSidecar::v4(CancunPayloadFields {
-                    parent_beacon_block_root: request.parent_beacon_block_root,
-                    versioned_hashes: self
-                        .validate_blobs_bundle(request.request.blobs_bundle)
-                        .map_err(|e| RethError::Other(e.into()))
-                        .to_rpc_result()?,
-                }, request.request.execution_requests.into()),
+                ExecutionPayloadSidecar::v4(
+                    CancunPayloadFields {
+                        parent_beacon_block_root: request.parent_beacon_block_root,
+                        versioned_hashes: self
+                            .validate_blobs_bundle(request.request.blobs_bundle)
+                            .map_err(|e| RethError::Other(e.into()))
+                            .to_rpc_result()?,
+                    },
+                    request.request.execution_requests.into(),
+                ),
             )
             .to_rpc_result()?
             .try_seal_with_senders()
@@ -440,7 +448,7 @@ where
             request.request.message,
             request.registered_gas_limit,
         )
-            .map_err(|e| RethError::Other(e.into()))
-            .to_rpc_result()
+        .map_err(|e| RethError::Other(e.into()))
+        .to_rpc_result()
     }
 }
