@@ -69,7 +69,7 @@ impl OptimismNode {
         OpPoolBuilder,
         OpPayloadBuilder,
         OpNetworkBuilder,
-        OptimismExecutorBuilder,
+        OpExecutorBuilder,
         OptimismConsensusBuilder,
     >
     where
@@ -86,7 +86,7 @@ impl OptimismNode {
                 disable_txpool_gossip,
                 disable_discovery_v4: !discovery_v4,
             })
-            .executor(OptimismExecutorBuilder::default())
+            .executor(OpExecutorBuilder::default())
             .consensus(OptimismConsensusBuilder::default())
     }
 }
@@ -102,7 +102,7 @@ where
         OpPoolBuilder,
         OpPayloadBuilder,
         OpNetworkBuilder,
-        OptimismExecutorBuilder,
+        OpExecutorBuilder,
         OptimismConsensusBuilder,
     >;
 
@@ -179,9 +179,9 @@ where
 /// A regular optimism evm and executor builder.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
-pub struct OptimismExecutorBuilder;
+pub struct OpExecutorBuilder;
 
-impl<Node> ExecutorBuilder<Node> for OptimismExecutorBuilder
+impl<Node> ExecutorBuilder<Node> for OpExecutorBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec>>,
 {
