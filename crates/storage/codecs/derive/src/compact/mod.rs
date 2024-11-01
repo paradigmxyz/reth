@@ -21,10 +21,10 @@ type IsCompact = bool;
 type FieldName = String;
 // Helper Alias type
 type FieldType = String;
-/// Compact has alternative functions that can be used as a workaround for type
+/// `Compact` has alternative functions that can be used as a workaround for type
 /// specialization of fixed sized types.
 ///
-/// Example: Vec<B256> vs Vec<U256>. The first does not
+/// Example: `Vec<B256>` vs `Vec<U256>`. The first does not
 /// require the len of the element, while the latter one does.
 type UseAlternative = bool;
 // Helper Alias type
@@ -39,7 +39,7 @@ pub enum FieldTypes {
     EnumUnnamedField((FieldType, UseAlternative)),
 }
 
-/// Derives the Compact trait and its from/to implementations.
+/// Derives the `Compact` trait and its from/to implementations.
 pub fn derive(input: TokenStream, is_zstd: bool) -> TokenStream {
     let mut output = quote! {};
 
@@ -159,7 +159,7 @@ fn load_field_from_segments(
 }
 
 /// Since there's no impl specialization in rust stable atm, once we find we have a
-/// Vec/Option we try to find out if it's a Vec/Option of a fixed size data type, e.g. Vec<B256>.
+/// Vec/Option we try to find out if it's a Vec/Option of a fixed size data type, e.g. `Vec<B256>`.
 ///
 /// If so, we use another impl to code/decode its data.
 fn should_use_alt_impl(ftype: &str, segment: &syn::PathSegment) -> bool {
@@ -180,7 +180,7 @@ fn should_use_alt_impl(ftype: &str, segment: &syn::PathSegment) -> bool {
                     ]
                     .contains(&path.ident.to_string().as_str())
                     {
-                        return true;
+                        return true
                     }
                 }
             }
@@ -203,7 +203,7 @@ pub fn get_bit_size(ftype: &str) -> u8 {
 }
 
 /// Given the field type in a string format, checks if its type should be added to the
-/// StructFlags.
+/// `StructFlags`.
 pub fn is_flag_type(ftype: &str) -> bool {
     get_bit_size(ftype) > 0
 }
@@ -231,7 +231,7 @@ mod tests {
              }
         };
 
-        // Generate code that will impl the Compact trait.
+        // Generate code that will impl the `Compact` trait.
         let mut output = quote! {};
         let DeriveInput { ident, data, attrs, .. } = parse2(f_struct).unwrap();
         let fields = get_fields(&data);
@@ -241,11 +241,11 @@ mod tests {
         // Expected output in a TokenStream format. Commas matter!
         let should_output = quote! {
             impl TestStruct {
-                #[doc = "Used bytes by [TestStructFlags]"]
+                #[doc = "Used bytes by [`TestStructFlags`]"]
                 pub const fn bitflag_encoded_bytes() -> usize {
                     2u8 as usize
                 }
-                #[doc = "Unused bits for new fields by [TestStructFlags]"]
+                #[doc = "Unused bits for new fields by [`TestStructFlags`]"]
                 pub const fn bitflag_unused_bits() -> usize {
                     1u8 as usize
                 }
