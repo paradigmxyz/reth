@@ -32,6 +32,7 @@ use std::{
     collections::VecDeque,
     future::Future,
     pin::Pin,
+    sync::Arc,
     task::{ready, Context, Poll},
 };
 use tokio::sync::oneshot;
@@ -258,7 +259,7 @@ where
     Evm: ConfigureEvm<Header = Header>,
     Spec: EthereumHardforks,
 {
-    let chain_spec = payload_validator.chain_spec();
+    let chain_spec = Arc::new(payload_validator.chain_spec());
 
     // Ensure next payload is valid.
     let next_block = payload_validator
@@ -303,7 +304,7 @@ where
     let mut evm = evm_config.evm_with_env(&mut state, env);
 
     // apply eip-4788 pre block contract call
-    let mut system_caller = SystemCaller::new(evm_config.clone(), chain_spec);
+    let mut system_caller = SystemCaller::new(evm_config.clone(), chain_spec.clone());
 
     system_caller.apply_beacon_root_contract_call(
         reorg_target.timestamp,
@@ -365,7 +366,7 @@ where
 
     if let Some(withdrawals) = &reorg_target.body.withdrawals {
         state.increment_balances(post_block_withdrawals_balance_increments(
-            chain_spec,
+            &chain_spec,
             reorg_target.timestamp,
             withdrawals,
         ))?;
