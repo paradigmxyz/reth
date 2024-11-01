@@ -144,13 +144,13 @@ pub trait DebugApi {
     async fn debug_execution_witness(&self, block: BlockNumberOrTag)
         -> RpcResult<ExecutionWitness>;
 
-    /// The `debug_executionWitness` method allows for re-execution of a block with the purpose of
-    /// generating an execution witness. The witness comprises of a map of all hashed trie nodes
-    /// to their preimages that were required during the execution of the block, including during
-    /// state root recomputation.
+    /// The `debug_executePayload` method allows for re-execution of a group of transactions with
+    /// the purpose of generating an execution witness. The witness comprises of a map of all
+    /// hashed trie nodes to their preimages that were required during the execution of the block,
+    ///  including during state root recomputation.
     ///
-    /// The first argument is the block number or block hash. The second argument is a boolean
-    /// indicating whether to include the preimages of keys in the response.
+    /// The first argument is the block number or block hash. The second argument is the payload
+    /// attributes for the new block. The third argument is a list of transactions to be included.
     #[method(name = "executePayload")]
     async fn debug_execute_payload(
         &self,
