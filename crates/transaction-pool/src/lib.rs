@@ -496,6 +496,13 @@ where
         self.pool.get_transactions_by_sender(sender)
     }
 
+    fn get_pending_transactions_with_predicate(
+        &self,
+        predicate: impl FnMut(&ValidPoolTransaction<Self::Transaction>) -> bool,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.pending_transactions_with_predicate(predicate)
+    }
+
     fn get_pending_transactions_by_sender(
         &self,
         sender: Address,
