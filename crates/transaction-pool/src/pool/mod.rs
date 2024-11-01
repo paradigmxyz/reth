@@ -787,6 +787,14 @@ where
         self.get_pool_data().pending_txs_by_sender(sender_id)
     }
 
+    /// Returns all pending transactions filtered by predicate
+    pub(crate) fn pending_transactions_with_predicate(
+        &self,
+        predicate: impl FnMut(&ValidPoolTransaction<T::Transaction>) -> bool,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.get_pool_data().pending_transactions_with_predicate(predicate)
+    }
+
     /// Returns all pending transactions of the address by sender
     pub(crate) fn get_pending_transactions_by_sender(
         &self,
