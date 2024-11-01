@@ -106,7 +106,7 @@ impl<'a> arbitrary::Arbitrary<'a> for TxEip4844 {
     }
 }
 
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(feature = "test-utils")]
 fn serialize_placeholder<S>(value: &Option<()>, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
@@ -119,7 +119,7 @@ where
     }
 }
 
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(feature = "test-utils")]
 fn deserialize_placeholder<'de, D>(deserializer: D) -> Result<Option<()>, D::Error>
 where
     D: serde::Deserializer<'de>,
