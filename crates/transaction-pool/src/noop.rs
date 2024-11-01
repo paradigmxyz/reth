@@ -213,6 +213,13 @@ impl TransactionPool for NoopTransactionPool {
         vec![]
     }
 
+    fn get_pending_transactions_with_predicate(
+        &self,
+        _predicate: impl FnMut(&ValidPoolTransaction<Self::Transaction>) -> bool,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        vec![]
+    }
+
     fn get_pending_transactions_by_sender(
         &self,
         _sender: Address,

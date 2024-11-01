@@ -22,3 +22,6 @@ pub mod test_utils;
 
 // Convenience re-exports.
 pub use revm::{self, *};
+
+/// Either type for flexible usage of different database types in the same context.
+pub mod either;
