@@ -102,7 +102,9 @@ impl TransactionCompat for () {
         WithOtherFields::default()
     }
 
-    fn otterscan_api_truncate_input(_tx: &mut Self::Transaction) {}
+    fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
+        tx.input = tx.input.slice(..4);
+    }
 
     fn tx_type(_tx: &Self::Transaction) -> u8 {
         0
