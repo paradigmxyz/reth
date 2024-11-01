@@ -110,14 +110,14 @@ pub mod noop;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
+use alloy_primitives as _;
 pub use alloy_rpc_types::engine::PayloadId;
 pub use reth_payload_primitives::{PayloadBuilderError, PayloadKind};
+use reth_primitives as _;
 pub use service::{
     PayloadBuilderHandle, PayloadBuilderService, PayloadServiceCommand, PayloadStore,
 };
 pub use traits::{KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator};
-use alloy_primitives as _;
-use reth_primitives as _;
 
 // re-export the Ethereum engine primitives for convenience
 #[doc(inline)]
