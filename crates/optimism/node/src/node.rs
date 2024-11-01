@@ -70,7 +70,7 @@ impl OptimismNode {
         OpPayloadBuilder,
         OpNetworkBuilder,
         OpExecutorBuilder,
-        OptimismConsensusBuilder,
+        OpConsensusBuilder,
     >
     where
         Node: FullNodeTypes<
@@ -87,7 +87,7 @@ impl OptimismNode {
                 disable_discovery_v4: !discovery_v4,
             })
             .executor(OpExecutorBuilder::default())
-            .consensus(OptimismConsensusBuilder::default())
+            .consensus(OpConsensusBuilder::default())
     }
 }
 
@@ -103,7 +103,7 @@ where
         OpPayloadBuilder,
         OpNetworkBuilder,
         OpExecutorBuilder,
-        OptimismConsensusBuilder,
+        OpConsensusBuilder,
     >;
 
     type AddOns = OptimismAddOns<
@@ -442,9 +442,9 @@ where
 /// A basic optimism consensus builder.
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
-pub struct OptimismConsensusBuilder;
+pub struct OpConsensusBuilder;
 
-impl<Node> ConsensusBuilder<Node> for OptimismConsensusBuilder
+impl<Node> ConsensusBuilder<Node> for OpConsensusBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec>>,
 {
