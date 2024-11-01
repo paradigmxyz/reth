@@ -150,8 +150,8 @@ where
 {
     type Provider = Provider;
     type Pool = Pool;
-    type Network = Network;
     type Evm = EvmConfig;
+    type Network = Network;
 
     fn pool(&self) -> &Self::Pool {
         self.inner.pool()
