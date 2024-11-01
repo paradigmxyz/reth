@@ -14,6 +14,8 @@ pub(crate) struct EngineApiMetrics {
     pub(crate) fcu_response: ForkchoiceUpdatedResponseMetrics,
     /// Engine API newPayload response type metrics
     pub(crate) new_payload_response: NewPayloadStatusResponseMetrics,
+    /// Engine API newPayload time diff between newPayload and FCU
+    pub(crate) payload_to_fcu_latency: EngineApiLatencyMetrics,
 }
 
 /// Beacon consensus engine latency metrics.
@@ -34,6 +36,8 @@ pub(crate) struct EngineApiLatencyMetrics {
     pub(crate) fork_choice_updated_v2: Histogram,
     /// Latency for `engine_forkchoiceUpdatedV3`
     pub(crate) fork_choice_updated_v3: Histogram,
+    /// Time diff between `engine_newPayloadV1` and FCU
+    pub(crate) new_payload_v1_time_diff: Histogram,
     /// Latency for `engine_getPayloadV1`
     pub(crate) get_payload_v1: Histogram,
     /// Latency for `engine_getPayloadV2`

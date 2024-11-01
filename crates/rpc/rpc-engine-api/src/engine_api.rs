@@ -27,7 +27,10 @@ use reth_rpc_types_compat::engine::payload::{
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
-use std::{sync::Arc, time::Instant};
+use std::{
+    sync::{Arc, Mutex},
+    time::Instant,
+};
 use tokio::sync::oneshot;
 use tracing::{trace, warn};
 
@@ -44,6 +47,7 @@ const MAX_BLOB_LIMIT: usize = 128;
 /// functions in the Execution layer that are crucial for the consensus process.
 pub struct EngineApi<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec> {
     inner: Arc<EngineApiInner<Provider, EngineT, Pool, Validator, ChainSpec>>,
+    start_time: Mutex<Option<Instant>>,
 }
 
 struct EngineApiInner<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec> {
@@ -103,7 +107,7 @@ where
             tx_pool,
             validator,
         });
-        Self { inner }
+        Self { inner, start_time: Mutex::new(None) }
     }
 
     /// Fetches the client version.
@@ -140,11 +144,18 @@ where
         self.inner
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V1, payload_or_attrs)?;
-        Ok(self
+
+        let response = self
             .inner
             .beacon_consensus
             .new_payload(payload, ExecutionPayloadSidecar::none())
-            .await?)
+            .await?;
+
+        // Instant of the new payload response
+        let mut start_time = self.start_time.lock().unwrap();
+        *start_time = Some(Instant::now());
+
+        Ok(response)
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/shanghai.md#engine_newpayloadv2>
@@ -239,6 +250,15 @@ where
         state: ForkchoiceState,
         payload_attrs: Option<EngineT::PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
+        let elapsed_time = self
+            .start_time
+            .lock()
+            .unwrap()
+            .expect("start_time should be set before fork_choice_updated_v1 is called")
+            .elapsed();
+
+        self.inner.metrics.payload_to_fcu_latency.new_payload_v1_time_diff.record(elapsed_time);
+
         self.validate_and_execute_forkchoice(EngineApiMessageVersion::V1, state, payload_attrs)
             .await
     }
