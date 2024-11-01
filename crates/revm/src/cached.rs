@@ -1,12 +1,12 @@
 //! Database adapters for payload building.
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{
+    map::{Entry, HashMap},
+    Address, B256, U256,
+};
+use core::cell::RefCell;
 use reth_primitives::revm_primitives::{
     db::{Database, DatabaseRef},
     AccountInfo, Bytecode,
-};
-use std::{
-    cell::RefCell,
-    collections::{hash_map::Entry, HashMap},
 };
 
 /// A container type that caches reads from an underlying [`DatabaseRef`].
@@ -17,7 +17,7 @@ use std::{
 /// # Example
 ///
 /// ```
-/// use reth_payload_builder::database::CachedReads;
+/// use reth_revm::cached::CachedReads;
 /// use revm::db::{DatabaseRef, State};
 ///
 /// fn build_payload<DB: DatabaseRef>(db: DB) {
