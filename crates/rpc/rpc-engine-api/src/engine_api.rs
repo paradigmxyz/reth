@@ -10,6 +10,7 @@ use alloy_rpc_types_engine::{
 };
 use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
+use parking_lot::Mutex;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_chainspec::{EthereumHardforks, Hardforks};
 use reth_engine_primitives::{EngineTypes, EngineValidator};
@@ -27,10 +28,7 @@ use reth_rpc_types_compat::engine::payload::{
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
-use std::{
-    sync::{Arc, Mutex},
-    time::Instant,
-};
+use std::{sync::Arc, time::Instant};
 use tokio::sync::oneshot;
 use tracing::{trace, warn};
 
@@ -47,7 +45,6 @@ const MAX_BLOB_LIMIT: usize = 128;
 /// functions in the Execution layer that are crucial for the consensus process.
 pub struct EngineApi<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec> {
     inner: Arc<EngineApiInner<Provider, EngineT, Pool, Validator, ChainSpec>>,
-    start_time: Mutex<Option<Instant>>,
 }
 
 struct EngineApiInner<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec> {
@@ -71,6 +68,8 @@ struct EngineApiInner<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec
     tx_pool: Pool,
     /// Engine validator.
     validator: Validator,
+    /// Start time of the latest payload request
+    start_time: Mutex<Option<Instant>>,
 }
 
 impl<Provider, EngineT, Pool, Validator, ChainSpec>
@@ -106,8 +105,9 @@ where
             capabilities,
             tx_pool,
             validator,
+            start_time: Mutex::new(None),
         });
-        Self { inner, start_time: Mutex::new(None) }
+        Self { inner }
     }
 
     /// Fetches the client version.
@@ -152,8 +152,8 @@ where
             .await?;
 
         // Instant of the new payload response
-        let mut start_time = self.start_time.lock().unwrap();
-        *start_time = Some(Instant::now());
+        let mut start_time_lock = self.inner.start_time.lock();
+        *start_time_lock = Some(Instant::now());
 
         Ok(response)
     }
@@ -250,14 +250,7 @@ where
         state: ForkchoiceState,
         payload_attrs: Option<EngineT::PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
-        let elapsed_time = self
-            .start_time
-            .lock()
-            .unwrap()
-            .expect("start_time should be set before fork_choice_updated_v1 is called")
-            .elapsed();
-
-        self.inner.metrics.payload_to_fcu_latency.new_payload_v1_time_diff.record(elapsed_time);
+        self.inner.record_elapsed_time_payload_v1();
 
         self.validate_and_execute_forkchoice(EngineApiMessageVersion::V1, state, payload_attrs)
             .await
@@ -648,6 +641,21 @@ where
         }
 
         Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs, version).await?)
+    }
+}
+
+impl<Provider, EngineT, Pool, Validator, ChainSpec>
+    EngineApiInner<Provider, EngineT, Pool, Validator, ChainSpec>
+where
+    EngineT: EngineTypes,
+{
+    fn record_elapsed_time_payload_v1(&self) {
+        let mut start_time_lock = self.start_time.lock();
+
+        if let Some(start_time) = start_time_lock.take() {
+            let elapsed_time = start_time.elapsed();
+            self.metrics.payload_to_fcu_latency.new_payload_v1_time_diff.record(elapsed_time);
+        }
     }
 }
 
