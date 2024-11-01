@@ -46,8 +46,8 @@ revm.workspace = true
 test-utils = [
 	"alloy-primitives",
 	"reth-chain-state",
-	"reth-chain-state?/test-utils",
-	"reth-primitives?/test-utils",
+	"reth-chain-state/test-utils",
+	"reth-primitives/test-utils",
 	"reth-provider/test-utils",
 	"revm/test-utils"
 ]
