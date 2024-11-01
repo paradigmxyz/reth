@@ -81,6 +81,15 @@ impl<'a, DB> CachedReadsDbMut<'a, DB> {
     }
 }
 
+impl<DB, T> AsRef<T> for CachedReadsDbMut<'_, DB>
+where
+    DB: AsRef<T>,
+{
+    fn as_ref(&self) -> &T {
+        self.inner().as_ref()
+    }
+}
+
 impl<DB: DatabaseRef> Database for CachedReadsDbMut<'_, DB> {
     type Error = <DB as DatabaseRef>::Error;
 
