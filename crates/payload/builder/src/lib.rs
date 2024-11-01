@@ -116,6 +116,8 @@ pub use service::{
     PayloadBuilderHandle, PayloadBuilderService, PayloadServiceCommand, PayloadStore,
 };
 pub use traits::{KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator};
+use alloy_primitives as _;
+use reth_primitives as _;
 
 // re-export the Ethereum engine primitives for convenience
 #[doc(inline)]
