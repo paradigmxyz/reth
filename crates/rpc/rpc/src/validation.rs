@@ -20,7 +20,10 @@ use reth_provider::{
     StateProviderFactory, WithdrawalsProvider,
 };
 use reth_revm::database::StateProviderDatabase;
-use reth_rpc_api::{BlockSubmissionValidationApiServer, BuilderBlockValidationRequestV3};
+use reth_rpc_api::{
+    BlockSubmissionValidationApiServer, BuilderBlockValidationRequestV3,
+    BuilderBlockValidationRequestV4,
+};
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_trie::HashedPostState;
@@ -402,6 +405,39 @@ where
                         .map_err(|e| RethError::Other(e.into()))
                         .to_rpc_result()?,
                 }),
+            )
+            .to_rpc_result()?
+            .try_seal_with_senders()
+            .map_err(|_| EthApiError::InvalidTransactionSignature)?;
+
+        self.validate_message_against_block(
+            block,
+            request.request.message,
+            request.registered_gas_limit,
+        )
+        .map_err(|e| RethError::Other(e.into()))
+        .to_rpc_result()
+    }
+
+    /// Validates a block submitted to the relay
+    async fn validate_builder_submission_v4(
+        &self,
+        request: BuilderBlockValidationRequestV4,
+    ) -> RpcResult<()> {
+        let block = self
+            .payload_validator
+            .ensure_well_formed_payload(
+                ExecutionPayload::V3(request.request.execution_payload),
+                ExecutionPayloadSidecar::v4(
+                    CancunPayloadFields {
+                        parent_beacon_block_root: request.parent_beacon_block_root,
+                        versioned_hashes: self
+                            .validate_blobs_bundle(request.request.blobs_bundle)
+                            .map_err(|e| RethError::Other(e.into()))
+                            .to_rpc_result()?,
+                    },
+                    request.request.execution_requests.into(),
+                ),
             )
             .to_rpc_result()?
             .try_seal_with_senders()
