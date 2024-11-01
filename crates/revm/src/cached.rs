@@ -17,7 +17,7 @@ use reth_primitives::revm_primitives::{
 /// # Example
 ///
 /// ```
-/// use reth_payload_builder::database::CachedReads;
+/// use reth_revm::cached::CachedReads;
 /// use revm::db::{DatabaseRef, State};
 ///
 /// fn build_payload<DB: DatabaseRef>(db: DB) {
