@@ -81,7 +81,7 @@ impl<'a, DB> CachedReadsDbMut<'a, DB> {
     }
 }
 
-impl<'a, DB, T> AsRef<T> for CachedReadsDbMut<'a, DB>
+impl<DB, T> AsRef<T> for CachedReadsDbMut<'_, DB>
 where
     DB: AsRef<T>,
 {

@@ -81,7 +81,7 @@ impl<DB> StateProviderDatabase<DB> {
 
 impl<DB> AsRef<DB> for StateProviderDatabase<DB> {
     fn as_ref(&self) -> &DB {
-        &self
+        self
     }
 }
 
