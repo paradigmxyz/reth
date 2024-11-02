@@ -1,6 +1,6 @@
 //! Optimism block execution strategy.
 
-use crate::{l1::ensure_create2_deployer, OptimismBlockExecutionError, OptimismEvmConfig};
+use crate::{l1::ensure_create2_deployer, OpEvmConfig, OptimismBlockExecutionError};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::Transaction as _;
 use alloy_eips::eip7685::Requests;
@@ -29,7 +29,7 @@ use tracing::trace;
 
 /// Factory for [`OpExecutionStrategy`].
 #[derive(Debug, Clone)]
-pub struct OpExecutionStrategyFactory<EvmConfig = OptimismEvmConfig> {
+pub struct OpExecutionStrategyFactory<EvmConfig = OpEvmConfig> {
     /// The chainspec
     chain_spec: Arc<OpChainSpec>,
     /// How to create an EVM.
@@ -39,7 +39,7 @@ pub struct OpExecutionStrategyFactory<EvmConfig = OptimismEvmConfig> {
 impl OpExecutionStrategyFactory {
     /// Creates a new default optimism executor strategy factory.
     pub fn optimism(chain_spec: Arc<OpChainSpec>) -> Self {
-        Self::new(chain_spec.clone(), OptimismEvmConfig::new(chain_spec))
+        Self::new(chain_spec.clone(), OpEvmConfig::new(chain_spec))
     }
 }
 
@@ -339,7 +339,7 @@ mod tests {
         chain_spec: Arc<OpChainSpec>,
     ) -> BasicBlockExecutorProvider<OpExecutionStrategyFactory> {
         let strategy_factory =
-            OpExecutionStrategyFactory::new(chain_spec.clone(), OptimismEvmConfig::new(chain_spec));
+            OpExecutionStrategyFactory::new(chain_spec.clone(), OpEvmConfig::new(chain_spec));
 
         BasicBlockExecutorProvider::new(strategy_factory)
     }
