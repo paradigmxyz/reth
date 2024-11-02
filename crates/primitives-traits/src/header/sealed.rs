@@ -1,4 +1,4 @@
-use crate::HeuristicSize;
+use crate::InMemorySize;
 
 use super::Header;
 use alloy_eips::BlockNumHash;
@@ -62,7 +62,7 @@ impl SealedHeader {
     }
 }
 
-impl HeuristicSize for SealedHeader {
+impl InMemorySize for SealedHeader {
     /// Calculates a heuristic for the in-memory size of the [`SealedHeader`].
     #[inline]
     fn size(&self) -> usize {

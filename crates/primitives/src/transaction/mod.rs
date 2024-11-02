@@ -19,7 +19,7 @@ use once_cell as _;
 #[cfg(not(feature = "std"))]
 use once_cell::sync::Lazy as LazyLock;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
-use reth_primitives_traits::HeuristicSize;
+use reth_primitives_traits::InMemorySize;
 use serde::{Deserialize, Serialize};
 use signature::{decode_with_eip155_chain_id, with_eip155_parity};
 #[cfg(feature = "std")]
@@ -558,7 +558,7 @@ impl Transaction {
     }
 }
 
-impl HeuristicSize for Transaction {
+impl InMemorySize for Transaction {
     /// Calculates a heuristic for the in-memory size of the [Transaction].
     #[inline]
     fn size(&self) -> usize {

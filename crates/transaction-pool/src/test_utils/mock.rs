@@ -26,7 +26,7 @@ use reth_primitives::{
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
 
 #[cfg(any(test, feature = "arbitrary"))]
-use reth_primitives_traits::HeuristicSize;
+use reth_primitives_traits::InMemorySize;
 
 /// A transaction pool implementation using [`MockOrdering`] for transaction ordering.
 ///

@@ -1,6 +1,6 @@
 use alloy_primitives::{BlockNumber, U256};
 use reth_primitives::{SealedBlock, SealedHeader};
-use reth_primitives_traits::HeuristicSize;
+use reth_primitives_traits::InMemorySize;
 
 /// The block response
 #[derive(PartialEq, Eq, Debug, Clone)]
@@ -34,7 +34,7 @@ impl BlockResponse {
     }
 }
 
-impl HeuristicSize for BlockResponse {
+impl InMemorySize for BlockResponse {
     /// Calculates a heuristic for the in-memory size of the [`BlockResponse`].
     #[inline]
     fn size(&self) -> usize {

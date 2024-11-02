@@ -11,7 +11,7 @@ use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
 pub use reth_primitives_traits::test_utils::{generate_valid_header, valid_header_strategy};
-use reth_primitives_traits::HeuristicSize;
+use reth_primitives_traits::InMemorySize;
 use serde::{Deserialize, Serialize};
 
 /// Ethereum full block.
@@ -92,7 +92,7 @@ impl Block {
     }
 }
 
-impl HeuristicSize for Block {
+impl InMemorySize for Block {
     /// Calculates a heuristic for the in-memory size of the [`Block`].
     #[inline]
     fn size(&self) -> usize {
@@ -432,7 +432,7 @@ impl SealedBlock {
     }
 }
 
-impl HeuristicSize for SealedBlock {
+impl InMemorySize for SealedBlock {
     /// Calculates a heuristic for the in-memory size of the [`SealedBlock`].
     #[inline]
     fn size(&self) -> usize {
@@ -615,7 +615,7 @@ impl BlockBody {
     }
 }
 
-impl HeuristicSize for BlockBody {
+impl InMemorySize for BlockBody {
     /// Calculates a heuristic for the in-memory size of the [`BlockBody`].
     #[inline]
     fn size(&self) -> usize {
