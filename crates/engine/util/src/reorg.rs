@@ -32,7 +32,6 @@ use std::{
     collections::VecDeque,
     future::Future,
     pin::Pin,
-    sync::Arc,
     task::{ready, Context, Poll},
 };
 use tokio::sync::oneshot;
@@ -259,7 +258,7 @@ where
     Evm: ConfigureEvm<Header = Header>,
     Spec: EthereumHardforks,
 {
-    let chain_spec = Arc::new(payload_validator.chain_spec());
+    let chain_spec = payload_validator.chain_spec();
 
     // Ensure next payload is valid.
     let next_block = payload_validator
@@ -366,7 +365,7 @@ where
 
     if let Some(withdrawals) = &reorg_target.body.withdrawals {
         state.increment_balances(post_block_withdrawals_balance_increments(
-            &chain_spec,
+            chain_spec,
             reorg_target.timestamp,
             withdrawals,
         ))?;
