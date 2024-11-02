@@ -647,7 +647,7 @@ struct DisconnectionsCounter(Arc<()>);
 impl DisconnectionsCounter {
     const MAX_CONCURRENT_GRACEFUL_DISCONNECTIONS: usize = 15;
 
-    /// Returns true if the [`DisconnectionCounter`] still has capacity
+    /// Returns true if the [`DisconnectionsCounter`] still has capacity
     /// for an additional graceful disconnection.
     fn has_capacity(&self) -> bool {
         Arc::strong_count(&self.0) <= Self::MAX_CONCURRENT_GRACEFUL_DISCONNECTIONS
