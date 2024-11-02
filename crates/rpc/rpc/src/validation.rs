@@ -1,5 +1,6 @@
 use alloy_consensus::{BlobTransactionValidationError, EnvKzgSettings, Transaction};
 use alloy_eips::eip4844::kzg_to_versioned_hash;
+use alloy_primitives::map::HashMap;
 use alloy_rpc_types::engine::{
     BlobsBundleV1, CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar,
 };
@@ -19,7 +20,7 @@ use reth_provider::{
     AccountReader, BlockExecutionInput, BlockExecutionOutput, BlockReaderIdExt, HeaderProvider,
     StateProviderFactory, WithdrawalsProvider,
 };
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
 use reth_rpc_api::{
     BlockSubmissionValidationApiServer, BuilderBlockValidationRequestV3,
     BuilderBlockValidationRequestV4,
@@ -30,6 +31,7 @@ use reth_trie::HashedPostState;
 use revm_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, sync::Arc};
+use tokio::sync::RwLock;
 
 /// Configuration for validation API.
 #[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -78,6 +80,10 @@ pub struct ValidationApiInner<Provider: ChainSpecProvider, E> {
     executor_provider: E,
     /// Set of disallowed addresses
     disallow: HashSet<Address>,
+    /// Cached state reads to avoid redundant disk I/O across multiple validation attempts.
+    /// Maps block hash to cached reads for that block's state.
+    /// Uses async `RwLock` to safely handle concurrent validation requests.
+    cached_states: Arc<RwLock<HashMap<B256, CachedReads>>>,
 }
 
 /// The type that implements the `validation` rpc namespace trait
@@ -107,6 +113,7 @@ where
             payload_validator,
             executor_provider,
             disallow,
+            cached_states: Arc::new(RwLock::new(HashMap::default())),
         });
 
         Self { inner }
@@ -126,7 +133,7 @@ where
     E: BlockExecutorProvider,
 {
     /// Validates the given block and a [`BidTrace`] against it.
-    pub fn validate_message_against_block(
+    pub async fn validate_message_against_block(
         &self,
         block: SealedBlockWithSenders,
         message: BidTrace,
@@ -170,8 +177,16 @@ where
         self.consensus.validate_header_against_parent(&block.header, &latest_header)?;
         self.validate_gas_limit(registered_gas_limit, &latest_header, &block.header)?;
 
-        let state_provider = self.provider.state_by_block_hash(latest_header.hash())?;
-        let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
+        let latest_header_hash = latest_header.hash();
+        let state_provider = self.provider.state_by_block_hash(latest_header_hash)?;
+
+        let mut cached_reads = {
+            let cached_states = self.cached_states.read().await;
+            cached_states.get(&latest_header_hash).cloned().unwrap_or_default()
+        };
+
+        let cached_db = cached_reads.as_db_mut(StateProviderDatabase::new(&state_provider));
+        let executor = self.executor_provider.executor(cached_db);
 
         let block = block.unseal();
         let mut accessed_blacklisted = None;
@@ -187,6 +202,11 @@ where
                 }
             },
         )?;
+        //TODO: to modify once the extend function is created for `CachedReads`
+        {
+            let mut cached_states = self.cached_states.write().await;
+            cached_states.insert(latest_header_hash, cached_reads);
+        }
 
         if let Some(account) = accessed_blacklisted {
             return Err(ValidationApiError::Blacklist(account))
@@ -415,6 +435,7 @@ where
             request.request.message,
             request.registered_gas_limit,
         )
+        .await
         .map_err(|e| RethError::Other(e.into()))
         .to_rpc_result()
     }
@@ -448,6 +469,7 @@ where
             request.request.message,
             request.registered_gas_limit,
         )
+        .await
         .map_err(|e| RethError::Other(e.into()))
         .to_rpc_result()
     }
