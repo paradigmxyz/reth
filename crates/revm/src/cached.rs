@@ -191,3 +191,57 @@ impl CachedAccount {
         Self { info, storage: HashMap::default() }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extend_with_two_cached_reads() {
+        // Setup test data
+        let hash1 = B256::from_slice(&[1u8; 32]);
+        let hash2 = B256::from_slice(&[2u8; 32]);
+        let address1 = Address::from_slice(&[1u8; 20]);
+        let address2 = Address::from_slice(&[2u8; 20]);
+
+        // Create primary cache
+        let mut primary = {
+            let mut cache = CachedReads::default();
+            cache.accounts.insert(address1, CachedAccount::new(Some(AccountInfo::default())));
+            cache.contracts.insert(hash1, Bytecode::default());
+            cache.block_hashes.insert(1, hash1);
+            cache
+        };
+
+        // Create additional cache
+        let additional = {
+            let mut cache = CachedReads::default();
+            cache.accounts.insert(address2, CachedAccount::new(Some(AccountInfo::default())));
+            cache.contracts.insert(hash2, Bytecode::default());
+            cache.block_hashes.insert(2, hash2);
+            cache
+        };
+
+        // Extending primary with additional cache
+        primary.extend(additional);
+
+        // Verify the combined state
+        assert!(
+            primary.accounts.len() == 2 &&
+                primary.contracts.len() == 2 &&
+                primary.block_hashes.len() == 2,
+            "All maps should contain 2 entries"
+        );
+
+        // Verify specific entries
+        assert!(
+            primary.accounts.contains_key(&address1) &&
+                primary.accounts.contains_key(&address2) &&
+                primary.contracts.contains_key(&hash1) &&
+                primary.contracts.contains_key(&hash2) &&
+                primary.block_hashes.get(&1) == Some(&hash1) &&
+                primary.block_hashes.get(&2) == Some(&hash2),
+            "All expected entries should be present"
+        );
+    }
+}
