@@ -1094,14 +1094,7 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn register_ots(&mut self) -> &mut Self
     where
-        EthApi: TraceExt
-            + EthTransactions<
-                NetworkTypes: alloy_network::Network<
-                    TransactionResponse = alloy_serde::WithOtherFields<
-                        alloy_rpc_types::Transaction,
-                    >,
-                >,
-            >,
+        EthApi: TraceExt + EthTransactions,
     {
         let otterscan_api = self.otterscan_api();
         self.modules.insert(RethRpcModule::Ots, otterscan_api.into_rpc().into());

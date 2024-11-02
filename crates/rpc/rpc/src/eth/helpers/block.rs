@@ -1,14 +1,13 @@
 //! Contains RPC handler implementations specific to blocks.
 
-use alloy_rpc_types::{AnyTransactionReceipt, BlockId};
-use alloy_serde::WithOtherFields;
+use alloy_rpc_types::{BlockId, TransactionReceipt};
 use reth_primitives::TransactionMeta;
 use reth_provider::{BlockReaderIdExt, HeaderProvider};
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
     RpcReceipt,
 };
-use reth_rpc_eth_types::{EthApiError, ReceiptBuilder};
+use reth_rpc_eth_types::{EthApiError, EthReceiptBuilder};
 
 use crate::EthApi;
 
@@ -16,7 +15,7 @@ impl<Provider, Pool, Network, EvmConfig> EthBlocks for EthApi<Provider, Pool, Ne
 where
     Self: LoadBlock<
         Error = EthApiError,
-        NetworkTypes: alloy_network::Network<ReceiptResponse = AnyTransactionReceipt>,
+        NetworkTypes: alloy_network::Network<ReceiptResponse = TransactionReceipt>,
         Provider: HeaderProvider,
     >,
 {
@@ -51,9 +50,8 @@ where
                         excess_blob_gas,
                         timestamp,
                     };
-                    ReceiptBuilder::new(&tx, meta, receipt, &receipts)
+                    EthReceiptBuilder::new(&tx, meta, receipt, &receipts)
                         .map(|builder| builder.build())
-                        .map(WithOtherFields::new)
                 })
                 .collect::<Result<Vec<_>, Self::Error>>()
                 .map(Some)

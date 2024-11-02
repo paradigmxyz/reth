@@ -8725,13 +8725,10 @@ dependencies = [
 name = "reth-rpc-builder"
 version = "1.1.0"
 dependencies = [
- "alloy-network",
  "alloy-primitives",
- "alloy-rpc-types",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
  "alloy-rpc-types-trace",
- "alloy-serde",
  "clap",
  "http",
  "jsonrpsee",
@@ -8860,7 +8857,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types",
  "alloy-rpc-types-eth",
- "alloy-serde",
  "alloy-sol-types",
  "derive_more 1.0.0",
  "futures",
@@ -8936,7 +8932,6 @@ dependencies = [
  "alloy-rpc-types",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
- "alloy-serde",
  "reth-primitives",
  "reth-trie-common",
  "serde",
