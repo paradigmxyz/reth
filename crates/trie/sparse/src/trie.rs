@@ -1522,7 +1522,11 @@ mod tests {
                         account.encode(&mut account_rlp);
                         sparse.update_leaf(key, account_rlp).unwrap();
                     }
-                    let (sparse_root, sparse_updates) = sparse.root();
+                    // We need to clone the sparse trie, so that all updated branch nodes are
+                    // preserved, and not only those that were changed after the last call to
+                    // `root()`.
+                    let mut updated_sparse = sparse.clone();
+                    let (sparse_root, sparse_updates) = updated_sparse.root();
 
                     // Insert state updates into the hash builder and calculate the root
                     state.extend(update);
@@ -1532,9 +1536,15 @@ mod tests {
                     // Assert that the sparse trie root matches the hash builder root
                     assert_eq!(sparse_root, hash_builder.root());
                     // Assert that the sparse trie updates match the hash builder updates
-                    assert_eq!(sparse_updates, hash_builder.updated_branch_nodes.take().unwrap());
+                    pretty_assertions::assert_eq!(
+                        sparse_updates,
+                        hash_builder.updated_branch_nodes.take().unwrap()
+                    );
                     // Assert that the sparse trie nodes match the hash builder proof nodes
-                    assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder.take_proof_nodes());
+                    assert_eq_sparse_trie_proof_nodes(
+                        &updated_sparse,
+                        hash_builder.take_proof_nodes(),
+                    );
 
                     // Delete some keys from both the hash builder and the sparse trie and check
                     // that the sparse trie root still matches the hash builder root
@@ -1543,7 +1553,11 @@ mod tests {
                         sparse.remove_leaf(&key).unwrap();
                     }
 
-                    let (sparse_root, sparse_updates) = sparse.root();
+                    // We need to clone the sparse trie, so that all updated branch nodes are
+                    // preserved, and not only those that were changed after the last call to
+                    // `root()`.
+                    let mut updated_sparse = sparse.clone();
+                    let (sparse_root, sparse_updates) = updated_sparse.root();
 
                     let mut hash_builder =
                         run_hash_builder(state.clone(), state.keys().cloned().collect::<Vec<_>>());
@@ -1551,9 +1565,15 @@ mod tests {
                     // Assert that the sparse trie root matches the hash builder root
                     assert_eq!(sparse_root, hash_builder.root());
                     // Assert that the sparse trie updates match the hash builder updates
-                    assert_eq!(sparse_updates, hash_builder.updated_branch_nodes.take().unwrap());
+                    pretty_assertions::assert_eq!(
+                        sparse_updates,
+                        hash_builder.updated_branch_nodes.take().unwrap()
+                    );
                     // Assert that the sparse trie nodes match the hash builder proof nodes
-                    assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder.take_proof_nodes());
+                    assert_eq_sparse_trie_proof_nodes(
+                        &updated_sparse,
+                        hash_builder.take_proof_nodes(),
+                    );
                 }
             }
         }
