@@ -19,7 +19,7 @@ use reth_node_builder::{
     BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig,
 };
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_consensus::OptimismBeaconConsensus;
+use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_evm::{OpExecutionStrategyFactory, OptimismEvmConfig};
 use reth_optimism_rpc::OpEthApi;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
@@ -454,7 +454,7 @@ where
         if ctx.is_dev() {
             Ok(Arc::new(reth_auto_seal_consensus::AutoSealConsensus::new(ctx.chain_spec())))
         } else {
-            Ok(Arc::new(OptimismBeaconConsensus::new(ctx.chain_spec())))
+            Ok(Arc::new(OpBeaconConsensus::new(ctx.chain_spec())))
         }
     }
 }
