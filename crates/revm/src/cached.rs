@@ -57,6 +57,13 @@ impl CachedReads {
     ) {
         self.accounts.insert(address, CachedAccount { info: Some(info), storage });
     }
+
+    /// Extends current cache with entries from another [`CachedReads`] instance.
+    pub fn extend(&mut self, other: Self) {
+        self.accounts.extend(other.accounts);
+        self.contracts.extend(other.contracts);
+        self.block_hashes.extend(other.block_hashes);
+    }
 }
 
 /// A [Database] that caches reads inside [`CachedReads`].
