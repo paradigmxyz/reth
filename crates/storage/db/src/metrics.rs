@@ -258,6 +258,10 @@ impl Labels {
 #[derive(Metrics, Clone)]
 #[metrics(scope = "database.transaction")]
 pub(crate) struct TransactionMetrics {
+    /// Total number of opened database transactions (cumulative)
+    opened_total: Counter,
+    /// Total number of closed database transactions (cumulative)
+    closed_total: Counter,
     /// Total number of currently open database transactions
     open_total: Gauge,
 }
@@ -265,10 +269,12 @@ pub(crate) struct TransactionMetrics {
 impl TransactionMetrics {
     pub(crate) fn record_open(&self) {
         self.open_total.increment(1.0);
+        self.opened_total.increment(1);
     }
 
     pub(crate) fn record_close(&self) {
         self.open_total.decrement(1.0);
+        self.closed_total.increment(1);
     }
 }
 
