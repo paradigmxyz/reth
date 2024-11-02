@@ -20,7 +20,7 @@ use reth_node_builder::{
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
-use reth_optimism_evm::{OpExecutionStrategyFactory, OptimismEvmConfig};
+use reth_optimism_evm::{OpEvmConfig, OpExecutionStrategyFactory};
 use reth_optimism_rpc::OpEthApi;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::{Block, Header};
@@ -185,14 +185,14 @@ impl<Node> ExecutorBuilder<Node> for OpExecutorBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec>>,
 {
-    type EVM = OptimismEvmConfig;
+    type EVM = OpEvmConfig;
     type Executor = BasicBlockExecutorProvider<OpExecutionStrategyFactory>;
 
     async fn build_evm(
         self,
         ctx: &BuilderContext<Node>,
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
-        let evm_config = OptimismEvmConfig::new(ctx.chain_spec());
+        let evm_config = OpEvmConfig::new(ctx.chain_spec());
         let strategy_factory =
             OpExecutionStrategyFactory::new(ctx.chain_spec(), evm_config.clone());
         let executor = BasicBlockExecutorProvider::new(strategy_factory);
@@ -359,7 +359,7 @@ where
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> eyre::Result<PayloadBuilderHandle<OptimismEngineTypes>> {
-        self.spawn(OptimismEvmConfig::new(ctx.chain_spec()), ctx, pool)
+        self.spawn(OpEvmConfig::new(ctx.chain_spec()), ctx, pool)
     }
 }
 
