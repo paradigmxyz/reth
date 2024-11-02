@@ -654,33 +654,46 @@ impl RevealedSparseTrie {
             let mut prefix_set_contains =
                 |path: &Nibbles| *is_in_prefix_set.get_or_insert_with(|| prefix_set.contains(path));
 
-            let (rlp_node, calculated, is_leaf) = match self.nodes.get_mut(&path).unwrap() {
-                SparseNode::Empty => (RlpNode::word_rlp(&EMPTY_ROOT_HASH), false, false),
-                SparseNode::Hash(hash) => (RlpNode::word_rlp(hash), false, false),
+            let (rlp_node, calculated, node_type) = match self.nodes.get_mut(&path).unwrap() {
+                SparseNode::Empty => {
+                    (RlpNode::word_rlp(&EMPTY_ROOT_HASH), false, SparseNodeType::Empty)
+                }
+                SparseNode::Hash(hash) => (RlpNode::word_rlp(hash), false, SparseNodeType::Hash),
                 SparseNode::Leaf { key, hash } => {
                     self.rlp_buf.clear();
                     let mut path = path.clone();
                     path.extend_from_slice_unchecked(key);
                     if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path)) {
-                        (RlpNode::word_rlp(&hash), false, true)
+                        (RlpNode::word_rlp(&hash), false, SparseNodeType::Leaf)
                     } else {
                         let value = self.values.get(&path).unwrap();
                         let rlp_node = LeafNodeRef { key, value }.rlp(&mut self.rlp_buf);
                         *hash = rlp_node.as_hash();
-                        (rlp_node, true, true)
+                        (rlp_node, true, SparseNodeType::Leaf)
                     }
                 }
                 SparseNode::Extension { key, hash } => {
                     let mut child_path = path.clone();
                     child_path.extend_from_slice_unchecked(key);
                     if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path)) {
-                        (RlpNode::word_rlp(&hash), false, false)
+                        (
+                            RlpNode::word_rlp(&hash),
+                            false,
+                            SparseNodeType::Extension { store_in_db_trie: true },
+                        )
                     } else if buffers.rlp_node_stack.last().map_or(false, |e| e.0 == child_path) {
-                        let child = buffers.rlp_node_stack.pop().unwrap().1;
+                        let (_, child, _, node_type) = buffers.rlp_node_stack.pop().unwrap();
                         self.rlp_buf.clear();
                         let rlp_node = ExtensionNodeRef::new(key, &child).rlp(&mut self.rlp_buf);
                         *hash = rlp_node.as_hash();
-                        (rlp_node, true, false)
+
+                        (
+                            rlp_node,
+                            true,
+                            SparseNodeType::Extension {
+                                store_in_db_trie: node_type.store_in_db_trie(),
+                            },
+                        )
                     } else {
                         // need to get rlp node for child first
                         buffers.path_stack.extend([(path, is_in_prefix_set), (child_path, None)]);
@@ -689,7 +702,12 @@ impl RevealedSparseTrie {
                 }
                 SparseNode::Branch { state_mask, hash } => {
                     if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path)) {
-                        buffers.rlp_node_stack.push((path, RlpNode::word_rlp(&hash), false, false));
+                        buffers.rlp_node_stack.push((
+                            path,
+                            RlpNode::word_rlp(&hash),
+                            false,
+                            SparseNodeType::Branch { store_in_db_trie: true },
+                        ));
                         continue
                     }
 
@@ -714,17 +732,19 @@ impl RevealedSparseTrie {
                     let mut hashes = Vec::new();
                     for (i, child_path) in buffers.branch_child_buf.iter().enumerate() {
                         if buffers.rlp_node_stack.last().map_or(false, |e| &e.0 == child_path) {
-                            let (_, child, calculated, is_leaf) =
+                            let (_, child, calculated, node_type) =
                                 buffers.rlp_node_stack.pop().unwrap();
 
-                            tree_mask_values.push(!calculated);
-                            let hash = child.as_hash().filter(|_| !is_leaf);
+                            if node_type.store_in_db_trie() {
+                                tree_mask_values.push(true);
+                            } else {
+                                tree_mask_values.push(!calculated);
+                            }
+                            let hash = child.as_hash().filter(|_| node_type.is_branch());
                             hash_mask_values.push(hash.is_some());
                             if let Some(hash) = hash {
                                 hashes.push(hash);
                             }
-
-                            println!("child_path: {child_path:?}, hash: {:?}", hash);
 
                             // Insert children in the resulting buffer in a normal order,
                             // because initially we iterated in reverse.
@@ -763,7 +783,9 @@ impl RevealedSparseTrie {
                         }
                     }
 
-                    if !tree_mask.is_empty() || !hash_mask.is_empty() {
+                    let store_in_db_trie = !tree_mask.is_empty() || !hash_mask.is_empty();
+
+                    if store_in_db_trie {
                         let branch_node = BranchNodeCompact::new(
                             *state_mask,
                             tree_mask,
@@ -774,14 +796,38 @@ impl RevealedSparseTrie {
                         updated_branch_nodes.insert(path.clone(), branch_node);
                     }
 
-                    (rlp_node, true, false)
+                    (rlp_node, true, SparseNodeType::Branch { store_in_db_trie })
                 }
             };
-            buffers.rlp_node_stack.push((path, rlp_node, calculated, is_leaf));
+            buffers.rlp_node_stack.push((path, rlp_node, calculated, node_type));
         }
 
         debug_assert_eq!(buffers.rlp_node_stack.len(), 1);
         (buffers.rlp_node_stack.pop().unwrap().1, updated_branch_nodes)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SparseNodeType {
+    Empty,
+    Hash,
+    Leaf,
+    Extension { store_in_db_trie: bool },
+    Branch { store_in_db_trie: bool },
+}
+
+impl SparseNodeType {
+    const fn is_branch(&self) -> bool {
+        matches!(self, Self::Branch { .. })
+    }
+
+    const fn store_in_db_trie(&self) -> bool {
+        match *self {
+            Self::Extension { store_in_db_trie } | Self::Branch { store_in_db_trie } => {
+                store_in_db_trie
+            }
+            _ => false,
+        }
     }
 }
 
@@ -867,7 +913,7 @@ struct RlpNodeBuffers {
     /// Stack of paths we need rlp nodes for and whether the path is in the prefix set.
     path_stack: Vec<(Nibbles, Option<bool>)>,
     /// Stack of rlp nodes
-    rlp_node_stack: Vec<(Nibbles, RlpNode, bool, bool)>,
+    rlp_node_stack: Vec<(Nibbles, RlpNode, bool, SparseNodeType)>,
     /// Reusable branch child path
     branch_child_buf: SmallVec<[Nibbles; 16]>,
     /// Reusable branch value stack
@@ -1091,7 +1137,6 @@ mod tests {
 
         let mut sparse = RevealedSparseTrie::default();
         for path in &paths {
-            println!("path: {path:?}");
             sparse.update_leaf(path.clone(), value_encoded()).unwrap();
         }
         let (sparse_root, sparse_updates) = sparse.root();
@@ -1112,7 +1157,6 @@ mod tests {
                 })
             })
             .collect::<Vec<_>>();
-        println!("paths: {paths:?}");
         let value = || Account::default();
         let value_encoded = || {
             let mut account_rlp = Vec::new();
