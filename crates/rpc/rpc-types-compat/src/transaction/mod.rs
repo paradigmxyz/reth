@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use alloy_consensus::{Transaction as _, TxEip4844Variant, TxEnvelope};
+use alloy_consensus::Transaction as _;
 use alloy_rpc_types::{
     request::{TransactionInput, TransactionRequest},
     TransactionInfo,

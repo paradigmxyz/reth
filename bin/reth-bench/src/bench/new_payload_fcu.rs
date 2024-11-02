@@ -47,7 +47,7 @@ impl Command {
                     block_provider.get_block_by_number(next_block.into(), true.into()).await;
                 let block = block_res.unwrap().unwrap();
                 let block_hash = block.header.hash;
-                let block = Block::try_from(block.inner).unwrap().seal(block_hash);
+                let block = Block::try_from(block).unwrap().seal(block_hash);
                 let head_block_hash = block.hash();
                 let safe_block_hash = block_provider
                     .get_block_by_number(block.number.saturating_sub(32).into(), false.into());

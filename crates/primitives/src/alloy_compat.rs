@@ -137,7 +137,7 @@ impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction<AnyTxEnvelope>>> for T
             }
             #[cfg(feature = "optimism")]
             AnyTxEnvelope::Unknown(tx) => {
-                if tx.inner.ty.0 == TxType::Deposit {
+                if tx.inner.ty.0 == crate::TxType::Deposit {
                     Ok(Self::Deposit(op_alloy_consensus::TxDeposit {
                         source_hash: tx.inner.deser_by_key("sourceHash").ok_or_else(|| {
                             ConversionError::Custom("missing `sourceHash`".to_string())
