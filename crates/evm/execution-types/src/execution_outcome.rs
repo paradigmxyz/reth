@@ -197,10 +197,22 @@ impl ExecutionOutcome {
         #[cfg(feature = "optimism")]
         panic!("This should not be called in optimism mode. Use `optimism_receipts_root_slow` instead.");
         #[cfg(not(feature = "optimism"))]
-        self.receipts.root_slow(
-            self.block_number_to_index(_block_number)?,
-            reth_primitives::proofs::calculate_receipt_root_no_memo,
-        )
+        {
+            // TODO: This is a temporary solution until we eliminate the `Option` from `Receipts`.
+            // We can then apply directly:
+            // ```rust
+            // self.receipts
+            //     .receipt_vec
+            //     .get(self.block_number_to_index(_block_number)?)
+            //     .map(|receipts| reth_primitives::proofs::calculate_receipt_root_no_memo(receipts))
+            // ```
+            let receipts = self.receipts().receipt_vec
+                [self.block_number_to_index(_block_number)?]
+            .iter()
+            .map(Option::as_ref)
+            .collect::<Option<Vec<_>>>()?;
+            Some(reth_primitives::proofs::calculate_receipt_root_no_memo(receipts.as_slice()))
+        }
     }
 
     /// Returns the receipt root for all recorded receipts.
@@ -211,7 +223,19 @@ impl ExecutionOutcome {
         block_number: BlockNumber,
         f: impl FnOnce(&[&Receipt]) -> B256,
     ) -> Option<B256> {
-        self.receipts.root_slow(self.block_number_to_index(block_number)?, f)
+        // TODO: This is a temporary solution until we eliminate the `Option` from `Receipts`.
+        // We can then apply directly:
+        // ```rust
+        // self.receipts
+        //     .receipt_vec
+        //     .get(self.block_number_to_index(block_number)?)
+        //     .map(|receipts| f(receipts))
+        // ```
+        let receipts = self.receipts.receipt_vec[self.block_number_to_index(block_number)?]
+            .iter()
+            .map(Option::as_ref)
+            .collect::<Option<Vec<_>>>()?;
+        Some(f(receipts.as_slice()))
     }
 
     /// Returns reference to receipts.
@@ -356,7 +380,7 @@ impl From<(BlockExecutionOutput<Receipt>, BlockNumber)> for ExecutionOutcome {
     fn from(value: (BlockExecutionOutput<Receipt>, BlockNumber)) -> Self {
         Self {
             bundle: value.0.state,
-            receipts: Receipts::from(value.0.receipts),
+            receipts: value.0.receipts.into_iter().map(Some).collect::<Vec<_>>().into(),
             first_block: value.1,
             requests: vec![value.0.requests],
         }

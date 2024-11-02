@@ -921,8 +921,14 @@ mod tests {
                 .map(|block| {
                     let senders = block.senders().expect("failed to recover senders");
                     let block_receipts = receipts.get(block.number as usize).unwrap().clone();
-                    let execution_outcome =
-                        ExecutionOutcome { receipts: block_receipts.into(), ..Default::default() };
+                    let execution_outcome = ExecutionOutcome {
+                        receipts: block_receipts
+                            .into_iter()
+                            .map(Option::Some)
+                            .collect::<Vec<_>>()
+                            .into(),
+                        ..Default::default()
+                    };
 
                     ExecutedBlock::new(
                         Arc::new(block.clone()),
