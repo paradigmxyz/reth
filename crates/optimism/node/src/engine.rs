@@ -22,7 +22,7 @@ use reth_optimism_payload_builder::{
 /// The types used in the optimism beacon consensus engine.
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]
-pub struct OptimismEngineTypes<T: PayloadTypes = OptimismPayloadTypes> {
+pub struct OptimismEngineTypes<T: PayloadTypes = OpPayloadTypes> {
     _marker: std::marker::PhantomData<T>,
 }
 
@@ -48,9 +48,9 @@ where
 /// A default payload type for [`OptimismEngineTypes`]
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]
-pub struct OptimismPayloadTypes;
+pub struct OpPayloadTypes;
 
-impl PayloadTypes for OptimismPayloadTypes {
+impl PayloadTypes for OpPayloadTypes {
     type BuiltPayload = OpBuiltPayload;
     type PayloadAttributes = OpPayloadAttributes;
     type PayloadBuilderAttributes = OpPayloadBuilderAttributes;
