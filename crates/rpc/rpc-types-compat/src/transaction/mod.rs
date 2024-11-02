@@ -160,14 +160,3 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> Transact
         authorization_list,
     }
 }
-
-/// Convert [`reth_primitives::TxType`] to [`alloy_consensus::TxType`]
-/// Will panics if the `TxType` is `TxType::Deposit` (Optimism Deposit transaction)
-pub fn tx_type_to_alloy(tx_type: TxType) -> alloy_consensus::TxType {
-    u8::from(tx_type).try_into().unwrap()
-}
-
-/// Convert [`alloy_consensus::TxType`] to [`reth_primitives::TxType`]
-pub fn tx_type_from_alloy(tx_type: alloy_consensus::TxType) -> TxType {
-    u8::from(tx_type).try_into().unwrap()
-}
