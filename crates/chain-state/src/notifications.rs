@@ -297,7 +297,7 @@ mod tests {
         block2.set_hash(block2_hash);
 
         // Create a receipt for the transaction in block1.
-        #[expect(clippy::needless_update)]
+        #[allow(clippy::needless_update)]
         let receipt1 = Receipt {
             tx_type: TxType::Legacy,
             cumulative_gas_used: 12345,
@@ -347,7 +347,7 @@ mod tests {
         old_block1.block.body.transactions.push(TransactionSigned::default());
 
         // Create a receipt for a transaction in the reverted block.
-        #[expect(clippy::needless_update)]
+        #[allow(clippy::needless_update)]
         let old_receipt = Receipt {
             tx_type: TxType::Legacy,
             cumulative_gas_used: 54321,
@@ -370,7 +370,7 @@ mod tests {
         new_block1.block.body.transactions.push(TransactionSigned::default());
 
         // Create a receipt for a transaction in the new committed block.
-        #[expect(clippy::needless_update)]
+        #[allow(clippy::needless_update)]
         let new_receipt = Receipt {
             tx_type: TxType::Legacy,
             cumulative_gas_used: 12345,
