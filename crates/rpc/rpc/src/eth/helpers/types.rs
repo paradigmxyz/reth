@@ -1,10 +1,9 @@
 //! L1 `eth` API types.
 
 use alloy_consensus::Transaction as _;
-use alloy_network::{AnyNetwork, Network};
+use alloy_network::{Ethereum, Network};
 use alloy_primitives::{Address, TxKind};
 use alloy_rpc_types::{Transaction, TransactionInfo};
-use alloy_serde::WithOtherFields;
 use reth_primitives::TransactionSignedEcRecovered;
 use reth_rpc_types_compat::{
     transaction::{from_primitive_signature, GasPrice},
@@ -19,7 +18,7 @@ impl TransactionCompat for EthTxBuilder
 where
     Self: Send + Sync,
 {
-    type Transaction = <AnyNetwork as Network>::TransactionResponse;
+    type Transaction = <Ethereum as Network>::TransactionResponse;
 
     fn fill(
         &self,
@@ -53,41 +52,38 @@ where
             signed_tx.chain_id(),
         );
 
-        WithOtherFields {
-            inner: Transaction {
-                hash: signed_tx.hash(),
-                nonce: signed_tx.nonce(),
-                from: signer,
-                to,
-                value: signed_tx.value(),
-                gas_price,
-                max_fee_per_gas,
-                max_priority_fee_per_gas: signed_tx.max_priority_fee_per_gas(),
-                signature: Some(signature),
-                gas: signed_tx.gas_limit(),
-                input,
-                chain_id,
-                access_list,
-                transaction_type: Some(signed_tx.tx_type() as u8),
-                // These fields are set to None because they are not stored as part of the
-                // transaction
-                block_hash,
-                block_number,
-                transaction_index,
-                // EIP-4844 fields
-                max_fee_per_blob_gas: signed_tx.max_fee_per_blob_gas(),
-                blob_versioned_hashes,
-                authorization_list,
-            },
-            ..Default::default()
+        Transaction {
+            hash: signed_tx.hash(),
+            nonce: signed_tx.nonce(),
+            from: signer,
+            to,
+            value: signed_tx.value(),
+            gas_price,
+            max_fee_per_gas,
+            max_priority_fee_per_gas: signed_tx.max_priority_fee_per_gas(),
+            signature: Some(signature),
+            gas: signed_tx.gas_limit(),
+            input,
+            chain_id,
+            access_list,
+            transaction_type: Some(signed_tx.tx_type() as u8),
+            // These fields are set to None because they are not stored as part of the
+            // transaction
+            block_hash,
+            block_number,
+            transaction_index,
+            // EIP-4844 fields
+            max_fee_per_blob_gas: signed_tx.max_fee_per_blob_gas(),
+            blob_versioned_hashes,
+            authorization_list,
         }
     }
 
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
-        tx.inner.input = tx.inner.input.slice(..4);
+        tx.input = tx.input.slice(..4);
     }
 
     fn tx_type(tx: &Self::Transaction) -> u8 {
-        tx.inner.transaction_type.unwrap_or(0)
+        tx.transaction_type.unwrap_or(0)
     }
 }

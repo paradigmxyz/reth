@@ -8,9 +8,8 @@ use std::fmt;
 use alloy_consensus::Transaction as _;
 use alloy_rpc_types::{
     request::{TransactionInput, TransactionRequest},
-    Transaction, TransactionInfo,
+    TransactionInfo,
 };
-use alloy_serde::WithOtherFields;
 use reth_primitives::{TransactionSigned, TransactionSignedEcRecovered, TxType};
 use serde::{Deserialize, Serialize};
 
@@ -87,28 +86,6 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + fmt::Debug {
     /// Returns the transaction type.
     // todo: remove when alloy TransactionResponse trait it updated.
     fn tx_type(tx: &Self::Transaction) -> u8;
-}
-
-impl TransactionCompat for () {
-    // this noop impl depends on integration in `reth_rpc_eth_api::EthApiTypes` noop impl, and
-    // `alloy_network::AnyNetwork`
-    type Transaction = WithOtherFields<Transaction>;
-
-    fn fill(
-        &self,
-        _tx: TransactionSignedEcRecovered,
-        _tx_info: TransactionInfo,
-    ) -> Self::Transaction {
-        WithOtherFields::default()
-    }
-
-    fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
-        tx.input = tx.input.slice(..4);
-    }
-
-    fn tx_type(_tx: &Self::Transaction) -> u8 {
-        0
-    }
 }
 
 /// Gas price and max fee per gas for a transaction. Helper type to format transaction RPC response.

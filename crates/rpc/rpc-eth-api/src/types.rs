@@ -2,9 +2,8 @@
 
 use std::{error::Error, fmt};
 
-use alloy_network::{AnyNetwork, Network};
+use alloy_network::Network;
 use alloy_rpc_types::Block;
-use reth_rpc_eth_types::EthApiError;
 use reth_rpc_types_compat::TransactionCompat;
 
 use crate::{AsEthApiError, FromEthApiError, FromEvmError};
@@ -26,16 +25,6 @@ pub trait EthApiTypes: Send + Sync + Clone {
 
     /// Returns reference to transaction response builder.
     fn tx_resp_builder(&self) -> &Self::TransactionCompat;
-}
-
-impl EthApiTypes for () {
-    type Error = EthApiError;
-    type NetworkTypes = AnyNetwork;
-    type TransactionCompat = ();
-
-    fn tx_resp_builder(&self) -> &Self::TransactionCompat {
-        self
-    }
 }
 
 /// Adapter for network specific transaction type.
