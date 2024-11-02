@@ -409,8 +409,10 @@ where
     type Handle = RpcHandle<N, EthApi>;
 
     async fn launch_add_ons(self, ctx: AddOnsContext<'_, N>) -> eyre::Result<Self::Handle> {
-        let AddOnsContext { node, config, beacon_engine_handle, jwt_secret } = ctx;
         let Self { eth_api_builder, engine_validator_builder, hooks, _pd: _ } = self;
+
+        let engine_validator = engine_validator_builder.build(&ctx).await?;
+        let AddOnsContext { node, config, beacon_engine_handle, jwt_secret } = ctx;
 
         let client = ClientVersionV1 {
             code: CLIENT_CODE,
@@ -422,17 +424,17 @@ where
         let engine_api = EngineApi::new(
             node.provider().clone(),
             config.chain.clone(),
-            beacon_engine_handle.clone(),
+            beacon_engine_handle,
             node.payload_builder().clone().into(),
             node.pool().clone(),
             Box::new(node.task_executor().clone()),
             client,
             EngineCapabilities::default(),
-            engine_validator_builder.build(&ctx).await?,
+            engine_validator,
         );
         info!(target: "reth::cli", "Engine API handler initialized");
 
-        let auth_config = config.rpc.auth_server_config(*jwt_secret)?;
+        let auth_config = config.rpc.auth_server_config(jwt_secret)?;
         let module_config = config.rpc.transport_rpc_module_config();
         debug!(target: "reth::cli", http=?module_config.http(), ws=?module_config.ws(), "Using RPC module config");
 
