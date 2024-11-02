@@ -329,10 +329,10 @@ where
         let jwt_secret = ctx.auth_jwt_secret()?;
 
         let add_ons_ctx = AddOnsContext {
-            node: ctx.node_adapter(),
+            node: ctx.node_adapter().clone(),
             config: ctx.node_config(),
-            beacon_engine_handle: &beacon_engine_handle,
-            jwt_secret: &jwt_secret,
+            beacon_engine_handle,
+            jwt_secret,
         };
 
         let RpcHandle { rpc_server_handles, rpc_registry } =
