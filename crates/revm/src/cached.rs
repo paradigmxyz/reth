@@ -59,6 +59,8 @@ impl CachedReads {
     }
 
     /// Extends current cache with entries from another [`CachedReads`] instance.
+    ///
+    /// Note: It is expected that both instances are based on the exact same state.
     pub fn extend(&mut self, other: Self) {
         self.accounts.extend(other.accounts);
         self.contracts.extend(other.contracts);
