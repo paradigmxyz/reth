@@ -1953,6 +1953,7 @@
               "mode": "off"
             }
           },
+          "decimals": 4,
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
