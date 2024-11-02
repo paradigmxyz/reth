@@ -60,6 +60,10 @@ pub struct FlattenedBundleItem {
     pub validity: Option<Validity>,
     /// Optional privacy settings for the bundle item
     pub privacy: Option<Privacy>,
+    /// Optional refund percent for the bundle item
+    pub refund_percent: Option<u64>,
+    /// Optional refund configs for the bundle item
+    pub refund_configs: Option<Vec<RefundConfig>>,
 }
 
 /// `Eth` sim bundle implementation.
@@ -173,6 +177,15 @@ where
                         let (tx, signer) = recovered_tx.into_components();
                         let tx = tx.into_transaction();
 
+                        let refund_percent =
+                            validity.as_ref().and_then(|v| v.refund.as_ref()).and_then(|refunds| {
+                                refunds.iter().find_map(|refund| {
+                                    (refund.body_idx as usize == idx).then_some(refund.percent)
+                                })
+                            });
+                        let refund_configs =
+                            validity.as_ref().and_then(|v| v.refund_config.clone());
+
                         // Create FlattenedBundleItem with current inclusion, validity, and privacy
                         let flattened_item = FlattenedBundleItem {
                             tx,
@@ -181,6 +194,8 @@ where
                             inclusion: inclusion.clone(),
                             validity: validity.clone(),
                             privacy: privacy.clone(),
+                            refund_percent,
+                            refund_configs,
                         };
 
                         // Add to items
@@ -229,7 +244,7 @@ where
         // Also, flatten the bundle here so that its easier to process
         let flattened_bundle = self.parse_and_flatten_bundle(&request)?;
 
-        let block_id = parent_block.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+        let block_id = parent_block.unwrap_or(BlockId::Number(BlockNumberOrTag::Pending));
         let (cfg, mut block_env, current_block) = self.eth_api().evm_env_at(block_id).await?;
 
         let parent_header = RpcNodeCore::provider(&self.inner.eth_api)
@@ -294,7 +309,7 @@ where
 
                 let mut evm = RpcNodeCore::evm_config(&eth_api).evm_with_env(db, env);
 
-                for (i, item) in flattened_bundle.iter().enumerate() {
+                for item in &flattened_bundle {
                     // Check inclusion constraints
                     let block_number = item.inclusion.block_number();
                     let max_block_number =
@@ -335,15 +350,8 @@ where
                         coinbase_balance_after_tx.saturating_sub(coinbase_balance_before_tx);
                     total_profit += coinbase_diff;
 
-                    // Add to refundable value if this tx index is not in refund config
-                    let has_refund = item
-                        .validity
-                        .as_ref()
-                        .and_then(|v| v.refund.as_ref())
-                        .map(|refunds| refunds.iter().any(|r| r.body_idx as usize == i))
-                        .unwrap_or(false);
-
-                    if !has_refund {
+                    // Add to refundable value if this tx does not have a refund percent
+                    if item.refund_percent.is_none() {
                         refundable_value += coinbase_diff;
                     }
 
@@ -351,7 +359,8 @@ where
                     coinbase_balance_before_tx = coinbase_balance_after_tx;
 
                     // Collect logs if requested
-                    // TODO: add bundle logs
+                    // TODO: since we are looping over iteratively, we are not collecting bundle
+                    // logs. We should collect bundle logs when we are processing the bundle items.
                     if logs {
                         let tx_logs = result.logs().to_vec();
                         let sim_bundle_logs =
@@ -364,61 +373,45 @@ where
                 }
 
                 // After processing all transactions, process refunds
-                for (i, item) in flattened_bundle.iter().enumerate() {
-                    let validity = match &item.validity {
-                        Some(validity) => validity,
-                        None => continue,
-                    };
+                for item in &flattened_bundle {
+                    if let Some(refund_percent) = item.refund_percent {
+                        // Get refund configurations
+                        let refund_configs = item.refund_configs.clone().unwrap_or_else(|| {
+                            vec![RefundConfig { address: item.signer, percent: 100 }]
+                        });
 
-                    let refunds = match &validity.refund {
-                        Some(refunds) => refunds,
-                        None => continue,
-                    };
+                        // Calculate payout transaction fee
+                        let payout_tx_fee = basefee *
+                            U256::from(SBUNDLE_PAYOUT_MAX_COST) *
+                            U256::from(refund_configs.len() as u64);
 
-                    for refund in refunds {
-                        if refund.body_idx as usize == i {
-                            // Get refund configurations
-                            let refund_configs =
-                                if let Some(refund_configs) = &validity.refund_config {
-                                    refund_configs.clone()
-                                } else {
-                                    // Default to refunding 100% to the transaction signer
-                                    vec![RefundConfig { address: item.signer, percent: 100 }]
-                                };
+                        // Add gas used for payout transactions
+                        total_gas_used += SBUNDLE_PAYOUT_MAX_COST * refund_configs.len() as u64;
 
-                            // Calculate payout transaction fee
-                            let payout_tx_fee = basefee *
-                                U256::from(SBUNDLE_PAYOUT_MAX_COST) *
-                                U256::from(refund_configs.len() as u64);
+                        // Calculate allocated refundable value (payout value)
+                        let payout_value =
+                            refundable_value * U256::from(refund_percent) / U256::from(100);
 
-                            // Add gas used for payout transactions
-                            total_gas_used += SBUNDLE_PAYOUT_MAX_COST * refund_configs.len() as u64;
-
-                            // Calculate allocated refundable value (payout value)
-                            let payout_value =
-                                refundable_value * U256::from(refund.percent) / U256::from(100);
-
-                            if payout_tx_fee > payout_value {
-                                return Err(EthApiError::InvalidParams(
-                                    EthSimBundleError::NegativeProfit.to_string(),
-                                )
-                                .into());
-                            }
-
-                            // Subtract payout value from total profit
-                            total_profit = total_profit.checked_sub(payout_value).ok_or(
-                                EthApiError::InvalidParams(
-                                    EthSimBundleError::NegativeProfit.to_string(),
-                                ),
-                            )?;
-
-                            // Adjust refundable value
-                            refundable_value = refundable_value.checked_sub(payout_value).ok_or(
-                                EthApiError::InvalidParams(
-                                    EthSimBundleError::NegativeProfit.to_string(),
-                                ),
-                            )?;
+                        if payout_tx_fee > payout_value {
+                            return Err(EthApiError::InvalidParams(
+                                EthSimBundleError::NegativeProfit.to_string(),
+                            )
+                            .into());
                         }
+
+                        // Subtract payout value from total profit
+                        total_profit = total_profit.checked_sub(payout_value).ok_or(
+                            EthApiError::InvalidParams(
+                                EthSimBundleError::NegativeProfit.to_string(),
+                            ),
+                        )?;
+
+                        // Adjust refundable value
+                        refundable_value = refundable_value.checked_sub(payout_value).ok_or(
+                            EthApiError::InvalidParams(
+                                EthSimBundleError::NegativeProfit.to_string(),
+                            ),
+                        )?;
                     }
                 }
 
