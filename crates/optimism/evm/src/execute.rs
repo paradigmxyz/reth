@@ -467,7 +467,7 @@ mod tests {
                 gas_limit: MIN_TRANSACTION_GAS,
                 ..Default::default()
             }),
-            optimism_deposit_tx_signature(),
+            TxDeposit::signature(),
         );
 
         let provider = executor_provider(chain_spec);

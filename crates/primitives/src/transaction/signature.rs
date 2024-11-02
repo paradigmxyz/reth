@@ -3,7 +3,7 @@ use alloy_consensus::transaction::from_eip155_value;
 use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Decodable;
 
-pub use alloy_primitives::Signature;
+pub use alloy_primitives::PrimitiveSignature as Signature;
 
 /// The order of the secp256k1 curve, divided by two. Signatures that should be checked according
 /// to EIP-2 should have an S value less than or equal to this.

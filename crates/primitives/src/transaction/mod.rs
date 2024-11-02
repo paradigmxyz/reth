@@ -20,7 +20,7 @@ use once_cell as _;
 #[cfg(not(feature = "std"))]
 use once_cell::sync::Lazy as LazyLock;
 #[cfg(feature = "optimism")]
-use op_alloy_consensus::{optimism_deposit_tx_signature, DepositTransaction};
+use op_alloy_consensus::DepositTransaction;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use signature::decode_with_eip155_chain_id;
@@ -899,7 +899,7 @@ impl TransactionSignedNoHash {
             // transactions with an empty signature
             //
             // NOTE: this is very hacky and only relevant for op-mainnet pre bedrock
-            if self.is_legacy() && self.signature == optimism_deposit_tx_signature() {
+            if self.is_legacy() && self.signature == TxDeposit::signature() {
                 return Some(Address::ZERO)
             }
         }
@@ -1478,7 +1478,7 @@ impl Decodable2718 for TransactionSigned {
             #[cfg(feature = "optimism")]
             TxType::Deposit => Ok(Self::from_transaction_and_signature(
                 Transaction::Deposit(TxDeposit::rlp_decode(buf)?),
-                optimism_deposit_tx_signature(),
+                TxDeposit::signature(),
             )),
         }
     }
@@ -1513,8 +1513,7 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
         }
 
         #[cfg(feature = "optimism")]
-        let signature =
-            if transaction.is_deposit() { optimism_deposit_tx_signature() } else { signature };
+        let signature = if transaction.is_deposit() { TxDeposit::signature() } else { signature };
 
         Ok(Self::from_transaction_and_signature(transaction, signature))
     }
@@ -1650,7 +1649,7 @@ pub mod serde_bincode_compat {
         transaction::serde_bincode_compat::{TxEip1559, TxEip2930, TxEip7702, TxLegacy},
         TxEip4844,
     };
-    use alloy_primitives::{Signature, TxHash};
+    use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
     #[cfg(feature = "optimism")]
     use op_alloy_consensus::serde_bincode_compat::TxDeposit;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};

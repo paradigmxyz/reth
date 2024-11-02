@@ -1,33 +1,19 @@
 //! Common conversions from alloy types.
 
-use crate::{
-    Block, BlockBody, Signature, Transaction, TransactionSigned, TransactionSignedEcRecovered,
-    TransactionSignedNoHash, TxType,
-};
+use crate::{Block, BlockBody, Transaction, TransactionSigned};
 use alloc::{string::ToString, vec::Vec};
-use alloy_consensus::{
-    constants::EMPTY_TRANSACTIONS, transaction::from_eip155_value, AnyHeader, Header, TxEip1559,
-    TxEip2930, TxEip4844, TxLegacy,
-};
-use alloy_primitives::{SignatureError, TxKind};
-use alloy_rlp::Error as RlpError;
-use alloy_rpc_types::AnyNetworkHeader;
+use alloy_consensus::{constants::EMPTY_TRANSACTIONS, AnyHeader, Header, TxEnvelope};
+use alloy_network::{AnyRpcBlock, AnyTxEnvelope};
 use alloy_serde::WithOtherFields;
 use op_alloy_rpc_types as _;
 
-impl
-    TryFrom<alloy_rpc_types::Block<WithOtherFields<alloy_rpc_types::Transaction>, AnyNetworkHeader>>
-    for Block
-{
+impl TryFrom<AnyRpcBlock> for Block {
     type Error = alloy_rpc_types::ConversionError;
 
-    fn try_from(
-        block: alloy_rpc_types::Block<
-            WithOtherFields<alloy_rpc_types::Transaction>,
-            AnyNetworkHeader,
-        >,
-    ) -> Result<Self, Self::Error> {
+    fn try_from(block: AnyRpcBlock) -> Result<Self, Self::Error> {
         use alloy_rpc_types::ConversionError;
+
+        let block = block.inner;
 
         let transactions = {
             let transactions: Result<Vec<TransactionSigned>, ConversionError> = match block
@@ -43,7 +29,7 @@ impl
                     if block.header.transactions_root == EMPTY_TRANSACTIONS {
                         Ok(Vec::new())
                     } else {
-                        Err(ConversionError::MissingFullTransactions)
+                        Err(ConversionError::Custom("missing transactions".to_string()))
                     }
                 }
             };
@@ -89,8 +75,9 @@ impl
                 gas_used,
                 timestamp,
                 extra_data,
-                mix_hash: mix_hash.ok_or(ConversionError::Custom("missing mixHash".to_string()))?,
-                nonce: nonce.ok_or(ConversionError::Custom("missing nonce".to_string()))?,
+                mix_hash: mix_hash
+                    .ok_or_else(|| ConversionError::Custom("missing mixHash".to_string()))?,
+                nonce: nonce.ok_or_else(|| ConversionError::Custom("missing nonce".to_string()))?,
                 base_fee_per_gas,
                 withdrawals_root,
                 blob_gas_used,
@@ -107,11 +94,12 @@ impl
     }
 }
 
-impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for Transaction {
+impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction<AnyTxEnvelope>>> for TransactionSigned {
     type Error = alloy_rpc_types::ConversionError;
 
-    fn try_from(tx: WithOtherFields<alloy_rpc_types::Transaction>) -> Result<Self, Self::Error> {
-        use alloy_eips::eip2718::Eip2718Error;
+    fn try_from(
+        tx: WithOtherFields<alloy_rpc_types::Transaction<AnyTxEnvelope>>,
+    ) -> Result<Self, Self::Error> {
         use alloy_rpc_types::ConversionError;
 
         #[cfg(feature = "optimism")]
@@ -119,211 +107,62 @@ impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for Transaction {
         #[cfg(not(feature = "optimism"))]
         let WithOtherFields { inner: tx, other: _ } = tx;
 
-        match tx.transaction_type.map(TryInto::try_into).transpose().map_err(|_| {
-            ConversionError::Eip2718Error(Eip2718Error::UnexpectedType(
-                tx.transaction_type.unwrap(),
-            ))
-        })? {
-            None | Some(TxType::Legacy) => {
-                // legacy
-                if tx.max_fee_per_gas.is_some() || tx.max_priority_fee_per_gas.is_some() {
-                    return Err(ConversionError::Eip2718Error(
-                        RlpError::Custom("EIP-1559 fields are present in a legacy transaction")
-                            .into(),
-                    ))
-                }
-
-                // extract the chain id if possible
-                let chain_id = match tx.chain_id {
-                    Some(chain_id) => Some(chain_id),
-                    None => {
-                        if let Some(signature) = tx.signature {
-                            // TODO: make this error conversion better. This is needed because
-                            // sometimes rpc providers return legacy transactions without a chain id
-                            // explicitly in the response, however those transactions may also have
-                            // a chain id in the signature from eip155
-                            from_eip155_value(signature.v.to())
-                                .ok_or_else(|| {
-                                    ConversionError::SignatureError(SignatureError::InvalidParity(
-                                        signature.v.to(),
-                                    ))
-                                })?
-                                .1
-                        } else {
-                            return Err(ConversionError::MissingChainId)
-                        }
-                    }
-                };
-
-                Ok(Self::Legacy(TxLegacy {
-                    chain_id,
-                    nonce: tx.nonce,
-                    gas_price: tx.gas_price.ok_or(ConversionError::MissingGasPrice)?,
-                    gas_limit: tx.gas,
-                    to: tx.to.map_or(TxKind::Create, TxKind::Call),
-                    value: tx.value,
-                    input: tx.input,
-                }))
+        let (transaction, signature, hash) = match tx.inner {
+            AnyTxEnvelope::Ethereum(TxEnvelope::Legacy(tx)) => {
+                let (tx, signature, hash) = tx.into_parts();
+                (Transaction::Legacy(tx), signature, hash)
             }
-            Some(TxType::Eip2930) => {
-                // eip2930
-                Ok(Self::Eip2930(TxEip2930 {
-                    chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
-                    nonce: tx.nonce,
-                    gas_limit: tx.gas,
-                    to: tx.to.map_or(TxKind::Create, TxKind::Call),
-                    value: tx.value,
-                    input: tx.input,
-                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,
-                    gas_price: tx.gas_price.ok_or(ConversionError::MissingGasPrice)?,
-                }))
+            AnyTxEnvelope::Ethereum(TxEnvelope::Eip2930(tx)) => {
+                let (tx, signature, hash) = tx.into_parts();
+                (Transaction::Eip2930(tx), signature, hash)
             }
-            Some(TxType::Eip1559) => {
-                // EIP-1559
-                Ok(Self::Eip1559(TxEip1559 {
-                    chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
-                    nonce: tx.nonce,
-                    max_priority_fee_per_gas: tx
-                        .max_priority_fee_per_gas
-                        .ok_or(ConversionError::MissingMaxPriorityFeePerGas)?,
-                    max_fee_per_gas: tx
-                        .max_fee_per_gas
-                        .ok_or(ConversionError::MissingMaxFeePerGas)?,
-                    gas_limit: tx.gas,
-                    to: tx.to.map_or(TxKind::Create, TxKind::Call),
-                    value: tx.value,
-                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,
-                    input: tx.input,
-                }))
+            AnyTxEnvelope::Ethereum(TxEnvelope::Eip1559(tx)) => {
+                let (tx, signature, hash) = tx.into_parts();
+                (Transaction::Eip1559(tx), signature, hash)
             }
-            Some(TxType::Eip4844) => {
-                // EIP-4844
-                Ok(Self::Eip4844(TxEip4844 {
-                    chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
-                    nonce: tx.nonce,
-                    max_priority_fee_per_gas: tx
-                        .max_priority_fee_per_gas
-                        .ok_or(ConversionError::MissingMaxPriorityFeePerGas)?,
-                    max_fee_per_gas: tx
-                        .max_fee_per_gas
-                        .ok_or(ConversionError::MissingMaxFeePerGas)?,
-                    gas_limit: tx.gas,
-                    to: tx.to.unwrap_or_default(),
-                    value: tx.value,
-                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,
-                    input: tx.input,
-                    blob_versioned_hashes: tx
-                        .blob_versioned_hashes
-                        .ok_or(ConversionError::MissingBlobVersionedHashes)?,
-                    max_fee_per_blob_gas: tx
-                        .max_fee_per_blob_gas
-                        .ok_or(ConversionError::MissingMaxFeePerBlobGas)?,
-                }))
+            AnyTxEnvelope::Ethereum(TxEnvelope::Eip4844(tx)) => {
+                let (tx, signature, hash) = tx.into_parts();
+                (Transaction::Eip4844(tx.into()), signature, hash)
             }
-            Some(TxType::Eip7702) => {
-                // this is currently unsupported as it is not present in alloy due to missing rpc
-                // specs
-                Err(ConversionError::Custom("Unimplemented".to_string()))
-                /*
-                // EIP-7702
-                Ok(Transaction::Eip7702(TxEip7702 {
-                    chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
-                    nonce: tx.nonce,
-                    max_priority_fee_per_gas: tx
-                        .max_priority_fee_per_gas
-                        .ok_or(ConversionError::MissingMaxPriorityFeePerGas)?,
-                    max_fee_per_gas: tx
-                        .max_fee_per_gas
-                        .ok_or(ConversionError::MissingMaxFeePerGas)?,
-                    gas_limit: tx
-                        .gas
-                        .try_into()
-                        .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
-                    to: tx.to.map_or(TxKind::Create, TxKind::Call),
-                    value: tx.value,
-                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,
-                    authorization_list: tx
-                        .authorization_list
-                        .ok_or(ConversionError::MissingAuthorizationList)?,
-                    input: tx.input,
-                    }))*/
+            AnyTxEnvelope::Ethereum(TxEnvelope::Eip7702(tx)) => {
+                let (tx, signature, hash) = tx.into_parts();
+                (Transaction::Eip7702(tx), signature, hash)
+            }
+            AnyTxEnvelope::Ethereum(_) => {
+                return Err(ConversionError::Custom("unknown transaction type".to_string()))
+            }
+            #[cfg(not(feature = "optimism"))]
+            AnyTxEnvelope::Unknown(_) => {
+                return Err(ConversionError::Custom("unknown transaction type".to_string()))
             }
             #[cfg(feature = "optimism")]
-            Some(TxType::Deposit) => {
-                let fields = other
-                    .deserialize_into::<op_alloy_rpc_types::OpTransactionFields>()
-                    .map_err(|e| ConversionError::Custom(e.to_string()))?;
-                Ok(Self::Deposit(op_alloy_consensus::TxDeposit {
-                    source_hash: fields
-                        .source_hash
-                        .ok_or_else(|| ConversionError::Custom("MissingSourceHash".to_string()))?,
-                    from: tx.from,
-                    to: TxKind::from(tx.to),
-                    mint: fields.mint.filter(|n| *n != 0),
-                    value: tx.value,
-                    gas_limit: tx.gas,
-                    is_system_transaction: fields.is_system_tx.unwrap_or(false),
-                    input: tx.input,
-                }))
-            }
-        }
-    }
-}
-
-impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for TransactionSigned {
-    type Error = alloy_rpc_types::ConversionError;
-
-    fn try_from(tx: WithOtherFields<alloy_rpc_types::Transaction>) -> Result<Self, Self::Error> {
-        use alloy_rpc_types::ConversionError;
-
-        let signature = tx.signature.ok_or(ConversionError::MissingSignature)?;
-        let transaction: Transaction = tx.try_into()?;
-        let y_parity = if let Some(y_parity) = signature.y_parity {
-            y_parity.0
-        } else {
-            match transaction.tx_type() {
-                // If the transaction type is Legacy, adjust the v component of the
-                // signature according to the Ethereum specification
-                TxType::Legacy => {
-                    from_eip155_value(signature.v.to())
-                        .ok_or_else(|| {
-                            ConversionError::SignatureError(SignatureError::InvalidParity(
-                                signature.v.to(),
-                            ))
-                        })?
-                        .0
+            AnyTxEnvelope::Unknown(tx) => {
+                if tx.inner.ty.0 == TxType::Deposit {
+                    Ok(Self::Deposit(op_alloy_consensus::TxDeposit {
+                        source_hash: tx.inner.deser_by_key("sourceHash").ok_or_else(|| {
+                            ConversionError::Custom("missing `sourceHash`".to_string())
+                        })?,
+                        from: tx
+                            .inner
+                            .deser_by_key("from")
+                            .ok_or_else(|| ConversionError::Custom("missing `from`".to_string()))?,
+                        to: tx.to(),
+                        mint: fields.mint.filter(|n| *n != 0),
+                        value: tx.value(),
+                        gas_limit: tx.gas_limit(),
+                        is_system_transaction: tx
+                            .inner
+                            .deser_by_key("isSystemTx")
+                            .unwrap_or(Ok(0))?,
+                        input: tx.input().clone(),
+                    }))
+                } else {
+                    return Err(ConversionError::Custom("unknown transaction type".to_string()))
                 }
-                _ => !signature.v.is_zero(),
             }
         };
 
-        Ok(Self::from_transaction_and_signature(
-            transaction,
-            Signature::new(signature.r, signature.s, y_parity),
-        ))
-    }
-}
-
-impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for TransactionSignedEcRecovered {
-    type Error = alloy_rpc_types::ConversionError;
-
-    fn try_from(tx: WithOtherFields<alloy_rpc_types::Transaction>) -> Result<Self, Self::Error> {
-        use alloy_rpc_types::ConversionError;
-
-        let transaction: TransactionSigned = tx.try_into()?;
-
-        transaction.try_into_ecrecovered().map_err(|_| ConversionError::InvalidSignature)
-    }
-}
-
-impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for TransactionSignedNoHash {
-    type Error = alloy_rpc_types::ConversionError;
-
-    fn try_from(tx: WithOtherFields<alloy_rpc_types::Transaction>) -> Result<Self, Self::Error> {
-        Ok(Self {
-            signature: tx.signature.ok_or(Self::Error::MissingSignature)?.try_into()?,
-            transaction: tx.try_into()?,
-        })
+        Ok(Self { transaction, signature, hash })
     }
 }
 

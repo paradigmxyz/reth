@@ -1,11 +1,8 @@
 //! Compatibility functions for rpc `Transaction` type.
-mod signature;
-
-pub use signature::*;
 
 use std::fmt;
 
-use alloy_consensus::Transaction as _;
+use alloy_consensus::{Transaction as _, TxEip4844Variant, TxEnvelope};
 use alloy_rpc_types::{
     request::{TransactionInput, TransactionRequest},
     TransactionInfo,
@@ -44,7 +41,6 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + fmt::Debug {
         + Sync
         + Unpin
         + Clone
-        + Default
         + fmt::Debug;
 
     ///

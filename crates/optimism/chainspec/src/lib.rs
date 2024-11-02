@@ -20,7 +20,7 @@ mod op_sepolia;
 use alloc::{boxed::Box, vec, vec::Vec};
 use alloy_chains::Chain;
 use alloy_genesis::Genesis;
-use alloy_primitives::{Bytes, Signature, B256, U256};
+use alloy_primitives::{Bytes, PrimitiveSignature as Signature, B256, U256};
 pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
 use derive_more::{Constructor, Deref, Display, From, Into};
