@@ -9,7 +9,7 @@ use crate::{
     StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
-use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
+use alloy_eips::{eip4895::Withdrawal, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable, TxHash, TxNumber, B256, U256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chain_state::{
@@ -25,7 +25,7 @@ use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
     Account, Block, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders,
     SealedHeader, StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
-    Withdrawal, Withdrawals,
+    Withdrawals,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};

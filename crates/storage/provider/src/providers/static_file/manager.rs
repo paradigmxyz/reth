@@ -7,7 +7,7 @@ use crate::{
     ReceiptProvider, StageCheckpointReader, StatsReader, TransactionVariant, TransactionsProvider,
     TransactionsProviderExt, WithdrawalsProvider,
 };
-use alloy_eips::BlockHashOrNumber;
+use alloy_eips::{eip4895::Withdrawal, BlockHashOrNumber};
 use alloy_primitives::{keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use dashmap::DashMap;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
@@ -31,8 +31,7 @@ use reth_primitives::{
         DEFAULT_BLOCKS_PER_STATIC_FILE,
     },
     Block, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    StaticFileSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash, Withdrawal,
-    Withdrawals,
+    StaticFileSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash, Withdrawals,
 };
 use reth_stages_types::{PipelineTarget, StageId};
 use reth_storage_api::DBProvider;
