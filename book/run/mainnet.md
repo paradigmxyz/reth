@@ -87,7 +87,7 @@ We provide a method for running Reth without a Consensus Layer via the `--debug.
 
 ## Running with Etherscan as Block Source
 
-You can use `--debug.etherscan` to run Reth with a fake consensus client that advances the chain using recent block hashes on Etherscan. This requires an Etherscan API key (set via `ETHERSCAN_API_KEY` environment variable). Optionally, specify a custom API URL with `--debug.etherscan <URL>`.
+You can use `--debug.etherscan` to run Reth with a fake consensus client that advances the chain using recent blocks on Etherscan. This requires an Etherscan API key (set via `ETHERSCAN_API_KEY` environment variable). Optionally, specify a custom API URL with `--debug.etherscan <URL>`.
 
 Example:
 ```bash
