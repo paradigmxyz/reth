@@ -680,6 +680,16 @@ where
         Ok(Self::new_payload_v1_metered(self, payload).await?)
     }
 
+    async fn new_payload_v1_metered(
+        &self,
+        payload: ExecutionPayloadV1,
+    ) -> RpcResult<PayloadStatus> {
+        let start = Instant::now();
+        let res = Self::fork_choice_updated_v1(self, fork_choice_state, payload_attributes).await;
+        self.inner.metrics.latency.fork_choice_updated_v1.record(start.elapsed());
+        self.inner.metrics.fcu_response.update_response_metrics(&res);
+    }
+
     /// Handler for `engine_newPayloadV2`
     /// See also <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/shanghai.md#engine_newpayloadv2>
     async fn new_payload_v2(&self, payload: ExecutionPayloadInputV2) -> RpcResult<PayloadStatus> {
@@ -961,15 +971,6 @@ where
 impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
     EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 {
-    async fn new_payload_v1_metered(
-        &self,
-        payload: ExecutionPayloadV1,
-    ) -> RpcResult<PayloadStatus> {
-        let start = Instant::now();
-        let res = Self::fork_choice_updated_v3(self, fork_choice_state, payload_attributes).await;
-        self.inner.metrics.latency.fork_choice_updated_v3.record(start.elapsed());
-        self.inner.metrics.fcu_response.update_response_metrics(&res);
-    }
 }
 
 impl<Provider, EngineT, Pool, Validator, ChainSpec> std::fmt::Debug
