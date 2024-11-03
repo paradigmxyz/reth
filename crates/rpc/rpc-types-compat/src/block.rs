@@ -99,17 +99,6 @@ pub fn from_block_full<T: TransactionCompat>(
     ))
 }
 
-/// Converts from a [`reth_primitives::SealedHeader`] to a [`alloy-rpc-types::Header`]
-///
-/// # Note
-///
-/// This does not set the `totalDifficulty` field.
-pub fn from_primitive_with_hash(primitive_header: reth_primitives::SealedHeader) -> Header {
-    let (inner, hash) = primitive_header.split();
-
-    Header { hash, inner, total_difficulty: None, size: None }
-}
-
 #[inline]
 fn from_block_with_transactions<T>(
     block_length: usize,

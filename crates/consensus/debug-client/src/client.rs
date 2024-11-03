@@ -206,11 +206,7 @@ pub fn block_to_execution_payload_v3(block: Block) -> ExecutionNewPayload {
                 block_hash: block.header.hash,
                 transactions: transactions
                     .into_iter()
-                    .map(|tx| {
-                        let mut buffer: Vec<u8> = vec![];
-                        tx.inner.encode_2718(&mut buffer);
-                        buffer.into()
-                    })
+                    .map(|tx| tx.inner.encoded_2718().into())
                     .collect(),
             },
             withdrawals: block.withdrawals.clone().unwrap_or_default().to_vec(),

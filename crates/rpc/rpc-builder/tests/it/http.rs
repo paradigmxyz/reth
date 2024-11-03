@@ -4,7 +4,7 @@
 use crate::utils::{launch_http, launch_http_ws, launch_ws};
 use alloy_primitives::{hex_literal::hex, Address, Bytes, TxHash, B256, B64, U256, U64};
 use alloy_rpc_types_eth::{
-    transaction::TransactionRequest, Block, FeeHistory, Filter, Header, Index, Log,
+    transaction::TransactionRequest, Block, FeeHistory, Filter, Index, Log,
     PendingTransactionFilterKind, SyncStatus, Transaction, TransactionReceipt,
 };
 use alloy_rpc_types_trace::filter::TraceFilter;
@@ -399,32 +399,28 @@ where
     let nonce = 1;
     let block_hash = B256::default();
 
-    OtterscanClient::<Transaction, Header>::get_header_by_number(client, block_number)
+    OtterscanClient::<Transaction>::get_header_by_number(client, block_number).await.unwrap();
+
+    OtterscanClient::<Transaction>::has_code(client, address, None).await.unwrap();
+    OtterscanClient::<Transaction>::has_code(client, address, Some(block_number.into()))
         .await
         .unwrap();
 
-    OtterscanClient::<Transaction, Header>::has_code(client, address, None).await.unwrap();
-    OtterscanClient::<Transaction, Header>::has_code(client, address, Some(block_number.into()))
-        .await
-        .unwrap();
+    OtterscanClient::<Transaction>::get_api_level(client).await.unwrap();
 
-    OtterscanClient::<Transaction, Header>::get_api_level(client).await.unwrap();
+    OtterscanClient::<Transaction>::get_internal_operations(client, tx_hash).await.unwrap();
 
-    OtterscanClient::<Transaction, Header>::get_internal_operations(client, tx_hash).await.unwrap();
+    OtterscanClient::<Transaction>::get_transaction_error(client, tx_hash).await.unwrap();
 
-    OtterscanClient::<Transaction, Header>::get_transaction_error(client, tx_hash).await.unwrap();
+    OtterscanClient::<Transaction>::trace_transaction(client, tx_hash).await.unwrap();
 
-    OtterscanClient::<Transaction, Header>::trace_transaction(client, tx_hash).await.unwrap();
+    OtterscanClient::<Transaction>::get_block_details(client, block_number).await.unwrap_err();
 
-    OtterscanClient::<Transaction, Header>::get_block_details(client, block_number)
+    OtterscanClient::<Transaction>::get_block_details_by_hash(client, block_hash)
         .await
         .unwrap_err();
 
-    OtterscanClient::<Transaction, Header>::get_block_details_by_hash(client, block_hash)
-        .await
-        .unwrap_err();
-
-    OtterscanClient::<Transaction, Header>::get_block_transactions(
+    OtterscanClient::<Transaction>::get_block_transactions(
         client,
         block_number,
         page_number,
@@ -435,7 +431,7 @@ where
     .unwrap();
 
     assert!(is_unimplemented(
-        OtterscanClient::<Transaction, Header>::search_transactions_before(
+        OtterscanClient::<Transaction>::search_transactions_before(
             client,
             address,
             block_number,
@@ -446,7 +442,7 @@ where
         .unwrap()
     ));
     assert!(is_unimplemented(
-        OtterscanClient::<Transaction, Header>::search_transactions_after(
+        OtterscanClient::<Transaction>::search_transactions_after(
             client,
             address,
             block_number,
@@ -456,13 +452,13 @@ where
         .err()
         .unwrap()
     ));
-    assert!(OtterscanClient::<Transaction, Header>::get_transaction_by_sender_and_nonce(
+    assert!(OtterscanClient::<Transaction>::get_transaction_by_sender_and_nonce(
         client, sender, nonce
     )
     .await
     .err()
     .is_none());
-    assert!(OtterscanClient::<Transaction, Header>::get_contract_creator(client, address)
+    assert!(OtterscanClient::<Transaction>::get_contract_creator(client, address)
         .await
         .unwrap()
         .is_none());

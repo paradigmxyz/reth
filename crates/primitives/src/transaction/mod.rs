@@ -1439,19 +1439,7 @@ impl Encodable2718 for TransactionSigned {
     }
 
     fn encode_2718(&self, out: &mut dyn alloy_rlp::BufMut) {
-        match &self.transaction {
-            Transaction::Legacy(legacy_tx) => legacy_tx.eip2718_encode(&self.signature, out),
-            Transaction::Eip2930(access_list_tx) => {
-                access_list_tx.eip2718_encode(&self.signature, out)
-            }
-            Transaction::Eip1559(dynamic_fee_tx) => {
-                dynamic_fee_tx.eip2718_encode(&self.signature, out)
-            }
-            Transaction::Eip4844(blob_tx) => blob_tx.eip2718_encode(&self.signature, out),
-            Transaction::Eip7702(set_code_tx) => set_code_tx.eip2718_encode(&self.signature, out),
-            #[cfg(feature = "optimism")]
-            Transaction::Deposit(deposit_tx) => deposit_tx.eip2718_encode(out),
-        }
+        self.transaction.eip2718_encode(&self.signature, out)
     }
 }
 

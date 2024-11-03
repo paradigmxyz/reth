@@ -399,23 +399,18 @@ impl Encodable2718 for PooledTransactionsElement {
     fn encode_2718_len(&self) -> usize {
         match self {
             Self::Legacy { transaction, signature, .. } => {
-                // method computes the payload len with a RLP header
                 transaction.eip2718_encoded_length(signature)
             }
             Self::Eip2930 { transaction, signature, .. } => {
-                // method computes the payload len without a RLP header
                 transaction.eip2718_encoded_length(signature)
             }
             Self::Eip1559 { transaction, signature, .. } => {
-                // method computes the payload len without a RLP header
                 transaction.eip2718_encoded_length(signature)
             }
             Self::Eip7702 { transaction, signature, .. } => {
-                // method computes the payload len without a RLP header
                 transaction.eip2718_encoded_length(signature)
             }
             Self::BlobTransaction(BlobTransaction { transaction, signature, .. }) => {
-                // the encoding does not use a header, so we set `with_header` to false
                 transaction.eip2718_encoded_length(signature)
             }
         }

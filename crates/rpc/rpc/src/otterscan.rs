@@ -61,7 +61,7 @@ where
 }
 
 #[async_trait]
-impl<Eth> OtterscanServer<RpcTransaction<Eth::NetworkTypes>, Header> for OtterscanApi<Eth>
+impl<Eth> OtterscanServer<RpcTransaction<Eth::NetworkTypes>> for OtterscanApi<Eth>
 where
     Eth: EthApiServer<
             RpcTransaction<Eth::NetworkTypes>,

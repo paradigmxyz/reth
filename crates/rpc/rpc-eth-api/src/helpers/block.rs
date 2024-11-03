@@ -188,20 +188,7 @@ pub trait EthBlocks: LoadBlock {
             }
             .unwrap_or_default();
 
-            Ok(uncles.into_iter().nth(index.into()).map(|uncle| {
-                let block = Block::uncle_from_header(uncle);
-                Block {
-                    header: Header {
-                        inner: block.header.inner,
-                        size: block.header.size,
-                        total_difficulty: block.header.total_difficulty,
-                        hash: block.header.hash,
-                    },
-                    uncles: block.uncles,
-                    transactions: block.transactions,
-                    withdrawals: block.withdrawals,
-                }
-            }))
+            Ok(uncles.into_iter().nth(index.into()).map(Block::uncle_from_header))
         }
     }
 }
