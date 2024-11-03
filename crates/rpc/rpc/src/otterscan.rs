@@ -253,7 +253,7 @@ where
         let timestamp = Some(block.header.timestamp());
         let receipts = receipts
             .drain(page_start..page_end)
-            .zip(transactions.iter().map(Eth::TransactionCompat::tx_type))
+            .zip(transactions.iter().map(Transaction::ty))
             .map(|(receipt, tx_ty)| {
                 let inner = OtsReceipt {
                     status: receipt.status(),

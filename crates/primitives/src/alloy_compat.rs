@@ -102,9 +102,6 @@ impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction<AnyTxEnvelope>>> for T
     ) -> Result<Self, Self::Error> {
         use alloy_rpc_types::ConversionError;
 
-        #[cfg(feature = "optimism")]
-        let WithOtherFields { inner: tx, other } = tx;
-        #[cfg(not(feature = "optimism"))]
         let WithOtherFields { inner: tx, other: _ } = tx;
 
         let (transaction, signature, hash) = match tx.inner {
@@ -128,38 +125,37 @@ impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction<AnyTxEnvelope>>> for T
                 let (tx, signature, hash) = tx.into_parts();
                 (Transaction::Eip7702(tx), signature, hash)
             }
-            AnyTxEnvelope::Ethereum(_) => {
-                return Err(ConversionError::Custom("unknown transaction type".to_string()))
-            }
-            #[cfg(not(feature = "optimism"))]
-            AnyTxEnvelope::Unknown(_) => {
-                return Err(ConversionError::Custom("unknown transaction type".to_string()))
-            }
             #[cfg(feature = "optimism")]
-            AnyTxEnvelope::Unknown(tx) => {
-                if tx.inner.ty.0 == crate::TxType::Deposit {
-                    Ok(Self::Deposit(op_alloy_consensus::TxDeposit {
-                        source_hash: tx.inner.deser_by_key("sourceHash").ok_or_else(|| {
-                            ConversionError::Custom("missing `sourceHash`".to_string())
-                        })?,
-                        from: tx
-                            .inner
-                            .deser_by_key("from")
-                            .ok_or_else(|| ConversionError::Custom("missing `from`".to_string()))?,
-                        to: tx.to(),
-                        mint: fields.mint.filter(|n| *n != 0),
-                        value: tx.value(),
-                        gas_limit: tx.gas_limit(),
-                        is_system_transaction: tx
-                            .inner
-                            .deser_by_key("isSystemTx")
-                            .unwrap_or(Ok(0))?,
-                        input: tx.input().clone(),
-                    }))
+            AnyTxEnvelope::Unknown(alloy_network::UnknownTxEnvelope { hash, inner }) => {
+                use alloy_consensus::Transaction as _;
+
+                if inner.ty() == crate::TxType::Deposit {
+                    let fields: op_alloy_rpc_types::OpTransactionFields = inner
+                        .fields
+                        .clone()
+                        .deserialize_into::<op_alloy_rpc_types::OpTransactionFields>()
+                        .map_err(|e| ConversionError::Custom(e.to_string()))?;
+                    (
+                        Transaction::Deposit(op_alloy_consensus::TxDeposit {
+                            source_hash: fields.source_hash.ok_or_else(|| {
+                                ConversionError::Custom("MissingSourceHash".to_string())
+                            })?,
+                            from: tx.from,
+                            to: revm_primitives::TxKind::from(inner.to()),
+                            mint: fields.mint.filter(|n| *n != 0),
+                            value: inner.value(),
+                            gas_limit: inner.gas_limit(),
+                            is_system_transaction: fields.is_system_tx.unwrap_or(false),
+                            input: inner.input().clone(),
+                        }),
+                        op_alloy_consensus::TxDeposit::signature(),
+                        hash,
+                    )
                 } else {
                     return Err(ConversionError::Custom("unknown transaction type".to_string()))
                 }
             }
+            _ => return Err(ConversionError::Custom("unknown transaction type".to_string())),
         };
 
         Ok(Self { transaction, signature, hash })
@@ -171,7 +167,7 @@ impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction<AnyTxEnvelope>>> for T
 mod tests {
     use super::*;
     use alloy_primitives::{address, Address, B256, U256};
-    use alloy_rpc_types::Transaction as AlloyTransaction;
+    use revm_primitives::TxKind;
 
     #[test]
     fn optimism_deposit_tx_conversion_no_mint() {
@@ -195,10 +191,11 @@ mod tests {
             "v": "0x0",
             "value": "0x0"
         }"#;
-        let alloy_tx: WithOtherFields<AlloyTransaction> =
+        let alloy_tx: WithOtherFields<alloy_rpc_types::Transaction<AnyTxEnvelope>> =
             serde_json::from_str(input).expect("failed to deserialize");
 
-        let reth_tx: Transaction = alloy_tx.try_into().expect("failed to convert");
+        let TransactionSigned { transaction: reth_tx, .. } =
+            alloy_tx.try_into().expect("failed to convert");
         if let Transaction::Deposit(deposit_tx) = reth_tx {
             assert_eq!(
                 deposit_tx.source_hash,
@@ -245,10 +242,11 @@ mod tests {
             "v": "0x0",
             "value": "0x239c2e16a5ca590000"
         }"#;
-        let alloy_tx: WithOtherFields<AlloyTransaction> =
+        let alloy_tx: WithOtherFields<alloy_rpc_types::Transaction<AnyTxEnvelope>> =
             serde_json::from_str(input).expect("failed to deserialize");
 
-        let reth_tx: Transaction = alloy_tx.try_into().expect("failed to convert");
+        let TransactionSigned { transaction: reth_tx, .. } =
+            alloy_tx.try_into().expect("failed to convert");
 
         if let Transaction::Deposit(deposit_tx) = reth_tx {
             assert_eq!(

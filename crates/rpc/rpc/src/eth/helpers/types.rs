@@ -1,6 +1,6 @@
 //! L1 `eth` API types.
 
-use alloy_consensus::{Signed, Transaction as _, TxEip4844Variant, TxEnvelope};
+use alloy_consensus::{Signed, TxEip4844Variant, TxEnvelope};
 use alloy_network::{Ethereum, Network};
 use alloy_rpc_types::{Transaction, TransactionInfo};
 use reth_primitives::{TransactionSigned, TransactionSignedEcRecovered};
@@ -40,6 +40,8 @@ where
             reth_primitives::Transaction::Eip7702(tx) => {
                 Signed::new_unchecked(tx, signature, hash).into()
             }
+            #[allow(unreachable_patterns)]
+            _ => unreachable!(),
         };
 
         let TransactionInfo { block_hash, block_number, index: transaction_index, .. } = tx_info;
@@ -60,9 +62,5 @@ where
             _ => return,
         };
         *input = input.slice(..4);
-    }
-
-    fn tx_type(tx: &Self::Transaction) -> u8 {
-        tx.ty()
     }
 }
