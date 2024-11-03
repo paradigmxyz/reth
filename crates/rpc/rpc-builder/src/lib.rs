@@ -194,7 +194,6 @@ use reth_rpc::{
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_api::{
     helpers::{Call, EthApiSpec, EthTransactions, LoadPendingBlock, TraceExt},
-    types::RpcHeader,
     EthApiServer, EthApiTypes, FullEthApiServer, RpcBlock, RpcReceipt, RpcTransaction,
 };
 use reth_rpc_eth_types::{EthConfig, EthStateCache, EthSubscriptionIdProvider};
@@ -1073,7 +1072,6 @@ where
     EthApi: EthApiServer<
             RpcTransaction<EthApi::NetworkTypes>,
             RpcBlock<EthApi::NetworkTypes>,
-            RpcHeader<EthApi::NetworkTypes>,
             RpcReceipt<EthApi::NetworkTypes>,
         > + EthApiTypes,
     BlockExecutor: BlockExecutorProvider,

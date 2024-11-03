@@ -1,9 +1,9 @@
 //! Utilities for serving `eth_simulateV1`
 
-use alloy_consensus::{BlockHeader, Transaction as _, TxEip4844Variant, TxType, TypedTransaction};
+use alloy_consensus::{Transaction as _, TxEip4844Variant, TxType, TypedTransaction};
 use alloy_rpc_types::{
     simulate::{SimCallResult, SimulateError, SimulatedBlock},
-    Block, BlockTransactionsKind, Header,
+    Block, BlockTransactionsKind,
 };
 use alloy_rpc_types_eth::transaction::TransactionRequest;
 use jsonrpsee_types::ErrorObject;
@@ -170,7 +170,7 @@ where
 
 /// Handles outputs of the calls execution and builds a [`SimulatedBlock`].
 #[expect(clippy::complexity)]
-pub fn build_block<T: TransactionCompat, H: BlockHeader + From<alloy_consensus::Header>>(
+pub fn build_block<T: TransactionCompat>(
     results: Vec<(Address, ExecutionResult)>,
     transactions: Vec<TransactionSigned>,
     block_env: &BlockEnv,
@@ -179,7 +179,7 @@ pub fn build_block<T: TransactionCompat, H: BlockHeader + From<alloy_consensus::
     full_transactions: bool,
     db: &CacheDB<StateProviderDatabase<StateProviderTraitObjWrapper<'_>>>,
     tx_resp_builder: &T,
-) -> Result<SimulatedBlock<Block<T::Transaction, Header<H>>>, EthApiError> {
+) -> Result<SimulatedBlock<Block<T::Transaction>>, EthApiError> {
     let mut calls: Vec<SimCallResult> = Vec::with_capacity(results.len());
     let mut senders = Vec::with_capacity(results.len());
     let mut receipts = Vec::with_capacity(results.len());
@@ -305,6 +305,6 @@ pub fn build_block<T: TransactionCompat, H: BlockHeader + From<alloy_consensus::
     let txs_kind =
         if full_transactions { BlockTransactionsKind::Full } else { BlockTransactionsKind::Hashes };
 
-    let block = from_block::<T, H>(block, total_difficulty, txs_kind, None, tx_resp_builder)?;
+    let block = from_block::<T>(block, total_difficulty, txs_kind, None, tx_resp_builder)?;
     Ok(SimulatedBlock { inner: block, calls })
 }

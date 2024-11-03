@@ -1,6 +1,6 @@
 //! Compatibility functions for rpc `Block` type.
 
-use alloy_consensus::{BlockHeader, Sealed};
+use alloy_consensus::Sealed;
 use alloy_primitives::{B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types::{
@@ -14,19 +14,19 @@ use crate::{transaction::from_recovered_with_block_context, TransactionCompat};
 /// [`BlockTransactionsKind`]
 ///
 /// If a `block_hash` is provided, then this is used, otherwise the block hash is computed.
-pub fn from_block<T: TransactionCompat, H: BlockHeader + From<alloy_consensus::Header>>(
+pub fn from_block<T: TransactionCompat>(
     block: BlockWithSenders,
     total_difficulty: U256,
     kind: BlockTransactionsKind,
     block_hash: Option<B256>,
     tx_resp_builder: &T,
-) -> Result<Block<T::Transaction, Header<H>>, BlockError> {
+) -> Result<Block<T::Transaction>, BlockError> {
     match kind {
         BlockTransactionsKind::Hashes => {
-            Ok(from_block_with_tx_hashes::<T::Transaction, H>(block, total_difficulty, block_hash))
+            Ok(from_block_with_tx_hashes::<T::Transaction>(block, total_difficulty, block_hash))
         }
         BlockTransactionsKind::Full => {
-            from_block_full::<T, H>(block, total_difficulty, block_hash, tx_resp_builder)
+            from_block_full::<T>(block, total_difficulty, block_hash, tx_resp_builder)
         }
     }
 }
@@ -36,11 +36,11 @@ pub fn from_block<T: TransactionCompat, H: BlockHeader + From<alloy_consensus::H
 ///
 /// This will populate the `transactions` field with only the hashes of the transactions in the
 /// block: [`BlockTransactions::Hashes`]
-pub fn from_block_with_tx_hashes<T, H: BlockHeader + From<alloy_consensus::Header>>(
+pub fn from_block_with_tx_hashes<T>(
     block: BlockWithSenders,
     total_difficulty: U256,
     block_hash: Option<B256>,
-) -> Block<T, Header<H>> {
+) -> Block<T> {
     let block_hash = block_hash.unwrap_or_else(|| block.header.hash_slow());
     let transactions = block.body.transactions().map(|tx| tx.hash()).collect();
 
@@ -58,12 +58,12 @@ pub fn from_block_with_tx_hashes<T, H: BlockHeader + From<alloy_consensus::Heade
 ///
 /// This will populate the `transactions` field with the _full_
 /// [`TransactionCompat::Transaction`] objects: [`BlockTransactions::Full`]
-pub fn from_block_full<T: TransactionCompat, H: BlockHeader + From<alloy_consensus::Header>>(
+pub fn from_block_full<T: TransactionCompat>(
     mut block: BlockWithSenders,
     total_difficulty: U256,
     block_hash: Option<B256>,
     tx_resp_builder: &T,
-) -> Result<Block<T::Transaction, Header<H>>, BlockError> {
+) -> Result<Block<T::Transaction>, BlockError> {
     let block_hash = block_hash.unwrap_or_else(|| block.block.header.hash_slow());
     let block_number = block.block.number;
     let base_fee_per_gas = block.block.base_fee_per_gas;
@@ -111,13 +111,13 @@ pub fn from_primitive_with_hash(primitive_header: reth_primitives::SealedHeader)
 }
 
 #[inline]
-fn from_block_with_transactions<T, H: BlockHeader + From<alloy_consensus::Header>>(
+fn from_block_with_transactions<T>(
     block_length: usize,
     block_hash: B256,
     block: PrimitiveBlock,
     total_difficulty: U256,
     transactions: BlockTransactions<T>,
-) -> Block<T, Header<H>> {
+) -> Block<T> {
     let withdrawals = block
         .header
         .withdrawals_root
@@ -127,7 +127,7 @@ fn from_block_with_transactions<T, H: BlockHeader + From<alloy_consensus::Header
 
     let uncles = block.body.ommers.into_iter().map(|h| h.hash_slow()).collect();
     let header = Header::from_consensus(
-        Sealed::new_unchecked(block.header.into(), block_hash),
+        Sealed::new_unchecked(block.header, block_hash),
         Some(total_difficulty),
         Some(U256::from(block_length)),
     );

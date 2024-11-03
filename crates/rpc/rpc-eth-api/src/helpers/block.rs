@@ -8,9 +8,7 @@ use reth_primitives::{BlockId, Receipt, SealedBlock, SealedBlockWithSenders};
 use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider};
 use reth_rpc_types_compat::block::from_block;
 
-use crate::{
-    node::RpcNodeCoreExt, types::RpcHeader, FromEthApiError, FullEthApiTypes, RpcBlock, RpcReceipt,
-};
+use crate::{node::RpcNodeCoreExt, FromEthApiError, FullEthApiTypes, RpcBlock, RpcReceipt};
 
 use super::{LoadPendingBlock, LoadReceipt, SpawnBlocking};
 
@@ -26,7 +24,7 @@ pub trait EthBlocks: LoadBlock {
     fn rpc_block_header(
         &self,
         block_id: BlockId,
-    ) -> impl Future<Output = Result<Option<RpcHeader<Self::NetworkTypes>>, Self::Error>> + Send
+    ) -> impl Future<Output = Result<Option<Header>, Self::Error>> + Send
     where
         Self: FullEthApiTypes,
     {
@@ -194,7 +192,7 @@ pub trait EthBlocks: LoadBlock {
                 let block = Block::uncle_from_header(uncle);
                 Block {
                     header: Header {
-                        inner: block.header.inner.into(),
+                        inner: block.header.inner,
                         size: block.header.size,
                         total_difficulty: block.header.total_difficulty,
                         hash: block.header.hash,

@@ -7,7 +7,7 @@ use std::{
 };
 
 use alloy_primitives::{TxHash, B256};
-use alloy_rpc_types::{Block, Header, Transaction};
+use alloy_rpc_types::{Block, Transaction};
 use alloy_rpc_types_eth::transaction::TransactionRequest;
 use alloy_rpc_types_trace::{
     common::TraceResult,
@@ -77,7 +77,7 @@ pub trait DebugApiExt {
 
 impl<T> DebugApiExt for T
 where
-    T: EthApiClient<Transaction, Block, Header, Receipt> + DebugApiClient + Sync,
+    T: EthApiClient<Transaction, Block, Receipt> + DebugApiClient + Sync,
 {
     type Provider = T;
 
