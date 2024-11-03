@@ -122,7 +122,7 @@ impl Rate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::time::{self};
+    use tokio::time;
 
     #[tokio::test]
     async fn test_rate_limit() {
