@@ -36,7 +36,7 @@ use crate::{
     args::RollupArgs,
     engine::OptimismEngineValidator,
     txpool::{OpTransactionPool, OpTransactionValidator},
-    OptimismEngineTypes,
+    OpEngineTypes,
 };
 
 /// Optimism primitive types.
@@ -74,7 +74,7 @@ impl OptimismNode {
     >
     where
         Node: FullNodeTypes<
-            Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = OpChainSpec>,
+            Types: NodeTypesWithEngine<Engine = OpEngineTypes, ChainSpec = OpChainSpec>,
         >,
     {
         let RollupArgs { disable_txpool_gossip, compute_pending_block, discovery_v4, .. } = args;
@@ -93,9 +93,7 @@ impl OptimismNode {
 
 impl<N> Node<N> for OptimismNode
 where
-    N: FullNodeTypes<
-        Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = OpChainSpec>,
-    >,
+    N: FullNodeTypes<Types: NodeTypesWithEngine<Engine = OpEngineTypes, ChainSpec = OpChainSpec>>,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
@@ -127,7 +125,7 @@ impl NodeTypes for OptimismNode {
 }
 
 impl NodeTypesWithEngine for OptimismNode {
-    type Engine = OptimismEngineTypes;
+    type Engine = OpEngineTypes;
 }
 
 /// Add-ons w.r.t. optimism.
@@ -312,10 +310,10 @@ impl OpPayloadBuilder {
         evm_config: Evm,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<PayloadBuilderHandle<OptimismEngineTypes>>
+    ) -> eyre::Result<PayloadBuilderHandle<OpEngineTypes>>
     where
         Node: FullNodeTypes<
-            Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = OpChainSpec>,
+            Types: NodeTypesWithEngine<Engine = OpEngineTypes, ChainSpec = OpChainSpec>,
         >,
         Pool: TransactionPool + Unpin + 'static,
         Evm: ConfigureEvm<Header = Header>,
@@ -349,16 +347,15 @@ impl OpPayloadBuilder {
 
 impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for OpPayloadBuilder
 where
-    Node: FullNodeTypes<
-        Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = OpChainSpec>,
-    >,
+    Node:
+        FullNodeTypes<Types: NodeTypesWithEngine<Engine = OpEngineTypes, ChainSpec = OpChainSpec>>,
     Pool: TransactionPool + Unpin + 'static,
 {
     async fn spawn_payload_service(
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<PayloadBuilderHandle<OptimismEngineTypes>> {
+    ) -> eyre::Result<PayloadBuilderHandle<OpEngineTypes>> {
         self.spawn(OpEvmConfig::new(ctx.chain_spec()), ctx, pool)
     }
 }
