@@ -773,6 +773,7 @@ dependencies = [
 [[package]]
 name = "alloy-trie"
 version = "0.7.2"
+source = "git+https://github.com/alloy-rs/trie?branch=alexey/branch-children#340c778ac8dae1a52b9f385a661f14e5330b77e3"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
