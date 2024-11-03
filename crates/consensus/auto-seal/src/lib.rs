@@ -219,6 +219,8 @@ pub(crate) struct StorageInner {
     pub(crate) headers: HashMap<BlockNumber, Header>,
     /// A mapping between block hash and number.
     pub(crate) hash_to_number: HashMap<BlockHash, BlockNumber>,
+    /// A mapping between block Number and hash.
+    pub(crate) number_to_hash: HashMap<BlockNumber, BlockHash>,
     /// Bodies buffered for download.
     pub(crate) bodies: HashMap<BlockHash, BlockBody>,
     /// Tracks best block
@@ -234,7 +236,8 @@ pub(crate) struct StorageInner {
 impl StorageInner {
     /// Returns the block hash for the given block number if it exists.
     pub(crate) fn block_hash(&self, num: u64) -> Option<BlockHash> {
-        self.hash_to_number.iter().find_map(|(k, v)| num.eq(v).then_some(*k))
+        self.number_to_hash.get(&num).copied()
+        // self.hash_to_number.iter().find_map(|(k, v)| num.eq(v).then_some(*k))
     }
 
     /// Returns the matching header if it exists.
@@ -261,6 +264,7 @@ impl StorageInner {
         trace!(target: "consensus::auto", num=self.best_block, hash=?self.best_hash, "inserting new block");
         self.headers.insert(header.number, header);
         self.bodies.insert(self.best_hash, body);
+        self.number_to_hash.insert(self.best_block, self.best_hash);
         self.hash_to_number.insert(self.best_hash, self.best_block);
     }
 
@@ -447,25 +451,27 @@ mod tests {
     fn test_block_hash() {
         let mut storage = StorageInner::default();
 
-        // Define two block hashes and their corresponding block numbers.
-        let block_hash_1: BlockHash = B256::random();
-        let block_number_1: BlockNumber = 1;
-        let block_hash_2: BlockHash = B256::random();
-        let block_number_2: BlockNumber = 2;
+        // First block
+        let body = BlockBody::default();
+        let header = Header::default();
+        storage.insert_new_block(header, body);
 
-        // Insert the block number and hash pairs into the `hash_to_number` map.
-        storage.hash_to_number.insert(block_hash_1, block_number_1);
-        storage.hash_to_number.insert(block_hash_2, block_number_2);
+        // Get the hash that was actually calculated
+        let block_1_hash = storage.best_hash;
+        assert_eq!(storage.block_hash(1), Some(block_1_hash));
 
-        // Verify that `block_hash` returns the correct block hash for the given block number.
-        assert_eq!(storage.block_hash(block_number_1), Some(block_hash_1));
-        assert_eq!(storage.block_hash(block_number_2), Some(block_hash_2));
+        // Second block
+        let body_2 = BlockBody::default();
+        let header_2 = Header::default();
+        storage.insert_new_block(header_2, body_2);
 
-        // Test that `block_hash` returns `None` for a non-existent block number.
-        let block_number_3: BlockNumber = 3;
-        assert_eq!(storage.block_hash(block_number_3), None);
+        // Get the second hash that was calculated
+        let block_2_hash = storage.best_hash;
+        assert_eq!(storage.block_hash(2), Some(block_2_hash));
+
+        // Non-existent block
+        assert_eq!(storage.block_hash(3), None);
     }
-
     #[test]
     fn test_header_by_hash_or_number() {
         let mut storage = StorageInner::default();
