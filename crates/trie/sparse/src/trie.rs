@@ -691,6 +691,8 @@ impl RevealedSparseTrie {
                             rlp_node,
                             true,
                             SparseNodeType::Extension {
+                                // Inherit the `store_in_db_trie` flag from the child node, which is
+                                // always the branch node
                                 store_in_db_trie: node_type.store_in_db_trie(),
                             },
                         )
@@ -735,11 +737,19 @@ impl RevealedSparseTrie {
                             let (_, child, calculated, node_type) =
                                 buffers.rlp_node_stack.pop().unwrap();
 
+                            // Set the trie mask
                             if node_type.store_in_db_trie() {
+                                // A branch or an extension node explicitly set the
+                                // `store_in_db_trie` flag
                                 tree_mask_values.push(true);
                             } else {
+                                // Set the flag according to whether a child node was pre-calculated
+                                // (`calculated = false`), meaning that it wasn't in the database
                                 tree_mask_values.push(!calculated);
                             }
+
+                            // Set the hash mask. If a child node has a hash value AND is a branch
+                            // node, set the hash mask and save the hash.
                             let hash = child.as_hash().filter(|_| node_type.is_branch());
                             hash_mask_values.push(hash.is_some());
                             if let Some(hash) = hash {
@@ -783,6 +793,8 @@ impl RevealedSparseTrie {
                         }
                     }
 
+                    // Store in DB trie if there are either any children that are stored in the DB
+                    // trie, or any children represent hashed values
                     let store_in_db_trie = !tree_mask.is_empty() || !hash_mask.is_empty();
 
                     if store_in_db_trie {
@@ -807,13 +819,25 @@ impl RevealedSparseTrie {
     }
 }
 
+/// Enum representing sparse trie node type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SparseNodeType {
+    /// Empty trie node.
     Empty,
+    /// The hash of the node that was not revealed.
     Hash,
+    /// Sparse leaf node.
     Leaf,
-    Extension { store_in_db_trie: bool },
-    Branch { store_in_db_trie: bool },
+    /// Sparse extension node.
+    Extension {
+        /// A flag indicating whether the extension node should be stored in the database.
+        store_in_db_trie: bool,
+    },
+    /// Sparse branch node.
+    Branch {
+        /// A flag indicating whether the branch node should be stored in the database.
+        store_in_db_trie: bool,
+    },
 }
 
 impl SparseNodeType {
