@@ -79,6 +79,12 @@ impl<DB> StateProviderDatabase<DB> {
     }
 }
 
+impl<DB> AsRef<DB> for StateProviderDatabase<DB> {
+    fn as_ref(&self) -> &DB {
+        self
+    }
+}
+
 impl<DB> Deref for StateProviderDatabase<DB> {
     type Target = DB;
 

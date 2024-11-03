@@ -351,7 +351,7 @@ impl OptimismHardforks for OpChainSpec {}
 impl From<Genesis> for OpChainSpec {
     fn from(genesis: Genesis) -> Self {
         use reth_optimism_forks::OptimismHardfork;
-        let optimism_genesis_info = OptimismGenesisInfo::extract_from(&genesis);
+        let optimism_genesis_info = OpGenesisInfo::extract_from(&genesis);
         let genesis_info =
             optimism_genesis_info.optimism_chain_info.genesis_info.unwrap_or_default();
 
@@ -441,12 +441,12 @@ impl From<Genesis> for OpChainSpec {
 }
 
 #[derive(Default, Debug)]
-struct OptimismGenesisInfo {
+struct OpGenesisInfo {
     optimism_chain_info: op_alloy_rpc_types::genesis::OpChainInfo,
     base_fee_params: BaseFeeParamsKind,
 }
 
-impl OptimismGenesisInfo {
+impl OpGenesisInfo {
     fn extract_from(genesis: &Genesis) -> Self {
         let mut info = Self {
             optimism_chain_info: op_alloy_rpc_types::genesis::OpChainInfo::extract_from(

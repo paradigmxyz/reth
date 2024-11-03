@@ -1,7 +1,7 @@
 //! Loads and formats OP receipt RPC response.
 
 use alloy_eips::eip2718::Encodable2718;
-use alloy_rpc_types::{AnyReceiptEnvelope, Log, TransactionReceipt};
+use alloy_rpc_types::{Log, TransactionReceipt};
 use op_alloy_consensus::{
     DepositTransaction, OpDepositReceipt, OpDepositReceiptWithBloom, OpReceiptEnvelope,
 };
@@ -13,7 +13,7 @@ use reth_optimism_forks::OptimismHardforks;
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned, TxType};
 use reth_provider::ChainSpecProvider;
 use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError, RpcReceipt};
-use reth_rpc_eth_types::{EthApiError, ReceiptBuilder};
+use reth_rpc_eth_types::{receipt::build_receipt, EthApiError};
 
 use crate::{OpEthApi, OpEthApiError};
 
@@ -172,9 +172,7 @@ impl OpReceiptFieldsBuilder {
 #[derive(Debug)]
 pub struct OpReceiptBuilder {
     /// Core receipt, has all the fields of an L1 receipt and is the basis for the OP receipt.
-    pub core_receipt: TransactionReceipt<AnyReceiptEnvelope<Log>>,
-    /// Transaction type.
-    pub tx_type: TxType,
+    pub core_receipt: TransactionReceipt<OpReceiptEnvelope<Log>>,
     /// Additional OP receipt fields.
     pub op_receipt_fields: OpTransactionReceiptFields,
 }
@@ -189,11 +187,29 @@ impl OpReceiptBuilder {
         all_receipts: &[Receipt],
         l1_block_info: revm::L1BlockInfo,
     ) -> Result<Self, OpEthApiError> {
-        let ReceiptBuilder { base: core_receipt, .. } =
-            ReceiptBuilder::new(transaction, meta, receipt, all_receipts)
-                .map_err(OpEthApiError::Eth)?;
-
-        let tx_type = transaction.tx_type();
+        let core_receipt =
+            build_receipt(transaction, meta, receipt, all_receipts, |receipt_with_bloom| {
+                match receipt.tx_type {
+                    TxType::Legacy => OpReceiptEnvelope::<Log>::Legacy(receipt_with_bloom),
+                    TxType::Eip2930 => OpReceiptEnvelope::<Log>::Eip2930(receipt_with_bloom),
+                    TxType::Eip1559 => OpReceiptEnvelope::<Log>::Eip1559(receipt_with_bloom),
+                    TxType::Eip4844 => {
+                        // TODO: unreachable
+                        OpReceiptEnvelope::<Log>::Eip1559(receipt_with_bloom)
+                    }
+                    TxType::Eip7702 => OpReceiptEnvelope::<Log>::Eip7702(receipt_with_bloom),
+                    TxType::Deposit => {
+                        OpReceiptEnvelope::<Log>::Deposit(OpDepositReceiptWithBloom::<Log> {
+                            receipt: OpDepositReceipt::<Log> {
+                                inner: receipt_with_bloom.receipt,
+                                deposit_nonce: receipt.deposit_nonce,
+                                deposit_receipt_version: receipt.deposit_receipt_version,
+                            },
+                            logs_bloom: receipt_with_bloom.logs_bloom,
+                        })
+                    }
+                }
+            })?;
 
         let op_receipt_fields = OpReceiptFieldsBuilder::default()
             .l1_block_info(chain_spec, transaction, l1_block_info)?
@@ -201,69 +217,15 @@ impl OpReceiptBuilder {
             .deposit_version(receipt.deposit_receipt_version)
             .build();
 
-        Ok(Self { core_receipt, tx_type, op_receipt_fields })
+        Ok(Self { core_receipt, op_receipt_fields })
     }
 
     /// Builds [`OpTransactionReceipt`] by combing core (l1) receipt fields and additional OP
     /// receipt fields.
     pub fn build(self) -> OpTransactionReceipt {
-        let Self { core_receipt, tx_type, op_receipt_fields } = self;
+        let Self { core_receipt: inner, op_receipt_fields } = self;
 
-        let OpTransactionReceiptFields { l1_block_info, deposit_nonce, deposit_receipt_version } =
-            op_receipt_fields;
-
-        let TransactionReceipt {
-            inner: AnyReceiptEnvelope { inner: receipt_with_bloom, .. },
-            transaction_hash,
-            transaction_index,
-            block_hash,
-            block_number,
-            gas_used,
-            effective_gas_price,
-            blob_gas_used,
-            blob_gas_price,
-            from,
-            to,
-            contract_address,
-            authorization_list,
-        } = core_receipt;
-
-        let inner = match tx_type {
-            TxType::Legacy => OpReceiptEnvelope::<Log>::Legacy(receipt_with_bloom),
-            TxType::Eip2930 => OpReceiptEnvelope::<Log>::Eip2930(receipt_with_bloom),
-            TxType::Eip1559 => OpReceiptEnvelope::<Log>::Eip1559(receipt_with_bloom),
-            TxType::Eip4844 => {
-                // TODO: unreachable
-                OpReceiptEnvelope::<Log>::Eip1559(receipt_with_bloom)
-            }
-            TxType::Eip7702 => OpReceiptEnvelope::<Log>::Eip7702(receipt_with_bloom),
-            TxType::Deposit => {
-                OpReceiptEnvelope::<Log>::Deposit(OpDepositReceiptWithBloom::<Log> {
-                    receipt: OpDepositReceipt::<Log> {
-                        inner: receipt_with_bloom.receipt,
-                        deposit_nonce,
-                        deposit_receipt_version,
-                    },
-                    logs_bloom: receipt_with_bloom.logs_bloom,
-                })
-            }
-        };
-
-        let inner = TransactionReceipt::<OpReceiptEnvelope<Log>> {
-            inner,
-            transaction_hash,
-            transaction_index,
-            block_hash,
-            block_number,
-            gas_used,
-            effective_gas_price,
-            blob_gas_used,
-            blob_gas_price,
-            from,
-            to,
-            contract_address,
-            authorization_list,
-        };
+        let OpTransactionReceiptFields { l1_block_info, .. } = op_receipt_fields;
 
         OpTransactionReceipt { inner, l1_block_info }
     }

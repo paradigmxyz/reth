@@ -2,12 +2,15 @@ use crate::utils::eth_payload_attributes;
 use alloy_eips::{calc_next_block_base_fee, eip2718::Encodable2718};
 use alloy_primitives::{Address, B256, U256};
 use alloy_provider::{network::EthereumWallet, Provider, ProviderBuilder, SendableTx};
-use alloy_rpc_types_beacon::relay::{BidTrace, SignedBidSubmissionV3};
+use alloy_rpc_types_beacon::relay::{BidTrace, SignedBidSubmissionV3, SignedBidSubmissionV4};
 use rand::{rngs::StdRng, Rng, SeedableRng};
-use reth::rpc::{
-    api::BuilderBlockValidationRequestV3,
-    compat::engine::payload::block_to_payload_v3,
-    types::{engine::BlobsBundleV1, TransactionRequest},
+use reth::{
+    payload::BuiltPayload,
+    rpc::{
+        api::{BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4},
+        compat::engine::payload::block_to_payload_v3,
+        types::{engine::BlobsBundleV1, TransactionRequest},
+    },
 };
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::setup_engine;
@@ -115,7 +118,7 @@ async fn test_fee_history() -> eyre::Result<()> {
 }
 
 #[tokio::test]
-async fn test_flashbots_validate() -> eyre::Result<()> {
+async fn test_flashbots_validate_v3() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let chain_spec = Arc::new(
@@ -183,6 +186,81 @@ async fn test_flashbots_validate() -> eyre::Result<()> {
     request.request.execution_payload.payload_inner.payload_inner.state_root = B256::ZERO;
     assert!(provider
         .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV3".into(), (&request,))
+        .await
+        .is_err());
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_flashbots_validate_v4() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .prague_activated()
+            .build(),
+    );
+
+    let (mut nodes, _tasks, wallet) =
+        setup_engine::<EthereumNode>(1, chain_spec.clone(), false, eth_payload_attributes).await?;
+    let mut node = nodes.pop().unwrap();
+    let provider = ProviderBuilder::new()
+        .with_recommended_fillers()
+        .wallet(EthereumWallet::new(wallet.gen().swap_remove(0)))
+        .on_http(node.rpc_url());
+
+    node.advance(100, |_| {
+        let provider = provider.clone();
+        Box::pin(async move {
+            let SendableTx::Envelope(tx) =
+                provider.fill(TransactionRequest::default().to(Address::ZERO)).await.unwrap()
+            else {
+                unreachable!()
+            };
+
+            tx.encoded_2718().into()
+        })
+    })
+    .await?;
+
+    let _ = provider.send_transaction(TransactionRequest::default().to(Address::ZERO)).await?;
+    let (payload, attrs) = node.new_payload().await?;
+
+    let mut request = BuilderBlockValidationRequestV4 {
+        request: SignedBidSubmissionV4 {
+            message: BidTrace {
+                parent_hash: payload.block().parent_hash,
+                block_hash: payload.block().hash(),
+                gas_used: payload.block().gas_used,
+                gas_limit: payload.block().gas_limit,
+                ..Default::default()
+            },
+            execution_payload: block_to_payload_v3(payload.block().clone()),
+            blobs_bundle: BlobsBundleV1::new([]),
+            execution_requests: payload.requests().unwrap_or_default().to_vec(),
+            signature: Default::default(),
+        },
+        parent_beacon_block_root: attrs.parent_beacon_block_root.unwrap(),
+        registered_gas_limit: payload.block().gas_limit,
+    };
+
+    provider
+        .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV4".into(), (&request,))
+        .await
+        .expect("request should validate");
+
+    request.registered_gas_limit -= 1;
+    assert!(provider
+        .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV4".into(), (&request,))
+        .await
+        .is_err());
+    request.registered_gas_limit += 1;
+
+    request.request.execution_payload.payload_inner.payload_inner.state_root = B256::ZERO;
+    assert!(provider
+        .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV4".into(), (&request,))
         .await
         .is_err());
     Ok(())
