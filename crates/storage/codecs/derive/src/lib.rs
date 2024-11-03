@@ -31,7 +31,7 @@ mod compact;
 ///
 /// ### Bit Sizes for Fields:
 /// The amount of bits used to store a field size is determined by the field's type. For specific
-/// types, a fixed number of bits is allocated (from fn get_bit_size):
+/// types, a fixed number of bits is allocated (from `fn get_bit_size`):
 /// - `bool`, `Option<T>`, `TransactionKind`, `Signature`: **1 bit**
 /// - `TxType`: **2 bits**
 /// - `u64`, `BlockNumber`, `TxNumber`, `ChainId`, `NumTransactions`: **4 bits**
@@ -55,7 +55,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
     compact::derive(input, is_zstd)
 }
 
-/// Adds `zstd` compression to derived `[Compact]`.
+/// Adds `zstd` compression to derived [`Compact`].
 #[proc_macro_derive(CompactZstd, attributes(maybe_zero, reth_codecs))]
 pub fn derive_zstd(input: TokenStream) -> TokenStream {
     let is_zstd = true;

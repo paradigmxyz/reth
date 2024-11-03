@@ -34,7 +34,7 @@ pub(crate) struct GenesisAccountRef<'a> {
     derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize)
 )]
 #[cfg_attr(feature = "test-utils", allow(unreachable_pub), visibility::make(pub))]
-#[add_arbitrary_tests(compact)]
+#[add_arbitrary_tests(crate, compact)]
 pub(crate) struct GenesisAccount {
     /// The nonce of the account at genesis.
     nonce: Option<u64>,
@@ -54,7 +54,7 @@ pub(crate) struct GenesisAccount {
     any(test, feature = "test-utils"),
     derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize)
 )]
-#[add_arbitrary_tests(compact)]
+#[add_arbitrary_tests(crate, compact)]
 pub(crate) struct StorageEntries {
     entries: Vec<StorageEntry>,
 }
@@ -65,7 +65,7 @@ pub(crate) struct StorageEntries {
     any(test, feature = "test-utils"),
     derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize)
 )]
-#[add_arbitrary_tests(compact)]
+#[add_arbitrary_tests(crate, compact)]
 pub(crate) struct StorageEntry {
     key: B256,
     value: B256,

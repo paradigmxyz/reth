@@ -10,7 +10,7 @@ use alloy_primitives::{Bytes, ChainId, TxKind, U256};
 #[cfg_attr(
     any(test, feature = "test-utils"),
     derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize),
-    crate::add_arbitrary_tests(compact)
+    crate::add_arbitrary_tests(crate, compact)
 )]
 #[cfg_attr(feature = "test-utils", allow(unreachable_pub), visibility::make(pub))]
 pub(crate) struct TxLegacy {

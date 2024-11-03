@@ -22,7 +22,7 @@ pub fn generate_from_to(
     let fuzz = format_ident!("fuzz_test_{snake_case_ident}");
     let test = format_ident!("fuzz_{snake_case_ident}");
 
-    let reth_codecs = parse_reth_codecs_path(attrs);
+    let reth_codecs = parse_reth_codecs_path(attrs).unwrap();
 
     let lifetime = if has_lifetime {
         quote! { 'a }
@@ -57,6 +57,7 @@ pub fn generate_from_to(
             #[allow(dead_code)]
             #[test_fuzz::test_fuzz]
             fn #fuzz(obj: #ident)  {
+                use #reth_codecs::Compact;
                 let mut buf = vec![];
                 let len = obj.clone().to_compact(&mut buf);
                 let (same_obj, buf) = #ident::from_compact(buf.as_ref(), len);
@@ -90,7 +91,7 @@ pub fn generate_from_to(
     }
 }
 
-/// Generates code to implement the `Compact` trait method to_compact.
+/// Generates code to implement the `Compact` trait method `to_compact`.
 fn generate_from_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> TokenStream2 {
     let mut lines = vec![];
     let mut known_types =
@@ -195,7 +196,7 @@ fn generate_to_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> Vec<
     }
 
     // Just because a type supports compression, doesn't mean all its values are to be compressed.
-    // We skip the smaller ones, and thus require a `flag __zstd` to specify if this value is
+    // We skip the smaller ones, and thus require a flag` __zstd` to specify if this value is
     // compressed or not.
     if is_zstd {
         lines.push(quote! {
@@ -237,28 +238,24 @@ fn generate_to_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> Vec<
     lines
 }
 
-/// Function to extract the crate path from #[reth_codecs(crate = "...")] attribute.
-fn parse_reth_codecs_path(attrs: &[Attribute]) -> TokenStream2 {
+/// Function to extract the crate path from `reth_codecs(crate = "...")` attribute.
+fn parse_reth_codecs_path(attrs: &[Attribute]) -> syn::Result<syn::Path> {
     // let default_crate_path: syn::Path = syn::parse_str("reth-codecs").unwrap();
-    let mut reth_codecs_path = quote! {reth_codecs};
+    let mut reth_codecs_path: syn::Path = syn::parse_quote!(reth_codecs);
     for attr in attrs {
         if attr.path().is_ident("reth_codecs") {
             attr.parse_nested_meta(|meta| {
                 if meta.path.is_ident("crate") {
                     let value = meta.value()?;
                     let lit: LitStr = value.parse()?;
-
-                    let specified_path: syn::Path =
-                        syn::parse_str(&lit.value()).expect("Invalid crate path");
-                    reth_codecs_path = quote::quote! {#specified_path};
+                    reth_codecs_path = syn::parse_str(&lit.value())?;
                     Ok(())
                 } else {
                     Err(meta.error("unsupported attribute"))
                 }
-            })
-            .unwrap();
+            })?;
         }
     }
 
-    reth_codecs_path
+    Ok(reth_codecs_path)
 }

@@ -662,7 +662,7 @@ mod tests {
     }
 
     #[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Compact, arbitrary::Arbitrary)]
-    #[add_arbitrary_tests(compact)]
+    #[add_arbitrary_tests(crate, compact)]
     #[reth_codecs(crate = "crate")]
     struct TestStruct {
         f_u64: u64,
@@ -715,7 +715,7 @@ mod tests {
     #[derive(
         Debug, PartialEq, Clone, Default, Serialize, Deserialize, Compact, arbitrary::Arbitrary,
     )]
-    #[add_arbitrary_tests(compact)]
+    #[add_arbitrary_tests(crate, compact)]
     #[reth_codecs(crate = "crate")]
     enum TestEnum {
         #[default]

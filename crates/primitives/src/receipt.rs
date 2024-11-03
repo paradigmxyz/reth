@@ -18,7 +18,6 @@ use serde::{Deserialize, Serialize};
     Clone, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable, Serialize, Deserialize,
 )]
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::CompactZstd))]
-#[reth_codecs(crate = "reth_codecs")]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests)]
 #[rlp(trailing)]
 pub struct Receipt {
@@ -132,7 +131,6 @@ impl From<Receipt> for ReceiptWithBloom {
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
-#[reth_codecs(crate = "reth_codecs")]
 pub struct ReceiptWithBloom {
     /// Bloom filter build from logs.
     pub bloom: Bloom,
@@ -362,7 +360,7 @@ impl Decodable for ReceiptWithBloom {
     }
 }
 
-/// [Receipt] reference type with calculated bloom filter.
+/// [`Receipt`] reference type with calculated bloom filter.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReceiptWithBloomRef<'a> {
     /// Bloom filter build from logs.
@@ -518,6 +516,7 @@ mod tests {
     use super::*;
     use crate::revm_primitives::Bytes;
     use alloy_primitives::{address, b256, bytes, hex_literal::hex};
+    use reth_codecs::Compact;
 
     #[test]
     fn test_decode_receipt() {

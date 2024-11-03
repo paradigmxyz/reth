@@ -21,7 +21,7 @@ use reth_codecs_derive::add_arbitrary_tests;
     derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize)
 )]
 #[cfg_attr(feature = "test-utils", allow(unreachable_pub), visibility::make(pub))]
-#[add_arbitrary_tests(compact)]
+#[add_arbitrary_tests(crate, compact)]
 pub(crate) struct TxEip2930 {
     chain_id: ChainId,
     nonce: u64,

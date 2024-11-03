@@ -63,9 +63,6 @@ use tx_type::{
     COMPACT_IDENTIFIER_LEGACY,
 };
 
-#[cfg(test)]
-use reth_codecs::Compact;
-
 use alloc::vec::Vec;
 
 /// Either a transaction hash or number.
