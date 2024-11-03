@@ -46,7 +46,7 @@ alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", rev = "d99f0
 alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", rev = "d99f09c" }
 alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", rev = "d99f09c" }
 
-op-alloy-rpc-types = { git = "https://github.com/alloy-rs/op-alloy", rev = "6a85614" }
-op-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/op-alloy", rev = "6a85614" }
-op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", rev = "6a85614" }
-op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", rev = "6a85614" }
+op-alloy-rpc-types = { git = "https://github.com/alloy-rs/op-alloy", rev = "1f4aa2a" }
+op-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/op-alloy", rev = "1f4aa2a" }
+op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", rev = "1f4aa2a" }
+op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", rev = "1f4aa2a" }
