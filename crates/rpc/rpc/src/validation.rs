@@ -1,6 +1,6 @@
 use alloy_consensus::{BlobTransactionValidationError, EnvKzgSettings, Transaction};
 use alloy_eips::eip4844::kzg_to_versioned_hash;
-use alloy_primitives::map::HashMap;
+use alloy_primitives::map::{Entry, HashMap};
 use alloy_rpc_types::engine::{
     BlobsBundleV1, CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar,
 };
@@ -180,12 +180,12 @@ where
         let latest_header_hash = latest_header.hash();
         let state_provider = self.provider.state_by_block_hash(latest_header_hash)?;
 
-        let mut cached_reads = {
+        let mut request_cache = {
             let cached_states = self.cached_states.read().await;
             cached_states.get(&latest_header_hash).cloned().unwrap_or_default()
         };
 
-        let cached_db = cached_reads.as_db_mut(StateProviderDatabase::new(&state_provider));
+        let cached_db = request_cache.as_db_mut(StateProviderDatabase::new(&state_provider));
         let executor = self.executor_provider.executor(cached_db);
 
         let block = block.unseal();
@@ -202,10 +202,17 @@ where
                 }
             },
         )?;
-        //TODO: to modify once the extend function is created for `CachedReads`
+
         {
             let mut cached_states = self.cached_states.write().await;
-            cached_states.insert(latest_header_hash, cached_reads);
+            match cached_states.entry(latest_header_hash) {
+                Entry::Occupied(mut entry) => {
+                    entry.get_mut().extend(request_cache);
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(request_cache);
+                }
+            }
         }
 
         if let Some(account) = accessed_blacklisted {
