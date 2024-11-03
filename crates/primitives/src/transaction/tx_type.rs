@@ -6,9 +6,6 @@ use alloy_primitives::{U64, U8};
 use alloy_rlp::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 
-#[cfg(test)]
-use reth_codecs::Compact;
-
 /// Identifier parameter for legacy transaction
 #[cfg(any(test, feature = "reth-codec"))]
 pub(crate) const COMPACT_IDENTIFIER_LEGACY: usize = 0;
