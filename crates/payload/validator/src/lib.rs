@@ -31,7 +31,7 @@ impl<ChainSpec> ExecutionPayloadValidator<ChainSpec> {
 
     /// Returns the chain spec used by the validator.
     #[inline]
-    pub fn chain_spec(&self) -> &ChainSpec {
+    pub const fn chain_spec(&self) -> &Arc<ChainSpec> {
         &self.chain_spec
     }
 }
