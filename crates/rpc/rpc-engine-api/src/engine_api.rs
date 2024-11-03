@@ -677,13 +677,7 @@ where
     /// Caution: This should not accept the `withdrawals` field
     async fn new_payload_v1(&self, payload: ExecutionPayloadV1) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV1");
-        let start = Instant::now();
-        let gas_used = payload.gas_used;
-        let res = Self::new_payload_v1(self, payload).await;
-        let elapsed = start.elapsed();
-        self.inner.metrics.latency.new_payload_v1.record(elapsed);
-        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
-        Ok(res?)
+        Ok(Self::new_payload_v1_metered(self, payload).await?)
     }
 
     /// Handler for `engine_newPayloadV2`
@@ -964,6 +958,20 @@ where
     }
 }
 
+impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
+    EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
+{
+    async fn new_payload_v1_metered(
+        &self,
+        payload: ExecutionPayloadV1,
+    ) -> RpcResult<PayloadStatus> {
+        let start = Instant::now();
+        let res = Self::fork_choice_updated_v3(self, fork_choice_state, payload_attributes).await;
+        self.inner.metrics.latency.fork_choice_updated_v3.record(start.elapsed());
+        self.inner.metrics.fcu_response.update_response_metrics(&res);
+    }
+}
+
 impl<Provider, EngineT, Pool, Validator, ChainSpec> std::fmt::Debug
     for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
@@ -1135,8 +1143,8 @@ mod tests {
                 blocks
                     .iter()
                     .filter(|b| {
-                        !first_missing_range.contains(&b.number) &&
-                            !second_missing_range.contains(&b.number)
+                        !first_missing_range.contains(&b.number)
+                            && !second_missing_range.contains(&b.number)
                     })
                     .map(|b| (b.hash(), b.clone().unseal())),
             );
@@ -1165,8 +1173,8 @@ mod tests {
                 // ensure we still return trailing `None`s here because by-hash will not be aware
                 // of the missing block's number, and cannot compare it to the current best block
                 .map(|b| {
-                    if first_missing_range.contains(&b.number) ||
-                        second_missing_range.contains(&b.number)
+                    if first_missing_range.contains(&b.number)
+                        || second_missing_range.contains(&b.number)
                     {
                         None
                     } else {
@@ -1196,8 +1204,8 @@ mod tests {
                     .chain_spec
                     .fork(EthereumHardfork::Paris)
                     .ttd()
-                    .unwrap() +
-                    U256::from(1),
+                    .unwrap()
+                    + U256::from(1),
                 ..Default::default()
             };
 
