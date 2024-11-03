@@ -22,17 +22,17 @@ use reth_optimism_payload_builder::{
 /// The types used in the optimism beacon consensus engine.
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]
-pub struct OptimismEngineTypes<T: PayloadTypes = OpPayloadTypes> {
+pub struct OpEngineTypes<T: PayloadTypes = OpPayloadTypes> {
     _marker: std::marker::PhantomData<T>,
 }
 
-impl<T: PayloadTypes> PayloadTypes for OptimismEngineTypes<T> {
+impl<T: PayloadTypes> PayloadTypes for OpEngineTypes<T> {
     type BuiltPayload = T::BuiltPayload;
     type PayloadAttributes = T::PayloadAttributes;
     type PayloadBuilderAttributes = T::PayloadBuilderAttributes;
 }
 
-impl<T: PayloadTypes> EngineTypes for OptimismEngineTypes<T>
+impl<T: PayloadTypes> EngineTypes for OpEngineTypes<T>
 where
     T::BuiltPayload: TryInto<ExecutionPayloadV1>
         + TryInto<ExecutionPayloadEnvelopeV2>
@@ -45,7 +45,7 @@ where
     type ExecutionPayloadEnvelopeV4 = OpExecutionPayloadEnvelopeV4;
 }
 
-/// A default payload type for [`OptimismEngineTypes`]
+/// A default payload type for [`OpEngineTypes`]
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]
 pub struct OpPayloadTypes;
@@ -224,7 +224,7 @@ mod test {
         let attributes = get_attributes(None, 1799999999);
 
         let result = <engine::OptimismEngineValidator as reth_node_builder::EngineValidator<
-            OptimismEngineTypes,
+            OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
         );
@@ -237,7 +237,7 @@ mod test {
         let attributes = get_attributes(None, 1800000000);
 
         let result = <engine::OptimismEngineValidator as reth_node_builder::EngineValidator<
-            OptimismEngineTypes,
+            OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
         );
@@ -250,7 +250,7 @@ mod test {
         let attributes = get_attributes(Some(b64!("0000000000000008")), 1800000000);
 
         let result = <engine::OptimismEngineValidator as reth_node_builder::EngineValidator<
-            OptimismEngineTypes,
+            OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
         );
@@ -263,7 +263,7 @@ mod test {
         let attributes = get_attributes(Some(b64!("0000000800000008")), 1800000000);
 
         let result = <engine::OptimismEngineValidator as reth_node_builder::EngineValidator<
-            OptimismEngineTypes,
+            OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
         );
@@ -276,7 +276,7 @@ mod test {
         let attributes = get_attributes(Some(b64!("0000000000000000")), 1800000000);
 
         let result = <engine::OptimismEngineValidator as reth_node_builder::EngineValidator<
-            OptimismEngineTypes,
+            OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
         );
