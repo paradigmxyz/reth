@@ -170,7 +170,7 @@ pub fn tx_type_to_alloy(tx_type: TxType) -> alloy_consensus::TxType {
 }
 
 /// Convert [`alloy_consensus::TxType`] to [`reth_primitives::TxType`]
-pub fn tx_type_from_alloy(tx_type: alloy_consensus::TxType) -> TxType {
+pub const fn tx_type_from_alloy(tx_type: alloy_consensus::TxType) -> TxType {
     match tx_type {
         alloy_consensus::TxType::Legacy => TxType::Legacy,
         alloy_consensus::TxType::Eip1559 => TxType::Eip1559,
