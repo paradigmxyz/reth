@@ -34,8 +34,8 @@ pub mod transaction;
 #[cfg(any(test, feature = "arbitrary"))]
 pub use block::{generate_valid_header, valid_header_strategy};
 pub use block::{
-    Block, BlockBody, BlockNumHash, BlockNumberOrTag, BlockWithSenders, ForkBlock, RpcBlockHash,
-    SealedBlock, SealedBlockWithSenders,
+    Block, BlockBody, BlockNumberOrTag, BlockWithSenders, ForkBlock, RpcBlockHash, SealedBlock,
+    SealedBlockWithSenders,
 };
 #[cfg(feature = "reth-codec")]
 pub use compression::*;
