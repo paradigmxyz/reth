@@ -39,9 +39,12 @@ alloy-primitives.workspace = true
 alloy-eips.workspace = true
 alloy-rpc-types-engine.workspace = true
 
+revm-primitives.workspace = true
+
 # common
 futures.workspace = true
 tokio = { workspace = true, features = ["macros", "sync"] }
+tokio-stream.workspace = true
 thiserror.workspace = true
 
 # metrics
