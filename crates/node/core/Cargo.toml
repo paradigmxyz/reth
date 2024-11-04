@@ -75,10 +75,12 @@ proptest.workspace = true
 tokio.workspace = true
 
 [features]
+default = ["opentelemetry"]
 optimism = ["reth-primitives/optimism", "reth-db/optimism"]
 # Features for vergen to generate correct env vars
 jemalloc = ["reth-cli-util/jemalloc"]
 asm-keccak = ["reth-primitives/asm-keccak", "alloy-primitives/asm-keccak"]
+opentelemetry = ["reth-tracing/opentelemetry"]
 
 [build-dependencies]
 vergen = { version = "8.0.0", features = ["build", "cargo", "git", "gitcl"] }

@@ -4,7 +4,7 @@ use crate::dirs::{LogsDir, PlatformPath};
 use clap::{ArgAction, Args, ValueEnum};
 use reth_tracing::{
     tracing_subscriber::filter::Directive, FileInfo, FileWorkerGuard, LayerInfo, LogFormat,
-    OtlpConfig, OtlpProtocols, RethTracer, Tracer,
+    RethTracer, Tracer,
 };
 use std::fmt::{self, Display};
 use tracing::{level_filters::LevelFilter, Level};
@@ -70,6 +70,7 @@ pub struct LogArgs {
     #[command(flatten)]
     pub verbosity: Verbosity,
 
+    #[cfg(feature = "opentelemetry")]
     /// Arguments for the `OpenTelemetry` tracing layer.
     #[command(flatten)]
     pub otel: OtelArgs,
@@ -112,6 +113,7 @@ impl LogArgs {
             tracer = tracer.with_file(file, info);
         }
 
+        #[cfg(feature = "opentelemetry")]
         if self.otel.url.is_some() {
             if let Ok(otel) = (&self.otel).try_into() {
                 tracer = tracer.with_otlp(otel);
@@ -131,28 +133,39 @@ impl LogArgs {
     }
 }
 
+#[cfg(feature = "opentelemetry")]
 #[derive(Debug, Args)]
 pub struct OtelArgs {
     /// Endpoint url to which to send spans and events. The endpoint URL must
     /// be a valid URL, including the protocol prefix (http or https) and any
     /// http basic auth information.
+    ///
+    /// Available only when compiled with the `opentelemetry` feature.
     #[arg(long = "otel.endpoint", value_name = "ENDPOINT", global = true)]
     pub url: Option<String>,
 
     /// The protocol to use for sending spans and events. Values are "grpc", "binary", or "json".
+    ///
+    /// Available only when compiled with the `opentelemetry` feature.
+
     #[arg(long = "otel.protocol", value_name = "PROTOCOL", global = true, default_value = "json")]
-    pub protocol: OtlpProtocols,
+    pub protocol: reth_tracing::OtlpProtocols,
 
     /// The log level to use for the `OpenTelemetry` layer.
+    ///
+    /// Available only when compiled with the `opentelemetry` feature.
     #[arg(long = "otel.level", value_name = "LEVEL", global = true, default_value = "info")]
     pub level: tracing::Level,
 
     /// The timeout for sending spans and events, in milliseconds.
+    ///
+    /// Available only when compiled with the `opentelemetry` feature.
     #[arg(long = "otel.timeout", value_name = "TIMEOUT", global = true, default_value = "1000")]
     pub timeout: u64,
 }
 
-impl TryFrom<&OtelArgs> for OtlpConfig {
+#[cfg(feature = "opentelemetry")]
+impl TryFrom<&OtelArgs> for reth_tracing::OtlpConfig {
     type Error = &'static str;
 
     fn try_from(value: &OtelArgs) -> Result<Self, Self::Error> {
