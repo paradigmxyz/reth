@@ -17,7 +17,7 @@ mod dev;
 mod op;
 mod op_sepolia;
 
-use alloc::{vec, vec::Vec};
+use alloc::{boxed::Box, vec, vec::Vec};
 use alloy_chains::Chain;
 use alloy_genesis::Genesis;
 use alloy_primitives::{Bytes, Parity, Signature, B256, U256};
@@ -30,8 +30,8 @@ pub(crate) use once_cell::sync::Lazy as LazyLock;
 pub use op::OP_MAINNET;
 pub use op_sepolia::OP_SEPOLIA;
 use reth_chainspec::{
-    BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract,
-    DisplayHardforks, EthChainSpec, EthereumHardforks, ForkFilter, ForkId, Hardforks, Head,
+    BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract, EthChainSpec,
+    EthereumHardforks, ForkFilter, ForkId, Hardforks, Head,
 };
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 use reth_network_peers::NodeRecord;
@@ -287,8 +287,8 @@ impl EthChainSpec for OpChainSpec {
         self.inner.prune_delete_limit()
     }
 
-    fn display_hardforks(&self) -> DisplayHardforks {
-        self.inner.display_hardforks()
+    fn display_hardforks(&self) -> Box<dyn Display> {
+        Box::new(ChainSpec::display_hardforks(self))
     }
 
     fn genesis_header(&self) -> &Header {
@@ -351,7 +351,7 @@ impl OptimismHardforks for OpChainSpec {}
 impl From<Genesis> for OpChainSpec {
     fn from(genesis: Genesis) -> Self {
         use reth_optimism_forks::OptimismHardfork;
-        let optimism_genesis_info = OptimismGenesisInfo::extract_from(&genesis);
+        let optimism_genesis_info = OpGenesisInfo::extract_from(&genesis);
         let genesis_info =
             optimism_genesis_info.optimism_chain_info.genesis_info.unwrap_or_default();
 
@@ -441,12 +441,12 @@ impl From<Genesis> for OpChainSpec {
 }
 
 #[derive(Default, Debug)]
-struct OptimismGenesisInfo {
+struct OpGenesisInfo {
     optimism_chain_info: op_alloy_rpc_types::genesis::OpChainInfo,
     base_fee_params: BaseFeeParamsKind,
 }
 
-impl OptimismGenesisInfo {
+impl OpGenesisInfo {
     fn extract_from(genesis: &Genesis) -> Self {
         let mut info = Self {
             optimism_chain_info: op_alloy_rpc_types::genesis::OpChainInfo::extract_from(

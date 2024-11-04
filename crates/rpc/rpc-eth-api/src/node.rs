@@ -38,8 +38,8 @@ where
 {
     type Provider = T::Provider;
     type Pool = T::Pool;
-    type Network = <T as FullNodeComponents>::Network;
     type Evm = <T as FullNodeComponents>::Evm;
+    type Network = <T as FullNodeComponents>::Network;
 
     #[inline]
     fn pool(&self) -> &Self::Pool {

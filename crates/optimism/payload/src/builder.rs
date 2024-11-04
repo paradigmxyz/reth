@@ -43,7 +43,7 @@ use reth_payload_builder::database::CachedReads;
 
 /// Optimism's payload builder
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OptimismPayloadBuilder<EvmConfig> {
+pub struct OpPayloadBuilder<EvmConfig> {
     /// The rollup's compute pending block configuration option.
     // TODO(clabby): Implement this feature.
     pub compute_pending_block: bool,
@@ -51,8 +51,8 @@ pub struct OptimismPayloadBuilder<EvmConfig> {
     pub evm_config: EvmConfig,
 }
 
-impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
-    /// `OptimismPayloadBuilder` constructor.
+impl<EvmConfig> OpPayloadBuilder<EvmConfig> {
+    /// `OpPayloadBuilder` constructor.
     pub const fn new(evm_config: EvmConfig) -> Self {
         Self { compute_pending_block: true, evm_config }
     }
@@ -73,8 +73,7 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
         self.compute_pending_block
     }
 }
-
-impl<EvmConfig> OptimismPayloadBuilder<EvmConfig>
+impl<EvmConfig> OpPayloadBuilder<EvmConfig>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
 {
@@ -136,8 +135,8 @@ fn best_txs<Pool: TransactionPool>(pool: Pool, attr: BestTransactionsAttributes)
     pool.best_transactions_with_attributes(attr)
 }
 
-/// Implementation of the [`PayloadBuilder`] trait for [`OptimismPayloadBuilder`].
-impl<Pool, Client, EvmConfig> PayloadBuilder<Pool, Client> for OptimismPayloadBuilder<EvmConfig>
+/// Implementation of the [`PayloadBuilder`] trait for [`OpPayloadBuilder`].
+impl<Pool, Client, EvmConfig> PayloadBuilder<Pool, Client> for OpPayloadBuilder<EvmConfig>
 where
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
     Pool: TransactionPool,
@@ -873,7 +872,7 @@ where
     let state_provider = client.state_by_block_hash(config.parent_header.hash())?;
     let state = StateProviderDatabase::new(state_provider);
     let mut db =
-        State::builder().with_database_ref(cached_reads.as_db(state)).with_bundle_update().build();
+        State::builder().with_database(cached_reads.as_db_mut(state)).with_bundle_update().build();
     let PayloadConfig { parent_header, attributes, mut extra_data } = config;
 
     debug!(target: "payload_builder", id=%attributes.payload_attributes.payload_id(), parent_header = ?parent_header.hash(), parent_number = parent_header.number, "building new payload");
@@ -900,7 +899,7 @@ where
         chain_spec.is_regolith_active_at_timestamp(attributes.payload_attributes.timestamp);
 
     // apply eip-4788 pre block contract call
-    let mut system_caller = SystemCaller::new(evm_config.clone(), &chain_spec);
+    let mut system_caller = SystemCaller::new(evm_config.clone(), chain_spec.clone());
 
     system_caller
         .pre_block_beacon_root_contract_call(
@@ -1148,8 +1147,7 @@ where
     // calculate the state root
     let hashed_state = HashedPostState::from_bundle_state(&execution_outcome.state().state);
     let (state_root, trie_output) = {
-        let state_provider = db.database.0.inner.borrow_mut();
-        state_provider.db.state_root_with_updates(hashed_state.clone()).inspect_err(|err| {
+        db.database.inner().state_root_with_updates(hashed_state.clone()).inspect_err(|err| {
             warn!(target: "payload_builder",
             parent_header=%parent_header.hash(),
                 %err,

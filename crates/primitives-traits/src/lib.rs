@@ -34,7 +34,7 @@ pub mod block;
 pub use block::{body::BlockBody, Block};
 
 mod withdrawal;
-pub use withdrawal::{Withdrawal, Withdrawals};
+pub use withdrawal::Withdrawals;
 
 mod error;
 pub use error::{GotExpected, GotExpectedBoxed};

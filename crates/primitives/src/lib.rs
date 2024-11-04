@@ -34,8 +34,8 @@ pub mod transaction;
 #[cfg(any(test, feature = "arbitrary"))]
 pub use block::{generate_valid_header, valid_header_strategy};
 pub use block::{
-    Block, BlockBody, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, BlockWithSenders,
-    ForkBlock, RpcBlockHash, SealedBlock, SealedBlockWithSenders,
+    Block, BlockBody, BlockId, BlockNumHash, BlockNumberOrTag, BlockWithSenders, ForkBlock,
+    RpcBlockHash, SealedBlock, SealedBlockWithSenders,
 };
 #[cfg(feature = "reth-codec")]
 pub use compression::*;
@@ -45,7 +45,7 @@ pub use receipt::{
 };
 pub use reth_primitives_traits::{
     logs_bloom, Account, Bytecode, GotExpected, GotExpectedBoxed, Header, HeaderError, Log,
-    LogData, SealedHeader, StorageEntry, Withdrawal, Withdrawals,
+    LogData, SealedHeader, StorageEntry, Withdrawals,
 };
 pub use static_file::StaticFileSegment;
 
