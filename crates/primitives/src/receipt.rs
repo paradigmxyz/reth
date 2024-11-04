@@ -11,8 +11,6 @@ use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodab
 use bytes::{Buf, BufMut};
 use core::{cmp::Ordering, ops::Deref};
 use derive_more::{DerefMut, From, IntoIterator};
-#[cfg(feature = "reth-codec")]
-use reth_codecs::Compact;
 use serde::{Deserialize, Serialize};
 
 /// Receipt containing result of transaction execution.
@@ -91,7 +89,7 @@ impl Receipts {
         self.receipt_vec.len()
     }
 
-    /// Returns `true` if the `Receipts` vector is empty.
+    /// Returns true if the `Receipts` vector is empty.
     pub fn is_empty(&self) -> bool {
         self.receipt_vec.is_empty()
     }
@@ -518,6 +516,7 @@ mod tests {
     use super::*;
     use crate::revm_primitives::Bytes;
     use alloy_primitives::{address, b256, bytes, hex_literal::hex};
+    use reth_codecs::Compact;
 
     #[test]
     fn test_decode_receipt() {

@@ -276,6 +276,7 @@ mod tests {
     use super::*;
     use alloy_consensus::{TxEip4844, EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH};
     use alloy_eips::BlockHashOrNumber;
+    use alloy_eips::eip4895::Withdrawal;
     use alloy_primitives::{
         hex_literal::hex, Address, BlockHash, BlockNumber, Bytes, Parity, Sealable, U256,
     };
@@ -283,7 +284,7 @@ mod tests {
     use rand::Rng;
     use reth_chainspec::ChainSpecBuilder;
     use reth_primitives::{
-        proofs, Account, BlockBody, Signature, Transaction, TransactionSigned, Withdrawal,
+        proofs, Account, BlockBody, Signature, Transaction, TransactionSigned,
         Withdrawals,
     };
     use reth_storage_api::{
