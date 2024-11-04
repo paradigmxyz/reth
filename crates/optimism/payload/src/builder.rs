@@ -9,7 +9,7 @@ use alloy_rpc_types_engine::PayloadId;
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::ChainSpecProvider;
-use reth_evm::{system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
+use reth_evm::{system_calls::SystemCaller, ConfigureEvm, NextBlockEnvAttributes};
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
@@ -39,7 +39,6 @@ use crate::{
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
 };
 use op_alloy_consensus::DepositTransaction;
-use reth_payload_builder::database::CachedReads;
 
 /// Optimism's payload builder
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -92,11 +91,21 @@ where
         self.evm_config.next_cfg_and_block_env(parent, next_attributes)
     }
 
-    fn build_payload<Client, Pool>(&self,  args: BuildArguments<Pool, Client, OpPayloadBuilderAttributes, OpBuiltPayload>) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError>
+    /// Constructs an Optimism payload from the transactions sent via the
+    /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
+    /// the payload attributes, the transaction pool will be ignored and the only transactions
+    /// included in the payload will be those sent through the attributes.
+    ///
+    /// Given build arguments including an Optimism client, transaction pool,
+    /// and configuration, this function creates a transaction payload. Returns
+    /// a result indicating success with the payload or an error in case of failure.
+    fn build_payload<Client, Pool>(
+        &self,
+        args: BuildArguments<Pool, Client, OpPayloadBuilderAttributes, OpBuiltPayload>,
+    ) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError>
     where
         Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
         Pool: TransactionPool,
-
     {
         let (initialized_cfg, initialized_block_env) = self
             .cfg_and_block_env(&args.config, &args.config.parent_header)
@@ -114,25 +123,24 @@ where
             best_payload,
         };
 
-        let mut builder = Builder {
-            cached_reads,
-            pool,
-            best: best_txs::<Pool>
-        };
+        let builder = OpBuilder { pool, best: best_txs::<Pool> };
 
         let state_provider = client.state_by_block_hash(ctx.parent().hash())?;
         let state = StateProviderDatabase::new(state_provider);
-        let mut db =
-            State::builder().with_database_ref(builder.cached_reads.as_db(state)).with_bundle_update().build();
 
-        // Builder::new().build(Context::new())
-        builder.build2(db, ctx);
-        todo!()
+        if ctx.attributes().no_tx_pool {
+            let db = State::builder().with_database(state).with_bundle_update().build();
+            builder.build(db, ctx)
+        } else {
+            // sequencer mode we can reuse cachedreads from previous runs
+            let db = State::builder()
+                .with_database(cached_reads.as_db_mut(state))
+                .with_bundle_update()
+                .build();
+            builder.build(db, ctx)
+        }
+        .map(|out| out.with_cached_reads(cached_reads))
     }
-}
-
-fn best_txs<Pool: TransactionPool>(pool: Pool, attr: BestTransactionsAttributes) -> BestTransactionsFor<Pool> {
-    pool.best_transactions_with_attributes(attr)
 }
 
 /// Implementation of the [`PayloadBuilder`] trait for [`OpPayloadBuilder`].
@@ -149,14 +157,7 @@ where
         &self,
         args: BuildArguments<Pool, Client, OpPayloadBuilderAttributes, OpBuiltPayload>,
     ) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError> {
-        let (cfg_env, block_env) = self
-            .cfg_and_block_env(&args.config, &args.config.parent_header)
-            .map_err(PayloadBuilderError::other)?;
-
-
-        // Builder::new().build(Context::new())
-
-        optimism_payload(&self.evm_config, args, cfg_env, block_env, self.compute_pending_block)
+        self.build_payload(args)
     }
 
     fn on_missing_payload(
@@ -184,12 +185,7 @@ where
             cancel: Default::default(),
             best_payload: None,
         };
-        let (cfg_env, block_env) = self
-            .cfg_and_block_env(&args.config, &args.config.parent_header)
-            .map_err(PayloadBuilderError::other)?;
-        optimism_payload(&self.evm_config, args, cfg_env, block_env, false)?
-            .into_payload()
-            .ok_or_else(|| PayloadBuilderError::MissingPayload)
+        self.build_payload(args)?.into_payload().ok_or_else(|| PayloadBuilderError::MissingPayload)
     }
 }
 
@@ -209,43 +205,31 @@ where
 /// And finally
 /// 5. build the block: compute all roots (txs, state)
 #[derive(Debug)]
-pub struct Builder<Pool, Best> {
-    /// Cached reads from previous run.
-    cached_reads: CachedReads,
+pub struct OpBuilder<Pool, Best> {
     /// The transaction pool
     pool: Pool,
     /// Yields the best transaction to include if transactions from the mempool are allowed.
+    // TODO(mattsse): convert this to a trait
     best: Best,
 }
 
-impl<Pool, Best> Builder<Pool, Best>
+impl<Pool, Best> OpBuilder<Pool, Best>
 where
     Pool: TransactionPool,
     Best: FnOnce(Pool, BestTransactionsAttributes) -> BestTransactionsFor<Pool>,
 {
-    pub fn build2<EvmConfig, DB>(
-        self,
-        mut db: State<DB>,
-        ctx: OpPayloadBuilderCtx<EvmConfig>,
-    ) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError>
-    where
-        EvmConfig: ConfigureEvm<Header = Header>,
-        DB: Database<Error = ProviderError>,
-    {
-       todo!()
-    }
-
     /// Builds the payload on top of the state.
-    pub fn build<EvmConfig, DB>(
+    pub fn build<EvmConfig, DB, P>(
         self,
         mut db: State<DB>,
         ctx: OpPayloadBuilderCtx<EvmConfig>,
-    ) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError>
+    ) -> Result<BuildOutcomeKind<OpBuiltPayload>, PayloadBuilderError>
     where
         EvmConfig: ConfigureEvm<Header = Header>,
-        DB: Database<Error = ProviderError> + StateRootProvider,
+        DB: Database<Error = ProviderError> + AsRef<P>,
+        P: StateRootProvider,
     {
-        let Self { cached_reads, pool, best } = self;
+        let Self { pool, best } = self;
         debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
 
         // 1. apply eip-4788 pre block contract call
@@ -269,7 +253,7 @@ where
             // check if the new payload is even more valuable
             if !ctx.is_better_payload(info.total_fees) {
                 // can skip building the block
-                return Ok(BuildOutcome::Aborted { fees: info.total_fees, cached_reads })
+                return Ok(BuildOutcomeKind::Aborted { fees: info.total_fees })
             }
         }
 
@@ -302,14 +286,15 @@ where
         // // calculate the state root
         let hashed_state = HashedPostState::from_bundle_state(&execution_outcome.state().state);
         let (state_root, trie_output) = {
-            let state_provider = db.database;
-            state_provider.state_root_with_updates(hashed_state.clone()).inspect_err(|err| {
-                warn!(target: "payload_builder",
-                parent_header=%ctx.parent().hash(),
-                    %err,
-                    "failed to calculate state root for payload"
-                );
-            })?
+            db.database.as_ref().state_root_with_updates(hashed_state.clone()).inspect_err(
+                |err| {
+                    warn!(target: "payload_builder",
+                    parent_header=%ctx.parent().hash(),
+                        %err,
+                        "failed to calculate state root for payload"
+                    );
+                },
+            )?
         };
 
         // create the block header
@@ -382,11 +367,18 @@ where
             // if `no_tx_pool` is set only transactions from the payload attributes will be included
             // in the payload. In other words, the payload is deterministic and we can
             // freeze it once we've successfully built it.
-            Ok(BuildOutcome::Freeze(payload))
+            Ok(BuildOutcomeKind::Freeze(payload))
         } else {
-            Ok(BuildOutcome::Better { payload, cached_reads })
+            Ok(BuildOutcomeKind::Better { payload })
         }
     }
+}
+
+fn best_txs<Pool: TransactionPool>(
+    pool: Pool,
+    attr: BestTransactionsAttributes,
+) -> BestTransactionsFor<Pool> {
+    pool.best_transactions_with_attributes(attr)
 }
 
 /// This acts as the container for executed transactions and its byproducts (receipts, gas used)
@@ -443,7 +435,7 @@ impl<EvmConfig> OpPayloadBuilderCtx<EvmConfig> {
     }
 
     /// Returns the builder attributes.
-    pub fn attributes(&self) -> &OpPayloadBuilderAttributes {
+    pub const fn attributes(&self) -> &OpPayloadBuilderAttributes {
         &self.config.attributes
     }
 
@@ -585,7 +577,7 @@ where
         DB: Database + DatabaseCommit,
         DB::Error: Display,
     {
-        SystemCaller::new(self.evm_config.clone(), &self.chain_spec)
+        SystemCaller::new(self.evm_config.clone(), self.chain_spec.clone())
             .pre_block_beacon_root_contract_call(
                 db,
                 &self.initialized_cfg,
@@ -711,7 +703,7 @@ where
         info: &mut ExecutionInfo,
         db: &mut State<DB>,
         mut best_txs: BestTransactionsFor<Pool>,
-    ) -> Result<Option<BuildOutcome<OpBuiltPayload>>, PayloadBuilderError>
+    ) -> Result<Option<BuildOutcomeKind<OpBuiltPayload>>, PayloadBuilderError>
     where
         DB: Database<Error = ProviderError>,
         Pool: TransactionPool,
@@ -736,7 +728,7 @@ where
 
             // check if the job was cancelled, if so we can exit early
             if self.cancel.is_cancelled() {
-                return Ok(Some(BuildOutcome::Cancelled))
+                return Ok(Some(BuildOutcomeKind::Cancelled))
             }
 
             // convert tx to a signed transaction
@@ -810,41 +802,6 @@ where
     }
 }
 
-// /// Creates the context and opens the state.
-// fn with_state_at<C>(
-//     attributes: OpPayloadBuilderAttributes,
-//     evm_config: C,
-//     client: C,
-// ) -> ProviderResult<OpPayloadBuildingCtx<EvmConfig, StateProviderDatabase<StateProviderBox>>>
-// where
-//     C: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
-// {
-//     todo!()
-// }
-//
-// /// Creates the context and opens the state with cached reads.
-// ///
-// /// This reuses reads captured from a previous run.
-// /// Note: this is only relevant if the attributes allows transactions from the mempool,
-// because /// if no transactions from the mempool should be included the payload is
-// deterministic and we /// can freeze it [`BuildOutcome::Freeze`] preventing another job.
-// fn with_cached_state_at<C>(
-//     attributes: OpPayloadBuilderAttributes,
-//     evm_config: C,
-//     client: C,
-//     cached_reads: &mut CachedReads,
-// ) -> ProviderResult<
-//     OpPayloadBuildingCtx<
-//         EvmConfig,
-//         WrapDatabaseRef<CachedReadsDBRef<'_, StateProviderDatabase<StateProviderBox>>>,
-//     >,
-// >
-// where
-//     C: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
-// {
-//     todo!()
-// }
-
 /// Constructs an Optimism transaction payload from the transactions sent through the
 /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
 /// the payload attributes, the transaction pool will be ignored and the only transactions
@@ -854,7 +811,7 @@ where
 /// and configuration, this function creates a transaction payload. Returns
 /// a result indicating success with the payload or an error in case of failure.
 #[inline]
-pub(crate) fn optimism_payload<EvmConfig, Pool, Client>(
+pub fn optimism_payload<EvmConfig, Pool, Client>(
     evm_config: &EvmConfig,
     args: BuildArguments<Pool, Client, OpPayloadBuilderAttributes, OpBuiltPayload>,
     initialized_cfg: CfgEnvWithHandlerCfg,
