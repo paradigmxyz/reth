@@ -12,6 +12,69 @@ description = "OP primitive types"
 workspace = true
 
 [dependencies]
+# reth
 reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
+reth-codecs = { workspace = true, optional = true }
+
+# ethereum
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
+alloy-rlp.workspace = true
+alloy-eips.workspace = true
+revm-primitives.workspace = true
+
+# op
+op-alloy-consensus.workspace = true
+
+# codec
+modular-bitfield = { workspace = true, optional = true }
+zstd = { workspace = true, optional = true }
+
+# io
+serde.workspace = true
+
+# misc
+derive_more = { workspace = true, features = ["deref", "from", "constructor"] }
+proptest = { workspace = true, optional = true }
+rand = { workspace = true, optional = true }
+
+# test-util
+arbitrary = { workspace = true, features = ["derive"], optional = true }
+
+[dev-dependencies]
+proptest-arbitrary-interop.workspace = true
+
+[features]
+default = ["std", "reth-codec"]
+std = [
+    "reth-primitives/std",
+    "reth-primitives-traits/std",
+    "alloy-consensus/std",
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "revm-primitives/std",
+    "serde/std",
+]
+reth-codec = [
+    "dep:reth-codecs",
+    "dep:zstd",
+    "dep:modular-bitfield",
+    "std",
+    "rand",
+    "dep:proptest",
+    "dep:arbitrary",
+]
+arbitrary = [
+    "reth-codec",
+    "dep:proptest",
+    "alloy-eips/arbitrary",
+    "rand",
+    "reth-primitives-traits/arbitrary",
+    "reth-primitives/arbitrary",
+]
+optimism = [
+    "reth-primitives/optimism",
+    "reth-codecs/optimism",
+    "revm-primitives/optimism",
+]

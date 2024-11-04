@@ -87,7 +87,7 @@ pub fn legacy_parity(signature: &Signature, chain_id: Option<u64>) -> Parity {
 }
 
 /// Returns a signature with the given chain ID applied to the `v` value.
-pub(crate) fn with_eip155_parity(signature: &Signature, chain_id: Option<u64>) -> Signature {
+pub fn with_eip155_parity(signature: &Signature, chain_id: Option<u64>) -> Signature {
     Signature::new(signature.r(), signature.s(), legacy_parity(signature, chain_id))
 }
 

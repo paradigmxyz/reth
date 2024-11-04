@@ -22,7 +22,7 @@ use once_cell::sync::Lazy as LazyLock;
 use op_alloy_consensus::DepositTransaction;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
-use signature::{decode_with_eip155_chain_id, with_eip155_parity};
+use signature::decode_with_eip155_chain_id;
 #[cfg(feature = "std")]
 use std::sync::LazyLock;
 
@@ -37,7 +37,8 @@ pub use sidecar::{BlobTransaction, BlobTransactionSidecar};
 
 pub use compat::FillTxEnv;
 pub use signature::{
-    extract_chain_id, legacy_parity, recover_signer, recover_signer_unchecked, Signature,
+    extract_chain_id, legacy_parity, recover_signer, recover_signer_unchecked, with_eip155_parity,
+    Signature,
 };
 pub use tx_type::TxType;
 pub use variant::TransactionSignedVariant;
@@ -1287,7 +1288,7 @@ impl TransactionSigned {
     ///
     /// Refer to the docs for [`Self::decode_rlp_legacy_transaction`] for details on the exact
     /// format expected.
-    pub(crate) fn decode_rlp_legacy_transaction_tuple(
+    pub fn decode_rlp_legacy_transaction_tuple(
         data: &mut &[u8],
     ) -> alloy_rlp::Result<(TxLegacy, TxHash, Signature)> {
         // keep this around, so we can use it to calculate the hash
