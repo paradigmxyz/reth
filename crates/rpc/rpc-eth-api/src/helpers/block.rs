@@ -6,10 +6,9 @@ use alloy_rpc_types::{Header, Index};
 use futures::Future;
 use reth_primitives::{BlockId, Receipt, SealedBlock, SealedBlockWithSenders};
 use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider};
-use reth_rpc_eth_types::EthStateCache;
 use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
 
-use crate::{FromEthApiError, FullEthApiTypes, RpcBlock, RpcReceipt};
+use crate::{node::RpcNodeCoreExt, FromEthApiError, FullEthApiTypes, RpcBlock, RpcReceipt};
 
 use super::{LoadPendingBlock, LoadReceipt, SpawnBlocking};
 
@@ -21,11 +20,6 @@ pub type BlockAndReceiptsResult<E> = Result<Option<(SealedBlock, Arc<Vec<Receipt
 /// Block related functions for the [`EthApiServer`](crate::EthApiServer) trait in the
 /// `eth_` namespace.
 pub trait EthBlocks: LoadBlock {
-    /// Returns a handle for reading data from disk.
-    ///
-    /// Data access in default (L1) trait method implementations.
-    fn provider(&self) -> impl HeaderProvider;
-
     /// Returns the block header for the given block id.
     fn rpc_block_header(
         &self,
@@ -52,22 +46,23 @@ pub trait EthBlocks: LoadBlock {
         async move {
             let Some(block) = self.block_with_senders(block_id).await? else { return Ok(None) };
             let block_hash = block.hash();
-            let mut total_difficulty = EthBlocks::provider(self)
+            let mut total_difficulty = self
+                .provider()
                 .header_td_by_number(block.number)
                 .map_err(Self::Error::from_eth_err)?;
             if total_difficulty.is_none() {
                 // if we failed to find td after we successfully loaded the block, try again using
                 // the hash this only matters if the chain is currently transitioning the merge block and there's a reorg: <https://github.com/paradigmxyz/reth/issues/10941>
-                total_difficulty = EthBlocks::provider(self)
-                    .header_td(&block.hash())
-                    .map_err(Self::Error::from_eth_err)?;
+                total_difficulty =
+                    self.provider().header_td(&block.hash()).map_err(Self::Error::from_eth_err)?;
             }
 
-            let block = from_block::<Self::TransactionCompat>(
+            let block = from_block(
                 (*block).clone().unseal(),
                 total_difficulty.unwrap_or_default(),
                 full.into(),
                 Some(block_hash),
+                self.tx_resp_builder(),
             )
             .map_err(Self::Error::from_eth_err)?;
             Ok(Some(block))
@@ -84,13 +79,15 @@ pub trait EthBlocks: LoadBlock {
         async move {
             if block_id.is_pending() {
                 // Pending block can be fetched directly without need for caching
-                return Ok(LoadBlock::provider(self)
+                return Ok(self
+                    .provider()
                     .pending_block()
                     .map_err(Self::Error::from_eth_err)?
                     .map(|block| block.body.transactions.len()))
             }
 
-            let block_hash = match LoadBlock::provider(self)
+            let block_hash = match self
+                .provider()
                 .block_hash_for_id(block_id)
                 .map_err(Self::Error::from_eth_err)?
             {
@@ -131,7 +128,8 @@ pub trait EthBlocks: LoadBlock {
             if block_id.is_pending() {
                 // First, try to get the pending block from the provider, in case we already
                 // received the actual pending block from the CL.
-                if let Some((block, receipts)) = LoadBlock::provider(self)
+                if let Some((block, receipts)) = self
+                    .provider()
                     .pending_block_and_receipts()
                     .map_err(Self::Error::from_eth_err)?
                 {
@@ -144,11 +142,11 @@ pub trait EthBlocks: LoadBlock {
                 }
             }
 
-            if let Some(block_hash) = LoadBlock::provider(self)
-                .block_hash_for_id(block_id)
-                .map_err(Self::Error::from_eth_err)?
+            if let Some(block_hash) =
+                self.provider().block_hash_for_id(block_id).map_err(Self::Error::from_eth_err)?
             {
-                return LoadReceipt::cache(self)
+                return self
+                    .cache()
                     .get_block_and_receipts(block_hash)
                     .await
                     .map_err(Self::Error::from_eth_err)
@@ -166,7 +164,7 @@ pub trait EthBlocks: LoadBlock {
         &self,
         block_id: BlockId,
     ) -> Result<Option<Vec<reth_primitives::Header>>, Self::Error> {
-        LoadBlock::provider(self).ommers_by_id(block_id).map_err(Self::Error::from_eth_err)
+        self.provider().ommers_by_id(block_id).map_err(Self::Error::from_eth_err)
     }
 
     /// Returns uncle block at given index in given block.
@@ -181,14 +179,12 @@ pub trait EthBlocks: LoadBlock {
         async move {
             let uncles = if block_id.is_pending() {
                 // Pending block can be fetched directly without need for caching
-                LoadBlock::provider(self)
+                self.provider()
                     .pending_block()
                     .map_err(Self::Error::from_eth_err)?
                     .map(|block| block.body.ommers)
             } else {
-                LoadBlock::provider(self)
-                    .ommers_by_id(block_id)
-                    .map_err(Self::Error::from_eth_err)?
+                self.provider().ommers_by_id(block_id).map_err(Self::Error::from_eth_err)?
             }
             .unwrap_or_default();
 
@@ -200,17 +196,7 @@ pub trait EthBlocks: LoadBlock {
 /// Loads a block from database.
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` blocks RPC methods.
-pub trait LoadBlock: LoadPendingBlock + SpawnBlocking {
-    // Returns a handle for reading data from disk.
-    ///
-    /// Data access in default (L1) trait method implementations.
-    fn provider(&self) -> impl BlockReaderIdExt;
-
-    /// Returns a handle for reading data from memory.
-    ///
-    /// Data access in default (L1) trait method implementations.
-    fn cache(&self) -> &EthStateCache;
-
+pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
     /// Returns the block object for the given block id.
     fn block_with_senders(
         &self,
@@ -219,21 +205,23 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking {
         async move {
             if block_id.is_pending() {
                 // Pending block can be fetched directly without need for caching
-                let maybe_pending = LoadPendingBlock::provider(self)
+                if let Some(pending_block) = self
+                    .provider()
                     .pending_block_with_senders()
-                    .map_err(Self::Error::from_eth_err)?;
-                return if maybe_pending.is_some() {
-                    Ok(maybe_pending.map(Arc::new))
-                } else {
-                    // If no pending block from provider, try to get local pending block
-                    return match self.local_pending_block().await? {
-                        Some((block, _)) => Ok(Some(Arc::new(block))),
-                        None => Ok(None),
-                    };
+                    .map_err(Self::Error::from_eth_err)?
+                {
+                    return Ok(Some(Arc::new(pending_block)));
+                }
+
+                // If no pending block from provider, try to get local pending block
+                return match self.local_pending_block().await? {
+                    Some((block, _)) => Ok(Some(Arc::new(block))),
+                    None => Ok(None),
                 };
             }
 
-            let block_hash = match LoadPendingBlock::provider(self)
+            let block_hash = match self
+                .provider()
                 .block_hash_for_id(block_id)
                 .map_err(Self::Error::from_eth_err)?
             {

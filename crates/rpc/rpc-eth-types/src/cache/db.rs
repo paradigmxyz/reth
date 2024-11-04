@@ -114,6 +114,13 @@ impl reth_storage_api::BlockHashReader for StateProviderTraitObjWrapper<'_> {
         self.0.block_hash(block_number)
     }
 
+    fn convert_block_hash(
+        &self,
+        hash_or_number: alloy_rpc_types::BlockHashOrNumber,
+    ) -> reth_errors::ProviderResult<Option<B256>> {
+        self.0.convert_block_hash(hash_or_number)
+    }
+
     fn canonical_hashes_range(
         &self,
         start: alloy_primitives::BlockNumber,
@@ -121,35 +128,15 @@ impl reth_storage_api::BlockHashReader for StateProviderTraitObjWrapper<'_> {
     ) -> reth_errors::ProviderResult<Vec<B256>> {
         self.0.canonical_hashes_range(start, end)
     }
-
-    fn convert_block_hash(
-        &self,
-        hash_or_number: alloy_rpc_types::BlockHashOrNumber,
-    ) -> reth_errors::ProviderResult<Option<B256>> {
-        self.0.convert_block_hash(hash_or_number)
-    }
 }
 
 impl StateProvider for StateProviderTraitObjWrapper<'_> {
-    fn account_balance(
+    fn storage(
         &self,
-        addr: revm_primitives::Address,
-    ) -> reth_errors::ProviderResult<Option<U256>> {
-        self.0.account_balance(addr)
-    }
-
-    fn account_code(
-        &self,
-        addr: revm_primitives::Address,
-    ) -> reth_errors::ProviderResult<Option<reth_primitives::Bytecode>> {
-        self.0.account_code(addr)
-    }
-
-    fn account_nonce(
-        &self,
-        addr: revm_primitives::Address,
-    ) -> reth_errors::ProviderResult<Option<u64>> {
-        self.0.account_nonce(addr)
+        account: revm_primitives::Address,
+        storage_key: alloy_primitives::StorageKey,
+    ) -> reth_errors::ProviderResult<Option<alloy_primitives::StorageValue>> {
+        self.0.storage(account, storage_key)
     }
 
     fn bytecode_by_hash(
@@ -159,12 +146,25 @@ impl StateProvider for StateProviderTraitObjWrapper<'_> {
         self.0.bytecode_by_hash(code_hash)
     }
 
-    fn storage(
+    fn account_code(
         &self,
-        account: revm_primitives::Address,
-        storage_key: alloy_primitives::StorageKey,
-    ) -> reth_errors::ProviderResult<Option<alloy_primitives::StorageValue>> {
-        self.0.storage(account, storage_key)
+        addr: revm_primitives::Address,
+    ) -> reth_errors::ProviderResult<Option<reth_primitives::Bytecode>> {
+        self.0.account_code(addr)
+    }
+
+    fn account_balance(
+        &self,
+        addr: revm_primitives::Address,
+    ) -> reth_errors::ProviderResult<Option<U256>> {
+        self.0.account_balance(addr)
+    }
+
+    fn account_nonce(
+        &self,
+        addr: revm_primitives::Address,
+    ) -> reth_errors::ProviderResult<Option<u64>> {
+        self.0.account_nonce(addr)
     }
 }
 

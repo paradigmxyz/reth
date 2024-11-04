@@ -102,7 +102,7 @@ where
             return Err(EthStreamError::MessageTooBig(their_msg.len()))
         }
 
-        let version = EthVersion::try_from(status.version)?;
+        let version = status.version;
         let msg = match ProtocolMessage::decode_message(version, &mut their_msg.as_ref()) {
             Ok(m) => m,
             Err(err) => {
@@ -368,7 +368,7 @@ mod tests {
         let fork_filter = ForkFilter::new(Head::default(), genesis, 0, Vec::new());
 
         let status = Status {
-            version: EthVersion::Eth67 as u8,
+            version: EthVersion::Eth67,
             chain: NamedChain::Mainnet.into(),
             total_difficulty: U256::ZERO,
             blockhash: B256::random(),
@@ -415,7 +415,7 @@ mod tests {
         let fork_filter = ForkFilter::new(Head::default(), genesis, 0, Vec::new());
 
         let status = Status {
-            version: EthVersion::Eth67 as u8,
+            version: EthVersion::Eth67,
             chain: NamedChain::Mainnet.into(),
             total_difficulty: U256::from(2).pow(U256::from(100)) - U256::from(1),
             blockhash: B256::random(),
@@ -462,7 +462,7 @@ mod tests {
         let fork_filter = ForkFilter::new(Head::default(), genesis, 0, Vec::new());
 
         let status = Status {
-            version: EthVersion::Eth67 as u8,
+            version: EthVersion::Eth67,
             chain: NamedChain::Mainnet.into(),
             total_difficulty: U256::from(2).pow(U256::from(100)),
             blockhash: B256::random(),
@@ -603,7 +603,7 @@ mod tests {
         let fork_filter = ForkFilter::new(Head::default(), genesis, 0, Vec::new());
 
         let status = Status {
-            version: EthVersion::Eth67 as u8,
+            version: EthVersion::Eth67,
             chain: NamedChain::Mainnet.into(),
             total_difficulty: U256::ZERO,
             blockhash: B256::random(),
@@ -674,7 +674,7 @@ mod tests {
         let fork_filter = ForkFilter::new(Head::default(), genesis, 0, Vec::new());
 
         let status = Status {
-            version: EthVersion::Eth67 as u8,
+            version: EthVersion::Eth67,
             chain: NamedChain::Mainnet.into(),
             total_difficulty: U256::ZERO,
             blockhash: B256::random(),

@@ -95,5 +95,6 @@ test-utils = [
 	"reth-revm/test-utils",
 	"reth-stages-api/test-utils",
 	"reth-provider/test-utils",
-	"reth-trie/test-utils"
+	"reth-trie/test-utils",
+	"reth-prune-types?/test-utils"
 ]

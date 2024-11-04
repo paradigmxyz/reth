@@ -5,7 +5,7 @@ use core::hash::Hash;
 
 use alloy_consensus::Transaction;
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
-use alloy_primitives::{keccak256, Address, TxHash, B256};
+use alloy_primitives::{keccak256, Address, Signature, TxHash, B256};
 
 /// A signed transaction.
 pub trait SignedTransaction:
@@ -26,9 +26,6 @@ pub trait SignedTransaction:
     /// Transaction type that is signed.
     type Transaction: Transaction;
 
-    /// Signature type that results from signing transaction.
-    type Signature;
-
     /// Returns reference to transaction hash.
     fn tx_hash(&self) -> &TxHash;
 
@@ -36,7 +33,7 @@ pub trait SignedTransaction:
     fn transaction(&self) -> &Self::Transaction;
 
     /// Returns reference to signature.
-    fn signature(&self) -> &Self::Signature;
+    fn signature(&self) -> &Signature;
 
     /// Recover signer from signature and hash.
     ///
@@ -59,10 +56,8 @@ pub trait SignedTransaction:
     /// Create a new signed transaction from a transaction and its signature.
     ///
     /// This will also calculate the transaction hash using its encoding.
-    fn from_transaction_and_signature(
-        transaction: Self::Transaction,
-        signature: Self::Signature,
-    ) -> Self;
+    fn from_transaction_and_signature(transaction: Self::Transaction, signature: Signature)
+        -> Self;
 
     /// Calculate transaction hash, eip2728 transaction does not contain rlp header and start with
     /// tx type.

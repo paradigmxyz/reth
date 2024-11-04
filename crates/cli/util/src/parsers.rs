@@ -1,7 +1,9 @@
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::B256;
+use reth_fs_util::FsPathError;
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs},
+    path::Path,
     str::FromStr,
     time::Duration,
 };
@@ -80,6 +82,11 @@ pub fn parse_socket_address(value: &str) -> eyre::Result<SocketAddr, SocketAddre
         .to_socket_addrs()?
         .next()
         .ok_or_else(|| SocketAddressParsingError::Parse(value.to_string()))
+}
+
+/// Wrapper around [`reth_fs_util::read_json_file`] which can be used as a clap value parser.
+pub fn read_json_from_file<T: serde::de::DeserializeOwned>(path: &str) -> Result<T, FsPathError> {
+    reth_fs_util::read_json_file(Path::new(path))
 }
 
 #[cfg(test)]

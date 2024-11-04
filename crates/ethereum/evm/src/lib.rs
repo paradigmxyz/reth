@@ -17,6 +17,8 @@
 
 extern crate alloc;
 
+use core::convert::Infallible;
+
 use alloc::{sync::Arc, vec::Vec};
 use alloy_primitives::{Address, Bytes, TxKind, U256};
 use reth_chainspec::{ChainSpec, Head};
@@ -27,9 +29,9 @@ use revm_primitives::{
 };
 
 mod config;
+use alloy_eips::eip1559::INITIAL_BASE_FEE;
 pub use config::{revm_spec, revm_spec_by_timestamp_after_merge};
 use reth_ethereum_forks::EthereumHardfork;
-use reth_primitives::constants::EIP1559_INITIAL_BASE_FEE;
 
 pub mod execute;
 
@@ -59,6 +61,7 @@ impl EthEvmConfig {
 
 impl ConfigureEvmEnv for EthEvmConfig {
     type Header = Header;
+    type Error = Infallible;
 
     fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
         transaction.fill_tx_env(tx_env, sender);
@@ -131,7 +134,7 @@ impl ConfigureEvmEnv for EthEvmConfig {
         &self,
         parent: &Self::Header,
         attributes: NextBlockEnvAttributes,
-    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), Self::Error> {
         // configure evm env based on parent block
         let cfg = CfgEnv::default().with_chain_id(self.chain_spec.chain().id());
 
@@ -163,7 +166,7 @@ impl ConfigureEvmEnv for EthEvmConfig {
             gas_limit *= U256::from(elasticity_multiplier);
 
             // set the base fee to the initial base fee from the EIP-1559 spec
-            basefee = Some(EIP1559_INITIAL_BASE_FEE)
+            basefee = Some(INITIAL_BASE_FEE)
         }
 
         let block_env = BlockEnv {
@@ -179,7 +182,7 @@ impl ConfigureEvmEnv for EthEvmConfig {
             blob_excess_gas_and_price,
         };
 
-        (CfgEnvWithHandlerCfg::new_with_spec_id(cfg, spec_id), block_env)
+        Ok((CfgEnvWithHandlerCfg::new_with_spec_id(cfg, spec_id), block_env))
     }
 }
 

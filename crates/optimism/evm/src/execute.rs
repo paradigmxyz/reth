@@ -1,10 +1,11 @@
 //! Optimism block execution strategy.
 
-use crate::{l1::ensure_create2_deployer, OptimismBlockExecutionError, OptimismEvmConfig};
+use crate::{l1::ensure_create2_deployer, OpEvmConfig, OptimismBlockExecutionError};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::Transaction as _;
 use alloy_eips::eip7685::Requests;
 use core::fmt::Display;
+use op_alloy_consensus::DepositTransaction;
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
 use reth_evm::{
@@ -20,10 +21,7 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::validate_block_post_execution;
 use reth_optimism_forks::OptimismHardfork;
 use reth_primitives::{BlockWithSenders, Header, Receipt, TxType};
-use reth_revm::{
-    db::{states::bundle_state::BundleRetention, BundleState},
-    Database, State,
-};
+use reth_revm::{Database, State};
 use revm_primitives::{
     db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState, U256,
 };
@@ -31,7 +29,7 @@ use tracing::trace;
 
 /// Factory for [`OpExecutionStrategy`].
 #[derive(Debug, Clone)]
-pub struct OpExecutionStrategyFactory<EvmConfig = OptimismEvmConfig> {
+pub struct OpExecutionStrategyFactory<EvmConfig = OpEvmConfig> {
     /// The chainspec
     chain_spec: Arc<OpChainSpec>,
     /// How to create an EVM.
@@ -41,7 +39,7 @@ pub struct OpExecutionStrategyFactory<EvmConfig = OptimismEvmConfig> {
 impl OpExecutionStrategyFactory {
     /// Creates a new default optimism executor strategy factory.
     pub fn optimism(chain_spec: Arc<OpChainSpec>) -> Self {
-        Self::new(chain_spec.clone(), OptimismEvmConfig::new(chain_spec))
+        Self::new(chain_spec.clone(), OpEvmConfig::new(chain_spec))
     }
 }
 
@@ -92,7 +90,7 @@ where
 {
     /// Creates a new [`OpExecutionStrategy`]
     pub fn new(state: State<DB>, chain_spec: Arc<OpChainSpec>, evm_config: EvmConfig) -> Self {
-        let system_caller = SystemCaller::new(evm_config.clone(), (*chain_spec).clone());
+        let system_caller = SystemCaller::new(evm_config.clone(), chain_spec.clone());
         Self { state, chain_spec, evm_config, system_caller }
     }
 }
@@ -271,11 +269,6 @@ where
         self.system_caller.with_state_hook(hook);
     }
 
-    fn finish(&mut self) -> BundleState {
-        self.state.merge_transitions(BundleRetention::Reverts);
-        self.state.take_bundle()
-    }
-
     fn validate_block_post_execution(
         &self,
         block: &BlockWithSenders,
@@ -305,9 +298,10 @@ mod tests {
     use crate::OpChainSpec;
     use alloy_consensus::TxEip1559;
     use alloy_primitives::{b256, Address, StorageKey, StorageValue};
+    use op_alloy_consensus::TxDeposit;
     use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_evm::execute::{BasicBlockExecutorProvider, BatchExecutor, BlockExecutorProvider};
-    use reth_optimism_chainspec::{optimism_deposit_tx_signature, OpChainSpecBuilder};
+    use reth_optimism_chainspec::OpChainSpecBuilder;
     use reth_primitives::{Account, Block, BlockBody, Signature, Transaction, TransactionSigned};
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, L1_BLOCK_CONTRACT,
@@ -345,7 +339,7 @@ mod tests {
         chain_spec: Arc<OpChainSpec>,
     ) -> BasicBlockExecutorProvider<OpExecutionStrategyFactory> {
         let strategy_factory =
-            OpExecutionStrategyFactory::new(chain_spec.clone(), OptimismEvmConfig::new(chain_spec));
+            OpExecutionStrategyFactory::new(chain_spec.clone(), OpEvmConfig::new(chain_spec));
 
         BasicBlockExecutorProvider::new(strategy_factory)
     }
@@ -473,7 +467,7 @@ mod tests {
                 gas_limit: MIN_TRANSACTION_GAS,
                 ..Default::default()
             }),
-            optimism_deposit_tx_signature(),
+            TxDeposit::signature(),
         );
 
         let provider = executor_provider(chain_spec);

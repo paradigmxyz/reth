@@ -1,11 +1,10 @@
 use crate::engine::{error::BeaconOnNewPayloadError, forkchoice::ForkchoiceStatus};
-use alloy_eips::eip7685::Requests;
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ExecutionPayload, ForkChoiceUpdateResult, ForkchoiceState,
+    ExecutionPayload, ExecutionPayloadSidecar, ForkChoiceUpdateResult, ForkchoiceState,
     ForkchoiceUpdateError, ForkchoiceUpdated, PayloadId, PayloadStatus, PayloadStatusEnum,
 };
 use futures::{future::Either, FutureExt};
-use reth_engine_primitives::EngineTypes;
+use reth_engine_primitives::{EngineApiMessageVersion, EngineTypes};
 use reth_errors::RethResult;
 use reth_payload_primitives::PayloadBuilderError;
 use std::{
@@ -145,12 +144,9 @@ pub enum BeaconEngineMessage<Engine: EngineTypes> {
     NewPayload {
         /// The execution payload received by Engine API.
         payload: ExecutionPayload,
-        /// The cancun-related newPayload fields, if any.
-        cancun_fields: Option<CancunPayloadFields>,
-        // HACK(onbjerg): We should have a pectra payload fields struct, this is just a temporary
-        // workaround.
-        /// The pectra EIP-7685 execution requests.
-        execution_requests: Option<Requests>,
+        /// The execution payload sidecar with additional version-specific fields received by
+        /// engine API.
+        sidecar: ExecutionPayloadSidecar,
         /// The sender for returning payload status result.
         tx: oneshot::Sender<Result<PayloadStatus, BeaconOnNewPayloadError>>,
     },
@@ -160,6 +156,8 @@ pub enum BeaconEngineMessage<Engine: EngineTypes> {
         state: ForkchoiceState,
         /// The payload attributes for block building.
         payload_attrs: Option<Engine::PayloadAttributes>,
+        /// The Engine API Version.
+        version: EngineApiMessageVersion,
         /// The sender for returning forkchoice updated result.
         tx: oneshot::Sender<RethResult<OnForkChoiceUpdated>>,
     },

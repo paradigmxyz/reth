@@ -15,6 +15,7 @@ workspace = true
 # reth
 reth-ipc.workspace = true
 reth-chainspec.workspace = true
+reth-consensus.workspace = true
 reth-network-api.workspace = true
 reth-node-core.workspace = true
 reth-provider.workspace = true
@@ -29,11 +30,6 @@ reth-transaction-pool.workspace = true
 reth-evm.workspace = true
 reth-engine-primitives.workspace = true
 reth-primitives.workspace = true
-
-# ethereum
-alloy-network.workspace = true
-alloy-rpc-types.workspace = true
-alloy-serde.workspace = true
 
 # rpc/net
 jsonrpsee = { workspace = true, features = ["server"] }
@@ -50,6 +46,8 @@ metrics.workspace = true
 serde = { workspace = true, features = ["derive"] }
 thiserror.workspace = true
 tracing.workspace = true
+tokio-util = { workspace = true }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 
 [dev-dependencies]
 reth-chainspec.workspace = true

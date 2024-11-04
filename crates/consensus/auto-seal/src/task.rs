@@ -3,7 +3,7 @@ use alloy_rpc_types_engine::ForkchoiceState;
 use futures_util::{future::BoxFuture, FutureExt};
 use reth_beacon_consensus::{BeaconEngineMessage, ForkchoiceStatus};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_engine_primitives::EngineTypes;
+use reth_engine_primitives::{EngineApiMessageVersion, EngineTypes};
 use reth_evm::execute::BlockExecutorProvider;
 use reth_provider::{CanonChainTracker, StateProviderFactory};
 use reth_stages_api::PipelineEvent;
@@ -155,6 +155,7 @@ where
                                     state,
                                     payload_attrs: None,
                                     tx,
+                                    version: EngineApiMessageVersion::default(),
                                 });
                                 debug!(target: "consensus::auto", ?state, "Sent fork choice update");
 

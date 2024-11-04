@@ -1,12 +1,10 @@
 //! Collection of methods for block validation.
 
 use alloy_consensus::constants::MAXIMUM_EXTRA_DATA_SIZE;
+use alloy_eips::eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::ConsensusError;
-use reth_primitives::{
-    constants::eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
-    EthereumHardfork, GotExpected, Header, SealedBlock, SealedHeader,
-};
+use reth_primitives::{EthereumHardfork, GotExpected, Header, SealedBlock, SealedHeader};
 use revm_primitives::calc_excess_blob_gas;
 
 /// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
@@ -204,7 +202,7 @@ pub fn validate_against_parent_eip1559_base_fee<ChainSpec: EthChainSpec + Ethere
 
         let expected_base_fee =
             if chain_spec.fork(EthereumHardfork::London).transitions_at_block(header.number) {
-                reth_primitives::constants::EIP1559_INITIAL_BASE_FEE
+                alloy_eips::eip1559::INITIAL_BASE_FEE
             } else {
                 // This BaseFeeMissing will not happen as previous blocks are checked to have
                 // them.

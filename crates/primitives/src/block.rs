@@ -150,26 +150,26 @@ mod block_rlp {
     }
 
     impl Encodable for Block {
-        fn length(&self) -> usize {
-            let helper: HelperRef<'_, _> = self.into();
-            helper.length()
-        }
-
         fn encode(&self, out: &mut dyn bytes::BufMut) {
             let helper: HelperRef<'_, _> = self.into();
             helper.encode(out)
+        }
+
+        fn length(&self) -> usize {
+            let helper: HelperRef<'_, _> = self.into();
+            helper.length()
         }
     }
 
     impl Encodable for SealedBlock {
-        fn length(&self) -> usize {
-            let helper: HelperRef<'_, _> = self.into();
-            helper.length()
-        }
-
         fn encode(&self, out: &mut dyn bytes::BufMut) {
             let helper: HelperRef<'_, _> = self.into();
             helper.encode(out)
+        }
+
+        fn length(&self) -> usize {
+            let helper: HelperRef<'_, _> = self.into();
+            helper.length()
         }
     }
 }
@@ -1089,5 +1089,14 @@ mod tests {
         let block = block.unseal();
         let block = block.seal_slow();
         assert_eq!(sealed, block.hash());
+    }
+
+    #[test]
+    fn empty_block_rlp() {
+        let body = BlockBody::default();
+        let mut buf = Vec::new();
+        body.encode(&mut buf);
+        let decoded = BlockBody::decode(&mut buf.as_slice()).unwrap();
+        assert_eq!(body, decoded);
     }
 }

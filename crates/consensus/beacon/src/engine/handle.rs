@@ -4,12 +4,11 @@ use crate::{
     engine::message::OnForkChoiceUpdated, BeaconConsensusEngineEvent, BeaconEngineMessage,
     BeaconForkChoiceUpdateError, BeaconOnNewPayloadError,
 };
-use alloy_eips::eip7685::Requests;
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
+    ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
 };
 use futures::TryFutureExt;
-use reth_engine_primitives::EngineTypes;
+use reth_engine_primitives::{EngineApiMessageVersion, EngineTypes};
 use reth_errors::RethResult;
 use reth_tokio_util::{EventSender, EventStream};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
@@ -47,18 +46,10 @@ where
     pub async fn new_payload(
         &self,
         payload: ExecutionPayload,
-        cancun_fields: Option<CancunPayloadFields>,
-        execution_requests: Option<Requests>,
+        sidecar: ExecutionPayloadSidecar,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
         let (tx, rx) = oneshot::channel();
-        // HACK(onbjerg): We should have a pectra payload fields struct, this is just a temporary
-        // workaround.
-        let _ = self.to_engine.send(BeaconEngineMessage::NewPayload {
-            payload,
-            cancun_fields,
-            execution_requests,
-            tx,
-        });
+        let _ = self.to_engine.send(BeaconEngineMessage::NewPayload { payload, sidecar, tx });
         rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?
     }
 
@@ -69,9 +60,10 @@ where
         &self,
         state: ForkchoiceState,
         payload_attrs: Option<Engine::PayloadAttributes>,
+        version: EngineApiMessageVersion,
     ) -> Result<ForkchoiceUpdated, BeaconForkChoiceUpdateError> {
         Ok(self
-            .send_fork_choice_updated(state, payload_attrs)
+            .send_fork_choice_updated(state, payload_attrs, version)
             .map_err(|_| BeaconForkChoiceUpdateError::EngineUnavailable)
             .await??
             .await?)
@@ -83,12 +75,14 @@ where
         &self,
         state: ForkchoiceState,
         payload_attrs: Option<Engine::PayloadAttributes>,
+        version: EngineApiMessageVersion,
     ) -> oneshot::Receiver<RethResult<OnForkChoiceUpdated>> {
         let (tx, rx) = oneshot::channel();
         let _ = self.to_engine.send(BeaconEngineMessage::ForkchoiceUpdated {
             state,
             payload_attrs,
             tx,
+            version,
         });
         rx
     }

@@ -91,17 +91,17 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
 }
 
 /// Context passed to [`NodeAddOns::launch_add_ons`],
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AddOnsContext<'a, N: FullNodeComponents> {
     /// Node with all configured components.
-    pub node: &'a N,
+    pub node: N,
     /// Node configuration.
     pub config: &'a NodeConfig<<N::Types as NodeTypes>::ChainSpec>,
     /// Handle to the beacon consensus engine.
     pub beacon_engine_handle:
-        &'a BeaconConsensusEngineHandle<<N::Types as NodeTypesWithEngine>::Engine>,
+        BeaconConsensusEngineHandle<<N::Types as NodeTypesWithEngine>::Engine>,
     /// JWT secret for the node.
-    pub jwt_secret: &'a JwtSecret,
+    pub jwt_secret: JwtSecret,
 }
 
 /// Customizable node add-on types.

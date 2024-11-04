@@ -11,7 +11,7 @@ use reth_ethereum_engine_primitives::{
 };
 use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_evm_ethereum::execute::EthExecutionStrategyFactory;
-use reth_network::NetworkHandle;
+use reth_network::{NetworkHandle, PeersInfo};
 use reth_node_api::{
     AddOnsContext, ConfigureEvm, EngineValidator, FullNodeComponents, NodePrimitives,
     NodeTypesWithDB,
@@ -34,6 +34,7 @@ use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, EthTransactionPool, TransactionPool,
     TransactionValidationTaskExecutor,
 };
+use reth_trie_db::MerklePatriciaTrie;
 
 use crate::{EthEngineTypes, EthEvmConfig};
 
@@ -81,6 +82,7 @@ impl EthereumNode {
 impl NodeTypes for EthereumNode {
     type Primitives = EthPrimitives;
     type ChainSpec = ChainSpec;
+    type StateCommitment = MerklePatriciaTrie;
 }
 
 impl NodeTypesWithEngine for EthereumNode {
@@ -314,7 +316,7 @@ where
     ) -> eyre::Result<NetworkHandle> {
         let network = ctx.network_builder().await?;
         let handle = ctx.start_network(network, pool);
-
+        info!(target: "reth::cli", enode=%handle.local_node_record(), "P2P networking initialized");
         Ok(handle)
     }
 }
