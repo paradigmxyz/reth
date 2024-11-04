@@ -479,7 +479,7 @@ impl<EvmConfig> OpPayloadBuilderCtx<EvmConfig> {
     ///
     /// After holocene this extracts the extradata from the paylpad
     pub fn extra_data(&self) -> Result<Bytes, PayloadBuilderError> {
-        if self.is_canyon_active() {
+        if self.is_holocene_active() {
             self.attributes()
                 .get_holocene_extra_data(
                     self.chain_spec.base_fee_params_at_timestamp(
