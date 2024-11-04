@@ -33,10 +33,7 @@ impl Compact for AccessList {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        let mut buffer = Vec::new();
-        self.0.to_compact(&mut buffer);
-        buf.put(&buffer[..]);
-        buffer.len()
+        self.0.to_compact(buf)
     }
 
     fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
