@@ -1,10 +1,11 @@
 //! Codec for reading raw block bodies from a file.
 
-use crate::file_client::FileClientError;
 use alloy_primitives::bytes::{Buf, BytesMut};
-use alloy_rlp::{Decodable, Encodable};
+use alloy_rlp::{Decodable, Encodable, RlpDecodable};
 use reth_primitives::Block;
 use tokio_util::codec::{Decoder, Encoder};
+
+use crate::file_client::FileClientError;
 
 /// Codec for reading raw block bodies from a file.
 ///
@@ -46,4 +47,13 @@ impl Encoder<Block> for OvmBlockFileCodec {
         item.encode(dst);
         Ok(())
     }
+}
+
+/// OVM block identical to EVM [`Block`] (at bedrock), except for different signature handling.
+#[derive(Debug, RlpDecodable)]
+pub struct Block {
+    /// Block header.
+    pub header: Header,
+    /// Block body.
+    pub body: BlockBody,
 }
