@@ -815,10 +815,10 @@ impl<Payload> BuildOutcomeKind<Payload> {
     /// Attaches the [`CachedReads`] to the outcome.
     pub fn with_cached_reads(self, cached_reads: CachedReads) -> BuildOutcome<Payload> {
         match self {
-            BuildOutcomeKind::Better { payload } => BuildOutcome::Better { payload, cached_reads },
-            BuildOutcomeKind::Aborted { fees } => BuildOutcome::Aborted { fees, cached_reads },
-            BuildOutcomeKind::Cancelled => BuildOutcome::Cancelled,
-            BuildOutcomeKind::Freeze(payload) => BuildOutcome::Freeze(payload),
+            Self::Better { payload } => BuildOutcome::Better { payload, cached_reads },
+            Self::Aborted { fees } => BuildOutcome::Aborted { fees, cached_reads },
+            Self::Cancelled => BuildOutcome::Cancelled,
+            Self::Freeze(payload) => BuildOutcome::Freeze(payload),
         }
     }
 }
