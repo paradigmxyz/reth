@@ -2,13 +2,14 @@
 //! RPC methods.
 
 use alloy_consensus::constants::KECCAK_EMPTY;
+use alloy_eips::BlockId;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types::{serde_helpers::JsonStorageKey, Account, EIP1186AccountProofResponse};
 use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
 use reth_evm::ConfigureEvmEnv;
-use reth_primitives::{BlockId, Header};
+use reth_primitives::Header;
 use reth_provider::{
     BlockIdReader, BlockNumReader, ChainSpecProvider, StateProvider, StateProviderBox,
     StateProviderFactory,

@@ -6,6 +6,7 @@ use std::{
     task::{Context, Poll},
 };
 
+use alloy_eips::BlockId;
 use alloy_primitives::{TxHash, B256};
 use alloy_rpc_types::{Block, Transaction};
 use alloy_rpc_types_eth::transaction::TransactionRequest;
@@ -15,7 +16,7 @@ use alloy_rpc_types_trace::{
 };
 use futures::{Stream, StreamExt};
 use jsonrpsee::core::client::Error as RpcError;
-use reth_primitives::{BlockId, Receipt};
+use reth_primitives::Receipt;
 use reth_rpc_api::{clients::DebugApiClient, EthApiClient};
 
 const NOOP_TRACER: &str = include_str!("../assets/noop-tracer.js");
@@ -292,7 +293,7 @@ pub struct DebugTraceTransactionsStream<'a> {
     stream: Pin<Box<dyn Stream<Item = TraceTransactionResult> + 'a>>,
 }
 
-impl<'a> DebugTraceTransactionsStream<'a> {
+impl DebugTraceTransactionsStream<'_> {
     /// Returns the next error result of the stream.
     pub async fn next_err(&mut self) -> Option<(RpcError, TxHash)> {
         loop {
@@ -324,7 +325,7 @@ pub struct DebugTraceBlockStream<'a> {
     stream: Pin<Box<dyn Stream<Item = DebugTraceBlockResult> + 'a>>,
 }
 
-impl<'a> DebugTraceBlockStream<'a> {
+impl DebugTraceBlockStream<'_> {
     /// Returns the next error result of the stream.
     pub async fn next_err(&mut self) -> Option<(RpcError, BlockId)> {
         loop {

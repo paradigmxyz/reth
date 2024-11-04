@@ -8,9 +8,8 @@ use alloy_rpc_types::{
         Params, PubSubSyncStatus, SubscriptionKind, SubscriptionResult as EthSubscriptionResult,
         SyncStatusMetadata,
     },
-    FilteredParams, Header, Log, Transaction,
+    FilteredParams, Header, Log,
 };
-use alloy_serde::WithOtherFields;
 use futures::StreamExt;
 use jsonrpsee::{
     server::SubscriptionMessage, types::ErrorObject, PendingSubscriptionSink, SubscriptionSink,
@@ -123,11 +122,9 @@ where
 {
     match kind {
         SubscriptionKind::NewHeads => {
-            let stream = pubsub.new_headers_stream().map(|header| {
-                EthSubscriptionResult::<WithOtherFields<Transaction>>::Header(Box::new(
-                    header.into(),
-                ))
-            });
+            let stream = pubsub
+                .new_headers_stream()
+                .map(|header| EthSubscriptionResult::<()>::Header(Box::new(header.into())));
             pipe_from_stream(accepted_sink, stream).await
         }
         SubscriptionKind::Logs => {
@@ -139,9 +136,9 @@ where
                 }
                 _ => FilteredParams::default(),
             };
-            let stream = pubsub.log_stream(filter).map(|log| {
-                EthSubscriptionResult::<WithOtherFields<Transaction>>::Log(Box::new(log))
-            });
+            let stream = pubsub
+                .log_stream(filter)
+                .map(|log| EthSubscriptionResult::<()>::Log(Box::new(log)));
             pipe_from_stream(accepted_sink, stream).await
         }
         SubscriptionKind::NewPendingTransactions => {
@@ -170,7 +167,7 @@ where
 
             let stream = pubsub
                 .pending_transaction_hashes_stream()
-                .map(EthSubscriptionResult::<WithOtherFields<Transaction>>::TransactionHash);
+                .map(EthSubscriptionResult::<()>::TransactionHash);
             pipe_from_stream(accepted_sink, stream).await
         }
         SubscriptionKind::Syncing => {

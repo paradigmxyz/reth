@@ -86,7 +86,7 @@ where
         let signed_tx = tx.clone().into_signed();
         let hash = tx.hash;
 
-        let mut inner = EthTxBuilder.fill(tx, tx_info).inner;
+        let mut inner = EthTxBuilder.fill(tx, tx_info);
 
         if signed_tx.is_deposit() {
             inner.gas_price = Some(signed_tx.max_fee_per_gas())

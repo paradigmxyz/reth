@@ -95,7 +95,7 @@ where
 {
     /// Creates a new [`EthExecutionStrategy`]
     pub fn new(state: State<DB>, chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
-        let system_caller = SystemCaller::new(evm_config.clone(), (*chain_spec).clone());
+        let system_caller = SystemCaller::new(evm_config.clone(), chain_spec.clone());
         Self { state, chain_spec, evm_config, system_caller }
     }
 }

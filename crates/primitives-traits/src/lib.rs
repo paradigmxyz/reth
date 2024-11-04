@@ -34,7 +34,7 @@ pub mod block;
 pub use block::{body::BlockBody, Block};
 
 mod withdrawal;
-pub use withdrawal::{Withdrawal, Withdrawals};
+pub use withdrawal::Withdrawals;
 
 mod error;
 pub use error::{GotExpected, GotExpectedBoxed};
@@ -44,6 +44,10 @@ pub use alloy_primitives::{logs_bloom, Log, LogData};
 
 mod storage;
 pub use storage::StorageEntry;
+
+/// Transaction types
+pub mod tx_type;
+pub use tx_type::TxType;
 
 /// Common header types
 pub mod header;
