@@ -123,7 +123,12 @@ where
             best_payload,
         };
 
-        let builder = OpBuilder { pool, best: best_txs::<Pool> };
+        let builder = OpBuilder {
+            pool,
+            // TODO(mattsse): make this configurable in the `OpPayloadBuilder` directly via an
+            // additional generic
+            best: best_txs::<Pool>,
+        };
 
         let state_provider = client.state_by_block_hash(ctx.parent().hash())?;
         let state = StateProviderDatabase::new(state_provider);
