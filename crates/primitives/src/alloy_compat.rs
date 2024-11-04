@@ -3,7 +3,7 @@
 use crate::{Block, BlockBody, Transaction, TransactionSigned};
 use alloc::{string::ToString, vec::Vec};
 use alloy_consensus::{constants::EMPTY_TRANSACTIONS, AnyHeader, Header, TxEnvelope};
-use alloy_network::{AnyRpcBlock, AnyTxEnvelope};
+use alloy_network::{AnyRpcBlock, AnyRpcTransaction, AnyTxEnvelope};
 use alloy_serde::WithOtherFields;
 use op_alloy_rpc_types as _;
 
@@ -94,11 +94,11 @@ impl TryFrom<AnyRpcBlock> for Block {
     }
 }
 
-impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction<AnyTxEnvelope>>> for TransactionSigned {
+impl TryFrom<AnyRpcTransaction> for TransactionSigned {
     type Error = alloy_rpc_types::ConversionError;
 
     fn try_from(
-        tx: WithOtherFields<alloy_rpc_types::Transaction<AnyTxEnvelope>>,
+        tx: AnyRpcTransaction,
     ) -> Result<Self, Self::Error> {
         use alloy_rpc_types::ConversionError;
 
