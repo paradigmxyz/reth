@@ -57,12 +57,12 @@ std = [
     "revm/std",
 ]
 test-utils = [
-	"dep:parking_lot",
-	"reth-chainspec/test-utils",
-	"reth-consensus/test-utils",
-	"reth-primitives/test-utils",
-	"reth-primitives-traits/test-utils",
-	"reth-revm/test-utils",
-	"revm/test-utils",
-	"reth-prune-types/test-utils"
+    "dep:parking_lot",
+    "reth-chainspec/test-utils",
+    "reth-consensus/test-utils",
+    "reth-primitives/test-utils",
+    "reth-primitives-traits/test-utils",
+    "reth-revm/test-utils",
+    "revm/test-utils",
+    "reth-prune-types/test-utils"
 ]

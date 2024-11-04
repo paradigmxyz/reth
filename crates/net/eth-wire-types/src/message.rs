@@ -50,9 +50,17 @@ impl ProtocolMessage {
         let message = match message_type {
             EthMessageID::Status => EthMessage::Status(Status::decode(buf)?),
             EthMessageID::NewBlockHashes => {
+                if version.is_eth69() {
+                    return Err(MessageError::Invalid(version, EthMessageID::NewBlockHashes));
+                }
                 EthMessage::NewBlockHashes(NewBlockHashes::decode(buf)?)
             }
-            EthMessageID::NewBlock => EthMessage::NewBlock(Box::new(NewBlock::decode(buf)?)),
+            EthMessageID::NewBlock => {
+                if version.is_eth69() {
+                    return Err(MessageError::Invalid(version, EthMessageID::NewBlock));
+                }
+                EthMessage::NewBlock(Box::new(NewBlock::decode(buf)?))
+            }
             EthMessageID::Transactions => EthMessage::Transactions(Transactions::decode(buf)?),
             EthMessageID::NewPooledTransactionHashes => {
                 if version >= EthVersion::Eth68 {

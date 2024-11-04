@@ -32,6 +32,8 @@ reth-chainspec.workspace = true
 reth-primitives.workspace = true
 reth-revm = { workspace = true, features = ["std"] }
 reth-db.workspace = true
+reth-trie-db.workspace = true
+
 # revm with required ethereum features
 revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
 
@@ -59,6 +61,7 @@ alloy-signer.workspace = true
 alloy-eips.workspace = true
 alloy-sol-types.workspace = true
 alloy-contract.workspace = true
+alloy-rpc-types-beacon.workspace = true
 
 [features]
 default = []
@@ -73,6 +76,7 @@ test-utils = [
 	"reth-db/test-utils",
 	"reth-provider/test-utils",
 	"reth-transaction-pool/test-utils",
+	"reth-trie-db/test-utils",
 	"revm/test-utils",
 	"reth-evm/test-utils"
 ]

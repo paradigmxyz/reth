@@ -227,7 +227,8 @@ where
         *transactions = transactions.drain(page_start..page_end).collect::<Vec<_>>();
 
         // The input field returns only the 4 bytes method selector instead of the entire
-        // calldata byte blob.
+        // calldata byte blob
+        // See also: <https://github.com/ledgerwatch/erigon/blob/aefb97b07d1c4fd32a66097a24eddd8f6ccacae0/turbo/jsonrpc/otterscan_api.go#L610-L617>
         for tx in transactions.iter_mut() {
             if tx.input().len() > 4 {
                 Eth::TransactionCompat::otterscan_api_truncate_input(tx);

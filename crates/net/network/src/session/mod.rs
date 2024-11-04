@@ -5,6 +5,7 @@ mod conn;
 mod counter;
 mod handle;
 
+use active::QueuedOutgoingMessages;
 pub use conn::EthRlpxConnection;
 pub use handle::{
     ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
@@ -495,7 +496,9 @@ impl SessionManager {
                     internal_request_tx: ReceiverStream::new(messages_rx).fuse(),
                     inflight_requests: Default::default(),
                     conn,
-                    queued_outgoing: Default::default(),
+                    queued_outgoing: QueuedOutgoingMessages::new(
+                        self.metrics.queued_outgoing_messages.clone(),
+                    ),
                     received_requests_from_remote: Default::default(),
                     internal_request_timeout_interval: tokio::time::interval(
                         self.initial_internal_request_timeout,

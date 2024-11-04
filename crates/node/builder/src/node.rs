@@ -70,6 +70,8 @@ where
 
     type ChainSpec = <N::Types as NodeTypes>::ChainSpec;
 
+    type StateCommitment = <N::Types as NodeTypes>::StateCommitment;
+
     type Storage = <N::Types as NodeTypes>::Storage;
 }
 

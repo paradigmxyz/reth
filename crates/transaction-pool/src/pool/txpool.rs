@@ -364,6 +364,14 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.pending_pool.all()
     }
 
+    /// Returns all pending transactions filtered by predicate
+    pub(crate) fn pending_transactions_with_predicate(
+        &self,
+        mut predicate: impl FnMut(&ValidPoolTransaction<T::Transaction>) -> bool,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.pending_transactions_iter().filter(|tx| predicate(tx)).collect()
+    }
+
     /// Returns all pending transactions for the specified sender
     pub(crate) fn pending_txs_by_sender(
         &self,
@@ -628,8 +636,8 @@ impl<T: TransactionOrdering> TxPool<T> {
                         *transaction.hash(),
                         PoolErrorKind::InvalidTransaction(
                             InvalidPoolTransactionError::ExceedsGasLimit(
-                                block_gas_limit,
                                 tx_gas_limit,
+                                block_gas_limit,
                             ),
                         ),
                     )),

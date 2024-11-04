@@ -103,7 +103,7 @@ impl BlobStore for DiskFileBlobStore {
         stat
     }
 
-    fn get(&self, tx: B256) -> Result<Option<BlobTransactionSidecar>, BlobStoreError> {
+    fn get(&self, tx: B256) -> Result<Option<Arc<BlobTransactionSidecar>>, BlobStoreError> {
         self.inner.get_one(tx)
     }
 
@@ -114,14 +114,17 @@ impl BlobStore for DiskFileBlobStore {
     fn get_all(
         &self,
         txs: Vec<B256>,
-    ) -> Result<Vec<(B256, BlobTransactionSidecar)>, BlobStoreError> {
+    ) -> Result<Vec<(B256, Arc<BlobTransactionSidecar>)>, BlobStoreError> {
         if txs.is_empty() {
             return Ok(Vec::new())
         }
         self.inner.get_all(txs)
     }
 
-    fn get_exact(&self, txs: Vec<B256>) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError> {
+    fn get_exact(
+        &self,
+        txs: Vec<B256>,
+    ) -> Result<Vec<Arc<BlobTransactionSidecar>>, BlobStoreError> {
         if txs.is_empty() {
             return Ok(Vec::new())
         }
@@ -164,7 +167,7 @@ impl BlobStore for DiskFileBlobStore {
 
 struct DiskFileBlobStoreInner {
     blob_dir: PathBuf,
-    blob_cache: Mutex<LruMap<TxHash, BlobTransactionSidecar, ByLength>>,
+    blob_cache: Mutex<LruMap<TxHash, Arc<BlobTransactionSidecar>, ByLength>>,
     size_tracker: BlobStoreSize,
     file_lock: RwLock<()>,
     txs_to_delete: RwLock<HashSet<B256>>,
@@ -205,7 +208,7 @@ impl DiskFileBlobStoreInner {
     fn insert_one(&self, tx: B256, data: BlobTransactionSidecar) -> Result<(), BlobStoreError> {
         let mut buf = Vec::with_capacity(data.rlp_encoded_fields_length());
         data.rlp_encode_fields(&mut buf);
-        self.blob_cache.lock().insert(tx, data);
+        self.blob_cache.lock().insert(tx, Arc::new(data));
         let size = self.write_one_encoded(tx, &buf)?;
 
         self.size_tracker.add_size(size);
@@ -227,7 +230,7 @@ impl DiskFileBlobStoreInner {
         {
             let mut cache = self.blob_cache.lock();
             for (tx, data) in txs {
-                cache.insert(tx, data);
+                cache.insert(tx, Arc::new(data));
             }
         }
         let mut add = 0;
@@ -278,15 +281,19 @@ impl DiskFileBlobStoreInner {
     }
 
     /// Retrieves the blob for the given transaction hash from the blob cache or disk.
-    fn get_one(&self, tx: B256) -> Result<Option<BlobTransactionSidecar>, BlobStoreError> {
+    fn get_one(&self, tx: B256) -> Result<Option<Arc<BlobTransactionSidecar>>, BlobStoreError> {
         if let Some(blob) = self.blob_cache.lock().get(&tx) {
             return Ok(Some(blob.clone()))
         }
         let blob = self.read_one(tx)?;
+
         if let Some(blob) = &blob {
-            self.blob_cache.lock().insert(tx, blob.clone());
+            let blob_arc = Arc::new(blob.clone());
+            self.blob_cache.lock().insert(tx, blob_arc.clone());
+            return Ok(Some(blob_arc))
         }
-        Ok(blob)
+
+        Ok(None)
     }
 
     /// Returns the path to the blob file for the given transaction hash.
@@ -374,7 +381,7 @@ impl DiskFileBlobStoreInner {
     fn get_all(
         &self,
         txs: Vec<B256>,
-    ) -> Result<Vec<(B256, BlobTransactionSidecar)>, BlobStoreError> {
+    ) -> Result<Vec<(B256, Arc<BlobTransactionSidecar>)>, BlobStoreError> {
         let mut res = Vec::with_capacity(txs.len());
         let mut cache_miss = Vec::new();
         {
@@ -396,8 +403,9 @@ impl DiskFileBlobStoreInner {
         }
         let mut cache = self.blob_cache.lock();
         for (tx, data) in from_disk {
-            cache.insert(tx, data.clone());
-            res.push((tx, data));
+            let arc = Arc::new(data.clone());
+            cache.insert(tx, arc.clone());
+            res.push((tx, arc.clone()));
         }
 
         Ok(res)
@@ -407,7 +415,10 @@ impl DiskFileBlobStoreInner {
     ///
     /// Returns an error if there are any missing blobs.
     #[inline]
-    fn get_exact(&self, txs: Vec<B256>) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError> {
+    fn get_exact(
+        &self,
+        txs: Vec<B256>,
+    ) -> Result<Vec<Arc<BlobTransactionSidecar>>, BlobStoreError> {
         txs.into_iter()
             .map(|tx| self.get_one(tx)?.ok_or(BlobStoreError::MissingSidecar(tx)))
             .collect()
@@ -514,14 +525,17 @@ mod tests {
         let blobs = rng_blobs(10);
         let all_hashes = blobs.iter().map(|(tx, _)| *tx).collect::<Vec<_>>();
         store.insert_all(blobs.clone()).unwrap();
+
         // all cached
         for (tx, blob) in &blobs {
             assert!(store.is_cached(tx));
-            assert_eq!(store.get(*tx).unwrap().unwrap(), *blob);
+            let b = store.get(*tx).unwrap().map(Arc::unwrap_or_clone).unwrap();
+            assert_eq!(b, *blob);
         }
+
         let all = store.get_all(all_hashes.clone()).unwrap();
         for (tx, blob) in all {
-            assert!(blobs.contains(&(tx, blob)), "missing blob {tx:?}");
+            assert!(blobs.contains(&(tx, Arc::unwrap_or_clone(blob))), "missing blob {tx:?}");
         }
 
         assert!(store.contains(all_hashes[0]).unwrap());

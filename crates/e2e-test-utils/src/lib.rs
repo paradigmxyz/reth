@@ -7,6 +7,7 @@ use reth::{
     args::{DiscoveryArgs, NetworkArgs, RpcServerArgs},
     builder::{NodeBuilder, NodeConfig, NodeHandle},
     network::PeersHandleProvider,
+    rpc::server_types::RpcModuleSelection,
     tasks::TaskManager,
 };
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
@@ -147,7 +148,12 @@ where
         let node_config = NodeConfig::new(chain_spec.clone())
             .with_network(network_config.clone())
             .with_unused_ports()
-            .with_rpc(RpcServerArgs::default().with_unused_ports().with_http())
+            .with_rpc(
+                RpcServerArgs::default()
+                    .with_unused_ports()
+                    .with_http()
+                    .with_http_api(RpcModuleSelection::All),
+            )
             .set_dev(is_dev);
 
         let span = span!(Level::INFO, "node", idx);
