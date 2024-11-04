@@ -107,6 +107,33 @@ impl Layers {
         self.inner.push(layer);
         Ok(guard)
     }
+
+    /// Adds an OpenTelemetry layer to the layers collection.
+    ///
+    /// # Arguments
+    /// * `otlp` - The OpenTelemetry configuration.
+    #[cfg(feature = "opentelemetry")]
+    pub(crate) fn otlp(&mut self, otlp: crate::OtlpConfig) -> eyre::Result<()> {
+        use opentelemetry::trace::TracerProvider;
+        use opentelemetry_otlp::{ExportConfig, WithExportConfig};
+
+        let tracer = opentelemetry_otlp::new_pipeline()
+            .tracing()
+            .with_exporter(opentelemetry_otlp::new_exporter().http().with_export_config(
+                ExportConfig {
+                    endpoint: otlp.url,
+                    protocol: otlp.protocol.into(),
+                    timeout: std::time::Duration::from_millis(otlp.timeout),
+                },
+            ))
+            .install_batch(opentelemetry_sdk::runtime::Tokio)?
+            .tracer("reth");
+
+        let layer = tracing_opentelemetry::layer().with_tracer(tracer);
+
+        self.inner.push(Box::new(layer));
+        Ok(())
+    }
 }
 
 /// Holds configuration information for file logging.

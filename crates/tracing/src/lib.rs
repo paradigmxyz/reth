@@ -55,12 +55,24 @@ pub use test_tracer::TestTracer;
 
 mod formatter;
 mod layers;
+#[cfg(feature = "opentelemetry")]
+mod otlp;
 mod test_tracer;
+
+#[cfg(feature = "opentelemetry")]
+pub use otlp::{OtlpConfig, OtlpProtocols};
 
 use crate::layers::Layers;
 use tracing::level_filters::LevelFilter;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+/// Placeholder to prevent annoying conditional compilation when feature is not
+/// enabled. This ensures we can keep the prop on the struct as a ZST, and
+/// avoid flagging it out of `new` and other constructor functions.
+#[cfg(not(feature = "opentelemetry"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct OtlpConfig;
 
 ///  Tracer for application logging.
 ///
@@ -71,6 +83,8 @@ pub struct RethTracer {
     stdout: LayerInfo,
     journald: Option<String>,
     file: Option<(LayerInfo, FileInfo)>,
+    #[cfg_attr(not(feature = "opentelemetry"), allow(dead_code))]
+    otlp: Option<OtlpConfig>,
 }
 
 impl RethTracer {
@@ -79,7 +93,7 @@ impl RethTracer {
     ///  Initializes with default stdout layer configuration.
     ///  Journald and file layers are not set by default.
     pub fn new() -> Self {
-        Self { stdout: LayerInfo::default(), journald: None, file: None }
+        Self { stdout: LayerInfo::default(), journald: None, file: None, otlp: None }
     }
 
     ///  Sets a custom configuration for the stdout layer.
@@ -107,6 +121,13 @@ impl RethTracer {
     ///  * `file_info` - The `FileInfo` containing details about the log file.
     pub fn with_file(mut self, config: LayerInfo, file_info: FileInfo) -> Self {
         self.file = Some((config, file_info));
+        self
+    }
+
+    /// Sets an OTLP configuration.
+    #[cfg(feature = "opentelemetry")]
+    pub fn with_otlp(mut self, config: OtlpConfig) -> Self {
+        self.otlp = Some(config);
         self
     }
 }
@@ -210,9 +231,20 @@ impl Tracer for RethTracer {
             None
         };
 
+        #[cfg(feature = "opentelemetry")]
+        if let Some(otlp) = self.otlp {
+            layers.otlp(otlp)?;
+        }
+
         // The error is returned if the global default subscriber is already set,
         // so it's safe to ignore it
-        let _ = tracing_subscriber::registry().with(layers.into_inner()).try_init();
+        let _ =
+            tracing_subscriber::registry().with(layers.into_inner()).try_init().inspect_err(|e| {
+                tracing::warn!(
+                    %e,
+                    "Tracing subscriber could not be initialized. This may be a reth bug."
+                )
+            });
         Ok(file_guard)
     }
 }

@@ -4,9 +4,9 @@ use crate::dirs::{LogsDir, PlatformPath};
 use clap::{ArgAction, Args, ValueEnum};
 use reth_tracing::{
     tracing_subscriber::filter::Directive, FileInfo, FileWorkerGuard, LayerInfo, LogFormat,
-    RethTracer, Tracer,
+    OtlpConfig, OtlpProtocols, RethTracer, Tracer,
 };
-use std::{fmt, fmt::Display};
+use std::fmt::{self, Display};
 use tracing::{level_filters::LevelFilter, Level};
 /// Constant to convert megabytes to bytes
 const MB_TO_BYTES: u64 = 1024 * 1024;
@@ -69,6 +69,10 @@ pub struct LogArgs {
     /// The verbosity settings for the tracer.
     #[command(flatten)]
     pub verbosity: Verbosity,
+
+    /// Arguments for the `OpenTelemetry` tracing layer.
+    #[command(flatten)]
+    pub otel: OtelArgs,
 }
 
 impl LogArgs {
@@ -91,10 +95,8 @@ impl LogArgs {
         )
     }
 
-    /// Initializes tracing with the configured options from cli args.
-    ///
-    /// Returns the file worker guard, and the file name, if a file worker was configured.
-    pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
+    /// Creates a [`RethTracer`] instance from the current log options.
+    pub fn tracer(&self) -> RethTracer {
         let mut tracer = RethTracer::new();
 
         let stdout = self.layer(self.log_stdout_format, self.log_stdout_filter.clone(), true);
@@ -110,8 +112,56 @@ impl LogArgs {
             tracer = tracer.with_file(file, info);
         }
 
-        let guard = tracer.init()?;
-        Ok(guard)
+        if self.otel.url.is_some() {
+            if let Ok(otel) = (&self.otel).try_into() {
+                tracer = tracer.with_otlp(otel);
+            } else {
+                tracing::warn!("Failed to parse otel config, skipping otel layer");
+            }
+        }
+
+        tracer
+    }
+
+    /// Initializes tracing with the configured options from cli args.
+    ///
+    /// Returns the file worker guard, and the file name, if a file worker was configured.
+    pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
+        self.tracer().init()
+    }
+}
+
+#[derive(Debug, Args)]
+pub struct OtelArgs {
+    /// Endpoint url to which to send spans and events. The endpoint URL must
+    /// be a valid URL, including the protocol prefix (http or https) and any
+    /// http basic auth information.
+    #[arg(long = "otel.endpoint", value_name = "ENDPOINT", global = true)]
+    pub url: Option<String>,
+
+    /// The protocol to use for sending spans and events. Values are "grpc", "binary", or "json".
+    #[arg(long = "otel.protocol", value_name = "PROTOCOL", global = true, default_value = "json")]
+    pub protocol: OtlpProtocols,
+
+    /// The log level to use for the `OpenTelemetry` layer.
+    #[arg(long = "otel.level", value_name = "LEVEL", global = true, default_value = "info")]
+    pub level: tracing::Level,
+
+    /// The timeout for sending spans and events, in milliseconds.
+    #[arg(long = "otel.timeout", value_name = "TIMEOUT", global = true, default_value = "1000")]
+    pub timeout: u64,
+}
+
+impl TryFrom<&OtelArgs> for OtlpConfig {
+    type Error = &'static str;
+
+    fn try_from(value: &OtelArgs) -> Result<Self, Self::Error> {
+        Ok(Self {
+            url: value.url.clone().ok_or("no otel url specified via --otel.url")?,
+            protocol: value.protocol,
+            level: value.level,
+            timeout: value.timeout,
+        })
     }
 }
 
