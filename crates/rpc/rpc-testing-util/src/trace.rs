@@ -1,5 +1,6 @@
 //! Helpers for testing trace calls.
 
+use alloy_eips::BlockId;
 use alloy_primitives::{map::HashSet, Bytes, TxHash, B256};
 use alloy_rpc_types::Index;
 use alloy_rpc_types_eth::transaction::TransactionRequest;
@@ -10,7 +11,6 @@ use alloy_rpc_types_trace::{
 };
 use futures::{Stream, StreamExt};
 use jsonrpsee::core::client::Error as RpcError;
-use reth_primitives::BlockId;
 use reth_rpc_api::clients::TraceApiClient;
 use std::{
     pin::Pin,

@@ -8706,6 +8706,7 @@ dependencies = [
 name = "reth-rpc-api-testing-util"
 version = "1.1.0"
 dependencies = [
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types",
  "alloy-rpc-types-eth",
@@ -8725,6 +8726,7 @@ dependencies = [
 name = "reth-rpc-builder"
 version = "1.1.0"
 dependencies = [
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
@@ -8910,13 +8912,13 @@ dependencies = [
 name = "reth-rpc-server-types"
 version = "1.1.0"
 dependencies = [
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "jsonrpsee-core",
  "jsonrpsee-types",
  "reth-errors",
  "reth-network-api",
- "reth-primitives",
  "serde",
  "strum",
 ]
