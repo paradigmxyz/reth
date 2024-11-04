@@ -1,7 +1,7 @@
 //! State root task related functionality.
 
 use reth_provider::providers::ConsistentDbView;
-use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
+use reth_trie::{updates::TrieUpdates, TrieInput};
 use reth_trie_parallel::parallel_root::ParallelStateRootError;
 use revm_primitives::{EvmState, B256};
 use std::{
@@ -28,19 +28,17 @@ pub(crate) struct StateRootTask<Factory> {
     state_stream: UnboundedReceiverStream<EvmState>,
     /// Latest trie input.
     input: Arc<TrieInput>,
-    /// Current state.
-    state: HashedPostState,
 }
 
 #[allow(dead_code)]
 impl<Factory> StateRootTask<Factory> {
     /// Creates a new `StateRootTask`.
-    pub(crate) fn new(
+    pub(crate) const fn new(
         consistent_view: ConsistentDbView<Factory>,
         input: Arc<TrieInput>,
         state_stream: UnboundedReceiverStream<EvmState>,
     ) -> Self {
-        Self { consistent_view, state_stream, input, state: HashedPostState::default() }
+        Self { consistent_view, state_stream, input }
     }
 
     /// Handles state updates.
