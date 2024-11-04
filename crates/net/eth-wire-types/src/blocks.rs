@@ -114,9 +114,9 @@ mod tests {
     };
     use alloy_consensus::TxLegacy;
     use alloy_eips::BlockHashOrNumber;
-    use alloy_primitives::{hex, Parity, TxKind, U256};
+    use alloy_primitives::{hex, Parity, Signature, TxKind, U256};
     use alloy_rlp::{Decodable, Encodable};
-    use reth_primitives::{Header, Signature, Transaction, TransactionSigned};
+    use reth_primitives::{Header, Transaction, TransactionSigned};
     use std::str::FromStr;
 
     use super::BlockBody;
