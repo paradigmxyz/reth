@@ -1,3 +1,4 @@
+use alloy_eips::BlockId;
 use alloy_primitives::{Address, Bytes, B256, U256, U64};
 use alloy_rpc_types::{
     state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, Log, SyncStatus,
@@ -5,7 +6,7 @@ use alloy_rpc_types::{
 use alloy_rpc_types_eth::transaction::TransactionRequest;
 use alloy_serde::JsonStorageKey;
 use jsonrpsee::core::RpcResult as Result;
-use reth_primitives::{BlockId, BlockNumberOrTag};
+use reth_primitives::BlockNumberOrTag;
 use reth_rpc_api::{EngineEthApiServer, EthApiServer, EthFilterApiServer};
 /// Re-export for convenience
 pub use reth_rpc_engine_api::EngineApi;

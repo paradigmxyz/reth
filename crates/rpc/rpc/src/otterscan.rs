@@ -1,4 +1,5 @@
 use alloy_consensus::Transaction;
+use alloy_eips::BlockId;
 use alloy_network::{ReceiptResponse, TransactionResponse};
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
 use alloy_rpc_types::{BlockTransactions, Header, TransactionReceipt};
@@ -11,7 +12,7 @@ use alloy_rpc_types_trace::{
 };
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
-use reth_primitives::{BlockId, BlockNumberOrTag};
+use reth_primitives::BlockNumberOrTag;
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},

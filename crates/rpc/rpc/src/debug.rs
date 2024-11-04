@@ -1,4 +1,4 @@
-use alloy_eips::eip2718::Encodable2718;
+use alloy_eips::{eip2718::Encodable2718, BlockId};
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types::{
@@ -19,7 +19,7 @@ use reth_evm::{
     system_calls::SystemCaller,
     ConfigureEvmEnv,
 };
-use reth_primitives::{Block, BlockId, BlockNumberOrTag, TransactionSignedEcRecovered};
+use reth_primitives::{Block, BlockNumberOrTag, TransactionSignedEcRecovered};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProofProvider, StateProviderFactory,
     TransactionVariant,
