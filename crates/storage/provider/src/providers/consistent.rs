@@ -1583,7 +1583,7 @@ mod tests {
         provider_rw.commit()?;
 
         // Create a new provider
-        let provider = BlockchainProvider2::new(factory)?;
+        let provider = BlockchainProvider2::<_, ()>::new(factory)?;
         let consistent_provider = provider.consistent_provider()?;
 
         // Useful blocks
@@ -1694,7 +1694,7 @@ mod tests {
         provider_rw.commit()?;
 
         // Create a new provider
-        let provider = BlockchainProvider2::new(factory)?;
+        let provider = BlockchainProvider2::<_, ()>::new(factory)?;
         let consistent_provider = provider.consistent_provider()?;
 
         // First in memory block
@@ -1812,7 +1812,7 @@ mod tests {
         )?;
         provider_rw.commit()?;
 
-        let provider = BlockchainProvider2::new(factory)?;
+        let provider = BlockchainProvider2::<_, ()>::new(factory)?;
 
         let in_memory_changesets = in_memory_changesets.into_iter().next().unwrap();
         let chain = NewCanonicalChain::Commit {

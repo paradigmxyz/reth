@@ -8091,7 +8091,6 @@ dependencies = [
  "reth-db-api",
  "reth-engine-primitives",
  "reth-primitives-traits",
- "reth-storage-api",
  "reth-trie-db",
 ]
 

@@ -46,7 +46,7 @@ type EngineServiceType<N, Client> = ChainOrchestrator<
 /// The type that drives the chain forward and communicates progress.
 #[pin_project]
 #[allow(missing_debug_implementations)]
-pub struct EngineService<N, Client, E>
+pub struct EngineService<N, Client, E, S>
 where
     N: EngineNodeTypes,
     Client: BlockClient + 'static,
@@ -54,13 +54,15 @@ where
 {
     orchestrator: EngineServiceType<N, Client>,
     _marker: PhantomData<E>,
+    _marker_s: PhantomData<S>,
 }
 
-impl<N, Client, E> EngineService<N, Client, E>
+impl<N, Client, E, S> EngineService<N, Client, E, S>
 where
     N: EngineNodeTypes,
     Client: BlockClient + 'static,
     E: BlockExecutorProvider + 'static,
+    S: Send + Sync + 'static,
 {
     /// Constructor for `EngineService`.
     #[allow(clippy::too_many_arguments)]
@@ -73,7 +75,7 @@ where
         pipeline: Pipeline<N>,
         pipeline_task_spawner: Box<dyn TaskSpawner>,
         provider: ProviderFactory<N>,
-        blockchain_db: BlockchainProvider2<N>,
+        blockchain_db: BlockchainProvider2<N, S>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         payload_builder: PayloadBuilderHandle<N::Engine>,
         tree_config: TreeConfig,
@@ -112,6 +114,7 @@ where
         Self {
             orchestrator: ChainOrchestrator::new(handler, backfill_sync),
             _marker: Default::default(),
+            _marker_s: Default::default(),
         }
     }
 
@@ -121,7 +124,7 @@ where
     }
 }
 
-impl<N, Client, E> Stream for EngineService<N, Client, E>
+impl<N, Client, E, S> Stream for EngineService<N, Client, E, S>
 where
     N: EngineNodeTypes,
     Client: BlockClient + 'static,
@@ -181,9 +184,11 @@ mod tests {
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
 
         let executor_factory = EthExecutorProvider::ethereum(chain_spec.clone());
-        let blockchain_db =
-            BlockchainProvider2::with_latest(provider_factory.clone(), SealedHeader::default())
-                .unwrap();
+        let blockchain_db = BlockchainProvider2::<_, ()>::with_latest(
+            provider_factory.clone(),
+            SealedHeader::default(),
+        )
+        .unwrap();
 
         let (_tx, rx) = watch::channel(FinishedExExHeight::NoExExs);
         let pruner = Pruner::new_with_factory(provider_factory.clone(), vec![], 0, 0, None, rx);

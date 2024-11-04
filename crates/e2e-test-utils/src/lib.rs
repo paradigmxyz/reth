@@ -161,7 +161,7 @@ where
         let node = N::default();
         let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
             .testing_node(exec.clone())
-            .with_types_and_provider::<N, BlockchainProvider2<_>>()
+            .with_types_and_provider::<N, BlockchainProvider2<_, ()>>()
             .with_components(node.components_builder())
             .with_add_ons(node.add_ons())
             .launch_with_fn(|builder| {

@@ -120,7 +120,6 @@ impl NodeTypes for TestNode {
     type Primitives = ();
     type ChainSpec = ChainSpec;
     type StateCommitment = reth_trie_db::MerklePatriciaTrie;
-    type Storage = ();
 }
 
 impl NodeTypesWithEngine for TestNode {

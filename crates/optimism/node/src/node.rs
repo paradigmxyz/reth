@@ -27,8 +27,8 @@ use reth_optimism_rpc::OpEthApi;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::{Block, BlockBody, Header};
 use reth_provider::{
-    BlockNumReader, BlockReader, CanonStateSubscriptions, ChainStorageReader, DBProvider,
-    HeaderProvider, ProviderResult, TransactionsProvider, WithdrawalsProvider,
+    BlockNumReader, BlockReader, CanonStateSubscriptions, ChainStorageReader, ChainStorageWriter,
+    DBProvider, HeaderProvider, ProviderResult, TransactionsProvider,
 };
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
@@ -127,7 +127,6 @@ impl NodeTypes for OptimismNode {
     type Primitives = OpPrimitives;
     type ChainSpec = OpChainSpec;
     type StateCommitment = MerklePatriciaTrie;
-    type Storage = OpStorage;
 }
 
 impl NodeTypesWithEngine for OptimismNode {
@@ -138,26 +137,34 @@ impl NodeTypesWithEngine for OptimismNode {
 #[derive(Debug, Default)]
 pub struct OpStorage;
 
-impl ChainStorageReader for OpStorage {
+impl<P> ChainStorageWriter<P> for OpStorage
+where
+    P: DBProvider<Tx: DbTxMut>,
+{
     type Primitives = OpPrimitives;
 
-    fn read_block<P>(
+    fn write_block(
+        &self,
+        _: &P,
+        _: &<Self::Primitives as NodePrimitives>::Block,
+    ) -> ProviderResult<()> {
+        unimplemented!()
+    }
+}
+
+impl<P> ChainStorageReader<P> for OpStorage
+where
+    P: DBProvider<Tx: DbTx> + TransactionsProvider + BlockReader + HeaderProvider + BlockNumReader,
+{
+    type Primitives = OpPrimitives;
+
+    fn read_block(
         &self,
         provider: &P,
         id: BlockHashOrNumber,
-    ) -> ProviderResult<Option<<Self::Primitives as NodePrimitives>::Block>>
-    where
-        P: DBProvider<Tx: DbTx>
-            + TransactionsProvider
-            + BlockReader
-            + WithdrawalsProvider
-            + HeaderProvider
-            + BlockNumReader,
-    {
+    ) -> ProviderResult<Option<<Self::Primitives as NodePrimitives>::Block>> {
         if let Some(number) = provider.convert_hash_or_number(id)? {
             if let Some(header) = provider.header_by_number(number)? {
-                let withdrawals = provider.withdrawals_by_block(number.into(), header.timestamp)?;
-                let ommers = provider.ommers(number.into())?.unwrap_or_default();
                 // If the body indices are not found, this means that the transactions either do not
                 // exist in the database yet, or they do exit but are not indexed.
                 // If they exist but are not indexed, we don't have enough
@@ -169,26 +176,14 @@ impl ChainStorageReader for OpStorage {
 
                 return Ok(Some(Block {
                     header,
-                    body: BlockBody { transactions, ommers, withdrawals },
+                    body: BlockBody { transactions, ommers: vec![], withdrawals: None },
                 }))
             }
         }
 
         Ok(None)
     }
-
-    fn write_block<P>(
-        &self,
-        _provider: &P,
-        _block: &<Self::Primitives as NodePrimitives>::Block,
-    ) -> ProviderResult<()>
-    where
-        P: DBProvider<Tx: DbTxMut>,
-    {
-        todo!()
-    }
 }
-
 /// Add-ons w.r.t. optimism.
 #[derive(Debug)]
 pub struct OptimismAddOns<N: FullNodeComponents>(

@@ -36,7 +36,7 @@ async fn can_run_dev_node_new_engine() -> eyre::Result<()> {
         .with_dev(DevArgs { dev: true, ..Default::default() });
     let NodeHandle { node, .. } = NodeBuilder::new(node_config.clone())
         .testing_node(exec.clone())
-        .with_types_and_provider::<EthereumNode, BlockchainProvider2<_>>()
+        .with_types_and_provider::<EthereumNode, BlockchainProvider2<_, ()>>()
         .with_components(EthereumNode::components())
         .with_add_ons(EthereumAddOns::default())
         .launch_with_fn(|builder| {

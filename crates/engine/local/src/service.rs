@@ -9,6 +9,7 @@
 use core::fmt;
 use std::{
     fmt::{Debug, Formatter},
+    marker::PhantomData,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -44,7 +45,7 @@ use tracing::error;
 ///
 /// This service both produces and consumes [`BeaconEngineMessage`]s. This is done to allow
 /// modifications of the stream
-pub struct LocalEngineService<N>
+pub struct LocalEngineService<N, S>
 where
     N: EngineNodeTypes,
 {
@@ -54,11 +55,13 @@ where
     handler: EngineApiRequestHandler<EngineApiRequest<N::Engine>>,
     /// Receiver for incoming requests (from the engine API endpoint) that need to be processed.
     incoming_requests: EngineMessageStream<N::Engine>,
+    _marker: PhantomData<S>,
 }
 
-impl<N> LocalEngineService<N>
+impl<N, S> LocalEngineService<N, S>
 where
     N: EngineNodeTypes,
+    S: Send + Sync + 'static,
 {
     /// Constructor for [`LocalEngineService`].
     #[allow(clippy::too_many_arguments)]
@@ -66,7 +69,7 @@ where
         consensus: Arc<dyn Consensus>,
         executor_factory: impl BlockExecutorProvider,
         provider: ProviderFactory<N>,
-        blockchain_db: BlockchainProvider2<N>,
+        blockchain_db: BlockchainProvider2<N, S>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         payload_builder: PayloadBuilderHandle<N::Engine>,
         tree_config: TreeConfig,
@@ -113,13 +116,14 @@ where
             payload_builder,
         );
 
-        Self { handler, incoming_requests: from_engine }
+        Self { handler, incoming_requests: from_engine, _marker: PhantomData }
     }
 }
 
-impl<N> Stream for LocalEngineService<N>
+impl<N, S> Stream for LocalEngineService<N, S>
 where
     N: EngineNodeTypes,
+    S: Unpin,
 {
     type Item = ChainEvent<BeaconConsensusEngineEvent>;
 
@@ -152,7 +156,7 @@ where
     }
 }
 
-impl<N: EngineNodeTypes> Debug for LocalEngineService<N> {
+impl<N: EngineNodeTypes, S> Debug for LocalEngineService<N, S> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("LocalEngineService").finish_non_exhaustive()
     }

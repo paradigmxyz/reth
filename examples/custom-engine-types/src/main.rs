@@ -230,7 +230,6 @@ impl NodeTypes for MyCustomNode {
     type Primitives = ();
     type ChainSpec = ChainSpec;
     type StateCommitment = MerklePatriciaTrie;
-    type Storage = ();
 }
 
 /// Configure the node types with the custom engine types

@@ -9,7 +9,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 pub use reth_primitives_traits::{Block, BlockBody, NodePrimitives};
-use reth_storage_api::ChainStorageReader;
 
 use std::marker::PhantomData;
 
@@ -33,8 +32,6 @@ pub trait NodeTypes: Send + Sync + Unpin + 'static {
     type ChainSpec: EthChainSpec;
     /// The type used to perform state commitment operations.
     type StateCommitment: StateCommitment;
-    /// The type used for reading chain specific types from storage.
-    type Storage: ChainStorageReader<Primitives = Self::Primitives>;
 }
 
 /// The type that configures an Ethereum-like node with an engine for consensus.
@@ -86,7 +83,6 @@ where
     type Primitives = Types::Primitives;
     type ChainSpec = Types::ChainSpec;
     type StateCommitment = Types::StateCommitment;
-    type Storage = Types::Storage;
 }
 
 impl<Types, DB> NodeTypesWithEngine for NodeTypesWithDBAdapter<Types, DB>
@@ -107,41 +103,34 @@ where
 
 /// A [`NodeTypes`] type builder.
 #[derive(Default, Debug)]
-pub struct AnyNodeTypes<P = (), C = (), S = (), D = ()>(PhantomData<P>, PhantomData<C>, PhantomData<S>, PhantomData<D>);
+pub struct AnyNodeTypes<P = (), C = (), S = ()>(PhantomData<P>, PhantomData<C>, PhantomData<S>);
 
 impl<P, C, S> AnyNodeTypes<P, C, S> {
     /// Sets the `Primitives` associated type.
-    pub const fn primitives<T>(self) -> AnyNodeTypes<T, C, S, D> {
-        AnyNodeTypes::<T, C, S>(PhantomData::<T>, PhantomData::<C>, PhantomData::<S>, PhantomData::<D>)
+    pub const fn primitives<T>(self) -> AnyNodeTypes<T, C, S> {
+        AnyNodeTypes::<T, C, S>(PhantomData::<T>, PhantomData::<C>, PhantomData::<S>)
     }
 
     /// Sets the `ChainSpec` associated type.
-    pub const fn chain_spec<T>(self) -> AnyNodeTypes<P, T, S, D> {
-        AnyNodeTypes::<P, T, S>(PhantomData::<P>, PhantomData::<T>, PhantomData::<S>, PhantomData::<D>)
+    pub const fn chain_spec<T>(self) -> AnyNodeTypes<P, T, S> {
+        AnyNodeTypes::<P, T, S>(PhantomData::<P>, PhantomData::<T>, PhantomData::<S>)
     }
 
     /// Sets the `StateCommitment` associated type.
-    pub const fn state_commitment<T>(self) -> AnyNodeTypes<P, C, T, D> {
-        AnyNodeTypes::<P, C, T>(PhantomData::<P>, PhantomData::<C>, PhantomData::<T>, PhantomData::<D>)
-    }
-
-    /// Sets the `Storage` associated type.
-    pub const fn storage<T>(self) -> AnyNodeTypes<P, C, S, T> {
-        AnyNodeTypes::<P, C, T>(PhantomData::<P>, PhantomData::<C>, PhantomData::<S>, PhantomData::<T>)
+    pub const fn state_commitment<T>(self) -> AnyNodeTypes<P, C, T> {
+        AnyNodeTypes::<P, C, T>(PhantomData::<P>, PhantomData::<C>, PhantomData::<T>)
     }
 }
 
-impl<P, C, S, D> NodeTypes for AnyNodeTypes<P, C, S, D>
+impl<P, C, S> NodeTypes for AnyNodeTypes<P, C, S>
 where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
     C: EthChainSpec + 'static,
     S: StateCommitment,
-    D: ChainStorageReader<Primitives = P> + 'static,
 {
     type Primitives = P;
     type ChainSpec = C;
     type StateCommitment = S;
-    type Storage = D;
 }
 
 /// A [`NodeTypesWithEngine`] type builder.
@@ -153,55 +142,46 @@ pub struct AnyNodeTypesWithEngine<P = (), E = (), C = (), S = ()> {
     _engine: PhantomData<E>,
 }
 
-impl<P, E, C, S> AnyNodeTypesWithEngine<P, E, C, S, D> {
+impl<P, E, C, S> AnyNodeTypesWithEngine<P, E, C, S> {
     /// Sets the `Primitives` associated type.
-    pub const fn primitives<T>(self) -> AnyNodeTypesWithEngine<T, E, C, S, D> {
+    pub const fn primitives<T>(self) -> AnyNodeTypesWithEngine<T, E, C, S> {
         AnyNodeTypesWithEngine { base: self.base.primitives::<T>(), _engine: PhantomData }
     }
 
     /// Sets the `Engine` associated type.
-    pub const fn engine<T>(self) -> AnyNodeTypesWithEngine<P, T, C, S, D> {
+    pub const fn engine<T>(self) -> AnyNodeTypesWithEngine<P, T, C, S> {
         AnyNodeTypesWithEngine { base: self.base, _engine: PhantomData::<T> }
     }
 
     /// Sets the `ChainSpec` associated type.
-    pub const fn chain_spec<T>(self) -> AnyNodeTypesWithEngine<P, E, T, S, D> {
+    pub const fn chain_spec<T>(self) -> AnyNodeTypesWithEngine<P, E, T, S> {
         AnyNodeTypesWithEngine { base: self.base.chain_spec::<T>(), _engine: PhantomData }
     }
 
     /// Sets the `StateCommitment` associated type.
-    pub const fn state_commitment<T>(self) -> AnyNodeTypesWithEngine<P, E, C, T, D> {
+    pub const fn state_commitment<T>(self) -> AnyNodeTypesWithEngine<P, E, C, T> {
         AnyNodeTypesWithEngine { base: self.base.state_commitment::<T>(), _engine: PhantomData }
     }
-
-    /// Sets the `Storage` associated type.
-    pub const fn storage<T>(self) -> AnyNodeTypesWithEngine<P, E, C, S, T> {
-        AnyNodeTypesWithEngine { base: self.base.storage::<T>(), _engine: PhantomData }
-
-
 }
 
-impl<P, E, C, S, D> NodeTypes for AnyNodeTypesWithEngine<P, E, C, S, D>
+impl<P, E, C, S> NodeTypes for AnyNodeTypesWithEngine<P, E, C, S>
 where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
     E: EngineTypes + Send + Sync + Unpin,
     C: EthChainSpec + 'static,
     S: StateCommitment,
-    D: ChainStorageReader<Primitives = P> + 'static,
 {
     type Primitives = P;
     type ChainSpec = C;
     type StateCommitment = S;
-    type Storage = D;
 }
 
-impl<P, E, C, S> NodeTypesWithEngine for AnyNodeTypesWithEngine<P, E, C, S, D>
+impl<P, E, C, S> NodeTypesWithEngine for AnyNodeTypesWithEngine<P, E, C, S>
 where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
     E: EngineTypes + Send + Sync + Unpin,
     C: EthChainSpec + 'static,
     S: StateCommitment,
-    D: ChainStorageReader<Primitives = P> + 'static,
 {
     type Engine = E;
 }

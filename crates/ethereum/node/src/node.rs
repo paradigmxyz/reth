@@ -30,8 +30,8 @@ use reth_node_builder::{
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::{Block, BlockBody, Header};
 use reth_provider::{
-    BlockNumReader, BlockReader, CanonStateSubscriptions, ChainStorageReader, DBProvider,
-    HeaderProvider, ProviderResult, TransactionsProvider, WithdrawalsProvider,
+    BlockNumReader, BlockReader, CanonStateSubscriptions, ChainStorageReader, ChainStorageWriter,
+    DBProvider, HeaderProvider, ProviderResult, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_rpc::EthApi;
 use reth_tracing::tracing::{debug, info};
@@ -88,7 +88,6 @@ impl NodeTypes for EthereumNode {
     type Primitives = EthPrimitives;
     type ChainSpec = ChainSpec;
     type StateCommitment = MerklePatriciaTrie;
-    type Storage = EthStorage;
 }
 
 impl NodeTypesWithEngine for EthereumNode {
@@ -138,22 +137,37 @@ where
 #[derive(Debug, Default)]
 pub struct EthStorage;
 
-impl ChainStorageReader for EthStorage {
+impl<P> ChainStorageWriter<P> for EthStorage
+where
+    P: DBProvider<Tx: DbTxMut>,
+{
     type Primitives = EthPrimitives;
 
-    fn read_block<P>(
+    fn write_block(
+        &self,
+        _: &P,
+        _: &<Self::Primitives as NodePrimitives>::Block,
+    ) -> ProviderResult<()> {
+        unimplemented!()
+    }
+}
+
+impl<P> ChainStorageReader<P> for EthStorage
+where
+    P: DBProvider<Tx: DbTx>
+        + TransactionsProvider
+        + BlockReader
+        + WithdrawalsProvider
+        + HeaderProvider
+        + BlockNumReader,
+{
+    type Primitives = EthPrimitives;
+
+    fn read_block(
         &self,
         provider: &P,
         id: BlockHashOrNumber,
-    ) -> ProviderResult<Option<<Self::Primitives as NodePrimitives>::Block>>
-    where
-        P: DBProvider<Tx: DbTx>
-            + TransactionsProvider
-            + BlockReader
-            + WithdrawalsProvider
-            + HeaderProvider
-            + BlockNumReader,
-    {
+    ) -> ProviderResult<Option<<Self::Primitives as NodePrimitives>::Block>> {
         if let Some(number) = provider.convert_hash_or_number(id)? {
             if let Some(header) = provider.header_by_number(number)? {
                 let withdrawals = provider.withdrawals_by_block(number.into(), header.timestamp)?;
@@ -175,17 +189,6 @@ impl ChainStorageReader for EthStorage {
         }
 
         Ok(None)
-    }
-
-    fn write_block<P>(
-        &self,
-        _provider: &P,
-        _block: &<Self::Primitives as NodePrimitives>::Block,
-    ) -> ProviderResult<()>
-    where
-        P: DBProvider<Tx: DbTxMut>,
-    {
-        todo!()
     }
 }
 

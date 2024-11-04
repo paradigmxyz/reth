@@ -421,7 +421,7 @@ mod tests {
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
-        let provider = BlockchainProvider2::new(provider_factory.clone())?;
+        let provider = BlockchainProvider2::<_, ()>::new(provider_factory.clone())?;
 
         let node_head_block = random_block(
             &mut rng,
@@ -502,7 +502,7 @@ mod tests {
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
-        let provider = BlockchainProvider2::new(provider_factory)?;
+        let provider = BlockchainProvider2::<_, ()>::new(provider_factory)?;
 
         let node_head =
             Head { number: genesis_block.number, hash: genesis_hash, ..Default::default() };
@@ -559,7 +559,7 @@ mod tests {
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
-        let provider = BlockchainProvider2::new(provider_factory)?;
+        let provider = BlockchainProvider2::<_, ()>::new(provider_factory)?;
 
         let node_head_block = random_block(
             &mut rng,
@@ -659,7 +659,7 @@ mod tests {
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
-        let provider = BlockchainProvider2::new(provider_factory)?;
+        let provider = BlockchainProvider2::<_, ()>::new(provider_factory)?;
 
         let exex_head_block = random_block(
             &mut rng,

@@ -78,7 +78,7 @@ impl<N: NodeTypesWithDB> WithTree for BlockchainProvider<N> {
     }
 }
 
-impl<N: NodeTypesWithDB> WithTree for BlockchainProvider2<N> {
+impl<N: NodeTypesWithDB, S> WithTree for BlockchainProvider2<N, S> {
     fn set_tree(self, _tree: Arc<dyn TreeViewer>) -> Self {
         self
     }

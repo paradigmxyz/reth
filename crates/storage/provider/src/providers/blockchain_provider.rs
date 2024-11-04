@@ -29,10 +29,13 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::{DBProvider, StorageChangeSetReader};
+use reth_storage_api::{
+    ChainStorageReader, ChainStorageWriter, DBProvider, StorageChangeSetReader,
+};
 use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
+    marker::PhantomData,
     ops::{Add, RangeBounds, RangeInclusive, Sub},
     sync::Arc,
     time::Instant,
@@ -47,24 +50,26 @@ use crate::providers::ProviderNodeTypes;
 /// from database storage and from the blockchain tree (pending state etc.) It is a simple wrapper
 /// type that holds an instance of the database and the blockchain tree.
 #[derive(Debug)]
-pub struct BlockchainProvider2<N: NodeTypesWithDB> {
+pub struct BlockchainProvider2<N: NodeTypesWithDB, S = ()> {
     /// Provider factory used to access the database.
     pub(crate) database: ProviderFactory<N>,
     /// Tracks the chain info wrt forkchoice updates and in memory canonical
     /// state.
     pub(crate) canonical_in_memory_state: CanonicalInMemoryState,
+    _marker: PhantomData<S>,
 }
 
-impl<N: NodeTypesWithDB> Clone for BlockchainProvider2<N> {
+impl<N: NodeTypesWithDB, S> Clone for BlockchainProvider2<N, S> {
     fn clone(&self) -> Self {
         Self {
             database: self.database.clone(),
             canonical_in_memory_state: self.canonical_in_memory_state.clone(),
+            _marker: PhantomData,
         }
     }
 }
 
-impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes, S: Send + Sync> BlockchainProvider2<N, S> {
     /// Create a new [`BlockchainProvider2`] using only the storage, fetching the latest
     /// header from the database to initialize the provider.
     pub fn new(storage: ProviderFactory<N>) -> ProviderResult<Self> {
@@ -108,6 +113,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
                 finalized_header,
                 safe_header,
             ),
+            _marker: PhantomData,
         })
     }
 
@@ -145,7 +151,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes, S: Send + Sync> DatabaseProviderFactory for BlockchainProvider2<N, S> {
     type DB = N::DB;
     type Provider = <ProviderFactory<N> as DatabaseProviderFactory>::Provider;
     type ProviderRW = <ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW;
@@ -159,13 +165,13 @@ impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider2<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes, S> StaticFileProviderFactory for BlockchainProvider2<N, S> {
     fn static_file_provider(&self) -> StaticFileProvider {
         self.database.static_file_provider()
     }
 }
 
-impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes, S: Send + Sync> HeaderProvider for BlockchainProvider2<N, S> {
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
         self.consistent_provider()?.header(block_hash)
     }
@@ -206,7 +212,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> BlockHashReader for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes, S: Send + Sync> BlockHashReader for BlockchainProvider2<N, S> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.consistent_provider()?.block_hash(number)
     }
@@ -220,7 +226,7 @@ impl<N: ProviderNodeTypes> BlockHashReader for BlockchainProvider2<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> BlockNumReader for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes, S: Send + Sync> BlockNumReader for BlockchainProvider2<N, S> {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
         Ok(self.canonical_in_memory_state.chain_info())
     }
@@ -238,7 +244,7 @@ impl<N: ProviderNodeTypes> BlockNumReader for BlockchainProvider2<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> BlockIdReader for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes, S: Send + Sync> BlockIdReader for BlockchainProvider2<N, S> {
     fn pending_block_num_hash(&self) -> ProviderResult<Option<BlockNumHash>> {
         Ok(self.canonical_in_memory_state.pending_block_num_hash())
     }
@@ -252,7 +258,7 @@ impl<N: ProviderNodeTypes> BlockIdReader for BlockchainProvider2<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes, S: Send + Sync> BlockReader for BlockchainProvider2<N, S> {
     fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> ProviderResult<Option<Block>> {
         self.consistent_provider()?.find_block_by_hash(hash, source)
     }
@@ -325,7 +331,7 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes, S: Send + Sync> TransactionsProvider for BlockchainProvider2<N, S> {
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         self.consistent_provider()?.transaction_id(tx_hash)
     }
@@ -389,7 +395,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> ReceiptProvider for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes, S: Send + Sync> ReceiptProvider for BlockchainProvider2<N, S> {
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
         self.consistent_provider()?.receipt(id)
     }
@@ -410,13 +416,13 @@ impl<N: ProviderNodeTypes> ReceiptProvider for BlockchainProvider2<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> ReceiptProviderIdExt for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes, S: Send + Sync> ReceiptProviderIdExt for BlockchainProvider2<N, S> {
     fn receipts_by_block_id(&self, block: BlockId) -> ProviderResult<Option<Vec<Receipt>>> {
         self.consistent_provider()?.receipts_by_block_id(block)
     }
 }
 
-impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes, S: Send + Sync> WithdrawalsProvider for BlockchainProvider2<N, S> {
     fn withdrawals_by_block(
         &self,
         id: BlockHashOrNumber,
@@ -430,7 +436,7 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider2<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> StageCheckpointReader for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes, S: Send + Sync> StageCheckpointReader for BlockchainProvider2<N, S> {
     fn get_stage_checkpoint(&self, id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
         self.consistent_provider()?.get_stage_checkpoint(id)
     }
@@ -444,7 +450,7 @@ impl<N: ProviderNodeTypes> StageCheckpointReader for BlockchainProvider2<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes, S: Send + Sync> EvmEnvProvider for BlockchainProvider2<N, S> {
     fn fill_env_at<EvmConfig>(
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,
@@ -496,7 +502,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider2<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> PruneCheckpointReader for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes, S: Send + Sync> PruneCheckpointReader for BlockchainProvider2<N, S> {
     fn get_prune_checkpoint(
         &self,
         segment: PruneSegment,
@@ -509,7 +515,7 @@ impl<N: ProviderNodeTypes> PruneCheckpointReader for BlockchainProvider2<N> {
     }
 }
 
-impl<N: NodeTypesWithDB> ChainSpecProvider for BlockchainProvider2<N> {
+impl<N: NodeTypesWithDB, S: Send + Sync> ChainSpecProvider for BlockchainProvider2<N, S> {
     type ChainSpec = N::ChainSpec;
 
     fn chain_spec(&self) -> Arc<N::ChainSpec> {
@@ -517,7 +523,7 @@ impl<N: NodeTypesWithDB> ChainSpecProvider for BlockchainProvider2<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes, S: Send + Sync> StateProviderFactory for BlockchainProvider2<N, S> {
     /// Storage provider for latest block
     fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", "Getting latest block state provider");
@@ -626,7 +632,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider2<N> {
     }
 }
 
-impl<N: NodeTypesWithDB> CanonChainTracker for BlockchainProvider2<N>
+impl<N: NodeTypesWithDB, S: Send + Sync> CanonChainTracker for BlockchainProvider2<N, S>
 where
     Self: BlockReader,
 {
@@ -660,7 +666,7 @@ where
     }
 }
 
-impl<N: ProviderNodeTypes> BlockReaderIdExt for BlockchainProvider2<N>
+impl<N: ProviderNodeTypes, S: Send + Sync> BlockReaderIdExt for BlockchainProvider2<N, S>
 where
     Self: BlockReader + ReceiptProviderIdExt,
 {
@@ -692,13 +698,13 @@ where
     }
 }
 
-impl<N: NodeTypesWithDB> CanonStateSubscriptions for BlockchainProvider2<N> {
+impl<N: NodeTypesWithDB, S: Send + Sync> CanonStateSubscriptions for BlockchainProvider2<N, S> {
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
         self.canonical_in_memory_state.subscribe_canon_state()
     }
 }
 
-impl<N: NodeTypesWithDB> ForkChoiceSubscriptions for BlockchainProvider2<N> {
+impl<N: NodeTypesWithDB, S: Send + Sync> ForkChoiceSubscriptions for BlockchainProvider2<N, S> {
     fn subscribe_safe_block(&self) -> ForkChoiceNotifications {
         let receiver = self.canonical_in_memory_state.subscribe_safe_block();
         ForkChoiceNotifications(receiver)
@@ -710,7 +716,7 @@ impl<N: NodeTypesWithDB> ForkChoiceSubscriptions for BlockchainProvider2<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> StorageChangeSetReader for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes, S: Send + Sync> StorageChangeSetReader for BlockchainProvider2<N, S> {
     fn storage_changeset(
         &self,
         block_number: BlockNumber,
@@ -719,7 +725,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for BlockchainProvider2<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes, S: Send + Sync> ChangeSetReader for BlockchainProvider2<N, S> {
     fn account_block_changeset(
         &self,
         block_number: BlockNumber,
@@ -728,14 +734,14 @@ impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider2<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> AccountReader for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes, S: Send + Sync> AccountReader for BlockchainProvider2<N, S> {
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
         self.consistent_provider()?.basic_account(address)
     }
 }
 
-impl<N: ProviderNodeTypes> StateReader for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes, S: Send + Sync> StateReader for BlockchainProvider2<N, S> {
     /// Re-constructs the [`ExecutionOutcome`] from in-memory and database state, if necessary.
     ///
     /// If data for the block does not exist, this will return [`None`].
@@ -912,7 +918,7 @@ mod tests {
         // Commit to both storages: database and static files
         UnifiedStorageWriter::commit(provider_rw, factory.static_file_provider())?;
 
-        let provider = BlockchainProvider2::new(factory)?;
+        let provider = BlockchainProvider2::<_, ()>::new(factory)?;
 
         // Insert the rest of the blocks and receipts into the in-memory state
         let chain = NewCanonicalChain::Commit {
@@ -1032,7 +1038,7 @@ mod tests {
         provider_rw.commit()?;
 
         // Create a new provider
-        let provider = BlockchainProvider2::new(factory)?;
+        let provider = BlockchainProvider2::<_, ()>::new(factory)?;
 
         // Useful blocks
         let first_db_block = database_blocks.first().unwrap();
@@ -1130,7 +1136,7 @@ mod tests {
         provider_rw.commit()?;
 
         // Create a new provider
-        let provider = BlockchainProvider2::new(factory)?;
+        let provider = BlockchainProvider2::<_, ()>::new(factory)?;
 
         // First in memory block
         let first_in_mem_block = in_memory_blocks.first().unwrap();
@@ -1394,7 +1400,7 @@ mod tests {
         provider_rw.insert_historical_block(block_1)?;
         provider_rw.commit()?;
 
-        let provider = BlockchainProvider2::new(factory)?;
+        let provider = BlockchainProvider2::<_, ()>::new(factory)?;
 
         // Subscribe twice for canonical state updates.
         let in_memory_state = provider.canonical_in_memory_state();
@@ -1839,7 +1845,7 @@ mod tests {
         )?;
         provider_rw.commit()?;
 
-        let provider = BlockchainProvider2::new(factory)?;
+        let provider = BlockchainProvider2::<_, ()>::new(factory)?;
 
         let in_memory_changesets = in_memory_changesets.into_iter().next().unwrap();
         let chain = NewCanonicalChain::Commit {

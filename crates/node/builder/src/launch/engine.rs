@@ -29,7 +29,10 @@ use reth_node_core::{
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_payload_primitives::PayloadBuilder;
 use reth_primitives::EthereumHardforks;
-use reth_provider::providers::{BlockchainProvider2, ProviderNodeTypes};
+use reth_provider::{
+    providers::{BlockchainProvider2, ProviderNodeTypes},
+    ChainStorageReader, ChainStorageWriter, DatabaseProviderFactory, ProviderFactory,
+};
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info};
@@ -68,10 +71,12 @@ impl EngineNodeLauncher {
     }
 }
 
-impl<Types, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
+impl<Types, S, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
 where
     Types: ProviderNodeTypes + NodeTypesWithEngine,
-    T: FullNodeTypes<Types = Types, Provider = BlockchainProvider2<Types>>,
+    S: ChainStorageReader<<ProviderFactory<Types> as DatabaseProviderFactory>::Provider>
+        + ChainStorageWriter<<ProviderFactory<Types> as DatabaseProviderFactory>::ProviderRW>,
+    T: FullNodeTypes<Types = Types, Provider = BlockchainProvider2<Types, S>>,
     CB: NodeComponentsBuilder<T>,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>,
     LocalPayloadAttributesBuilder<Types::ChainSpec>: PayloadAttributesBuilder<
