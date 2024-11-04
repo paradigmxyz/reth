@@ -72,6 +72,11 @@ arbitrary = [
     "rand",
     "reth-primitives-traits/arbitrary",
     "reth-primitives/arbitrary",
+    "alloy-consensus/arbitrary",
+    "alloy-primitives/arbitrary",
+    "op-alloy-consensus/arbitrary",
+    "reth-codecs/arbitrary",
+    "revm-primitives/arbitrary",
 ]
 optimism = [
     "reth-primitives/optimism",
