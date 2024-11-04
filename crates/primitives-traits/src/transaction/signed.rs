@@ -6,6 +6,7 @@ use core::hash::Hash;
 use alloy_consensus::Transaction;
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
 use alloy_primitives::{keccak256, Address, Signature, TxHash, B256};
+use revm_primitives::TxEnv;
 
 /// A signed transaction.
 pub trait SignedTransaction:
@@ -64,4 +65,7 @@ pub trait SignedTransaction:
     fn recalculate_hash(&self) -> B256 {
         keccak256(self.encoded_2718())
     }
+
+    /// Fills [`TxEnv`] with an [`Address`] and transaction.
+    fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address);
 }
