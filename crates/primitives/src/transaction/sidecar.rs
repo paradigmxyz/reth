@@ -2,12 +2,10 @@
 
 use crate::{Signature, Transaction, TransactionSigned};
 use alloy_consensus::{constants::EIP4844_TX_TYPE_ID, TxEip4844WithSidecar};
+use alloy_eips::eip4844::BlobTransactionSidecar;
 use alloy_primitives::TxHash;
 use alloy_rlp::Header;
 use serde::{Deserialize, Serialize};
-
-#[doc(inline)]
-pub use alloy_eips::eip4844::BlobTransactionSidecar;
 
 #[cfg(feature = "c-kzg")]
 pub use alloy_eips::eip4844::BlobTransactionValidationError;

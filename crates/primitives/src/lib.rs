@@ -50,8 +50,7 @@ pub use reth_primitives_traits::{
 pub use static_file::StaticFileSegment;
 
 pub use transaction::{
-    BlobTransaction, BlobTransactionSidecar, PooledTransactionsElement,
-    PooledTransactionsElementEcRecovered,
+    BlobTransaction, PooledTransactionsElement, PooledTransactionsElementEcRecovered,
 };
 
 #[cfg(feature = "c-kzg")]
