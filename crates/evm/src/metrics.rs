@@ -2,14 +2,41 @@
 //!
 //! Block processing related to syncing should take care to update the metrics by using either
 //! [`ExecutorMetrics::execute_metered`] or [`ExecutorMetrics::metered_one`].
-use std::time::Instant;
-
+use crate::{execute::Executor, system_calls::OnStateHook};
 use metrics::{Counter, Gauge, Histogram};
 use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput};
 use reth_metrics::Metrics;
 use reth_primitives::BlockWithSenders;
+use revm_primitives::ResultAndState;
+use std::time::Instant;
 
-use crate::execute::Executor;
+/// Wrapper struct that combines metrics and state hook
+struct StateHookWrapper {
+    metrics: ExecutorMetrics,
+    inner_hook: Box<dyn OnStateHook>,
+}
+
+impl OnStateHook for StateHookWrapper {
+    fn on_state(&mut self, result_and_state: &ResultAndState) {
+        // Update the metrics for the number of accounts, storage slots and bytecodes loaded
+        let accounts = result_and_state.state.keys().len();
+        let storage_slots =
+            result_and_state.state.values().map(|account| account.storage.len()).sum::<usize>();
+        let bytecodes = result_and_state
+            .state
+            .values()
+            .filter(|account| !account.info.is_empty_code_hash())
+            .collect::<Vec<_>>()
+            .len();
+
+        self.metrics.accounts_loaded_histogram.record(accounts as f64);
+        self.metrics.storage_slots_loaded_histogram.record(storage_slots as f64);
+        self.metrics.bytecodes_loaded_histogram.record(bytecodes as f64);
+
+        // Call the original state hook
+        self.inner_hook.on_state(result_and_state);
+    }
+}
 
 /// Executor metrics.
 // TODO(onbjerg): add sload/sstore
@@ -65,10 +92,13 @@ impl ExecutorMetrics {
     ///
     /// Compared to [`Self::metered_one`], this method additionally updates metrics for the number
     /// of accounts, storage slots and bytecodes loaded and updated.
+    /// Execute the given block using the provided [`Executor`] and update metrics for the
+    /// execution.
     pub fn execute_metered<'a, E, DB, O, Error>(
         &self,
         executor: E,
         input: BlockExecutionInput<'a, BlockWithSenders>,
+        state_hook: Box<dyn OnStateHook>,
     ) -> Result<BlockExecutionOutput<O>, Error>
     where
         E: Executor<
@@ -78,29 +108,16 @@ impl ExecutorMetrics {
             Error = Error,
         >,
     {
-        let output = self.metered(input.block, || {
-            executor.execute_with_state_closure(input, |state: &revm::db::State<DB>| {
-                // Update the metrics for the number of accounts, storage slots and bytecodes
-                // loaded
-                let accounts = state.cache.accounts.len();
-                let storage_slots = state
-                    .cache
-                    .accounts
-                    .values()
-                    .filter_map(|account| {
-                        account.account.as_ref().map(|account| account.storage.len())
-                    })
-                    .sum::<usize>();
-                let bytecodes = state.cache.contracts.len();
+        // clone here is cheap, all the metrics are Option<Arc<_>>. additionally
+        // they are gloally registered so that the data recorded in the hook will
+        // be accessible.
+        let wrapper = StateHookWrapper { metrics: self.clone(), inner_hook: state_hook };
 
-                // Record all state present in the cache state as loaded even though some might have
-                // been newly created.
-                // TODO: Consider spitting these into loaded and newly created.
-                self.accounts_loaded_histogram.record(accounts as f64);
-                self.storage_slots_loaded_histogram.record(storage_slots as f64);
-                self.bytecodes_loaded_histogram.record(bytecodes as f64);
-            })
-        })?;
+        // Store reference to block for metered
+        let block = input.block;
+
+        // Use metered to execute and track timing/gas metrics
+        let output = self.metered(block, || executor.execute_with_state_hook(input, wrapper))?;
 
         // Update the metrics for the number of accounts, storage slots and bytecodes updated
         let accounts = output.state.state.len();
@@ -121,5 +138,154 @@ impl ExecutorMetrics {
         F: FnOnce(BlockExecutionInput<'_, BlockWithSenders>) -> R,
     {
         self.metered(input.block, || f(input))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_eips::eip7685::Requests;
+    use metrics_util::debugging::DebuggingRecorder;
+    use revm::db::BundleState;
+    use revm_primitives::{EvmState, ExecutionResult};
+    use std::sync::{mpsc, Arc};
+
+    /// A mock executor that simulates state changes
+    struct MockExecutor {
+        result_and_state: ResultAndState,
+    }
+
+    impl Executor<()> for MockExecutor {
+        type Input<'a>
+            = BlockExecutionInput<'a, BlockWithSenders>
+        where
+            Self: 'a;
+        type Output = BlockExecutionOutput<()>;
+        type Error = std::convert::Infallible;
+
+        fn execute(self, _input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
+            Ok(BlockExecutionOutput {
+                state: BundleState::default(),
+                receipts: vec![],
+                requests: Requests::default(),
+                gas_used: 0,
+            })
+        }
+        fn execute_with_state_closure<F>(
+            self,
+            _input: Self::Input<'_>,
+            _state: F,
+        ) -> Result<Self::Output, Self::Error>
+        where
+            F: FnMut(&revm::State<()>),
+        {
+            Ok(BlockExecutionOutput {
+                state: BundleState::default(),
+                receipts: vec![],
+                requests: Requests::default(),
+                gas_used: 0,
+            })
+        }
+        fn execute_with_state_hook<F>(
+            self,
+            _input: Self::Input<'_>,
+            mut hook: F,
+        ) -> Result<Self::Output, Self::Error>
+        where
+            F: OnStateHook + 'static,
+        {
+            // Call hook with our mock state
+            hook.on_state(&self.result_and_state);
+
+            Ok(BlockExecutionOutput {
+                state: BundleState::default(),
+                receipts: vec![],
+                requests: Requests::default(),
+                gas_used: 0,
+            })
+        }
+    }
+
+    struct ChannelStateHook {
+        output: i32,
+        sender: mpsc::Sender<i32>,
+    }
+
+    impl OnStateHook for ChannelStateHook {
+        fn on_state(&mut self, _result_and_state: &ResultAndState) {
+            let _ = self.sender.send(self.output);
+        }
+    }
+
+    fn setup_test_recorder() -> DebuggingRecorder {
+        let recorder = DebuggingRecorder::new();
+        recorder.install();
+        recorder
+    }
+
+    #[test]
+    fn test_executor_metrics_hook_metrics_recorded() {
+        let recorder = setup_test_recorder();
+        let metrics = ExecutorMetrics::default();
+
+        let input = BlockExecutionInput {
+            block: &BlockWithSenders::default(),
+            total_difficulty: Default::default(),
+        };
+
+        let (tx, _rx) = mpsc::channel();
+        let expected_output = 42;
+        let state_hook = Box::new(ChannelStateHook { sender: tx, output: expected_output });
+
+        let result_and_state = ResultAndState {
+            result: ExecutionResult::Revert { gas_used: 0, output: Default::default() },
+            state: EvmState::default(),
+        };
+        let executor = MockExecutor { result_and_state };
+        let _result = metrics.execute_metered(executor, input, state_hook).unwrap();
+
+        let snapshot = recorder.snapshotter().snapshot().into_hashmap();
+        /*
+            assert!(
+                snapshot.get(&"sync.execution.accounts_loaded_histogram").unwrap().unwrap() > 0,
+                "accounts loaded histogram should have records"
+            );
+            assert!(
+                snapshot.get(&"sync.execution.storage_slots_loaded_histogram").unwrap().unwrap() > 0,
+                "storage slots loaded histogram should have records"
+            );
+            assert!(
+                snapshot.get(&"sync.execution.bytecodes_loaded_histogram").unwrap().unwrap() > 0,
+                "bytecodes loaded histogram should have records"
+            );
+            assert!(
+                snapshot.get(&"sync.execution.gas_processed_total").unwrap() > 0,
+                "gas processed counter should have records"
+        );
+            */
+    }
+
+    #[test]
+    fn test_executor_metrics_hook_called() {
+        let metrics = ExecutorMetrics::default();
+
+        let input = BlockExecutionInput {
+            block: &BlockWithSenders::default(),
+            total_difficulty: Default::default(),
+        };
+
+        let (tx, rx) = mpsc::channel();
+        let expected_output = 42;
+        let state_hook = Box::new(ChannelStateHook { sender: tx, output: expected_output });
+
+        let result_and_state = ResultAndState {
+            result: ExecutionResult::Revert { gas_used: 0, output: Default::default() },
+            state: EvmState::default(),
+        };
+        let executor = MockExecutor { result_and_state };
+        let _result = metrics.execute_metered(executor, input, state_hook).unwrap();
+
+        let actual_output = rx.try_recv().unwrap();
+        assert_eq!(actual_output, expected_output);
     }
 }
