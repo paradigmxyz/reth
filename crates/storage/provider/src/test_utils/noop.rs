@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
+use alloy_eips::{eip4895::Withdrawal, BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
     map::{HashMap, HashSet},
     Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
@@ -20,7 +20,7 @@ use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{
     Account, Block, BlockWithSenders, Bytecode, Header, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash, Withdrawal, Withdrawals,
+    TransactionSignedNoHash, Withdrawals,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};

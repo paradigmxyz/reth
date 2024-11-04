@@ -6,12 +6,13 @@ use alloy_primitives::{
     TxKind, B256, U256,
 };
 
+use alloy_eips::eip4895::Withdrawal;
 use reth_db::tables;
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_node_types::NodeTypes;
 use reth_primitives::{
     Account, BlockBody, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    Signature, Transaction, TransactionSigned, TxType, Withdrawal, Withdrawals,
+    Signature, Transaction, TransactionSigned, TxType, Withdrawals,
 };
 use reth_trie::root::{state_root_unhashed, storage_root_unhashed};
 use revm::{db::BundleState, primitives::AccountInfo};
