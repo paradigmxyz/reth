@@ -1444,7 +1444,7 @@ mod tests {
         assert_eq!(
             provider
                 .withdrawals_by_block(
-                    reth_primitives::BlockHashOrNumber::Number(15),
+                    alloy_eips::BlockHashOrNumber::Number(15),
                     shainghai_timestamp
                 )
                 .expect("could not call withdrawals by block"),
@@ -1456,7 +1456,7 @@ mod tests {
             assert_eq!(
                 provider
                     .withdrawals_by_block(
-                        reth_primitives::BlockHashOrNumber::Number(block.number),
+                        alloy_eips::BlockHashOrNumber::Number(block.number),
                         shainghai_timestamp
                     )?
                     .unwrap(),

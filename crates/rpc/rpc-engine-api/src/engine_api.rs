@@ -1,7 +1,7 @@
 use crate::{
     capabilities::EngineCapabilities, metrics::EngineApiMetrics, EngineApiError, EngineApiResult,
 };
-use alloy_eips::{eip4844::BlobAndProofV1, eip7685::Requests};
+use alloy_eips::{eip1898::BlockHashOrNumber, eip4844::BlobAndProofV1, eip7685::Requests};
 use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionPayload, ExecutionPayloadBodiesV1,
@@ -19,7 +19,7 @@ use reth_payload_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, PayloadBuilderAttributes,
     PayloadOrAttributes,
 };
-use reth_primitives::{Block, BlockHashOrNumber, EthereumHardfork};
+use reth_primitives::{Block, EthereumHardfork};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types_compat::engine::payload::{
     convert_payload_input_v2_to_payload, convert_to_payload_body_v1,
