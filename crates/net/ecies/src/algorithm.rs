@@ -650,7 +650,8 @@ impl ECIES {
         out.extend_from_slice(tag.as_slice());
     }
 
-    /// Extracts the header from slice and returns the body size.
+    /// Reads the `RLPx` header from the slice, setting up the MAC and AES, returning the body
+    /// size contained in the header.
     pub fn read_header(&mut self, data: &mut [u8]) -> Result<usize, ECIESError> {
         // If the data is not large enough to fit the header and mac bytes, return an error
         //

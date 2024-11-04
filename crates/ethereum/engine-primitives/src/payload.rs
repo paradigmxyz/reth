@@ -184,7 +184,7 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV4 {
 }
 
 /// Container type for all components required to build a payload.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct EthPayloadBuilderAttributes {
     /// Id of the payload
     pub id: PayloadId,

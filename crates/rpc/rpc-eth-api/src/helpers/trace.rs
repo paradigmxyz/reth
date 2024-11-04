@@ -195,11 +195,7 @@ pub trait Trace: LoadState<Evm: ConfigureEvm<Header = Header>> {
                 let block_txs = block.transactions_with_sender();
 
                 // apply relevant system calls
-                let mut system_caller = SystemCaller::new(
-                    this.evm_config().clone(),
-                    RpcNodeCore::provider(&this).chain_spec(),
-                );
-                system_caller
+                SystemCaller::new(this.evm_config().clone(), this.provider().chain_spec())
                     .pre_block_beacon_root_contract_call(
                         &mut db,
                         &cfg,
@@ -338,11 +334,7 @@ pub trait Trace: LoadState<Evm: ConfigureEvm<Header = Header>> {
                     CacheDB::new(StateProviderDatabase::new(StateProviderTraitObjWrapper(&state)));
 
                 // apply relevant system calls
-                let mut system_caller = SystemCaller::new(
-                    this.evm_config().clone(),
-                    RpcNodeCore::provider(&this).chain_spec(),
-                );
-                system_caller
+                SystemCaller::new(this.evm_config().clone(), this.provider().chain_spec())
                     .pre_block_beacon_root_contract_call(
                         &mut db,
                         &cfg,

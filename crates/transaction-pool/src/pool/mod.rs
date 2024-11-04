@@ -307,7 +307,9 @@ where
     /// Caution: this assumes the given transaction is eip-4844
     fn get_blob_transaction(&self, transaction: TransactionSigned) -> Option<BlobTransaction> {
         if let Ok(Some(sidecar)) = self.blob_store.get(transaction.hash()) {
-            if let Ok(blob) = BlobTransaction::try_from_signed(transaction, sidecar) {
+            if let Ok(blob) =
+                BlobTransaction::try_from_signed(transaction, Arc::unwrap_or_clone(sidecar))
+            {
                 return Some(blob)
             }
         }
@@ -783,6 +785,14 @@ where
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let sender_id = self.get_sender_id(sender);
         self.get_pool_data().pending_txs_by_sender(sender_id)
+    }
+
+    /// Returns all pending transactions filtered by predicate
+    pub(crate) fn pending_transactions_with_predicate(
+        &self,
+        predicate: impl FnMut(&ValidPoolTransaction<T::Transaction>) -> bool,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.get_pool_data().pending_transactions_with_predicate(predicate)
     }
 
     /// Returns all pending transactions of the address by sender

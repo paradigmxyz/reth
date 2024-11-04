@@ -402,6 +402,29 @@ mod tests {
     }
 
     #[test]
+    fn test_best_transactions_iter_invalid() {
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        let num_tx = 10;
+        // insert 10 gapless tx
+        let tx = MockTransaction::eip1559();
+        for nonce in 0..num_tx {
+            let tx = tx.clone().rng_hash().with_nonce(nonce);
+            let valid_tx = f.validated(tx);
+            pool.add_transaction(Arc::new(valid_tx), 0);
+        }
+
+        let mut best: Box<
+            dyn crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<MockTransaction>>>,
+        > = Box::new(pool.best());
+
+        let tx = best.next().unwrap();
+        best.mark_invalid(&tx);
+        assert!(best.next().is_none());
+    }
+
+    #[test]
     fn test_best_with_fees_iter_base_fee_satisfied() {
         let mut pool = PendingPool::new(MockOrdering::default());
         let mut f = MockTransactionFactory::default();

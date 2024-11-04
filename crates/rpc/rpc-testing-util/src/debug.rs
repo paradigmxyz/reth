@@ -292,7 +292,7 @@ pub struct DebugTraceTransactionsStream<'a> {
     stream: Pin<Box<dyn Stream<Item = TraceTransactionResult> + 'a>>,
 }
 
-impl<'a> DebugTraceTransactionsStream<'a> {
+impl DebugTraceTransactionsStream<'_> {
     /// Returns the next error result of the stream.
     pub async fn next_err(&mut self) -> Option<(RpcError, TxHash)> {
         loop {
@@ -324,7 +324,7 @@ pub struct DebugTraceBlockStream<'a> {
     stream: Pin<Box<dyn Stream<Item = DebugTraceBlockResult> + 'a>>,
 }
 
-impl<'a> DebugTraceBlockStream<'a> {
+impl DebugTraceBlockStream<'_> {
     /// Returns the next error result of the stream.
     pub async fn next_err(&mut self) -> Option<(RpcError, BlockId)> {
         loop {

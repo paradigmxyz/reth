@@ -1,12 +1,12 @@
 //! Database adapters for payload building.
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{
+    map::{Entry, HashMap},
+    Address, B256, U256,
+};
+use core::cell::RefCell;
 use reth_primitives::revm_primitives::{
     db::{Database, DatabaseRef},
     AccountInfo, Bytecode,
-};
-use std::{
-    cell::RefCell,
-    collections::{hash_map::Entry, HashMap},
 };
 
 /// A container type that caches reads from an underlying [`DatabaseRef`].
@@ -17,15 +17,15 @@ use std::{
 /// # Example
 ///
 /// ```
-/// use reth_payload_builder::database::CachedReads;
+/// use reth_revm::cached::CachedReads;
 /// use revm::db::{DatabaseRef, State};
 ///
 /// fn build_payload<DB: DatabaseRef>(db: DB) {
 ///     let mut cached_reads = CachedReads::default();
-///     let db_ref = cached_reads.as_db(db);
-///     // this is `Database` and can be used to build a payload, it never writes to `CachedReads` or the underlying database, but all reads from the underlying database are cached in `CachedReads`.
+///     let db = cached_reads.as_db_mut(db);
+///     // this is `Database` and can be used to build a payload, it never commits to `CachedReads` or the underlying database, but all reads from the underlying database are cached in `CachedReads`.
 ///     // Subsequent payload build attempts can use cached reads and avoid hitting the underlying database.
-///     let db = State::builder().with_database_ref(db_ref).build();
+///     let state = State::builder().with_database(db).build();
 /// }
 /// ```
 #[derive(Debug, Clone, Default)]
@@ -40,10 +40,11 @@ pub struct CachedReads {
 impl CachedReads {
     /// Gets a [`DatabaseRef`] that will cache reads from the given database.
     pub fn as_db<DB>(&mut self, db: DB) -> CachedReadsDBRef<'_, DB> {
-        CachedReadsDBRef { inner: RefCell::new(self.as_db_mut(db)) }
+        self.as_db_mut(db).into_db()
     }
 
-    fn as_db_mut<DB>(&mut self, db: DB) -> CachedReadsDbMut<'_, DB> {
+    /// Gets a mutable [`Database`] that will cache reads from the underlying database.
+    pub fn as_db_mut<DB>(&mut self, db: DB) -> CachedReadsDbMut<'_, DB> {
         CachedReadsDbMut { cached: self, db }
     }
 
@@ -56,6 +57,15 @@ impl CachedReads {
     ) {
         self.accounts.insert(address, CachedAccount { info: Some(info), storage });
     }
+
+    /// Extends current cache with entries from another [`CachedReads`] instance.
+    ///
+    /// Note: It is expected that both instances are based on the exact same state.
+    pub fn extend(&mut self, other: Self) {
+        self.accounts.extend(other.accounts);
+        self.contracts.extend(other.contracts);
+        self.block_hashes.extend(other.block_hashes);
+    }
 }
 
 /// A [Database] that caches reads inside [`CachedReads`].
@@ -65,6 +75,28 @@ pub struct CachedReadsDbMut<'a, DB> {
     pub cached: &'a mut CachedReads,
     /// The underlying database.
     pub db: DB,
+}
+
+impl<'a, DB> CachedReadsDbMut<'a, DB> {
+    /// Converts this [`Database`] implementation into a [`DatabaseRef`] that will still cache
+    /// reads.
+    pub const fn into_db(self) -> CachedReadsDBRef<'a, DB> {
+        CachedReadsDBRef { inner: RefCell::new(self) }
+    }
+
+    /// Returns access to wrapped [`DatabaseRef`].
+    pub const fn inner(&self) -> &DB {
+        &self.db
+    }
+}
+
+impl<DB, T> AsRef<T> for CachedReadsDbMut<'_, DB>
+where
+    DB: AsRef<T>,
+{
+    fn as_ref(&self) -> &T {
+        self.inner().as_ref()
+    }
 }
 
 impl<DB: DatabaseRef> Database for CachedReadsDbMut<'_, DB> {
@@ -159,5 +191,59 @@ struct CachedAccount {
 impl CachedAccount {
     fn new(info: Option<AccountInfo>) -> Self {
         Self { info, storage: HashMap::default() }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extend_with_two_cached_reads() {
+        // Setup test data
+        let hash1 = B256::from_slice(&[1u8; 32]);
+        let hash2 = B256::from_slice(&[2u8; 32]);
+        let address1 = Address::from_slice(&[1u8; 20]);
+        let address2 = Address::from_slice(&[2u8; 20]);
+
+        // Create primary cache
+        let mut primary = {
+            let mut cache = CachedReads::default();
+            cache.accounts.insert(address1, CachedAccount::new(Some(AccountInfo::default())));
+            cache.contracts.insert(hash1, Bytecode::default());
+            cache.block_hashes.insert(1, hash1);
+            cache
+        };
+
+        // Create additional cache
+        let additional = {
+            let mut cache = CachedReads::default();
+            cache.accounts.insert(address2, CachedAccount::new(Some(AccountInfo::default())));
+            cache.contracts.insert(hash2, Bytecode::default());
+            cache.block_hashes.insert(2, hash2);
+            cache
+        };
+
+        // Extending primary with additional cache
+        primary.extend(additional);
+
+        // Verify the combined state
+        assert!(
+            primary.accounts.len() == 2 &&
+                primary.contracts.len() == 2 &&
+                primary.block_hashes.len() == 2,
+            "All maps should contain 2 entries"
+        );
+
+        // Verify specific entries
+        assert!(
+            primary.accounts.contains_key(&address1) &&
+                primary.accounts.contains_key(&address2) &&
+                primary.contracts.contains_key(&hash1) &&
+                primary.contracts.contains_key(&hash2) &&
+                primary.block_hashes.get(&1) == Some(&hash1) &&
+                primary.block_hashes.get(&2) == Some(&hash2),
+            "All expected entries should be present"
+        );
     }
 }
