@@ -1407,7 +1407,6 @@ impl alloy_consensus::Transaction for TransactionSigned {
 
 impl SignedTransaction for TransactionSigned {
     type Transaction = Transaction;
-    type Signature = Signature;
 
     fn tx_hash(&self) -> &TxHash {
         Self::hash_ref(self)
@@ -1417,7 +1416,7 @@ impl SignedTransaction for TransactionSigned {
         Self::transaction(self)
     }
 
-    fn signature(&self) -> &Self::Signature {
+    fn signature(&self) -> &Signature {
         Self::signature(self)
     }
 
@@ -1431,7 +1430,7 @@ impl SignedTransaction for TransactionSigned {
 
     fn from_transaction_and_signature(
         transaction: Self::Transaction,
-        signature: Self::Signature,
+        signature: Signature,
     ) -> Self {
         Self::from_transaction_and_signature(transaction, signature)
     }
