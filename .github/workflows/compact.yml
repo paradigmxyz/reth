@@ -10,7 +10,7 @@ on:
   pull_request:
   merge_group:
   push:
-    branches: [main]
+    branches: [scroll]
 
 env:
   CARGO_TERM_COLOR: always
@@ -32,8 +32,8 @@ jobs:
       - name: Checkout base
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.base_ref || 'main' }}
-      # On `main` branch, generates test vectors and serializes them to disk using `Compact`.
+          ref: ${{ github.base_ref || 'scroll' }}
+      # On `scroll` branch, generates test vectors and serializes them to disk using `Compact`.
       - name: Generate compact vectors
         run: |
           ${{ matrix.bin }} -- test-vectors compact --write
