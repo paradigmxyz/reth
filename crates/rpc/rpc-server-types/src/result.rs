@@ -4,6 +4,7 @@ use std::fmt;
 
 use alloy_rpc_types_engine::PayloadError;
 use jsonrpsee_core::RpcResult;
+use reth_errors::ConsensusError;
 use reth_primitives::BlockId;
 
 /// Helper trait to easily convert various `Result` types into [`RpcResult`]
@@ -102,6 +103,7 @@ macro_rules! impl_to_rpc_result {
 }
 
 impl_to_rpc_result!(PayloadError);
+impl_to_rpc_result!(ConsensusError);
 impl_to_rpc_result!(reth_errors::RethError);
 impl_to_rpc_result!(reth_errors::ProviderError);
 impl_to_rpc_result!(reth_network_api::NetworkError);

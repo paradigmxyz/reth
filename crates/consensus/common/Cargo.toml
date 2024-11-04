@@ -20,6 +20,7 @@ reth-consensus.workspace = true
 alloy-primitives.workspace = true
 revm-primitives.workspace = true
 alloy-consensus.workspace = true
+alloy-eips.workspace = true
 
 [dev-dependencies]
 reth-storage-api.workspace = true

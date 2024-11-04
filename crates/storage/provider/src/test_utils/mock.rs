@@ -1,10 +1,9 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
-    AccountReader, BlockExecutionReader, BlockHashReader, BlockIdReader, BlockNumReader,
-    BlockReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader, DatabaseProvider,
-    EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt, StateProvider, StateProviderBox,
-    StateProviderFactory, StateReader, StateRootProvider, TransactionVariant, TransactionsProvider,
-    WithdrawalsProvider,
+    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
+    ChainSpecProvider, ChangeSetReader, DatabaseProvider, EvmEnvProvider, HeaderProvider,
+    ReceiptProviderIdExt, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
+    StateRootProvider, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_consensus::constants::EMPTY_ROOT_HASH;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
@@ -19,7 +18,8 @@ use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_db::mock::{DatabaseMock, TxMock};
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
-use reth_execution_types::{Chain, ExecutionOutcome};
+use reth_execution_types::ExecutionOutcome;
+use reth_node_types::NodeTypes;
 use reth_primitives::{
     Account, Block, BlockWithSenders, Bytecode, GotExpected, Header, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
@@ -34,6 +34,7 @@ use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, StorageProof,
     TrieInput,
 };
+use reth_trie_db::MerklePatriciaTrie;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
     collections::BTreeMap,
@@ -150,10 +151,20 @@ impl MockEthProvider {
     }
 }
 
+/// Mock node.
+#[derive(Debug)]
+pub struct MockNode;
+
+impl NodeTypes for MockNode {
+    type Primitives = ();
+    type ChainSpec = ChainSpec;
+    type StateCommitment = MerklePatriciaTrie;
+}
+
 impl DatabaseProviderFactory for MockEthProvider {
     type DB = DatabaseMock;
-    type Provider = DatabaseProvider<TxMock, ChainSpec>;
-    type ProviderRW = DatabaseProvider<TxMock, ChainSpec>;
+    type Provider = DatabaseProvider<TxMock, MockNode>;
+    type ProviderRW = DatabaseProvider<TxMock, MockNode>;
 
     fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
         Err(ConsistentViewError::Syncing { best_block: GotExpected::new(0, 0) }.into())
@@ -749,18 +760,6 @@ impl StateProviderFactory for MockEthProvider {
         Ok(Box::new(self.clone()))
     }
 
-    fn history_by_block_number(&self, _block: BlockNumber) -> ProviderResult<StateProviderBox> {
-        Ok(Box::new(self.clone()))
-    }
-
-    fn history_by_block_hash(&self, _block: BlockHash) -> ProviderResult<StateProviderBox> {
-        Ok(Box::new(self.clone()))
-    }
-
-    fn state_by_block_hash(&self, _block: BlockHash) -> ProviderResult<StateProviderBox> {
-        Ok(Box::new(self.clone()))
-    }
-
     fn state_by_block_number_or_tag(
         &self,
         number_or_tag: BlockNumberOrTag,
@@ -785,6 +784,18 @@ impl StateProviderFactory for MockEthProvider {
             BlockNumberOrTag::Pending => self.pending(),
             BlockNumberOrTag::Number(num) => self.history_by_block_number(num),
         }
+    }
+
+    fn history_by_block_number(&self, _block: BlockNumber) -> ProviderResult<StateProviderBox> {
+        Ok(Box::new(self.clone()))
+    }
+
+    fn history_by_block_hash(&self, _block: BlockHash) -> ProviderResult<StateProviderBox> {
+        Ok(Box::new(self.clone()))
+    }
+
+    fn state_by_block_hash(&self, _block: BlockHash) -> ProviderResult<StateProviderBox> {
+        Ok(Box::new(self.clone()))
     }
 
     fn pending(&self) -> ProviderResult<StateProviderBox> {
@@ -815,15 +826,6 @@ impl ChangeSetReader for MockEthProvider {
         _block_number: BlockNumber,
     ) -> ProviderResult<Vec<AccountBeforeTx>> {
         Ok(Vec::default())
-    }
-}
-
-impl BlockExecutionReader for MockEthProvider {
-    fn get_block_and_execution_range(
-        &self,
-        _range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Chain> {
-        Ok(Chain::default())
     }
 }
 

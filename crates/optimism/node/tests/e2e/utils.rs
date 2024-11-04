@@ -6,7 +6,7 @@ use reth_e2e_test_utils::{
 };
 use reth_optimism_chainspec::OpChainSpecBuilder;
 use reth_optimism_node::{
-    node::OptimismAddOns, OptimismBuiltPayload, OptimismNode, OptimismPayloadBuilderAttributes,
+    node::OptimismAddOns, OpBuiltPayload, OpPayloadBuilderAttributes, OptimismNode,
 };
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use std::sync::Arc;
@@ -21,6 +21,7 @@ pub(crate) async fn setup(num_nodes: usize) -> eyre::Result<(Vec<OpNode>, TaskMa
         num_nodes,
         Arc::new(OpChainSpecBuilder::base_mainnet().genesis(genesis).ecotone_activated().build()),
         false,
+        optimism_payload_attributes,
     )
     .await
 }
@@ -30,29 +31,25 @@ pub(crate) async fn advance_chain(
     length: usize,
     node: &mut OpNode,
     wallet: Arc<Mutex<Wallet>>,
-) -> eyre::Result<Vec<(OptimismBuiltPayload, OptimismPayloadBuilderAttributes)>> {
-    node.advance(
-        length as u64,
-        |_| {
-            let wallet = wallet.clone();
-            Box::pin(async move {
-                let mut wallet = wallet.lock().await;
-                let tx_fut = TransactionTestContext::optimism_l1_block_info_tx(
-                    wallet.chain_id,
-                    wallet.inner.clone(),
-                    wallet.inner_nonce,
-                );
-                wallet.inner_nonce += 1;
-                tx_fut.await
-            })
-        },
-        optimism_payload_attributes,
-    )
+) -> eyre::Result<Vec<(OpBuiltPayload, OpPayloadBuilderAttributes)>> {
+    node.advance(length as u64, |_| {
+        let wallet = wallet.clone();
+        Box::pin(async move {
+            let mut wallet = wallet.lock().await;
+            let tx_fut = TransactionTestContext::optimism_l1_block_info_tx(
+                wallet.chain_id,
+                wallet.inner.clone(),
+                wallet.inner_nonce,
+            );
+            wallet.inner_nonce += 1;
+            tx_fut.await
+        })
+    })
     .await
 }
 
 /// Helper function to create a new eth payload attributes
-pub(crate) fn optimism_payload_attributes(timestamp: u64) -> OptimismPayloadBuilderAttributes {
+pub(crate) fn optimism_payload_attributes(timestamp: u64) -> OpPayloadBuilderAttributes {
     let attributes = PayloadAttributes {
         timestamp,
         prev_randao: B256::ZERO,
@@ -61,10 +58,11 @@ pub(crate) fn optimism_payload_attributes(timestamp: u64) -> OptimismPayloadBuil
         parent_beacon_block_root: Some(B256::ZERO),
     };
 
-    OptimismPayloadBuilderAttributes {
+    OpPayloadBuilderAttributes {
         payload_attributes: EthPayloadBuilderAttributes::new(B256::ZERO, attributes),
         transactions: vec![],
         no_tx_pool: false,
         gas_limit: Some(30_000_000),
+        eip_1559_params: None,
     }
 }

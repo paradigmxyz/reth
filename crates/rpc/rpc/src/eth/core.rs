@@ -3,14 +3,15 @@
 
 use std::sync::Arc;
 
-use alloy_network::AnyNetwork;
+use alloy_network::Ethereum;
 use alloy_primitives::U256;
 use derive_more::Deref;
 use reth_primitives::BlockNumberOrTag;
 use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},
-    EthApiTypes,
+    node::RpcNodeCoreExt,
+    EthApiTypes, RpcNodeCore,
 };
 use reth_rpc_eth_types::{
     EthApiBuilderCtx, EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle,
@@ -36,12 +37,15 @@ use crate::eth::EthTxBuilder;
 #[derive(Deref)]
 pub struct EthApi<Provider, Pool, Network, EvmConfig> {
     /// All nested fields bundled together.
+    #[deref]
     pub(super) inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
+    /// Transaction RPC response builder.
+    pub tx_resp_builder: EthTxBuilder,
 }
 
 impl<Provider, Pool, Network, EvmConfig> Clone for EthApi<Provider, Pool, Network, EvmConfig> {
     fn clone(&self) -> Self {
-        Self { inner: self.inner.clone() }
+        Self { inner: self.inner.clone(), tx_resp_builder: EthTxBuilder }
     }
 }
 
@@ -81,7 +85,7 @@ where
             proof_permits,
         );
 
-        Self { inner: Arc::new(inner) }
+        Self { inner: Arc::new(inner), tx_resp_builder: EthTxBuilder }
     }
 }
 
@@ -119,7 +123,7 @@ where
             ctx.config.proof_permits,
         );
 
-        Self { inner: Arc::new(inner) }
+        Self { inner: Arc::new(inner), tx_resp_builder: EthTxBuilder }
     }
 }
 
@@ -128,9 +132,52 @@ where
     Self: Send + Sync,
 {
     type Error = EthApiError;
-    // todo: replace with alloy_network::Ethereum
-    type NetworkTypes = AnyNetwork;
+    type NetworkTypes = Ethereum;
     type TransactionCompat = EthTxBuilder;
+
+    fn tx_resp_builder(&self) -> &Self::TransactionCompat {
+        &self.tx_resp_builder
+    }
+}
+
+impl<Provider, Pool, Network, EvmConfig> RpcNodeCore for EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Provider: Send + Sync + Clone + Unpin,
+    Pool: Send + Sync + Clone + Unpin,
+    Network: Send + Sync + Clone,
+    EvmConfig: Send + Sync + Clone + Unpin,
+{
+    type Provider = Provider;
+    type Pool = Pool;
+    type Evm = EvmConfig;
+    type Network = Network;
+
+    fn pool(&self) -> &Self::Pool {
+        self.inner.pool()
+    }
+
+    fn evm_config(&self) -> &Self::Evm {
+        self.inner.evm_config()
+    }
+
+    fn network(&self) -> &Self::Network {
+        self.inner.network()
+    }
+
+    fn provider(&self) -> &Self::Provider {
+        self.inner.provider()
+    }
+}
+
+impl<Provider, Pool, Network, EvmConfig> RpcNodeCoreExt
+    for EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Self: RpcNodeCore,
+{
+    #[inline]
+    fn cache(&self) -> &EthStateCache {
+        self.inner.cache()
+    }
 }
 
 impl<Provider, Pool, Network, EvmConfig> std::fmt::Debug

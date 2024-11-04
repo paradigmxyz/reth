@@ -22,18 +22,20 @@ use reth_errors::RethResult;
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
-use reth_node_api::{NodeTypesWithDB, NodeTypesWithEngine, PayloadBuilderAttributes};
+use reth_node_api::{
+    EngineApiMessageVersion, NodeTypesWithDB, NodeTypesWithEngine, PayloadBuilderAttributes,
+};
 use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider};
-use reth_payload_builder::database::CachedReads;
 use reth_primitives::{
     revm_primitives::KzgSettings, BlobTransaction, BlobTransactionSidecar,
-    PooledTransactionsElement, SealedBlock, SealedBlockWithSenders, Transaction, TransactionSigned,
+    PooledTransactionsElement, SealedBlock, SealedBlockWithSenders, SealedHeader, Transaction,
+    TransactionSigned,
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider,
     ProviderFactory, StageCheckpointReader, StateProviderFactory,
 };
-use reth_revm::{database::StateProviderDatabase, primitives::EnvKzgSettings};
+use reth_revm::{cached::CachedReads, database::StateProviderDatabase, primitives::EnvKzgSettings};
 use reth_stages::StageId;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, BlobStore, EthPooledTransaction, PoolConfig, TransactionOrigin,
@@ -222,11 +224,12 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             withdrawals: None,
         };
         let payload_config = PayloadConfig::new(
-            Arc::clone(&best_block),
+            Arc::new(SealedHeader::new(best_block.header().clone(), best_block.hash())),
             Bytes::default(),
             reth_payload_builder::EthPayloadBuilderAttributes::try_new(
                 best_block.hash(),
                 payload_attrs,
+                EngineApiMessageVersion::default() as u8,
             )?,
         );
 

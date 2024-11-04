@@ -50,9 +50,17 @@ impl ProtocolMessage {
         let message = match message_type {
             EthMessageID::Status => EthMessage::Status(Status::decode(buf)?),
             EthMessageID::NewBlockHashes => {
+                if version.is_eth69() {
+                    return Err(MessageError::Invalid(version, EthMessageID::NewBlockHashes));
+                }
                 EthMessage::NewBlockHashes(NewBlockHashes::decode(buf)?)
             }
-            EthMessageID::NewBlock => EthMessage::NewBlock(Box::new(NewBlock::decode(buf)?)),
+            EthMessageID::NewBlock => {
+                if version.is_eth69() {
+                    return Err(MessageError::Invalid(version, EthMessageID::NewBlock));
+                }
+                EthMessage::NewBlock(Box::new(NewBlock::decode(buf)?))
+            }
             EthMessageID::Transactions => EthMessage::Transactions(Transactions::decode(buf)?),
             EthMessageID::NewPooledTransactionHashes => {
                 if version >= EthVersion::Eth68 {
@@ -494,7 +502,8 @@ where
 mod tests {
     use super::MessageError;
     use crate::{
-        message::RequestPair, EthMessage, EthMessageID, GetNodeData, NodeData, ProtocolMessage,
+        message::RequestPair, EthMessage, EthMessageID, EthVersion, GetNodeData, NodeData,
+        ProtocolMessage,
     };
     use alloy_primitives::hex;
     use alloy_rlp::{Decodable, Encodable, Error};
@@ -565,5 +574,18 @@ mod tests {
 
         let result = RequestPair::<Vec<u8>>::decode(&mut &*raw_pair);
         assert!(matches!(result, Err(Error::UnexpectedLength)));
+    }
+
+    #[test]
+    fn empty_block_bodies_protocol() {
+        let empty_block_bodies = ProtocolMessage::from(EthMessage::BlockBodies(RequestPair {
+            request_id: 0,
+            message: Default::default(),
+        }));
+        let mut buf = Vec::new();
+        empty_block_bodies.encode(&mut buf);
+        let decoded =
+            ProtocolMessage::decode_message(EthVersion::Eth68, &mut buf.as_slice()).unwrap();
+        assert_eq!(empty_block_bodies, decoded);
     }
 }

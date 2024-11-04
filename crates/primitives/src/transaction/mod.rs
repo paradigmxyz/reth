@@ -18,6 +18,8 @@ use derive_more::{AsRef, Deref};
 use once_cell as _;
 #[cfg(not(feature = "std"))]
 use once_cell::sync::Lazy as LazyLock;
+#[cfg(feature = "optimism")]
+use op_alloy_consensus::DepositTransaction;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use signature::{decode_with_eip155_chain_id, with_eip155_parity};
@@ -29,8 +31,6 @@ pub use error::{
 };
 pub use meta::TransactionMeta;
 pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
-#[cfg(all(feature = "c-kzg", any(test, feature = "arbitrary")))]
-pub use sidecar::generate_blob_sidecar;
 #[cfg(feature = "c-kzg")]
 pub use sidecar::BlobTransactionValidationError;
 pub use sidecar::{BlobTransaction, BlobTransactionSidecar};
@@ -56,17 +56,12 @@ mod variant;
 #[cfg(feature = "optimism")]
 use op_alloy_consensus::TxDeposit;
 #[cfg(feature = "optimism")]
-use reth_optimism_chainspec::optimism_deposit_tx_signature;
-#[cfg(feature = "optimism")]
 pub use tx_type::DEPOSIT_TX_TYPE_ID;
 #[cfg(any(test, feature = "reth-codec"))]
 use tx_type::{
     COMPACT_EXTENDED_IDENTIFIER_FLAG, COMPACT_IDENTIFIER_EIP1559, COMPACT_IDENTIFIER_EIP2930,
     COMPACT_IDENTIFIER_LEGACY,
 };
-
-#[cfg(test)]
-use reth_codecs::Compact;
 
 use alloc::vec::Vec;
 
@@ -136,6 +131,31 @@ pub enum Transaction {
     /// Optimism deposit transaction.
     #[cfg(feature = "optimism")]
     Deposit(TxDeposit),
+}
+
+#[cfg(feature = "optimism")]
+impl DepositTransaction for Transaction {
+    fn source_hash(&self) -> Option<B256> {
+        match self {
+            Self::Deposit(tx) => tx.source_hash(),
+            _ => None,
+        }
+    }
+    fn mint(&self) -> Option<u128> {
+        match self {
+            Self::Deposit(tx) => tx.mint(),
+            _ => None,
+        }
+    }
+    fn is_system_transaction(&self) -> bool {
+        match self {
+            Self::Deposit(tx) => tx.is_system_transaction(),
+            _ => false,
+        }
+    }
+    fn is_deposit(&self) -> bool {
+        matches!(self, Self::Deposit(_))
+    }
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
@@ -299,7 +319,7 @@ impl Transaction {
     /// transaction.
     ///
     /// This is the number of blobs times the
-    /// [`DATA_GAS_PER_BLOB`](crate::constants::eip4844::DATA_GAS_PER_BLOB) a single blob consumes.
+    /// [`DATA_GAS_PER_BLOB`](alloy_eips::eip4844::DATA_GAS_PER_BLOB) a single blob consumes.
     pub fn blob_gas_used(&self) -> Option<u64> {
         self.as_eip4844().map(TxEip4844::blob_gas)
     }
@@ -361,42 +381,6 @@ impl Transaction {
             #[cfg(feature = "optimism")]
             Self::Deposit(TxDeposit { input, .. }) => input,
         }
-    }
-
-    /// Returns the source hash of the transaction, which uniquely identifies its source.
-    /// If not a deposit transaction, this will always return `None`.
-    #[cfg(feature = "optimism")]
-    pub const fn source_hash(&self) -> Option<B256> {
-        match self {
-            Self::Deposit(TxDeposit { source_hash, .. }) => Some(*source_hash),
-            _ => None,
-        }
-    }
-
-    /// Returns the amount of ETH locked up on L1 that will be minted on L2. If the transaction
-    /// is not a deposit transaction, this will always return `None`.
-    #[cfg(feature = "optimism")]
-    pub const fn mint(&self) -> Option<u128> {
-        match self {
-            Self::Deposit(TxDeposit { mint, .. }) => *mint,
-            _ => None,
-        }
-    }
-
-    /// Returns whether or not the transaction is a system transaction. If the transaction
-    /// is not a deposit transaction, this will always return `false`.
-    #[cfg(feature = "optimism")]
-    pub const fn is_system_transaction(&self) -> bool {
-        match self {
-            Self::Deposit(TxDeposit { is_system_transaction, .. }) => *is_system_transaction,
-            _ => false,
-        }
-    }
-
-    /// Returns whether or not the transaction is an Optimism Deposited transaction.
-    #[cfg(feature = "optimism")]
-    pub const fn is_deposit(&self) -> bool {
-        matches!(self, Self::Deposit(_))
     }
 
     /// This encodes the transaction _without_ the signature, and is only suitable for creating a
@@ -651,10 +635,12 @@ impl reth_codecs::Compact for Transaction {
                         let (tx, buf) = TxDeposit::from_compact(buf, buf.len());
                         (Self::Deposit(tx), buf)
                     }
-                    _ => unreachable!("Junk data in database: unknown Transaction variant"),
+                    _ => unreachable!(
+                        "Junk data in database: unknown Transaction variant: {identifier}"
+                    ),
                 }
             }
-            _ => unreachable!("Junk data in database: unknown Transaction variant"),
+            _ => unreachable!("Junk data in database: unknown Transaction variant: {identifier}"),
         }
     }
 }
@@ -955,7 +941,7 @@ impl TransactionSignedNoHash {
             // transactions with an empty signature
             //
             // NOTE: this is very hacky and only relevant for op-mainnet pre bedrock
-            if self.is_legacy() && self.signature == optimism_deposit_tx_signature() {
+            if self.is_legacy() && self.signature == TxDeposit::signature() {
                 return Some(Address::ZERO)
             }
         }
@@ -1530,7 +1516,7 @@ impl Decodable2718 for TransactionSigned {
             #[cfg(feature = "optimism")]
             TxType::Deposit => Ok(Self::from_transaction_and_signature(
                 Transaction::Deposit(TxDeposit::decode(buf)?),
-                optimism_deposit_tx_signature(),
+                TxDeposit::signature(),
             )),
         }
     }
@@ -1575,8 +1561,7 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
         }
 
         #[cfg(feature = "optimism")]
-        let signature =
-            if transaction.is_deposit() { optimism_deposit_tx_signature() } else { signature };
+        let signature = if transaction.is_deposit() { TxDeposit::signature() } else { signature };
 
         Ok(Self::from_transaction_and_signature(transaction, signature))
     }

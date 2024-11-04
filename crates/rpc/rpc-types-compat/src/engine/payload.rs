@@ -9,7 +9,8 @@ use alloy_eips::{
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types_engine::{
     payload::{ExecutionPayloadBodyV1, ExecutionPayloadFieldV2, ExecutionPayloadInputV2},
-    ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, PayloadError,
+    ExecutionPayload, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV2,
+    ExecutionPayloadV3, PayloadError,
 };
 use reth_primitives::{
     proofs::{self},
@@ -248,17 +249,18 @@ pub fn convert_block_to_payload_input_v2(value: SealedBlock) -> ExecutionPayload
     }
 }
 
-/// Tries to create a new block (without a block hash) from the given payload and optional parent
-/// beacon block root.
+/// Tries to create a new unsealed block from the given payload and payload sidecar.
+///
 /// Performs additional validation of `extra_data` and `base_fee_per_gas` fields.
 ///
-/// NOTE: The log bloom is assumed to be validated during serialization.
+/// # Note
+///
+/// The log bloom is assumed to be validated during serialization.
 ///
 /// See <https://github.com/ethereum/go-ethereum/blob/79a478bb6176425c2400e949890e668a3d9a3d05/core/beacon/types.go#L145>
 pub fn try_into_block(
     value: ExecutionPayload,
-    parent_beacon_block_root: Option<B256>,
-    execution_requests: Option<Requests>,
+    sidecar: &ExecutionPayloadSidecar,
 ) -> Result<Block, PayloadError> {
     let mut base_payload = match value {
         ExecutionPayload::V1(payload) => try_payload_v1_to_block(payload)?,
@@ -266,29 +268,30 @@ pub fn try_into_block(
         ExecutionPayload::V3(payload) => try_payload_v3_to_block(payload)?,
     };
 
-    base_payload.header.parent_beacon_block_root = parent_beacon_block_root;
-    base_payload.header.requests_hash = execution_requests.map(|reqs| reqs.requests_hash());
+    base_payload.header.parent_beacon_block_root = sidecar.parent_beacon_block_root();
+    base_payload.header.requests_hash = sidecar.requests().map(Requests::requests_hash);
 
     Ok(base_payload)
 }
 
-/// Tries to create a new block from the given payload and optional parent beacon block root.
-///
-/// NOTE: Empty ommers, nonce and difficulty values are validated upon computing block hash and
-/// comparing the value with `payload.block_hash`.
+/// Tries to create a sealed new block from the given payload and payload sidecar.
 ///
 /// Uses [`try_into_block`] to convert from the [`ExecutionPayload`] to [`Block`] and seals the
 /// block with its hash.
 ///
 /// Uses [`validate_block_hash`] to validate the payload block hash and ultimately return the
 /// [`SealedBlock`].
+///
+/// # Note
+///
+/// Empty ommers, nonce, difficulty, and execution request values are validated upon computing block
+/// hash and comparing the value with `payload.block_hash`.
 pub fn try_into_sealed_block(
     payload: ExecutionPayload,
-    parent_beacon_block_root: Option<B256>,
-    execution_requests: Option<Requests>,
+    sidecar: &ExecutionPayloadSidecar,
 ) -> Result<SealedBlock, PayloadError> {
     let block_hash = payload.block_hash();
-    let base_payload = try_into_block(payload, parent_beacon_block_root, execution_requests)?;
+    let base_payload = try_into_block(payload, sidecar)?;
 
     // validate block hash and return
     validate_block_hash(block_hash, base_payload)
@@ -356,8 +359,8 @@ mod tests {
     };
     use alloy_primitives::{b256, hex, Bytes, U256};
     use alloy_rpc_types_engine::{
-        CancunPayloadFields, ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2,
-        ExecutionPayloadV3,
+        CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ExecutionPayloadV1,
+        ExecutionPayloadV2, ExecutionPayloadV3,
     };
 
     #[test]
@@ -575,8 +578,7 @@ mod tests {
         let cancun_fields = CancunPayloadFields { parent_beacon_block_root, versioned_hashes };
 
         // convert into block
-        let block =
-            try_into_block(payload, Some(cancun_fields.parent_beacon_block_root), None).unwrap();
+        let block = try_into_block(payload, &ExecutionPayloadSidecar::v3(cancun_fields)).unwrap();
 
         // Ensure the actual hash is calculated if we set the fields to what they should be
         validate_block_hash(block_hash_with_blob_fee_fields, block).unwrap();

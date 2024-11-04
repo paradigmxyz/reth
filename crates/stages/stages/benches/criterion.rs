@@ -2,12 +2,11 @@
 use criterion::{criterion_main, measurement::WallTime, BenchmarkGroup, Criterion};
 #[cfg(not(target_os = "windows"))]
 use pprof::criterion::{Output, PProfProfiler};
-use reth_chainspec::ChainSpec;
 use reth_config::config::{EtlConfig, TransactionLookupConfig};
 use reth_db::{test_utils::TempDatabase, Database, DatabaseEnv};
 
 use alloy_primitives::BlockNumber;
-use reth_provider::{DatabaseProvider, DatabaseProviderFactory};
+use reth_provider::{test_utils::MockNodeTypesWithDB, DatabaseProvider, DatabaseProviderFactory};
 use reth_stages::{
     stages::{MerkleStage, SenderRecoveryStage, TransactionLookupStage},
     test_utils::TestStageDB,
@@ -148,7 +147,8 @@ fn measure_stage<F, S>(
     block_interval: RangeInclusive<BlockNumber>,
     label: String,
 ) where
-    S: Clone + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, ChainSpec>>,
+    S: Clone
+        + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, MockNodeTypesWithDB>>,
     F: Fn(S, &TestStageDB, StageRange),
 {
     let stage_range = (

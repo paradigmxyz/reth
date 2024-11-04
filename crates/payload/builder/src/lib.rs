@@ -65,7 +65,7 @@
 //!         },
 //!         ..Default::default()
 //!     };
-//!     let payload = EthBuiltPayload::new(self.attributes.id, payload.seal_slow(), U256::ZERO, None);
+//!     let payload = EthBuiltPayload::new(self.attributes.id, payload.seal_slow(), U256::ZERO, None, None);
 //!     Ok(payload)
 //! }
 //!
@@ -101,7 +101,6 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-pub mod database;
 mod metrics;
 mod service;
 mod traits;

@@ -453,7 +453,7 @@ impl IntoIterator for ChainBlocks<'_> {
 }
 
 /// Used to hold receipts and their attachment.
-#[derive(Default, Clone, Debug)]
+#[derive(Default, Clone, Debug, PartialEq, Eq)]
 pub struct BlockReceipts {
     /// Block identifier
     pub block: BlockNumHash,

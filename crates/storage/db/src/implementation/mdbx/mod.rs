@@ -23,7 +23,7 @@ use reth_libmdbx::{
 use reth_storage_errors::db::LogLevel;
 use reth_tracing::tracing::error;
 use std::{
-    ops::Deref,
+    ops::{Deref, Range},
     path::Path,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
@@ -33,8 +33,14 @@ use tx::Tx;
 pub mod cursor;
 pub mod tx;
 
-const GIGABYTE: usize = 1024 * 1024 * 1024;
-const TERABYTE: usize = GIGABYTE * 1024;
+/// 1 KB in bytes
+pub const KILOBYTE: usize = 1024;
+/// 1 MB in bytes
+pub const MEGABYTE: usize = KILOBYTE * 1024;
+/// 1 GB in bytes
+pub const GIGABYTE: usize = MEGABYTE * 1024;
+/// 1 TB in bytes
+pub const TERABYTE: usize = GIGABYTE * 1024;
 
 /// MDBX allows up to 32767 readers (`MDBX_READERS_LIMIT`), but we limit it to slightly below that
 const DEFAULT_MAX_READERS: u64 = 32_000;
@@ -64,6 +70,8 @@ impl DatabaseEnvKind {
 pub struct DatabaseArguments {
     /// Client version that accesses the database.
     client_version: ClientVersion,
+    /// Database geometry settings.
+    geometry: Geometry<Range<usize>>,
     /// Database log level. If [None], the default value is used.
     log_level: Option<LogLevel>,
     /// Maximum duration of a read transaction. If [None], the default value is used.
@@ -93,13 +101,35 @@ pub struct DatabaseArguments {
 
 impl DatabaseArguments {
     /// Create new database arguments with given client version.
-    pub const fn new(client_version: ClientVersion) -> Self {
+    pub fn new(client_version: ClientVersion) -> Self {
         Self {
             client_version,
+            geometry: Geometry {
+                size: Some(0..(4 * TERABYTE)),
+                growth_step: Some(4 * GIGABYTE as isize),
+                shrink_threshold: Some(0),
+                page_size: Some(PageSize::Set(default_page_size())),
+            },
             log_level: None,
             max_read_transaction_duration: None,
             exclusive: None,
         }
+    }
+
+    /// Sets the upper size limit of the db environment, the maximum database size in bytes.
+    pub const fn with_geometry_max_size(mut self, max_size: Option<usize>) -> Self {
+        if let Some(max_size) = max_size {
+            self.geometry.size = Some(0..max_size);
+        }
+        self
+    }
+
+    /// Configures the database growth step in bytes.
+    pub const fn with_growth_step(mut self, growth_step: Option<usize>) -> Self {
+        if let Some(growth_step) = growth_step {
+            self.geometry.growth_step = Some(growth_step as isize);
+        }
+        self
     }
 
     /// Set the log level.
@@ -278,15 +308,7 @@ impl DatabaseEnv {
         // environment creation.
         debug_assert!(Tables::ALL.len() <= 256, "number of tables exceed max dbs");
         inner_env.set_max_dbs(256);
-        inner_env.set_geometry(Geometry {
-            // Maximum database size of 4 terabytes
-            size: Some(0..(4 * TERABYTE)),
-            // We grow the database in increments of 4 gigabytes
-            growth_step: Some(4 * GIGABYTE as isize),
-            // The database never shrinks
-            shrink_threshold: Some(0),
-            page_size: Some(PageSize::Set(default_page_size())),
-        });
+        inner_env.set_geometry(args.geometry);
 
         fn is_current_process(id: u32) -> bool {
             #[cfg(unix)]

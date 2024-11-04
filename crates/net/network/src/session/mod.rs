@@ -5,6 +5,7 @@ mod conn;
 mod counter;
 mod handle;
 
+use active::QueuedOutgoingMessages;
 pub use conn::EthRlpxConnection;
 pub use handle::{
     ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
@@ -495,7 +496,9 @@ impl SessionManager {
                     internal_request_tx: ReceiverStream::new(messages_rx).fuse(),
                     inflight_requests: Default::default(),
                     conn,
-                    queued_outgoing: Default::default(),
+                    queued_outgoing: QueuedOutgoingMessages::new(
+                        self.metrics.queued_outgoing_messages.clone(),
+                    ),
                     received_requests_from_remote: Default::default(),
                     internal_request_timeout_interval: tokio::time::interval(
                         self.initial_internal_request_timeout,
@@ -868,7 +871,7 @@ async fn authenticate(
     extra_handlers: RlpxSubProtocolHandlers,
 ) {
     let local_addr = stream.local_addr().ok();
-    let stream = match get_eciess_stream(stream, secret_key, direction).await {
+    let stream = match get_ecies_stream(stream, secret_key, direction).await {
         Ok(stream) => stream,
         Err(error) => {
             let _ = events
@@ -917,7 +920,7 @@ async fn authenticate(
 
 /// Returns an [`ECIESStream`] if it can be built. If not, send a
 /// [`PendingSessionEvent::EciesAuthError`] and returns `None`
-async fn get_eciess_stream<Io: AsyncRead + AsyncWrite + Unpin>(
+async fn get_ecies_stream<Io: AsyncRead + AsyncWrite + Unpin>(
     stream: Io,
     secret_key: SecretKey,
     direction: Direction,

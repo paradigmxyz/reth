@@ -18,6 +18,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 pub use reth_codecs_derive::*;
+use serde as _;
 
 use alloy_primitives::{Address, Bloom, Bytes, FixedBytes, U256};
 use bytes::{Buf, BufMut};
@@ -25,6 +26,10 @@ use bytes::{Buf, BufMut};
 extern crate alloc;
 use alloc::vec::Vec;
 
+#[cfg(feature = "test-utils")]
+pub mod alloy;
+
+#[cfg(not(feature = "test-utils"))]
 #[cfg(any(test, feature = "alloy"))]
 mod alloy;
 
@@ -657,7 +662,8 @@ mod tests {
     }
 
     #[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Compact, arbitrary::Arbitrary)]
-    #[add_arbitrary_tests(compact)]
+    #[add_arbitrary_tests(crate, compact)]
+    #[reth_codecs(crate = "crate")]
     struct TestStruct {
         f_u64: u64,
         f_u256: U256,
@@ -709,7 +715,8 @@ mod tests {
     #[derive(
         Debug, PartialEq, Clone, Default, Serialize, Deserialize, Compact, arbitrary::Arbitrary,
     )]
-    #[add_arbitrary_tests(compact)]
+    #[add_arbitrary_tests(crate, compact)]
+    #[reth_codecs(crate = "crate")]
     enum TestEnum {
         #[default]
         Var0,
