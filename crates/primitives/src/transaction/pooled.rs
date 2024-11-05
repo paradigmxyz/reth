@@ -6,10 +6,9 @@ use super::{
     signature::{recover_signer, with_eip155_parity},
     TxEip7702,
 };
-use crate::{
-    BlobTransaction, BlobTransactionSidecar, Transaction, TransactionSigned,
-    TransactionSignedEcRecovered,
-};
+use crate::{BlobTransaction, Transaction, TransactionSigned, TransactionSignedEcRecovered};
+use alloy_eips::eip4844::BlobTransactionSidecar;
+
 use alloy_consensus::{
     constants::EIP4844_TX_TYPE_ID,
     transaction::{TxEip1559, TxEip2930, TxEip4844, TxLegacy},
@@ -546,7 +545,7 @@ impl<'a> arbitrary::Arbitrary<'a> for PooledTransactionsElement {
         match Self::try_from(tx_signed) {
             Ok(Self::BlobTransaction(mut tx)) => {
                 // Successfully converted to a BlobTransaction, now generate a sidecar.
-                tx.transaction.sidecar = crate::BlobTransactionSidecar::arbitrary(u)?;
+                tx.transaction.sidecar = alloy_eips::eip4844::BlobTransactionSidecar::arbitrary(u)?;
                 Ok(Self::BlobTransaction(tx))
             }
             Ok(tx) => Ok(tx), // Successfully converted, but not a BlobTransaction.
