@@ -145,9 +145,12 @@ impl ExecutorMetrics {
 mod tests {
     use super::*;
     use alloy_eips::eip7685::Requests;
-    use metrics_util::debugging::{DebuggingRecorder, Snapshotter};
+    use metrics_util::debugging::{DebugValue, DebuggingRecorder, Snapshotter};
     use revm::db::BundleState;
-    use revm_primitives::{EvmState, ExecutionResult};
+    use revm_primitives::{
+        Account, AccountInfo, AccountStatus, Bytes, EvmState, EvmStorage, EvmStorageSlot,
+        ExecutionResult, Output, SuccessReason, B256, U256,
+    };
     use std::sync::mpsc;
 
     /// A mock executor that simulates state changes
@@ -239,31 +242,52 @@ mod tests {
         let state_hook = Box::new(ChannelStateHook { sender: tx, output: expected_output });
 
         let result_and_state = ResultAndState {
-            result: ExecutionResult::Revert { gas_used: 0, output: Default::default() },
-            state: EvmState::default(),
+            result: ExecutionResult::Success {
+                reason: SuccessReason::Stop,
+                gas_used: 100,
+                output: Output::Call(Bytes::default()),
+                logs: vec![],
+                gas_refunded: 0,
+            },
+            state: {
+                let mut state = EvmState::default();
+                let storage =
+                    EvmStorage::from_iter([(U256::from(1), EvmStorageSlot::new(U256::from(2)))]);
+                state.insert(
+                    Default::default(),
+                    Account {
+                        info: AccountInfo {
+                            balance: U256::from(100),
+                            nonce: 10,
+                            code_hash: B256::random(),
+                            code: Default::default(),
+                        },
+                        storage,
+                        status: AccountStatus::Loaded,
+                    },
+                );
+                state
+            },
         };
         let executor = MockExecutor { result_and_state };
         let _result = metrics.execute_metered(executor, input, state_hook).unwrap();
 
-        let _snapshot = snapshotter.snapshot().into_vec();
-        /*
-            assert!(
-                snapshot.get(&"sync.execution.accounts_loaded_histogram").unwrap().unwrap() > 0,
-                "accounts loaded histogram should have records"
-            );
-            assert!(
-                snapshot.get(&"sync.execution.storage_slots_loaded_histogram").unwrap().unwrap() > 0,
-                "storage slots loaded histogram should have records"
-            );
-            assert!(
-                snapshot.get(&"sync.execution.bytecodes_loaded_histogram").unwrap().unwrap() > 0,
-                "bytecodes loaded histogram should have records"
-            );
-            assert!(
-                snapshot.get(&"sync.execution.gas_processed_total").unwrap() > 0,
-                "gas processed counter should have records"
-        );
-            */
+        let snapshot = snapshotter.snapshot().into_vec();
+
+        for metric in snapshot {
+            let metric_name = metric.0.key().name();
+            if metric_name == "sync.execution.accounts_loaded_histogram" ||
+                metric_name == "sync.execution.storage_slots_loaded_histogram" ||
+                metric_name == "sync.execution.bytecodes_loaded_histogram"
+            {
+                if let DebugValue::Histogram(vs) = metric.3 {
+                    assert!(
+                        vs.iter().any(|v| v.into_inner() > 0.0),
+                        "metric {metric_name} not recorded"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
