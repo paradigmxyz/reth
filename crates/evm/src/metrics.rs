@@ -145,10 +145,10 @@ impl ExecutorMetrics {
 mod tests {
     use super::*;
     use alloy_eips::eip7685::Requests;
-    use metrics_util::debugging::DebuggingRecorder;
+    use metrics_util::debugging::{DebuggingRecorder, Snapshotter};
     use revm::db::BundleState;
     use revm_primitives::{EvmState, ExecutionResult};
-    use std::sync::{mpsc, Arc};
+    use std::sync::mpsc;
 
     /// A mock executor that simulates state changes
     struct MockExecutor {
@@ -217,15 +217,16 @@ mod tests {
         }
     }
 
-    fn setup_test_recorder() -> DebuggingRecorder {
+    fn setup_test_recorder() -> Snapshotter {
         let recorder = DebuggingRecorder::new();
-        recorder.install();
-        recorder
+        let snapshotter = recorder.snapshotter();
+        recorder.install().unwrap();
+        snapshotter
     }
 
     #[test]
     fn test_executor_metrics_hook_metrics_recorded() {
-        let recorder = setup_test_recorder();
+        let snapshotter = setup_test_recorder();
         let metrics = ExecutorMetrics::default();
 
         let input = BlockExecutionInput {
@@ -244,7 +245,7 @@ mod tests {
         let executor = MockExecutor { result_and_state };
         let _result = metrics.execute_metered(executor, input, state_hook).unwrap();
 
-        let snapshot = recorder.snapshotter().snapshot().into_hashmap();
+        let _snapshot = snapshotter.snapshot().into_vec();
         /*
             assert!(
                 snapshot.get(&"sync.execution.accounts_loaded_histogram").unwrap().unwrap() > 0,
