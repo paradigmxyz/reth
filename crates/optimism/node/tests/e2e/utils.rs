@@ -13,7 +13,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 /// Optimism Node Helper type
-pub(crate) type OpNode = NodeHelperType<OpNode, OptimismAddOns<Adapter<OpNode>>>;
+pub(crate) type OpNode = NodeHelperType<OtherOpNode, OptimismAddOns<Adapter<OtherOpNode>>>;
 
 pub(crate) async fn setup(num_nodes: usize) -> eyre::Result<(Vec<OpNode>, TaskManager, Wallet)> {
     let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
