@@ -22,7 +22,7 @@ pub(crate) struct StateRootHandle {
 impl StateRootHandle {
     /// Waits for the state root calculation to complete.
     #[allow(dead_code)]
-    pub(crate) async fn wait_result(self) -> StateRootResult {
+    pub(crate) fn wait_result(self) -> StateRootResult {
         self.rx.recv().expect("state root task was dropped without sending result")
     }
 }
