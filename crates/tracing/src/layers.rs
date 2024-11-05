@@ -108,10 +108,14 @@ impl Layers {
         Ok(guard)
     }
 
-    /// Adds an OpenTelemetry layer to the layers collection.
+    /// Adds an `OpenTelemetry` layer to the layers collection.
     ///
     /// # Arguments
-    /// * `otlp` - The OpenTelemetry configuration.
+    /// * `otlp` - The `OpenTelemetry` configuration.
+    ///
+    /// # Returns
+    /// An `eyre::Result<()>` indicating the success or failure of the
+    /// operation.
     #[cfg(feature = "opentelemetry")]
     pub(crate) fn otlp(&mut self, otlp: crate::OtlpConfig) -> eyre::Result<()> {
         use opentelemetry::trace::TracerProvider;
