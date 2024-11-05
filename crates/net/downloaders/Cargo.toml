@@ -80,11 +80,14 @@ tempfile.workspace = true
 
 [features]
 optimism = [
-    "reth-primitives/optimism",
-    "dep:alloy-consensus",
-    "dep:derive_more",
-    "dep:serde",
-    "dep:op-alloy-consensus"
+	"reth-primitives/optimism",
+	"dep:alloy-consensus",
+	"dep:derive_more",
+	"dep:serde",
+	"dep:op-alloy-consensus",
+	"reth-db?/optimism",
+	"reth-db-api?/optimism",
+	"reth-provider/optimism"
 ]
 
 test-utils = [
