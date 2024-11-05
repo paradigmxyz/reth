@@ -589,7 +589,7 @@ where
             if listener.kind.is_propagate_only() && !event.transaction.propagate {
                 // only emit this hash to listeners that are only allowed to receive propagate only
                 // transactions, such as network
-                return !listener.sender.is_closed();
+                return !listener.sender.is_closed()
             }
 
             listener.send(event.clone())
@@ -727,7 +727,7 @@ where
         hashes: Vec<TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         if hashes.is_empty() {
-            return Vec::new();
+            return Vec::new()
         }
         let removed = self.pool.write().remove_transactions_and_descendants(hashes);
 
