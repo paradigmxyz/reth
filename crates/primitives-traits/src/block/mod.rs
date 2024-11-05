@@ -6,8 +6,14 @@ use alloc::{fmt, vec::Vec};
 
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{Address, Sealable, B256};
+use reth_codecs::Compact;
 
 use crate::BlockBody;
+
+/// Helper trait that unifies all behaviour required by block to support full node operations.
+pub trait FullBlock: Block<Header: Compact> + Compact {}
+
+impl<T> FullBlock for T where T: Block<Header: Compact> + Compact {}
 
 /// Helper trait, unifies behaviour required of a block header.
 pub trait Header: BlockHeader + Sealable {}
