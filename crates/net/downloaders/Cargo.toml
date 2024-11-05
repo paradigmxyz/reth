@@ -27,6 +27,7 @@ reth-db-api = { workspace = true, optional = true }
 reth-testing-utils = { workspace = true, optional = true }
 
 # ethereum
+alloy-consensus = { workspace = true, optional = true }
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
@@ -44,9 +45,17 @@ reth-metrics.workspace = true
 metrics.workspace = true
 
 # misc
-tracing.workspace = true
+derive_more = { workspace = true, optional = true }
 rayon.workspace = true
+serde = { workspace = true, optional = true }
 thiserror.workspace = true
+tracing.workspace = true
+
+# optimism
+op-alloy-consensus = { workspace = true, features = [
+	"arbitrary",
+	"serde",
+], optional = true }
 
 tempfile = { workspace = true, optional = true }
 itertools.workspace = true
@@ -70,6 +79,8 @@ rand.workspace = true
 tempfile.workspace = true
 
 [features]
+optimism = ["reth-primitives/optimism"]
+
 test-utils = [
 	"dep:tempfile",
 	"dep:reth-db-api",

@@ -21,7 +21,10 @@ use tracing::{debug, trace, warn};
 
 use crate::receipt_file_client::FromReceiptReader;
 
+#[cfg(not(feature = "optimism"))]
 use super::file_codec::BlockFileCodec;
+#[cfg(feature = "optimism")]
+use super::ovm_file_codec::OvmBlockFileCodec as BlockFileCodec;
 
 /// Default byte length of chunk to read from chain file.
 ///
