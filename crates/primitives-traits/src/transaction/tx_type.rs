@@ -1,7 +1,10 @@
+//! Abstraction of transaction type.
+
+use core::fmt::{Debug, Display};
+
 use alloy_eips::eip2718::Eip2718Error;
 use alloy_primitives::{U64, U8};
 use alloy_rlp::{Decodable, Encodable};
-use core::fmt::{Debug, Display};
 
 /// Trait representing the behavior of a transaction type.
 pub trait TxType:

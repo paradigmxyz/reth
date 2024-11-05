@@ -8,6 +8,7 @@ use reth_codecs::Compact;
 use serde::{Deserialize, Serialize};
 
 pub mod signed;
+pub mod tx_type;
 
 #[allow(dead_code)]
 /// Abstraction of a transaction.
