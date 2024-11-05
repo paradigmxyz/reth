@@ -25,7 +25,10 @@ pub mod receipt;
 pub use receipt::Receipt;
 
 pub mod transaction;
-pub use transaction::{signed::SignedTransaction, FullTransaction, Transaction};
+pub use transaction::{
+    signed::{FullSignedTx, SignedTransaction},
+    FullTransaction, Transaction,
+};
 
 mod integer_list;
 pub use integer_list::{IntegerList, IntegerListError};
