@@ -11,7 +11,7 @@ use alloy_eips::{
     eip2930::AccessList,
     eip7702::SignedAuthorization,
 };
-use alloy_primitives::{keccak256, Address, Bytes, ChainId, TxHash, TxKind, B256, U256};
+use alloy_primitives::{keccak256, Address, Bytes, ChainId, Signature, TxHash, TxKind, B256, U256};
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
 use core::mem;
 use derive_more::{AsRef, Deref};
@@ -36,9 +36,7 @@ pub use sidecar::BlobTransactionValidationError;
 pub use sidecar::{BlobTransaction, BlobTransactionSidecar};
 
 pub use compat::FillTxEnv;
-pub use signature::{
-    extract_chain_id, legacy_parity, recover_signer, recover_signer_unchecked, Signature,
-};
+pub use signature::{extract_chain_id, legacy_parity, recover_signer, recover_signer_unchecked};
 pub use tx_type::TxType;
 pub use variant::TransactionSignedVariant;
 
@@ -2016,12 +2014,14 @@ pub mod serde_bincode_compat {
 #[cfg(test)]
 mod tests {
     use crate::{
-        transaction::{signature::Signature, TxEip1559, TxKind, TxLegacy},
+        transaction::{TxEip1559, TxKind, TxLegacy},
         Transaction, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
     };
     use alloy_consensus::Transaction as _;
     use alloy_eips::eip2718::{Decodable2718, Encodable2718};
-    use alloy_primitives::{address, b256, bytes, hex, Address, Bytes, Parity, B256, U256};
+    use alloy_primitives::{
+        address, b256, bytes, hex, Address, Bytes, Parity, Signature, B256, U256,
+    };
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
     use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_codecs::Compact;
