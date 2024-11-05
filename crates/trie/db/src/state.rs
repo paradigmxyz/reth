@@ -218,7 +218,7 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
 impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostState {
     fn from_reverts(tx: &TX, from: BlockNumber) -> Result<Self, DatabaseError> {
         // Iterate over account changesets and record value before first occurring account change.
-        let mut accounts = HashMap::new();
+        let mut accounts = HashMap::default();
         let mut account_changesets_cursor = tx.cursor_read::<tables::AccountChangeSets>()?;
         for entry in account_changesets_cursor.walk_range(from..)? {
             let (_, AccountBeforeTx { address, info }) = entry?;
