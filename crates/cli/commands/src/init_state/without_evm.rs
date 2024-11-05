@@ -93,11 +93,13 @@ fn append_dummy_chain(
     let chunk_size = DEFAULT_BLOCKS_PER_STATIC_FILE;
 
     // Calculate chunk ranges
-    let chunks: Vec<_> = (1..=target_height)
+    let chunks: Vec<_> = (0..=target_height)
         .step_by(chunk_size as usize)
         .map(|start: u64| {
             let end = (start + chunk_size - 1).min(target_height);
-            start..=end
+            // If this chunk includes block 0, start from 1 instead
+            let actual_start = if start == 0 { 1 } else { start };
+            actual_start..=end
         })
         .collect();
 
