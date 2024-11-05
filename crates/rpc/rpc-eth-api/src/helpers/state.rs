@@ -30,7 +30,7 @@ pub trait EthState: LoadState + SpawnBlocking {
 
     /// Returns the number of transactions sent from an address at the given block identifier.
     ///
-    /// If this is [`BlockNumberOrTag::Pending`](reth_primitives::BlockNumberOrTag) then this will
+    /// If this is [`BlockNumberOrTag::Pending`](alloy_eips::BlockNumberOrTag) then this will
     /// look up the highest transaction in pool and return the next nonce (highest + 1).
     fn transaction_count(
         &self,
@@ -184,7 +184,7 @@ pub trait LoadState:
 
     /// Returns the state at the given [`BlockId`] enum.
     ///
-    /// Note: if not [`BlockNumberOrTag::Pending`](reth_primitives::BlockNumberOrTag) then this
+    /// Note: if not [`BlockNumberOrTag::Pending`](alloy_eips::BlockNumberOrTag) then this
     /// will only return canonical state. See also <https://github.com/paradigmxyz/reth/issues/4515>
     fn state_at_block_id(&self, at: BlockId) -> Result<StateProviderBox, Self::Error> {
         self.provider().state_by_block_id(at).map_err(Self::Error::from_eth_err)
@@ -302,7 +302,7 @@ pub trait LoadState:
 
     /// Returns the number of transactions sent from an address at the given block identifier.
     ///
-    /// If this is [`BlockNumberOrTag::Pending`](reth_primitives::BlockNumberOrTag) then this will
+    /// If this is [`BlockNumberOrTag::Pending`](alloy_eips::BlockNumberOrTag) then this will
     /// look up the highest transaction in pool and return the next nonce (highest + 1).
     fn transaction_count(
         &self,
