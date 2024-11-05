@@ -1498,7 +1498,8 @@ mod tests {
     use super::*;
     use alloy_consensus::{TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
     use alloy_eips::eip4844::DATA_GAS_PER_BLOB;
-    use reth_primitives::{Signature, TransactionSigned};
+    use alloy_primitives::Signature;
+    use reth_primitives::TransactionSigned;
 
     #[test]
     fn test_pool_size_invariants() {
