@@ -152,7 +152,6 @@ pub struct OtelArgs {
     /// "binary", or "json".
     ///
     /// Available only when compiled with the `opentelemetry` feature.
-
     #[arg(long = "otel.protocol", value_name = "PROTOCOL", global = true, default_value = "json")]
     pub protocol: reth_tracing::OtlpProtocols,
 
