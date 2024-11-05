@@ -464,8 +464,8 @@ mod tests {
     use super::*;
     use alloy_consensus::TxEip1559;
     use alloy_eips::eip2930::AccessList;
-    use alloy_primitives::{hex, Parity};
-    use reth_primitives::{public_key_to_address, Signature};
+    use alloy_primitives::{hex, Parity, Signature};
+    use reth_primitives::public_key_to_address;
     use std::str::FromStr;
 
     #[test]
