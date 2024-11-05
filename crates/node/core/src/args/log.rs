@@ -115,10 +115,13 @@ impl LogArgs {
 
         #[cfg(feature = "opentelemetry")]
         if self.otel.url.is_some() {
-            if let Ok(otel) = (&self.otel).try_into() {
-                tracer = tracer.with_otlp(otel);
-            } else {
-                tracing::warn!("Failed to parse otel config, skipping otel layer");
+            match self.otel.try_to_otlp_config() {
+                Ok(otel) => {
+                    tracer = tracer.with_otlp(otel);
+                }
+                Err(err) => {
+                    tracing::warn!(err, "Failed to parse otel config, skipping otel layer");
+                }
             }
         }
 
@@ -175,15 +178,14 @@ pub struct OtelArgs {
 }
 
 #[cfg(feature = "opentelemetry")]
-impl TryFrom<&OtelArgs> for reth_tracing::OtlpConfig {
-    type Error = &'static str;
-
-    fn try_from(value: &OtelArgs) -> Result<Self, Self::Error> {
-        Ok(Self {
-            url: value.url.clone().ok_or("no otel url specified via --otel.url")?,
-            protocol: value.protocol,
-            level: value.level.into(),
-            timeout: value.timeout,
+impl OtelArgs {
+    /// Create an `OtlpConfig` from these command line arguments options.
+    pub fn try_to_otlp_config(&self) -> Result<reth_tracing::OtlpConfig, &'static str> {
+        Ok(reth_tracing::OtlpConfig {
+            url: self.url.clone().ok_or("no otel url specified via --otel.url")?,
+            protocol: self.protocol,
+            level: self.level.into(),
+            timeout: self.timeout,
         })
     }
 }

@@ -67,13 +67,6 @@ use tracing::level_filters::LevelFilter;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-/// Placeholder to prevent annoying conditional compilation when feature is not
-/// enabled. This ensures we can keep the prop on the struct as a ZST, and
-/// avoid flagging it out of `new` and other constructor functions.
-#[cfg(not(feature = "opentelemetry"))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct OtlpConfig;
-
 ///  Tracer for application logging.
 ///
 ///  Manages the configuration and initialization of logging layers,
@@ -83,7 +76,7 @@ pub struct RethTracer {
     stdout: LayerInfo,
     journald: Option<String>,
     file: Option<(LayerInfo, FileInfo)>,
-    #[cfg_attr(not(feature = "opentelemetry"), allow(dead_code))]
+    #[cfg(feature = "opentelemetry")]
     otlp: Option<OtlpConfig>,
 }
 
@@ -93,7 +86,13 @@ impl RethTracer {
     ///  Initializes with default stdout layer configuration.
     ///  Journald and file layers are not set by default.
     pub fn new() -> Self {
-        Self { stdout: LayerInfo::default(), journald: None, file: None, otlp: None }
+        Self {
+            stdout: LayerInfo::default(),
+            journald: None,
+            file: None,
+            #[cfg(feature = "opentelemetry")]
+            otlp: None,
+        }
     }
 
     ///  Sets a custom configuration for the stdout layer.
