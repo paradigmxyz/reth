@@ -1,7 +1,7 @@
 //! Utilities for serving `eth_simulateV1`
 
 use alloy_consensus::{Transaction as _, TxEip4844Variant, TxType, TypedTransaction};
-use alloy_primitives::Parity;
+use alloy_primitives::{Parity, Signature};
 use alloy_rpc_types::{
     simulate::{SimCallResult, SimulateError, SimulatedBlock},
     Block, BlockTransactionsKind,
@@ -10,8 +10,7 @@ use alloy_rpc_types_eth::transaction::TransactionRequest;
 use jsonrpsee_types::ErrorObject;
 use reth_primitives::{
     proofs::{calculate_receipt_root, calculate_transaction_root},
-    BlockBody, BlockWithSenders, Receipt, Signature, Transaction, TransactionSigned,
-    TransactionSignedNoHash,
+    BlockBody, BlockWithSenders, Receipt, Transaction, TransactionSigned, TransactionSignedNoHash,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_server_types::result::rpc_err;
