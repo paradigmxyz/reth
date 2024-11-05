@@ -144,14 +144,16 @@ pub struct OtelArgs {
     #[arg(long = "otel.endpoint", value_name = "ENDPOINT", global = true)]
     pub url: Option<String>,
 
-    /// The protocol to use for sending spans and events. Values are "grpc", "binary", or "json".
+    /// The protocol to use for sending spans and events. Values are "grpc",
+    /// "binary", or "json".
     ///
     /// Available only when compiled with the `opentelemetry` feature.
 
     #[arg(long = "otel.protocol", value_name = "PROTOCOL", global = true, default_value = "json")]
     pub protocol: reth_tracing::OtlpProtocols,
 
-    /// The log level to use for the `OpenTelemetry` layer.
+    /// The log level to use for the `OpenTelemetry` layer. Values are
+    /// "trace", "debug", "info", "warn", and "error".
     ///
     /// Available only when compiled with the `opentelemetry` feature.
     #[arg(long = "otel.level", value_name = "LEVEL", global = true, default_value = "info")]

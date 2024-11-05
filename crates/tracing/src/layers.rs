@@ -129,7 +129,9 @@ impl Layers {
             .install_batch(opentelemetry_sdk::runtime::Tokio)?
             .tracer("reth");
 
-        let layer = tracing_opentelemetry::layer().with_tracer(tracer);
+        let layer = tracing_opentelemetry::layer()
+            .with_tracer(tracer)
+            .with_filter(tracing_subscriber::filter::LevelFilter::from(otlp.level));
 
         self.inner.push(Box::new(layer));
         Ok(())
