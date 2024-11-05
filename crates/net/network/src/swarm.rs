@@ -202,10 +202,12 @@ impl Swarm {
                         }
                         InboundConnectionError::ExceedsCapacity => {
                             trace!(target: "net", ?remote_addr, "No capacity for incoming connection");
+                            self.sessions.try_disconnect_incoming_connection(
+                                stream,
+                                DisconnectReason::TooManyPeers,
+                            );
                         }
                     }
-                    self.sessions
-                        .try_disconnect_incoming_connection(stream, DisconnectReason::TooManyPeers);
                     return None
                 }
 

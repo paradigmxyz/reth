@@ -395,6 +395,10 @@ impl SessionManager {
         let secret_key = self.secret_key;
 
         self.spawn(async move {
+            trace!(
+                target: "net::session",
+                "gracefully disconnecting incoming connection"
+            );
             if let Ok(stream) = get_ecies_stream(stream, secret_key, Direction::Incoming).await {
                 let mut unauth = UnauthedP2PStream::new(stream);
                 let _ = unauth.send_disconnect(reason).await;
