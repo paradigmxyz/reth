@@ -363,7 +363,7 @@ impl Transaction {
 
         // Check if max_fee_per_gas is less than base_fee
         if max_fee_per_gas < base_fee {
-            return None;
+            return None
         }
 
         // Calculate the difference between max_fee_per_gas and base_fee
@@ -912,7 +912,7 @@ impl TransactionSignedNoHash {
         // `from` address.
         #[cfg(feature = "optimism")]
         if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from);
+            return Some(from)
         }
 
         let signature_hash = self.signature_hash();
@@ -941,7 +941,7 @@ impl TransactionSignedNoHash {
         #[cfg(feature = "optimism")]
         {
             if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-                return Some(from);
+                return Some(from)
             }
 
             // pre bedrock system transactions were sent from the zero address as legacy
@@ -949,7 +949,7 @@ impl TransactionSignedNoHash {
             //
             // NOTE: this is very hacky and only relevant for op-mainnet pre bedrock
             if self.is_legacy() && self.signature == TxDeposit::signature() {
-                return Some(Address::ZERO);
+                return Some(Address::ZERO)
             }
         }
 
@@ -1154,7 +1154,7 @@ impl TransactionSigned {
         // `from` address.
         #[cfg(feature = "optimism")]
         if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from);
+            return Some(from)
         }
         let signature_hash = self.signature_hash();
         recover_signer(&self.signature, signature_hash)
@@ -1170,7 +1170,7 @@ impl TransactionSigned {
         // `from` address.
         #[cfg(feature = "optimism")]
         if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from);
+            return Some(from)
         }
         let signature_hash = self.signature_hash();
         recover_signer_unchecked(&self.signature, signature_hash)
@@ -1299,7 +1299,7 @@ impl TransactionSigned {
         let transaction_payload_len = header.payload_length;
 
         if transaction_payload_len > remaining_len {
-            return Err(RlpError::InputTooShort);
+            return Err(RlpError::InputTooShort)
         }
 
         let mut transaction = TxLegacy {
@@ -1317,7 +1317,7 @@ impl TransactionSigned {
         // check the new length, compared to the original length and the header length
         let decoded = remaining_len - data.len();
         if decoded != transaction_payload_len {
-            return Err(RlpError::UnexpectedLength);
+            return Err(RlpError::UnexpectedLength)
         }
 
         let tx_length = header.payload_length + header.length();
