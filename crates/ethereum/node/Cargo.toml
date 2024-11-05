@@ -59,6 +59,7 @@ alloy-signer.workspace = true
 alloy-eips.workspace = true
 alloy-sol-types.workspace = true
 alloy-contract.workspace = true
+alloy-rpc-types-beacon.workspace = true
 
 [features]
 default = []

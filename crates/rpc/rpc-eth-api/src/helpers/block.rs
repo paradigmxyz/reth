@@ -2,9 +2,10 @@
 
 use std::sync::Arc;
 
+use alloy_eips::BlockId;
 use alloy_rpc_types::{Header, Index};
 use futures::Future;
-use reth_primitives::{BlockId, Receipt, SealedBlock, SealedBlockWithSenders};
+use reth_primitives::{Receipt, SealedBlock, SealedBlockWithSenders};
 use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider};
 use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
 

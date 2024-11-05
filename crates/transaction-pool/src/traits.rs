@@ -249,16 +249,6 @@ pub trait TransactionPool: Send + Sync + Clone {
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>>;
 
     /// Returns an iterator that yields transactions that are ready for block production with the
-    /// given base fee.
-    ///
-    /// Consumer: Block production
-    #[deprecated(note = "Use best_transactions_with_attributes instead.")]
-    fn best_transactions_with_base_fee(
-        &self,
-        base_fee: u64,
-    ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>>;
-
-    /// Returns an iterator that yields transactions that are ready for block production with the
     /// given base fee and optional blob fee attributes.
     ///
     /// Consumer: Block production
@@ -352,6 +342,12 @@ pub trait TransactionPool: Send + Sync + Clone {
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
+    /// Returns all pending transactions filtered by predicate
+    fn get_pending_transactions_with_predicate(
+        &self,
+        predicate: impl FnMut(&ValidPoolTransaction<Self::Transaction>) -> bool,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
     /// Returns all pending transactions sent by a given user
     fn get_pending_transactions_by_sender(
         &self,
@@ -443,7 +439,10 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Returns the [BlobTransactionSidecar] for the given transaction hash if it exists in the blob
     /// store.
-    fn get_blob(&self, tx_hash: TxHash) -> Result<Option<BlobTransactionSidecar>, BlobStoreError>;
+    fn get_blob(
+        &self,
+        tx_hash: TxHash,
+    ) -> Result<Option<Arc<BlobTransactionSidecar>>, BlobStoreError>;
 
     /// Returns all [BlobTransactionSidecar] for the given transaction hashes if they exists in the
     /// blob store.
@@ -453,7 +452,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     fn get_all_blobs(
         &self,
         tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<(TxHash, BlobTransactionSidecar)>, BlobStoreError>;
+    ) -> Result<Vec<(TxHash, Arc<BlobTransactionSidecar>)>, BlobStoreError>;
 
     /// Returns the exact [BlobTransactionSidecar] for the given transaction hashes in the order
     /// they were requested.
@@ -462,7 +461,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     fn get_all_blobs_exact(
         &self,
         tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError>;
+    ) -> Result<Vec<Arc<BlobTransactionSidecar>>, BlobStoreError>;
 
     /// Return the [`BlobTransactionSidecar`]s for a list of blob versioned hashes.
     fn get_blobs_for_versioned_hashes(
@@ -1499,7 +1498,8 @@ mod tests {
     use super::*;
     use alloy_consensus::{TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
     use alloy_eips::eip4844::DATA_GAS_PER_BLOB;
-    use reth_primitives::{Signature, TransactionSigned};
+    use alloy_primitives::Signature;
+    use reth_primitives::TransactionSigned;
 
     #[test]
     fn test_pool_size_invariants() {

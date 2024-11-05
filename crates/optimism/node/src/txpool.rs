@@ -231,9 +231,8 @@ pub struct OpL1BlockInfo {
 mod tests {
     use crate::txpool::OpTransactionValidator;
     use alloy_eips::eip2718::Encodable2718;
-    use alloy_primitives::{TxKind, U256};
+    use alloy_primitives::{Signature, TxKind, U256};
     use op_alloy_consensus::TxDeposit;
-    use reth::primitives::Signature;
     use reth_chainspec::MAINNET;
     use reth_primitives::{Transaction, TransactionSigned, TransactionSignedEcRecovered};
     use reth_provider::test_utils::MockEthProvider;

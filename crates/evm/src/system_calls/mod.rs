@@ -1,7 +1,7 @@
 //! System contract call functions.
 
 use crate::ConfigureEvm;
-use alloc::{boxed::Box, vec};
+use alloc::{boxed::Box, sync::Arc, vec};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::Bytes;
 use core::fmt::Display;
@@ -46,7 +46,7 @@ impl OnStateHook for NoopHook {
 #[allow(missing_debug_implementations)]
 pub struct SystemCaller<EvmConfig, Chainspec> {
     evm_config: EvmConfig,
-    chain_spec: Chainspec,
+    chain_spec: Arc<Chainspec>,
     /// Optional hook to be called after each state change.
     hook: Option<Box<dyn OnStateHook>>,
 }
@@ -54,7 +54,7 @@ pub struct SystemCaller<EvmConfig, Chainspec> {
 impl<EvmConfig, Chainspec> SystemCaller<EvmConfig, Chainspec> {
     /// Create a new system caller with the given EVM config, database, and chain spec, and creates
     /// the EVM with the given initialized config and block environment.
-    pub const fn new(evm_config: EvmConfig, chain_spec: Chainspec) -> Self {
+    pub const fn new(evm_config: EvmConfig, chain_spec: Arc<Chainspec>) -> Self {
         Self { evm_config, chain_spec, hook: None }
     }
 

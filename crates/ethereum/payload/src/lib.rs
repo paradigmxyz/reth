@@ -73,7 +73,7 @@ where
         &self,
         config: &PayloadConfig<EthPayloadBuilderAttributes>,
         parent: &Header,
-    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), EvmConfig::Error> {
         let next_attributes = NextBlockEnvAttributes {
             timestamp: config.attributes.timestamp(),
             suggested_fee_recipient: config.attributes.suggested_fee_recipient(),
@@ -97,7 +97,9 @@ where
         &self,
         args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
     ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
-        let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_header);
+        let (cfg_env, block_env) = self
+            .cfg_and_block_env(&args.config, &args.config.parent_header)
+            .map_err(PayloadBuilderError::other)?;
 
         let pool = args.pool.clone();
         default_ethereum_payload(self.evm_config.clone(), args, cfg_env, block_env, |attributes| {
@@ -120,7 +122,9 @@ where
             None,
         );
 
-        let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_header);
+        let (cfg_env, block_env) = self
+            .cfg_and_block_env(&args.config, &args.config.parent_header)
+            .map_err(PayloadBuilderError::other)?;
 
         let pool = args.pool.clone();
 
@@ -157,7 +161,7 @@ where
     let state_provider = client.state_by_block_hash(config.parent_header.hash())?;
     let state = StateProviderDatabase::new(state_provider);
     let mut db =
-        State::builder().with_database_ref(cached_reads.as_db(state)).with_bundle_update().build();
+        State::builder().with_database(cached_reads.as_db_mut(state)).with_bundle_update().build();
     let PayloadConfig { parent_header, extra_data, attributes } = config;
 
     debug!(target: "payload_builder", id=%attributes.id, parent_header = ?parent_header.hash(), parent_number = parent_header.number, "building new payload");
@@ -368,8 +372,7 @@ where
     // calculate the state root
     let hashed_state = HashedPostState::from_bundle_state(&execution_outcome.state().state);
     let (state_root, trie_output) = {
-        let state_provider = db.database.0.inner.borrow_mut();
-        state_provider.db.state_root_with_updates(hashed_state.clone()).inspect_err(|err| {
+        db.database.inner().state_root_with_updates(hashed_state.clone()).inspect_err(|err| {
             warn!(target: "payload_builder",
                 parent_hash=%parent_header.hash(),
                 %err,
@@ -452,7 +455,7 @@ where
         EthBuiltPayload::new(attributes.id, sealed_block, total_fees, Some(executed), requests);
 
     // extend the payload with the blob sidecars from the executed txs
-    payload.extend_sidecars(blob_sidecars);
+    payload.extend_sidecars(blob_sidecars.into_iter().map(Arc::unwrap_or_clone));
 
     Ok(BuildOutcome::Better { payload, cached_reads })
 }

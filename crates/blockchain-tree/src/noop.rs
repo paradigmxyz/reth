@@ -60,18 +60,18 @@ impl BlockchainTreeEngine for NoopBlockchainTree {
         Ok(())
     }
 
+    fn update_block_hashes_and_clear_buffered(
+        &self,
+    ) -> Result<BTreeMap<BlockNumber, BlockHash>, CanonicalError> {
+        Ok(BTreeMap::new())
+    }
+
     fn connect_buffered_blocks_to_canonical_hashes(&self) -> Result<(), CanonicalError> {
         Ok(())
     }
 
     fn make_canonical(&self, block_hash: BlockHash) -> Result<CanonicalOutcome, CanonicalError> {
         Err(BlockchainTreeError::BlockHashNotFoundInChain { block_hash }.into())
-    }
-
-    fn update_block_hashes_and_clear_buffered(
-        &self,
-    ) -> Result<BTreeMap<BlockNumber, BlockHash>, CanonicalError> {
-        Ok(BTreeMap::new())
     }
 }
 

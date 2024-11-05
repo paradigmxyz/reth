@@ -1,4 +1,4 @@
-use alloy_eips::eip2718::Encodable2718;
+use alloy_eips::{eip2718::Encodable2718, BlockId};
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types::{
@@ -19,7 +19,7 @@ use reth_evm::{
     system_calls::SystemCaller,
     ConfigureEvmEnv,
 };
-use reth_primitives::{Block, BlockId, BlockNumberOrTag, TransactionSignedEcRecovered};
+use reth_primitives::{Block, BlockNumberOrTag, TransactionSignedEcRecovered};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProofProvider, StateProviderFactory,
     TransactionVariant,
@@ -98,6 +98,7 @@ where
         cfg: CfgEnvWithHandlerCfg,
         block_env: BlockEnv,
         opts: GethDebugTracingOptions,
+        parent_beacon_block_root: Option<B256>,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
         if transactions.is_empty() {
             // nothing to trace
@@ -111,6 +112,24 @@ where
                 let block_hash = at.as_block_hash();
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
+
+                // apply relevant system calls
+                SystemCaller::new(
+                    this.eth_api().evm_config().clone(),
+                    this.eth_api().provider().chain_spec(),
+                )
+                .pre_block_beacon_root_contract_call(
+                    &mut db,
+                    &cfg,
+                    &block_env,
+                    parent_beacon_block_root,
+                )
+                .map_err(|_| {
+                    EthApiError::EvmCustom(
+                        "failed to apply 4788 beacon root system call".to_string(),
+                    )
+                })?;
+
                 let mut transactions = transactions.into_iter().enumerate().peekable();
                 let mut inspector = None;
                 while let Some((index, tx)) = transactions.next() {
@@ -170,6 +189,9 @@ where
         // we trace on top the block's parent block
         let parent = block.parent_hash;
 
+        // we need the beacon block root for a system call
+        let parent_beacon_block_root = block.parent_beacon_block_root;
+
         // Depending on EIP-2 we need to recover the transactions differently
         let transactions =
             if self.inner.provider.chain_spec().is_homestead_active_at_block(block.number) {
@@ -196,7 +218,15 @@ where
                     .collect::<Result<Vec<_>, Eth::Error>>()?
             };
 
-        self.trace_block(parent.into(), transactions, cfg, block_env, opts).await
+        self.trace_block(
+            parent.into(),
+            transactions,
+            cfg,
+            block_env,
+            opts,
+            parent_beacon_block_root,
+        )
+        .await
     }
 
     /// Replays a block and returns the trace of each transaction.
@@ -228,6 +258,7 @@ where
             cfg,
             block_env,
             opts,
+            block.parent_beacon_block_root,
         )
         .await
     }
@@ -263,23 +294,21 @@ where
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
                 // apply relevant system calls
-                let mut system_caller = SystemCaller::new(
-                    RpcNodeCore::evm_config(this.eth_api()).clone(),
-                    RpcNodeCore::provider(this.eth_api()).chain_spec(),
-                );
-
-                system_caller
-                    .pre_block_beacon_root_contract_call(
-                        &mut db,
-                        &cfg,
-                        &block_env,
-                        parent_beacon_block_root,
+                SystemCaller::new(
+                    this.eth_api().evm_config().clone(),
+                    this.eth_api().provider().chain_spec(),
+                )
+                .pre_block_beacon_root_contract_call(
+                    &mut db,
+                    &cfg,
+                    &block_env,
+                    parent_beacon_block_root,
+                )
+                .map_err(|_| {
+                    EthApiError::EvmCustom(
+                        "failed to apply 4788 beacon root system call".to_string(),
                     )
-                    .map_err(|_| {
-                        EthApiError::EvmCustom(
-                            "failed to apply 4788 beacon root system call".to_string(),
-                        )
-                    })?;
+                })?;
 
                 // replay all transactions prior to the targeted transaction
                 let index = this.eth_api().replay_transactions_until(

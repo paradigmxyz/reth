@@ -34,8 +34,8 @@ pub mod transaction;
 #[cfg(any(test, feature = "arbitrary"))]
 pub use block::{generate_valid_header, valid_header_strategy};
 pub use block::{
-    Block, BlockBody, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, BlockWithSenders,
-    ForkBlock, RpcBlockHash, SealedBlock, SealedBlockWithSenders,
+    Block, BlockBody, BlockNumberOrTag, BlockWithSenders, ForkBlock, RpcBlockHash, SealedBlock,
+    SealedBlockWithSenders,
 };
 #[cfg(feature = "reth-codec")]
 pub use compression::*;
@@ -45,7 +45,7 @@ pub use receipt::{
 };
 pub use reth_primitives_traits::{
     logs_bloom, Account, Bytecode, GotExpected, GotExpectedBoxed, Header, HeaderError, Log,
-    LogData, SealedHeader, StorageEntry, Withdrawal, Withdrawals,
+    LogData, SealedHeader, StorageEntry, Withdrawals,
 };
 pub use static_file::StaticFileSegment;
 
@@ -59,7 +59,7 @@ pub use transaction::BlobTransactionValidationError;
 
 pub use transaction::{
     util::secp256k1::{public_key_to_address, recover_signer_unchecked, sign_message},
-    InvalidTransactionError, Signature, Transaction, TransactionMeta, TransactionSigned,
+    InvalidTransactionError, Transaction, TransactionMeta, TransactionSigned,
     TransactionSignedEcRecovered, TransactionSignedNoHash, TxHashOrNumber, TxType,
 };
 

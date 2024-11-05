@@ -15,7 +15,7 @@ use crate::{
     StaticFileProviderFactory, StatsReader, StorageReader, StorageTrieWriter, TransactionVariant,
     TransactionsProvider, TransactionsProviderExt, TrieWriter, WithdrawalsProvider,
 };
-use alloy_eips::BlockHashOrNumber;
+use alloy_eips::{eip4895::Withdrawal, BlockHashOrNumber};
 use alloy_primitives::{keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use itertools::{izip, Itertools};
 use rayon::slice::ParallelSliceMut;
@@ -43,7 +43,7 @@ use reth_primitives::{
     Account, Block, BlockBody, BlockWithSenders, Bytecode, GotExpected, Header, Receipt,
     SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, StorageEntry,
     TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
-    Withdrawal, Withdrawals,
+    Withdrawals,
 };
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -2055,17 +2055,17 @@ impl<TX: DbTx, N: NodeTypes> StageCheckpointReader for DatabaseProvider<TX, N> {
         Ok(self.tx.get::<tables::StageCheckpoints>(id.to_string())?)
     }
 
+    /// Get stage checkpoint progress.
+    fn get_stage_checkpoint_progress(&self, id: StageId) -> ProviderResult<Option<Vec<u8>>> {
+        Ok(self.tx.get::<tables::StageCheckpointProgresses>(id.to_string())?)
+    }
+
     fn get_all_checkpoints(&self) -> ProviderResult<Vec<(String, StageCheckpoint)>> {
         self.tx
             .cursor_read::<tables::StageCheckpoints>()?
             .walk(None)?
             .collect::<Result<Vec<(String, StageCheckpoint)>, _>>()
             .map_err(ProviderError::Database)
-    }
-
-    /// Get stage checkpoint progress.
-    fn get_stage_checkpoint_progress(&self, id: StageId) -> ProviderResult<Option<Vec<u8>>> {
-        Ok(self.tx.get::<tables::StageCheckpointProgresses>(id.to_string())?)
     }
 }
 
