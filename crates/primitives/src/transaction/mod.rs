@@ -31,8 +31,6 @@ pub use error::{
 };
 pub use meta::TransactionMeta;
 pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
-#[cfg(feature = "c-kzg")]
-pub use sidecar::BlobTransactionValidationError;
 pub use sidecar::{BlobTransaction, BlobTransactionSidecar};
 
 pub use compat::FillTxEnv;
