@@ -36,7 +36,9 @@ pub use sidecar::BlobTransactionValidationError;
 pub use sidecar::{BlobTransaction, BlobTransactionSidecar};
 
 pub use compat::FillTxEnv;
-pub use signature::{extract_chain_id, legacy_parity, recover_signer, recover_signer_unchecked};
+pub use signature::{
+    extract_chain_id, legacy_parity, recover_signer, recover_signer_unchecked, with_eip155_parity,
+};
 pub use tx_type::TxType;
 pub use variant::TransactionSignedVariant;
 
