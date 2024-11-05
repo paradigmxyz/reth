@@ -17,8 +17,7 @@ use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_primitives::{
     transaction::{
         signature::{recover_signer, recover_signer_unchecked, with_eip155_parity},
-        Transaction, TxType,
-        PARALLEL_SENDER_RECOVERY_THRESHOLD
+        Transaction, TxType, PARALLEL_SENDER_RECOVERY_THRESHOLD,
     },
     Signature, Withdrawals,
 };
