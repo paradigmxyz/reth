@@ -2190,21 +2190,19 @@ where
 
         let exec_time = Instant::now();
 
-        let (_state_root_tx, state_root_rx) = unbounded_channel();
+        let (state_root_tx, state_root_rx) = unbounded_channel();
         // TODO: create consistent_view using `new_with_latest_tip` when we
         // switch to `StateRootTask`.
         let consistent_view = ConsistentDbView::new(self.provider.clone(), None);
-        let _state_root_task = StateRootTask::new(
+        let state_root_task = StateRootTask::new(
             consistent_view,
             // TODO: calculate `TrieInput` like in `self.compute_state_root_parallel`.
             Arc::new(TrieInput::default()),
             UnboundedReceiverStream::new(state_root_rx),
         );
-        let state_hook = move |_result_and_state: &ResultAndState| {
-            // TODO: uncomment when we start using `StateRootTask`, otherwise
-            // the messages sent here would not be consumed and we would
-            // increase memory usage for no reason.
-            // let _ = state_root_tx.send(result_and_state.state.clone());
+        let state_root_handle = state_root_task.spawn();
+        let state_hook = move |result_and_state: &ResultAndState| {
+            let _ = state_root_tx.send(result_and_state.state.clone());
         };
 
         let output = self.metrics.executor.execute_metered(
@@ -2214,6 +2212,8 @@ where
         )?;
 
         trace!(target: "engine::tree", elapsed=?exec_time.elapsed(), ?block_number, "Executed block");
+
+        let _ = state_root_handle.wait_result();
         if let Err(err) = self.consensus.validate_block_post_execution(
             &block,
             PostExecutionInput::new(&output.receipts, &output.requests),
