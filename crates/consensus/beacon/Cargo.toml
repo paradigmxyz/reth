@@ -29,7 +29,7 @@ reth-engine-primitives.workspace = true
 reth-network-p2p.workspace = true
 reth-node-types.workspace = true
 reth-chainspec = { workspace = true, optional = true }
-reth-downloaders.workspace = true
+reth-downloaders = { workspace = true, optional = true }
 
 # ethereum
 alloy-primitives.workspace = true
@@ -79,11 +79,12 @@ assert_matches.workspace = true
 
 [features]
 optimism = [
+	"reth-blockchain-tree/optimism",
 	"reth-chainspec",
+	"reth-db-api/optimism",
+	"reth-db/optimism",
+	"reth-downloaders",
 	"reth-primitives/optimism",
 	"reth-provider/optimism",
-	"reth-blockchain-tree/optimism",
-	"reth-db/optimism",
-	"reth-db-api/optimism",
-	"reth-downloaders/optimism"
+	"reth-downloaders?/optimism"
 ]
