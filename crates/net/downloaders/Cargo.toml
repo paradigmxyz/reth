@@ -79,7 +79,13 @@ rand.workspace = true
 tempfile.workspace = true
 
 [features]
-optimism = ["reth-primitives/optimism"]
+optimism = [
+    "reth-primitives/optimism",
+    "dep:alloy-consensus",
+    "dep:derive_more",
+    "dep:serde",
+    "dep:op-alloy-consensus"
+]
 
 test-utils = [
 	"dep:tempfile",

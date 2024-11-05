@@ -27,7 +27,7 @@ pub mod commands;
 /// made for op-erigon's import needs).
 pub mod receipt_file_codec;
 
-/// OVM block, same as EVM [`Block`] at bedrock, except for signature of deposit transaction
+/// OVM block, same as EVM block at bedrock, except for signature of deposit transaction
 /// not having a signature back then.
 /// `pub mod ovm_file_codec`;
 /// Move back to net/downloader to avoid circular dependency
