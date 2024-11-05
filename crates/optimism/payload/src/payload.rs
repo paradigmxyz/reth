@@ -3,7 +3,10 @@
 //! Optimism builder support
 
 use crate::{builder::decode_eip_1559_params, error::EIP1559ParamError};
-use alloy_eips::{eip1559::BaseFeeParams, eip2718::Decodable2718, eip7685::Requests};
+use alloy_eips::{
+    eip1559::BaseFeeParams, eip2718::Decodable2718, eip4844::BlobTransactionSidecar,
+    eip7685::Requests,
+};
 use alloy_primitives::{keccak256, Address, Bytes, B256, B64, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadId};
@@ -15,9 +18,7 @@ use reth_chainspec::EthereumHardforks;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
-use reth_primitives::{
-    transaction::WithEncoded, BlobTransactionSidecar, SealedBlock, TransactionSigned, Withdrawals,
-};
+use reth_primitives::{transaction::WithEncoded, SealedBlock, TransactionSigned, Withdrawals};
 use reth_rpc_types_compat::engine::payload::{
     block_to_payload_v1, block_to_payload_v3, convert_block_to_payload_field_v2,
 };

@@ -1,9 +1,9 @@
-use alloy_primitives::U256;
+use alloy_primitives::{Signature as PrimitiveSignature, U256};
 use alloy_rpc_types::{Parity, Signature};
-use reth_primitives::{transaction::legacy_parity, Signature as PrimitiveSignature, TxType};
+use reth_primitives::{transaction::legacy_parity, TxType};
 
 /// Creates a new rpc signature from a legacy [primitive
-/// signature](reth_primitives::Signature), using the give chain id to compute the signature's
+/// signature](alloy_primitives::Signature), using the give chain id to compute the signature's
 /// recovery id.
 ///
 /// If the chain id is `Some`, the recovery id is computed according to [EIP-155](https://eips.ethereum.org/EIPS/eip-155).
@@ -20,7 +20,7 @@ pub fn from_legacy_primitive_signature(
 }
 
 /// Creates a new rpc signature from a non-legacy [primitive
-/// signature](reth_primitives::Signature). This sets the `v` value to `0` or `1` depending on
+/// signature](alloy_primitives::Signature). This sets the `v` value to `0` or `1` depending on
 /// the signature's `odd_y_parity`.
 pub fn from_typed_primitive_signature(signature: PrimitiveSignature) -> Signature {
     Signature {
@@ -32,7 +32,7 @@ pub fn from_typed_primitive_signature(signature: PrimitiveSignature) -> Signatur
 }
 
 /// Creates a new rpc signature from a legacy [primitive
-/// signature](reth_primitives::Signature).
+/// signature](alloy_primitives::Signature).
 ///
 /// The tx type is used to determine whether or not to use the `chain_id` to compute the
 /// signature's recovery id.

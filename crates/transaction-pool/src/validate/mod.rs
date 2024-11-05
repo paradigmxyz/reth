@@ -6,9 +6,10 @@ use crate::{
     traits::{PoolTransaction, TransactionOrigin},
     PriceBumpConfig,
 };
+use alloy_eips::eip4844::BlobTransactionSidecar;
 use alloy_primitives::{Address, TxHash, B256, U256};
 use futures_util::future::Either;
-use reth_primitives::{BlobTransactionSidecar, SealedBlock, TransactionSignedEcRecovered};
+use reth_primitives::{SealedBlock, TransactionSignedEcRecovered};
 use std::{fmt, future::Future, time::Instant};
 
 mod constants;
