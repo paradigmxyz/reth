@@ -42,24 +42,39 @@ use op_alloy_consensus::DepositTransaction;
 
 /// Optimism's payload builder
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OpPayloadBuilder<EvmConfig> {
+pub struct OpPayloadBuilder<EvmConfig, Txs = ()> {
     /// The rollup's compute pending block configuration option.
     // TODO(clabby): Implement this feature.
     pub compute_pending_block: bool,
     /// The type responsible for creating the evm.
     pub evm_config: EvmConfig,
+    /// The type responsible for yielding the best transactions for the payload if mempool
+    /// transactions are allowed.
+    pub best_transactions: Txs,
 }
 
 impl<EvmConfig> OpPayloadBuilder<EvmConfig> {
     /// `OpPayloadBuilder` constructor.
     pub const fn new(evm_config: EvmConfig) -> Self {
-        Self { compute_pending_block: true, evm_config }
+        Self { compute_pending_block: true, evm_config, best_transactions: () }
     }
+}
 
+impl<EvmConfig, Txs> OpPayloadBuilder<EvmConfig, Txs> {
     /// Sets the rollup's compute pending block configuration option.
     pub const fn set_compute_pending_block(mut self, compute_pending_block: bool) -> Self {
         self.compute_pending_block = compute_pending_block;
         self
+    }
+
+    /// Configures the type responsible for yielding the transactions that should be included in the
+    /// payload.
+    pub fn with_transactions<T: OpPayloadTransactions>(
+        self,
+        best_transactions: T,
+    ) -> OpPayloadBuilder<EvmConfig, T> {
+        let Self { compute_pending_block, evm_config, .. } = self;
+        OpPayloadBuilder { compute_pending_block, evm_config, best_transactions }
     }
 
     /// Enables the rollup's compute pending block configuration option.
@@ -72,9 +87,10 @@ impl<EvmConfig> OpPayloadBuilder<EvmConfig> {
         self.compute_pending_block
     }
 }
-impl<EvmConfig> OpPayloadBuilder<EvmConfig>
+impl<EvmConfig, Txs> OpPayloadBuilder<EvmConfig, Txs>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
+    Txs: OpPayloadTransactions,
 {
     /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the targeted payload
     /// (that has the `parent` as its parent).
@@ -123,12 +139,7 @@ where
             best_payload,
         };
 
-        let builder = OpBuilder {
-            pool,
-            // TODO(mattsse): make this configurable in the `OpPayloadBuilder` directly via an
-            // additional generic
-            best: best_txs::<Pool>,
-        };
+        let builder = OpBuilder { pool, best: self.best_transactions.clone() };
 
         let state_provider = client.state_by_block_hash(ctx.parent().hash())?;
         let state = StateProviderDatabase::new(state_provider);
@@ -149,11 +160,12 @@ where
 }
 
 /// Implementation of the [`PayloadBuilder`] trait for [`OpPayloadBuilder`].
-impl<Pool, Client, EvmConfig> PayloadBuilder<Pool, Client> for OpPayloadBuilder<EvmConfig>
+impl<Pool, Client, EvmConfig, Txs> PayloadBuilder<Pool, Client> for OpPayloadBuilder<EvmConfig, Txs>
 where
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
     Pool: TransactionPool,
     EvmConfig: ConfigureEvm<Header = Header>,
+    Txs: OpPayloadTransactions,
 {
     type Attributes = OpPayloadBuilderAttributes;
     type BuiltPayload = OpBuiltPayload;
@@ -210,18 +222,17 @@ where
 /// And finally
 /// 5. build the block: compute all roots (txs, state)
 #[derive(Debug)]
-pub struct OpBuilder<Pool, Best> {
+pub struct OpBuilder<Pool, Txs> {
     /// The transaction pool
     pool: Pool,
     /// Yields the best transaction to include if transactions from the mempool are allowed.
-    // TODO(mattsse): convert this to a trait
-    best: Best,
+    best: Txs,
 }
 
-impl<Pool, Best> OpBuilder<Pool, Best>
+impl<Pool, Txs> OpBuilder<Pool, Txs>
 where
     Pool: TransactionPool,
-    Best: FnOnce(Pool, BestTransactionsAttributes) -> BestTransactionsFor<Pool>,
+    Txs: OpPayloadTransactions,
 {
     /// Builds the payload on top of the state.
     pub fn build<EvmConfig, DB, P>(
@@ -248,7 +259,7 @@ where
 
         // 4. if mem pool transactions are requested we execute them
         if !ctx.attributes().no_tx_pool {
-            let best_txs = best(pool, ctx.best_transaction_attributes());
+            let best_txs = best.best_transactions(pool, ctx.best_transaction_attributes());
             if let Some(cancelled) =
                 ctx.execute_best_transactions::<_, Pool>(&mut info, &mut db, best_txs)?
             {
@@ -379,11 +390,25 @@ where
     }
 }
 
-fn best_txs<Pool: TransactionPool>(
-    pool: Pool,
-    attr: BestTransactionsAttributes,
-) -> BestTransactionsFor<Pool> {
-    pool.best_transactions_with_attributes(attr)
+/// A type that returns a the [`BestTransactions`] that should be included in the pool.
+pub trait OpPayloadTransactions: Clone + Send + Sync + Unpin + 'static {
+    /// Returns an iterator that yields the transaction in the order they should get included in the
+    /// new payload.
+    fn best_transactions<Pool: TransactionPool>(
+        &self,
+        pool: Pool,
+        attr: BestTransactionsAttributes,
+    ) -> BestTransactionsFor<Pool>;
+}
+
+impl OpPayloadTransactions for () {
+    fn best_transactions<Pool: TransactionPool>(
+        &self,
+        pool: Pool,
+        attr: BestTransactionsAttributes,
+    ) -> BestTransactionsFor<Pool> {
+        pool.best_transactions_with_attributes(attr)
+    }
 }
 
 /// This acts as the container for executed transactions and its byproducts (receipts, gas used)
