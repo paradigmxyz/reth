@@ -934,7 +934,7 @@ mod tests {
         // Notes:
         // - If prioritized addresses overlap, a single transaction will be prioritized twice and
         //   therefore use the per-segment gas limit twice.
-        // - Priority pool and main pool must syncronize between each other to make sure there are
+        // - Priority pool and main pool must synchronize between each other to make sure there are
         //   no conflicts for the same nonce. For example, in this scenario, pools can't reject
         //   transactions with seemingly incorrect nonces, because previous transactions might be in
         //   the other pool.
