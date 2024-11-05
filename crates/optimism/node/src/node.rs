@@ -50,12 +50,12 @@ impl NodePrimitives for OpPrimitives {
 /// Type configuration for a regular Optimism node.
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
-pub struct OptimismNode {
+pub struct OpNode {
     /// Additional Optimism args
     pub args: RollupArgs,
 }
 
-impl OptimismNode {
+impl OpNode {
     /// Creates a new instance of the Optimism node type.
     pub const fn new(args: RollupArgs) -> Self {
         Self { args }
@@ -91,7 +91,7 @@ impl OptimismNode {
     }
 }
 
-impl<N> Node<N> for OptimismNode
+impl<N> Node<N> for OpNode
 where
     N: FullNodeTypes<Types: NodeTypesWithEngine<Engine = OpEngineTypes, ChainSpec = OpChainSpec>>,
 {
@@ -118,13 +118,13 @@ where
     }
 }
 
-impl NodeTypes for OptimismNode {
+impl NodeTypes for OpNode {
     type Primitives = OpPrimitives;
     type ChainSpec = OpChainSpec;
     type StateCommitment = MerklePatriciaTrie;
 }
 
-impl NodeTypesWithEngine for OptimismNode {
+impl NodeTypesWithEngine for OpNode {
     type Engine = OpEngineTypes;
 }
 
