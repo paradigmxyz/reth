@@ -9256,6 +9256,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
+ "reqwest",
  "rolling-file",
  "tracing",
  "tracing-appender",

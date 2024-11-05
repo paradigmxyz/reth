@@ -121,15 +121,18 @@ impl Layers {
         use opentelemetry::trace::TracerProvider;
         use opentelemetry_otlp::{ExportConfig, WithExportConfig};
 
+        let exporter = opentelemetry_otlp::new_exporter()
+            .http()
+            .with_export_config(ExportConfig {
+                endpoint: otlp.url,
+                protocol: otlp.protocol.into(),
+                timeout: std::time::Duration::from_millis(otlp.timeout),
+            })
+            .with_http_client(reqwest::Client::default());
+
         let tracer = opentelemetry_otlp::new_pipeline()
             .tracing()
-            .with_exporter(opentelemetry_otlp::new_exporter().http().with_export_config(
-                ExportConfig {
-                    endpoint: otlp.url,
-                    protocol: otlp.protocol.into(),
-                    timeout: std::time::Duration::from_millis(otlp.timeout),
-                },
-            ))
+            .with_exporter(exporter)
             .install_batch(opentelemetry_sdk::runtime::Tokio)?
             .tracer("reth");
 
