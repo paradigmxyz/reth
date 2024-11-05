@@ -11,7 +11,11 @@ use alloy_consensus::{
     constants::{EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID},
     TxEip1559, TxEip2930, TxEip4844, TxLegacy,
 };
-use alloy_eips::{eip1559::MIN_PROTOCOL_BASE_FEE, eip2930::AccessList, eip4844::DATA_GAS_PER_BLOB};
+use alloy_eips::{
+    eip1559::MIN_PROTOCOL_BASE_FEE,
+    eip2930::AccessList,
+    eip4844::{BlobTransactionValidationError, DATA_GAS_PER_BLOB},
+};
 use alloy_primitives::{Address, Bytes, ChainId, Signature, TxHash, TxKind, B256, U256};
 use paste::paste;
 use rand::{
@@ -20,8 +24,8 @@ use rand::{
 };
 use reth_primitives::{
     transaction::TryFromRecoveredTransactionError, BlobTransactionSidecar,
-    BlobTransactionValidationError, PooledTransactionsElementEcRecovered, Transaction,
-    TransactionSigned, TransactionSignedEcRecovered, TxType,
+    PooledTransactionsElementEcRecovered, Transaction, TransactionSigned,
+    TransactionSignedEcRecovered, TxType,
 };
 
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
@@ -761,7 +765,7 @@ impl EthPoolTransaction for MockTransaction {
         &self,
         _blob: &BlobTransactionSidecar,
         _settings: &reth_primitives::kzg::KzgSettings,
-    ) -> Result<(), reth_primitives::BlobTransactionValidationError> {
+    ) -> Result<(), alloy_eips::eip4844::BlobTransactionValidationError> {
         match &self {
             Self::Eip4844 { .. } => Ok(()),
             _ => Err(BlobTransactionValidationError::NotBlobTransaction(self.tx_type())),
