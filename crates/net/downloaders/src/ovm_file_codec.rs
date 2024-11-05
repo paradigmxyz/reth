@@ -7,7 +7,7 @@ use alloy_eips::{
 };
 use alloy_primitives::{
     bytes::{Buf, BufMut, BytesMut},
-    keccak256, Address, Bytes, ChainId, Parity, TxHash, TxKind, B256, U256,
+    keccak256, Address, Bytes, ChainId, Parity, Signature, TxHash, TxKind, B256, U256,
 };
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, RlpDecodable, RlpEncodable};
 use core::mem;
@@ -19,7 +19,7 @@ use reth_primitives::{
         signature::{recover_signer, recover_signer_unchecked, with_eip155_parity},
         Transaction, TxType, PARALLEL_SENDER_RECOVERY_THRESHOLD,
     },
-    Signature, Withdrawals,
+    Withdrawals,
 };
 use serde::{Deserialize, Serialize};
 use tokio_util::codec::{Decoder, Encoder};
