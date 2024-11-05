@@ -2190,7 +2190,7 @@ where
 
         let exec_time = Instant::now();
 
-        let (state_root_tx, state_root_rx) = unbounded_channel();
+        let (_state_root_tx, state_root_rx) = unbounded_channel();
         // TODO: create consistent_view using `new_with_latest_tip` when we
         // switch to `StateRootTask`.
         let consistent_view = ConsistentDbView::new(self.provider.clone(), None);
@@ -2200,8 +2200,11 @@ where
             Arc::new(TrieInput::default()),
             UnboundedReceiverStream::new(state_root_rx),
         );
-        let state_hook = move |result_and_state: &ResultAndState| {
-            let _ = state_root_tx.send(result_and_state.state.clone());
+        let state_hook = move |_result_and_state: &ResultAndState| {
+            // TODO: uncomment when we start using `StateRootTask`, otherwise
+            // the messages sent here would not be consumed and we would
+            // increase memory usage for no reason.
+            // let _ = state_root_tx.send(result_and_state.state.clone());
         };
 
         let output = self.metrics.executor.execute_metered(
