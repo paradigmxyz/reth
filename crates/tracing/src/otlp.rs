@@ -1,5 +1,3 @@
-use tracing_subscriber::filter::LevelFilter;
-
 /// OTLP protocol options.
 #[derive(Debug, Clone, Copy)]
 pub enum OtlpProtocols {
@@ -43,8 +41,11 @@ pub struct OtlpConfig {
     pub url: String,
     /// The protocol to use for sending spans and events.
     pub protocol: OtlpProtocols,
-    /// The log level to use for the `OpenTelemetry` layer.
-    pub level: LevelFilter,
+    /// The [`EnvFilter`] directive to use for spans and events exported to the
+    /// `OpenTelemetry` layer.
+    ///
+    /// [`EnvFilter`]: tracing_subscriber::filter::EnvFilter
+    pub directive: String,
     /// The timeout for sending spans and events.
     pub timeout: u64,
 }

@@ -158,17 +158,17 @@ pub struct OtelArgs {
     #[arg(long = "otel.protocol", value_name = "PROTOCOL", global = true, default_value = "json")]
     pub protocol: reth_tracing::OtlpProtocols,
 
-    /// The log level to use for the `OpenTelemetry` layer. Values are
-    /// "trace", "debug", "info", "warn", and "error". The default is "info".
-    /// Events and spans above this level will not be exported. Events and spans
-    /// at this level or below will be exported. See the documentation of
-    /// [`Level`] for more information.
+    /// The filter to use for spans and events exported to the `OpenTelemetry`
+    /// layer. Values are expected to be in the [`EnvFilter`]'s directive format
+    /// "info".
     ///
     /// To specify `off`, omit the `--otel.url` argument.
     ///
     /// Available only when compiled with the `opentelemetry` feature.
-    #[arg(long = "otel.level", value_name = "LEVEL", global = true, default_value = "info")]
-    pub level: tracing::Level,
+    ///
+    /// [`EnvFilter`]: https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html#directives
+    #[arg(long = "otel.filter", value_name = "LEVEL", global = true, default_value = "info")]
+    pub directive: String,
 
     /// The timeout for sending spans and events, in milliseconds.
     ///
@@ -184,7 +184,7 @@ impl OtelArgs {
         Ok(reth_tracing::OtlpConfig {
             url: self.url.clone().ok_or("no otel url specified via --otel.url")?,
             protocol: self.protocol,
-            level: self.level.into(),
+            directive: self.directive.clone(),
             timeout: self.timeout,
         })
     }
