@@ -1645,7 +1645,7 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
         #[allow(unused_mut)]
         let mut transaction = Transaction::arbitrary(u)?;
 
-        let secp = secp256k1::Secp256k1::new();
+        let secp = secp256k1::&secp256k1::SECP256K1;
         let key_pair = secp256k1::Keypair::new(&secp, &mut rand::thread_rng());
         let mut signature = crate::sign_message(
             B256::from_slice(&key_pair.secret_bytes()[..]),
@@ -2302,7 +2302,7 @@ mod tests {
             *crate::transaction::PARALLEL_SENDER_RECOVERY_THRESHOLD * 5
         )) {
             let mut rng =rand::thread_rng();
-            let secp = secp256k1::Secp256k1::new();
+            let secp = &secp256k1::SECP256K1;
             let txes: Vec<TransactionSigned> = txes.into_iter().map(|mut tx| {
                  if let Some(chain_id) = tx.chain_id() {
                     // Otherwise we might overflow when calculating `v` on `recalculate_hash`

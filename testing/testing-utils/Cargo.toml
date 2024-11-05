@@ -20,7 +20,7 @@ alloy-consensus.workspace = true
 alloy-eips.workspace = true
 
 rand.workspace = true
-secp256k1 = { workspace = true, features = ["rand"] }
+secp256k1 = { workspace = true, features = ["rand", "global-context"] }
 
 [dev-dependencies]
 alloy-eips.workspace = true
