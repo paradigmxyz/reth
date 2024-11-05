@@ -44,7 +44,10 @@ pub trait FullEthApiTypes:
 
 impl<T> FullEthApiTypes for T where
     T: EthApiTypes<
-        TransactionCompat: TransactionCompat<Transaction = RpcTransaction<T::NetworkTypes>>,
+        TransactionCompat: TransactionCompat<
+            Transaction = RpcTransaction<T::NetworkTypes>,
+            TransactionError = T::Error,
+        >,
     >
 {
 }
