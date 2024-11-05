@@ -15,6 +15,5 @@ workspace = true
 reth-chainspec.workspace = true
 reth-db-api.workspace = true
 reth-engine-primitives.workspace = true
-reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-trie-db.workspace = true
