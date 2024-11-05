@@ -1,4 +1,4 @@
-use alloy_eips::eip2718::Encodable2718;
+use alloy_eips::eip2718::{Encodable2718, Decodable2718};
 use alloy_primitives::{Address, BlockHash, Bytes, Keccak256, B256, U256};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types::{
@@ -20,7 +20,7 @@ use reth_evm::{
     system_calls::SystemCaller,
     ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes,
 };
-use reth_primitives::{Block, BlockId, BlockNumberOrTag, TransactionSignedEcRecovered};
+use reth_primitives::{Block, BlockId, BlockNumberOrTag, TransactionSignedEcRecovered, TransactionSigned};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProofProvider, StateProviderFactory,
     TransactionVariant,
@@ -31,7 +31,7 @@ use reth_rpc_eth_api::{
     helpers::{EthApiSpec, EthTransactions, TraceExt},
     EthApiTypes, FromEthApiError, RpcNodeCore,
 };
-use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError, StateCacheDb};
+use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_trie::{HashedPostState, HashedStorage};
@@ -746,11 +746,10 @@ where
     ) -> Result<ExecutionWitness, Eth::Error> {
         let transactions = txs
             .into_iter()
-            .map(recover_raw_transaction)
-            .collect::<Result<Vec<_>, _>>()?
+            .map(|b| { TransactionSigned::decode_2718(&mut b.as_ref()) })
             .into_iter()
-            .map(|tx| tx.into_components())
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|err| EthApiError::InvalidParams(err.to_string()))?;
 
         let parent_block_header = self
             .eth_api()
@@ -783,8 +782,10 @@ where
 
                 let mut tx_iter = transactions.into_iter().peekable();
 
-                while let Some((tx, signer)) = tx_iter.next() {
-                    let tx = tx.into_transaction();
+                while let Some(tx) = tx_iter.next() {
+                    let signer = tx.recover_signer().ok_or(
+                        EthApiError::InvalidTransactionSignature
+                    )?;
 
                     hasher.update(tx.hash());
                     eth_api.evm_config().fill_tx_env(evm.tx_mut(), &tx, signer);
