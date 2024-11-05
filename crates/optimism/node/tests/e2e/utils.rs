@@ -6,7 +6,7 @@ use reth_e2e_test_utils::{
 };
 use reth_optimism_chainspec::OpChainSpecBuilder;
 use reth_optimism_node::{
-    node::OptimismAddOns, OpBuiltPayload, OpNode, OpPayloadBuilderAttributes,
+    node::OptimismAddOns, OpBuiltPayload, OpNode as OtherOpNode, OpPayloadBuilderAttributes,
 };
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use std::sync::Arc;
