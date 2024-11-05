@@ -24,10 +24,13 @@ use reth_trie_db::StateCommitment;
 pub trait NodePrimitives {
     /// Block primitive.
     type Block;
+    /// Transaction envelope type ID.
+    type TxType;
 }
 
 impl NodePrimitives for () {
-    type Block = reth_primitives::Block;
+    type Block = ();
+    type TxType = ();
 }
 
 /// The type that configures the essential types of an Ethereum-like node.

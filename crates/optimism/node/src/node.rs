@@ -23,7 +23,7 @@ use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_evm::{OpEvmConfig, OpExecutionStrategyFactory};
 use reth_optimism_rpc::OpEthApi;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::{Block, Header};
+use reth_primitives::{Block, Header, TxTypes};
 use reth_provider::CanonStateSubscriptions;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
@@ -45,6 +45,7 @@ pub struct OpPrimitives;
 
 impl NodePrimitives for OpPrimitives {
     type Block = Block;
+    type TxType = TxType;
 }
 
 /// Type configuration for a regular Optimism node.
