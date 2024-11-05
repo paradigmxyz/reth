@@ -23,7 +23,7 @@ clap = { workspace = true, features = ["derive"] }
 
 # OpenTelemetry
 tracing-opentelemetry = { version = "0.27.0", optional = true }
-opentelemetry-otlp = { version = "0.26.0", default-features = false, features = ["http", "http-proto", "http-json", "logs", "tokio", "trace"], optional = true }
+opentelemetry-otlp = { version = "0.26.0", default-features = false, features = ["http", "http-proto", "http-json", "logs", "reqwest-rustls", "tokio", "trace"], optional = true }
 opentelemetry_sdk = { version = "0.26.0", features = ["rt-tokio", "tokio"], optional = true }
 opentelemetry = { version = "0.26.0", optional = true }
 
