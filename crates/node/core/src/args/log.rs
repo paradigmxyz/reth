@@ -133,12 +133,16 @@ impl LogArgs {
     }
 }
 
+/// Arguments for the `OpenTelemetry` tracing layer.
 #[cfg(feature = "opentelemetry")]
 #[derive(Debug, Args)]
 pub struct OtelArgs {
     /// Endpoint url to which to send spans and events. The endpoint URL must
     /// be a valid URL, including the protocol prefix (http or https) and any
     /// http basic auth information.
+    ///
+    /// If the endpoint is not specified, events and spans will not be exported
+    /// to any external service.
     ///
     /// Available only when compiled with the `opentelemetry` feature.
     #[arg(long = "otel.endpoint", value_name = "ENDPOINT", global = true)]
