@@ -157,7 +157,12 @@ pub struct OtelArgs {
     pub protocol: reth_tracing::OtlpProtocols,
 
     /// The log level to use for the `OpenTelemetry` layer. Values are
-    /// "trace", "debug", "info", "warn", and "error".
+    /// "trace", "debug", "info", "warn", and "error". The default is "info".
+    /// Events and spans above this level will not be exported. Events and spans
+    /// at this level or below will be exported. See the documentation of
+    /// [`Level`] for more information.
+    ///
+    /// To specify `off`, omit the `--otel.url` argument.
     ///
     /// Available only when compiled with the `opentelemetry` feature.
     #[arg(long = "otel.level", value_name = "LEVEL", global = true, default_value = "info")]
@@ -178,7 +183,7 @@ impl TryFrom<&OtelArgs> for reth_tracing::OtlpConfig {
         Ok(Self {
             url: value.url.clone().ok_or("no otel url specified via --otel.url")?,
             protocol: value.protocol,
-            level: value.level,
+            level: value.level.into(),
             timeout: value.timeout,
         })
     }
