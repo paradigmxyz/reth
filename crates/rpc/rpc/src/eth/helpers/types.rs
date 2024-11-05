@@ -1,12 +1,11 @@
 //! L1 `eth` API types.
 
-use std::convert::Infallible;
-
 use alloy_consensus::Transaction as _;
 use alloy_network::{Ethereum, Network};
 use alloy_primitives::{Address, TxKind};
 use alloy_rpc_types::{Transaction, TransactionInfo};
 use reth_primitives::TransactionSignedEcRecovered;
+use reth_rpc_eth_types::EthApiError;
 use reth_rpc_types_compat::{
     transaction::{from_primitive_signature, GasPrice},
     TransactionCompat,
@@ -22,7 +21,7 @@ where
 {
     type Transaction = <Ethereum as Network>::TransactionResponse;
 
-    type TransactionError = Infallible;
+    type TransactionError = EthApiError;
 
     fn fill(
         &self,

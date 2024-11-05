@@ -7,7 +7,7 @@ use op_alloy_consensus::DepositTransaction;
 use op_alloy_rpc_types::Transaction;
 use reth_node_api::FullNodeComponents;
 use reth_primitives::TransactionSignedEcRecovered;
-use reth_provider::{BlockReaderIdExt, ProviderError, ReceiptProvider, TransactionsProvider};
+use reth_provider::{BlockReaderIdExt, ReceiptProvider, TransactionsProvider};
 use reth_rpc::eth::EthTxBuilder;
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
@@ -16,7 +16,7 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::utils::recover_raw_transaction;
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
-use crate::{OpEthApi, SequencerClient};
+use crate::{OpEthApi, OpEthApiError, SequencerClient};
 
 impl<N> EthTransactions for OpEthApi<N>
 where
@@ -77,7 +77,7 @@ where
     N: FullNodeComponents,
 {
     type Transaction = Transaction;
-    type TransactionError = ProviderError;
+    type TransactionError = OpEthApiError;
 
     fn fill(
         &self,
