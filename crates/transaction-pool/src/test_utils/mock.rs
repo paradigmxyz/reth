@@ -12,7 +12,7 @@ use alloy_consensus::{
     TxEip1559, TxEip2930, TxEip4844, TxLegacy,
 };
 use alloy_eips::{eip1559::MIN_PROTOCOL_BASE_FEE, eip2930::AccessList, eip4844::DATA_GAS_PER_BLOB};
-use alloy_primitives::{Address, Bytes, ChainId, TxHash, TxKind, B256, U256};
+use alloy_primitives::{Address, Bytes, ChainId, Signature, TxHash, TxKind, B256, U256};
 use paste::paste;
 use rand::{
     distributions::{Uniform, WeightedIndex},
@@ -20,7 +20,7 @@ use rand::{
 };
 use reth_primitives::{
     transaction::TryFromRecoveredTransactionError, BlobTransactionSidecar,
-    BlobTransactionValidationError, PooledTransactionsElementEcRecovered, Signature, Transaction,
+    BlobTransactionValidationError, PooledTransactionsElementEcRecovered, Transaction,
     TransactionSigned, TransactionSignedEcRecovered, TxType,
 };
 

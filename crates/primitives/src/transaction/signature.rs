@@ -1,8 +1,6 @@
 use crate::transaction::util::secp256k1;
-use alloy_primitives::{Address, Parity, B256, U256};
+use alloy_primitives::{Address, Parity, Signature, B256, U256};
 use alloy_rlp::{Decodable, Error as RlpError};
-
-pub use alloy_primitives::Signature;
 
 /// The order of the secp256k1 curve, divided by two. Signatures that should be checked according
 /// to EIP-2 should have an S value less than or equal to this.
@@ -111,14 +109,11 @@ pub const fn extract_chain_id(v: u64) -> alloy_rlp::Result<(bool, Option<u64>)> 
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        transaction::signature::{
-            legacy_parity, recover_signer, recover_signer_unchecked, SECP256K1N_HALF,
-        },
-        Signature,
+    use crate::transaction::signature::{
+        legacy_parity, recover_signer, recover_signer_unchecked, SECP256K1N_HALF,
     };
     use alloy_eips::eip2718::Decodable2718;
-    use alloy_primitives::{hex, Address, Parity, B256, U256};
+    use alloy_primitives::{hex, Address, Parity, Signature, B256, U256};
     use std::str::FromStr;
 
     #[test]
