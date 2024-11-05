@@ -34,7 +34,7 @@ use reth_trie_db::MerklePatriciaTrie;
 
 use crate::{
     args::RollupArgs,
-    engine::OptimismEngineValidator,
+    engine::OpEngineValidator,
     txpool::{OpTransactionPool, OpTransactionValidator},
     OpEngineTypes,
 };
@@ -150,7 +150,7 @@ impl<N: FullNodeComponents> OptimismAddOns<N> {
 impl<N> NodeAddOns<N> for OptimismAddOns<N>
 where
     N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>,
-    OptimismEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
+    OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
 {
     type Handle = RpcHandle<N, OpEthApi<N>>;
 
@@ -165,7 +165,7 @@ where
 impl<N> RethRpcAddOns<N> for OptimismAddOns<N>
 where
     N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>,
-    OptimismEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
+    OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
 {
     type EthApi = OpEthApi<N>;
 
@@ -456,7 +456,7 @@ where
     }
 }
 
-/// Builder for [`OptimismEngineValidator`].
+/// Builder for [`OpEngineValidator`].
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
 pub struct OptimismEngineValidatorBuilder;
@@ -465,11 +465,11 @@ impl<Node, Types> EngineValidatorBuilder<Node> for OptimismEngineValidatorBuilde
 where
     Types: NodeTypesWithEngine<ChainSpec = OpChainSpec>,
     Node: FullNodeComponents<Types = Types>,
-    OptimismEngineValidator: EngineValidator<Types::Engine>,
+    OpEngineValidator: EngineValidator<Types::Engine>,
 {
-    type Validator = OptimismEngineValidator;
+    type Validator = OpEngineValidator;
 
     async fn build(self, ctx: &AddOnsContext<'_, Node>) -> eyre::Result<Self::Validator> {
-        Ok(OptimismEngineValidator::new(ctx.config.chain.clone()))
+        Ok(OpEngineValidator::new(ctx.config.chain.clone()))
     }
 }
