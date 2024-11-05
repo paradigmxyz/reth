@@ -3,7 +3,6 @@
 use crate::{Transaction, TransactionSigned};
 use alloy_consensus::{constants::EIP4844_TX_TYPE_ID, TxEip4844WithSidecar};
 use alloy_eips::eip4844::BlobTransactionSidecar;
-use alloy_primitives::TxHash;
 use alloy_primitives::{Signature, TxHash};
 use alloy_rlp::Header;
 use serde::{Deserialize, Serialize};

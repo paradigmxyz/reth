@@ -6,10 +6,7 @@ use super::{
     signature::{recover_signer, with_eip155_parity},
     TxEip7702,
 };
-use crate::{
-    BlobTransaction, Transaction, TransactionSigned,
-    TransactionSignedEcRecovered,
-};
+use crate::{BlobTransaction, Transaction, TransactionSigned, TransactionSignedEcRecovered};
 use alloy_eips::eip4844::BlobTransactionSidecar;
 
 use alloy_consensus::{
