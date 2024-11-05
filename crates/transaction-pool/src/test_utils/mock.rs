@@ -16,8 +16,6 @@ use alloy_eips::{
     eip2930::AccessList,
     eip4844::{BlobTransactionValidationError, DATA_GAS_PER_BLOB},
 };
-use alloy_primitives::{Address, Bytes, ChainId, TxHash, TxKind, B256, U256};
-use alloy_eips::{eip1559::MIN_PROTOCOL_BASE_FEE, eip2930::AccessList, eip4844::DATA_GAS_PER_BLOB};
 use alloy_primitives::{Address, Bytes, ChainId, Signature, TxHash, TxKind, B256, U256};
 use paste::paste;
 use rand::{
@@ -26,8 +24,8 @@ use rand::{
 };
 use reth_primitives::{
     transaction::TryFromRecoveredTransactionError, BlobTransactionSidecar,
-    PooledTransactionsElementEcRecovered, Transaction,
-    TransactionSigned, TransactionSignedEcRecovered, TxType,
+    PooledTransactionsElementEcRecovered, Transaction, TransactionSigned,
+    TransactionSignedEcRecovered, TxType,
 };
 
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
