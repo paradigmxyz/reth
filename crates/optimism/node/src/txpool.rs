@@ -74,7 +74,7 @@ where
     pub fn new(inner: EthTransactionValidator<Client, Tx>) -> Self {
         let this = Self::with_block_info(inner, OpL1BlockInfo::default());
         if let Ok(Some(block)) =
-            this.inner.client().block_by_number_or_tag(reth_primitives::BlockNumberOrTag::Latest)
+            this.inner.client().block_by_number_or_tag(alloy_eips::BlockNumberOrTag::Latest)
         {
             // genesis block has no txs, so we can't extract L1 info, we set the block info to empty
             // so that we will accept txs into the pool before the first block
