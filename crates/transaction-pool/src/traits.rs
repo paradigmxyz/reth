@@ -14,16 +14,15 @@ use alloy_consensus::{
 use alloy_eips::{
     eip2718::Encodable2718,
     eip2930::AccessList,
-    eip4844::{BlobAndProofV1, BlobTransactionValidationError},
+    eip4844::{BlobAndProofV1, BlobTransactionSidecar, BlobTransactionValidationError},
 };
 use alloy_primitives::{Address, TxHash, TxKind, B256, U256};
 use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 use reth_primitives::{
-    kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, BlobTransactionSidecar,
-    PooledTransactionsElement, PooledTransactionsElementEcRecovered, SealedBlock, Transaction,
-    TransactionSignedEcRecovered,
+    kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, PooledTransactionsElement,
+    PooledTransactionsElementEcRecovered, SealedBlock, Transaction, TransactionSignedEcRecovered,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
