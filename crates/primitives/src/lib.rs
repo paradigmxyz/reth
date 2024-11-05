@@ -50,9 +50,6 @@ pub use transaction::{
     BlobTransaction, PooledTransactionsElement, PooledTransactionsElementEcRecovered,
 };
 
-#[cfg(feature = "c-kzg")]
-pub use transaction::BlobTransactionValidationError;
-
 pub use transaction::{
     util::secp256k1::{public_key_to_address, recover_signer_unchecked, sign_message},
     InvalidTransactionError, Transaction, TransactionMeta, TransactionSigned,

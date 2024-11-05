@@ -7,9 +7,6 @@ use alloy_primitives::{Signature, TxHash};
 use alloy_rlp::Header;
 use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "c-kzg")]
-pub use alloy_eips::eip4844::BlobTransactionValidationError;
-
 /// A response to `GetPooledTransactions` that includes blob data, their commitments, and their
 /// corresponding proofs.
 ///
@@ -56,7 +53,7 @@ impl BlobTransaction {
     pub fn validate(
         &self,
         proof_settings: &c_kzg::KzgSettings,
-    ) -> Result<(), BlobTransactionValidationError> {
+    ) -> Result<(), alloy_eips::eip4844::BlobTransactionValidationError> {
         self.transaction.validate_blob(proof_settings)
     }
 

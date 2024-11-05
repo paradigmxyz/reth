@@ -15,6 +15,7 @@ use alloy_eips::{
     eip1559::MIN_PROTOCOL_BASE_FEE,
     eip2930::AccessList,
     eip4844::{BlobTransactionSidecar, DATA_GAS_PER_BLOB},
+    eip4844::{BlobTransactionValidationError, DATA_GAS_PER_BLOB},
 };
 use alloy_primitives::{Address, Bytes, ChainId, Signature, TxHash, TxKind, B256, U256};
 use paste::paste;
@@ -23,7 +24,7 @@ use rand::{
     prelude::Distribution,
 };
 use reth_primitives::{
-    transaction::TryFromRecoveredTransactionError, BlobTransactionValidationError,
+    transaction::TryFromRecoveredTransactionError, 
     PooledTransactionsElementEcRecovered, Transaction, TransactionSigned,
     TransactionSignedEcRecovered, TxType,
 };
@@ -765,7 +766,7 @@ impl EthPoolTransaction for MockTransaction {
         &self,
         _blob: &BlobTransactionSidecar,
         _settings: &reth_primitives::kzg::KzgSettings,
-    ) -> Result<(), reth_primitives::BlobTransactionValidationError> {
+    ) -> Result<(), alloy_eips::eip4844::BlobTransactionValidationError> {
         match &self {
             Self::Eip4844 { .. } => Ok(()),
             _ => Err(BlobTransactionValidationError::NotBlobTransaction(self.tx_type())),

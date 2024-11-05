@@ -31,9 +31,7 @@ pub use error::{
 };
 pub use meta::TransactionMeta;
 pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
-pub use sidecar::BlobTransaction;
-#[cfg(feature = "c-kzg")]
-pub use sidecar::BlobTransactionValidationError;
+pub use sidecar::{BlobTransaction};
 
 pub use compat::FillTxEnv;
 pub use signature::{extract_chain_id, legacy_parity, recover_signer, recover_signer_unchecked};
