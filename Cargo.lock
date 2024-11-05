@@ -2993,6 +2993,7 @@ dependencies = [
 name = "example-network-txpool"
 version = "0.0.0"
 dependencies = [
+ "alloy-primitives",
  "eyre",
  "reth-network",
  "reth-provider",
@@ -8270,6 +8271,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tokio-stream",
 ]
 
 [[package]]

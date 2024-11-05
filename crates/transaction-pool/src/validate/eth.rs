@@ -16,6 +16,7 @@ use alloy_consensus::constants::{
     LEGACY_TX_TYPE_ID,
 };
 use alloy_eips::eip4844::MAX_BLOBS_PER_BLOCK;
+use alloy_primitives::B256;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_primitives::{GotExpected, InvalidTransactionError, SealedBlock};
 use reth_storage_api::{AccountReader, StateProviderFactory};
@@ -61,8 +62,9 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
+        at: B256,
     ) -> TransactionValidationOutcome<Tx> {
-        self.inner.validate_one(origin, transaction)
+        self.inner.validate_one(origin, transaction, at)
     }
 
     /// Validates all given transactions.
@@ -73,8 +75,9 @@ where
     pub fn validate_all(
         &self,
         transactions: Vec<(TransactionOrigin, Tx)>,
+        at: B256,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
-        transactions.into_iter().map(|(origin, tx)| self.validate_one(origin, tx)).collect()
+        transactions.into_iter().map(|(origin, tx)| self.validate_one(origin, tx, at)).collect()
     }
 }
 
@@ -89,15 +92,17 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: Self::Transaction,
+        at: B256,
     ) -> TransactionValidationOutcome<Self::Transaction> {
-        self.validate_one(origin, transaction)
+        self.validate_one(origin, transaction, at)
     }
 
     async fn validate_transactions(
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+        at: B256,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        self.validate_all(transactions)
+        self.validate_all(transactions, at)
     }
 
     fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
@@ -157,6 +162,7 @@ where
         &self,
         origin: TransactionOrigin,
         mut transaction: Tx,
+        at: B256,
     ) -> TransactionValidationOutcome<Tx> {
         // Checks for tx_type
         match transaction.tx_type() {
@@ -327,7 +333,7 @@ where
 
         let account = match self
             .client
-            .latest()
+            .state_by_block_hash(at)
             .and_then(|state| state.basic_account(transaction.sender()))
         {
             Ok(account) => account.unwrap_or_default(),
@@ -346,7 +352,7 @@ where
             let is_eip7702 = if self.fork_tracker.is_prague_activated() {
                 match self
                     .client
-                    .latest()
+                    .state_by_block_hash(at)
                     .and_then(|state| state.bytecode_by_hash(account.get_bytecode_hash()))
                 {
                     Ok(bytecode) => bytecode.unwrap_or_default().is_eip7702(),
@@ -855,9 +861,13 @@ mod tests {
         );
         let blob_store = InMemoryBlobStore::default();
         let validator = EthTransactionValidatorBuilder::new(MAINNET.clone())
-            .build(provider, blob_store.clone());
+            .build(provider.clone(), blob_store.clone());
 
-        let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
+        let outcome = validator.validate_one(
+            TransactionOrigin::External,
+            transaction.clone(),
+            Default::default(),
+        );
 
         assert!(outcome.is_valid());
 
@@ -884,9 +894,13 @@ mod tests {
         let blob_store = InMemoryBlobStore::default();
         let validator = EthTransactionValidatorBuilder::new(MAINNET.clone())
             .set_block_gas_limit(1_000_000) // tx gas limit is 1_015_288
-            .build(provider, blob_store.clone());
+            .build(provider.clone(), blob_store.clone());
 
-        let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
+        let outcome = validator.validate_one(
+            TransactionOrigin::External,
+            transaction.clone(),
+            Default::default(),
+        );
 
         assert!(outcome.is_invalid());
 

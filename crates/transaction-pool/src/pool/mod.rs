@@ -155,6 +155,10 @@ where
     blob_transaction_sidecar_listener: Mutex<Vec<BlobTransactionSidecarListener>>,
     /// Metrics for the blob store
     blob_store_metrics: BlobStoreMetrics,
+    /// Lock to prevent pool state updating while we are importing transactions.
+    ///
+    /// When adding transactions, we acquire a read lock. When updating the state - a write lock.
+    pub(crate) transaction_import_lock: tokio::sync::RwLock<()>,
 }
 
 // === impl PoolInner ===
@@ -178,6 +182,7 @@ where
             config,
             blob_store,
             blob_store_metrics: Default::default(),
+            transaction_import_lock: Default::default(),
         }
     }
 

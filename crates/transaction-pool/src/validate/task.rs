@@ -6,6 +6,7 @@ use crate::{
     EthTransactionValidator, PoolTransaction, TransactionOrigin, TransactionValidationOutcome,
     TransactionValidator,
 };
+use alloy_primitives::B256;
 use futures_util::{lock::Mutex, StreamExt};
 use reth_chainspec::ChainSpec;
 use reth_primitives::SealedBlock;
@@ -173,6 +174,7 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: Self::Transaction,
+        at: B256,
     ) -> TransactionValidationOutcome<Self::Transaction> {
         let hash = *transaction.hash();
         let (tx, rx) = oneshot::channel();
@@ -183,7 +185,7 @@ where
                 let validator = self.validator.clone();
                 to_validation_task
                     .send(Box::pin(async move {
-                        let res = validator.validate_transaction(origin, transaction).await;
+                        let res = validator.validate_transaction(origin, transaction, at).await;
                         let _ = tx.send(res);
                     }))
                     .await

@@ -322,6 +322,7 @@ impl<T: EthPoolTransaction> TransactionValidator for MockTransactionValidator<T>
         &self,
         origin: TransactionOrigin,
         mut transaction: Self::Transaction,
+        _at: B256,
     ) -> TransactionValidationOutcome<Self::Transaction> {
         let maybe_sidecar = transaction.take_blob().maybe_sidecar().cloned();
         // we return `balance: U256::MAX` to simulate a valid transaction which will never go into

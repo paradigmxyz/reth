@@ -257,7 +257,11 @@ where
     ) -> (TxHash, TransactionValidationOutcome<V::Transaction>) {
         let hash = *transaction.hash();
 
-        let outcome = self.pool.validator().validate_transaction(origin, transaction).await;
+        let outcome = self
+            .pool
+            .validator()
+            .validate_transaction(origin, transaction, self.pool.block_info().last_seen_block_hash)
+            .await;
 
         (hash, outcome)
     }
@@ -343,6 +347,9 @@ where
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> PoolResult<TransactionEvents> {
+        // acquire a read lock to prevent pool state updates while we are importing transactions
+        let _lock = self.pool.transaction_import_lock.read().await;
+
         let (_, tx) = self.validate(origin, transaction).await;
         self.pool.add_transaction_and_subscribe(origin, tx)
     }
@@ -352,6 +359,9 @@ where
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> PoolResult<TxHash> {
+        // acquire a read lock to prevent pool state updates while we are importing transactions
+        let _lock = self.pool.transaction_import_lock.read().await;
+
         let (_, tx) = self.validate(origin, transaction).await;
         let mut results = self.pool.add_transactions(origin, std::iter::once(tx));
         results.pop().expect("result length is the same as the input")
@@ -365,6 +375,10 @@ where
         if transactions.is_empty() {
             return Vec::new()
         }
+
+        // acquire a read lock to prevent pool state updates while we are importing transactions
+        let _lock = self.pool.transaction_import_lock.read().await;
+
         let validated = self.validate_all(origin, transactions).await;
 
         self.pool.add_transactions(origin, validated.into_iter().map(|(_, tx)| tx))
@@ -603,7 +617,10 @@ where
         self.pool.set_block_info(info)
     }
 
-    fn on_canonical_state_change(&self, update: CanonicalStateUpdate<'_>) {
+    async fn on_canonical_state_change(&self, update: CanonicalStateUpdate<'_>) {
+        // acquire a write lock and wait for transaction imports to finish
+        let _lock = self.pool.transaction_import_lock.write().await;
+
         self.pool.on_canonical_state_change(update);
     }
 

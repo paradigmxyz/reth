@@ -183,6 +183,7 @@ pub trait TransactionValidator: Send + Sync {
         &self,
         origin: TransactionOrigin,
         transaction: Self::Transaction,
+        at: B256,
     ) -> impl Future<Output = TransactionValidationOutcome<Self::Transaction>> + Send;
 
     /// Validates a batch of transactions.
@@ -193,10 +194,13 @@ pub trait TransactionValidator: Send + Sync {
     fn validate_transactions(
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+        at: B256,
     ) -> impl Future<Output = Vec<TransactionValidationOutcome<Self::Transaction>>> + Send {
-        async {
+        async move {
             futures_util::future::join_all(
-                transactions.into_iter().map(|(origin, tx)| self.validate_transaction(origin, tx)),
+                transactions
+                    .into_iter()
+                    .map(|(origin, tx)| self.validate_transaction(origin, tx, at)),
             )
             .await
         }
@@ -219,20 +223,22 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: Self::Transaction,
+        at: B256,
     ) -> TransactionValidationOutcome<Self::Transaction> {
         match self {
-            Self::Left(v) => v.validate_transaction(origin, transaction).await,
-            Self::Right(v) => v.validate_transaction(origin, transaction).await,
+            Self::Left(v) => v.validate_transaction(origin, transaction, at).await,
+            Self::Right(v) => v.validate_transaction(origin, transaction, at).await,
         }
     }
 
     async fn validate_transactions(
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+        at: B256,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
         match self {
-            Self::Left(v) => v.validate_transactions(transactions).await,
-            Self::Right(v) => v.validate_transactions(transactions).await,
+            Self::Left(v) => v.validate_transactions(transactions, at).await,
+            Self::Right(v) => v.validate_transactions(transactions, at).await,
         }
     }
 

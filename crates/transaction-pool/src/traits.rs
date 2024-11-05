@@ -491,7 +491,10 @@ pub trait TransactionPoolExt: TransactionPool {
     /// sidecar must not be removed from the blob store. Only after a blob transaction is
     /// finalized, its sidecar is removed from the blob store. This ensures that in case of a reorg,
     /// the sidecar is still available.
-    fn on_canonical_state_change(&self, update: CanonicalStateUpdate<'_>);
+    fn on_canonical_state_change(
+        &self,
+        update: CanonicalStateUpdate<'_>,
+    ) -> impl Future<Output = ()> + Send;
 
     /// Updates the accounts in the pool
     fn update_accounts(&self, accounts: Vec<ChangedAccount>);
