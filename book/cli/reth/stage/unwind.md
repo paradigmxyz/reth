@@ -329,4 +329,34 @@ Display:
 
   -q, --quiet
           Silence all log output
+
+      --otel.endpoint <ENDPOINT>
+          Endpoint url to which to send spans and events. The endpoint URL must be a valid URL, including the protocol prefix (http or https) and any http basic auth information.
+
+          If the endpoint is not specified, events and spans will not be exported to any external service.
+
+          Available only when compiled with the `opentelemetry` feature.
+
+      --otel.protocol <PROTOCOL>
+          The protocol to use for sending spans and events. Values are "grpc", "binary", or "json".
+
+          Available only when compiled with the `opentelemetry` feature.
+
+          [default: json]
+
+      --otel.level <LEVEL>
+          The log level to use for the `OpenTelemetry` layer. Values are "trace", "debug", "info", "warn", and "error". The default is "info". Events and spans above this level will not be exported. Events and spans at this level or below will be exported. See the documentation of [`Level`] for more information.
+
+          To specify `off`, omit the `--otel.url` argument.
+
+          Available only when compiled with the `opentelemetry` feature.
+
+          [default: info]
+
+      --otel.timeout <TIMEOUT>
+          The timeout for sending spans and events, in milliseconds.
+
+          Available only when compiled with the `opentelemetry` feature.
+
+          [default: 1000]
 ```
