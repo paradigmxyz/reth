@@ -43,6 +43,7 @@ revm-primitives.workspace = true
 
 # common
 futures.workspace = true
+pin-project.workspace = true
 tokio = { workspace = true, features = ["macros", "sync"] }
 tokio-stream.workspace = true
 thiserror.workspace = true

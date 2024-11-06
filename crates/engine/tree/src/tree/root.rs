@@ -1,10 +1,17 @@
 //! State root task related functionality.
 
+use futures::Stream;
+use pin_project::pin_project;
 use reth_provider::providers::ConsistentDbView;
 use reth_trie::{updates::TrieUpdates, TrieInput};
 use reth_trie_parallel::parallel_root::ParallelStateRootError;
 use revm_primitives::{EvmState, B256};
-use std::sync::{mpsc, Arc};
+use std::{
+    future::Future,
+    pin::Pin,
+    sync::{mpsc, Arc},
+    task::{Context, Poll},
+};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::debug;
 
@@ -35,10 +42,12 @@ impl StateRootHandle {
 /// fetches the proofs for relevant accounts from the database and reveal them
 /// to the tree.
 /// Then it updates relevant leaves according to the result of the transaction.
+#[pin_project]
 pub(crate) struct StateRootTask<Factory> {
     /// View over the state in the database.
     consistent_view: ConsistentDbView<Factory>,
     /// Incoming state updates.
+    #[pin]
     state_stream: UnboundedReceiverStream<EvmState>,
     /// Latest trie input.
     input: Arc<TrieInput>,
@@ -63,14 +72,12 @@ where
         let (tx, rx) = mpsc::channel();
 
         // Spawn the task that will process state updates and calculate the root
-        std::thread::Builder::new()
-            .name("State Root Task".to_string())
-            .spawn(move || {
-                debug!(target: "engine::tree", "Starting state root task");
-                let result = self.run();
-                let _ = tx.send(result);
-            })
-            .expect("failed to spawn state root thread");
+        tokio::spawn(async move {
+            debug!(target: "engine::tree", "Starting state root task");
+            let result = self.await;
+            let _ = tx.send(result);
+        });
+
         StateRootHandle { rx }
     }
 
@@ -82,21 +89,36 @@ where
     ) {
         // TODO: calculate hashed state update and dispatch proof gathering for it.
     }
+}
 
-    fn run(self) -> StateRootResult {
-        let Self { state_stream, consistent_view, input } = self;
+impl<Factory> Future for StateRootTask<Factory>
+where
+    Factory: Send + 'static,
+{
+    type Output = StateRootResult;
 
-        let mut receiver = state_stream.into_inner();
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut this = self.project();
 
-        // Process all items until the channel is closed
-        while let Ok(state) = receiver.try_recv() {
-            Self::on_state_update(&consistent_view, &input, state);
+        // Process all items until the stream is closed
+        loop {
+            match this.state_stream.as_mut().poll_next(cx) {
+                Poll::Ready(Some(state)) => {
+                    Self::on_state_update(this.consistent_view, this.input, state);
+                }
+                Poll::Ready(None) => {
+                    // stream closed, return final result
+                    return Poll::Ready(Ok((B256::default(), TrieUpdates::default())));
+                }
+                Poll::Pending => {
+                    return Poll::Pending;
+                }
+            }
         }
 
         // TODO:
         //    * keep track of proof calculation
         //    * keep track of intermediate root computation
         //    * return final state root result
-        Ok((B256::default(), TrieUpdates::default()))
     }
 }
