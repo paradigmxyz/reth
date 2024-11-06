@@ -301,8 +301,8 @@ pub(crate) fn payload_id(parent: &B256, attributes: &PayloadAttributes) -> Paylo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_eips::eip4895::Withdrawal;
     use alloy_primitives::B64;
-    use reth_primitives::Withdrawal;
     use std::str::FromStr;
 
     #[test]
