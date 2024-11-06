@@ -1,10 +1,12 @@
 use crate::{
     identifier::{SenderId, TransactionId},
     pool::pending::PendingTransaction,
-    PoolTransaction, TransactionOrdering, ValidPoolTransaction,
+    PayloadTransactions, PoolTransaction, TransactionOrdering, ValidPoolTransaction,
 };
+use alloy_consensus::Transaction;
 use alloy_primitives::Address;
 use core::fmt;
+use reth_primitives::TransactionSignedEcRecovered;
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet, VecDeque},
     sync::Arc,
@@ -48,7 +50,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactionsWithFees<T> {
     fn next(&mut self) -> Option<Self::Item> {
         // find the next transaction that satisfies the base fee
         loop {
-            let best = self.best.next()?;
+            let best = Iterator::next(&mut self.best)?;
             // If both the base fee and blob fee (if applicable for EIP-4844) are satisfied, return
             // the transaction
             if best.transaction.max_fee_per_gas() >= self.base_fee as u128 &&
@@ -196,6 +198,30 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
     }
 }
 
+impl<T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>> PayloadTransactions
+    for Box<dyn crate::BestTransactions<Item = Arc<ValidPoolTransaction<T>>>>
+{
+    fn next(&mut self, _ctx: ()) -> Option<TransactionSignedEcRecovered> {
+        Iterator::next(self).map(|tx| tx.to_recovered_transaction())
+    }
+
+    fn mark_invalid(&mut self, _sender: Address, _nonce: u64) {
+        // TODO: Implement this. Can't use BestTransactions::mark_invalid directly
+        //   because it requires a sender ID.
+    }
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl PayloadTransactions
+    for Box<dyn crate::BestTransactions<Item = crate::test_utils::MockTransaction>>
+{
+    fn next(&mut self, _ctx: ()) -> Option<TransactionSignedEcRecovered> {
+        Iterator::next(self).map(|tx| tx.into())
+    }
+
+    fn mark_invalid(&mut self, _sender: Address, _nonce: u64) {}
+}
+
 /// A [`BestTransactions`](crate::traits::BestTransactions) implementation that filters the
 /// transactions of iter with predicate.
 ///
@@ -341,53 +367,43 @@ where
     }
 }
 
-/// An implementation of [`crate::traits::BestTransactions`] that yields
+/// An implementation of [`crate::traits::PayloadTransactions`] that yields
 /// a pre-defined set of transactions.
 ///
 /// This is useful to put a sequencer-specified set of transactions into the block
 /// and compose it with the rest of the transactions.
 #[derive(Debug)]
-pub struct BestTransactionsFixed<T> {
+pub struct PayloadTransactionsFixed<T> {
     transactions: Vec<T>,
     index: usize,
 }
 
-impl<T> BestTransactionsFixed<T> {
-    /// Constructs a new [`BestTransactionsFixed`].
+impl<T> PayloadTransactionsFixed<T> {
+    /// Constructs a new [`PayloadTransactionsFixed`].
     pub fn new(transactions: Vec<T>) -> Self {
         Self { transactions, index: Default::default() }
     }
 
-    /// Constructs a new [`BestTransactionsFixed`] with a single transaction.
+    /// Constructs a new [`PayloadTransactionsFixed`] with a single transaction.
     pub fn single(transaction: T) -> Self {
         Self { transactions: vec![transaction], index: Default::default() }
     }
 }
 
-impl<T: Clone> Iterator for BestTransactionsFixed<T> {
-    type Item = T;
-
-    fn next(&mut self) -> Option<Self::Item> {
+impl PayloadTransactions for PayloadTransactionsFixed<TransactionSignedEcRecovered> {
+    fn next(&mut self, _ctx: ()) -> Option<TransactionSignedEcRecovered> {
         (self.index < self.transactions.len()).then(|| {
             let tx = self.transactions[self.index].clone();
             self.index += 1;
             tx
         })
     }
+
+    fn mark_invalid(&mut self, _sender: Address, _nonce: u64) {}
 }
 
-impl<T: Clone + Send> crate::traits::BestTransactions for BestTransactionsFixed<T> {
-    fn mark_invalid(&mut self, _tx: &Self::Item) {
-        // TODO: Implement when it's supported on the main pool too
-    }
-
-    fn no_updates(&mut self) {}
-
-    fn set_skip_blobs(&mut self, _skip_blobs: bool) {}
-}
-
-/// Wrapper over [`crate::traits::BestTransactions`] that combines transactions from multiple
-/// `BestTransactions` iterators and keeps track of the gas for both of iterators.
+/// Wrapper over [`crate::traits::PayloadTransactions`] that combines transactions from multiple
+/// `PayloadTransactions` iterators and keeps track of the gas for both of iterators.
 ///
 /// We can't use [`Iterator::chain`], because:
 /// (a) we need to propagate the `mark_invalid` and `no_updates`
@@ -399,7 +415,7 @@ impl<T: Clone + Send> crate::traits::BestTransactions for BestTransactionsFixed<
 /// If the `before` iterator has transactions that are not fitting into the block,
 /// the after iterator will get propagated a `mark_invalid` call for each of them.
 #[derive(Debug)]
-pub struct BestTransactionsChain<B: Iterator, A: Iterator> {
+pub struct PayloadTransactionsChain<B: PayloadTransactions, A: PayloadTransactions> {
     /// Iterator that will be used first
     before: B,
     /// Allowed gas for the transactions from `before` iterator. If `None`, no gas limit is
@@ -416,8 +432,8 @@ pub struct BestTransactionsChain<B: Iterator, A: Iterator> {
     after_gas: u64,
 }
 
-impl<B: Iterator, A: Iterator> BestTransactionsChain<B, A> {
-    /// Constructs a new [`BestTransactionsChain`].
+impl<B: PayloadTransactions, A: PayloadTransactions> PayloadTransactionsChain<B, A> {
+    /// Constructs a new [`PayloadTransactionsChain`].
     pub fn new(
         before: B,
         before_max_gas: Option<u64>,
@@ -435,35 +451,32 @@ impl<B: Iterator, A: Iterator> BestTransactionsChain<B, A> {
     }
 }
 
-impl<B, A, T> Iterator for BestTransactionsChain<B, A>
+impl<B, A> PayloadTransactions for PayloadTransactionsChain<B, A>
 where
-    B: crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<T>>>,
-    A: crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<T>>>,
-    T: PoolTransaction,
+    B: PayloadTransactions,
+    A: PayloadTransactions,
 {
-    type Item = Arc<ValidPoolTransaction<T>>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        while let Some(tx) = self.before.next() {
+    fn next(&mut self, ctx: ()) -> Option<TransactionSignedEcRecovered> {
+        while let Some(tx) = self.before.next(ctx) {
             if let Some(before_max_gas) = self.before_max_gas {
                 if self.before_gas + tx.transaction.gas_limit() <= before_max_gas {
                     self.before_gas += tx.transaction.gas_limit();
                     return Some(tx);
                 }
-                self.before.mark_invalid(&tx);
-                self.after.mark_invalid(&tx);
+                self.before.mark_invalid(tx.signer(), tx.transaction.nonce());
+                self.after.mark_invalid(tx.signer(), tx.transaction.nonce());
             } else {
                 return Some(tx);
             }
         }
 
-        while let Some(tx) = self.after.next() {
+        while let Some(tx) = self.after.next(ctx) {
             if let Some(after_max_gas) = self.after_max_gas {
                 if self.after_gas + tx.transaction.gas_limit() <= after_max_gas {
                     self.after_gas += tx.transaction.gas_limit();
                     return Some(tx);
                 }
-                self.after.mark_invalid(&tx);
+                self.after.mark_invalid(tx.signer(), tx.transaction.nonce());
             } else {
                 return Some(tx);
             }
@@ -471,27 +484,10 @@ where
 
         None
     }
-}
 
-impl<B, A, T> crate::traits::BestTransactions for BestTransactionsChain<B, A>
-where
-    B: crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<T>>>,
-    A: crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<T>>>,
-    T: PoolTransaction,
-{
-    fn mark_invalid(&mut self, tx: &Self::Item) {
-        self.before.mark_invalid(tx);
-        self.after.mark_invalid(tx);
-    }
-
-    fn no_updates(&mut self) {
-        self.before.no_updates();
-        self.after.no_updates();
-    }
-
-    fn set_skip_blobs(&mut self, skip_blobs: bool) {
-        self.before.set_skip_blobs(skip_blobs);
-        self.after.set_skip_blobs(skip_blobs);
+    fn mark_invalid(&mut self, sender: Address, nonce: u64) {
+        self.before.mark_invalid(sender, nonce);
+        self.after.mark_invalid(sender, nonce);
     }
 }
 
@@ -573,9 +569,9 @@ mod tests {
             dyn crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<MockTransaction>>>,
         > = Box::new(pool.best());
 
-        let tx = best.next().unwrap();
-        best.mark_invalid(&tx);
-        assert!(best.next().is_none());
+        let tx = Iterator::next(&mut best).unwrap();
+        crate::traits::BestTransactions::mark_invalid(&mut *best, &tx);
+        assert!(Iterator::next(&mut best).is_none());
     }
 
     #[test]
@@ -967,39 +963,40 @@ mod tests {
             priority_pool.add_transaction(Arc::new(valid_prioritized_tx), 0);
         }
 
-        let block = BestTransactionsChain::new(
-            // Segment 1
-            BestTransactionsFixed::single(Arc::new(
-                f.validated(MockTransaction::eip1559().with_sender(address_top_of_block)),
-            )),
-            Some(100),
-            BestTransactionsChain::new(
-                // Segment 2
-                priority_pool.best(),
-                Some(100),
-                // Segment 3
+        type MockPoolBestTransactions =
+            Box<dyn crate::BestTransactions<Item = Arc<ValidPoolTransaction<MockTransaction>>>>;
+        let priority_pool_best: MockPoolBestTransactions = Box::new(priority_pool.best());
+        let main_pool_best: MockPoolBestTransactions = Box::new(pool.best());
+        let prioritized_main_pool: MockPoolBestTransactions =
+            Box::new(BestTransactionsWithPrioritizedSenders::new(
+                HashSet::from([address_a]),
+                200,
                 BestTransactionsWithPrioritizedSenders::new(
-                    HashSet::from([address_a]),
+                    HashSet::from([address_b]),
                     200,
-                    // Segment 4
-                    BestTransactionsWithPrioritizedSenders::new(
-                        HashSet::from([address_b]),
-                        200,
-                        // Segment 5
-                        pool.best(),
-                    ),
+                    main_pool_best,
                 ),
+            ));
+
+        let mut block: Box<dyn PayloadTransactions> = Box::new(PayloadTransactionsChain::new(
+            PayloadTransactionsFixed::single(
+                MockTransaction::eip1559().with_sender(address_top_of_block).into(),
+            ),
+            Some(100),
+            PayloadTransactionsChain::new(
+                priority_pool_best,
+                Some(100),
+                prioritized_main_pool,
                 None,
             ),
             None,
-        );
+        ));
 
-        let mut iter = block.into_iter();
-        assert_eq!(iter.next().unwrap().sender(), address_top_of_block);
-        assert_eq!(iter.next().unwrap().sender(), address_in_priority_pool);
-        assert_eq!(iter.next().unwrap().sender(), address_a);
-        assert_eq!(iter.next().unwrap().sender(), address_b);
-        assert_eq!(iter.next().unwrap().sender(), address_regular);
+        assert_eq!(block.next(()).unwrap().signer(), address_top_of_block);
+        assert_eq!(block.next(()).unwrap().signer(), address_in_priority_pool);
+        assert_eq!(block.next(()).unwrap().signer(), address_a);
+        assert_eq!(block.next(()).unwrap().signer(), address_b);
+        assert_eq!(block.next(()).unwrap().signer(), address_regular);
     }
 
     // TODO: Same nonce test

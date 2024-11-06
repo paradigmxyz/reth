@@ -2,7 +2,7 @@
 
 use std::{fmt::Display, sync::Arc};
 
-use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
+use alloy_consensus::{Transaction, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::merge::BEACON_NONCE;
 use alloy_primitives::{Address, Bytes, B64, U256};
 use alloy_rpc_types_engine::PayloadId;
@@ -23,8 +23,7 @@ use reth_primitives::{
 use reth_provider::{ProviderError, StateProviderFactory, StateRootProvider};
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{
-    noop::NoopTransactionPool, BestTransactions, BestTransactionsAttributes, BestTransactionsFor,
-    TransactionPool,
+    noop::NoopTransactionPool, BestTransactionsAttributes, PayloadTransactions, TransactionPool,
 };
 use reth_trie::HashedPostState;
 use revm::{
@@ -398,7 +397,7 @@ pub trait OpPayloadTransactions: Clone + Send + Sync + Unpin + 'static {
         &self,
         pool: Pool,
         attr: BestTransactionsAttributes,
-    ) -> BestTransactionsFor<Pool>;
+    ) -> impl PayloadTransactions;
 }
 
 impl OpPayloadTransactions for () {
@@ -406,7 +405,7 @@ impl OpPayloadTransactions for () {
         &self,
         pool: Pool,
         attr: BestTransactionsAttributes,
-    ) -> BestTransactionsFor<Pool> {
+    ) -> impl PayloadTransactions {
         pool.best_transactions_with_attributes(attr)
     }
 }
@@ -732,7 +731,7 @@ where
         &self,
         info: &mut ExecutionInfo,
         db: &mut State<DB>,
-        mut best_txs: BestTransactionsFor<Pool>,
+        mut best_txs: impl PayloadTransactions,
     ) -> Result<Option<BuildOutcomeKind<OpBuiltPayload>>, PayloadBuilderError>
     where
         DB: Database<Error = ProviderError>,
@@ -740,19 +739,19 @@ where
     {
         let block_gas_limit = self.block_gas_limit();
         let base_fee = self.base_fee();
-        while let Some(pool_tx) = best_txs.next() {
+        while let Some(tx) = best_txs.next(()) {
             // ensure we still have capacity for this transaction
-            if info.cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
+            if info.cumulative_gas_used + tx.gas_limit() > block_gas_limit {
                 // we can't fit this transaction into the block, so we need to mark it as
                 // invalid which also removes all dependent transaction from
                 // the iterator before we can continue
-                best_txs.mark_invalid(&pool_tx);
+                best_txs.mark_invalid(tx.signer(), tx.nonce());
                 continue
             }
 
             // A sequencer's block should never contain blob or deposit transactions from the pool.
-            if pool_tx.is_eip4844() || pool_tx.tx_type() == TxType::Deposit as u8 {
-                best_txs.mark_invalid(&pool_tx);
+            if tx.is_eip4844() || tx.tx_type() == TxType::Deposit as u8 {
+                best_txs.mark_invalid(tx.signer(), tx.nonce());
                 continue
             }
 
@@ -762,7 +761,6 @@ where
             }
 
             // convert tx to a signed transaction
-            let tx = pool_tx.to_recovered_transaction();
             let env = EnvWithHandlerCfg::new_with_cfg_env(
                 self.initialized_cfg.clone(),
                 self.initialized_block_env.clone(),
@@ -784,7 +782,8 @@ where
                                 // if the transaction is invalid, we can skip it and all of its
                                 // descendants
                                 trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
-                                best_txs.mark_invalid(&pool_tx);
+                                // FIXME: This call is currently a NOOP.
+                                best_txs.mark_invalid(tx.signer(), tx.nonce());
                             }
 
                             continue
@@ -819,7 +818,7 @@ where
 
             // update add to total fees
             let miner_fee = tx
-                .effective_tip_per_gas(Some(base_fee))
+                .effective_tip_per_gas(base_fee)
                 .expect("fee is always valid; execution succeeded");
             info.total_fees += U256::from(miner_fee) * U256::from(gas_used);
 

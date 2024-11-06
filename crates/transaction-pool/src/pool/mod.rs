@@ -107,8 +107,8 @@ use crate::{
     validate::ValidTransaction,
 };
 pub use best::{
-    BestTransactionFilter, BestTransactionsChain, BestTransactionsFixed,
-    BestTransactionsWithPrioritizedSenders,
+    BestTransactionFilter, BestTransactionsWithPrioritizedSenders, PayloadTransactionsChain,
+    PayloadTransactionsFixed,
 };
 pub use blob::{blob_tx_priority, fee_delta};
 pub use events::{FullTransactionEvent, TransactionEvent};

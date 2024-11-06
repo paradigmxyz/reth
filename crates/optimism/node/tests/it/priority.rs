@@ -11,6 +11,12 @@ use reth_optimism_node::{
     OpEngineTypes, OptimismNode,
 };
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
+use reth_primitives::TransactionSignedEcRecovered;
+use reth_transaction_pool::{
+    pool::{PayloadTransactionsChain, PayloadTransactionsFixed},
+    test_utils::MockTransaction,
+    PayloadTransactions,
+};
 
 #[derive(Clone)]
 struct CustomTxPriority {}
@@ -20,13 +26,24 @@ impl OpPayloadTransactions for CustomTxPriority {
         &self,
         pool: Pool,
         attr: reth_transaction_pool::BestTransactionsAttributes,
-        // TODO(Seva): More arguments in this trait implementation for PayloadAttributes, etc.
-    ) -> reth_transaction_pool::BestTransactionsFor<Pool>
+    ) -> impl PayloadTransactions
     where
         Pool: reth_transaction_pool::TransactionPool,
     {
-        // TODO(Seva): Build a custom implementation here
-        pool.best_transactions_with_attributes(attr)
+        // Block composition:
+        // 1. Top-of-block transaction created by the nod
+        // 2. Best transactions from the pool
+
+        // TODO: Proper transaction generation. This transaction won't even validate.
+        let top_of_block_tx: TransactionSignedEcRecovered = MockTransaction::eip4844().into();
+
+        PayloadTransactionsChain::new(
+            PayloadTransactionsFixed::single(top_of_block_tx),
+            // Allow 100k gas for the top-of-block transaction
+            Some(100_000),
+            pool.best_transactions_with_attributes(attr),
+            None,
+        )
     }
 }
 
