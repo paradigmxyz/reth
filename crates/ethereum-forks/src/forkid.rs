@@ -176,7 +176,7 @@ impl From<EnrForkIdEntry> for ForkId {
 }
 
 /// Reason for rejecting provided `ForkId`.
-#[derive(Clone, Copy, Debug, thiserror_no_std::Error, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, thiserror::Error, PartialEq, Eq, Hash)]
 pub enum ValidationError {
     /// Remote node is outdated and needs a software update.
     #[error(
