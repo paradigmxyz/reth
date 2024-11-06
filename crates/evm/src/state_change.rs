@@ -1,9 +1,10 @@
 //! State changes that are not related to transactions.
 
+use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::{map::HashMap, Address, U256};
 use reth_chainspec::EthereumHardforks;
 use reth_consensus_common::calc;
-use reth_primitives::{Block, Withdrawal, Withdrawals};
+use reth_primitives::{Block, Withdrawals};
 
 /// Collect all balance changes at the end of the block.
 ///

@@ -1,5 +1,4 @@
-use crate::Signature;
-use alloy_primitives::Address;
+use alloy_primitives::{Address, Signature};
 
 #[cfg(feature = "secp256k1")]
 pub(crate) mod secp256k1 {

@@ -21,6 +21,7 @@ use reth_node_builder::{
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_evm::{OpEvmConfig, OpExecutionStrategyFactory};
+use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_rpc::OpEthApi;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::{Block, Header};
@@ -34,7 +35,7 @@ use reth_trie_db::MerklePatriciaTrie;
 
 use crate::{
     args::RollupArgs,
-    engine::OptimismEngineValidator,
+    engine::OpEngineValidator,
     txpool::{OpTransactionPool, OpTransactionValidator},
     OpEngineTypes,
 };
@@ -50,12 +51,12 @@ impl NodePrimitives for OpPrimitives {
 /// Type configuration for a regular Optimism node.
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
-pub struct OptimismNode {
+pub struct OpNode {
     /// Additional Optimism args
     pub args: RollupArgs,
 }
 
-impl OptimismNode {
+impl OpNode {
     /// Creates a new instance of the Optimism node type.
     pub const fn new(args: RollupArgs) -> Self {
         Self { args }
@@ -91,7 +92,7 @@ impl OptimismNode {
     }
 }
 
-impl<N> Node<N> for OptimismNode
+impl<N> Node<N> for OpNode
 where
     N: FullNodeTypes<Types: NodeTypesWithEngine<Engine = OpEngineTypes, ChainSpec = OpChainSpec>>,
 {
@@ -118,13 +119,13 @@ where
     }
 }
 
-impl NodeTypes for OptimismNode {
+impl NodeTypes for OpNode {
     type Primitives = OpPrimitives;
     type ChainSpec = OpChainSpec;
     type StateCommitment = MerklePatriciaTrie;
 }
 
-impl NodeTypesWithEngine for OptimismNode {
+impl NodeTypesWithEngine for OpNode {
     type Engine = OpEngineTypes;
 }
 
@@ -150,7 +151,7 @@ impl<N: FullNodeComponents> OptimismAddOns<N> {
 impl<N> NodeAddOns<N> for OptimismAddOns<N>
 where
     N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>,
-    OptimismEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
+    OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
 {
     type Handle = RpcHandle<N, OpEthApi<N>>;
 
@@ -165,7 +166,7 @@ where
 impl<N> RethRpcAddOns<N> for OptimismAddOns<N>
 where
     N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>,
-    OptimismEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
+    OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
 {
     type EthApi = OpEthApi<N>;
 
@@ -286,7 +287,7 @@ where
 
 /// A basic optimism payload service builder
 #[derive(Debug, Default, Clone)]
-pub struct OpPayloadBuilder {
+pub struct OpPayloadBuilder<Txs = ()> {
     /// By default the pending block equals the latest block
     /// to save resources and not leak txs from the tx-pool,
     /// this flag enables computing of the pending block
@@ -296,12 +297,30 @@ pub struct OpPayloadBuilder {
     /// will use the payload attributes from the latest block. Note
     /// that this flag is not yet functional.
     pub compute_pending_block: bool,
+    /// The type responsible for yielding the best transactions for the payload if mempool
+    /// transactions are allowed.
+    pub best_transactions: Txs,
 }
 
 impl OpPayloadBuilder {
     /// Create a new instance with the given `compute_pending_block` flag.
     pub const fn new(compute_pending_block: bool) -> Self {
-        Self { compute_pending_block }
+        Self { compute_pending_block, best_transactions: () }
+    }
+}
+
+impl<Txs> OpPayloadBuilder<Txs>
+where
+    Txs: OpPayloadTransactions,
+{
+    /// Configures the type responsible for yielding the transactions that should be included in the
+    /// payload.
+    pub fn with_transactions<T: OpPayloadTransactions>(
+        self,
+        best_transactions: T,
+    ) -> OpPayloadBuilder<T> {
+        let Self { compute_pending_block, .. } = self;
+        OpPayloadBuilder { compute_pending_block, best_transactions }
     }
 
     /// A helper method to initialize [`PayloadBuilderService`] with the given EVM config.
@@ -319,6 +338,7 @@ impl OpPayloadBuilder {
         Evm: ConfigureEvm<Header = Header>,
     {
         let payload_builder = reth_optimism_payload_builder::OpPayloadBuilder::new(evm_config)
+            .with_transactions(self.best_transactions)
             .set_compute_pending_block(self.compute_pending_block);
         let conf = ctx.payload_builder_config();
 
@@ -345,11 +365,12 @@ impl OpPayloadBuilder {
     }
 }
 
-impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for OpPayloadBuilder
+impl<Node, Pool, Txs> PayloadServiceBuilder<Node, Pool> for OpPayloadBuilder<Txs>
 where
     Node:
         FullNodeTypes<Types: NodeTypesWithEngine<Engine = OpEngineTypes, ChainSpec = OpChainSpec>>,
     Pool: TransactionPool + Unpin + 'static,
+    Txs: OpPayloadTransactions,
 {
     async fn spawn_payload_service(
         self,
@@ -456,7 +477,7 @@ where
     }
 }
 
-/// Builder for [`OptimismEngineValidator`].
+/// Builder for [`OpEngineValidator`].
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
 pub struct OptimismEngineValidatorBuilder;
@@ -465,11 +486,11 @@ impl<Node, Types> EngineValidatorBuilder<Node> for OptimismEngineValidatorBuilde
 where
     Types: NodeTypesWithEngine<ChainSpec = OpChainSpec>,
     Node: FullNodeComponents<Types = Types>,
-    OptimismEngineValidator: EngineValidator<Types::Engine>,
+    OpEngineValidator: EngineValidator<Types::Engine>,
 {
-    type Validator = OptimismEngineValidator;
+    type Validator = OpEngineValidator;
 
     async fn build(self, ctx: &AddOnsContext<'_, Node>) -> eyre::Result<Self::Validator> {
-        Ok(OptimismEngineValidator::new(ctx.config.chain.clone()))
+        Ok(OpEngineValidator::new(ctx.config.chain.clone()))
     }
 }

@@ -6,7 +6,7 @@ use crate::{
     StateRootProvider, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_consensus::constants::EMPTY_ROOT_HASH;
-use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
+use alloy_eips::{eip4895::Withdrawal, BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
     keccak256,
     map::{HashMap, HashSet},
@@ -23,7 +23,7 @@ use reth_node_types::NodeTypes;
 use reth_primitives::{
     Account, Block, BlockWithSenders, Bytecode, GotExpected, Header, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash, Withdrawal, Withdrawals,
+    TransactionSignedNoHash, Withdrawals,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
@@ -463,15 +463,15 @@ impl BlockNumReader for MockEthProvider {
 }
 
 impl BlockIdReader for MockEthProvider {
-    fn pending_block_num_hash(&self) -> ProviderResult<Option<reth_primitives::BlockNumHash>> {
+    fn pending_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
         Ok(None)
     }
 
-    fn safe_block_num_hash(&self) -> ProviderResult<Option<reth_primitives::BlockNumHash>> {
+    fn safe_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
         Ok(None)
     }
 
-    fn finalized_block_num_hash(&self) -> ProviderResult<Option<reth_primitives::BlockNumHash>> {
+    fn finalized_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
         Ok(None)
     }
 }
