@@ -1647,7 +1647,8 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
         jwt_secret.map(|secret| AuthLayer::new(JwtAuthValidator::new(secret)))
     }
 
-    /// Creates a [`CompressionLayer`] that only compresses when client accepts gzip
+    /// Returns a [`CompressionLayer`] that adds compression support (gzip, deflate, brotli, zstd)
+    /// based on the client's `Accept-Encoding` header
     const fn maybe_compression_layer() -> Option<CompressionLayer> {
         Some(CompressionLayer::new())
     }
