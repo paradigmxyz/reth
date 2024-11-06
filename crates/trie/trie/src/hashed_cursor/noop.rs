@@ -32,11 +32,11 @@ pub struct NoopHashedAccountCursor;
 impl HashedCursor for NoopHashedAccountCursor {
     type Value = Account;
 
-    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+    fn seek(&mut self, _key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         Ok(None)
     }
 
-    fn seek(&mut self, _key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         Ok(None)
     }
 }
@@ -49,11 +49,11 @@ pub struct NoopHashedStorageCursor;
 impl HashedCursor for NoopHashedStorageCursor {
     type Value = U256;
 
-    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+    fn seek(&mut self, _key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         Ok(None)
     }
 
-    fn seek(&mut self, _key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         Ok(None)
     }
 }

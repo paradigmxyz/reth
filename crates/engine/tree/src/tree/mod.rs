@@ -75,6 +75,8 @@ pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
 pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::InvalidBlockHook;
 
+mod root;
+
 /// Keeps track of the state of the tree.
 ///
 /// ## Invariants

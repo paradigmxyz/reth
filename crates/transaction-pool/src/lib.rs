@@ -151,12 +151,12 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use crate::{identifier::TransactionId, pool::PoolInner};
-use alloy_eips::eip4844::BlobAndProofV1;
+use alloy_eips::eip4844::{BlobAndProofV1, BlobTransactionSidecar};
 use alloy_primitives::{Address, TxHash, B256, U256};
 use aquamarine as _;
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
-use reth_primitives::{BlobTransactionSidecar, PooledTransactionsElement};
+use reth_primitives::PooledTransactionsElement;
 use reth_storage_api::StateProviderFactory;
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::mpsc::Receiver;
@@ -494,6 +494,13 @@ where
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.pool.get_transactions_by_sender(sender)
+    }
+
+    fn get_pending_transactions_with_predicate(
+        &self,
+        predicate: impl FnMut(&ValidPoolTransaction<Self::Transaction>) -> bool,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.pending_transactions_with_predicate(predicate)
     }
 
     fn get_pending_transactions_by_sender(

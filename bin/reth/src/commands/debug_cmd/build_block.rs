@@ -1,6 +1,6 @@
 //! Command for debugging block building.
 use alloy_consensus::TxEip4844;
-use alloy_eips::eip2718::Encodable2718;
+use alloy_eips::{eip2718::Encodable2718, eip4844::BlobTransactionSidecar};
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rlp::Decodable;
 use alloy_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
@@ -26,17 +26,15 @@ use reth_node_api::{
     EngineApiMessageVersion, NodeTypesWithDB, NodeTypesWithEngine, PayloadBuilderAttributes,
 };
 use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider};
-use reth_payload_builder::database::CachedReads;
 use reth_primitives::{
-    revm_primitives::KzgSettings, BlobTransaction, BlobTransactionSidecar,
-    PooledTransactionsElement, SealedBlock, SealedBlockWithSenders, SealedHeader, Transaction,
-    TransactionSigned,
+    revm_primitives::KzgSettings, BlobTransaction, PooledTransactionsElement, SealedBlock,
+    SealedBlockWithSenders, SealedHeader, Transaction, TransactionSigned,
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider,
     ProviderFactory, StageCheckpointReader, StateProviderFactory,
 };
-use reth_revm::{database::StateProviderDatabase, primitives::EnvKzgSettings};
+use reth_revm::{cached::CachedReads, database::StateProviderDatabase, primitives::EnvKzgSettings};
 use reth_stages::StageId;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, BlobStore, EthPooledTransaction, PoolConfig, TransactionOrigin,

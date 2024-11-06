@@ -1,5 +1,6 @@
 //! Helpers for testing trace calls.
 
+use alloy_eips::BlockId;
 use alloy_primitives::{map::HashSet, Bytes, TxHash, B256};
 use alloy_rpc_types::Index;
 use alloy_rpc_types_eth::transaction::TransactionRequest;
@@ -10,7 +11,6 @@ use alloy_rpc_types_trace::{
 };
 use futures::{Stream, StreamExt};
 use jsonrpsee::core::client::Error as RpcError;
-use reth_primitives::BlockId;
 use reth_rpc_api::clients::TraceApiClient;
 use std::{
     pin::Pin,
@@ -381,7 +381,7 @@ pub struct TraceBlockStream<'a> {
     stream: Pin<Box<dyn Stream<Item = TraceBlockResult> + 'a>>,
 }
 
-impl<'a> TraceBlockStream<'a> {
+impl TraceBlockStream<'_> {
     /// Returns the next error result of the stream.
     pub async fn next_err(&mut self) -> Option<(RpcError, BlockId)> {
         loop {
@@ -514,9 +514,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_eips::BlockNumberOrTag;
     use alloy_rpc_types_trace::filter::TraceFilterMode;
     use jsonrpsee::http_client::HttpClientBuilder;
-    use reth_primitives::BlockNumberOrTag;
 
     const fn assert_is_stream<St: Stream>(_: &St) {}
 

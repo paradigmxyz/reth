@@ -16,10 +16,12 @@ use crate::{
     PooledTransactionsElement, PropagatedTransactions, TransactionEvents, TransactionOrigin,
     TransactionPool, TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
 };
-use alloy_eips::{eip1559::ETHEREUM_BLOCK_GAS_LIMIT, eip4844::BlobAndProofV1};
+use alloy_eips::{
+    eip1559::ETHEREUM_BLOCK_GAS_LIMIT,
+    eip4844::{BlobAndProofV1, BlobTransactionSidecar},
+};
 use alloy_primitives::{Address, TxHash, B256, U256};
 use reth_eth_wire_types::HandleMempoolData;
-use reth_primitives::BlobTransactionSidecar;
 use std::{collections::HashSet, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
 
@@ -209,6 +211,13 @@ impl TransactionPool for NoopTransactionPool {
     fn get_transactions_by_sender(
         &self,
         _sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        vec![]
+    }
+
+    fn get_pending_transactions_with_predicate(
+        &self,
+        _predicate: impl FnMut(&ValidPoolTransaction<Self::Transaction>) -> bool,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         vec![]
     }

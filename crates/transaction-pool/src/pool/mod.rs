@@ -86,9 +86,9 @@ use parking_lot::{Mutex, RwLock, RwLockReadGuard};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 
+use alloy_eips::eip4844::BlobTransactionSidecar;
 use reth_primitives::{
-    BlobTransaction, BlobTransactionSidecar, PooledTransactionsElement, TransactionSigned,
-    TransactionSignedEcRecovered,
+    BlobTransaction, PooledTransactionsElement, TransactionSigned, TransactionSignedEcRecovered,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -785,6 +785,14 @@ where
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let sender_id = self.get_sender_id(sender);
         self.get_pool_data().pending_txs_by_sender(sender_id)
+    }
+
+    /// Returns all pending transactions filtered by predicate
+    pub(crate) fn pending_transactions_with_predicate(
+        &self,
+        predicate: impl FnMut(&ValidPoolTransaction<T::Transaction>) -> bool,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.get_pool_data().pending_transactions_with_predicate(predicate)
     }
 
     /// Returns all pending transactions of the address by sender

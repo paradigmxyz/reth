@@ -5,6 +5,7 @@ mod conn;
 mod counter;
 mod handle;
 
+use active::QueuedOutgoingMessages;
 pub use conn::EthRlpxConnection;
 pub use handle::{
     ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
@@ -109,6 +110,8 @@ pub struct SessionManager {
     active_session_rx: ReceiverStream<ActiveSessionMessage>,
     /// Additional `RLPx` sub-protocols to be used by the session manager.
     extra_protocols: RlpxSubProtocols,
+    /// Tracks the ongoing graceful disconnections attempts for incoming connections.
+    disconnections_counter: DisconnectionsCounter,
     /// Metrics for the session manager.
     metrics: SessionManagerMetrics,
 }
@@ -150,6 +153,7 @@ impl SessionManager {
             active_session_tx: MeteredPollSender::new(active_session_tx, "network_active_session"),
             active_session_rx: ReceiverStream::new(active_session_rx),
             extra_protocols,
+            disconnections_counter: Default::default(),
             metrics: Default::default(),
         }
     }
@@ -375,6 +379,35 @@ impl SessionManager {
         Some(session)
     }
 
+    /// Try to gracefully disconnect an incoming connection by initiating a ECIES connection and
+    /// sending a disconnect. If [`SessionManager`] is at capacity for ongoing disconnections, will
+    /// simply drop the incoming connection.
+    pub(crate) fn try_disconnect_incoming_connection(
+        &self,
+        stream: TcpStream,
+        reason: DisconnectReason,
+    ) {
+        if !self.disconnections_counter.has_capacity() {
+            // drop the connection if we don't have capacity for gracefully disconnecting
+            return
+        }
+
+        let guard = self.disconnections_counter.clone();
+        let secret_key = self.secret_key;
+
+        self.spawn(async move {
+            trace!(
+                target: "net::session",
+                "gracefully disconnecting incoming connection"
+            );
+            if let Ok(stream) = get_ecies_stream(stream, secret_key, Direction::Incoming).await {
+                let mut unauth = UnauthedP2PStream::new(stream);
+                let _ = unauth.send_disconnect(reason).await;
+                drop(guard);
+            }
+        });
+    }
+
     /// This polls all the session handles and returns [`SessionEvent`].
     ///
     /// Active sessions are prioritized.
@@ -495,7 +528,9 @@ impl SessionManager {
                     internal_request_tx: ReceiverStream::new(messages_rx).fuse(),
                     inflight_requests: Default::default(),
                     conn,
-                    queued_outgoing: Default::default(),
+                    queued_outgoing: QueuedOutgoingMessages::new(
+                        self.metrics.queued_outgoing_messages.clone(),
+                    ),
                     received_requests_from_remote: Default::default(),
                     internal_request_timeout_interval: tokio::time::interval(
                         self.initial_internal_request_timeout,
@@ -609,6 +644,20 @@ impl SessionManager {
                 }
             }
         }
+    }
+}
+
+/// A counter for ongoing graceful disconnections attempts.
+#[derive(Default, Debug, Clone)]
+struct DisconnectionsCounter(Arc<()>);
+
+impl DisconnectionsCounter {
+    const MAX_CONCURRENT_GRACEFUL_DISCONNECTIONS: usize = 15;
+
+    /// Returns true if the [`DisconnectionsCounter`] still has capacity
+    /// for an additional graceful disconnection.
+    fn has_capacity(&self) -> bool {
+        Arc::strong_count(&self.0) <= Self::MAX_CONCURRENT_GRACEFUL_DISCONNECTIONS
     }
 }
 

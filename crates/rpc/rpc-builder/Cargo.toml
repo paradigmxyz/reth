@@ -31,11 +31,6 @@ reth-evm.workspace = true
 reth-engine-primitives.workspace = true
 reth-primitives.workspace = true
 
-# ethereum
-alloy-network.workspace = true
-alloy-rpc-types.workspace = true
-alloy-serde.workspace = true
-
 # rpc/net
 jsonrpsee = { workspace = true, features = ["server"] }
 tower-http = { workspace = true, features = ["full"] }
@@ -73,6 +68,7 @@ alloy-primitives.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-rpc-types-trace.workspace = true
 alloy-rpc-types-engine.workspace = true
+alloy-eips.workspace = true
 
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 serde_json.workspace = true

@@ -22,17 +22,17 @@ use reth_optimism_payload_builder::{
 /// The types used in the optimism beacon consensus engine.
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]
-pub struct OptimismEngineTypes<T: PayloadTypes = OptimismPayloadTypes> {
+pub struct OpEngineTypes<T: PayloadTypes = OpPayloadTypes> {
     _marker: std::marker::PhantomData<T>,
 }
 
-impl<T: PayloadTypes> PayloadTypes for OptimismEngineTypes<T> {
+impl<T: PayloadTypes> PayloadTypes for OpEngineTypes<T> {
     type BuiltPayload = T::BuiltPayload;
     type PayloadAttributes = T::PayloadAttributes;
     type PayloadBuilderAttributes = T::PayloadBuilderAttributes;
 }
 
-impl<T: PayloadTypes> EngineTypes for OptimismEngineTypes<T>
+impl<T: PayloadTypes> EngineTypes for OpEngineTypes<T>
 where
     T::BuiltPayload: TryInto<ExecutionPayloadV1>
         + TryInto<ExecutionPayloadEnvelopeV2>
@@ -45,12 +45,12 @@ where
     type ExecutionPayloadEnvelopeV4 = OpExecutionPayloadEnvelopeV4;
 }
 
-/// A default payload type for [`OptimismEngineTypes`]
+/// A default payload type for [`OpEngineTypes`]
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]
-pub struct OptimismPayloadTypes;
+pub struct OpPayloadTypes;
 
-impl PayloadTypes for OptimismPayloadTypes {
+impl PayloadTypes for OpPayloadTypes {
     type BuiltPayload = OpBuiltPayload;
     type PayloadAttributes = OpPayloadAttributes;
     type PayloadBuilderAttributes = OpPayloadBuilderAttributes;
@@ -58,11 +58,11 @@ impl PayloadTypes for OptimismPayloadTypes {
 
 /// Validator for Optimism engine API.
 #[derive(Debug, Clone)]
-pub struct OptimismEngineValidator {
+pub struct OpEngineValidator {
     chain_spec: Arc<OpChainSpec>,
 }
 
-impl OptimismEngineValidator {
+impl OpEngineValidator {
     /// Instantiates a new validator.
     pub const fn new(chain_spec: Arc<OpChainSpec>) -> Self {
         Self { chain_spec }
@@ -111,7 +111,7 @@ pub fn validate_withdrawals_presence(
     Ok(())
 }
 
-impl<Types> EngineValidator<Types> for OptimismEngineValidator
+impl<Types> EngineValidator<Types> for OpEngineValidator
 where
     Types: EngineTypes<PayloadAttributes = OpPayloadAttributes>,
 {
@@ -220,11 +220,11 @@ mod test {
 
     #[test]
     fn test_well_formed_attributes_pre_holocene() {
-        let validator = OptimismEngineValidator::new(get_chainspec(false));
+        let validator = OpEngineValidator::new(get_chainspec(false));
         let attributes = get_attributes(None, 1799999999);
 
-        let result = <engine::OptimismEngineValidator as reth_node_builder::EngineValidator<
-            OptimismEngineTypes,
+        let result = <engine::OpEngineValidator as reth_node_builder::EngineValidator<
+            OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
         );
@@ -233,11 +233,11 @@ mod test {
 
     #[test]
     fn test_well_formed_attributes_holocene_no_eip1559_params() {
-        let validator = OptimismEngineValidator::new(get_chainspec(true));
+        let validator = OpEngineValidator::new(get_chainspec(true));
         let attributes = get_attributes(None, 1800000000);
 
-        let result = <engine::OptimismEngineValidator as reth_node_builder::EngineValidator<
-            OptimismEngineTypes,
+        let result = <engine::OpEngineValidator as reth_node_builder::EngineValidator<
+            OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
         );
@@ -246,11 +246,11 @@ mod test {
 
     #[test]
     fn test_well_formed_attributes_holocene_eip1559_params_zero_denominator() {
-        let validator = OptimismEngineValidator::new(get_chainspec(true));
+        let validator = OpEngineValidator::new(get_chainspec(true));
         let attributes = get_attributes(Some(b64!("0000000000000008")), 1800000000);
 
-        let result = <engine::OptimismEngineValidator as reth_node_builder::EngineValidator<
-            OptimismEngineTypes,
+        let result = <engine::OpEngineValidator as reth_node_builder::EngineValidator<
+            OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
         );
@@ -259,11 +259,11 @@ mod test {
 
     #[test]
     fn test_well_formed_attributes_holocene_valid() {
-        let validator = OptimismEngineValidator::new(get_chainspec(true));
+        let validator = OpEngineValidator::new(get_chainspec(true));
         let attributes = get_attributes(Some(b64!("0000000800000008")), 1800000000);
 
-        let result = <engine::OptimismEngineValidator as reth_node_builder::EngineValidator<
-            OptimismEngineTypes,
+        let result = <engine::OpEngineValidator as reth_node_builder::EngineValidator<
+            OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
         );
@@ -272,11 +272,11 @@ mod test {
 
     #[test]
     fn test_well_formed_attributes_holocene_valid_all_zero() {
-        let validator = OptimismEngineValidator::new(get_chainspec(true));
+        let validator = OpEngineValidator::new(get_chainspec(true));
         let attributes = get_attributes(Some(b64!("0000000000000000")), 1800000000);
 
-        let result = <engine::OptimismEngineValidator as reth_node_builder::EngineValidator<
-            OptimismEngineTypes,
+        let result = <engine::OpEngineValidator as reth_node_builder::EngineValidator<
+            OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
         );

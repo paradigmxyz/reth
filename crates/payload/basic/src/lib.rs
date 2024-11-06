@@ -10,24 +10,21 @@
 
 use crate::metrics::PayloadBuilderMetrics;
 use alloy_consensus::constants::EMPTY_WITHDRAWALS;
-use alloy_eips::merge::SLOT_DURATION;
+use alloy_eips::{merge::SLOT_DURATION, BlockNumberOrTag};
 use alloy_primitives::{Bytes, B256, U256};
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_evm::state_change::post_block_withdrawals_balance_increments;
-use reth_payload_builder::{
-    database::CachedReads, KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJobGenerator,
-};
+use reth_payload_builder::{KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJobGenerator};
 use reth_payload_primitives::{
     BuiltPayload, PayloadBuilderAttributes, PayloadBuilderError, PayloadKind,
 };
-use reth_primitives::{
-    constants::RETH_CLIENT_VERSION, proofs, BlockNumberOrTag, SealedHeader, Withdrawals,
-};
+use reth_primitives::{constants::RETH_CLIENT_VERSION, proofs, SealedHeader, Withdrawals};
 use reth_provider::{
     BlockReaderIdExt, BlockSource, CanonStateNotification, ProviderError, StateProviderFactory,
 };
+use reth_revm::cached::CachedReads;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use revm::{Database, State};
@@ -784,6 +781,37 @@ impl<Payload> BuildOutcome<Payload> {
     /// Returns true if the outcome is `Cancelled`.
     pub const fn is_cancelled(&self) -> bool {
         matches!(self, Self::Cancelled)
+    }
+}
+
+/// The possible outcomes of a payload building attempt without reused [`CachedReads`]
+#[derive(Debug)]
+pub enum BuildOutcomeKind<Payload> {
+    /// Successfully built a better block.
+    Better {
+        /// The new payload that was built.
+        payload: Payload,
+    },
+    /// Aborted payload building because resulted in worse block wrt. fees.
+    Aborted {
+        /// The total fees associated with the attempted payload.
+        fees: U256,
+    },
+    /// Build job was cancelled
+    Cancelled,
+    /// The payload is final and no further building should occur
+    Freeze(Payload),
+}
+
+impl<Payload> BuildOutcomeKind<Payload> {
+    /// Attaches the [`CachedReads`] to the outcome.
+    pub fn with_cached_reads(self, cached_reads: CachedReads) -> BuildOutcome<Payload> {
+        match self {
+            Self::Better { payload } => BuildOutcome::Better { payload, cached_reads },
+            Self::Aborted { fees } => BuildOutcome::Aborted { fees, cached_reads },
+            Self::Cancelled => BuildOutcome::Cancelled,
+            Self::Freeze(payload) => BuildOutcome::Freeze(payload),
+        }
     }
 }
 
