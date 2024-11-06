@@ -209,7 +209,7 @@ pub fn block_to_execution_payload_v3(block: Block) -> ExecutionNewPayload {
                     .map(|tx| tx.inner.encoded_2718().into())
                     .collect(),
             },
-            withdrawals: block.withdrawals.clone().unwrap_or_default().to_vec(),
+            withdrawals: block.withdrawals.clone().unwrap_or_default().into_inner(),
         },
         blob_gas_used: block.header.blob_gas_used.unwrap(),
         excess_blob_gas: block.header.excess_blob_gas.unwrap(),
