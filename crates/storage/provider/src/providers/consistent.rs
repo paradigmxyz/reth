@@ -1388,7 +1388,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                 .bundle
                 .reverts
                 .clone()
-                .into_plain_state_reverts()
+                .to_plain_state_reverts()
                 .storage
                 .into_iter()
                 .flatten()
@@ -1441,7 +1441,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
                 .bundle
                 .reverts
                 .clone()
-                .into_plain_state_reverts()
+                .to_plain_state_reverts()
                 .accounts
                 .into_iter()
                 .flatten()

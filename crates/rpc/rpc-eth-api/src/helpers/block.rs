@@ -3,11 +3,11 @@
 use std::sync::Arc;
 
 use alloy_eips::BlockId;
-use alloy_rpc_types::{Header, Index};
+use alloy_rpc_types::{Block, Header, Index};
 use futures::Future;
 use reth_primitives::{Receipt, SealedBlock, SealedBlockWithSenders};
 use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider};
-use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
+use reth_rpc_types_compat::block::from_block;
 
 use crate::{node::RpcNodeCoreExt, FromEthApiError, FullEthApiTypes, RpcBlock, RpcReceipt};
 
@@ -189,7 +189,7 @@ pub trait EthBlocks: LoadBlock {
             }
             .unwrap_or_default();
 
-            Ok(uncles.into_iter().nth(index.into()).map(uncle_block_from_header))
+            Ok(uncles.into_iter().nth(index.into()).map(Block::uncle_from_header))
         }
     }
 }
