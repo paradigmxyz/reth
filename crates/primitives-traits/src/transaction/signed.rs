@@ -2,11 +2,17 @@
 
 use alloc::fmt;
 use core::hash::Hash;
+use reth_codecs::Compact;
 
 use alloy_consensus::Transaction;
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
 use alloy_primitives::{keccak256, Address, Signature, TxHash, B256};
 use revm_primitives::TxEnv;
+
+/// Helper trait that unifies all behaviour required by block to support full node operations.
+pub trait FullSignedTx: SignedTransaction<Transaction: Compact> + Compact {}
+
+impl<T> FullSignedTx for T where T: SignedTransaction<Transaction: Compact> + Compact {}
 
 /// A signed transaction.
 pub trait SignedTransaction:
