@@ -17,7 +17,7 @@ mod jwt_validator;
 mod compression_layer;
 
 pub use auth_layer::{AuthService, ResponseFuture};
-pub use compression_layer::CompressionService;
+pub use compression_layer::CompressionLayer;
 
 // Export alloy JWT types
 pub use alloy_rpc_types_engine::{Claims, JwtError, JwtSecret};

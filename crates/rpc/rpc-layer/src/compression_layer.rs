@@ -24,11 +24,20 @@ pub struct CompressionService<S> {
 }
 
 /// Layer for adding compression support
+#[allow(missing_debug_implementations)]
 pub struct CompressionLayer;
 
 impl CompressionLayer {
+    /// Creates a new compression layer with default settings
     pub const fn new() -> Self {
         Self
+    }
+}
+
+impl Default for CompressionLayer {
+    /// Creates a new compression layer with default settings
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -117,7 +126,7 @@ mod tests {
     use std::future::ready;
     use tower::{Service, ServiceBuilder, ServiceExt};
 
-    use crate::compression_layer::CompressionLayer;
+    use crate::CompressionLayer;
 
     #[derive(Clone)]
     struct MockRequestService;
