@@ -1,6 +1,6 @@
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, B256};
-use reth::{rpc::types::engine::PayloadAttributes, tasks::TaskManager};
+use reth::rpc::types::engine::PayloadAttributes;
 use reth_e2e_test_utils::{
     transaction::TransactionTestContext, wallet::Wallet, Adapter, NodeHelperType,
 };
@@ -15,7 +15,7 @@ use tokio::sync::Mutex;
 /// Optimism Node Helper type
 pub(crate) type OpNode = NodeHelperType<OtherOpNode, OptimismAddOns<Adapter<OtherOpNode>>>;
 
-pub(crate) async fn setup(num_nodes: usize) -> eyre::Result<(Vec<OpNode>, TaskManager, Wallet)> {
+pub(crate) async fn setup(num_nodes: usize) -> eyre::Result<(Vec<OpNode>, Wallet)> {
     let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
     reth_e2e_test_utils::setup(
         num_nodes,

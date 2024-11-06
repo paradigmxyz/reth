@@ -16,7 +16,7 @@ use std::sync::Arc;
 async fn can_run_eth_node() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let (mut nodes, _tasks, wallet) = setup::<EthereumNode>(
+    let (mut nodes, wallet) = setup::<EthereumNode>(
         1,
         Arc::new(
             ChainSpecBuilder::default()

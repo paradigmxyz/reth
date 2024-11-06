@@ -51,7 +51,7 @@ pub async fn setup<N>(
     chain_spec: Arc<N::ChainSpec>,
     is_dev: bool,
     attributes_generator: impl Fn(u64) -> <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes + Copy + 'static,
-) -> eyre::Result<(Vec<NodeHelperType<N, N::AddOns>>, TaskManager, Wallet)>
+) -> eyre::Result<(Vec<NodeHelperType<N, N::AddOns>>, Wallet)>
 where
     N: Default + Node<TmpNodeAdapter<N>> + NodeTypesWithEngine<ChainSpec: EthereumHardforks>,
     N::ComponentsBuilder: NodeComponentsBuilder<
@@ -103,7 +103,7 @@ where
         nodes.push(node);
     }
 
-    Ok((nodes, tasks, Wallet::default().with_chain_id(chain_spec.chain().into())))
+    Ok((nodes, Wallet::default().with_chain_id(chain_spec.chain().into())))
 }
 
 /// Creates the initial setup with `num_nodes` started and interconnected.

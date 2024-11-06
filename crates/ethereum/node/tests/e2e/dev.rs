@@ -18,7 +18,7 @@ use reth_tasks::TaskManager;
 #[tokio::test]
 async fn can_run_dev_node() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let (mut nodes, _tasks, _) =
+    let (mut nodes, _) =
         setup::<EthereumNode>(1, custom_chain(), true, eth_payload_attributes).await?;
 
     assert_chain_advances(nodes.pop().unwrap().inner).await;

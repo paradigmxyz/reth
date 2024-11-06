@@ -20,7 +20,7 @@ use std::sync::Arc;
 async fn can_sync() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let (mut nodes, _tasks, wallet) = setup::<EthereumNode>(
+    let (mut nodes, wallet) = setup::<EthereumNode>(
         2,
         Arc::new(
             ChainSpecBuilder::default()
