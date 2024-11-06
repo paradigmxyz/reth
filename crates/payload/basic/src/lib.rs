@@ -10,7 +10,7 @@
 
 use crate::metrics::PayloadBuilderMetrics;
 use alloy_consensus::constants::EMPTY_WITHDRAWALS;
-use alloy_eips::{merge::SLOT_DURATION, BlockNumberOrTag};
+use alloy_eips::merge::SLOT_DURATION;
 use alloy_primitives::{Bytes, B256, U256};
 use futures_core::ready;
 use futures_util::FutureExt;
@@ -22,7 +22,7 @@ use reth_payload_primitives::{
 };
 use reth_primitives::{constants::RETH_CLIENT_VERSION, proofs, SealedHeader, Withdrawals};
 use reth_provider::{
-    BlockReaderIdExt, BlockSource, CanonStateNotification, ProviderError, StateProviderFactory,
+    BlockReaderIdExt, CanonStateNotification, ProviderError, StateProviderFactory,
 };
 use reth_revm::cached::CachedReads;
 use reth_tasks::TaskSpawner;
@@ -144,33 +144,30 @@ where
         &self,
         attributes: <Self::Job as PayloadJob>::PayloadAttributes,
     ) -> Result<Self::Job, PayloadBuilderError> {
-        let parent_block = if attributes.parent().is_zero() {
-            // use latest block if parent is zero: genesis block
+        let parent_header = if attributes.parent().is_zero() {
+            // Use latest header for genesis block case
             self.client
-                .block_by_number_or_tag(BlockNumberOrTag::Latest)?
-                .ok_or_else(|| PayloadBuilderError::MissingParentBlock(attributes.parent()))?
-                .seal_slow()
+                .latest_header()
+                .map_err(PayloadBuilderError::from)?
+                .ok_or_else(|| PayloadBuilderError::MissingParentHeader(B256::ZERO))?
         } else {
-            let block = self
-                .client
-                .find_block_by_hash(attributes.parent(), BlockSource::Any)?
-                .ok_or_else(|| PayloadBuilderError::MissingParentBlock(attributes.parent()))?;
-
-            // we already know the hash, so we can seal it
-            block.seal(attributes.parent())
+            // Fetch specific header by hash
+            self.client
+                .sealed_header_by_hash(attributes.parent())
+                .map_err(PayloadBuilderError::from)?
+                .ok_or_else(|| PayloadBuilderError::MissingParentHeader(attributes.parent()))?
         };
 
-        let hash = parent_block.hash();
-        let parent_header = parent_block.header();
-        let header = SealedHeader::new(parent_header.clone(), hash);
-
-        let config =
-            PayloadConfig::new(Arc::new(header), self.config.extradata.clone(), attributes);
+        let config = PayloadConfig::new(
+            Arc::new(parent_header.clone()),
+            self.config.extradata.clone(),
+            attributes,
+        );
 
         let until = self.job_deadline(config.attributes.timestamp());
         let deadline = Box::pin(tokio::time::sleep_until(until));
 
-        let cached_reads = self.maybe_pre_cached(hash);
+        let cached_reads = self.maybe_pre_cached(parent_header.hash());
 
         let mut job = BasicPayloadJob {
             config,
