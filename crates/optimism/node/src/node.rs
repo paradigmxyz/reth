@@ -105,9 +105,8 @@ where
         OpConsensusBuilder,
     >;
 
-    type AddOns = OptimismAddOns<
-        NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
-    >;
+    type AddOns =
+        OpAddOns<NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>>;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
         let Self { args } = self;
@@ -115,7 +114,7 @@ where
     }
 
     fn add_ons(&self) -> Self::AddOns {
-        OptimismAddOns::new(self.args.sequencer_http.clone())
+        OpAddOns::new(self.args.sequencer_http.clone())
     }
 }
 
@@ -131,24 +130,24 @@ impl NodeTypesWithEngine for OpNode {
 
 /// Add-ons w.r.t. optimism.
 #[derive(Debug)]
-pub struct OptimismAddOns<N: FullNodeComponents>(
+pub struct OpAddOns<N: FullNodeComponents>(
     pub RpcAddOns<N, OpEthApi<N>, OptimismEngineValidatorBuilder>,
 );
 
-impl<N: FullNodeComponents> Default for OptimismAddOns<N> {
+impl<N: FullNodeComponents> Default for OpAddOns<N> {
     fn default() -> Self {
         Self::new(None)
     }
 }
 
-impl<N: FullNodeComponents> OptimismAddOns<N> {
+impl<N: FullNodeComponents> OpAddOns<N> {
     /// Create a new instance with the given `sequencer_http` URL.
     pub fn new(sequencer_http: Option<String>) -> Self {
         Self(RpcAddOns::new(move |ctx| OpEthApi::new(ctx, sequencer_http), Default::default()))
     }
 }
 
-impl<N> NodeAddOns<N> for OptimismAddOns<N>
+impl<N> NodeAddOns<N> for OpAddOns<N>
 where
     N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>,
     OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
@@ -163,7 +162,7 @@ where
     }
 }
 
-impl<N> RethRpcAddOns<N> for OptimismAddOns<N>
+impl<N> RethRpcAddOns<N> for OpAddOns<N>
 where
     N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>,
     OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
