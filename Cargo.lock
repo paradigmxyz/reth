@@ -7209,6 +7209,7 @@ dependencies = [
  "assert_matches",
  "futures",
  "metrics",
+ "pin-project",
  "reth-beacon-consensus",
  "reth-blockchain-tree",
  "reth-blockchain-tree-api",
