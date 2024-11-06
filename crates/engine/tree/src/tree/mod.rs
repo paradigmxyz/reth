@@ -45,7 +45,6 @@ use reth_stages_api::ControlFlow;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_parallel::parallel_root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::ResultAndState;
-use root::StateRootTask;
 use std::{
     cmp::Ordering,
     collections::{btree_map, hash_map, BTreeMap, VecDeque},
@@ -61,7 +60,6 @@ use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     oneshot::{self, error::TryRecvError},
 };
-use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
 
 pub mod config;
@@ -2190,30 +2188,17 @@ where
 
         let exec_time = Instant::now();
 
-        let (state_root_tx, state_root_rx) = unbounded_channel();
-        // TODO: create consistent_view using `new_with_latest_tip` when we
-        // switch to `StateRootTask`.
-        let consistent_view = ConsistentDbView::new(self.provider.clone(), None);
-        let state_root_task = StateRootTask::new(
-            consistent_view,
-            // TODO: calculate `TrieInput` like in `self.compute_state_root_parallel`.
-            Arc::new(TrieInput::default()),
-            UnboundedReceiverStream::new(state_root_rx),
-        );
-        let state_root_handle = state_root_task.spawn();
-        let state_hook = move |result_and_state: &ResultAndState| {
-            let _ = state_root_tx.send(result_and_state.state.clone());
-        };
-
+        // TODO: create StateRootTask with the receiving end of a channel and
+        // pass the sending end of the channel to the state hook.
+        let noop_state_hook = |_result_and_state: &ResultAndState| {};
         let output = self.metrics.executor.execute_metered(
             executor,
             (&block, U256::MAX).into(),
-            Box::new(state_hook),
+            Box::new(noop_state_hook),
         )?;
 
         trace!(target: "engine::tree", elapsed=?exec_time.elapsed(), ?block_number, "Executed block");
 
-        let _ = state_root_handle.wait_result();
         if let Err(err) = self.consensus.validate_block_post_execution(
             &block,
             PostExecutionInput::new(&output.receipts, &output.requests),

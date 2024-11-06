@@ -13,11 +13,13 @@ pub(crate) type StateRootResult = Result<(B256, TrieUpdates), ParallelStateRootE
 
 /// Handle to a spawned state root task.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub(crate) struct StateRootHandle {
     /// Channel for receiving the final result.
     rx: mpsc::Receiver<StateRootResult>,
 }
 
+#[allow(dead_code)]
 impl StateRootHandle {
     /// Waits for the state root calculation to complete.
     pub(crate) fn wait_result(self) -> StateRootResult {
