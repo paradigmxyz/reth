@@ -4,7 +4,7 @@ use std::{fmt::Display, sync::Arc};
 
 use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
 use alloy_eips::merge::BEACON_NONCE;
-use alloy_primitives::{Address, Bytes, B64, U256};
+use alloy_primitives::{Address, Bytes, U256};
 use alloy_rpc_types_engine::PayloadId;
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
@@ -830,13 +830,4 @@ where
 
         Ok(None)
     }
-}
-
-/// Extracts the Holocene 1599 parameters from the encoded form:
-/// <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#eip1559params-encoding>
-pub fn decode_eip_1559_params(eip_1559_params: B64) -> (u32, u32) {
-    let denominator: [u8; 4] = eip_1559_params.0[..4].try_into().expect("sufficient length");
-    let elasticity: [u8; 4] = eip_1559_params.0[4..8].try_into().expect("sufficient length");
-
-    (u32::from_be_bytes(elasticity), u32::from_be_bytes(denominator))
 }
