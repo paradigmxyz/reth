@@ -13,7 +13,7 @@ use reth_primitives::{SealedBlock, Withdrawals};
 use reth_rpc_types_compat::engine::payload::{
     block_to_payload_v1, block_to_payload_v3, convert_block_to_payload_field_v2,
 };
-use std::convert::Infallible;
+use std::{convert::Infallible, sync::Arc};
 
 /// Contains the built payload.
 ///
@@ -25,7 +25,7 @@ pub struct EthBuiltPayload {
     /// Identifier of the payload
     pub(crate) id: PayloadId,
     /// The built block
-    pub(crate) block: SealedBlock,
+    pub(crate) block: Arc<SealedBlock>,
     /// Block execution data for the payload, if any.
     pub(crate) executed_block: Option<ExecutedBlock>,
     /// The fees of the block
@@ -45,7 +45,7 @@ impl EthBuiltPayload {
     /// Caution: This does not set any [`BlobTransactionSidecar`].
     pub const fn new(
         id: PayloadId,
-        block: SealedBlock,
+        block: Arc<SealedBlock>,
         fees: U256,
         executed_block: Option<ExecutedBlock>,
         requests: Option<Requests>,
@@ -59,7 +59,7 @@ impl EthBuiltPayload {
     }
 
     /// Returns the built block(sealed)
-    pub const fn block(&self) -> &SealedBlock {
+    pub fn block(&self) -> &SealedBlock {
         &self.block
     }
 
@@ -127,7 +127,7 @@ impl BuiltPayload for &EthBuiltPayload {
 // V1 engine_getPayloadV1 response
 impl From<EthBuiltPayload> for ExecutionPayloadV1 {
     fn from(value: EthBuiltPayload) -> Self {
-        block_to_payload_v1(value.block)
+        block_to_payload_v1(Arc::unwrap_or_clone(value.block))
     }
 }
 
@@ -136,7 +136,10 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV2 {
     fn from(value: EthBuiltPayload) -> Self {
         let EthBuiltPayload { block, fees, .. } = value;
 
-        Self { block_value: fees, execution_payload: convert_block_to_payload_field_v2(block) }
+        Self {
+            block_value: fees,
+            execution_payload: convert_block_to_payload_field_v2(Arc::unwrap_or_clone(block)),
+        }
     }
 }
 
@@ -145,7 +148,7 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV3 {
         let EthBuiltPayload { block, fees, sidecars, .. } = value;
 
         Self {
-            execution_payload: block_to_payload_v3(block),
+            execution_payload: block_to_payload_v3(Arc::unwrap_or_clone(block)),
             block_value: fees,
             // From the engine API spec:
             //
@@ -166,7 +169,7 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV4 {
         let EthBuiltPayload { block, fees, sidecars, requests, .. } = value;
 
         Self {
-            execution_payload: block_to_payload_v3(block),
+            execution_payload: block_to_payload_v3(Arc::unwrap_or_clone(block)),
             block_value: fees,
             // From the engine API spec:
             //

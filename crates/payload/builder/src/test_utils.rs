@@ -13,6 +13,7 @@ use reth_provider::CanonStateNotification;
 use std::{
     future::Future,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 
@@ -86,7 +87,7 @@ impl PayloadJob for TestPayloadJob {
     fn best_payload(&self) -> Result<EthBuiltPayload, PayloadBuilderError> {
         Ok(EthBuiltPayload::new(
             self.attr.payload_id(),
-            Block::default().seal_slow(),
+            Arc::new(Block::default().seal_slow()),
             U256::ZERO,
             Some(ExecutedBlock::default()),
             Some(Default::default()),
