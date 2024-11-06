@@ -8,7 +8,7 @@ use reth_optimism_node::{
     node::{
         OpConsensusBuilder, OpExecutorBuilder, OpNetworkBuilder, OpPayloadBuilder, OpPoolBuilder,
     },
-    OpEngineTypes, OptimismNode,
+    OpEngineTypes, OpNode,
 };
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_primitives::TransactionSignedEcRecovered;
@@ -79,7 +79,7 @@ async fn test_custom_block_priority_config() {
 
     let _builder = NodeBuilder::new(config)
         .with_database(db)
-        .with_types::<OptimismNode>()
+        .with_types::<OpNode>()
         .with_components(build_components())
         .check_launch();
 

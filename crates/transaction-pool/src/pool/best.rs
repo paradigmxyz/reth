@@ -409,7 +409,7 @@ impl PayloadTransactions for PayloadTransactionsFixed<TransactionSignedEcRecover
 /// (a) we need to propagate the `mark_invalid` and `no_updates`
 /// (b) we need to keep track of the gas
 ///
-/// Notes that [`BestTransactionsChain`] fully drains the first iterator
+/// Notes that [`PayloadTransactionsChain`] fully drains the first iterator
 /// before moving to the second one.
 ///
 /// If the `before` iterator has transactions that are not fitting into the block,
