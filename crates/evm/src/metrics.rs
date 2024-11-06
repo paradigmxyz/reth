@@ -11,12 +11,12 @@ use revm_primitives::ResultAndState;
 use std::time::Instant;
 
 /// Wrapper struct that combines metrics and state hook
-struct StateHookWrapper {
+struct MeteredStateHook {
     metrics: ExecutorMetrics,
     inner_hook: Box<dyn OnStateHook>,
 }
 
-impl OnStateHook for StateHookWrapper {
+impl OnStateHook for MeteredStateHook {
     fn on_state(&mut self, result_and_state: &ResultAndState) {
         // Update the metrics for the number of accounts, storage slots and bytecodes loaded
         let accounts = result_and_state.state.keys().len();
@@ -111,7 +111,7 @@ impl ExecutorMetrics {
         // clone here is cheap, all the metrics are Option<Arc<_>>. additionally
         // they are gloally registered so that the data recorded in the hook will
         // be accessible.
-        let wrapper = StateHookWrapper { metrics: self.clone(), inner_hook: state_hook };
+        let wrapper = MeteredStateHook { metrics: self.clone(), inner_hook: state_hook };
 
         // Store reference to block for metered
         let block = input.block;
