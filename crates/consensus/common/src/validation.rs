@@ -275,15 +275,16 @@ pub fn validate_against_parent_4844(
 mod tests {
     use super::*;
     use alloy_consensus::{TxEip4844, EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH};
+    use alloy_eips::{eip4895::Withdrawal, BlockHashOrNumber};
     use alloy_primitives::{
-        hex_literal::hex, Address, BlockHash, BlockNumber, Bytes, Sealable, U256,
+        hex_literal::hex, Address, BlockHash, BlockNumber, Bytes, PrimitiveSignature as Signature,
+        Sealable, U256,
     };
     use mockall::mock;
     use rand::Rng;
     use reth_chainspec::ChainSpecBuilder;
     use reth_primitives::{
-        proofs, Account, BlockBody, BlockHashOrNumber, Signature, Transaction, TransactionSigned,
-        Withdrawal, Withdrawals,
+        proofs, Account, BlockBody, Transaction, TransactionSigned, Withdrawals,
     };
     use reth_storage_api::{
         errors::provider::ProviderResult, AccountReader, HeaderProvider, WithdrawalsProvider,

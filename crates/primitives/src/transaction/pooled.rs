@@ -2,17 +2,16 @@
 //! response to `GetPooledTransactions`.
 
 use super::{error::TransactionConversionError, signature::recover_signer, TxEip7702};
-use crate::{
-    BlobTransaction, BlobTransactionSidecar, Signature, Transaction, TransactionSigned,
-    TransactionSignedEcRecovered,
-};
+use crate::{BlobTransaction, Transaction, TransactionSigned, TransactionSignedEcRecovered};
+use alloy_eips::eip4844::BlobTransactionSidecar;
+
 use alloy_consensus::{
     constants::EIP4844_TX_TYPE_ID,
     transaction::{RlpEcdsaTx, TxEip1559, TxEip2930, TxEip4844, TxLegacy},
     SignableTransaction, TxEip4844WithSidecar,
 };
 use alloy_eips::eip2718::{Decodable2718, Eip2718Result, Encodable2718};
-use alloy_primitives::{Address, TxHash, B256};
+use alloy_primitives::{Address, PrimitiveSignature as Signature, TxHash, B256};
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
 use bytes::Buf;
 use derive_more::{AsRef, Deref};
@@ -522,7 +521,7 @@ impl<'a> arbitrary::Arbitrary<'a> for PooledTransactionsElement {
         match Self::try_from(tx_signed) {
             Ok(Self::BlobTransaction(mut tx)) => {
                 // Successfully converted to a BlobTransaction, now generate a sidecar.
-                tx.transaction.sidecar = crate::BlobTransactionSidecar::arbitrary(u)?;
+                tx.transaction.sidecar = alloy_eips::eip4844::BlobTransactionSidecar::arbitrary(u)?;
                 Ok(Self::BlobTransaction(tx))
             }
             Ok(tx) => Ok(tx), // Successfully converted, but not a BlobTransaction.

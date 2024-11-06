@@ -1,15 +1,10 @@
 #![cfg_attr(docsrs, doc(cfg(feature = "c-kzg")))]
 
-use crate::{Signature, Transaction, TransactionSigned};
+use crate::{Transaction, TransactionSigned};
 use alloy_consensus::{transaction::RlpEcdsaTx, TxEip4844WithSidecar};
-use alloy_primitives::TxHash;
+use alloy_eips::eip4844::BlobTransactionSidecar;
+use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
 use serde::{Deserialize, Serialize};
-
-#[doc(inline)]
-pub use alloy_eips::eip4844::BlobTransactionSidecar;
-
-#[cfg(feature = "c-kzg")]
-pub use alloy_eips::eip4844::BlobTransactionValidationError;
 
 /// A response to `GetPooledTransactions` that includes blob data, their commitments, and their
 /// corresponding proofs.
@@ -57,7 +52,7 @@ impl BlobTransaction {
     pub fn validate(
         &self,
         proof_settings: &c_kzg::KzgSettings,
-    ) -> Result<(), BlobTransactionValidationError> {
+    ) -> Result<(), alloy_eips::eip4844::BlobTransactionValidationError> {
         self.transaction.validate_blob(proof_settings)
     }
 

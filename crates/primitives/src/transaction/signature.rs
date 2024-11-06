@@ -1,9 +1,7 @@
 use crate::transaction::util::secp256k1;
 use alloy_consensus::transaction::from_eip155_value;
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{Address, PrimitiveSignature as Signature, B256, U256};
 use alloy_rlp::Decodable;
-
-pub use alloy_primitives::PrimitiveSignature as Signature;
 
 /// The order of the secp256k1 curve, divided by two. Signatures that should be checked according
 /// to EIP-2 should have an S value less than or equal to this.
@@ -69,12 +67,11 @@ pub fn recover_signer(signature: &Signature, hash: B256) -> Option<Address> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        transaction::signature::{recover_signer, recover_signer_unchecked, SECP256K1N_HALF},
-        Signature,
+    use crate::transaction::signature::{
+        recover_signer, recover_signer_unchecked, SECP256K1N_HALF,
     };
     use alloy_eips::eip2718::Decodable2718;
-    use alloy_primitives::{hex, Address, B256, U256};
+    use alloy_primitives::{hex, Address, PrimitiveSignature as Signature, B256, U256};
     use std::str::FromStr;
 
     #[test]

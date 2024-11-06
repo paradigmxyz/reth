@@ -32,7 +32,7 @@ where
             env!("CARGO_MANIFEST_DIR"),
             T::NAME
         ))
-        .expect("Test vectors not found. They can be generated from the workspace by calling `cargo run --bin reth -- test-vectors tables`."),
+        .expect("Test vectors not found. They can be generated from the workspace by calling `cargo run --bin reth --features dev -- test-vectors tables`."),
     ))
     .unwrap();
 

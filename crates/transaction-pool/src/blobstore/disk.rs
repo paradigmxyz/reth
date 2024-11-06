@@ -1,10 +1,9 @@
 //! A simple diskstore for blobs
 
 use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize};
-use alloy_eips::eip4844::BlobAndProofV1;
+use alloy_eips::eip4844::{BlobAndProofV1, BlobTransactionSidecar};
 use alloy_primitives::{TxHash, B256};
 use parking_lot::{Mutex, RwLock};
-use reth_primitives::BlobTransactionSidecar;
 use schnellru::{ByLength, LruMap};
 use std::{collections::HashSet, fmt, fs, io, path::PathBuf, sync::Arc};
 use tracing::{debug, trace};
