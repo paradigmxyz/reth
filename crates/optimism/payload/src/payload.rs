@@ -1,8 +1,5 @@
 //! Payload related types
 
-//! Optimism builder support
-
-use crate::{builder::decode_eip_1559_params, error::EIP1559ParamError};
 use alloy_eips::{
     eip1559::BaseFeeParams, eip2718::Decodable2718, eip4844::BlobTransactionSidecar,
     eip7685::Requests,
@@ -10,6 +7,7 @@ use alloy_eips::{
 use alloy_primitives::{keccak256, Address, Bytes, B256, B64, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadId};
+use op_alloy_consensus::eip1559::{decode_holocene_extra_data, EIP1559ParamError};
 /// Re-export for use in downstream arguments.
 pub use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use op_alloy_rpc_types_engine::{OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4};
@@ -46,31 +44,9 @@ impl OpPayloadBuilderAttributes {
         &self,
         default_base_fee_params: BaseFeeParams,
     ) -> Result<Bytes, EIP1559ParamError> {
-        let eip_1559_params = self.eip_1559_params.ok_or(EIP1559ParamError::NoEIP1559Params)?;
-
-        let mut extra_data = [0u8; 9];
-        // If eip 1559 params aren't set, use the canyon base fee param constants
-        // otherwise use them
-        if eip_1559_params.is_zero() {
-            // Try casting max_change_denominator to u32
-            let max_change_denominator: u32 = (default_base_fee_params.max_change_denominator)
-                .try_into()
-                .map_err(|_| EIP1559ParamError::DenominatorOverflow)?;
-
-            // Try casting elasticity_multiplier to u32
-            let elasticity_multiplier: u32 = (default_base_fee_params.elasticity_multiplier)
-                .try_into()
-                .map_err(|_| EIP1559ParamError::ElasticityOverflow)?;
-
-            // Copy the values safely
-            extra_data[1..5].copy_from_slice(&max_change_denominator.to_be_bytes());
-            extra_data[5..9].copy_from_slice(&elasticity_multiplier.to_be_bytes());
-        } else {
-            let (elasticity, denominator) = decode_eip_1559_params(eip_1559_params);
-            extra_data[1..5].copy_from_slice(&denominator.to_be_bytes());
-            extra_data[5..9].copy_from_slice(&elasticity.to_be_bytes());
-        }
-        Ok(Bytes::copy_from_slice(&extra_data))
+        self.eip_1559_params
+            .map(|params| decode_holocene_extra_data(params, default_base_fee_params))
+            .ok_or(EIP1559ParamError::NoEIP1559Params)?
     }
 }
 
