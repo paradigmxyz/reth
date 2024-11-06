@@ -13,8 +13,8 @@ use jsonrpsee_http_client::HttpResponse;
 
 mod auth_client_layer;
 mod auth_layer;
-mod jwt_validator;
 mod compression_layer;
+mod jwt_validator;
 
 pub use auth_layer::{AuthService, ResponseFuture};
 pub use compression_layer::CompressionLayer;
