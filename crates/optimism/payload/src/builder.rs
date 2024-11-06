@@ -389,7 +389,7 @@ where
     }
 }
 
-/// A type that returns a the [`BestTransactions`] that should be included in the pool.
+/// A type that returns a the [`PayloadTransactions`] that should be included in the pool.
 pub trait OpPayloadTransactions: Clone + Send + Sync + Unpin + 'static {
     /// Returns an iterator that yields the transaction in the order they should get included in the
     /// new payload.
