@@ -25,13 +25,16 @@ pub mod receipt;
 pub use receipt::Receipt;
 
 pub mod transaction;
-pub use transaction::{signed::SignedTransaction, FullTransaction, Transaction};
+pub use transaction::{
+    signed::{FullSignedTx, SignedTransaction},
+    FullTransaction, Transaction,
+};
 
 mod integer_list;
 pub use integer_list::{IntegerList, IntegerListError};
 
 pub mod block;
-pub use block::{body::BlockBody, Block};
+pub use block::{body::BlockBody, Block, FullBlock};
 
 mod withdrawal;
 pub use withdrawal::Withdrawals;

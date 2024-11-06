@@ -1,6 +1,9 @@
 //! Trait for specifying `eth` network dependent API types.
 
-use std::{error::Error, fmt};
+use std::{
+    error::Error,
+    fmt::{self},
+};
 
 use alloy_network::Network;
 use alloy_rpc_types::Block;
