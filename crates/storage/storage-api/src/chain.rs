@@ -1,4 +1,4 @@
-use reth_primitives::BlockHashOrNumber;
+use alloy_eips::BlockHashOrNumber;
 use reth_primitives_traits::NodePrimitives;
 use reth_storage_errors::provider::ProviderResult;
 use std::fmt::Debug;
