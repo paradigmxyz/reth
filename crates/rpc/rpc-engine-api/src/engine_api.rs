@@ -69,7 +69,7 @@ struct EngineApiInner<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec
     /// Engine validator.
     validator: Validator,
     /// Start time of the latest payload request
-    start_time: Mutex<Option<Instant>>,
+    latest_new_payload_response: Mutex<Option<Instant>>,
 }
 
 impl<Provider, EngineT, Pool, Validator, ChainSpec>
@@ -105,7 +105,7 @@ where
             capabilities,
             tx_pool,
             validator,
-            start_time: Mutex::new(None),
+            latest_new_payload_response: Mutex::new(None),
         });
         Self { inner }
     }
@@ -145,17 +145,12 @@ where
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V1, payload_or_attrs)?;
 
-        let response = self
+        Ok(self
             .inner
             .beacon_consensus
             .new_payload(payload, ExecutionPayloadSidecar::none())
-            .await?;
-
-        // Instant of the new payload response
-        let mut start_time_lock = self.inner.start_time.lock();
-        *start_time_lock = Some(Instant::now());
-
-        Ok(response)
+            .await
+            .inspect(|_| self.inner.on_new_payload_response())?)
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/shanghai.md#engine_newpayloadv2>
@@ -175,7 +170,8 @@ where
             .inner
             .beacon_consensus
             .new_payload(payload, ExecutionPayloadSidecar::none())
-            .await?)
+            .await
+            .inspect(|_| self.inner.on_new_payload_response())?)
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_newpayloadv3>
@@ -205,7 +201,8 @@ where
                     parent_beacon_block_root,
                 }),
             )
-            .await?)
+            .await
+            .inspect(|_| self.inner.on_new_payload_response())?)
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/7907424db935b93c2fe6a3c0faab943adebe8557/src/engine/prague.md#engine_newpayloadv4>
@@ -236,7 +233,8 @@ where
                     execution_requests,
                 ),
             )
-            .await?)
+            .await
+            .inspect(|_| self.inner.on_new_payload_response())?)
     }
 
     /// Sends a message to the beacon consensus engine to update the fork choice _without_
@@ -250,8 +248,6 @@ where
         state: ForkchoiceState,
         payload_attrs: Option<EngineT::PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
-        self.inner.record_elapsed_time_payload_v1();
-
         self.validate_and_execute_forkchoice(EngineApiMessageVersion::V1, state, payload_attrs)
             .await
     }
@@ -611,6 +607,8 @@ where
         state: ForkchoiceState,
         payload_attrs: Option<EngineT::PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
+        self.inner.record_elapsed_time_on_fcu();
+
         if let Some(ref attrs) = payload_attrs {
             let attr_validation_res =
                 self.inner.validator.ensure_well_formed_attributes(version, attrs);
@@ -649,13 +647,18 @@ impl<Provider, EngineT, Pool, Validator, ChainSpec>
 where
     EngineT: EngineTypes,
 {
-    fn record_elapsed_time_payload_v1(&self) {
-        let mut start_time_lock = self.start_time.lock();
-
-        if let Some(start_time) = start_time_lock.take() {
+    /// Tracks the elapsed time between the new payload response and the received forkchoice update
+    /// request.
+    fn record_elapsed_time_on_fcu(&self) {
+        if let Some(start_time) = self.latest_new_payload_response.lock().take() {
             let elapsed_time = start_time.elapsed();
-            self.metrics.payload_to_fcu_latency.new_payload_v1_time_diff.record(elapsed_time);
+            self.metrics.latency.new_payload_forkchoice_updated_time_diff.record(elapsed_time);
         }
+    }
+
+    /// Updates the timestamp for the latest new payload response.
+    fn on_new_payload_response(&self) {
+        self.latest_new_payload_response.lock().replace(Instant::now());
     }
 }
 
