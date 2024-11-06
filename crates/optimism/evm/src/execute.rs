@@ -297,7 +297,9 @@ mod tests {
     use super::*;
     use crate::OpChainSpec;
     use alloy_consensus::TxEip1559;
-    use alloy_primitives::{b256, Address, Signature, StorageKey, StorageValue};
+    use alloy_primitives::{
+        b256, Address, PrimitiveSignature as Signature, StorageKey, StorageValue,
+    };
     use op_alloy_consensus::TxDeposit;
     use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_evm::execute::{BasicBlockExecutorProvider, BatchExecutor, BlockExecutorProvider};

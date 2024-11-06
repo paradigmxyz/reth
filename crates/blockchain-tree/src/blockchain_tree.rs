@@ -1377,7 +1377,7 @@ mod tests {
     use alloy_consensus::{TxEip1559, EMPTY_ROOT_HASH};
     use alloy_eips::eip1559::INITIAL_BASE_FEE;
     use alloy_genesis::{Genesis, GenesisAccount};
-    use alloy_primitives::{keccak256, Address, Sealable, Signature, B256};
+    use alloy_primitives::{keccak256, Address, PrimitiveSignature as Signature, Sealable, B256};
     use assert_matches::assert_matches;
     use linked_hash_set::LinkedHashSet;
     use reth_chainspec::{ChainSpecBuilder, MAINNET, MIN_TRANSACTION_GAS};
