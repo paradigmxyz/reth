@@ -117,7 +117,7 @@ mod tests {
     use std::future::ready;
     use tower::{Service, ServiceBuilder, ServiceExt};
 
-    use crate::CompressionLayer;
+    use crate::compression_layer::CompressionLayer;
 
     #[derive(Clone)]
     struct MockRequestService;
