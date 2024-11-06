@@ -156,7 +156,8 @@ where
                 let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, TxEnv::default());
                 let db = CacheDB::new(StateProviderDatabase::new(state));
 
-                let initial_coinbase = DatabaseRef::basic_ref(&db, coinbase)
+                let initial_coinbase = db
+                    .basic_ref(coinbase)
                     .map_err(Eth::Error::from_eth_err)?
                     .map(|acc| acc.balance)
                     .unwrap_or_default();

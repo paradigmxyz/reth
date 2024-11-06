@@ -47,7 +47,7 @@ workspace = true
 
 [features]
 optimism = [
-	"op-alloy-rpc-types-engine",
-	"reth-beacon-consensus/optimism",
-	"reth-provider/optimism"
+    "op-alloy-rpc-types-engine",
+    "reth-beacon-consensus/optimism",
+    "reth-provider/optimism",
 ]

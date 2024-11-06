@@ -2,10 +2,10 @@
 
 use std::fmt;
 
+use alloy_eips::BlockId;
 use alloy_rpc_types_engine::PayloadError;
 use jsonrpsee_core::RpcResult;
 use reth_errors::ConsensusError;
-use reth_primitives::BlockId;
 
 /// Helper trait to easily convert various `Result` types into [`RpcResult`]
 pub trait ToRpcResult<Ok, Err>: Sized {

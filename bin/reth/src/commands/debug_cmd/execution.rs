@@ -1,6 +1,7 @@
 //! Command for debugging execution.
 
 use crate::{args::NetworkArgs, utils::get_single_header};
+use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{BlockNumber, B256};
 use clap::Parser;
 use futures::{stream::select as stream_select, StreamExt};
@@ -23,7 +24,6 @@ use reth_network_api::NetworkInfo;
 use reth_network_p2p::{headers::client::HeadersClient, BlockClient};
 use reth_node_api::{NodeTypesWithDB, NodeTypesWithDBAdapter, NodeTypesWithEngine};
 use reth_node_ethereum::EthExecutorProvider;
-use reth_primitives::BlockHashOrNumber;
 use reth_provider::{
     BlockExecutionWriter, ChainSpecProvider, ProviderFactory, StageCheckpointReader,
 };

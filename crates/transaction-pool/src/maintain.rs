@@ -7,6 +7,7 @@ use crate::{
     traits::{CanonicalStateUpdate, TransactionPool, TransactionPoolExt},
     BlockInfo, PoolTransaction,
 };
+use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable};
 use futures_util::{
     future::{BoxFuture, Fuse, FusedFuture},
@@ -17,7 +18,7 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
 use reth_primitives::{
-    BlockNumberOrTag, PooledTransactionsElementEcRecovered, SealedHeader, TransactionSigned,
+    PooledTransactionsElementEcRecovered, SealedHeader, TransactionSigned,
     TransactionSignedEcRecovered,
 };
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
