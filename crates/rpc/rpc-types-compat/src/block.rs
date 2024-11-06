@@ -90,7 +90,7 @@ pub fn from_block_full<T: TransactionCompat>(
             from_recovered_with_block_context::<T>(signed_tx_ec_recovered, tx_info, tx_resp_builder)
         })
         .collect::<Result<Vec<_>, T::TransactionError>>()
-        .expect("failed to fill transactions");
+        .map_err(|_| BlockError::TransactionCompatError)?;
 
     Ok(from_block_with_transactions(
         block_length,

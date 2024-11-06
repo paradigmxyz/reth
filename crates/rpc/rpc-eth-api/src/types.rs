@@ -38,7 +38,12 @@ pub type RpcReceipt<T> = <T as Network>::ReceiptResponse;
 
 /// Helper trait holds necessary trait bounds on [`EthApiTypes`] to implement `eth` API.
 pub trait FullEthApiTypes:
-    EthApiTypes<TransactionCompat: TransactionCompat<Transaction = RpcTransaction<Self::NetworkTypes>>>
+    EthApiTypes<
+    TransactionCompat: TransactionCompat<
+        Transaction = RpcTransaction<Self::NetworkTypes>,
+        TransactionError = Self::Error,
+    >,
+>
 {
 }
 
