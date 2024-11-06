@@ -97,9 +97,7 @@ impl TryFrom<AnyRpcBlock> for Block {
 impl TryFrom<AnyRpcTransaction> for TransactionSigned {
     type Error = alloy_rpc_types::ConversionError;
 
-    fn try_from(
-        tx: AnyRpcTransaction,
-    ) -> Result<Self, Self::Error> {
+    fn try_from(tx: AnyRpcTransaction) -> Result<Self, Self::Error> {
         use alloy_rpc_types::ConversionError;
 
         let WithOtherFields { inner: tx, other: _ } = tx;
