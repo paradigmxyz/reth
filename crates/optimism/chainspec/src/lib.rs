@@ -20,7 +20,7 @@ mod op_sepolia;
 use alloc::{boxed::Box, vec, vec::Vec};
 use alloy_chains::Chain;
 use alloy_genesis::Genesis;
-use alloy_primitives::{Bytes, Parity, Signature, B256, U256};
+use alloy_primitives::{Bytes, B256, U256};
 pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
 use derive_more::{Constructor, Deref, Display, From, Into};
@@ -254,12 +254,6 @@ pub fn decode_holocene_1559_params(extra_data: Bytes) -> Result<(u32, u32), Deco
     let elasticity: [u8; 4] =
         extra_data[5..9].try_into().map_err(|_| DecodeError::InvalidElasticity)?;
     Ok((u32::from_be_bytes(denominator), u32::from_be_bytes(elasticity)))
-}
-
-/// Returns the signature for the optimism deposit transactions, which don't include a
-/// signature.
-pub fn optimism_deposit_tx_signature() -> Signature {
-    Signature::new(U256::ZERO, U256::ZERO, Parity::Parity(false))
 }
 
 impl EthChainSpec for OpChainSpec {

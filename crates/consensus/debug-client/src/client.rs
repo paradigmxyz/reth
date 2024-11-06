@@ -1,4 +1,4 @@
-use alloy_consensus::TxEnvelope;
+use alloy_consensus::Transaction;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::B256;
 use alloy_rpc_types::{Block, BlockTransactions};
@@ -184,18 +184,19 @@ pub fn block_to_execution_payload_v3(block: Block) -> ExecutionNewPayload {
     // https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#specification
     let versioned_hashes = transactions
         .iter()
-        .flat_map(|tx| tx.blob_versioned_hashes.clone().unwrap_or_default())
+        .flat_map(|tx| tx.blob_versioned_hashes().unwrap_or_default())
+        .copied()
         .collect();
 
     let payload: ExecutionPayloadV3 = ExecutionPayloadV3 {
         payload_inner: ExecutionPayloadV2 {
             payload_inner: ExecutionPayloadV1 {
                 parent_hash: block.header.parent_hash,
-                fee_recipient: block.header.miner,
+                fee_recipient: block.header.beneficiary,
                 state_root: block.header.state_root,
                 receipts_root: block.header.receipts_root,
                 logs_bloom: block.header.logs_bloom,
-                prev_randao: block.header.mix_hash.unwrap(),
+                prev_randao: block.header.mix_hash,
                 block_number: block.header.number,
                 gas_limit: block.header.gas_limit,
                 gas_used: block.header.gas_used,
@@ -205,15 +206,10 @@ pub fn block_to_execution_payload_v3(block: Block) -> ExecutionNewPayload {
                 block_hash: block.header.hash,
                 transactions: transactions
                     .into_iter()
-                    .map(|tx| {
-                        let envelope: TxEnvelope = tx.try_into().unwrap();
-                        let mut buffer: Vec<u8> = vec![];
-                        envelope.encode_2718(&mut buffer);
-                        buffer.into()
-                    })
+                    .map(|tx| tx.inner.encoded_2718().into())
                     .collect(),
             },
-            withdrawals: block.withdrawals.clone().unwrap_or_default(),
+            withdrawals: block.withdrawals.clone().unwrap_or_default().into_inner(),
         },
         blob_gas_used: block.header.blob_gas_used.unwrap(),
         excess_blob_gas: block.header.excess_blob_gas.unwrap(),

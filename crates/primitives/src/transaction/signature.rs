@@ -1,6 +1,7 @@
 use crate::transaction::util::secp256k1;
-use alloy_primitives::{Address, Parity, Signature, B256, U256};
-use alloy_rlp::{Decodable, Error as RlpError};
+use alloy_consensus::transaction::from_eip155_value;
+use alloy_primitives::{Address, PrimitiveSignature as Signature, B256, U256};
+use alloy_rlp::Decodable;
 
 /// The order of the secp256k1 curve, divided by two. Signatures that should be checked according
 /// to EIP-2 should have an S value less than or equal to this.
@@ -14,25 +15,23 @@ const SECP256K1N_HALF: U256 = U256::from_be_bytes([
 pub(crate) fn decode_with_eip155_chain_id(
     buf: &mut &[u8],
 ) -> alloy_rlp::Result<(Signature, Option<u64>)> {
-    let v: Parity = Decodable::decode(buf)?;
+    let v: u64 = Decodable::decode(buf)?;
     let r: U256 = Decodable::decode(buf)?;
     let s: U256 = Decodable::decode(buf)?;
 
-    #[cfg(not(feature = "optimism"))]
-    if matches!(v, Parity::Parity(_)) {
-        return Err(alloy_rlp::Error::Custom("invalid parity for legacy transaction"));
-    }
+    let Some((parity, chain_id)) = from_eip155_value(v) else {
+        // pre bedrock system transactions were sent from the zero address as legacy
+        // transactions with an empty signature
+        //
+        // NOTE: this is very hacky and only relevant for op-mainnet pre bedrock
+        #[cfg(feature = "optimism")]
+        if v == 0 && r.is_zero() && s.is_zero() {
+            return Ok((Signature::new(r, s, false), None))
+        }
+        return Err(alloy_rlp::Error::Custom("invalid parity for legacy transaction"))
+    };
 
-    #[cfg(feature = "optimism")]
-    // pre bedrock system transactions were sent from the zero address as legacy
-    // transactions with an empty signature
-    //
-    // NOTE: this is very hacky and only relevant for op-mainnet pre bedrock
-    if matches!(v, Parity::Parity(false)) && r.is_zero() && s.is_zero() {
-        return Ok((Signature::new(r, s, Parity::Parity(false)), None))
-    }
-
-    Ok((Signature::new(r, s, v), v.chain_id()))
+    Ok((Signature::new(r, s, parity), chain_id))
 }
 
 /// Recover signer from message hash, _without ensuring that the signature has a low `s`
@@ -46,7 +45,7 @@ pub fn recover_signer_unchecked(signature: &Signature, hash: B256) -> Option<Add
 
     sig[0..32].copy_from_slice(&signature.r().to_be_bytes::<32>());
     sig[32..64].copy_from_slice(&signature.s().to_be_bytes::<32>());
-    sig[64] = signature.v().y_parity_byte();
+    sig[64] = signature.v() as u8;
 
     // NOTE: we are removing error from underlying crypto library as it will restrain primitive
     // errors and we care only if recovery is passing or not.
@@ -66,67 +65,14 @@ pub fn recover_signer(signature: &Signature, hash: B256) -> Option<Address> {
     recover_signer_unchecked(signature, hash)
 }
 
-/// Returns [Parity] value based on `chain_id` for legacy transaction signature.
-#[allow(clippy::missing_const_for_fn)]
-pub fn legacy_parity(signature: &Signature, chain_id: Option<u64>) -> Parity {
-    if let Some(chain_id) = chain_id {
-        Parity::Parity(signature.v().y_parity()).with_chain_id(chain_id)
-    } else {
-        #[cfg(feature = "optimism")]
-        // pre bedrock system transactions were sent from the zero address as legacy
-        // transactions with an empty signature
-        //
-        // NOTE: this is very hacky and only relevant for op-mainnet pre bedrock
-        if *signature == op_alloy_consensus::TxDeposit::signature() {
-            return Parity::Parity(false)
-        }
-        Parity::NonEip155(signature.v().y_parity())
-    }
-}
-
-/// Returns a signature with the given chain ID applied to the `v` value.
-pub(crate) fn with_eip155_parity(signature: &Signature, chain_id: Option<u64>) -> Signature {
-    Signature::new(signature.r(), signature.s(), legacy_parity(signature, chain_id))
-}
-
-/// Outputs (`odd_y_parity`, `chain_id`) from the `v` value.
-/// This doesn't check validity of the `v` value for optimism.
-#[inline]
-pub const fn extract_chain_id(v: u64) -> alloy_rlp::Result<(bool, Option<u64>)> {
-    if v < 35 {
-        // non-EIP-155 legacy scheme, v = 27 for even y-parity, v = 28 for odd y-parity
-        if v != 27 && v != 28 {
-            return Err(RlpError::Custom("invalid Ethereum signature (V is not 27 or 28)"))
-        }
-        Ok((v == 28, None))
-    } else {
-        // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
-        let odd_y_parity = ((v - 35) % 2) != 0;
-        let chain_id = (v - 35) >> 1;
-        Ok((odd_y_parity, Some(chain_id)))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::transaction::signature::{
-        legacy_parity, recover_signer, recover_signer_unchecked, SECP256K1N_HALF,
+        recover_signer, recover_signer_unchecked, SECP256K1N_HALF,
     };
     use alloy_eips::eip2718::Decodable2718;
-    use alloy_primitives::{hex, Address, Parity, Signature, B256, U256};
+    use alloy_primitives::{hex, Address, PrimitiveSignature as Signature, B256, U256};
     use std::str::FromStr;
-
-    #[test]
-    fn test_legacy_parity() {
-        // Select 1 as an arbitrary nonzero value for R and S, as v() always returns 0 for (0, 0).
-        let signature = Signature::new(U256::from(1), U256::from(1), Parity::Parity(false));
-        assert_eq!(Parity::NonEip155(false), legacy_parity(&signature, None));
-        assert_eq!(Parity::Eip155(37), legacy_parity(&signature, Some(1)));
-
-        let signature = Signature::new(U256::from(1), U256::from(1), Parity::Parity(true));
-        assert_eq!(Parity::NonEip155(true), legacy_parity(&signature, None));
-        assert_eq!(Parity::Eip155(38), legacy_parity(&signature, Some(1)));
-    }
 
     #[test]
     fn test_recover_signer() {
@@ -139,7 +85,7 @@ mod tests {
                 "46948507304638947509940763649030358759909902576025900602547168820602576006531",
             )
             .unwrap(),
-            Parity::Parity(false),
+            false,
         );
         let hash =
             B256::from_str("daf5a779ae972f972197303d7b574746c7ef83eadac0f2791ad23db92e4c8e53")

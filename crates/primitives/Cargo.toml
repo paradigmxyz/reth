@@ -22,6 +22,7 @@ reth-codecs = { workspace = true, optional = true }
 
 # ethereum
 alloy-consensus.workspace = true
+alloy-network = { workspace = true, optional = true }
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
 alloy-rpc-types = { workspace = true, optional = true }
@@ -138,6 +139,7 @@ alloy-compat = [
 	"dep:alloy-rpc-types",
 	"dep:alloy-serde",
 	"dep:op-alloy-rpc-types",
+    "dep:alloy-network",
 ]
 test-utils = [
 	"reth-primitives-traits/test-utils",

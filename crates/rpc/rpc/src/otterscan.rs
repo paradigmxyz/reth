@@ -165,7 +165,7 @@ where
     }
 
     /// Handler for `ots_getBlockDetails`
-    async fn get_block_details(&self, block_number: u64) -> RpcResult<BlockDetails> {
+    async fn get_block_details(&self, block_number: u64) -> RpcResult<BlockDetails<Header>> {
         let block_id = block_number.into();
         let block = self.eth.block_by_number(block_id, true);
         let block_id = block_id.into();
@@ -178,7 +178,7 @@ where
     }
 
     /// Handler for `getBlockDetailsByHash`
-    async fn get_block_details_by_hash(&self, block_hash: B256) -> RpcResult<BlockDetails> {
+    async fn get_block_details_by_hash(&self, block_hash: B256) -> RpcResult<BlockDetails<Header>> {
         let block = self.eth.block_by_hash(block_hash, true);
         let block_id = block_hash.into();
         let receipts = self.eth.block_receipts(block_id);
@@ -195,7 +195,7 @@ where
         block_number: u64,
         page_number: usize,
         page_size: usize,
-    ) -> RpcResult<OtsBlockTransactions<RpcTransaction<Eth::NetworkTypes>>> {
+    ) -> RpcResult<OtsBlockTransactions<RpcTransaction<Eth::NetworkTypes>, Header>> {
         let block_id = block_number.into();
         // retrieve full block and its receipts
         let block = self.eth.block_by_number(block_id, true);
@@ -239,7 +239,7 @@ where
         let timestamp = Some(block.header.timestamp);
         let receipts = receipts
             .drain(page_start..page_end)
-            .zip(transactions.iter().map(Eth::TransactionCompat::tx_type))
+            .zip(transactions.iter().map(Transaction::ty))
             .map(|(receipt, tx_ty)| {
                 let inner = OtsReceipt {
                     status: receipt.status(),
