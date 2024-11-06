@@ -10,7 +10,7 @@
 
 use crate::metrics::PayloadBuilderMetrics;
 use alloy_consensus::constants::EMPTY_WITHDRAWALS;
-use alloy_eips::{merge::SLOT_DURATION, BlockNumberOrTag};
+use alloy_eips::merge::SLOT_DURATION;
 use alloy_primitives::{Bytes, B256, U256};
 use futures_core::ready;
 use futures_util::FutureExt;
@@ -22,7 +22,7 @@ use reth_payload_primitives::{
 };
 use reth_primitives::{constants::RETH_CLIENT_VERSION, proofs, SealedHeader, Withdrawals};
 use reth_provider::{
-    BlockReaderIdExt, BlockSource, CanonStateNotification, ProviderError, StateProviderFactory,
+    BlockReaderIdExt, CanonStateNotification, ProviderError, StateProviderFactory,
 };
 use reth_revm::cached::CachedReads;
 use reth_tasks::TaskSpawner;
@@ -143,23 +143,26 @@ where
     fn new_payload_job(
         &self,
         attributes: <Self::Job as PayloadJob>::PayloadAttributes,
-    ) -> Result<Self::Job, PayloadBuilderError> {        
-        
-        
+    ) -> Result<Self::Job, PayloadBuilderError> {
         let parent_header = if attributes.parent().is_zero() {
             // Use latest header for genesis block case
             self.client
                 .latest_header()
-                .map_err(Self::Error::from_eth_err)?
-                .ok_or_else(|| PayloadBuilderError::Internal(RethError::Provider(ProviderError::HeaderNotFound(attributes.parent()))))?
+                .map_err(PayloadBuilderError::from)?
+                .ok_or_else(|| PayloadBuilderError::MissingParentHeader(B256::ZERO))?
         } else {
             // Fetch specific header by hash
             self.client
-            .sealed_header_by_hash(attributes.parent())
-            .ok_or_else(|| PayloadBuilderError::MissingParentBlock(attributes.parent()))?
+                .sealed_header_by_hash(attributes.parent())
+                .map_err(PayloadBuilderError::from)?
+                .ok_or_else(|| PayloadBuilderError::MissingParentHeader(attributes.parent()))?
         };
-        let config =
-            PayloadConfig::new(Arc::new(parent_header), self.config.extradata.clone(), attributes);
+
+        let config = PayloadConfig::new(
+            Arc::new(parent_header.clone()),
+            self.config.extradata.clone(),
+            attributes,
+        );
 
         let until = self.job_deadline(config.attributes.timestamp());
         let deadline = Box::pin(tokio::time::sleep_until(until));
