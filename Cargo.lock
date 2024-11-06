@@ -4863,7 +4863,9 @@ dependencies = [
  "crossbeam-epoch",
  "crossbeam-utils",
  "hashbrown 0.15.0",
+ "indexmap 2.6.0",
  "metrics",
+ "ordered-float",
  "quanta",
  "sketches-ddsketch",
 ]
@@ -5403,6 +5405,15 @@ name = "option-ext"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
+
+[[package]]
+name = "ordered-float"
+version = "4.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44d501f1a72f71d3c063a6bbc8f7271fa73aa09fe5d6283b6571e2ed176a2537"
+dependencies = [
+ "num-traits",
+]
 
 [[package]]
 name = "overload"
@@ -7440,6 +7451,7 @@ dependencies = [
  "auto_impl",
  "futures-util",
  "metrics",
+ "metrics-util",
  "parking_lot",
  "reth-chainspec",
  "reth-consensus",
