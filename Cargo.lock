@@ -8790,6 +8790,7 @@ dependencies = [
  "jsonrpsee-core",
  "jsonrpsee-types",
  "metrics",
+ "parking_lot",
  "reth-beacon-consensus",
  "reth-chainspec",
  "reth-engine-primitives",
