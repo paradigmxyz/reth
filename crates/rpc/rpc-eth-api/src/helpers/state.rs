@@ -122,7 +122,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                 let proof = state
                     .proof(Default::default(), address, &storage_keys)
                     .map_err(Self::Error::from_eth_err)?;
-                Ok(from_primitive_account_proof(proof))
+                Ok(from_primitive_account_proof(proof, keys))
             })
             .await
         })

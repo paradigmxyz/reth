@@ -304,10 +304,109 @@ pub(crate) fn payload_id(parent: &B256, attributes: &PayloadAttributes) -> Paylo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_eips::eip4895::Withdrawal;
+    use alloy_primitives::B64;
+    use std::str::FromStr;
 
     #[test]
     fn attributes_serde() {
         let attributes = r#"{"timestamp":"0x1235","prevRandao":"0xf343b00e02dc34ec0124241f74f32191be28fb370bb48060f5fa4df99bda774c","suggestedFeeRecipient":"0x0000000000000000000000000000000000000000","withdrawals":null,"parentBeaconBlockRoot":null}"#;
         let _attributes: PayloadAttributes = serde_json::from_str(attributes).unwrap();
+    }
+
+    #[test]
+    fn test_payload_id_basic() {
+        // Create a parent block and payload attributes
+        let parent =
+            B256::from_str("0x3b8fb240d288781d4aac94d3fd16809ee413bc99294a085798a589dae51ddd4a")
+                .unwrap();
+        let attributes = PayloadAttributes {
+            timestamp: 0x5,
+            prev_randao: B256::from_str(
+                "0x0000000000000000000000000000000000000000000000000000000000000000",
+            )
+            .unwrap(),
+            suggested_fee_recipient: Address::from_str(
+                "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            )
+            .unwrap(),
+            withdrawals: None,
+            parent_beacon_block_root: None,
+        };
+
+        // Verify that the generated payload ID matches the expected value
+        assert_eq!(
+            payload_id(&parent, &attributes),
+            PayloadId(B64::from_str("0xa247243752eb10b4").unwrap())
+        );
+    }
+
+    #[test]
+    fn test_payload_id_with_withdrawals() {
+        // Set up the parent and attributes with withdrawals
+        let parent =
+            B256::from_str("0x9876543210abcdef9876543210abcdef9876543210abcdef9876543210abcdef")
+                .unwrap();
+        let attributes = PayloadAttributes {
+            timestamp: 1622553200,
+            prev_randao: B256::from_slice(&[1; 32]),
+            suggested_fee_recipient: Address::from_str(
+                "0xb94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            )
+            .unwrap(),
+            withdrawals: Some(vec![
+                Withdrawal {
+                    index: 1,
+                    validator_index: 123,
+                    address: Address::from([0xAA; 20]),
+                    amount: 10,
+                },
+                Withdrawal {
+                    index: 2,
+                    validator_index: 456,
+                    address: Address::from([0xBB; 20]),
+                    amount: 20,
+                },
+            ]),
+            parent_beacon_block_root: None,
+        };
+
+        // Verify that the generated payload ID matches the expected value
+        assert_eq!(
+            payload_id(&parent, &attributes),
+            PayloadId(B64::from_str("0xedddc2f84ba59865").unwrap())
+        );
+    }
+
+    #[test]
+    fn test_payload_id_with_parent_beacon_block_root() {
+        // Set up the parent and attributes with a parent beacon block root
+        let parent =
+            B256::from_str("0x9876543210abcdef9876543210abcdef9876543210abcdef9876543210abcdef")
+                .unwrap();
+        let attributes = PayloadAttributes {
+            timestamp: 1622553200,
+            prev_randao: B256::from_str(
+                "0x123456789abcdef123456789abcdef123456789abcdef123456789abcdef1234",
+            )
+            .unwrap(),
+            suggested_fee_recipient: Address::from_str(
+                "0xc94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            )
+            .unwrap(),
+            withdrawals: None,
+            parent_beacon_block_root: Some(
+                B256::from_str(
+                    "0x2222222222222222222222222222222222222222222222222222222222222222",
+                )
+                .unwrap(),
+            ),
+        };
+
+        // Verify that the generated payload ID matches the expected value
+        assert_eq!(
+            payload_id(&parent, &attributes),
+            PayloadId(B64::from_str("0x0fc49cd532094cce").unwrap())
+        );
     }
 }

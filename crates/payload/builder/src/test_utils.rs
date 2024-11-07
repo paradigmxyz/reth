@@ -6,10 +6,9 @@ use crate::{
 };
 
 use alloy_primitives::U256;
-use reth_chain_state::ExecutedBlock;
+use reth_chain_state::{CanonStateNotification, ExecutedBlock};
 use reth_payload_primitives::{PayloadBuilderError, PayloadKind, PayloadTypes};
 use reth_primitives::Block;
-use reth_provider::CanonStateNotification;
 use std::{
     future::Future,
     pin::Pin,
