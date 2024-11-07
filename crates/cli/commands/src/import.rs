@@ -180,7 +180,7 @@ where
     let last_block_number = provider_factory.last_block_number()?;
     let local_head = provider_factory
         .sealed_header(last_block_number)?
-        .ok_or(ProviderError::HeaderNotFound(last_block_number.into()))?;
+        .ok_or_else(|| ProviderError::HeaderNotFound(last_block_number.into()))?;
 
     let mut header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
         .build(file_client.clone(), consensus.clone())
@@ -207,6 +207,7 @@ where
         .with_tip_sender(tip_tx)
         // we want to sync all blocks the file client provides or 0 if empty
         .with_max_block(max_block)
+        .with_fail_on_unwind(true)
         .add_stages(
             DefaultStages::new(
                 provider_factory.clone(),
@@ -231,12 +232,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_node_core::args::utils::{DefaultChainSpecParser, SUPPORTED_CHAINS};
+    use reth_ethereum_cli::chainspec::{EthereumChainSpecParser, SUPPORTED_CHAINS};
 
     #[test]
     fn parse_common_import_command_chain_args() {
         for chain in SUPPORTED_CHAINS {
-            let args: ImportCommand<DefaultChainSpecParser> =
+            let args: ImportCommand<EthereumChainSpecParser> =
                 ImportCommand::parse_from(["reth", "--chain", chain, "."]);
             assert_eq!(
                 Ok(args.env.chain.chain),

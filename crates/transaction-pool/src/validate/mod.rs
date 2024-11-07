@@ -4,13 +4,12 @@ use crate::{
     error::InvalidPoolTransactionError,
     identifier::{SenderId, TransactionId},
     traits::{PoolTransaction, TransactionOrigin},
+    PriceBumpConfig,
 };
+use alloy_eips::eip4844::BlobTransactionSidecar;
 use alloy_primitives::{Address, TxHash, B256, U256};
 use futures_util::future::Either;
-use reth_primitives::{
-    BlobTransactionSidecar, PooledTransactionsElementEcRecovered, SealedBlock,
-    TransactionSignedEcRecovered,
-};
+use reth_primitives::{SealedBlock, TransactionSignedEcRecovered};
 use std::{fmt, future::Future, time::Instant};
 
 mod constants;
@@ -51,7 +50,7 @@ pub enum TransactionValidationOutcome<T: PoolTransaction> {
     /// this transaction from ever becoming valid.
     Invalid(T, InvalidPoolTransactionError),
     /// An error occurred while trying to validate the transaction
-    Error(TxHash, Box<dyn std::error::Error + Send + Sync>),
+    Error(TxHash, Box<dyn core::error::Error + Send + Sync>),
 }
 
 impl<T: PoolTransaction> TransactionValidationOutcome<T> {
@@ -154,10 +153,7 @@ impl<T: PoolTransaction> ValidTransaction<T> {
 /// Provides support for validating transaction at any given state of the chain
 pub trait TransactionValidator: Send + Sync {
     /// The transaction type to validate.
-    type Transaction: PoolTransaction<
-        Pooled = PooledTransactionsElementEcRecovered,
-        Consensus = TransactionSignedEcRecovered,
-    >;
+    type Transaction: PoolTransaction;
 
     /// Validates the transaction and returns a [`TransactionValidationOutcome`] describing the
     /// validity of the given transaction.
@@ -378,14 +374,66 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     pub(crate) fn tx_type_conflicts_with(&self, other: &Self) -> bool {
         self.is_eip4844() != other.is_eip4844()
     }
+
+    /// Determines whether a candidate transaction (`maybe_replacement`) is underpriced compared to
+    /// an existing transaction in the pool.
+    ///
+    /// A transaction is considered underpriced if it doesn't meet the required fee bump threshold.
+    /// This applies to both standard gas fees and, for blob-carrying transactions (EIP-4844),
+    /// the blob-specific fees.
+    #[inline]
+    pub(crate) fn is_underpriced(
+        &self,
+        maybe_replacement: &Self,
+        price_bumps: &PriceBumpConfig,
+    ) -> bool {
+        // Retrieve the required price bump percentage for this type of transaction.
+        //
+        // The bump is different for EIP-4844 and other transactions. See `PriceBumpConfig`.
+        let price_bump = price_bumps.price_bump(self.tx_type());
+
+        // Check if the max fee per gas is underpriced.
+        if maybe_replacement.max_fee_per_gas() <= self.max_fee_per_gas() * (100 + price_bump) / 100
+        {
+            return true
+        }
+
+        let existing_max_priority_fee_per_gas =
+            self.transaction.max_priority_fee_per_gas().unwrap_or_default();
+        let replacement_max_priority_fee_per_gas =
+            maybe_replacement.transaction.max_priority_fee_per_gas().unwrap_or_default();
+
+        // Check max priority fee per gas (relevant for EIP-1559 transactions only)
+        if existing_max_priority_fee_per_gas != 0 &&
+            replacement_max_priority_fee_per_gas != 0 &&
+            replacement_max_priority_fee_per_gas <=
+                existing_max_priority_fee_per_gas * (100 + price_bump) / 100
+        {
+            return true
+        }
+
+        // Check max blob fee per gas
+        if let Some(existing_max_blob_fee_per_gas) = self.transaction.max_fee_per_blob_gas() {
+            // This enforces that blob txs can only be replaced by blob txs
+            let replacement_max_blob_fee_per_gas =
+                maybe_replacement.transaction.max_fee_per_blob_gas().unwrap_or_default();
+            if replacement_max_blob_fee_per_gas <=
+                existing_max_blob_fee_per_gas * (100 + price_bump) / 100
+            {
+                return true
+            }
+        }
+
+        false
+    }
 }
 
-impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> ValidPoolTransaction<T> {
+impl<T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>> ValidPoolTransaction<T> {
     /// Converts to this type into a [`TransactionSignedEcRecovered`].
     ///
     /// Note: this takes `&self` since indented usage is via `Arc<Self>`.
     pub fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
-        self.transaction.clone().into_consensus()
+        self.transaction.clone().into_consensus().into()
     }
 }
 

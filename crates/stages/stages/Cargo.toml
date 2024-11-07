@@ -24,7 +24,9 @@ reth-evm.workspace = true
 reth-exex.workspace = true
 reth-network-p2p.workspace = true
 reth-primitives = { workspace = true, features = ["secp256k1"] }
-reth-primitives-traits.workspace = true
+reth-primitives-traits = { workspace = true, features = [
+    "serde-bincode-compat",
+] }
 reth-provider.workspace = true
 reth-execution-types.workspace = true
 reth-prune.workspace = true
@@ -52,6 +54,7 @@ itertools.workspace = true
 rayon.workspace = true
 num-traits = "0.2.15"
 tempfile = { workspace = true, optional = true }
+bincode.workspace = true
 
 [dev-dependencies]
 # reth
@@ -81,9 +84,6 @@ tempfile.workspace = true
 # Stage benchmarks
 criterion = { workspace = true, features = ["async_tokio"] }
 
-# io
-serde_json.workspace = true
-
 [target.'cfg(not(target_os = "windows"))'.dev-dependencies]
 pprof = { workspace = true, features = [
     "flamegraph",
@@ -93,13 +93,25 @@ pprof = { workspace = true, features = [
 
 [features]
 test-utils = [
-    "dep:reth-chainspec",
-    "reth-network-p2p/test-utils",
-    "reth-db/test-utils",
-    "reth-provider/test-utils",
-    "reth-stages-api/test-utils",
-    "dep:reth-testing-utils",
-    "dep:tempfile",
+	"dep:reth-chainspec",
+	"reth-network-p2p/test-utils",
+	"reth-db/test-utils",
+	"reth-provider/test-utils",
+	"reth-stages-api/test-utils",
+	"dep:reth-testing-utils",
+	"dep:tempfile",
+	"reth-chainspec?/test-utils",
+	"reth-consensus/test-utils",
+	"reth-evm/test-utils",
+	"reth-downloaders/test-utils",
+	"reth-primitives/test-utils",
+	"reth-primitives-traits/test-utils",
+	"reth-revm/test-utils",
+	"reth-codecs/test-utils",
+	"reth-db-api/test-utils",
+	"reth-trie-db/test-utils",
+	"reth-trie/test-utils",
+	"reth-prune-types/test-utils"
 ]
 
 [[bench]]

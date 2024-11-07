@@ -75,7 +75,7 @@ impl<'a> StaticFileJarProvider<'a> {
     }
 }
 
-impl<'a> HeaderProvider for StaticFileJarProvider<'a> {
+impl HeaderProvider for StaticFileJarProvider<'_> {
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
         Ok(self
             .cursor()?
@@ -147,7 +147,7 @@ impl<'a> HeaderProvider for StaticFileJarProvider<'a> {
     }
 }
 
-impl<'a> BlockHashReader for StaticFileJarProvider<'a> {
+impl BlockHashReader for StaticFileJarProvider<'_> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.cursor()?.get_one::<HeaderMask<BlockHash>>(number.into())
     }
@@ -169,7 +169,7 @@ impl<'a> BlockHashReader for StaticFileJarProvider<'a> {
     }
 }
 
-impl<'a> BlockNumReader for StaticFileJarProvider<'a> {
+impl BlockNumReader for StaticFileJarProvider<'_> {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
         // Information on live database
         Err(ProviderError::UnsupportedProvider)
@@ -194,7 +194,7 @@ impl<'a> BlockNumReader for StaticFileJarProvider<'a> {
     }
 }
 
-impl<'a> TransactionsProvider for StaticFileJarProvider<'a> {
+impl TransactionsProvider for StaticFileJarProvider<'_> {
     fn transaction_id(&self, hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         let mut cursor = self.cursor()?;
 
@@ -290,7 +290,7 @@ impl<'a> TransactionsProvider for StaticFileJarProvider<'a> {
     }
 }
 
-impl<'a> ReceiptProvider for StaticFileJarProvider<'a> {
+impl ReceiptProvider for StaticFileJarProvider<'_> {
     fn receipt(&self, num: TxNumber) -> ProviderResult<Option<Receipt>> {
         self.cursor()?.get_one::<ReceiptMask<Receipt>>(num.into())
     }

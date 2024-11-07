@@ -1,7 +1,7 @@
 //! Utilities for serving `eth_simulateV1`
 
-use alloy_consensus::{TxEip4844Variant, TxType, TypedTransaction};
-use alloy_primitives::Parity;
+use alloy_consensus::{Transaction as _, TxEip4844Variant, TxType, TypedTransaction};
+use alloy_primitives::PrimitiveSignature as Signature;
 use alloy_rpc_types::{
     simulate::{SimCallResult, SimulateError, SimulatedBlock},
     Block, BlockTransactionsKind,
@@ -9,14 +9,11 @@ use alloy_rpc_types::{
 use alloy_rpc_types_eth::transaction::TransactionRequest;
 use jsonrpsee_types::ErrorObject;
 use reth_primitives::{
-    logs_bloom,
     proofs::{calculate_receipt_root, calculate_transaction_root},
-    BlockBody, BlockWithSenders, Receipt, Signature, Transaction, TransactionSigned,
-    TransactionSignedNoHash,
+    BlockBody, BlockWithSenders, Receipt, Transaction, TransactionSigned, TransactionSignedNoHash,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_server_types::result::rpc_err;
-use reth_rpc_types::ToRpcError;
 use reth_rpc_types_compat::{block::from_block, TransactionCompat};
 use reth_storage_api::StateRootProvider;
 use reth_trie::{HashedPostState, HashedStorage};
@@ -24,7 +21,8 @@ use revm::{db::CacheDB, Database};
 use revm_primitives::{keccak256, Address, BlockEnv, Bytes, ExecutionResult, TxKind, B256, U256};
 
 use crate::{
-    cache::db::StateProviderTraitObjWrapper, EthApiError, RevertError, RpcInvalidTransactionError,
+    cache::db::StateProviderTraitObjWrapper, error::ToRpcError, EthApiError, RevertError,
+    RpcInvalidTransactionError,
 };
 
 /// Errors which may occur during `eth_simulateV1` execution.
@@ -61,7 +59,7 @@ impl ToRpcError for EthSimulateError {
 pub fn resolve_transactions<DB: Database>(
     txs: &mut [TransactionRequest],
     validation: bool,
-    block_gas_limit: u128,
+    block_gas_limit: u64,
     chain_id: u64,
     db: &mut DB,
 ) -> Result<Vec<TransactionSigned>, EthApiError>
@@ -71,7 +69,7 @@ where
     let mut transactions = Vec::with_capacity(txs.len());
 
     let default_gas_limit = {
-        let total_specified_gas = txs.iter().filter_map(|tx| tx.gas).sum::<u128>();
+        let total_specified_gas = txs.iter().filter_map(|tx| tx.gas).sum::<u64>();
         let txs_without_gas_limit = txs.iter().filter(|tx| tx.gas.is_none()).count();
 
         if total_specified_gas > block_gas_limit {
@@ -79,7 +77,7 @@ where
         }
 
         if txs_without_gas_limit > 0 {
-            (block_gas_limit - total_specified_gas) / txs_without_gas_limit as u128
+            (block_gas_limit - total_specified_gas) / txs_without_gas_limit as u64
         } else {
             0
         }
@@ -135,8 +133,7 @@ where
         };
 
         // Create an empty signature for the transaction.
-        let signature =
-            Signature::new(Default::default(), Default::default(), Parity::Parity(false));
+        let signature = Signature::new(Default::default(), Default::default(), false);
 
         let tx = match tx {
             TypedTransaction::Legacy(tx) => {
@@ -172,6 +169,7 @@ where
 }
 
 /// Handles outputs of the calls execution and builds a [`SimulatedBlock`].
+#[expect(clippy::complexity)]
 pub fn build_block<T: TransactionCompat>(
     results: Vec<(Address, ExecutionResult)>,
     transactions: Vec<TransactionSigned>,
@@ -180,10 +178,11 @@ pub fn build_block<T: TransactionCompat>(
     total_difficulty: U256,
     full_transactions: bool,
     db: &CacheDB<StateProviderDatabase<StateProviderTraitObjWrapper<'_>>>,
+    tx_resp_builder: &T,
 ) -> Result<SimulatedBlock<Block<T::Transaction>>, EthApiError> {
     let mut calls: Vec<SimCallResult> = Vec::with_capacity(results.len());
     let mut senders = Vec::with_capacity(results.len());
-    let mut receipts = Vec::new();
+    let mut receipts = Vec::with_capacity(results.len());
 
     let mut log_index = 0;
     for (transaction_index, ((sender, result), tx)) in
@@ -195,7 +194,7 @@ pub fn build_block<T: TransactionCompat>(
             ExecutionResult::Halt { reason, gas_used } => {
                 let error = RpcInvalidTransactionError::halt(reason, tx.gas_limit());
                 SimCallResult {
-                    return_value: Bytes::new(),
+                    return_data: Bytes::new(),
                     error: Some(SimulateError {
                         code: error.error_code(),
                         message: error.to_string(),
@@ -208,7 +207,7 @@ pub fn build_block<T: TransactionCompat>(
             ExecutionResult::Revert { output, gas_used } => {
                 let error = RevertError::new(output.clone());
                 SimCallResult {
-                    return_value: output,
+                    return_data: output,
                     error: Some(SimulateError {
                         code: error.error_code(),
                         message: error.to_string(),
@@ -219,7 +218,7 @@ pub fn build_block<T: TransactionCompat>(
                 }
             }
             ExecutionResult::Success { output, gas_used, logs, .. } => SimCallResult {
-                return_value: output.into_data(),
+                return_data: output.into_data(),
                 error: None,
                 gas_used,
                 logs: logs
@@ -273,7 +272,7 @@ pub fn build_block<T: TransactionCompat>(
         }
     }
 
-    let state_root = db.db.0.state_root(hashed_state)?;
+    let state_root = db.db.state_root(hashed_state)?;
 
     let header = reth_primitives::Header {
         beneficiary: block_env.coinbase,
@@ -282,13 +281,15 @@ pub fn build_block<T: TransactionCompat>(
         timestamp: block_env.timestamp.to(),
         base_fee_per_gas: Some(block_env.basefee.to()),
         gas_limit: block_env.gas_limit.to(),
-        gas_used: calls.iter().map(|c| c.gas_used).sum::<u64>() as u128,
+        gas_used: calls.iter().map(|c| c.gas_used).sum::<u64>(),
         blob_gas_used: Some(0),
         parent_hash,
         receipts_root: calculate_receipt_root(&receipts),
         transactions_root: calculate_transaction_root(&transactions),
         state_root,
-        logs_bloom: logs_bloom(receipts.iter().flat_map(|r| r.receipt.logs.iter())),
+        logs_bloom: alloy_primitives::logs_bloom(
+            receipts.iter().flat_map(|r| r.receipt.logs.iter()),
+        ),
         mix_hash: block_env.prevrandao.unwrap_or_default(),
         ..Default::default()
     };
@@ -304,6 +305,6 @@ pub fn build_block<T: TransactionCompat>(
     let txs_kind =
         if full_transactions { BlockTransactionsKind::Full } else { BlockTransactionsKind::Hashes };
 
-    let block = from_block::<T>(block, total_difficulty, txs_kind, None)?;
+    let block = from_block::<T>(block, total_difficulty, txs_kind, None, tx_resp_builder)?;
     Ok(SimulatedBlock { inner: block, calls })
 }

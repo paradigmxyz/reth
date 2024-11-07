@@ -16,6 +16,7 @@ reth-basic-payload-builder.workspace = true
 reth-ethereum-payload-builder.workspace = true
 reth-node-ethereum = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
+reth-trie-db.workspace = true
 alloy-genesis.workspace = true
 alloy-rpc-types = { workspace = true, features = ["engine"] }
 alloy-primitives.workspace = true

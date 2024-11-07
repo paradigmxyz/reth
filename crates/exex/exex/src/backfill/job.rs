@@ -8,7 +8,7 @@ use alloy_primitives::BlockNumber;
 use reth_evm::execute::{
     BatchExecutor, BlockExecutionError, BlockExecutionOutput, BlockExecutorProvider, Executor,
 };
-use reth_primitives::{Block, BlockBody, BlockWithSenders, Receipt};
+use reth_primitives::{Block, BlockWithSenders, Receipt};
 use reth_primitives_traits::format_gas_throughput;
 use reth_provider::{
     BlockReader, Chain, HeaderProvider, ProviderError, StateProviderFactory, TransactionVariant,
@@ -17,6 +17,8 @@ use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ExecutionStageThresholds;
 use reth_tracing::tracing::{debug, trace};
+
+pub(super) type BackfillJobResult<T> = Result<T, BlockExecutionError>;
 
 /// Backfill job started for a specific range.
 ///
@@ -37,7 +39,7 @@ where
     E: BlockExecutorProvider,
     P: HeaderProvider + BlockReader + StateProviderFactory,
 {
-    type Item = Result<Chain, BlockExecutionError>;
+    type Item = BackfillJobResult<Chain>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.range.is_empty() {
@@ -63,7 +65,13 @@ where
         self.into()
     }
 
-    fn execute_range(&mut self) -> Result<Chain, BlockExecutionError> {
+    fn execute_range(&mut self) -> BackfillJobResult<Chain> {
+        debug!(
+            target: "exex::backfill",
+            range = ?self.range,
+            "Executing block range"
+        );
+
         let mut executor = self.executor.batch_executor(StateProviderDatabase::new(
             self.provider.history_by_block_number(self.range.start().saturating_sub(1))?,
         ));
@@ -103,16 +111,8 @@ where
             // Unseal the block for execution
             let (block, senders) = block.into_components();
             let (unsealed_header, hash) = block.header.split();
-            let block = Block {
-                header: unsealed_header,
-                body: BlockBody {
-                    transactions: block.body.transactions,
-                    ommers: block.body.ommers,
-                    withdrawals: block.body.withdrawals,
-                    requests: block.body.requests,
-                },
-            }
-            .with_senders_unchecked(senders);
+            let block =
+                Block { header: unsealed_header, body: block.body }.with_senders_unchecked(senders);
 
             executor.execute_and_verify_one((&block, td).into())?;
             execution_duration += execute_start.elapsed();
@@ -127,7 +127,7 @@ where
             if self.thresholds.is_end_of_batch(
                 block_number - *self.range.start(),
                 bundle_size_hint,
-                cumulative_gas as u64,
+                cumulative_gas,
                 batch_start.elapsed(),
             ) {
                 break
@@ -140,7 +140,7 @@ where
             range = ?*self.range.start()..=last_block_number,
             block_fetch = ?fetch_block_duration,
             execution = ?execution_duration,
-            throughput = format_gas_throughput(cumulative_gas as u64, execution_duration),
+            throughput = format_gas_throughput(cumulative_gas, execution_duration),
             "Finished executing block range"
         );
         self.range = last_block_number + 1..=*self.range.end();
@@ -167,7 +167,7 @@ where
     E: BlockExecutorProvider,
     P: HeaderProvider + BlockReader + StateProviderFactory,
 {
-    type Item = Result<(BlockWithSenders, BlockExecutionOutput<Receipt>), BlockExecutionError>;
+    type Item = BackfillJobResult<(BlockWithSenders, BlockExecutionOutput<Receipt>)>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.range.next().map(|block_number| self.execute_block(block_number))
@@ -189,7 +189,7 @@ where
     pub(crate) fn execute_block(
         &self,
         block_number: u64,
-    ) -> Result<(BlockWithSenders, BlockExecutionOutput<Receipt>), BlockExecutionError> {
+    ) -> BackfillJobResult<(BlockWithSenders, BlockExecutionOutput<Receipt>)> {
         let td = self
             .provider
             .header_td_by_number(block_number)?

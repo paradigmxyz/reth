@@ -1,4 +1,4 @@
-//! Commonly used types in reth.
+//! Commonly used types in Reth.
 //!
 //! This crate contains Ethereum primitive types and helper functions.
 //!
@@ -33,47 +33,30 @@ pub use reth_static_file_types as static_file;
 pub mod transaction;
 #[cfg(any(test, feature = "arbitrary"))]
 pub use block::{generate_valid_header, valid_header_strategy};
-pub use block::{
-    Block, BlockBody, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, BlockWithSenders,
-    ForkBlock, RpcBlockHash, SealedBlock, SealedBlockWithSenders,
-};
+pub use block::{Block, BlockBody, BlockWithSenders, SealedBlock, SealedBlockWithSenders};
 #[cfg(feature = "reth-codec")]
 pub use compression::*;
-pub use constants::{
-    DEV_GENESIS_HASH, EMPTY_OMMER_ROOT_HASH, HOLESKY_GENESIS_HASH, KECCAK_EMPTY,
-    MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
-};
+pub use constants::HOLESKY_GENESIS_HASH;
 pub use receipt::{
     gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,
 };
 pub use reth_primitives_traits::{
     logs_bloom, Account, Bytecode, GotExpected, GotExpectedBoxed, Header, HeaderError, Log,
-    LogData, Request, Requests, SealedHeader, StorageEntry, Withdrawal, Withdrawals,
+    LogData, SealedHeader, StorageEntry, Withdrawals,
 };
 pub use static_file::StaticFileSegment;
 
 pub use transaction::{
-    BlobTransaction, BlobTransactionSidecar, PooledTransactionsElement,
-    PooledTransactionsElementEcRecovered,
+    BlobTransaction, PooledTransactionsElement, PooledTransactionsElementEcRecovered,
 };
-
-#[cfg(feature = "c-kzg")]
-pub use transaction::BlobTransactionValidationError;
 
 pub use transaction::{
     util::secp256k1::{public_key_to_address, recover_signer_unchecked, sign_message},
-    InvalidTransactionError, Signature, Transaction, TransactionMeta, TransactionSigned,
+    InvalidTransactionError, Transaction, TransactionMeta, TransactionSigned,
     TransactionSignedEcRecovered, TransactionSignedNoHash, TxHashOrNumber, TxType,
-    EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
-    LEGACY_TX_TYPE_ID,
 };
 
 // Re-exports
-pub use alloy_primitives::{
-    self, address, b256, bloom, bytes,
-    bytes::{Buf, BufMut, BytesMut},
-    hex, Bytes, TxHash, B256, U256, U64,
-};
 pub use reth_ethereum_forks::*;
 pub use revm_primitives::{self, JumpTable};
 
@@ -83,12 +66,17 @@ pub use arbitrary;
 #[cfg(feature = "c-kzg")]
 pub use c_kzg as kzg;
 
-/// Optimism specific re-exports
-#[cfg(feature = "optimism")]
-mod optimism {
-    pub use crate::transaction::{optimism_deposit_tx_signature, TxDeposit, DEPOSIT_TX_TYPE_ID};
-    pub use reth_optimism_chainspec::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
+/// Bincode-compatible serde implementations for commonly used types in Reth.
+///
+/// `bincode` crate doesn't work with optionally serializable serde fields, but some of the
+/// Reth types require optional serialization for RPC compatibility. This module makes so that
+/// all fields are serialized.
+///
+/// Read more: <https://github.com/bincode-org/bincode/issues/326>
+#[cfg(feature = "serde-bincode-compat")]
+pub mod serde_bincode_compat {
+    pub use super::{
+        block::serde_bincode_compat::*,
+        transaction::{serde_bincode_compat as transaction, serde_bincode_compat::*},
+    };
 }
-
-#[cfg(feature = "optimism")]
-pub use optimism::*;

@@ -1,12 +1,10 @@
 //! Helper function for calculating Merkle proofs and hashes.
 
-use crate::{
-    constants::EMPTY_OMMER_ROOT_HASH, Header, Receipt, ReceiptWithBloom, ReceiptWithBloomRef,
-    Request, TransactionSigned, Withdrawal, B256,
-};
+use crate::{Header, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, TransactionSigned};
 use alloc::vec::Vec;
-use alloy_eips::eip7685::Encodable7685;
-use alloy_primitives::keccak256;
+use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
+use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawal};
+use alloy_primitives::{keccak256, B256};
 use reth_trie_common::root::{ordered_trie_root, ordered_trie_root_with_encoder};
 
 /// Calculate a transaction root.
@@ -16,7 +14,7 @@ pub fn calculate_transaction_root<T>(transactions: &[T]) -> B256
 where
     T: AsRef<TransactionSigned>,
 {
-    ordered_trie_root_with_encoder(transactions, |tx: &T, buf| tx.as_ref().encode_inner(buf, false))
+    ordered_trie_root_with_encoder(transactions, |tx: &T, buf| tx.as_ref().encode_2718(buf))
 }
 
 /// Calculates the root hash of the withdrawals.
@@ -27,13 +25,6 @@ pub fn calculate_withdrawals_root(withdrawals: &[Withdrawal]) -> B256 {
 /// Calculates the receipt root for a header.
 pub fn calculate_receipt_root(receipts: &[ReceiptWithBloom]) -> B256 {
     ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_inner(buf, false))
-}
-
-/// Calculate [EIP-7685](https://eips.ethereum.org/EIPS/eip-7685) requests root.
-///
-/// NOTE: The requests are encoded as `id + request`
-pub fn calculate_requests_root(requests: &[Request]) -> B256 {
-    ordered_trie_root_with_encoder(requests, |item, buf| item.encode_7685(buf))
 }
 
 /// Calculates the receipt root for a header.
@@ -65,9 +56,10 @@ pub fn calculate_ommers_root(ommers: &[Header]) -> B256 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{constants::EMPTY_ROOT_HASH, Block, U256};
+    use crate::Block;
+    use alloy_consensus::EMPTY_ROOT_HASH;
     use alloy_genesis::GenesisAccount;
-    use alloy_primitives::{b256, hex_literal::hex, Address};
+    use alloy_primitives::{b256, hex_literal::hex, Address, U256};
     use alloy_rlp::Decodable;
     use reth_chainspec::{HOLESKY, MAINNET, SEPOLIA};
     use reth_trie_common::root::{state_root_ref_unhashed, state_root_unhashed};

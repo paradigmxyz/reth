@@ -29,7 +29,7 @@ impl TransactionTestContext {
     /// Creates a deployment transaction and signs it, returning an envelope.
     pub async fn deploy_tx(
         chain_id: u64,
-        gas: u128,
+        gas: u64,
         init_code: Bytes,
         wallet: PrivateKeySigner,
     ) -> TxEnvelope {
@@ -40,7 +40,7 @@ impl TransactionTestContext {
     /// Creates a deployment transaction and signs it, returning bytes.
     pub async fn deploy_tx_bytes(
         chain_id: u64,
-        gas: u128,
+        gas: u64,
         init_code: Bytes,
         wallet: PrivateKeySigner,
     ) -> Bytes {
@@ -56,8 +56,7 @@ impl TransactionTestContext {
         delegate_to: Address,
         wallet: PrivateKeySigner,
     ) -> TxEnvelope {
-        let authorization =
-            Authorization { chain_id: U256::from(chain_id), address: delegate_to, nonce: 0 };
+        let authorization = Authorization { chain_id, address: delegate_to, nonce: 0 };
         let signature = wallet
             .sign_hash_sync(&authorization.signature_hash())
             .expect("could not sign authorization");
@@ -145,7 +144,7 @@ impl TransactionTestContext {
 /// Creates a type 2 transaction
 fn tx(
     chain_id: u64,
-    gas: u128,
+    gas: u64,
     data: Option<Bytes>,
     delegate_to: Option<SignedAuthorization>,
     nonce: u64,

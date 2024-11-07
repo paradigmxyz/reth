@@ -1,6 +1,6 @@
 //! Contains types required for building a payload.
 
-use alloy_eips::eip4844::BlobTransactionSidecar;
+use alloy_eips::{eip4844::BlobTransactionSidecar, eip7685::Requests};
 use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{
@@ -11,10 +11,9 @@ use reth_chain_state::ExecutedBlock;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{SealedBlock, Withdrawals};
 use reth_rpc_types_compat::engine::payload::{
-    block_to_payload_v1, block_to_payload_v3, block_to_payload_v4,
-    convert_block_to_payload_field_v2,
+    block_to_payload_v1, block_to_payload_v3, convert_block_to_payload_field_v2,
 };
-use std::convert::Infallible;
+use std::{convert::Infallible, sync::Arc};
 
 /// Contains the built payload.
 ///
@@ -26,7 +25,7 @@ pub struct EthBuiltPayload {
     /// Identifier of the payload
     pub(crate) id: PayloadId,
     /// The built block
-    pub(crate) block: SealedBlock,
+    pub(crate) block: Arc<SealedBlock>,
     /// Block execution data for the payload, if any.
     pub(crate) executed_block: Option<ExecutedBlock>,
     /// The fees of the block
@@ -34,19 +33,24 @@ pub struct EthBuiltPayload {
     /// The blobs, proofs, and commitments in the block. If the block is pre-cancun, this will be
     /// empty.
     pub(crate) sidecars: Vec<BlobTransactionSidecar>,
+    /// The requests of the payload
+    pub(crate) requests: Option<Requests>,
 }
 
 // === impl BuiltPayload ===
 
 impl EthBuiltPayload {
-    /// Initializes the payload with the given initial block.
+    /// Initializes the payload with the given initial block
+    ///
+    /// Caution: This does not set any [`BlobTransactionSidecar`].
     pub const fn new(
         id: PayloadId,
-        block: SealedBlock,
+        block: Arc<SealedBlock>,
         fees: U256,
         executed_block: Option<ExecutedBlock>,
+        requests: Option<Requests>,
     ) -> Self {
-        Self { id, block, executed_block, fees, sidecars: Vec::new() }
+        Self { id, block, executed_block, fees, sidecars: Vec::new(), requests }
     }
 
     /// Returns the identifier of the payload.
@@ -55,7 +59,7 @@ impl EthBuiltPayload {
     }
 
     /// Returns the built block(sealed)
-    pub const fn block(&self) -> &SealedBlock {
+    pub fn block(&self) -> &SealedBlock {
         &self.block
     }
 
@@ -70,8 +74,17 @@ impl EthBuiltPayload {
     }
 
     /// Adds sidecars to the payload.
-    pub fn extend_sidecars(&mut self, sidecars: Vec<BlobTransactionSidecar>) {
+    pub fn extend_sidecars(&mut self, sidecars: impl IntoIterator<Item = BlobTransactionSidecar>) {
         self.sidecars.extend(sidecars)
+    }
+
+    /// Same as [`Self::extend_sidecars`] but returns the type again.
+    pub fn with_sidecars(
+        mut self,
+        sidecars: impl IntoIterator<Item = BlobTransactionSidecar>,
+    ) -> Self {
+        self.extend_sidecars(sidecars);
+        self
     }
 }
 
@@ -87,9 +100,13 @@ impl BuiltPayload for EthBuiltPayload {
     fn executed_block(&self) -> Option<ExecutedBlock> {
         self.executed_block.clone()
     }
+
+    fn requests(&self) -> Option<Requests> {
+        self.requests.clone()
+    }
 }
 
-impl<'a> BuiltPayload for &'a EthBuiltPayload {
+impl BuiltPayload for &EthBuiltPayload {
     fn block(&self) -> &SealedBlock {
         (**self).block()
     }
@@ -101,12 +118,16 @@ impl<'a> BuiltPayload for &'a EthBuiltPayload {
     fn executed_block(&self) -> Option<ExecutedBlock> {
         self.executed_block.clone()
     }
+
+    fn requests(&self) -> Option<Requests> {
+        self.requests.clone()
+    }
 }
 
 // V1 engine_getPayloadV1 response
 impl From<EthBuiltPayload> for ExecutionPayloadV1 {
     fn from(value: EthBuiltPayload) -> Self {
-        block_to_payload_v1(value.block)
+        block_to_payload_v1(Arc::unwrap_or_clone(value.block))
     }
 }
 
@@ -115,7 +136,10 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV2 {
     fn from(value: EthBuiltPayload) -> Self {
         let EthBuiltPayload { block, fees, .. } = value;
 
-        Self { block_value: fees, execution_payload: convert_block_to_payload_field_v2(block) }
+        Self {
+            block_value: fees,
+            execution_payload: convert_block_to_payload_field_v2(Arc::unwrap_or_clone(block)),
+        }
     }
 }
 
@@ -124,7 +148,7 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV3 {
         let EthBuiltPayload { block, fees, sidecars, .. } = value;
 
         Self {
-            execution_payload: block_to_payload_v3(block),
+            execution_payload: block_to_payload_v3(Arc::unwrap_or_clone(block)),
             block_value: fees,
             // From the engine API spec:
             //
@@ -135,17 +159,17 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV3 {
             // Spec:
             // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
             should_override_builder: false,
-            blobs_bundle: sidecars.into_iter().map(Into::into).collect::<Vec<_>>().into(),
+            blobs_bundle: sidecars.into(),
         }
     }
 }
 
 impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV4 {
     fn from(value: EthBuiltPayload) -> Self {
-        let EthBuiltPayload { block, fees, sidecars, .. } = value;
+        let EthBuiltPayload { block, fees, sidecars, requests, .. } = value;
 
         Self {
-            execution_payload: block_to_payload_v4(block),
+            execution_payload: block_to_payload_v3(Arc::unwrap_or_clone(block)),
             block_value: fees,
             // From the engine API spec:
             //
@@ -157,12 +181,13 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV4 {
             // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
             should_override_builder: false,
             blobs_bundle: sidecars.into_iter().map(Into::into).collect::<Vec<_>>().into(),
+            execution_requests: requests.unwrap_or_default().take(),
         }
     }
 }
 
 /// Container type for all components required to build a payload.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct EthPayloadBuilderAttributes {
     /// Id of the payload
     pub id: PayloadId,
@@ -215,7 +240,11 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
     /// Creates a new payload builder for the given parent block and the attributes.
     ///
     /// Derives the unique [`PayloadId`] for the given parent and attributes
-    fn try_new(parent: B256, attributes: PayloadAttributes) -> Result<Self, Infallible> {
+    fn try_new(
+        parent: B256,
+        attributes: PayloadAttributes,
+        _version: u8,
+    ) -> Result<Self, Infallible> {
         Ok(Self::new(parent, attributes))
     }
 

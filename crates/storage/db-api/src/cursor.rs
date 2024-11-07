@@ -149,15 +149,10 @@ where
     }
 }
 
-impl<'cursor, T: Table, CURSOR: DbCursorRO<T>> Iterator for Walker<'cursor, T, CURSOR> {
+impl<T: Table, CURSOR: DbCursorRO<T>> Iterator for Walker<'_, T, CURSOR> {
     type Item = Result<TableRow<T>, DatabaseError>;
     fn next(&mut self) -> Option<Self::Item> {
-        let start = self.start.take();
-        if start.is_some() {
-            return start
-        }
-
-        self.cursor.next().transpose()
+        self.start.take().or_else(|| self.cursor.next().transpose())
     }
 }
 
@@ -174,7 +169,7 @@ impl<'cursor, T: Table, CURSOR: DbCursorRO<T>> Walker<'cursor, T, CURSOR> {
     }
 }
 
-impl<'cursor, T: Table, CURSOR: DbCursorRW<T> + DbCursorRO<T>> Walker<'cursor, T, CURSOR> {
+impl<T: Table, CURSOR: DbCursorRW<T> + DbCursorRO<T>> Walker<'_, T, CURSOR> {
     /// Delete current item that walker points to.
     pub fn delete_current(&mut self) -> Result<(), DatabaseError> {
         self.start.take();
@@ -217,7 +212,7 @@ impl<'cursor, T: Table, CURSOR: DbCursorRO<T>> ReverseWalker<'cursor, T, CURSOR>
     }
 }
 
-impl<'cursor, T: Table, CURSOR: DbCursorRW<T> + DbCursorRO<T>> ReverseWalker<'cursor, T, CURSOR> {
+impl<T: Table, CURSOR: DbCursorRW<T> + DbCursorRO<T>> ReverseWalker<'_, T, CURSOR> {
     /// Delete current item that walker points to.
     pub fn delete_current(&mut self) -> Result<(), DatabaseError> {
         self.start.take();
@@ -225,7 +220,7 @@ impl<'cursor, T: Table, CURSOR: DbCursorRW<T> + DbCursorRO<T>> ReverseWalker<'cu
     }
 }
 
-impl<'cursor, T: Table, CURSOR: DbCursorRO<T>> Iterator for ReverseWalker<'cursor, T, CURSOR> {
+impl<T: Table, CURSOR: DbCursorRO<T>> Iterator for ReverseWalker<'_, T, CURSOR> {
     type Item = Result<TableRow<T>, DatabaseError>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -266,7 +261,7 @@ where
     }
 }
 
-impl<'cursor, T: Table, CURSOR: DbCursorRO<T>> Iterator for RangeWalker<'cursor, T, CURSOR> {
+impl<T: Table, CURSOR: DbCursorRO<T>> Iterator for RangeWalker<'_, T, CURSOR> {
     type Item = Result<TableRow<T>, DatabaseError>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -316,7 +311,7 @@ impl<'cursor, T: Table, CURSOR: DbCursorRO<T>> RangeWalker<'cursor, T, CURSOR> {
     }
 }
 
-impl<'cursor, T: Table, CURSOR: DbCursorRW<T> + DbCursorRO<T>> RangeWalker<'cursor, T, CURSOR> {
+impl<T: Table, CURSOR: DbCursorRW<T> + DbCursorRO<T>> RangeWalker<'_, T, CURSOR> {
     /// Delete current item that walker points to.
     pub fn delete_current(&mut self) -> Result<(), DatabaseError> {
         self.start.take();
@@ -349,7 +344,7 @@ where
     }
 }
 
-impl<'cursor, T: DupSort, CURSOR: DbCursorRW<T> + DbDupCursorRO<T>> DupWalker<'cursor, T, CURSOR> {
+impl<T: DupSort, CURSOR: DbCursorRW<T> + DbDupCursorRO<T>> DupWalker<'_, T, CURSOR> {
     /// Delete current item that walker points to.
     pub fn delete_current(&mut self) -> Result<(), DatabaseError> {
         self.start.take();
@@ -357,7 +352,7 @@ impl<'cursor, T: DupSort, CURSOR: DbCursorRW<T> + DbDupCursorRO<T>> DupWalker<'c
     }
 }
 
-impl<'cursor, T: DupSort, CURSOR: DbDupCursorRO<T>> Iterator for DupWalker<'cursor, T, CURSOR> {
+impl<T: DupSort, CURSOR: DbDupCursorRO<T>> Iterator for DupWalker<'_, T, CURSOR> {
     type Item = Result<TableRow<T>, DatabaseError>;
     fn next(&mut self) -> Option<Self::Item> {
         let start = self.start.take();

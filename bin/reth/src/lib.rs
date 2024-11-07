@@ -90,6 +90,7 @@ pub mod dirs {
 /// Re-exported from `reth_chainspec`
 pub mod chainspec {
     pub use reth_chainspec::*;
+    pub use reth_ethereum_cli::chainspec::*;
 }
 
 /// Re-exported from `reth_provider`.

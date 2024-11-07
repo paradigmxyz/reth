@@ -1,3 +1,5 @@
+//! Compact implementation for [`AlloyTxEip7702`]
+
 use crate::Compact;
 use alloc::vec::Vec;
 use alloy_consensus::TxEip7702 as AlloyTxEip7702;
@@ -14,8 +16,13 @@ use reth_codecs_derive::add_arbitrary_tests;
 ///
 /// Notice: Make sure this struct is 1:1 with [`alloy_consensus::TxEip7702`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Compact)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize))]
-#[add_arbitrary_tests(compact)]
+#[reth_codecs(crate = "crate")]
+#[cfg_attr(
+    any(test, feature = "test-utils"),
+    derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize)
+)]
+#[cfg_attr(feature = "test-utils", allow(unreachable_pub), visibility::make(pub))]
+#[add_arbitrary_tests(crate, compact)]
 pub(crate) struct TxEip7702 {
     chain_id: ChainId,
     nonce: u64,
@@ -39,7 +46,7 @@ impl Compact for AlloyTxEip7702 {
             nonce: self.nonce,
             max_fee_per_gas: self.max_fee_per_gas,
             max_priority_fee_per_gas: self.max_priority_fee_per_gas,
-            gas_limit: self.gas_limit as u64,
+            gas_limit: self.gas_limit,
             to: self.to,
             value: self.value,
             input: self.input.clone(),
@@ -56,7 +63,7 @@ impl Compact for AlloyTxEip7702 {
             nonce: tx.nonce,
             max_fee_per_gas: tx.max_fee_per_gas,
             max_priority_fee_per_gas: tx.max_priority_fee_per_gas,
-            gas_limit: tx.gas_limit as u128,
+            gas_limit: tx.gas_limit,
             to: tx.to,
             value: tx.value,
             input: tx.input,

@@ -1,10 +1,11 @@
 use crate::BeaconSidecarConfig;
+use alloy_primitives::B256;
 use alloy_rpc_types_beacon::sidecar::{BeaconBlobBundle, SidecarIterator};
 use eyre::Result;
 use futures_util::{stream::FuturesUnordered, Future, Stream, StreamExt};
 use reqwest::{Error, StatusCode};
 use reth::{
-    primitives::{BlobTransaction, SealedBlockWithSenders, B256},
+    primitives::{BlobTransaction, SealedBlockWithSenders},
     providers::CanonStateNotification,
     transaction_pool::{BlobStoreError, TransactionPoolExt},
 };
@@ -12,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::VecDeque,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 use thiserror::Error;
@@ -108,14 +110,16 @@ where
 
         match self.pool.get_all_blobs_exact(txs.iter().map(|(tx, _)| tx.hash()).collect()) {
             Ok(blobs) => {
-                for ((tx, _), sidecar) in txs.iter().zip(blobs.iter()) {
-                    let transaction = BlobTransaction::try_from_signed(tx.clone(), sidecar.clone())
-                        .expect("should not fail to convert blob tx if it is already eip4844");
+                actions_to_queue.reserve_exact(txs.len());
+                for ((tx, _), sidecar) in txs.iter().zip(blobs.into_iter()) {
+                    let transaction =
+                        BlobTransaction::try_from_signed(tx.clone(), Arc::unwrap_or_clone(sidecar))
+                            .expect("should not fail to convert blob tx if it is already eip4844");
 
                     let block_metadata = BlockMetadata {
                         block_hash: block.hash(),
                         block_number: block.number,
-                        gas_used: block.gas_used as u64,
+                        gas_used: block.gas_used,
                     };
                     actions_to_queue.push(BlobTransactionEvent::Mined(MinedBlob {
                         transaction,
@@ -194,7 +198,7 @@ where
                                         let block_metadata = BlockMetadata {
                                             block_hash: new.tip().block.hash(),
                                             block_number: new.tip().block.number,
-                                            gas_used: new.tip().block.gas_used as u64,
+                                            gas_used: new.tip().block.gas_used,
                                         };
                                         BlobTransactionEvent::Reorged(ReorgedBlob {
                                             transaction_hash,
@@ -267,7 +271,7 @@ async fn fetch_blobs_for_block(
                 let block_metadata = BlockMetadata {
                     block_hash: block.hash(),
                     block_number: block.number,
-                    gas_used: block.gas_used as u64,
+                    gas_used: block.gas_used,
                 };
                 BlobTransactionEvent::Mined(MinedBlob { transaction, block_metadata })
             })

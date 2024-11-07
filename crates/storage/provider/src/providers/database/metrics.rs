@@ -61,7 +61,6 @@ pub(crate) enum Action {
     InsertTransactions,
     InsertTransactionHashNumbers,
     InsertBlockWithdrawals,
-    InsertBlockRequests,
     InsertBlockBodyIndices,
     InsertTransactionBlocks,
     GetNextTxNum,
@@ -106,8 +105,6 @@ struct DatabaseProviderMetrics {
     insert_tx_hash_numbers: Histogram,
     /// Duration of insert block withdrawals
     insert_block_withdrawals: Histogram,
-    /// Duration of insert block requests
-    insert_block_requests: Histogram,
     /// Duration of insert block body indices
     insert_block_body_indices: Histogram,
     /// Duration of insert transaction blocks
@@ -139,7 +136,6 @@ impl DatabaseProviderMetrics {
             Action::InsertTransactions => self.insert_transactions.record(duration),
             Action::InsertTransactionHashNumbers => self.insert_tx_hash_numbers.record(duration),
             Action::InsertBlockWithdrawals => self.insert_block_withdrawals.record(duration),
-            Action::InsertBlockRequests => self.insert_block_requests.record(duration),
             Action::InsertBlockBodyIndices => self.insert_block_body_indices.record(duration),
             Action::InsertTransactionBlocks => self.insert_tx_blocks.record(duration),
             Action::GetNextTxNum => self.get_next_tx_num.record(duration),

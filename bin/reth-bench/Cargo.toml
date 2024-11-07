@@ -36,6 +36,7 @@ alloy-pubsub.workspace = true
 alloy-json-rpc.workspace = true
 alloy-rpc-client.workspace = true
 alloy-eips.workspace = true
+alloy-primitives.workspace = true
 
 # reqwest
 reqwest = { workspace = true, default-features = false, features = [
@@ -75,9 +76,16 @@ reth-tracing.workspace = true
 [features]
 default = ["jemalloc"]
 
-asm-keccak = ["reth-primitives/asm-keccak"]
+asm-keccak = [
+	"reth-primitives/asm-keccak",
+	"reth-node-core/asm-keccak",
+	"alloy-primitives/asm-keccak"
+]
 
-jemalloc = ["reth-cli-util/jemalloc"]
+jemalloc = [
+	"reth-cli-util/jemalloc",
+	"reth-node-core/jemalloc"
+]
 jemalloc-prof = ["reth-cli-util/jemalloc-prof"]
 tracy-allocator = ["reth-cli-util/tracy-allocator"]
 

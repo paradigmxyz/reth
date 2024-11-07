@@ -2,6 +2,7 @@
 //! response. This is useful for benchmarking, as it allows us to wait for a payload to be valid
 //! before sending additional calls.
 
+use alloy_primitives::B256;
 use alloy_provider::{ext::EngineApi, Network};
 use alloy_rpc_types_engine::{
     ExecutionPayload, ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3,
@@ -9,7 +10,6 @@ use alloy_rpc_types_engine::{
 };
 use alloy_transport::{Transport, TransportResult};
 use reth_node_api::EngineApiMessageVersion;
-use reth_primitives::B256;
 use tracing::error;
 
 /// An extension trait for providers that implement the engine API, to wait for a VALID response.
@@ -215,14 +215,6 @@ pub(crate) async fn call_new_payload<N, T, P: EngineApiValidWaitExt<N, T>>(
     versioned_hashes: Vec<B256>,
 ) -> TransportResult<EngineApiMessageVersion> {
     match payload {
-        ExecutionPayload::V4(_payload) => {
-            todo!("V4 payloads not supported yet");
-            // auth_provider
-            //     .new_payload_v4_wait(payload, versioned_hashes, parent_beacon_block_root, ...)
-            //     .await?;
-            //
-            // Ok(EngineApiMessageVersion::V4)
-        }
         ExecutionPayload::V3(payload) => {
             // We expect the caller
             let parent_beacon_block_root = parent_beacon_block_root

@@ -7,7 +7,7 @@ use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::StaticFileSegment;
 use reth_provider::{
-    providers::ProviderNodeTypes, FinalizedBlockReader, FinalizedBlockWriter, ProviderFactory,
+    providers::ProviderNodeTypes, ChainStateBlockReader, ChainStateBlockWriter, ProviderFactory,
     StaticFileProviderFactory, StatsReader,
 };
 use reth_storage_errors::provider::ProviderResult;
@@ -21,7 +21,6 @@ use std::{collections::BTreeMap, sync::Arc};
 /// - A handle to the database
 /// - A handle to the consensus engine
 /// - The executor factory to execute blocks with
-/// - The chain spec
 #[derive(Debug)]
 pub struct TreeExternals<N: NodeTypesWithDB, E> {
     /// The provider factory, used to commit the canonical chain, or unwind it.

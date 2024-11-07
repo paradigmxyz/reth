@@ -3,7 +3,7 @@ use alloy_rpc_types_engine::ForkchoiceState;
 use futures_util::{future::BoxFuture, FutureExt};
 use reth_beacon_consensus::{BeaconEngineMessage, ForkchoiceStatus};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_engine_primitives::EngineTypes;
+use reth_engine_primitives::{EngineApiMessageVersion, EngineTypes};
 use reth_evm::execute::BlockExecutorProvider;
 use reth_provider::{CanonChainTracker, StateProviderFactory};
 use reth_stages_api::PipelineEvent;
@@ -113,7 +113,6 @@ where
                 let to_engine = this.to_engine.clone();
                 let client = this.client.clone();
                 let chain_spec = Arc::clone(&this.chain_spec);
-                let pool = this.pool.clone();
                 let events = this.pipe_line_events.take();
                 let executor = this.block_executor.clone();
 
@@ -139,11 +138,6 @@ where
                         &executor,
                     ) {
                         Ok((new_header, _bundle_state)) => {
-                            // clear all transactions from pool
-                            pool.remove_transactions(
-                                transactions.iter().map(|tx| tx.hash()).collect(),
-                            );
-
                             let state = ForkchoiceState {
                                 head_block_hash: new_header.hash(),
                                 finalized_block_hash: new_header.hash(),
@@ -161,6 +155,7 @@ where
                                     state,
                                     payload_attrs: None,
                                     tx,
+                                    version: EngineApiMessageVersion::default(),
                                 });
                                 debug!(target: "consensus::auto", ?state, "Sent fork choice update");
 

@@ -1,9 +1,8 @@
 use crate::EthVersion;
 use alloy_chains::{Chain, NamedChain};
-use alloy_genesis::Genesis;
 use alloy_primitives::{hex, B256, U256};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
-use reth_chainspec::{ChainSpec, EthChainSpec, Hardforks, MAINNET};
+use reth_chainspec::{EthChainSpec, Hardforks, MAINNET};
 use reth_codecs_derive::add_arbitrary_tests;
 use reth_primitives::{EthereumHardfork, ForkId, Head};
 use std::fmt::{Debug, Display};
@@ -20,7 +19,7 @@ use std::fmt::{Debug, Display};
 pub struct Status {
     /// The current protocol version. For example, peers running `eth/66` would have a version of
     /// 66.
-    pub version: u8,
+    pub version: EthVersion,
 
     /// The chain id, as introduced in
     /// [EIP155](https://eips.ethereum.org/EIPS/eip-155#list-of-chain-ids).
@@ -43,23 +42,6 @@ pub struct Status {
     pub forkid: ForkId,
 }
 
-impl From<Genesis> for Status {
-    fn from(genesis: Genesis) -> Self {
-        let chain = genesis.config.chain_id;
-        let total_difficulty = genesis.difficulty;
-        let chainspec = ChainSpec::from(genesis);
-
-        Self {
-            version: EthVersion::Eth68 as u8,
-            chain: Chain::from_id(chain),
-            total_difficulty,
-            blockhash: chainspec.genesis_hash(),
-            genesis: chainspec.genesis_hash(),
-            forkid: chainspec.fork_id(&Head::default()),
-        }
-    }
-}
-
 impl Status {
     /// Helper for returning a builder for the status message.
     pub fn builder() -> StatusBuilder {
@@ -68,13 +50,13 @@ impl Status {
 
     /// Sets the [`EthVersion`] for the status.
     pub fn set_eth_version(&mut self, version: EthVersion) {
-        self.version = version as u8;
+        self.version = version;
     }
 
-    /// Create a [`StatusBuilder`] from the given [`ChainSpec`] and head block.
+    /// Create a [`StatusBuilder`] from the given [`EthChainSpec`] and head block.
     ///
-    /// Sets the `chain` and `genesis`, `blockhash`, and `forkid` fields based on the [`ChainSpec`]
-    /// and head.
+    /// Sets the `chain` and `genesis`, `blockhash`, and `forkid` fields based on the
+    /// [`EthChainSpec`] and head.
     pub fn spec_builder<Spec>(spec: Spec, head: &Head) -> StatusBuilder
     where
         Spec: EthChainSpec + Hardforks,
@@ -140,7 +122,7 @@ impl Default for Status {
     fn default() -> Self {
         let mainnet_genesis = MAINNET.genesis_hash();
         Self {
-            version: EthVersion::Eth68 as u8,
+            version: EthVersion::Eth68,
             chain: Chain::from_named(NamedChain::Mainnet),
             total_difficulty: U256::from(17_179_869_184u64),
             blockhash: mainnet_genesis,
@@ -156,14 +138,14 @@ impl Default for Status {
 ///
 /// # Example
 /// ```
+/// use alloy_consensus::constants::MAINNET_GENESIS_HASH;
 /// use alloy_primitives::{B256, U256};
 /// use reth_chainspec::{Chain, EthereumHardfork, MAINNET};
 /// use reth_eth_wire_types::{EthVersion, Status};
-/// use reth_primitives::MAINNET_GENESIS_HASH;
 ///
 /// // this is just an example status message!
 /// let status = Status::builder()
-///     .version(EthVersion::Eth66.into())
+///     .version(EthVersion::Eth66)
 ///     .chain(Chain::mainnet())
 ///     .total_difficulty(U256::from(100))
 ///     .blockhash(B256::from(MAINNET_GENESIS_HASH))
@@ -174,7 +156,7 @@ impl Default for Status {
 /// assert_eq!(
 ///     status,
 ///     Status {
-///         version: EthVersion::Eth66.into(),
+///         version: EthVersion::Eth66,
 ///         chain: Chain::mainnet(),
 ///         total_difficulty: U256::from(100),
 ///         blockhash: B256::from(MAINNET_GENESIS_HASH),
@@ -195,7 +177,7 @@ impl StatusBuilder {
     }
 
     /// Sets the protocol version.
-    pub const fn version(mut self, version: u8) -> Self {
+    pub const fn version(mut self, version: EthVersion) -> Self {
         self.status.version = version;
         self
     }
@@ -234,6 +216,7 @@ impl StatusBuilder {
 #[cfg(test)]
 mod tests {
     use crate::{EthVersion, Status};
+    use alloy_consensus::constants::MAINNET_GENESIS_HASH;
     use alloy_genesis::Genesis;
     use alloy_primitives::{hex, B256, U256};
     use alloy_rlp::{Decodable, Encodable};
@@ -246,17 +229,14 @@ mod tests {
     fn encode_eth_status_message() {
         let expected = hex!("f85643018a07aac59dabcdd74bc567a0feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13da0d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3c684b715077d80");
         let status = Status {
-            version: EthVersion::Eth67 as u8,
+            version: EthVersion::Eth67,
             chain: Chain::from_named(NamedChain::Mainnet),
             total_difficulty: U256::from(36206751599115524359527u128),
             blockhash: B256::from_str(
                 "feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d",
             )
             .unwrap(),
-            genesis: B256::from_str(
-                "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3",
-            )
-            .unwrap(),
+            genesis: MAINNET_GENESIS_HASH,
             forkid: ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 },
         };
 
@@ -269,17 +249,14 @@ mod tests {
     fn decode_eth_status_message() {
         let data = hex!("f85643018a07aac59dabcdd74bc567a0feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13da0d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3c684b715077d80");
         let expected = Status {
-            version: EthVersion::Eth67 as u8,
+            version: EthVersion::Eth67,
             chain: Chain::from_named(NamedChain::Mainnet),
             total_difficulty: U256::from(36206751599115524359527u128),
             blockhash: B256::from_str(
                 "feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d",
             )
             .unwrap(),
-            genesis: B256::from_str(
-                "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3",
-            )
-            .unwrap(),
+            genesis: MAINNET_GENESIS_HASH,
             forkid: ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 },
         };
         let status = Status::decode(&mut &data[..]).unwrap();
@@ -290,7 +267,7 @@ mod tests {
     fn encode_network_status_message() {
         let expected = hex!("f850423884024190faa0f8514c4680ef27700751b08f37645309ce65a449616a3ea966bf39dd935bb27ba00d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5bc6845d43d2fd80");
         let status = Status {
-            version: EthVersion::Eth66 as u8,
+            version: EthVersion::Eth66,
             chain: Chain::from_named(NamedChain::BinanceSmartChain),
             total_difficulty: U256::from(37851386u64),
             blockhash: B256::from_str(
@@ -313,7 +290,7 @@ mod tests {
     fn decode_network_status_message() {
         let data = hex!("f850423884024190faa0f8514c4680ef27700751b08f37645309ce65a449616a3ea966bf39dd935bb27ba00d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5bc6845d43d2fd80");
         let expected = Status {
-            version: EthVersion::Eth66 as u8,
+            version: EthVersion::Eth66,
             chain: Chain::from_named(NamedChain::BinanceSmartChain),
             total_difficulty: U256::from(37851386u64),
             blockhash: B256::from_str(
@@ -334,7 +311,7 @@ mod tests {
     fn decode_another_network_status_message() {
         let data = hex!("f86142820834936d68fcffffffffffffffffffffffffdeab81b8a0523e8163a6d620a4cc152c547a05f28a03fec91a2a615194cb86df9731372c0ca06499dccdc7c7def3ebb1ce4c6ee27ec6bd02aee570625ca391919faf77ef27bdc6841a67ccd880");
         let expected = Status {
-            version: EthVersion::Eth66 as u8,
+            version: EthVersion::Eth66,
             chain: Chain::from_id(2100),
             total_difficulty: U256::from_str(
                 "0x000000000000000000000000006d68fcffffffffffffffffffffffffdeab81b8",

@@ -26,7 +26,7 @@ pub use traits::{
 mod payload;
 pub use payload::PayloadOrAttributes;
 
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_chainspec::EthereumHardforks;
 /// The types that are used by the engine API.
 pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static {
     /// The built payload type.
@@ -125,8 +125,8 @@ pub fn validate_payload_timestamp(
 /// Validates the presence of the `withdrawals` field according to the payload timestamp.
 /// After Shanghai, withdrawals field must be [Some].
 /// Before Shanghai, withdrawals field must be [None];
-pub fn validate_withdrawals_presence(
-    chain_spec: &ChainSpec,
+pub fn validate_withdrawals_presence<T: EthereumHardforks>(
+    chain_spec: &T,
     version: EngineApiMessageVersion,
     message_validation_kind: MessageValidationKind,
     timestamp: u64,
@@ -210,8 +210,8 @@ pub fn validate_withdrawals_presence(
 /// `MessageValidationKind::Payload`, then the error code will be `-32602: Invalid params`. If the
 /// parameter is `MessageValidationKind::PayloadAttributes`, then the error code will be `-38003:
 /// Invalid payload attributes`.
-pub fn validate_parent_beacon_block_root_presence(
-    chain_spec: &ChainSpec,
+pub fn validate_parent_beacon_block_root_presence<T: EthereumHardforks>(
+    chain_spec: &T,
     version: EngineApiMessageVersion,
     validation_kind: MessageValidationKind,
     timestamp: u64,
@@ -298,13 +298,14 @@ impl MessageValidationKind {
 /// either an execution payload, or payload attributes.
 ///
 /// The version is provided by the [`EngineApiMessageVersion`] argument.
-pub fn validate_version_specific_fields<Type>(
-    chain_spec: &ChainSpec,
+pub fn validate_version_specific_fields<Type, T>(
+    chain_spec: &T,
     version: EngineApiMessageVersion,
     payload_or_attrs: PayloadOrAttributes<'_, Type>,
 ) -> Result<(), EngineObjectValidationError>
 where
     Type: PayloadAttributes,
+    T: EthereumHardforks,
 {
     validate_withdrawals_presence(
         chain_spec,
@@ -323,22 +324,45 @@ where
 }
 
 /// The version of Engine API message.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum EngineApiMessageVersion {
     /// Version 1
-    V1,
+    V1 = 1,
     /// Version 2
     ///
     /// Added in the Shanghai hardfork.
-    V2,
+    V2 = 2,
     /// Version 3
     ///
     /// Added in the Cancun hardfork.
-    V3,
+    #[default]
+    V3 = 3,
     /// Version 4
     ///
     /// Added in the Prague hardfork.
-    V4,
+    V4 = 4,
+}
+
+/// Determines how we should choose the payload to return.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PayloadKind {
+    /// Returns the next best available payload (the earliest available payload).
+    /// This does not wait for a real for pending job to finish if there's no best payload yet and
+    /// is allowed to race various payload jobs (empty, pending best) against each other and
+    /// returns whichever job finishes faster.
+    ///
+    /// This should be used when it's more important to return a valid payload as fast as possible.
+    /// For example, the engine API timeout for `engine_getPayload` is 1s and clients should rather
+    /// return an empty payload than indefinitely waiting for the pending payload job to finish and
+    /// risk missing the deadline.
+    #[default]
+    Earliest,
+    /// Only returns once we have at least one built payload.
+    ///
+    /// Compared to [`PayloadKind::Earliest`] this does not race an empty payload job against the
+    /// already in progress one, and returns the best available built payload or awaits the job in
+    /// progress.
+    WaitForPending,
 }
 
 #[cfg(test)]

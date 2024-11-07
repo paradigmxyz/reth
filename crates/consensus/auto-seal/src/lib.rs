@@ -15,6 +15,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+use alloy_eips::{eip1898::BlockHashOrNumber, eip7685::Requests};
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256, U256};
 use reth_beacon_consensus::BeaconEngineMessage;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
@@ -25,8 +26,8 @@ use reth_execution_errors::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    proofs, Block, BlockBody, BlockHashOrNumber, BlockWithSenders, Header, Requests, SealedBlock,
-    SealedHeader, TransactionSigned, Withdrawals,
+    proofs, Block, BlockBody, BlockWithSenders, Header, SealedBlock, SealedHeader,
+    TransactionSigned, Withdrawals,
 };
 use reth_provider::{BlockReaderIdExt, StateProviderFactory, StateRootProvider};
 use reth_revm::database::StateProviderDatabase;
@@ -282,17 +283,13 @@ impl StorageInner {
             parent.next_block_base_fee(chain_spec.base_fee_params_at_timestamp(timestamp))
         });
 
-        let blob_gas_used = if chain_spec.is_cancun_active_at_timestamp(timestamp) {
-            let mut sum_blob_gas_used = 0;
-            for tx in transactions {
-                if let Some(blob_tx) = tx.transaction.as_eip4844() {
-                    sum_blob_gas_used += blob_tx.blob_gas();
-                }
-            }
-            Some(sum_blob_gas_used)
-        } else {
-            None
-        };
+        let blob_gas_used = chain_spec.is_cancun_active_at_timestamp(timestamp).then(|| {
+            transactions
+                .iter()
+                .filter_map(|tx| tx.transaction.as_eip4844())
+                .map(|blob_tx| blob_tx.blob_gas())
+                .sum::<u64>()
+        });
 
         let mut header = Header {
             parent_hash: self.best_hash,
@@ -301,11 +298,11 @@ impl StorageInner {
             withdrawals_root: withdrawals.map(|w| proofs::calculate_withdrawals_root(w)),
             difficulty: U256::from(2),
             number: self.best_block + 1,
-            gas_limit: chain_spec.max_gas_limit().into(),
+            gas_limit: chain_spec.max_gas_limit(),
             timestamp,
             base_fee_per_gas,
-            blob_gas_used: blob_gas_used.map(Into::into),
-            requests_root: requests.map(|r| proofs::calculate_requests_root(&r.0)),
+            blob_gas_used,
+            requests_hash: requests.map(|r| r.requests_hash()),
             ..Default::default()
         };
 
@@ -316,20 +313,14 @@ impl StorageInner {
             header.blob_gas_used = Some(0);
 
             let (parent_excess_blob_gas, parent_blob_gas_used) = match parent {
-                Some(parent_block)
-                    if chain_spec.is_cancun_active_at_timestamp(parent_block.timestamp) =>
-                {
-                    (
-                        parent_block.excess_blob_gas.unwrap_or_default(),
-                        parent_block.blob_gas_used.unwrap_or_default(),
-                    )
-                }
+                Some(parent) if chain_spec.is_cancun_active_at_timestamp(parent.timestamp) => (
+                    parent.excess_blob_gas.unwrap_or_default(),
+                    parent.blob_gas_used.unwrap_or_default(),
+                ),
                 _ => (0, 0),
             };
-            header.excess_blob_gas = Some(
-                calc_excess_blob_gas(parent_excess_blob_gas as u64, parent_blob_gas_used as u64)
-                    .into(),
-            )
+            header.excess_blob_gas =
+                Some(calc_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used))
         }
 
         header
@@ -376,7 +367,6 @@ impl StorageInner {
                 transactions,
                 ommers: ommers.clone(),
                 withdrawals: withdrawals.clone(),
-                requests: requests.clone(),
             },
         }
         .with_recovered_senders()
@@ -400,13 +390,13 @@ impl StorageInner {
         // root here
 
         let Block { mut header, body, .. } = block.block;
-        let body = BlockBody { transactions: body.transactions, ommers, withdrawals, requests };
+        let body = BlockBody { transactions: body.transactions, ommers, withdrawals };
 
         trace!(target: "consensus::auto", ?execution_outcome, ?header, ?body, "executed block, calculating state root and completing header");
 
         // now we need to update certain header fields with the results of the execution
         header.state_root = db.state_root(hashed_state)?;
-        header.gas_used = gas_used.into();
+        header.gas_used = gas_used;
 
         let receipts = execution_outcome.receipts_by_block(header.number);
 
@@ -594,7 +584,7 @@ mod tests {
         assert_eq!(header.parent_hash, best_block_hash);
         assert_eq!(header.number, best_block_number + 1);
         assert_eq!(header.timestamp, timestamp);
-        assert_eq!(header.gas_limit, chain_spec.max_gas_limit.into());
+        assert_eq!(header.gas_limit, chain_spec.max_gas_limit);
     }
 
     #[test]
@@ -688,11 +678,11 @@ mod tests {
                 withdrawals_root: None,
                 difficulty: U256::from(2),
                 number: 1,
-                gas_limit: chain_spec.max_gas_limit.into(),
+                gas_limit: chain_spec.max_gas_limit,
                 timestamp,
                 base_fee_per_gas: None,
                 blob_gas_used: Some(0),
-                requests_root: None,
+                requests_hash: None,
                 excess_blob_gas: Some(0),
                 ..Default::default()
             }

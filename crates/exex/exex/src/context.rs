@@ -1,12 +1,13 @@
 use std::fmt::Debug;
 
+use reth_exex_types::ExExHead;
 use reth_node_api::{FullNodeComponents, NodeTypes, NodeTypesWithEngine};
 use reth_node_core::node_config::NodeConfig;
 use reth_primitives::Head;
 use reth_tasks::TaskExecutor;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::{ExExEvent, ExExNotifications};
+use crate::{ExExContextDyn, ExExEvent, ExExNotifications, ExExNotificationsStream};
 
 /// Captures the context that an `ExEx` has access to.
 pub struct ExExContext<Node: FullNodeComponents> {
@@ -32,7 +33,7 @@ pub struct ExExContext<Node: FullNodeComponents> {
     /// considered delivered by the node.
     pub notifications: ExExNotifications<Node::Provider, Node::Executor>,
 
-    /// node components
+    /// Node components
     pub components: Node,
 }
 
@@ -54,7 +55,22 @@ where
     }
 }
 
-impl<Node: FullNodeComponents> ExExContext<Node> {
+impl<Node> ExExContext<Node>
+where
+    Node: FullNodeComponents,
+    Node::Provider: Debug,
+    Node::Executor: Debug,
+{
+    /// Returns dynamic version of the context
+    pub fn into_dyn(self) -> ExExContextDyn {
+        ExExContextDyn::from(self)
+    }
+}
+
+impl<Node> ExExContext<Node>
+where
+    Node: FullNodeComponents,
+{
     /// Returns the transaction pool of the node.
     pub fn pool(&self) -> &Node::Pool {
         self.components.pool()
@@ -91,5 +107,48 @@ impl<Node: FullNodeComponents> ExExContext<Node> {
     /// Returns the task executor.
     pub fn task_executor(&self) -> &TaskExecutor {
         self.components.task_executor()
+    }
+
+    /// Sets notifications stream to [`crate::ExExNotificationsWithoutHead`], a stream of
+    /// notifications without a head.
+    pub fn set_notifications_without_head(&mut self) {
+        self.notifications.set_without_head();
+    }
+
+    /// Sets notifications stream to [`crate::ExExNotificationsWithHead`], a stream of notifications
+    /// with the provided head.
+    pub fn set_notifications_with_head(&mut self, head: ExExHead) {
+        self.notifications.set_with_head(head);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use reth_exex_types::ExExHead;
+    use reth_node_api::FullNodeComponents;
+
+    use crate::ExExContext;
+
+    /// <https://github.com/paradigmxyz/reth/issues/12054>
+    #[test]
+    const fn issue_12054() {
+        #[allow(dead_code)]
+        struct ExEx<Node: FullNodeComponents> {
+            ctx: ExExContext<Node>,
+        }
+
+        impl<Node: FullNodeComponents> ExEx<Node> {
+            async fn _test_bounds(mut self) -> eyre::Result<()> {
+                self.ctx.pool();
+                self.ctx.block_executor();
+                self.ctx.provider();
+                self.ctx.network();
+                self.ctx.payload_builder();
+                self.ctx.task_executor();
+                self.ctx.set_notifications_without_head();
+                self.ctx.set_notifications_with_head(ExExHead { block: Default::default() });
+                Ok(())
+            }
+        }
     }
 }

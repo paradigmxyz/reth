@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// `key` is the subkey when used as a value in the `StorageChangeSets` table.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(compact)]
 pub struct StorageEntry {
     /// Storage key.

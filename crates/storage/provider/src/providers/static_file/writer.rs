@@ -67,14 +67,14 @@ pub struct StaticFileProviderRWRefMut<'a>(
     pub(crate) RwLockWriteGuard<'a, RawRwLock, Option<StaticFileProviderRW>>,
 );
 
-impl<'a> std::ops::DerefMut for StaticFileProviderRWRefMut<'a> {
+impl std::ops::DerefMut for StaticFileProviderRWRefMut<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         // This is always created by [`StaticFileWriters::get_or_create`]
         self.0.as_mut().expect("static file writer provider should be init")
     }
 }
 
-impl<'a> std::ops::Deref for StaticFileProviderRWRefMut<'a> {
+impl std::ops::Deref for StaticFileProviderRWRefMut<'_> {
     type Target = StaticFileProviderRW;
 
     fn deref(&self) -> &Self::Target {
@@ -289,16 +289,16 @@ impl StaticFileProviderRW {
         //
         // If that expected block start is 0, then it means that there's no actual block data, and
         // there's no block data in static files.
-        let segment_max_block = match self.writer.user_header().block_range() {
-            Some(block_range) => Some(block_range.end()),
-            None => {
-                if self.writer.user_header().expected_block_start() > 0 {
-                    Some(self.writer.user_header().expected_block_start() - 1)
-                } else {
-                    None
-                }
-            }
-        };
+        let segment_max_block = self
+            .writer
+            .user_header()
+            .block_range()
+            .as_ref()
+            .map(|block_range| block_range.end())
+            .or_else(|| {
+                (self.writer.user_header().expected_block_start() > 0)
+                    .then(|| self.writer.user_header().expected_block_start() - 1)
+            });
 
         self.reader().update_index(self.writer.user_header().segment(), segment_max_block)
     }

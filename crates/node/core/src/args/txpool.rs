@@ -1,9 +1,9 @@
 //! Transaction pool arguments
 
 use crate::cli::config::RethTransactionPoolConfig;
+use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE};
 use alloy_primitives::Address;
 use clap::Args;
-use reth_primitives::constants::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE};
 use reth_transaction_pool::{
     blobstore::disk::DEFAULT_MAX_CACHED_BLOBS,
     pool::{NEW_TX_LISTENER_BUFFER_SIZE, PENDING_TX_LISTENER_BUFFER_SIZE},
@@ -125,19 +125,19 @@ impl RethTransactionPoolConfig for TxPoolArgs {
             },
             pending_limit: SubPoolLimit {
                 max_txs: self.pending_max_count,
-                max_size: self.pending_max_size * 1024 * 1024,
+                max_size: self.pending_max_size.saturating_mul(1024 * 1024),
             },
             basefee_limit: SubPoolLimit {
                 max_txs: self.basefee_max_count,
-                max_size: self.basefee_max_size * 1024 * 1024,
+                max_size: self.basefee_max_size.saturating_mul(1024 * 1024),
             },
             queued_limit: SubPoolLimit {
                 max_txs: self.queued_max_count,
-                max_size: self.queued_max_size * 1024 * 1024,
+                max_size: self.queued_max_size.saturating_mul(1024 * 1024),
             },
             blob_limit: SubPoolLimit {
                 max_txs: self.queued_max_count,
-                max_size: self.queued_max_size * 1024 * 1024,
+                max_size: self.queued_max_size.saturating_mul(1024 * 1024),
             },
             max_account_slots: self.max_account_slots,
             price_bumps: PriceBumpConfig {
@@ -169,5 +169,16 @@ mod tests {
         let default_args = TxPoolArgs::default();
         let args = CommandParser::<TxPoolArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
+    }
+
+    #[test]
+    fn txpool_parse_locals() {
+        let args = CommandParser::<TxPoolArgs>::parse_from([
+            "reth",
+            "--txpool.locals",
+            "0x0000000000000000000000000000000000000000",
+        ])
+        .args;
+        assert_eq!(args.locals, vec![Address::ZERO]);
     }
 }

@@ -1,11 +1,18 @@
+//! Compact implementation for [`AlloyTxLegacy`]
+
 use crate::Compact;
 use alloy_consensus::TxLegacy as AlloyTxLegacy;
 use alloy_primitives::{Bytes, ChainId, TxKind, U256};
 
 /// Legacy transaction.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Compact)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize))]
-#[cfg_attr(test, crate::add_arbitrary_tests(compact))]
+#[reth_codecs(crate = "crate")]
+#[cfg_attr(
+    any(test, feature = "test-utils"),
+    derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize),
+    crate::add_arbitrary_tests(crate, compact)
+)]
+#[cfg_attr(feature = "test-utils", allow(unreachable_pub), visibility::make(pub))]
 pub(crate) struct TxLegacy {
     /// Added as EIP-155: Simple replay attack protection
     chain_id: Option<ChainId>,
@@ -50,7 +57,7 @@ impl Compact for AlloyTxLegacy {
             chain_id: self.chain_id,
             nonce: self.nonce,
             gas_price: self.gas_price,
-            gas_limit: self.gas_limit as u64,
+            gas_limit: self.gas_limit,
             to: self.to,
             value: self.value,
             input: self.input.clone(),
@@ -66,7 +73,7 @@ impl Compact for AlloyTxLegacy {
             chain_id: tx.chain_id,
             nonce: tx.nonce,
             gas_price: tx.gas_price,
-            gas_limit: tx.gas_limit.into(),
+            gas_limit: tx.gas_limit,
             to: tx.to,
             value: tx.value,
             input: tx.input,

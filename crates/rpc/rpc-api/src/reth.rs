@@ -1,6 +1,6 @@
+use alloy_eips::BlockId;
 use alloy_primitives::{Address, U256};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::BlockId;
 use std::collections::HashMap;
 
 /// Reth API namespace for reth-specific methods

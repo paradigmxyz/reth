@@ -5,13 +5,11 @@ use crate::{
     headers::client::{HeadersClient, SingleHeaderRequest},
     BlockClient,
 };
-use alloy_primitives::B256;
+use alloy_primitives::{Sealable, B256};
 use reth_consensus::{Consensus, ConsensusError};
 use reth_eth_wire_types::HeadersDirection;
 use reth_network_peers::WithPeerId;
-use reth_primitives::{
-    alloy_primitives::Sealable, BlockBody, GotExpected, Header, SealedBlock, SealedHeader,
-};
+use reth_primitives::{BlockBody, GotExpected, Header, SealedBlock, SealedHeader};
 use std::{
     cmp::Reverse,
     collections::{HashMap, VecDeque},
@@ -179,6 +177,9 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
+        // preemptive yield point
+        let mut budget = 4;
+
         loop {
             match ready!(this.request.poll(cx)) {
                 ResponseResult::Header(res) => {
@@ -233,6 +234,14 @@ where
 
             if let Some(res) = this.take_block() {
                 return Poll::Ready(res)
+            }
+
+            // ensure we still have enough budget for another iteration
+            budget -= 1;
+            if budget == 0 {
+                // make sure we're woken up again
+                cx.waker().wake_by_ref();
+                return Poll::Pending
             }
         }
     }
@@ -336,22 +345,6 @@ fn ensure_valid_body_response(
             // this is ok because we assume the fork is not active in this case
         }
         _ => return Err(ConsensusError::WithdrawalsRootUnexpected),
-    }
-
-    match (header.requests_root, &block.requests) {
-        (Some(header_requests_root), Some(requests)) => {
-            let requests = requests.0.as_slice();
-            let requests_root = reth_primitives::proofs::calculate_requests_root(requests);
-            if requests_root != header_requests_root {
-                return Err(ConsensusError::BodyRequestsRootDiff(
-                    GotExpected { got: requests_root, expected: header_requests_root }.into(),
-                ))
-            }
-        }
-        (None, None) => {
-            // this is ok because we assume the fork is not active in this case
-        }
-        _ => return Err(ConsensusError::RequestsRootUnexpected),
     }
 
     Ok(())

@@ -9,6 +9,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![allow(clippy::useless_let_if_seq)]
 
+use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
+use alloy_eips::{eip4844::MAX_DATA_GAS_PER_BLOCK, eip7685::Requests, merge::BEACON_NONCE};
 use alloy_primitives::U256;
 use reth_basic_payload_builder::{
     commit_withdrawals, is_better_payload, BuildArguments, BuildOutcome, PayloadBuilder,
@@ -17,38 +19,35 @@ use reth_basic_payload_builder::{
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::ChainSpec;
 use reth_errors::RethError;
-use reth_evm::{
-    system_calls::{
-        post_block_consolidation_requests_contract_call,
-        post_block_withdrawal_requests_contract_call, pre_block_beacon_root_contract_call,
-        pre_block_blockhashes_contract_call,
-    },
-    ConfigureEvm, NextBlockEnvAttributes,
-};
+use reth_evm::{system_calls::SystemCaller, ConfigureEvm, NextBlockEnvAttributes};
 use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_payload_primitives::{PayloadBuilderAttributes, PayloadBuilderError};
 use reth_primitives::{
-    constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
-    proofs::{self, calculate_requests_root},
+    proofs::{self},
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-    Block, BlockBody, EthereumHardforks, Header, Receipt, EMPTY_OMMER_ROOT_HASH,
+    Block, BlockBody, EthereumHardforks, Header, Receipt,
 };
 use reth_provider::{ChainSpecProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{
-    noop::NoopTransactionPool, BestTransactionsAttributes, TransactionPool,
+    noop::NoopTransactionPool, BestTransactions, BestTransactionsAttributes, TransactionPool,
+    ValidPoolTransaction,
 };
 use reth_trie::HashedPostState;
 use revm::{
-    db::states::bundle_state::BundleRetention,
+    db::{states::bundle_state::BundleRetention, State},
     primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
-    DatabaseCommit, State,
+    DatabaseCommit,
 };
-use revm_primitives::calc_excess_blob_gas;
+use revm_primitives::{calc_excess_blob_gas, TxEnv};
 use std::sync::Arc;
 use tracing::{debug, trace, warn};
+
+type BestTransactionsIter<Pool> = Box<
+    dyn BestTransactions<Item = Arc<ValidPoolTransaction<<Pool as TransactionPool>::Transaction>>>,
+>;
 
 /// Ethereum payload builder
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,7 +73,7 @@ where
         &self,
         config: &PayloadConfig<EthPayloadBuilderAttributes>,
         parent: &Header,
-    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), EvmConfig::Error> {
         let next_attributes = NextBlockEnvAttributes {
             timestamp: config.attributes.timestamp(),
             suggested_fee_recipient: config.attributes.suggested_fee_recipient(),
@@ -98,8 +97,14 @@ where
         &self,
         args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
     ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
-        let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
-        default_ethereum_payload(self.evm_config.clone(), args, cfg_env, block_env)
+        let (cfg_env, block_env) = self
+            .cfg_and_block_env(&args.config, &args.config.parent_header)
+            .map_err(PayloadBuilderError::other)?;
+
+        let pool = args.pool.clone();
+        default_ethereum_payload(self.evm_config.clone(), args, cfg_env, block_env, |attributes| {
+            pool.best_transactions_with_attributes(attributes)
+        })
     }
 
     fn build_empty_payload(
@@ -107,19 +112,27 @@ where
         client: &Client,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<EthBuiltPayload, PayloadBuilderError> {
-        let args = BuildArguments {
+        let args = BuildArguments::new(
             client,
-            config,
             // we use defaults here because for the empty payload we don't need to execute anything
-            pool: NoopTransactionPool::default(),
-            cached_reads: Default::default(),
-            cancel: Default::default(),
-            best_payload: None,
-        };
-        let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
-        default_ethereum_payload(self.evm_config.clone(), args, cfg_env, block_env)?
-            .into_payload()
-            .ok_or_else(|| PayloadBuilderError::MissingPayload)
+            NoopTransactionPool::default(),
+            Default::default(),
+            config,
+            Default::default(),
+            None,
+        );
+
+        let (cfg_env, block_env) = self
+            .cfg_and_block_env(&args.config, &args.config.parent_header)
+            .map_err(PayloadBuilderError::other)?;
+
+        let pool = args.pool.clone();
+
+        default_ethereum_payload(self.evm_config.clone(), args, cfg_env, block_env, |attributes| {
+            pool.best_transactions_with_attributes(attributes)
+        })?
+        .into_payload()
+        .ok_or_else(|| PayloadBuilderError::MissingPayload)
     }
 }
 
@@ -129,27 +142,29 @@ where
 /// and configuration, this function creates a transaction payload. Returns
 /// a result indicating success with the payload or an error in case of failure.
 #[inline]
-pub fn default_ethereum_payload<EvmConfig, Pool, Client>(
+pub fn default_ethereum_payload<EvmConfig, Pool, Client, F>(
     evm_config: EvmConfig,
     args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
     initialized_cfg: CfgEnvWithHandlerCfg,
     initialized_block_env: BlockEnv,
+    best_txs: F,
 ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
     Pool: TransactionPool,
+    F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
 {
     let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
 
     let chain_spec = client.chain_spec();
-    let state_provider = client.state_by_block_hash(config.parent_block.hash())?;
+    let state_provider = client.state_by_block_hash(config.parent_header.hash())?;
     let state = StateProviderDatabase::new(state_provider);
     let mut db =
-        State::builder().with_database_ref(cached_reads.as_db(state)).with_bundle_update().build();
-    let PayloadConfig { parent_block, extra_data, attributes } = config;
+        State::builder().with_database(cached_reads.as_db_mut(state)).with_bundle_update().build();
+    let PayloadConfig { parent_header, extra_data, attributes } = config;
 
-    debug!(target: "payload_builder", id=%attributes.id, parent_hash = ?parent_block.hash(), parent_number = parent_block.number, "building new payload");
+    debug!(target: "payload_builder", id=%attributes.id, parent_header = ?parent_header.hash(), parent_number = parent_header.number, "building new payload");
     let mut cumulative_gas_used = 0;
     let mut sum_blob_gas_used = 0;
     let block_gas_limit: u64 = initialized_block_env.gas_limit.to::<u64>();
@@ -158,46 +173,51 @@ where
     let mut executed_txs = Vec::new();
     let mut executed_senders = Vec::new();
 
-    let mut best_txs = pool.best_transactions_with_attributes(BestTransactionsAttributes::new(
+    let mut best_txs = best_txs(BestTransactionsAttributes::new(
         base_fee,
         initialized_block_env.get_blob_gasprice().map(|gasprice| gasprice as u64),
     ));
-
     let mut total_fees = U256::ZERO;
 
     let block_number = initialized_block_env.number.to::<u64>();
 
+    let mut system_caller = SystemCaller::new(evm_config.clone(), chain_spec.clone());
+
     // apply eip-4788 pre block contract call
-    pre_block_beacon_root_contract_call(
+    system_caller
+        .pre_block_beacon_root_contract_call(
+            &mut db,
+            &initialized_cfg,
+            &initialized_block_env,
+            attributes.parent_beacon_block_root,
+        )
+        .map_err(|err| {
+            warn!(target: "payload_builder",
+                parent_hash=%parent_header.hash(),
+                %err,
+                "failed to apply beacon root contract call for payload"
+            );
+            PayloadBuilderError::Internal(err.into())
+        })?;
+
+    // apply eip-2935 blockhashes update
+    system_caller.pre_block_blockhashes_contract_call(
         &mut db,
-        &evm_config,
-        &chain_spec,
         &initialized_cfg,
         &initialized_block_env,
-        attributes.parent_beacon_block_root,
+        parent_header.hash(),
     )
     .map_err(|err| {
-        warn!(target: "payload_builder",
-            parent_hash=%parent_block.hash(),
-            %err,
-            "failed to apply beacon root contract call for empty payload"
-        );
+        warn!(target: "payload_builder", parent_hash=%parent_header.hash(), %err, "failed to update parent header blockhashes for payload");
         PayloadBuilderError::Internal(err.into())
     })?;
 
-    // apply eip-2935 blockhashes update
-    pre_block_blockhashes_contract_call(
-        &mut db,
-        &evm_config,
-        &chain_spec,
-        &initialized_cfg,
-        &initialized_block_env,
-        parent_block.hash(),
-    )
-    .map_err(|err| {
-        warn!(target: "payload_builder", parent_hash=%parent_block.hash(), %err, "failed to update blockhashes for empty payload");
-        PayloadBuilderError::Internal(err.into())
-    })?;
+    let env = EnvWithHandlerCfg::new_with_cfg_env(
+        initialized_cfg.clone(),
+        initialized_block_env.clone(),
+        TxEnv::default(),
+    );
+    let mut evm = evm_config.evm_with_env(&mut db, env);
 
     let mut receipts = Vec::new();
     while let Some(pool_tx) = best_txs.next() {
@@ -233,14 +253,8 @@ where
             }
         }
 
-        let env = EnvWithHandlerCfg::new_with_cfg_env(
-            initialized_cfg.clone(),
-            initialized_block_env.clone(),
-            evm_config.tx_env(&tx),
-        );
-
-        // Configure the environment for the block.
-        let mut evm = evm_config.evm_with_env(&mut db, env);
+        // Configure the environment for the tx.
+        *evm.tx_mut() = evm_config.tx_env(tx.as_signed(), tx.signer());
 
         let ResultAndState { result, state } = match evm.transact() {
             Ok(res) => res,
@@ -266,10 +280,9 @@ where
                 }
             }
         };
-        // drop evm so db is released.
-        drop(evm);
+
         // commit changes
-        db.commit(state);
+        evm.db_mut().commit(state);
 
         // add to the total blob gas used if the transaction successfully executed
         if let Some(blob_tx) = tx.transaction.as_eip4844() {
@@ -308,6 +321,9 @@ where
         executed_txs.push(tx.into_signed());
     }
 
+    // Release db
+    drop(evm);
+
     // check if we have a better block
     if !is_better_payload(best_payload.as_ref(), total_fees) {
         // can skip building the block
@@ -315,31 +331,27 @@ where
     }
 
     // calculate the requests and the requests root
-    let (requests, requests_root) = if chain_spec
-        .is_prague_active_at_timestamp(attributes.timestamp)
-    {
+    let requests = if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
         let deposit_requests = parse_deposits_from_receipts(&chain_spec, receipts.iter().flatten())
             .map_err(|err| PayloadBuilderError::Internal(RethError::Execution(err.into())))?;
-        let withdrawal_requests = post_block_withdrawal_requests_contract_call(
-            &evm_config,
-            &mut db,
-            &initialized_cfg,
-            &initialized_block_env,
-        )
-        .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
-        let consolidation_requests = post_block_consolidation_requests_contract_call(
-            &evm_config,
-            &mut db,
-            &initialized_cfg,
-            &initialized_block_env,
-        )
-        .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
+        let withdrawal_requests = system_caller
+            .post_block_withdrawal_requests_contract_call(
+                &mut db,
+                &initialized_cfg,
+                &initialized_block_env,
+            )
+            .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
+        let consolidation_requests = system_caller
+            .post_block_consolidation_requests_contract_call(
+                &mut db,
+                &initialized_cfg,
+                &initialized_block_env,
+            )
+            .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
 
-        let requests = [deposit_requests, withdrawal_requests, consolidation_requests].concat();
-        let requests_root = calculate_requests_root(&requests);
-        (Some(requests.into()), Some(requests_root))
+        Some(Requests::new(vec![deposit_requests, withdrawal_requests, consolidation_requests]))
     } else {
-        (None, None)
+        None
     };
 
     let WithdrawalsOutcome { withdrawals_root, withdrawals } =
@@ -349,9 +361,10 @@ where
     // and 4788 contract call
     db.merge_transitions(BundleRetention::Reverts);
 
+    let requests_hash = requests.as_ref().map(|requests| requests.requests_hash());
     let execution_outcome = ExecutionOutcome::new(
         db.take_bundle(),
-        vec![receipts.clone()].into(),
+        vec![receipts].into(),
         block_number,
         vec![requests.clone().unwrap_or_default()],
     );
@@ -362,12 +375,11 @@ where
     // calculate the state root
     let hashed_state = HashedPostState::from_bundle_state(&execution_outcome.state().state);
     let (state_root, trie_output) = {
-        let state_provider = db.database.0.inner.borrow_mut();
-        state_provider.db.state_root_with_updates(hashed_state.clone()).inspect_err(|err| {
+        db.database.inner().state_root_with_updates(hashed_state.clone()).inspect_err(|err| {
             warn!(target: "payload_builder",
-                parent_hash=%parent_block.hash(),
+                parent_hash=%parent_header.hash(),
                 %err,
-                "failed to calculate state root for empty payload"
+                "failed to calculate state root for payload"
             );
         })?
     };
@@ -387,10 +399,10 @@ where
             executed_txs.iter().filter(|tx| tx.is_eip4844()).map(|tx| tx.hash).collect(),
         )?;
 
-        excess_blob_gas = if chain_spec.is_cancun_active_at_timestamp(parent_block.timestamp) {
-            let parent_excess_blob_gas = parent_block.excess_blob_gas.unwrap_or_default();
-            let parent_blob_gas_used = parent_block.blob_gas_used.unwrap_or_default();
-            Some(calc_excess_blob_gas(parent_excess_blob_gas as u64, parent_blob_gas_used as u64))
+        excess_blob_gas = if chain_spec.is_cancun_active_at_timestamp(parent_header.timestamp) {
+            let parent_excess_blob_gas = parent_header.excess_blob_gas.unwrap_or_default();
+            let parent_blob_gas_used = parent_header.blob_gas_used.unwrap_or_default();
+            Some(calc_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used))
         } else {
             // for the first post-fork block, both parent.blob_gas_used and
             // parent.excess_blob_gas are evaluated as 0
@@ -401,7 +413,7 @@ where
     }
 
     let header = Header {
-        parent_hash: parent_block.hash(),
+        parent_hash: parent_header.hash(),
         ommers_hash: EMPTY_OMMER_ROOT_HASH,
         beneficiary: initialized_block_env.coinbase,
         state_root,
@@ -412,40 +424,41 @@ where
         timestamp: attributes.timestamp,
         mix_hash: attributes.prev_randao,
         nonce: BEACON_NONCE.into(),
-        base_fee_per_gas: Some(base_fee.into()),
-        number: parent_block.number + 1,
-        gas_limit: block_gas_limit.into(),
+        base_fee_per_gas: Some(base_fee),
+        number: parent_header.number + 1,
+        gas_limit: block_gas_limit,
         difficulty: U256::ZERO,
-        gas_used: cumulative_gas_used.into(),
+        gas_used: cumulative_gas_used,
         extra_data,
         parent_beacon_block_root: attributes.parent_beacon_block_root,
         blob_gas_used: blob_gas_used.map(Into::into),
         excess_blob_gas: excess_blob_gas.map(Into::into),
-        requests_root,
+        requests_hash,
     };
 
     // seal the block
     let block = Block {
         header,
-        body: BlockBody { transactions: executed_txs, ommers: vec![], withdrawals, requests },
+        body: BlockBody { transactions: executed_txs, ommers: vec![], withdrawals },
     };
 
-    let sealed_block = block.seal_slow();
+    let sealed_block = Arc::new(block.seal_slow());
     debug!(target: "payload_builder", ?sealed_block, "sealed built block");
 
     // create the executed block data
     let executed = ExecutedBlock {
-        block: Arc::new(sealed_block.clone()),
+        block: sealed_block.clone(),
         senders: Arc::new(executed_senders),
         execution_output: Arc::new(execution_outcome),
         hashed_state: Arc::new(hashed_state),
         trie: Arc::new(trie_output),
     };
 
-    let mut payload = EthBuiltPayload::new(attributes.id, sealed_block, total_fees, Some(executed));
+    let mut payload =
+        EthBuiltPayload::new(attributes.id, sealed_block, total_fees, Some(executed), requests);
 
     // extend the payload with the blob sidecars from the executed txs
-    payload.extend_sidecars(blob_sidecars);
+    payload.extend_sidecars(blob_sidecars.into_iter().map(Arc::unwrap_or_clone));
 
     Ok(BuildOutcome::Better { payload, cached_reads })
 }

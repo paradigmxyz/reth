@@ -113,12 +113,10 @@ mod tests {
         HeadersDirection,
     };
     use alloy_consensus::TxLegacy;
-    use alloy_primitives::{hex, TxKind, U256};
+    use alloy_eips::BlockHashOrNumber;
+    use alloy_primitives::{hex, PrimitiveSignature as Signature, TxKind, U256};
     use alloy_rlp::{Decodable, Encodable};
-    use reth_primitives::{
-        alloy_primitives::Parity, BlockHashOrNumber, Header, Signature, Transaction,
-        TransactionSigned,
-    };
+    use reth_primitives::{Header, Transaction, TransactionSigned};
     use std::str::FromStr;
 
     use super::BlockBody;
@@ -269,8 +267,8 @@ mod tests {
                     logs_bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
                     difficulty: U256::from(0x8aeu64),
                     number: 0xd05u64,
-                    gas_limit: 0x115cu128,
-                    gas_used: 0x15b3u128,
+                    gas_limit: 0x115c,
+                    gas_used: 0x15b3,
                     timestamp: 0x1a0au64,
                     extra_data: hex!("7788")[..].into(),
                     mix_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
@@ -280,7 +278,7 @@ mod tests {
                     blob_gas_used: None,
                     excess_blob_gas: None,
                     parent_beacon_block_root: None,
-                    requests_root: None
+                    requests_hash: None
                 },
             ]),
         }.encode(&mut data);
@@ -304,8 +302,8 @@ mod tests {
                     logs_bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
                     difficulty: U256::from(0x8aeu64),
                     number: 0xd05u64,
-                    gas_limit: 0x115cu128,
-                    gas_used: 0x15b3u128,
+                    gas_limit: 0x115c,
+                    gas_used: 0x15b3,
                     timestamp: 0x1a0au64,
                     extra_data: hex!("7788")[..].into(),
                     mix_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
@@ -315,7 +313,7 @@ mod tests {
                     blob_gas_used: None,
                     excess_blob_gas: None,
                     parent_beacon_block_root: None,
-                    requests_root: None
+                    requests_hash: None
                 },
             ]),
         };
@@ -375,7 +373,7 @@ mod tests {
                         }), Signature::new(
                                 U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12").unwrap(),
                                 U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10").unwrap(),
-                                Parity::Parity(false),
+                                false,
                             ),
                         ),
                         TransactionSigned::from_transaction_and_signature(Transaction::Legacy(TxLegacy {
@@ -389,7 +387,7 @@ mod tests {
                         }), Signature::new(
                                 U256::from_str("0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
                                 U256::from_str("0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
-                                Parity::Parity(false),
+                                false,
                             ),
                         ),
                     ],
@@ -404,8 +402,8 @@ mod tests {
                             logs_bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
                             difficulty: U256::from(0x8aeu64),
                             number: 0xd05u64,
-                            gas_limit: 0x115cu128,
-                            gas_used: 0x15b3u128,
+                            gas_limit: 0x115c,
+                            gas_used: 0x15b3,
                             timestamp: 0x1a0au64,
                             extra_data: hex!("7788")[..].into(),
                             mix_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
@@ -415,11 +413,10 @@ mod tests {
                             blob_gas_used: None,
                             excess_blob_gas: None,
                             parent_beacon_block_root: None,
-                            requests_root: None
+                            requests_hash: None
                         },
                     ],
                     withdrawals: None,
-                    requests: None
                 }
             ]),
         };
@@ -449,7 +446,7 @@ mod tests {
                             Signature::new(
                                 U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12").unwrap(),
                                 U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10").unwrap(),
-                                Parity::Eip155(37),
+                                false,
                             ),
                         ),
                         TransactionSigned::from_transaction_and_signature(
@@ -465,7 +462,7 @@ mod tests {
                             Signature::new(
                                 U256::from_str("0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
                                 U256::from_str("0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
-                                Parity::Eip155(37),
+                                false,
                             ),
                         ),
                     ],
@@ -480,8 +477,8 @@ mod tests {
                             logs_bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
                             difficulty: U256::from(0x8aeu64),
                             number: 0xd05u64,
-                            gas_limit: 0x115cu128,
-                            gas_used: 0x15b3u128,
+                            gas_limit: 0x115c,
+                            gas_used: 0x15b3,
                             timestamp: 0x1a0au64,
                             extra_data: hex!("7788")[..].into(),
                             mix_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
@@ -491,15 +488,23 @@ mod tests {
                             blob_gas_used: None,
                             excess_blob_gas: None,
                             parent_beacon_block_root: None,
-                            requests_root: None
+                            requests_hash: None
                         },
                     ],
                     withdrawals: None,
-                    requests: None
                 }
             ]),
         };
         let result = RequestPair::decode(&mut &data[..]).unwrap();
         assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn empty_block_bodies_rlp() {
+        let body = BlockBodies::default();
+        let mut buf = Vec::new();
+        body.encode(&mut buf);
+        let decoded = BlockBodies::decode(&mut buf.as_slice()).unwrap();
+        assert_eq!(body, decoded);
     }
 }

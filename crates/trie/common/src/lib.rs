@@ -14,6 +14,9 @@ pub mod hash_builder;
 mod account;
 pub use account::TrieAccount;
 
+mod key;
+pub use key::{KeccakKeyHasher, KeyHasher};
+
 mod nibbles;
 pub use nibbles::{Nibbles, StoredNibbles, StoredNibblesSubKey};
 

@@ -9,6 +9,9 @@ use tokio::sync::oneshot;
 /// Possible error variants during payload building.
 #[derive(Debug, thiserror::Error)]
 pub enum PayloadBuilderError {
+    /// Thrown when the parent header cannot be found
+    #[error("missing parent header: {0}")]
+    MissingParentHeader(B256),
     /// Thrown when the parent block is missing.
     #[error("missing parent block {0}")]
     MissingParentBlock(B256),
@@ -35,14 +38,14 @@ pub enum PayloadBuilderError {
     WithdrawalsBeforeShanghai,
     /// Any other payload building errors.
     #[error(transparent)]
-    Other(Box<dyn std::error::Error + Send + Sync>),
+    Other(Box<dyn core::error::Error + Send + Sync>),
 }
 
 impl PayloadBuilderError {
     /// Create a new error from a boxed error.
     pub fn other<E>(error: E) -> Self
     where
-        E: std::error::Error + Send + Sync + 'static,
+        E: core::error::Error + Send + Sync + 'static,
     {
         Self::Other(Box::new(error))
     }
@@ -84,7 +87,7 @@ pub enum EngineObjectValidationError {
     UnsupportedFork,
     /// Another type of error that is not covered by the above variants.
     #[error("Invalid params: {0}")]
-    InvalidParams(#[from] Box<dyn std::error::Error + Send + Sync>),
+    InvalidParams(#[from] Box<dyn core::error::Error + Send + Sync>),
 }
 
 /// Thrown when validating an execution payload OR payload attributes fails due to:
@@ -117,7 +120,7 @@ impl EngineObjectValidationError {
     /// Creates an instance of the `InvalidParams` variant with the given error.
     pub fn invalid_params<E>(error: E) -> Self
     where
-        E: std::error::Error + Send + Sync + 'static,
+        E: core::error::Error + Send + Sync + 'static,
     {
         Self::InvalidParams(Box::new(error))
     }

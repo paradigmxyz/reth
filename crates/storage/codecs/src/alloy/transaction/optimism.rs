@@ -1,3 +1,5 @@
+//! Compact implementation for [`AlloyTxDeposit`]
+
 use crate::Compact;
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
 use op_alloy_consensus::TxDeposit as AlloyTxDeposit;
@@ -12,8 +14,13 @@ use reth_codecs_derive::add_arbitrary_tests;
 ///
 /// Notice: Make sure this struct is 1:1 with [`op_alloy_consensus::TxDeposit`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Compact)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize))]
-#[add_arbitrary_tests(compact)]
+#[cfg_attr(
+    any(test, feature = "test-utils"),
+    derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize)
+)]
+#[cfg_attr(feature = "test-utils", allow(unreachable_pub), visibility::make(pub))]
+#[reth_codecs(crate = "crate")]
+#[add_arbitrary_tests(crate, compact)]
 pub(crate) struct TxDeposit {
     source_hash: B256,
     from: Address,
@@ -36,7 +43,7 @@ impl Compact for AlloyTxDeposit {
             to: self.to,
             mint: self.mint,
             value: self.value,
-            gas_limit: self.gas_limit as u64,
+            gas_limit: self.gas_limit,
             is_system_transaction: self.is_system_transaction,
             input: self.input.clone(),
         };
@@ -51,7 +58,7 @@ impl Compact for AlloyTxDeposit {
             to: tx.to,
             mint: tx.mint,
             value: tx.value,
-            gas_limit: tx.gas_limit as u128,
+            gas_limit: tx.gas_limit,
             is_system_transaction: tx.is_system_transaction,
             input: tx.input,
         };
