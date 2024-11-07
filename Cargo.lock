@@ -7214,6 +7214,7 @@ dependencies = [
  "futures",
  "metrics",
  "pin-project",
+ "rayon",
  "reth-beacon-consensus",
  "reth-blockchain-tree",
  "reth-blockchain-tree-api",
