@@ -1,7 +1,5 @@
 use super::{
-    async_task::StateRootAsyncTask,
-    common::{StateRootConfig, StateRootTask},
-    sync_task::StateRootSyncTask,
+    async_task::StateRootAsyncTask, sync_task::StateRootSyncTask, StateRootConfig, StateRootTask,
 };
 use crate::tree::root::sync_task::StdReceiverStream;
 use reth_provider::{providers::ConsistentDbView, test_utils::MockEthProvider};

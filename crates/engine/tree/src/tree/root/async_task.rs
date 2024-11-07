@@ -1,6 +1,6 @@
 //! Async state root task implementation.
 
-use super::common::{StateRootConfig, StateRootHandle, StateRootResult, StateRootTask};
+use super::{StateRootConfig, StateRootHandle, StateRootResult, StateRootTask};
 use futures::Stream;
 use pin_project::pin_project;
 use reth_trie::updates::TrieUpdates;

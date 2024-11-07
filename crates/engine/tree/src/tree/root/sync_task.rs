@@ -1,6 +1,6 @@
 //! Sync state root task implementation.
 
-use super::common::{StateRootConfig, StateRootHandle, StateRootResult, StateRootTask};
+use super::{StateRootConfig, StateRootHandle, StateRootResult, StateRootTask};
 use reth_trie::updates::TrieUpdates;
 use revm_primitives::{EvmState, B256};
 use std::sync::mpsc::{self, Receiver, RecvError};
