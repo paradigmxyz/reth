@@ -131,7 +131,12 @@ impl<T: TransactionOrdering> BestTransactions<T> {
     /// Checks for new transactions that have come into the `PendingPool` after this iterator was
     /// created and inserts them
     fn add_new_transactions(&mut self) {
+        let mut new_txs = Vec::new();
         while let Some(pending_tx) = self.try_recv() {
+            new_txs.push(pending_tx);
+        }
+        new_txs.sort_by_key(|tx| tx.transaction.nonce());
+        for tx in new_txs {
             //  same logic as PendingPool::add_transaction/PendingPool::best_with_unlocked
             let tx_id = *pending_tx.transaction.id();
             if self.ancestor(&tx_id).is_none() {
