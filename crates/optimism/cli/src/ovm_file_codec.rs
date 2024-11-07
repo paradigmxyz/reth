@@ -785,10 +785,8 @@ mod tests {
             input: Default::default(),
         });
 
-        let signed_tx = TransactionSigned::from_transaction_and_signature(
-            deposit_tx.clone(),
-            TxDeposit::signature(),
-        );
+        let signed_tx =
+            TransactionSigned::from_transaction_and_signature(deposit_tx, TxDeposit::signature());
 
         let block = Block {
             header: Header::default(),
