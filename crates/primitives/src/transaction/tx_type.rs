@@ -217,18 +217,6 @@ impl Decodable for TxType {
     }
 }
 
-impl From<alloy_consensus::TxType> for TxType {
-    fn from(value: alloy_consensus::TxType) -> Self {
-        match value {
-            alloy_consensus::TxType::Legacy => Self::Legacy,
-            alloy_consensus::TxType::Eip2930 => Self::Eip2930,
-            alloy_consensus::TxType::Eip1559 => Self::Eip1559,
-            alloy_consensus::TxType::Eip4844 => Self::Eip4844,
-            alloy_consensus::TxType::Eip7702 => Self::Eip7702,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use alloy_primitives::hex;
@@ -263,7 +251,7 @@ mod tests {
     }
 
     #[test]
-    fn test_txtype_to_compat() {
+    fn test_txtype_to_compact() {
         let cases = vec![
             (TxType::Legacy, COMPACT_IDENTIFIER_LEGACY, vec![]),
             (TxType::Eip2930, COMPACT_IDENTIFIER_EIP2930, vec![]),
