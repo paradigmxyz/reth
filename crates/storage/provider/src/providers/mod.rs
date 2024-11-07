@@ -18,7 +18,7 @@ use reth_chain_state::{ChainInfoTracker, ForkChoiceNotifications, ForkChoiceSubs
 use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
-use reth_node_types::NodeTypesWithDB;
+use reth_node_types::{NodePrimitives, NodeTypesWithDB};
 use reth_primitives::{
     Account, Block, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders,
     SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash, Withdrawals,
@@ -64,9 +64,21 @@ mod consistent;
 pub use consistent::ConsistentProvider;
 
 /// Helper trait keeping common requirements of providers for [`NodeTypesWithDB`].
-pub trait ProviderNodeTypes: NodeTypesWithDB<ChainSpec: EthereumHardforks> {}
+pub trait ProviderNodeTypes:
+    NodeTypesWithDB<
+    ChainSpec: EthereumHardforks,
+    Primitives: NodePrimitives<Receipt = reth_primitives::Receipt>,
+>
+{
+}
 
-impl<T> ProviderNodeTypes for T where T: NodeTypesWithDB<ChainSpec: EthereumHardforks> {}
+impl<T> ProviderNodeTypes for T where
+    T: NodeTypesWithDB<
+        ChainSpec: EthereumHardforks,
+        Primitives: NodePrimitives<Receipt = reth_primitives::Receipt>,
+    >
+{
+}
 
 /// The main type for interacting with the blockchain.
 ///

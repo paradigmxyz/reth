@@ -26,6 +26,7 @@ use reth_evm::execute::BlockExecutorProvider;
 use reth_network::NetworkHandle;
 use reth_network_api::FullNetwork;
 use reth_node_api::NodeTypesWithEngine;
+use reth_node_types::NodeTypes;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives::Header;
 use reth_transaction_pool::TransactionPool;
@@ -45,7 +46,7 @@ pub trait NodeComponents<T: FullNodeTypes>: Clone + Unpin + Send + Sync + 'stati
     type Evm: ConfigureEvm<Header = Header>;
 
     /// The type that knows how to execute blocks.
-    type Executor: BlockExecutorProvider;
+    type Executor: BlockExecutorProvider<<T::Types as NodeTypes>::Primitives>;
 
     /// The consensus type of the node.
     type Consensus: Consensus + Clone + Unpin + 'static;
@@ -97,7 +98,7 @@ where
     Node: FullNodeTypes,
     Pool: TransactionPool + Unpin + 'static,
     EVM: ConfigureEvm<Header = Header>,
-    Executor: BlockExecutorProvider,
+    Executor: BlockExecutorProvider<<Node::Types as NodeTypes>::Primitives>,
     Cons: Consensus + Clone + Unpin + 'static,
 {
     type Pool = Pool;
@@ -138,7 +139,7 @@ where
     Node: FullNodeTypes,
     Pool: TransactionPool,
     EVM: ConfigureEvm<Header = Header>,
-    Executor: BlockExecutorProvider,
+    Executor: BlockExecutorProvider<<Node::Types as NodeTypes>::Primitives>,
     Cons: Consensus + Clone,
 {
     fn clone(&self) -> Self {

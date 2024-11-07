@@ -93,7 +93,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
     pub async fn execute<N, E, F>(self, executor: F) -> eyre::Result<()>
     where
         N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>,
-        E: BlockExecutorProvider,
+        E: BlockExecutorProvider<N::Primitives>,
         F: FnOnce(Arc<C::ChainSpec>) -> E,
     {
         let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RO)?;

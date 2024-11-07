@@ -32,6 +32,8 @@ reth-chainspec.workspace = true
 reth-primitives.workspace = true
 reth-revm = { workspace = true, features = ["std"] }
 reth-trie-db.workspace = true
+reth-ethereum-primitives.workspace = true
+reth-node-types.workspace = true
 
 # revm with required ethereum features
 revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }

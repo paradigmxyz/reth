@@ -91,7 +91,7 @@ impl<P, E> ExExNotifications<P, E> {
 impl<P, E> ExExNotificationsStream for ExExNotifications<P, E>
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: BlockExecutorProvider + Clone + Unpin + 'static,
+    E: BlockExecutorProvider<reth_node_types::AnyPrimitives> + Clone + Unpin + 'static,
 {
     fn set_without_head(&mut self) {
         let current = std::mem::replace(&mut self.inner, ExExNotificationsInner::Invalid);
@@ -140,7 +140,7 @@ where
 impl<P, E> Stream for ExExNotifications<P, E>
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: BlockExecutorProvider + Clone + Unpin + 'static,
+    E: BlockExecutorProvider<reth_node_types::AnyPrimitives> + Clone + Unpin + 'static,
 {
     type Item = eyre::Result<ExExNotification>;
 
@@ -263,7 +263,7 @@ impl<P, E> ExExNotificationsWithHead<P, E> {
 impl<P, E> ExExNotificationsWithHead<P, E>
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: BlockExecutorProvider + Clone + Unpin + 'static,
+    E: BlockExecutorProvider<reth_node_types::AnyPrimitives> + Clone + Unpin + 'static,
 {
     /// Checks if the ExEx head is on the canonical chain.
     ///
@@ -340,7 +340,7 @@ where
 impl<P, E> Stream for ExExNotificationsWithHead<P, E>
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: BlockExecutorProvider + Clone + Unpin + 'static,
+    E: BlockExecutorProvider<reth_node_types::AnyPrimitives> + Clone + Unpin + 'static,
 {
     type Item = eyre::Result<ExExNotification>;
 

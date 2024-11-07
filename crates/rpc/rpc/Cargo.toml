@@ -36,6 +36,7 @@ reth-network-types.workspace = true
 reth-trie.workspace = true
 reth-consensus.workspace = true
 reth-payload-validator.workspace = true
+reth-node-types.workspace = true
 
 # ethereum
 alloy-consensus.workspace = true

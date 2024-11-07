@@ -1,9 +1,11 @@
 //! A no operation block executor implementation.
 
-use alloy_primitives::BlockNumber;
 use core::fmt::Display;
+
+use alloy_primitives::BlockNumber;
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
+use reth_node_types::NodePrimitives;
 use reth_primitives::BlockWithSenders;
 use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderError;
@@ -22,7 +24,7 @@ const UNAVAILABLE_FOR_NOOP: &str = "execution unavailable for noop";
 #[non_exhaustive]
 pub struct NoopBlockExecutorProvider;
 
-impl BlockExecutorProvider<()> for NoopBlockExecutorProvider {
+impl<N: NodePrimitives> BlockExecutorProvider<N> for NoopBlockExecutorProvider {
     type Executor<DB: Database<Error: Into<ProviderError> + Display>> = Self;
 
     type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> = Self;
@@ -42,9 +44,12 @@ impl BlockExecutorProvider<()> for NoopBlockExecutorProvider {
     }
 }
 
-impl<DB> Executor<DB, ()> for NoopBlockExecutorProvider {
+impl<DB, N> Executor<DB, N> for NoopBlockExecutorProvider
+where
+    N: NodePrimitives,
+{
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-    type Output = BlockExecutionOutput<()>;
+    type Output = BlockExecutionOutput<N::Receipt>;
     type Error = BlockExecutionError;
 
     fn execute(self, _: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
@@ -74,9 +79,12 @@ impl<DB> Executor<DB, ()> for NoopBlockExecutorProvider {
     }
 }
 
-impl<DB> BatchExecutor<DB> for NoopBlockExecutorProvider {
+impl<DB, N> BatchExecutor<DB, N> for NoopBlockExecutorProvider
+where
+    N: NodePrimitives,
+{
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-    type Output = ExecutionOutcome;
+    type Output = ExecutionOutcome<N::Receipt>;
     type Error = BlockExecutionError;
 
     fn execute_and_verify_one(&mut self, _: Self::Input<'_>) -> Result<(), Self::Error> {

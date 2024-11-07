@@ -183,27 +183,33 @@ impl<T> ExecutionOutcome<T> {
     }
 
     /// Returns an iterator over all block logs.
-    pub fn logs(&self, block_number: BlockNumber) -> Option<impl Iterator<Item = &Log>> where T: Receipt {
+    pub fn logs(&self, block_number: BlockNumber) -> Option<impl Iterator<Item = &Log>>
+    where
+        T: Receipt,
+    {
         let index = self.block_number_to_index(block_number)?;
         Some(self.receipts[index].iter().filter_map(|r| Some(r.as_ref()?.logs().iter())).flatten())
     }
 
     /// Return blocks logs bloom
-    pub fn block_logs_bloom(&self, block_number: BlockNumber) -> Option<Bloom> where T: Receipt {
+    pub fn block_logs_bloom(&self, block_number: BlockNumber) -> Option<Bloom>
+    where
+        T: Receipt,
+    {
         Some(logs_bloom(self.logs(block_number)?))
     }
 
     /// Returns the receipt root for all recorded receipts.
     /// Note: this function calculated Bloom filters for every receipt and created merkle trees
     /// of receipt. This is a expensive operation.
-    pub fn receipts_root_slow(&self, _block_number: BlockNumber) -> Option<B256> {
+    pub fn receipts_root_slow(&self, _block_number: BlockNumber) -> Option<B256>
+    where
+        T: Receipt,
+    {
         #[cfg(feature = "optimism")]
         panic!("This should not be called in optimism mode. Use `optimism_receipts_root_slow` instead.");
         #[cfg(not(feature = "optimism"))]
-        self.receipts.root_slow(
-            self.block_number_to_index(_block_number)?,
-            reth_primitives::proofs::calculate_receipt_root_no_memo,
-        )
+        self.receipts.root_slow(self.block_number_to_index(_block_number)?, T::receipts_root)
     }
 
     /// Returns the receipt root for all recorded receipts.
@@ -280,7 +286,10 @@ impl<T> ExecutionOutcome<T> {
     /// # Panics
     ///
     /// If the target block number is not included in the state block range.
-    pub fn split_at(self, at: BlockNumber) -> (Option<Self>, Self) where T: Clone {
+    pub fn split_at(self, at: BlockNumber) -> (Option<Self>, Self)
+    where
+        T: Clone,
+    {
         if at == self.first_block {
             return (None, self)
         }
@@ -372,9 +381,9 @@ mod tests {
     #[cfg(not(feature = "optimism"))]
     use alloy_primitives::bytes;
     use alloy_primitives::{Address, B256};
-    use reth_primitives::{Receipt, Receipts};
     #[cfg(not(feature = "optimism"))]
     use reth_primitives::{LogData, TxType};
+    use reth_primitives::{Receipt, Receipts};
 
     #[test]
     #[cfg(not(feature = "optimism"))]

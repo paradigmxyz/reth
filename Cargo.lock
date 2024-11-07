@@ -6402,6 +6402,7 @@ dependencies = [
  "reth-execution-types",
  "reth-network-p2p",
  "reth-network-peers",
+ "reth-node-types",
  "reth-optimism-consensus",
  "reth-primitives",
  "reth-provider",
@@ -7225,6 +7226,7 @@ dependencies = [
  "reth-exex-types",
  "reth-metrics",
  "reth-network-p2p",
+ "reth-node-types",
  "reth-payload-builder",
  "reth-payload-primitives",
  "reth-payload-validator",
@@ -7441,6 +7443,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-ethereum-primitives"
+version = "1.1.1"
+dependencies = [
+ "reth-node-types",
+ "reth-primitives",
+]
+
+[[package]]
 name = "reth-etl"
 version = "1.1.1"
 dependencies = [
@@ -7492,8 +7502,10 @@ dependencies = [
  "reth-consensus",
  "reth-ethereum-consensus",
  "reth-ethereum-forks",
+ "reth-ethereum-primitives",
  "reth-evm",
  "reth-execution-types",
+ "reth-node-types",
  "reth-primitives",
  "reth-revm",
  "reth-testing-utils",
@@ -7561,6 +7573,7 @@ dependencies = [
  "reth-metrics",
  "reth-node-api",
  "reth-node-core",
+ "reth-node-types",
  "reth-payload-builder",
  "reth-primitives",
  "reth-primitives-traits",
@@ -7954,6 +7967,7 @@ dependencies = [
  "reth-node-core",
  "reth-node-events",
  "reth-node-metrics",
+ "reth-node-types",
  "reth-payload-builder",
  "reth-payload-primitives",
  "reth-payload-validator",
@@ -8054,12 +8068,14 @@ dependencies = [
  "reth-e2e-test-utils",
  "reth-ethereum-engine-primitives",
  "reth-ethereum-payload-builder",
+ "reth-ethereum-primitives",
  "reth-evm",
  "reth-evm-ethereum",
  "reth-exex",
  "reth-network",
  "reth-node-api",
  "reth-node-builder",
+ "reth-node-types",
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
@@ -8679,6 +8695,7 @@ dependencies = [
  "reth-network-api",
  "reth-network-peers",
  "reth-network-types",
+ "reth-node-types",
  "reth-payload-validator",
  "reth-primitives",
  "reth-provider",
@@ -8778,6 +8795,7 @@ dependencies = [
  "reth-network-api",
  "reth-network-peers",
  "reth-node-core",
+ "reth-node-types",
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
@@ -9002,6 +9020,7 @@ dependencies = [
  "reth-exex",
  "reth-network-p2p",
  "reth-network-peers",
+ "reth-node-types",
  "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",

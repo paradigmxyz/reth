@@ -22,18 +22,18 @@ use std::{fmt::Display, sync::Arc};
 
 /// A [`BlockExecutorProvider`] that returns mocked execution results.
 #[derive(Clone, Debug, Default)]
-pub struct MockExecutorProvider {
-    exec_results: Arc<Mutex<Vec<ExecutionOutcome>>>,
+pub struct MockExecutorProvider<T> {
+    exec_results: Arc<Mutex<Vec<ExecutionOutcome<T>>>>,
 }
 
-impl MockExecutorProvider {
+impl<T> MockExecutorProvider<T> {
     /// Extend the mocked execution results
-    pub fn extend(&self, results: impl IntoIterator<Item = impl Into<ExecutionOutcome>>) {
+    pub fn extend(&self, results: impl IntoIterator<Item = impl Into<ExecutionOutcome<T>>>) {
         self.exec_results.lock().extend(results.into_iter().map(Into::into));
     }
 }
 
-impl<N: NodePrimitives> BlockExecutorProvider<N> for MockExecutorProvider {
+impl<N: NodePrimitives + 'static> BlockExecutorProvider<N> for MockExecutorProvider<N::Receipt> {
     type Executor<DB: Database<Error: Into<ProviderError> + Display>> = Self;
 
     type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> = Self;
@@ -53,7 +53,7 @@ impl<N: NodePrimitives> BlockExecutorProvider<N> for MockExecutorProvider {
     }
 }
 
-impl<DB, N> Executor<DB, N> for MockExecutorProvider
+impl<DB, N> Executor<DB, N> for MockExecutorProvider<N::Receipt>
 where
     N: NodePrimitives,
 {
@@ -83,7 +83,7 @@ where
     where
         F: FnMut(&State<DB>),
     {
-        <Self as Executor<DB>>::execute(self, input)
+        <Self as Executor<DB, N>>::execute(self, input)
     }
 
     fn execute_with_state_hook<F>(
@@ -94,13 +94,16 @@ where
     where
         F: OnStateHook,
     {
-        <Self as Executor<DB>>::execute(self, input)
+        <Self as Executor<DB, N>>::execute(self, input)
     }
 }
 
-impl<DB> BatchExecutor<DB> for MockExecutorProvider {
+impl<DB, N> BatchExecutor<DB, N> for MockExecutorProvider<N::Receipt>
+where
+    N: NodePrimitives,
+{
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-    type Output = ExecutionOutcome;
+    type Output = ExecutionOutcome<N::Receipt>;
     type Error = BlockExecutionError;
 
     fn execute_and_verify_one(&mut self, _: Self::Input<'_>) -> Result<(), Self::Error> {
@@ -166,7 +169,7 @@ where
     }
 
     /// Accessor for batch executor receipts.
-    pub const fn receipts(&self) -> &Receipts {
+    pub const fn receipts(&self) -> &Receipts<N::Receipt> {
         self.batch_record.receipts()
     }
 }

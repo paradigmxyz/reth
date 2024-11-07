@@ -4,6 +4,7 @@ use std::{future::Future, marker::PhantomData};
 
 use reth_consensus::Consensus;
 use reth_evm::execute::BlockExecutorProvider;
+use reth_node_types::NodeTypes;
 use reth_primitives::Header;
 use reth_transaction_pool::TransactionPool;
 
@@ -374,7 +375,7 @@ where
     Fut: Future<Output = eyre::Result<Components<Node, Pool, EVM, Executor, Cons>>> + Send,
     Pool: TransactionPool + Unpin + 'static,
     EVM: ConfigureEvm<Header = Header>,
-    Executor: BlockExecutorProvider,
+    Executor: BlockExecutorProvider<<Node::Types as NodeTypes>::Primitives>,
     Cons: Consensus + Clone + Unpin + 'static,
 {
     type Components = Components<Node, Pool, EVM, Executor, Cons>;

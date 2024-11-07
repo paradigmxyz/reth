@@ -339,7 +339,7 @@ impl StorageInner {
         executor: &Executor,
     ) -> Result<(SealedHeader, ExecutionOutcome), BlockExecutionError>
     where
-        Executor: BlockExecutorProvider,
+        Executor: BlockExecutorProvider<reth_node_types::AnyPrimitives>,
         Provider: StateProviderFactory,
         ChainSpec: EthChainSpec + EthereumHardforks,
     {

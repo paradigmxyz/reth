@@ -26,7 +26,7 @@ pub(crate) async fn dump_execution_stage<N, E>(
 ) -> eyre::Result<()>
 where
     N: ProviderNodeTypes,
-    E: BlockExecutorProvider,
+    E: BlockExecutorProvider<N::Primitives>,
 {
     let (output_db, tip_block_number) = setup(from, to, &output_datadir.db(), db_tool)?;
 
@@ -169,7 +169,7 @@ fn dry_run<N, E>(
 ) -> eyre::Result<()>
 where
     N: ProviderNodeTypes,
-    E: BlockExecutorProvider,
+    E: BlockExecutorProvider<N::Primitives>,
 {
     info!(target: "reth::cli", "Executing stage. [dry-run]");
 

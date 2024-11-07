@@ -61,7 +61,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportComm
     pub async fn execute<N, E, F>(self, executor: F) -> eyre::Result<()>
     where
         N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>,
-        E: BlockExecutorProvider,
+        E: BlockExecutorProvider<N::Primitives>,
         F: FnOnce(Arc<N::ChainSpec>) -> E,
     {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
@@ -170,7 +170,7 @@ pub fn build_import_pipeline<N, C, E>(
 where
     N: ProviderNodeTypes,
     C: Consensus + 'static,
-    E: BlockExecutorProvider,
+    E: BlockExecutorProvider<N::Primitives>,
 {
     if !file_client.has_canonical_blocks() {
         eyre::bail!("unable to import non canonical blocks");

@@ -1,16 +1,15 @@
 //! Ethereum block execution strategy.
 
-use crate::{
-    dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
-    EthEvmConfig,
-};
 use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
+use core::fmt::Display;
+
 use alloy_consensus::Transaction as _;
 use alloy_eips::eip7685::Requests;
-use core::fmt::Display;
 use reth_chainspec::{ChainSpec, EthereumHardfork, EthereumHardforks, MAINNET};
 use reth_consensus::ConsensusError;
 use reth_ethereum_consensus::validate_block_post_execution;
+#[allow(unused_imports)] // todo: replace use of AnyPrimitives
+use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{
     execute::{
         BasicBlockExecutorProvider, BlockExecutionError, BlockExecutionStrategy,
@@ -25,6 +24,11 @@ use reth_revm::db::State;
 use revm_primitives::{
     db::{Database, DatabaseCommit},
     BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState, U256,
+};
+
+use crate::{
+    dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
+    EthEvmConfig,
 };
 
 /// Factory for [`EthExecutionStrategy`].
@@ -55,7 +59,9 @@ impl<EvmConfig> EthExecutionStrategyFactory<EvmConfig> {
     }
 }
 
-impl<EvmConfig> BlockExecutionStrategyFactory for EthExecutionStrategyFactory<EvmConfig>
+// todo: replace with EthPrimitives
+impl<EvmConfig> BlockExecutionStrategyFactory<reth_node_types::AnyPrimitives>
+    for EthExecutionStrategyFactory<EvmConfig>
 where
     EvmConfig:
         Clone + Unpin + Sync + Send + 'static + ConfigureEvm<Header = alloy_consensus::Header>,
@@ -123,7 +129,8 @@ where
     }
 }
 
-impl<DB, EvmConfig> BlockExecutionStrategy<DB, EthPrimitives>
+// replace with EthPrimitives
+impl<DB, EvmConfig> BlockExecutionStrategy<DB, reth_node_types::AnyPrimitives>
     for EthExecutionStrategy<DB, EvmConfig>
 where
     DB: Database<Error: Into<ProviderError> + Display>,
@@ -153,7 +160,7 @@ where
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<ExecuteOutput<EthPrimitives::Receipt>, Self::Error> {
+    ) -> Result<ExecuteOutput<Receipt>, Self::Error> {
         let env = self.evm_env_for_block(&block.header, total_difficulty);
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
 

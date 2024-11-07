@@ -120,7 +120,7 @@ where
 }
 
 impl NodeTypes for OpNode {
-    type Primitives = OpPrimitives;
+    type Primitives = reth_node_types::AnyPrimitives; // replace with OpPrimitives
     type ChainSpec = OpChainSpec;
     type StateCommitment = MerklePatriciaTrie;
 }

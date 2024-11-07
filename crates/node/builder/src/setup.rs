@@ -39,7 +39,7 @@ pub fn build_networked_pipeline<N, Client, Executor>(
 where
     N: ProviderNodeTypes,
     Client: BlockClient + 'static,
-    Executor: BlockExecutorProvider,
+    Executor: BlockExecutorProvider<N::Primitives>,
 {
     // building network downloaders using the fetch client
     let header_downloader = ReverseHeadersDownloaderBuilder::new(config.headers)
@@ -86,7 +86,7 @@ where
     N: ProviderNodeTypes,
     H: HeaderDownloader + 'static,
     B: BodyDownloader + 'static,
-    Executor: BlockExecutorProvider,
+    Executor: BlockExecutorProvider<N::Primitives>,
 {
     let mut builder = Pipeline::<N>::builder();
 

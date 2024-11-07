@@ -112,24 +112,27 @@ where
     }
 }
 
-impl<A, B, DB> BatchExecutor<DB> for Either<A, B>
+impl<A, B, DB, N> BatchExecutor<DB, N> for Either<A, B>
 where
     A: for<'a> BatchExecutor<
         DB,
+        N,
         Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
-        Output = ExecutionOutcome,
+        Output = ExecutionOutcome<N::Receipt>,
         Error = BlockExecutionError,
     >,
     B: for<'a> BatchExecutor<
         DB,
+        N,
         Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
-        Output = ExecutionOutcome,
+        Output = ExecutionOutcome<N::Receipt>,
         Error = BlockExecutionError,
     >,
     DB: Database<Error: Into<ProviderError> + Display>,
+    N: NodePrimitives,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-    type Output = ExecutionOutcome;
+    type Output = ExecutionOutcome<N::Receipt>;
     type Error = BlockExecutionError;
 
     fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {

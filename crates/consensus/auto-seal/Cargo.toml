@@ -29,6 +29,7 @@ reth-consensus.workspace = true
 reth-network-peers.workspace = true
 reth-tokio-util.workspace = true
 reth-trie.workspace = true
+reth-node-types.workspace = true
 
 # ethereum
 alloy-eips.workspace = true

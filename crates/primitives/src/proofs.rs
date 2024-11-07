@@ -1,14 +1,11 @@
 //! Helper function for calculating Merkle proofs and hashes.
 
+use crate::{Header, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, TransactionSigned};
 use alloc::vec::Vec;
-
-use reth_primitives_traits::Receipt;
 use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawal};
 use alloy_primitives::{keccak256, B256};
 use reth_trie_common::root::{ordered_trie_root, ordered_trie_root_with_encoder};
-
-use crate::{Header, ReceiptWithBloom, ReceiptWithBloomRef, TransactionSigned};
 
 /// Calculate a transaction root.
 ///
@@ -31,14 +28,14 @@ pub fn calculate_receipt_root(receipts: &[ReceiptWithBloom]) -> B256 {
 }
 
 /// Calculates the receipt root for a header.
-pub fn calculate_receipt_root_ref<T: Receipt>(receipts: &[ReceiptWithBloomRef<'_, T>]) -> B256 {
+pub fn calculate_receipt_root_ref(receipts: &[ReceiptWithBloomRef<'_>]) -> B256 {
     ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_inner(buf, false))
 }
 
 /// Calculates the receipt root for a header for the reference type of [Receipt].
 ///
 /// NOTE: Prefer [`calculate_receipt_root`] if you have log blooms memoized.
-pub fn calculate_receipt_root_no_memo<T: Receipt>(receipts: &[&T]) -> B256 {
+pub fn calculate_receipt_root_no_memo(receipts: &[&Receipt]) -> B256 {
     ordered_trie_root_with_encoder(receipts, |r, buf| {
         ReceiptWithBloomRef::from(*r).encode_inner(buf, false)
     })

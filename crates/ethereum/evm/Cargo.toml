@@ -19,6 +19,8 @@ reth-primitives = { workspace = true, features = ["reth-codec"] }
 reth-revm.workspace = true
 reth-ethereum-consensus.workspace = true
 reth-consensus.workspace = true
+reth-ethereum-primitives.workspace = true
+reth-node-types.workspace = true
 
 # Ethereum
 revm-primitives.workspace = true

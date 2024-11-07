@@ -85,7 +85,7 @@ where
     Client: StateProviderFactory + CanonChainTracker + Clone + Unpin + 'static,
     Pool: TransactionPool + Unpin + 'static,
     Engine: EngineTypes,
-    Executor: BlockExecutorProvider,
+    Executor: BlockExecutorProvider<reth_node_types::AnyPrimitives>,
     ChainSpec: EthChainSpec + EthereumHardforks + 'static,
 {
     type Output = ();

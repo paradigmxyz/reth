@@ -30,6 +30,7 @@ reth-transaction-pool.workspace = true
 reth-evm.workspace = true
 reth-engine-primitives.workspace = true
 reth-primitives.workspace = true
+reth-node-types.workspace = true
 
 # rpc/net
 jsonrpsee = { workspace = true, features = ["server"] }

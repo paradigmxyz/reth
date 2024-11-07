@@ -37,7 +37,7 @@ impl<N: NodeTypesWithDB, E> ShareableBlockchainTree<N, E> {
 impl<N, E> BlockchainTreeEngine for ShareableBlockchainTree<N, E>
 where
     N: ProviderNodeTypes,
-    E: BlockExecutorProvider,
+    E: BlockExecutorProvider<N::Primitives>,
 {
     fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError> {
         let mut tree = self.tree.write();
@@ -108,7 +108,7 @@ where
 impl<N, E> BlockchainTreeViewer for ShareableBlockchainTree<N, E>
 where
     N: ProviderNodeTypes,
-    E: BlockExecutorProvider,
+    E: BlockExecutorProvider<N::Primitives>,
 {
     fn header_by_hash(&self, hash: BlockHash) -> Option<SealedHeader> {
         trace!(target: "blockchain_tree", ?hash, "Returning header by hash");
@@ -171,7 +171,7 @@ where
 impl<N, E> BlockchainTreePendingStateProvider for ShareableBlockchainTree<N, E>
 where
     N: ProviderNodeTypes,
-    E: BlockExecutorProvider,
+    E: BlockExecutorProvider<N::Primitives>,
 {
     fn find_pending_state_provider(
         &self,

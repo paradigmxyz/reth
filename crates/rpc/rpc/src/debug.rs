@@ -83,7 +83,7 @@ where
         + StateProviderFactory
         + 'static,
     Eth: EthApiTypes + TraceExt + 'static,
-    BlockExecutor: BlockExecutorProvider,
+    BlockExecutor: BlockExecutorProvider<reth_node_types::AnyPrimitives>,
 {
     /// Acquires a permit to execute a tracing call.
     async fn acquire_trace_permit(&self) -> Result<OwnedSemaphorePermit, AcquireError> {
@@ -901,7 +901,7 @@ where
         + StateProviderFactory
         + 'static,
     Eth: EthApiSpec + EthTransactions + TraceExt + 'static,
-    BlockExecutor: BlockExecutorProvider,
+    BlockExecutor: BlockExecutorProvider<reth_node_types::AnyPrimitives>,
 {
     /// Handler for `debug_getRawHeader`
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {

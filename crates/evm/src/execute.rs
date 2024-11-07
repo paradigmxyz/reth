@@ -71,7 +71,7 @@ pub trait Executor<DB, N> {
 
 /// A general purpose executor that can execute multiple inputs in sequence, validate the outputs,
 /// and keep track of the state over the entire batch.
-pub trait BatchExecutor<DB> {
+pub trait BatchExecutor<DB, N> {
     /// The input type for the executor.
     type Input<'a>;
     /// The output type for the executor.
@@ -153,8 +153,9 @@ pub trait BlockExecutorProvider<N: NodePrimitives>: Send + Sync + Clone + Unpin 
     /// An executor that can execute a batch of blocks given a database.
     type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>>: for<'a> BatchExecutor<
         DB,
+        N,
         Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
-        Output = ExecutionOutcome,
+        Output = ExecutionOutcome<N::Receipt>,
         Error = BlockExecutionError,
     >;
 
@@ -282,7 +283,7 @@ impl<F> BasicBlockExecutorProvider<F> {
 impl<F, N> BlockExecutorProvider<N> for BasicBlockExecutorProvider<F>
 where
     F: BlockExecutionStrategyFactory<N>,
-    N: NodePrimitives,
+    N: NodePrimitives<Receipt: Receipt>,
 {
     type Executor<DB: Database<Error: Into<ProviderError> + Display>> =
         BasicBlockExecutor<F::Strategy<DB>, DB, N>;
@@ -432,20 +433,17 @@ where
     }
 }
 
-impl<S, DB, N> BatchExecutor<DB> for BasicBatchExecutor<S, DB, N>
+impl<S, DB, N> BatchExecutor<DB, N> for BasicBatchExecutor<S, DB, N>
 where
     S: BlockExecutionStrategy<DB, N, Error = BlockExecutionError>,
     DB: Database<Error: Into<ProviderError> + Display>,
-    N: NodePrimitives,
+    N: NodePrimitives<Receipt: Receipt>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-    type Output = ExecutionOutcome;
+    type Output = ExecutionOutcome<N::Receipt>;
     type Error = BlockExecutionError;
 
-    fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error>
-    where
-        N: NodePrimitives<Receipt: Receipt>,
-    {
+    fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
 
         if self.batch_record.first_block().is_none() {
@@ -563,9 +561,12 @@ mod tests {
         }
     }
 
-    impl<DB> BatchExecutor<DB> for TestExecutor<DB> {
+    impl<DB, N> BatchExecutor<DB, N> for TestExecutor<DB>
+    where
+        N: NodePrimitives,
+    {
         type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-        type Output = ExecutionOutcome;
+        type Output = ExecutionOutcome<N::Receipt>;
         type Error = BlockExecutionError;
 
         fn execute_and_verify_one(&mut self, _input: Self::Input<'_>) -> Result<(), Self::Error> {

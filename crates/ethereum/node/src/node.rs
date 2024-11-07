@@ -9,12 +9,13 @@ use reth_chainspec::ChainSpec;
 use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes, EthereumEngineValidator,
 };
+#[allow(unused_imports)] // todo: replace use of AnyPrimitives
+use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_evm_ethereum::execute::EthExecutionStrategyFactory;
 use reth_network::{NetworkHandle, PeersInfo};
 use reth_node_api::{
-    AddOnsContext, ConfigureEvm, EngineValidator, FullNodeComponents, NodePrimitives,
-    NodeTypesWithDB,
+    AddOnsContext, ConfigureEvm, EngineValidator, FullNodeComponents, NodeTypesWithDB,
 };
 use reth_node_builder::{
     components::{
@@ -26,7 +27,7 @@ use reth_node_builder::{
     BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig, PayloadTypes,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::{Block, Header, Receipt};
+use reth_primitives::Header;
 use reth_provider::CanonStateSubscriptions;
 use reth_rpc::EthApi;
 use reth_tracing::tracing::{debug, info};
@@ -37,15 +38,6 @@ use reth_transaction_pool::{
 use reth_trie_db::MerklePatriciaTrie;
 
 use crate::{EthEngineTypes, EthEvmConfig};
-
-/// Ethereum primitive types.
-#[derive(Debug)]
-pub struct EthPrimitives;
-
-impl NodePrimitives for EthPrimitives {
-    type Block = Block;
-    type Receipt = Receipt;
-}
 
 /// Type configuration for a regular Ethereum node.
 #[derive(Debug, Default, Clone, Copy)]
@@ -81,7 +73,7 @@ impl EthereumNode {
 }
 
 impl NodeTypes for EthereumNode {
-    type Primitives = EthPrimitives;
+    type Primitives = reth_node_types::AnyPrimitives; //replace with EthPrimitives
     type ChainSpec = ChainSpec;
     type StateCommitment = MerklePatriciaTrie;
 }

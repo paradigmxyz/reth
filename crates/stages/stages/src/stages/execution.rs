@@ -173,7 +173,7 @@ impl<E> ExecutionStage<E> {
 
 impl<E, Provider> Stage<Provider> for ExecutionStage<E>
 where
-    E: BlockExecutorProvider,
+    E: BlockExecutorProvider<reth_node_types::AnyPrimitives>,
     Provider:
         DBProvider + BlockReader + StaticFileProviderFactory + StatsReader + StateChangeWriter,
     for<'a> UnifiedStorageWriter<'a, Provider, StaticFileProviderRWRefMut<'a>>: StateWriter,
