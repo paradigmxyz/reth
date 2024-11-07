@@ -1677,25 +1677,13 @@ impl<T: PoolTransaction> AllTransactions<T> {
         let on_chain_id = TransactionId::new(transaction.sender_id(), on_chain_nonce);
         {
             // get all transactions of the sender's account
-            let mut descendants = self.descendant_txs_mut(&on_chain_id).peekable();
+            let descendants = self.descendant_txs_mut(&on_chain_id).peekable();
 
             // Tracks the next nonce we expect if the transactions are gapless
             let mut next_nonce = on_chain_id.nonce;
 
             // We need to find out if the next transaction of the sender is considered pending
-            let mut has_parked_ancestor = if ancestor.is_none() {
-                // the new transaction is the next one
-                false
-            } else {
-                // The transaction was added above so the _inclusive_ descendants iterator
-                // returns at least 1 tx.
-                let (id, tx) = descendants.peek().expect("includes >= 1");
-                if id.nonce < inserted_tx_id.nonce {
-                    !tx.state.is_pending()
-                } else {
-                    true
-                }
-            };
+            let mut has_parked_ancestor = false;
 
             // Traverse all transactions of the sender and update existing transactions
             for (id, tx) in descendants {
@@ -2903,7 +2891,7 @@ mod tests {
         pool.update_basefee(pool_base_fee);
 
         // 2 txs, that should put the pool over the size limit but not max txs
-        let a_txs = MockTransactionSet::dependent(a_sender, 0, 2, TxType::Eip1559)
+        let a_txs = MockTransactionSet::dependent(a_sender, 0, 3, TxType::Eip1559)
             .into_iter()
             .map(|mut tx| {
                 tx.set_size(default_limits.max_size / 2 + 1);
@@ -3264,7 +3252,7 @@ mod tests {
         let mut f = MockTransactionFactory::default();
         let mut pool = TxPool::new(MockOrdering::default(), Default::default());
 
-        let tx_0 = MockTransaction::eip1559().with_nonce(1);
+        let tx_0 = MockTransaction::eip1559().with_nonce(1).set_gas_price(100).inc_limit();
         let tx_1 = tx_0.next();
 
         let v0 = f.validated(tx_0);
@@ -3277,8 +3265,8 @@ mod tests {
         // nonce gap is closed on-chain, both transactions should be moved to pending
         pool.add_transaction(v1, U256::MAX, 1).unwrap();
 
-        assert_eq!(0, pool.queued_transactions().len());
         assert_eq!(2, pool.pending_transactions().len());
+        assert_eq!(0, pool.queued_transactions().len());
 
         assert_eq!(
             pool.pending_pool.independent().get(&v0.sender_id()).unwrap().transaction.nonce(),
