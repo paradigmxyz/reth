@@ -1,11 +1,7 @@
 use crate::{PayloadEvents, PayloadKind, PayloadTypes};
-use alloy_eips::eip7685::Requests;
+use alloy_eips::{eip4895::Withdrawal, eip7685::Requests};
 use alloy_primitives::{Address, B256, U256};
-use alloy_rpc_types::{
-    engine::{PayloadAttributes as EthPayloadAttributes, PayloadId},
-    Withdrawal,
-};
-use op_alloy_rpc_types_engine::OpPayloadAttributes;
+use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
 use reth_chain_state::ExecutedBlock;
 use reth_primitives::{SealedBlock, Withdrawals};
 use tokio::sync::oneshot;
@@ -146,7 +142,8 @@ impl PayloadAttributes for EthPayloadAttributes {
     }
 }
 
-impl PayloadAttributes for OpPayloadAttributes {
+#[cfg(feature = "op")]
+impl PayloadAttributes for op_alloy_rpc_types_engine::OpPayloadAttributes {
     fn timestamp(&self) -> u64 {
         self.payload_attributes.timestamp
     }
