@@ -3,11 +3,16 @@
 use std::sync::Arc;
 
 use alloy_eips::BlockHashOrNumber;
+use alloy_primitives::BlockNumber;
 use reth_auto_seal_consensus::AutoSealConsensus;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_beacon_consensus::EthBeaconConsensus;
-use reth_chainspec::ChainSpec;
-use reth_db::transaction::{DbTx, DbTxMut};
+use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_db::{
+    cursor::DbCursorRO,
+    tables,
+    transaction::{DbTx, DbTxMut},
+};
 use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes, EthereumEngineValidator,
 };
@@ -30,8 +35,9 @@ use reth_node_builder::{
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::{Block, BlockBody, Header};
 use reth_provider::{
-    BlockNumReader, BlockReader, CanonStateSubscriptions, ChainStorageReader, ChainStorageWriter,
-    DBProvider, HeaderProvider, ProviderResult, TransactionsProvider, WithdrawalsProvider,
+    BlockNumReader, BlockReader, CanonStateSubscriptions, ChainSpecProvider, ChainStorageReader,
+    ChainStorageWriter, DBProvider, HeaderProvider, ProviderResult, TransactionsProvider,
+    WithdrawalsProvider,
 };
 use reth_rpc::EthApi;
 use reth_tracing::tracing::{debug, info};
@@ -159,6 +165,7 @@ where
         + BlockReader
         + WithdrawalsProvider
         + HeaderProvider
+        + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + BlockNumReader,
 {
     type Primitives = EthPrimitives;
@@ -189,6 +196,71 @@ where
         }
 
         Ok(None)
+    }
+
+    fn read_block_range(
+        &self,
+        provider: &P,
+        range: std::ops::RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<impl IntoIterator<Item = Option<<Self::Primitives as NodePrimitives>::Block>>>
+    {
+        let mut _tx_cursor = provider.tx_ref().cursor_read::<tables::Transactions>()?;
+        let mut ommers_cursor = provider.tx_ref().cursor_read::<tables::BlockOmmers>()?;
+        let mut withdrawals_cursor = provider.tx_ref().cursor_read::<tables::BlockWithdrawals>()?;
+        let mut block_body_cursor = provider.tx_ref().cursor_read::<tables::BlockBodyIndices>()?;
+        let chain_spec = provider.chain_spec();
+
+        Ok(provider.headers_range(range)?.into_iter().map(move |header| {
+            let header_ref = header.as_ref();
+            // If the body indices are not found, this means that the transactions either do
+            // not exist in the database yet, or they do exit but are
+            // not indexed. If they exist but are not indexed, we don't
+            // have enough information to return the block anyways, so
+            // we skip the block.
+            if let Some((_, block_body_indices)) =
+                block_body_cursor.seek_exact(header_ref.number).ok()?
+            {
+                let _tx_range = block_body_indices.tx_num_range();
+
+                // If we are past shanghai, then all blocks should have a withdrawal list,
+                // even if empty
+                let withdrawals =
+                    if chain_spec.is_shanghai_active_at_timestamp(header_ref.timestamp) {
+                        withdrawals_cursor
+                            .seek_exact(header_ref.number)
+                            .ok()?
+                            .map(|(_, w)| w.withdrawals)
+                            .unwrap_or_default()
+                            .into()
+                    } else {
+                        None
+                    };
+                let ommers = if chain_spec.final_paris_total_difficulty(header_ref.number).is_some()
+                {
+                    Vec::new()
+                } else {
+                    ommers_cursor
+                        .seek_exact(header_ref.number)
+                        .ok()?
+                        .map(|(_, o)| o.ommers)
+                        .unwrap_or_default()
+                };
+
+                // TODO: move `transactions_by_tx_range_with_cursor` to a provider trait
+                // let transactions = provider
+                //     .transactions_by_tx_range_with_cursor(tx_range.clone(), &mut tx_cursor)?
+                //     .into_iter()
+                //     .map(Into::into)
+                //     .collect::<Vec<TransactionSigned>>();
+
+                let transactions = vec![];
+                return Some(Block {
+                    header: header.clone(),
+                    body: BlockBody { transactions, ommers, withdrawals },
+                })
+            }
+            None
+        }))
     }
 }
 

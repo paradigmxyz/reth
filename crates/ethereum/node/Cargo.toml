@@ -38,6 +38,7 @@ reth-trie-db.workspace = true
 revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
 
 # misc
+alloy-primitives.workspace = true
 alloy-eips.workspace = true
 eyre.workspace = true
 

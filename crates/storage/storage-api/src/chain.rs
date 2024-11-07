@@ -1,7 +1,8 @@
 use alloy_eips::BlockHashOrNumber;
+use alloy_primitives::BlockNumber;
 use reth_primitives_traits::NodePrimitives;
 use reth_storage_errors::provider::ProviderResult;
-use std::fmt::Debug;
+use std::{fmt::Debug, ops::RangeInclusive};
 
 /// Trait that implements how complex types (eg. Block) should be read from disk.
 pub trait ChainStorageReader<P>: Send + Sync + Unpin + Default + Debug + 'static {
@@ -16,6 +17,15 @@ pub trait ChainStorageReader<P>: Send + Sync + Unpin + Default + Debug + 'static
         provider: &P,
         id: BlockHashOrNumber,
     ) -> ProviderResult<Option<<Self::Primitives as NodePrimitives>::Block>>;
+
+    /// Returns the block with given id from storage.
+    ///
+    /// Returns `None` if block is not found.
+    fn read_block_range(
+        &self,
+        provider: &P,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<impl IntoIterator<Item = Option<<Self::Primitives as NodePrimitives>::Block>>>;
 }
 
 /// Trait that implements how complex types (eg. Block) should be written to disk.
@@ -40,6 +50,15 @@ impl<P> ChainStorageReader<P> for () {
         _: BlockHashOrNumber,
     ) -> ProviderResult<Option<<Self::Primitives as NodePrimitives>::Block>> {
         todo!()
+    }
+
+    fn read_block_range(
+        &self,
+        _: &P,
+        _: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<impl IntoIterator<Item = Option<<Self::Primitives as NodePrimitives>::Block>>>
+    {
+        Ok(vec![])
     }
 }
 

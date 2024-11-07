@@ -1,11 +1,14 @@
 //! Optimism Node types config.
 
-use std::sync::Arc;
-
 use alloy_eips::BlockHashOrNumber;
+use alloy_primitives::BlockNumber;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_chainspec::{EthChainSpec, Hardforks};
-use reth_db::transaction::{DbTx, DbTxMut};
+use reth_db::{
+    cursor::DbCursorRO,
+    tables,
+    transaction::{DbTx, DbTxMut},
+};
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, PeersInfo};
 use reth_node_api::{
@@ -37,6 +40,7 @@ use reth_transaction_pool::{
     TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
+use std::{ops::RangeInclusive, sync::Arc};
 
 use crate::{
     args::RollupArgs,
@@ -183,6 +187,44 @@ where
         }
 
         Ok(None)
+    }
+
+    fn read_block_range(
+        &self,
+        provider: &P,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<impl IntoIterator<Item = Option<<Self::Primitives as NodePrimitives>::Block>>>
+    {
+        let mut _tx_cursor = provider.tx_ref().cursor_read::<tables::Transactions>()?;
+        let mut block_body_cursor = provider.tx_ref().cursor_read::<tables::BlockBodyIndices>()?;
+
+        Ok(provider.headers_range(range)?.into_iter().map(move |header| {
+            let header_ref = header.as_ref();
+            // If the body indices are not found, this means that the transactions either do
+            // not exist in the database yet, or they do exit but are
+            // not indexed. If they exist but are not indexed, we don't
+            // have enough information to return the block anyways, so
+            // we skip the block.
+            if let Some((_, block_body_indices)) =
+                block_body_cursor.seek_exact(header_ref.number).ok()?
+            {
+                let _tx_range = block_body_indices.tx_num_range();
+
+                // TODO: move `transactions_by_tx_range_with_cursor` to a provider trait
+                // let transactions = provider
+                //     .transactions_by_tx_range_with_cursor(tx_range.clone(), &mut tx_cursor)?
+                //     .into_iter()
+                //     .map(Into::into)
+                //     .collect::<Vec<TransactionSigned>>();
+
+                let transactions = vec![];
+                return Some(Block {
+                    header: header.clone(),
+                    body: BlockBody { transactions, ommers: vec![], withdrawals: None },
+                })
+            }
+            None
+        }))
     }
 }
 /// Add-ons w.r.t. optimism.
