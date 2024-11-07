@@ -782,7 +782,6 @@ where
                                 // if the transaction is invalid, we can skip it and all of its
                                 // descendants
                                 trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
-                                // FIXME: This call is currently a NOOP.
                                 best_txs.mark_invalid(tx.signer(), tx.nonce());
                             }
 
