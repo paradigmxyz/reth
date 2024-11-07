@@ -32,7 +32,7 @@ pub enum DatabaseVersionError {
         version: u64,
     },
     /// IO error occurred while reading the database version file.
-    #[error("IO error occurred while reading {}: {err}", path.display())]
+    #[error("IO error occurred while reading {path}: {err}")]
     IORead {
         /// The encountered IO error.
         err: io::Error,

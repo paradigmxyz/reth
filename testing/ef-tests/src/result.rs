@@ -21,7 +21,7 @@ pub enum Error {
     #[error("no post state found for validation")]
     MissingPostState,
     /// An IO error occurred
-    #[error("an error occurred interacting with the file system at {}: {error}", .path.display())]
+    #[error("an error occurred interacting with the file system at {path}: {error}")]
     Io {
         /// The path to the file or directory
         path: PathBuf,
@@ -30,7 +30,7 @@ pub enum Error {
         error: std::io::Error,
     },
     /// A deserialization error occurred
-    #[error("an error occurred deserializing the test at {}: {error}", .path.display())]
+    #[error("an error occurred deserializing the test at {path}: {error}")]
     CouldNotDeserialize {
         /// The path to the file we wanted to deserialize
         path: PathBuf,
