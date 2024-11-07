@@ -44,7 +44,7 @@ pub struct PendingPool<T: TransactionOrdering> {
     independent_transactions: HashMap<SenderId, PendingTransaction<T>>,
     /// Keeps track of the size of this pool.
     ///
-    /// See also [`PoolTransaction::size`](crate::traits::PoolTransaction::size).
+    /// See also [`PoolTransaction::size`].
     size_of: SizeTracker,
     /// Used to broadcast new transactions that have been added to the `PendingPool` to existing
     /// `static_files` of this pool.
@@ -522,6 +522,12 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// Retrieves a transaction with the given ID from the pool, if it exists.
     fn get(&self, id: &TransactionId) -> Option<&PendingTransaction<T>> {
         self.by_id.get(id)
+    }
+
+    /// Returns a reference to the independent transactions in the pool
+    #[cfg(test)]
+    pub(crate) const fn independent(&self) -> &HashMap<SenderId, PendingTransaction<T>> {
+        &self.independent_transactions
     }
 
     /// Asserts that the bijection between `by_id` and `all` is valid.

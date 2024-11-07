@@ -3258,4 +3258,31 @@ mod tests {
             vec![1, 2, 3]
         );
     }
+
+    #[test]
+    fn test_pending_ordering() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let tx_0 = MockTransaction::eip1559().with_nonce(1);
+        let tx_1 = tx_0.next();
+
+        let v0 = f.validated(tx_0);
+        let v1 = f.validated(tx_1);
+
+        // nonce gap, tx should be queued
+        pool.add_transaction(v0.clone(), U256::MAX, 0).unwrap();
+        assert_eq!(1, pool.queued_transactions().len());
+
+        // nonce gap is closed on-chain, both transactions should be moved to pending
+        pool.add_transaction(v1, U256::MAX, 1).unwrap();
+
+        assert_eq!(0, pool.queued_transactions().len());
+        assert_eq!(2, pool.pending_transactions().len());
+
+        assert_eq!(
+            pool.pending_pool.independent().get(&v0.sender_id()).unwrap().transaction.nonce(),
+            v0.nonce()
+        );
+    }
 }
