@@ -135,7 +135,7 @@ pub struct OpBuiltPayload {
     /// Identifier of the payload
     pub(crate) id: PayloadId,
     /// The built block
-    pub(crate) block: SealedBlock,
+    pub(crate) block: Arc<SealedBlock>,
     /// Block execution data for the payload, if any.
     pub(crate) executed_block: Option<ExecutedBlock>,
     /// The fees of the block
@@ -155,7 +155,7 @@ impl OpBuiltPayload {
     /// Initializes the payload with the given initial block.
     pub const fn new(
         id: PayloadId,
-        block: SealedBlock,
+        block: Arc<SealedBlock>,
         fees: U256,
         chain_spec: Arc<OpChainSpec>,
         attributes: OpPayloadBuilderAttributes,
@@ -170,7 +170,7 @@ impl OpBuiltPayload {
     }
 
     /// Returns the built block(sealed)
-    pub const fn block(&self) -> &SealedBlock {
+    pub fn block(&self) -> &SealedBlock {
         &self.block
     }
 
@@ -224,7 +224,7 @@ impl BuiltPayload for &OpBuiltPayload {
 // V1 engine_getPayloadV1 response
 impl From<OpBuiltPayload> for ExecutionPayloadV1 {
     fn from(value: OpBuiltPayload) -> Self {
-        block_to_payload_v1(value.block)
+        block_to_payload_v1(Arc::unwrap_or_clone(value.block))
     }
 }
 
@@ -233,7 +233,10 @@ impl From<OpBuiltPayload> for ExecutionPayloadEnvelopeV2 {
     fn from(value: OpBuiltPayload) -> Self {
         let OpBuiltPayload { block, fees, .. } = value;
 
-        Self { block_value: fees, execution_payload: convert_block_to_payload_field_v2(block) }
+        Self {
+            block_value: fees,
+            execution_payload: convert_block_to_payload_field_v2(Arc::unwrap_or_clone(block)),
+        }
     }
 }
 
@@ -248,7 +251,7 @@ impl From<OpBuiltPayload> for OpExecutionPayloadEnvelopeV3 {
                 B256::ZERO
             };
         Self {
-            execution_payload: block_to_payload_v3(block),
+            execution_payload: block_to_payload_v3(Arc::unwrap_or_clone(block)),
             block_value: fees,
             // From the engine API spec:
             //
@@ -275,7 +278,7 @@ impl From<OpBuiltPayload> for OpExecutionPayloadEnvelopeV4 {
                 B256::ZERO
             };
         Self {
-            execution_payload: block_to_payload_v3(block),
+            execution_payload: block_to_payload_v3(Arc::unwrap_or_clone(block)),
             block_value: fees,
             // From the engine API spec:
             //
