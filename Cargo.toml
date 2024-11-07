@@ -20,7 +20,6 @@ members = [
     "crates/cli/runner/",
     "crates/cli/util/",
     "crates/config/",
-    "crates/consensus/auto-seal/",
     "crates/consensus/beacon/",
     "crates/consensus/common/",
     "crates/consensus/consensus/",
@@ -299,7 +298,6 @@ overflow-checks = true
 # reth
 op-reth = { path = "crates/optimism/bin" }
 reth = { path = "bin/reth" }
-reth-auto-seal-consensus = { path = "crates/consensus/auto-seal" }
 reth-basic-payload-builder = { path = "crates/payload/basic" }
 reth-beacon-consensus = { path = "crates/consensus/beacon" }
 reth-bench = { path = "bin/reth-bench" }
