@@ -3270,4 +3270,92 @@ mod tests {
             v0.nonce()
         );
     }
+
+    // <https://github.com/paradigmxyz/reth/issues/12286>
+    #[test]
+    fn one_sender_two_independent_transactions() {
+        let mut on_chain_balance = U256::from(4_999); // only enough for 4 txs
+        let mut on_chain_nonce = 40;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::mock();
+        let mut submitted_txs = Vec::new();
+
+        // We use a "template" because we want all txs to have the same sender.
+        let template =
+            MockTransaction::eip1559().inc_price().inc_limit().with_value(U256::from(1_001));
+
+        // Add 8 txs. Because the balance is only sufficient for 4, so the last 4 will be
+        // Queued.
+        for tx_nonce in 40..48 {
+            let tx = f.validated(template.clone().with_nonce(tx_nonce).rng_hash());
+            submitted_txs.push(*tx.id());
+            pool.add_transaction(tx, on_chain_balance, on_chain_nonce).unwrap();
+        }
+
+        // A block is mined with two txs (so nonce is changed from 40 to 42).
+        // Now the balance gets so high that it's enough to execute alltxs.
+        on_chain_balance = U256::from(999_999);
+        on_chain_nonce = 42;
+        pool.remove_transaction(&submitted_txs[0]);
+        pool.remove_transaction(&submitted_txs[1]);
+
+        // Add 4 txs.
+        for tx_nonce in 48..52 {
+            pool.add_transaction(
+                f.validated(template.clone().with_nonce(tx_nonce).rng_hash()),
+                on_chain_balance,
+                on_chain_nonce,
+            )
+                .unwrap();
+        }
+
+        let best_txs: Vec<_> = pool.pending().best().map(|tx| *tx.id()).collect();
+        assert_eq!(best_txs.len(), 10); // 8 - 2 + 4 = 10
+
+        // Another useful assertion.
+        // assert_eq!(pool.pending().num_independent_transactions(), 1);
+    }
+
+    // <https://github.com/paradigmxyz/reth/issues/12340>
+    #[test]
+    fn test_eligible_updates_not_promoted() {
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        let num_senders = 10;
+
+        let first_txs: Vec<_> = (0..num_senders) //
+            .map(|_| MockTransaction::eip1559())
+            .collect();
+        let second_txs: Vec<_> =
+            first_txs.iter().map(|tx| tx.clone().rng_hash().inc_nonce()).collect();
+
+        for tx in first_txs {
+            let valid_tx = f.validated(tx);
+            pool.add_transaction(Arc::new(valid_tx), 0);
+        }
+
+        let mut best = pool.best();
+
+        for _ in 0..num_senders {
+            if let Some(tx) = best.next() {
+                println!("{:?}", tx.transaction_id);
+            } else {
+                panic!("cannot read one of first_txs");
+            }
+        }
+
+        for tx in second_txs {
+            let valid_tx = f.validated(tx);
+            pool.add_transaction(Arc::new(valid_tx), 0);
+        }
+
+        for _ in 0..num_senders {
+            if let Some(tx) = best.next() {
+                println!("{:?}", tx.transaction_id);
+            } else {
+                panic!("cannot read one of second_txs");
+            }
+        }
+    }
 }
