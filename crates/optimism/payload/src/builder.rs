@@ -35,7 +35,7 @@ use revm::{
 use tracing::{debug, trace, warn};
 
 use crate::{
-    error::OptimismPayloadBuilderError,
+    error::OpPayloadBuilderError,
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
 };
 use op_alloy_consensus::DepositTransaction;
@@ -589,7 +589,7 @@ impl<EvmConfig> OpPayloadBuilderCtx<EvmConfig> {
         )
         .map_err(|err| {
             warn!(target: "payload_builder", %err, "missing create2 deployer, skipping block.");
-            PayloadBuilderError::other(OptimismPayloadBuilderError::ForceCreate2DeployerFail)
+            PayloadBuilderError::other(OpPayloadBuilderError::ForceCreate2DeployerFail)
         })
     }
 }
@@ -640,7 +640,7 @@ where
             // A sequencer's block should never contain blob transactions.
             if sequencer_tx.value().is_eip4844() {
                 return Err(PayloadBuilderError::other(
-                    OptimismPayloadBuilderError::BlobTransactionRejected,
+                    OpPayloadBuilderError::BlobTransactionRejected,
                 ))
             }
 
@@ -650,9 +650,7 @@ where
             // will just pull in its `from` address.
             let sequencer_tx =
                 sequencer_tx.value().clone().try_into_ecrecovered().map_err(|_| {
-                    PayloadBuilderError::other(
-                        OptimismPayloadBuilderError::TransactionEcRecoverFailed,
-                    )
+                    PayloadBuilderError::other(OpPayloadBuilderError::TransactionEcRecoverFailed)
                 })?;
 
             // Cache the depositor account prior to the state transition for the deposit nonce.
@@ -667,7 +665,7 @@ where
                 })
                 .transpose()
                 .map_err(|_| {
-                    PayloadBuilderError::other(OptimismPayloadBuilderError::AccountLoadFailed(
+                    PayloadBuilderError::other(OpPayloadBuilderError::AccountLoadFailed(
                         sequencer_tx.signer(),
                     ))
                 })?;
