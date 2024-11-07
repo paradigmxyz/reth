@@ -24,7 +24,6 @@ use reth_primitives::{
 use serde::{Deserialize, Serialize};
 use tokio_util::codec::{Decoder, Encoder};
 
-#[allow(dead_code)]
 /// Specific codec for reading raw block bodies from a file
 /// with optimism-specific signature handling
 pub(crate) struct OvmBlockFileCodec;
@@ -627,8 +626,45 @@ impl Decodable for TransactionSignedEcRecovered {
             // Normal signature recovery for other type of transactions
             _ => signed_transaction
                 .recover_signer()
-                .ok_or(RlpError::Custom("Unable to recover decoded transaction signer."))?
+                .ok_or(RlpError::Custom("Unable to recover decoded transaction signer."))?,
         };
         Ok(Self { signer, signed_transaction })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ovm_file_codec::TransactionSigned;
+    use alloy_consensus::TxLegacy;
+    use alloy_primitives::{address, hex, Address, Parity, Signature, TxKind, U256};
+    use alloy_rlp::{Decodable, Encodable};
+    use reth_primitives::transaction::Transaction;
+
+    const DEPOSIT_FUNCTION_SELECTOR: [u8; 4] = [0xb6, 0xb5, 0x5f, 0x25];
+
+    #[test]
+    fn test_decode_deposit_tx() {
+        // This is a deposit transaction from Optimism mainnet
+        // tx https://optimistic.etherscan.io/getRawTx?tx=0x7860252963a2df21113344f323035ef59648638a571eef742e33d789602c7a1c
+
+        let tx_bytes = hex!("f88881f0830f481c830c6e4594a75127121d28a9bf848f3b70e7eea26570aa770080a4b6b55f2500000000000000000000000000000000000000000000000000000000000710b238a0d5c622d92ddf37f9c18a3465a572f74d8b1aeaf50c1cfb10b3833242781fd45fa02c4f1d5819bf8b70bf651e7a063b7db63c55bd336799c6ae3e5bc72ad6ef3def");
+
+        let decoded = TransactionSigned::decode(&mut &tx_bytes[..]).unwrap();
+
+        let legacy = match decoded.transaction {
+            Transaction::Legacy(legacy) => legacy,
+            _ => panic!("Expected legacy transaction for NFT deposit"),
+        };
+        assert_eq!(legacy.to, TxKind::Call(address!("a75127121d28a9bf848f3b70e7eea26570aa7700")));
+        assert_eq!(legacy.nonce, 240);
+        assert_eq!(legacy.gas_price, 1001500);
+        assert_eq!(legacy.gas_limit, 814661);
+        assert_eq!(legacy.value, U256::ZERO);
+        // verify deposit function selector
+        assert_eq!(
+            &legacy.input.as_ref()[0..4],
+            DEPOSIT_FUNCTION_SELECTOR,
+            "Should call deposit function"
+        );
     }
 }
