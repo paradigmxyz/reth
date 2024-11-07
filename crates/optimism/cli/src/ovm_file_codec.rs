@@ -24,6 +24,7 @@ use reth_primitives::{
 use serde::{Deserialize, Serialize};
 use tokio_util::codec::{Decoder, Encoder};
 
+#[allow(dead_code)]
 /// Specific codec for reading raw block bodies from a file
 /// with optimism-specific signature handling
 pub(crate) struct OvmBlockFileCodec;
@@ -634,17 +635,34 @@ impl Decodable for TransactionSignedEcRecovered {
 
 #[cfg(test)]
 mod tests {
-    use crate::ovm_file_codec::TransactionSigned;
-    use alloy_consensus::TxLegacy;
-    use alloy_primitives::{address, hex, Address, Parity, Signature, TxKind, U256};
-    use alloy_rlp::{Decodable, Encodable};
+    use crate::ovm_file_codec::{
+        Block, BlockBody, OvmBlockFileCodec, TransactionSigned, TransactionSignedEcRecovered,
+    };
+    use alloy_consensus::Header;
+    use alloy_primitives::{address, hex, TxKind, U256};
     use reth_primitives::transaction::Transaction;
-
     const DEPOSIT_FUNCTION_SELECTOR: [u8; 4] = [0xb6, 0xb5, 0x5f, 0x25];
+    use alloy_rlp::{BytesMut, Decodable};
+    use tokio_util::codec::{Decoder, Encoder};
 
     #[test]
-    fn test_decode_deposit_tx() {
-        // This is a deposit transaction from Optimism mainnet
+    fn test_ovm_block_file_codec() {
+        let mut codec = OvmBlockFileCodec;
+        let mut buffer = BytesMut::new();
+
+        assert!(codec.decode(&mut buffer).unwrap().is_none());
+
+        let block = Block { header: Header::default(), body: BlockBody::default() };
+
+        codec.encode(block.clone(), &mut buffer).unwrap();
+
+        let decoded = codec.decode(&mut buffer).unwrap().unwrap();
+        assert_eq!(decoded, block);
+    }
+
+    #[test]
+    fn test_contract_normal_deposit() {
+        // Contract deposit: regular L2 transaction calling deposit() function
         // tx https://optimistic.etherscan.io/getRawTx?tx=0x7860252963a2df21113344f323035ef59648638a571eef742e33d789602c7a1c
 
         let tx_bytes = hex!("f88881f0830f481c830c6e4594a75127121d28a9bf848f3b70e7eea26570aa770080a4b6b55f2500000000000000000000000000000000000000000000000000000000000710b238a0d5c622d92ddf37f9c18a3465a572f74d8b1aeaf50c1cfb10b3833242781fd45fa02c4f1d5819bf8b70bf651e7a063b7db63c55bd336799c6ae3e5bc72ad6ef3def");
@@ -655,16 +673,61 @@ mod tests {
             Transaction::Legacy(legacy) => legacy,
             _ => panic!("Expected legacy transaction for NFT deposit"),
         };
+
         assert_eq!(legacy.to, TxKind::Call(address!("a75127121d28a9bf848f3b70e7eea26570aa7700")));
         assert_eq!(legacy.nonce, 240);
         assert_eq!(legacy.gas_price, 1001500);
         assert_eq!(legacy.gas_limit, 814661);
         assert_eq!(legacy.value, U256::ZERO);
-        // verify deposit function selector
-        assert_eq!(
-            &legacy.input.as_ref()[0..4],
-            DEPOSIT_FUNCTION_SELECTOR,
-            "Should call deposit function"
-        );
+        let input_data = legacy.input.as_ref();
+        assert_eq!(&input_data[0..4], DEPOSIT_FUNCTION_SELECTOR, "Wrong function selector");
+        assert_eq!(legacy.chain_id, Some(10));
+    }
+    #[test]
+    fn test_decode_normal_legacy_tx() {
+        // Normal legacy transaction with standard signature
+        let tx_bytes = hex!("f88881f0830f481c830c6e4594a75127121d28a9bf848f3b70e7eea26570aa770080a4b6b55f2500000000000000000000000000000000000000000000000000000000000710b238a0d5c622d92ddf37f9c18a3465a572f74d8b1aeaf50c1cfb10b3833242781fd45fa02c4f1d5819bf8b70bf651e7a063b7db63c55bd336799c6ae3e5bc72ad6ef3def");
+
+        let decoded = TransactionSigned::decode(&mut &tx_bytes[..]).unwrap();
+
+        let expected_r = U256::from_str_radix(
+            "d5c622d92ddf37f9c18a3465a572f74d8b1aeaf50c1cfb10b3833242781fd45f",
+            16,
+        )
+        .unwrap();
+        let expected_s = U256::from_str_radix(
+            "2c4f1d5819bf8b70bf651e7a063b7db63c55bd336799c6ae3e5bc72ad6ef3def",
+            16,
+        )
+        .unwrap();
+
+        // Verify signature values for normal transaction
+        assert_eq!(decoded.signature.r(), expected_r, "Wrong r value");
+        assert_eq!(decoded.signature.s(), expected_s, "Wrong s value");
+    }
+
+    #[test]
+    fn test_decode_signed_ec_recovered_transaction() {
+        // tx https://optimistic.etherscan.io/getRawTx?tx=0x7860252963a2df21113344f323035ef59648638a571eef742e33d789602c7a1c
+        // This is a properly RLP encoded transaction that includes signature fields
+        let tx_bytes = hex!("f88e830310f1840479e442830f424094eb4378aacdfb7d02a0c9accfac2e90ad545ad62a80a70000053800ac70a8221300000000000049e7c4ebf673a7b663033bf6debe00000000003e97520d38a08f9b10c30337089472b821c408dff35ab37e2d52c4fbf3913f64066009981963a04b5ea18e18b3cc7f808d0e25ea1e138bb5ed193d5b2b24441a77978e3b5f385d");
+        let tx = TransactionSigned::decode(&mut &tx_bytes[..]).unwrap();
+        let recovered = tx.into_ecrecovered().unwrap();
+
+        let decoded =
+            TransactionSignedEcRecovered::decode(&mut &alloy_rlp::encode(&recovered)[..]).unwrap();
+        assert_eq!(recovered, decoded)
+    }
+
+    #[test]
+    fn recover_legacy_singer() {
+        // tx https://optimistic.etherscan.io/getRawTx?tx=0x7860252963a2df21113344f323035ef59648638a571eef742e33d789602c7a1c
+        let tx_bytes = hex!("f88881f0830f481c830c6e4594a75127121d28a9bf848f3b70e7eea26570aa770080a4b6b55f2500000000000000000000000000000000000000000000000000000000000710b238a0d5c622d92ddf37f9c18a3465a572f74d8b1aeaf50c1cfb10b3833242781fd45fa02c4f1d5819bf8b70bf651e7a063b7db63c55bd336799c6ae3e5bc72ad6ef3def");
+        let tx =
+            TransactionSigned::decode_rlp_legacy_transaction(&mut tx_bytes.as_slice()).unwrap();
+        assert!(tx.is_legacy());
+        let sender = tx.recover_signer().unwrap();
+        println!("Sender: {:?}", sender);
+        assert_eq!(sender, address!("6d74af94c8e72805ba3f7ce357a5b12ecb3ad71a"));
     }
 }
