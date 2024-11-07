@@ -6,13 +6,30 @@ use super::common::{
 };
 use reth_trie::updates::TrieUpdates;
 use revm_primitives::{EvmState, B256};
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use std::sync::mpsc::{Receiver, RecvError};
 use tracing::debug;
+
+/// Wrapper for std channel receiver to maintain compatibility with `UnboundedReceiverStream`
+#[allow(dead_code)]
+pub(crate) struct StdReceiverStream {
+    rx: Receiver<EvmState>,
+}
+
+#[allow(dead_code)]
+impl StdReceiverStream {
+    pub(crate) const fn new(rx: Receiver<EvmState>) -> Self {
+        Self { rx }
+    }
+
+    pub(crate) fn recv(&self) -> Result<EvmState, RecvError> {
+        self.rx.recv()
+    }
+}
 
 /// Synchronous implementation of the state root task
 #[allow(dead_code)]
 pub(crate) struct StateRootSyncTask<Factory> {
-    state_stream: UnboundedReceiverStream<EvmState>,
+    state_stream: StdReceiverStream,
     config: StateRootConfig<Factory>,
 }
 
@@ -20,7 +37,7 @@ impl<Factory> StateRootTask for StateRootSyncTask<Factory>
 where
     Factory: Send + 'static,
 {
-    type StateStream = UnboundedReceiverStream<EvmState>;
+    type StateStream = StdReceiverStream;
     type Factory = Factory;
 
     fn new(config: StateRootConfig<Factory>, state_stream: Self::StateStream) -> Self {
@@ -54,9 +71,7 @@ where
     Factory: Send + 'static,
 {
     fn run(self) -> StateRootResult {
-        let mut receiver = self.state_stream.into_inner();
-
-        while let Ok(state) = receiver.try_recv() {
+        while let Ok(state) = self.state_stream.recv() {
             Self::on_state_update(&self.config.consistent_view, &self.config.input, state);
         }
 
