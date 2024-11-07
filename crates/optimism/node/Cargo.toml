@@ -68,9 +68,7 @@ reth-db.workspace = true
 reth-node-builder = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-revm = { workspace = true, features = ["test-utils"] }
-tokio.workspace = true
 alloy-primitives.workspace = true
-alloy-genesis.workspace = true
 op-alloy-consensus.workspace = true
 alloy-signer-local.workspace = true
 alloy-network.workspace = true
