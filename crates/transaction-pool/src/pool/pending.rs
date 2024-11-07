@@ -8,7 +8,7 @@ use crate::{
 };
 use std::{
     cmp::Ordering,
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap},
     ops::Bound::Unbounded,
     sync::Arc,
 };
@@ -252,19 +252,25 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// Updates the independent transaction and highest nonces set, assuming the given transaction
     /// is being _added_ to the pool.
     fn update_independents_and_highest_nonces(&mut self, tx: &PendingTransaction<T>) {
-        if let Some(highest) = self.highest_nonces.get_mut(&tx.transaction.sender_id()) {
-            if highest.transaction.nonce() < tx.transaction.nonce() {
-                *highest = tx.clone();
+        match self.highest_nonces.entry(tx.transaction.sender_id()) {
+            Entry::Occupied(mut entry) => {
+                if entry.get().transaction.nonce() < tx.transaction.nonce() {
+                    *entry.get_mut() = tx.clone();
+                }
             }
-        } else {
-            self.highest_nonces.insert(tx.transaction.sender_id(), tx.clone());
+            Entry::Vacant(entry) => {
+                entry.insert(tx.clone());
+            }
         }
-        if let Some(lowest) = self.independent_transactions.get_mut(&tx.transaction.sender_id()) {
-            if lowest.transaction.nonce() > tx.transaction.nonce() {
-                *lowest = tx.clone();
+        match self.independent_transactions.entry(tx.transaction.sender_id()) {
+            Entry::Occupied(mut entry) => {
+                if entry.get().transaction.nonce() > tx.transaction.nonce() {
+                    *entry.get_mut() = tx.clone();
+                }
             }
-        } else {
-            self.independent_transactions.insert(tx.transaction.sender_id(), tx.clone());
+            Entry::Vacant(entry) => {
+                entry.insert(tx.clone());
+            }
         }
     }
 
