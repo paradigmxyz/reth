@@ -198,8 +198,8 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
     }
 }
 
-/// Wrapper struct that allows to convert BestTransactions (used in tx pool) to PayloadTransactions
-/// (used in block composition).
+/// Wrapper struct that allows to convert [`BestTransactions`] (used in tx pool) to
+/// [`PayloadTransactions`] (used in block composition).
 #[derive(Debug)]
 pub struct BestPayloadTransactions<T, I>
 where
@@ -215,7 +215,7 @@ where
     T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
     I: Iterator<Item = Arc<ValidPoolTransaction<T>>>,
 {
-    /// Create a new BestPayloadTransactions with the given iterator.
+    /// Create a new `BestPayloadTransactions` with the given iterator.
     pub fn new(best: I) -> Self {
         Self { invalid: Default::default(), best }
     }
