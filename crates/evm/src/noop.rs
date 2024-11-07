@@ -4,7 +4,7 @@ use alloy_primitives::BlockNumber;
 use core::fmt::Display;
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
-use reth_primitives::{BlockWithSenders, Receipt};
+use reth_primitives::BlockWithSenders;
 use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderError;
 use revm::State;
@@ -22,7 +22,7 @@ const UNAVAILABLE_FOR_NOOP: &str = "execution unavailable for noop";
 #[non_exhaustive]
 pub struct NoopBlockExecutorProvider;
 
-impl BlockExecutorProvider for NoopBlockExecutorProvider {
+impl BlockExecutorProvider<()> for NoopBlockExecutorProvider {
     type Executor<DB: Database<Error: Into<ProviderError> + Display>> = Self;
 
     type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> = Self;
@@ -42,9 +42,9 @@ impl BlockExecutorProvider for NoopBlockExecutorProvider {
     }
 }
 
-impl<DB> Executor<DB> for NoopBlockExecutorProvider {
+impl<DB> Executor<DB, ()> for NoopBlockExecutorProvider {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-    type Output = BlockExecutionOutput<Receipt>;
+    type Output = BlockExecutionOutput<()>;
     type Error = BlockExecutionError;
 
     fn execute(self, _: Self::Input<'_>) -> Result<Self::Output, Self::Error> {

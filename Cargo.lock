@@ -7469,6 +7469,7 @@ dependencies = [
  "reth-execution-errors",
  "reth-execution-types",
  "reth-metrics",
+ "reth-node-types",
  "reth-primitives",
  "reth-primitives-traits",
  "reth-prune-types",

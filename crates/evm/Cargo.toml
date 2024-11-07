@@ -23,6 +23,7 @@ reth-primitives-traits.workspace = true
 reth-prune-types.workspace = true
 reth-revm.workspace = true
 reth-storage-errors.workspace = true
+reth-node-types.workspace = true
 
 revm.workspace = true
 revm-primitives.workspace = true

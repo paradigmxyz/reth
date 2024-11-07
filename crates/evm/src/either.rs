@@ -2,26 +2,29 @@
 
 use core::fmt::Display;
 
+use alloy_primitives::BlockNumber;
+use reth_execution_errors::BlockExecutionError;
+use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
+use reth_node_types::NodePrimitives;
+use reth_primitives::BlockWithSenders;
+use reth_prune_types::PruneModes;
+use reth_storage_errors::provider::ProviderError;
+use revm_primitives::db::Database;
+
 use crate::{
     execute::{BatchExecutor, BlockExecutorProvider, Executor},
     system_calls::OnStateHook,
 };
-use alloy_primitives::BlockNumber;
-use reth_execution_errors::BlockExecutionError;
-use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
-use reth_primitives::{BlockWithSenders, Receipt};
-use reth_prune_types::PruneModes;
-use reth_storage_errors::provider::ProviderError;
-use revm_primitives::db::Database;
 
 // re-export Either
 pub use futures_util::future::Either;
 use revm::State;
 
-impl<A, B> BlockExecutorProvider for Either<A, B>
+impl<A, B, N> BlockExecutorProvider<N> for Either<A, B>
 where
-    A: BlockExecutorProvider,
-    B: BlockExecutorProvider,
+    A: BlockExecutorProvider<N>,
+    B: BlockExecutorProvider<N>,
+    N: NodePrimitives,
 {
     type Executor<DB: Database<Error: Into<ProviderError> + Display>> =
         Either<A::Executor<DB>, B::Executor<DB>>;
@@ -50,24 +53,27 @@ where
     }
 }
 
-impl<A, B, DB> Executor<DB> for Either<A, B>
+impl<A, B, DB, N> Executor<DB, N> for Either<A, B>
 where
     A: for<'a> Executor<
         DB,
+        N,
         Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
-        Output = BlockExecutionOutput<Receipt>,
+        Output = BlockExecutionOutput<N::Receipt>,
         Error = BlockExecutionError,
     >,
     B: for<'a> Executor<
         DB,
+        N,
         Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
-        Output = BlockExecutionOutput<Receipt>,
+        Output = BlockExecutionOutput<N::Receipt>,
         Error = BlockExecutionError,
     >,
     DB: Database<Error: Into<ProviderError> + Display>,
+    N: NodePrimitives,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-    type Output = BlockExecutionOutput<Receipt>;
+    type Output = BlockExecutionOutput<N::Receipt>;
     type Error = BlockExecutionError;
 
     fn execute(self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {

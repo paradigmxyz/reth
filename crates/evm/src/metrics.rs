@@ -94,7 +94,7 @@ impl ExecutorMetrics {
     /// of accounts, storage slots and bytecodes loaded and updated.
     /// Execute the given block using the provided [`Executor`] and update metrics for the
     /// execution.
-    pub fn execute_metered<'a, E, DB, O, Error>(
+    pub fn execute_metered<'a, E, DB, N, O, Error>(
         &self,
         executor: E,
         input: BlockExecutionInput<'a, BlockWithSenders>,
@@ -103,6 +103,7 @@ impl ExecutorMetrics {
     where
         E: Executor<
             DB,
+            N,
             Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
             Output = BlockExecutionOutput<O>,
             Error = Error,

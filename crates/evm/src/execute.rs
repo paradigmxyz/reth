@@ -6,25 +6,30 @@ pub use reth_execution_errors::{
 };
 pub use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
 pub use reth_storage_errors::provider::ProviderError;
-use revm::db::states::bundle_state::BundleRetention;
 
-use crate::system_calls::OnStateHook;
 use alloc::{boxed::Box, vec::Vec};
+use core::{fmt::Display, marker::PhantomData};
+
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::BlockNumber;
-use core::{fmt::Display, marker::PhantomData};
 use reth_consensus::ConsensusError;
+use reth_node_types::NodePrimitives;
 use reth_primitives::{BlockWithSenders, Receipt};
 use reth_prune_types::PruneModes;
 use reth_revm::batch::BlockBatchRecord;
-use revm::{db::BundleState, State};
+use revm::{
+    db::{states::bundle_state::BundleRetention, BundleState},
+    State,
+};
 use revm_primitives::{db::Database, U256};
+
+use crate::system_calls::OnStateHook;
 
 /// A general purpose executor trait that executes an input (e.g. block) and produces an output
 /// (e.g. state changes and receipts).
 ///
 /// This executor does not validate the output, see [`BatchExecutor`] for that.
-pub trait Executor<DB> {
+pub trait Executor<DB, N> {
     /// The input type for the executor.
     type Input<'a>;
     /// The output type for the executor.
@@ -124,7 +129,7 @@ pub trait BatchExecutor<DB> {
 }
 
 /// A type that can create a new executor for block execution.
-pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
+pub trait BlockExecutorProvider<N: NodePrimitives>: Send + Sync + Clone + Unpin + 'static {
     /// An executor that can execute a single block given a database.
     ///
     /// # Verification
@@ -138,8 +143,9 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     /// the returned state.
     type Executor<DB: Database<Error: Into<ProviderError> + Display>>: for<'a> Executor<
         DB,
+        N,
         Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
-        Output = BlockExecutionOutput<Receipt>,
+        Output = BlockExecutionOutput<N::Receipt>,
         Error = BlockExecutionError,
     >;
 
@@ -268,9 +274,10 @@ impl<F> BasicBlockExecutorProvider<F> {
     }
 }
 
-impl<F> BlockExecutorProvider for BasicBlockExecutorProvider<F>
+impl<F, N> BlockExecutorProvider<N> for BasicBlockExecutorProvider<F>
 where
     F: BlockExecutionStrategyFactory,
+    N: NodePrimitives,
 {
     type Executor<DB: Database<Error: Into<ProviderError> + Display>> =
         BasicBlockExecutor<F::Strategy<DB>, DB>;
@@ -320,13 +327,14 @@ where
     }
 }
 
-impl<S, DB> Executor<DB> for BasicBlockExecutor<S, DB>
+impl<S, DB, N> Executor<DB, N> for BasicBlockExecutor<S, DB>
 where
     S: BlockExecutionStrategy<DB>,
     DB: Database<Error: Into<ProviderError> + Display>,
+    N: NodePrimitives,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-    type Output = BlockExecutionOutput<Receipt>;
+    type Output = BlockExecutionOutput<N::Receipt>;
     type Error = S::Error;
 
     fn execute(mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
@@ -507,9 +515,12 @@ mod tests {
 
     struct TestExecutor<DB>(PhantomData<DB>);
 
-    impl<DB> Executor<DB> for TestExecutor<DB> {
+    impl<DB, N> Executor<DB, N> for TestExecutor<DB>
+    where
+        N: NodePrimitives,
+    {
         type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-        type Output = BlockExecutionOutput<Receipt>;
+        type Output = BlockExecutionOutput<N::Receipt>;
         type Error = BlockExecutionError;
 
         fn execute(self, _input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
