@@ -18,8 +18,8 @@ use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
 use reth_optimism_node::{
     args::RollupArgs,
     node::{
-        OpConsensusBuilder, OpExecutorBuilder, OpNetworkBuilder, OpPayloadBuilder, OpPoolBuilder,
-        OptimismAddOns,
+        OpAddOns, OpConsensusBuilder, OpExecutorBuilder, OpNetworkBuilder, OpPayloadBuilder,
+        OpPoolBuilder,
     },
     utils::optimism_payload_attributes,
     OpEngineTypes, OpNode,
@@ -142,7 +142,7 @@ async fn test_custom_block_priority_config() {
         .with_database(db)
         .with_types_and_provider::<OpNode, BlockchainProvider2<_>>()
         .with_components(build_components(config.chain.chain_id()))
-        .with_add_ons(OptimismAddOns::default())
+        .with_add_ons(OpAddOns::default())
         .launch_with_fn(|builder| {
             let launcher = EngineNodeLauncher::new(
                 tasks.executor(),
