@@ -1676,9 +1676,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
         // The next transaction of this sender
         let on_chain_id = TransactionId::new(transaction.sender_id(), on_chain_nonce);
         {
-            // get all transactions of the sender's account
-            let descendants = self.descendant_txs_mut(&on_chain_id).peekable();
-
             // Tracks the next nonce we expect if the transactions are gapless
             let mut next_nonce = on_chain_id.nonce;
 
@@ -1686,7 +1683,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             let mut has_parked_ancestor = false;
 
             // Traverse all transactions of the sender and update existing transactions
-            for (id, tx) in descendants {
+            for (id, tx) in self.descendant_txs_mut(&on_chain_id) {
                 let current_pool = tx.subpool;
 
                 // If there's a nonce gap, we can shortcircuit
