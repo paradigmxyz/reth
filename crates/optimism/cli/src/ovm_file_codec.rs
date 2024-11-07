@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use tokio_util::codec::{Decoder, Encoder};
 
 #[allow(dead_code)]
-/// Codec for reading raw block bodies from a file
+/// Specific codec for reading raw block bodies from a file
 /// with optimism-specific signature handling
 pub(crate) struct OvmBlockFileCodec;
 
@@ -132,27 +132,6 @@ impl From<Block> for BlockBody {
     }
 }
 
-// To enable the conversion in the file client
-// bodies.insert(block_hash, block.into());
-impl From<Block> for reth_primitives::BlockBody {
-    fn from(block: Block) -> Self {
-        Self {
-            transactions: block
-                .body
-                .transactions
-                .into_iter()
-                .map(|tx| reth_primitives::TransactionSigned {
-                    hash: tx.hash,
-                    signature: tx.signature,
-                    transaction: tx.transaction,
-                })
-                .collect(),
-            ommers: block.body.ommers.into_iter().collect(),
-            withdrawals: block.body.withdrawals,
-        }
-    }
-}
-
 // === impl TransactionSigned ===
 
 impl TransactionSigned {
@@ -180,13 +159,17 @@ impl TransactionSigned {
     /// This can fail for some early ethereum mainnet transactions pre EIP-2, use
     /// [`Self::recover_signer_unchecked`] if you want to recover the signer without ensuring that
     /// the signature has a low `s` value.
+    /// Optimism's Deposit transaction does not have a signature
     pub fn recover_signer(&self) -> Option<Address> {
-        // Optimism's Deposit transaction does not have a signature. Directly return the
-        // `from` address.
-        #[cfg(feature = "optimism")]
+        // For deposit transactions, directly return `from`the ` address
         if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
             return Some(from);
         }
+        // For pre-bedrock system transactions with empty signatures, return zero address
+        if self.is_legacy() && self.signature == TxDeposit::signature() {
+            return Some(Address::ZERO);
+        }
+
         let signature_hash = self.signature_hash();
         recover_signer(&self.signature, signature_hash)
     }
@@ -530,7 +513,6 @@ impl Encodable2718 for TransactionSigned {
             Transaction::Eip7702(set_code_tx) => {
                 set_code_tx.encoded_len_with_signature(&self.signature, false)
             }
-            #[cfg(feature = "optimism")]
             Transaction::Deposit(deposit_tx) => deposit_tx.encoded_len(false),
         }
     }
@@ -560,7 +542,6 @@ impl Decodable2718 for TransactionSigned {
                 let (tx, signature, hash) = TxEip4844::decode_signed_fields(buf)?.into_parts();
                 Ok(Self { transaction: Transaction::Eip4844(tx), signature, hash })
             }
-            #[cfg(feature = "optimism")]
             TxType::Deposit => Ok(Self::from_transaction_and_signature(
                 Transaction::Deposit(TxDeposit::decode(buf)?),
                 TxDeposit::signature(),
@@ -634,9 +615,20 @@ impl Encodable for TransactionSignedEcRecovered {
 impl Decodable for TransactionSignedEcRecovered {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let signed_transaction = TransactionSigned::decode(buf)?;
-        let signer = signed_transaction
-            .recover_signer()
-            .ok_or(RlpError::Custom("Unable to recover decoded transaction signer."))?;
+        let signer = match &signed_transaction.transaction {
+            // For deposit transactions, use from address
+            Transaction::Deposit(TxDeposit { from, .. }) => *from,
+
+            // For system transactions with empty signatures
+            tx if tx.is_legacy() && signed_transaction.signature == TxDeposit::signature() => {
+                Address::ZERO
+            }
+
+            // Normal signature recovery for other type of transactions
+            _ => signed_transaction
+                .recover_signer()
+                .ok_or(RlpError::Custom("Unable to recover decoded transaction signer."))?
+        };
         Ok(Self { signer, signed_transaction })
     }
 }
