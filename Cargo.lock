@@ -8405,7 +8405,6 @@ dependencies = [
  "reth-metrics",
  "reth-payload-primitives",
  "reth-primitives",
- "reth-provider",
  "revm",
  "tokio",
  "tokio-stream",
