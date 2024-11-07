@@ -438,10 +438,9 @@ impl StorageInner {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use reth_chainspec::{ChainHardforks, ChainSpec, EthereumHardfork, ForkCondition};
     use reth_primitives::Transaction;
-
-    use super::*;
 
     #[test]
     fn test_block_hash() {
