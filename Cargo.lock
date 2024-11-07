@@ -6386,37 +6386,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-auto-seal-consensus"
-version = "1.1.1"
-dependencies = [
- "alloy-eips",
- "alloy-primitives",
- "alloy-rpc-types-engine",
- "futures-util",
- "reth-beacon-consensus",
- "reth-chainspec",
- "reth-consensus",
- "reth-engine-primitives",
- "reth-evm",
- "reth-execution-errors",
- "reth-execution-types",
- "reth-network-p2p",
- "reth-network-peers",
- "reth-optimism-consensus",
- "reth-primitives",
- "reth-provider",
- "reth-revm",
- "reth-stages-api",
- "reth-tokio-util",
- "reth-transaction-pool",
- "reth-trie",
- "revm-primitives",
- "tokio",
- "tokio-stream",
- "tracing",
-]
-
-[[package]]
 name = "reth-basic-payload-builder"
 version = "1.1.1"
 dependencies = [
@@ -7924,7 +7893,6 @@ dependencies = [
  "futures",
  "jsonrpsee",
  "rayon",
- "reth-auto-seal-consensus",
  "reth-beacon-consensus",
  "reth-blockchain-tree",
  "reth-chain-state",
@@ -8043,7 +8011,6 @@ dependencies = [
  "futures",
  "rand 0.8.5",
  "reth",
- "reth-auto-seal-consensus",
  "reth-basic-payload-builder",
  "reth-beacon-consensus",
  "reth-chainspec",
@@ -8266,7 +8233,6 @@ dependencies = [
  "op-alloy-rpc-types-engine",
  "parking_lot",
  "reth",
- "reth-auto-seal-consensus",
  "reth-basic-payload-builder",
  "reth-beacon-consensus",
  "reth-chainspec",
