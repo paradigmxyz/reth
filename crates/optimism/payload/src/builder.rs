@@ -356,12 +356,12 @@ where
             },
         };
 
-        let sealed_block = block.seal_slow();
+        let sealed_block = Arc::new(block.seal_slow());
         debug!(target: "payload_builder", ?sealed_block, "sealed built block");
 
         // create the executed block data
         let executed = ExecutedBlock {
-            block: Arc::new(sealed_block.clone()),
+            block: sealed_block.clone(),
             senders: Arc::new(info.executed_senders),
             execution_output: Arc::new(execution_outcome),
             hashed_state: Arc::new(hashed_state),
