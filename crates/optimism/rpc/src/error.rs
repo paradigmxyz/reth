@@ -2,7 +2,7 @@
 
 use alloy_rpc_types::error::EthRpcErrorCode;
 use jsonrpsee_types::error::INTERNAL_ERROR_CODE;
-use reth_optimism_evm::OptimismBlockExecutionError;
+use reth_optimism_evm::OpBlockExecutionError;
 use reth_primitives::revm_primitives::{InvalidTransaction, OptimismInvalidTransaction};
 use reth_rpc_eth_api::AsEthApiError;
 use reth_rpc_eth_types::EthApiError;
@@ -16,7 +16,7 @@ pub enum OpEthApiError {
     Eth(#[from] EthApiError),
     /// EVM error originating from invalid optimism data.
     #[error(transparent)]
-    Evm(#[from] OptimismBlockExecutionError),
+    Evm(#[from] OpBlockExecutionError),
     /// Thrown when calculating L1 gas fee.
     #[error("failed to calculate l1 gas fee")]
     L1BlockFeeError,

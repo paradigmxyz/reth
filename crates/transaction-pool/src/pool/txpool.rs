@@ -1936,15 +1936,14 @@ impl SenderInfo {
 
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::address;
-    use reth_primitives::TxType;
-
     use super::*;
     use crate::{
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory, MockTransactionSet},
         traits::TransactionOrigin,
         SubPoolLimit,
     };
+    use alloy_primitives::address;
+    use reth_primitives::TxType;
 
     #[test]
     fn test_insert_blob() {

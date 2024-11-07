@@ -1,4 +1,4 @@
-use crate::{node::OptimismAddOns, OpNode as OtherOpNode};
+use crate::{OpNode as OtherOpNode};
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, B256};
 use reth::{rpc::types::engine::PayloadAttributes, tasks::TaskManager};
@@ -6,13 +6,15 @@ use reth_e2e_test_utils::{
     transaction::TransactionTestContext, wallet::Wallet, Adapter, NodeHelperType,
 };
 use reth_optimism_chainspec::OpChainSpecBuilder;
-use reth_optimism_payload_builder::{OpBuiltPayload, OpPayloadBuilderAttributes};
+use reth_optimism_node::{
+    node::OpAddOns, OpBuiltPayload, OpNode as OtherOpNode, OpPayloadBuilderAttributes,
+};
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 /// Optimism Node Helper type
-pub type OpNode = NodeHelperType<OtherOpNode, OptimismAddOns<Adapter<OtherOpNode>>>;
+pub(crate) type OpNode = NodeHelperType<OtherOpNode, OpAddOns<Adapter<OtherOpNode>>>;
 
 /// Creates the initial setup with `num_nodes` of the node config, started and connected.
 pub async fn setup(num_nodes: usize) -> eyre::Result<(Vec<OpNode>, TaskManager, Wallet)> {

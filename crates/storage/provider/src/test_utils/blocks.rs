@@ -1,5 +1,5 @@
 //! Dummy blocks and data for tests
-use crate::{DatabaseProviderRW, ExecutionOutcome};
+use crate::{DBProvider, DatabaseProviderRW, ExecutionOutcome};
 use alloy_consensus::{TxLegacy, EMPTY_OMMER_ROOT_HASH};
 use alloy_primitives::{
     b256, hex_literal::hex, map::HashMap, Address, BlockNumber, Bytes, Log, Sealable, TxKind, B256,

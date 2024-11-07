@@ -57,9 +57,8 @@ use std::{
     time::Instant,
 };
 use tokio::sync::{
-    mpsc::{UnboundedReceiver, UnboundedSender},
-    oneshot,
-    oneshot::error::TryRecvError,
+    mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    oneshot::{self, error::TryRecvError},
 };
 use tracing::*;
 
@@ -612,7 +611,7 @@ where
             remove_above_state: VecDeque::new(),
         };
 
-        let (tx, outgoing) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, outgoing) = unbounded_channel();
         let state = EngineApiTreeState::new(
             config.block_buffer_limit(),
             config.max_invalid_header_cache_length(),
@@ -2188,6 +2187,7 @@ where
         let block = block.unseal();
 
         let exec_time = Instant::now();
+
         // TODO: create StateRootTask with the receiving end of a channel and
         // pass the sending end of the channel to the state hook.
         let noop_state_hook = |_result_and_state: &ResultAndState| {};
@@ -2198,6 +2198,7 @@ where
         )?;
 
         trace!(target: "engine::tree", elapsed=?exec_time.elapsed(), ?block_number, "Executed block");
+
         if let Err(err) = self.consensus.validate_block_post_execution(
             &block,
             PostExecutionInput::new(&output.receipts, &output.requests),
@@ -2217,6 +2218,8 @@ where
         trace!(target: "engine::tree", block=?sealed_block.num_hash(), "Calculating block state root");
         let root_time = Instant::now();
         let mut state_root_result = None;
+
+        // TODO: switch to calculate state root using `StateRootTask`.
 
         // We attempt to compute state root in parallel if we are currently not persisting anything
         // to database. This is safe, because the database state cannot change until we
@@ -2305,6 +2308,9 @@ where
         parent_hash: B256,
         hashed_state: &HashedPostState,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
+        // TODO: when we switch to calculate state root using `StateRootTask` this
+        // method can be still useful to calculate the required `TrieInput` to
+        // create the task.
         let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
         let mut input = TrieInput::default();
 
@@ -2607,7 +2613,6 @@ mod tests {
         str::FromStr,
         sync::mpsc::{channel, Sender},
     };
-    use tokio::sync::mpsc::unbounded_channel;
 
     /// This is a test channel that allows you to `release` any value that is in the channel.
     ///
