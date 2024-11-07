@@ -1,5 +1,5 @@
-use alloy_eips::eip4895::Withdrawal;
 use crate::{MessageValidationKind, PayloadAttributes};
+use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::ExecutionPayload;
 
