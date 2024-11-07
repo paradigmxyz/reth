@@ -3306,7 +3306,7 @@ mod tests {
                 on_chain_balance,
                 on_chain_nonce,
             )
-                .unwrap();
+            .unwrap();
         }
 
         let best_txs: Vec<_> = pool.pending().best().map(|tx| *tx.id()).collect();
