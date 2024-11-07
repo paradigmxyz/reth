@@ -36,5 +36,6 @@ tempfile.workspace = true
 
 
 [features]
-default = []
+default = ["std"]
 test-utils = []
+std = ["thiserror/std"]
