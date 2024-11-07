@@ -1,4 +1,7 @@
-use alloy_consensus::{Header, TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
+use alloy_consensus::{
+    transaction::{from_eip155_value, RlpEcdsaTx},
+    Header, TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy,
+};
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
     eip2930::AccessList,
@@ -6,7 +9,8 @@ use alloy_eips::{
 };
 use alloy_primitives::{
     bytes::{Buf, BufMut, BytesMut},
-    keccak256, Address, Bytes, ChainId, Parity, Signature, TxHash, TxKind, B256, U256,
+    keccak256, Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256,
+    U256,
 };
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, RlpDecodable, RlpEncodable};
 use core::mem;
@@ -16,7 +20,7 @@ use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_downloaders::file_client::FileClientError;
 use reth_primitives::{
     transaction::{
-        signature::{recover_signer, recover_signer_unchecked, with_eip155_parity},
+        signature::{recover_signer, recover_signer_unchecked},
         Transaction, TxType, PARALLEL_SENDER_RECOVERY_THRESHOLD,
     },
     Withdrawals,
@@ -304,7 +308,6 @@ impl TransactionSigned {
     pub(crate) fn decode_rlp_legacy_transaction_tuple(
         data: &mut &[u8],
     ) -> alloy_rlp::Result<(TxLegacy, TxHash, Signature)> {
-        // keep this around, so we can use it to calculate the hash
         let original_encoding = *data;
 
         let header = alloy_rlp::Header::decode(data)?;
@@ -326,24 +329,30 @@ impl TransactionSigned {
             chain_id: None,
         };
 
-        let v: Parity = Decodable::decode(data)?;
+        let v: u64 = Decodable::decode(data)?;
         let r: U256 = Decodable::decode(data)?;
         let s: U256 = Decodable::decode(data)?;
 
-        // To replace https://github.com/paradigmxyz/reth/pull/12181/files
-        if matches!(v, Parity::Parity(false)) && r.is_zero() && s.is_zero() {
-            let signature = Signature::new(r, s, Parity::Parity(false));
-            let tx_length = header.payload_length + header.length();
-            let hash = keccak256(&original_encoding[..tx_length]);
-            transaction.chain_id = None;
-            return Ok((transaction, hash, signature));
-        }
-
-        let chain_id = v.chain_id();
-        let signature = Signature::new(r, s, v);
         let tx_length = header.payload_length + header.length();
         let hash = keccak256(&original_encoding[..tx_length]);
+
+        // Handle both pre-bedrock and regular cases
+        let (signature, chain_id) = if v == 0 && r.is_zero() && s.is_zero() {
+            // Pre-bedrock system transactions case
+            (Signature::new(r, s, false), None)
+        } else {
+            // Regular transaction case
+            let (parity, chain_id) = from_eip155_value(v)
+                .ok_or(alloy_rlp::Error::Custom("invalid parity for legacy transaction"))?;
+            (Signature::new(r, s, parity), chain_id)
+        };
+
+        // Set chain ID and verify length
         transaction.chain_id = chain_id;
+        let decoded = remaining_len - data.len();
+        if decoded != transaction_payload_len {
+            return Err(RlpError::UnexpectedLength);
+        }
 
         Ok((transaction, hash, signature))
     }
@@ -498,27 +507,23 @@ impl Encodable2718 for TransactionSigned {
 
     fn encode_2718_len(&self) -> usize {
         match &self.transaction {
-            Transaction::Legacy(legacy_tx) => legacy_tx.encoded_len_with_signature(
-                &with_eip155_parity(&self.signature, legacy_tx.chain_id),
-            ),
+            Transaction::Legacy(legacy_tx) => legacy_tx.eip2718_encoded_length(&self.signature),
             Transaction::Eip2930(access_list_tx) => {
-                access_list_tx.encoded_len_with_signature(&self.signature, false)
+                access_list_tx.eip2718_encoded_length(&self.signature)
             }
             Transaction::Eip1559(dynamic_fee_tx) => {
-                dynamic_fee_tx.encoded_len_with_signature(&self.signature, false)
+                dynamic_fee_tx.eip2718_encoded_length(&self.signature)
             }
-            Transaction::Eip4844(blob_tx) => {
-                blob_tx.encoded_len_with_signature(&self.signature, false)
-            }
+            Transaction::Eip4844(blob_tx) => blob_tx.eip2718_encoded_length(&self.signature),
             Transaction::Eip7702(set_code_tx) => {
-                set_code_tx.encoded_len_with_signature(&self.signature, false)
+                set_code_tx.eip2718_encoded_length(&self.signature)
             }
-            Transaction::Deposit(deposit_tx) => deposit_tx.encoded_len(false),
+            Transaction::Deposit(deposit_tx) => deposit_tx.eip2718_encoded_length(),
         }
     }
 
     fn encode_2718(&self, out: &mut dyn alloy_rlp::BufMut) {
-        self.transaction.encode_with_signature(&self.signature, out, false)
+        self.transaction.eip2718_encode(&self.signature, out)
     }
 }
 
@@ -527,23 +532,23 @@ impl Decodable2718 for TransactionSigned {
         match ty.try_into().map_err(|_| Eip2718Error::UnexpectedType(ty))? {
             TxType::Legacy => Err(Eip2718Error::UnexpectedType(0)),
             TxType::Eip2930 => {
-                let (tx, signature, hash) = TxEip2930::decode_signed_fields(buf)?.into_parts();
+                let (tx, signature, hash) = TxEip2930::rlp_decode_signed(buf)?.into_parts();
                 Ok(Self { transaction: Transaction::Eip2930(tx), signature, hash })
             }
             TxType::Eip1559 => {
-                let (tx, signature, hash) = TxEip1559::decode_signed_fields(buf)?.into_parts();
+                let (tx, signature, hash) = TxEip1559::rlp_decode_signed(buf)?.into_parts();
                 Ok(Self { transaction: Transaction::Eip1559(tx), signature, hash })
             }
             TxType::Eip7702 => {
-                let (tx, signature, hash) = TxEip7702::decode_signed_fields(buf)?.into_parts();
+                let (tx, signature, hash) = TxEip7702::rlp_decode_signed(buf)?.into_parts();
                 Ok(Self { transaction: Transaction::Eip7702(tx), signature, hash })
             }
             TxType::Eip4844 => {
-                let (tx, signature, hash) = TxEip4844::decode_signed_fields(buf)?.into_parts();
+                let (tx, signature, hash) = TxEip4844::rlp_decode_signed(buf)?.into_parts();
                 Ok(Self { transaction: Transaction::Eip4844(tx), signature, hash })
             }
             TxType::Deposit => Ok(Self::from_transaction_and_signature(
-                Transaction::Deposit(TxDeposit::decode(buf)?),
+                Transaction::Deposit(TxDeposit::rlp_decode(buf)?),
                 TxDeposit::signature(),
             )),
         }

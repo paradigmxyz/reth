@@ -1,14 +1,13 @@
 //! Loads and formats OP transaction RPC response.
 
-use alloy_consensus::Transaction as _;
+use alloy_consensus::Signed;
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types::TransactionInfo;
-use op_alloy_consensus::DepositTransaction;
+use op_alloy_consensus::OpTxEnvelope;
 use op_alloy_rpc_types::Transaction;
 use reth_node_api::FullNodeComponents;
-use reth_primitives::TransactionSignedEcRecovered;
+use reth_primitives::{TransactionSigned, TransactionSignedEcRecovered};
 use reth_provider::{BlockReaderIdExt, ReceiptProvider, TransactionsProvider};
-use reth_rpc::eth::EthTxBuilder;
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
     FromEthApiError, FullEthApiTypes, RpcNodeCore, TransactionCompat,
@@ -83,14 +82,25 @@ where
         tx: TransactionSignedEcRecovered,
         tx_info: TransactionInfo,
     ) -> Self::Transaction {
-        let signed_tx = tx.clone().into_signed();
-        let hash = tx.hash;
+        let from = tx.signer();
+        let TransactionSigned { transaction, signature, hash } = tx.into_signed();
 
-        let mut inner = EthTxBuilder.fill(tx, tx_info);
-
-        if signed_tx.is_deposit() {
-            inner.gas_price = Some(signed_tx.max_fee_per_gas())
-        }
+        let inner = match transaction {
+            reth_primitives::Transaction::Legacy(tx) => {
+                Signed::new_unchecked(tx, signature, hash).into()
+            }
+            reth_primitives::Transaction::Eip2930(tx) => {
+                Signed::new_unchecked(tx, signature, hash).into()
+            }
+            reth_primitives::Transaction::Eip1559(tx) => {
+                Signed::new_unchecked(tx, signature, hash).into()
+            }
+            reth_primitives::Transaction::Eip4844(_) => unreachable!(),
+            reth_primitives::Transaction::Eip7702(tx) => {
+                Signed::new_unchecked(tx, signature, hash).into()
+            }
+            reth_primitives::Transaction::Deposit(tx) => OpTxEnvelope::Deposit(tx),
+        };
 
         let deposit_receipt_version = self
             .inner
@@ -100,22 +110,29 @@ where
             .flatten()
             .and_then(|receipt| receipt.deposit_receipt_version);
 
+        let TransactionInfo { block_hash, block_number, index: transaction_index, .. } = tx_info;
+
         Transaction {
-            inner,
-            source_hash: signed_tx.source_hash(),
-            mint: signed_tx.mint(),
-            // only include is_system_tx if true: <https://github.com/ethereum-optimism/op-geth/blob/641e996a2dcf1f81bac9416cb6124f86a69f1de7/internal/ethapi/api.go#L1518-L1518>
-            is_system_tx: (signed_tx.is_deposit() && signed_tx.is_system_transaction())
-                .then_some(true),
+            inner: alloy_rpc_types::Transaction {
+                inner,
+                block_hash,
+                block_number,
+                transaction_index,
+                from,
+            },
             deposit_receipt_version,
         }
     }
 
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
-        tx.inner.input = tx.inner.input.slice(..4);
-    }
-
-    fn tx_type(tx: &Self::Transaction) -> u8 {
-        tx.inner.transaction_type.unwrap_or_default()
+        let input = match &mut tx.inner.inner {
+            OpTxEnvelope::Eip1559(tx) => &mut tx.tx_mut().input,
+            OpTxEnvelope::Eip2930(tx) => &mut tx.tx_mut().input,
+            OpTxEnvelope::Legacy(tx) => &mut tx.tx_mut().input,
+            OpTxEnvelope::Eip7702(tx) => &mut tx.tx_mut().input,
+            OpTxEnvelope::Deposit(tx) => &mut tx.input,
+            _ => return,
+        };
+        *input = input.slice(..4);
     }
 }

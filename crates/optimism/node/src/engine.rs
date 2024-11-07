@@ -15,9 +15,7 @@ use reth_node_api::{
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::{OptimismHardfork, OptimismHardforks};
-use reth_optimism_payload_builder::{
-    builder::decode_eip_1559_params, OpBuiltPayload, OpPayloadBuilderAttributes,
-};
+use reth_optimism_payload_builder::{OpBuiltPayload, OpPayloadBuilderAttributes};
 
 /// The types used in the optimism beacon consensus engine.
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
@@ -151,12 +149,12 @@ where
 
         if self.chain_spec.is_holocene_active_at_timestamp(attributes.payload_attributes.timestamp)
         {
-            let Some(eip_1559_params) = attributes.eip_1559_params else {
-                return Err(EngineObjectValidationError::InvalidParams(
-                    "MissingEip1559ParamsInPayloadAttributes".to_string().into(),
-                ))
-            };
-            let (elasticity, denominator) = decode_eip_1559_params(eip_1559_params);
+            let (elasticity, denominator) =
+                attributes.decode_eip_1559_params().ok_or_else(|| {
+                    EngineObjectValidationError::InvalidParams(
+                        "MissingEip1559ParamsInPayloadAttributes".to_string().into(),
+                    )
+                })?;
             if elasticity != 0 && denominator == 0 {
                 return Err(EngineObjectValidationError::InvalidParams(
                     "Eip1559ParamsDenominatorZero".to_string().into(),

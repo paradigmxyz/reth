@@ -5,7 +5,7 @@ use alloy_rpc_types::{Log, TransactionReceipt};
 use op_alloy_consensus::{
     DepositTransaction, OpDepositReceipt, OpDepositReceiptWithBloom, OpReceiptEnvelope,
 };
-use op_alloy_rpc_types::{receipt::L1BlockInfo, OpTransactionReceipt, OpTransactionReceiptFields};
+use op_alloy_rpc_types::{L1BlockInfo, OpTransactionReceipt, OpTransactionReceiptFields};
 use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::RethL1BlockInfo;

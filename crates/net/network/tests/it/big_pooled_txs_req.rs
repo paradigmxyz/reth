@@ -1,4 +1,4 @@
-use alloy_primitives::{Signature, B256};
+use alloy_primitives::{PrimitiveSignature as Signature, B256};
 use reth_eth_wire::{GetPooledTransactions, PooledTransactions};
 use reth_network::{
     test_utils::{NetworkEventStream, Testnet},

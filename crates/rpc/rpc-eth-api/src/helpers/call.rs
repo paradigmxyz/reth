@@ -5,6 +5,7 @@ use crate::{
     AsEthApiError, FromEthApiError, FromEvmError, FullEthApiTypes, IntoEthApiError, RpcBlock,
     RpcNodeCore,
 };
+use alloy_consensus::BlockHeader;
 use alloy_eips::{eip1559::calc_next_block_base_fee, eip2930::AccessListResult};
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
 use alloy_rpc_types::{
@@ -125,9 +126,9 @@ pub trait EthCall: Call + LoadPendingBlock {
                         let base_fee = if let Some(latest) = blocks.last() {
                             let header = &latest.inner.header;
                             calc_next_block_base_fee(
-                                header.gas_used,
-                                header.gas_limit,
-                                header.base_fee_per_gas.unwrap_or_default(),
+                                header.gas_used(),
+                                header.gas_limit(),
+                                header.base_fee_per_gas().unwrap_or_default(),
                                 base_fee_params,
                             )
                         } else {
@@ -192,19 +193,20 @@ pub trait EthCall: Call + LoadPendingBlock {
                         results.push((env.tx.caller, res.result));
                     }
 
-                    let block = simulate::build_block(
-                        results,
-                        transactions,
-                        &block_env,
-                        parent_hash,
-                        total_difficulty,
-                        return_full_transactions,
-                        &db,
-                        this.tx_resp_builder(),
-                    )?;
+                    let block: SimulatedBlock<RpcBlock<Self::NetworkTypes>> =
+                        simulate::build_block(
+                            results,
+                            transactions,
+                            &block_env,
+                            parent_hash,
+                            total_difficulty,
+                            return_full_transactions,
+                            &db,
+                            this.tx_resp_builder(),
+                        )?;
 
                     parent_hash = block.inner.header.hash;
-                    gas_used += block.inner.header.gas_used;
+                    gas_used += block.inner.header.gas_used();
 
                     blocks.push(block);
                 }

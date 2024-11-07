@@ -1,7 +1,7 @@
 //! Utilities for serving `eth_simulateV1`
 
 use alloy_consensus::{Transaction as _, TxEip4844Variant, TxType, TypedTransaction};
-use alloy_primitives::{Parity, Signature};
+use alloy_primitives::PrimitiveSignature as Signature;
 use alloy_rpc_types::{
     simulate::{SimCallResult, SimulateError, SimulatedBlock},
     Block, BlockTransactionsKind,
@@ -133,8 +133,7 @@ where
         };
 
         // Create an empty signature for the transaction.
-        let signature =
-            Signature::new(Default::default(), Default::default(), Parity::Parity(false));
+        let signature = Signature::new(Default::default(), Default::default(), false);
 
         let tx = match tx {
             TypedTransaction::Legacy(tx) => {
@@ -170,7 +169,7 @@ where
 }
 
 /// Handles outputs of the calls execution and builds a [`SimulatedBlock`].
-#[expect(clippy::too_many_arguments)]
+#[expect(clippy::complexity)]
 pub fn build_block<T: TransactionCompat>(
     results: Vec<(Address, ExecutionResult)>,
     transactions: Vec<TransactionSigned>,
@@ -306,6 +305,6 @@ pub fn build_block<T: TransactionCompat>(
     let txs_kind =
         if full_transactions { BlockTransactionsKind::Full } else { BlockTransactionsKind::Hashes };
 
-    let block = from_block(block, total_difficulty, txs_kind, None, tx_resp_builder)?;
+    let block = from_block::<T>(block, total_difficulty, txs_kind, None, tx_resp_builder)?;
     Ok(SimulatedBlock { inner: block, calls })
 }

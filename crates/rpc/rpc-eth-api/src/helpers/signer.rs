@@ -1,7 +1,7 @@
 //! An abstraction over ethereum signers.
 
 use alloy_dyn_abi::TypedData;
-use alloy_primitives::{Address, Signature};
+use alloy_primitives::{Address, PrimitiveSignature as Signature};
 use alloy_rpc_types_eth::TransactionRequest;
 use dyn_clone::DynClone;
 use reth_primitives::TransactionSigned;
