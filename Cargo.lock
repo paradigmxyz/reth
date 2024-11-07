@@ -8417,7 +8417,7 @@ version = "1.1.1"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
- "alloy-rpc-types",
+ "alloy-rpc-types-engine",
  "async-trait",
  "op-alloy-rpc-types-engine",
  "pin-project",
