@@ -1,9 +1,6 @@
 //! Async state root task implementation.
 
-use super::common::{
-    create_result_channel, send_result, StateRootConfig, StateRootHandle, StateRootResult,
-    StateRootTask,
-};
+use super::common::{StateRootConfig, StateRootHandle, StateRootResult, StateRootTask};
 use futures::Stream;
 use pin_project::pin_project;
 use reth_trie::updates::TrieUpdates;
@@ -11,6 +8,7 @@ use revm_primitives::{EvmState, B256};
 use std::{
     future::Future,
     pin::Pin,
+    sync::mpsc,
     task::{Context, Poll},
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -37,12 +35,12 @@ where
     }
 
     fn spawn(self) -> StateRootHandle {
-        let (tx, rx) = create_result_channel();
+        let (tx, rx) = mpsc::channel();
 
         tokio::spawn(async move {
             debug!(target: "engine::tree", "Starting async state root task");
             let result = self.await;
-            send_result(tx, result);
+            let _ = tx.send(result);
         });
 
         StateRootHandle::new(rx)

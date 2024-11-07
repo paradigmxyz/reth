@@ -1,12 +1,9 @@
 //! Sync state root task implementation.
 
-use super::common::{
-    create_result_channel, send_result, StateRootConfig, StateRootHandle, StateRootResult,
-    StateRootTask,
-};
+use super::common::{StateRootConfig, StateRootHandle, StateRootResult, StateRootTask};
 use reth_trie::updates::TrieUpdates;
 use revm_primitives::{EvmState, B256};
-use std::sync::mpsc::{Receiver, RecvError};
+use std::sync::mpsc::{self, Receiver, RecvError};
 use tracing::debug;
 
 /// Wrapper for std channel receiver to maintain compatibility with `UnboundedReceiverStream`
@@ -45,11 +42,11 @@ where
     }
 
     fn spawn(self) -> StateRootHandle {
-        let (tx, rx) = create_result_channel();
+        let (tx, rx) = mpsc::channel();
         rayon::spawn(move || {
             debug!(target: "engine::tree", "Starting sync state root task");
             let result = self.run();
-            send_result(tx, result);
+            let _ = tx.send(result);
         });
 
         StateRootHandle::new(rx)

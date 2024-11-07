@@ -60,16 +60,3 @@ pub(crate) trait StateRootTask: Sized {
         _state: EvmState,
     );
 }
-
-/// Helper function to create and send a result through the channel
-#[allow(dead_code)]
-pub(crate) fn send_result(tx: mpsc::Sender<StateRootResult>, result: StateRootResult) {
-    let _ = tx.send(result);
-}
-
-/// Creates a channel pair for state root results
-#[allow(dead_code)]
-pub(crate) fn create_result_channel(
-) -> (mpsc::Sender<StateRootResult>, mpsc::Receiver<StateRootResult>) {
-    mpsc::channel()
-}
