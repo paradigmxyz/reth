@@ -37,4 +37,4 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [features]
-optimism = ["dep:op-alloy-rpc-types-engine"]
+op = ["dep:op-alloy-rpc-types-engine"]
