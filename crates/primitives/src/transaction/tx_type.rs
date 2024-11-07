@@ -231,7 +231,7 @@ mod tests {
     #[case(U64::from(EIP1559_TX_TYPE_ID), Ok(TxType::Eip1559))]
     #[case(U64::from(EIP4844_TX_TYPE_ID), Ok(TxType::Eip4844))]
     #[case(U64::from(EIP7702_TX_TYPE_ID), Ok(TxType::Eip7702))]
-    #[cfg_attr(feature = "optimism", case(DEPOSIT_TX_TYPE_ID, Ok(TxType::Deposit)))]
+    #[cfg_attr(feature = "optimism", case(U64::from(DEPOSIT_TX_TYPE_ID), Ok(TxType::Deposit)))]
     #[case(U64::MAX, Err("invalid tx type"))]
     fn test_u64_to_tx_type(#[case] input: U64, #[case] expected: Result<TxType, &'static str>) {
         let tx_type_result = TxType::try_from(input);
