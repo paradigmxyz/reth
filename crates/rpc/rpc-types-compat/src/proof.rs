@@ -28,8 +28,10 @@ pub fn from_primitive_account_proof(
         storage_proof: proof
             .storage_proofs
             .into_iter()
-            .zip(slots)
-            .map(|(proof, slot)| from_primitive_storage_proof(proof, slot))
+            .filter_map(|proof| {
+                let input_slot = slots.iter().find(|s| s.as_b256() == proof.key)?;
+                Some(from_primitive_storage_proof(proof, *input_slot))
+            })
             .collect(),
     }
 }
