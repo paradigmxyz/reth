@@ -105,11 +105,6 @@ impl<T: TransactionOrdering> PendingPool<T> {
         BestTransactions {
             all: self.by_id.clone(),
             independent: self.independent_transactions.values().cloned().collect(),
-            lowest_nonces: self
-                .independent_transactions
-                .iter()
-                .map(|(id, tx)| (*id, tx.transaction.nonce()))
-                .collect(),
             invalid: Default::default(),
             new_transaction_receiver: Some(self.new_transaction_notifier.subscribe()),
             skip_blobs: false,
@@ -146,8 +141,12 @@ impl<T: TransactionOrdering> PendingPool<T> {
             submission_id += 1;
             debug_assert!(!best.all.contains_key(tx.id()), "transaction already included");
             let priority = self.ordering.priority(&tx.transaction, base_fee);
+            let tx_id = *tx.id();
             let transaction = PendingTransaction { submission_id, transaction: tx, priority };
-            best.add_transaction(transaction);
+            if best.ancestor(&tx_id).is_none() {
+                best.independent.insert(transaction.clone());
+            }
+            best.all.insert(tx_id, transaction);
         }
 
         best

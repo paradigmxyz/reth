@@ -6,7 +6,7 @@ use crate::{
 use alloy_primitives::Address;
 use core::fmt;
 use std::{
-    collections::{btree_map::Entry, BTreeMap, BTreeSet, HashSet, VecDeque},
+    collections::{BTreeMap, BTreeSet, HashSet, VecDeque},
     sync::Arc,
 };
 use tokio::sync::broadcast::{error::TryRecvError, Receiver};
@@ -79,8 +79,6 @@ pub(crate) struct BestTransactions<T: TransactionOrdering> {
     /// Once an `independent` transaction with the nonce `N` is returned, it unlocks `N+1`, which
     /// then can be moved from the `all` set to the `independent` set.
     pub(crate) independent: BTreeSet<PendingTransaction<T>>,
-    /// Mapping from sender to lowest nonce of its transactions in the pool
-    pub(crate) lowest_nonces: BTreeMap<SenderId, u64>,
     /// There might be the case where a yielded transactions is invalid, this will track it.
     pub(crate) invalid: HashSet<SenderId>,
     /// Used to receive any new pending transactions that have been added to the pool after this
@@ -97,6 +95,14 @@ impl<T: TransactionOrdering> BestTransactions<T> {
     /// Mark the transaction and it's descendants as invalid.
     pub(crate) fn mark_invalid(&mut self, tx: &Arc<ValidPoolTransaction<T::Transaction>>) {
         self.invalid.insert(tx.sender_id());
+    }
+
+    /// Returns the ancestor the given transaction, the transaction with `nonce - 1`.
+    ///
+    /// Note: for a transaction with nonce higher than the current on chain nonce this will always
+    /// return an ancestor since all transaction in this pool are gapless.
+    pub(crate) fn ancestor(&self, id: &TransactionId) -> Option<&PendingTransaction<T>> {
+        self.all.get(&id.unchecked_ancestor()?)
     }
 
     /// Non-blocking read on the new pending transactions subscription channel
@@ -122,45 +128,25 @@ impl<T: TransactionOrdering> BestTransactions<T> {
         }
     }
 
-    /// Adds a transaction to the set. If transaction has lower nonce than the current lowest nonce
-    /// for the sender, it will be moved to the `independent` set.
-    pub(crate) fn add_transaction(&mut self, tx: PendingTransaction<T>) {
-        let sender = tx.transaction.sender_id();
-        match self.lowest_nonces.entry(sender) {
-            Entry::Vacant(entry) => {
-                entry.insert(tx.transaction.nonce());
-                self.independent.insert(tx.clone());
-            }
-            Entry::Occupied(mut entry) => {
-                let current_min = entry.get();
-                if current_min >= &tx.transaction.nonce() {
-                    if let Some(prev) = self.all.get(&TransactionId { sender, nonce: *current_min })
-                    {
-                        self.independent.remove(prev);
-                    }
-                    *entry.get_mut() = tx.transaction.nonce();
-                    self.independent.insert(tx.clone());
-                }
-            }
-        };
-        self.all.insert(*tx.transaction.id(), tx);
-    }
-
     /// Removes the currently best independent transaction from the independent set and the total
     /// set.
     fn pop_best(&mut self) -> Option<PendingTransaction<T>> {
         self.independent.pop_last().inspect(|best| {
-            self.lowest_nonces.remove(&best.transaction.sender_id());
             let removed = self.all.remove(best.transaction.id());
             debug_assert!(removed.is_some(), "must be present in both sets");
-        });
+        })
     }
 
     /// Checks for new transactions that have come into the `PendingPool` after this iterator was
     /// created and inserts them
     fn add_new_transactions(&mut self) {
         while let Some(pending_tx) = self.try_recv() {
-            self.add_transaction(pending_tx);
+            //  same logic as PendingPool::add_transaction/PendingPool::best_with_unlocked
+            let tx_id = *pending_tx.transaction.id();
+            if self.ancestor(&tx_id).is_none() {
+                self.independent.insert(pending_tx.clone());
+            }
+            self.all.insert(tx_id, pending_tx);
         }
     }
 }
@@ -206,8 +192,6 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
             // Insert transactions that just got unlocked.
             if let Some(unlocked) = self.all.get(&best.unlocks()) {
                 self.independent.insert(unlocked.clone());
-                self.lowest_nonces
-                    .insert(unlocked.transaction.sender_id(), unlocked.transaction.nonce());
             }
 
             if self.skip_blobs && best.transaction.transaction.is_eip4844() {
