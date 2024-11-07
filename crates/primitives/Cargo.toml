@@ -79,6 +79,7 @@ proptest.workspace = true
 rand.workspace = true
 serde_json.workspace = true
 test-fuzz.workspace = true
+rstest.workspace = true
 
 criterion.workspace = true
 pprof = { workspace = true, features = [
