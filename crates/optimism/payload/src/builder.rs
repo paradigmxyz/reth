@@ -29,7 +29,7 @@ use reth_transaction_pool::{
 use reth_trie::HashedPostState;
 use revm::{
     db::{states::bundle_state::BundleRetention, State},
-    primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
+    primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState, TxEnv},
     Database, DatabaseCommit,
 };
 use tracing::{debug, trace, warn};
@@ -636,6 +636,13 @@ where
     {
         let mut info = ExecutionInfo::with_capacity(self.attributes().transactions.len());
 
+        let env = EnvWithHandlerCfg::new_with_cfg_env(
+            self.initialized_cfg.clone(),
+            self.initialized_block_env.clone(),
+            TxEnv::default(),
+        );
+        let mut evm = self.evm_config.evm_with_env(&mut *db, env);
+
         for sequencer_tx in &self.attributes().transactions {
             // A sequencer's block should never contain blob transactions.
             if sequencer_tx.value().is_eip4844() {
@@ -660,7 +667,8 @@ where
             // nonces, so we don't need to touch the DB for those.
             let depositor = (self.is_regolith_active() && sequencer_tx.is_deposit())
                 .then(|| {
-                    db.load_cache_account(sequencer_tx.signer())
+                    evm.db_mut()
+                        .load_cache_account(sequencer_tx.signer())
                         .map(|acc| acc.account_info().unwrap_or_default())
                 })
                 .transpose()
@@ -670,13 +678,7 @@ where
                     ))
                 })?;
 
-            let env = EnvWithHandlerCfg::new_with_cfg_env(
-                self.initialized_cfg.clone(),
-                self.initialized_block_env.clone(),
-                self.evm_config.tx_env(sequencer_tx.as_signed(), sequencer_tx.signer()),
-            );
-
-            let mut evm = self.evm_config.evm_with_env(&mut *db, env);
+            *evm.tx_mut() = self.evm_config.tx_env(sequencer_tx.as_signed(), sequencer_tx.signer());
 
             let ResultAndState { result, state } = match evm.transact() {
                 Ok(res) => res,
@@ -694,10 +696,8 @@ where
                 }
             };
 
-            // to release the db reference drop evm.
-            drop(evm);
             // commit changes
-            db.commit(state);
+            evm.db_mut().commit(state);
 
             let gas_used = result.gas_used();
 
@@ -738,6 +738,14 @@ where
     {
         let block_gas_limit = self.block_gas_limit();
         let base_fee = self.base_fee();
+
+        let env = EnvWithHandlerCfg::new_with_cfg_env(
+            self.initialized_cfg.clone(),
+            self.initialized_block_env.clone(),
+            TxEnv::default(),
+        );
+        let mut evm = self.evm_config.evm_with_env(&mut *db, env);
+
         while let Some(pool_tx) = best_txs.next() {
             // ensure we still have capacity for this transaction
             if info.cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
@@ -761,14 +769,9 @@ where
 
             // convert tx to a signed transaction
             let tx = pool_tx.to_recovered_transaction();
-            let env = EnvWithHandlerCfg::new_with_cfg_env(
-                self.initialized_cfg.clone(),
-                self.initialized_block_env.clone(),
-                self.evm_config.tx_env(tx.as_signed(), tx.signer()),
-            );
 
-            // Configure the environment for the block.
-            let mut evm = self.evm_config.evm_with_env(&mut *db, env);
+            // Configure the environment for the tx.
+            *evm.tx_mut() = self.evm_config.tx_env(tx.as_signed(), tx.signer());
 
             let ResultAndState { result, state } = match evm.transact() {
                 Ok(res) => res,
@@ -794,10 +797,9 @@ where
                     }
                 }
             };
-            // drop evm so db is released.
-            drop(evm);
+
             // commit changes
-            db.commit(state);
+            evm.db_mut().commit(state);
 
             let gas_used = result.gas_used();
 
