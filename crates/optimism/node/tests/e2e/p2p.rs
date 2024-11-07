@@ -38,7 +38,7 @@ async fn can_sync() -> eyre::Result<()> {
         )
         .await?;
     // We send FCU twice to ensure that pool receives canonical chain update on the second FCU
-    // This is required because notications are not sent during backfill sync
+    // This is required because notifications are not sent during backfill sync
     second_node
         .engine_api
         .update_optimistic_forkchoice(canonical_chain[tip_index - reorg_depth])
