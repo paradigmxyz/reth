@@ -1,4 +1,3 @@
-use crate::file_client::FileClientError;
 use alloy_consensus::{Header, TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
@@ -14,6 +13,7 @@ use core::mem;
 use derive_more::{AsRef, Deref};
 use op_alloy_consensus::TxDeposit;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+use reth_downloaders::file_client::FileClientError;
 use reth_primitives::{
     transaction::{
         signature::{recover_signer, recover_signer_unchecked, with_eip155_parity},
@@ -24,6 +24,7 @@ use reth_primitives::{
 use serde::{Deserialize, Serialize};
 use tokio_util::codec::{Decoder, Encoder};
 
+#[allow(dead_code)]
 /// Codec for reading raw block bodies from a file
 /// with optimism-specific signature handling
 pub(crate) struct OvmBlockFileCodec;

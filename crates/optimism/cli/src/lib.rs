@@ -27,9 +27,11 @@ pub mod commands;
 /// made for op-erigon's import needs).
 pub mod receipt_file_codec;
 
+/// #[cfg(feature = "optimism")]
 /// OVM block, same as EVM block at bedrock, except for signature of deposit transaction
 /// not having a signature back then.
-/// `pub mod ovm_file_codec`;
+/// Enables decoding and encoding `Block` types within file contexts.
+pub mod ovm_file_codec;
 /// Move back to net/downloader to avoid circular dependency
 /// TODO: needs to double check it was not possible to keep it in the cli crate
 pub use commands::{import::ImportOpCommand, import_receipts::ImportReceiptsOpCommand};

@@ -38,12 +38,6 @@ pub mod receipt_file_client;
 /// Enables decoding and encoding `Block` types within file contexts.
 pub mod file_codec;
 
-#[cfg(feature = "optimism")]
-/// OVM Module with a codec for reading and encoding block bodies in files.
-///
-/// Enables decoding and encoding `Block` types within file contexts.
-pub mod ovm_file_codec;
-
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
