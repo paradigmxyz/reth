@@ -1680,9 +1680,12 @@ impl<T: PoolTransaction> AllTransactions<T> {
             let mut next_nonce = on_chain_id.nonce;
 
             // We need to find out if the next transaction of the sender is considered pending
+            // The direct descendant has _no_ parked ancestors because the `on_chain_nonce` is
+            // pending, so we can set this to `false`
             let mut has_parked_ancestor = false;
 
-            // Traverse all transactions of the sender and update existing transactions
+            // Traverse all future transactions of the sender starting with the on chain nonce, and
+            // update existing transactions: `[on_chain_nonce,..]`
             for (id, tx) in self.descendant_txs_mut(&on_chain_id) {
                 let current_pool = tx.subpool;
 
