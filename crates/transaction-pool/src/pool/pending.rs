@@ -4,7 +4,7 @@ use crate::{
         best::{BestTransactions, BestTransactionsWithFees},
         size::SizeTracker,
     },
-    Priority, SubPoolLimit, TransactionOrdering, ValidPoolTransaction,
+    PoolTransaction, Priority, SubPoolLimit, TransactionOrdering, ValidPoolTransaction,
 };
 use std::{
     cmp::Ordering,

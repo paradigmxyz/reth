@@ -136,7 +136,7 @@ impl<T: TransactionOrdering> BestTransactions<T> {
             new_txs.push(pending_tx);
         }
         new_txs.sort_by_key(|tx| tx.transaction.nonce());
-        for tx in new_txs {
+        for pending_tx in new_txs {
             //  same logic as PendingPool::add_transaction/PendingPool::best_with_unlocked
             let tx_id = *pending_tx.transaction.id();
             if self.ancestor(&tx_id).is_none() {
