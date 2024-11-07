@@ -142,7 +142,7 @@ impl PayloadAttributes for EthPayloadAttributes {
     }
 }
 
-#[cfg(feature = "optimism")]
+#[cfg(feature = "op")]
 impl PayloadAttributes for op_alloy_rpc_types_engine::OpPayloadAttributes {
     fn timestamp(&self) -> u64 {
         self.payload_attributes.timestamp
