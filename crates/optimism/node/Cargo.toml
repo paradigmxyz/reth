@@ -56,17 +56,25 @@ parking_lot.workspace = true
 # rpc
 serde_json.workspace = true
 
+# test-utils dependencies
+reth = { workspace = true, optional = true }
+reth-e2e-test-utils = { workspace = true, optional = true }
+alloy-genesis = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+
 [dev-dependencies]
-reth.workspace = true
 reth-db.workspace = true
-reth-e2e-test-utils.workspace = true
 reth-node-builder = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-revm = { workspace = true, features = ["test-utils"] }
+reth-optimism-node = { workspace = true, features = ["test-utils"] }
 tokio.workspace = true
 alloy-primitives.workspace = true
 alloy-genesis.workspace = true
 op-alloy-consensus.workspace = true
+alloy-signer-local.workspace = true
+alloy-network.workspace = true
+alloy-consensus.workspace = true
 
 [features]
 optimism = [
@@ -89,6 +97,10 @@ asm-keccak = [
 	"revm/asm-keccak"
 ]
 test-utils = [
+	"reth",
+	"reth-e2e-test-utils",
+	"alloy-genesis",
+	"tokio",
 	"reth-node-builder/test-utils",
 	"reth-chainspec/test-utils",
 	"reth-consensus/test-utils",
