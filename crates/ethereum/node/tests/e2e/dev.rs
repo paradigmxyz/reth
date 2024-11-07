@@ -1,12 +1,10 @@
 use std::sync::Arc;
 
-use crate::utils::eth_payload_attributes;
 use alloy_genesis::Genesis;
 use alloy_primitives::{b256, hex};
 use futures::StreamExt;
 use reth::{args::DevArgs, rpc::api::eth::helpers::EthTransactions};
 use reth_chainspec::ChainSpec;
-use reth_e2e_test_utils::setup;
 use reth_node_api::FullNodeComponents;
 use reth_node_builder::{
     rpc::RethRpcAddOns, EngineNodeLauncher, FullNode, NodeBuilder, NodeConfig, NodeHandle,
