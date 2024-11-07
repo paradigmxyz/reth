@@ -198,8 +198,8 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
     }
 }
 
-/// Wrapper struct that allows to convert [`BestTransactions`] (used in tx pool) to
-/// [`PayloadTransactions`] (used in block composition).
+/// Wrapper struct that allows to convert `BestTransactions` (used in tx pool) to
+/// `PayloadTransactions` (used in block composition).
 #[derive(Debug)]
 pub struct BestPayloadTransactions<T, I>
 where
