@@ -175,9 +175,9 @@ pub trait BlockExecutorProvider<N: NodePrimitives>: Send + Sync + Clone + Unpin 
 
 /// Helper type for the output of executing a block.
 #[derive(Debug, Clone)]
-pub struct ExecuteOutput {
+pub struct ExecuteOutput<T = reth_primitives::Receipt> {
     /// Receipts obtained after executing a block.
-    pub receipts: Vec<Receipt>,
+    pub receipts: Vec<T>,
     /// Cumulative gas used in the block execution.
     pub gas_used: u64,
 }
