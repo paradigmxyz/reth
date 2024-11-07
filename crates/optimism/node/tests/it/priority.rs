@@ -28,7 +28,7 @@ use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_primitives::{SealedBlock, Transaction, TransactionSigned, TransactionSignedEcRecovered};
 use reth_provider::providers::BlockchainProvider2;
 use reth_transaction_pool::{
-    pool::{PayloadTransactionsChain, PayloadTransactionsFixed},
+    pool::{BestPayloadTransactions, PayloadTransactionsChain, PayloadTransactionsFixed},
     PayloadTransactions,
 };
 use std::sync::Arc;
@@ -73,7 +73,7 @@ impl OpPayloadTransactions for CustomTxPriority {
         );
 
         PayloadTransactionsChain::new(
-            pool.best_transactions_with_attributes(attr),
+            BestPayloadTransactions::new(pool.best_transactions_with_attributes(attr)),
             // Allow 250k gas for the transactions from the pool
             Some(250_000),
             PayloadTransactionsFixed::single(end_of_block_tx),

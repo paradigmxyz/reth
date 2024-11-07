@@ -198,28 +198,47 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
     }
 }
 
-impl<T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>> PayloadTransactions
-    for Box<dyn crate::BestTransactions<Item = Arc<ValidPoolTransaction<T>>>>
+/// Wrapper struct that allows to convert BestTransactions (used in tx pool) to PayloadTransactions
+/// (used in block composition).
+#[derive(Debug)]
+pub struct BestPayloadTransactions<T, I>
+where
+    T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
+    I: Iterator<Item = Arc<ValidPoolTransaction<T>>>,
 {
-    fn next(&mut self, _ctx: ()) -> Option<TransactionSignedEcRecovered> {
-        Iterator::next(self).map(|tx| tx.to_recovered_transaction())
-    }
+    invalid: HashSet<Address>,
+    best: I,
+}
 
-    fn mark_invalid(&mut self, _sender: Address, _nonce: u64) {
-        // TODO: Implement this. Can't use BestTransactions::mark_invalid directly
-        //   because it requires a sender ID.
+impl<T, I> BestPayloadTransactions<T, I>
+where
+    T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
+    I: Iterator<Item = Arc<ValidPoolTransaction<T>>>,
+{
+    /// Create a new BestPayloadTransactions with the given iterator.
+    pub fn new(best: I) -> Self {
+        Self { invalid: Default::default(), best }
     }
 }
 
-#[cfg(any(test, feature = "test-utils"))]
-impl PayloadTransactions
-    for Box<dyn crate::BestTransactions<Item = crate::test_utils::MockTransaction>>
+impl<T, I> PayloadTransactions for BestPayloadTransactions<T, I>
+where
+    T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
+    I: Iterator<Item = Arc<ValidPoolTransaction<T>>>,
 {
     fn next(&mut self, _ctx: ()) -> Option<TransactionSignedEcRecovered> {
-        Iterator::next(self).map(|tx| tx.into())
+        loop {
+            let tx = self.best.next()?;
+            if self.invalid.contains(&tx.sender()) {
+                continue
+            }
+            return Some(tx.to_recovered_transaction())
+        }
     }
 
-    fn mark_invalid(&mut self, _sender: Address, _nonce: u64) {}
+    fn mark_invalid(&mut self, sender: Address, _nonce: u64) {
+        self.invalid.insert(sender);
+    }
 }
 
 /// A [`BestTransactions`](crate::traits::BestTransactions) implementation that filters the
@@ -963,34 +982,27 @@ mod tests {
             priority_pool.add_transaction(Arc::new(valid_prioritized_tx), 0);
         }
 
-        type MockPoolBestTransactions =
-            Box<dyn crate::BestTransactions<Item = Arc<ValidPoolTransaction<MockTransaction>>>>;
-        let priority_pool_best: MockPoolBestTransactions = Box::new(priority_pool.best());
-        let main_pool_best: MockPoolBestTransactions = Box::new(pool.best());
-        let prioritized_main_pool: MockPoolBestTransactions =
-            Box::new(BestTransactionsWithPrioritizedSenders::new(
-                HashSet::from([address_a]),
-                200,
-                BestTransactionsWithPrioritizedSenders::new(
-                    HashSet::from([address_b]),
-                    200,
-                    main_pool_best,
-                ),
-            ));
-
-        let mut block: Box<dyn PayloadTransactions> = Box::new(PayloadTransactionsChain::new(
+        let mut block = PayloadTransactionsChain::new(
             PayloadTransactionsFixed::single(
                 MockTransaction::eip1559().with_sender(address_top_of_block).into(),
             ),
             Some(100),
             PayloadTransactionsChain::new(
-                priority_pool_best,
+                BestPayloadTransactions::new(priority_pool.best()),
                 Some(100),
-                prioritized_main_pool,
+                BestPayloadTransactions::new(BestTransactionsWithPrioritizedSenders::new(
+                    HashSet::from([address_a]),
+                    200,
+                    BestTransactionsWithPrioritizedSenders::new(
+                        HashSet::from([address_b]),
+                        200,
+                        pool.best(),
+                    ),
+                )),
                 None,
             ),
             None,
-        ));
+        );
 
         assert_eq!(block.next(()).unwrap().signer(), address_top_of_block);
         assert_eq!(block.next(()).unwrap().signer(), address_in_priority_pool);

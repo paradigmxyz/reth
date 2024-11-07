@@ -38,6 +38,7 @@ use crate::{
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
 };
 use op_alloy_consensus::DepositTransaction;
+use reth_transaction_pool::pool::BestPayloadTransactions;
 
 /// Optimism's payload builder
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -406,7 +407,7 @@ impl OpPayloadTransactions for () {
         pool: Pool,
         attr: BestTransactionsAttributes,
     ) -> impl PayloadTransactions {
-        pool.best_transactions_with_attributes(attr)
+        BestPayloadTransactions::new(pool.best_transactions_with_attributes(attr))
     }
 }
 
