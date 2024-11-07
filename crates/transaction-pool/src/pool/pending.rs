@@ -4,7 +4,7 @@ use crate::{
         best::{BestTransactions, BestTransactionsWithFees},
         size::SizeTracker,
     },
-    PoolTransaction, Priority, SubPoolLimit, TransactionOrdering, ValidPoolTransaction,
+    Priority, SubPoolLimit, TransactionOrdering, ValidPoolTransaction,
 };
 use std::{
     cmp::Ordering,
@@ -105,6 +105,11 @@ impl<T: TransactionOrdering> PendingPool<T> {
         BestTransactions {
             all: self.by_id.clone(),
             independent: self.independent_transactions.values().cloned().collect(),
+            lowest_nonces: self
+                .independent_transactions
+                .iter()
+                .map(|(id, tx)| (*id, tx.transaction.nonce()))
+                .collect(),
             invalid: Default::default(),
             new_transaction_receiver: Some(self.new_transaction_notifier.subscribe()),
             skip_blobs: false,
@@ -132,22 +137,17 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// if the transaction is already included
     pub(crate) fn best_with_unlocked(
         &self,
-        mut unlocked: Vec<Arc<ValidPoolTransaction<T::Transaction>>>,
+        unlocked: Vec<Arc<ValidPoolTransaction<T::Transaction>>>,
         base_fee: u64,
     ) -> BestTransactions<T> {
         let mut best = self.best();
         let mut submission_id = self.submission_id;
-        unlocked.sort_by_key(|tx| tx.transaction.nonce());
         for tx in unlocked {
             submission_id += 1;
             debug_assert!(!best.all.contains_key(tx.id()), "transaction already included");
             let priority = self.ordering.priority(&tx.transaction, base_fee);
-            let tx_id = *tx.id();
             let transaction = PendingTransaction { submission_id, transaction: tx, priority };
-            if best.ancestor(&tx_id).is_none() {
-                best.independent.insert(transaction.clone());
-            }
-            best.all.insert(tx_id, transaction);
+            best.add_transaction(transaction);
         }
 
         best
