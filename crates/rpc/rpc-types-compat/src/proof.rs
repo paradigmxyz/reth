@@ -7,7 +7,7 @@ use reth_trie_common::{AccountProof, StorageProof};
 /// Creates a new rpc storage proof from a primitive storage proof type.
 pub fn from_primitive_storage_proof(proof: StorageProof) -> EIP1186StorageProof {
     EIP1186StorageProof {
-        key: JsonStorageKey::Hash(proof.key),
+        key: JsonStorageKey::Number(proof.key.into()),
         value: proof.value,
         proof: proof.proof,
     }
