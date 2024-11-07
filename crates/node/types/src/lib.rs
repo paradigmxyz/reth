@@ -10,6 +10,7 @@
 
 pub use reth_primitives_traits::{Block, BlockBody};
 
+use core::fmt;
 use std::marker::PhantomData;
 
 use reth_chainspec::EthChainSpec;
@@ -21,11 +22,11 @@ use reth_engine_primitives::EngineTypes;
 use reth_trie_db::StateCommitment;
 
 /// Configures all the primitive types of the node.
-pub trait NodePrimitives {
+pub trait NodePrimitives: Send + Sync + Default + fmt::Debug + Clone {
     /// Block primitive.
-    type Block;
+    type Block: Send + Sync + Default + fmt::Debug + Clone;
     /// A receipt.
-    type Receipt;
+    type Receipt: Send + Sync + Default + fmt::Debug + Clone;
 }
 
 impl NodePrimitives for () {

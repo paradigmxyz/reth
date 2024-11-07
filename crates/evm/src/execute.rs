@@ -15,6 +15,7 @@ use alloy_primitives::BlockNumber;
 use reth_consensus::ConsensusError;
 use reth_node_types::NodePrimitives;
 use reth_primitives::BlockWithSenders;
+use reth_primitives_traits::Receipt;
 use reth_prune_types::PruneModes;
 use reth_revm::batch::BlockBatchRecord;
 use revm::{
@@ -415,7 +416,7 @@ where
     /// Batch execution strategy.
     pub(crate) strategy: S,
     /// Keeps track of batch execution receipts and requests.
-    pub(crate) batch_record: BlockBatchRecord,
+    pub(crate) batch_record: BlockBatchRecord<N::Receipt>,
     _phantom: PhantomData<(DB, N)>,
 }
 
@@ -426,7 +427,7 @@ where
     N: NodePrimitives,
 {
     /// Creates a new `BasicBatchExecutor` with the given strategy.
-    pub const fn new(strategy: S, batch_record: BlockBatchRecord) -> Self {
+    pub const fn new(strategy: S, batch_record: BlockBatchRecord<N::Receipt>) -> Self {
         Self { strategy, batch_record, _phantom: PhantomData }
     }
 }
@@ -441,7 +442,10 @@ where
     type Output = ExecutionOutcome;
     type Error = BlockExecutionError;
 
-    fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
+    fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error>
+    where
+        N: NodePrimitives<Receipt: Receipt>,
+    {
         let BlockExecutionInput { block, total_difficulty } = input;
 
         if self.batch_record.first_block().is_none() {
