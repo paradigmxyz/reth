@@ -25,7 +25,7 @@ pub enum OpEthApiError {
     L1BlockGasError,
     /// Wrapper for [`revm_primitives::InvalidTransaction`](InvalidTransaction).
     #[error(transparent)]
-    InvalidTransaction(#[from] OptimismInvalidTransactionError),
+    InvalidTransaction(#[from] OpInvalidTransactionError),
     /// Sequencer client error.
     #[error(transparent)]
     Sequencer(#[from] SequencerClientError),
@@ -55,7 +55,7 @@ impl From<OpEthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
 
 /// Optimism specific invalid transaction errors
 #[derive(thiserror::Error, Debug)]
-pub enum OptimismInvalidTransactionError {
+pub enum OpInvalidTransactionError {
     /// A deposit transaction was submitted as a system transaction post-regolith.
     #[error("no system transactions allowed after regolith")]
     DepositSystemTxPostRegolith,
@@ -64,18 +64,18 @@ pub enum OptimismInvalidTransactionError {
     HaltedDepositPostRegolith,
 }
 
-impl From<OptimismInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'static> {
-    fn from(err: OptimismInvalidTransactionError) -> Self {
+impl From<OpInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'static> {
+    fn from(err: OpInvalidTransactionError) -> Self {
         match err {
-            OptimismInvalidTransactionError::DepositSystemTxPostRegolith |
-            OptimismInvalidTransactionError::HaltedDepositPostRegolith => {
+            OpInvalidTransactionError::DepositSystemTxPostRegolith |
+            OpInvalidTransactionError::HaltedDepositPostRegolith => {
                 rpc_err(EthRpcErrorCode::TransactionRejected.code(), err.to_string(), None)
             }
         }
     }
 }
 
-impl TryFrom<InvalidTransaction> for OptimismInvalidTransactionError {
+impl TryFrom<InvalidTransaction> for OpInvalidTransactionError {
     type Error = InvalidTransaction;
 
     fn try_from(err: InvalidTransaction) -> Result<Self, Self::Error> {
