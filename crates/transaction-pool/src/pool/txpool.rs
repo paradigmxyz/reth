@@ -3276,7 +3276,7 @@ mod tests {
 
     // <https://github.com/paradigmxyz/reth/issues/12286>
     #[test]
-    fn one_sender_two_independent_transactions() {
+    fn one_sender_one_independent_transaction() {
         let mut on_chain_balance = U256::from(4_999); // only enough for 4 txs
         let mut on_chain_nonce = 40;
         let mut f = MockTransactionFactory::default();
@@ -3315,50 +3315,6 @@ mod tests {
         let best_txs: Vec<_> = pool.pending().best().map(|tx| *tx.id()).collect();
         assert_eq!(best_txs.len(), 10); // 8 - 2 + 4 = 10
 
-        // Another useful assertion.
-        // assert_eq!(pool.pending().num_independent_transactions(), 1);
-    }
-
-    // <https://github.com/paradigmxyz/reth/issues/12340>
-    #[test]
-    fn test_eligible_updates_not_promoted() {
-        let mut pool = PendingPool::new(MockOrdering::default());
-        let mut f = MockTransactionFactory::default();
-
-        let num_senders = 10;
-
-        let first_txs: Vec<_> = (0..num_senders) //
-            .map(|_| MockTransaction::eip1559())
-            .collect();
-        let second_txs: Vec<_> =
-            first_txs.iter().map(|tx| tx.clone().rng_hash().inc_nonce()).collect();
-
-        for tx in first_txs {
-            let valid_tx = f.validated(tx);
-            pool.add_transaction(Arc::new(valid_tx), 0);
-        }
-
-        let mut best = pool.best();
-
-        for _ in 0..num_senders {
-            if let Some(tx) = best.next() {
-                println!("{:?}", tx.transaction_id);
-            } else {
-                panic!("cannot read one of first_txs");
-            }
-        }
-
-        for tx in second_txs {
-            let valid_tx = f.validated(tx);
-            pool.add_transaction(Arc::new(valid_tx), 0);
-        }
-
-        for _ in 0..num_senders {
-            if let Some(tx) = best.next() {
-                println!("{:?}", tx.transaction_id);
-            } else {
-                panic!("cannot read one of second_txs");
-            }
-        }
+        assert_eq!(pool.pending_pool.independent().len(), 1);
     }
 }

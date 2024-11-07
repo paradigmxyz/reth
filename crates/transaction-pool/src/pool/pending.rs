@@ -312,6 +312,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
         // send the new transaction to any existing pendingpool static file iterators
         if self.new_transaction_notifier.receiver_count() > 0 {
+            dbg!("notify");
             let _ = self.new_transaction_notifier.send(tx.clone());
         }
 
