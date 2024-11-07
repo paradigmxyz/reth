@@ -16,10 +16,9 @@ use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthereumHardforks;
 use reth_evm::{
     execute::{BlockExecutorProvider, Executor},
-    system_calls::SystemCaller,
     ConfigureEvmEnv,
 };
-use reth_primitives::{Block, TransactionSignedEcRecovered};
+use reth_primitives::{Block, SealedBlockWithSenders};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProofProvider, StateProviderFactory,
     TransactionVariant,
@@ -93,54 +92,30 @@ where
     /// Trace the entire block asynchronously
     async fn trace_block(
         &self,
-        at: BlockId,
-        transactions: Vec<TransactionSignedEcRecovered>,
+        block: Arc<SealedBlockWithSenders>,
         cfg: CfgEnvWithHandlerCfg,
         block_env: BlockEnv,
         opts: GethDebugTracingOptions,
-        parent_beacon_block_root: Option<B256>,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
-        if transactions.is_empty() {
-            // nothing to trace
-            return Ok(Vec::new())
-        }
-
         // replay all transactions of the block
         let this = self.clone();
         self.eth_api()
-            .spawn_with_state_at_block(at, move |state| {
-                let block_hash = at.as_block_hash();
-                let mut results = Vec::with_capacity(transactions.len());
+            .spawn_with_state_at_block(block.parent_hash.into(), move |state| {
+                let mut results = Vec::with_capacity(block.body.transactions.len());
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
-                // apply relevant system calls
-                SystemCaller::new(
-                    this.eth_api().evm_config().clone(),
-                    this.eth_api().provider().chain_spec(),
-                )
-                .pre_block_beacon_root_contract_call(
-                    &mut db,
-                    &cfg,
-                    &block_env,
-                    parent_beacon_block_root,
-                )
-                .map_err(|_| {
-                    EthApiError::EvmCustom(
-                        "failed to apply 4788 beacon root system call".to_string(),
-                    )
-                })?;
+                this.eth_api().apply_pre_execution_changes(&block, &mut db, &cfg, &block_env)?;
 
-                let mut transactions = transactions.into_iter().enumerate().peekable();
+                let mut transactions = block.transactions_with_sender().enumerate().peekable();
                 let mut inspector = None;
-                while let Some((index, tx)) = transactions.next() {
+                while let Some((index, (signer, tx))) = transactions.next() {
                     let tx_hash = tx.hash;
 
                     let env = EnvWithHandlerCfg {
                         env: Env::boxed(
                             cfg.cfg_env.clone(),
                             block_env.clone(),
-                            RpcNodeCore::evm_config(this.eth_api())
-                                .tx_env(tx.as_signed(), tx.signer()),
+                            RpcNodeCore::evm_config(this.eth_api()).tx_env(tx, *signer),
                         ),
                         handler_cfg: cfg.handler_cfg,
                     };
@@ -149,7 +124,7 @@ where
                         env,
                         &mut db,
                         Some(TransactionContext {
-                            block_hash,
+                            block_hash: Some(block.hash()),
                             tx_hash: Some(tx_hash),
                             tx_index: Some(index),
                         }),
@@ -186,45 +161,38 @@ where
             .map_err(Eth::Error::from_eth_err)?;
 
         let (cfg, block_env) = self.eth_api().evm_env_for_raw_block(&block.header).await?;
-        // we trace on top the block's parent block
-        let parent = block.parent_hash;
-
-        // we need the beacon block root for a system call
-        let parent_beacon_block_root = block.parent_beacon_block_root;
 
         // Depending on EIP-2 we need to recover the transactions differently
-        let transactions =
-            if self.inner.provider.chain_spec().is_homestead_active_at_block(block.number) {
-                block
-                    .body
-                    .transactions
-                    .into_iter()
-                    .map(|tx| {
-                        tx.into_ecrecovered()
-                            .ok_or(EthApiError::InvalidTransactionSignature)
-                            .map_err(Eth::Error::from_eth_err)
-                    })
-                    .collect::<Result<Vec<_>, Eth::Error>>()?
-            } else {
-                block
-                    .body
-                    .transactions
-                    .into_iter()
-                    .map(|tx| {
-                        tx.into_ecrecovered_unchecked()
-                            .ok_or(EthApiError::InvalidTransactionSignature)
-                            .map_err(Eth::Error::from_eth_err)
-                    })
-                    .collect::<Result<Vec<_>, Eth::Error>>()?
-            };
+        let senders = if self.inner.provider.chain_spec().is_homestead_active_at_block(block.number)
+        {
+            block
+                .body
+                .transactions
+                .iter()
+                .map(|tx| {
+                    tx.recover_signer()
+                        .ok_or(EthApiError::InvalidTransactionSignature)
+                        .map_err(Eth::Error::from_eth_err)
+                })
+                .collect::<Result<Vec<_>, Eth::Error>>()?
+        } else {
+            block
+                .body
+                .transactions
+                .iter()
+                .map(|tx| {
+                    tx.recover_signer_unchecked()
+                        .ok_or(EthApiError::InvalidTransactionSignature)
+                        .map_err(Eth::Error::from_eth_err)
+                })
+                .collect::<Result<Vec<_>, Eth::Error>>()?
+        };
 
         self.trace_block(
-            parent.into(),
-            transactions,
+            Arc::new(block.with_senders_unchecked(senders).seal_slow()),
             cfg,
             block_env,
             opts,
-            parent_beacon_block_root,
         )
         .await
     }
@@ -248,19 +216,8 @@ where
         )?;
 
         let block = block.ok_or(EthApiError::HeaderNotFound(block_id))?;
-        // we need to get the state of the parent block because we're replaying this block on top of
-        // its parent block's state
-        let state_at = block.parent_hash;
 
-        self.trace_block(
-            state_at.into(),
-            (*block).clone().into_transactions_ecrecovered().collect(),
-            cfg,
-            block_env,
-            opts,
-            block.parent_beacon_block_root,
-        )
-        .await
+        self.trace_block(block, cfg, block_env, opts).await
     }
 
     /// Trace the transaction according to the provided options.
@@ -281,7 +238,6 @@ where
         // block the transaction is included in
         let state_at: BlockId = block.parent_hash.into();
         let block_hash = block.hash();
-        let parent_beacon_block_root = block.parent_beacon_block_root;
 
         let this = self.clone();
         self.eth_api()
@@ -293,22 +249,7 @@ where
 
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
-                // apply relevant system calls
-                SystemCaller::new(
-                    this.eth_api().evm_config().clone(),
-                    this.eth_api().provider().chain_spec(),
-                )
-                .pre_block_beacon_root_contract_call(
-                    &mut db,
-                    &cfg,
-                    &block_env,
-                    parent_beacon_block_root,
-                )
-                .map_err(|_| {
-                    EthApiError::EvmCustom(
-                        "failed to apply 4788 beacon root system call".to_string(),
-                    )
-                })?;
+                this.eth_api().apply_pre_execution_changes(&block, &mut db, &cfg, &block_env)?;
 
                 // replay all transactions prior to the targeted transaction
                 let index = this.eth_api().replay_transactions_until(
