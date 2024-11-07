@@ -9,7 +9,7 @@ mod tests;
 use reth_provider::providers::ConsistentDbView;
 use reth_trie::{updates::TrieUpdates, TrieInput};
 use reth_trie_parallel::parallel_root::ParallelStateRootError;
-use revm_primitives::{EvmState, B256};
+use revm_primitives::B256;
 use std::sync::{mpsc, Arc};
 
 /// Result of the state root calculation
@@ -43,26 +43,4 @@ pub(crate) struct StateRootConfig<Factory> {
     pub consistent_view: ConsistentDbView<Factory>,
     /// Latest trie input.
     pub input: Arc<TrieInput>,
-}
-
-/// Trait defining common behavior for state root tasks
-#[allow(dead_code)]
-pub(crate) trait StateRootTask: Sized {
-    /// The type of the state stream used by this task
-    type StateStream;
-    /// The factory type used for database access
-    type Factory: Send + 'static;
-
-    /// Creates a new state root task instance
-    fn new(config: StateRootConfig<Self::Factory>, state_stream: Self::StateStream) -> Self;
-
-    /// Spawns the task and returns a handle to await its result
-    fn spawn(self) -> StateRootHandle;
-
-    /// Handles individual state updates
-    fn on_state_update(
-        _view: &ConsistentDbView<impl Send + 'static>,
-        _input: &Arc<TrieInput>,
-        _state: EvmState,
-    );
 }

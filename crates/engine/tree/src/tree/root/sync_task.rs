@@ -1,6 +1,6 @@
 //! Sync state root task implementation.
 
-use super::{StateRootConfig, StateRootHandle, StateRootResult, StateRootTask};
+use super::{StateRootConfig, StateRootHandle, StateRootResult};
 use reth_trie::updates::TrieUpdates;
 use revm_primitives::{EvmState, B256};
 use std::sync::mpsc::{self, Receiver, RecvError};
@@ -30,18 +30,19 @@ pub(crate) struct StateRootSyncTask<Factory> {
     config: StateRootConfig<Factory>,
 }
 
-impl<Factory> StateRootTask for StateRootSyncTask<Factory>
+#[allow(dead_code)]
+impl<Factory> StateRootSyncTask<Factory>
 where
     Factory: Send + 'static,
 {
-    type StateStream = StdReceiverStream;
-    type Factory = Factory;
-
-    fn new(config: StateRootConfig<Factory>, state_stream: Self::StateStream) -> Self {
+    pub(crate) const fn new(
+        config: StateRootConfig<Factory>,
+        state_stream: StdReceiverStream,
+    ) -> Self {
         Self { config, state_stream }
     }
 
-    fn spawn(self) -> StateRootHandle {
+    pub(crate) fn spawn(self) -> StateRootHandle {
         let (tx, rx) = mpsc::channel();
         rayon::spawn(move || {
             debug!(target: "engine::tree", "Starting sync state root task");

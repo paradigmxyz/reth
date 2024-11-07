@@ -1,6 +1,4 @@
-use super::{
-    async_task::StateRootAsyncTask, sync_task::StateRootSyncTask, StateRootConfig, StateRootTask,
-};
+use super::{async_task::StateRootAsyncTask, sync_task::StateRootSyncTask, StateRootConfig};
 use crate::tree::root::sync_task::StdReceiverStream;
 use reth_provider::{providers::ConsistentDbView, test_utils::MockEthProvider};
 use reth_trie::TrieInput;

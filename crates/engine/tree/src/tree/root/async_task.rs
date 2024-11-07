@@ -1,6 +1,6 @@
 //! Async state root task implementation.
 
-use super::{StateRootConfig, StateRootHandle, StateRootResult, StateRootTask};
+use super::{StateRootConfig, StateRootHandle, StateRootResult};
 use futures::Stream;
 use pin_project::pin_project;
 use reth_trie::updates::TrieUpdates;
@@ -23,18 +23,19 @@ pub(crate) struct StateRootAsyncTask<Factory> {
     config: StateRootConfig<Factory>,
 }
 
-impl<Factory> StateRootTask for StateRootAsyncTask<Factory>
+#[allow(dead_code)]
+impl<Factory> StateRootAsyncTask<Factory>
 where
     Factory: Send + 'static,
 {
-    type StateStream = UnboundedReceiverStream<EvmState>;
-    type Factory = Factory;
-
-    fn new(config: StateRootConfig<Factory>, state_stream: Self::StateStream) -> Self {
+    pub(crate) const fn new(
+        config: StateRootConfig<Factory>,
+        state_stream: UnboundedReceiverStream<EvmState>,
+    ) -> Self {
         Self { config, state_stream }
     }
 
-    fn spawn(self) -> StateRootHandle {
+    pub(crate) fn spawn(self) -> StateRootHandle {
         let (tx, rx) = mpsc::channel();
 
         tokio::spawn(async move {
