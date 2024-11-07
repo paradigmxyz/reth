@@ -143,9 +143,10 @@ where
     }
 }
 
-impl<DB> BlockExecutionStrategy<DB> for CustomExecutorStrategy<DB>
+impl<DB, N> BlockExecutionStrategy<DB, N> for CustomExecutorStrategy<DB>
 where
     DB: Database<Error: Into<ProviderError> + Display>,
+    N: NodePrimitives,
 {
     type Error = BlockExecutionError;
 
@@ -166,7 +167,7 @@ where
         &mut self,
         _block: &BlockWithSenders,
         _total_difficulty: U256,
-    ) -> Result<ExecuteOutput, Self::Error> {
+    ) -> Result<ExecuteOutput<N::Receipt>, Self::Error> {
         Ok(ExecuteOutput { receipts: vec![], gas_used: 0 })
     }
 

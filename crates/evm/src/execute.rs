@@ -14,7 +14,7 @@ use alloy_eips::eip7685::Requests;
 use alloy_primitives::BlockNumber;
 use reth_consensus::ConsensusError;
 use reth_node_types::NodePrimitives;
-use reth_primitives::{BlockWithSenders, Receipt};
+use reth_primitives::BlockWithSenders;
 use reth_prune_types::PruneModes;
 use reth_revm::batch::BlockBatchRecord;
 use revm::{
@@ -183,9 +183,10 @@ pub struct ExecuteOutput<T = reth_primitives::Receipt> {
 }
 
 /// Defines the strategy for executing a single block.
-pub trait BlockExecutionStrategy<DB>
+pub trait BlockExecutionStrategy<DB, N>
 where
     DB: Database,
+    N: NodePrimitives,
 {
     /// The error type returned by this strategy's methods.
     type Error: From<ProviderError> + core::error::Error;
@@ -202,14 +203,14 @@ where
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<ExecuteOutput, Self::Error>;
+    ) -> Result<ExecuteOutput<N::Receipt>, Self::Error>;
 
     /// Applies any necessary changes after executing the block's transactions.
     fn apply_post_execution_changes(
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-        receipts: &[Receipt],
+        receipts: &[N::Receipt],
     ) -> Result<Requests, Self::Error>;
 
     /// Returns a reference to the current state.
@@ -231,7 +232,7 @@ where
     fn validate_block_post_execution(
         &self,
         _block: &BlockWithSenders,
-        _receipts: &[Receipt],
+        _receipts: &[N::Receipt],
         _requests: &Requests,
     ) -> Result<(), ConsensusError> {
         Ok(())
@@ -239,10 +240,13 @@ where
 }
 
 /// A strategy factory that can create block execution strategies.
-pub trait BlockExecutionStrategyFactory: Send + Sync + Clone + Unpin + 'static {
+pub trait BlockExecutionStrategyFactory<N: NodePrimitives>:
+    Send + Sync + Clone + Unpin + 'static
+{
     /// Associated strategy type.
     type Strategy<DB: Database<Error: Into<ProviderError> + Display>>: BlockExecutionStrategy<
         DB,
+        N,
         Error = BlockExecutionError,
     >;
 
@@ -276,14 +280,14 @@ impl<F> BasicBlockExecutorProvider<F> {
 
 impl<F, N> BlockExecutorProvider<N> for BasicBlockExecutorProvider<F>
 where
-    F: BlockExecutionStrategyFactory,
+    F: BlockExecutionStrategyFactory<N>,
     N: NodePrimitives,
 {
     type Executor<DB: Database<Error: Into<ProviderError> + Display>> =
-        BasicBlockExecutor<F::Strategy<DB>, DB>;
+        BasicBlockExecutor<F::Strategy<DB>, DB, N>;
 
     type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> =
-        BasicBatchExecutor<F::Strategy<DB>, DB>;
+        BasicBatchExecutor<F::Strategy<DB>, DB, N>;
 
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
@@ -306,20 +310,22 @@ where
 /// A generic block executor that uses a [`BlockExecutionStrategy`] to
 /// execute blocks.
 #[allow(missing_debug_implementations, dead_code)]
-pub struct BasicBlockExecutor<S, DB>
+pub struct BasicBlockExecutor<S, DB, N>
 where
-    S: BlockExecutionStrategy<DB>,
+    S: BlockExecutionStrategy<DB, N>,
     DB: Database,
+    N: NodePrimitives,
 {
     /// Block execution strategy.
     pub(crate) strategy: S,
-    _phantom: PhantomData<DB>,
+    _phantom: PhantomData<(DB, N)>,
 }
 
-impl<S, DB> BasicBlockExecutor<S, DB>
+impl<S, DB, N> BasicBlockExecutor<S, DB, N>
 where
-    S: BlockExecutionStrategy<DB>,
+    S: BlockExecutionStrategy<DB, N>,
     DB: Database,
+    N: NodePrimitives,
 {
     /// Creates a new `BasicBlockExecutor` with the given strategy.
     pub const fn new(strategy: S) -> Self {
@@ -327,9 +333,9 @@ where
     }
 }
 
-impl<S, DB, N> Executor<DB, N> for BasicBlockExecutor<S, DB>
+impl<S, DB, N> Executor<DB, N> for BasicBlockExecutor<S, DB, N>
 where
-    S: BlockExecutionStrategy<DB>,
+    S: BlockExecutionStrategy<DB, N>,
     DB: Database<Error: Into<ProviderError> + Display>,
     N: NodePrimitives,
 {
@@ -400,22 +406,24 @@ where
 /// A generic batch executor that uses a [`BlockExecutionStrategy`] to
 /// execute batches.
 #[allow(missing_debug_implementations)]
-pub struct BasicBatchExecutor<S, DB>
+pub struct BasicBatchExecutor<S, DB, N>
 where
-    S: BlockExecutionStrategy<DB>,
+    S: BlockExecutionStrategy<DB, N>,
     DB: Database,
+    N: NodePrimitives,
 {
     /// Batch execution strategy.
     pub(crate) strategy: S,
     /// Keeps track of batch execution receipts and requests.
     pub(crate) batch_record: BlockBatchRecord,
-    _phantom: PhantomData<DB>,
+    _phantom: PhantomData<(DB, N)>,
 }
 
-impl<S, DB> BasicBatchExecutor<S, DB>
+impl<S, DB, N> BasicBatchExecutor<S, DB, N>
 where
-    S: BlockExecutionStrategy<DB>,
+    S: BlockExecutionStrategy<DB, N>,
     DB: Database,
+    N: NodePrimitives,
 {
     /// Creates a new `BasicBatchExecutor` with the given strategy.
     pub const fn new(strategy: S, batch_record: BlockBatchRecord) -> Self {
@@ -423,10 +431,11 @@ where
     }
 }
 
-impl<S, DB> BatchExecutor<DB> for BasicBatchExecutor<S, DB>
+impl<S, DB, N> BatchExecutor<DB> for BasicBatchExecutor<S, DB, N>
 where
-    S: BlockExecutionStrategy<DB, Error = BlockExecutionError>,
+    S: BlockExecutionStrategy<DB, N, Error = BlockExecutionError>,
     DB: Database<Error: Into<ProviderError> + Display>,
+    N: NodePrimitives,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
     type Output = ExecutionOutcome;
@@ -576,13 +585,13 @@ mod tests {
         }
     }
 
-    struct TestExecutorStrategy<DB, EvmConfig> {
+    struct TestExecutorStrategy<DB, EvmConfig, N> {
         // chain spec and evm config here only to illustrate how the strategy
         // factory can use them in a real use case.
         _chain_spec: Arc<ChainSpec>,
         _evm_config: EvmConfig,
         state: State<DB>,
-        execute_transactions_result: ExecuteOutput,
+        execute_transactions_result: ExecuteOutput<N::Receipt>,
         apply_post_execution_changes_result: Requests,
         finish_result: BundleState,
     }
@@ -621,9 +630,10 @@ mod tests {
         }
     }
 
-    impl<DB> BlockExecutionStrategy<DB> for TestExecutorStrategy<DB, TestEvmConfig>
+    impl<DB, N> BlockExecutionStrategy<DB, N> for TestExecutorStrategy<DB, TestEvmConfig, N>
     where
         DB: Database,
+        N: NodePrimitives,
     {
         type Error = BlockExecutionError;
 
@@ -639,7 +649,7 @@ mod tests {
             &mut self,
             _block: &BlockWithSenders,
             _total_difficulty: U256,
-        ) -> Result<ExecuteOutput, Self::Error> {
+        ) -> Result<ExecuteOutput<N::Receipt>, Self::Error> {
             Ok(self.execute_transactions_result.clone())
         }
 

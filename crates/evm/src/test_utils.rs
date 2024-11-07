@@ -120,10 +120,11 @@ impl<DB> BatchExecutor<DB> for MockExecutorProvider {
     }
 }
 
-impl<S, DB> BasicBlockExecutor<S, DB>
+impl<S, DB, N> BasicBlockExecutor<S, DB, N>
 where
-    S: BlockExecutionStrategy<DB>,
+    S: BlockExecutionStrategy<DB, N>,
     DB: Database,
+    N: NodePrimitives,
 {
     /// Provides safe read access to the state
     pub fn with_state<F, R>(&self, f: F) -> R
@@ -142,10 +143,11 @@ where
     }
 }
 
-impl<S, DB> BasicBatchExecutor<S, DB>
+impl<S, DB, N> BasicBatchExecutor<S, DB, N>
 where
-    S: BlockExecutionStrategy<DB>,
+    S: BlockExecutionStrategy<DB, N>,
     DB: Database,
+    N: NodePrimitives,
 {
     /// Provides safe read access to the state
     pub fn with_state<F, R>(&self, f: F) -> R
