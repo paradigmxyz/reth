@@ -502,6 +502,11 @@ TxPool:
 
           [default: 1024]
 
+      --txpool.new-txs-notifier <NEW_TRANSACTION_NOTIFIER>
+          Broadcasts new transactions added to the pool
+
+          [default: 200]
+
 Builder:
       --builder.extradata <EXTRADATA>
           Block extra data set by the payload builder

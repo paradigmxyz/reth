@@ -27,6 +27,9 @@ pub const DEFAULT_PRICE_BUMP: u128 = 10;
 /// This enforces that a blob transaction requires a 100% price bump to be replaced
 pub const REPLACE_BLOB_PRICE_BUMP: u128 = 100;
 
+/// Default maximum new transactions for broadcasting.
+pub const NEW_TRANSACTIONS_NOTIFIER: usize = 200;
+
 /// Configuration options for the Transaction pool.
 #[derive(Debug, Clone)]
 pub struct PoolConfig {
@@ -53,6 +56,8 @@ pub struct PoolConfig {
     pub pending_tx_listener_buffer_size: usize,
     /// Bound on number of new transactions from `reth_network::TransactionsManager` to buffer.
     pub new_tx_listener_buffer_size: usize,
+    /// Broadcasts new transactions added to the pool.
+    pub new_transaction_notifier: usize,
 }
 
 impl PoolConfig {
@@ -80,6 +85,7 @@ impl Default for PoolConfig {
             local_transactions_config: Default::default(),
             pending_tx_listener_buffer_size: PENDING_TX_LISTENER_BUFFER_SIZE,
             new_tx_listener_buffer_size: NEW_TX_LISTENER_BUFFER_SIZE,
+            new_transaction_notifier: NEW_TRANSACTIONS_NOTIFIER,
         }
     }
 }

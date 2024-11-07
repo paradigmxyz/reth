@@ -9,7 +9,7 @@ use reth_transaction_pool::{
     pool::{NEW_TX_LISTENER_BUFFER_SIZE, PENDING_TX_LISTENER_BUFFER_SIZE},
     validate::DEFAULT_MAX_TX_INPUT_BYTES,
     LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP,
-    DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS, REPLACE_BLOB_PRICE_BUMP,
+    DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS, NEW_TRANSACTIONS_NOTIFIER, REPLACE_BLOB_PRICE_BUMP,
     TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER, TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
     TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
 };
@@ -86,6 +86,10 @@ pub struct TxPoolArgs {
     /// Maximum number of new transactions to buffer
     #[arg(long = "txpool.max-new-txns", alias = "txpool.max_new_txns", default_value_t = NEW_TX_LISTENER_BUFFER_SIZE)]
     pub new_tx_listener_buffer_size: usize,
+
+    /// Broadcasts new transactions added to the pool.
+    #[arg(long = "txpool.new-txs-notifier", alias = "txpool.new-txns-notifier", default_value_t = NEW_TRANSACTIONS_NOTIFIER)]
+    pub new_transaction_notifier: usize,
 }
 
 impl Default for TxPoolArgs {
@@ -110,6 +114,7 @@ impl Default for TxPoolArgs {
             additional_validation_tasks: DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS,
             pending_tx_listener_buffer_size: PENDING_TX_LISTENER_BUFFER_SIZE,
             new_tx_listener_buffer_size: NEW_TX_LISTENER_BUFFER_SIZE,
+            new_transaction_notifier: NEW_TRANSACTIONS_NOTIFIER,
         }
     }
 }
@@ -148,6 +153,7 @@ impl RethTransactionPoolConfig for TxPoolArgs {
             gas_limit: self.gas_limit,
             pending_tx_listener_buffer_size: self.pending_tx_listener_buffer_size,
             new_tx_listener_buffer_size: self.new_tx_listener_buffer_size,
+            new_transaction_notifier: self.new_transaction_notifier,
         }
     }
 }
