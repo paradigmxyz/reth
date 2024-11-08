@@ -2,11 +2,11 @@
 
 use alloy_consensus::{Transaction as _, TxEip4844Variant, TxType, TypedTransaction};
 use alloy_primitives::PrimitiveSignature as Signature;
-use alloy_rpc_types::{
+use alloy_rpc_types_eth::{
     simulate::{SimCallResult, SimulateError, SimulatedBlock},
+    transaction::TransactionRequest,
     Block, BlockTransactionsKind,
 };
-use alloy_rpc_types_eth::transaction::TransactionRequest;
 use jsonrpsee_types::ErrorObject;
 use reth_primitives::{
     proofs::{calculate_receipt_root, calculate_transaction_root},
@@ -225,7 +225,7 @@ pub fn build_block<T: TransactionCompat>(
                     .into_iter()
                     .map(|log| {
                         log_index += 1;
-                        alloy_rpc_types::Log {
+                        alloy_rpc_types_eth::Log {
                             inner: log,
                             log_index: Some(log_index - 1),
                             transaction_index: Some(transaction_index as u64),

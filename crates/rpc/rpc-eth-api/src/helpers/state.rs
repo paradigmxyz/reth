@@ -4,7 +4,8 @@
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::BlockId;
 use alloy_primitives::{Address, Bytes, B256, U256};
-use alloy_rpc_types::{serde_helpers::JsonStorageKey, Account, EIP1186AccountProofResponse};
+use alloy_rpc_types_eth::{Account, EIP1186AccountProofResponse};
+use alloy_serde::JsonStorageKey;
 use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;

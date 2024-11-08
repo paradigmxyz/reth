@@ -4,7 +4,7 @@
 
 use alloy_eips::BlockNumHash;
 use alloy_primitives::TxHash;
-use alloy_rpc_types::{FilteredParams, Log};
+use alloy_rpc_types_eth::{FilteredParams, Log};
 use reth_chainspec::ChainInfo;
 use reth_errors::ProviderError;
 use reth_primitives::{Receipt, SealedBlockWithSenders};
