@@ -26,14 +26,11 @@ pub trait NodePrimitives {
     type Block;
     /// Signed version of the transaction type.
     type SignedTx;
-    /// Transaction type.
-    type Transaction;
 }
 
 impl NodePrimitives for () {
     type Block = reth_primitives::Block;
     type SignedTx = reth_primitives::TransactionSigned;
-    type Transaction = reth_primitives::Transaction;
 }
 
 /// The type that configures the essential types of an Ethereum-like node.
