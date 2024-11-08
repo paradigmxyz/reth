@@ -1,6 +1,6 @@
 //! Optimism block execution strategy.
 
-use crate::{l1::ensure_create2_deployer, OpEvmConfig, OptimismBlockExecutionError};
+use crate::{l1::ensure_create2_deployer, OpBlockExecutionError, OpEvmConfig};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::Transaction as _;
 use alloy_eips::eip7685::Requests;
@@ -144,7 +144,7 @@ where
         // so we can safely assume that this will always be triggered upon the transition and that
         // the above check for empty blocks will never be hit on OP chains.
         ensure_create2_deployer(self.chain_spec.clone(), block.timestamp, evm.db_mut())
-            .map_err(|_| OptimismBlockExecutionError::ForceCreate2DeployerFail)?;
+            .map_err(|_| OpBlockExecutionError::ForceCreate2DeployerFail)?;
 
         Ok(())
     }
@@ -178,7 +178,7 @@ where
 
             // An optimism block should never contain blob transactions.
             if matches!(transaction.tx_type(), TxType::Eip4844) {
-                return Err(OptimismBlockExecutionError::BlobTransactionRejected.into())
+                return Err(OpBlockExecutionError::BlobTransactionRejected.into())
             }
 
             // Cache the depositor account prior to the state transition for the deposit nonce.
@@ -193,7 +193,7 @@ where
                         .map(|acc| acc.account_info().unwrap_or_default())
                 })
                 .transpose()
-                .map_err(|_| OptimismBlockExecutionError::AccountLoadFailed(*sender))?;
+                .map_err(|_| OpBlockExecutionError::AccountLoadFailed(*sender))?;
 
             self.evm_config.fill_tx_env(evm.tx_mut(), transaction, *sender);
 
@@ -297,12 +297,14 @@ mod tests {
     use super::*;
     use crate::OpChainSpec;
     use alloy_consensus::TxEip1559;
-    use alloy_primitives::{b256, Address, StorageKey, StorageValue};
+    use alloy_primitives::{
+        b256, Address, PrimitiveSignature as Signature, StorageKey, StorageValue,
+    };
     use op_alloy_consensus::TxDeposit;
     use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_evm::execute::{BasicBlockExecutorProvider, BatchExecutor, BlockExecutorProvider};
     use reth_optimism_chainspec::OpChainSpecBuilder;
-    use reth_primitives::{Account, Block, BlockBody, Signature, Transaction, TransactionSigned};
+    use reth_primitives::{Account, Block, BlockBody, Transaction, TransactionSigned};
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, L1_BLOCK_CONTRACT,
     };

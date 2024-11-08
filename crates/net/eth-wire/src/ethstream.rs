@@ -21,6 +21,9 @@ use tracing::{debug, trace};
 // https://github.com/ethereum/go-ethereum/blob/30602163d5d8321fbc68afdcbbaf2362b2641bde/eth/protocols/eth/protocol.go#L50
 pub const MAX_MESSAGE_SIZE: usize = 10 * 1024 * 1024;
 
+/// [`MAX_STATUS_SIZE`] is the maximum cap on the size of the initial status message
+pub(crate) const MAX_STATUS_SIZE: usize = 500 * 1024;
+
 /// An un-authenticated [`EthStream`]. This is consumed and returns a [`EthStream`] after the
 /// `Status` handshake is completed.
 #[pin_project]
@@ -97,7 +100,7 @@ where
             }
         }?;
 
-        if their_msg.len() > MAX_MESSAGE_SIZE {
+        if their_msg.len() > MAX_STATUS_SIZE {
             self.inner.disconnect(DisconnectReason::ProtocolBreach).await?;
             return Err(EthStreamError::MessageTooBig(their_msg.len()))
         }

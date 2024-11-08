@@ -265,7 +265,7 @@ where
 {
     // we need to fetch the account via the `DatabaseRef` to not update the state of the account,
     // which is modified via `Database::basic_ref`
-    let mut account_info = DatabaseRef::basic_ref(db, account)?.unwrap_or_default();
+    let mut account_info = db.basic_ref(account)?.unwrap_or_default();
 
     if let Some(nonce) = account_override.nonce {
         account_info.nonce = nonce;

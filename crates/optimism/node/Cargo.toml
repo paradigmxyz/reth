@@ -16,7 +16,6 @@ reth-chainspec.workspace = true
 reth-engine-local.workspace = true
 reth-primitives.workspace = true
 reth-payload-builder.workspace = true
-reth-auto-seal-consensus.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-consensus.workspace = true
 reth-node-api.workspace = true
@@ -76,7 +75,6 @@ optimism = [
 	"reth-optimism-payload-builder/optimism",
 	"reth-beacon-consensus/optimism",
 	"revm/optimism",
-	"reth-auto-seal-consensus/optimism",
 	"reth-optimism-rpc/optimism",
 	"reth-engine-local/optimism",
 	"reth-optimism-consensus/optimism",

@@ -5,6 +5,7 @@ use alloy_rpc_types::engine::{
 };
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequest, BuilderBlockValidationRequestV2,
+    BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
@@ -20,10 +21,7 @@ use reth_provider::{
     StateProviderFactory, WithdrawalsProvider,
 };
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
-use reth_rpc_api::{
-    BlockSubmissionValidationApiServer, BuilderBlockValidationRequestV3,
-    BuilderBlockValidationRequestV4,
-};
+use reth_rpc_api::BlockSubmissionValidationApiServer;
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_trie::HashedPostState;
@@ -145,18 +143,18 @@ where
 
         if !self.disallow.is_empty() {
             if self.disallow.contains(&block.beneficiary) {
-                return Err(ValidationApiError::Blacklist(block.beneficiary))
+                return Err(ValidationApiError::Blacklist(block.beneficiary));
             }
             if self.disallow.contains(&message.proposer_fee_recipient) {
-                return Err(ValidationApiError::Blacklist(message.proposer_fee_recipient))
+                return Err(ValidationApiError::Blacklist(message.proposer_fee_recipient));
             }
             for (sender, tx) in block.senders.iter().zip(block.transactions()) {
                 if self.disallow.contains(sender) {
-                    return Err(ValidationApiError::Blacklist(*sender))
+                    return Err(ValidationApiError::Blacklist(*sender));
                 }
                 if let Some(to) = tx.to() {
                     if self.disallow.contains(&to) {
-                        return Err(ValidationApiError::Blacklist(to))
+                        return Err(ValidationApiError::Blacklist(to));
                     }
                 }
             }
@@ -170,7 +168,7 @@ where
                 GotExpected { got: block.header.parent_hash, expected: latest_header.hash() }
                     .into(),
             )
-            .into())
+            .into());
         }
         self.consensus.validate_header_against_parent(&block.header, &latest_header)?;
         self.validate_gas_limit(registered_gas_limit, &latest_header, &block.header)?;
@@ -210,7 +208,7 @@ where
         }
 
         if let Some(account) = accessed_blacklisted {
-            return Err(ValidationApiError::Blacklist(account))
+            return Err(ValidationApiError::Blacklist(account));
         }
 
         self.consensus.validate_block_post_execution(
@@ -227,7 +225,7 @@ where
             return Err(ConsensusError::BodyStateRootDiff(
                 GotExpected { got: state_root, expected: block.state_root }.into(),
             )
-            .into())
+            .into());
         }
 
         Ok(())
@@ -258,7 +256,7 @@ where
             return Err(ValidationApiError::GasUsedMismatch(GotExpected {
                 got: message.gas_used,
                 expected: header.gas_used,
-            }))
+            }));
         } else {
             Ok(())
         }
@@ -286,7 +284,7 @@ where
             return Err(ValidationApiError::GasLimitMismatch(GotExpected {
                 got: header.gas_limit,
                 expected: best_gas_limit,
-            }))
+            }));
         }
 
         Ok(())
@@ -324,7 +322,7 @@ where
         }
 
         if balance_after >= balance_before + message.value {
-            return Ok(())
+            return Ok(());
         }
 
         let (receipt, tx) = output
@@ -334,24 +332,24 @@ where
             .ok_or(ValidationApiError::ProposerPayment)?;
 
         if !receipt.success {
-            return Err(ValidationApiError::ProposerPayment)
+            return Err(ValidationApiError::ProposerPayment);
         }
 
         if tx.to() != Some(message.proposer_fee_recipient) {
-            return Err(ValidationApiError::ProposerPayment)
+            return Err(ValidationApiError::ProposerPayment);
         }
 
         if tx.value() != message.value {
-            return Err(ValidationApiError::ProposerPayment)
+            return Err(ValidationApiError::ProposerPayment);
         }
 
         if !tx.input().is_empty() {
-            return Err(ValidationApiError::ProposerPayment)
+            return Err(ValidationApiError::ProposerPayment);
         }
 
         if let Some(block_base_fee) = block.base_fee_per_gas {
             if tx.effective_tip_per_gas(block_base_fee).unwrap_or_default() != 0 {
-                return Err(ValidationApiError::ProposerPayment)
+                return Err(ValidationApiError::ProposerPayment);
             }
         }
 
@@ -366,7 +364,7 @@ where
         if blobs_bundle.commitments.len() != blobs_bundle.proofs.len() ||
             blobs_bundle.commitments.len() != blobs_bundle.blobs.len()
         {
-            return Err(ValidationApiError::InvalidBlobsBundle)
+            return Err(ValidationApiError::InvalidBlobsBundle);
         }
 
         let versioned_hashes = blobs_bundle

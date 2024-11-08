@@ -15,10 +15,10 @@ pub mod args;
 /// Exports optimism-specific implementations of the [`EngineTypes`](reth_node_api::EngineTypes)
 /// trait.
 pub mod engine;
-pub use engine::OptimismEngineTypes;
+pub use engine::OpEngineTypes;
 
 pub mod node;
-pub use node::OptimismNode;
+pub use node::OpNode;
 
 pub mod txpool;
 

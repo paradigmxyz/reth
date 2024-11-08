@@ -2,11 +2,11 @@
 //! previous blocks.
 
 use alloy_consensus::constants::GWEI_TO_WEI;
+use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types::BlockId;
 use derive_more::{Deref, DerefMut, From, Into};
 use itertools::Itertools;
-use reth_primitives::BlockNumberOrTag;
 use reth_rpc_server_types::constants;
 use reth_storage_api::BlockReaderIdExt;
 use schnellru::{ByLength, LruMap};
