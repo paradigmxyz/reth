@@ -86,7 +86,7 @@ pub struct ValidationApiInner<Provider: ChainSpecProvider, E> {
 }
 
 /// The type that implements the `validation` rpc namespace trait
-#[derive(Clone, Debug, derive_more::Deref)]
+#[derive(Debug, derive_more::Deref)]
 pub struct ValidationApi<Provider: ChainSpecProvider, E> {
     #[deref]
     inner: Arc<ValidationApiInner<Provider, E>>,
@@ -127,7 +127,6 @@ where
         + HeaderProvider
         + AccountReader
         + WithdrawalsProvider
-        + Clone
         + 'static,
     E: BlockExecutorProvider,
 {
