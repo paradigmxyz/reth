@@ -8327,6 +8327,7 @@ dependencies = [
  "alloy-rpc-types",
  "alloy-rpc-types-eth",
  "derive_more 1.0.0",
+ "jsonrpsee",
  "jsonrpsee-types",
  "op-alloy-consensus",
  "op-alloy-network",

@@ -16,6 +16,7 @@ pub mod sequencer;
 
 pub use error::{OpEthApiError, OpInvalidTransactionError, SequencerClientError};
 pub use eth::{OpEthApi, OpReceiptBuilder};
+use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use op_alloy_rpc_types_engine::{ProtocolVersion, SuperchainSignal};
 pub use sequencer::SequencerClient;
 
