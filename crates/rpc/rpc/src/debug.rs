@@ -1,7 +1,7 @@
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rlp::{Decodable, Encodable};
-use alloy_rpc_types::{
+use alloy_rpc_types_eth::{
     state::EvmOverrides, Block as RpcBlock, BlockError, Bundle, StateContext, TransactionInfo,
 };
 use alloy_rpc_types_debug::ExecutionWitness;

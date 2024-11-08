@@ -1,6 +1,6 @@
 use alloy_consensus::{BlobTransactionValidationError, EnvKzgSettings, Transaction};
 use alloy_eips::eip4844::kzg_to_versioned_hash;
-use alloy_rpc_types::engine::{
+use alloy_rpc_types_engine::{
     BlobsBundleV1, CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar,
 };
 use alloy_rpc_types_beacon::relay::{

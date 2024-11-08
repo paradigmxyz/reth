@@ -2,7 +2,7 @@
 
 use alloy_consensus::{Signed, Transaction as _, TxEip4844Variant, TxEnvelope};
 use alloy_network::{Ethereum, Network};
-use alloy_rpc_types::{Transaction, TransactionInfo};
+use alloy_rpc_types_eth::{Transaction, TransactionInfo};
 use reth_primitives::{TransactionSigned, TransactionSignedEcRecovered};
 use reth_rpc_types_compat::TransactionCompat;
 
