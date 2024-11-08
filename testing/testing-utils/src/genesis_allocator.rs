@@ -70,8 +70,7 @@ impl<'a> GenesisAllocator<'a> {
     ///
     /// Returns the key pair for the account and the account's address.
     pub fn new_funded_account(&mut self, balance: U256) -> (Keypair, Address) {
-        let secp = &secp256k1::SECP256K1;
-        let pair = Keypair::new(&secp, &mut self.rng);
+        let pair = Keypair::new(&secp256k1::SECP256K1, &mut self.rng);
         let address = public_key_to_address(pair.public_key());
 
         self.alloc.insert(address, GenesisAccount::default().with_balance(balance));
@@ -87,8 +86,7 @@ impl<'a> GenesisAllocator<'a> {
         balance: U256,
         code: Bytes,
     ) -> (Keypair, Address) {
-        let secp = &secp256k1::SECP256K1;
-        let pair = Keypair::new(&secp, &mut self.rng);
+        let pair = Keypair::new(&secp256k1::SECP256K1, &mut self.rng);
         let address = public_key_to_address(pair.public_key());
 
         self.alloc
@@ -105,8 +103,7 @@ impl<'a> GenesisAllocator<'a> {
         balance: U256,
         storage: BTreeMap<B256, B256>,
     ) -> (Keypair, Address) {
-        let secp = &secp256k1::SECP256K1;
-        let pair = Keypair::new(&secp, &mut self.rng);
+        let pair = Keypair::new(&secp256k1::SECP256K1, &mut self.rng);
         let address = public_key_to_address(pair.public_key());
 
         self.alloc.insert(
@@ -125,8 +122,7 @@ impl<'a> GenesisAllocator<'a> {
         code: Bytes,
         storage: BTreeMap<B256, B256>,
     ) -> (Keypair, Address) {
-        let secp = &secp256k1::SECP256K1;
-        let pair = Keypair::new(&secp, &mut self.rng);
+        let pair = Keypair::new(&secp256k1::SECP256K1, &mut self.rng);
         let address = public_key_to_address(pair.public_key());
 
         self.alloc.insert(
@@ -141,8 +137,7 @@ impl<'a> GenesisAllocator<'a> {
     ///
     /// Returns the key pair for the account and the account's address.
     pub fn new_account_with_code(&mut self, code: Bytes) -> (Keypair, Address) {
-        let secp = &secp256k1::SECP256K1;
-        let pair = Keypair::new(&secp, &mut self.rng);
+        let pair = Keypair::new(&secp256k1::SECP256K1, &mut self.rng);
         let address = public_key_to_address(pair.public_key());
 
         self.alloc.insert(address, GenesisAccount::default().with_code(Some(code)));
@@ -162,8 +157,7 @@ impl<'a> GenesisAllocator<'a> {
     ///
     /// Returns the key pair for the account and the account's address.
     pub fn add_account(&mut self, account: GenesisAccount) -> Address {
-        let secp = &secp256k1::SECP256K1;
-        let pair = Keypair::new(&secp, &mut self.rng);
+        let pair = Keypair::new(&secp256k1::SECP256K1, &mut self.rng);
         let address = public_key_to_address(pair.public_key());
 
         self.alloc.insert(address, account);

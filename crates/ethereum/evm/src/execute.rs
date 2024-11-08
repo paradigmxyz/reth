@@ -1053,8 +1053,7 @@ mod tests {
 
         let mut db = create_state_provider_with_withdrawal_requests_contract();
 
-        let secp = &secp256k1::SECP256K1;
-        let sender_key_pair = Keypair::new(&secp, &mut generators::rng());
+        let sender_key_pair = Keypair::new(&secp256k1::SECP256K1, &mut generators::rng());
         let sender_address = public_key_to_address(sender_key_pair.public_key());
 
         db.insert_account(
@@ -1131,10 +1130,8 @@ mod tests {
         // Create a state provider with the withdrawal requests contract pre-deployed
         let mut db = create_state_provider_with_withdrawal_requests_contract();
 
-        // Initialize Secp256k1 for key pair generation
-        let secp = &secp256k1::SECP256K1;
         // Generate a new key pair for the sender
-        let sender_key_pair = Keypair::new(&secp, &mut generators::rng());
+        let sender_key_pair = Keypair::new(&secp256k1::SECP256K1, &mut generators::rng());
         // Get the sender's address from the public key
         let sender_address = public_key_to_address(sender_key_pair.public_key());
 

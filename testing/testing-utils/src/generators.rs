@@ -141,8 +141,7 @@ pub fn random_signed_tx<R: Rng>(rng: &mut R) -> TransactionSigned {
 
 /// Signs the [Transaction] with a random key pair.
 pub fn sign_tx_with_random_key_pair<R: Rng>(rng: &mut R, tx: Transaction) -> TransactionSigned {
-    let secp = &secp256k1::SECP256K1;
-    let key_pair = Keypair::new(&secp, rng);
+    let key_pair = Keypair::new(&secp256k1::SECP256K1, rng);
     sign_tx_with_key_pair(key_pair, tx)
 }
 
@@ -164,8 +163,7 @@ pub fn sign_tx_with_key_pair(key_pair: Keypair, tx: Transaction) -> TransactionS
 
 /// Generates a set of [Keypair]s based on the desired count.
 pub fn generate_keys<R: Rng>(rng: &mut R, count: usize) -> Vec<Keypair> {
-    let secp = &secp256k1::SECP256K1;
-    (0..count).map(|_| Keypair::new(&secp, rng)).collect()
+    (0..count).map(|_| Keypair::new(&secp256k1::SECP256K1, rng)).collect()
 }
 
 /// Generate a random block filled with signed transactions (generated using
@@ -470,8 +468,6 @@ mod tests {
 
     #[test]
     fn test_sign_message() {
-        let secp = &secp256k1::SECP256K1;
-
         let tx = Transaction::Eip1559(TxEip1559 {
             chain_id: 1,
             nonce: 0x42,
@@ -486,7 +482,7 @@ mod tests {
         let signature_hash = tx.signature_hash();
 
         for _ in 0..100 {
-            let key_pair = Keypair::new(&secp, &mut rand::thread_rng());
+            let key_pair = Keypair::new(&secp256k1::SECP256K1, &mut rand::thread_rng());
 
             let signature =
                 sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), signature_hash)
