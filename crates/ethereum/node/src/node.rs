@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use reth_auto_seal_consensus::AutoSealConsensus;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
@@ -26,7 +25,7 @@ use reth_node_builder::{
     BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig, PayloadTypes,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::{Block, Header, TransactionSigned};
+use reth_primitives::{Block, Header, Receipt, TransactionSigned};
 use reth_provider::CanonStateSubscriptions;
 use reth_rpc::EthApi;
 use reth_tracing::tracing::{debug, info};
@@ -45,6 +44,7 @@ pub struct EthPrimitives;
 impl NodePrimitives for EthPrimitives {
     type Block = Block;
     type SignedTx = TransactionSigned;
+    type Receipt = Receipt;
 }
 
 /// Type configuration for a regular Ethereum node.
@@ -335,11 +335,7 @@ where
     type Consensus = Arc<dyn reth_consensus::Consensus>;
 
     async fn build_consensus(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
-        if ctx.is_dev() {
-            Ok(Arc::new(AutoSealConsensus::new(ctx.chain_spec())))
-        } else {
-            Ok(Arc::new(EthBeaconConsensus::new(ctx.chain_spec())))
-        }
+        Ok(Arc::new(EthBeaconConsensus::new(ctx.chain_spec())))
     }
 }
 

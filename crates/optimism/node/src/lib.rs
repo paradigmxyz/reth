@@ -18,7 +18,7 @@ pub mod engine;
 pub use engine::OpEngineTypes;
 
 pub mod node;
-pub use node::OptimismNode;
+pub use node::OpNode;
 
 pub mod txpool;
 

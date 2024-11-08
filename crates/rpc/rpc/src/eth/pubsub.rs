@@ -329,7 +329,7 @@ where
         self.chain_events.canonical_state_stream().flat_map(|new_chain| {
             let headers = new_chain.committed().headers().collect::<Vec<_>>();
             futures::stream::iter(
-                headers.into_iter().map(reth_rpc_types_compat::block::from_primitive_with_hash),
+                headers.into_iter().map(|h| Header::from_consensus(h.into(), None, None)),
             )
         })
     }

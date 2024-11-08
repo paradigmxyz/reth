@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use alloy_consensus::TxEip2930;
-use alloy_primitives::{Bytes, Parity, Signature, TxKind, U256};
+use alloy_primitives::{Bytes, PrimitiveSignature as Signature, TxKind, U256};
 use rand::Rng;
 use reth_eth_wire::HeadersDirection;
 use reth_network::{
@@ -31,7 +31,7 @@ pub fn rng_transaction(rng: &mut impl rand::RngCore) -> TransactionSigned {
         input: Bytes::from(vec![1, 2]),
         access_list: Default::default(),
     });
-    let signature = Signature::new(U256::default(), U256::default(), Parity::Parity(true));
+    let signature = Signature::new(U256::default(), U256::default(), true);
 
     TransactionSigned::from_transaction_and_signature(request, signature)
 }

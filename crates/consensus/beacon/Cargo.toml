@@ -32,7 +32,7 @@ reth-chainspec = { workspace = true, optional = true }
 
 # ethereum
 alloy-primitives.workspace = true
-alloy-rpc-types-engine.workspace = true
+alloy-rpc-types-engine = { workspace = true, features = ["std"] }
 alloy-eips.workspace = true
 
 # async

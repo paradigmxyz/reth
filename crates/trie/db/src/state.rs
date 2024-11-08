@@ -7,16 +7,12 @@ use reth_db_api::{
     transaction::DbTx,
 };
 use reth_execution_errors::StateRootError;
-use reth_primitives::Account;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdates, HashedPostState, HashedStorage, StateRoot, StateRootProgress, TrieInput,
 };
-use std::{
-    collections::{hash_map, HashMap},
-    ops::RangeInclusive,
-};
+use std::{collections::HashMap, ops::RangeInclusive};
 use tracing::debug;
 
 /// Extends [`StateRoot`] with operations specific for working with a database transaction.
@@ -222,13 +218,11 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
 impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostState {
     fn from_reverts(tx: &TX, from: BlockNumber) -> Result<Self, DatabaseError> {
         // Iterate over account changesets and record value before first occurring account change.
-        let mut accounts = HashMap::<Address, Option<Account>>::default();
+        let mut accounts = HashMap::new();
         let mut account_changesets_cursor = tx.cursor_read::<tables::AccountChangeSets>()?;
         for entry in account_changesets_cursor.walk_range(from..)? {
             let (_, AccountBeforeTx { address, info }) = entry?;
-            if let hash_map::Entry::Vacant(entry) = accounts.entry(address) {
-                entry.insert(info);
-            }
+            accounts.entry(address).or_insert(info);
         }
 
         // Iterate over storage changesets and record value before first occurring storage change.
@@ -239,9 +233,7 @@ impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostState {
         {
             let (BlockNumberAddress((_, address)), storage) = entry?;
             let account_storage = storages.entry(address).or_default();
-            if let hash_map::Entry::Vacant(entry) = account_storage.entry(storage.key) {
-                entry.insert(storage.value);
-            }
+            account_storage.entry(storage.key).or_insert(storage.value);
         }
 
         let hashed_accounts =

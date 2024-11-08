@@ -47,7 +47,7 @@ use reth_node_core::{
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use reth_optimism_evm::OpExecutorProvider;
-use reth_optimism_node::OptimismNode;
+use reth_optimism_node::OpNode;
 use reth_tracing::FileWorkerGuard;
 use tracing::info;
 
@@ -145,30 +145,28 @@ where
                 runner.run_command_until_exit(|ctx| command.execute(ctx, launcher))
             }
             Commands::Init(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<OptimismNode>())
+                runner.run_blocking_until_ctrl_c(command.execute::<OpNode>())
             }
             Commands::InitState(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<OptimismNode>())
+                runner.run_blocking_until_ctrl_c(command.execute::<OpNode>())
             }
             Commands::ImportOp(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<OptimismNode>())
+                runner.run_blocking_until_ctrl_c(command.execute::<OpNode>())
             }
             Commands::ImportReceiptsOp(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<OptimismNode>())
+                runner.run_blocking_until_ctrl_c(command.execute::<OpNode>())
             }
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            Commands::Db(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<OptimismNode>())
-            }
+            Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute::<OpNode>()),
             Commands::Stage(command) => runner.run_command_until_exit(|ctx| {
-                command.execute::<OptimismNode, _, _>(ctx, OpExecutorProvider::optimism)
+                command.execute::<OpNode, _, _>(ctx, OpExecutorProvider::optimism)
             }),
             Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::Recover(command) => {
-                runner.run_command_until_exit(|ctx| command.execute::<OptimismNode>(ctx))
+                runner.run_command_until_exit(|ctx| command.execute::<OpNode>(ctx))
             }
-            Commands::Prune(command) => runner.run_until_ctrl_c(command.execute::<OptimismNode>()),
+            Commands::Prune(command) => runner.run_until_ctrl_c(command.execute::<OpNode>()),
             #[cfg(feature = "dev")]
             Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
         }

@@ -1,4 +1,4 @@
-use alloy_primitives::{hex, private::getrandom::getrandom, TxKind};
+use alloy_primitives::{hex, private::getrandom::getrandom, PrimitiveSignature, TxKind};
 use arbitrary::Arbitrary;
 use eyre::{Context, Result};
 use proptest::{
@@ -126,7 +126,7 @@ compact_types!(
     ],
     // These types require an extra identifier which is usually stored elsewhere (eg. parent type).
     identifier: [
-        // Signature todo we for v we only store parity(true || false), while v can take more values
+        PrimitiveSignature,
         Transaction,
         TxType,
         TxKind
