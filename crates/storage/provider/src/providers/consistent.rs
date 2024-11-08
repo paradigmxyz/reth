@@ -6,7 +6,9 @@ use crate::{
     StageCheckpointReader, StateReader, StaticFileProviderFactory, TransactionVariant,
     TransactionsProvider, WithdrawalsProvider,
 };
-use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, HashOrNumber};
+use alloy_eips::{
+    eip4895::Withdrawal, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, HashOrNumber,
+};
 use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable, TxHash, TxNumber, B256, U256};
 use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStateProviderRef};
 use reth_chainspec::{ChainInfo, EthereumHardforks};
@@ -17,7 +19,7 @@ use reth_execution_types::{BundleStateInit, ExecutionOutcome, RevertsInit};
 use reth_primitives::{
     Account, Block, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders,
     SealedHeader, StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
-    Withdrawal, Withdrawals,
+    Withdrawals,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -296,7 +298,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     ) -> ProviderResult<Vec<T>>
     where
         F: FnOnce(
-            &DatabaseProviderRO<N::DB, N::ChainSpec>,
+            &DatabaseProviderRO<N::DB, N>,
             RangeInclusive<BlockNumber>,
             &mut P,
         ) -> ProviderResult<Vec<T>>,
@@ -413,7 +415,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     ) -> ProviderResult<Vec<R>>
     where
         S: FnOnce(
-            &DatabaseProviderRO<N::DB, N::ChainSpec>,
+            &DatabaseProviderRO<N::DB, N>,
             RangeInclusive<TxNumber>,
         ) -> ProviderResult<Vec<R>>,
         M: Fn(RangeInclusive<usize>, &BlockState) -> ProviderResult<Vec<R>>,
@@ -511,7 +513,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         fetch_from_block_state: M,
     ) -> ProviderResult<Option<R>>
     where
-        S: FnOnce(&DatabaseProviderRO<N::DB, N::ChainSpec>) -> ProviderResult<Option<R>>,
+        S: FnOnce(&DatabaseProviderRO<N::DB, N>) -> ProviderResult<Option<R>>,
         M: Fn(usize, TxNumber, &BlockState) -> ProviderResult<Option<R>>,
     {
         let in_mem_chain = self.head_block.iter().flat_map(|b| b.chain()).collect::<Vec<_>>();
@@ -578,7 +580,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         fetch_from_block_state: M,
     ) -> ProviderResult<R>
     where
-        S: FnOnce(&DatabaseProviderRO<N::DB, N::ChainSpec>) -> ProviderResult<R>,
+        S: FnOnce(&DatabaseProviderRO<N::DB, N>) -> ProviderResult<R>,
         M: Fn(&BlockState) -> ProviderResult<R>,
     {
         if let Some(Some(block_state)) = self.head_block.as_ref().map(|b| b.block_on_chain(id)) {
@@ -1386,7 +1388,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                 .bundle
                 .reverts
                 .clone()
-                .into_plain_state_reverts()
+                .to_plain_state_reverts()
                 .storage
                 .into_iter()
                 .flatten()
@@ -1439,7 +1441,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
                 .bundle
                 .reverts
                 .clone()
-                .into_plain_state_reverts()
+                .to_plain_state_reverts()
                 .accounts
                 .into_iter()
                 .flatten()

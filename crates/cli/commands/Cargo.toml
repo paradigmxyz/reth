@@ -51,6 +51,7 @@ reth-trie-common = { workspace = true, optional = true }
 # ethereum
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
+alloy-rlp.workspace = true
 
 itertools.workspace = true
 futures.workspace = true

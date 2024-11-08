@@ -1,6 +1,7 @@
 //! Helper trait for interfacing with [`FullNodeComponents`].
 
 use reth_node_api::FullNodeComponents;
+use reth_rpc_eth_types::EthStateCache;
 
 /// Helper trait to relax trait bounds on [`FullNodeComponents`].
 ///
@@ -37,22 +38,33 @@ where
 {
     type Provider = T::Provider;
     type Pool = T::Pool;
-    type Network = <T as FullNodeComponents>::Network;
     type Evm = <T as FullNodeComponents>::Evm;
+    type Network = <T as FullNodeComponents>::Network;
 
+    #[inline]
     fn pool(&self) -> &Self::Pool {
         FullNodeComponents::pool(self)
     }
 
+    #[inline]
     fn evm_config(&self) -> &Self::Evm {
         FullNodeComponents::evm_config(self)
     }
 
+    #[inline]
     fn network(&self) -> &Self::Network {
         FullNodeComponents::network(self)
     }
 
+    #[inline]
     fn provider(&self) -> &Self::Provider {
         FullNodeComponents::provider(self)
     }
+}
+
+/// Additional components, asides the core node components, needed to run `eth_` namespace API
+/// server.
+pub trait RpcNodeCoreExt: RpcNodeCore {
+    /// Returns handle to RPC cache service.
+    fn cache(&self) -> &EthStateCache;
 }

@@ -38,6 +38,7 @@ use discv5::{
     ConnectionDirection, ConnectionState,
 };
 use enr::Enr;
+use itertools::Itertools;
 use parking_lot::Mutex;
 use proto::{EnrRequest, EnrResponse};
 use reth_ethereum_forks::ForkId;
@@ -793,7 +794,7 @@ impl Discv4Service {
     }
 
     /// Sends a new `FindNode` packet to the node with `target` as the lookup target but checks
-    /// whether we should should send a new ping first to renew the endpoint proof by checking the
+    /// whether we should send a new ping first to renew the endpoint proof by checking the
     /// previously failed findNode requests. It could be that the node is no longer reachable or
     /// lost our entry.
     fn find_node_checked(&mut self, node: &NodeRecord, ctx: LookupContext) {
@@ -861,7 +862,7 @@ impl Discv4Service {
         let Some(bucket) = self.kbuckets.get_bucket(&key) else { return false };
         if bucket.num_entries() < MAX_NODES_PER_BUCKET / 2 {
             // skip half empty bucket
-            return false;
+            return false
         }
         self.remove_key(node_id, key)
     }
@@ -1405,6 +1406,16 @@ impl Discv4Service {
                 return
             }
         };
+
+        // log the peers we discovered
+        trace!(target: "discv4",
+            target=format!("{:#?}", node_id),
+            peers_count=msg.nodes.len(),
+            peers=format!("[{:#}]", msg.nodes.iter()
+                .map(|node_rec| node_rec.id
+            ).format(", ")),
+            "Received peers from Neighbours packet"
+        );
 
         // This is the recursive lookup step where we initiate new FindNode requests for new nodes
         // that were discovered.

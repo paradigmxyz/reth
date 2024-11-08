@@ -44,6 +44,7 @@ use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_parallel::parallel_root::{ParallelStateRoot, ParallelStateRootError};
+use revm_primitives::ResultAndState;
 use std::{
     cmp::Ordering,
     collections::{btree_map, hash_map, BTreeMap, VecDeque},
@@ -56,9 +57,8 @@ use std::{
     time::Instant,
 };
 use tokio::sync::{
-    mpsc::{UnboundedReceiver, UnboundedSender},
-    oneshot,
-    oneshot::error::TryRecvError,
+    mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    oneshot::{self, error::TryRecvError},
 };
 use tracing::*;
 
@@ -74,6 +74,8 @@ pub use config::TreeConfig;
 pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
 pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::InvalidBlockHook;
+
+mod root;
 
 /// Keeps track of the state of the tree.
 ///
@@ -609,7 +611,7 @@ where
             remove_above_state: VecDeque::new(),
         };
 
-        let (tx, outgoing) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, outgoing) = unbounded_channel();
         let state = EngineApiTreeState::new(
             config.block_buffer_limit(),
             config.max_invalid_header_cache_length(),
@@ -2185,9 +2187,18 @@ where
         let block = block.unseal();
 
         let exec_time = Instant::now();
-        let output = self.metrics.executor.execute_metered(executor, (&block, U256::MAX).into())?;
+
+        // TODO: create StateRootTask with the receiving end of a channel and
+        // pass the sending end of the channel to the state hook.
+        let noop_state_hook = |_result_and_state: &ResultAndState| {};
+        let output = self.metrics.executor.execute_metered(
+            executor,
+            (&block, U256::MAX).into(),
+            Box::new(noop_state_hook),
+        )?;
 
         trace!(target: "engine::tree", elapsed=?exec_time.elapsed(), ?block_number, "Executed block");
+
         if let Err(err) = self.consensus.validate_block_post_execution(
             &block,
             PostExecutionInput::new(&output.receipts, &output.requests),
@@ -2207,6 +2218,8 @@ where
         trace!(target: "engine::tree", block=?sealed_block.num_hash(), "Calculating block state root");
         let root_time = Instant::now();
         let mut state_root_result = None;
+
+        // TODO: switch to calculate state root using `StateRootTask`.
 
         // We attempt to compute state root in parallel if we are currently not persisting anything
         // to database. This is safe, because the database state cannot change until we
@@ -2295,6 +2308,9 @@ where
         parent_hash: B256,
         hashed_state: &HashedPostState,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
+        // TODO: when we switch to calculate state root using `StateRootTask` this
+        // method can be still useful to calculate the required `TrieInput` to
+        // create the task.
         let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
         let mut input = TrieInput::default();
 
@@ -2492,7 +2508,7 @@ where
         attrs: T::PayloadAttributes,
         head: &Header,
         state: ForkchoiceState,
-        _version: EngineApiMessageVersion,
+        version: EngineApiMessageVersion,
     ) -> OnForkChoiceUpdated {
         // 7. Client software MUST ensure that payloadAttributes.timestamp is greater than timestamp
         //    of a block referenced by forkchoiceState.headBlockHash. If this condition isn't held
@@ -2510,6 +2526,7 @@ where
         match <T::PayloadBuilderAttributes as PayloadBuilderAttributes>::try_new(
             state.head_block_hash,
             attrs,
+            version as u8,
         ) {
             Ok(attributes) => {
                 // send the payload to the builder and return the receiver for the pending payload
@@ -2596,7 +2613,6 @@ mod tests {
         str::FromStr,
         sync::mpsc::{channel, Sender},
     };
-    use tokio::sync::mpsc::unbounded_channel;
 
     /// This is a test channel that allows you to `release` any value that is in the channel.
     ///

@@ -15,7 +15,7 @@ extern crate alloc;
 use alloc::{sync::Arc, vec::Vec};
 use alloy_primitives::{Address, U256};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
-use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_chainspec::{DecodeError, OpChainSpec};
 use reth_primitives::{
     revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
     transaction::FillTxEnv,
@@ -31,19 +31,19 @@ pub mod l1;
 pub use l1::*;
 
 mod error;
-pub use error::OptimismBlockExecutionError;
+pub use error::OpBlockExecutionError;
 use revm_primitives::{
     BlobExcessGasAndPrice, BlockEnv, Bytes, CfgEnv, Env, HandlerCfg, OptimismFields, SpecId, TxKind,
 };
 
 /// Optimism-related EVM configuration.
 #[derive(Debug, Clone)]
-pub struct OptimismEvmConfig {
+pub struct OpEvmConfig {
     chain_spec: Arc<OpChainSpec>,
 }
 
-impl OptimismEvmConfig {
-    /// Creates a new [`OptimismEvmConfig`] with the given chain spec.
+impl OpEvmConfig {
+    /// Creates a new [`OpEvmConfig`] with the given chain spec.
     pub const fn new(chain_spec: Arc<OpChainSpec>) -> Self {
         Self { chain_spec }
     }
@@ -54,8 +54,9 @@ impl OptimismEvmConfig {
     }
 }
 
-impl ConfigureEvmEnv for OptimismEvmConfig {
+impl ConfigureEvmEnv for OpEvmConfig {
     type Header = Header;
+    type Error = DecodeError;
 
     fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
         transaction.fill_tx_env(tx_env, sender);
@@ -134,7 +135,7 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
         &self,
         parent: &Self::Header,
         attributes: NextBlockEnvAttributes,
-    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), Self::Error> {
         // configure evm env based on parent block
         let cfg = CfgEnv::default().with_chain_id(self.chain_spec.chain().id());
 
@@ -156,13 +157,7 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
             prevrandao: Some(attributes.prev_randao),
             gas_limit: U256::from(parent.gas_limit),
             // calculate basefee based on parent block's gas usage
-            basefee: U256::from(
-                parent
-                    .next_block_base_fee(
-                        self.chain_spec.base_fee_params_at_timestamp(attributes.timestamp),
-                    )
-                    .unwrap_or_default(),
-            ),
+            basefee: self.chain_spec.next_block_base_fee(parent, attributes.timestamp)?,
             // calculate excess gas based on parent block's blob gas usage
             blob_excess_gas_and_price,
         };
@@ -175,11 +170,11 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
             };
         }
 
-        (cfg_with_handler_cfg, block_env)
+        Ok((cfg_with_handler_cfg, block_env))
     }
 }
 
-impl ConfigureEvm for OptimismEvmConfig {
+impl ConfigureEvm for OpEvmConfig {
     type DefaultExternalContext<'a> = ();
 
     fn evm<DB: Database>(&self, db: DB) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
@@ -231,8 +226,8 @@ mod tests {
         sync::Arc,
     };
 
-    fn test_evm_config() -> OptimismEvmConfig {
-        OptimismEvmConfig::new(BASE_MAINNET.clone())
+    fn test_evm_config() -> OpEvmConfig {
+        OpEvmConfig::new(BASE_MAINNET.clone())
     }
 
     #[test]
@@ -259,9 +254,9 @@ mod tests {
         // Define the total difficulty as zero (default)
         let total_difficulty = U256::ZERO;
 
-        // Use the `OptimismEvmConfig` to fill the `cfg_env` and `block_env` based on the ChainSpec,
+        // Use the `OpEvmConfig` to fill the `cfg_env` and `block_env` based on the ChainSpec,
         // Header, and total difficulty
-        OptimismEvmConfig::new(Arc::new(OpChainSpec { inner: chain_spec.clone() }))
+        OpEvmConfig::new(Arc::new(OpChainSpec { inner: chain_spec.clone() }))
             .fill_cfg_and_block_env(&mut cfg_env, &mut block_env, &header, total_difficulty);
 
         // Assert that the chain ID in the `cfg_env` is correctly set to the chain ID of the
@@ -271,7 +266,7 @@ mod tests {
 
     #[test]
     fn test_evm_configure() {
-        // Create a default `OptimismEvmConfig`
+        // Create a default `OpEvmConfig`
         let evm_config = test_evm_config();
 
         // Initialize an empty database wrapped in CacheDB

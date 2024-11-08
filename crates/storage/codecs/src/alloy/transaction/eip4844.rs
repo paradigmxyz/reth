@@ -16,9 +16,10 @@ use reth_codecs_derive::add_arbitrary_tests;
 ///
 /// Notice: Make sure this struct is 1:1 with [`alloy_consensus::TxEip4844`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Compact)]
+#[reth_codecs(crate = "crate")]
 #[cfg_attr(any(test, feature = "test-utils"), derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "test-utils", allow(unreachable_pub), visibility::make(pub))]
-#[add_arbitrary_tests(compact)]
+#[add_arbitrary_tests(crate, compact)]
 pub(crate) struct TxEip4844 {
     chain_id: ChainId,
     nonce: u64,
@@ -106,7 +107,7 @@ impl<'a> arbitrary::Arbitrary<'a> for TxEip4844 {
     }
 }
 
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(feature = "test-utils")]
 fn serialize_placeholder<S>(value: &Option<()>, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
@@ -119,7 +120,7 @@ where
     }
 }
 
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(feature = "test-utils")]
 fn deserialize_placeholder<'de, D>(deserializer: D) -> Result<Option<()>, D::Error>
 where
     D: serde::Deserializer<'de>,
