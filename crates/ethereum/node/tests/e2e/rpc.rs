@@ -2,12 +2,14 @@ use crate::utils::eth_payload_attributes;
 use alloy_eips::{calc_next_block_base_fee, eip2718::Encodable2718};
 use alloy_primitives::{Address, B256, U256};
 use alloy_provider::{network::EthereumWallet, Provider, ProviderBuilder, SendableTx};
-use alloy_rpc_types_beacon::relay::{BidTrace, SignedBidSubmissionV3, SignedBidSubmissionV4};
+use alloy_rpc_types_beacon::relay::{
+    BidTrace, BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
+    SignedBidSubmissionV3, SignedBidSubmissionV4,
+};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth::{
     payload::BuiltPayload,
     rpc::{
-        api::{BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4},
         compat::engine::payload::block_to_payload_v3,
         types::{engine::BlobsBundleV1, TransactionRequest},
     },
