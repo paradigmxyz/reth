@@ -8,7 +8,7 @@ mod tests;
 
 use reth_provider::providers::ConsistentDbView;
 use reth_trie::{updates::TrieUpdates, TrieInput};
-use reth_trie_parallel::parallel_root::ParallelStateRootError;
+use reth_trie_parallel::root::ParallelStateRootError;
 use revm_primitives::B256;
 use std::sync::{mpsc, Arc};
 

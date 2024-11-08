@@ -43,7 +43,7 @@ where
     }
 
     pub(crate) fn spawn(self) -> StateRootHandle {
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = mpsc::sync_channel(1);
         std::thread::Builder::new()
             .name("State Root Task".to_string())
             .spawn(move || {
