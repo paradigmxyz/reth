@@ -30,7 +30,7 @@ pub mod receipt_file_codec;
 /// OVM block, same as EVM block at bedrock, except for signature of deposit transaction
 /// not having a signature back then.
 /// Enables decoding and encoding `Block` types within file contexts.
-mod ovm_file_codec;
+pub mod ovm_file_codec;
 
 pub use commands::{import::ImportOpCommand, import_receipts::ImportReceiptsOpCommand};
 use reth_optimism_chainspec::OpChainSpec;
