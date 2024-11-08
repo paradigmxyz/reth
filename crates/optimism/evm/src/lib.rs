@@ -31,7 +31,7 @@ pub mod l1;
 pub use l1::*;
 
 mod error;
-pub use error::OptimismBlockExecutionError;
+pub use error::OpBlockExecutionError;
 use revm_primitives::{
     BlobExcessGasAndPrice, BlockEnv, Bytes, CfgEnv, Env, HandlerCfg, OptimismFields, SpecId, TxKind,
 };

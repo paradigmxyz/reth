@@ -24,7 +24,7 @@ use reth_optimism_evm::{OpEvmConfig, OpExecutionStrategyFactory};
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_rpc::OpEthApi;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::{Block, Header};
+use reth_primitives::{Block, Header, Receipt};
 use reth_provider::CanonStateSubscriptions;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
@@ -46,6 +46,7 @@ pub struct OpPrimitives;
 
 impl NodePrimitives for OpPrimitives {
     type Block = Block;
+    type Receipt = Receipt;
 }
 
 /// Type configuration for a regular Optimism node.
@@ -130,9 +131,7 @@ impl NodeTypesWithEngine for OpNode {
 
 /// Add-ons w.r.t. optimism.
 #[derive(Debug)]
-pub struct OpAddOns<N: FullNodeComponents>(
-    pub RpcAddOns<N, OpEthApi<N>, OptimismEngineValidatorBuilder>,
-);
+pub struct OpAddOns<N: FullNodeComponents>(pub RpcAddOns<N, OpEthApi<N>, OpEngineValidatorBuilder>);
 
 impl<N: FullNodeComponents> Default for OpAddOns<N> {
     fn default() -> Self {
@@ -468,20 +467,16 @@ where
     type Consensus = Arc<dyn reth_consensus::Consensus>;
 
     async fn build_consensus(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
-        if ctx.is_dev() {
-            Ok(Arc::new(reth_auto_seal_consensus::AutoSealConsensus::new(ctx.chain_spec())))
-        } else {
-            Ok(Arc::new(OpBeaconConsensus::new(ctx.chain_spec())))
-        }
+        Ok(Arc::new(OpBeaconConsensus::new(ctx.chain_spec())))
     }
 }
 
 /// Builder for [`OpEngineValidator`].
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
-pub struct OptimismEngineValidatorBuilder;
+pub struct OpEngineValidatorBuilder;
 
-impl<Node, Types> EngineValidatorBuilder<Node> for OptimismEngineValidatorBuilder
+impl<Node, Types> EngineValidatorBuilder<Node> for OpEngineValidatorBuilder
 where
     Types: NodeTypesWithEngine<ChainSpec = OpChainSpec>,
     Node: FullNodeComponents<Types = Types>,

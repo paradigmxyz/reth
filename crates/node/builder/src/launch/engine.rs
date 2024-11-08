@@ -8,7 +8,7 @@ use reth_beacon_consensus::{
 use reth_blockchain_tree::BlockchainTreeConfig;
 use reth_chainspec::EthChainSpec;
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider};
-use reth_engine_local::{LocalEngineService, LocalPayloadAttributesBuilder, MiningMode};
+use reth_engine_local::{LocalEngineService, LocalPayloadAttributesBuilder};
 use reth_engine_service::service::{ChainEvent, EngineService};
 use reth_engine_tree::{
     engine::{EngineApiRequest, EngineRequestHandler},
@@ -208,11 +208,6 @@ where
         info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
 
         let mut engine_service = if ctx.is_dev() {
-            let mining_mode = if let Some(block_time) = ctx.node_config().dev.block_time {
-                MiningMode::interval(block_time)
-            } else {
-                MiningMode::instant(ctx.components().pool().clone())
-            };
             let eth_service = LocalEngineService::new(
                 ctx.consensus(),
                 ctx.components().block_executor().clone(),
@@ -225,7 +220,7 @@ where
                 ctx.sync_metrics_tx(),
                 consensus_engine_tx.clone(),
                 Box::pin(consensus_engine_stream),
-                mining_mode,
+                ctx.dev_mining_mode(ctx.components().pool()),
                 LocalPayloadAttributesBuilder::new(ctx.chain_spec()),
             );
 
