@@ -30,7 +30,7 @@ pub trait NodePrimitives: Send + Sync + Unpin + Clone + Default + fmt::Debug {
 }
 
 impl NodePrimitives for () {
-    type Block = reth_primitives::Block;
+    type Block = ();
     type Receipt = ();
 }
 
