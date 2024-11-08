@@ -38,4 +38,8 @@ tempfile.workspace = true
 [features]
 default = ["std"]
 test-utils = []
-std = ["thiserror/std"]
+std = [
+  "thiserror/std",
+  "lz4_flex/std",
+  "serde/std"
+]
