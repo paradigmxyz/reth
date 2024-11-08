@@ -8,12 +8,11 @@ use alloy_eips::{
     eip7702::SignedAuthorization,
 };
 use alloy_primitives::{
-    bytes::{Buf, BufMut, BytesMut},
+    bytes::{Buf, BytesMut},
     keccak256, Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256,
     U256,
 };
-use alloy_rlp::{Decodable, Encodable, Error as RlpError, RlpDecodable, RlpEncodable};
-use core::mem;
+use alloy_rlp::{Decodable, Error as RlpError, RlpDecodable};
 use derive_more::{AsRef, Deref};
 use op_alloy_consensus::TxDeposit;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
@@ -26,7 +25,7 @@ use reth_primitives::{
     Withdrawals,
 };
 use serde::{Deserialize, Serialize};
-use tokio_util::codec::{Decoder, Encoder};
+use tokio_util::codec::Decoder;
 
 #[allow(dead_code)]
 /// Specific codec for reading raw block bodies from a file
@@ -51,19 +50,10 @@ impl Decoder for OvmBlockFileCodec {
     }
 }
 
-impl Encoder<Block> for OvmBlockFileCodec {
-    type Error = FileClientError;
-
-    fn encode(&mut self, item: Block, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        item.encode(dst);
-        Ok(())
-    }
-}
-
 /// OVM block, same as EVM block but with different transaction signature handling
 /// Pre-bedrock system transactions on Optimism were sent from the zero address
 /// with an empty signature,
-#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[derive(Debug, Clone, PartialEq, Eq, RlpDecodable)]
 pub struct Block {
     /// Block header
     pub header: Header,
@@ -78,15 +68,10 @@ impl Block {
         let body = BlockBody::decode(buf)?;
         Ok(Self { header, body })
     }
-    /// Encodes the `Block` into the `out` buffer.
-    pub fn encode(&self, out: &mut dyn BufMut) {
-        self.header.encode(out);
-        self.body.encode(out);
-    }
 }
 
 /// The body of a block for OVM
-#[derive(Debug, Clone, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, RlpDecodable)]
 #[rlp(trailing)]
 pub struct BlockBody {
     /// Transactions in the block
@@ -126,34 +111,8 @@ impl AsRef<Self> for TransactionSigned {
     }
 }
 
-impl From<Block> for BlockBody {
-    fn from(block: Block) -> Self {
-        Self {
-            transactions: block.body.transactions.into_iter().collect(),
-            ommers: block.body.ommers.into_iter().collect(),
-            withdrawals: block.body.withdrawals,
-        }
-    }
-}
-
 // === impl TransactionSigned ===
-
 impl TransactionSigned {
-    /// Transaction signature.
-    pub const fn signature(&self) -> &Signature {
-        &self.signature
-    }
-
-    /// Transaction hash. Used to identify transaction.
-    pub const fn hash(&self) -> TxHash {
-        self.hash
-    }
-
-    /// Reference to transaction hash. Used to identify transaction.
-    pub const fn hash_ref(&self) -> &TxHash {
-        &self.hash
-    }
-
     /// Recover signer from signature and hash.
     ///
     /// Returns `None` if the transaction's signature is invalid following [EIP-2](https://eips.ethereum.org/EIPS/eip-2), see also [`recover_signer`].
@@ -225,59 +184,6 @@ impl TransactionSigned {
         }
     }
 
-    /// Returns the [`TransactionSignedEcRecovered`] transaction with the given sender.
-    #[inline]
-    pub const fn with_signer(self, signer: Address) -> TransactionSignedEcRecovered {
-        TransactionSignedEcRecovered::from_signed_transaction(self, signer)
-    }
-
-    /// Consumes the type, recover signer and return [`TransactionSignedEcRecovered`]
-    ///
-    /// Returns `None` if the transaction's signature is invalid, see also [`Self::recover_signer`].
-    pub fn into_ecrecovered(self) -> Option<TransactionSignedEcRecovered> {
-        let signer = self.recover_signer()?;
-        Some(TransactionSignedEcRecovered { signed_transaction: self, signer })
-    }
-
-    /// Consumes the type, recover signer and return [`TransactionSignedEcRecovered`] _without
-    /// ensuring that the signature has a low `s` value_ (EIP-2).
-    ///
-    /// Returns `None` if the transaction's signature is invalid, see also
-    /// [`Self::recover_signer_unchecked`].
-    pub fn into_ecrecovered_unchecked(self) -> Option<TransactionSignedEcRecovered> {
-        let signer = self.recover_signer_unchecked()?;
-        Some(TransactionSignedEcRecovered { signed_transaction: self, signer })
-    }
-
-    /// Tries to recover signer and return [`TransactionSignedEcRecovered`] by cloning the type.
-    pub fn try_ecrecovered(&self) -> Option<TransactionSignedEcRecovered> {
-        let signer = self.recover_signer()?;
-        Some(TransactionSignedEcRecovered { signed_transaction: self.clone(), signer })
-    }
-
-    /// Tries to recover signer and return [`TransactionSignedEcRecovered`].
-    ///
-    /// Returns `Err(Self)` if the transaction's signature is invalid, see also
-    /// [`Self::recover_signer`].
-    pub fn try_into_ecrecovered(self) -> Result<TransactionSignedEcRecovered, Self> {
-        match self.recover_signer() {
-            None => Err(self),
-            Some(signer) => Ok(TransactionSignedEcRecovered { signed_transaction: self, signer }),
-        }
-    }
-
-    /// Tries to recover signer and return [`TransactionSignedEcRecovered`]. _without ensuring that
-    /// the signature has a low `s` value_ (EIP-2).
-    ///
-    /// Returns `Err(Self)` if the transaction's signature is invalid, see also
-    /// [`Self::recover_signer_unchecked`].
-    pub fn try_into_ecrecovered_unchecked(self) -> Result<TransactionSignedEcRecovered, Self> {
-        match self.recover_signer_unchecked() {
-            None => Err(self),
-            Some(signer) => Ok(TransactionSignedEcRecovered { signed_transaction: self, signer }),
-        }
-    }
-
     /// Calculate transaction hash, eip2728 transaction does not contain rlp header and start with
     /// tx type.
     pub fn recalculate_hash(&self) -> B256 {
@@ -291,12 +197,6 @@ impl TransactionSigned {
         let mut initial_tx = Self { transaction, hash: Default::default(), signature };
         initial_tx.hash = initial_tx.recalculate_hash();
         initial_tx
-    }
-
-    /// Calculate a heuristic for the in-memory size of the [`TransactionSigned`].
-    #[inline]
-    pub fn size(&self) -> usize {
-        mem::size_of::<TxHash>() + self.transaction.size() + mem::size_of::<Signature>()
     }
 
     /// Decodes legacy transaction from the data buffer into a tuple.
@@ -443,29 +343,6 @@ impl From<TransactionSignedEcRecovered> for TransactionSigned {
     }
 }
 
-impl Encodable for TransactionSigned {
-    /// This encodes the transaction _with_ the signature, and an rlp header.
-    ///
-    /// For legacy transactions, it encodes the transaction data:
-    /// `rlp(tx-data)`
-    ///
-    /// For EIP-2718 typed transactions, it encodes the transaction type followed by the rlp of the
-    /// transaction:
-    /// `rlp(tx-type || rlp(tx-data))`
-    fn encode(&self, out: &mut dyn BufMut) {
-        self.network_encode(out);
-    }
-
-    fn length(&self) -> usize {
-        let mut payload_length = self.encode_2718_len();
-        if !self.is_legacy() {
-            payload_length += alloy_rlp::Header { list: false, payload_length }.length();
-        }
-
-        payload_length
-    }
-}
-
 impl Decodable for TransactionSigned {
     /// This `Decodable` implementation only supports decoding rlp encoded transactions as it's used
     /// by p2p.
@@ -521,7 +398,6 @@ impl Encodable2718 for TransactionSigned {
             Transaction::Deposit(deposit_tx) => deposit_tx.eip2718_encoded_length(),
         }
     }
-
     fn encode_2718(&self, out: &mut dyn alloy_rlp::BufMut) {
         self.transaction.eip2718_encode(&self.signature, out)
     }
@@ -604,19 +480,6 @@ impl TransactionSignedEcRecovered {
     }
 }
 
-impl Encodable for TransactionSignedEcRecovered {
-    /// This encodes the transaction _with_ the signature, and an rlp header.
-    ///
-    /// Refer to docs for [`TransactionSigned::encode`] for details on the exact format.
-    fn encode(&self, out: &mut dyn BufMut) {
-        self.signed_transaction.encode(out)
-    }
-
-    fn length(&self) -> usize {
-        self.signed_transaction.length()
-    }
-}
-
 impl Decodable for TransactionSignedEcRecovered {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let signed_transaction = TransactionSigned::decode(buf)?;
@@ -640,18 +503,11 @@ impl Decodable for TransactionSignedEcRecovered {
 
 #[cfg(test)]
 mod tests {
-    use crate::ovm_file_codec::{
-        Block, BlockBody, OvmBlockFileCodec, TransactionSigned, TransactionSignedEcRecovered,
-    };
-    use alloy_consensus::{Header, TxLegacy};
-    use alloy_primitives::{
-        address, hex, Address, PrimitiveSignature as Signature, TxKind, B256, U256,
-    };
+    use crate::ovm_file_codec::TransactionSigned;
+    use alloy_primitives::{address, hex, TxKind, B256, U256};
     use reth_primitives::transaction::Transaction;
     const DEPOSIT_FUNCTION_SELECTOR: [u8; 4] = [0xb6, 0xb5, 0x5f, 0x25];
-    use alloy_rlp::{BytesMut, Decodable, Encodable};
-    use op_alloy_consensus::TxDeposit;
-    use tokio_util::codec::{Decoder, Encoder};
+    use alloy_rlp::Decodable;
 
     #[test]
     fn test_decode_legacy_transactions() {
@@ -736,24 +592,6 @@ mod tests {
             system_decoded.hash,
             B256::from(hex!("e20b11349681dd049f8df32f5cdbb4c68d46b537685defcd86c7fa42cfe75b9e"))
         );
-
-        // Verify RLP encoding/decoding roundtrips
-        let mut encoded = Vec::new();
-        system_decoded.encode(&mut encoded);
-        assert_eq!(&encoded[..], &system_tx_bytes[..]);
-    }
-
-    #[test]
-    fn test_decode_signed_ec_recovered_transaction() {
-        // tx https://optimistic.etherscan.io/getRawTx?tx=0x7860252963a2df21113344f323035ef59648638a571eef742e33d789602c7a1c
-        // This is a properly RLP encoded transaction that includes signature fields
-        let tx_bytes = hex!("f88e830310f1840479e442830f424094eb4378aacdfb7d02a0c9accfac2e90ad545ad62a80a70000053800ac70a8221300000000000049e7c4ebf673a7b663033bf6debe00000000003e97520d38a08f9b10c30337089472b821c408dff35ab37e2d52c4fbf3913f64066009981963a04b5ea18e18b3cc7f808d0e25ea1e138bb5ed193d5b2b24441a77978e3b5f385d");
-        let tx = TransactionSigned::decode(&mut &tx_bytes[..]).unwrap();
-        let recovered = tx.into_ecrecovered().unwrap();
-
-        let decoded =
-            TransactionSignedEcRecovered::decode(&mut &alloy_rlp::encode(&recovered)[..]).unwrap();
-        assert_eq!(recovered, decoded)
     }
 
     #[test]
@@ -766,92 +604,5 @@ mod tests {
         let sender = tx.recover_signer().unwrap();
         println!("Sender: {:?}", sender);
         assert_eq!(sender, address!("6d74af94c8e72805ba3f7ce357a5b12ecb3ad71a"));
-    }
-
-    #[test]
-    fn test_deposit_tx_roundtrip() {
-        let mut codec = OvmBlockFileCodec;
-        let mut buffer = BytesMut::new();
-
-        // Create a block with a deposit transaction
-        let deposit_tx = Transaction::Deposit(TxDeposit {
-            source_hash: B256::random(),
-            from: Address::random(),
-            to: TxKind::Call(Address::random()),
-            mint: Some(1000000000000000000u128),
-            value: U256::from(1000000000000000000u128),
-            gas_limit: 100000,
-            is_system_transaction: false,
-            input: Default::default(),
-        });
-
-        let signed_tx =
-            TransactionSigned::from_transaction_and_signature(deposit_tx, TxDeposit::signature());
-
-        let block = Block {
-            header: Header::default(),
-            body: BlockBody { transactions: vec![signed_tx], ommers: vec![], withdrawals: None },
-        };
-
-        codec.encode(block.clone(), &mut buffer).unwrap();
-        let decoded = codec.decode(&mut buffer).unwrap().unwrap();
-
-        assert_eq!(decoded, block);
-        assert_eq!(decoded.body.transactions.len(), 1);
-        assert!(
-            matches!(decoded.body.transactions[0].transaction, Transaction::Deposit(_)),
-            "Expected Deposit transaction"
-        );
-    }
-
-    #[test]
-    fn test_decode_encode_block_with_multiple_tx_types() {
-        let mut codec = OvmBlockFileCodec;
-        let mut buffer = BytesMut::new();
-
-        // create transactions of different types
-        let legacy_tx = TransactionSigned::from_transaction_and_signature(
-            Transaction::Legacy(TxLegacy {
-                chain_id: Some(10),
-                nonce: 1,
-                gas_price: 1000000000,
-                gas_limit: 100000,
-                to: Address::random().into(),
-                value: U256::from(1000000000000000u64),
-                input: Default::default(),
-            }),
-            Signature::test_signature(),
-        );
-
-        let deposit_tx = TransactionSigned::from_transaction_and_signature(
-            Transaction::Deposit(TxDeposit {
-                source_hash: B256::random(),
-                from: Address::random(),
-                to: TxKind::Call(Address::random()),
-                mint: Some(1000000000000000000u128),
-                value: U256::from(1000000000000000000u128),
-                gas_limit: 100000,
-                is_system_transaction: false,
-                input: Default::default(),
-            }),
-            TxDeposit::signature(),
-        );
-
-        let block = Block {
-            header: Header::default(),
-            body: BlockBody {
-                transactions: vec![legacy_tx, deposit_tx],
-                ommers: vec![],
-                withdrawals: None,
-            },
-        };
-
-        codec.encode(block.clone(), &mut buffer).unwrap();
-        let decoded = codec.decode(&mut buffer).unwrap().unwrap();
-
-        assert_eq!(decoded, block);
-        assert_eq!(decoded.body.transactions.len(), 2);
-        assert!(matches!(decoded.body.transactions[0].transaction, Transaction::Legacy(_)));
-        assert!(matches!(decoded.body.transactions[1].transaction, Transaction::Deposit(_)));
     }
 }
