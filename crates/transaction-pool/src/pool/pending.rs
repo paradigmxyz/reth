@@ -44,7 +44,7 @@ pub struct PendingPool<T: TransactionOrdering> {
     independent_transactions: HashMap<SenderId, PendingTransaction<T>>,
     /// Keeps track of the size of this pool.
     ///
-    /// See also [`PoolTransaction::size`].
+    /// See also [`PoolTransaction::size`](crate::traits::PoolTransaction::size).
     size_of: SizeTracker,
     /// Used to broadcast new transactions that have been added to the `PendingPool` to existing
     /// `static_files` of this pool.
