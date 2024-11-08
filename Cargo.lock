@@ -8244,6 +8244,7 @@ dependencies = [
  "alloy-signer-local",
  "clap",
  "eyre",
+ "futures",
  "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
  "parking_lot",

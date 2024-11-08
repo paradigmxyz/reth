@@ -72,6 +72,7 @@ op-alloy-consensus.workspace = true
 alloy-signer-local.workspace = true
 alloy-network.workspace = true
 alloy-consensus.workspace = true
+futures.workspace = true
 
 [features]
 optimism = [
