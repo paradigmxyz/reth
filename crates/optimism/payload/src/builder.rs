@@ -2,7 +2,7 @@
 
 use std::{fmt::Display, sync::Arc};
 
-use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
+use alloy_consensus::{Transaction, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::merge::BEACON_NONCE;
 use alloy_primitives::{Address, Bytes, U256};
 use alloy_rpc_types_engine::PayloadId;
@@ -23,8 +23,7 @@ use reth_primitives::{
 use reth_provider::{ProviderError, StateProviderFactory, StateRootProvider};
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{
-    noop::NoopTransactionPool, BestTransactions, BestTransactionsAttributes, BestTransactionsFor,
-    TransactionPool,
+    noop::NoopTransactionPool, BestTransactionsAttributes, PayloadTransactions, TransactionPool,
 };
 use reth_trie::HashedPostState;
 use revm::{
@@ -39,6 +38,7 @@ use crate::{
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
 };
 use op_alloy_consensus::DepositTransaction;
+use reth_transaction_pool::pool::BestPayloadTransactions;
 
 /// Optimism's payload builder
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -390,7 +390,7 @@ where
     }
 }
 
-/// A type that returns a the [`BestTransactions`] that should be included in the pool.
+/// A type that returns a the [`PayloadTransactions`] that should be included in the pool.
 pub trait OpPayloadTransactions: Clone + Send + Sync + Unpin + 'static {
     /// Returns an iterator that yields the transaction in the order they should get included in the
     /// new payload.
@@ -398,7 +398,7 @@ pub trait OpPayloadTransactions: Clone + Send + Sync + Unpin + 'static {
         &self,
         pool: Pool,
         attr: BestTransactionsAttributes,
-    ) -> BestTransactionsFor<Pool>;
+    ) -> impl PayloadTransactions;
 }
 
 impl OpPayloadTransactions for () {
@@ -406,8 +406,8 @@ impl OpPayloadTransactions for () {
         &self,
         pool: Pool,
         attr: BestTransactionsAttributes,
-    ) -> BestTransactionsFor<Pool> {
-        pool.best_transactions_with_attributes(attr)
+    ) -> impl PayloadTransactions {
+        BestPayloadTransactions::new(pool.best_transactions_with_attributes(attr))
     }
 }
 
@@ -730,7 +730,7 @@ where
         &self,
         info: &mut ExecutionInfo,
         db: &mut State<DB>,
-        mut best_txs: BestTransactionsFor<Pool>,
+        mut best_txs: impl PayloadTransactions,
     ) -> Result<Option<BuildOutcomeKind<OpBuiltPayload>>, PayloadBuilderError>
     where
         DB: Database<Error = ProviderError>,
@@ -746,19 +746,19 @@ where
         );
         let mut evm = self.evm_config.evm_with_env(&mut *db, env);
 
-        while let Some(pool_tx) = best_txs.next() {
+        while let Some(tx) = best_txs.next(()) {
             // ensure we still have capacity for this transaction
-            if info.cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
+            if info.cumulative_gas_used + tx.gas_limit() > block_gas_limit {
                 // we can't fit this transaction into the block, so we need to mark it as
                 // invalid which also removes all dependent transaction from
                 // the iterator before we can continue
-                best_txs.mark_invalid(&pool_tx);
+                best_txs.mark_invalid(tx.signer(), tx.nonce());
                 continue
             }
 
             // A sequencer's block should never contain blob or deposit transactions from the pool.
-            if pool_tx.is_eip4844() || pool_tx.tx_type() == TxType::Deposit as u8 {
-                best_txs.mark_invalid(&pool_tx);
+            if tx.is_eip4844() || tx.tx_type() == TxType::Deposit as u8 {
+                best_txs.mark_invalid(tx.signer(), tx.nonce());
                 continue
             }
 
@@ -766,9 +766,6 @@ where
             if self.cancel.is_cancelled() {
                 return Ok(Some(BuildOutcomeKind::Cancelled))
             }
-
-            // convert tx to a signed transaction
-            let tx = pool_tx.to_recovered_transaction();
 
             // Configure the environment for the tx.
             *evm.tx_mut() = self.evm_config.tx_env(tx.as_signed(), tx.signer());
@@ -785,7 +782,7 @@ where
                                 // if the transaction is invalid, we can skip it and all of its
                                 // descendants
                                 trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
-                                best_txs.mark_invalid(&pool_tx);
+                                best_txs.mark_invalid(tx.signer(), tx.nonce());
                             }
 
                             continue
@@ -819,7 +816,7 @@ where
 
             // update add to total fees
             let miner_fee = tx
-                .effective_tip_per_gas(Some(base_fee))
+                .effective_tip_per_gas(base_fee)
                 .expect("fee is always valid; execution succeeded");
             info.total_fees += U256::from(miner_fee) * U256::from(gas_used);
 
