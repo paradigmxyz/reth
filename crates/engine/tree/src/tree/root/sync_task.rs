@@ -44,11 +44,14 @@ where
 
     pub(crate) fn spawn(self) -> StateRootHandle {
         let (tx, rx) = mpsc::channel();
-        rayon::spawn(move || {
-            debug!(target: "engine::tree", "Starting sync state root task");
-            let result = self.run();
-            let _ = tx.send(result);
-        });
+        std::thread::Builder::new()
+            .name("State Root Task".to_string())
+            .spawn(move || {
+                debug!(target: "engine::tree", "Starting state root task");
+                let result = self.run();
+                let _ = tx.send(result);
+            })
+            .expect("failed to spawn state root thread");
 
         StateRootHandle::new(rx)
     }
