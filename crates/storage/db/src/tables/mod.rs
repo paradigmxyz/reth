@@ -106,12 +106,20 @@ macro_rules! tables {
     (@view $name:ident $v:ident) => { $v.view::<$name>() };
     (@view $name:ident $v:ident $_subkey:ty) => { $v.view_dupsort::<$name>() };
 
+    (@value_doc $key:ty, $value:ty) => {
+        concat!("[`", stringify!($value), "`]")
+    };
+    // Don't generate links if we have generics
+    (@value_doc $key:ty, $value:ty, $($generic:ident),*) => {
+        concat!("`", stringify!($value), "`")
+    };
+
     ($($(#[$attr:meta])* table $name:ident$(<$($generic:ident $(= $default:ty)?),*>)? { type Key = $key:ty; type Value = $value:ty; $(type SubKey = $subkey:ty;)? } )*) => {
         // Table marker types.
         $(
             $(#[$attr])*
             ///
-            #[doc = concat!("Marker type representing a database table mapping [`", stringify!($key), "`] to [`", stringify!($value), "`].")]
+            #[doc = concat!("Marker type representing a database table mapping [`", stringify!($key), "`] to ", tables!(@value_doc $key, $value, $($($generic),*)?), ".")]
             $(
                 #[doc = concat!("\n\nThis table's `DUPSORT` subkey is [`", stringify!($subkey), "`].")]
             )?
@@ -251,7 +259,7 @@ macro_rules! tables {
         /// use reth_db_api::table::Table;
         ///
         /// let table = Tables::Headers;
-        /// let result = tables_to_generic!(table, |GenericTable| GenericTable::NAME);
+        /// let result = tables_to_generic!(table, |GenericTable| <GenericTable as Table>::NAME);
         /// assert_eq!(result, table.name());
         /// ```
         #[macro_export]
