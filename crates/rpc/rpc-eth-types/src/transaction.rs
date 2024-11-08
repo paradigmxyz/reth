@@ -44,7 +44,7 @@ impl TransactionSource {
     pub fn into_transaction<T: TransactionCompat>(
         self,
         resp_builder: &T,
-    ) -> Result<T::Transaction, T::TransactionError> {
+    ) -> Result<T::Transaction, T::Error> {
         match self {
             Self::Pool(tx) => from_recovered(tx, resp_builder),
             Self::Block { transaction, index, block_hash, block_number, base_fee } => {

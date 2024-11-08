@@ -17,13 +17,13 @@ where
 {
     type Transaction = <Ethereum as Network>::TransactionResponse;
 
-    type TransactionError = EthApiError;
+    type Error = EthApiError;
 
     fn fill(
         &self,
         tx: TransactionSignedEcRecovered,
         tx_info: TransactionInfo,
-    ) -> Result<Self::Transaction, Self::TransactionError> {
+    ) -> Result<Self::Transaction, Self::Error> {
         let from = tx.signer();
         let TransactionSigned { transaction, signature, hash } = tx.into_signed();
 

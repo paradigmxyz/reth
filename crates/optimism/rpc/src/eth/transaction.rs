@@ -76,22 +76,13 @@ where
     N: FullNodeComponents,
 {
     type Transaction = Transaction;
-    type TransactionError = OpEthApiError;
+    type Error = OpEthApiError;
 
     fn fill(
         &self,
         tx: TransactionSignedEcRecovered,
         tx_info: TransactionInfo,
-    ) -> Result<Self::Transaction, Self::TransactionError> {
-        //let signed_tx = tx.clone().into_signed();
-        //let hash = tx.hash;
-        //
-        //let mut inner =
-        //    EthTxBuilder.fill(tx, tx_info).expect("EthTxBuilder.fill should be infallible");
-        //
-        //if signed_tx.is_deposit() {
-        //    inner.gas_price = Some(signed_tx.max_fee_per_gas())
-        //}
+    ) -> Result<Self::Transaction, Self::Error> {
         let from = tx.signer();
         let TransactionSigned { transaction, signature, hash } = tx.into_signed();
 
@@ -115,7 +106,8 @@ where
         let deposit_receipt_version = self
             .inner
             .provider()
-            .receipt_by_hash(hash)?
+            .receipt_by_hash(hash)
+            .map_err(Self::Error::from_eth_err)?
             .and_then(|receipt| receipt.deposit_receipt_version);
 
         let TransactionInfo { block_hash, block_number, index: transaction_index, .. } = tx_info;

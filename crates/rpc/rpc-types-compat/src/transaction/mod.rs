@@ -20,7 +20,7 @@ pub fn from_recovered_with_block_context<T: TransactionCompat>(
     tx: TransactionSignedEcRecovered,
     tx_info: TransactionInfo,
     resp_builder: &T,
-) -> Result<T::Transaction, T::TransactionError> {
+) -> Result<T::Transaction, T::Error> {
     resp_builder.fill(tx, tx_info)
 }
 
@@ -29,7 +29,7 @@ pub fn from_recovered_with_block_context<T: TransactionCompat>(
 pub fn from_recovered<T: TransactionCompat>(
     tx: TransactionSignedEcRecovered,
     resp_builder: &T,
-) -> Result<T::Transaction, T::TransactionError> {
+) -> Result<T::Transaction, T::Error> {
     resp_builder.fill(tx, TransactionInfo::default())
 }
 
@@ -45,7 +45,7 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + fmt::Debug {
         + fmt::Debug;
 
     /// RPC transaction error type.
-    type TransactionError: error::Error;
+    type Error: error::Error;
 
     /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
     /// environment related fields to `None`.
@@ -53,7 +53,7 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + fmt::Debug {
         &self,
         tx: TransactionSignedEcRecovered,
         tx_inf: TransactionInfo,
-    ) -> Result<Self::Transaction, Self::TransactionError>;
+    ) -> Result<Self::Transaction, Self::Error>;
 
     /// Truncates the input of a transaction to only the first 4 bytes.
     // todo: remove in favour of using constructor on `TransactionResponse` or similar

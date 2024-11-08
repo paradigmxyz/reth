@@ -39,12 +39,15 @@ pub type RpcBlock<T> = Block<RpcTransaction<T>, <T as Network>::HeaderResponse>;
 /// Adapter for network specific receipt type.
 pub type RpcReceipt<T> = <T as Network>::ReceiptResponse;
 
+/// Adapter for network specific error type.
+pub type RpcError<T> = <T as EthApiTypes>::Error;
+
 /// Helper trait holds necessary trait bounds on [`EthApiTypes`] to implement `eth` API.
 pub trait FullEthApiTypes:
     EthApiTypes<
     TransactionCompat: TransactionCompat<
         Transaction = RpcTransaction<Self::NetworkTypes>,
-        TransactionError = Self::Error,
+        Error = RpcError<Self>,
     >,
 >
 {
@@ -54,7 +57,7 @@ impl<T> FullEthApiTypes for T where
     T: EthApiTypes<
         TransactionCompat: TransactionCompat<
             Transaction = RpcTransaction<T::NetworkTypes>,
-            TransactionError = T::Error,
+            Error = RpcError<T>,
         >,
     >
 {
