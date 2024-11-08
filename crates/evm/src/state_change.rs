@@ -4,7 +4,7 @@ use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::{map::HashMap, Address, U256};
 use reth_chainspec::EthereumHardforks;
 use reth_consensus_common::calc;
-use reth_primitives::{Block, Withdrawal};
+use reth_primitives::Block;
 
 /// Collect all balance changes at the end of the block.
 ///
