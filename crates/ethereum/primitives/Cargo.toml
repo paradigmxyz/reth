@@ -13,3 +13,10 @@ workspace = true
 [dependencies]
 reth-primitives.workspace = true
 reth-node-types.workspace = true
+
+[features]
+default = ["std"]
+std = [
+    "reth-primitives/std",
+    "reth-node-types/std",
+]

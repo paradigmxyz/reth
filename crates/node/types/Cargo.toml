@@ -18,3 +18,11 @@ reth-engine-primitives.workspace = true
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-trie-db.workspace = true
+
+[features]
+default = ["std"]
+std = [
+    "reth-primitives/std",
+    "reth-primitives-traits/std",
+    "reth-chainspec/std",
+]

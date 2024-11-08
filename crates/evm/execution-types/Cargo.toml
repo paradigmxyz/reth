@@ -53,5 +53,6 @@ std = [
 	"alloy-eips/std",
 	"alloy-primitives/std",
 	"revm/std",
-	"serde?/std"
+	"serde?/std",
+	"reth-primitives-traits/std",
 ]
