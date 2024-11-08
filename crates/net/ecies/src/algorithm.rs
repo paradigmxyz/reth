@@ -731,7 +731,8 @@ impl ECIES {
         Ok(split_at_mut(ret, size)?.0)
     }
 
-    /// return num alignment value
+    /// Returns `num` aligned to 16.
+    ///
     /// `<https://stackoverflow.com/questions/14561402/how-is-this-size-alignment-working>`
     #[inline]
     const fn align_16(num: usize) -> usize {
