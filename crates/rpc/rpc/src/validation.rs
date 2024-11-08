@@ -1,6 +1,5 @@
 use alloy_consensus::{BlobTransactionValidationError, EnvKzgSettings, Transaction};
 use alloy_eips::eip4844::kzg_to_versioned_hash;
-use alloy_primitives::map::{Entry, HashMap};
 use alloy_rpc_types::engine::{
     BlobsBundleV1, CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar,
 };
@@ -81,9 +80,9 @@ pub struct ValidationApiInner<Provider: ChainSpecProvider, E> {
     /// Set of disallowed addresses
     disallow: HashSet<Address>,
     /// Cached state reads to avoid redundant disk I/O across multiple validation attempts.
-    /// Maps block hash to cached reads for that block's state.
+    /// Stores a tuple of (`block_hash`, `cached_reads`) for the latest head block state.
     /// Uses async `RwLock` to safely handle concurrent validation requests.
-    cached_states: Arc<RwLock<HashMap<B256, CachedReads>>>,
+    cached_state: Arc<RwLock<(B256, CachedReads)>>,
 }
 
 /// The type that implements the `validation` rpc namespace trait
@@ -113,7 +112,7 @@ where
             payload_validator,
             executor_provider,
             disallow,
-            cached_states: Arc::new(RwLock::new(HashMap::default())),
+            cached_state: Arc::new(RwLock::new((B256::default(), CachedReads::default()))),
         });
 
         Self { inner }
@@ -181,8 +180,11 @@ where
         let state_provider = self.provider.state_by_block_hash(latest_header_hash)?;
 
         let mut request_cache = {
-            let cached_states = self.cached_states.read().await;
-            cached_states.get(&latest_header_hash).cloned().unwrap_or_default()
+            let guard = self.inner.cached_state.read().await;
+            match *guard {
+                (ref hash, ref cache) if hash == &latest_header_hash => cache.clone(),
+                _ => CachedReads::default(),
+            }
         };
 
         let cached_db = request_cache.as_db_mut(StateProviderDatabase::new(&state_provider));
@@ -204,15 +206,8 @@ where
         )?;
 
         {
-            let mut cached_states = self.cached_states.write().await;
-            match cached_states.entry(latest_header_hash) {
-                Entry::Occupied(mut entry) => {
-                    entry.get_mut().extend(request_cache);
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(request_cache);
-                }
-            }
+            let mut cached_state = self.inner.cached_state.write().await;
+            *cached_state = (latest_header_hash, request_cache);
         }
 
         if let Some(account) = accessed_blacklisted {
