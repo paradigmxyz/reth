@@ -59,34 +59,33 @@ impl Account {
     }
 }
 
-impl PartialOrd for Account {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        // First we compare nonces
+impl Ord for Account {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // First compare nonces
         match self.nonce.cmp(&other.nonce) {
-            Ordering::Equal => {},
-            ordering => return Some(ordering),
+            Ordering::Equal => {}
+            ordering => return ordering,
         }
-        
-        // If nonces are equal,we compare balances
+
+        // If nonces are equal, compare balances
         match self.balance.cmp(&other.balance) {
-            Ordering::Equal => {},
-            ordering => return Some(ordering),
+            Ordering::Equal => {}
+            ordering => return ordering,
         }
-        
-        // If balances are equal, we compare bytecode hashes
+
+        // If balances are equal, compare bytecode hashes
         match (&self.bytecode_hash, &other.bytecode_hash) {
-            (None, None) => Some(Ordering::Equal),
-            (None, Some(_)) => Some(Ordering::Less),
-            (Some(_), None) => Some(Ordering::Greater),
-            (Some(a), Some(b)) => Some(a.cmp(b)),
+            (None, None) => Ordering::Equal,
+            (None, Some(_)) => Ordering::Less,
+            (Some(_), None) => Ordering::Greater,
+            (Some(a), Some(b)) => a.cmp(b),
         }
     }
 }
 
-// Since all fields implement Ord
-impl Ord for Account {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.partial_cmp(other).unwrap()
+impl PartialOrd for Account {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 

@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 
 #[derive(Clone)]
 struct ForwardInMemoryCursor {
@@ -9,7 +9,7 @@ struct ForwardInMemoryCursor {
 }
 
 impl ForwardInMemoryCursor {
-    fn new(entries: Vec<(i32, i32)>) -> Self {
+    const fn new(entries: Vec<(i32, i32)>) -> Self {
         Self { entries, index: 0 }
     }
 
@@ -19,7 +19,7 @@ impl ForwardInMemoryCursor {
             self.index += 1;
             entry = self.entries.get(self.index);
         }
-        entry.cloned()
+        entry.copied()
     }
 
     fn binary_advance(&mut self, comparator: impl Fn(&i32) -> bool) -> Option<(i32, i32)> {
@@ -39,13 +39,13 @@ impl ForwardInMemoryCursor {
         };
 
         let mut first_false = pos;
-        
+
         while first_false > self.index && !comparator(&self.entries[first_false - 1].0) {
             first_false -= 1;
         }
 
         self.index = first_false;
-        self.entries.get(self.index).cloned()
+        self.entries.get(self.index).copied()
     }
 
     fn hybrid_advance(&mut self, comparator: impl Fn(&i32) -> bool) -> Option<(i32, i32)> {
@@ -59,7 +59,7 @@ impl ForwardInMemoryCursor {
                 self.index += 1;
                 entry = self.entries.get(self.index);
             }
-            entry.cloned()
+            entry.copied()
         } else {
             let pos = match self.entries[self.index..].binary_search_by(|(k, _)| {
                 if comparator(k) {
@@ -78,7 +78,7 @@ impl ForwardInMemoryCursor {
             }
 
             self.index = first_false;
-            self.entries.get(self.index).cloned()
+            self.entries.get(self.index).copied()
         }
     }
 }
@@ -86,30 +86,30 @@ impl ForwardInMemoryCursor {
 fn bench_strategies(c: &mut Criterion) {
     let mut group = c.benchmark_group("advance_strategies");
     for size in [10, 50, 90, 100, 110, 500, 1000] {
-        let data = (0..size).map(|i| (i as i32, i as i32)).collect::<Vec<_>>();
-        let target = size / 2; 
+        let data = (0..size).map(|i| (i, i)).collect::<Vec<_>>();
+        let target = size / 2;
         group.bench_with_input(BenchmarkId::new("linear", size), &data, |b, data| {
             b.iter(|| {
                 let mut cursor = ForwardInMemoryCursor::new(data.clone());
-                black_box(cursor.linear_advance(|k| *k < target as i32))
+                black_box(cursor.linear_advance(|k| *k < target))
             });
         });
 
         group.bench_with_input(BenchmarkId::new("binary", size), &data, |b, data| {
             b.iter(|| {
                 let mut cursor = ForwardInMemoryCursor::new(data.clone());
-                black_box(cursor.binary_advance(|k| *k < target as i32))
+                black_box(cursor.binary_advance(|k| *k < target))
             });
         });
 
         group.bench_with_input(BenchmarkId::new("hybrid", size), &data, |b, data| {
             b.iter(|| {
                 let mut cursor = ForwardInMemoryCursor::new(data.clone());
-                black_box(cursor.hybrid_advance(|k| *k < target as i32))
+                black_box(cursor.hybrid_advance(|k| *k < target))
             });
         });
     }
-    
+
     group.finish();
 }
 

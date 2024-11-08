@@ -16,7 +16,7 @@ impl<'a, K, V> ForwardInMemoryCursor<'a, K, V> {
     }
 
     /// Returns `true` if the cursor is empty, regardless of its position.
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 }
