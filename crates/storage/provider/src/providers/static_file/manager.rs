@@ -1671,6 +1671,6 @@ fn calculate_hash(
     rlp_buf: &mut Vec<u8>,
 ) -> Result<(B256, TxNumber), Box<ProviderError>> {
     let (tx_id, tx) = entry;
-    tx.transaction.encode_with_signature(&tx.signature, rlp_buf, false);
+    tx.transaction.eip2718_encode(&tx.signature, rlp_buf);
     Ok((keccak256(rlp_buf), tx_id))
 }

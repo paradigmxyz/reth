@@ -1343,16 +1343,13 @@ struct TxFetcherSearchDurations {
 
 #[cfg(test)]
 mod test {
-    use std::{collections::HashSet, str::FromStr};
-
+    use super::*;
+    use crate::transactions::tests::{default_cache, new_mock_session};
     use alloy_primitives::{hex, B256};
     use alloy_rlp::Decodable;
     use derive_more::IntoIterator;
     use reth_primitives::TransactionSigned;
-
-    use crate::transactions::tests::{default_cache, new_mock_session};
-
-    use super::*;
+    use std::{collections::HashSet, str::FromStr};
 
     #[derive(IntoIterator)]
     struct TestValidAnnouncementData(Vec<(TxHash, Option<(u8, usize)>)>);

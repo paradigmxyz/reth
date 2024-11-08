@@ -78,7 +78,7 @@ impl FromIterator<PooledTransactionsElement> for PooledTransactions {
 mod tests {
     use crate::{message::RequestPair, GetPooledTransactions, PooledTransactions};
     use alloy_consensus::{TxEip1559, TxLegacy};
-    use alloy_primitives::{hex, Parity, Signature, TxKind, U256};
+    use alloy_primitives::{hex, PrimitiveSignature as Signature, TxKind, U256};
     use alloy_rlp::{Decodable, Encodable};
     use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_primitives::{PooledTransactionsElement, Transaction, TransactionSigned};
@@ -142,7 +142,7 @@ mod tests {
                         "0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10",
                     )
                     .unwrap(),
-                    Parity::Parity(false),
+                    false,
                 ),
             ),
             TransactionSigned::from_transaction_and_signature(
@@ -164,7 +164,7 @@ mod tests {
                         "0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb",
                     )
                     .unwrap(),
-                    Parity::Parity(false),
+                    false,
                 ),
             ),
         ];
@@ -208,7 +208,7 @@ mod tests {
                         "0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10",
                     )
                     .unwrap(),
-                    Parity::Eip155(37),
+                    false,
                 ),
             ),
             TransactionSigned::from_transaction_and_signature(
@@ -230,7 +230,7 @@ mod tests {
                         "0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb",
                     )
                     .unwrap(),
-                    Parity::Eip155(37),
+                    false,
                 ),
             ),
         ];
@@ -275,7 +275,7 @@ mod tests {
                         "0x612638fb29427ca33b9a3be2a0a561beecfe0269655be160d35e72d366a6a860",
                     )
                     .unwrap(),
-                    Parity::Eip155(44),
+                    true,
                 ),
             ),
             TransactionSigned::from_transaction_and_signature(
@@ -299,7 +299,7 @@ mod tests {
                         "0x016b83f4f980694ed2eee4d10667242b1f40dc406901b34125b008d334d47469",
                     )
                     .unwrap(),
-                    Parity::Parity(true),
+                    true,
                 ),
             ),
             TransactionSigned::from_transaction_and_signature(
@@ -321,7 +321,7 @@ mod tests {
                         "0x3ca3ae86580e94550d7c071e3a02eadb5a77830947c9225165cf9100901bee88",
                     )
                     .unwrap(),
-                    Parity::Eip155(43),
+                    false,
                 ),
             ),
             TransactionSigned::from_transaction_and_signature(
@@ -343,7 +343,7 @@ mod tests {
                         "0x5406ad177223213df262cb66ccbb2f46bfdccfdfbbb5ffdda9e2c02d977631da",
                     )
                     .unwrap(),
-                    Parity::Eip155(43),
+                    false,
                 ),
             ),
             TransactionSigned::from_transaction_and_signature(
@@ -365,7 +365,7 @@ mod tests {
                         "0x3a456401896b1b6055311536bf00a718568c744d8c1f9df59879e8350220ca18",
                     )
                     .unwrap(),
-                    Parity::Eip155(43),
+                    false,
                 ),
             ),
         ];
@@ -414,7 +414,7 @@ mod tests {
                         "0x612638fb29427ca33b9a3be2a0a561beecfe0269655be160d35e72d366a6a860",
                     )
                     .unwrap(),
-                    Parity::Parity(true),
+                    true,
                 ),
             ),
             TransactionSigned::from_transaction_and_signature(
@@ -438,7 +438,7 @@ mod tests {
                         "0x016b83f4f980694ed2eee4d10667242b1f40dc406901b34125b008d334d47469",
                     )
                     .unwrap(),
-                    Parity::Parity(true),
+                    true,
                 ),
             ),
             TransactionSigned::from_transaction_and_signature(
@@ -460,7 +460,7 @@ mod tests {
                         "0x3ca3ae86580e94550d7c071e3a02eadb5a77830947c9225165cf9100901bee88",
                     )
                     .unwrap(),
-                    Parity::Parity(false),
+                    false,
                 ),
             ),
             TransactionSigned::from_transaction_and_signature(
@@ -482,7 +482,7 @@ mod tests {
                         "0x5406ad177223213df262cb66ccbb2f46bfdccfdfbbb5ffdda9e2c02d977631da",
                     )
                     .unwrap(),
-                    Parity::Parity(false),
+                    false,
                 ),
             ),
             TransactionSigned::from_transaction_and_signature(
@@ -504,7 +504,7 @@ mod tests {
                         "0x3a456401896b1b6055311536bf00a718568c744d8c1f9df59879e8350220ca18",
                     )
                     .unwrap(),
-                    Parity::Parity(false),
+                    false,
                 ),
             ),
         ];

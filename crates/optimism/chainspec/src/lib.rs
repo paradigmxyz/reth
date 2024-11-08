@@ -20,7 +20,7 @@ mod op_sepolia;
 use alloc::{boxed::Box, vec, vec::Vec};
 use alloy_chains::Chain;
 use alloy_genesis::Genesis;
-use alloy_primitives::{Bytes, Parity, Signature, B256, U256};
+use alloy_primitives::{Bytes, B256, U256};
 pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
 use derive_more::{Constructor, Deref, Display, From, Into};
@@ -256,12 +256,6 @@ pub fn decode_holocene_1559_params(extra_data: Bytes) -> Result<(u32, u32), Deco
     Ok((u32::from_be_bytes(denominator), u32::from_be_bytes(elasticity)))
 }
 
-/// Returns the signature for the optimism deposit transactions, which don't include a
-/// signature.
-pub fn optimism_deposit_tx_signature() -> Signature {
-    Signature::new(U256::ZERO, U256::ZERO, Parity::Parity(false))
-}
-
 impl EthChainSpec for OpChainSpec {
     fn chain(&self) -> alloy_chains::Chain {
         self.inner.chain()
@@ -442,14 +436,14 @@ impl From<Genesis> for OpChainSpec {
 
 #[derive(Default, Debug)]
 struct OpGenesisInfo {
-    optimism_chain_info: op_alloy_rpc_types::genesis::OpChainInfo,
+    optimism_chain_info: op_alloy_rpc_types::OpChainInfo,
     base_fee_params: BaseFeeParamsKind,
 }
 
 impl OpGenesisInfo {
     fn extract_from(genesis: &Genesis) -> Self {
         let mut info = Self {
-            optimism_chain_info: op_alloy_rpc_types::genesis::OpChainInfo::extract_from(
+            optimism_chain_info: op_alloy_rpc_types::OpChainInfo::extract_from(
                 &genesis.config.extra_fields,
             )
             .unwrap_or_default(),
@@ -858,7 +852,7 @@ mod tests {
 
     #[test]
     fn parse_genesis_optimism_with_variable_base_fee_params() {
-        use op_alloy_rpc_types::genesis::OpBaseFeeInfo;
+        use op_alloy_rpc_types::OpBaseFeeInfo;
 
         let geth_genesis = r#"
     {

@@ -1,21 +1,17 @@
 //! Defines the types for blob transactions, legacy, and other EIP-2718 transactions included in a
 //! response to `GetPooledTransactions`.
 
-use super::{
-    error::TransactionConversionError,
-    signature::{recover_signer, with_eip155_parity},
-    TxEip7702,
-};
+use super::{error::TransactionConversionError, signature::recover_signer, TxEip7702};
 use crate::{BlobTransaction, Transaction, TransactionSigned, TransactionSignedEcRecovered};
 use alloy_eips::eip4844::BlobTransactionSidecar;
 
 use alloy_consensus::{
     constants::EIP4844_TX_TYPE_ID,
-    transaction::{TxEip1559, TxEip2930, TxEip4844, TxLegacy},
+    transaction::{RlpEcdsaTx, TxEip1559, TxEip2930, TxEip4844, TxLegacy},
     SignableTransaction, TxEip4844WithSidecar,
 };
 use alloy_eips::eip2718::{Decodable2718, Eip2718Result, Encodable2718};
-use alloy_primitives::{Address, Signature, TxHash, B256};
+use alloy_primitives::{Address, PrimitiveSignature as Signature, TxHash, B256};
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
 use bytes::Buf;
 use derive_more::{AsRef, Deref};
@@ -402,59 +398,39 @@ impl Encodable2718 for PooledTransactionsElement {
     fn encode_2718_len(&self) -> usize {
         match self {
             Self::Legacy { transaction, signature, .. } => {
-                // method computes the payload len with a RLP header
-                transaction.encoded_len_with_signature(&with_eip155_parity(
-                    signature,
-                    transaction.chain_id,
-                ))
+                transaction.eip2718_encoded_length(signature)
             }
             Self::Eip2930 { transaction, signature, .. } => {
-                // method computes the payload len without a RLP header
-                transaction.encoded_len_with_signature(signature, false)
+                transaction.eip2718_encoded_length(signature)
             }
             Self::Eip1559 { transaction, signature, .. } => {
-                // method computes the payload len without a RLP header
-                transaction.encoded_len_with_signature(signature, false)
+                transaction.eip2718_encoded_length(signature)
             }
             Self::Eip7702 { transaction, signature, .. } => {
-                // method computes the payload len without a RLP header
-                transaction.encoded_len_with_signature(signature, false)
+                transaction.eip2718_encoded_length(signature)
             }
-            Self::BlobTransaction(blob_tx) => {
-                // the encoding does not use a header, so we set `with_header` to false
-                blob_tx.payload_len_with_type(false)
+            Self::BlobTransaction(BlobTransaction { transaction, signature, .. }) => {
+                transaction.eip2718_encoded_length(signature)
             }
         }
     }
 
     fn encode_2718(&self, out: &mut dyn alloy_rlp::BufMut) {
-        // The encoding of `tx-data` depends on the transaction type. Refer to these docs for more
-        // information on the exact format:
-        // - Legacy: TxLegacy::encode_with_signature
-        // - EIP-2930: TxEip2930::encode_with_signature
-        // - EIP-1559: TxEip1559::encode_with_signature
-        // - EIP-4844: BlobTransaction::encode_with_type_inner
-        // - EIP-7702: TxEip7702::encode_with_signature
         match self {
-            Self::Legacy { transaction, signature, .. } => transaction
-                .encode_with_signature_fields(
-                    &with_eip155_parity(signature, transaction.chain_id),
-                    out,
-                ),
+            Self::Legacy { transaction, signature, .. } => {
+                transaction.eip2718_encode(signature, out)
+            }
             Self::Eip2930 { transaction, signature, .. } => {
-                transaction.encode_with_signature(signature, out, false)
+                transaction.eip2718_encode(signature, out)
             }
             Self::Eip1559 { transaction, signature, .. } => {
-                transaction.encode_with_signature(signature, out, false)
+                transaction.eip2718_encode(signature, out)
             }
             Self::Eip7702 { transaction, signature, .. } => {
-                transaction.encode_with_signature(signature, out, false)
+                transaction.eip2718_encode(signature, out)
             }
-            Self::BlobTransaction(blob_tx) => {
-                // The inner encoding is used with `with_header` set to true, making the final
-                // encoding:
-                // `tx_type || rlp([transaction_payload_body, blobs, commitments, proofs]))`
-                blob_tx.encode_with_type_inner(out, false);
+            Self::BlobTransaction(BlobTransaction { transaction, signature, .. }) => {
+                transaction.eip2718_encode(signature, out)
             }
         }
     }

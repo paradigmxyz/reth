@@ -1,10 +1,10 @@
 use alloy_eips::BlockId;
 use alloy_primitives::{map::HashSet, Bytes, B256, U256};
-use alloy_rpc_types::{
+use alloy_rpc_types_eth::{
     state::{EvmOverrides, StateOverride},
+    transaction::TransactionRequest,
     BlockOverrides, Index,
 };
-use alloy_rpc_types_eth::transaction::TransactionRequest;
 use alloy_rpc_types_trace::{
     filter::TraceFilter,
     opcode::{BlockOpcodeGas, TransactionOpcodeGas},

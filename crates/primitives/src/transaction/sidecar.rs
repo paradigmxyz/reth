@@ -1,10 +1,9 @@
 #![cfg_attr(docsrs, doc(cfg(feature = "c-kzg")))]
 
 use crate::{Transaction, TransactionSigned};
-use alloy_consensus::{constants::EIP4844_TX_TYPE_ID, TxEip4844WithSidecar};
+use alloy_consensus::{transaction::RlpEcdsaTx, TxEip4844WithSidecar};
 use alloy_eips::eip4844::BlobTransactionSidecar;
-use alloy_primitives::{Signature, TxHash};
-use alloy_rlp::Header;
+use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
 use serde::{Deserialize, Serialize};
 
 /// A response to `GetPooledTransactions` that includes blob data, their commitments, and their
@@ -69,107 +68,6 @@ impl BlobTransaction {
         (transaction, self.transaction.sidecar)
     }
 
-    /// Encodes the [`BlobTransaction`] fields as RLP, with a tx type. If `with_header` is `false`,
-    /// the following will be encoded:
-    /// `tx_type (0x03) || rlp([transaction_payload_body, blobs, commitments, proofs])`
-    ///
-    /// If `with_header` is `true`, the following will be encoded:
-    /// `rlp(tx_type (0x03) || rlp([transaction_payload_body, blobs, commitments, proofs]))`
-    ///
-    /// NOTE: The header will be a byte string header, not a list header.
-    pub(crate) fn encode_with_type_inner(&self, out: &mut dyn bytes::BufMut, with_header: bool) {
-        // Calculate the length of:
-        // `tx_type || rlp([transaction_payload_body, blobs, commitments, proofs])`
-        //
-        // to construct and encode the string header
-        if with_header {
-            Header {
-                list: false,
-                // add one for the tx type
-                payload_length: 1 + self.payload_len(),
-            }
-            .encode(out);
-        }
-
-        out.put_u8(EIP4844_TX_TYPE_ID);
-
-        // Now we encode the inner blob transaction:
-        self.encode_inner(out);
-    }
-
-    /// Encodes the [`BlobTransaction`] fields as RLP, with the following format:
-    /// `rlp([transaction_payload_body, blobs, commitments, proofs])`
-    ///
-    /// where `transaction_payload_body` is a list:
-    /// `[chain_id, nonce, max_priority_fee_per_gas, ..., y_parity, r, s]`
-    ///
-    /// Note: this should be used only when implementing other RLP encoding methods, and does not
-    /// represent the full RLP encoding of the blob transaction.
-    pub(crate) fn encode_inner(&self, out: &mut dyn bytes::BufMut) {
-        self.transaction.encode_with_signature_fields(&self.signature, out);
-    }
-
-    /// Outputs the length of the RLP encoding of the blob transaction, including the tx type byte,
-    /// optionally including the length of a wrapping string header. If `with_header` is `false`,
-    /// the length of the following will be calculated:
-    /// `tx_type (0x03) || rlp([transaction_payload_body, blobs, commitments, proofs])`
-    ///
-    /// If `with_header` is `true`, the length of the following will be calculated:
-    /// `rlp(tx_type (0x03) || rlp([transaction_payload_body, blobs, commitments, proofs]))`
-    pub(crate) fn payload_len_with_type(&self, with_header: bool) -> usize {
-        if with_header {
-            // Construct a header and use that to calculate the total length
-            let wrapped_header = Header {
-                list: false,
-                // add one for the tx type byte
-                payload_length: 1 + self.payload_len(),
-            };
-
-            // The total length is now the length of the header plus the length of the payload
-            // (which includes the tx type byte)
-            wrapped_header.length() + wrapped_header.payload_length
-        } else {
-            // Just add the length of the tx type to the payload length
-            1 + self.payload_len()
-        }
-    }
-
-    /// Outputs the length of the RLP encoding of the blob transaction with the following format:
-    /// `rlp([transaction_payload_body, blobs, commitments, proofs])`
-    ///
-    /// where `transaction_payload_body` is a list:
-    /// `[chain_id, nonce, max_priority_fee_per_gas, ..., y_parity, r, s]`
-    ///
-    /// Note: this should be used only when implementing other RLP encoding length methods, and
-    /// does not represent the full RLP encoding of the blob transaction.
-    pub(crate) fn payload_len(&self) -> usize {
-        // The `transaction_payload_body` length is the length of the fields, plus the length of
-        // its list header.
-        let tx_header = Header {
-            list: true,
-            payload_length: self.transaction.tx.fields_len() + self.signature.rlp_vrs_len(),
-        };
-
-        let tx_length = tx_header.length() + tx_header.payload_length;
-
-        // The payload length is the length of the `tranascation_payload_body` list, plus the
-        // length of the blobs, commitments, and proofs.
-        let payload_length = tx_length + self.transaction.sidecar.rlp_encoded_fields_length();
-
-        // We use the calculated payload len to construct the first list header, which encompasses
-        // everything in the tx - the length of the second, inner list header is part of
-        // payload_length
-        let blob_tx_header = Header { list: true, payload_length };
-
-        // The final length is the length of:
-        //  * the outer blob tx header +
-        //  * the inner tx header +
-        //  * the inner tx fields +
-        //  * the signature fields +
-        //  * the sidecar fields
-        blob_tx_header.length() + blob_tx_header.payload_length
-    }
-
     /// Decodes a [`BlobTransaction`] from RLP. This expects the encoding to be:
     /// `rlp([transaction_payload_body, blobs, commitments, proofs])`
     ///
@@ -180,7 +78,7 @@ impl BlobTransaction {
     /// represent the full RLP decoding of the `PooledTransactionsElement` type.
     pub(crate) fn decode_inner(data: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let (transaction, signature, hash) =
-            TxEip4844WithSidecar::decode_signed_fields(data)?.into_parts();
+            TxEip4844WithSidecar::rlp_decode_signed(data)?.into_parts();
 
         Ok(Self { transaction, hash, signature })
     }

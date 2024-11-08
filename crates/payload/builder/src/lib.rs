@@ -26,6 +26,7 @@
 //! ```
 //! use std::future::Future;
 //! use std::pin::Pin;
+//! use std::sync::Arc;
 //! use std::task::{Context, Poll};
 //! use alloy_primitives::U256;
 //! use reth_payload_builder::{EthBuiltPayload, PayloadBuilderError, KeepPayloadJobAlive, EthPayloadBuilderAttributes, PayloadJob, PayloadJobGenerator, PayloadKind};
@@ -56,7 +57,7 @@
 //!
 //! fn best_payload(&self) -> Result<EthBuiltPayload, PayloadBuilderError> {
 //!     // NOTE: some fields are omitted here for brevity
-//!     let payload = Block {
+//!     let block = Block {
 //!         header: Header {
 //!             parent_hash: self.attributes.parent,
 //!             timestamp: self.attributes.timestamp,
@@ -65,7 +66,7 @@
 //!         },
 //!         ..Default::default()
 //!     };
-//!     let payload = EthBuiltPayload::new(self.attributes.id, payload.seal_slow(), U256::ZERO, None, None);
+//!     let payload = EthBuiltPayload::new(self.attributes.id, Arc::new(block.seal_slow()), U256::ZERO, None, None);
 //!     Ok(payload)
 //! }
 //!
