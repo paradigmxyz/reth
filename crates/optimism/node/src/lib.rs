@@ -22,6 +22,10 @@ pub use node::OpNode;
 
 pub mod txpool;
 
+/// Helpers for running test node instances.
+#[cfg(feature = "test-utils")]
+pub mod utils;
+
 pub use reth_optimism_payload_builder::{
     OpBuiltPayload, OpPayloadBuilder, OpPayloadBuilderAttributes,
 };

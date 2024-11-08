@@ -1,7 +1,7 @@
-use crate::utils::{advance_chain, setup};
 use alloy_rpc_types_engine::PayloadStatusEnum;
 use futures::StreamExt;
 use reth::blockchain_tree::error::BlockchainTreeError;
+use reth_optimism_node::utils::{advance_chain, setup};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 

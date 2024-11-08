@@ -8235,10 +8235,13 @@ dependencies = [
 name = "reth-optimism-node"
 version = "1.1.1"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-genesis",
+ "alloy-network",
  "alloy-primitives",
  "alloy-rpc-types-engine",
+ "alloy-signer-local",
  "clap",
  "eyre",
  "futures",
@@ -8261,6 +8264,7 @@ dependencies = [
  "reth-optimism-consensus",
  "reth-optimism-evm",
  "reth-optimism-forks",
+ "reth-optimism-node",
  "reth-optimism-payload-builder",
  "reth-optimism-rpc",
  "reth-payload-builder",

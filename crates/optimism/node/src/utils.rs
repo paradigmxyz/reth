@@ -1,3 +1,4 @@
+use crate::{node::OpAddOns, OpBuiltPayload, OpNode as OtherOpNode, OpPayloadBuilderAttributes};
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, B256};
 use reth::{rpc::types::engine::PayloadAttributes, tasks::TaskManager};
@@ -5,9 +6,6 @@ use reth_e2e_test_utils::{
     transaction::TransactionTestContext, wallet::Wallet, Adapter, NodeHelperType,
 };
 use reth_optimism_chainspec::OpChainSpecBuilder;
-use reth_optimism_node::{
-    node::OpAddOns, OpBuiltPayload, OpNode as OtherOpNode, OpPayloadBuilderAttributes,
-};
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -15,8 +13,10 @@ use tokio::sync::Mutex;
 /// Optimism Node Helper type
 pub(crate) type OpNode = NodeHelperType<OtherOpNode, OpAddOns<Adapter<OtherOpNode>>>;
 
-pub(crate) async fn setup(num_nodes: usize) -> eyre::Result<(Vec<OpNode>, TaskManager, Wallet)> {
-    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
+/// Creates the initial setup with `num_nodes` of the node config, started and connected.
+pub async fn setup(num_nodes: usize) -> eyre::Result<(Vec<OpNode>, TaskManager, Wallet)> {
+    let genesis: Genesis =
+        serde_json::from_str(include_str!("../tests/assets/genesis.json")).unwrap();
     reth_e2e_test_utils::setup(
         num_nodes,
         Arc::new(OpChainSpecBuilder::base_mainnet().genesis(genesis).ecotone_activated().build()),
@@ -27,7 +27,7 @@ pub(crate) async fn setup(num_nodes: usize) -> eyre::Result<(Vec<OpNode>, TaskMa
 }
 
 /// Advance the chain with sequential payloads returning them in the end.
-pub(crate) async fn advance_chain(
+pub async fn advance_chain(
     length: usize,
     node: &mut OpNode,
     wallet: Arc<Mutex<Wallet>>,
@@ -49,7 +49,7 @@ pub(crate) async fn advance_chain(
 }
 
 /// Helper function to create a new eth payload attributes
-pub(crate) fn optimism_payload_attributes(timestamp: u64) -> OpPayloadBuilderAttributes {
+pub fn optimism_payload_attributes(timestamp: u64) -> OpPayloadBuilderAttributes {
     let attributes = PayloadAttributes {
         timestamp,
         prev_randao: B256::ZERO,
