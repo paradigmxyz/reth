@@ -1,5 +1,8 @@
 use crate::{root::ParallelStateRootError, stats::ParallelTrieTracker, StorageRootTargets};
-use alloy_primitives::{map::HashSet, B256};
+use alloy_primitives::{
+    map::{HashMap, HashSet},
+    B256,
+};
 use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
 use reth_db::DatabaseError;
@@ -214,7 +217,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{keccak256, Address, U256};
+    use alloy_primitives::{keccak256, map::DefaultHashBuilder, Address, U256};
     use rand::Rng;
     use reth_primitives::{Account, StorageEntry};
     use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
@@ -231,7 +234,7 @@ mod tests {
                 let address = Address::random();
                 let account =
                     Account { balance: U256::from(rng.gen::<u64>()), ..Default::default() };
-                let mut storage = HashMap::<B256, U256>::default();
+                let mut storage = HashMap::<B256, U256, DefaultHashBuilder>::default();
                 let has_storage = rng.gen_bool(0.7);
                 if has_storage {
                     for _ in 0..100 {
@@ -243,7 +246,7 @@ mod tests {
                 }
                 (address, (account, storage))
             })
-            .collect::<HashMap<_, _>>();
+            .collect::<HashMap<_, _, DefaultHashBuilder>>();
 
         {
             let provider_rw = factory.provider_rw().unwrap();
@@ -265,10 +268,11 @@ mod tests {
             provider_rw.commit().unwrap();
         }
 
-        let mut targets = HashMap::new();
+        let mut targets =
+            HashMap::<B256, HashSet<B256, DefaultHashBuilder>, DefaultHashBuilder>::default();
         for (address, (_, storage)) in state.iter().take(10) {
             let hashed_address = keccak256(*address);
-            let mut target_slots = HashSet::new();
+            let mut target_slots = HashSet::<B256, DefaultHashBuilder>::default();
 
             for (slot, _) in storage.iter().take(5) {
                 target_slots.insert(*slot);
@@ -284,7 +288,7 @@ mod tests {
         let hashed_cursor_factory = DatabaseHashedCursorFactory::new(provider_rw.tx_ref());
 
         assert_eq!(
-            ParallelProof::new(consistent_view.clone(), Default::default())
+            ParallelProof::new(consistent_view, Default::default())
                 .multiproof(targets.clone())
                 .unwrap(),
             Proof::new(trie_cursor_factory, hashed_cursor_factory).multiproof(targets).unwrap()
