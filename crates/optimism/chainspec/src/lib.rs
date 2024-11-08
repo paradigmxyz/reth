@@ -96,7 +96,7 @@ impl OpChainSpecBuilder {
     }
 
     /// Remove the given fork from the spec.
-    pub fn without_fork(mut self, fork: reth_optimism_forks::OptimismHardfork) -> Self {
+    pub fn without_fork(mut self, fork: reth_optimism_forks::OpHardfork) -> Self {
         self.inner = self.inner.without_fork(fork);
         self
     }
@@ -104,19 +104,17 @@ impl OpChainSpecBuilder {
     /// Enable Bedrock at genesis
     pub fn bedrock_activated(mut self) -> Self {
         self.inner = self.inner.paris_activated();
-        self.inner = self
-            .inner
-            .with_fork(reth_optimism_forks::OptimismHardfork::Bedrock, ForkCondition::Block(0));
+        self.inner =
+            self.inner.with_fork(reth_optimism_forks::OpHardfork::Bedrock, ForkCondition::Block(0));
         self
     }
 
     /// Enable Regolith at genesis
     pub fn regolith_activated(mut self) -> Self {
         self = self.bedrock_activated();
-        self.inner = self.inner.with_fork(
-            reth_optimism_forks::OptimismHardfork::Regolith,
-            ForkCondition::Timestamp(0),
-        );
+        self.inner = self
+            .inner
+            .with_fork(reth_optimism_forks::OpHardfork::Regolith, ForkCondition::Timestamp(0));
         self
     }
 
@@ -127,7 +125,7 @@ impl OpChainSpecBuilder {
         self.inner = self.inner.with_fork(EthereumHardfork::Shanghai, ForkCondition::Timestamp(0));
         self.inner = self
             .inner
-            .with_fork(reth_optimism_forks::OptimismHardfork::Canyon, ForkCondition::Timestamp(0));
+            .with_fork(reth_optimism_forks::OpHardfork::Canyon, ForkCondition::Timestamp(0));
         self
     }
 
@@ -137,7 +135,7 @@ impl OpChainSpecBuilder {
         self.inner = self.inner.with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(0));
         self.inner = self
             .inner
-            .with_fork(reth_optimism_forks::OptimismHardfork::Ecotone, ForkCondition::Timestamp(0));
+            .with_fork(reth_optimism_forks::OpHardfork::Ecotone, ForkCondition::Timestamp(0));
         self
     }
 
@@ -146,7 +144,7 @@ impl OpChainSpecBuilder {
         self = self.ecotone_activated();
         self.inner = self
             .inner
-            .with_fork(reth_optimism_forks::OptimismHardfork::Fjord, ForkCondition::Timestamp(0));
+            .with_fork(reth_optimism_forks::OpHardfork::Fjord, ForkCondition::Timestamp(0));
         self
     }
 
@@ -155,17 +153,16 @@ impl OpChainSpecBuilder {
         self = self.fjord_activated();
         self.inner = self
             .inner
-            .with_fork(reth_optimism_forks::OptimismHardfork::Granite, ForkCondition::Timestamp(0));
+            .with_fork(reth_optimism_forks::OpHardfork::Granite, ForkCondition::Timestamp(0));
         self
     }
 
     /// Enable Holocene at genesis
     pub fn holocene_activated(mut self) -> Self {
         self = self.granite_activated();
-        self.inner = self.inner.with_fork(
-            reth_optimism_forks::OptimismHardfork::Holocene,
-            ForkCondition::Timestamp(0),
-        );
+        self.inner = self
+            .inner
+            .with_fork(reth_optimism_forks::OpHardfork::Holocene, ForkCondition::Timestamp(0));
         self
     }
 
@@ -194,10 +191,9 @@ impl OpChainSpec {
         parent: &Header,
         timestamp: u64,
     ) -> Result<U256, DecodeError> {
-        let is_holocene_activated = self.inner.is_fork_active_at_timestamp(
-            reth_optimism_forks::OptimismHardfork::Holocene,
-            timestamp,
-        );
+        let is_holocene_activated = self
+            .inner
+            .is_fork_active_at_timestamp(reth_optimism_forks::OpHardfork::Holocene, timestamp);
         // If we are in the Holocene, we need to use the base fee params
         // from the parent block's extra data.
         // Else, use the base fee params (default values) from chainspec
@@ -344,7 +340,7 @@ impl OptimismHardforks for OpChainSpec {}
 
 impl From<Genesis> for OpChainSpec {
     fn from(genesis: Genesis) -> Self {
-        use reth_optimism_forks::OptimismHardfork;
+        use reth_optimism_forks::OpHardfork;
         let optimism_genesis_info = OpGenesisInfo::extract_from(&genesis);
         let genesis_info =
             optimism_genesis_info.optimism_chain_info.genesis_info.unwrap_or_default();
@@ -363,7 +359,7 @@ impl From<Genesis> for OpChainSpec {
             (EthereumHardfork::London.boxed(), genesis.config.london_block),
             (EthereumHardfork::ArrowGlacier.boxed(), genesis.config.arrow_glacier_block),
             (EthereumHardfork::GrayGlacier.boxed(), genesis.config.gray_glacier_block),
-            (OptimismHardfork::Bedrock.boxed(), genesis_info.bedrock_block),
+            (OpHardfork::Bedrock.boxed(), genesis_info.bedrock_block),
         ];
         let mut block_hardforks = hardfork_opts
             .into_iter()
@@ -391,11 +387,11 @@ impl From<Genesis> for OpChainSpec {
             (EthereumHardfork::Shanghai.boxed(), genesis.config.shanghai_time),
             (EthereumHardfork::Cancun.boxed(), genesis.config.cancun_time),
             (EthereumHardfork::Prague.boxed(), genesis.config.prague_time),
-            (OptimismHardfork::Regolith.boxed(), genesis_info.regolith_time),
-            (OptimismHardfork::Canyon.boxed(), genesis_info.canyon_time),
-            (OptimismHardfork::Ecotone.boxed(), genesis_info.ecotone_time),
-            (OptimismHardfork::Fjord.boxed(), genesis_info.fjord_time),
-            (OptimismHardfork::Granite.boxed(), genesis_info.granite_time),
+            (OpHardfork::Regolith.boxed(), genesis_info.regolith_time),
+            (OpHardfork::Canyon.boxed(), genesis_info.canyon_time),
+            (OpHardfork::Ecotone.boxed(), genesis_info.ecotone_time),
+            (OpHardfork::Fjord.boxed(), genesis_info.fjord_time),
+            (OpHardfork::Granite.boxed(), genesis_info.granite_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts
@@ -408,7 +404,7 @@ impl From<Genesis> for OpChainSpec {
         block_hardforks.append(&mut time_hardforks);
 
         // Ordered Hardforks
-        let mainnet_hardforks = OptimismHardfork::op_mainnet();
+        let mainnet_hardforks = OpHardfork::op_mainnet();
         let mainnet_order = mainnet_hardforks.forks_iter();
 
         let mut ordered_hardforks = Vec::with_capacity(block_hardforks.len());
@@ -464,7 +460,7 @@ impl OpGenesisInfo {
                                 BaseFeeParams::new(denominator as u128, elasticity as u128),
                             ),
                             (
-                                reth_optimism_forks::OptimismHardfork::Canyon.boxed(),
+                                reth_optimism_forks::OpHardfork::Canyon.boxed(),
                                 BaseFeeParams::new(canyon_denominator as u128, elasticity as u128),
                             ),
                         ]
@@ -490,7 +486,7 @@ mod tests {
     use alloy_primitives::b256;
     use reth_chainspec::{test_fork_ids, BaseFeeParams, BaseFeeParamsKind};
     use reth_ethereum_forks::{EthereumHardfork, ForkCondition, ForkHash, ForkId, Head};
-    use reth_optimism_forks::{OptimismHardfork, OptimismHardforks};
+    use reth_optimism_forks::{OpHardfork, OptimismHardforks};
 
     use crate::*;
 
@@ -763,19 +759,19 @@ mod tests {
             BaseFeeParamsKind::Constant(BaseFeeParams::new(70, 60))
         );
 
-        assert!(!chain_spec.is_fork_active_at_block(OptimismHardfork::Bedrock, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Regolith, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Ecotone, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Fjord, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Granite, 0));
+        assert!(!chain_spec.is_fork_active_at_block(OpHardfork::Bedrock, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Regolith, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Canyon, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Ecotone, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Fjord, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Granite, 0));
 
-        assert!(chain_spec.is_fork_active_at_block(OptimismHardfork::Bedrock, 10));
-        assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Regolith, 20));
-        assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, 30));
-        assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Ecotone, 40));
-        assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Fjord, 50));
-        assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Granite, 51));
+        assert!(chain_spec.is_fork_active_at_block(OpHardfork::Bedrock, 10));
+        assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Regolith, 20));
+        assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Canyon, 30));
+        assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Ecotone, 40));
+        assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Fjord, 50));
+        assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Granite, 51));
     }
 
     #[test]
@@ -829,25 +825,25 @@ mod tests {
             BaseFeeParamsKind::Variable(
                 vec![
                     (EthereumHardfork::London.boxed(), BaseFeeParams::new(70, 60)),
-                    (OptimismHardfork::Canyon.boxed(), BaseFeeParams::new(80, 60)),
+                    (OpHardfork::Canyon.boxed(), BaseFeeParams::new(80, 60)),
                 ]
                 .into()
             )
         );
 
-        assert!(!chain_spec.is_fork_active_at_block(OptimismHardfork::Bedrock, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Regolith, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Ecotone, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Fjord, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Granite, 0));
+        assert!(!chain_spec.is_fork_active_at_block(OpHardfork::Bedrock, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Regolith, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Canyon, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Ecotone, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Fjord, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Granite, 0));
 
-        assert!(chain_spec.is_fork_active_at_block(OptimismHardfork::Bedrock, 10));
-        assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Regolith, 20));
-        assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, 30));
-        assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Ecotone, 40));
-        assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Fjord, 50));
-        assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Granite, 51));
+        assert!(chain_spec.is_fork_active_at_block(OpHardfork::Bedrock, 10));
+        assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Regolith, 20));
+        assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Canyon, 30));
+        assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Ecotone, 40));
+        assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Fjord, 50));
+        assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Granite, 51));
     }
 
     #[test]
@@ -921,14 +917,14 @@ mod tests {
             })
         );
 
-        assert!(chainspec.is_fork_active_at_block(OptimismHardfork::Bedrock, 0));
+        assert!(chainspec.is_fork_active_at_block(OpHardfork::Bedrock, 0));
 
-        assert!(chainspec.is_fork_active_at_timestamp(OptimismHardfork::Regolith, 20));
+        assert!(chainspec.is_fork_active_at_timestamp(OpHardfork::Regolith, 20));
     }
 
     #[test]
     fn test_fork_order_optimism_mainnet() {
-        use reth_optimism_forks::OptimismHardfork;
+        use reth_optimism_forks::OpHardfork;
 
         let genesis = Genesis {
             config: ChainConfig {
@@ -984,14 +980,14 @@ mod tests {
             EthereumHardfork::ArrowGlacier.boxed(),
             EthereumHardfork::GrayGlacier.boxed(),
             EthereumHardfork::Paris.boxed(),
-            OptimismHardfork::Bedrock.boxed(),
-            OptimismHardfork::Regolith.boxed(),
+            OpHardfork::Bedrock.boxed(),
+            OpHardfork::Regolith.boxed(),
             EthereumHardfork::Shanghai.boxed(),
-            OptimismHardfork::Canyon.boxed(),
+            OpHardfork::Canyon.boxed(),
             EthereumHardfork::Cancun.boxed(),
-            OptimismHardfork::Ecotone.boxed(),
-            OptimismHardfork::Fjord.boxed(),
-            OptimismHardfork::Granite.boxed(),
+            OpHardfork::Ecotone.boxed(),
+            OpHardfork::Fjord.boxed(),
+            OpHardfork::Granite.boxed(),
         ];
 
         assert!(expected_hardforks
@@ -1022,8 +1018,8 @@ mod tests {
     }
 
     fn holocene_chainspec() -> Arc<OpChainSpec> {
-        let mut hardforks = OptimismHardfork::base_sepolia();
-        hardforks.insert(OptimismHardfork::Holocene.boxed(), ForkCondition::Timestamp(1800000000));
+        let mut hardforks = OpHardfork::base_sepolia();
+        hardforks.insert(OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(1800000000));
         Arc::new(OpChainSpec {
             inner: ChainSpec {
                 chain: BASE_SEPOLIA.inner.chain,
