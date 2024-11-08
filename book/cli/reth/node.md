@@ -502,8 +502,8 @@ TxPool:
 
           [default: 1024]
 
-      --txpool.max-new-pending-txs-notifications <NEW_TRANSACTION_NOTIFIER>
-          Broadcasts new transactions added to the pool
+      --txpool.max-new-pending-txs-notifications <MAX_NEW_PENDING_TXS_NOTIFICATIONS>
+          How many new pending transactions to buffer and send to in progress pending transaction iterators
 
           [default: 200]
 
