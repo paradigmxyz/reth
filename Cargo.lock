@@ -8241,6 +8241,7 @@ dependencies = [
  "alloy-rpc-types-engine",
  "clap",
  "eyre",
+ "futures",
  "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
  "parking_lot",
