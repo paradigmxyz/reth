@@ -208,7 +208,7 @@ where
         }
 
         if let Some(account) = accessed_blacklisted {
-            return Err(ValidationApiError::Blacklist(account));
+            return Err(ValidationApiError::Blacklist(account))
         }
 
         self.consensus.validate_block_post_execution(
