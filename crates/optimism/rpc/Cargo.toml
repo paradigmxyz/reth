@@ -72,3 +72,8 @@ optimism = [
 	"revm/optimism",
 	"reth-optimism-consensus/optimism"
 ]
+client = [
+	"jsonrpsee/client",
+	"jsonrpsee/async-client",
+	"reth-rpc-eth-api/client",
+]
