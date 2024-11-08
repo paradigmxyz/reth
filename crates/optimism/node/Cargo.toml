@@ -66,6 +66,7 @@ tokio.workspace = true
 alloy-primitives.workspace = true
 alloy-genesis.workspace = true
 op-alloy-consensus.workspace = true
+futures.workspace = true
 
 [features]
 optimism = [
