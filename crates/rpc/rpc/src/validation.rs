@@ -77,10 +77,11 @@ pub struct ValidationApiInner<Provider: ChainSpecProvider, E> {
     executor_provider: E,
     /// Set of disallowed addresses
     disallow: HashSet<Address>,
-    /// Cached state reads to avoid redundant disk I/O across multiple validation attempts.
-    /// Stores a tuple of (`block_hash`, `cached_reads`) for the latest head block state.
-    /// Uses async `RwLock` to safely handle concurrent validation requests.
-    cached_state: Arc<RwLock<(B256, CachedReads)>>,
+    /// Cached state reads to avoid redundant disk I/O across multiple validation attempts
+    /// targeting the same state. Stores a tuple of (`block_hash`, `cached_reads`) for the
+    /// latest head block state. Uses async `RwLock` to safely handle concurrent validation
+    /// requests.
+    cached_state: RwLock<(B256, CachedReads)>,
 }
 
 /// The type that implements the `validation` rpc namespace trait
@@ -110,10 +111,30 @@ where
             payload_validator,
             executor_provider,
             disallow,
-            cached_state: Arc::new(RwLock::new((B256::default(), CachedReads::default()))),
+            cached_state: Default::default(),
         });
 
         Self { inner }
+    }
+
+    /// Returns the cached reads for the given head hash.
+    async fn cached_reads(&self, head: B256) -> CachedReads {
+        let cache = self.inner.cached_state.read().await;
+        if cache.0 == head {
+            cache.1.clone()
+        } else {
+            Default::default()
+        }
+    }
+
+    /// Updates the cached state for the given head hash.
+    async fn update_cached_reads(&self, head: B256, cached_state: CachedReads) {
+        let mut cache = self.inner.cached_state.write().await;
+        if cache.0 == head {
+            cache.1.extend(cached_state);
+        } else {
+            *cache = (head, cached_state)
+        }
     }
 }
 
@@ -176,13 +197,7 @@ where
         let latest_header_hash = latest_header.hash();
         let state_provider = self.provider.state_by_block_hash(latest_header_hash)?;
 
-        let mut request_cache = {
-            let guard = self.inner.cached_state.read().await;
-            match *guard {
-                (ref hash, ref cache) if hash == &latest_header_hash => cache.clone(),
-                _ => CachedReads::default(),
-            }
-        };
+        let mut request_cache = self.cached_reads(latest_header_hash).await;
 
         let cached_db = request_cache.as_db_mut(StateProviderDatabase::new(&state_provider));
         let executor = self.executor_provider.executor(cached_db);
@@ -202,10 +217,8 @@ where
             },
         )?;
 
-        {
-            let mut cached_state = self.inner.cached_state.write().await;
-            *cached_state = (latest_header_hash, request_cache);
-        }
+        // update the cached reads
+        self.update_cached_reads(latest_header_hash, request_cache).await;
 
         if let Some(account) = accessed_blacklisted {
             return Err(ValidationApiError::Blacklist(account))
