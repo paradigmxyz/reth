@@ -88,7 +88,7 @@ pub struct TxPoolArgs {
     pub new_tx_listener_buffer_size: usize,
 
     /// Broadcasts new transactions added to the pool.
-    #[arg(long = "txpool.new-txs-notifier", alias = "txpool.new-txns-notifier", default_value_t = NEW_TRANSACTIONS_NOTIFIER)]
+    #[arg(long = "txpool.max-new-pending-txs-notifications", alias = "txpool.max-new-pending-txs-notifications", default_value_t = NEW_TRANSACTIONS_NOTIFIER)]
     pub new_transaction_notifier: usize,
 }
 
