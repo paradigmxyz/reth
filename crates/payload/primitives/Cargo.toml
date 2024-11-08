@@ -22,8 +22,8 @@ reth-chain-state.workspace = true
 # alloy
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
-alloy-rpc-types = { workspace = true, features = ["engine"] }
-op-alloy-rpc-types-engine.workspace = true
+alloy-rpc-types-engine = { workspace = true, features = ["serde"] }
+op-alloy-rpc-types-engine = { workspace = true, optional = true }
 
 # async
 async-trait.workspace = true
@@ -35,3 +35,6 @@ pin-project.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+
+[features]
+op = ["dep:op-alloy-rpc-types-engine"]

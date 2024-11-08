@@ -1,8 +1,8 @@
 //! Loads and formats OP transaction RPC response.
 
-use alloy_consensus::Signed;
+use alloy_consensus::{Signed, Transaction as _};
 use alloy_primitives::{Bytes, B256};
-use alloy_rpc_types::TransactionInfo;
+use alloy_rpc_types_eth::TransactionInfo;
 use op_alloy_consensus::OpTxEnvelope;
 use op_alloy_rpc_types::Transaction;
 use reth_node_api::FullNodeComponents;
@@ -110,15 +110,24 @@ where
             .flatten()
             .and_then(|receipt| receipt.deposit_receipt_version);
 
-        let TransactionInfo { block_hash, block_number, index: transaction_index, .. } = tx_info;
+        let TransactionInfo {
+            block_hash, block_number, index: transaction_index, base_fee, ..
+        } = tx_info;
+
+        let effective_gas_price = base_fee
+            .map(|base_fee| {
+                inner.effective_tip_per_gas(base_fee as u64).unwrap_or_default() + base_fee
+            })
+            .unwrap_or_else(|| inner.max_fee_per_gas());
 
         Transaction {
-            inner: alloy_rpc_types::Transaction {
+            inner: alloy_rpc_types_eth::Transaction {
                 inner,
                 block_hash,
                 block_number,
                 transaction_index,
                 from,
+                effective_gas_price: Some(effective_gas_price),
             },
             deposit_receipt_version,
         }
