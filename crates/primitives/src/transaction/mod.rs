@@ -1599,7 +1599,7 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
         #[allow(unused_mut)]
         let mut transaction = Transaction::arbitrary(u)?;
 
-        let key_pair = secp256k1::Keypair::new(&secp256k1::SECP256K1, &mut rand::thread_rng());
+        let key_pair = secp256k1::Keypair::new(secp256k1::SECP256K1, &mut rand::thread_rng());
         let signature = crate::sign_message(
             B256::from_slice(&key_pair.secret_bytes()[..]),
             transaction.signature_hash(),
@@ -2251,7 +2251,7 @@ mod tests {
                     tx.set_chain_id(chain_id % (u64::MAX / 2 - 36));
                 }
 
-                let key_pair = secp256k1::Keypair::new(&secp256k1::SECP256K1, &mut rng);
+                let key_pair = secp256k1::Keypair::new(secp256k1::SECP256K1, &mut rng);
 
                 let signature =
                     crate::sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
