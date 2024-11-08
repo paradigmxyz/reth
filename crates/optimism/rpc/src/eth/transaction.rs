@@ -2,7 +2,7 @@
 
 use alloy_consensus::{Signed, Transaction as _};
 use alloy_primitives::{Bytes, B256};
-use alloy_rpc_types::TransactionInfo;
+use alloy_rpc_types_eth::TransactionInfo;
 use op_alloy_consensus::OpTxEnvelope;
 use op_alloy_rpc_types::Transaction;
 use reth_node_api::FullNodeComponents;
@@ -121,7 +121,7 @@ where
             .unwrap_or_else(|| inner.max_fee_per_gas());
 
         Transaction {
-            inner: alloy_rpc_types::Transaction {
+            inner: alloy_rpc_types_eth::Transaction {
                 inner,
                 block_hash,
                 block_number,
