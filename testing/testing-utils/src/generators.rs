@@ -11,7 +11,7 @@ use reth_primitives::{
     proofs, sign_message, Account, BlockBody, Header, Log, Receipt, SealedBlock, SealedHeader,
     StorageEntry, Transaction, TransactionSigned, Withdrawals,
 };
-use secp256k1::{Keypair, Secp256k1};
+use secp256k1::Keypair;
 use std::{
     cmp::{max, min},
     collections::{hash_map::DefaultHasher, BTreeMap},
