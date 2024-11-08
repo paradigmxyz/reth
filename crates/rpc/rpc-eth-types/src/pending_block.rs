@@ -4,10 +4,10 @@
 
 use std::time::Instant;
 
-use alloy_eips::BlockId;
+use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::B256;
 use derive_more::Constructor;
-use reth_primitives::{BlockNumberOrTag, Receipt, SealedBlockWithSenders, SealedHeader};
+use reth_primitives::{Receipt, SealedBlockWithSenders, SealedHeader};
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 
 /// Configured [`BlockEnv`] and [`CfgEnvWithHandlerCfg`] for a pending block.

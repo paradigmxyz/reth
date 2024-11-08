@@ -1,6 +1,6 @@
 //! Loads a pending block from database. Helper trait for `eth_` call and trace RPC methods.
 
-use std::sync::Arc;
+use std::{fmt::Display, sync::Arc};
 
 use crate::{FromEvmError, RpcNodeCore};
 use alloy_primitives::B256;
@@ -16,7 +16,9 @@ use reth_rpc_eth_types::{
 };
 use revm::{db::CacheDB, Database, DatabaseCommit, GetInspector, Inspector};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
-use revm_primitives::{EnvWithHandlerCfg, EvmState, ExecutionResult, ResultAndState};
+use revm_primitives::{
+    BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, EvmState, ExecutionResult, ResultAndState,
+};
 
 use super::{Call, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction};
 
@@ -187,26 +189,13 @@ pub trait Trace: LoadState<Evm: ConfigureEvm<Header = Header>> {
             // we need to get the state of the parent block because we're essentially replaying the
             // block the transaction is included in
             let parent_block = block.parent_hash;
-            let parent_beacon_block_root = block.parent_beacon_block_root;
 
             let this = self.clone();
             self.spawn_with_state_at_block(parent_block.into(), move |state| {
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
                 let block_txs = block.transactions_with_sender();
 
-                // apply relevant system calls
-                SystemCaller::new(this.evm_config().clone(), this.provider().chain_spec())
-                    .pre_block_beacon_root_contract_call(
-                        &mut db,
-                        &cfg,
-                        &block_env,
-                        parent_beacon_block_root,
-                    )
-                    .map_err(|_| {
-                        EthApiError::EvmCustom(
-                            "failed to apply 4788 beacon root system call".to_string(),
-                        )
-                    })?;
+                this.apply_pre_execution_changes(&block, &mut db, &cfg, &block_env)?;
 
                 // replay all transactions prior to the targeted transaction
                 this.replay_transactions_until(
@@ -333,17 +322,7 @@ pub trait Trace: LoadState<Evm: ConfigureEvm<Header = Header>> {
                 let mut db =
                     CacheDB::new(StateProviderDatabase::new(StateProviderTraitObjWrapper(&state)));
 
-                // apply relevant system calls
-                SystemCaller::new(this.evm_config().clone(), this.provider().chain_spec())
-                    .pre_block_beacon_root_contract_call(
-                        &mut db,
-                        &cfg,
-                        &block_env,
-                        block.header().parent_beacon_block_root,
-                    )
-                    .map_err(|_| {
-                        EthApiError::EvmCustom("failed to apply 4788 system call".to_string())
-                    })?;
+                this.apply_pre_execution_changes(&block, &mut db, &cfg, &block_env)?;
 
                 // prepare transactions, we do everything upfront to reduce time spent with open
                 // state
@@ -469,5 +448,38 @@ pub trait Trace: LoadState<Evm: ConfigureEvm<Header = Header>> {
         R: Send + 'static,
     {
         self.trace_block_until_with_inspector(block_id, block, None, insp_setup, f)
+    }
+
+    /// Applies chain-specific state transitions required before executing a block.
+    ///
+    /// Note: This should only be called when tracing an entire block vs individual transactions.
+    /// When tracing transaction on top of an already committed block state, those transitions are
+    /// already applied.
+    fn apply_pre_execution_changes<DB: Send + Database<Error: Display> + DatabaseCommit>(
+        &self,
+        block: &SealedBlockWithSenders,
+        db: &mut DB,
+        cfg: &CfgEnvWithHandlerCfg,
+        block_env: &BlockEnv,
+    ) -> Result<(), Self::Error> {
+        let mut system_caller =
+            SystemCaller::new(self.evm_config().clone(), self.provider().chain_spec());
+        // apply relevant system calls
+        system_caller
+            .pre_block_beacon_root_contract_call(
+                db,
+                cfg,
+                block_env,
+                block.header.parent_beacon_block_root,
+            )
+            .map_err(|_| EthApiError::EvmCustom("failed to apply 4788 system call".to_string()))?;
+
+        system_caller
+            .pre_block_blockhashes_contract_call(db, cfg, block_env, block.header.parent_hash)
+            .map_err(|_| {
+                EthApiError::EvmCustom("failed to apply blockhashes system call".to_string())
+            })?;
+
+        Ok(())
     }
 }
