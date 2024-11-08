@@ -68,7 +68,7 @@ pub enum ValidationApiError {
     Execution(#[from] BlockExecutionError),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ValidationApiInner<Provider: ChainSpecProvider, E> {
     /// The provider that can interact with the chain.
     provider: Provider,
