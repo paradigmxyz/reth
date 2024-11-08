@@ -315,7 +315,7 @@ mod tests {
     };
     use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
     use revm_primitives::BLOCKHASH_SERVE_WINDOW;
-    use secp256k1::{Keypair, Secp256k1};
+    use secp256k1::Keypair;
     use std::collections::HashMap;
 
     fn create_state_provider_with_beacon_root_contract() -> StateProviderTest {
