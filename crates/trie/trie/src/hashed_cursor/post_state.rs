@@ -60,8 +60,8 @@ where
     C: HashedCursor<Value = Account>,
 {
     /// Create new instance of [`HashedPostStateAccountCursor`].
-    pub const fn new(cursor: C, post_state_accounts: &'a HashedAccountsSorted) -> Self {
-        let post_state_cursor = ForwardInMemoryCursor::new(&post_state_accounts.accounts);
+    pub fn new(cursor: C, post_state_accounts: &'a HashedAccountsSorted) -> Self {
+        let post_state_cursor = ForwardInMemoryCursor::new(&post_state_accounts.accounts.as_slice());
         let destroyed_accounts = &post_state_accounts.destroyed_accounts;
         Self { cursor, post_state_cursor, destroyed_accounts, last_account: None }
     }

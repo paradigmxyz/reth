@@ -63,8 +63,8 @@ pub struct InMemoryAccountTrieCursor<'a, C> {
 impl<'a, C: TrieCursor> InMemoryAccountTrieCursor<'a, C> {
     /// Create new account trie cursor from underlying cursor and reference to
     /// [`TrieUpdatesSorted`].
-    pub const fn new(cursor: C, trie_updates: &'a TrieUpdatesSorted) -> Self {
-        let in_memory_cursor = ForwardInMemoryCursor::new(&trie_updates.account_nodes);
+    pub fn new(cursor: C, trie_updates: &'a TrieUpdatesSorted) -> Self {
+        let in_memory_cursor = ForwardInMemoryCursor::new(&trie_updates.account_nodes.as_slice());
         Self {
             cursor,
             in_memory_cursor,
