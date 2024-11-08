@@ -9304,6 +9304,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-trie",
+ "reth-trie-common",
  "reth-trie-db",
  "thiserror",
  "tokio",
