@@ -179,7 +179,7 @@ pub fn get_filter_block_range(
 
 #[cfg(test)]
 mod tests {
-    use alloy_rpc_types::Filter;
+    use alloy_rpc_types_eth::Filter;
 
     use super::*;
 
@@ -242,8 +242,8 @@ mod tests {
         let start_block = info.best_number;
 
         let (from_block_number, to_block_number) = get_filter_block_range(
-            from_block.and_then(alloy_rpc_types::BlockNumberOrTag::as_number),
-            to_block.and_then(alloy_rpc_types::BlockNumberOrTag::as_number),
+            from_block.and_then(alloy_rpc_types_eth::BlockNumberOrTag::as_number),
+            to_block.and_then(alloy_rpc_types_eth::BlockNumberOrTag::as_number),
             start_block,
             info,
         );
