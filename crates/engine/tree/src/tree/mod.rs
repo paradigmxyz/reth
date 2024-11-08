@@ -20,6 +20,7 @@ use alloy_rpc_types_engine::{
 };
 use block_buffer::BlockBuffer;
 use error::{InsertBlockError, InsertBlockErrorKind, InsertBlockFatalError};
+use persistence_state::CurrentPersistenceAction;
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates,
     MemoryOverlayStateProvider, NewCanonicalChain,
@@ -1181,7 +1182,7 @@ where
     /// or send a new persistence action if necessary.
     fn advance_persistence(&mut self) -> Result<(), AdvancePersistenceError> {
         if self.persistence_state.in_progress() {
-            let (mut rx, start_time) = self
+            let (mut rx, start_time, current_action) = self
                 .persistence_state
                 .rx
                 .take()
@@ -1207,7 +1208,9 @@ where
                     self.on_new_persisted_block()?;
                 }
                 Err(TryRecvError::Closed) => return Err(TryRecvError::Closed.into()),
-                Err(TryRecvError::Empty) => self.persistence_state.rx = Some((rx, start_time)),
+                Err(TryRecvError::Empty) => {
+                    self.persistence_state.rx = Some((rx, start_time, current_action))
+                }
             }
         }
 
@@ -1218,7 +1221,7 @@ where
                     debug!(target: "engine::tree", ?new_tip_num, "Starting remove blocks job");
                     let (tx, rx) = oneshot::channel();
                     let _ = self.persistence.remove_blocks_above(new_tip_num, tx);
-                    self.persistence_state.start(rx);
+                    self.persistence_state.start_remove(new_tip_num, rx);
                 }
             } else if self.should_persist() {
                 let blocks_to_persist = self.get_canonical_blocks_to_persist();
@@ -1227,8 +1230,8 @@ where
                 } else {
                     debug!(target: "engine::tree", blocks = ?blocks_to_persist.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
                     let (tx, rx) = oneshot::channel();
-                    let _ = self.persistence.save_blocks(blocks_to_persist, tx);
-                    self.persistence_state.start(rx);
+                    let _ = self.persistence.save_blocks(blocks_to_persist.clone(), tx);
+                    self.persistence_state.start_save(blocks_to_persist, rx);
                 }
             }
         }
@@ -2273,6 +2276,16 @@ where
 
         let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
         let persistence_not_in_progress = !self.persistence_state.in_progress();
+
+        let is_descendant_block = self.persistence_state.current_action().map_or(true, |action| {
+            match action {
+                CurrentPersistenceAction::SavingBlocks { blocks: _ } => {
+                    // TODO: check if this block is a descendant of the ones being persisted
+                    true
+                }
+                CurrentPersistenceAction::RemovingBlocks { new_tip_num: _ } => false,
+            }
+        });
 
         let (state_root_handle, state_root_task_config, state_hook) = if persistence_not_in_progress &&
             self.config.use_state_root_task()

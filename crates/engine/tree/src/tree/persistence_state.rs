@@ -1,5 +1,6 @@
 use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
+use reth_chain_state::ExecutedBlock;
 use std::{collections::VecDeque, time::Instant};
 use tokio::sync::oneshot;
 use tracing::{debug, trace};
@@ -13,7 +14,8 @@ pub struct PersistenceState {
     pub(crate) last_persisted_block: BlockNumHash,
     /// Receiver end of channel where the result of the persistence task will be
     /// sent when done. A None value means there's no persistence task in progress.
-    pub(crate) rx: Option<(oneshot::Receiver<Option<BlockNumHash>>, Instant)>,
+    pub(crate) rx:
+        Option<(oneshot::Receiver<Option<BlockNumHash>>, Instant, CurrentPersistenceAction)>,
     /// The block above which blocks should be removed from disk, because there has been an on disk
     /// reorg.
     pub(crate) remove_above_state: VecDeque<u64>,
@@ -26,9 +28,30 @@ impl PersistenceState {
         self.rx.is_some()
     }
 
-    /// Sets state for a started persistence task.
-    pub(crate) fn start(&mut self, rx: oneshot::Receiver<Option<BlockNumHash>>) {
-        self.rx = Some((rx, Instant::now()));
+    /// Sets the state for a block removal operation.
+    pub(crate) fn start_remove(
+        &mut self,
+        new_tip_num: u64,
+        rx: oneshot::Receiver<Option<BlockNumHash>>,
+    ) {
+        self.rx =
+            Some((rx, Instant::now(), CurrentPersistenceAction::RemovingBlocks { new_tip_num }));
+    }
+
+    /// Sets the state for a block save operation.
+    pub(crate) fn start_save(
+        &mut self,
+        to_save: Vec<ExecutedBlock>,
+        rx: oneshot::Receiver<Option<BlockNumHash>>,
+    ) {
+        self.rx =
+            Some((rx, Instant::now(), CurrentPersistenceAction::SavingBlocks { blocks: to_save }));
+    }
+
+    /// Returns the current persistence action. If there is no persistence task in progress, then
+    /// this returns `None`.
+    pub(crate) fn current_action(&self) -> Option<&CurrentPersistenceAction> {
+        self.rx.as_ref().map(|rx| &rx.2)
     }
 
     /// Sets the `remove_above_state`, to the new tip number specified, only if it is less than the
@@ -49,4 +72,19 @@ impl PersistenceState {
         self.last_persisted_block =
             BlockNumHash::new(last_persisted_block_number, last_persisted_block_hash);
     }
+}
+
+/// The currently running persistence action.
+#[derive(Debug)]
+pub(crate) enum CurrentPersistenceAction {
+    /// The persistence task is saving blocks.
+    SavingBlocks {
+        /// The blocks being saved
+        blocks: Vec<ExecutedBlock>,
+    },
+    /// The persistence task is removing blocks.
+    RemovingBlocks {
+        /// The tip, above which we are removing blocks.
+        new_tip_num: u64,
+    },
 }

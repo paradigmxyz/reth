@@ -156,7 +156,7 @@ where
         );
 
         let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
-        let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
+        let mut account_rlp = Vec::with_capacity(128);
         while let Some(node) = account_node_iter.try_next().map_err(ProviderError::Database)? {
             match node {
                 TrieElement::Branch(node) => {

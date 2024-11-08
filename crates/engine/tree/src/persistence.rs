@@ -91,9 +91,6 @@ where
                     let result = self.on_save_blocks(blocks)?;
                     let result_number = result.map(|r| r.number);
 
-                    // we ignore the error because the caller may or may not care about the result
-                    let _ = sender.send(result);
-
                     if let Some(block_number) = result_number {
                         // send new sync metrics based on saved blocks
                         let _ = self
@@ -105,6 +102,9 @@ where
                             let _ = self.prune_before(block_number)?;
                         }
                     }
+
+                    // we ignore the error because the caller may or may not care about the result
+                    let _ = sender.send(result);
                 }
                 PersistenceAction::SaveFinalizedBlock(finalized_block) => {
                     let provider = self.provider.database_provider_rw()?;
