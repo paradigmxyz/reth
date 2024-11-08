@@ -41,7 +41,7 @@ use revm::{
     primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
     DatabaseCommit,
 };
-use revm_primitives::calc_excess_blob_gas;
+use revm_primitives::{calc_excess_blob_gas, TxEnv};
 use std::sync::Arc;
 use tracing::{debug, trace, warn};
 
@@ -212,6 +212,13 @@ where
         PayloadBuilderError::Internal(err.into())
     })?;
 
+    let env = EnvWithHandlerCfg::new_with_cfg_env(
+        initialized_cfg.clone(),
+        initialized_block_env.clone(),
+        TxEnv::default(),
+    );
+    let mut evm = evm_config.evm_with_env(&mut db, env);
+
     let mut receipts = Vec::new();
     while let Some(pool_tx) = best_txs.next() {
         // ensure we still have capacity for this transaction
@@ -246,14 +253,8 @@ where
             }
         }
 
-        let env = EnvWithHandlerCfg::new_with_cfg_env(
-            initialized_cfg.clone(),
-            initialized_block_env.clone(),
-            evm_config.tx_env(tx.as_signed(), tx.signer()),
-        );
-
-        // Configure the environment for the block.
-        let mut evm = evm_config.evm_with_env(&mut db, env);
+        // Configure the environment for the tx.
+        *evm.tx_mut() = evm_config.tx_env(tx.as_signed(), tx.signer());
 
         let ResultAndState { result, state } = match evm.transact() {
             Ok(res) => res,
@@ -279,10 +280,9 @@ where
                 }
             }
         };
-        // drop evm so db is released.
-        drop(evm);
+
         // commit changes
-        db.commit(state);
+        evm.db_mut().commit(state);
 
         // add to the total blob gas used if the transaction successfully executed
         if let Some(blob_tx) = tx.transaction.as_eip4844() {
@@ -320,6 +320,9 @@ where
         executed_senders.push(tx.signer());
         executed_txs.push(tx.into_signed());
     }
+
+    // Release db
+    drop(evm);
 
     // check if we have a better block
     if !is_better_payload(best_payload.as_ref(), total_fees) {

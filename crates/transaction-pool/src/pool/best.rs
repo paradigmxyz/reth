@@ -128,6 +128,15 @@ impl<T: TransactionOrdering> BestTransactions<T> {
         }
     }
 
+    /// Removes the currently best independent transaction from the independent set and the total
+    /// set.
+    fn pop_best(&mut self) -> Option<PendingTransaction<T>> {
+        self.independent.pop_last().inspect(|best| {
+            let removed = self.all.remove(best.transaction.id());
+            debug_assert!(removed.is_some(), "must be present in both sets");
+        })
+    }
+
     /// Checks for new transactions that have come into the `PendingPool` after this iterator was
     /// created and inserts them
     fn add_new_transactions(&mut self) {
@@ -167,7 +176,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
         loop {
             self.add_new_transactions();
             // Remove the next independent tx with the highest priority
-            let best = self.independent.pop_last()?;
+            let best = self.pop_best()?;
             let sender_id = best.transaction.sender_id();
 
             // skip transactions for which sender was marked as invalid

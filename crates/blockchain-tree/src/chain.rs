@@ -18,7 +18,8 @@ use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{GotExpected, SealedBlockWithSenders, SealedHeader};
 use reth_provider::{
     providers::{BundleStateProvider, ConsistentDbView, ProviderNodeTypes},
-    FullExecutionDataProvider, ProviderError, StateRootProvider, TryIntoHistoricalStateProvider,
+    DBProvider, FullExecutionDataProvider, ProviderError, StateRootProvider,
+    TryIntoHistoricalStateProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};

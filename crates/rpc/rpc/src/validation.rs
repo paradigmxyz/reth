@@ -5,6 +5,7 @@ use alloy_rpc_types::engine::{
 };
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequest, BuilderBlockValidationRequestV2,
+    BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
@@ -20,10 +21,7 @@ use reth_provider::{
     StateProviderFactory, WithdrawalsProvider,
 };
 use reth_revm::database::StateProviderDatabase;
-use reth_rpc_api::{
-    BlockSubmissionValidationApiServer, BuilderBlockValidationRequestV3,
-    BuilderBlockValidationRequestV4,
-};
+use reth_rpc_api::BlockSubmissionValidationApiServer;
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_trie::HashedPostState;

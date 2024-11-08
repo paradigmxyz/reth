@@ -42,6 +42,9 @@ use tokio::{
 use tracing::{debug, trace, warn};
 
 mod metrics;
+mod stack;
+
+pub use stack::PayloadBuilderStack;
 
 /// The [`PayloadJobGenerator`] that creates [`BasicPayloadJob`]s.
 #[derive(Debug)]
@@ -782,6 +785,21 @@ impl<Payload> BuildOutcome<Payload> {
     /// Returns true if the outcome is `Cancelled`.
     pub const fn is_cancelled(&self) -> bool {
         matches!(self, Self::Cancelled)
+    }
+
+    /// Applies a fn on the current payload.
+    pub(crate) fn map_payload<F, P>(self, f: F) -> BuildOutcome<P>
+    where
+        F: FnOnce(Payload) -> P,
+    {
+        match self {
+            Self::Better { payload, cached_reads } => {
+                BuildOutcome::Better { payload: f(payload), cached_reads }
+            }
+            Self::Aborted { fees, cached_reads } => BuildOutcome::Aborted { fees, cached_reads },
+            Self::Cancelled => BuildOutcome::Cancelled,
+            Self::Freeze(payload) => BuildOutcome::Freeze(f(payload)),
+        }
     }
 }
 

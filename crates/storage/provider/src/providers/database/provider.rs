@@ -24,7 +24,6 @@ use reth_db::{
     cursor::DbDupCursorRW, tables, BlockNumberList, PlainAccountState, PlainStorageState,
 };
 use reth_db_api::{
-    common::KeyValue,
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
     models::{
@@ -63,7 +62,7 @@ use std::{
     cmp::Ordering,
     collections::{hash_map, BTreeMap, BTreeSet, HashMap, HashSet},
     fmt::Debug,
-    ops::{Bound, Deref, DerefMut, Range, RangeBounds, RangeInclusive},
+    ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::{mpsc, Arc},
     time::{Duration, Instant},
 };
@@ -145,7 +144,7 @@ impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
+impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     /// State provider for latest block
     pub fn latest<'a>(&'a self) -> ProviderResult<Box<dyn StateProvider + 'a>> {
         trace!(target: "providers::db", "Returning latest state provider");
@@ -364,7 +363,7 @@ where
     Ok(Vec::new())
 }
 
-impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
+impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Creates a provider with an inner read-only transaction.
     pub const fn new(
         tx: TX,
@@ -393,75 +392,6 @@ impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Returns a reference to the chain specification.
     pub fn chain_spec(&self) -> &N::ChainSpec {
         &self.chain_spec
-    }
-
-    /// Disables long-lived read transaction safety guarantees for leaks prevention and
-    /// observability improvements.
-    ///
-    /// CAUTION: In most of the cases, you want the safety guarantees for long read transactions
-    /// enabled. Use this only if you're sure that no write transaction is open in parallel, meaning
-    /// that Reth as a node is offline and not progressing.
-    pub fn disable_long_read_transaction_safety(mut self) -> Self {
-        self.tx.disable_long_read_transaction_safety();
-        self
-    }
-
-    /// Return full table as Vec
-    pub fn table<T: Table>(&self) -> Result<Vec<KeyValue<T>>, DatabaseError>
-    where
-        T::Key: Default + Ord,
-    {
-        self.tx
-            .cursor_read::<T>()?
-            .walk(Some(T::Key::default()))?
-            .collect::<Result<Vec<_>, DatabaseError>>()
-    }
-
-    /// Return a list of entries from the table, based on the given range.
-    #[inline]
-    pub fn get<T: Table>(
-        &self,
-        range: impl RangeBounds<T::Key>,
-    ) -> Result<Vec<KeyValue<T>>, DatabaseError> {
-        self.tx.cursor_read::<T>()?.walk_range(range)?.collect::<Result<Vec<_>, _>>()
-    }
-
-    /// Iterates over read only values in the given table and collects them into a vector.
-    ///
-    /// Early-returns if the range is empty, without opening a cursor transaction.
-    fn cursor_read_collect<T: Table<Key = u64>>(
-        &self,
-        range: impl RangeBounds<T::Key>,
-    ) -> ProviderResult<Vec<T::Value>> {
-        let capacity = match range_size_hint(&range) {
-            Some(0) | None => return Ok(Vec::new()),
-            Some(capacity) => capacity,
-        };
-        let mut cursor = self.tx.cursor_read::<T>()?;
-        self.cursor_collect_with_capacity(&mut cursor, range, capacity)
-    }
-
-    /// Iterates over read only values in the given table and collects them into a vector.
-    fn cursor_collect<T: Table<Key = u64>>(
-        &self,
-        cursor: &mut impl DbCursorRO<T>,
-        range: impl RangeBounds<T::Key>,
-    ) -> ProviderResult<Vec<T::Value>> {
-        let capacity = range_size_hint(&range).unwrap_or(0);
-        self.cursor_collect_with_capacity(cursor, range, capacity)
-    }
-
-    fn cursor_collect_with_capacity<T: Table<Key = u64>>(
-        &self,
-        cursor: &mut impl DbCursorRO<T>,
-        range: impl RangeBounds<T::Key>,
-        capacity: usize,
-    ) -> ProviderResult<Vec<T::Value>> {
-        let mut items = Vec::with_capacity(capacity);
-        for entry in cursor.walk_range(range)? {
-            items.push(entry?.1);
-        }
-        Ok(items)
     }
 
     fn transactions_by_tx_range_with_cursor<C>(
@@ -852,42 +782,10 @@ impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: DbTxMut + DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
+impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Commit database transaction.
     pub fn commit(self) -> ProviderResult<bool> {
         Ok(self.tx.commit()?)
-    }
-
-    /// Remove list of entries from the table. Returns the number of entries removed.
-    #[inline]
-    pub fn remove<T: Table>(
-        &self,
-        range: impl RangeBounds<T::Key>,
-    ) -> Result<usize, DatabaseError> {
-        let mut entries = 0;
-        let mut cursor_write = self.tx.cursor_write::<T>()?;
-        let mut walker = cursor_write.walk_range(range)?;
-        while walker.next().transpose()?.is_some() {
-            walker.delete_current()?;
-            entries += 1;
-        }
-        Ok(entries)
-    }
-
-    /// Return a list of entries from the table, and remove them, based on the given range.
-    #[inline]
-    pub fn take<T: Table>(
-        &self,
-        range: impl RangeBounds<T::Key>,
-    ) -> Result<Vec<KeyValue<T>>, DatabaseError> {
-        let mut cursor_write = self.tx.cursor_write::<T>()?;
-        let mut walker = cursor_write.walk_range(range)?;
-        let mut items = Vec::new();
-        while let Some(i) = walker.next().transpose()? {
-            walker.delete_current()?;
-            items.push(i)
-        }
-        Ok(items)
     }
 
     /// Remove requested block transactions, without returning them.
@@ -1299,7 +1197,7 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: DbTx, N: NodeTypes> HeaderSyncGapProvider for DatabaseProvider<TX, N> {
+impl<TX: DbTx + 'static, N: NodeTypes> HeaderSyncGapProvider for DatabaseProvider<TX, N> {
     fn sync_gap(
         &self,
         tip: watch::Receiver<B256>,
@@ -1343,7 +1241,7 @@ impl<TX: DbTx, N: NodeTypes> HeaderSyncGapProvider for DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: DbTx, N: NodeTypes<ChainSpec: EthereumHardforks>> HeaderProvider
+impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> HeaderProvider
     for DatabaseProvider<TX, N>
 {
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
@@ -1443,7 +1341,7 @@ impl<TX: DbTx, N: NodeTypes<ChainSpec: EthereumHardforks>> HeaderProvider
     }
 }
 
-impl<TX: DbTx, N: NodeTypes> BlockHashReader for DatabaseProvider<TX, N> {
+impl<TX: DbTx + 'static, N: NodeTypes> BlockHashReader for DatabaseProvider<TX, N> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.static_file_provider.get_with_static_file_or_database(
             StaticFileSegment::Headers,
@@ -1470,7 +1368,7 @@ impl<TX: DbTx, N: NodeTypes> BlockHashReader for DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: DbTx, N: NodeTypes> BlockNumReader for DatabaseProvider<TX, N> {
+impl<TX: DbTx + 'static, N: NodeTypes> BlockNumReader for DatabaseProvider<TX, N> {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
         let best_number = self.best_block_number()?;
         let best_hash = self.block_hash(best_number)?.unwrap_or_default();
@@ -1501,7 +1399,9 @@ impl<TX: DbTx, N: NodeTypes> BlockNumReader for DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: DbTx, N: NodeTypes<ChainSpec: EthereumHardforks>> BlockReader for DatabaseProvider<TX, N> {
+impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> BlockReader
+    for DatabaseProvider<TX, N>
+{
     fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> ProviderResult<Option<Block>> {
         if source.is_canonical() {
             self.block(hash.into())
@@ -1676,7 +1576,7 @@ impl<TX: DbTx, N: NodeTypes<ChainSpec: EthereumHardforks>> BlockReader for Datab
     }
 }
 
-impl<TX: DbTx, N: NodeTypes<ChainSpec: EthereumHardforks>> TransactionsProviderExt
+impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> TransactionsProviderExt
     for DatabaseProvider<TX, N>
 {
     /// Recovers transaction hashes by walking through `Transactions` table and
@@ -1746,7 +1646,7 @@ impl<TX: DbTx, N: NodeTypes<ChainSpec: EthereumHardforks>> TransactionsProviderE
 }
 
 // Calculates the hash of the given transaction
-impl<TX: DbTx, N: NodeTypes<ChainSpec: EthereumHardforks>> TransactionsProvider
+impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> TransactionsProvider
     for DatabaseProvider<TX, N>
 {
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
@@ -1906,7 +1806,7 @@ impl<TX: DbTx, N: NodeTypes<ChainSpec: EthereumHardforks>> TransactionsProvider
     }
 }
 
-impl<TX: DbTx, N: NodeTypes<ChainSpec: EthereumHardforks>> ReceiptProvider
+impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> ReceiptProvider
     for DatabaseProvider<TX, N>
 {
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
@@ -1954,7 +1854,7 @@ impl<TX: DbTx, N: NodeTypes<ChainSpec: EthereumHardforks>> ReceiptProvider
     }
 }
 
-impl<TX: DbTx, N: NodeTypes<ChainSpec: EthereumHardforks>> WithdrawalsProvider
+impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> WithdrawalsProvider
     for DatabaseProvider<TX, N>
 {
     fn withdrawals_by_block(
@@ -1984,7 +1884,7 @@ impl<TX: DbTx, N: NodeTypes<ChainSpec: EthereumHardforks>> WithdrawalsProvider
     }
 }
 
-impl<TX: DbTx, N: NodeTypes<ChainSpec: EthereumHardforks>> EvmEnvProvider
+impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> EvmEnvProvider
     for DatabaseProvider<TX, N>
 {
     fn fill_env_at<EvmConfig>(
@@ -2110,7 +2010,7 @@ impl<TX: DbTxMut, N: NodeTypes> StageCheckpointWriter for DatabaseProvider<TX, N
     }
 }
 
-impl<TX: DbTx, N: NodeTypes> StorageReader for DatabaseProvider<TX, N> {
+impl<TX: DbTx + 'static, N: NodeTypes> StorageReader for DatabaseProvider<TX, N> {
     fn plain_state_storages(
         &self,
         addresses_with_keys: impl IntoIterator<Item = (Address, impl IntoIterator<Item = B256>)>,
@@ -2173,7 +2073,7 @@ impl<TX: DbTx, N: NodeTypes> StorageReader for DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: DbTxMut + DbTx, N: NodeTypes> StateChangeWriter for DatabaseProvider<TX, N> {
+impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StateChangeWriter for DatabaseProvider<TX, N> {
     fn write_state_reverts(
         &self,
         reverts: PlainStateReverts,
@@ -2550,7 +2450,7 @@ impl<TX: DbTxMut + DbTx, N: NodeTypes> StateChangeWriter for DatabaseProvider<TX
     }
 }
 
-impl<TX: DbTxMut + DbTx, N: NodeTypes> TrieWriter for DatabaseProvider<TX, N> {
+impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider<TX, N> {
     /// Writes trie updates. Returns the number of entries modified.
     fn write_trie_updates(&self, trie_updates: &TrieUpdates) -> ProviderResult<usize> {
         if trie_updates.is_empty() {
@@ -2600,7 +2500,7 @@ impl<TX: DbTxMut + DbTx, N: NodeTypes> TrieWriter for DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: DbTxMut + DbTx, N: NodeTypes> StorageTrieWriter for DatabaseProvider<TX, N> {
+impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseProvider<TX, N> {
     /// Writes storage trie updates from the given storage trie map. First sorts the storage trie
     /// updates by the hashed address, writing in sorted order.
     fn write_storage_trie_updates(
@@ -2637,7 +2537,7 @@ impl<TX: DbTxMut + DbTx, N: NodeTypes> StorageTrieWriter for DatabaseProvider<TX
     }
 }
 
-impl<TX: DbTxMut + DbTx, N: NodeTypes> HashingWriter for DatabaseProvider<TX, N> {
+impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvider<TX, N> {
     fn unwind_account_hashing<'a>(
         &self,
         changesets: impl Iterator<Item = &'a (BlockNumber, AccountBeforeTx)>,
@@ -2862,7 +2762,7 @@ impl<TX: DbTxMut + DbTx, N: NodeTypes> HashingWriter for DatabaseProvider<TX, N>
     }
 }
 
-impl<TX: DbTxMut + DbTx, N: NodeTypes> HistoryWriter for DatabaseProvider<TX, N> {
+impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvider<TX, N> {
     fn unwind_account_history_indices<'a>(
         &self,
         changesets: impl Iterator<Item = &'a (BlockNumber, AccountBeforeTx)>,
@@ -2996,7 +2896,7 @@ impl<TX: DbTxMut + DbTx, N: NodeTypes> HistoryWriter for DatabaseProvider<TX, N>
     }
 }
 
-impl<TX: DbTx, N: NodeTypes> StateReader for DatabaseProvider<TX, N> {
+impl<TX: DbTx + 'static, N: NodeTypes> StateReader for DatabaseProvider<TX, N> {
     fn get_state(&self, block: BlockNumber) -> ProviderResult<Option<ExecutionOutcome>> {
         self.get_state(block..=block)
     }
@@ -3417,7 +3317,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks> + 
     }
 }
 
-impl<TX: DbTx, N: NodeTypes> PruneCheckpointReader for DatabaseProvider<TX, N> {
+impl<TX: DbTx + 'static, N: NodeTypes> PruneCheckpointReader for DatabaseProvider<TX, N> {
     fn get_prune_checkpoint(
         &self,
         segment: PruneSegment,
@@ -3444,7 +3344,7 @@ impl<TX: DbTxMut, N: NodeTypes> PruneCheckpointWriter for DatabaseProvider<TX, N
     }
 }
 
-impl<TX: DbTx, N: NodeTypes> StatsReader for DatabaseProvider<TX, N> {
+impl<TX: DbTx + 'static, N: NodeTypes> StatsReader for DatabaseProvider<TX, N> {
     fn count_entries<T: Table>(&self) -> ProviderResult<usize> {
         let db_entries = self.tx.entries::<T>()?;
         let static_file_entries = match self.static_file_provider.count_entries::<T>() {
@@ -3457,7 +3357,7 @@ impl<TX: DbTx, N: NodeTypes> StatsReader for DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: DbTx, N: NodeTypes> ChainStateBlockReader for DatabaseProvider<TX, N> {
+impl<TX: DbTx + 'static, N: NodeTypes> ChainStateBlockReader for DatabaseProvider<TX, N> {
     fn last_finalized_block_number(&self) -> ProviderResult<Option<BlockNumber>> {
         let mut finalized_blocks = self
             .tx
@@ -3591,18 +3491,4 @@ fn recover_block_senders(
     }
 
     Ok(())
-}
-
-fn range_size_hint(range: &impl RangeBounds<TxNumber>) -> Option<usize> {
-    let start = match range.start_bound().cloned() {
-        Bound::Included(start) => start,
-        Bound::Excluded(start) => start.checked_add(1)?,
-        Bound::Unbounded => 0,
-    };
-    let end = match range.end_bound().cloned() {
-        Bound::Included(end) => end.saturating_add(1),
-        Bound::Excluded(end) => end,
-        Bound::Unbounded => return None,
-    };
-    end.checked_sub(start).map(|x| x as _)
 }
