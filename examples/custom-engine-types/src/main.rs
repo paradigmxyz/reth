@@ -227,7 +227,7 @@ struct MyCustomNode;
 
 /// Configure the node types
 impl NodeTypes for MyCustomNode {
-    type Primitives = ();
+    type Primitives = reth_node_types::AnyPrimitives;
     type ChainSpec = ChainSpec;
     type StateCommitment = MerklePatriciaTrie;
 }

@@ -95,11 +95,11 @@ impl reth_primitives_traits::Receipt for Receipt {
         self.tx_type as u8
     }
 
-    fn receipts_root(receipts: &[&Self]) -> B256 {
+    fn receipts_root(_receipts: &[&Self]) -> B256 {
         #[cfg(feature = "optimism")]
         panic!("This should not be called in optimism mode. Use `optimism_receipts_root_slow` instead.");
         #[cfg(not(feature = "optimism"))]
-        crate::proofs::calculate_receipt_root_no_memo(receipts)
+        crate::proofs::calculate_receipt_root_no_memo(_receipts)
     }
 }
 

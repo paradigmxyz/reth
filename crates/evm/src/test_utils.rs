@@ -13,7 +13,7 @@ use parking_lot::Mutex;
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::NodePrimitives;
-use reth_primitives::{BlockWithSenders, Receipt, Receipts};
+use reth_primitives::{BlockWithSenders, Receipts};
 use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderError;
 use revm::State;
@@ -22,7 +22,7 @@ use std::{fmt::Display, sync::Arc};
 
 /// A [`BlockExecutorProvider`] that returns mocked execution results.
 #[derive(Clone, Debug, Default)]
-pub struct MockExecutorProvider<T> {
+pub struct MockExecutorProvider<T = reth_primitives::Receipt> {
     exec_results: Arc<Mutex<Vec<ExecutionOutcome<T>>>>,
 }
 

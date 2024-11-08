@@ -9,7 +9,7 @@ use alloy_sol_types::SolCall;
 #[cfg(feature = "optimism")]
 use reth::revm::primitives::OptimismFields;
 use reth::{
-    api::{ConfigureEvm, ConfigureEvmEnv, NodeTypesWithEngine},
+    api::{ConfigureEvm, ConfigureEvmEnv, NodePrimitives, NodeTypesWithEngine},
     builder::{components::ExecutorBuilder, BuilderContext, FullNodeTypes},
     cli::Cli,
     providers::ProviderError,
@@ -30,7 +30,7 @@ use reth_primitives::{
     revm_primitives::{
         address, Address, BlockEnv, Bytes, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, U256,
     },
-    BlockWithSenders, Receipt,
+    BlockWithSenders,
 };
 use std::{fmt::Display, sync::Arc};
 
@@ -92,7 +92,7 @@ pub struct CustomExecutorStrategyFactory {
     evm_config: EthEvmConfig,
 }
 
-impl BlockExecutionStrategyFactory for CustomExecutorStrategyFactory {
+impl<N: NodePrimitives> BlockExecutionStrategyFactory<N> for CustomExecutorStrategyFactory {
     type Strategy<DB: Database<Error: Into<ProviderError> + Display>> = CustomExecutorStrategy<DB>;
 
     fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
@@ -175,7 +175,7 @@ where
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-        _receipts: &[Receipt],
+        _receipts: &[N::Receipt],
     ) -> Result<Requests, Self::Error> {
         let env = self.evm_env_for_block(&block.header, total_difficulty);
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);

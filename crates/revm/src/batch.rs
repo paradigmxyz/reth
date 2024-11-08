@@ -15,7 +15,7 @@ use revm::db::states::bundle_state::BundleRetention;
 ///  - pruning receipts according to the pruning configuration.
 ///  - batch range if known
 #[derive(Debug, Default)]
-pub struct BlockBatchRecord<T> {
+pub struct BlockBatchRecord<T = reth_primitives::Receipt> {
     /// Pruning configuration.
     prune_modes: PruneModes,
     /// The collection of receipts.
@@ -197,7 +197,7 @@ mod tests {
 
     #[test]
     fn test_save_receipts_empty() {
-        let mut recorder = BlockBatchRecord::default();
+        let mut recorder: BlockBatchRecord = BlockBatchRecord::default();
         // Create an empty vector of receipts
         let receipts = vec![];
 

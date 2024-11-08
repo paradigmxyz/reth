@@ -381,9 +381,9 @@ mod tests {
     #[cfg(not(feature = "optimism"))]
     use alloy_primitives::bytes;
     use alloy_primitives::{Address, B256};
+    use reth_primitives::Receipts;
     #[cfg(not(feature = "optimism"))]
     use reth_primitives::{LogData, TxType};
-    use reth_primitives::{Receipt, Receipts};
 
     #[test]
     #[cfg(not(feature = "optimism"))]
@@ -397,7 +397,7 @@ mod tests {
 
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![vec![Some(Receipt {
+            receipt_vec: vec![vec![Some(reth_primitives::Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 46913,
                 logs: vec![],
@@ -459,7 +459,7 @@ mod tests {
     fn test_block_number_to_index() {
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![vec![Some(Receipt {
+            receipt_vec: vec![vec![Some(reth_primitives::Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 46913,
                 logs: vec![],
@@ -494,7 +494,7 @@ mod tests {
     fn test_get_logs() {
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![vec![Some(Receipt {
+            receipt_vec: vec![vec![Some(reth_primitives::Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
@@ -526,7 +526,7 @@ mod tests {
     fn test_receipts_by_block() {
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![vec![Some(Receipt {
+            receipt_vec: vec![vec![Some(reth_primitives::Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
@@ -552,7 +552,7 @@ mod tests {
         // Assert that the receipts for block number 123 match the expected receipts
         assert_eq!(
             receipts_by_block,
-            vec![&Some(Receipt {
+            vec![&Some(reth_primitives::Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
@@ -566,7 +566,7 @@ mod tests {
     fn test_receipts_len() {
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![vec![Some(Receipt {
+            receipt_vec: vec![vec![Some(reth_primitives::Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
@@ -575,7 +575,7 @@ mod tests {
         };
 
         // Create an empty Receipts object
-        let receipts_empty = Receipts { receipt_vec: vec![] };
+        let receipts_empty: Receipts = Receipts { receipt_vec: vec![] };
 
         // Define the first block number
         let first_block = 123;
@@ -614,7 +614,7 @@ mod tests {
     #[cfg(not(feature = "optimism"))]
     fn test_revert_to() {
         // Create a random receipt object
-        let receipt = Receipt {
+        let receipt = reth_primitives::Receipt {
             tx_type: TxType::Legacy,
             cumulative_gas_used: 46913,
             logs: vec![],
@@ -663,7 +663,7 @@ mod tests {
     #[cfg(not(feature = "optimism"))]
     fn test_extend_execution_outcome() {
         // Create a Receipt object with specific attributes.
-        let receipt = Receipt {
+        let receipt = reth_primitives::Receipt {
             tx_type: TxType::Legacy,
             cumulative_gas_used: 46913,
             logs: vec![],
@@ -707,7 +707,7 @@ mod tests {
     #[cfg(not(feature = "optimism"))]
     fn test_split_at_execution_outcome() {
         // Create a random receipt object
-        let receipt = Receipt {
+        let receipt = reth_primitives::Receipt {
             tx_type: TxType::Legacy,
             cumulative_gas_used: 46913,
             logs: vec![],
@@ -815,7 +815,7 @@ mod tests {
             },
         );
 
-        let execution_outcome = ExecutionOutcome {
+        let execution_outcome: ExecutionOutcome = ExecutionOutcome {
             bundle: bundle_state,
             receipts: Receipts::default(),
             first_block: 0,

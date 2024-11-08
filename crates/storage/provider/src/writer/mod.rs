@@ -1375,7 +1375,7 @@ mod tests {
 
     #[test]
     fn revert_to_indices() {
-        let base = ExecutionOutcome {
+        let base: ExecutionOutcome = ExecutionOutcome {
             bundle: BundleState::default(),
             receipts: vec![vec![Some(Receipt::default()); 2]; 7].into(),
             first_block: 10,
@@ -1441,7 +1441,7 @@ mod tests {
             assert_eq!(
                 StateRoot::overlay_root(
                     tx,
-                    ExecutionOutcome::new(
+                    ExecutionOutcome::<Receipt>::new(
                         state.bundle_state.clone(),
                         Receipts::default(),
                         0,
@@ -1592,7 +1592,7 @@ mod tests {
             .build();
         assert_eq!(previous_state.reverts.len(), 1);
 
-        let mut test = ExecutionOutcome {
+        let mut test = ExecutionOutcome::<Receipt> {
             bundle: present_state,
             receipts: vec![vec![Some(Receipt::default()); 2]; 1].into(),
             first_block: 2,

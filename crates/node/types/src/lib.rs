@@ -22,11 +22,11 @@ use reth_engine_primitives::EngineTypes;
 use reth_trie_db::StateCommitment;
 
 /// Configures all the primitive types of the node.
-pub trait NodePrimitives: Send + Sync + Default + fmt::Debug + Clone {
+pub trait NodePrimitives: Send + Sync + Default + fmt::Debug + Clone + Unpin {
     /// Block primitive.
-    type Block: Send + Sync + Default + fmt::Debug + Clone;
+    type Block: Send + Sync + Default + fmt::Debug + Clone + Unpin;
     /// A receipt.
-    type Receipt: Send + Sync + Default + fmt::Debug + Clone;
+    type Receipt: Send + Sync + Default + fmt::Debug + Clone + Unpin;
 }
 
 impl NodePrimitives for () {

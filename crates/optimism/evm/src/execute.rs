@@ -50,7 +50,9 @@ impl<EvmConfig> OpExecutionStrategyFactory<EvmConfig> {
     }
 }
 
-impl<EvmConfig> BlockExecutionStrategyFactory for OpExecutionStrategyFactory<EvmConfig>
+// todo: replace with OpPrimitives
+impl<EvmConfig> BlockExecutionStrategyFactory<reth_node_types::AnyPrimitives>
+    for OpExecutionStrategyFactory<EvmConfig>
 where
     EvmConfig:
         Clone + Unpin + Sync + Send + 'static + ConfigureEvm<Header = alloy_consensus::Header>,
@@ -112,7 +114,9 @@ where
     }
 }
 
-impl<DB, EvmConfig> BlockExecutionStrategy<DB, OpPrimitives> for OpExecutionStrategy<DB, EvmConfig>
+// replace with OpPrimitives
+impl<DB, EvmConfig> BlockExecutionStrategy<DB, reth_node_types::AnyPrimitives>
+    for OpExecutionStrategy<DB, EvmConfig>
 where
     DB: Database<Error: Into<ProviderError> + Display>,
     EvmConfig: ConfigureEvm<Header = alloy_consensus::Header>,
@@ -153,7 +157,7 @@ where
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<ExecuteOutput<OpPrimitives::Receipt>, Self::Error> {
+    ) -> Result<ExecuteOutput<reth_primitives::Receipt>, Self::Error> {
         let env = self.evm_env_for_block(&block.header, total_difficulty);
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
 
@@ -245,7 +249,7 @@ where
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-        _receipts: &[Receipt],
+        _receipts: &[reth_primitives::Receipt],
     ) -> Result<Requests, Self::Error> {
         let balance_increments =
             post_block_balance_increments(&self.chain_spec.clone(), block, total_difficulty);

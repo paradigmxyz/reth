@@ -22,7 +22,7 @@ pub use reth_chain_state::test_utils::TestCanonStateSubscriptions;
 
 /// Mock [`reth_node_types::NodeTypes`] for testing.
 pub type MockNodeTypes = reth_node_types::AnyNodeTypesWithEngine<
-    (),
+    reth_node_types::AnyPrimitives,
     reth_ethereum_engine_primitives::EthEngineTypes,
     reth_chainspec::ChainSpec,
     reth_trie_db::MerklePatriciaTrie,

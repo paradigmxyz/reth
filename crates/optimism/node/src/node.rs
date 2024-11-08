@@ -41,7 +41,7 @@ use crate::{
 };
 
 /// Optimism primitive types.
-#[derive(Debug)]
+#[derive(Debug, Clone, Default)]
 pub struct OpPrimitives;
 
 impl NodePrimitives for OpPrimitives {
@@ -120,7 +120,7 @@ where
 }
 
 impl NodeTypes for OpNode {
-    type Primitives = reth_node_types::AnyPrimitives; // replace with OpPrimitives
+    type Primitives = reth_node_api::AnyPrimitives; // replace with OpPrimitives
     type ChainSpec = OpChainSpec;
     type StateCommitment = MerklePatriciaTrie;
 }

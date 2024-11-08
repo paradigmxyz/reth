@@ -159,7 +159,7 @@ mod tests {
         result_and_state: ResultAndState,
     }
 
-    impl Executor<()> for MockExecutor {
+    impl Executor<(), ()> for MockExecutor {
         type Input<'a>
             = BlockExecutionInput<'a, BlockWithSenders>
         where

@@ -1,10 +1,9 @@
-use crate::{
-    traits::{BlockSource, ReceiptProvider},
-    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    ChainSpecProvider, ChangeSetReader, DatabaseProvider, EvmEnvProvider, HeaderProvider,
-    ReceiptProviderIdExt, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
-    StateRootProvider, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+use std::{
+    collections::BTreeMap,
+    ops::{RangeBounds, RangeInclusive},
+    sync::Arc,
 };
+
 use alloy_consensus::constants::EMPTY_ROOT_HASH;
 use alloy_eips::{eip4895::Withdrawal, BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
@@ -36,10 +35,13 @@ use reth_trie::{
 };
 use reth_trie_db::MerklePatriciaTrie;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
-use std::{
-    collections::BTreeMap,
-    ops::{RangeBounds, RangeInclusive},
-    sync::Arc,
+
+use crate::{
+    traits::{BlockSource, ReceiptProvider},
+    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
+    ChainSpecProvider, ChangeSetReader, DatabaseProvider, EvmEnvProvider, HeaderProvider,
+    ReceiptProviderIdExt, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
+    StateRootProvider, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 
 /// A mock implementation for Provider interfaces.
@@ -156,7 +158,7 @@ impl MockEthProvider {
 pub struct MockNode;
 
 impl NodeTypes for MockNode {
-    type Primitives = ();
+    type Primitives = reth_node_types::AnyPrimitives;
     type ChainSpec = ChainSpec;
     type StateCommitment = MerklePatriciaTrie;
 }

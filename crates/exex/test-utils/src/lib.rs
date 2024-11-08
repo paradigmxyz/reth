@@ -118,7 +118,7 @@ where
 pub struct TestNode;
 
 impl NodeTypes for TestNode {
-    type Primitives = ();
+    type Primitives = reth_node_types::AnyPrimitives;
     type ChainSpec = ChainSpec;
     type StateCommitment = reth_trie_db::MerklePatriciaTrie;
 }

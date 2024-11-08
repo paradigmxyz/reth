@@ -1500,7 +1500,10 @@ mod tests {
             self
         }
 
-        fn assert<N: NodeTypesWithDB, E: BlockExecutorProvider>(self, tree: &BlockchainTree<N, E>) {
+        fn assert<N: NodeTypesWithDB, E: BlockExecutorProvider<N::Primitives>>(
+            self,
+            tree: &BlockchainTree<N, E>,
+        ) {
             if let Some(chain_num) = self.chain_num {
                 assert_eq!(tree.state.chains.len(), chain_num);
             }

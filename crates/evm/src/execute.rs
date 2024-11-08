@@ -505,9 +505,10 @@ mod tests {
     #[derive(Clone, Default)]
     struct TestExecutorProvider;
 
-    impl BlockExecutorProvider for TestExecutorProvider {
-        type Executor<DB: Database<Error: Into<ProviderError> + Display>> = TestExecutor<DB>;
-        type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> = TestExecutor<DB>;
+    impl<N: NodePrimitives> BlockExecutorProvider<N> for TestExecutorProvider {
+        type Executor<DB: Database<Error: Into<ProviderError> + Display>> = TestExecutor<DB, N>;
+        type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> =
+            TestExecutor<DB, N>;
 
         fn executor<DB>(&self, _db: DB) -> Self::Executor<DB>
         where
@@ -524,9 +525,9 @@ mod tests {
         }
     }
 
-    struct TestExecutor<DB>(PhantomData<DB>);
+    struct TestExecutor<DB, N>(PhantomData<(DB, N)>);
 
-    impl<DB, N> Executor<DB, N> for TestExecutor<DB>
+    impl<DB, N> Executor<DB, N> for TestExecutor<DB, N>
     where
         N: NodePrimitives,
     {
@@ -561,7 +562,7 @@ mod tests {
         }
     }
 
-    impl<DB, N> BatchExecutor<DB, N> for TestExecutor<DB>
+    impl<DB, N> BatchExecutor<DB, N> for TestExecutor<DB, N>
     where
         N: NodePrimitives,
     {
@@ -590,7 +591,7 @@ mod tests {
         }
     }
 
-    struct TestExecutorStrategy<DB, EvmConfig, N> {
+    struct TestExecutorStrategy<DB, EvmConfig, N: NodePrimitives> {
         // chain spec and evm config here only to illustrate how the strategy
         // factory can use them in a real use case.
         _chain_spec: Arc<ChainSpec>,
@@ -602,15 +603,18 @@ mod tests {
     }
 
     #[derive(Clone)]
-    struct TestExecutorStrategyFactory {
-        execute_transactions_result: ExecuteOutput,
+    struct TestExecutorStrategyFactory<N: NodePrimitives> {
+        execute_transactions_result: ExecuteOutput<N::Receipt>,
         apply_post_execution_changes_result: Requests,
         finish_result: BundleState,
     }
 
-    impl BlockExecutionStrategyFactory for TestExecutorStrategyFactory {
+    impl<N> BlockExecutionStrategyFactory<N> for TestExecutorStrategyFactory<N>
+    where
+        N: NodePrimitives + 'static,
+    {
         type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
-            TestExecutorStrategy<DB, TestEvmConfig>;
+            TestExecutorStrategy<DB, TestEvmConfig, N>;
 
         fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
         where
@@ -662,7 +666,7 @@ mod tests {
             &mut self,
             _block: &BlockWithSenders,
             _total_difficulty: U256,
-            _receipts: &[Receipt],
+            _receipts: &[N::Receipt],
         ) -> Result<Requests, Self::Error> {
             Ok(self.apply_post_execution_changes_result.clone())
         }
@@ -684,7 +688,7 @@ mod tests {
         fn validate_block_post_execution(
             &self,
             _block: &BlockWithSenders,
-            _receipts: &[Receipt],
+            _receipts: &[N::Receipt],
             _requests: &Requests,
         ) -> Result<(), ConsensusError> {
             Ok(())
@@ -698,20 +702,20 @@ mod tests {
     fn test_provider() {
         let provider = TestExecutorProvider;
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
-        let executor = provider.executor(db);
+        let executor: TestExecutor<_, reth_node_types::AnyPrimitives> = provider.executor(db);
         let _ = executor.execute(BlockExecutionInput::new(&Default::default(), U256::ZERO));
     }
 
     #[test]
     fn test_strategy() {
         let expected_gas_used = 10;
-        let expected_receipts = vec![Receipt::default()];
+        let expected_receipts = vec![reth_primitives::Receipt::default()];
         let expected_execute_transactions_result =
             ExecuteOutput { receipts: expected_receipts.clone(), gas_used: expected_gas_used };
         let expected_apply_post_execution_changes_result = Requests::new(vec![bytes!("deadbeef")]);
         let expected_finish_result = BundleState::default();
 
-        let strategy_factory = TestExecutorStrategyFactory {
+        let strategy_factory = TestExecutorStrategyFactory::<reth_node_types::AnyPrimitives> {
             execute_transactions_result: expected_execute_transactions_result,
             apply_post_execution_changes_result: expected_apply_post_execution_changes_result
                 .clone(),
