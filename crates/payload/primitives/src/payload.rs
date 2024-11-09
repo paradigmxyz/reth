@@ -1,10 +1,13 @@
 use crate::{MessageValidationKind, PayloadAttributes};
+use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::B256;
-use alloy_rpc_types::engine::ExecutionPayload;
+use alloy_rpc_types_engine::ExecutionPayload;
 
 /// Either an [`ExecutionPayload`] or a types that implements the [`PayloadAttributes`] trait.
+///
+/// This is a helper type to unify pre-validation of version specific fields of the engine API.
 #[derive(Debug)]
-pub enum PayloadOrAttributes<'a, AttributesType> {
+pub enum PayloadOrAttributes<'a, Attributes> {
     /// An [`ExecutionPayload`] and optional parent beacon block root.
     ExecutionPayload {
         /// The inner execution payload
@@ -13,13 +16,10 @@ pub enum PayloadOrAttributes<'a, AttributesType> {
         parent_beacon_block_root: Option<B256>,
     },
     /// A payload attributes type.
-    PayloadAttributes(&'a AttributesType),
+    PayloadAttributes(&'a Attributes),
 }
 
-impl<'a, AttributesType> PayloadOrAttributes<'a, AttributesType>
-where
-    AttributesType: PayloadAttributes,
-{
+impl<'a, Attributes> PayloadOrAttributes<'a, Attributes> {
     /// Construct a [`PayloadOrAttributes`] from an [`ExecutionPayload`] and optional parent beacon
     /// block root.
     pub const fn from_execution_payload(
@@ -29,8 +29,18 @@ where
         Self::ExecutionPayload { payload, parent_beacon_block_root }
     }
 
+    /// Construct a [`PayloadOrAttributes::PayloadAttributes`] variant
+    pub const fn from_attributes(attributes: &'a Attributes) -> Self {
+        Self::PayloadAttributes(attributes)
+    }
+}
+
+impl<Attributes> PayloadOrAttributes<'_, Attributes>
+where
+    Attributes: PayloadAttributes,
+{
     /// Return the withdrawals for the payload or attributes.
-    pub fn withdrawals(&self) -> Option<&Vec<alloy_rpc_types::Withdrawal>> {
+    pub fn withdrawals(&self) -> Option<&Vec<Withdrawal>> {
         match self {
             Self::ExecutionPayload { payload, .. } => payload.withdrawals(),
             Self::PayloadAttributes(attributes) => attributes.withdrawals(),

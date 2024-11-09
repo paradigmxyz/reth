@@ -39,9 +39,13 @@ alloy-primitives.workspace = true
 alloy-eips.workspace = true
 alloy-rpc-types-engine.workspace = true
 
+revm-primitives.workspace = true
+
 # common
 futures.workspace = true
+pin-project.workspace = true
 tokio = { workspace = true, features = ["macros", "sync"] }
+tokio-stream.workspace = true
 thiserror.workspace = true
 
 # metrics
@@ -76,15 +80,25 @@ reth-chainspec.workspace = true
 alloy-rlp.workspace = true
 
 assert_matches.workspace = true
-rand.workspace = true
 
 [features]
 test-utils = [
-  "reth-db/test-utils",
-  "reth-chain-state/test-utils",
-  "reth-network-p2p/test-utils",
-  "reth-prune-types",
-  "reth-stages/test-utils",
-  "reth-static-file",
-  "reth-tracing"
+	"reth-db/test-utils",
+	"reth-chain-state/test-utils",
+	"reth-network-p2p/test-utils",
+	"reth-prune-types",
+	"reth-stages/test-utils",
+	"reth-static-file",
+	"reth-tracing",
+	"reth-blockchain-tree/test-utils",
+	"reth-chainspec/test-utils",
+	"reth-consensus/test-utils",
+	"reth-evm/test-utils",
+	"reth-payload-builder/test-utils",
+	"reth-primitives/test-utils",
+	"reth-revm/test-utils",
+	"reth-stages-api/test-utils",
+	"reth-provider/test-utils",
+	"reth-trie/test-utils",
+	"reth-prune-types?/test-utils"
 ]

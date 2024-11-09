@@ -2,12 +2,11 @@ use crate::{
     pool::{NEW_TX_LISTENER_BUFFER_SIZE, PENDING_TX_LISTENER_BUFFER_SIZE},
     PoolSize, TransactionOrigin,
 };
+use alloy_consensus::constants::EIP4844_TX_TYPE_ID;
+use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE};
 use alloy_primitives::Address;
-use reth_primitives::{
-    constants::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE},
-    EIP4844_TX_TYPE_ID,
-};
-use std::collections::HashSet;
+use std::{collections::HashSet, ops::Mul};
+
 /// Guarantees max transactions for one sender, compatible with geth/erigon
 pub const TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER: usize = 16;
 
@@ -27,6 +26,9 @@ pub const DEFAULT_PRICE_BUMP: u128 = 10;
 ///
 /// This enforces that a blob transaction requires a 100% price bump to be replaced
 pub const REPLACE_BLOB_PRICE_BUMP: u128 = 100;
+
+/// Default maximum new transactions for broadcasting.
+pub const MAX_NEW_PENDING_TXS_NOTIFICATIONS: usize = 200;
 
 /// Configuration options for the Transaction pool.
 #[derive(Debug, Clone)]
@@ -54,6 +56,8 @@ pub struct PoolConfig {
     pub pending_tx_listener_buffer_size: usize,
     /// Bound on number of new transactions from `reth_network::TransactionsManager` to buffer.
     pub new_tx_listener_buffer_size: usize,
+    /// How many new pending transactions to buffer and send iterators in progress.
+    pub max_new_pending_txs_notifications: usize,
 }
 
 impl PoolConfig {
@@ -81,6 +85,7 @@ impl Default for PoolConfig {
             local_transactions_config: Default::default(),
             pending_tx_listener_buffer_size: PENDING_TX_LISTENER_BUFFER_SIZE,
             new_tx_listener_buffer_size: NEW_TX_LISTENER_BUFFER_SIZE,
+            max_new_pending_txs_notifications: MAX_NEW_PENDING_TXS_NOTIFICATIONS,
         }
     }
 }
@@ -104,6 +109,15 @@ impl SubPoolLimit {
     #[inline]
     pub const fn is_exceeded(&self, txs: usize, size: usize) -> bool {
         self.max_txs < txs || self.max_size < size
+    }
+}
+
+impl Mul<usize> for SubPoolLimit {
+    type Output = Self;
+
+    fn mul(self, rhs: usize) -> Self::Output {
+        let Self { max_txs, max_size } = self;
+        Self { max_txs: max_txs * rhs, max_size: max_size * rhs }
     }
 }
 
@@ -317,5 +331,15 @@ mod tests {
 
         let new_config = config.set_propagate_local_transactions(false);
         assert!(!new_config.propagate_local_transactions);
+    }
+
+    #[test]
+    fn scale_pool_limit() {
+        let limit = SubPoolLimit::default();
+        let double = limit * 2;
+        assert_eq!(
+            double,
+            SubPoolLimit { max_txs: limit.max_txs * 2, max_size: limit.max_size * 2 }
+        )
     }
 }

@@ -18,15 +18,34 @@ concurrency:
 
 jobs:
   test:
-    name: test / ${{ matrix.network }} (${{ matrix.partition }}/2)
+    name: test / ${{ matrix.type }} (${{ matrix.partition }}/${{ matrix.total_partitions }})
     runs-on:
       group: Reth
     env:
       RUST_BACKTRACE: 1
     strategy:
       matrix:
-        partition: [1, 2]
-        network: ["ethereum", "optimism"]
+        include:
+          - type: ethereum
+            args: --features "asm-keccak ethereum" --locked
+            partition: 1
+            total_partitions: 2
+          - type: ethereum
+            args: --features "asm-keccak ethereum" --locked
+            partition: 2
+            total_partitions: 2
+          - type: optimism
+            args: --features "asm-keccak optimism" --locked
+            partition: 1
+            total_partitions: 2
+          - type: optimism
+            args: --features "asm-keccak optimism" --locked
+            partition: 2
+            total_partitions: 2
+          - type: book
+            args: --manifest-path book/sources/Cargo.toml
+            partition: 1
+            total_partitions: 1
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -35,11 +54,14 @@ jobs:
         with:
           cache-on-failure: true
       - uses: taiki-e/install-action@nextest
+      - if: "${{ matrix.type == 'book' }}"
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Run tests
         run: |
           cargo nextest run \
-            --locked --features "asm-keccak ${{ matrix.network }}" \
-            --workspace --exclude ef-tests \
+            ${{ matrix.args }} --workspace --exclude ef-tests \
             --partition hash:${{ matrix.partition }}/2 \
             -E "!kind(test)"
 

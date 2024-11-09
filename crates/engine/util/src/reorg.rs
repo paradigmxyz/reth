@@ -1,23 +1,26 @@
 //! Stream wrapper that simulates reorgs.
 
+use alloy_consensus::Transaction;
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ExecutionPayload, ForkchoiceState, PayloadStatus,
+    CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState, PayloadStatus,
 };
 use futures::{stream::FuturesUnordered, Stream, StreamExt, TryFutureExt};
 use itertools::Either;
 use reth_beacon_consensus::{BeaconEngineMessage, BeaconOnNewPayloadError, OnForkChoiceUpdated};
-use reth_engine_primitives::EngineTypes;
+use reth_engine_primitives::{EngineApiMessageVersion, EngineTypes};
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
 use reth_ethereum_forks::EthereumHardforks;
-use reth_evm::{system_calls::SystemCaller, ConfigureEvm};
+use reth_evm::{
+    state_change::post_block_withdrawals_balance_increments, system_calls::SystemCaller,
+    ConfigureEvm,
+};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{proofs, Block, BlockBody, Header, Receipt, Receipts};
 use reth_provider::{BlockReader, ExecutionOutcome, ProviderError, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
     db::{states::bundle_state::BundleRetention, State},
-    state_change::post_block_withdrawals_balance_increments,
     DatabaseCommit,
 };
 use reth_rpc_types_compat::engine::payload::block_to_payload;
@@ -146,7 +149,7 @@ where
             let next = ready!(this.stream.poll_next_unpin(cx));
             let item = match (next, &this.last_forkchoice_state) {
                 (
-                    Some(BeaconEngineMessage::NewPayload { payload, cancun_fields, tx }),
+                    Some(BeaconEngineMessage::NewPayload { payload, sidecar, tx }),
                     Some(last_forkchoice_state),
                 ) if this.forkchoice_states_forwarded > this.frequency &&
                         // Only enter reorg state if new payload attaches to current head.
@@ -161,13 +164,13 @@ where
                     // forkchoice state. We will rely on CL to reorg us back to canonical chain.
                     // TODO: This is an expensive blocking operation, ideally it's spawned as a task
                     // so that the stream could yield the control back.
-                    let (reorg_payload, reorg_cancun_fields) = match create_reorg_head(
+                    let (reorg_payload, reorg_sidecar) = match create_reorg_head(
                         this.provider,
                         this.evm_config,
                         this.payload_validator,
                         *this.depth,
                         payload.clone(),
-                        cancun_fields.clone(),
+                        sidecar.clone(),
                     ) {
                         Ok(result) => result,
                         Err(error) => {
@@ -176,7 +179,7 @@ where
                             // the next one
                             return Poll::Ready(Some(BeaconEngineMessage::NewPayload {
                                 payload,
-                                cancun_fields,
+                                sidecar,
                                 tx,
                             }))
                         }
@@ -196,11 +199,11 @@ where
 
                     let queue = VecDeque::from([
                         // Current payload
-                        BeaconEngineMessage::NewPayload { payload, cancun_fields, tx },
+                        BeaconEngineMessage::NewPayload { payload, sidecar, tx },
                         // Reorg payload
                         BeaconEngineMessage::NewPayload {
                             payload: reorg_payload,
-                            cancun_fields: reorg_cancun_fields,
+                            sidecar: reorg_sidecar,
                             tx: reorg_payload_tx,
                         },
                         // Reorg forkchoice state
@@ -208,18 +211,32 @@ where
                             state: reorg_forkchoice_state,
                             payload_attrs: None,
                             tx: reorg_fcu_tx,
+                            version: EngineApiMessageVersion::default(),
                         },
                     ]);
                     *this.state = EngineReorgState::Reorg { queue };
                     continue
                 }
-                (Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx }), _) => {
+                (
+                    Some(BeaconEngineMessage::ForkchoiceUpdated {
+                        state,
+                        payload_attrs,
+                        tx,
+                        version,
+                    }),
+                    _,
+                ) => {
                     // Record last forkchoice state forwarded to the engine.
                     // We do not care if it's valid since engine should be able to handle
                     // reorgs that rely on invalid forkchoice state.
                     *this.last_forkchoice_state = Some(state);
                     *this.forkchoice_states_forwarded += 1;
-                    Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx })
+                    Some(BeaconEngineMessage::ForkchoiceUpdated {
+                        state,
+                        payload_attrs,
+                        tx,
+                        version,
+                    })
                 }
                 (item, _) => item,
             };
@@ -234,8 +251,8 @@ fn create_reorg_head<Provider, Evm, Spec>(
     payload_validator: &ExecutionPayloadValidator<Spec>,
     mut depth: usize,
     next_payload: ExecutionPayload,
-    next_cancun_fields: Option<CancunPayloadFields>,
-) -> RethResult<(ExecutionPayload, Option<CancunPayloadFields>)>
+    next_sidecar: ExecutionPayloadSidecar,
+) -> RethResult<(ExecutionPayload, ExecutionPayloadSidecar)>
 where
     Provider: BlockReader + StateProviderFactory,
     Evm: ConfigureEvm<Header = Header>,
@@ -245,7 +262,7 @@ where
 
     // Ensure next payload is valid.
     let next_block = payload_validator
-        .ensure_well_formed_payload(next_payload, next_cancun_fields.into())
+        .ensure_well_formed_payload(next_payload, next_sidecar)
         .map_err(RethError::msg)?;
 
     // Fetch reorg target block depending on its depth and its parent.
@@ -286,7 +303,7 @@ where
     let mut evm = evm_config.evm_with_env(&mut state, env);
 
     // apply eip-4788 pre block contract call
-    let mut system_caller = SystemCaller::new(evm_config, chain_spec);
+    let mut system_caller = SystemCaller::new(evm_config.clone(), chain_spec.clone());
 
     system_caller.apply_beacon_root_contract_call(
         reorg_target.timestamp,
@@ -400,7 +417,7 @@ where
             transactions_root: proofs::calculate_transaction_root(&transactions),
             receipts_root: outcome.receipts_root_slow(reorg_target.header.number).unwrap(),
             logs_bloom: outcome.block_logs_bloom(reorg_target.header.number).unwrap(),
-            requests_root: None, // TODO(prague)
+            requests_hash: None, // TODO(prague)
             gas_used: cumulative_gas_used,
             blob_gas_used: blob_gas_used.map(Into::into),
             excess_blob_gas: excess_blob_gas.map(Into::into),
@@ -410,16 +427,22 @@ where
             transactions,
             ommers: reorg_target.body.ommers,
             withdrawals: reorg_target.body.withdrawals,
-            requests: None, // TODO(prague)
         },
     }
     .seal_slow();
 
     Ok((
         block_to_payload(reorg_block),
+        // todo(onbjerg): how do we support execution requests?
         reorg_target
             .header
             .parent_beacon_block_root
-            .map(|root| CancunPayloadFields { parent_beacon_block_root: root, versioned_hashes }),
+            .map(|root| {
+                ExecutionPayloadSidecar::v3(CancunPayloadFields {
+                    parent_beacon_block_root: root,
+                    versioned_hashes,
+                })
+            })
+            .unwrap_or_else(ExecutionPayloadSidecar::none),
     ))
 }

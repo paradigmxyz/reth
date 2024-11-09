@@ -13,7 +13,7 @@ workspace = true
 
 [dependencies]
 # reth
-reth-chainspec = { workspace = true, features = ["optimism"] }
+reth-chainspec.workspace = true
 reth-ethereum-forks.workspace = true
 reth-primitives-traits.workspace = true
 reth-network-peers.workspace = true
@@ -25,6 +25,8 @@ reth-optimism-forks.workspace = true
 alloy-chains.workspace = true
 alloy-genesis.workspace = true
 alloy-primitives.workspace = true
+alloy-consensus.workspace = true
+alloy-eips.workspace = true
 
 # op
 op-alloy-rpc-types.workspace = true
@@ -43,4 +45,16 @@ op-alloy-rpc-types.workspace = true
 
 [features]
 default = ["std"]
-std = []
+std = [
+    "alloy-chains/std",
+    "alloy-genesis/std",
+    "alloy-primitives/std",
+    "alloy-eips/std",
+    "op-alloy-rpc-types/std",
+    "reth-chainspec/std",
+    "reth-ethereum-forks/std",
+    "reth-primitives-traits/std",
+    "reth-optimism-forks/std",
+    "alloy-consensus/std",
+    "once_cell/std",
+]

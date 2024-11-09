@@ -13,7 +13,6 @@ workspace = true
 
 [dependencies]
 ## reth
-reth-auto-seal-consensus.workspace = true
 reth-beacon-consensus.workspace = true
 reth-blockchain-tree.workspace = true
 reth-chain-state.workspace = true
@@ -26,6 +25,7 @@ reth-db = { workspace = true, features = ["mdbx"], optional = true }
 reth-db-api.workspace = true
 reth-db-common.workspace = true
 reth-downloaders.workspace = true
+reth-engine-local.workspace = true
 reth-engine-service.workspace = true
 reth-engine-tree.workspace = true
 reth-engine-util.workspace = true
@@ -95,4 +95,21 @@ tempfile.workspace = true
 
 [features]
 default = []
-test-utils = ["reth-db/test-utils"]
+test-utils = [
+	"reth-db/test-utils",
+	"reth-blockchain-tree/test-utils",
+	"reth-chain-state/test-utils",
+	"reth-chainspec/test-utils",
+	"reth-consensus/test-utils",
+	"reth-engine-tree/test-utils",
+	"reth-evm/test-utils",
+	"reth-downloaders/test-utils",
+	"reth-network/test-utils",
+	"reth-network-p2p/test-utils",
+	"reth-payload-builder/test-utils",
+	"reth-primitives/test-utils",
+	"reth-stages/test-utils",
+	"reth-db-api/test-utils",
+	"reth-provider/test-utils",
+	"reth-transaction-pool/test-utils"
+]

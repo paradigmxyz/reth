@@ -3,15 +3,14 @@
 use std::collections::HashMap;
 
 use crate::EthApi;
-use alloy_consensus::TxEnvelope;
 use alloy_dyn_abi::TypedData;
 use alloy_eips::eip2718::Decodable2718;
 use alloy_network::{eip2718::Encodable2718, EthereumWallet, TransactionBuilder};
-use alloy_primitives::{eip191_hash_message, Address, B256};
+use alloy_primitives::{eip191_hash_message, Address, PrimitiveSignature as Signature, B256};
 use alloy_rpc_types_eth::TransactionRequest;
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
-use reth_primitives::{Signature, TransactionSigned};
+use reth_primitives::TransactionSigned;
 use reth_rpc_eth_api::helpers::{signer::Result, AddDevSigners, EthSigner};
 use reth_rpc_eth_types::SignError;
 
@@ -41,7 +40,7 @@ impl DevSigner {
     /// Generates provided number of random dev signers
     /// which satisfy [`EthSigner`] trait
     pub fn random_signers(num: u32) -> Vec<Box<dyn EthSigner + 'static>> {
-        let mut signers = Vec::new();
+        let mut signers = Vec::with_capacity(num as usize);
         for _ in 0..num {
             let sk = PrivateKeySigner::random_with(&mut rand::thread_rng());
 
@@ -91,7 +90,7 @@ impl EthSigner for DevSigner {
         let wallet = EthereumWallet::from(signer);
 
         // build and sign transaction with signer
-        let txn_envelope: TxEnvelope =
+        let txn_envelope =
             request.build(&wallet).await.map_err(|_| SignError::InvalidTransactionRequest)?;
 
         // decode transaction into signed transaction type
@@ -110,7 +109,7 @@ impl EthSigner for DevSigner {
 
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::{Bytes, Parity, U256};
+    use alloy_primitives::{Bytes, U256};
     use alloy_rpc_types_eth::TransactionInput;
     use revm_primitives::TxKind;
 
@@ -206,7 +205,7 @@ mod tests {
                 16,
             )
             .unwrap(),
-            Parity::Parity(false),
+            false,
         );
         assert_eq!(sig, expected)
     }
@@ -228,7 +227,7 @@ mod tests {
                 16,
             )
             .unwrap(),
-            Parity::Parity(true),
+            true,
         );
         assert_eq!(sig, expected)
     }

@@ -1,0 +1,95 @@
+# Runs `assertoor` tests on a `kurtosis` testnet.
+
+name: kurtosis
+
+on:
+  workflow_dispatch:
+  schedule:
+    # every day
+    - cron: "0 1 * * *"
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  prepare-reth:
+    if: github.repository == 'paradigmxyz/reth'
+    timeout-minutes: 45
+    runs-on:
+      group: Reth
+    steps:
+      - uses: actions/checkout@v4
+      - run: mkdir artifacts
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - name: Build reth
+        run: |
+          cargo build --features asm-keccak --profile hivetests --bin reth --locked
+          mkdir dist && cp ./target/hivetests/reth ./dist/reth
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build and export reth image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: .github/assets/hive/Dockerfile
+          tags: ghcr.io/paradigmxyz/reth:kurtosis-ci
+          outputs: type=docker,dest=./artifacts/reth_image.tar
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Upload reth image
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts
+          path: ./artifacts
+
+  test:
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+    name: run kurtosis
+    runs-on:
+      group: Reth
+    needs:
+      - prepare-reth
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download reth image
+        uses: actions/download-artifact@v4
+        with:
+          name: artifacts
+          path: /tmp
+
+      - name: Load Docker image
+        run: |
+          docker load -i /tmp/reth_image.tar &
+          wait
+          docker image ls -a
+
+      - name: Run kurtosis
+        uses: ethpandaops/kurtosis-assertoor-github-action@v1
+        with:
+          ethereum_package_args: '.github/assets/kurtosis_network_params.yaml'
+
+  notify-on-error:
+    needs: test
+    if: failure()
+    runs-on:
+      group: Reth
+    steps:
+      - name: Slack Webhook Action
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_COLOR: ${{ job.status }}
+          SLACK_MESSAGE: "Failed run: https://github.com/paradigmxyz/reth/actions/runs/${{ github.run_id }}"
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}

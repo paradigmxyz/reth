@@ -35,8 +35,6 @@ alloy-rpc-types-eth.workspace = true
 revm.workspace = true
 revm-inspectors.workspace = true
 revm-primitives = { workspace = true, features = ["dev"] }
-alloy-rpc-types.workspace = true
-alloy-serde.workspace = true
 alloy-eips.workspace = true
 
 # rpc
@@ -58,6 +56,7 @@ derive_more.workspace = true
 schnellru.workspace = true
 rand.workspace = true
 tracing.workspace = true
+itertools.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

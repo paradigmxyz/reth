@@ -74,6 +74,9 @@ Networking:
       --enable-discv5-discovery
           Enable Discv5 discovery
 
+      --disable-nat
+          Disable Nat discovery
+
       --discovery.addr <DISCOVERY_ADDR>
           The UDP address to use for devp2p peer discovery version 4
 
@@ -242,7 +245,7 @@ RPC:
       --http.api <HTTP_API>
           Rpc Modules to be configured for the HTTP server
 
-          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots]
+          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, flashbots]
 
       --http.corsdomain <HTTP_CORSDOMAIN>
           Http Corsdomain to allow request from
@@ -266,7 +269,7 @@ RPC:
       --ws.api <WS_API>
           Rpc Modules to be configured for the WS server
 
-          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots]
+          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, flashbots]
 
       --ipcdisable
           Disable the IPC-RPC server
@@ -328,7 +331,9 @@ RPC:
           [default: 500]
 
       --rpc.max-tracing-requests <COUNT>
-          Maximum number of concurrent tracing requests
+          Maximum number of concurrent tracing requests.
+
+          By default this chooses a sensible value based on the number of available cores. Tracing requests are generally CPU bound. Choosing a value that is higher than the available CPU cores can have a negative impact on the performance of the node and affect the node's ability to maintain sync.
 
           [default: <NUM CPU CORES-2>]
 
@@ -361,6 +366,9 @@ RPC:
           Maximum number of concurrent getproof requests
 
           [default: 25]
+
+      --builder.disallow <PATH>
+          Path to file containing disallowed addresses, json-encoded list of strings. Block validation API will reject blocks containing transactions from these addresses
 
 RPC State Cache:
       --rpc-cache.max-blocks <MAX_BLOCKS>
@@ -494,6 +502,11 @@ TxPool:
 
           [default: 1024]
 
+      --txpool.max-new-pending-txs-notifications <MAX_NEW_PENDING_TXS_NOTIFICATIONS>
+          How many new pending transactions to buffer and send to in progress pending transaction iterators
+
+          [default: 200]
+
 Builder:
       --builder.extradata <EXTRADATA>
           Block extra data set by the payload builder
@@ -585,6 +598,15 @@ Database:
 
           [possible values: true, false]
 
+      --db.max-size <MAX_SIZE>
+          Maximum database size (e.g., 4TB, 8MB)
+
+      --db.growth-step <GROWTH_STEP>
+          Database growth step (e.g., 4GB, 4KB)
+
+      --db.read-transaction-timeout <READ_TRANSACTION_TIMEOUT>
+          Read transaction timeout in seconds, 0 means no timeout
+
 Dev testnet:
       --dev
           Start the node in dev mode
@@ -610,8 +632,6 @@ Pruning:
 
       --block-interval <BLOCK_INTERVAL>
           Minimum pruning interval measured in blocks
-
-          [default: 0]
 
       --prune.senderrecovery.full
           Prunes all sender recovery data
@@ -663,7 +683,12 @@ Pruning:
 
 Engine:
       --engine.experimental
-          Enable the engine2 experimental features on reth binary
+          Enable the experimental engine features on reth binary
+
+          DEPRECATED: experimental engine is default now, use --engine.legacy to enable the legacy functionality
+
+      --engine.legacy
+          Enable the legacy engine on reth binary
 
       --engine.persistence-threshold <PERSISTENCE_THRESHOLD>
           Configure persistence threshold for engine experimental

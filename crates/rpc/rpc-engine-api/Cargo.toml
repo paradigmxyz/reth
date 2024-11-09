@@ -45,6 +45,7 @@ jsonrpsee-types.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+parking_lot.workspace = true
 
 [dev-dependencies]
 reth-ethereum-engine-primitives.workspace = true
@@ -56,6 +57,3 @@ reth-testing-utils.workspace = true
 alloy-rlp.workspace = true
 
 assert_matches.workspace = true
-
-[features]
-optimism = ["reth-primitives/optimism"]

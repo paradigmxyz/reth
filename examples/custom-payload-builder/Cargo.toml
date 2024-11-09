@@ -16,6 +16,7 @@ reth-node-ethereum.workspace = true
 reth-ethereum-payload-builder.workspace = true
 
 alloy-primitives.workspace = true
+alloy-eips.workspace = true
 
 tracing.workspace = true
 futures-util.workspace = true

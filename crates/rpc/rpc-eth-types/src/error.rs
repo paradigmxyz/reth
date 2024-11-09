@@ -2,11 +2,12 @@
 
 use std::time::Duration;
 
+use alloy_eips::BlockId;
 use alloy_primitives::{Address, Bytes, U256};
-use alloy_rpc_types::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
+use alloy_rpc_types_eth::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
 use alloy_sol_types::decode_revert_reason;
 use reth_errors::RethError;
-use reth_primitives::{revm_primitives::InvalidHeader, BlockId};
+use reth_primitives::revm_primitives::InvalidHeader;
 use reth_rpc_server_types::result::{
     block_id_to_str, internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
 };
@@ -150,6 +151,11 @@ impl EthApiError {
     /// Returns `true` if error is [`RpcInvalidTransactionError::GasTooHigh`]
     pub const fn is_gas_too_high(&self) -> bool {
         matches!(self, Self::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh))
+    }
+
+    /// Returns `true` if error is [`RpcInvalidTransactionError::GasTooLow`]
+    pub const fn is_gas_too_low(&self) -> bool {
+        matches!(self, Self::InvalidTransaction(RpcInvalidTransactionError::GasTooLow))
     }
 }
 

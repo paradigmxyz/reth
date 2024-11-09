@@ -47,9 +47,14 @@ use reth_node_core::{
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use reth_optimism_evm::OpExecutorProvider;
-use reth_optimism_node::OptimismNode;
+use reth_optimism_node::OpNode;
 use reth_tracing::FileWorkerGuard;
 use tracing::info;
+
+// This allows us to manually enable node metrics features, required for proper jemalloc metric
+// reporting
+use reth_node_metrics as _;
+use reth_node_metrics::recorder::install_prometheus_recorder;
 
 /// The main op-reth cli interface.
 ///
@@ -131,36 +136,39 @@ where
         let _guard = self.init_tracing()?;
         info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
 
+        // Install the prometheus recorder to be sure to record all metrics
+        let _ = install_prometheus_recorder();
+
         let runner = CliRunner::default();
         match self.command {
             Commands::Node(command) => {
                 runner.run_command_until_exit(|ctx| command.execute(ctx, launcher))
             }
             Commands::Init(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<OptimismNode>())
+                runner.run_blocking_until_ctrl_c(command.execute::<OpNode>())
             }
             Commands::InitState(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<OptimismNode>())
+                runner.run_blocking_until_ctrl_c(command.execute::<OpNode>())
             }
             Commands::ImportOp(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<OptimismNode>())
+                runner.run_blocking_until_ctrl_c(command.execute::<OpNode>())
             }
             Commands::ImportReceiptsOp(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<OptimismNode>())
+                runner.run_blocking_until_ctrl_c(command.execute::<OpNode>())
             }
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            Commands::Db(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<OptimismNode>())
-            }
+            Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute::<OpNode>()),
             Commands::Stage(command) => runner.run_command_until_exit(|ctx| {
-                command.execute::<OptimismNode, _, _>(ctx, OpExecutorProvider::optimism)
+                command.execute::<OpNode, _, _>(ctx, OpExecutorProvider::optimism)
             }),
             Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::Recover(command) => {
-                runner.run_command_until_exit(|ctx| command.execute::<OptimismNode>(ctx))
+                runner.run_command_until_exit(|ctx| command.execute::<OpNode>(ctx))
             }
-            Commands::Prune(command) => runner.run_until_ctrl_c(command.execute::<OptimismNode>()),
+            Commands::Prune(command) => runner.run_until_ctrl_c(command.execute::<OpNode>()),
+            #[cfg(feature = "dev")]
+            Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
         }
     }
 

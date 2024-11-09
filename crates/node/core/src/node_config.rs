@@ -15,8 +15,9 @@ use reth_network_p2p::headers::client::HeadersClient;
 use serde::{de::DeserializeOwned, Serialize};
 use std::{fs, path::Path};
 
+use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{BlockNumber, B256};
-use reth_primitives::{BlockHashOrNumber, Head, SealedHeader};
+use reth_primitives::{Head, SealedHeader};
 use reth_stages_types::StageId;
 use reth_storage_api::{
     BlockHashReader, DatabaseProviderFactory, HeaderProvider, StageCheckpointReader,
@@ -420,6 +421,29 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
                 Ok(cfg)
             }
             Err(e) => Err(eyre!("Failed to load configuration: {e}")),
+        }
+    }
+
+    /// Modifies the [`ChainSpec`] generic of the config using the provided closure.
+    pub fn map_chainspec<F, C>(self, f: F) -> NodeConfig<C>
+    where
+        F: FnOnce(Arc<ChainSpec>) -> C,
+    {
+        let chain = Arc::new(f(self.chain));
+        NodeConfig {
+            chain,
+            datadir: self.datadir,
+            config: self.config,
+            metrics: self.metrics,
+            instance: self.instance,
+            network: self.network,
+            rpc: self.rpc,
+            txpool: self.txpool,
+            builder: self.builder,
+            debug: self.debug,
+            db: self.db,
+            dev: self.dev,
+            pruning: self.pruning,
         }
     }
 }

@@ -2,21 +2,27 @@
 
 use crate::{
     blobstore::BlobStoreError,
-    error::PoolResult,
+    error::{InvalidPoolTransactionError, PoolResult},
     pool::{state::SubPool, BestTransactionFilter, TransactionEvents},
     validate::ValidPoolTransaction,
     AllTransactionsEvents,
 };
-use alloy_eips::{eip2718::Encodable2718, eip2930::AccessList, eip4844::BlobAndProofV1};
+use alloy_consensus::{
+    constants::{EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID},
+    Transaction as _,
+};
+use alloy_eips::{
+    eip2718::Encodable2718,
+    eip2930::AccessList,
+    eip4844::{BlobAndProofV1, BlobTransactionSidecar, BlobTransactionValidationError},
+};
 use alloy_primitives::{Address, TxHash, TxKind, B256, U256};
 use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 use reth_primitives::{
-    kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, BlobTransactionSidecar,
-    BlobTransactionValidationError, PooledTransactionsElement,
+    kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, PooledTransactionsElement,
     PooledTransactionsElementEcRecovered, SealedBlock, Transaction, TransactionSignedEcRecovered,
-    EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -69,7 +75,6 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Imports all _external_ transactions
     ///
-    ///
     /// Consumer: Utility
     fn add_external_transactions(
         &self,
@@ -80,7 +85,7 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Adds an _unvalidated_ transaction into the pool and subscribe to state changes.
     ///
-    /// This is the same as [TransactionPool::add_transaction] but returns an event stream for the
+    /// This is the same as [`TransactionPool::add_transaction`] but returns an event stream for the
     /// given transaction.
     ///
     /// Consumer: Custom
@@ -247,16 +252,6 @@ pub trait TransactionPool: Send + Sync + Clone {
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>>;
 
     /// Returns an iterator that yields transactions that are ready for block production with the
-    /// given base fee.
-    ///
-    /// Consumer: Block production
-    #[deprecated(note = "Use best_transactions_with_attributes instead.")]
-    fn best_transactions_with_base_fee(
-        &self,
-        base_fee: u64,
-    ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>>;
-
-    /// Returns an iterator that yields transactions that are ready for block production with the
     /// given base fee and optional blob fee attributes.
     ///
     /// Consumer: Block production
@@ -293,12 +288,28 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Removes all transactions corresponding to the given hashes.
     ///
-    /// Also removes all _dependent_ transactions.
-    ///
     /// Consumer: Utility
     fn remove_transactions(
         &self,
         hashes: Vec<TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Removes all transactions corresponding to the given hashes.
+    ///
+    /// Also removes all _dependent_ transactions.
+    ///
+    /// Consumer: Utility
+    fn remove_transactions_and_descendants(
+        &self,
+        hashes: Vec<TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Removes all transactions from the given sender
+    ///
+    /// Consumer: Utility
+    fn remove_transactions_by_sender(
+        &self,
+        sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
     /// Retains only those hashes that are unknown to the pool.
@@ -333,6 +344,45 @@ pub trait TransactionPool: Send + Sync + Clone {
         &self,
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns all pending transactions filtered by predicate
+    fn get_pending_transactions_with_predicate(
+        &self,
+        predicate: impl FnMut(&ValidPoolTransaction<Self::Transaction>) -> bool,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns all pending transactions sent by a given user
+    fn get_pending_transactions_by_sender(
+        &self,
+        sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns all queued transactions sent by a given user
+    fn get_queued_transactions_by_sender(
+        &self,
+        sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns the highest transaction sent by a given user
+    fn get_highest_transaction_by_sender(
+        &self,
+        sender: Address,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns the transaction with the highest nonce that is executable given the on chain nonce.
+    /// In other words the highest non nonce gapped transaction.
+    ///
+    /// Note: The next pending pooled transaction must have the on chain nonce.
+    ///
+    /// For example, for a given on chain nonce of `5`, the next transaction must have that nonce.
+    /// If the pool contains txs `[5,6,7]` this returns tx `7`.
+    /// If the pool contains txs `[6,7]` this returns `None` because the next valid nonce (5) is
+    /// missing, which means txs `[6,7]` are nonce gapped.
+    fn get_highest_consecutive_transaction_by_sender(
+        &self,
+        sender: Address,
+        on_chain_nonce: u64,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
     /// Returns a transaction sent by a given user and a nonce
     fn get_transaction_by_sender_and_nonce(
@@ -392,7 +442,10 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Returns the [BlobTransactionSidecar] for the given transaction hash if it exists in the blob
     /// store.
-    fn get_blob(&self, tx_hash: TxHash) -> Result<Option<BlobTransactionSidecar>, BlobStoreError>;
+    fn get_blob(
+        &self,
+        tx_hash: TxHash,
+    ) -> Result<Option<Arc<BlobTransactionSidecar>>, BlobStoreError>;
 
     /// Returns all [BlobTransactionSidecar] for the given transaction hashes if they exists in the
     /// blob store.
@@ -402,7 +455,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     fn get_all_blobs(
         &self,
         tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<(TxHash, BlobTransactionSidecar)>, BlobStoreError>;
+    ) -> Result<Vec<(TxHash, Arc<BlobTransactionSidecar>)>, BlobStoreError>;
 
     /// Returns the exact [BlobTransactionSidecar] for the given transaction hashes in the order
     /// they were requested.
@@ -411,7 +464,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     fn get_all_blobs_exact(
         &self,
         tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError>;
+    ) -> Result<Vec<Arc<BlobTransactionSidecar>>, BlobStoreError>;
 
     /// Return the [`BlobTransactionSidecar`]s for a list of blob versioned hashes.
     fn get_blobs_for_versioned_hashes(
@@ -685,6 +738,11 @@ impl fmt::Display for CanonicalStateUpdate<'_> {
     }
 }
 
+/// Alias to restrict the [`BestTransactions`] items to the pool's transaction type.
+pub type BestTransactionsFor<Pool> = Box<
+    dyn BestTransactions<Item = Arc<ValidPoolTransaction<<Pool as TransactionPool>::Transaction>>>,
+>;
+
 /// An `Iterator` that only returns transactions that are ready to be executed.
 ///
 /// This makes no assumptions about the order of the transactions, but expects that _all_
@@ -708,6 +766,15 @@ pub trait BestTransactions: Iterator + Send {
     /// listen to pool updates.
     fn no_updates(&mut self);
 
+    /// Convenience function for [`Self::no_updates`] that returns the iterator again.
+    fn without_updates(mut self) -> Self
+    where
+        Self: Sized,
+    {
+        self.no_updates();
+        self
+    }
+
     /// Skip all blob transactions.
     ///
     /// There's only limited blob space available in a block, once exhausted, EIP-4844 transactions
@@ -716,12 +783,36 @@ pub trait BestTransactions: Iterator + Send {
     /// If called then the iterator will no longer yield blob transactions.
     ///
     /// Note: this will also exclude any transactions that depend on blob transactions.
-    fn skip_blobs(&mut self);
+    fn skip_blobs(&mut self) {
+        self.set_skip_blobs(true);
+    }
 
     /// Controls whether the iterator skips blob transactions or not.
     ///
     /// If set to true, no blob transactions will be returned.
     fn set_skip_blobs(&mut self, skip_blobs: bool);
+
+    /// Convenience function for [`Self::skip_blobs`] that returns the iterator again.
+    fn without_blobs(mut self) -> Self
+    where
+        Self: Sized,
+    {
+        self.skip_blobs();
+        self
+    }
+
+    /// Creates an iterator which uses a closure to determine whether a transaction should be
+    /// returned by the iterator.
+    ///
+    /// All items the closure returns false for are marked as invalid via [`Self::mark_invalid`] and
+    /// descendant transactions will be skipped.
+    fn filter_transactions<P>(self, predicate: P) -> BestTransactionFilter<Self, P>
+    where
+        P: FnMut(&Self::Item) -> bool,
+        Self: Sized,
+    {
+        BestTransactionFilter::new(self, predicate)
+    }
 }
 
 impl<T> BestTransactions for Box<T>
@@ -745,25 +836,6 @@ where
     }
 }
 
-/// A subtrait on the [`BestTransactions`] trait that allows to filter transactions.
-pub trait BestTransactionsFilter: BestTransactions {
-    /// Creates an iterator which uses a closure to determine if a transaction should be yielded.
-    ///
-    /// Given an element the closure must return true or false. The returned iterator will yield
-    /// only the elements for which the closure returns true.
-    ///
-    /// Descendant transactions will be skipped.
-    fn filter<P>(self, predicate: P) -> BestTransactionFilter<Self, P>
-    where
-        P: FnMut(&Self::Item) -> bool,
-        Self: Sized,
-    {
-        BestTransactionFilter::new(self, predicate)
-    }
-}
-
-impl<T> BestTransactionsFilter for T where T: BestTransactions {}
-
 /// A no-op implementation that yields no transactions.
 impl<T> BestTransactions for std::iter::Empty<T> {
     fn mark_invalid(&mut self, _tx: &T) {}
@@ -773,6 +845,36 @@ impl<T> BestTransactions for std::iter::Empty<T> {
     fn skip_blobs(&mut self) {}
 
     fn set_skip_blobs(&mut self, _skip_blobs: bool) {}
+}
+
+/// A filter that allows to check if a transaction satisfies a set of conditions
+pub trait TransactionFilter {
+    /// The type of the transaction to check.
+    type Transaction;
+
+    /// Returns true if the transaction satisfies the conditions.
+    fn is_valid(&self, transaction: &Self::Transaction) -> bool;
+}
+
+/// A no-op implementation of [`TransactionFilter`] which
+/// marks all transactions as valid.
+#[derive(Debug, Clone)]
+pub struct NoopTransactionFilter<T>(std::marker::PhantomData<T>);
+
+// We can't derive Default because this forces T to be
+// Default as well, which isn't necessary.
+impl<T> Default for NoopTransactionFilter<T> {
+    fn default() -> Self {
+        Self(std::marker::PhantomData)
+    }
+}
+
+impl<T> TransactionFilter for NoopTransactionFilter<T> {
+    type Transaction = T;
+
+    fn is_valid(&self, _transaction: &Self::Transaction) -> bool {
+        true
+    }
 }
 
 /// A Helper type that bundles the best transactions attributes together.
@@ -922,6 +1024,26 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
 
     /// Returns `chain_id`
     fn chain_id(&self) -> Option<u64>;
+
+    /// Ensures that the transaction's code size does not exceed the provided `max_init_code_size`.
+    ///
+    /// This is specifically relevant for contract creation transactions ([`TxKind::Create`]),
+    /// where the input data contains the initialization code. If the input code size exceeds
+    /// the configured limit, an [`InvalidPoolTransactionError::ExceedsMaxInitCodeSize`] error is
+    /// returned.
+    fn ensure_max_init_code_size(
+        &self,
+        max_init_code_size: usize,
+    ) -> Result<(), InvalidPoolTransactionError> {
+        if self.kind().is_create() && self.input().len() > max_init_code_size {
+            Err(InvalidPoolTransactionError::ExceedsMaxInitCodeSize(
+                self.size(),
+                max_init_code_size,
+            ))
+        } else {
+            Ok(())
+        }
+    }
 }
 
 /// Super trait for transactions that can be converted to and from Eth transactions
@@ -1045,7 +1167,7 @@ impl EthPooledTransaction {
 /// Conversion from the network transaction type to the pool transaction type.
 impl From<PooledTransactionsElementEcRecovered> for EthPooledTransaction {
     fn from(tx: PooledTransactionsElementEcRecovered) -> Self {
-        let encoded_length = tx.length_without_header();
+        let encoded_length = tx.encode_2718_len();
         let (tx, signer) = tx.into_components();
         match tx {
             PooledTransactionsElement::BlobTransaction(tx) => {
@@ -1145,7 +1267,7 @@ impl PoolTransaction for EthPooledTransaction {
     /// For EIP-1559 transactions: `min(max_fee_per_gas - base_fee, max_priority_fee_per_gas)`.
     /// For legacy transactions: `gas_price - base_fee`.
     fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
-        self.transaction.effective_tip_per_gas(Some(base_fee))
+        self.transaction.effective_tip_per_gas(base_fee)
     }
 
     /// Returns the max priority fee per gas if the transaction is an EIP-1559 transaction, and
@@ -1161,7 +1283,7 @@ impl PoolTransaction for EthPooledTransaction {
     }
 
     fn input(&self) -> &[u8] {
-        self.transaction.input().as_ref()
+        self.transaction.input()
     }
 
     /// Returns a measurement of the heap usage of this type and all its internals.
@@ -1231,7 +1353,7 @@ impl TryFrom<TransactionSignedEcRecovered> for EthPooledTransaction {
             }
             EIP4844_TX_TYPE_ID => {
                 // doesn't have a blob sidecar
-                return Err(TryFromRecoveredTransactionError::BlobSidecarMissing)
+                return Err(TryFromRecoveredTransactionError::BlobSidecarMissing);
             }
             unsupported => {
                 // unsupported transaction type
@@ -1379,11 +1501,31 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
     }
 }
 
+/// Iterator that returns transactions for the block building process in the order they should be
+/// included in the block.
+///
+/// Can include transactions from the pool and other sources (alternative pools,
+/// sequencer-originated transactions, etc.).
+pub trait PayloadTransactions {
+    /// Returns the next transaction to include in the block.
+    fn next(
+        &mut self,
+        // In the future, `ctx` can include access to state for block building purposes.
+        ctx: (),
+    ) -> Option<TransactionSignedEcRecovered>;
+
+    /// Exclude descendants of the transaction with given sender and nonce from the iterator,
+    /// because this transaction won't be included in the block.
+    fn mark_invalid(&mut self, sender: Address, nonce: u64);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloy_consensus::{TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
-    use reth_primitives::{constants::eip4844::DATA_GAS_PER_BLOB, Signature, TransactionSigned};
+    use alloy_eips::eip4844::DATA_GAS_PER_BLOB;
+    use alloy_primitives::PrimitiveSignature as Signature;
+    use reth_primitives::TransactionSigned;
 
     #[test]
     fn test_pool_size_invariants() {
@@ -1534,5 +1676,28 @@ mod tests {
         assert_eq!(pooled_tx.encoded_length, 200);
         assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::None);
         assert_eq!(pooled_tx.cost, U256::from(100) + U256::from(10 * 1000));
+    }
+
+    #[test]
+    fn test_pooled_transaction_limit() {
+        // No limit should never exceed
+        let limit_none = GetPooledTransactionLimit::None;
+        // Any size should return false
+        assert!(!limit_none.exceeds(1000));
+
+        // Size limit of 2MB (2 * 1024 * 1024 bytes)
+        let size_limit_2mb = GetPooledTransactionLimit::ResponseSizeSoftLimit(2 * 1024 * 1024);
+
+        // Test with size below the limit
+        // 1MB is below 2MB, should return false
+        assert!(!size_limit_2mb.exceeds(1024 * 1024));
+
+        // Test with size exactly at the limit
+        // 2MB equals the limit, should return false
+        assert!(!size_limit_2mb.exceeds(2 * 1024 * 1024));
+
+        // Test with size exceeding the limit
+        // 3MB is above the 2MB limit, should return true
+        assert!(size_limit_2mb.exceeds(3 * 1024 * 1024));
     }
 }

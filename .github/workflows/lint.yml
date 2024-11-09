@@ -11,26 +11,35 @@ env:
 
 jobs:
   clippy-binaries:
-    name: clippy / ${{ matrix.network }}
+    name: clippy binaries / ${{ matrix.type }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       matrix:
         include:
-          - binary: reth
-            network: ethereum
-          - binary: op-reth
-            network: optimism
+          - type: ethereum
+            args: --bin reth --workspace --lib --examples --tests --benches --locked
+            features: "ethereum asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
+          - type: optimism
+            args: --bin op-reth --workspace --lib --examples --tests --benches --locked
+            features: "optimism asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
+          - type: book
+            args: --manifest-path book/sources/Cargo.toml --workspace --bins
+            features: ""
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@clippy
         with:
-          toolchain: nightly-2024-09-25
           components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: cargo clippy --bin "${{ matrix.binary }}" --workspace --features "${{ matrix.network }} asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
+      - if: "${{ matrix.type == 'book' }}"
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Run clippy on binaries
+        run: cargo clippy ${{ matrix.args }} --features "${{ matrix.features }}"
         env:
           RUSTFLAGS: -D warnings
 
@@ -42,7 +51,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
         with:
-          toolchain: nightly-2024-09-25
           components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
@@ -95,7 +103,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.81" # MSRV
+          toolchain: "1.82" # MSRV
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
@@ -128,7 +136,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt
-      - run: cargo fmt --all --check
+      - name: Run fmt
+        run: cargo fmt --all --check
+      - name: Run fmt on book sources
+        run: cargo fmt --manifest-path book/sources/Cargo.toml --all --check
 
   udeps:
     name: udeps
@@ -152,7 +163,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.81" # MSRV
+          toolchain: "1.82" # MSRV
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
@@ -208,6 +219,22 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
 
+  # Check crates correctly propagate features
+  feature-propagation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: fetch deps
+        run: |
+          # Eagerly pull dependencies
+          time cargo metadata --format-version=1 --locked > /dev/null
+      - name: run zepter
+        run: |
+          cargo install zepter -f --locked
+          zepter --version
+          time zepter run check
+
   lint-success:
     name: lint success
     runs-on: ubuntu-latest
@@ -225,6 +252,7 @@ jobs:
       - grafana
       - no-test-deps
       - features
+      - feature-propagation
     timeout-minutes: 30
     steps:
       - name: Decide whether the needed jobs succeeded or failed

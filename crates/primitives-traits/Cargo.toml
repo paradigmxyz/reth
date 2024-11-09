@@ -44,7 +44,6 @@ reth-testing-utils.workspace = true
 alloy-primitives = { workspace = true, features = ["arbitrary"] }
 alloy-consensus = { workspace = true, features = ["arbitrary"] }
 
-arbitrary = { workspace = true, features = ["derive"] }
 bincode.workspace = true
 proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
@@ -54,14 +53,31 @@ test-fuzz.workspace = true
 
 [features]
 default = ["std"]
-std = []
-test-utils = ["arbitrary"]
-arbitrary = [
-    "std",
-    "alloy-consensus/arbitrary",
-    "alloy-primitives/arbitrary",
-    "dep:arbitrary",
-    "dep:proptest",
-    "dep:proptest-arbitrary-interop",
+std = [
+	"alloy-consensus/std",
+	"alloy-eips/std",
+	"alloy-genesis/std",
+	"alloy-primitives/std",
+	"revm-primitives/std",
+	"serde/std"
 ]
-serde-bincode-compat = ["serde_with", "alloy-consensus/serde-bincode-compat"]
+test-utils = [
+	"arbitrary",
+	"reth-codecs/test-utils"
+]
+arbitrary = [
+	"std",
+	"alloy-consensus/arbitrary",
+	"alloy-primitives/arbitrary",
+	"dep:arbitrary",
+	"dep:proptest",
+	"dep:proptest-arbitrary-interop",
+	"alloy-eips/arbitrary",
+	"revm-primitives/arbitrary",
+	"reth-codecs/arbitrary"
+]
+serde-bincode-compat = [
+	"serde_with",
+	"alloy-consensus/serde-bincode-compat",
+	"alloy-eips/serde-bincode-compat"
+]

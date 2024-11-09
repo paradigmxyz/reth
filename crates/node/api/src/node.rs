@@ -1,18 +1,19 @@
 //! Traits for configuring a node.
 
-use std::marker::PhantomData;
-
+use crate::ConfigureEvm;
+use alloy_rpc_types_engine::JwtSecret;
+use reth_beacon_consensus::BeaconConsensusEngineHandle;
+use reth_consensus::Consensus;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network_api::FullNetwork;
-use reth_node_types::{NodeTypesWithDB, NodeTypesWithEngine};
+use reth_node_core::node_config::NodeConfig;
+use reth_node_types::{NodeTypes, NodeTypesWithDB, NodeTypesWithEngine};
 use reth_payload_primitives::PayloadBuilder;
 use reth_primitives::Header;
 use reth_provider::FullProvider;
-use reth_rpc_eth_api::EthApiTypes;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::TransactionPool;
-
-use crate::ConfigureEvm;
+use std::{future::Future, marker::PhantomData};
 
 /// A helper trait that is downstream of the [`NodeTypesWithEngine`] trait and adds stateful
 /// components to the node.
@@ -54,11 +55,14 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     /// The type that knows how to execute blocks.
     type Executor: BlockExecutorProvider;
 
+    /// The consensus type of the node.
+    type Consensus: Consensus + Clone + Unpin + 'static;
+
     /// Network API.
     type Network: FullNetwork;
 
     /// Builds new blocks.
-    type PayloadBuilder: PayloadBuilder;
+    type PayloadBuilder: PayloadBuilder + Clone;
 
     /// Returns the transaction pool of the node.
     fn pool(&self) -> &Self::Pool;
@@ -69,8 +73,8 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     /// Returns the node's executor type.
     fn block_executor(&self) -> &Self::Executor;
 
-    /// Returns the provider of the node.
-    fn provider(&self) -> &Self::Provider;
+    /// Returns the node's consensus type.
+    fn consensus(&self) -> &Self::Consensus;
 
     /// Returns the handle to the network
     fn network(&self) -> &Self::Network;
@@ -78,37 +82,43 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     /// Returns the handle to the payload builder service.
     fn payload_builder(&self) -> &Self::PayloadBuilder;
 
+    /// Returns the provider of the node.
+    fn provider(&self) -> &Self::Provider;
+
     /// Returns handle to runtime.
     fn task_executor(&self) -> &TaskExecutor;
 }
 
+/// Context passed to [`NodeAddOns::launch_add_ons`],
+#[derive(Debug, Clone)]
+pub struct AddOnsContext<'a, N: FullNodeComponents> {
+    /// Node with all configured components.
+    pub node: N,
+    /// Node configuration.
+    pub config: &'a NodeConfig<<N::Types as NodeTypes>::ChainSpec>,
+    /// Handle to the beacon consensus engine.
+    pub beacon_engine_handle:
+        BeaconConsensusEngineHandle<<N::Types as NodeTypesWithEngine>::Engine>,
+    /// JWT secret for the node.
+    pub jwt_secret: JwtSecret,
+}
+
 /// Customizable node add-on types.
-pub trait NodeAddOns<N: FullNodeComponents>: Send + Sync + Unpin + Clone + 'static {
-    /// The core `eth` namespace API type to install on the RPC server (see
-    /// `reth_rpc_eth_api::EthApiServer`).
-    type EthApi: EthApiTypes + Send + Clone;
+pub trait NodeAddOns<N: FullNodeComponents>: Send {
+    /// Handle to add-ons.
+    type Handle: Send + Sync + Clone;
+
+    /// Configures and launches the add-ons.
+    fn launch_add_ons(
+        self,
+        ctx: AddOnsContext<'_, N>,
+    ) -> impl Future<Output = eyre::Result<Self::Handle>> + Send;
 }
 
 impl<N: FullNodeComponents> NodeAddOns<N> for () {
-    type EthApi = ();
-}
+    type Handle = ();
 
-/// Returns the builder for type.
-pub trait BuilderProvider<N: FullNodeComponents>: Send {
-    /// Context required to build type.
-    type Ctx<'a>;
-
-    /// Returns builder for type.
-    #[allow(clippy::type_complexity)]
-    fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send>;
-}
-
-impl<N: FullNodeComponents> BuilderProvider<N> for () {
-    type Ctx<'a> = ();
-
-    fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
-        Box::new(noop_builder)
+    async fn launch_add_ons(self, _components: AddOnsContext<'_, N>) -> eyre::Result<Self::Handle> {
+        Ok(())
     }
 }
-
-const fn noop_builder(_: ()) {}

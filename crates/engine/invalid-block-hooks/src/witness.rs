@@ -6,14 +6,15 @@ use eyre::OptionExt;
 use pretty_assertions::Comparison;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::InvalidBlockHook;
-use reth_evm::{system_calls::SystemCaller, ConfigureEvm};
+use reth_evm::{
+    state_change::post_block_balance_increments, system_calls::SystemCaller, ConfigureEvm,
+};
 use reth_primitives::{Header, Receipt, SealedBlockWithSenders, SealedHeader};
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
     db::states::bundle_state::BundleRetention,
     primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg},
-    state_change::post_block_balance_increments,
     DatabaseCommit, StateBuilder,
 };
 use reth_rpc_api::DebugApiClient;
@@ -84,7 +85,8 @@ where
             EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default()),
         );
 
-        let mut system_caller = SystemCaller::new(&self.evm_config, self.provider.chain_spec());
+        let mut system_caller =
+            SystemCaller::new(self.evm_config.clone(), self.provider.chain_spec());
 
         // Apply pre-block system contract calls.
         system_caller.apply_pre_execution_changes(&block.clone().unseal(), &mut evm)?;
@@ -161,7 +163,7 @@ where
         let response = ExecutionWitness {
             state: HashMap::from_iter(state),
             codes: Default::default(),
-            keys: Some(state_preimages),
+            keys: state_preimages,
         };
         let re_executed_witness_path = self.save_file(
             format!("{}_{}.witness.re_executed.json", block.number, block.hash()),

@@ -8,6 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
 use alloy_primitives::U256;
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
@@ -19,12 +20,11 @@ use reth_consensus_common::validation::{
 };
 use reth_primitives::{
     constants::MINIMUM_GAS_LIMIT, BlockWithSenders, Header, SealedBlock, SealedHeader,
-    EMPTY_OMMER_ROOT_HASH,
 };
 use std::{fmt::Debug, sync::Arc, time::SystemTime};
 
 /// The bound divisor of the gas limit, used in update calculations.
-const GAS_LIMIT_BOUND_DIVISOR: u64 = 1024;
+pub const GAS_LIMIT_BOUND_DIVISOR: u64 = 1024;
 
 mod validation;
 pub use validation::validate_block_post_execution;
@@ -32,7 +32,7 @@ pub use validation::validate_block_post_execution;
 /// Ethereum beacon consensus
 ///
 /// This consensus engine does basic checks as outlined in the execution specs.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EthBeaconConsensus<ChainSpec> {
     /// Configuration
     chain_spec: Arc<ChainSpec>,
@@ -121,11 +121,11 @@ impl<ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug> Consensu
         }
 
         if self.chain_spec.is_prague_active_at_timestamp(header.timestamp) {
-            if header.requests_root.is_none() {
-                return Err(ConsensusError::RequestsRootMissing)
+            if header.requests_hash.is_none() {
+                return Err(ConsensusError::RequestsHashMissing)
             }
-        } else if header.requests_root.is_some() {
-            return Err(ConsensusError::RequestsRootUnexpected)
+        } else if header.requests_hash.is_some() {
+            return Err(ConsensusError::RequestsHashUnexpected)
         }
 
         Ok(())

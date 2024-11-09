@@ -74,7 +74,7 @@ where
     pub fn new(inner: EthTransactionValidator<Client, Tx>) -> Self {
         let this = Self::with_block_info(inner, OpL1BlockInfo::default());
         if let Ok(Some(block)) =
-            this.inner.client().block_by_number_or_tag(reth_primitives::BlockNumberOrTag::Latest)
+            this.inner.client().block_by_number_or_tag(alloy_eips::BlockNumberOrTag::Latest)
         {
             // genesis block has no txs, so we can't extract L1 info, we set the block info to empty
             // so that we will accept txs into the pool before the first block
@@ -99,7 +99,7 @@ where
     /// Update the L1 block info.
     fn update_l1_block_info(&self, block: &Block) {
         self.block_info.timestamp.store(block.timestamp, Ordering::Relaxed);
-        if let Ok(cost_addition) = reth_optimism_evm::extract_l1_info(block) {
+        if let Ok(cost_addition) = reth_optimism_evm::extract_l1_info(&block.body) {
             *self.block_info.l1_block_info.write() = cost_addition;
         }
     }
@@ -231,9 +231,8 @@ pub struct OpL1BlockInfo {
 mod tests {
     use crate::txpool::OpTransactionValidator;
     use alloy_eips::eip2718::Encodable2718;
-    use alloy_primitives::{TxKind, U256};
+    use alloy_primitives::{PrimitiveSignature as Signature, TxKind, U256};
     use op_alloy_consensus::TxDeposit;
-    use reth::primitives::Signature;
     use reth_chainspec::MAINNET;
     use reth_primitives::{Transaction, TransactionSigned, TransactionSignedEcRecovered};
     use reth_provider::test_utils::MockEthProvider;

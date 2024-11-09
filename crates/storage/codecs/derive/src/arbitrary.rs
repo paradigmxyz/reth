@@ -18,10 +18,26 @@ pub fn maybe_generate_tests(
     let mut traits = vec![];
     let mut roundtrips = vec![];
     let mut additional_tests = vec![];
+    let mut is_crate = false;
 
-    for arg in args {
+    let mut iter = args.into_iter().peekable();
+
+    // we check if there's a crate argument which is used from inside the codecs crate directly
+    if let Some(arg) = iter.peek() {
+        if arg.to_string() == "crate" {
+            is_crate = true;
+            iter.next();
+        }
+    }
+
+    for arg in iter {
         if arg.to_string() == "compact" {
-            traits.push(quote! { use super::Compact; });
+            let path = if is_crate {
+                quote! { use crate::Compact; }
+            } else {
+                quote! { use reth_codecs::Compact; }
+            };
+            traits.push(path);
             roundtrips.push(quote! {
                 {
                     let mut buf = vec![];

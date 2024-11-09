@@ -82,7 +82,6 @@ The networking component mainly lives in [`net/network`](../../crates/net/networ
 Different consensus mechanisms.
 
 - [`consensus/common`](../../crates/consensus/common): Common consensus functions and traits (e.g. fee calculation)
-- [`consensus/auto-seal`](../../crates/consensus/auto-seal): A consensus mechanism that auto-seals blocks for local development (also commonly known as "auto-mine")
 - [`consensus/beacon`](../../crates/consensus/beacon): Consensus mechanism that handles messages from a beacon node ("eth2")
 
 ### Execution
@@ -132,7 +131,6 @@ The IPC transport lives in [`rpc/ipc`](../../crates/rpc/ipc).
 - [`rpc/rpc-api`](../../crates/rpc/rpc-api): RPC traits
   - Supported transports: HTTP, WS, IPC
   - Supported namespaces: `eth_`, `engine_`, `debug_`
-- [`rpc/rpc-types`](../../crates/rpc/rpc-types): Types relevant for the RPC endpoints above, grouped by namespace
 - [`rpc/rpc-eth-api`](../../crates/rpc/rpc-eth-api/): Reth RPC 'eth' namespace API (including interface and implementation), this crate is re-exported by `rpc/rpc-api`
 - [`rpc/rpc-eth-types`](../../crates/rpc/rpc-eth-types/): Types `supporting implementation` of 'eth' namespace RPC server API
 - [`rpc/rpc-server-types`](../../crates/rpc/rpc-server-types/): RPC server types and constants
@@ -169,7 +167,7 @@ Small utility crates.
 
 - [`tasks`](../../crates/tasks): An executor-agnostic task abstraction, used to spawn tasks on different async executors. Supports blocking tasks and handles panics gracefully. A tokio implementation is provided by default.
 - [`metrics/common`](../../crates/metrics/src/common): Common metrics types (e.g. metered channels)
-- [`metrics/metrics-derive`](../../crates/metrics/metrics-derive): A derive-style API for creating metrics
+- [`metrics/metrics-derive`](https://github.com/rkrasiuk/metrics-derive): A derive-style API for creating metrics
 - [`tracing`](../../crates/tracing): A small utility crate to install a uniform [`tracing`][tracing] subscriber
 
 [libmdbx-rs]: https://crates.io/crates/libmdbx

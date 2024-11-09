@@ -1,7 +1,5 @@
-use crate::blobstore::{
-    BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize, BlobTransactionSidecar,
-};
-use alloy_eips::eip4844::BlobAndProofV1;
+use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize};
+use alloy_eips::eip4844::{BlobAndProofV1, BlobTransactionSidecar};
 use alloy_primitives::B256;
 use parking_lot::RwLock;
 use std::{collections::HashMap, sync::Arc};
@@ -15,7 +13,7 @@ pub struct InMemoryBlobStore {
 #[derive(Debug, Default)]
 struct InMemoryBlobStoreInner {
     /// Storage for all blob data.
-    store: RwLock<HashMap<B256, BlobTransactionSidecar>>,
+    store: RwLock<HashMap<B256, Arc<BlobTransactionSidecar>>>,
     size_tracker: BlobStoreSize,
 }
 
@@ -75,43 +73,28 @@ impl BlobStore for InMemoryBlobStore {
     }
 
     // Retrieves the decoded blob data for the given transaction hash.
-    fn get(&self, tx: B256) -> Result<Option<BlobTransactionSidecar>, BlobStoreError> {
-        let store = self.inner.store.read();
-        Ok(store.get(&tx).cloned())
+    fn get(&self, tx: B256) -> Result<Option<Arc<BlobTransactionSidecar>>, BlobStoreError> {
+        Ok(self.inner.store.read().get(&tx).cloned())
     }
 
     fn contains(&self, tx: B256) -> Result<bool, BlobStoreError> {
-        let store = self.inner.store.read();
-        Ok(store.contains_key(&tx))
+        Ok(self.inner.store.read().contains_key(&tx))
     }
 
     fn get_all(
         &self,
         txs: Vec<B256>,
-    ) -> Result<Vec<(B256, BlobTransactionSidecar)>, BlobStoreError> {
-        let mut items = Vec::with_capacity(txs.len());
+    ) -> Result<Vec<(B256, Arc<BlobTransactionSidecar>)>, BlobStoreError> {
         let store = self.inner.store.read();
-        for tx in txs {
-            if let Some(item) = store.get(&tx) {
-                items.push((tx, item.clone()));
-            }
-        }
-
-        Ok(items)
+        Ok(txs.into_iter().filter_map(|tx| store.get(&tx).map(|item| (tx, item.clone()))).collect())
     }
 
-    fn get_exact(&self, txs: Vec<B256>) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError> {
-        let mut items = Vec::with_capacity(txs.len());
+    fn get_exact(
+        &self,
+        txs: Vec<B256>,
+    ) -> Result<Vec<Arc<BlobTransactionSidecar>>, BlobStoreError> {
         let store = self.inner.store.read();
-        for tx in txs {
-            if let Some(item) = store.get(&tx) {
-                items.push(item.clone());
-            } else {
-                return Err(BlobStoreError::MissingSidecar(tx))
-            }
-        }
-
-        Ok(items)
+        Ok(txs.into_iter().filter_map(|tx| store.get(&tx).cloned()).collect())
     }
 
     fn get_by_versioned_hashes(
@@ -150,7 +133,7 @@ impl BlobStore for InMemoryBlobStore {
 
 /// Removes the given blob from the store and returns the size of the blob that was removed.
 #[inline]
-fn remove_size(store: &mut HashMap<B256, BlobTransactionSidecar>, tx: &B256) -> usize {
+fn remove_size(store: &mut HashMap<B256, Arc<BlobTransactionSidecar>>, tx: &B256) -> usize {
     store.remove(tx).map(|rem| rem.size()).unwrap_or_default()
 }
 
@@ -159,11 +142,11 @@ fn remove_size(store: &mut HashMap<B256, BlobTransactionSidecar>, tx: &B256) -> 
 /// We don't need to handle the size updates for replacements because transactions are unique.
 #[inline]
 fn insert_size(
-    store: &mut HashMap<B256, BlobTransactionSidecar>,
+    store: &mut HashMap<B256, Arc<BlobTransactionSidecar>>,
     tx: B256,
     blob: BlobTransactionSidecar,
 ) -> usize {
     let add = blob.size();
-    store.insert(tx, blob);
+    store.insert(tx, Arc::new(blob));
     add
 }

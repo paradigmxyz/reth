@@ -1,17 +1,15 @@
 //! Generators for different data structures like block headers, block bodies and ranges of those.
 
-use alloy_consensus::TxLegacy;
-use alloy_eips::{
-    eip6110::DepositRequest, eip7002::WithdrawalRequest, eip7251::ConsolidationRequest,
-};
-use alloy_primitives::{Address, BlockNumber, Bytes, Parity, Sealable, TxKind, B256, U256};
+use alloy_consensus::{Transaction as _, TxLegacy};
+use alloy_eips::eip4895::Withdrawal;
+use alloy_primitives::{Address, BlockNumber, Bytes, Sealable, TxKind, B256, U256};
 pub use rand::Rng;
 use rand::{
     distributions::uniform::SampleRange, rngs::StdRng, seq::SliceRandom, thread_rng, SeedableRng,
 };
 use reth_primitives::{
-    proofs, sign_message, Account, BlockBody, Header, Log, Receipt, Request, Requests, SealedBlock,
-    SealedHeader, StorageEntry, Transaction, TransactionSigned, Withdrawal, Withdrawals,
+    proofs, sign_message, Account, BlockBody, Header, Log, Receipt, SealedBlock, SealedHeader,
+    StorageEntry, Transaction, TransactionSigned, Withdrawals,
 };
 use secp256k1::{Keypair, Secp256k1};
 use std::{
@@ -150,16 +148,8 @@ pub fn sign_tx_with_random_key_pair<R: Rng>(rng: &mut R, tx: Transaction) -> Tra
 
 /// Signs the [Transaction] with the given key pair.
 pub fn sign_tx_with_key_pair(key_pair: Keypair, tx: Transaction) -> TransactionSigned {
-    let mut signature =
+    let signature =
         sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
-
-    if matches!(tx, Transaction::Legacy(_)) {
-        signature = if let Some(chain_id) = tx.chain_id() {
-            signature.with_chain_id(chain_id)
-        } else {
-            signature.with_parity(Parity::NonEip155(signature.v().y_parity()))
-        }
-    }
 
     TransactionSigned::from_transaction_and_signature(tx, signature)
 }
@@ -201,11 +191,6 @@ pub fn random_block<R: Rng>(rng: &mut R, number: u64, block_params: BlockParams)
     let transactions_root = proofs::calculate_transaction_root(&transactions);
     let ommers_hash = proofs::calculate_ommers_root(&ommers);
 
-    let requests = block_params
-        .requests_count
-        .map(|count| (0..count).map(|_| random_request(rng)).collect::<Vec<_>>());
-    let requests_root = requests.as_ref().map(|requests| proofs::calculate_requests_root(requests));
-
     let withdrawals = block_params.withdrawals_count.map(|count| {
         (0..count)
             .map(|i| Withdrawal {
@@ -226,7 +211,8 @@ pub fn random_block<R: Rng>(rng: &mut R, number: u64, block_params: BlockParams)
         transactions_root,
         ommers_hash,
         base_fee_per_gas: Some(rng.gen()),
-        requests_root,
+        // TODO(onbjerg): Proper EIP-7685 request support
+        requests_hash: None,
         withdrawals_root,
         ..Default::default()
     }
@@ -236,12 +222,7 @@ pub fn random_block<R: Rng>(rng: &mut R, number: u64, block_params: BlockParams)
 
     SealedBlock {
         header: SealedHeader::new(header, seal),
-        body: BlockBody {
-            transactions,
-            ommers,
-            withdrawals: withdrawals.map(Withdrawals::new),
-            requests: requests.map(Requests),
-        },
+        body: BlockBody { transactions, ommers, withdrawals: withdrawals.map(Withdrawals::new) },
     }
 }
 
@@ -470,38 +451,13 @@ pub fn random_log<R: Rng>(rng: &mut R, address: Option<Address>, topics_count: O
     )
 }
 
-/// Generate random request
-pub fn random_request<R: Rng>(rng: &mut R) -> Request {
-    let request_type = rng.gen_range(0..3);
-    match request_type {
-        0 => Request::DepositRequest(DepositRequest {
-            pubkey: rng.gen(),
-            withdrawal_credentials: rng.gen(),
-            amount: rng.gen(),
-            signature: rng.gen(),
-            index: rng.gen(),
-        }),
-        1 => Request::WithdrawalRequest(WithdrawalRequest {
-            source_address: rng.gen(),
-            validator_pubkey: rng.gen(),
-            amount: rng.gen(),
-        }),
-        2 => Request::ConsolidationRequest(ConsolidationRequest {
-            source_address: rng.gen(),
-            source_pubkey: rng.gen(),
-            target_pubkey: rng.gen(),
-        }),
-        _ => panic!("invalid request type"),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloy_consensus::TxEip1559;
     use alloy_eips::eip2930::AccessList;
-    use alloy_primitives::{hex, Parity};
-    use reth_primitives::{public_key_to_address, Signature};
+    use alloy_primitives::{hex, PrimitiveSignature as Signature};
+    use reth_primitives::public_key_to_address;
     use std::str::FromStr;
 
     #[test]
@@ -574,7 +530,7 @@ mod tests {
                 "46948507304638947509940763649030358759909902576025900602547168820602576006531",
             )
             .unwrap(),
-            Parity::Parity(false),
+            false,
         );
         assert_eq!(expected, signature);
     }
