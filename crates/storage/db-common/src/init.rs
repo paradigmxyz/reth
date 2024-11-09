@@ -98,7 +98,10 @@ where
                 database_hash: block_hash,
             })
         }
-        Err(e) => return Err(dbg!(e).into()),
+        Err(e) => {
+            debug!(?e);
+            return Err(e.into());
+        }
     }
 
     debug!("Writing genesis block.");

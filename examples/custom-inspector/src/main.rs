@@ -12,7 +12,7 @@
 
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::Address;
-use alloy_rpc_types::state::EvmOverrides;
+use alloy_rpc_types_eth::state::EvmOverrides;
 use clap::Parser;
 use futures_util::StreamExt;
 use reth::{

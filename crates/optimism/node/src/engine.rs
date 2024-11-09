@@ -14,7 +14,7 @@ use reth_node_api::{
     validate_version_specific_fields, EngineTypes, EngineValidator,
 };
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_forks::{OptimismHardfork, OptimismHardforks};
+use reth_optimism_forks::{OpHardfork, OptimismHardforks};
 use reth_optimism_payload_builder::{OpBuiltPayload, OpPayloadBuilderAttributes};
 
 /// The types used in the optimism beacon consensus engine.
@@ -81,7 +81,7 @@ pub fn validate_withdrawals_presence(
     timestamp: u64,
     has_withdrawals: bool,
 ) -> Result<(), EngineObjectValidationError> {
-    let is_shanghai = chain_spec.fork(OptimismHardfork::Canyon).active_at_timestamp(timestamp);
+    let is_shanghai = chain_spec.fork(OpHardfork::Canyon).active_at_timestamp(timestamp);
 
     match version {
         EngineApiMessageVersion::V1 => {
@@ -178,10 +178,9 @@ mod test {
     use super::*;
 
     fn get_chainspec(is_holocene: bool) -> Arc<OpChainSpec> {
-        let mut hardforks = OptimismHardfork::base_sepolia();
+        let mut hardforks = OpHardfork::base_sepolia();
         if is_holocene {
-            hardforks
-                .insert(OptimismHardfork::Holocene.boxed(), ForkCondition::Timestamp(1800000000));
+            hardforks.insert(OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(1800000000));
         }
         Arc::new(OpChainSpec {
             inner: ChainSpec {

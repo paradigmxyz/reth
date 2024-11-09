@@ -106,7 +106,7 @@ where
             .into())
         }
 
-        let block_id: alloy_rpc_types::BlockId = state_block_number.into();
+        let block_id: alloy_rpc_types_eth::BlockId = state_block_number.into();
         // Note: the block number is considered the `parent` block: <https://github.com/flashbots/mev-geth/blob/fddf97beec5877483f879a77b7dea2e58a58d653/internal/ethapi/api.go#L2104>
         let (cfg, mut block_env, at) = self.eth_api().evm_env_at(block_id).await?;
 
@@ -167,7 +167,7 @@ where
                 let mut total_gas_fess = U256::ZERO;
                 let mut hasher = Keccak256::new();
 
-                let mut evm = RpcNodeCore::evm_config(&eth_api).evm_with_env(db, env);
+                let mut evm = eth_api.evm_config().evm_with_env(db, env);
 
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut transactions = transactions.into_iter().peekable();
@@ -188,7 +188,7 @@ where
                         .effective_tip_per_gas(basefee)
                         .ok_or_else(|| RpcInvalidTransactionError::FeeCapTooLow)
                         .map_err(Eth::Error::from_eth_err)?;
-                    RpcNodeCore::evm_config(&eth_api).fill_tx_env(evm.tx_mut(), &tx, signer);
+                    eth_api.evm_config().fill_tx_env(evm.tx_mut(), &tx, signer);
                     let ResultAndState { result, state } =
                         evm.transact().map_err(Eth::Error::from_evm_err)?;
 

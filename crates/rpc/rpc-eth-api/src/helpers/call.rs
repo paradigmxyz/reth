@@ -8,12 +8,12 @@ use crate::{
 use alloy_consensus::BlockHeader;
 use alloy_eips::{eip1559::calc_next_block_base_fee, eip2930::AccessListResult};
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
-use alloy_rpc_types::{
+use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimulatePayload, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
+    transaction::TransactionRequest,
     BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
 };
-use alloy_rpc_types_eth::transaction::TransactionRequest;
 use futures::Future;
 use reth_chainspec::{EthChainSpec, MIN_TRANSACTION_GAS};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};

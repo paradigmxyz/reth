@@ -10,7 +10,7 @@ use std::{
 };
 
 use alloy_primitives::TxHash;
-use alloy_rpc_types::{
+use alloy_rpc_types_eth::{
     BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
     PendingTransactionFilterKind,
 };

@@ -1645,7 +1645,7 @@ impl StatsReader for StaticFileProvider {
     fn count_entries<T: Table>(&self) -> ProviderResult<usize> {
         match T::NAME {
             tables::CanonicalHeaders::NAME |
-            tables::Headers::NAME |
+            tables::Headers::<Header>::NAME |
             tables::HeaderTerminalDifficulties::NAME => Ok(self
                 .get_highest_static_file_block(StaticFileSegment::Headers)
                 .map(|block| block + 1)
@@ -1655,10 +1655,11 @@ impl StatsReader for StaticFileProvider {
                 .get_highest_static_file_tx(StaticFileSegment::Receipts)
                 .map(|receipts| receipts + 1)
                 .unwrap_or_default() as usize),
-            tables::Transactions::NAME => Ok(self
+            tables::Transactions::<TransactionSignedNoHash>::NAME => Ok(self
                 .get_highest_static_file_tx(StaticFileSegment::Transactions)
                 .map(|txs| txs + 1)
-                .unwrap_or_default() as usize),
+                .unwrap_or_default()
+                as usize),
             _ => Err(ProviderError::UnsupportedProvider),
         }
     }
