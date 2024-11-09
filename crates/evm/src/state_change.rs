@@ -4,7 +4,7 @@ use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::{map::HashMap, Address, U256};
 use reth_chainspec::EthereumHardforks;
 use reth_consensus_common::calc;
-use reth_primitives::{Block, Withdrawals};
+use reth_primitives::Block;
 
 /// Collect all balance changes at the end of the block.
 ///
@@ -37,7 +37,7 @@ pub fn post_block_balance_increments<ChainSpec: EthereumHardforks>(
     insert_post_block_withdrawals_balance_increments(
         chain_spec,
         block.timestamp,
-        block.body.withdrawals.as_ref().map(Withdrawals::as_ref),
+        block.body.withdrawals.as_ref().map(|w| w.as_slice()),
         &mut balance_increments,
     );
 

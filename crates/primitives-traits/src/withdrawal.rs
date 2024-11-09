@@ -1,86 +1,11 @@
 //! [EIP-4895](https://eips.ethereum.org/EIPS/eip-4895) Withdrawal types.
 
-use alloc::vec::Vec;
-use alloy_eips::eip4895::Withdrawal;
-use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
-use derive_more::{AsRef, Deref, DerefMut, From, IntoIterator};
-use reth_codecs::{add_arbitrary_tests, Compact};
-use serde::{Deserialize, Serialize};
+/// Re-export from `alloy_eips`.
+#[doc(inline)]
+pub use alloy_eips::eip4895::Withdrawal;
 
 /// Represents a collection of Withdrawals.
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Default,
-    Hash,
-    From,
-    AsRef,
-    Deref,
-    DerefMut,
-    IntoIterator,
-    RlpEncodableWrapper,
-    RlpDecodableWrapper,
-    Serialize,
-    Deserialize,
-    Compact,
-)]
-#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-#[add_arbitrary_tests(compact)]
-#[as_ref(forward)]
-pub struct Withdrawals(Vec<Withdrawal>);
-
-impl Withdrawals {
-    /// Create a new Withdrawals instance.
-    pub const fn new(withdrawals: Vec<Withdrawal>) -> Self {
-        Self(withdrawals)
-    }
-
-    /// Calculate the total size, including capacity, of the Withdrawals.
-    #[inline]
-    pub fn total_size(&self) -> usize {
-        self.capacity() * core::mem::size_of::<Withdrawal>()
-    }
-
-    /// Calculate a heuristic for the in-memory size of the [Withdrawals].
-    #[inline]
-    pub fn size(&self) -> usize {
-        self.len() * core::mem::size_of::<Withdrawal>()
-    }
-
-    /// Get an iterator over the Withdrawals.
-    pub fn iter(&self) -> core::slice::Iter<'_, Withdrawal> {
-        self.0.iter()
-    }
-
-    /// Get a mutable iterator over the Withdrawals.
-    pub fn iter_mut(&mut self) -> core::slice::IterMut<'_, Withdrawal> {
-        self.0.iter_mut()
-    }
-
-    /// Convert [Self] into raw vec of withdrawals.
-    pub fn into_inner(self) -> Vec<Withdrawal> {
-        self.0
-    }
-}
-
-impl<'a> IntoIterator for &'a Withdrawals {
-    type Item = &'a Withdrawal;
-    type IntoIter = core::slice::Iter<'a, Withdrawal>;
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter()
-    }
-}
-
-impl<'a> IntoIterator for &'a mut Withdrawals {
-    type Item = &'a mut Withdrawal;
-    type IntoIter = core::slice::IterMut<'a, Withdrawal>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter_mut()
-    }
-}
+pub type Withdrawals = alloy_eips::eip4895::Withdrawals;
 
 #[cfg(test)]
 mod tests {
@@ -89,6 +14,8 @@ mod tests {
     use alloy_rlp::{RlpDecodable, RlpEncodable};
     use proptest::proptest;
     use proptest_arbitrary_interop::arb;
+    use reth_codecs::{add_arbitrary_tests, Compact};
+    use serde::{Deserialize, Serialize};
 
     /// This type is kept for compatibility tests after the codec support was added to alloy-eips
     /// Withdrawal type natively
