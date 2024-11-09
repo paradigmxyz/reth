@@ -2611,6 +2611,7 @@ dependencies = [
 name = "ef-tests"
 version = "1.1.1"
 dependencies = [
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
  "rayon",
@@ -2852,6 +2853,7 @@ dependencies = [
 name = "example-custom-engine-types"
 version = "0.0.0"
 dependencies = [
+ "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rpc-types",
@@ -6915,6 +6917,7 @@ dependencies = [
 name = "reth-db-models"
 version = "1.1.1"
 dependencies = [
+ "alloy-eips",
  "alloy-primitives",
  "arbitrary",
  "bytes",
