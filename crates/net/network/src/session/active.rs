@@ -282,8 +282,8 @@ impl ActiveSession {
 
     /// Returns the deadline timestamp at which the request times out
     fn request_deadline(&self) -> Instant {
-        Instant::now()
-            + Duration::from_millis(self.internal_request_timeout.load(Ordering::Relaxed))
+        Instant::now() +
+            Duration::from_millis(self.internal_request_timeout.load(Ordering::Relaxed))
     }
 
     /// Handle a Response to the peer
