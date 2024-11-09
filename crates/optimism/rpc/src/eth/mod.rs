@@ -121,6 +121,7 @@ where
     type Pool = N::Pool;
     type Evm = <N as RpcNodeCore>::Evm;
     type Network = <N as RpcNodeCore>::Network;
+    type PayloadBuilder = ();
 
     #[inline]
     fn pool(&self) -> &Self::Pool {
@@ -135,6 +136,11 @@ where
     #[inline]
     fn network(&self) -> &Self::Network {
         self.inner.network()
+    }
+
+    #[inline]
+    fn payload_builder(&self) -> &Self::PayloadBuilder {
+        &()
     }
 
     #[inline]
