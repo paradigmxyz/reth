@@ -4,7 +4,7 @@ use alloy_primitives::{
     Bytes, B256,
 };
 use alloy_rlp::Decodable;
-use reth_trie::{BranchNodeCompact, Nibbles, TrieNode};
+use reth_trie::{Nibbles, TrieNode};
 
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
 #[derive(Default, Debug)]
@@ -78,7 +78,7 @@ impl SparseStateTrie {
     }
 
     /// Returns sparse trie root if the trie has been revealed.
-    pub fn root(&mut self) -> Option<(B256, HashMap<Nibbles, BranchNodeCompact>)> {
+    pub fn root(&mut self) -> Option<B256> {
         self.state.root()
     }
 }
