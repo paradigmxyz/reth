@@ -22,7 +22,7 @@ use reth_primitives::Header;
 use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::TraceApiServer;
-use reth_rpc_eth_api::{helpers::TraceExt, FromEthApiError, RpcNodeCore};
+use reth_rpc_eth_api::{helpers::TraceExt, FromEthApiError};
 use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction};
 use reth_tasks::pool::BlockingTaskGuard;
 use revm::{
@@ -122,7 +122,7 @@ where
         let env = EnvWithHandlerCfg::new_with_cfg_env(
             cfg,
             block,
-            RpcNodeCore::evm_config(self.eth_api()).tx_env(tx.as_signed(), tx.signer()),
+            self.eth_api().evm_config().tx_env(tx.as_signed(), tx.signer()),
         );
 
         let config = TracingInspectorConfig::from_parity_config(&trace_types);
