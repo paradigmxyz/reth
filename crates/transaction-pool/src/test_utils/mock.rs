@@ -11,6 +11,7 @@ use alloy_consensus::{
     constants::{EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID},
     TxEip1559, TxEip2930, TxEip4844, TxLegacy,
 };
+
 use alloy_eips::{eip1559::MIN_PROTOCOL_BASE_FEE, eip2930::AccessList, eip4844::DATA_GAS_PER_BLOB};
 use alloy_primitives::{Address, Bytes, ChainId, TxHash, TxKind, B256, U256};
 use paste::paste;
@@ -24,9 +25,6 @@ use reth_primitives::{
     TransactionSigned, TransactionSignedEcRecovered, TxType,
 };
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
-
-#[cfg(any(test, feature = "arbitrary"))]
-use reth_primitives_traits::InMemorySize;
 
 /// A transaction pool implementation using [`MockOrdering`] for transaction ordering.
 ///
@@ -1004,6 +1002,7 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::Strategy;
         use proptest_arbitrary_interop::arb;
+        use reth_primitives_traits::size::InMemorySize;
 
         arb::<(Transaction, Address, B256)>()
             .prop_map(|(tx, sender, tx_hash)| match &tx {
