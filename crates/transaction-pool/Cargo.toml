@@ -124,3 +124,8 @@ harness = false
 name = "priority"
 required-features = ["arbitrary"]
 harness = false
+
+[[bench]]
+name = "lookup"
+required-features = ["test-utils", "arbitrary"]
+harness = false
