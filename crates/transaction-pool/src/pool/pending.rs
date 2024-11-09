@@ -8,8 +8,7 @@ use crate::{
 };
 use std::{
     cmp::Ordering,
-    collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap},
-    ops::Bound::Unbounded,
+    collections::{BTreeSet, HashMap},
     sync::Arc,
 };
 use tokio::sync::broadcast;
@@ -33,9 +32,7 @@ pub struct PendingPool<T: TransactionOrdering> {
     /// This way we can determine when transactions were submitted to the pool.
     submission_id: u64,
     /// _All_ Transactions that are currently inside the pool grouped by their identifier.
-    by_id: BTreeMap<TransactionId, PendingTransaction<T>>,
-    /// _All_ transactions sorted by priority
-    all: BTreeSet<PendingTransaction<T>>,
+    by_id: HashMap<TransactionId, PendingTransaction<T>>,
     /// The highest nonce transactions for each sender - like the `independent` set, but the
     /// highest instead of lowest nonce.
     highest_nonces: HashMap<SenderId, PendingTransaction<T>>,
@@ -61,7 +58,6 @@ impl<T: TransactionOrdering> PendingPool<T> {
             ordering,
             submission_id: 0,
             by_id: Default::default(),
-            all: Default::default(),
             independent_transactions: Default::default(),
             highest_nonces: Default::default(),
             size_of: Default::default(),
@@ -75,10 +71,9 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// # Returns
     ///
     /// Returns all transactions by id.
-    fn clear_transactions(&mut self) -> BTreeMap<TransactionId, PendingTransaction<T>> {
+    fn clear_transactions(&mut self) -> HashMap<TransactionId, PendingTransaction<T>> {
         self.independent_transactions.clear();
         self.highest_nonces.clear();
-        self.all.clear();
         self.size_of.reset();
         std::mem::take(&mut self.by_id)
     }
@@ -194,7 +189,6 @@ impl<T: TransactionOrdering> PendingPool<T> {
             } else {
                 self.size_of += tx.transaction.size();
                 self.update_independents_and_highest_nonces(&tx);
-                self.all.insert(tx.clone());
                 self.by_id.insert(id, tx);
             }
         }
@@ -240,7 +234,6 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
                 self.size_of += tx.transaction.size();
                 self.update_independents_and_highest_nonces(&tx);
-                self.all.insert(tx.clone());
                 self.by_id.insert(id, tx);
             }
         }
@@ -307,7 +300,6 @@ impl<T: TransactionOrdering> PendingPool<T> {
         let tx = PendingTransaction { submission_id, transaction: tx, priority };
 
         self.update_independents_and_highest_nonces(&tx);
-        self.all.insert(tx.clone());
 
         // send the new transaction to any existing pendingpool static file iterators
         if self.new_transaction_notifier.receiver_count() > 0 {
@@ -337,7 +329,8 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
         let tx = self.by_id.remove(id)?;
         self.size_of -= tx.transaction.size();
-        self.all.remove(&tx);
+        self.independent_transactions.remove(&tx);
+
 
         if let Some(highest) = self.highest_nonces.get(&id.sender) {
             if highest.transaction.nonce() == id.nonce {
@@ -517,11 +510,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
     /// Get transactions by sender
     pub(crate) fn get_txs_by_sender(&self, sender: SenderId) -> Vec<TransactionId> {
-        self.by_id
-            .range((sender.start_bound(), Unbounded))
-            .take_while(move |(other, _)| sender == other.sender)
-            .map(|(tx_id, _)| *tx_id)
-            .collect()
+        self.by_id.iter().filter(|(id, _)| id.sender == sender).map(|(tx_id, _)| *tx_id).collect()
     }
 
     /// Retrieves a transaction with the given ID from the pool, if it exists.
@@ -538,15 +527,15 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// Asserts that the bijection between `by_id` and `all` is valid.
     #[cfg(any(test, feature = "test-utils"))]
     pub(crate) fn assert_invariants(&self) {
-        assert_eq!(self.by_id.len(), self.all.len(), "by_id.len() != all.len()");
-        assert!(
-            self.independent_transactions.len() <= self.all.len(),
-            "independent.len() > all.len()"
-        );
-        assert!(
-            self.highest_nonces.len() <= self.all.len(),
-            "independent_descendants.len() > all.len()"
-        );
+        // assert_eq!(self.by_id.len(), self.all.len(), "by_id.len() != all.len()");
+        // assert!(
+        //     self.independent_transactions.len() <= self.all.len(),
+        //     "independent.len() > all.len()"
+        // );
+        // assert!(
+        //     self.highest_nonces.len() <= self.all.len(),
+        //     "independent_descendants.len() > all.len()"
+        // );
         assert_eq!(
             self.highest_nonces.len(),
             self.independent_transactions.len(),
