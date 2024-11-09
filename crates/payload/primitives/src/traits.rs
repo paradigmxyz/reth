@@ -1,9 +1,12 @@
 use crate::{PayloadBuilderError, PayloadEvents, PayloadKind, PayloadTypes};
-use alloy_eips::{eip4895::Withdrawal, eip7685::Requests};
+use alloy_eips::{
+    eip4895::{Withdrawal, Withdrawals},
+    eip7685::Requests,
+};
 use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
 use reth_chain_state::ExecutedBlock;
-use reth_primitives::{SealedBlock, Withdrawals};
+use reth_primitives::SealedBlock;
 use tokio::sync::oneshot;
 
 /// A type that can request, subscribe to and resolve payloads.
