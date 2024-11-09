@@ -90,6 +90,6 @@ pub enum NippyJarError {
     InconsistentState,
 
     /// A specified file is missing.
-    #[error("Missing file: {0}.")]
+    #[error("Missing file: {}", .0.display())]
     MissingFile(PathBuf),
 }
