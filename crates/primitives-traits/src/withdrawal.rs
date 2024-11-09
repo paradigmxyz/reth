@@ -1,13 +1,10 @@
 //! [EIP-4895](https://eips.ethereum.org/EIPS/eip-4895) Withdrawal types.
 
 use alloc::vec::Vec;
+use alloy_eips::eip4895::Withdrawal;
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use derive_more::{AsRef, Deref, DerefMut, From, IntoIterator};
 use reth_codecs::{add_arbitrary_tests, Compact};
-
-/// Re-export from `alloy_eips`.
-#[doc(inline)]
-pub use alloy_eips::eip4895::Withdrawal;
 use serde::{Deserialize, Serialize};
 
 /// Represents a collection of Withdrawals.

@@ -1,8 +1,9 @@
 use alloy_primitives::{Address, BlockNumber, B256};
 use auto_impl::auto_impl;
-use reth_db_api::models::BlockNumberAddress;
+use reth_db::models::{AccountBeforeTx, BlockNumberAddress};
+use reth_primitives::StorageEntry;
 use reth_storage_errors::provider::ProviderResult;
-use std::ops::{Range, RangeInclusive};
+use std::ops::{RangeBounds, RangeInclusive};
 
 /// History Writer
 #[auto_impl(&, Arc, Box)]
@@ -10,9 +11,17 @@ pub trait HistoryWriter: Send + Sync {
     /// Unwind and clear account history indices.
     ///
     /// Returns number of changesets walked.
-    fn unwind_account_history_indices(
+    fn unwind_account_history_indices<'a>(
         &self,
-        range: RangeInclusive<BlockNumber>,
+        changesets: impl Iterator<Item = &'a (BlockNumber, AccountBeforeTx)>,
+    ) -> ProviderResult<usize>;
+
+    /// Unwind and clear account history indices in a given block range.
+    ///
+    /// Returns number of changesets walked.
+    fn unwind_account_history_indices_range(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<usize>;
 
     /// Insert account change index to database. Used inside AccountHistoryIndex stage
@@ -26,7 +35,15 @@ pub trait HistoryWriter: Send + Sync {
     /// Returns number of changesets walked.
     fn unwind_storage_history_indices(
         &self,
-        range: Range<BlockNumberAddress>,
+        changesets: impl Iterator<Item = (BlockNumberAddress, StorageEntry)>,
+    ) -> ProviderResult<usize>;
+
+    /// Unwind and clear storage history indices in a given block range.
+    ///
+    /// Returns number of changesets walked.
+    fn unwind_storage_history_indices_range(
+        &self,
+        range: impl RangeBounds<BlockNumberAddress>,
     ) -> ProviderResult<usize>;
 
     /// Insert storage change index to database. Used inside StorageHistoryIndex stage

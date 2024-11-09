@@ -1,7 +1,7 @@
 //! System contract call functions.
 
 use crate::ConfigureEvm;
-use alloc::{boxed::Box, vec};
+use alloc::{boxed::Box, sync::Arc, vec};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::Bytes;
 use core::fmt::Display;
@@ -46,7 +46,7 @@ impl OnStateHook for NoopHook {
 #[allow(missing_debug_implementations)]
 pub struct SystemCaller<EvmConfig, Chainspec> {
     evm_config: EvmConfig,
-    chain_spec: Chainspec,
+    chain_spec: Arc<Chainspec>,
     /// Optional hook to be called after each state change.
     hook: Option<Box<dyn OnStateHook>>,
 }
@@ -54,7 +54,7 @@ pub struct SystemCaller<EvmConfig, Chainspec> {
 impl<EvmConfig, Chainspec> SystemCaller<EvmConfig, Chainspec> {
     /// Create a new system caller with the given EVM config, database, and chain spec, and creates
     /// the EVM with the given initialized config and block environment.
-    pub const fn new(evm_config: EvmConfig, chain_spec: Chainspec) -> Self {
+    pub const fn new(evm_config: EvmConfig, chain_spec: Arc<Chainspec>) -> Self {
         Self { evm_config, chain_spec, hook: None }
     }
 
@@ -171,7 +171,7 @@ where
         DB::Error: Display,
     {
         let result_and_state = eip2935::transact_blockhashes_contract_call(
-            &self.evm_config.clone(),
+            &self.evm_config,
             &self.chain_spec,
             timestamp,
             block_number,
@@ -226,7 +226,7 @@ where
         DB::Error: Display,
     {
         let result_and_state = eip4788::transact_beacon_root_contract_call(
-            &self.evm_config.clone(),
+            &self.evm_config,
             &self.chain_spec,
             timestamp,
             block_number,

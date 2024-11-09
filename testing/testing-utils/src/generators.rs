@@ -1,14 +1,15 @@
 //! Generators for different data structures like block headers, block bodies and ranges of those.
 
 use alloy_consensus::{Transaction as _, TxLegacy};
-use alloy_primitives::{Address, BlockNumber, Bytes, Parity, Sealable, TxKind, B256, U256};
+use alloy_eips::eip4895::Withdrawal;
+use alloy_primitives::{Address, BlockNumber, Bytes, Sealable, TxKind, B256, U256};
 pub use rand::Rng;
 use rand::{
     distributions::uniform::SampleRange, rngs::StdRng, seq::SliceRandom, thread_rng, SeedableRng,
 };
 use reth_primitives::{
     proofs, sign_message, Account, BlockBody, Header, Log, Receipt, SealedBlock, SealedHeader,
-    StorageEntry, Transaction, TransactionSigned, Withdrawal, Withdrawals,
+    StorageEntry, Transaction, TransactionSigned, Withdrawals,
 };
 use secp256k1::{Keypair, Secp256k1};
 use std::{
@@ -147,16 +148,8 @@ pub fn sign_tx_with_random_key_pair<R: Rng>(rng: &mut R, tx: Transaction) -> Tra
 
 /// Signs the [Transaction] with the given key pair.
 pub fn sign_tx_with_key_pair(key_pair: Keypair, tx: Transaction) -> TransactionSigned {
-    let mut signature =
+    let signature =
         sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
-
-    if matches!(tx, Transaction::Legacy(_)) {
-        signature = if let Some(chain_id) = tx.chain_id() {
-            signature.with_chain_id(chain_id)
-        } else {
-            signature.with_parity(Parity::NonEip155(signature.v().y_parity()))
-        }
-    }
 
     TransactionSigned::from_transaction_and_signature(tx, signature)
 }
@@ -463,8 +456,8 @@ mod tests {
     use super::*;
     use alloy_consensus::TxEip1559;
     use alloy_eips::eip2930::AccessList;
-    use alloy_primitives::{hex, Parity};
-    use reth_primitives::{public_key_to_address, Signature};
+    use alloy_primitives::{hex, PrimitiveSignature as Signature};
+    use reth_primitives::public_key_to_address;
     use std::str::FromStr;
 
     #[test]
@@ -537,7 +530,7 @@ mod tests {
                 "46948507304638947509940763649030358759909902576025900602547168820602576006531",
             )
             .unwrap(),
-            Parity::Parity(false),
+            false,
         );
         assert_eq!(expected, signature);
     }

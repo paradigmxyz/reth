@@ -20,6 +20,7 @@ derive_more.workspace = true
 modular-bitfield.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+arbitrary = { workspace = true, features = ["derive"], optional = true }
 
 [dev-dependencies]
 arbitrary = { workspace = true, features = ["derive"] }
@@ -29,3 +30,13 @@ proptest-arbitrary-interop.workspace = true
 serde_json.workspace = true
 test-fuzz.workspace = true
 toml.workspace = true
+
+[features]
+test-utils = [
+	"dep:arbitrary",
+	"reth-codecs/test-utils"
+]
+arbitrary = [
+	"alloy-primitives/arbitrary",
+	"reth-codecs/arbitrary"
+]

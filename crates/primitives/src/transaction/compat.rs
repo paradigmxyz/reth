@@ -1,5 +1,7 @@
 use crate::{Transaction, TransactionSigned};
 use alloy_primitives::{Address, TxKind, U256};
+#[cfg(feature = "optimism")]
+use op_alloy_consensus::DepositTransaction;
 use revm_primitives::{AuthorizationList, TxEnv};
 
 /// Implements behaviour to fill a [`TxEnv`] from another transaction.

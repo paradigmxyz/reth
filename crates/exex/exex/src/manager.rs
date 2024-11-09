@@ -1,13 +1,14 @@
 use crate::{
     wal::Wal, ExExEvent, ExExNotification, ExExNotifications, FinishedExExHeight, WalHandle,
 };
+use alloy_eips::BlockNumHash;
 use futures::StreamExt;
 use itertools::Itertools;
 use metrics::Gauge;
 use reth_chain_state::ForkChoiceStream;
 use reth_chainspec::Head;
 use reth_metrics::{metrics::Counter, Metrics};
-use reth_primitives::{BlockNumHash, SealedHeader};
+use reth_primitives::SealedHeader;
 use reth_provider::HeaderProvider;
 use reth_tracing::tracing::debug;
 use std::{

@@ -4,6 +4,7 @@ use crate::{
     args::NetworkArgs,
     utils::{get_single_body, get_single_header},
 };
+use alloy_eips::BlockHashOrNumber;
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
 use reth_chainspec::ChainSpec;
@@ -19,7 +20,6 @@ use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_node_api::{NodeTypesWithDB, NodeTypesWithEngine};
 use reth_node_ethereum::EthExecutorProvider;
-use reth_primitives::BlockHashOrNumber;
 use reth_provider::{
     writer::UnifiedStorageWriter, AccountExtReader, ChainSpecProvider, HashingWriter,
     HeaderProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderFactory,

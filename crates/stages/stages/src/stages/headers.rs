@@ -2,7 +2,7 @@ use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
 use futures_util::StreamExt;
 use reth_config::config::EtlConfig;
 use reth_consensus::Consensus;
-use reth_db::{tables, RawKey, RawTable, RawValue};
+use reth_db::{tables, transaction::DbTx, RawKey, RawTable, RawValue};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     transaction::DbTxMut,
@@ -155,11 +155,13 @@ where
 
         // If we only have the genesis block hash, then we are at first sync, and we can remove it,
         // add it to the collector and use tx.append on all hashes.
-        if let Some((hash, block_number)) = cursor_header_numbers.last()? {
-            if block_number.value()? == 0 {
-                self.hash_collector.insert(hash.key()?, 0)?;
-                cursor_header_numbers.delete_current()?;
-                first_sync = true;
+        if provider.tx_ref().entries::<RawTable<tables::HeaderNumbers>>()? == 1 {
+            if let Some((hash, block_number)) = cursor_header_numbers.last()? {
+                if block_number.value()? == 0 {
+                    self.hash_collector.insert(hash.key()?, 0)?;
+                    cursor_header_numbers.delete_current()?;
+                    first_sync = true;
+                }
             }
         }
 

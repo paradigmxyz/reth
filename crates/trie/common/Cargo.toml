@@ -55,5 +55,6 @@ arbitrary = [
 	"alloy-consensus/arbitrary",
 	"alloy-primitives/arbitrary",
 	"nybbles/arbitrary",
-	"revm-primitives/arbitrary"
+	"revm-primitives/arbitrary",
+	"reth-codecs/arbitrary"
 ]

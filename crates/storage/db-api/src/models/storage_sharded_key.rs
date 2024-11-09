@@ -12,6 +12,10 @@ use super::ShardedKey;
 /// Number of indices in one shard.
 pub const NUM_OF_INDICES_IN_SHARD: usize = 2_000;
 
+/// The size of [`StorageShardedKey`] encode bytes.
+/// The fields are: 20-byte address, 32-byte key, and 8-byte block number
+const STORAGE_SHARD_KEY_BYTES_SIZE: usize = 20 + 32 + 8;
+
 /// Sometimes data can be too big to be saved for a single key. This helps out by dividing the data
 /// into different shards. Example:
 ///
@@ -53,7 +57,8 @@ impl Encode for StorageShardedKey {
     type Encoded = Vec<u8>;
 
     fn encode(self) -> Self::Encoded {
-        let mut buf: Vec<u8> = Encode::encode(self.address).into();
+        let mut buf: Vec<u8> = Vec::with_capacity(STORAGE_SHARD_KEY_BYTES_SIZE);
+        buf.extend_from_slice(&Encode::encode(self.address));
         buf.extend_from_slice(&Encode::encode(self.sharded_key.key));
         buf.extend_from_slice(&self.sharded_key.highest_block_number.to_be_bytes());
         buf
@@ -62,6 +67,9 @@ impl Encode for StorageShardedKey {
 
 impl Decode for StorageShardedKey {
     fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
+        if value.len() != STORAGE_SHARD_KEY_BYTES_SIZE {
+            return Err(DatabaseError::Decode)
+        }
         let tx_num_index = value.len() - 8;
 
         let highest_tx_number = u64::from_be_bytes(

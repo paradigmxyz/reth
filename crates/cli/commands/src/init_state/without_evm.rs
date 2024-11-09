@@ -1,5 +1,6 @@
 use alloy_primitives::{BlockNumber, B256, U256};
-use reth_optimism_primitives::bedrock::{BEDROCK_HEADER, BEDROCK_HEADER_HASH, BEDROCK_HEADER_TTD};
+use alloy_rlp::Decodable;
+
 use reth_primitives::{
     BlockBody, Header, SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment,
 };
@@ -7,28 +8,42 @@ use reth_provider::{
     providers::StaticFileProvider, BlockWriter, StageCheckpointWriter, StaticFileWriter,
 };
 use reth_stages::{StageCheckpoint, StageId};
+
+use std::{fs::File, io::Read, path::PathBuf};
 use tracing::info;
 
-/// Creates a dummy chain (with no transactions) up to the last OVM block and appends the
-/// first valid Bedrock block.
-pub(crate) fn setup_op_mainnet_without_ovm<Provider>(
+/// Reads the header RLP from a file and returns the Header.
+pub(crate) fn read_header_from_file(path: PathBuf) -> Result<Header, eyre::Error> {
+    let mut file = File::open(path)?;
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf)?;
+
+    let header = Header::decode(&mut &buf[..])?;
+    Ok(header)
+}
+
+/// Creates a dummy chain (with no transactions) up to the last EVM block and appends the
+/// first valid block.
+pub fn setup_without_evm<Provider>(
     provider_rw: &Provider,
     static_file_provider: &StaticFileProvider,
+    header: SealedHeader,
+    total_difficulty: U256,
 ) -> Result<(), eyre::Error>
 where
     Provider: StageCheckpointWriter + BlockWriter,
 {
-    info!(target: "reth::cli", "Setting up dummy OVM chain before importing state.");
+    info!(target: "reth::cli", "Setting up dummy EVM chain before importing state.");
 
-    // Write OVM dummy data up to `BEDROCK_HEADER - 1` block
-    append_dummy_chain(static_file_provider, BEDROCK_HEADER.number - 1)?;
+    // Write EVM dummy data up to `header - 1` block
+    append_dummy_chain(static_file_provider, header.number - 1)?;
 
-    info!(target: "reth::cli", "Appending Bedrock block.");
+    info!(target: "reth::cli", "Appending first valid block.");
 
-    append_bedrock_block(provider_rw, static_file_provider)?;
+    append_first_block(provider_rw, static_file_provider, &header, total_difficulty)?;
 
     for stage in StageId::ALL {
-        provider_rw.save_stage_checkpoint(stage, StageCheckpoint::new(BEDROCK_HEADER.number))?;
+        provider_rw.save_stage_checkpoint(stage, StageCheckpoint::new(header.number))?;
     }
 
     info!(target: "reth::cli", "Set up finished.");
@@ -36,38 +51,30 @@ where
     Ok(())
 }
 
-/// Appends the first bedrock block.
+/// Appends the first block.
 ///
 /// By appending it, static file writer also verifies that all segments are at the same
 /// height.
-fn append_bedrock_block(
+fn append_first_block(
     provider_rw: impl BlockWriter,
     sf_provider: &StaticFileProvider,
+    header: &SealedHeader,
+    total_difficulty: U256,
 ) -> Result<(), eyre::Error> {
     provider_rw.insert_block(
-        SealedBlockWithSenders::new(
-            SealedBlock::new(
-                SealedHeader::new(BEDROCK_HEADER, BEDROCK_HEADER_HASH),
-                BlockBody::default(),
-            ),
-            vec![],
-        )
-        .expect("no senders or txes"),
+        SealedBlockWithSenders::new(SealedBlock::new(header.clone(), BlockBody::default()), vec![])
+            .expect("no senders or txes"),
     )?;
 
     sf_provider.latest_writer(StaticFileSegment::Headers)?.append_header(
-        &BEDROCK_HEADER,
-        BEDROCK_HEADER_TTD,
-        &BEDROCK_HEADER_HASH,
+        header,
+        total_difficulty,
+        &header.hash(),
     )?;
 
-    sf_provider
-        .latest_writer(StaticFileSegment::Receipts)?
-        .increment_block(BEDROCK_HEADER.number)?;
+    sf_provider.latest_writer(StaticFileSegment::Receipts)?.increment_block(header.number)?;
 
-    sf_provider
-        .latest_writer(StaticFileSegment::Transactions)?
-        .increment_block(BEDROCK_HEADER.number)?;
+    sf_provider.latest_writer(StaticFileSegment::Transactions)?.increment_block(header.number)?;
 
     Ok(())
 }

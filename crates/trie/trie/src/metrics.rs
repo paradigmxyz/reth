@@ -1,5 +1,5 @@
 use crate::stats::TrieStats;
-use metrics::Histogram;
+use metrics::{Counter, Histogram};
 use reth_metrics::Metrics;
 
 /// Wrapper for state root metrics.
@@ -61,5 +61,25 @@ impl TrieType {
             Self::State => "state",
             Self::Storage => "storage",
         }
+    }
+}
+
+/// Metrics for trie walker
+#[derive(Clone, Metrics)]
+#[metrics(scope = "trie.walker")]
+pub struct WalkerMetrics {
+    /// The number of subnodes out of order due to wrong tree mask.
+    out_of_order_subnode: Counter,
+}
+
+impl WalkerMetrics {
+    /// Create new metrics for the given trie type.
+    pub fn new(ty: TrieType) -> Self {
+        Self::new_with_labels(&[("type", ty.as_str())])
+    }
+
+    /// Increment `out_of_order_subnode`.
+    pub fn inc_out_of_order_subnode(&self, amount: u64) {
+        self.out_of_order_subnode.increment(amount);
     }
 }

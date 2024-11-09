@@ -24,6 +24,7 @@ eyre.workspace = true
 rand.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }
 thiserror.workspace = true
+serde.workspace = true
 
 tracy-client = { workspace = true, optional = true, features = ["demangle"] }
 

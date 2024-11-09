@@ -11,7 +11,6 @@ exclude_crates=(
   # The following are not working yet, but known to be fixable
   reth-exex-types # https://github.com/paradigmxyz/reth/issues/9946
   # The following require investigation if they can be fixed
-  reth-auto-seal-consensus
   reth-basic-payload-builder
   reth-beacon-consensus
   reth-bench

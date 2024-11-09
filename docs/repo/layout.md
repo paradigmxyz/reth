@@ -82,7 +82,6 @@ The networking component mainly lives in [`net/network`](../../crates/net/networ
 Different consensus mechanisms.
 
 - [`consensus/common`](../../crates/consensus/common): Common consensus functions and traits (e.g. fee calculation)
-- [`consensus/auto-seal`](../../crates/consensus/auto-seal): A consensus mechanism that auto-seals blocks for local development (also commonly known as "auto-mine")
 - [`consensus/beacon`](../../crates/consensus/beacon): Consensus mechanism that handles messages from a beacon node ("eth2")
 
 ### Execution

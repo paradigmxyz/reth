@@ -8,7 +8,8 @@ use std::{
 
 use futures::Stream;
 use reth_eth_wire::{
-    capability::CapabilityMessage, errors::EthStreamError, Capabilities, EthVersion, Status,
+    capability::CapabilityMessage, errors::EthStreamError, Capabilities, DisconnectReason,
+    EthVersion, Status,
 };
 use reth_network_api::PeerRequestSender;
 use reth_network_peers::PeerId;
@@ -32,7 +33,7 @@ use crate::{
 /// [`SessionManager`]. Outgoing connections are either initiated on demand or triggered by the
 /// [`NetworkState`] and also delegated to the [`NetworkState`].
 ///
-/// Following diagram gives displays the dataflow contained in the [`Swarm`]
+/// Following diagram displays the dataflow contained in the [`Swarm`]
 ///
 /// The [`ConnectionListener`] yields incoming [`TcpStream`]s from peers that are spawned as session
 /// tasks. After a successful `RLPx` authentication, the task is ready to accept ETH requests or
@@ -70,7 +71,7 @@ impl Swarm {
         Self { incoming, sessions, state }
     }
 
-    /// Adds an additional protocol handler to the `RLPx` sub-protocol list.
+    /// Adds a protocol handler to the `RLPx` sub-protocol list.
     pub(crate) fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
         self.sessions_mut().add_rlpx_sub_protocol(protocol);
     }
@@ -201,6 +202,10 @@ impl Swarm {
                         }
                         InboundConnectionError::ExceedsCapacity => {
                             trace!(target: "net", ?remote_addr, "No capacity for incoming connection");
+                            self.sessions.try_disconnect_incoming_connection(
+                                stream,
+                                DisconnectReason::TooManyPeers,
+                            );
                         }
                     }
                     return None

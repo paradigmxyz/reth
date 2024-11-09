@@ -89,7 +89,8 @@ mod tests {
     "terminalTotalDifficulty": 0,
     "shanghaiTime": 0,
     "cancunTime": 0,
-    "pragueTime": 0
+    "pragueTime": 0,
+    "osakaTime": 0
   }
 }"#;
 
@@ -97,5 +98,6 @@ mod tests {
         assert!(spec.is_shanghai_active_at_timestamp(0));
         assert!(spec.is_cancun_active_at_timestamp(0));
         assert!(spec.is_prague_active_at_timestamp(0));
+        assert!(spec.is_osaka_active_at_timestamp(0));
     }
 }

@@ -115,6 +115,7 @@ where
                 .get_final_paris_total_difficulty()
                 .is_some(),
             terminal_total_difficulty: self.chain_spec.fork(EthereumHardfork::Paris).ttd(),
+            deposit_contract_address: self.chain_spec.deposit_contract().map(|dc| dc.address),
             ..self.chain_spec.genesis().config.clone()
         };
 

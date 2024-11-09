@@ -2,6 +2,7 @@ use std::{net::SocketAddr, path::PathBuf};
 
 use jsonrpsee::server::ServerBuilder;
 use reth_node_core::{args::RpcServerArgs, utils::get_or_create_jwt_secret_from_path};
+use reth_rpc::ValidationApiConfig;
 use reth_rpc_eth_types::{EthConfig, EthStateCacheConfig, GasPriceOracleConfig};
 use reth_rpc_layer::{JwtError, JwtSecret};
 use reth_rpc_server_types::RpcModuleSelection;
@@ -26,6 +27,9 @@ pub trait RethRpcServerConfig {
 
     /// The configured ethereum RPC settings.
     fn eth_config(&self) -> EthConfig;
+
+    /// The configured ethereum RPC settings.
+    fn flashbots_config(&self) -> ValidationApiConfig;
 
     /// Returns state cache configuration.
     fn state_cache_config(&self) -> EthStateCacheConfig;
@@ -101,6 +105,10 @@ impl RethRpcServerConfig for RpcServerArgs {
             .proof_permits(self.rpc_proof_permits)
     }
 
+    fn flashbots_config(&self) -> ValidationApiConfig {
+        ValidationApiConfig { disallow: self.builder_disallow.clone().unwrap_or_default() }
+    }
+
     fn state_cache_config(&self) -> EthStateCacheConfig {
         EthStateCacheConfig {
             max_blocks: self.rpc_state_cache.max_blocks,
@@ -124,7 +132,7 @@ impl RethRpcServerConfig for RpcServerArgs {
 
     fn transport_rpc_module_config(&self) -> TransportRpcModuleConfig {
         let mut config = TransportRpcModuleConfig::default()
-            .with_config(RpcModuleConfig::new(self.eth_config()));
+            .with_config(RpcModuleConfig::new(self.eth_config(), self.flashbots_config()));
 
         if self.http {
             config = config.with_http(

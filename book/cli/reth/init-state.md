@@ -69,6 +69,31 @@ Database:
 
           [possible values: true, false]
 
+      --db.max-size <MAX_SIZE>
+          Maximum database size (e.g., 4TB, 8MB)
+
+      --db.growth-step <GROWTH_STEP>
+          Database growth step (e.g., 4GB, 4KB)
+
+      --db.read-transaction-timeout <READ_TRANSACTION_TIMEOUT>
+          Read transaction timeout in seconds, 0 means no timeout
+
+      --without-evm
+          Specifies whether to initialize the state without relying on EVM historical data.
+
+          When enabled, and before inserting the state, it creates a dummy chain up to the last EVM block specified. It then, appends the first block provided block.
+
+          - **Note**: **Do not** import receipts and blocks beforehand, or this will fail or be ignored.
+
+      --header <HEADER_FILE>
+          Header file containing the header in an RLP encoded format.
+
+      --total-difficulty <TOTAL_DIFFICULTY>
+          Total difficulty of the header.
+
+      --header-hash <HEADER_HASH>
+          Hash of the header.
+
   <STATE_DUMP_FILE>
           JSONL file with state dump.
 

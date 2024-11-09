@@ -11,7 +11,7 @@ use std::{
 
 /// A set of validated blob transactions in the pool that are __not pending__.
 ///
-/// The purpose of this pool is keep track of blob transactions that are queued and to evict the
+/// The purpose of this pool is to keep track of blob transactions that are queued and to evict the
 /// worst blob transactions once the sub-pool is full.
 ///
 /// This expects that certain constraints are met:
@@ -198,14 +198,13 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         &mut self,
         pending_fees: &PendingFees,
     ) -> Vec<Arc<ValidPoolTransaction<T>>> {
-        let to_remove = self.satisfy_pending_fee_ids(pending_fees);
+        let removed = self
+            .satisfy_pending_fee_ids(pending_fees)
+            .into_iter()
+            .map(|id| self.remove_transaction(&id).expect("transaction exists"))
+            .collect();
 
-        let mut removed = Vec::with_capacity(to_remove.len());
-        for id in to_remove {
-            removed.push(self.remove_transaction(&id).expect("transaction exists"));
-        }
-
-        // set pending fees and reprioritize / resort
+        // Update pending fees and reprioritize
         self.pending_fees = pending_fees.clone();
         self.reprioritize();
 

@@ -1,4 +1,5 @@
 use crate::job::EmptyBlockPayloadJob;
+use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::Bytes;
 use reth::{
     providers::{BlockReaderIdExt, BlockSource, StateProviderFactory},
@@ -8,7 +9,7 @@ use reth::{
 use reth_basic_payload_builder::{BasicPayloadJobGeneratorConfig, PayloadBuilder, PayloadConfig};
 use reth_node_api::PayloadBuilderAttributes;
 use reth_payload_builder::{PayloadBuilderError, PayloadJobGenerator};
-use reth_primitives::BlockNumberOrTag;
+use reth_primitives::SealedHeader;
 use std::sync::Arc;
 
 /// The generator type that creates new jobs that builds empty blocks.
@@ -77,7 +78,10 @@ where
             // we already know the hash, so we can seal it
             block.seal(attributes.parent())
         };
-        let config = PayloadConfig::new(Arc::new(parent_block), Bytes::default(), attributes);
+        let hash = parent_block.hash();
+        let header = SealedHeader::new(parent_block.header().clone(), hash);
+
+        let config = PayloadConfig::new(Arc::new(header), Bytes::default(), attributes);
         Ok(EmptyBlockPayloadJob {
             client: self.client.clone(),
             _pool: self.pool.clone(),

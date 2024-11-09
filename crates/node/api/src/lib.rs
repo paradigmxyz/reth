@@ -25,5 +25,3 @@ pub use node::*;
 // re-export for convenience
 pub use reth_node_types::*;
 pub use reth_provider::FullProvider;
-
-pub use reth_rpc_eth_api::EthApiTypes;

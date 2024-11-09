@@ -1,4 +1,5 @@
 use super::Header;
+use alloy_consensus::Sealed;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{keccak256, BlockHash, Sealable};
 #[cfg(any(test, feature = "test-utils"))]
@@ -129,6 +130,12 @@ impl SealedHeader {
     /// Updates the block difficulty.
     pub fn set_difficulty(&mut self, difficulty: U256) {
         self.header.difficulty = difficulty;
+    }
+}
+
+impl<H> From<SealedHeader<H>> for Sealed<H> {
+    fn from(value: SealedHeader<H>) -> Self {
+        Self::new_unchecked(value.header, value.hash)
     }
 }
 

@@ -523,7 +523,7 @@ where
         is_value_known: OriginalValuesKnown,
     ) -> ProviderResult<()> {
         let (plain_state, reverts) =
-            execution_outcome.bundle.into_plain_state_and_reverts(is_value_known);
+            execution_outcome.bundle.to_plain_state_and_reverts(is_value_known);
 
         self.database().write_state_reverts(reverts, execution_outcome.first_block)?;
 
@@ -664,8 +664,8 @@ mod tests {
         let mut revm_bundle_state = state.take_bundle();
 
         // Write plain state and reverts separately.
-        let reverts = revm_bundle_state.take_all_reverts().into_plain_state_reverts();
-        let plain_state = revm_bundle_state.into_plain_state(OriginalValuesKnown::Yes);
+        let reverts = revm_bundle_state.take_all_reverts().to_plain_state_reverts();
+        let plain_state = revm_bundle_state.to_plain_state(OriginalValuesKnown::Yes);
         assert!(plain_state.storage.is_empty());
         assert!(plain_state.contracts.is_empty());
         provider.write_state_changes(plain_state).expect("Could not write plain state to DB");
@@ -722,8 +722,8 @@ mod tests {
         let mut revm_bundle_state = state.take_bundle();
 
         // Write plain state and reverts separately.
-        let reverts = revm_bundle_state.take_all_reverts().into_plain_state_reverts();
-        let plain_state = revm_bundle_state.into_plain_state(OriginalValuesKnown::Yes);
+        let reverts = revm_bundle_state.take_all_reverts().to_plain_state_reverts();
+        let plain_state = revm_bundle_state.to_plain_state(OriginalValuesKnown::Yes);
         // Account B selfdestructed so flag for it should be present.
         assert_eq!(
             plain_state.storage,

@@ -30,31 +30,35 @@ impl StorageLock {
     /// Note: In-process exclusivity is not on scope. If called from the same process (or another
     /// with the same PID), it will succeed.
     pub fn try_acquire(path: &Path) -> Result<Self, StorageLockError> {
-        let file_path = path.join(LOCKFILE_NAME);
-
         #[cfg(feature = "disable-lock")]
         {
+            let file_path = path.join(LOCKFILE_NAME);
             // Too expensive for ef-tests to write/read lock to/from disk.
             Ok(Self(Arc::new(StorageLockInner { file_path })))
         }
 
         #[cfg(not(feature = "disable-lock"))]
-        {
-            if let Some(process_lock) = ProcessUID::parse(&file_path)? {
-                if process_lock.pid != (process::id() as usize) && process_lock.is_active() {
-                    error!(
-                        target: "reth::db::lockfile",
-                        path = ?file_path,
-                        pid = process_lock.pid,
-                        start_time = process_lock.start_time,
-                        "Storage lock already taken."
-                    );
-                    return Err(StorageLockError::Taken(process_lock.pid))
-                }
-            }
+        Self::try_acquire_file_lock(path)
+    }
 
-            Ok(Self(Arc::new(StorageLockInner::new(file_path)?)))
+    /// Acquire a file write lock.
+    #[cfg(any(test, not(feature = "disable-lock")))]
+    fn try_acquire_file_lock(path: &Path) -> Result<Self, StorageLockError> {
+        let file_path = path.join(LOCKFILE_NAME);
+        if let Some(process_lock) = ProcessUID::parse(&file_path)? {
+            if process_lock.pid != (process::id() as usize) && process_lock.is_active() {
+                error!(
+                    target: "reth::db::lockfile",
+                    path = ?file_path,
+                    pid = process_lock.pid,
+                    start_time = process_lock.start_time,
+                    "Storage lock already taken."
+                );
+                return Err(StorageLockError::Taken(process_lock.pid))
+            }
         }
+
+        Ok(Self(Arc::new(StorageLockInner::new(file_path)?)))
     }
 }
 
@@ -164,10 +168,10 @@ mod tests {
 
         let temp_dir = tempfile::tempdir().unwrap();
 
-        let lock = StorageLock::try_acquire(temp_dir.path()).unwrap();
+        let lock = StorageLock::try_acquire_file_lock(temp_dir.path()).unwrap();
 
         // Same process can re-acquire the lock
-        assert_eq!(Ok(lock.clone()), StorageLock::try_acquire(temp_dir.path()));
+        assert_eq!(Ok(lock.clone()), StorageLock::try_acquire_file_lock(temp_dir.path()));
 
         // A lock of a non existent PID can be acquired.
         let lock_file = temp_dir.path().join(LOCKFILE_NAME);
@@ -177,18 +181,21 @@ mod tests {
             fake_pid += 1;
         }
         ProcessUID { pid: fake_pid, start_time: u64::MAX }.write(&lock_file).unwrap();
-        assert_eq!(Ok(lock.clone()), StorageLock::try_acquire(temp_dir.path()));
+        assert_eq!(Ok(lock.clone()), StorageLock::try_acquire_file_lock(temp_dir.path()));
 
         let mut pid_1 = ProcessUID::new(1).unwrap();
 
         // If a parsed `ProcessUID` exists, the lock can NOT be acquired.
         pid_1.write(&lock_file).unwrap();
-        assert_eq!(Err(StorageLockError::Taken(1)), StorageLock::try_acquire(temp_dir.path()));
+        assert_eq!(
+            Err(StorageLockError::Taken(1)),
+            StorageLock::try_acquire_file_lock(temp_dir.path())
+        );
 
         // A lock of a different but existing PID can be acquired ONLY IF the start_time differs.
         pid_1.start_time += 1;
         pid_1.write(&lock_file).unwrap();
-        assert_eq!(Ok(lock), StorageLock::try_acquire(temp_dir.path()));
+        assert_eq!(Ok(lock), StorageLock::try_acquire_file_lock(temp_dir.path()));
     }
 
     #[test]
@@ -198,7 +205,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let lock_file = temp_dir.path().join(LOCKFILE_NAME);
 
-        let lock = StorageLock::try_acquire(temp_dir.path()).unwrap();
+        let lock = StorageLock::try_acquire_file_lock(temp_dir.path()).unwrap();
 
         assert!(lock_file.exists());
         drop(lock);

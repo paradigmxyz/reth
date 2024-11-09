@@ -2,6 +2,7 @@ use crate::{
     providers::{state::macros::delegate_provider_impls, StaticFileProvider},
     AccountReader, BlockHashReader, ProviderError, StateProvider, StateRootProvider,
 };
+use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::{
     map::{HashMap, HashSet},
     Address, BlockNumber, Bytes, StorageKey, StorageValue, B256,
@@ -13,7 +14,7 @@ use reth_db_api::{
     table::Table,
     transaction::DbTx,
 };
-use reth_primitives::{constants::EPOCH_SLOTS, Account, Bytecode, StaticFileSegment};
+use reth_primitives::{Account, Bytecode, StaticFileSegment};
 use reth_storage_api::{StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{

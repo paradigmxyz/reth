@@ -40,6 +40,9 @@ pub use backfill::*;
 mod context;
 pub use context::*;
 
+mod dyn_context;
+pub use dyn_context::*;
+
 mod event;
 pub use event::*;
 

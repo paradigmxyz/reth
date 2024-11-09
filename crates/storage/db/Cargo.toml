@@ -97,7 +97,9 @@ test-utils = [
 	"reth-primitives-traits/test-utils",
 	"reth-db-api/test-utils",
 	"reth-nippy-jar/test-utils",
-	"reth-trie-common/test-utils"
+	"reth-trie-common/test-utils",
+	"reth-prune-types/test-utils",
+	"reth-stages-types/test-utils"
 ]
 bench = []
 arbitrary = [
@@ -105,7 +107,9 @@ arbitrary = [
 	"reth-db-api/arbitrary",
 	"reth-primitives-traits/arbitrary",
 	"reth-trie-common/arbitrary",
-	"alloy-primitives/arbitrary"
+	"alloy-primitives/arbitrary",
+	"reth-prune-types/arbitrary",
+	"reth-stages-types/arbitrary"
 ]
 optimism = [
 	"reth-primitives/optimism",

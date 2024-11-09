@@ -62,7 +62,9 @@ test-utils = [
 	"reth-primitives-traits/test-utils",
 	"reth-codecs/test-utils",
 	"reth-db-models/test-utils",
-	"reth-trie-common/test-utils"
+	"reth-trie-common/test-utils",
+	"reth-prune-types/test-utils",
+	"reth-stages-types/test-utils"
 ]
 arbitrary = [
 	"reth-primitives/arbitrary",
@@ -72,7 +74,10 @@ arbitrary = [
 	"reth-primitives-traits/arbitrary",
 	"reth-trie-common/arbitrary",
 	"alloy-primitives/arbitrary",
-	"parity-scale-codec/arbitrary"
+	"parity-scale-codec/arbitrary",
+	"reth-codecs/arbitrary",
+	"reth-prune-types/arbitrary",
+	"reth-stages-types/arbitrary"
 ]
 optimism = [
 	"reth-primitives/optimism",

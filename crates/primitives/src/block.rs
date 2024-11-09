@@ -2,9 +2,6 @@ use crate::{
     GotExpected, Header, SealedHeader, TransactionSigned, TransactionSignedEcRecovered, Withdrawals,
 };
 use alloc::vec::Vec;
-pub use alloy_eips::eip1898::{
-    BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, ForkBlock, RpcBlockHash,
-};
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{Address, Bytes, Sealable, B256};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
@@ -150,26 +147,26 @@ mod block_rlp {
     }
 
     impl Encodable for Block {
-        fn length(&self) -> usize {
-            let helper: HelperRef<'_, _> = self.into();
-            helper.length()
-        }
-
         fn encode(&self, out: &mut dyn bytes::BufMut) {
             let helper: HelperRef<'_, _> = self.into();
             helper.encode(out)
+        }
+
+        fn length(&self) -> usize {
+            let helper: HelperRef<'_, _> = self.into();
+            helper.length()
         }
     }
 
     impl Encodable for SealedBlock {
-        fn length(&self) -> usize {
-            let helper: HelperRef<'_, _> = self.into();
-            helper.length()
-        }
-
         fn encode(&self, out: &mut dyn bytes::BufMut) {
             let helper: HelperRef<'_, _> = self.into();
             helper.encode(out)
+        }
+
+        fn length(&self) -> usize {
+            let helper: HelperRef<'_, _> = self.into();
+            helper.length()
         }
     }
 }
@@ -906,8 +903,11 @@ pub(super) mod serde_bincode_compat {
 
 #[cfg(test)]
 mod tests {
-    use super::{BlockNumberOrTag::*, *};
-    use alloy_eips::eip1898::HexStringMissingPrefixError;
+    use super::*;
+    use alloy_eips::{
+        eip1898::HexStringMissingPrefixError, BlockId, BlockNumberOrTag, BlockNumberOrTag::*,
+        RpcBlockHash,
+    };
     use alloy_primitives::hex_literal::hex;
     use alloy_rlp::{Decodable, Encodable};
     use std::str::FromStr;
@@ -1089,5 +1089,14 @@ mod tests {
         let block = block.unseal();
         let block = block.seal_slow();
         assert_eq!(sealed, block.hash());
+    }
+
+    #[test]
+    fn empty_block_rlp() {
+        let body = BlockBody::default();
+        let mut buf = Vec::new();
+        body.encode(&mut buf);
+        let decoded = BlockBody::decode(&mut buf.as_slice()).unwrap();
+        assert_eq!(body, decoded);
     }
 }

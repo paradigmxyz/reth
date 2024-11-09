@@ -113,9 +113,11 @@ where
             }
 
             // advance the downloader
-            if let Poll::Ready(DownloadOutcome::Blocks(blocks)) = self.downloader.poll(cx) {
-                // delegate the downloaded blocks to the handler
-                self.handler.on_event(FromEngine::DownloadedBlocks(blocks));
+            if let Poll::Ready(outcome) = self.downloader.poll(cx) {
+                if let DownloadOutcome::Blocks(blocks) = outcome {
+                    // delegate the downloaded blocks to the handler
+                    self.handler.on_event(FromEngine::DownloadedBlocks(blocks));
+                }
                 continue
             }
 

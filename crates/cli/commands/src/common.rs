@@ -126,7 +126,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Environmen
             .static_file_provider()
             .check_consistency(&factory.provider()?, has_receipt_pruning)?
         {
-            if factory.db_ref().is_read_only() {
+            if factory.db_ref().is_read_only()? {
                 warn!(target: "reth::cli", ?unwind_target, "Inconsistent storage. Restart node to heal.");
                 return Ok(factory)
             }

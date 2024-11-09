@@ -108,7 +108,8 @@ serde = [
 	"notify/serde",
 	"parking_lot/serde",
 	"rand/serde",
-	"revm/serde"
+	"revm/serde",
+	"reth-codecs/serde"
 ]
 test-utils = [
 	"reth-db/test-utils",
@@ -124,5 +125,7 @@ test-utils = [
 	"reth-codecs/test-utils",
 	"reth-db-api/test-utils",
 	"reth-trie-db/test-utils",
-	"revm/test-utils"
+	"revm/test-utils",
+	"reth-prune-types/test-utils",
+	"reth-stages-types/test-utils"
 ]

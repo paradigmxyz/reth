@@ -257,7 +257,7 @@ impl Account {
 }
 
 /// Fork specification.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Hash, Ord, Clone, Deserialize)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Hash, Ord, Clone, Copy, Deserialize)]
 pub enum ForkSpec {
     /// Frontier
     Frontier,

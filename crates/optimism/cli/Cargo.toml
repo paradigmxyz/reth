@@ -65,6 +65,13 @@ tokio-util = { workspace = true, features = ["codec"] }
 tracing.workspace = true
 eyre.workspace = true
 
+# reth test-vectors
+proptest = { workspace = true, optional = true }
+op-alloy-consensus = { workspace = true, features = [
+    "arbitrary",
+], optional = true }
+
+
 [dev-dependencies]
 tempfile.workspace = true
 reth-stages = { workspace = true, features = ["test-utils"] }
@@ -93,4 +100,10 @@ asm-keccak = [
 jemalloc = [
     "reth-node-core/jemalloc",
     "reth-node-metrics/jemalloc"
+]
+
+dev = [
+    "dep:proptest",
+    "reth-cli-commands/arbitrary",
+    "op-alloy-consensus"
 ]

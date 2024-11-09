@@ -19,6 +19,7 @@ pub use nybbles::Nibbles;
     Deserialize,
     derive_more::Index,
 )]
+#[cfg_attr(feature = "test-utils", derive(arbitrary::Arbitrary))]
 pub struct StoredNibbles(pub Nibbles);
 
 impl From<Nibbles> for StoredNibbles {
@@ -74,6 +75,7 @@ impl Compact for StoredNibbles {
 
 /// The representation of nibbles of the merkle trie stored in the database.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord, Hash, Deref)]
+#[cfg_attr(feature = "test-utils", derive(arbitrary::Arbitrary))]
 pub struct StoredNibblesSubKey(pub Nibbles);
 
 impl From<Nibbles> for StoredNibblesSubKey {

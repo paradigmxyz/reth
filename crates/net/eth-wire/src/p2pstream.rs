@@ -614,25 +614,24 @@ where
     /// Returns `Poll::Ready(Ok(()))` when no buffered items remain.
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let mut this = self.project();
-        loop {
-            match ready!(this.inner.as_mut().poll_flush(cx)) {
-                Err(err) => {
-                    trace!(target: "net::p2p",
-                        %err,
-                        "error flushing p2p stream"
-                    );
-                    return Poll::Ready(Err(err.into()))
-                }
-                Ok(()) => {
+        let poll_res = loop {
+            match this.inner.as_mut().poll_ready(cx) {
+                Poll::Pending => break Poll::Pending,
+                Poll::Ready(Err(err)) => break Poll::Ready(Err(err.into())),
+                Poll::Ready(Ok(())) => {
                     let Some(message) = this.outgoing_messages.pop_front() else {
-                        return Poll::Ready(Ok(()))
+                        break Poll::Ready(Ok(()))
                     };
                     if let Err(err) = this.inner.as_mut().start_send(message) {
-                        return Poll::Ready(Err(err.into()))
+                        break Poll::Ready(Err(err.into()))
                     }
                 }
             }
-        }
+        };
+
+        ready!(this.inner.as_mut().poll_flush(cx))?;
+
+        poll_res
     }
 
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {

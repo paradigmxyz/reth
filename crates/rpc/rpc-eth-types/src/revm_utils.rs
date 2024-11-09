@@ -1,7 +1,7 @@
 //! utilities for working with revm
 
 use alloy_primitives::{Address, B256, U256};
-use alloy_rpc_types::{
+use alloy_rpc_types_eth::{
     state::{AccountOverride, StateOverride},
     BlockOverrides,
 };
@@ -265,7 +265,7 @@ where
 {
     // we need to fetch the account via the `DatabaseRef` to not update the state of the account,
     // which is modified via `Database::basic_ref`
-    let mut account_info = DatabaseRef::basic_ref(db, account)?.unwrap_or_default();
+    let mut account_info = db.basic_ref(account)?.unwrap_or_default();
 
     if let Some(nonce) = account_override.nonce {
         account_info.nonce = nonce;
@@ -315,7 +315,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::constants::GWEI_TO_WEI;
+    use alloy_consensus::constants::GWEI_TO_WEI;
 
     #[test]
     fn test_ensure_0_fallback() {

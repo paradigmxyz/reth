@@ -213,7 +213,7 @@ impl Compression for Zstd {
             return Err(NippyJarError::ColumnLenMismatch(self.columns, columns.len()))
         }
 
-        let mut dictionaries = vec![];
+        let mut dictionaries = Vec::with_capacity(columns.len());
         for column in columns {
             // ZSTD requires all training data to be continuous in memory, alongside the size of
             // each entry

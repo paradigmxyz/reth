@@ -13,7 +13,7 @@ impl<Provider, Pool, Network, EvmConfig> EthCall for EthApi<Provider, Pool, Netw
 
 impl<Provider, Pool, Network, EvmConfig> Call for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: LoadState + SpawnBlocking,
+    Self: LoadState<Evm: ConfigureEvm<Header = Header>> + SpawnBlocking,
     EvmConfig: ConfigureEvm<Header = Header>,
 {
     #[inline]
@@ -24,10 +24,5 @@ where
     #[inline]
     fn max_simulate_blocks(&self) -> u64 {
         self.inner.max_simulate_blocks()
-    }
-
-    #[inline]
-    fn evm_config(&self) -> &impl ConfigureEvm<Header = Header> {
-        self.inner.evm_config()
     }
 }

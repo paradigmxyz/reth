@@ -4,7 +4,7 @@ use alloy_network::{
     eip2718::Encodable2718, Ethereum, EthereumWallet, TransactionBuilder, TransactionBuilder4844,
 };
 use alloy_primitives::{hex, Address, Bytes, TxKind, B256, U256};
-use alloy_rpc_types::{Authorization, TransactionInput, TransactionRequest};
+use alloy_rpc_types_eth::{Authorization, TransactionInput, TransactionRequest};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
 use eyre::Ok;

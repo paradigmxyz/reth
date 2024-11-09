@@ -15,6 +15,7 @@ use std::{
     task::Poll,
 };
 
+use alloy_eips::BlockNumHash;
 use futures_util::FutureExt;
 use reth_blockchain_tree::noop::NoopBlockchainTree;
 use reth_chainspec::{ChainSpec, MAINNET};
@@ -44,7 +45,7 @@ use reth_node_ethereum::{
     EthEngineTypes, EthEvmConfig,
 };
 use reth_payload_builder::noop::NoopPayloadBuilderService;
-use reth_primitives::{BlockNumHash, Head, SealedBlockWithSenders};
+use reth_primitives::{Head, SealedBlockWithSenders};
 use reth_provider::{
     providers::{BlockchainProvider, StaticFileProvider},
     BlockReader, ProviderFactory,
@@ -119,6 +120,7 @@ pub struct TestNode;
 impl NodeTypes for TestNode {
     type Primitives = ();
     type ChainSpec = ChainSpec;
+    type StateCommitment = reth_trie_db::MerklePatriciaTrie;
 }
 
 impl NodeTypesWithEngine for TestNode {
@@ -268,15 +270,16 @@ pub async fn test_exex_context_with_chain_spec(
     let network_manager = NetworkManager::new(
         NetworkConfigBuilder::new(SecretKey::new(&mut rand::thread_rng()))
             .with_unused_discovery_port()
+            .with_unused_listener_port()
             .build(provider_factory.clone()),
     )
     .await?;
     let network = network_manager.handle().clone();
-
-    let (_, payload_builder) = NoopPayloadBuilderService::<EthEngineTypes>::new();
-
     let tasks = TaskManager::current();
     let task_executor = tasks.executor();
+    tasks.executor().spawn(network_manager);
+
+    let (_, payload_builder) = NoopPayloadBuilderService::<EthEngineTypes>::new();
 
     let components = NodeAdapter::<FullNodeTypesAdapter<NodeTypesWithDBAdapter<TestNode, _>, _>, _> {
         components: Components {

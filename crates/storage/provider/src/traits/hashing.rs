@@ -1,11 +1,11 @@
 use alloy_primitives::{Address, BlockNumber, B256};
 use auto_impl::auto_impl;
-use reth_db_api::models::BlockNumberAddress;
+use reth_db::models::{AccountBeforeTx, BlockNumberAddress};
 use reth_primitives::{Account, StorageEntry};
 use reth_storage_errors::provider::ProviderResult;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
-    ops::{Range, RangeInclusive},
+    ops::{RangeBounds, RangeInclusive},
 };
 
 /// Hashing Writer
@@ -16,9 +16,19 @@ pub trait HashingWriter: Send + Sync {
     /// # Returns
     ///
     /// Set of hashed keys of updated accounts.
-    fn unwind_account_hashing(
+    fn unwind_account_hashing<'a>(
         &self,
-        range: RangeInclusive<BlockNumber>,
+        changesets: impl Iterator<Item = &'a (BlockNumber, AccountBeforeTx)>,
+    ) -> ProviderResult<BTreeMap<B256, Option<Account>>>;
+
+    /// Unwind and clear account hashing in a given block range.
+    ///
+    /// # Returns
+    ///
+    /// Set of hashed keys of updated accounts.
+    fn unwind_account_hashing_range(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<BTreeMap<B256, Option<Account>>>;
 
     /// Inserts all accounts into [reth_db::tables::AccountsHistory] table.
@@ -38,7 +48,17 @@ pub trait HashingWriter: Send + Sync {
     /// Mapping of hashed keys of updated accounts to their respective updated hashed slots.
     fn unwind_storage_hashing(
         &self,
-        range: Range<BlockNumberAddress>,
+        changesets: impl Iterator<Item = (BlockNumberAddress, StorageEntry)>,
+    ) -> ProviderResult<HashMap<B256, BTreeSet<B256>>>;
+
+    /// Unwind and clear storage hashing in a given block range.
+    ///
+    /// # Returns
+    ///
+    /// Mapping of hashed keys of updated accounts to their respective updated hashed slots.
+    fn unwind_storage_hashing_range(
+        &self,
+        range: impl RangeBounds<BlockNumberAddress>,
     ) -> ProviderResult<HashMap<B256, BTreeSet<B256>>>;
 
     /// Iterates over storages and inserts them to hashing table.

@@ -20,12 +20,11 @@ impl NetworkStackId {
     /// ENR fork ID kv-pair key, for an Optimism CL node.
     pub const OPSTACK: &'static [u8] = b"opstack";
 
-    #[allow(clippy::missing_const_for_fn)]
     /// Returns the [`NetworkStackId`] that matches the given chain spec.
     pub fn id(chain: impl EthChainSpec) -> Option<&'static [u8]> {
-        if chain.chain().is_optimism() {
+        if chain.is_optimism() {
             return Some(Self::OPEL)
-        } else if chain.chain().is_ethereum() {
+        } else if chain.is_ethereum() {
             return Some(Self::ETH)
         }
 

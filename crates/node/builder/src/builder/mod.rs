@@ -79,7 +79,7 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<
 /// configured components and can interact with the node.
 ///
 /// There are convenience functions for networks that come with a preset of types and components via
-/// the [Node] trait, see `reth_node_ethereum::EthereumNode` or `reth_optimism_node::OptimismNode`.
+/// the [`Node`] trait, see `reth_node_ethereum::EthereumNode` or `reth_optimism_node::OpNode`.
 ///
 /// The [`NodeBuilder::node`] function configures the node's types and components in one step.
 ///

@@ -44,7 +44,6 @@ reth-testing-utils.workspace = true
 alloy-primitives = { workspace = true, features = ["arbitrary"] }
 alloy-consensus = { workspace = true, features = ["arbitrary"] }
 
-arbitrary = { workspace = true, features = ["derive"] }
 bincode.workspace = true
 proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
@@ -74,7 +73,8 @@ arbitrary = [
 	"dep:proptest",
 	"dep:proptest-arbitrary-interop",
 	"alloy-eips/arbitrary",
-	"revm-primitives/arbitrary"
+	"revm-primitives/arbitrary",
+	"reth-codecs/arbitrary"
 ]
 serde-bincode-compat = [
 	"serde_with",

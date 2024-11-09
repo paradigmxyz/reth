@@ -347,6 +347,7 @@ impl HashedStorageSorted {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use alloy_primitives::Bytes;
     use revm::{
         db::{
@@ -355,8 +356,6 @@ mod tests {
         },
         primitives::{AccountInfo, Bytecode},
     };
-
-    use super::*;
 
     #[test]
     fn hashed_state_wiped_extension() {

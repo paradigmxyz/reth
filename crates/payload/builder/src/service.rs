@@ -9,11 +9,11 @@ use crate::{
 };
 use alloy_rpc_types::engine::PayloadId;
 use futures_util::{future::FutureExt, Stream, StreamExt};
+use reth_chain_state::CanonStateNotification;
 use reth_payload_primitives::{
     BuiltPayload, Events, PayloadBuilder, PayloadBuilderAttributes, PayloadBuilderError,
     PayloadEvents, PayloadKind, PayloadTypes,
 };
-use reth_provider::CanonStateNotification;
 use std::{
     fmt,
     future::Future,

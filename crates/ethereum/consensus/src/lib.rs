@@ -24,7 +24,7 @@ use reth_primitives::{
 use std::{fmt::Debug, sync::Arc, time::SystemTime};
 
 /// The bound divisor of the gas limit, used in update calculations.
-const GAS_LIMIT_BOUND_DIVISOR: u64 = 1024;
+pub const GAS_LIMIT_BOUND_DIVISOR: u64 = 1024;
 
 mod validation;
 pub use validation::validate_block_post_execution;
@@ -32,7 +32,7 @@ pub use validation::validate_block_post_execution;
 /// Ethereum beacon consensus
 ///
 /// This consensus engine does basic checks as outlined in the execution specs.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EthBeaconConsensus<ChainSpec> {
     /// Configuration
     chain_spec: Arc<ChainSpec>,

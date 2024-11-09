@@ -6,13 +6,14 @@ use alloc::{fmt, vec::Vec};
 
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{Address, Sealable, B256};
+use reth_codecs::Compact;
 
 use crate::BlockBody;
 
-/// Helper trait, unifies behaviour required of a block header.
-pub trait Header: BlockHeader + Sealable {}
+/// Helper trait that unifies all behaviour required by block to support full node operations.
+pub trait FullBlock: Block<Header: Compact> + Compact {}
 
-impl<T> Header for T where T: BlockHeader + Sealable {}
+impl<T> FullBlock for T where T: Block<Header: Compact> + Compact {}
 
 /// Abstraction of block data type.
 // todo: make sealable super-trait, depends on <https://github.com/paradigmxyz/reth/issues/11449>
@@ -30,7 +31,7 @@ pub trait Block:
     + Into<(Self::Header, Self::Body)>
 {
     /// Header part of the block.
-    type Header: Header;
+    type Header: BlockHeader + Sealable;
 
     /// The block's body contains the transactions in the block.
     type Body: BlockBody;

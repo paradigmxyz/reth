@@ -1,24 +1,27 @@
 //! Dummy blocks and data for tests
-use crate::{DatabaseProviderRW, ExecutionOutcome};
+use crate::{DBProvider, DatabaseProviderRW, ExecutionOutcome};
 use alloy_consensus::{TxLegacy, EMPTY_OMMER_ROOT_HASH};
 use alloy_primitives::{
-    b256, hex_literal::hex, map::HashMap, Address, BlockNumber, Bytes, Log, Parity, Sealable,
-    TxKind, B256, U256,
+    b256, hex_literal::hex, map::HashMap, Address, BlockNumber, Bytes, Log, Sealable, TxKind, B256,
+    U256,
 };
 
+use alloy_eips::eip4895::Withdrawal;
+use alloy_primitives::PrimitiveSignature as Signature;
 use reth_db::tables;
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
+use reth_node_types::NodeTypes;
 use reth_primitives::{
     Account, BlockBody, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    Signature, Transaction, TransactionSigned, TxType, Withdrawal, Withdrawals,
+    Transaction, TransactionSigned, TxType, Withdrawals,
 };
 use reth_trie::root::{state_root_unhashed, storage_root_unhashed};
 use revm::{db::BundleState, primitives::AccountInfo};
 use std::{str::FromStr, sync::LazyLock};
 
 /// Assert genesis block
-pub fn assert_genesis_block<DB: Database, Spec: Send + Sync>(
-    provider: &DatabaseProviderRW<DB, Spec>,
+pub fn assert_genesis_block<DB: Database, N: NodeTypes>(
+    provider: &DatabaseProviderRW<DB, N>,
     g: SealedBlock,
 ) {
     let n = g.number;
@@ -96,7 +99,7 @@ pub(crate) static TEST_BLOCK: LazyLock<SealedBlock> = LazyLock::new(|| SealedBlo
                     "29056683545955299640297374067888344259176096769870751649153779895496107008675",
                 )
                 .unwrap(),
-                Parity::NonEip155(false),
+                false,
             ),
             transaction: Transaction::Legacy(TxLegacy {
                 gas_price: 10,

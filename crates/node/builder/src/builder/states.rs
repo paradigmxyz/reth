@@ -95,8 +95,8 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<
     type Pool = C::Pool;
     type Evm = C::Evm;
     type Executor = C::Executor;
-    type Network = C::Network;
     type Consensus = C::Consensus;
+    type Network = C::Network;
 
     fn pool(&self) -> &Self::Pool {
         self.components.pool()
@@ -110,8 +110,8 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<
         self.components.block_executor()
     }
 
-    fn provider(&self) -> &Self::Provider {
-        &self.provider
+    fn consensus(&self) -> &Self::Consensus {
+        self.components.consensus()
     }
 
     fn network(&self) -> &Self::Network {
@@ -122,12 +122,12 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<
         self.components.payload_builder()
     }
 
-    fn task_executor(&self) -> &TaskExecutor {
-        &self.task_executor
+    fn provider(&self) -> &Self::Provider {
+        &self.provider
     }
 
-    fn consensus(&self) -> &Self::Consensus {
-        self.components.consensus()
+    fn task_executor(&self) -> &TaskExecutor {
+        &self.task_executor
     }
 }
 

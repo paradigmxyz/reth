@@ -289,11 +289,11 @@ mod read_transactions {
 
                     // Sleep not more than `READ_TRANSACTIONS_CHECK_INTERVAL`, but at least until
                     // the closest deadline of an active read transaction
-                    let duration_until_closest_deadline =
-                        self.max_duration - max_active_transaction_duration.unwrap_or_default();
-                    std::thread::sleep(
-                        READ_TRANSACTIONS_CHECK_INTERVAL.min(duration_until_closest_deadline),
+                    let sleep_duration = READ_TRANSACTIONS_CHECK_INTERVAL.min(
+                        self.max_duration - max_active_transaction_duration.unwrap_or_default(),
                     );
+                    trace!(target: "libmdbx", ?sleep_duration, elapsed = ?now.elapsed(), "Putting transaction monitor to sleep");
+                    std::thread::sleep(sleep_duration);
                 }
             };
             std::thread::Builder::new()

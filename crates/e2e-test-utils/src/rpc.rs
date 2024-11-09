@@ -4,12 +4,15 @@ use alloy_primitives::{Bytes, B256};
 use reth::{
     builder::{rpc::RpcRegistry, FullNodeComponents},
     rpc::api::{
-        eth::helpers::{EthApiSpec, EthTransactions, TraceExt},
+        eth::{
+            helpers::{EthApiSpec, EthTransactions, TraceExt},
+            EthApiTypes,
+        },
         DebugApiServer,
     },
 };
 use reth_chainspec::EthereumHardforks;
-use reth_node_builder::{EthApiTypes, NodeTypes};
+use reth_node_builder::NodeTypes;
 
 #[allow(missing_debug_implementations)]
 pub struct RpcTestContext<Node: FullNodeComponents, EthApi: EthApiTypes> {

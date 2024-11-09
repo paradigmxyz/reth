@@ -16,7 +16,6 @@ reth-chainspec.workspace = true
 reth-engine-local.workspace = true
 reth-primitives.workspace = true
 reth-payload-builder.workspace = true
-reth-auto-seal-consensus.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-consensus.workspace = true
 reth-node-api.workspace = true
@@ -28,6 +27,7 @@ reth-network.workspace = true
 reth-evm.workspace = true
 reth-revm = { workspace = true, features = ["std"] }
 reth-beacon-consensus.workspace = true
+reth-trie-db.workspace = true
 
 # op-reth
 reth-optimism-payload-builder.workspace = true
@@ -55,17 +55,24 @@ parking_lot.workspace = true
 # rpc
 serde_json.workspace = true
 
+# test-utils dependencies
+reth = { workspace = true, optional = true }
+reth-e2e-test-utils = { workspace = true, optional = true }
+alloy-genesis = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+
 [dev-dependencies]
-reth.workspace = true
+reth-optimism-node = { workspace = true, features = ["test-utils"] }
 reth-db.workspace = true
-reth-e2e-test-utils.workspace = true
 reth-node-builder = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-revm = { workspace = true, features = ["test-utils"] }
-tokio.workspace = true
 alloy-primitives.workspace = true
-alloy-genesis.workspace = true
 op-alloy-consensus.workspace = true
+alloy-signer-local.workspace = true
+alloy-network.workspace = true
+alloy-consensus.workspace = true
+futures.workspace = true
 
 [features]
 optimism = [
@@ -75,19 +82,24 @@ optimism = [
 	"reth-optimism-payload-builder/optimism",
 	"reth-beacon-consensus/optimism",
 	"revm/optimism",
-	"reth-auto-seal-consensus/optimism",
 	"reth-optimism-rpc/optimism",
 	"reth-engine-local/optimism",
 	"reth-optimism-consensus/optimism",
-	"reth-db/optimism"
+	"reth-db/optimism",
+	"reth-optimism-node/optimism"
 ]
 asm-keccak = [
 	"reth-primitives/asm-keccak",
 	"reth/asm-keccak",
 	"alloy-primitives/asm-keccak",
-	"revm/asm-keccak"
+	"revm/asm-keccak",
+	"reth-optimism-node/asm-keccak"
 ]
 test-utils = [
+	"reth",
+	"reth-e2e-test-utils",
+	"alloy-genesis",
+	"tokio",
 	"reth-node-builder/test-utils",
 	"reth-chainspec/test-utils",
 	"reth-consensus/test-utils",
@@ -99,5 +111,7 @@ test-utils = [
 	"reth-db/test-utils",
 	"reth-provider/test-utils",
 	"reth-transaction-pool/test-utils",
-	"revm/test-utils"
+	"reth-trie-db/test-utils",
+	"revm/test-utils",
+	"reth-optimism-node/test-utils"
 ]

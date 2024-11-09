@@ -25,6 +25,7 @@ pub type MockNodeTypes = reth_node_types::AnyNodeTypesWithEngine<
     (),
     reth_ethereum_engine_primitives::EthEngineTypes,
     reth_chainspec::ChainSpec,
+    reth_trie_db::MerklePatriciaTrie,
 >;
 
 /// Mock [`reth_node_types::NodeTypesWithDB`] for testing.

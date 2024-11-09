@@ -49,6 +49,8 @@ hardfork!(
         Cancun,
         /// Prague: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/prague.md>
         Prague,
+        /// Osaka: <https://eips.ethereum.org/EIPS/eip-7607>
+        Osaka,
     }
 );
 

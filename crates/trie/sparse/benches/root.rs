@@ -1,4 +1,5 @@
 #![allow(missing_docs, unreachable_pub)]
+
 use alloy_primitives::{map::HashMap, B256, U256};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use itertools::Itertools;
@@ -198,6 +199,8 @@ fn generate_test_data(size: usize) -> HashMap<B256, U256> {
         .new_tree(&mut runner)
         .unwrap()
         .current()
+        .into_iter()
+        .collect()
 }
 
 criterion_group!(root, calculate_root_from_leaves, calculate_root_from_leaves_repeated);

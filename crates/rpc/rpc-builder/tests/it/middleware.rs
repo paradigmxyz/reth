@@ -1,5 +1,5 @@
 use crate::utils::{test_address, test_rpc_builder};
-use alloy_rpc_types::{Block, Receipt, Transaction};
+use alloy_rpc_types_eth::{Block, Receipt, Transaction};
 use jsonrpsee::{
     server::{middleware::rpc::RpcServiceT, RpcServiceBuilder},
     types::Request,

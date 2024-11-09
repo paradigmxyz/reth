@@ -1,12 +1,10 @@
 //! Collection of methods for block validation.
 
 use alloy_consensus::constants::MAXIMUM_EXTRA_DATA_SIZE;
+use alloy_eips::eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::ConsensusError;
-use reth_primitives::{
-    constants::eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
-    EthereumHardfork, GotExpected, Header, SealedBlock, SealedHeader,
-};
+use reth_primitives::{EthereumHardfork, GotExpected, Header, SealedBlock, SealedHeader};
 use revm_primitives::calc_excess_blob_gas;
 
 /// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
@@ -204,7 +202,7 @@ pub fn validate_against_parent_eip1559_base_fee<ChainSpec: EthChainSpec + Ethere
 
         let expected_base_fee =
             if chain_spec.fork(EthereumHardfork::London).transitions_at_block(header.number) {
-                reth_primitives::constants::EIP1559_INITIAL_BASE_FEE
+                alloy_eips::eip1559::INITIAL_BASE_FEE
             } else {
                 // This BaseFeeMissing will not happen as previous blocks are checked to have
                 // them.
@@ -277,15 +275,16 @@ pub fn validate_against_parent_4844(
 mod tests {
     use super::*;
     use alloy_consensus::{TxEip4844, EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH};
+    use alloy_eips::{eip4895::Withdrawal, BlockHashOrNumber};
     use alloy_primitives::{
-        hex_literal::hex, Address, BlockHash, BlockNumber, Bytes, Parity, Sealable, U256,
+        hex_literal::hex, Address, BlockHash, BlockNumber, Bytes, PrimitiveSignature as Signature,
+        Sealable, U256,
     };
     use mockall::mock;
     use rand::Rng;
     use reth_chainspec::ChainSpecBuilder;
     use reth_primitives::{
-        proofs, Account, BlockBody, BlockHashOrNumber, Signature, Transaction, TransactionSigned,
-        Withdrawal, Withdrawals,
+        proofs, Account, BlockBody, Transaction, TransactionSigned, Withdrawals,
     };
     use reth_storage_api::{
         errors::provider::ProviderResult, AccountReader, HeaderProvider, WithdrawalsProvider,
@@ -405,7 +404,7 @@ mod tests {
             blob_versioned_hashes: std::iter::repeat_with(|| rng.gen()).take(num_blobs).collect(),
         });
 
-        let signature = Signature::new(U256::default(), U256::default(), Parity::Parity(true));
+        let signature = Signature::new(U256::default(), U256::default(), true);
 
         TransactionSigned::from_transaction_and_signature(request, signature)
     }

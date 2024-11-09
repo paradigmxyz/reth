@@ -101,7 +101,7 @@ tempfile.workspace = true
 [features]
 default = ["jemalloc"]
 
-dev = ["reth-cli-commands/dev"]
+dev = ["reth-cli-commands/arbitrary"]
 
 asm-keccak = [
 	"reth-node-core/asm-keccak",

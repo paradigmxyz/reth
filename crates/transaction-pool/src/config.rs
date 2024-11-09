@@ -3,8 +3,8 @@ use crate::{
     PoolSize, TransactionOrigin,
 };
 use alloy_consensus::constants::EIP4844_TX_TYPE_ID;
+use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE};
 use alloy_primitives::Address;
-use reth_primitives::constants::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE};
 use std::{collections::HashSet, ops::Mul};
 
 /// Guarantees max transactions for one sender, compatible with geth/erigon
@@ -26,6 +26,9 @@ pub const DEFAULT_PRICE_BUMP: u128 = 10;
 ///
 /// This enforces that a blob transaction requires a 100% price bump to be replaced
 pub const REPLACE_BLOB_PRICE_BUMP: u128 = 100;
+
+/// Default maximum new transactions for broadcasting.
+pub const MAX_NEW_PENDING_TXS_NOTIFICATIONS: usize = 200;
 
 /// Configuration options for the Transaction pool.
 #[derive(Debug, Clone)]
@@ -53,6 +56,8 @@ pub struct PoolConfig {
     pub pending_tx_listener_buffer_size: usize,
     /// Bound on number of new transactions from `reth_network::TransactionsManager` to buffer.
     pub new_tx_listener_buffer_size: usize,
+    /// How many new pending transactions to buffer and send iterators in progress.
+    pub max_new_pending_txs_notifications: usize,
 }
 
 impl PoolConfig {
@@ -80,6 +85,7 @@ impl Default for PoolConfig {
             local_transactions_config: Default::default(),
             pending_tx_listener_buffer_size: PENDING_TX_LISTENER_BUFFER_SIZE,
             new_tx_listener_buffer_size: NEW_TX_LISTENER_BUFFER_SIZE,
+            max_new_pending_txs_notifications: MAX_NEW_PENDING_TXS_NOTIFICATIONS,
         }
     }
 }

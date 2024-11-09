@@ -58,7 +58,7 @@ allow = [
 # aren't accepted for every possible crate as with the normal allow list
 exceptions = [
     # TODO: decide on MPL-2.0 handling
-    # These dependencies are grandfathered in in https://github.com/paradigmxyz/reth/pull/6980
+    # These dependencies are grandfathered in https://github.com/paradigmxyz/reth/pull/6980
     { allow = ["MPL-2.0"], name = "option-ext" },
     { allow = ["MPL-2.0"], name = "webpki-roots" },
 ]

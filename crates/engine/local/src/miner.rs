@@ -1,12 +1,12 @@
 //! Contains the implementation of the mining mode for the local engine.
 
 use alloy_primitives::{TxHash, B256};
-use alloy_rpc_types_engine::{CancunPayloadFields, ForkchoiceState};
+use alloy_rpc_types_engine::{CancunPayloadFields, ExecutionPayloadSidecar, ForkchoiceState};
 use eyre::OptionExt;
 use futures_util::{stream::Fuse, StreamExt};
 use reth_beacon_consensus::BeaconEngineMessage;
 use reth_chainspec::EthereumHardforks;
-use reth_engine_primitives::EngineTypes;
+use reth_engine_primitives::{EngineApiMessageVersion, EngineTypes};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{
     BuiltPayload, PayloadAttributesBuilder, PayloadBuilder, PayloadKind, PayloadTypes,
@@ -167,6 +167,7 @@ where
             state: self.forkchoice_state(),
             payload_attrs: None,
             tx,
+            version: EngineApiMessageVersion::default(),
         })?;
 
         let res = rx.await??;
@@ -193,6 +194,7 @@ where
             state: self.forkchoice_state(),
             payload_attrs: Some(self.payload_attributes_builder.build(timestamp)),
             tx,
+            version: EngineApiMessageVersion::default(),
         })?;
 
         let res = rx.await??.await?;
@@ -221,9 +223,10 @@ where
         let (tx, rx) = oneshot::channel();
         self.to_engine.send(BeaconEngineMessage::NewPayload {
             payload: block_to_payload(payload.block().clone()),
-            cancun_fields,
-            // todo: prague
-            execution_requests: None,
+            // todo: prague support
+            sidecar: cancun_fields
+                .map(ExecutionPayloadSidecar::v3)
+                .unwrap_or_else(ExecutionPayloadSidecar::none),
             tx,
         })?;
 

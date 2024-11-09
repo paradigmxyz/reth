@@ -43,13 +43,13 @@ pub enum FieldTypes {
 pub fn derive(input: TokenStream, is_zstd: bool) -> TokenStream {
     let mut output = quote! {};
 
-    let DeriveInput { ident, data, generics, .. } = parse_macro_input!(input);
+    let DeriveInput { ident, data, generics, attrs, .. } = parse_macro_input!(input);
 
     let has_lifetime = has_lifetime(&generics);
 
     let fields = get_fields(&data);
     output.extend(generate_flag_struct(&ident, has_lifetime, &fields, is_zstd));
-    output.extend(generate_from_to(&ident, has_lifetime, &fields, is_zstd));
+    output.extend(generate_from_to(&ident, &attrs, has_lifetime, &fields, is_zstd));
     output.into()
 }
 
@@ -233,10 +233,10 @@ mod tests {
 
         // Generate code that will impl the `Compact` trait.
         let mut output = quote! {};
-        let DeriveInput { ident, data, .. } = parse2(f_struct).unwrap();
+        let DeriveInput { ident, data, attrs, .. } = parse2(f_struct).unwrap();
         let fields = get_fields(&data);
         output.extend(generate_flag_struct(&ident, false, &fields, false));
-        output.extend(generate_from_to(&ident, false, &fields, false));
+        output.extend(generate_from_to(&ident, &attrs, false, &fields, false));
 
         // Expected output in a TokenStream format. Commas matter!
         let should_output = quote! {
@@ -285,6 +285,7 @@ mod tests {
             #[allow(dead_code)]
             #[test_fuzz::test_fuzz]
             fn fuzz_test_test_struct(obj: TestStruct) {
+                use reth_codecs::Compact;
                 let mut buf = vec![];
                 let len = obj.clone().to_compact(&mut buf);
                 let (same_obj, buf) = TestStruct::from_compact(buf.as_ref(), len);
@@ -295,7 +296,7 @@ mod tests {
             pub fn fuzz_test_struct() {
                 fuzz_test_test_struct(TestStruct::default())
             }
-            impl Compact for TestStruct {
+            impl reth_codecs::Compact for TestStruct {
                 fn to_compact<B>(&self, buf: &mut B) -> usize where B: bytes::BufMut + AsMut<[u8]> {
                     let mut flags = TestStructFlags::default();
                     let mut total_length = 0;

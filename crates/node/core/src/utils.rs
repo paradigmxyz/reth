@@ -1,6 +1,7 @@
 //! Utility functions for node startup and shutdown, for example path parsing and retrieving single
 //! blocks from the network.
 
+use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::Sealable;
 use alloy_rpc_types_engine::{JwtError, JwtSecret};
 use eyre::Result;
@@ -11,7 +12,7 @@ use reth_network_p2p::{
     headers::client::{HeadersClient, HeadersDirection, HeadersRequest},
     priority::Priority,
 };
-use reth_primitives::{BlockHashOrNumber, SealedBlock, SealedHeader};
+use reth_primitives::{SealedBlock, SealedHeader};
 use std::{
     env::VarError,
     path::{Path, PathBuf},

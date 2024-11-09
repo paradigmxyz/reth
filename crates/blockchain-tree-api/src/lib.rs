@@ -9,8 +9,9 @@
 
 use self::error::CanonicalError;
 use crate::error::InsertBlockError;
+use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockHash, BlockNumber};
-use reth_primitives::{BlockNumHash, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader};
+use reth_primitives::{Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::collections::BTreeMap;
 

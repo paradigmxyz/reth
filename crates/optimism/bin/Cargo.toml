@@ -47,6 +47,10 @@ optimism = [
 	"reth-provider/optimism"
 ]
 
+dev = [
+	"reth-optimism-cli/dev"
+]
+
 min-error-logs = ["tracing/release_max_level_error"]
 min-warn-logs = ["tracing/release_max_level_warn"]
 min-info-logs = ["tracing/release_max_level_info"]

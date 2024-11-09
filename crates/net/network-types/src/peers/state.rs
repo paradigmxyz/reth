@@ -31,6 +31,12 @@ impl PeerConnectionState {
         }
     }
 
+    /// Returns true if this is the idle state.
+    #[inline]
+    pub const fn is_idle(&self) -> bool {
+        matches!(self, Self::Idle)
+    }
+
     /// Returns true if this is an active incoming connection.
     #[inline]
     pub const fn is_incoming(&self) -> bool {

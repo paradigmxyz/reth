@@ -21,6 +21,11 @@ pub trait EthereumHardforks: Hardforks {
         self.is_fork_active_at_timestamp(EthereumHardfork::Prague, timestamp)
     }
 
+    /// Convenience method to check if [`EthereumHardfork::Osaka`] is active at a given timestamp.
+    fn is_osaka_active_at_timestamp(&self, timestamp: u64) -> bool {
+        self.is_fork_active_at_timestamp(EthereumHardfork::Osaka, timestamp)
+    }
+
     /// Convenience method to check if [`EthereumHardfork::Byzantium`] is active at a given block
     /// number.
     fn is_byzantium_active_at_block(&self, block_number: u64) -> bool {
