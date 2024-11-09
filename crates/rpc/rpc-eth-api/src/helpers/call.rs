@@ -1130,7 +1130,7 @@ pub trait Call: LoadState<Evm: ConfigureEvm<Header = Header>> + SpawnBlocking {
 /// gas limit for a transaction. It adjusts the highest or lowest gas limits depending on
 /// whether the execution succeeded, reverted, or halted due to specific reasons.
 #[inline]
-fn update_estimated_gas_range(
+pub fn update_estimated_gas_range(
     result: ExecutionResult,
     tx_gas_limit: u64,
     highest_gas_limit: &mut u64,
