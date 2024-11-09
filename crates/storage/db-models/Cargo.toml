@@ -52,5 +52,6 @@ arbitrary = [
     "dep:arbitrary",
     "dep:proptest",
     "alloy-primitives/arbitrary",
+    "alloy-eips/arbitrary",
     "reth-codecs/arbitrary",
 ]
