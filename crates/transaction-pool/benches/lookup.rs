@@ -2,7 +2,6 @@
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
-
 use alloy_primitives::address;
 use reth_transaction_pool::test_utils::{MockTransaction, MockTransactionFactory};
 use std::collections::{BTreeMap, HashMap};
