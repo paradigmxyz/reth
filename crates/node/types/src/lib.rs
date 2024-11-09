@@ -8,17 +8,15 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-pub use reth_primitives_traits::{Block, BlockBody};
-
-use std::marker::PhantomData;
-
 use reth_chainspec::EthChainSpec;
 use reth_db_api::{
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
     Database,
 };
 use reth_engine_primitives::EngineTypes;
+pub use reth_primitives_traits::{Block, BlockBody};
 use reth_trie_db::StateCommitment;
+use std::marker::PhantomData;
 
 /// Configures all the primitive types of the node.
 pub trait NodePrimitives {
