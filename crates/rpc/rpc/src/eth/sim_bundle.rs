@@ -307,7 +307,7 @@ where
                 let mut refundable_value = U256::ZERO;
                 let mut body_logs: Vec<SimBundleLogs> = Vec::new();
 
-                let mut evm = RpcNodeCore::evm_config(&eth_api).evm_with_env(db, env);
+                let mut evm = eth_api.evm_config().evm_with_env(db, env);
 
                 for item in &flattened_bundle {
                     // Check inclusion constraints
@@ -323,11 +323,7 @@ where
                         )
                         .into());
                     }
-                    RpcNodeCore::evm_config(&eth_api).fill_tx_env(
-                        evm.tx_mut(),
-                        &item.tx,
-                        item.signer,
-                    );
+                    eth_api.evm_config().fill_tx_env(evm.tx_mut(), &item.tx, item.signer);
 
                     let ResultAndState { result, state } =
                         evm.transact().map_err(EthApiError::from_eth_err)?;
