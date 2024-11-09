@@ -24,7 +24,7 @@ use reth_optimism_evm::{OpEvmConfig, OpExecutionStrategyFactory};
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_rpc::OpEthApi;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::{Block, Header, Receipt};
+use reth_primitives::{Block, Header, Receipt, TransactionSigned};
 use reth_provider::CanonStateSubscriptions;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
@@ -46,6 +46,7 @@ pub struct OpPrimitives;
 
 impl NodePrimitives for OpPrimitives {
     type Block = Block;
+    type SignedTx = TransactionSigned;
     type Receipt = Receipt;
 }
 
