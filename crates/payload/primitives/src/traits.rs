@@ -1,4 +1,4 @@
-use crate::{PayloadEvents, PayloadKind, PayloadTypes};
+use crate::{PayloadBuilderError, PayloadEvents, PayloadKind, PayloadTypes};
 use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
     eip7685::Requests,
@@ -15,7 +15,7 @@ pub trait PayloadBuilder: Send + Unpin {
     /// The Payload type for the builder.
     type PayloadType: PayloadTypes;
     /// The error type returned by the builder.
-    type Error;
+    type Error: Into<PayloadBuilderError>;
 
     /// Sends a message to the service to start building a new payload for the given payload.
     ///
