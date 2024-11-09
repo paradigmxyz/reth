@@ -34,10 +34,11 @@ derive_more.workspace = true
 rand = { workspace = true, features = ["small_rng"] }
 tempfile.workspace = true
 
-
 [features]
 default = ["std"]
 test-utils = []
 std = [
-    "thiserror/std",
+	"thiserror/std",
+	"lz4_flex/std",
+	"serde/std"
 ]
