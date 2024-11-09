@@ -153,6 +153,7 @@ where
             .inspect(|_| self.inner.on_new_payload_response())?)
     }
 
+    /// Metered version of `new_payload_v1`.
     async fn new_payload_v1_metered(
         &self,
         payload: ExecutionPayloadV1,
