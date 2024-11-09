@@ -8106,7 +8106,6 @@ dependencies = [
  "reth-chainspec",
  "reth-db-api",
  "reth-engine-primitives",
- "reth-primitives",
  "reth-primitives-traits",
  "reth-trie-db",
 ]
