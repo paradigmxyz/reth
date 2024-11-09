@@ -7,8 +7,7 @@ use crate::helpers::{
     Call,
 };
 use alloy_primitives::U256;
-use alloy_rpc_types::{state::StateOverride, BlockId};
-use alloy_rpc_types_eth::transaction::TransactionRequest;
+use alloy_rpc_types_eth::{state::StateOverride, transaction::TransactionRequest, BlockId};
 use futures::Future;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, MIN_TRANSACTION_GAS};
 use reth_provider::StateProvider;
