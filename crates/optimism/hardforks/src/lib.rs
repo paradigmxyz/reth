@@ -14,47 +14,47 @@ pub mod hardfork;
 mod dev;
 
 pub use dev::DEV_HARDFORKS;
-pub use hardfork::OptimismHardfork;
+pub use hardfork::OpHardfork;
 
 use reth_ethereum_forks::EthereumHardforks;
 
 /// Extends [`EthereumHardforks`] with optimism helper methods.
 pub trait OptimismHardforks: EthereumHardforks {
-    /// Convenience method to check if [`OptimismHardfork::Bedrock`] is active at a given block
+    /// Convenience method to check if [`OpHardfork::Bedrock`] is active at a given block
     /// number.
     fn is_bedrock_active_at_block(&self, block_number: u64) -> bool {
-        self.fork(OptimismHardfork::Bedrock).active_at_block(block_number)
+        self.fork(OpHardfork::Bedrock).active_at_block(block_number)
     }
 
-    /// Returns `true` if [`Canyon`](OptimismHardfork::Canyon) is active at given block timestamp.
+    /// Returns `true` if [`Canyon`](OpHardfork::Canyon) is active at given block timestamp.
     fn is_canyon_active_at_timestamp(&self, timestamp: u64) -> bool {
-        self.fork(OptimismHardfork::Canyon).active_at_timestamp(timestamp)
+        self.fork(OpHardfork::Canyon).active_at_timestamp(timestamp)
     }
 
-    /// Returns `true` if [`Ecotone`](OptimismHardfork::Ecotone) is active at given block timestamp.
+    /// Returns `true` if [`Ecotone`](OpHardfork::Ecotone) is active at given block timestamp.
     fn is_ecotone_active_at_timestamp(&self, timestamp: u64) -> bool {
-        self.fork(OptimismHardfork::Ecotone).active_at_timestamp(timestamp)
+        self.fork(OpHardfork::Ecotone).active_at_timestamp(timestamp)
     }
 
-    /// Returns `true` if [`Fjord`](OptimismHardfork::Fjord) is active at given block timestamp.
+    /// Returns `true` if [`Fjord`](OpHardfork::Fjord) is active at given block timestamp.
     fn is_fjord_active_at_timestamp(&self, timestamp: u64) -> bool {
-        self.fork(OptimismHardfork::Fjord).active_at_timestamp(timestamp)
+        self.fork(OpHardfork::Fjord).active_at_timestamp(timestamp)
     }
 
-    /// Returns `true` if [`Granite`](OptimismHardfork::Granite) is active at given block timestamp.
+    /// Returns `true` if [`Granite`](OpHardfork::Granite) is active at given block timestamp.
     fn is_granite_active_at_timestamp(&self, timestamp: u64) -> bool {
-        self.fork(OptimismHardfork::Granite).active_at_timestamp(timestamp)
+        self.fork(OpHardfork::Granite).active_at_timestamp(timestamp)
     }
 
-    /// Returns `true` if [`Holocene`](OptimismHardfork::Holocene) is active at given block
+    /// Returns `true` if [`Holocene`](OpHardfork::Holocene) is active at given block
     /// timestamp.
     fn is_holocene_active_at_timestamp(&self, timestamp: u64) -> bool {
-        self.fork(OptimismHardfork::Holocene).active_at_timestamp(timestamp)
+        self.fork(OpHardfork::Holocene).active_at_timestamp(timestamp)
     }
 
-    /// Returns `true` if [`Regolith`](OptimismHardfork::Regolith) is active at given block
+    /// Returns `true` if [`Regolith`](OpHardfork::Regolith) is active at given block
     /// timestamp.
     fn is_regolith_active_at_timestamp(&self, timestamp: u64) -> bool {
-        self.fork(OptimismHardfork::Regolith).active_at_timestamp(timestamp)
+        self.fork(OpHardfork::Regolith).active_at_timestamp(timestamp)
     }
 }

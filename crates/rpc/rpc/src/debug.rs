@@ -27,7 +27,7 @@ use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{
     helpers::{EthApiSpec, EthTransactions, TraceExt},
-    EthApiTypes, FromEthApiError, RpcNodeCore,
+    EthApiTypes, FromEthApiError,
 };
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
@@ -115,7 +115,7 @@ where
                         env: Env::boxed(
                             cfg.cfg_env.clone(),
                             block_env.clone(),
-                            RpcNodeCore::evm_config(this.eth_api()).tx_env(tx, *signer),
+                            this.eth_api().evm_config().tx_env(tx, *signer),
                         ),
                         handler_cfg: cfg.handler_cfg,
                     };
@@ -264,7 +264,7 @@ where
                     env: Env::boxed(
                         cfg.cfg_env.clone(),
                         block_env,
-                        RpcNodeCore::evm_config(this.eth_api()).tx_env(tx.as_signed(), tx.signer()),
+                        this.eth_api().evm_config().tx_env(tx.as_signed(), tx.signer()),
                     ),
                     handler_cfg: cfg.handler_cfg,
                 };
@@ -533,7 +533,7 @@ where
                             env: Env::boxed(
                                 cfg.cfg_env.clone(),
                                 block_env.clone(),
-                                RpcNodeCore::evm_config(this.eth_api()).tx_env(tx, *signer),
+                                this.eth_api().evm_config().tx_env(tx, *signer),
                             ),
                             handler_cfg: cfg.handler_cfg,
                         };

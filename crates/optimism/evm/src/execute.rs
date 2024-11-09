@@ -19,7 +19,7 @@ use reth_evm::{
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::validate_block_post_execution;
-use reth_optimism_forks::OptimismHardfork;
+use reth_optimism_forks::OpHardfork;
 use reth_primitives::{BlockWithSenders, Header, Receipt, TxType};
 use reth_revm::{Database, State};
 use revm_primitives::{
@@ -158,7 +158,7 @@ where
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
 
         let is_regolith =
-            self.chain_spec.fork(OptimismHardfork::Regolith).active_at_timestamp(block.timestamp);
+            self.chain_spec.fork(OpHardfork::Regolith).active_at_timestamp(block.timestamp);
 
         let mut cumulative_gas_used = 0;
         let mut receipts = Vec::with_capacity(block.body.transactions.len());
@@ -233,7 +233,7 @@ where
                 // this is only set for post-Canyon deposit transactions.
                 deposit_receipt_version: (transaction.is_deposit() &&
                     self.chain_spec
-                        .is_fork_active_at_timestamp(OptimismHardfork::Canyon, block.timestamp))
+                        .is_fork_active_at_timestamp(OpHardfork::Canyon, block.timestamp))
                 .then_some(1),
             });
         }

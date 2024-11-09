@@ -51,7 +51,7 @@ pub fn generate_vectors(mut tables: Vec<String>) -> Result<()> {
             for table in tables {
                 match table.as_str() {
                     $(
-                        stringify!($table_type$(<$($generic),+>)?) => {
+                        stringify!($table_type) => {
                             println!("Generating test vectors for {} <{}>.", stringify!($table_or_dup), tables::$table_type$(::<$($generic),+>)?::NAME);
 
                             generate_vector!($table_type$(<$($generic),+>)?, $per_table, $table_or_dup);
