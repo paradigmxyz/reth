@@ -4,9 +4,6 @@
 #[doc(inline)]
 pub use alloy_eips::eip4895::Withdrawal;
 
-/// Represents a collection of Withdrawals.
-pub type Withdrawals = alloy_eips::eip4895::Withdrawals;
-
 #[cfg(test)]
 mod tests {
     use super::*;
