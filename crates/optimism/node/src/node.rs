@@ -23,7 +23,7 @@ use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_evm::{OpEvmConfig, OpExecutionStrategyFactory};
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_rpc::OpEthApi;
-use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
+use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService, PayloadStore};
 use reth_primitives::{Block, Header, Receipt, TransactionSigned};
 use reth_provider::CanonStateSubscriptions;
 use reth_tracing::tracing::{debug, info};
@@ -149,7 +149,10 @@ impl<N: FullNodeComponents> OpAddOns<N> {
 
 impl<N> NodeAddOns<N> for OpAddOns<N>
 where
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>,
+    N: FullNodeComponents<
+        Types: NodeTypes<ChainSpec = OpChainSpec>,
+        PayloadBuilder: Into<PayloadStore<<N::Types as NodeTypesWithEngine>::Engine>>,
+    >,
     OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
 {
     type Handle = RpcHandle<N, OpEthApi<N>>;
@@ -164,7 +167,10 @@ where
 
 impl<N> RethRpcAddOns<N> for OpAddOns<N>
 where
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>,
+    N: FullNodeComponents<
+        Types: NodeTypes<ChainSpec = OpChainSpec>,
+        PayloadBuilder: Into<PayloadStore<<N::Types as NodeTypesWithEngine>::Engine>>,
+    >,
     OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
 {
     type EthApi = OpEthApi<N>;
