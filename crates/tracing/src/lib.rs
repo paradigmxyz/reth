@@ -187,6 +187,7 @@ impl Default for LayerInfo {
 }
 
 /// Tracer handle for managing the logging configuration.
+#[derive(Default)]
 pub struct TracerHandle {
     /// Guard for the file layer, if any
     pub file_guard: Option<WorkerGuard>,
@@ -197,18 +198,6 @@ pub struct TracerHandle {
     /// Handle for the tracing subscriber, to allow reloading after
     #[cfg(feature = "opentelemetry")]
     otlp_config: Option<OtlpConfig>,
-}
-
-impl Default for TracerHandle {
-    fn default() -> Self {
-        Self {
-            file_guard: None,
-            #[cfg(feature = "opentelemetry")]
-            otlp_handle: None,
-            #[cfg(feature = "opentelemetry")]
-            otlp_config: None,
-        }
-    }
 }
 
 impl fmt::Debug for TracerHandle {

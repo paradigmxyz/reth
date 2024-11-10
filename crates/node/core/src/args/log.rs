@@ -132,7 +132,7 @@ impl LogArgs {
     ///
     /// If file logging is enabled, the returned handle has a guard that must be
     /// kept alive to ensure that all logs are flushed to disk. If OTLP is
-    /// enabled, the handle can be used to start the OpenTelemetry layer after
+    /// enabled, the handle can be used to start the `OpenTelemetry` layer after
     /// the tokio runtime is initialized.
     pub fn init_tracing(&self) -> eyre::Result<TracerHandle> {
         self.tracer().init()

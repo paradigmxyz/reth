@@ -30,7 +30,7 @@ pub struct CliRunner {
 
 impl CliRunner {
     /// Creates a new CLI runner with the given tracer handle.
-    pub fn new(handle: TracerHandle) -> Self {
+    pub const fn new(handle: TracerHandle) -> Self {
         Self { handle }
     }
 

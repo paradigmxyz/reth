@@ -12,7 +12,7 @@ use crate::formatter::LogFormat;
 ///  belongs to.
 pub type FileWorkerGuard = tracing_appender::non_blocking::WorkerGuard;
 
-/// Reloadable handle for the OpenTelemetry layer.
+/// Reloadable handle for the `OpenTelemetry` layer.
 pub type ReloadableOtlpHandle = reload::Handle<Box<dyn Layer<Registry> + Send + Sync>, Registry>;
 
 ///  A boxed tracing [Layer].
@@ -116,7 +116,7 @@ impl Layers {
     /// # Returns
     ///
     /// A [`ReloadableOtlpHandle`] that can be used to configure the
-    /// OpenTelemetry layer after the tokio runtime is initialized.
+    /// `OpenTelemetry` layer after the tokio runtime is initialized.
     #[cfg(feature = "opentelemetry")]
     pub(crate) fn otlp_placeholder(&mut self) -> ReloadableOtlpHandle {
         //
