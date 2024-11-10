@@ -410,7 +410,7 @@ reth-storage-errors = { path = "crates/storage/errors" }
 reth-tasks = { path = "crates/tasks" }
 reth-testing-utils = { path = "testing/testing-utils" }
 reth-tokio-util = { path = "crates/tokio-util" }
-reth-tracing = { path = "crates/tracing" }
+reth-tracing = { path = "crates/tracing", default-features = false }
 reth-transaction-pool = { path = "crates/transaction-pool" }
 reth-trie = { path = "crates/trie/trie" }
 reth-trie-common = { path = "crates/trie/common" }

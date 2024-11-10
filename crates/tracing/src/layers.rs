@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use rolling_file::{RollingConditionBasic, RollingFileAppender};
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{filter::Directive, EnvFilter, Layer, Registry};
+use tracing_subscriber::{filter::Directive, reload, EnvFilter, Layer, Registry};
 
 use crate::formatter::LogFormat;
 
@@ -11,6 +11,9 @@ use crate::formatter::LogFormat;
 ///  When a guard is dropped, all events currently in-memory are flushed to the log file this guard
 ///  belongs to.
 pub type FileWorkerGuard = tracing_appender::non_blocking::WorkerGuard;
+
+/// Reloadable handle for the OpenTelemetry layer.
+pub type ReloadableOtlpHandle = reload::Handle<Box<dyn Layer<Registry> + Send + Sync>, Registry>;
 
 ///  A boxed tracing [Layer].
 pub(crate) type BoxedLayer<S> = Box<dyn Layer<S> + Send + Sync>;
@@ -108,40 +111,21 @@ impl Layers {
         Ok(guard)
     }
 
-    /// Adds an `OpenTelemetry` layer to the layers collection.
-    ///
-    /// # Arguments
-    /// * `otlp` - The `OpenTelemetry` configuration.
+    /// Adds a placeholder layer
     ///
     /// # Returns
-    /// An `eyre::Result<()>` indicating the success or failure of the
-    /// operation.
+    ///
+    /// A [`ReloadableOtlpHandle`] that can be used to configure the
+    /// OpenTelemetry layer after the tokio runtime is initialized.
     #[cfg(feature = "opentelemetry")]
-    pub(crate) fn otlp(&mut self, otlp: crate::OtlpConfig) -> eyre::Result<()> {
-        use opentelemetry::trace::TracerProvider;
-        use opentelemetry_otlp::{ExportConfig, WithExportConfig};
+    pub(crate) fn otlp_placeholder(&mut self) -> ReloadableOtlpHandle {
+        //
+        let (layer, handle) =
+            reload::Layer::new(Box::new(tracing_subscriber::layer::Identity::new())
+                as Box<dyn Layer<Registry> + Send + Sync>);
 
-        let exporter = opentelemetry_otlp::new_exporter()
-            .http()
-            .with_export_config(ExportConfig {
-                endpoint: otlp.url,
-                protocol: otlp.protocol.into(),
-                timeout: std::time::Duration::from_millis(otlp.timeout),
-            })
-            .with_http_client(reqwest::Client::default());
-
-        let tracer = opentelemetry_otlp::new_pipeline()
-            .tracing()
-            .with_exporter(exporter)
-            .install_batch(opentelemetry_sdk::runtime::Tokio)?
-            .tracer("reth");
-
-        let filter = build_env_filter(None, &otlp.directive)?;
-
-        let layer = tracing_opentelemetry::layer().with_tracer(tracer).with_filter(filter).boxed();
-
-        self.inner.push(layer);
-        Ok(())
+        self.inner.push(layer.boxed());
+        handle
     }
 }
 
@@ -202,7 +186,7 @@ impl FileInfo {
 ///
 /// # Returns
 /// An `eyre::Result<EnvFilter>` that can be used to configure a tracing subscriber.
-fn build_env_filter(
+pub(crate) fn build_env_filter(
     default_directive: Option<Directive>,
     directives: &str,
 ) -> eyre::Result<EnvFilter> {

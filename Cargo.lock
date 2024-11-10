@@ -6799,8 +6799,8 @@ name = "reth-cli-runner"
 version = "1.1.0"
 dependencies = [
  "reth-tasks",
+ "reth-tracing",
  "tokio",
- "tracing",
 ]
 
 [[package]]

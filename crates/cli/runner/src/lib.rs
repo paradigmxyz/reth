@@ -11,19 +11,45 @@
 //! Entrypoint for running commands.
 
 use reth_tasks::{TaskExecutor, TaskManager};
+use reth_tracing::{
+    tracing::{debug, error, trace, warn},
+    TracerHandle,
+};
 use std::{future::Future, pin::pin, sync::mpsc, time::Duration};
-use tracing::{debug, error, trace};
 
 /// Executes CLI commands.
 ///
 /// Provides utilities for running a cli command to completion.
-#[derive(Clone, Debug, Default)]
+#[derive(Debug, Default)]
 #[non_exhaustive]
-pub struct CliRunner;
+pub struct CliRunner {
+    handle: TracerHandle,
+}
 
 // === impl CliRunner ===
 
 impl CliRunner {
+    /// Creates a new CLI runner with the given tracer handle.
+    pub fn new(handle: TracerHandle) -> Self {
+        Self { handle }
+    }
+
+    /// Consumes the runner and returns the tracer handle.
+    pub fn into_handle(self) -> TracerHandle {
+        self.handle
+    }
+
+    /// Reload the OTLP layer after the tokio runtime is initialized, emitting
+    /// a warning event if the layer fails to reload.
+    ///
+    /// This is a no-op if the `opentelemetry` feature is not enabled.
+    fn reload_otlp(&self) {
+        #[cfg(feature = "opentelemetry")]
+        let _ = self.handle.reload_otlp().inspect_err(|err| {
+            warn!(err = format!("{:#}", err), "Failed to reload OTLP layer");
+        });
+    }
+
     /// Executes the given _async_ command on the tokio runtime until the command future resolves or
     /// until the process receives a `SIGINT` or `SIGTERM` signal.
     ///
@@ -40,10 +66,12 @@ impl CliRunner {
         let AsyncCliRunner { context, mut task_manager, tokio_runtime } = AsyncCliRunner::new()?;
 
         // Executes the command until it finished or ctrl-c was fired
-        let command_res = tokio_runtime.block_on(run_to_completion_or_panic(
-            &mut task_manager,
-            run_until_ctrl_c(command(context)),
-        ));
+        let command_fut = async {
+            self.reload_otlp();
+            run_to_completion_or_panic(&mut task_manager, run_until_ctrl_c(command(context))).await
+        };
+
+        let command_res = tokio_runtime.block_on(command_fut);
 
         if command_res.is_err() {
             error!(target: "reth::cli", "shutting down due to error");
@@ -82,6 +110,10 @@ impl CliRunner {
         E: Send + Sync + From<std::io::Error> + 'static,
     {
         let tokio_runtime = tokio_runtime()?;
+        let fut = async {
+            self.reload_otlp();
+            fut.await
+        };
         tokio_runtime.block_on(run_until_ctrl_c(fut))?;
         Ok(())
     }
@@ -97,7 +129,12 @@ impl CliRunner {
     {
         let tokio_runtime = tokio_runtime()?;
         let handle = tokio_runtime.handle().clone();
+        let fut = async move {
+            self.reload_otlp();
+            fut.await
+        };
         let fut = tokio_runtime.handle().spawn_blocking(move || handle.block_on(fut));
+
         tokio_runtime
             .block_on(run_until_ctrl_c(async move { fut.await.expect("Failed to join task") }))?;
 

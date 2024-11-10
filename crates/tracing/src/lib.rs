@@ -50,7 +50,7 @@ pub use tracing_subscriber;
 
 // Re-export our types
 pub use formatter::LogFormat;
-pub use layers::{FileInfo, FileWorkerGuard};
+pub use layers::{FileInfo, FileWorkerGuard, ReloadableOtlpHandle};
 pub use test_tracer::TestTracer;
 
 mod formatter;
@@ -63,6 +63,7 @@ mod test_tracer;
 pub use otlp::{OtlpConfig, OtlpProtocols};
 
 use crate::layers::Layers;
+use core::fmt;
 use tracing::level_filters::LevelFilter;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -185,6 +186,80 @@ impl Default for LayerInfo {
     }
 }
 
+/// Tracer handle for managing the logging configuration.
+pub struct TracerHandle {
+    /// Guard for the file layer, if any
+    pub file_guard: Option<WorkerGuard>,
+    /// Handle for the tracing subscriber, to allow reloading after
+    /// tokio runtime initialization.
+    #[cfg(feature = "opentelemetry")]
+    otlp_handle: Option<ReloadableOtlpHandle>,
+    /// Handle for the tracing subscriber, to allow reloading after
+    #[cfg(feature = "opentelemetry")]
+    otlp_config: Option<OtlpConfig>,
+}
+
+impl Default for TracerHandle {
+    fn default() -> Self {
+        Self {
+            file_guard: None,
+            #[cfg(feature = "opentelemetry")]
+            otlp_handle: None,
+            #[cfg(feature = "opentelemetry")]
+            otlp_config: None,
+        }
+    }
+}
+
+impl fmt::Debug for TracerHandle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TracerHandle")
+            .field("file_guard", &self.file_guard)
+            .field("otlp_config", &self.otlp_config)
+            .finish_non_exhaustive()
+    }
+}
+
+impl TracerHandle {
+    /// Reloads the otlp layer if configured. If not configured, this does
+    /// nothing. This allows OTLP to be lazily initalized after the tokio
+    /// runtime has started.
+    #[cfg(feature = "opentelemetry")]
+    pub fn reload_otlp(&self) -> eyre::Result<()> {
+        if let Some(handle) = &self.otlp_handle {
+            use opentelemetry::trace::TracerProvider;
+            use opentelemetry_otlp::{ExportConfig, WithExportConfig};
+            use tracing_subscriber::Layer;
+
+            let otlp = self.otlp_config.as_ref().expect("otlp config not set");
+
+            let filter = layers::build_env_filter(None, &otlp.directive)?;
+            let exporter = opentelemetry_otlp::new_exporter()
+                .http()
+                .with_export_config(ExportConfig {
+                    endpoint: otlp.url.clone(),
+                    protocol: otlp.protocol.into(),
+                    timeout: std::time::Duration::from_millis(otlp.timeout),
+                })
+                .with_http_client(reqwest::Client::default());
+
+            let tracer = opentelemetry_otlp::new_pipeline()
+                .tracing()
+                .with_exporter(exporter)
+                .install_batch(opentelemetry_sdk::runtime::Tokio)?
+                .tracer("reth");
+
+            let layer =
+                tracing_opentelemetry::layer().with_tracer(tracer).with_filter(filter).boxed();
+
+            handle.modify(|existing| {
+                *existing = layer;
+            })?;
+        }
+        Ok(())
+    }
+}
+
 /// Trait defining a general interface for logging configuration.
 ///
 /// The `Tracer` trait provides a standardized way to initialize logging configurations
@@ -196,7 +271,7 @@ pub trait Tracer {
     ///  # Returns
     ///  An `eyre::Result` which is `Ok` with an optional `WorkerGuard` if a file layer is used,
     ///  or an `Err` in case of an error during initialization.
-    fn init(self) -> eyre::Result<Option<WorkerGuard>>;
+    fn init(self) -> eyre::Result<TracerHandle>;
 }
 
 impl Tracer for RethTracer {
@@ -210,7 +285,7 @@ impl Tracer for RethTracer {
     ///  # Returns
     ///  An `eyre::Result` which is `Ok` with an optional `WorkerGuard` if a file layer is used,
     ///  or an `Err` in case of an error during initialization.
-    fn init(self) -> eyre::Result<Option<WorkerGuard>> {
+    fn init(self) -> eyre::Result<TracerHandle> {
         let mut layers = Layers::new();
 
         layers.stdout(
@@ -231,9 +306,8 @@ impl Tracer for RethTracer {
         };
 
         #[cfg(feature = "opentelemetry")]
-        if let Some(otlp) = self.otlp {
-            layers.otlp(otlp)?;
-        }
+        let otlp_handle: Option<ReloadableOtlpHandle> =
+            self.otlp.as_ref().map(|_| layers.otlp_placeholder());
 
         // The error is returned if the global default subscriber is already set,
         // so it's safe to ignore it
@@ -244,7 +318,13 @@ impl Tracer for RethTracer {
                     "Tracing subscriber could not be initialized. This may be a reth bug."
                 )
             });
-        Ok(file_guard)
+        Ok(TracerHandle {
+            file_guard,
+            #[cfg(feature = "opentelemetry")]
+            otlp_handle,
+            #[cfg(feature = "opentelemetry")]
+            otlp_config: self.otlp,
+        })
     }
 }
 

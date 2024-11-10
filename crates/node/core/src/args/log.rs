@@ -3,8 +3,8 @@
 use crate::dirs::{LogsDir, PlatformPath};
 use clap::{ArgAction, Args, ValueEnum};
 use reth_tracing::{
-    tracing_subscriber::filter::Directive, FileInfo, FileWorkerGuard, LayerInfo, LogFormat,
-    RethTracer, Tracer,
+    tracing_subscriber::filter::Directive, FileInfo, LayerInfo, LogFormat, RethTracer, Tracer,
+    TracerHandle,
 };
 use std::fmt::{self, Display};
 use tracing::{level_filters::LevelFilter, Level};
@@ -130,8 +130,11 @@ impl LogArgs {
 
     /// Initializes tracing with the configured options from cli args.
     ///
-    /// Returns the file worker guard, and the file name, if a file worker was configured.
-    pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
+    /// If file logging is enabled, the returned handle has a guard that must be
+    /// kept alive to ensure that all logs are flushed to disk. If OTLP is
+    /// enabled, the handle can be used to start the OpenTelemetry layer after
+    /// the tokio runtime is initialized.
+    pub fn init_tracing(&self) -> eyre::Result<TracerHandle> {
         self.tracer().init()
     }
 }

@@ -13,9 +13,12 @@ workspace = true
 [dependencies]
 # reth
 reth-tasks.workspace = true
+reth-tracing = { workspace = true, default-features = false }
 
 # async
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
 
-# misc
-tracing.workspace = true
+[features]
+default = ["opentelemetry"]
+opentelemetry = ["reth-tracing/opentelemetry"]
+

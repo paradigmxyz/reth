@@ -19,7 +19,7 @@ use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_ethereum::{EthExecutorProvider, EthereumNode};
 use reth_node_metrics::recorder::install_prometheus_recorder;
-use reth_tracing::FileWorkerGuard;
+use reth_tracing::TracerHandle;
 use std::{ffi::OsString, fmt, future::Future, sync::Arc};
 use tracing::info;
 
@@ -144,13 +144,14 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
         self.logs.log_file_directory =
             self.logs.log_file_directory.join(self.chain.chain.to_string());
 
-        let _guard = self.init_tracing()?;
+        let trace_handle = self.init_tracing()?;
         info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
 
         // Install the prometheus recorder to be sure to record all metrics
         let _ = install_prometheus_recorder();
 
-        let runner = CliRunner::default();
+        let runner = CliRunner::new(trace_handle);
+
         match self.command {
             Commands::Node(command) => {
                 runner.run_command_until_exit(|ctx| command.execute(ctx, launcher))
@@ -187,11 +188,12 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
 
     /// Initializes tracing with the configured options.
     ///
-    /// If file logging is enabled, this function returns a guard that must be kept alive to ensure
-    /// that all logs are flushed to disk.
-    pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
-        let guard = self.logs.init_tracing()?;
-        Ok(guard)
+    /// If file logging is enabled, the returned handle has a guard that must be
+    /// kept alive to ensure that all logs are flushed to disk. If OTLP is
+    /// enabled, the handle can be used to start the OpenTelemetry layer after
+    /// the tokio runtime is initialized.
+    pub fn init_tracing(&self) -> eyre::Result<TracerHandle> {
+        self.logs.init_tracing()
     }
 }
 
