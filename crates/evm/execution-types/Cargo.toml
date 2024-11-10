@@ -44,9 +44,10 @@ serde = [
 ]
 serde-bincode-compat = [
 	"reth-primitives/serde-bincode-compat",
+	"reth-primitives-traits/serde-bincode-compat",
 	"reth-trie/serde-bincode-compat",
 	"serde_with",
-	"alloy-eips/serde-bincode-compat"
+	"alloy-eips/serde-bincode-compat",
 ]
 std = [
 	"reth-primitives/std",
