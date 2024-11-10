@@ -56,7 +56,7 @@ pub use tx_type::TxType;
 pub mod header;
 #[cfg(any(test, feature = "arbitrary", feature = "test-utils"))]
 pub use header::test_utils;
-pub use header::{Header, HeaderError, SealedHeader};
+pub use header::{BlockHeader, Header, HeaderError, SealedHeader};
 
 /// Bincode-compatible serde implementations for common abstracted types in Reth.
 ///
@@ -73,8 +73,11 @@ pub mod serde_bincode_compat {
 /// Helper trait that requires arbitrary implementation if the feature is enabled.
 #[cfg(feature = "arbitrary")]
 pub trait MaybeArbitrary: for<'a> arbitrary::Arbitrary<'a> {}
+/// Helper trait that requires arbitrary implementation if the feature is enabled.
 #[cfg(not(feature = "arbitrary"))]
 pub trait MaybeArbitrary {}
 
 #[cfg(feature = "arbitrary")]
 impl<T> MaybeArbitrary for T where T: for<'a> arbitrary::Arbitrary<'a> {}
+#[cfg(not(feature = "arbitrary"))]
+impl<T> MaybeArbitrary for T {}

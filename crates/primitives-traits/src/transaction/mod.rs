@@ -27,8 +27,6 @@ pub trait Transaction:
     + Hash
     + Serialize
     + for<'de> Deserialize<'de>
-    + alloy_rlp::Encodable
-    + alloy_rlp::Decodable
     + AlloyTransactionExt
     + MaybeArbitrary
 {
@@ -43,8 +41,6 @@ impl<T> Transaction for T where
         + Hash
         + Serialize
         + for<'de> Deserialize<'de>
-        + alloy_rlp::Encodable
-        + alloy_rlp::Decodable
         + AlloyTransactionExt
         + MaybeArbitrary
 {

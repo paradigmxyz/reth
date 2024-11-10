@@ -843,6 +843,8 @@ impl AlloyTransactionExt for Transaction {
             Self::Eip1559(tx) => tx.signature_hash(),
             Self::Eip4844(tx) => tx.signature_hash(),
             Self::Eip7702(tx) => tx.signature_hash(),
+            #[cfg(feature = "optimism")]
+            _ => todo!("use op type for op"),
         }
     }
 
@@ -850,6 +852,8 @@ impl AlloyTransactionExt for Transaction {
         match self {
             Self::Legacy(_) | Self::Eip2930(_) => false,
             Self::Eip1559(_) | Self::Eip4844(_) | Self::Eip7702(_) => true,
+            #[cfg(feature = "optimism")]
+            _ => todo!("use op type for op"),
         }
     }
 
@@ -860,6 +864,8 @@ impl AlloyTransactionExt for Transaction {
             Self::Eip1559(dynamic_tx) => dynamic_tx.effective_gas_price(base_fee),
             Self::Eip4844(dynamic_tx) => dynamic_tx.effective_gas_price(base_fee),
             Self::Eip7702(dynamic_tx) => dynamic_tx.effective_gas_price(base_fee),
+            #[cfg(feature = "optimism")]
+            _ => todo!("use op type for op"),
         }
     }
 
@@ -871,6 +877,8 @@ impl AlloyTransactionExt for Transaction {
             Self::Eip1559(tx) => tx.size(),
             Self::Eip4844(tx) => tx.size(),
             Self::Eip7702(tx) => tx.size(),
+            #[cfg(feature = "optimism")]
+            _ => todo!("use op type for op"),
         }
     }
 }

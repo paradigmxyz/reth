@@ -1,6 +1,5 @@
-use core::fmt::{Debug, Display};
+use core::fmt;
 
-use alloy_eips::eip2718::Eip2718Error;
 use alloy_primitives::{U64, U8};
 use alloy_rlp::{Decodable, Encodable};
 
@@ -11,11 +10,11 @@ pub trait TxType:
     + PartialEq
     + Eq
     + PartialEq<u8>
-    + TryFrom<u8, Error = Eip2718Error>
-    + TryFrom<u64>
-    + TryFrom<U64>
-    + Debug
-    + Display
+    + TryFrom<u8, Error: fmt::Debug>
+    + TryFrom<u64, Error: fmt::Debug>
+    + TryFrom<U64, Error: fmt::Debug>
+    + fmt::Debug
+    + fmt::Display
     + Clone
     + Copy
     + Default
@@ -33,11 +32,11 @@ impl<T> TxType for T where
         + PartialEq
         + Eq
         + PartialEq<u8>
-        + TryFrom<u8, Error = Eip2718Error>
-        + TryFrom<u64>
-        + TryFrom<U64>
-        + Debug
-        + Display
+        + TryFrom<u8, Error: fmt::Debug>
+        + TryFrom<u64, Error: fmt::Debug>
+        + TryFrom<U64, Error: fmt::Debug>
+        + fmt::Debug
+        + fmt::Display
         + Clone
         + Copy
         + Default
