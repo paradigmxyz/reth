@@ -1,4 +1,4 @@
-use reth_primitives::BlockNumHash;
+use alloy_eips::BlockNumHash;
 
 /// Events emitted by an `ExEx`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -650,7 +650,8 @@ impl ECIES {
         out.extend_from_slice(tag.as_slice());
     }
 
-    /// Extracts the header from slice and returns the body size.
+    /// Reads the `RLPx` header from the slice, setting up the MAC and AES, returning the body
+    /// size contained in the header.
     pub fn read_header(&mut self, data: &mut [u8]) -> Result<usize, ECIESError> {
         // If the data is not large enough to fit the header and mac bytes, return an error
         //
@@ -687,7 +688,7 @@ impl ECIES {
 
     pub fn body_len(&self) -> usize {
         let len = self.body_size.unwrap();
-        (if len % 16 == 0 { len } else { (len / 16 + 1) * 16 }) + 16
+        Self::align_16(len) + 16
     }
 
     #[cfg(test)]
@@ -698,7 +699,7 @@ impl ECIES {
     }
 
     pub fn write_body(&mut self, out: &mut BytesMut, data: &[u8]) {
-        let len = if data.len() % 16 == 0 { data.len() } else { (data.len() / 16 + 1) * 16 };
+        let len = Self::align_16(data.len());
         let old_len = out.len();
         out.resize(old_len + len, 0);
 
@@ -730,6 +731,14 @@ impl ECIES {
         let ret = body;
         self.ingress_aes.as_mut().unwrap().apply_keystream(ret);
         Ok(split_at_mut(ret, size)?.0)
+    }
+
+    /// Returns `num` aligned to 16.
+    ///
+    /// `<https://stackoverflow.com/questions/14561402/how-is-this-size-alignment-working>`
+    #[inline]
+    const fn align_16(num: usize) -> usize {
+        (num + (16 - 1)) & !(16 - 1)
     }
 }
 

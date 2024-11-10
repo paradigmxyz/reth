@@ -25,16 +25,19 @@ pub mod receipt;
 pub use receipt::Receipt;
 
 pub mod transaction;
-pub use transaction::{signed::SignedTransaction, FullTransaction, Transaction};
+pub use transaction::{
+    signed::{FullSignedTx, SignedTransaction},
+    FullTransaction, Transaction,
+};
 
 mod integer_list;
 pub use integer_list::{IntegerList, IntegerListError};
 
 pub mod block;
-pub use block::{body::BlockBody, Block};
+pub use block::{body::BlockBody, Block, FullBlock};
 
 mod withdrawal;
-pub use withdrawal::{Withdrawal, Withdrawals};
+pub use withdrawal::Withdrawal;
 
 mod error;
 pub use error::{GotExpected, GotExpectedBoxed};
@@ -44,6 +47,10 @@ pub use alloy_primitives::{logs_bloom, Log, LogData};
 
 mod storage;
 pub use storage::StorageEntry;
+
+/// Transaction types
+pub mod tx_type;
+pub use tx_type::TxType;
 
 /// Common header types
 pub mod header;

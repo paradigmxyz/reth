@@ -33,7 +33,7 @@ async fn test_session_established_with_highest_version() {
             }
             NetworkEvent::SessionEstablished { peer_id, status, .. } => {
                 assert_eq!(handle1.peer_id(), &peer_id);
-                assert_eq!(status.version, EthVersion::Eth68 as u8);
+                assert_eq!(status.version, EthVersion::Eth68);
             }
             ev => {
                 panic!("unexpected event {ev:?}")
@@ -71,7 +71,7 @@ async fn test_session_established_with_different_capability() {
             }
             NetworkEvent::SessionEstablished { peer_id, status, .. } => {
                 assert_eq!(handle1.peer_id(), &peer_id);
-                assert_eq!(status.version, EthVersion::Eth66 as u8);
+                assert_eq!(status.version, EthVersion::Eth66);
             }
             ev => {
                 panic!("unexpected event: {ev:?}")

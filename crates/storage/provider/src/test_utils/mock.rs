@@ -6,7 +6,10 @@ use crate::{
     StateRootProvider, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_consensus::constants::EMPTY_ROOT_HASH;
-use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
+use alloy_eips::{
+    eip4895::{Withdrawal, Withdrawals},
+    BlockHashOrNumber, BlockId, BlockNumberOrTag,
+};
 use alloy_primitives::{
     keccak256,
     map::{HashMap, HashSet},
@@ -23,7 +26,7 @@ use reth_node_types::NodeTypes;
 use reth_primitives::{
     Account, Block, BlockWithSenders, Bytecode, GotExpected, Header, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash, Withdrawal, Withdrawals,
+    TransactionSignedNoHash,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
@@ -34,6 +37,7 @@ use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, StorageProof,
     TrieInput,
 };
+use reth_trie_db::MerklePatriciaTrie;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
     collections::BTreeMap,
@@ -157,6 +161,7 @@ pub struct MockNode;
 impl NodeTypes for MockNode {
     type Primitives = ();
     type ChainSpec = ChainSpec;
+    type StateCommitment = MerklePatriciaTrie;
 }
 
 impl DatabaseProviderFactory for MockEthProvider {
@@ -461,15 +466,15 @@ impl BlockNumReader for MockEthProvider {
 }
 
 impl BlockIdReader for MockEthProvider {
-    fn pending_block_num_hash(&self) -> ProviderResult<Option<reth_primitives::BlockNumHash>> {
+    fn pending_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
         Ok(None)
     }
 
-    fn safe_block_num_hash(&self) -> ProviderResult<Option<reth_primitives::BlockNumHash>> {
+    fn safe_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
         Ok(None)
     }
 
-    fn finalized_block_num_hash(&self) -> ProviderResult<Option<reth_primitives::BlockNumHash>> {
+    fn finalized_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
         Ok(None)
     }
 }
@@ -758,18 +763,6 @@ impl StateProviderFactory for MockEthProvider {
         Ok(Box::new(self.clone()))
     }
 
-    fn history_by_block_number(&self, _block: BlockNumber) -> ProviderResult<StateProviderBox> {
-        Ok(Box::new(self.clone()))
-    }
-
-    fn history_by_block_hash(&self, _block: BlockHash) -> ProviderResult<StateProviderBox> {
-        Ok(Box::new(self.clone()))
-    }
-
-    fn state_by_block_hash(&self, _block: BlockHash) -> ProviderResult<StateProviderBox> {
-        Ok(Box::new(self.clone()))
-    }
-
     fn state_by_block_number_or_tag(
         &self,
         number_or_tag: BlockNumberOrTag,
@@ -794,6 +787,18 @@ impl StateProviderFactory for MockEthProvider {
             BlockNumberOrTag::Pending => self.pending(),
             BlockNumberOrTag::Number(num) => self.history_by_block_number(num),
         }
+    }
+
+    fn history_by_block_number(&self, _block: BlockNumber) -> ProviderResult<StateProviderBox> {
+        Ok(Box::new(self.clone()))
+    }
+
+    fn history_by_block_hash(&self, _block: BlockHash) -> ProviderResult<StateProviderBox> {
+        Ok(Box::new(self.clone()))
+    }
+
+    fn state_by_block_hash(&self, _block: BlockHash) -> ProviderResult<StateProviderBox> {
+        Ok(Box::new(self.clone()))
     }
 
     fn pending(&self) -> ProviderResult<StateProviderBox> {

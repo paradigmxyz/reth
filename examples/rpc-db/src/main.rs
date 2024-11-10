@@ -16,6 +16,7 @@ use std::{path::Path, sync::Arc};
 
 use reth::{
     api::NodeTypesWithDBAdapter,
+    beacon_consensus::EthBeaconConsensus,
     providers::{
         providers::{BlockchainProvider, StaticFileProvider},
         ProviderFactory,
@@ -66,9 +67,10 @@ async fn main() -> eyre::Result<()> {
         .with_noop_pool()
         .with_noop_network()
         .with_executor(TokioTaskExecutor::default())
-        .with_evm_config(EthEvmConfig::new(spec))
+        .with_evm_config(EthEvmConfig::new(spec.clone()))
         .with_events(TestCanonStateSubscriptions::default())
-        .with_block_executor(EthExecutorProvider::ethereum(provider.chain_spec()));
+        .with_block_executor(EthExecutorProvider::ethereum(provider.chain_spec()))
+        .with_consensus(EthBeaconConsensus::new(spec));
 
     // Pick which namespaces to expose.
     let config = TransportRpcModuleConfig::default().with_http([RethRpcModule::Eth]);

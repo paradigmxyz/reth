@@ -23,7 +23,7 @@ pub struct ExecutionPayloadValidator<ChainSpec> {
     chain_spec: Arc<ChainSpec>,
 }
 
-impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
+impl<ChainSpec> ExecutionPayloadValidator<ChainSpec> {
     /// Create a new validator.
     pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { chain_spec }
@@ -31,10 +31,12 @@ impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
 
     /// Returns the chain spec used by the validator.
     #[inline]
-    pub fn chain_spec(&self) -> &ChainSpec {
+    pub const fn chain_spec(&self) -> &Arc<ChainSpec> {
         &self.chain_spec
     }
+}
 
+impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
     /// Returns true if the Cancun hardfork is active at the given timestamp.
     #[inline]
     fn is_cancun_active_at_timestamp(&self, timestamp: u64) -> bool {

@@ -41,7 +41,7 @@ use revm::{
     primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
     DatabaseCommit,
 };
-use revm_primitives::calc_excess_blob_gas;
+use revm_primitives::{calc_excess_blob_gas, TxEnv};
 use std::sync::Arc;
 use tracing::{debug, trace, warn};
 
@@ -73,7 +73,7 @@ where
         &self,
         config: &PayloadConfig<EthPayloadBuilderAttributes>,
         parent: &Header,
-    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), EvmConfig::Error> {
         let next_attributes = NextBlockEnvAttributes {
             timestamp: config.attributes.timestamp(),
             suggested_fee_recipient: config.attributes.suggested_fee_recipient(),
@@ -97,7 +97,9 @@ where
         &self,
         args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
     ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
-        let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_header);
+        let (cfg_env, block_env) = self
+            .cfg_and_block_env(&args.config, &args.config.parent_header)
+            .map_err(PayloadBuilderError::other)?;
 
         let pool = args.pool.clone();
         default_ethereum_payload(self.evm_config.clone(), args, cfg_env, block_env, |attributes| {
@@ -120,7 +122,9 @@ where
             None,
         );
 
-        let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_header);
+        let (cfg_env, block_env) = self
+            .cfg_and_block_env(&args.config, &args.config.parent_header)
+            .map_err(PayloadBuilderError::other)?;
 
         let pool = args.pool.clone();
 
@@ -157,7 +161,7 @@ where
     let state_provider = client.state_by_block_hash(config.parent_header.hash())?;
     let state = StateProviderDatabase::new(state_provider);
     let mut db =
-        State::builder().with_database_ref(cached_reads.as_db(state)).with_bundle_update().build();
+        State::builder().with_database(cached_reads.as_db_mut(state)).with_bundle_update().build();
     let PayloadConfig { parent_header, extra_data, attributes } = config;
 
     debug!(target: "payload_builder", id=%attributes.id, parent_header = ?parent_header.hash(), parent_number = parent_header.number, "building new payload");
@@ -208,6 +212,13 @@ where
         PayloadBuilderError::Internal(err.into())
     })?;
 
+    let env = EnvWithHandlerCfg::new_with_cfg_env(
+        initialized_cfg.clone(),
+        initialized_block_env.clone(),
+        TxEnv::default(),
+    );
+    let mut evm = evm_config.evm_with_env(&mut db, env);
+
     let mut receipts = Vec::new();
     while let Some(pool_tx) = best_txs.next() {
         // ensure we still have capacity for this transaction
@@ -242,14 +253,8 @@ where
             }
         }
 
-        let env = EnvWithHandlerCfg::new_with_cfg_env(
-            initialized_cfg.clone(),
-            initialized_block_env.clone(),
-            evm_config.tx_env(tx.as_signed(), tx.signer()),
-        );
-
-        // Configure the environment for the block.
-        let mut evm = evm_config.evm_with_env(&mut db, env);
+        // Configure the environment for the tx.
+        *evm.tx_mut() = evm_config.tx_env(tx.as_signed(), tx.signer());
 
         let ResultAndState { result, state } = match evm.transact() {
             Ok(res) => res,
@@ -275,10 +280,9 @@ where
                 }
             }
         };
-        // drop evm so db is released.
-        drop(evm);
+
         // commit changes
-        db.commit(state);
+        evm.db_mut().commit(state);
 
         // add to the total blob gas used if the transaction successfully executed
         if let Some(blob_tx) = tx.transaction.as_eip4844() {
@@ -316,6 +320,9 @@ where
         executed_senders.push(tx.signer());
         executed_txs.push(tx.into_signed());
     }
+
+    // Release db
+    drop(evm);
 
     // check if we have a better block
     if !is_better_payload(best_payload.as_ref(), total_fees) {
@@ -368,8 +375,7 @@ where
     // calculate the state root
     let hashed_state = HashedPostState::from_bundle_state(&execution_outcome.state().state);
     let (state_root, trie_output) = {
-        let state_provider = db.database.0.inner.borrow_mut();
-        state_provider.db.state_root_with_updates(hashed_state.clone()).inspect_err(|err| {
+        db.database.inner().state_root_with_updates(hashed_state.clone()).inspect_err(|err| {
             warn!(target: "payload_builder",
                 parent_hash=%parent_header.hash(),
                 %err,
@@ -436,12 +442,12 @@ where
         body: BlockBody { transactions: executed_txs, ommers: vec![], withdrawals },
     };
 
-    let sealed_block = block.seal_slow();
+    let sealed_block = Arc::new(block.seal_slow());
     debug!(target: "payload_builder", ?sealed_block, "sealed built block");
 
     // create the executed block data
     let executed = ExecutedBlock {
-        block: Arc::new(sealed_block.clone()),
+        block: sealed_block.clone(),
         senders: Arc::new(executed_senders),
         execution_output: Arc::new(execution_outcome),
         hashed_state: Arc::new(hashed_state),
@@ -452,7 +458,7 @@ where
         EthBuiltPayload::new(attributes.id, sealed_block, total_fees, Some(executed), requests);
 
     // extend the payload with the blob sidecars from the executed txs
-    payload.extend_sidecars(blob_sidecars);
+    payload.extend_sidecars(blob_sidecars.into_iter().map(Arc::unwrap_or_clone));
 
     Ok(BuildOutcome::Better { payload, cached_reads })
 }

@@ -113,9 +113,10 @@ mod tests {
         HeadersDirection,
     };
     use alloy_consensus::TxLegacy;
-    use alloy_primitives::{hex, Parity, TxKind, U256};
+    use alloy_eips::BlockHashOrNumber;
+    use alloy_primitives::{hex, PrimitiveSignature as Signature, TxKind, U256};
     use alloy_rlp::{Decodable, Encodable};
-    use reth_primitives::{BlockHashOrNumber, Header, Signature, Transaction, TransactionSigned};
+    use reth_primitives::{Header, Transaction, TransactionSigned};
     use std::str::FromStr;
 
     use super::BlockBody;
@@ -372,7 +373,7 @@ mod tests {
                         }), Signature::new(
                                 U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12").unwrap(),
                                 U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10").unwrap(),
-                                Parity::Parity(false),
+                                false,
                             ),
                         ),
                         TransactionSigned::from_transaction_and_signature(Transaction::Legacy(TxLegacy {
@@ -386,7 +387,7 @@ mod tests {
                         }), Signature::new(
                                 U256::from_str("0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
                                 U256::from_str("0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
-                                Parity::Parity(false),
+                                false,
                             ),
                         ),
                     ],
@@ -445,7 +446,7 @@ mod tests {
                             Signature::new(
                                 U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12").unwrap(),
                                 U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10").unwrap(),
-                                Parity::Eip155(37),
+                                false,
                             ),
                         ),
                         TransactionSigned::from_transaction_and_signature(
@@ -461,7 +462,7 @@ mod tests {
                             Signature::new(
                                 U256::from_str("0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
                                 U256::from_str("0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
-                                Parity::Eip155(37),
+                                false,
                             ),
                         ),
                     ],

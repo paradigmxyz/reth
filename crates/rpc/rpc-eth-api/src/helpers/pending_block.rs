@@ -10,7 +10,7 @@ use alloy_eips::{
     eip4844::MAX_DATA_GAS_PER_BLOCK, eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE,
 };
 use alloy_primitives::{BlockNumber, B256, U256};
-use alloy_rpc_types::BlockNumberOrTag;
+use alloy_rpc_types_eth::BlockNumberOrTag;
 use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::{
@@ -399,9 +399,7 @@ pub trait LoadPendingBlock:
             execution_outcome.block_logs_bloom(block_number).expect("Block is present");
 
         // calculate the state root
-        let state_provider = &db.database;
-        let state_root =
-            state_provider.state_root(hashed_state).map_err(Self::Error::from_eth_err)?;
+        let state_root = db.database.state_root(hashed_state).map_err(Self::Error::from_eth_err)?;
 
         // create the block header
         let transactions_root = calculate_transaction_root(&executed_txs);
