@@ -1,22 +1,21 @@
-use crate::{PayloadEvents, PayloadKind, PayloadTypes};
-use alloy_eips::eip7685::Requests;
-use alloy_primitives::{Address, B256, U256};
-use alloy_rpc_types::{
-    engine::{PayloadAttributes as EthPayloadAttributes, PayloadId},
-    Withdrawal,
+use crate::{PayloadBuilderError, PayloadEvents, PayloadKind, PayloadTypes};
+use alloy_eips::{
+    eip4895::{Withdrawal, Withdrawals},
+    eip7685::Requests,
 };
-use op_alloy_rpc_types_engine::OpPayloadAttributes;
+use alloy_primitives::{Address, B256, U256};
+use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
 use reth_chain_state::ExecutedBlock;
-use reth_primitives::{SealedBlock, Withdrawals};
+use reth_primitives::SealedBlock;
 use tokio::sync::oneshot;
 
 /// A type that can request, subscribe to and resolve payloads.
 #[async_trait::async_trait]
-pub trait PayloadBuilder: Send + Unpin {
+pub trait PayloadBuilder: Send + Sync + Unpin {
     /// The Payload type for the builder.
     type PayloadType: PayloadTypes;
     /// The error type returned by the builder.
-    type Error;
+    type Error: Into<PayloadBuilderError>;
 
     /// Sends a message to the service to start building a new payload for the given payload.
     ///
@@ -146,7 +145,8 @@ impl PayloadAttributes for EthPayloadAttributes {
     }
 }
 
-impl PayloadAttributes for OpPayloadAttributes {
+#[cfg(feature = "op")]
+impl PayloadAttributes for op_alloy_rpc_types_engine::OpPayloadAttributes {
     fn timestamp(&self) -> u64 {
         self.payload_attributes.timestamp
     }

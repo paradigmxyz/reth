@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use alloy_consensus::TxLegacy;
-use alloy_primitives::{Signature, U256};
+use alloy_primitives::{PrimitiveSignature as Signature, U256};
 use futures::StreamExt;
 use rand::thread_rng;
 use reth_network::{test_utils::Testnet, NetworkEvent, NetworkEventListenerProvider};

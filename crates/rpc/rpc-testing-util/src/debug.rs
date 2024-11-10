@@ -8,8 +8,7 @@ use std::{
 
 use alloy_eips::BlockId;
 use alloy_primitives::{TxHash, B256};
-use alloy_rpc_types::{Block, Transaction};
-use alloy_rpc_types_eth::transaction::TransactionRequest;
+use alloy_rpc_types_eth::{transaction::TransactionRequest, Block, Transaction};
 use alloy_rpc_types_trace::{
     common::TraceResult,
     geth::{GethDebugTracerType, GethDebugTracingOptions, GethTrace},

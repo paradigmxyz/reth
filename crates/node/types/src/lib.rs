@@ -10,6 +10,7 @@
 
 pub use reth_primitives_traits::{Block, BlockBody};
 
+use core::fmt;
 use std::marker::PhantomData;
 
 use reth_chainspec::EthChainSpec;
@@ -21,16 +22,22 @@ use reth_engine_primitives::EngineTypes;
 use reth_trie_db::StateCommitment;
 
 /// Configures all the primitive types of the node.
-pub trait NodePrimitives {
+pub trait NodePrimitives: Send + Sync + Unpin + Clone + Default + fmt::Debug {
     /// Block primitive.
-    type Block;
+    type Block: Send + Sync + Unpin + Clone + Default + fmt::Debug + 'static;
+    /// Signed version of the transaction type.
+    type SignedTx: Send + Sync + Unpin + Clone + Default + fmt::Debug + 'static;
     /// Transaction envelope type ID.
-    type TxType;
+    type TxType: Send + Sync + Unpin + Clone + Default + fmt::Debug + 'static;
+    /// A receipt.
+    type Receipt: Send + Sync + Unpin + Clone + Default + fmt::Debug + 'static;
 }
 
 impl NodePrimitives for () {
     type Block = ();
+    type SignedTx = ();
     type TxType = ();
+    type Receipt = ();
 }
 
 /// The type that configures the essential types of an Ethereum-like node.

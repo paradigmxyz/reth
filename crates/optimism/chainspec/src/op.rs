@@ -7,7 +7,7 @@ use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT;
 use alloy_primitives::{b256, U256};
 use reth_chainspec::{once_cell_set, BaseFeeParams, BaseFeeParamsKind, ChainSpec};
 use reth_ethereum_forks::EthereumHardfork;
-use reth_optimism_forks::OptimismHardfork;
+use reth_optimism_forks::OpHardfork;
 
 use crate::{LazyLock, OpChainSpec};
 
@@ -24,11 +24,11 @@ pub static OP_MAINNET: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
                 "7ca38a1916c42007829c55e69d3e9a73265554b586a499015373241b8a3fa48b"
             )),
             paris_block_and_final_difficulty: Some((0, U256::from(0))),
-            hardforks: OptimismHardfork::op_mainnet(),
+            hardforks: OpHardfork::op_mainnet(),
             base_fee_params: BaseFeeParamsKind::Variable(
                 vec![
                     (EthereumHardfork::London.boxed(), BaseFeeParams::optimism()),
-                    (OptimismHardfork::Canyon.boxed(), BaseFeeParams::optimism_canyon()),
+                    (OpHardfork::Canyon.boxed(), BaseFeeParams::optimism_canyon()),
                 ]
                 .into(),
             ),

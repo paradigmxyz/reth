@@ -1,7 +1,8 @@
 //! Transaction pool errors
 
+use alloy_eips::eip4844::BlobTransactionValidationError;
 use alloy_primitives::{Address, TxHash, U256};
-use reth_primitives::{BlobTransactionValidationError, InvalidTransactionError};
+use reth_primitives::InvalidTransactionError;
 
 /// Transaction pool result type.
 pub type PoolResult<T> = Result<T, PoolError>;
