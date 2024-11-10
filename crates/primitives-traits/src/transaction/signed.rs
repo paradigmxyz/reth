@@ -2,17 +2,24 @@
 
 use alloc::fmt;
 use core::hash::Hash;
-use reth_codecs::Compact;
 
-use alloy_consensus::Transaction;
-use alloy_eips::eip2718::{Decodable2718, Encodable2718};
-use alloy_primitives::{keccak256, Address, PrimitiveSignature as Signature, TxHash, B256};
+use alloy_eips::{
+    eip2718::{Decodable2718, Encodable2718},
+    eip2930::AccessList,
+    eip7702::SignedAuthorization,
+};
+use alloy_primitives::{
+    keccak256, Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
+};
+use reth_codecs::Compact;
 use revm_primitives::TxEnv;
 
-/// Helper trait that unifies all behaviour required by block to support full node operations.
-pub trait FullSignedTx: SignedTransaction<Transaction: Compact> + Compact {}
+use crate::{FullTransaction, Transaction};
 
-impl<T> FullSignedTx for T where T: SignedTransaction<Transaction: Compact> + Compact {}
+/// Helper trait that unifies all behaviour required by block to support full node operations.
+pub trait FullSignedTx: SignedTransaction<Transaction: FullTransaction> + Compact {}
+
+impl<T> FullSignedTx for T where T: SignedTransaction<Transaction: FullTransaction> + Compact {}
 
 /// A signed transaction.
 pub trait SignedTransaction:
@@ -29,6 +36,7 @@ pub trait SignedTransaction:
     + alloy_rlp::Decodable
     + Encodable2718
     + Decodable2718
+    + Transaction
 {
     /// Transaction type that is signed.
     type Transaction: Transaction;
@@ -74,4 +82,92 @@ pub trait SignedTransaction:
 
     /// Fills [`TxEnv`] with an [`Address`] and transaction.
     fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address);
+}
+
+impl<T: SignedTransaction> alloy_consensus::Transaction for T {
+    fn chain_id(&self) -> Option<ChainId> {
+        self.transaction().chain_id()
+    }
+
+    fn nonce(&self) -> u64 {
+        self.transaction().nonce()
+    }
+
+    fn gas_limit(&self) -> u64 {
+        self.transaction().gas_limit()
+    }
+
+    fn gas_price(&self) -> Option<u128> {
+        self.transaction().gas_price()
+    }
+
+    fn max_fee_per_gas(&self) -> u128 {
+        self.transaction().max_fee_per_gas()
+    }
+
+    fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        self.transaction().max_priority_fee_per_gas()
+    }
+
+    fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        self.transaction().max_fee_per_blob_gas()
+    }
+
+    fn priority_fee_or_price(&self) -> u128 {
+        self.transaction().priority_fee_or_price()
+    }
+
+    fn kind(&self) -> TxKind {
+        self.transaction().kind()
+    }
+
+    fn value(&self) -> U256 {
+        self.transaction().value()
+    }
+
+    fn input(&self) -> &Bytes {
+        self.transaction().input()
+    }
+
+    fn ty(&self) -> u8 {
+        self.transaction().ty()
+    }
+
+    fn access_list(&self) -> Option<&AccessList> {
+        self.transaction().access_list()
+    }
+
+    fn blob_versioned_hashes(&self) -> Option<&[B256]> {
+        self.transaction().blob_versioned_hashes()
+    }
+
+    fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
+        self.transaction().authorization_list()
+    }
+}
+
+impl<T: SignedTransaction> Transaction for T {
+    fn signature_hash(&self) -> B256 {
+        self.transaction().signature_hash()
+    }
+
+    fn kind(&self) -> TxKind {
+        self.transaction().kind()
+    }
+
+    fn is_dynamic_fee(&self) -> bool {
+        self.transaction().is_dynamic_fee()
+    }
+
+    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        self.transaction().effective_gas_price(base_fee)
+    }
+
+    fn encode_without_signature(&self, out: &mut dyn bytes::BufMut) {
+        self.transaction().encode_without_signature(out)
+    }
+
+    fn size(&self) -> usize {
+        self.transaction().size()
+    }
 }
