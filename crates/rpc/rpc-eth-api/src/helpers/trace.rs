@@ -4,7 +4,7 @@ use std::{fmt::Display, sync::Arc};
 
 use crate::{FromEvmError, RpcNodeCore};
 use alloy_primitives::B256;
-use alloy_rpc_types::{BlockId, TransactionInfo};
+use alloy_rpc_types_eth::{BlockId, TransactionInfo};
 use futures::Future;
 use reth_chainspec::ChainSpecProvider;
 use reth_evm::{system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv};

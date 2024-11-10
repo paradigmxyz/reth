@@ -1755,8 +1755,6 @@ pub mod serde_bincode_compat {
         TxEip4844,
     };
     use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
-    #[cfg(feature = "optimism")]
-    use op_alloy_consensus::serde_bincode_compat::TxDeposit;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -1784,8 +1782,7 @@ pub mod serde_bincode_compat {
         Eip4844(Cow<'a, TxEip4844>),
         Eip7702(TxEip7702<'a>),
         #[cfg(feature = "optimism")]
-        #[cfg(feature = "optimism")]
-        Deposit(TxDeposit<'a>),
+        Deposit(op_alloy_consensus::serde_bincode_compat::TxDeposit<'a>),
     }
 
     impl<'a> From<&'a super::Transaction> for Transaction<'a> {
@@ -1797,7 +1794,9 @@ pub mod serde_bincode_compat {
                 super::Transaction::Eip4844(tx) => Self::Eip4844(Cow::Borrowed(tx)),
                 super::Transaction::Eip7702(tx) => Self::Eip7702(TxEip7702::from(tx)),
                 #[cfg(feature = "optimism")]
-                super::Transaction::Deposit(tx) => Self::Deposit(TxDeposit::from(tx)),
+                super::Transaction::Deposit(tx) => {
+                    Self::Deposit(op_alloy_consensus::serde_bincode_compat::TxDeposit::from(tx))
+                }
             }
         }
     }
@@ -1900,7 +1899,6 @@ pub mod serde_bincode_compat {
     #[cfg(test)]
     mod tests {
         use super::super::{serde_bincode_compat, Transaction, TransactionSigned};
-
         use arbitrary::Arbitrary;
         use rand::Rng;
         use reth_testing_utils::generators;

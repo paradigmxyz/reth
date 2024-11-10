@@ -2,7 +2,7 @@ use alloy_consensus::Transaction;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_network::{ReceiptResponse, TransactionResponse};
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
-use alloy_rpc_types::{BlockTransactions, Header, TransactionReceipt};
+use alloy_rpc_types_eth::{BlockTransactions, Header, TransactionReceipt};
 use alloy_rpc_types_trace::{
     otterscan::{
         BlockDetails, ContractCreator, InternalOperation, OperationType, OtsBlockTransactions,

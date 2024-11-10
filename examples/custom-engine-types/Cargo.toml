@@ -6,6 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+# reth
 reth.workspace = true
 reth-chainspec.workspace = true
 reth-node-api.workspace = true
@@ -17,12 +18,20 @@ reth-ethereum-payload-builder.workspace = true
 reth-node-ethereum = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
 reth-trie-db.workspace = true
+reth-node-types.workspace = true
+
+# ethereum
 alloy-genesis.workspace = true
 alloy-rpc-types = { workspace = true, features = ["engine"] }
 alloy-primitives.workspace = true
-reth-node-types.workspace = true
+alloy-eips.workspace = true
 
-eyre.workspace = true
+# async
 tokio.workspace = true
-thiserror.workspace = true
+
+# io
 serde.workspace = true
+
+# misc
+eyre.workspace = true
+thiserror.workspace = true

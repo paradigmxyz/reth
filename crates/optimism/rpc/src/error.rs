@@ -1,6 +1,6 @@
 //! RPC errors specific to OP.
 
-use alloy_rpc_types::error::EthRpcErrorCode;
+use alloy_rpc_types_eth::error::EthRpcErrorCode;
 use jsonrpsee_types::error::INTERNAL_ERROR_CODE;
 use reth_optimism_evm::OpBlockExecutionError;
 use reth_primitives::revm_primitives::{InvalidTransaction, OptimismInvalidTransaction};

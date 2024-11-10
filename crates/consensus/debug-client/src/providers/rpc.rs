@@ -1,7 +1,7 @@
 use crate::BlockProvider;
 use alloy_eips::BlockNumberOrTag;
 use alloy_provider::{Provider, ProviderBuilder};
-use alloy_rpc_types::{Block, BlockTransactionsKind};
+use alloy_rpc_types_eth::{Block, BlockTransactionsKind};
 use futures::StreamExt;
 use tokio::sync::mpsc::Sender;
 

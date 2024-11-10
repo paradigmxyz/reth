@@ -19,18 +19,22 @@ use reth_db_api::{
     Database,
 };
 use reth_engine_primitives::EngineTypes;
+pub use reth_primitives_traits::{Block, BlockBody};
 use reth_trie_db::StateCommitment;
 
 /// Configures all the primitive types of the node.
 pub trait NodePrimitives: Send + Sync + Default + fmt::Debug + Clone + Unpin {
     /// Block primitive.
     type Block: Send + Sync + Default + fmt::Debug + Clone + Unpin;
+    /// Signed version of the transaction type.
+    type SignedTx: Send + Sync + Default + fmt::Debug + Clone + Unpin;
     /// A receipt.
     type Receipt: Send + Sync + Default + fmt::Debug + Clone + Unpin;
 }
 
 impl NodePrimitives for () {
     type Block = ();
+    type SignedTx = ();
     type Receipt = ();
 }
 
@@ -40,6 +44,7 @@ pub struct AnyPrimitives;
 
 impl NodePrimitives for AnyPrimitives {
     type Block = reth_primitives::Block;
+    type SignedTx = reth_primitives::TransactionSigned;
     type Receipt = reth_primitives::Receipt;
 }
 

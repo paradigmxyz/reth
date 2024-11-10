@@ -1,7 +1,6 @@
 //! Traits for configuring a node.
 
-use std::{future::Future, marker::PhantomData};
-
+use crate::ConfigureEvm;
 use alloy_rpc_types_engine::JwtSecret;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_consensus::Consensus;
@@ -9,13 +8,12 @@ use reth_evm::execute::BlockExecutorProvider;
 use reth_network_api::FullNetwork;
 use reth_node_core::node_config::NodeConfig;
 use reth_node_types::{NodeTypes, NodeTypesWithDB, NodeTypesWithEngine};
-use reth_payload_builder::PayloadBuilderHandle;
+use reth_payload_primitives::PayloadBuilder;
 use reth_primitives::Header;
 use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::TransactionPool;
-
-use crate::ConfigureEvm;
+use std::{future::Future, marker::PhantomData};
 
 /// A helper trait that is downstream of the [`NodeTypesWithEngine`] trait and adds stateful
 /// components to the node.
@@ -63,6 +61,9 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     /// Network API.
     type Network: FullNetwork;
 
+    /// Builds new blocks.
+    type PayloadBuilder: PayloadBuilder + Clone;
+
     /// Returns the transaction pool of the node.
     fn pool(&self) -> &Self::Pool;
 
@@ -79,9 +80,7 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     fn network(&self) -> &Self::Network;
 
     /// Returns the handle to the payload builder service.
-    fn payload_builder(
-        &self,
-    ) -> &PayloadBuilderHandle<<Self::Types as NodeTypesWithEngine>::Engine>;
+    fn payload_builder(&self) -> &Self::PayloadBuilder;
 
     /// Returns the provider of the node.
     fn provider(&self) -> &Self::Provider;

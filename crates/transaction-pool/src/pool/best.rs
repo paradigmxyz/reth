@@ -1,10 +1,12 @@
 use crate::{
     identifier::{SenderId, TransactionId},
     pool::pending::PendingTransaction,
-    PoolTransaction, TransactionOrdering, ValidPoolTransaction,
+    PayloadTransactions, PoolTransaction, TransactionOrdering, ValidPoolTransaction,
 };
+use alloy_consensus::Transaction;
 use alloy_primitives::Address;
 use core::fmt;
+use reth_primitives::TransactionSignedEcRecovered;
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet, VecDeque},
     sync::Arc,
@@ -48,7 +50,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactionsWithFees<T> {
     fn next(&mut self) -> Option<Self::Item> {
         // find the next transaction that satisfies the base fee
         loop {
-            let best = self.best.next()?;
+            let best = Iterator::next(&mut self.best)?;
             // If both the base fee and blob fee (if applicable for EIP-4844) are satisfied, return
             // the transaction
             if best.transaction.max_fee_per_gas() >= self.base_fee as u128 &&
@@ -205,6 +207,49 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
     }
 }
 
+/// Wrapper struct that allows to convert `BestTransactions` (used in tx pool) to
+/// `PayloadTransactions` (used in block composition).
+#[derive(Debug)]
+pub struct BestPayloadTransactions<T, I>
+where
+    T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
+    I: Iterator<Item = Arc<ValidPoolTransaction<T>>>,
+{
+    invalid: HashSet<Address>,
+    best: I,
+}
+
+impl<T, I> BestPayloadTransactions<T, I>
+where
+    T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
+    I: Iterator<Item = Arc<ValidPoolTransaction<T>>>,
+{
+    /// Create a new `BestPayloadTransactions` with the given iterator.
+    pub fn new(best: I) -> Self {
+        Self { invalid: Default::default(), best }
+    }
+}
+
+impl<T, I> PayloadTransactions for BestPayloadTransactions<T, I>
+where
+    T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
+    I: Iterator<Item = Arc<ValidPoolTransaction<T>>>,
+{
+    fn next(&mut self, _ctx: ()) -> Option<TransactionSignedEcRecovered> {
+        loop {
+            let tx = self.best.next()?;
+            if self.invalid.contains(&tx.sender()) {
+                continue
+            }
+            return Some(tx.to_recovered_transaction())
+        }
+    }
+
+    fn mark_invalid(&mut self, sender: Address, _nonce: u64) {
+        self.invalid.insert(sender);
+    }
+}
+
 /// A [`BestTransactions`](crate::traits::BestTransactions) implementation that filters the
 /// transactions of iter with predicate.
 ///
@@ -350,6 +395,130 @@ where
     }
 }
 
+/// An implementation of [`crate::traits::PayloadTransactions`] that yields
+/// a pre-defined set of transactions.
+///
+/// This is useful to put a sequencer-specified set of transactions into the block
+/// and compose it with the rest of the transactions.
+#[derive(Debug)]
+pub struct PayloadTransactionsFixed<T> {
+    transactions: Vec<T>,
+    index: usize,
+}
+
+impl<T> PayloadTransactionsFixed<T> {
+    /// Constructs a new [`PayloadTransactionsFixed`].
+    pub fn new(transactions: Vec<T>) -> Self {
+        Self { transactions, index: Default::default() }
+    }
+
+    /// Constructs a new [`PayloadTransactionsFixed`] with a single transaction.
+    pub fn single(transaction: T) -> Self {
+        Self { transactions: vec![transaction], index: Default::default() }
+    }
+}
+
+impl PayloadTransactions for PayloadTransactionsFixed<TransactionSignedEcRecovered> {
+    fn next(&mut self, _ctx: ()) -> Option<TransactionSignedEcRecovered> {
+        (self.index < self.transactions.len()).then(|| {
+            let tx = self.transactions[self.index].clone();
+            self.index += 1;
+            tx
+        })
+    }
+
+    fn mark_invalid(&mut self, _sender: Address, _nonce: u64) {}
+}
+
+/// Wrapper over [`crate::traits::PayloadTransactions`] that combines transactions from multiple
+/// `PayloadTransactions` iterators and keeps track of the gas for both of iterators.
+///
+/// We can't use [`Iterator::chain`], because:
+/// (a) we need to propagate the `mark_invalid` and `no_updates`
+/// (b) we need to keep track of the gas
+///
+/// Notes that [`PayloadTransactionsChain`] fully drains the first iterator
+/// before moving to the second one.
+///
+/// If the `before` iterator has transactions that are not fitting into the block,
+/// the after iterator will get propagated a `mark_invalid` call for each of them.
+#[derive(Debug)]
+pub struct PayloadTransactionsChain<B: PayloadTransactions, A: PayloadTransactions> {
+    /// Iterator that will be used first
+    before: B,
+    /// Allowed gas for the transactions from `before` iterator. If `None`, no gas limit is
+    /// enforced.
+    before_max_gas: Option<u64>,
+    /// Gas used by the transactions from `before` iterator
+    before_gas: u64,
+    /// Iterator that will be used after `before` iterator
+    after: A,
+    /// Allowed gas for the transactions from `after` iterator. If `None`, no gas limit is
+    /// enforced.
+    after_max_gas: Option<u64>,
+    /// Gas used by the transactions from `after` iterator
+    after_gas: u64,
+}
+
+impl<B: PayloadTransactions, A: PayloadTransactions> PayloadTransactionsChain<B, A> {
+    /// Constructs a new [`PayloadTransactionsChain`].
+    pub fn new(
+        before: B,
+        before_max_gas: Option<u64>,
+        after: A,
+        after_max_gas: Option<u64>,
+    ) -> Self {
+        Self {
+            before,
+            before_max_gas,
+            before_gas: Default::default(),
+            after,
+            after_max_gas,
+            after_gas: Default::default(),
+        }
+    }
+}
+
+impl<B, A> PayloadTransactions for PayloadTransactionsChain<B, A>
+where
+    B: PayloadTransactions,
+    A: PayloadTransactions,
+{
+    fn next(&mut self, ctx: ()) -> Option<TransactionSignedEcRecovered> {
+        while let Some(tx) = self.before.next(ctx) {
+            if let Some(before_max_gas) = self.before_max_gas {
+                if self.before_gas + tx.transaction.gas_limit() <= before_max_gas {
+                    self.before_gas += tx.transaction.gas_limit();
+                    return Some(tx);
+                }
+                self.before.mark_invalid(tx.signer(), tx.transaction.nonce());
+                self.after.mark_invalid(tx.signer(), tx.transaction.nonce());
+            } else {
+                return Some(tx);
+            }
+        }
+
+        while let Some(tx) = self.after.next(ctx) {
+            if let Some(after_max_gas) = self.after_max_gas {
+                if self.after_gas + tx.transaction.gas_limit() <= after_max_gas {
+                    self.after_gas += tx.transaction.gas_limit();
+                    return Some(tx);
+                }
+                self.after.mark_invalid(tx.signer(), tx.transaction.nonce());
+            } else {
+                return Some(tx);
+            }
+        }
+
+        None
+    }
+
+    fn mark_invalid(&mut self, sender: Address, nonce: u64) {
+        self.before.mark_invalid(sender, nonce);
+        self.after.mark_invalid(sender, nonce);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -428,9 +597,9 @@ mod tests {
             dyn crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<MockTransaction>>>,
         > = Box::new(pool.best());
 
-        let tx = best.next().unwrap();
-        best.mark_invalid(&tx);
-        assert!(best.next().is_none());
+        let tx = Iterator::next(&mut best).unwrap();
+        crate::traits::BestTransactions::mark_invalid(&mut *best, &tx);
+        assert!(Iterator::next(&mut best).is_none());
     }
 
     #[test]
@@ -737,4 +906,119 @@ mod tests {
             assert_eq!(tx.nonce() % 2, 0);
         }
     }
+
+    #[test]
+    fn test_best_transactions_prioritized_senders() {
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        // Add 5 plain transactions from different senders with increasing gas price
+        for gas_price in 0..5 {
+            let tx = MockTransaction::eip1559().with_gas_price(gas_price);
+            let valid_tx = f.validated(tx);
+            pool.add_transaction(Arc::new(valid_tx), 0);
+        }
+
+        // Add another transaction with 0 gas price that's going to be prioritized by sender
+        let prioritized_tx = MockTransaction::eip1559().with_gas_price(0);
+        let valid_prioritized_tx = f.validated(prioritized_tx.clone());
+        pool.add_transaction(Arc::new(valid_prioritized_tx), 0);
+
+        let prioritized_senders = HashSet::from([prioritized_tx.sender()]);
+        let best =
+            BestTransactionsWithPrioritizedSenders::new(prioritized_senders, 200, pool.best());
+
+        // Verify that the prioritized transaction is returned first
+        // and the rest are returned in the reverse order of gas price
+        let mut iter = best.into_iter();
+        let top_of_block_tx = iter.next().unwrap();
+        assert_eq!(top_of_block_tx.max_fee_per_gas(), 0);
+        assert_eq!(top_of_block_tx.sender(), prioritized_tx.sender());
+        for gas_price in (0..5).rev() {
+            assert_eq!(iter.next().unwrap().max_fee_per_gas(), gas_price);
+        }
+
+        // TODO: Test that gas limits for prioritized transactions are respected
+    }
+
+    #[test]
+    fn test_best_transactions_chained_iterators() {
+        let mut priority_pool = PendingPool::new(MockOrdering::default());
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        // Block composition
+        // ===
+        // (1) up to 100 gas: custom top-of-block transaction
+        // (2) up to 100 gas: transactions from the priority pool
+        // (3) up to 200 gas: only transactions from address A
+        // (4) up to 200 gas: only transactions from address B
+        // (5) until block gas limit: all transactions from the main pool
+
+        // Notes:
+        // - If prioritized addresses overlap, a single transaction will be prioritized twice and
+        //   therefore use the per-segment gas limit twice.
+        // - Priority pool and main pool must synchronize between each other to make sure there are
+        //   no conflicts for the same nonce. For example, in this scenario, pools can't reject
+        //   transactions with seemingly incorrect nonces, because previous transactions might be in
+        //   the other pool.
+
+        let address_top_of_block = Address::random();
+        let address_in_priority_pool = Address::random();
+        let address_a = Address::random();
+        let address_b = Address::random();
+        let address_regular = Address::random();
+
+        // Add transactions to the main pool
+        {
+            let prioritized_tx_a =
+                MockTransaction::eip1559().with_gas_price(5).with_sender(address_a);
+            // without our custom logic, B would be prioritized over A due to gas price:
+            let prioritized_tx_b =
+                MockTransaction::eip1559().with_gas_price(10).with_sender(address_b);
+            let regular_tx =
+                MockTransaction::eip1559().with_gas_price(15).with_sender(address_regular);
+            pool.add_transaction(Arc::new(f.validated(prioritized_tx_a)), 0);
+            pool.add_transaction(Arc::new(f.validated(prioritized_tx_b)), 0);
+            pool.add_transaction(Arc::new(f.validated(regular_tx)), 0);
+        }
+
+        // Add transactions to the priority pool
+        {
+            let prioritized_tx =
+                MockTransaction::eip1559().with_gas_price(0).with_sender(address_in_priority_pool);
+            let valid_prioritized_tx = f.validated(prioritized_tx);
+            priority_pool.add_transaction(Arc::new(valid_prioritized_tx), 0);
+        }
+
+        let mut block = PayloadTransactionsChain::new(
+            PayloadTransactionsFixed::single(
+                MockTransaction::eip1559().with_sender(address_top_of_block).into(),
+            ),
+            Some(100),
+            PayloadTransactionsChain::new(
+                BestPayloadTransactions::new(priority_pool.best()),
+                Some(100),
+                BestPayloadTransactions::new(BestTransactionsWithPrioritizedSenders::new(
+                    HashSet::from([address_a]),
+                    200,
+                    BestTransactionsWithPrioritizedSenders::new(
+                        HashSet::from([address_b]),
+                        200,
+                        pool.best(),
+                    ),
+                )),
+                None,
+            ),
+            None,
+        );
+
+        assert_eq!(block.next(()).unwrap().signer(), address_top_of_block);
+        assert_eq!(block.next(()).unwrap().signer(), address_in_priority_pool);
+        assert_eq!(block.next(()).unwrap().signer(), address_a);
+        assert_eq!(block.next(()).unwrap().signer(), address_b);
+        assert_eq!(block.next(()).unwrap().signer(), address_regular);
+    }
+
+    // TODO: Same nonce test
 }

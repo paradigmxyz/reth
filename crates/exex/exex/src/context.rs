@@ -97,10 +97,7 @@ where
     }
 
     /// Returns the handle to the payload builder service.
-    pub fn payload_builder(
-        &self,
-    ) -> &reth_payload_builder::PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>
-    {
+    pub fn payload_builder(&self) -> &Node::PayloadBuilder {
         self.components.payload_builder()
     }
 
