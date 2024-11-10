@@ -7,7 +7,10 @@ use crate::{
     StageCheckpointReader, StateProviderBox, StateProviderFactory, StaticFileProviderFactory,
     TransactionVariant, TransactionsProvider, TreeViewer, WithdrawalsProvider,
 };
-use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
+use alloy_eips::{
+    eip4895::{Withdrawal, Withdrawals},
+    BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
+};
 use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable, TxHash, TxNumber, B256, U256};
 use reth_blockchain_tree_api::{
     error::{CanonicalError, InsertBlockError},
@@ -21,8 +24,7 @@ use reth_evm::ConfigureEvmEnv;
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
     Account, Block, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash, Withdrawal,
-    Withdrawals,
+    SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -601,35 +603,6 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         self.database.latest()
     }
 
-    fn history_by_block_number(
-        &self,
-        block_number: BlockNumber,
-    ) -> ProviderResult<StateProviderBox> {
-        trace!(target: "providers::blockchain", ?block_number, "Getting history by block number");
-        self.ensure_canonical_block(block_number)?;
-        self.database.history_by_block_number(block_number)
-    }
-
-    fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
-        trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
-        self.database.history_by_block_hash(block_hash)
-    }
-
-    fn state_by_block_hash(&self, block: BlockHash) -> ProviderResult<StateProviderBox> {
-        trace!(target: "providers::blockchain", ?block, "Getting state by block hash");
-        let mut state = self.history_by_block_hash(block);
-
-        // we failed to get the state by hash, from disk, hash block be the pending block
-        if state.is_err() {
-            if let Ok(Some(pending)) = self.pending_state_by_hash(block) {
-                // we found pending block by hash
-                state = Ok(pending)
-            }
-        }
-
-        state
-    }
-
     /// Returns a [`StateProviderBox`] indexed by the given block number or tag.
     ///
     /// Note: if a number is provided this will only look at historical(canonical) state.
@@ -660,6 +633,35 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
                 self.history_by_block_number(num)
             }
         }
+    }
+
+    fn history_by_block_number(
+        &self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<StateProviderBox> {
+        trace!(target: "providers::blockchain", ?block_number, "Getting history by block number");
+        self.ensure_canonical_block(block_number)?;
+        self.database.history_by_block_number(block_number)
+    }
+
+    fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
+        trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
+        self.database.history_by_block_hash(block_hash)
+    }
+
+    fn state_by_block_hash(&self, block: BlockHash) -> ProviderResult<StateProviderBox> {
+        trace!(target: "providers::blockchain", ?block, "Getting state by block hash");
+        let mut state = self.history_by_block_hash(block);
+
+        // we failed to get the state by hash, from disk, hash block be the pending block
+        if state.is_err() {
+            if let Ok(Some(pending)) = self.pending_state_by_hash(block) {
+                // we found pending block by hash
+                state = Ok(pending)
+            }
+        }
+
+        state
     }
 
     /// Returns the state provider for pending state.

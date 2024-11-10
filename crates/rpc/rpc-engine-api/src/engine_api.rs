@@ -1,7 +1,7 @@
 use crate::{
     capabilities::EngineCapabilities, metrics::EngineApiMetrics, EngineApiError, EngineApiResult,
 };
-use alloy_eips::{eip4844::BlobAndProofV1, eip7685::Requests};
+use alloy_eips::{eip1898::BlockHashOrNumber, eip4844::BlobAndProofV1, eip7685::Requests};
 use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionPayload, ExecutionPayloadBodiesV1,
@@ -10,6 +10,7 @@ use alloy_rpc_types_engine::{
 };
 use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
+use parking_lot::Mutex;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_chainspec::{EthereumHardforks, Hardforks};
 use reth_engine_primitives::{EngineTypes, EngineValidator};
@@ -19,7 +20,7 @@ use reth_payload_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, PayloadBuilderAttributes,
     PayloadOrAttributes,
 };
-use reth_primitives::{Block, BlockHashOrNumber, EthereumHardfork};
+use reth_primitives::{Block, EthereumHardfork};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types_compat::engine::payload::{
     convert_payload_input_v2_to_payload, convert_to_payload_body_v1,
@@ -67,6 +68,8 @@ struct EngineApiInner<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec
     tx_pool: Pool,
     /// Engine validator.
     validator: Validator,
+    /// Start time of the latest payload request
+    latest_new_payload_response: Mutex<Option<Instant>>,
 }
 
 impl<Provider, EngineT, Pool, Validator, ChainSpec>
@@ -102,6 +105,7 @@ where
             capabilities,
             tx_pool,
             validator,
+            latest_new_payload_response: Mutex::new(None),
         });
         Self { inner }
     }
@@ -140,11 +144,13 @@ where
         self.inner
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V1, payload_or_attrs)?;
+
         Ok(self
             .inner
             .beacon_consensus
             .new_payload(payload, ExecutionPayloadSidecar::none())
-            .await?)
+            .await
+            .inspect(|_| self.inner.on_new_payload_response())?)
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/shanghai.md#engine_newpayloadv2>
@@ -164,7 +170,8 @@ where
             .inner
             .beacon_consensus
             .new_payload(payload, ExecutionPayloadSidecar::none())
-            .await?)
+            .await
+            .inspect(|_| self.inner.on_new_payload_response())?)
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_newpayloadv3>
@@ -194,7 +201,8 @@ where
                     parent_beacon_block_root,
                 }),
             )
-            .await?)
+            .await
+            .inspect(|_| self.inner.on_new_payload_response())?)
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/7907424db935b93c2fe6a3c0faab943adebe8557/src/engine/prague.md#engine_newpayloadv4>
@@ -225,7 +233,8 @@ where
                     execution_requests,
                 ),
             )
-            .await?)
+            .await
+            .inspect(|_| self.inner.on_new_payload_response())?)
     }
 
     /// Sends a message to the beacon consensus engine to update the fork choice _without_
@@ -281,7 +290,7 @@ where
     pub async fn get_payload_v1(
         &self,
         payload_id: PayloadId,
-    ) -> EngineApiResult<EngineT::ExecutionPayloadV1> {
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV1> {
         self.inner
             .payload_store
             .resolve(payload_id)
@@ -598,6 +607,8 @@ where
         state: ForkchoiceState,
         payload_attrs: Option<EngineT::PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
+        self.inner.record_elapsed_time_on_fcu();
+
         if let Some(ref attrs) = payload_attrs {
             let attr_validation_res =
                 self.inner.validator.ensure_well_formed_attributes(version, attrs);
@@ -616,7 +627,8 @@ where
             // To do this, we set the payload attrs to `None` if attribute validation failed, but
             // we still apply the forkchoice update.
             if let Err(err) = attr_validation_res {
-                let fcu_res = self.inner.beacon_consensus.fork_choice_updated(state, None).await?;
+                let fcu_res =
+                    self.inner.beacon_consensus.fork_choice_updated(state, None, version).await?;
                 // TODO: decide if we want this branch - the FCU INVALID response might be more
                 // useful than the payload attributes INVALID response
                 if fcu_res.is_invalid() {
@@ -626,7 +638,27 @@ where
             }
         }
 
-        Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
+        Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs, version).await?)
+    }
+}
+
+impl<Provider, EngineT, Pool, Validator, ChainSpec>
+    EngineApiInner<Provider, EngineT, Pool, Validator, ChainSpec>
+where
+    EngineT: EngineTypes,
+{
+    /// Tracks the elapsed time between the new payload response and the received forkchoice update
+    /// request.
+    fn record_elapsed_time_on_fcu(&self) {
+        if let Some(start_time) = self.latest_new_payload_response.lock().take() {
+            let elapsed_time = start_time.elapsed();
+            self.metrics.latency.new_payload_forkchoice_updated_time_diff.record(elapsed_time);
+        }
+    }
+
+    /// Updates the timestamp for the latest new payload response.
+    fn on_new_payload_response(&self) {
+        self.latest_new_payload_response.lock().replace(Instant::now());
     }
 }
 
@@ -774,7 +806,7 @@ where
     async fn get_payload_v1(
         &self,
         payload_id: PayloadId,
-    ) -> RpcResult<EngineT::ExecutionPayloadV1> {
+    ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV1> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV1");
         let start = Instant::now();
         let res = Self::get_payload_v1(self, payload_id).await;

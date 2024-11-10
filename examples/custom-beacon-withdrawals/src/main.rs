@@ -3,7 +3,7 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-use alloy_eips::eip7685::Requests;
+use alloy_eips::{eip4895::Withdrawal, eip7685::Requests};
 use alloy_sol_macro::sol;
 use alloy_sol_types::SolCall;
 #[cfg(feature = "optimism")]
@@ -30,7 +30,7 @@ use reth_primitives::{
     revm_primitives::{
         address, Address, BlockEnv, Bytes, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, U256,
     },
-    BlockWithSenders, Receipt, Withdrawal,
+    BlockWithSenders, Receipt,
 };
 use std::{fmt::Display, sync::Arc};
 

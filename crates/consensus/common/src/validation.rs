@@ -275,16 +275,18 @@ pub fn validate_against_parent_4844(
 mod tests {
     use super::*;
     use alloy_consensus::{TxEip4844, EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH};
+    use alloy_eips::{
+        eip4895::{Withdrawal, Withdrawals},
+        BlockHashOrNumber,
+    };
     use alloy_primitives::{
-        hex_literal::hex, Address, BlockHash, BlockNumber, Bytes, Parity, Sealable, U256,
+        hex_literal::hex, Address, BlockHash, BlockNumber, Bytes, PrimitiveSignature as Signature,
+        Sealable, U256,
     };
     use mockall::mock;
     use rand::Rng;
     use reth_chainspec::ChainSpecBuilder;
-    use reth_primitives::{
-        proofs, Account, BlockBody, BlockHashOrNumber, Signature, Transaction, TransactionSigned,
-        Withdrawal, Withdrawals,
-    };
+    use reth_primitives::{proofs, Account, BlockBody, Transaction, TransactionSigned};
     use reth_storage_api::{
         errors::provider::ProviderResult, AccountReader, HeaderProvider, WithdrawalsProvider,
     };
@@ -403,7 +405,7 @@ mod tests {
             blob_versioned_hashes: std::iter::repeat_with(|| rng.gen()).take(num_blobs).collect(),
         });
 
-        let signature = Signature::new(U256::default(), U256::default(), Parity::Parity(true));
+        let signature = Signature::new(U256::default(), U256::default(), true);
 
         TransactionSigned::from_transaction_and_signature(request, signature)
     }

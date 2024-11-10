@@ -106,7 +106,8 @@ async fn handshake_eth(p2p_stream: AuthedP2PStream) -> eyre::Result<(AuthedEthSt
         .forkid(MAINNET.hardfork_fork_id(EthereumHardfork::Shanghai).unwrap())
         .build();
 
-    let status = Status { version: p2p_stream.shared_capabilities().eth()?.version(), ..status };
+    let status =
+        Status { version: p2p_stream.shared_capabilities().eth()?.version().try_into()?, ..status };
     let eth_unauthed = UnauthedEthStream::new(p2p_stream);
     Ok(eth_unauthed.handshake(status, fork_filter).await?)
 }

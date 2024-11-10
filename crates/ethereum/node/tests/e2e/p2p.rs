@@ -157,7 +157,8 @@ async fn e2e_test_send_transactions() -> eyre::Result<()> {
 
     assert_eq!(second_provider.get_block_number().await?, 0);
 
-    let head = provider.get_block_by_number(Default::default(), false).await?.unwrap().header.hash;
+    let head =
+        provider.get_block_by_number(Default::default(), false.into()).await?.unwrap().header.hash;
     second_node.engine_api.update_forkchoice(head, head).await?;
 
     let start = std::time::Instant::now();

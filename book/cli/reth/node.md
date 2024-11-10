@@ -367,6 +367,9 @@ RPC:
 
           [default: 25]
 
+      --builder.disallow <PATH>
+          Path to file containing disallowed addresses, json-encoded list of strings. Block validation API will reject blocks containing transactions from these addresses
+
 RPC State Cache:
       --rpc-cache.max-blocks <MAX_BLOCKS>
           Max number of blocks in cache
@@ -499,6 +502,11 @@ TxPool:
 
           [default: 1024]
 
+      --txpool.max-new-pending-txs-notifications <MAX_NEW_PENDING_TXS_NOTIFICATIONS>
+          How many new pending transactions to buffer and send to in progress pending transaction iterators
+
+          [default: 200]
+
 Builder:
       --builder.extradata <EXTRADATA>
           Block extra data set by the payload builder
@@ -589,6 +597,12 @@ Database:
           Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an NFS volume
 
           [possible values: true, false]
+
+      --db.max-size <MAX_SIZE>
+          Maximum database size (e.g., 4TB, 8MB)
+
+      --db.growth-step <GROWTH_STEP>
+          Database growth step (e.g., 4GB, 4KB)
 
       --db.read-transaction-timeout <READ_TRANSACTION_TIMEOUT>
           Read transaction timeout in seconds, 0 means no timeout

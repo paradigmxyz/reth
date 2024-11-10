@@ -26,7 +26,7 @@ pub use bundle::{EthBundleApiServer, EthCallBundleApiServer};
 pub use core::{EthApiServer, FullEthApiServer};
 pub use filter::EthFilterApiServer;
 pub use helpers::error::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
-pub use node::RpcNodeCore;
+pub use node::{RpcNodeCore, RpcNodeCoreExt};
 pub use pubsub::EthPubSubApiServer;
 pub use types::{EthApiTypes, FullEthApiTypes, RpcBlock, RpcReceipt, RpcTransaction};
 

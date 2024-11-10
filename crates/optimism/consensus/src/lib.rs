@@ -34,19 +34,19 @@ pub use validation::validate_block_post_execution;
 ///
 /// Provides basic checks as outlined in the execution specs.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OptimismBeaconConsensus {
+pub struct OpBeaconConsensus {
     /// Configuration
     chain_spec: Arc<OpChainSpec>,
 }
 
-impl OptimismBeaconConsensus {
-    /// Create a new instance of [`OptimismBeaconConsensus`]
+impl OpBeaconConsensus {
+    /// Create a new instance of [`OpBeaconConsensus`]
     pub const fn new(chain_spec: Arc<OpChainSpec>) -> Self {
         Self { chain_spec }
     }
 }
 
-impl Consensus for OptimismBeaconConsensus {
+impl Consensus for OpBeaconConsensus {
     fn validate_header(&self, header: &SealedHeader) -> Result<(), ConsensusError> {
         validate_header_gas(header)?;
         validate_header_base_fee(header, &self.chain_spec)

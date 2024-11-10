@@ -23,8 +23,8 @@ use reth_primitives::{
 use reth_provider::{
     providers::ProviderNodeTypes, BlockExecutionWriter, BlockNumReader, BlockWriter,
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
-    ChainSpecProvider, ChainSplit, ChainSplitTarget, DisplayBlocksChain, HeaderProvider,
-    ProviderError, StaticFileProviderFactory,
+    ChainSpecProvider, ChainSplit, ChainSplitTarget, DBProvider, DisplayBlocksChain,
+    HeaderProvider, ProviderError, StaticFileProviderFactory,
 };
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
@@ -1375,9 +1375,9 @@ where
 mod tests {
     use super::*;
     use alloy_consensus::{TxEip1559, EMPTY_ROOT_HASH};
-    use alloy_eips::eip1559::INITIAL_BASE_FEE;
+    use alloy_eips::{eip1559::INITIAL_BASE_FEE, eip4895::Withdrawals};
     use alloy_genesis::{Genesis, GenesisAccount};
-    use alloy_primitives::{keccak256, Address, Sealable, B256};
+    use alloy_primitives::{keccak256, Address, PrimitiveSignature as Signature, Sealable, B256};
     use assert_matches::assert_matches;
     use linked_hash_set::LinkedHashSet;
     use reth_chainspec::{ChainSpecBuilder, MAINNET, MIN_TRANSACTION_GAS};
@@ -1389,8 +1389,7 @@ mod tests {
     use reth_primitives::{
         proofs::{calculate_receipt_root, calculate_transaction_root},
         revm_primitives::AccountInfo,
-        Account, BlockBody, Header, Signature, Transaction, TransactionSigned,
-        TransactionSignedEcRecovered, Withdrawals,
+        Account, BlockBody, Header, Transaction, TransactionSigned, TransactionSignedEcRecovered,
     };
     use reth_provider::{
         test_utils::{

@@ -1,6 +1,7 @@
 //! Helper trait for interfacing with [`FullNodeComponents`].
 
 use reth_node_api::FullNodeComponents;
+use reth_rpc_eth_types::EthStateCache;
 
 /// Helper trait to relax trait bounds on [`FullNodeComponents`].
 ///
@@ -18,6 +19,9 @@ pub trait RpcNodeCore: Clone + Send + Sync {
     /// Network API.
     type Network: Send + Sync + Clone;
 
+    /// Builds new blocks.
+    type PayloadBuilder: Send + Sync + Clone;
+
     /// Returns the transaction pool of the node.
     fn pool(&self) -> &Self::Pool;
 
@@ -26,6 +30,9 @@ pub trait RpcNodeCore: Clone + Send + Sync {
 
     /// Returns the handle to the network
     fn network(&self) -> &Self::Network;
+
+    /// Returns the handle to the payload builder service.
+    fn payload_builder(&self) -> &Self::PayloadBuilder;
 
     /// Returns the provider of the node.
     fn provider(&self) -> &Self::Provider;
@@ -37,22 +44,39 @@ where
 {
     type Provider = T::Provider;
     type Pool = T::Pool;
-    type Network = <T as FullNodeComponents>::Network;
     type Evm = <T as FullNodeComponents>::Evm;
+    type Network = <T as FullNodeComponents>::Network;
+    type PayloadBuilder = <T as FullNodeComponents>::PayloadBuilder;
 
+    #[inline]
     fn pool(&self) -> &Self::Pool {
         FullNodeComponents::pool(self)
     }
 
+    #[inline]
     fn evm_config(&self) -> &Self::Evm {
         FullNodeComponents::evm_config(self)
     }
 
+    #[inline]
     fn network(&self) -> &Self::Network {
         FullNodeComponents::network(self)
     }
 
+    #[inline]
+    fn payload_builder(&self) -> &Self::PayloadBuilder {
+        FullNodeComponents::payload_builder(self)
+    }
+
+    #[inline]
     fn provider(&self) -> &Self::Provider {
         FullNodeComponents::provider(self)
     }
+}
+
+/// Additional components, asides the core node components, needed to run `eth_` namespace API
+/// server.
+pub trait RpcNodeCoreExt: RpcNodeCore {
+    /// Returns handle to RPC cache service.
+    fn cache(&self) -> &EthStateCache;
 }

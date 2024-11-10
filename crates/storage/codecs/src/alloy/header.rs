@@ -18,6 +18,7 @@ use alloy_primitives::{Address, BlockNumber, Bloom, Bytes, B256, U256};
 )]
 #[cfg_attr(feature = "test-utils", allow(unreachable_pub), visibility::make(pub))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Compact)]
+#[reth_codecs(crate = "crate")]
 pub(crate) struct Header {
     parent_hash: B256,
     ommers_hash: B256,
@@ -54,6 +55,7 @@ pub(crate) struct Header {
 )]
 #[cfg_attr(feature = "test-utils", allow(unreachable_pub), visibility::make(pub))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Compact)]
+#[reth_codecs(crate = "crate")]
 pub(crate) struct HeaderExt {
     requests_hash: Option<B256>,
 }
