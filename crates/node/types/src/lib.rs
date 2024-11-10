@@ -32,9 +32,9 @@ pub trait NodePrimitives: Send + Sync + Unpin + Clone + Default + fmt::Debug {
 }
 
 impl NodePrimitives for () {
-    type Block = reth_primitives::Block;
-    type SignedTx = reth_primitives::TransactionSigned;
-    type Receipt = reth_primitives::Receipt;
+    type Block = ();
+    type SignedTx = ();
+    type Receipt = ();
 }
 
 /// Helper trait that sets trait bounds on [`NodePrimitives`].
