@@ -144,9 +144,6 @@ mod tests {
     #[test]
     fn assert_extradata_less_32bytes() {
         let extradata = default_extradata();
-        assert!(
-            extradata.as_bytes().len() <= 32,
-            "extradata must be less than 32 bytes: {extradata}"
-        )
+        assert!(extradata.len() <= 32, "extradata must be less than 32 bytes: {extradata}")
     }
 }

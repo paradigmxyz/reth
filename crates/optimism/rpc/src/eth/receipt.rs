@@ -1,7 +1,7 @@
 //! Loads and formats OP receipt RPC response.
 
 use alloy_eips::eip2718::Encodable2718;
-use alloy_rpc_types::{Log, TransactionReceipt};
+use alloy_rpc_types_eth::{Log, TransactionReceipt};
 use op_alloy_consensus::{
     DepositTransaction, OpDepositReceipt, OpDepositReceiptWithBloom, OpReceiptEnvelope,
 };

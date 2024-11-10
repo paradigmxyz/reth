@@ -25,12 +25,15 @@ use reth_trie_db::StateCommitment;
 pub trait NodePrimitives: Send + Sync + Unpin + Clone + Default + fmt::Debug {
     /// Block primitive.
     type Block: Send + Sync + Unpin + Clone + Default + fmt::Debug + 'static;
+    /// Signed version of the transaction type.
+    type SignedTx: Send + Sync + Unpin + Clone + Default + fmt::Debug + 'static;
     /// A receipt.
     type Receipt: Send + Sync + Unpin + Clone + Default + fmt::Debug + 'static;
 }
 
 impl NodePrimitives for () {
     type Block = ();
+    type SignedTx = ();
     type Receipt = ();
 }
 

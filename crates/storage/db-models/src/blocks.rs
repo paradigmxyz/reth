@@ -1,8 +1,8 @@
 use std::ops::Range;
 
+use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::TxNumber;
 use reth_codecs::{add_arbitrary_tests, Compact};
-use reth_primitives_traits::Withdrawals;
 use serde::{Deserialize, Serialize};
 
 /// Total number of transactions.

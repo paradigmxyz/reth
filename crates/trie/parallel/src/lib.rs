@@ -16,6 +16,9 @@ pub mod stats;
 /// Implementation of parallel state root computation.
 pub mod parallel_root;
 
+/// Implementation of parallel proof computation.
+pub mod parallel_proof;
+
 /// Parallel state root metrics.
 #[cfg(feature = "metrics")]
 pub mod metrics;
