@@ -13,7 +13,6 @@ pub trait TxType:
     + TryFrom<u8, Error = Eip2718Error>
     + TryFrom<u64>
     + TryFrom<U64>
-    + From<alloy_consensus::TxType>
     + Debug
     + Display
     + Clone
