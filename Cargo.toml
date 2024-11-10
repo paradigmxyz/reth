@@ -596,6 +596,7 @@ serial_test = { default-features = false, version = "3" }
 similar-asserts = { version = "1.5.0", features = ["serde"] }
 tempfile = "3.8"
 test-fuzz = "6"
+rstest = "0.23.0"
 
 tikv-jemalloc-ctl = "0.6"
 tikv-jemallocator = "0.6"
