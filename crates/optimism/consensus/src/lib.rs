@@ -112,7 +112,7 @@ impl Consensus for OpBeaconConsensus {
                 return Err(ConsensusError::TimestampIsInFuture {
                     timestamp: header.timestamp,
                     present_timestamp,
-                })
+                });
             }
         }
 
