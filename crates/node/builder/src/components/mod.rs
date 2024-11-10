@@ -21,6 +21,7 @@ pub use network::*;
 pub use payload::*;
 pub use pool::*;
 
+use crate::{ConfigureEvm, FullNodeTypes};
 use reth_consensus::Consensus;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network::NetworkHandle;
@@ -29,8 +30,6 @@ use reth_node_api::NodeTypesWithEngine;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives::Header;
 use reth_transaction_pool::TransactionPool;
-
-use crate::{ConfigureEvm, FullNodeTypes};
 
 /// An abstraction over the components of a node, consisting of:
 ///  - evm and executor
@@ -53,6 +52,9 @@ pub trait NodeComponents<T: FullNodeTypes>: Clone + Unpin + Send + Sync + 'stati
     /// Network API.
     type Network: FullNetwork;
 
+    /// Builds new blocks.
+    type PayloadBuilder: Clone;
+
     /// Returns the transaction pool of the node.
     fn pool(&self) -> &Self::Pool;
 
@@ -69,7 +71,7 @@ pub trait NodeComponents<T: FullNodeTypes>: Clone + Unpin + Send + Sync + 'stati
     fn network(&self) -> &Self::Network;
 
     /// Returns the handle to the payload builder service.
-    fn payload_builder(&self) -> &PayloadBuilderHandle<<T::Types as NodeTypesWithEngine>::Engine>;
+    fn payload_builder(&self) -> &Self::PayloadBuilder;
 }
 
 /// All the components of the node.
@@ -105,6 +107,7 @@ where
     type Executor = Executor;
     type Consensus = Cons;
     type Network = NetworkHandle;
+    type PayloadBuilder = PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>;
 
     fn pool(&self) -> &Self::Pool {
         &self.transaction_pool
@@ -126,9 +129,7 @@ where
         &self.network
     }
 
-    fn payload_builder(
-        &self,
-    ) -> &PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine> {
+    fn payload_builder(&self) -> &Self::PayloadBuilder {
         &self.payload_builder
     }
 }

@@ -14,10 +14,8 @@ use reth_node_api::{
     validate_version_specific_fields, EngineTypes, EngineValidator,
 };
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_forks::{OptimismHardfork, OptimismHardforks};
-use reth_optimism_payload_builder::{
-    builder::decode_eip_1559_params, OpBuiltPayload, OpPayloadBuilderAttributes,
-};
+use reth_optimism_forks::{OpHardfork, OptimismHardforks};
+use reth_optimism_payload_builder::{OpBuiltPayload, OpPayloadBuilderAttributes};
 
 /// The types used in the optimism beacon consensus engine.
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
@@ -58,11 +56,11 @@ impl PayloadTypes for OpPayloadTypes {
 
 /// Validator for Optimism engine API.
 #[derive(Debug, Clone)]
-pub struct OptimismEngineValidator {
+pub struct OpEngineValidator {
     chain_spec: Arc<OpChainSpec>,
 }
 
-impl OptimismEngineValidator {
+impl OpEngineValidator {
     /// Instantiates a new validator.
     pub const fn new(chain_spec: Arc<OpChainSpec>) -> Self {
         Self { chain_spec }
@@ -83,7 +81,7 @@ pub fn validate_withdrawals_presence(
     timestamp: u64,
     has_withdrawals: bool,
 ) -> Result<(), EngineObjectValidationError> {
-    let is_shanghai = chain_spec.fork(OptimismHardfork::Canyon).active_at_timestamp(timestamp);
+    let is_shanghai = chain_spec.fork(OpHardfork::Canyon).active_at_timestamp(timestamp);
 
     match version {
         EngineApiMessageVersion::V1 => {
@@ -111,7 +109,7 @@ pub fn validate_withdrawals_presence(
     Ok(())
 }
 
-impl<Types> EngineValidator<Types> for OptimismEngineValidator
+impl<Types> EngineValidator<Types> for OpEngineValidator
 where
     Types: EngineTypes<PayloadAttributes = OpPayloadAttributes>,
 {
@@ -151,12 +149,12 @@ where
 
         if self.chain_spec.is_holocene_active_at_timestamp(attributes.payload_attributes.timestamp)
         {
-            let Some(eip_1559_params) = attributes.eip_1559_params else {
-                return Err(EngineObjectValidationError::InvalidParams(
-                    "MissingEip1559ParamsInPayloadAttributes".to_string().into(),
-                ))
-            };
-            let (elasticity, denominator) = decode_eip_1559_params(eip_1559_params);
+            let (elasticity, denominator) =
+                attributes.decode_eip_1559_params().ok_or_else(|| {
+                    EngineObjectValidationError::InvalidParams(
+                        "MissingEip1559ParamsInPayloadAttributes".to_string().into(),
+                    )
+                })?;
             if elasticity != 0 && denominator == 0 {
                 return Err(EngineObjectValidationError::InvalidParams(
                     "Eip1559ParamsDenominatorZero".to_string().into(),
@@ -180,10 +178,9 @@ mod test {
     use super::*;
 
     fn get_chainspec(is_holocene: bool) -> Arc<OpChainSpec> {
-        let mut hardforks = OptimismHardfork::base_sepolia();
+        let mut hardforks = OpHardfork::base_sepolia();
         if is_holocene {
-            hardforks
-                .insert(OptimismHardfork::Holocene.boxed(), ForkCondition::Timestamp(1800000000));
+            hardforks.insert(OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(1800000000));
         }
         Arc::new(OpChainSpec {
             inner: ChainSpec {
@@ -220,10 +217,10 @@ mod test {
 
     #[test]
     fn test_well_formed_attributes_pre_holocene() {
-        let validator = OptimismEngineValidator::new(get_chainspec(false));
+        let validator = OpEngineValidator::new(get_chainspec(false));
         let attributes = get_attributes(None, 1799999999);
 
-        let result = <engine::OptimismEngineValidator as reth_node_builder::EngineValidator<
+        let result = <engine::OpEngineValidator as reth_node_builder::EngineValidator<
             OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
@@ -233,10 +230,10 @@ mod test {
 
     #[test]
     fn test_well_formed_attributes_holocene_no_eip1559_params() {
-        let validator = OptimismEngineValidator::new(get_chainspec(true));
+        let validator = OpEngineValidator::new(get_chainspec(true));
         let attributes = get_attributes(None, 1800000000);
 
-        let result = <engine::OptimismEngineValidator as reth_node_builder::EngineValidator<
+        let result = <engine::OpEngineValidator as reth_node_builder::EngineValidator<
             OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
@@ -246,10 +243,10 @@ mod test {
 
     #[test]
     fn test_well_formed_attributes_holocene_eip1559_params_zero_denominator() {
-        let validator = OptimismEngineValidator::new(get_chainspec(true));
+        let validator = OpEngineValidator::new(get_chainspec(true));
         let attributes = get_attributes(Some(b64!("0000000000000008")), 1800000000);
 
-        let result = <engine::OptimismEngineValidator as reth_node_builder::EngineValidator<
+        let result = <engine::OpEngineValidator as reth_node_builder::EngineValidator<
             OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
@@ -259,10 +256,10 @@ mod test {
 
     #[test]
     fn test_well_formed_attributes_holocene_valid() {
-        let validator = OptimismEngineValidator::new(get_chainspec(true));
+        let validator = OpEngineValidator::new(get_chainspec(true));
         let attributes = get_attributes(Some(b64!("0000000800000008")), 1800000000);
 
-        let result = <engine::OptimismEngineValidator as reth_node_builder::EngineValidator<
+        let result = <engine::OpEngineValidator as reth_node_builder::EngineValidator<
             OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
@@ -272,10 +269,10 @@ mod test {
 
     #[test]
     fn test_well_formed_attributes_holocene_valid_all_zero() {
-        let validator = OptimismEngineValidator::new(get_chainspec(true));
+        let validator = OpEngineValidator::new(get_chainspec(true));
         let attributes = get_attributes(Some(b64!("0000000000000000")), 1800000000);
 
-        let result = <engine::OptimismEngineValidator as reth_node_builder::EngineValidator<
+        let result = <engine::OpEngineValidator as reth_node_builder::EngineValidator<
             OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes

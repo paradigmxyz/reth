@@ -8,7 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-pub use reth_primitives_traits::{Block, BlockBody, FullBlock, FullSignedTx, FullTransaction};
+pub use reth_primitives_traits::{Block, BlockBody, FullBlock, FullReceipt, FullSignedTx};
 
 use std::marker::PhantomData;
 
@@ -26,14 +26,14 @@ pub trait NodePrimitives {
     type Block;
     /// Signed version of the transaction type.
     type SignedTx;
-    /// Transaction type.
-    type Transaction;
+    /// A receipt.
+    type Receipt;
 }
 
 impl NodePrimitives for () {
     type Block = reth_primitives::Block;
     type SignedTx = reth_primitives::TransactionSigned;
-    type Transaction = reth_primitives::Transaction;
+    type Receipt = reth_primitives::Receipt;
 }
 
 /// Helper trait that sets trait bounds on [`NodePrimitives`].
@@ -41,9 +41,9 @@ pub trait FullNodePrimitives {
     /// Block primitive.
     type Block: FullBlock<Body: BlockBody<SignedTransaction = Self::SignedTx>>;
     /// Signed version of the transaction type.
-    type SignedTx: FullSignedTx<Transaction = Self::Transaction>;
-    /// Transaction type.
-    type Transaction: FullTransaction;
+    type SignedTx: FullSignedTx;
+    /// A receipt.
+    type Receipt: FullReceipt;
 }
 
 impl<T> NodePrimitives for T
@@ -52,7 +52,7 @@ where
 {
     type Block = T::Block;
     type SignedTx = T::SignedTx;
-    type Transaction = T::Transaction;
+    type Receipt = T::Receipt;
 }
 
 /// The type that configures the essential types of an Ethereum-like node.

@@ -9,6 +9,9 @@ use tokio::sync::oneshot;
 /// Possible error variants during payload building.
 #[derive(Debug, thiserror::Error)]
 pub enum PayloadBuilderError {
+    /// Thrown when the parent header cannot be found
+    #[error("missing parent header: {0}")]
+    MissingParentHeader(B256),
     /// Thrown when the parent block is missing.
     #[error("missing parent block {0}")]
     MissingParentBlock(B256),

@@ -1,9 +1,6 @@
-use crate::{
-    GotExpected, Header, SealedHeader, TransactionSigned, TransactionSignedEcRecovered, Withdrawals,
-};
+use crate::{GotExpected, Header, SealedHeader, TransactionSigned, TransactionSignedEcRecovered};
 use alloc::vec::Vec;
-pub use alloy_eips::eip1898::{BlockNumberOrTag, ForkBlock, RpcBlockHash};
-use alloy_eips::eip2718::Encodable2718;
+use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
 use alloy_primitives::{Address, Bytes, Sealable, B256};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
@@ -656,8 +653,9 @@ impl<'a> arbitrary::Arbitrary<'a> for BlockBody {
 pub(super) mod serde_bincode_compat {
     use alloc::{borrow::Cow, vec::Vec};
     use alloy_consensus::serde_bincode_compat::Header;
+    use alloy_eips::eip4895::Withdrawals;
     use alloy_primitives::Address;
-    use reth_primitives_traits::{serde_bincode_compat::SealedHeader, Withdrawals};
+    use reth_primitives_traits::serde_bincode_compat::SealedHeader;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -904,8 +902,11 @@ pub(super) mod serde_bincode_compat {
 
 #[cfg(test)]
 mod tests {
-    use super::{BlockNumberOrTag::*, *};
-    use alloy_eips::{eip1898::HexStringMissingPrefixError, BlockId};
+    use super::*;
+    use alloy_eips::{
+        eip1898::HexStringMissingPrefixError, BlockId, BlockNumberOrTag, BlockNumberOrTag::*,
+        RpcBlockHash,
+    };
     use alloy_primitives::hex_literal::hex;
     use alloy_rlp::{Decodable, Encodable};
     use std::str::FromStr;

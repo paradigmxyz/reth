@@ -7,7 +7,8 @@ use crate::{
     TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_eips::{
-    eip4895::Withdrawal, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, HashOrNumber,
+    eip4895::{Withdrawal, Withdrawals},
+    BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, HashOrNumber,
 };
 use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable, TxHash, TxNumber, B256, U256};
 use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStateProviderRef};
@@ -19,7 +20,6 @@ use reth_execution_types::{BundleStateInit, ExecutionOutcome, RevertsInit};
 use reth_primitives::{
     Account, Block, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders,
     SealedHeader, StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
-    Withdrawals,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -1388,7 +1388,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                 .bundle
                 .reverts
                 .clone()
-                .into_plain_state_reverts()
+                .to_plain_state_reverts()
                 .storage
                 .into_iter()
                 .flatten()
@@ -1441,7 +1441,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
                 .bundle
                 .reverts
                 .clone()
-                .into_plain_state_reverts()
+                .to_plain_state_reverts()
                 .accounts
                 .into_iter()
                 .flatten()

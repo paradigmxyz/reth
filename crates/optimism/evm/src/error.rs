@@ -5,7 +5,7 @@ use reth_evm::execute::BlockExecutionError;
 
 /// Optimism Block Executor Errors
 #[derive(Debug, Clone, PartialEq, Eq, derive_more::Display)]
-pub enum OptimismBlockExecutionError {
+pub enum OpBlockExecutionError {
     /// Error when trying to parse L1 block info
     #[display("could not get L1 block info from L2 block: {message}")]
     L1BlockInfoError {
@@ -23,10 +23,10 @@ pub enum OptimismBlockExecutionError {
     AccountLoadFailed(alloy_primitives::Address),
 }
 
-impl core::error::Error for OptimismBlockExecutionError {}
+impl core::error::Error for OpBlockExecutionError {}
 
-impl From<OptimismBlockExecutionError> for BlockExecutionError {
-    fn from(err: OptimismBlockExecutionError) -> Self {
+impl From<OpBlockExecutionError> for BlockExecutionError {
+    fn from(err: OpBlockExecutionError) -> Self {
         Self::other(err)
     }
 }

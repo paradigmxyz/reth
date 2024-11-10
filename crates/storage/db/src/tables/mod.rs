@@ -106,28 +106,39 @@ macro_rules! tables {
     (@view $name:ident $v:ident) => { $v.view::<$name>() };
     (@view $name:ident $v:ident $_subkey:ty) => { $v.view_dupsort::<$name>() };
 
-    ($( $(#[$attr:meta])* table $name:ident<Key = $key:ty, Value = $value:ty $(, SubKey = $subkey:ty)? $(,)?>; )*) => {
+    (@value_doc $key:ty, $value:ty) => {
+        concat!("[`", stringify!($value), "`]")
+    };
+    // Don't generate links if we have generics
+    (@value_doc $key:ty, $value:ty, $($generic:ident),*) => {
+        concat!("`", stringify!($value), "`")
+    };
+
+    ($($(#[$attr:meta])* table $name:ident$(<$($generic:ident $(= $default:ty)?),*>)? { type Key = $key:ty; type Value = $value:ty; $(type SubKey = $subkey:ty;)? } )*) => {
         // Table marker types.
         $(
             $(#[$attr])*
             ///
-            #[doc = concat!("Marker type representing a database table mapping [`", stringify!($key), "`] to [`", stringify!($value), "`].")]
+            #[doc = concat!("Marker type representing a database table mapping [`", stringify!($key), "`] to ", tables!(@value_doc $key, $value, $($($generic),*)?), ".")]
             $(
                 #[doc = concat!("\n\nThis table's `DUPSORT` subkey is [`", stringify!($subkey), "`].")]
             )?
-            pub struct $name {
-                _private: (),
+            pub struct $name$(<$($generic $( = $default)?),*>)? {
+                _private: std::marker::PhantomData<($($($generic,)*)?)>,
             }
 
             // Ideally this implementation wouldn't exist, but it is necessary to derive `Debug`
             // when a type is generic over `T: Table`. See: https://github.com/rust-lang/rust/issues/26925
-            impl fmt::Debug for $name {
+            impl$(<$($generic),*>)? fmt::Debug for $name$(<$($generic),*>)? {
                 fn fmt(&self, _: &mut fmt::Formatter<'_>) -> fmt::Result {
                     unreachable!("this type cannot be instantiated")
                 }
             }
 
-            impl reth_db_api::table::Table for $name {
+            impl$(<$($generic),*>)? reth_db_api::table::Table for $name$(<$($generic),*>)?
+            where
+                $value: reth_db_api::table::Value + 'static
+            {
                 const NAME: &'static str = table_names::$name;
 
                 type Key = $key;
@@ -248,7 +259,7 @@ macro_rules! tables {
         /// use reth_db_api::table::Table;
         ///
         /// let table = Tables::Headers;
-        /// let result = tables_to_generic!(table, |GenericTable| GenericTable::NAME);
+        /// let result = tables_to_generic!(table, |GenericTable| <GenericTable as Table>::NAME);
         /// assert_eq!(result, table.name());
         /// ```
         #[macro_export]
@@ -269,53 +280,96 @@ macro_rules! tables {
 
 tables! {
     /// Stores the header hashes belonging to the canonical chain.
-    table CanonicalHeaders<Key = BlockNumber, Value = HeaderHash>;
+    table CanonicalHeaders {
+        type Key = BlockNumber;
+        type Value = HeaderHash;
+    }
 
     /// Stores the total difficulty from a block header.
-    table HeaderTerminalDifficulties<Key = BlockNumber, Value = CompactU256>;
+    table HeaderTerminalDifficulties {
+        type Key = BlockNumber;
+        type Value = CompactU256;
+    }
 
     /// Stores the block number corresponding to a header.
-    table HeaderNumbers<Key = BlockHash, Value = BlockNumber>;
+    table HeaderNumbers {
+        type Key = BlockHash;
+        type Value = BlockNumber;
+    }
 
     /// Stores header bodies.
-    table Headers<Key = BlockNumber, Value = Header>;
+    table Headers<H = Header> {
+        type Key = BlockNumber;
+        type Value = H;
+    }
 
     /// Stores block indices that contains indexes of transaction and the count of them.
     ///
     /// More information about stored indices can be found in the [`StoredBlockBodyIndices`] struct.
-    table BlockBodyIndices<Key = BlockNumber, Value = StoredBlockBodyIndices>;
+    table BlockBodyIndices {
+        type Key = BlockNumber;
+        type Value = StoredBlockBodyIndices;
+    }
 
     /// Stores the uncles/ommers of the block.
-    table BlockOmmers<Key = BlockNumber, Value = StoredBlockOmmers>;
+    table BlockOmmers {
+        type Key = BlockNumber;
+        type Value = StoredBlockOmmers;
+    }
 
     /// Stores the block withdrawals.
-    table BlockWithdrawals<Key = BlockNumber, Value = StoredBlockWithdrawals>;
+    table BlockWithdrawals {
+        type Key = BlockNumber;
+        type Value = StoredBlockWithdrawals;
+    }
 
     /// Canonical only Stores the transaction body for canonical transactions.
-    table Transactions<Key = TxNumber, Value = TransactionSignedNoHash>;
+    table Transactions<T = TransactionSignedNoHash> {
+        type Key = TxNumber;
+        type Value = T;
+    }
 
     /// Stores the mapping of the transaction hash to the transaction number.
-    table TransactionHashNumbers<Key = TxHash, Value = TxNumber>;
+    table TransactionHashNumbers {
+        type Key = TxHash;
+        type Value = TxNumber;
+    }
 
     /// Stores the mapping of transaction number to the blocks number.
     ///
     /// The key is the highest transaction ID in the block.
-    table TransactionBlocks<Key = TxNumber, Value = BlockNumber>;
+    table TransactionBlocks {
+        type Key = TxNumber;
+        type Value = BlockNumber;
+    }
 
     /// Canonical only Stores transaction receipts.
-    table Receipts<Key = TxNumber, Value = Receipt>;
+    table Receipts {
+        type Key = TxNumber;
+        type Value = Receipt;
+    }
 
     /// Stores all smart contract bytecodes.
     /// There will be multiple accounts that have same bytecode
     /// So we would need to introduce reference counter.
     /// This will be small optimization on state.
-    table Bytecodes<Key = B256, Value = Bytecode>;
+    table Bytecodes {
+        type Key = B256;
+        type Value = Bytecode;
+    }
 
     /// Stores the current state of an [`Account`].
-    table PlainAccountState<Key = Address, Value = Account>;
+    table PlainAccountState {
+        type Key = Address;
+        type Value = Account;
+    }
 
     /// Stores the current value of a storage key.
-    table PlainStorageState<Key = Address, Value = StorageEntry, SubKey = B256>;
+    table PlainStorageState {
+        type Key = Address;
+        type Value = StorageEntry;
+        type SubKey = B256;
+    }
 
     /// Stores pointers to block changeset with changes for each account key.
     ///
@@ -335,7 +389,10 @@ tables! {
     /// * If there were no shard we would get `None` entry or entry of different storage key.
     ///
     /// Code example can be found in `reth_provider::HistoricalStateProviderRef`
-    table AccountsHistory<Key = ShardedKey<Address>, Value = BlockNumberList>;
+    table AccountsHistory {
+        type Key = ShardedKey<Address>;
+        type Value = BlockNumberList;
+    }
 
     /// Stores pointers to block number changeset with changes for each storage key.
     ///
@@ -355,55 +412,98 @@ tables! {
     /// * If there were no shard we would get `None` entry or entry of different storage key.
     ///
     /// Code example can be found in `reth_provider::HistoricalStateProviderRef`
-    table StoragesHistory<Key = StorageShardedKey, Value = BlockNumberList>;
+    table StoragesHistory {
+        type Key = StorageShardedKey;
+        type Value = BlockNumberList;
+    }
 
     /// Stores the state of an account before a certain transaction changed it.
     /// Change on state can be: account is created, selfdestructed, touched while empty
     /// or changed balance,nonce.
-    table AccountChangeSets<Key = BlockNumber, Value = AccountBeforeTx, SubKey = Address>;
+    table AccountChangeSets {
+        type Key = BlockNumber;
+        type Value = AccountBeforeTx;
+        type SubKey = Address;
+    }
 
     /// Stores the state of a storage key before a certain transaction changed it.
     /// If [`StorageEntry::value`] is zero, this means storage was not existing
     /// and needs to be removed.
-    table StorageChangeSets<Key = BlockNumberAddress, Value = StorageEntry, SubKey = B256>;
+    table StorageChangeSets {
+        type Key = BlockNumberAddress;
+        type Value = StorageEntry;
+        type SubKey = B256;
+    }
 
     /// Stores the current state of an [`Account`] indexed with `keccak256Address`
     /// This table is in preparation for merklization and calculation of state root.
     /// We are saving whole account data as it is needed for partial update when
     /// part of storage is changed. Benefit for merklization is that hashed addresses are sorted.
-    table HashedAccounts<Key = B256, Value = Account>;
+    table HashedAccounts {
+        type Key = B256;
+        type Value = Account;
+    }
 
     /// Stores the current storage values indexed with `keccak256Address` and
     /// hash of storage key `keccak256key`.
     /// This table is in preparation for merklization and calculation of state root.
     /// Benefit for merklization is that hashed addresses/keys are sorted.
-    table HashedStorages<Key = B256, Value = StorageEntry, SubKey = B256>;
+    table HashedStorages {
+        type Key = B256;
+        type Value = StorageEntry;
+        type SubKey = B256;
+    }
 
     /// Stores the current state's Merkle Patricia Tree.
-    table AccountsTrie<Key = StoredNibbles, Value = BranchNodeCompact>;
+    table AccountsTrie {
+        type Key = StoredNibbles;
+        type Value = BranchNodeCompact;
+    }
 
     /// From HashedAddress => NibblesSubKey => Intermediate value
-    table StoragesTrie<Key = B256, Value = StorageTrieEntry, SubKey = StoredNibblesSubKey>;
+    table StoragesTrie {
+        type Key = B256;
+        type Value = StorageTrieEntry;
+        type SubKey = StoredNibblesSubKey;
+    }
 
     /// Stores the transaction sender for each canonical transaction.
     /// It is needed to speed up execution stage and allows fetching signer without doing
     /// transaction signed recovery
-    table TransactionSenders<Key = TxNumber, Value = Address>;
+    table TransactionSenders {
+        type Key = TxNumber;
+        type Value = Address;
+    }
 
     /// Stores the highest synced block number and stage-specific checkpoint of each stage.
-    table StageCheckpoints<Key = StageId, Value = StageCheckpoint>;
+    table StageCheckpoints {
+        type Key = StageId;
+        type Value = StageCheckpoint;
+    }
 
     /// Stores arbitrary data to keep track of a stage first-sync progress.
-    table StageCheckpointProgresses<Key = StageId, Value = Vec<u8>>;
+    table StageCheckpointProgresses {
+        type Key = StageId;
+        type Value = Vec<u8>;
+    }
 
     /// Stores the highest pruned block number and prune mode of each prune segment.
-    table PruneCheckpoints<Key = PruneSegment, Value = PruneCheckpoint>;
+    table PruneCheckpoints {
+        type Key = PruneSegment;
+        type Value = PruneCheckpoint;
+    }
 
     /// Stores the history of client versions that have accessed the database with write privileges by unix timestamp in seconds.
-    table VersionHistory<Key = u64, Value = ClientVersion>;
+    table VersionHistory {
+        type Key = u64;
+        type Value = ClientVersion;
+    }
 
     /// Stores generic chain state info, like the last finalized block.
-    table ChainState<Key = ChainStateKey, Value = BlockNumber>;
+    table ChainState {
+        type Key = ChainStateKey;
+        type Value = BlockNumber;
+    }
 }
 
 /// Keys for the `ChainState` table.

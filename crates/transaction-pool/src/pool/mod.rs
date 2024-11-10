@@ -86,9 +86,9 @@ use parking_lot::{Mutex, RwLock, RwLockReadGuard};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 
+use alloy_eips::eip4844::BlobTransactionSidecar;
 use reth_primitives::{
-    BlobTransaction, BlobTransactionSidecar, PooledTransactionsElement, TransactionSigned,
-    TransactionSignedEcRecovered,
+    BlobTransaction, PooledTransactionsElement, TransactionSigned, TransactionSignedEcRecovered,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -106,7 +106,10 @@ use crate::{
     traits::{GetPooledTransactionLimit, NewBlobSidecar, TransactionListenerKind},
     validate::ValidTransaction,
 };
-pub use best::{BestTransactionFilter, BestTransactionsWithPrioritizedSenders};
+pub use best::{
+    BestPayloadTransactions, BestTransactionFilter, BestTransactionsWithPrioritizedSenders,
+    PayloadTransactionsChain, PayloadTransactionsFixed,
+};
 pub use blob::{blob_tx_priority, fee_delta};
 pub use events::{FullTransactionEvent, TransactionEvent};
 pub use listener::{AllTransactionsEvents, TransactionEvents};
