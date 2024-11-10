@@ -197,12 +197,12 @@ use reth_rpc_eth_api::{
     EthApiServer, EthApiTypes, FullEthApiServer, RpcBlock, RpcReceipt, RpcTransaction,
 };
 use reth_rpc_eth_types::{EthConfig, EthStateCache, EthSubscriptionIdProvider};
-use reth_rpc_layer::{AuthLayer, Claims, CompressionLayer, JwtAuthValidator, JwtSecret};
+use reth_rpc_layer::{AuthLayer, Claims, JwtAuthValidator, JwtSecret};
 use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
 use serde::{Deserialize, Serialize};
 use tower::Layer;
-use tower_http::cors::CorsLayer;
+use tower_http::{compression::CompressionLayer, cors::CorsLayer};
 
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
 
@@ -1649,7 +1649,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
 
     /// Returns a [`CompressionLayer`] that adds compression support (gzip, deflate, brotli, zstd)
     /// based on the client's `Accept-Encoding` header
-    const fn maybe_compression_layer() -> Option<CompressionLayer> {
+    fn maybe_compression_layer() -> Option<CompressionLayer> {
         Some(CompressionLayer::new())
     }
 
