@@ -19,7 +19,6 @@ use reth_db_api::{
     Database,
 };
 use reth_engine_primitives::EngineTypes;
-pub use reth_primitives_traits::{Block, BlockBody};
 use reth_trie_db::StateCommitment;
 
 /// Configures all the primitive types of the node.

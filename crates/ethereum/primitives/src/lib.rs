@@ -9,7 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use reth_node_types::NodePrimitives;
-use reth_primitives::{Block, Receipt};
+use reth_primitives::{Block, Receipt, TransactionSigned};
 
 /// Ethereum primitive types.
 #[derive(Debug, Clone, Default)]
@@ -17,5 +17,6 @@ pub struct EthPrimitives;
 
 impl NodePrimitives for EthPrimitives {
     type Block = Block;
+    type SignedTx = TransactionSigned;
     type Receipt = Receipt;
 }
