@@ -63,7 +63,7 @@ use tx_type::{
 };
 
 use alloc::vec::Vec;
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{transaction::AlloyTransactionExt, SignedTransaction};
 use revm_primitives::{AuthorizationList, TxEnv};
 
 /// Either a transaction hash or number.
@@ -829,6 +829,48 @@ impl alloy_consensus::Transaction for Transaction {
             Self::Eip7702(tx) => tx.kind(),
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => tx.kind(),
+        }
+    }
+}
+
+impl AlloyTransactionExt for Transaction {
+    type Type = TxType;
+
+    fn signature_hash(&self) -> B256 {
+        match self {
+            Self::Legacy(tx) => tx.signature_hash(),
+            Self::Eip2930(tx) => tx.signature_hash(),
+            Self::Eip1559(tx) => tx.signature_hash(),
+            Self::Eip4844(tx) => tx.signature_hash(),
+            Self::Eip7702(tx) => tx.signature_hash(),
+        }
+    }
+
+    fn is_dynamic_fee(&self) -> bool {
+        match self {
+            Self::Legacy(_) | Self::Eip2930(_) => false,
+            Self::Eip1559(_) | Self::Eip4844(_) | Self::Eip7702(_) => true,
+        }
+    }
+
+    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        match self {
+            Self::Legacy(tx) => tx.gas_price,
+            Self::Eip2930(tx) => tx.gas_price,
+            Self::Eip1559(dynamic_tx) => dynamic_tx.effective_gas_price(base_fee),
+            Self::Eip4844(dynamic_tx) => dynamic_tx.effective_gas_price(base_fee),
+            Self::Eip7702(dynamic_tx) => dynamic_tx.effective_gas_price(base_fee),
+        }
+    }
+
+    #[inline]
+    fn size(&self) -> usize {
+        match self {
+            Self::Legacy(tx) => tx.size(),
+            Self::Eip2930(tx) => tx.size(),
+            Self::Eip1559(tx) => tx.size(),
+            Self::Eip4844(tx) => tx.size(),
+            Self::Eip7702(tx) => tx.size(),
         }
     }
 }
