@@ -33,7 +33,7 @@ impl<T> MockExecutorProvider<T> {
     }
 }
 
-impl<N: NodePrimitives + 'static> BlockExecutorProvider<N> for MockExecutorProvider<N::Receipt> {
+impl<N: NodePrimitives> BlockExecutorProvider<N> for MockExecutorProvider<N::Receipt> {
     type Executor<DB: Database<Error: Into<ProviderError> + Display>> = Self;
 
     type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> = Self;
