@@ -2,16 +2,29 @@
 
 use alloc::{fmt, vec::Vec};
 
-use alloy_consensus::{BlockHeader, Transaction, TxType};
 use alloy_eips::{eip4895::Withdrawal, eip7685::Requests};
 use alloy_primitives::{Address, B256};
+use reth_codecs::Compact;
 
-use crate::Block;
+use crate::{
+    AlloyTransactionExt, Block, BlockHeader, FullBlockHeader, FullSignedTx, SignedTransaction,
+    TxType,
+};
+
+/// Helper trait that unifies all behaviour required by block to support full node operations.
+pub trait FullBlockBody:
+    BlockBody<Ommer: FullBlockHeader, SignedTransaction: FullSignedTx> + Compact
+{
+}
+
+impl<T> FullBlockBody for T where
+    T: BlockBody<Ommer: FullBlockHeader, SignedTransaction: FullSignedTx> + Compact
+{
+}
 
 /// Abstraction for block's body.
 pub trait BlockBody:
-    Clone
-    + fmt::Debug
+    fmt::Debug
     + PartialEq
     + Eq
     + Default
@@ -19,13 +32,21 @@ pub trait BlockBody:
     + for<'de> serde::Deserialize<'de>
     + alloy_rlp::Encodable
     + alloy_rlp::Decodable
+    + Body
 {
-    /// Ordered list of signed transactions as committed in block.
-    // todo: requires trait for signed transaction
-    type SignedTransaction: Transaction;
+    /// Create a [`Block`] from the body and its header.
+    fn into_block<T: Block<Header = Self::Ommer, Body = Self>>(self, header: Self::Ommer) -> T {
+        T::from((header, self))
+    }
+}
+
+/// Block body functionality.
+pub trait Body {
+    /// Signed transaction.
+    type SignedTransaction: SignedTransaction;
 
     /// Header type (uncle blocks).
-    type Header: BlockHeader;
+    type Ommer: BlockHeader;
 
     /// Withdrawals in block.
     type Withdrawals: Iterator<Item = Withdrawal>;
@@ -38,15 +59,10 @@ pub trait BlockBody:
     fn withdrawals(&self) -> Option<&Self::Withdrawals>;
 
     /// Returns reference to uncle block headers.
-    fn ommers(&self) -> &[Self::Header];
+    fn ommers(&self) -> &[Self::Ommer];
 
     /// Returns [`Requests`] in block, if any.
     fn requests(&self) -> Option<&Requests>;
-
-    /// Create a [`Block`] from the body and its header.
-    fn into_block<T: Block<Header = Self::Header, Body = Self>>(self, header: Self::Header) -> T {
-        T::from((header, self))
-    }
 
     /// Calculate the transaction root for the block body.
     fn calculate_tx_root(&self) -> B256;
@@ -65,17 +81,17 @@ pub trait BlockBody:
 
     /// Returns whether or not the block body contains any blob transactions.
     fn has_blob_transactions(&self) -> bool {
-        self.transactions().iter().any(|tx| tx.ty() == TxType::Eip4844 as u8)
+        self.transactions().iter().any(|tx| tx.tx_type().is_eip4844())
     }
 
     /// Returns whether or not the block body contains any EIP-7702 transactions.
     fn has_eip7702_transactions(&self) -> bool {
-        self.transactions().iter().any(|tx| tx.ty() == TxType::Eip7702 as u8)
+        self.transactions().iter().any(|tx| tx.tx_type().is_eip7702())
     }
 
     /// Returns an iterator over all blob transactions of the block
     fn blob_transactions_iter(&self) -> impl Iterator<Item = &Self::SignedTransaction> + '_ {
-        self.transactions().iter().filter(|tx| tx.ty() == TxType::Eip4844 as u8)
+        self.transactions().iter().filter(|tx| tx.tx_type().is_eip4844())
     }
 
     /// Returns only the blob transactions, if any, from the block body.
@@ -83,13 +99,8 @@ pub trait BlockBody:
         self.blob_transactions_iter().collect()
     }
 
-    /// Returns an iterator over all blob versioned hashes from the block body.
-    fn blob_versioned_hashes_iter(&self) -> impl Iterator<Item = &B256> + '_;
-
     /// Returns all blob versioned hashes from the block body.
-    fn blob_versioned_hashes(&self) -> Vec<&B256> {
-        self.blob_versioned_hashes_iter().collect()
-    }
+    fn blob_versioned_hashes(&self) -> &[B256];
 
     /// Calculates a heuristic for the in-memory size of the [`BlockBody`].
     fn size(&self) -> usize;
