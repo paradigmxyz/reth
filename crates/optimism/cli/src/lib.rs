@@ -48,7 +48,7 @@ use reth_node_core::{
 };
 use reth_optimism_evm::OpExecutorProvider;
 use reth_optimism_node::OptimismNode;
-use reth_tracing::FileWorkerGuard;
+use reth_tracing::TracerHandle;
 use tracing::info;
 
 // This allows us to manually enable node metrics features, required for proper jemalloc metric
@@ -178,9 +178,8 @@ where
     ///
     /// If file logging is enabled, this function returns a guard that must be kept alive to ensure
     /// that all logs are flushed to disk.
-    pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
-        let guard = self.logs.init_tracing()?;
-        Ok(guard)
+    pub fn init_tracing(&self) -> eyre::Result<TracerHandle> {
+        self.logs.init_tracing()
     }
 }
 
