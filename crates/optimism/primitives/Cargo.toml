@@ -23,6 +23,7 @@ alloy-consensus.workspace = true
 alloy-rlp.workspace = true
 alloy-eips.workspace = true
 revm-primitives.workspace = true
+secp256k1.workspace = true
 
 # op
 op-alloy-consensus.workspace = true

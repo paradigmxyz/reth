@@ -8327,6 +8327,7 @@ dependencies = [
  "reth-primitives",
  "reth-primitives-traits",
  "revm-primitives",
+ "secp256k1",
  "serde",
  "zstd",
 ]

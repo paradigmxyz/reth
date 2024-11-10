@@ -1,15 +1,15 @@
 //! A signed Optimism transaction.
 
-#[cfg(any(test, feature = "arbitrary"))]
-use alloy_consensus::Transaction as _;
-use alloy_consensus::{SignableTransaction, TxEip1559, TxEip2930, TxEip7702};
+use alloy_consensus::{
+    transaction::RlpEcdsaTx, SignableTransaction, TxEip1559, TxEip2930, TxEip7702,
+};
 use alloy_eips::eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718};
-use alloy_primitives::{keccak256, Address, Signature, TxHash, B256, U256};
-use alloy_rlp::{Decodable as _, Header};
+use alloy_primitives::{keccak256, Address, PrimitiveSignature, TxHash, B256, U256};
+use alloy_rlp::Header;
 use derive_more::{AsRef, Constructor, Deref};
 use op_alloy_consensus::{OpTxType, OpTypedTransaction, TxDeposit};
 use reth_primitives::{
-    transaction::{recover_signer, recover_signer_unchecked, with_eip155_parity},
+    transaction::{recover_signer, recover_signer_unchecked},
     TransactionSigned,
 };
 use reth_primitives_traits::SignedTransaction;
@@ -23,24 +23,11 @@ pub struct OpTransactionSigned {
     /// Transaction hash
     pub hash: TxHash,
     /// The transaction signature values
-    pub signature: Signature,
+    pub signature: PrimitiveSignature,
     /// Raw transaction info
     #[deref]
     #[as_ref]
     pub transaction: OpTypedTransaction,
-}
-
-impl OpTransactionSigned {
-    /// Calculates the signing hash for the transaction.
-    pub fn signature_hash(&self) -> B256 {
-        match &self.transaction {
-            OpTypedTransaction::Legacy(tx) => tx.signature_hash(),
-            OpTypedTransaction::Eip2930(tx) => tx.signature_hash(),
-            OpTypedTransaction::Eip1559(tx) => tx.signature_hash(),
-            OpTypedTransaction::Eip7702(tx) => tx.signature_hash(),
-            OpTypedTransaction::Deposit(_) => unreachable!(),
-        }
-    }
 }
 
 impl SignedTransaction for OpTransactionSigned {
@@ -54,7 +41,7 @@ impl SignedTransaction for OpTransactionSigned {
         &self.transaction
     }
 
-    fn signature(&self) -> &Signature {
+    fn signature(&self) -> &PrimitiveSignature {
         &self.signature
     }
 
@@ -65,8 +52,9 @@ impl SignedTransaction for OpTransactionSigned {
             return Some(from)
         }
 
-        let signature_hash = self.signature_hash();
-        recover_signer(&self.signature, signature_hash)
+        let Self { transaction, signature, .. } = self;
+        let signature_hash = signature_hash(transaction);
+        recover_signer(signature, signature_hash)
     }
 
     fn recover_signer_unchecked(&self) -> Option<Address> {
@@ -75,13 +63,15 @@ impl SignedTransaction for OpTransactionSigned {
         if let OpTypedTransaction::Deposit(TxDeposit { from, .. }) = self.transaction {
             return Some(from)
         }
-        let signature_hash = self.signature_hash();
-        recover_signer_unchecked(&self.signature, signature_hash)
+
+        let Self { transaction, signature, .. } = self;
+        let signature_hash = signature_hash(transaction);
+        recover_signer_unchecked(signature, signature_hash)
     }
 
     fn from_transaction_and_signature(
         transaction: Self::Transaction,
-        signature: Signature,
+        signature: PrimitiveSignature,
     ) -> Self {
         let mut initial_tx = Self { transaction, hash: Default::default(), signature };
         initial_tx.hash = initial_tx.recalculate_hash();
@@ -218,19 +208,19 @@ impl Encodable2718 for OpTransactionSigned {
 
     fn encode_2718_len(&self) -> usize {
         match &self.transaction {
-            OpTypedTransaction::Legacy(legacy_tx) => legacy_tx.encoded_len_with_signature(
-                &with_eip155_parity(&self.signature, legacy_tx.chain_id),
-            ),
+            OpTypedTransaction::Legacy(legacy_tx) => {
+                legacy_tx.eip2718_encoded_length(&self.signature)
+            }
             OpTypedTransaction::Eip2930(access_list_tx) => {
-                access_list_tx.encoded_len_with_signature(&self.signature, false)
+                access_list_tx.eip2718_encoded_length(&self.signature)
             }
             OpTypedTransaction::Eip1559(dynamic_fee_tx) => {
-                dynamic_fee_tx.encoded_len_with_signature(&self.signature, false)
+                dynamic_fee_tx.eip2718_encoded_length(&self.signature)
             }
             OpTypedTransaction::Eip7702(set_code_tx) => {
-                set_code_tx.encoded_len_with_signature(&self.signature, false)
+                set_code_tx.eip2718_encoded_length(&self.signature)
             }
-            OpTypedTransaction::Deposit(deposit_tx) => deposit_tx.encoded_len(false),
+            OpTypedTransaction::Deposit(deposit_tx) => deposit_tx.eip2718_encoded_length(),
         }
     }
 
@@ -240,21 +230,16 @@ impl Encodable2718 for OpTransactionSigned {
         match transaction {
             OpTypedTransaction::Legacy(legacy_tx) => {
                 // do nothing w/ with_header
-                legacy_tx.encode_with_signature_fields(
-                    &with_eip155_parity(signature, legacy_tx.chain_id),
-                    out,
-                )
+                legacy_tx.eip2718_encode(signature, out)
             }
             OpTypedTransaction::Eip2930(access_list_tx) => {
-                access_list_tx.encode_with_signature(signature, out, false)
+                access_list_tx.eip2718_encode(signature, out)
             }
             OpTypedTransaction::Eip1559(dynamic_fee_tx) => {
-                dynamic_fee_tx.encode_with_signature(signature, out, false)
+                dynamic_fee_tx.eip2718_encode(signature, out)
             }
-            OpTypedTransaction::Eip7702(set_code_tx) => {
-                set_code_tx.encode_with_signature(signature, out, false)
-            }
-            OpTypedTransaction::Deposit(deposit_tx) => deposit_tx.encode_inner(out, false),
+            OpTypedTransaction::Eip7702(set_code_tx) => set_code_tx.eip2718_encode(signature, out),
+            OpTypedTransaction::Deposit(deposit_tx) => deposit_tx.eip2718_encode(out),
         }
     }
 }
@@ -264,19 +249,19 @@ impl Decodable2718 for OpTransactionSigned {
         match ty.try_into().map_err(|_| Eip2718Error::UnexpectedType(ty))? {
             OpTxType::Legacy => Err(Eip2718Error::UnexpectedType(0)),
             OpTxType::Eip2930 => {
-                let (tx, signature, hash) = TxEip2930::decode_signed_fields(buf)?.into_parts();
-                Ok(Self::new(hash, signature, OpTypedTransaction::Eip2930(tx)))
+                let (tx, signature, hash) = TxEip2930::rlp_decode_signed(buf)?.into_parts();
+                Ok(Self { transaction: OpTypedTransaction::Eip2930(tx), signature, hash })
             }
             OpTxType::Eip1559 => {
-                let (tx, signature, hash) = TxEip1559::decode_signed_fields(buf)?.into_parts();
-                Ok(Self::new(hash, signature, OpTypedTransaction::Eip1559(tx)))
+                let (tx, signature, hash) = TxEip1559::rlp_decode_signed(buf)?.into_parts();
+                Ok(Self { transaction: OpTypedTransaction::Eip1559(tx), signature, hash })
             }
             OpTxType::Eip7702 => {
-                let (tx, signature, hash) = TxEip7702::decode_signed_fields(buf)?.into_parts();
-                Ok(Self::new(hash, signature, OpTypedTransaction::Eip7702(tx)))
+                let (tx, signature, hash) = TxEip7702::rlp_decode_signed(buf)?.into_parts();
+                Ok(Self { transaction: OpTypedTransaction::Eip7702(tx), signature, hash })
             }
             OpTxType::Deposit => Ok(Self::from_transaction_and_signature(
-                OpTypedTransaction::Deposit(TxDeposit::decode(buf)?),
+                OpTypedTransaction::Deposit(TxDeposit::rlp_decode(buf)?),
                 TxDeposit::signature(),
             )),
         }
@@ -294,17 +279,14 @@ impl<'a> arbitrary::Arbitrary<'a> for OpTransactionSigned {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         #[allow(unused_mut)]
         let mut transaction = OpTypedTransaction::arbitrary(u)?;
-        let mut signature = alloy_primitives::Signature::arbitrary(u)?;
 
-        signature = if matches!(transaction, OpTypedTransaction::Legacy(_)) {
-            if let Some(chain_id) = transaction.chain_id() {
-                signature.with_chain_id(chain_id)
-            } else {
-                signature.with_parity(alloy_primitives::Parity::NonEip155(bool::arbitrary(u)?))
-            }
-        } else {
-            signature.with_parity_bool()
-        };
+        let secp = secp256k1::Secp256k1::new();
+        let key_pair = secp256k1::Keypair::new(&secp, &mut rand::thread_rng());
+        let signature = reth_primitives::transaction::util::secp256k1::sign_message(
+            B256::from_slice(&key_pair.secret_bytes()[..]),
+            signature_hash(&transaction),
+        )
+        .unwrap();
 
         // Both `Some(0)` and `None` values are encoded as empty string byte. This introduces
         // ambiguity in roundtrip tests. Patch the mint value of deposit transaction here, so that
@@ -315,10 +297,24 @@ impl<'a> arbitrary::Arbitrary<'a> for OpTransactionSigned {
             }
         }
 
-        if let OpTypedTransaction::Deposit(_) = transaction {
-            signature = TxDeposit::signature()
-        }
+        let signature = if is_deposit(&transaction) { TxDeposit::signature() } else { signature };
 
         Ok(Self::from_transaction_and_signature(transaction, signature))
     }
+}
+
+/// Calculates the signing hash for the transaction.
+pub fn signature_hash(tx: &OpTypedTransaction) -> B256 {
+    match tx {
+        OpTypedTransaction::Legacy(tx) => tx.signature_hash(),
+        OpTypedTransaction::Eip2930(tx) => tx.signature_hash(),
+        OpTypedTransaction::Eip1559(tx) => tx.signature_hash(),
+        OpTypedTransaction::Eip7702(tx) => tx.signature_hash(),
+        OpTypedTransaction::Deposit(_) => B256::ZERO,
+    }
+}
+
+/// Returns `true` if transaction is deposit transaction.
+pub const fn is_deposit(tx: &OpTypedTransaction) -> bool {
+    matches!(tx, OpTypedTransaction::Deposit(_))
 }

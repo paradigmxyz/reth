@@ -41,6 +41,8 @@ pub use signature::{recover_signer, recover_signer_unchecked};
 pub use tx_type::TxType;
 pub use variant::TransactionSignedVariant;
 
+pub mod util;
+
 pub(crate) mod access_list;
 mod compat;
 mod error;
@@ -49,7 +51,6 @@ mod pooled;
 mod sidecar;
 mod signature;
 mod tx_type;
-pub(crate) mod util;
 mod variant;
 
 #[cfg(feature = "optimism")]
