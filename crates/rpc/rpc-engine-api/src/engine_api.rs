@@ -237,7 +237,7 @@ where
             .inspect(|_| self.inner.on_new_payload_response())?)
     }
 
-    /// Metrics version of new_payload_v4
+    /// Metrics version of `new_payload_v4`
     async fn new_payload_v4_metered(
         &self,
         payload: ExecutionPayloadV3,
@@ -751,7 +751,14 @@ where
         parent_beacon_block_root: B256,
         execution_requests: Requests,
     ) -> RpcResult<PayloadStatus> {
-        Ok(self.new_payload_v4_metered(payload, versioned_hashes, parent_beacon_block_root, execution_requests).await?)
+        Ok(self
+            .new_payload_v4_metered(
+                payload,
+                versioned_hashes,
+                parent_beacon_block_root,
+                execution_requests,
+            )
+            .await?)
     }
 
     /// Handler for `engine_forkchoiceUpdatedV1`
