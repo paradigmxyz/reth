@@ -2,9 +2,8 @@
 //! OpTxType that implements reth_primitives_traits::TxType.
 //! This type is required because a Compact impl is needed on the deposit tx type.
 
-use alloy_eips::eip2718::Eip2718Error;
 use alloy_primitives::{U64, U8};
-use alloy_rlp::{Decodable, Encodable};
+use alloy_rlp::{Decodable, Encodable, Error};
 use bytes::BufMut;
 use core::fmt::Debug;
 use derive_more::{
@@ -12,7 +11,6 @@ use derive_more::{
     Display,
 };
 use op_alloy_consensus::OpTxType as AlloyOpTxType;
-use reth_primitives_traits::TxType;
 use std::convert::TryFrom;
 
 /// Wrapper type for `AlloyOpTxType` to implement `TxType` trait.
@@ -28,12 +26,12 @@ impl From<OpTxType> for U8 {
 }
 
 impl TryFrom<u8> for OpTxType {
-    type Error = Eip2718Error;
+    type Error = Error;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         AlloyOpTxType::try_from(value)
             .map(OpTxType)
-            .map_err(|_| Eip2718Error::UnexpectedType(value))
+            .map_err(|_| Error::Custom("Invalid transaction type"))
     }
 }
 
@@ -51,21 +49,21 @@ impl PartialEq<u8> for OpTxType {
 }
 
 impl TryFrom<u64> for OpTxType {
-    type Error = Eip2718Error;
+    type Error = Error;
 
     fn try_from(value: u64) -> Result<Self, Self::Error> {
         if value > u8::MAX as u64 {
-            return Err(Eip2718Error::UnexpectedType(0));
+            return Err(Error::Custom("value out of range"));
         }
         Self::try_from(value as u8)
     }
 }
 
 impl TryFrom<U64> for OpTxType {
-    type Error = Eip2718Error;
+    type Error = Error;
 
     fn try_from(value: U64) -> Result<Self, Self::Error> {
-        let u64_value: u64 = value.try_into().map_err(|_| Eip2718Error::UnexpectedType(0))?;
+        let u64_value: u64 = value.try_into().map_err(|_| Error::Custom("value out of range"))?;
         Self::try_from(u64_value)
     }
 }
@@ -97,16 +95,10 @@ impl Decodable for OpTxType {
     }
 }
 
-impl TxType for OpTxType {}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::eip2718::Eip2718Error;
-    use alloy_primitives::{U64, U8};
-    use alloy_rlp::{Decodable, Encodable};
     use bytes::BytesMut;
-    use op_alloy_consensus::OpTxType as AlloyOpTxType;
 
     #[test]
     fn test_from_alloy_op_tx_type() {
@@ -139,7 +131,7 @@ mod tests {
     fn test_try_from_invalid_u8() {
         let invalid_value: u8 = 255;
         let result = OpTxType::try_from(invalid_value);
-        assert!(matches!(result, Err(Eip2718Error::UnexpectedType(v)) if v == invalid_value));
+        assert_eq!(result, Err(Error::Custom("Invalid transaction type")));
     }
 
     #[test]
@@ -151,7 +143,7 @@ mod tests {
     #[test]
     fn test_try_from_u64_out_of_range() {
         let result = OpTxType::try_from(u64::MAX);
-        assert!(matches!(result, Err(Eip2718Error::UnexpectedType(0))));
+        assert_eq!(result, Err(Error::Custom("value out of range")));
     }
 
     #[test]
