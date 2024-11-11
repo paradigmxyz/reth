@@ -751,6 +751,7 @@ where
         parent_beacon_block_root: B256,
         execution_requests: Requests,
     ) -> RpcResult<PayloadStatus> {
+        trace!(target: "rpc::engine", "Serving engine_newPayloadV4");
         Ok(self
             .new_payload_v4_metered(
                 payload,
