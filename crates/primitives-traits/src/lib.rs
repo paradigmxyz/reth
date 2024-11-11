@@ -22,7 +22,7 @@ pub mod account;
 pub use account::{Account, Bytecode};
 
 pub mod receipt;
-pub use receipt::Receipt;
+pub use receipt::{FullReceipt, Receipt};
 
 pub mod transaction;
 pub use transaction::{
@@ -34,7 +34,11 @@ mod integer_list;
 pub use integer_list::{IntegerList, IntegerListError};
 
 pub mod block;
-pub use block::{body::BlockBody, Block, FullBlock};
+pub use block::{
+    body::BlockBody,
+    header::{BlockHeader, FullBlockHeader},
+    Block, FullBlock,
+};
 
 mod withdrawal;
 pub use withdrawal::Withdrawal;
@@ -56,7 +60,7 @@ pub use tx_type::TxType;
 pub mod header;
 #[cfg(any(test, feature = "arbitrary", feature = "test-utils"))]
 pub use header::test_utils;
-pub use header::{BlockHeader, Header, HeaderError, SealedHeader};
+pub use header::{Header, HeaderError, SealedHeader};
 
 /// Bincode-compatible serde implementations for common abstracted types in Reth.
 ///

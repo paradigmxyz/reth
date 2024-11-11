@@ -10,11 +10,14 @@ use crate::Block;
 
 /// Abstraction for block's body.
 pub trait BlockBody:
-    Clone
+    Send
+    + Sync
+    + Unpin
+    + Clone
+    + Default
     + fmt::Debug
     + PartialEq
     + Eq
-    + Default
     + serde::Serialize
     + for<'de> serde::Deserialize<'de>
     + alloy_rlp::Encodable
