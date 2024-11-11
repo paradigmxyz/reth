@@ -153,6 +153,20 @@ where
             .inspect(|_| self.inner.on_new_payload_response())?)
     }
 
+    /// Metered version of `new_payload_v1`.
+    async fn new_payload_v1_metered(
+        &self,
+        payload: ExecutionPayloadV1,
+    ) -> EngineApiResult<PayloadStatus> {
+        let start = Instant::now();
+        let gas_used = payload.gas_used;
+        let res = Self::new_payload_v1(self, payload).await;
+        let elapsed = start.elapsed();
+        self.inner.metrics.latency.new_payload_v1.record(elapsed);
+        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
+        res
+    }
+
     /// See also <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/shanghai.md#engine_newpayloadv2>
     pub async fn new_payload_v2(
         &self,
@@ -691,13 +705,7 @@ where
     /// Caution: This should not accept the `withdrawals` field
     async fn new_payload_v1(&self, payload: ExecutionPayloadV1) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV1");
-        let start = Instant::now();
-        let gas_used = payload.gas_used;
-        let res = Self::new_payload_v1(self, payload).await;
-        let elapsed = start.elapsed();
-        self.inner.metrics.latency.new_payload_v1.record(elapsed);
-        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
-        Ok(res?)
+        Ok(self.new_payload_v1_metered(payload).await?)
     }
 
     /// Handler for `engine_newPayloadV2`
