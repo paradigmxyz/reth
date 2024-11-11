@@ -30,12 +30,10 @@ impl<H> SealedHeader<H> {
     pub const fn new(header: H, hash: BlockHash) -> Self {
         Self { header, hash }
     }
-}
 
-impl SealedHeader {
     /// Returns the sealed Header fields.
     #[inline]
-    pub const fn header(&self) -> &Header {
+    pub const fn header(&self) -> &H {
         &self.header
     }
 
@@ -46,15 +44,17 @@ impl SealedHeader {
     }
 
     /// Extract raw header that can be modified.
-    pub fn unseal(self) -> Header {
+    pub fn unseal(self) -> H {
         self.header
     }
 
     /// This is the inverse of [`Header::seal_slow`] which returns the raw header and hash.
-    pub fn split(self) -> (Header, BlockHash) {
+    pub fn split(self) -> (H, BlockHash) {
         (self.header, self.hash)
     }
+}
 
+impl SealedHeader {
     /// Return the number hash tuple.
     pub fn num_hash(&self) -> BlockNumHash {
         BlockNumHash::new(self.number, self.hash)
@@ -67,9 +67,9 @@ impl SealedHeader {
     }
 }
 
-impl Default for SealedHeader {
+impl<H: Sealable + Default> Default for SealedHeader<H> {
     fn default() -> Self {
-        let sealed = Header::default().seal_slow();
+        let sealed = H::default().seal_slow();
         let (header, hash) = sealed.into_parts();
         Self { header, hash }
     }
