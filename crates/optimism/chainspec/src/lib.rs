@@ -35,7 +35,7 @@ use reth_chainspec::{
 };
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 use reth_network_peers::NodeRecord;
-use reth_optimism_forks::OptimismHardforks;
+use reth_optimism_forks::OpHardforks;
 use reth_primitives_traits::Header;
 #[cfg(feature = "std")]
 pub(crate) use std::sync::LazyLock;
@@ -336,7 +336,7 @@ impl EthereumHardforks for OpChainSpec {
     }
 }
 
-impl OptimismHardforks for OpChainSpec {}
+impl OpHardforks for OpChainSpec {}
 
 impl From<Genesis> for OpChainSpec {
     fn from(genesis: Genesis) -> Self {
@@ -486,7 +486,7 @@ mod tests {
     use alloy_primitives::b256;
     use reth_chainspec::{test_fork_ids, BaseFeeParams, BaseFeeParamsKind};
     use reth_ethereum_forks::{EthereumHardfork, ForkCondition, ForkHash, ForkId, Head};
-    use reth_optimism_forks::{OpHardfork, OptimismHardforks};
+    use reth_optimism_forks::{OpHardfork, OpHardforks};
 
     use crate::*;
 
