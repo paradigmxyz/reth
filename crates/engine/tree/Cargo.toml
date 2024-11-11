@@ -80,6 +80,12 @@ reth-chainspec.workspace = true
 alloy-rlp.workspace = true
 
 assert_matches.workspace = true
+criterion.workspace = true
+crossbeam-channel = "0.5.13"
+
+[[bench]]
+name = "channel_perf"
+harness = false
 
 [features]
 test-utils = [

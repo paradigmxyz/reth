@@ -7211,6 +7211,8 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types-engine",
  "assert_matches",
+ "criterion",
+ "crossbeam-channel",
  "futures",
  "metrics",
  "pin-project",
