@@ -24,10 +24,14 @@ impl<T> FullBlockBody for T where
 
 /// Abstraction for block's body.
 pub trait BlockBody:
-    fmt::Debug
+    Send
+    + Sync
+    + Unpin
+    + Clone
+    + Default
+    + fmt::Debug
     + PartialEq
     + Eq
-    + Default
     + serde::Serialize
     + for<'de> serde::Deserialize<'de>
     + alloy_rlp::Encodable

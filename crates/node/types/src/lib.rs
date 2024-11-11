@@ -7,11 +7,11 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
 
-pub use reth_primitives_traits::{Block, BlockBody};
+pub use reth_primitives_traits::{Block, BlockBody, FullBlock, FullReceipt, FullSignedTx};
 
-use core::fmt;
-use std::marker::PhantomData;
+use core::{fmt, marker::PhantomData};
 
 use reth_chainspec::EthChainSpec;
 use reth_db_api::{
@@ -35,6 +35,25 @@ impl NodePrimitives for () {
     type Block = ();
     type SignedTx = ();
     type Receipt = ();
+}
+
+/// Helper trait that sets trait bounds on [`NodePrimitives`].
+pub trait FullNodePrimitives: Send + Sync + Unpin + Clone + Default + fmt::Debug {
+    /// Block primitive.
+    type Block: FullBlock<Body: BlockBody<SignedTransaction = Self::SignedTx>>;
+    /// Signed version of the transaction type.
+    type SignedTx: FullSignedTx;
+    /// A receipt.
+    type Receipt: FullReceipt;
+}
+
+impl<T> NodePrimitives for T
+where
+    T: FullNodePrimitives<Block: 'static, SignedTx: 'static, Receipt: 'static>,
+{
+    type Block = T::Block;
+    type SignedTx = T::SignedTx;
+    type Receipt = T::Receipt;
 }
 
 /// The type that configures the essential types of an Ethereum-like node.
