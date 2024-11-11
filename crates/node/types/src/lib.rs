@@ -11,8 +11,7 @@
 
 pub use reth_primitives_traits::{Block, BlockBody};
 
-use core::fmt;
-use std::marker::PhantomData;
+use core::{fmt, marker::PhantomData};
 
 use reth_chainspec::EthChainSpec;
 use reth_db_api::{
