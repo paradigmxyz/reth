@@ -282,6 +282,30 @@ where
             .inspect(|_| self.inner.on_new_payload_response())?)
     }
 
+    /// Metrics version of `new_payload_v4`
+    async fn new_payload_v4_metered(
+        &self,
+        payload: ExecutionPayloadV3,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+        execution_requests: Requests,
+    ) -> RpcResult<PayloadStatus> {
+        let start = Instant::now();
+        let gas_used = payload.payload_inner.payload_inner.gas_used;
+        let res = Self::new_payload_v4(
+            self,
+            payload,
+            versioned_hashes,
+            parent_beacon_block_root,
+            execution_requests,
+        )
+        .await;
+        let elapsed = start.elapsed();
+        self.inner.metrics.latency.new_payload_v4.record(elapsed);
+        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
+        Ok(res?)
+    }
+
     /// Sends a message to the beacon consensus engine to update the fork choice _without_
     /// withdrawals.
     ///
@@ -754,20 +778,14 @@ where
         execution_requests: Requests,
     ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV4");
-        let start = Instant::now();
-        let gas_used = payload.payload_inner.payload_inner.gas_used;
-        let res = Self::new_payload_v4(
-            self,
-            payload,
-            versioned_hashes,
-            parent_beacon_block_root,
-            execution_requests,
-        )
-        .await;
-        let elapsed = start.elapsed();
-        self.inner.metrics.latency.new_payload_v4.record(elapsed);
-        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
-        Ok(res?)
+        Ok(self
+            .new_payload_v4_metered(
+                payload,
+                versioned_hashes,
+                parent_beacon_block_root,
+                execution_requests,
+            )
+            .await?)
     }
 
     /// Handler for `engine_forkchoiceUpdatedV1`
