@@ -205,7 +205,7 @@ where
             .inspect(|_| self.inner.on_new_payload_response())?)
     }
 
-    // Metrics version of new_payload_v3
+    // Metrics version of `new_payload_v3`
     async fn new_payload_v3_metered(
         &self,
         payload: ExecutionPayloadV3,
