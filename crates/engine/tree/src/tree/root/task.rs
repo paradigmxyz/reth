@@ -25,13 +25,13 @@ impl StdReceiverStream {
 
 /// Synchronous implementation of the state root task
 #[allow(dead_code)]
-pub(crate) struct StateRootSyncTask<Factory> {
+pub(crate) struct StateRootTask<Factory> {
     state_stream: StdReceiverStream,
     config: StateRootConfig<Factory>,
 }
 
 #[allow(dead_code)]
-impl<Factory> StateRootSyncTask<Factory>
+impl<Factory> StateRootTask<Factory>
 where
     Factory: Send + 'static,
 {
@@ -67,7 +67,7 @@ where
 }
 
 #[allow(dead_code)]
-impl<Factory> StateRootSyncTask<Factory>
+impl<Factory> StateRootTask<Factory>
 where
     Factory: Send + 'static,
 {

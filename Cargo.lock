@@ -7215,7 +7215,6 @@ dependencies = [
  "crossbeam-channel",
  "futures",
  "metrics",
- "pin-project",
  "reth-beacon-consensus",
  "reth-blockchain-tree",
  "reth-blockchain-tree-api",
@@ -7249,7 +7248,6 @@ dependencies = [
  "revm-primitives",
  "thiserror",
  "tokio",
- "tokio-stream",
  "tracing",
 ]
 

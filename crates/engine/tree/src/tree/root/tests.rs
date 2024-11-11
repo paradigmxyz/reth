@@ -1,5 +1,7 @@
-use super::{async_task::StateRootAsyncTask, sync_task::StateRootSyncTask, StateRootConfig};
-use crate::tree::root::sync_task::StdReceiverStream;
+use super::{
+    task::{StateRootTask, StdReceiverStream},
+    StateRootConfig,
+};
 use reth_provider::{providers::ConsistentDbView, test_utils::MockEthProvider};
 use reth_trie::TrieInput;
 use revm_primitives::{
@@ -7,8 +9,6 @@ use revm_primitives::{
     B256, U256,
 };
 use std::sync::Arc;
-use tokio::sync::mpsc::unbounded_channel;
-use tokio_stream::wrappers::UnboundedReceiverStream;
 
 fn create_mock_config() -> StateRootConfig<MockEthProvider> {
     let factory = MockEthProvider::default();
@@ -38,12 +38,12 @@ fn create_mock_state() -> revm_primitives::EvmState {
 }
 
 #[test]
-fn test_state_root_task_sync() {
+fn test_state_root_task() {
     let config = create_mock_config();
     let (tx, rx) = std::sync::mpsc::channel();
     let stream = StdReceiverStream::new(rx);
 
-    let task = StateRootSyncTask::new(config, stream);
+    let task = StateRootTask::new(config, stream);
     let handle = task.spawn();
 
     for _ in 0..10 {
@@ -53,26 +53,4 @@ fn test_state_root_task_sync() {
 
     let result = handle.wait_for_result();
     assert!(result.is_ok(), "sync block execution failed");
-}
-
-#[test]
-fn test_state_root_task_async() {
-    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
-
-    runtime.block_on(async {
-        let config = create_mock_config();
-        let (tx, rx) = unbounded_channel();
-        let stream = UnboundedReceiverStream::new(rx);
-
-        let task = StateRootAsyncTask::new(config, stream);
-        let handle = task.spawn();
-
-        for _ in 0..10 {
-            tx.send(create_mock_state()).expect("failed to send state");
-        }
-        drop(tx);
-
-        let result = handle.wait_for_result();
-        assert!(result.is_ok(), "async block execution failed");
-    });
 }

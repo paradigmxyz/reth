@@ -1,7 +1,6 @@
 //! State root computation related code.
 
-mod async_task;
-mod sync_task;
+mod task;
 
 #[cfg(test)]
 mod tests;
