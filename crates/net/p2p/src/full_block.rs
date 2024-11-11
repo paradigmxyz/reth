@@ -746,6 +746,7 @@ mod tests {
 
         let test_consensus = reth_consensus::test_utils::TestConsensus::default();
         test_consensus.set_fail_validation(true);
+        test_consensus.set_fail_body_against_header(false);
         let client = FullBlockClient::new(client, Arc::new(test_consensus));
 
         let received = client.get_full_block_range(header.hash(), range_length as u64).await;

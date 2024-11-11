@@ -8,11 +8,15 @@ use reth_primitives::{BlockWithSenders, SealedBlock, SealedHeader};
 pub struct TestConsensus {
     /// Flag whether the header validation should purposefully fail
     fail_validation: AtomicBool,
+    /// Separate flag for setting whether `validate_body_against_header` should fail. It is needed
+    /// for testing networking logic for which the body failing this check is getting completely
+    /// rejected while more high-level failures are handled by the sync logic.
+    fail_body_against_header: AtomicBool,
 }
 
 impl Default for TestConsensus {
     fn default() -> Self {
-        Self { fail_validation: AtomicBool::new(false) }
+        Self { fail_validation: AtomicBool::new(false), fail_body_against_header: AtomicBool::new(false) }
     }
 }
 
@@ -24,7 +28,13 @@ impl TestConsensus {
 
     /// Update the validation flag.
     pub fn set_fail_validation(&self, val: bool) {
-        self.fail_validation.store(val, Ordering::SeqCst)
+        self.fail_validation.store(val, Ordering::SeqCst);
+        self.fail_body_against_header.store(val, Ordering::SeqCst);
+    }
+
+    /// Update the body validation flag.
+    pub fn set_fail_body_against_header(&self, val: bool) {
+        self.fail_body_against_header.store(val, Ordering::SeqCst);
     }
 }
 

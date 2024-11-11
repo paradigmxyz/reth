@@ -81,7 +81,7 @@ pub fn validate_cancun_gas(block: &SealedBlock) -> Result<(), ConsensusError> {
 ///   - ommer hash
 ///   - transaction root
 ///   - withdrawals root
-pub fn validate_body_againt_header(
+pub fn validate_body_against_header(
     body: &BlockBody,
     header: &SealedHeader,
 ) -> Result<(), ConsensusError> {
