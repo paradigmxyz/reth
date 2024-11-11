@@ -17,7 +17,8 @@ use alloy_consensus::constants::{
 };
 use alloy_eips::eip4844::MAX_BLOBS_PER_BLOCK;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
-use reth_primitives::{GotExpected, InvalidTransactionError, SealedBlock};
+use reth_primitives::{InvalidTransactionError, SealedBlock};
+use reth_primitives_traits::GotExpected;
 use reth_storage_api::{AccountReader, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use revm::{
