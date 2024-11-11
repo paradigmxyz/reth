@@ -7,26 +7,19 @@ use alloy_primitives::{U64, U8};
 use alloy_rlp::{Decodable, Encodable};
 use bytes::BufMut;
 use core::fmt::Debug;
-use derive_more::Display;
+use derive_more::{
+    derive::{From, Into},
+    Display,
+};
 use op_alloy_consensus::OpTxType as AlloyOpTxType;
 use reth_primitives_traits::TxType;
 use std::convert::TryFrom;
 
 /// Wrapper type for `AlloyOpTxType` to implement `TxType` trait.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Display, Ord, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Display, Ord, Hash, From, Into)]
+#[from(AlloyOpTxType)]
+#[into(u8)]
 pub struct OpTxType(AlloyOpTxType);
-
-impl From<AlloyOpTxType> for OpTxType {
-    fn from(tx_type: AlloyOpTxType) -> Self {
-        OpTxType(tx_type)
-    }
-}
-
-impl From<OpTxType> for u8 {
-    fn from(tx_type: OpTxType) -> Self {
-        tx_type.0 as u8
-    }
-}
 
 impl From<OpTxType> for U8 {
     fn from(tx_type: OpTxType) -> Self {
@@ -46,8 +39,7 @@ impl TryFrom<u8> for OpTxType {
 
 impl Default for OpTxType {
     fn default() -> Self {
-        // TODO: default to `Deposit` for optimism ?
-        OpTxType(AlloyOpTxType::Deposit)
+        OpTxType(AlloyOpTxType::Legacy)
     }
 }
 
@@ -92,7 +84,15 @@ impl Encodable for OpTxType {
 
 impl Decodable for OpTxType {
     fn decode(buf: &mut &[u8]) -> Result<Self, alloy_rlp::Error> {
-        let value = u8::decode(buf)?;
+        // Decode the u8 value from RLP
+        let value = if buf.is_empty() {
+            return Err(alloy_rlp::Error::InputTooShort);
+        } else if buf[0] == 0x80 {
+            0 // Special case: RLP encoding for integer 0 is `b"\x80"`
+        } else {
+            u8::decode(buf)?
+        };
+
         OpTxType::try_from(value).map_err(|_| alloy_rlp::Error::Custom("Invalid transaction type"))
     }
 }
@@ -110,29 +110,29 @@ mod tests {
 
     #[test]
     fn test_from_alloy_op_tx_type() {
-        let alloy_tx = AlloyOpTxType::Deposit;
+        let alloy_tx = AlloyOpTxType::Legacy;
         let op_tx: OpTxType = OpTxType::from(alloy_tx);
-        assert_eq!(op_tx, OpTxType(AlloyOpTxType::Deposit));
+        assert_eq!(op_tx, OpTxType(AlloyOpTxType::Legacy));
     }
 
     #[test]
     fn test_from_op_tx_type_to_u8() {
-        let op_tx = OpTxType(AlloyOpTxType::Deposit);
+        let op_tx = OpTxType(AlloyOpTxType::Legacy);
         let tx_type_u8: u8 = op_tx.into();
-        assert_eq!(tx_type_u8, AlloyOpTxType::Deposit as u8);
+        assert_eq!(tx_type_u8, AlloyOpTxType::Legacy as u8);
     }
 
     #[test]
     fn test_from_op_tx_type_to_u8_u8() {
-        let op_tx = OpTxType(AlloyOpTxType::Deposit);
+        let op_tx = OpTxType(AlloyOpTxType::Legacy);
         let tx_type_u8: U8 = op_tx.into();
-        assert_eq!(tx_type_u8, U8::from(AlloyOpTxType::Deposit as u8));
+        assert_eq!(tx_type_u8, U8::from(AlloyOpTxType::Legacy as u8));
     }
 
     #[test]
     fn test_try_from_u8() {
-        let op_tx = OpTxType::try_from(AlloyOpTxType::Deposit as u8).unwrap();
-        assert_eq!(op_tx, OpTxType(AlloyOpTxType::Deposit));
+        let op_tx = OpTxType::try_from(AlloyOpTxType::Legacy as u8).unwrap();
+        assert_eq!(op_tx, OpTxType(AlloyOpTxType::Legacy));
     }
 
     #[test]
@@ -144,8 +144,8 @@ mod tests {
 
     #[test]
     fn test_try_from_u64() {
-        let op_tx = OpTxType::try_from(AlloyOpTxType::Deposit as u64).unwrap();
-        assert_eq!(op_tx, OpTxType(AlloyOpTxType::Deposit));
+        let op_tx = OpTxType::try_from(AlloyOpTxType::Legacy as u64).unwrap();
+        assert_eq!(op_tx, OpTxType(AlloyOpTxType::Legacy));
     }
 
     #[test]
@@ -156,36 +156,37 @@ mod tests {
 
     #[test]
     fn test_try_from_u64_within_range() {
-        let valid_value: U64 = U64::from(AlloyOpTxType::Deposit as u64);
+        let valid_value: U64 = U64::from(AlloyOpTxType::Legacy as u64);
         let op_tx = OpTxType::try_from(valid_value).unwrap();
-        assert_eq!(op_tx, OpTxType(AlloyOpTxType::Deposit));
+        assert_eq!(op_tx, OpTxType(AlloyOpTxType::Legacy));
     }
 
     #[test]
     fn test_default() {
         let default_tx = OpTxType::default();
-        assert_eq!(default_tx, OpTxType(AlloyOpTxType::Deposit));
+        assert_eq!(default_tx, OpTxType(AlloyOpTxType::Legacy));
     }
 
     #[test]
     fn test_partial_eq_u8() {
-        let op_tx = OpTxType(AlloyOpTxType::Deposit);
-        assert_eq!(op_tx, AlloyOpTxType::Deposit as u8);
+        let op_tx = OpTxType(AlloyOpTxType::Legacy);
+        assert_eq!(op_tx, AlloyOpTxType::Legacy as u8);
     }
 
     #[test]
     fn test_encodable() {
-        let op_tx = OpTxType(AlloyOpTxType::Deposit);
+        let op_tx = OpTxType(AlloyOpTxType::Legacy);
         let mut buf = BytesMut::new();
         op_tx.encode(&mut buf);
-        assert_eq!(buf, BytesMut::from(&[AlloyOpTxType::Deposit as u8][..]));
+        assert_eq!(buf, BytesMut::from(&[0x80][..]));
     }
 
     #[test]
-    fn test_decodable() {
-        let mut buf: &[u8] = &[AlloyOpTxType::Deposit as u8];
+    fn test_decodable_success() {
+        // Using the RLP-encoded form of 0, which is `b"\x80"`
+        let mut buf: &[u8] = &[0x80];
         let decoded_tx = OpTxType::decode(&mut buf).unwrap();
-        assert_eq!(decoded_tx, OpTxType(AlloyOpTxType::Deposit));
+        assert_eq!(decoded_tx, OpTxType(AlloyOpTxType::Legacy));
     }
 
     #[test]

@@ -1,4 +1,3 @@
-use alloy_eips::eip2718::Eip2718Error;
 use alloy_primitives::{U64, U8};
 use alloy_rlp::{Decodable, Encodable};
 use core::fmt::{Debug, Display};
@@ -10,7 +9,7 @@ pub trait TxType:
     + PartialEq
     + Eq
     + PartialEq<u8>
-    + TryFrom<u8, Error = Eip2718Error>
+    + TryFrom<u8>
     + TryFrom<u64>
     + TryFrom<U64>
     + Debug
