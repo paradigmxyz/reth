@@ -117,12 +117,12 @@ impl reth_primitives_traits::Receipt for Receipt {
     DerefMut,
     IntoIterator,
 )]
-pub struct Receipts {
+pub struct Receipts<T = Receipt> {
     /// A two-dimensional vector of optional `Receipt` instances.
-    pub receipt_vec: Vec<Vec<Option<Receipt>>>,
+    pub receipt_vec: Vec<Vec<Option<T>>>,
 }
 
-impl Receipts {
+impl<T> Receipts<T> {
     /// Returns the length of the `Receipts` vector.
     pub fn len(&self) -> usize {
         self.receipt_vec.len()
@@ -134,26 +134,26 @@ impl Receipts {
     }
 
     /// Push a new vector of receipts into the `Receipts` collection.
-    pub fn push(&mut self, receipts: Vec<Option<Receipt>>) {
+    pub fn push(&mut self, receipts: Vec<Option<T>>) {
         self.receipt_vec.push(receipts);
     }
 
     /// Retrieves all recorded receipts from index and calculates the root using the given closure.
-    pub fn root_slow(&self, index: usize, f: impl FnOnce(&[&Receipt]) -> B256) -> Option<B256> {
+    pub fn root_slow(&self, index: usize, f: impl FnOnce(&[&T]) -> B256) -> Option<B256> {
         let receipts =
             self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?;
         Some(f(receipts.as_slice()))
     }
 }
 
-impl From<Vec<Receipt>> for Receipts {
-    fn from(block_receipts: Vec<Receipt>) -> Self {
+impl<T> From<Vec<T>> for Receipts<T> {
+    fn from(block_receipts: Vec<T>) -> Self {
         Self { receipt_vec: vec![block_receipts.into_iter().map(Option::Some).collect()] }
     }
 }
 
-impl FromIterator<Vec<Option<Receipt>>> for Receipts {
-    fn from_iter<I: IntoIterator<Item = Vec<Option<Receipt>>>>(iter: I) -> Self {
+impl<T> FromIterator<Vec<Option<T>>> for Receipts<T> {
+    fn from_iter<I: IntoIterator<Item = Vec<Option<T>>>>(iter: I) -> Self {
         iter.into_iter().collect::<Vec<_>>().into()
     }
 }
