@@ -17,13 +17,6 @@
 
 extern crate alloc;
 
-use crate::builder::RethEvmBuilder;
-use alloy_primitives::{Address, Bytes, B256, U256};
-use reth_primitives::TransactionSigned;
-use reth_primitives_traits::BlockHeader;
-use revm::{Database, Evm, GetInspector};
-use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, SpecId, TxEnv};
-
 pub mod builder;
 pub mod either;
 pub mod execute;
@@ -33,10 +26,18 @@ pub mod noop;
 pub mod provider;
 pub mod state_change;
 pub mod system_calls;
-
 #[cfg(any(test, feature = "test-utils"))]
 /// test helpers for mocking executor
 pub mod test_utils;
+
+use alloy_consensus::BlockHeader as _;
+use alloy_primitives::{Address, Bytes, B256, U256};
+use reth_primitives::TransactionSigned;
+use reth_primitives_traits::BlockHeader;
+use revm::{Database, Evm, GetInspector};
+use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, SpecId, TxEnv};
+
+use crate::builder::RethEvmBuilder;
 
 /// Trait for configuring the EVM for executing full blocks.
 #[auto_impl::auto_impl(&, Arc)]
@@ -155,7 +156,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
         block_env.coinbase = header.beneficiary();
         block_env.timestamp = U256::from(header.timestamp());
         if after_merge {
-            block_env.prevrandao = Some(header.mix_hash());
+            block_env.prevrandao = header.mix_hash();
             block_env.difficulty = U256::ZERO;
         } else {
             block_env.difficulty = header.difficulty();
