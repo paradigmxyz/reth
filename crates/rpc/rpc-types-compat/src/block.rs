@@ -3,9 +3,7 @@
 use alloy_consensus::Sealed;
 use alloy_primitives::{B256, U256};
 use alloy_rlp::Encodable;
-use alloy_rpc_types::{
-    Block, BlockError, BlockTransactions, BlockTransactionsKind, Header, TransactionInfo,
-};
+use alloy_rpc_types::{Block, BlockTransactions, BlockTransactionsKind, Header, TransactionInfo};
 use reth_primitives::{Block as PrimitiveBlock, BlockWithSenders, Withdrawals};
 
 use crate::{transaction::from_recovered_with_block_context, TransactionCompat};
@@ -20,7 +18,7 @@ pub fn from_block<T: TransactionCompat>(
     kind: BlockTransactionsKind,
     block_hash: Option<B256>,
     tx_resp_builder: &T,
-) -> Result<Block<T::Transaction>, BlockError> {
+) -> Result<Block<T::Transaction>, T::Error> {
     match kind {
         BlockTransactionsKind::Hashes => {
             Ok(from_block_with_tx_hashes::<T::Transaction>(block, total_difficulty, block_hash))
@@ -63,7 +61,7 @@ pub fn from_block_full<T: TransactionCompat>(
     total_difficulty: U256,
     block_hash: Option<B256>,
     tx_resp_builder: &T,
-) -> Result<Block<T::Transaction>, BlockError> {
+) -> Result<Block<T::Transaction>, T::Error> {
     let block_hash = block_hash.unwrap_or_else(|| block.block.header.hash_slow());
     let block_number = block.block.number;
     let base_fee_per_gas = block.block.base_fee_per_gas;
@@ -88,8 +86,7 @@ pub fn from_block_full<T: TransactionCompat>(
 
             from_recovered_with_block_context::<T>(signed_tx_ec_recovered, tx_info, tx_resp_builder)
         })
-        .collect::<Result<Vec<_>, T::Error>>()
-        .expect("fill should be infallible");
+        .collect::<Result<Vec<_>, T::Error>>()?;
 
     Ok(from_block_with_transactions(
         block_length,

@@ -179,7 +179,7 @@ pub fn build_block<T: TransactionCompat>(
     full_transactions: bool,
     db: &CacheDB<StateProviderDatabase<StateProviderTraitObjWrapper<'_>>>,
     tx_resp_builder: &T,
-) -> Result<SimulatedBlock<Block<T::Transaction>>, EthApiError> {
+) -> Result<SimulatedBlock<Block<T::Transaction>>, T::Error> {
     let mut calls: Vec<SimCallResult> = Vec::with_capacity(results.len());
     let mut senders = Vec::with_capacity(results.len());
     let mut receipts = Vec::with_capacity(results.len());
