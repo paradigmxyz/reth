@@ -1,6 +1,6 @@
-//! newtype pattern on op_alloy_consensus::OpTxType.
-//! OpTxType that implements reth_primitives_traits::TxType.
-//! This type is required because a Compact impl is needed on the deposit tx type.
+//! newtype pattern on `op_alloy_consensus::OpTxType`.
+//! `OpTxType` implements `reth_primitives_traits::TxType`.
+//! This type is required because a `Compact` impl is needed on the deposit tx type.
 
 use alloy_primitives::{U64, U8};
 use alloy_rlp::{Decodable, Encodable, Error};
@@ -20,7 +20,7 @@ pub struct OpTxType(AlloyOpTxType);
 
 impl From<OpTxType> for U8 {
     fn from(tx_type: OpTxType) -> Self {
-        U8::from(u8::from(tx_type))
+        Self::from(u8::from(tx_type))
     }
 }
 
@@ -36,7 +36,7 @@ impl TryFrom<u8> for OpTxType {
 
 impl Default for OpTxType {
     fn default() -> Self {
-        OpTxType(AlloyOpTxType::Legacy)
+        Self(AlloyOpTxType::Legacy)
     }
 }
 
@@ -90,7 +90,7 @@ impl Decodable for OpTxType {
             u8::decode(buf)?
         };
 
-        OpTxType::try_from(value).map_err(|_| alloy_rlp::Error::Custom("Invalid transaction type"))
+        Self::try_from(value).map_err(|_| alloy_rlp::Error::Custom("Invalid transaction type"))
     }
 }
 
