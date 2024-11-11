@@ -75,7 +75,7 @@ impl PersistenceState {
 }
 
 /// The currently running persistence action.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CurrentPersistenceAction {
     /// The persistence task is saving blocks.
     SavingBlocks {

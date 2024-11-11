@@ -378,6 +378,35 @@ impl<N: NodePrimitives> TreeState<N> {
         }
     }
 
+    /// Determines if the second block is a strict descendant of the first block.
+    ///
+    /// If the two blocks are the same, this returns `false`.
+    fn is_descendant(&self, first: BlockNumHash, second: &Header) -> bool {
+        // If the second block is lower than, or has the same block number, they are not
+        // descendants.
+        if second.number <= first.number {
+            return false
+        }
+
+        // iterate through parents of the second until we reach the number
+        let Some(mut current_block) = self.block_by_hash(second.parent_hash) else {
+            // If we can't find its parent in the tree, we can't continue, so return false
+            return false
+        };
+
+        while current_block.number > first.number {
+            let Some(block) = self.block_by_hash(current_block.header.parent_hash) else {
+                // If we can't find its parent in the tree, we can't continue, so return false
+                return false
+            };
+
+            current_block = block;
+        }
+
+        // Now the block numbers should be equal, so we compare hashes.
+        current_block.hash() == first.hash
+    }
+
     /// Updates the canonical head to the given block.
     fn set_canonical_head(&mut self, new_head: BlockNumHash) {
         self.current_canonical_head = new_head;
@@ -1176,6 +1205,31 @@ where
         }
     }
 
+    /// Helper method to remove blocks and set the persistence state. This ensures we keep track of
+    /// the current persistence action while we're removing blocks.
+    fn remove_blocks(&mut self, new_tip_num: u64) {
+        debug!(target: "engine::tree", ?new_tip_num, remove_state=?self.persistence_state.remove_above_state, last_persisted_block_number=?self.persistence_state.last_persisted_block.number, "Removing blocks using persistence task");
+        if new_tip_num < self.persistence_state.last_persisted_block.number {
+            debug!(target: "engine::tree", ?new_tip_num, "Starting remove blocks job");
+            let (tx, rx) = oneshot::channel();
+            let _ = self.persistence.remove_blocks_above(new_tip_num, tx);
+            self.persistence_state.start_remove(new_tip_num, rx);
+        }
+    }
+
+    /// Helper method to save blocks and set the persistence state. This ensures we keep track of
+    /// the current persistence action while we're saving blocks.
+    fn persist_blocks(&mut self, blocks_to_persist: Vec<ExecutedBlock>) {
+        if blocks_to_persist.is_empty() {
+            debug!(target: "engine::tree", "Returned empty set of blocks to persist");
+        } else {
+            debug!(target: "engine::tree", blocks = ?blocks_to_persist.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
+            let (tx, rx) = oneshot::channel();
+            let _ = self.persistence.save_blocks(blocks_to_persist.clone(), tx);
+            self.persistence_state.start_save(blocks_to_persist, rx);
+        }
+    }
+
     /// Attempts to advance the persistence state.
     ///
     /// If we're currently awaiting a response this will try to receive the response (non-blocking)
@@ -1216,23 +1270,10 @@ where
 
         if !self.persistence_state.in_progress() {
             if let Some(new_tip_num) = self.persistence_state.remove_above_state.pop_front() {
-                debug!(target: "engine::tree", ?new_tip_num, remove_state=?self.persistence_state.remove_above_state, last_persisted_block_number=?self.persistence_state.last_persisted_block.number, "Removing blocks using persistence task");
-                if new_tip_num < self.persistence_state.last_persisted_block.number {
-                    debug!(target: "engine::tree", ?new_tip_num, "Starting remove blocks job");
-                    let (tx, rx) = oneshot::channel();
-                    let _ = self.persistence.remove_blocks_above(new_tip_num, tx);
-                    self.persistence_state.start_remove(new_tip_num, rx);
-                }
+                self.remove_blocks(new_tip_num)
             } else if self.should_persist() {
                 let blocks_to_persist = self.get_canonical_blocks_to_persist();
-                if blocks_to_persist.is_empty() {
-                    debug!(target: "engine::tree", "Returned empty set of blocks to persist");
-                } else {
-                    debug!(target: "engine::tree", blocks = ?blocks_to_persist.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
-                    let (tx, rx) = oneshot::channel();
-                    let _ = self.persistence.save_blocks(blocks_to_persist.clone(), tx);
-                    self.persistence_state.start_save(blocks_to_persist, rx);
-                }
+                self.persist_blocks(blocks_to_persist);
             }
         }
 
@@ -2279,9 +2320,25 @@ where
 
         let is_descendant_block = self.persistence_state.current_action().map_or(true, |action| {
             match action {
-                CurrentPersistenceAction::SavingBlocks { blocks: _ } => {
-                    // TODO: check if this block is a descendant of the ones being persisted
-                    true
+                CurrentPersistenceAction::SavingBlocks { blocks } => {
+                    // Get the highest block num and hash
+                    let Some(highest_num_hash) = blocks
+                        .iter()
+                        .max_by_key(|elem| elem.block().num_hash().number)
+                        .map(|block| block.block.num_hash())
+                    else {
+                        // If the blocks are empty for some reason, we can actually proceed here.
+                        return true
+                    };
+
+                    // The block being validated can't be a descendant if its number is lower than
+                    // the highest block being persisted. In that case, it's likely a fork of a
+                    // lower block.
+                    if block_number <= highest_num_hash.number {
+                        return false
+                    }
+
+                    self.state.tree_state.is_descendant(highest_num_hash, &block.header)
                 }
                 CurrentPersistenceAction::RemovingBlocks { new_tip_num: _ } => false,
             }
@@ -3426,6 +3483,20 @@ mod tests {
         assert!(resp.is_syncing());
     }
 
+    #[test]
+    fn test_tree_state_normal_descendant() {
+        let mut tree_state = TreeState::new(BlockNumHash::default());
+        let blocks: Vec<_> = TestBlockBuilder::default().get_executed_blocks(1..4).collect();
+
+        tree_state.insert_executed(blocks[0].clone());
+        assert!(tree_state.is_descendant(blocks[0].block.num_hash(), &blocks[1].block.header));
+
+        tree_state.insert_executed(blocks[1].clone());
+
+        assert!(tree_state.is_descendant(blocks[0].block.num_hash(), &blocks[2].block.header));
+        assert!(tree_state.is_descendant(blocks[1].block.num_hash(), &blocks[2].block.header));
+    }
+
     #[tokio::test]
     async fn test_tree_state_insert_executed() {
         let mut tree_state = TreeState::new(BlockNumHash::default());
@@ -3642,7 +3713,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_tree_state_on_new_head() {
+    async fn test_tree_state_on_new_head_reorg() {
+        reth_tracing::init_test_tracing();
         let chain_spec = MAINNET.clone();
         let mut test_harness = TestHarness::new(chain_spec);
         let mut test_block_builder = TestBlockBuilder::eth();
@@ -3681,6 +3753,28 @@ mod tests {
             assert_eq!(new[1].recovered_block().hash(), blocks[4].recovered_block().hash());
         }
 
+        // should be a None persistence action before we advance persistence
+        let current_action = test_harness.tree.persistence_state.current_action();
+        assert_eq!(current_action, None);
+
+        // let's attempt to persist and check that it attempts to save blocks
+        test_harness.tree.advance_persistence().unwrap();
+        let current_action = test_harness.tree.persistence_state.current_action().cloned();
+        assert_eq!(
+            current_action,
+            Some(CurrentPersistenceAction::SavingBlocks { blocks: vec![blocks[0].clone()] })
+        );
+
+        // get rid of the prev action
+        let received_action = test_harness.action_rx.recv().unwrap();
+        let PersistenceAction::SaveBlocks(saved_blocks, sender) = received_action else {
+            panic!("received wrong action");
+        };
+        assert_eq!(saved_blocks, vec![blocks[0].clone()]);
+
+        // send the response so we can advance again
+        sender.send(Some(blocks[0].block.num_hash())).unwrap();
+
         // reorg case
         let result = test_harness.tree.on_new_head(fork_block_5.recovered_block().hash()).unwrap();
         assert!(matches!(result, Some(NewCanonicalChain::Reorg { .. })));
@@ -3693,6 +3787,11 @@ mod tests {
             assert_eq!(old.len(), 1);
             assert_eq!(old[0].recovered_block().hash(), blocks[2].recovered_block().hash());
         }
+
+        // The persistence threshold is too high for the reorg to result in an on-disk removal
+        test_harness.tree.advance_persistence().unwrap();
+        let current_action = test_harness.tree.persistence_state.current_action().cloned();
+        assert_eq!(current_action, None);
     }
 
     #[tokio::test]
@@ -3817,6 +3916,13 @@ mod tests {
         // check that the original block 4 is still included
         assert!(blocks_to_persist.iter().any(|b| b.recovered_block().number == 4 &&
             b.recovered_block().hash() == blocks[4].recovered_block().hash()));
+
+        // check that if we advance persistence, the persistence action is the correct value
+        test_harness.tree.advance_persistence().expect("advancing persistence should succeed");
+        assert_eq!(
+            test_harness.tree.persistence_state.current_action().cloned(),
+            Some(CurrentPersistenceAction::SavingBlocks { blocks: blocks_to_persist })
+        );
     }
 
     #[tokio::test]
