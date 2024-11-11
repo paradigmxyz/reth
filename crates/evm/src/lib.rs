@@ -17,6 +17,15 @@
 
 extern crate alloc;
 
+use alloy_consensus::BlockHeader as _;
+use alloy_primitives::{Address, Bytes, B256, U256};
+use reth_primitives::TransactionSigned;
+use reth_primitives_traits::BlockHeader;
+use revm::{Database, Evm, GetInspector};
+use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, SpecId, TxEnv};
+
+use crate::builder::RethEvmBuilder;
+
 pub mod builder;
 pub mod either;
 pub mod execute;
@@ -29,15 +38,6 @@ pub mod system_calls;
 #[cfg(any(test, feature = "test-utils"))]
 /// test helpers for mocking executor
 pub mod test_utils;
-
-use alloy_consensus::BlockHeader as _;
-use alloy_primitives::{Address, Bytes, B256, U256};
-use reth_primitives::TransactionSigned;
-use reth_primitives_traits::BlockHeader;
-use revm::{Database, Evm, GetInspector};
-use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, SpecId, TxEnv};
-
-use crate::builder::RethEvmBuilder;
 
 /// Trait for configuring the EVM for executing full blocks.
 #[auto_impl::auto_impl(&, Arc)]
