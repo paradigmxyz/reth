@@ -35,6 +35,11 @@ impl TestConsensus {
         self.fail_body_against_header.store(val, Ordering::SeqCst);
     }
 
+    /// Returns the body validation flag.
+    pub fn fail_body_against_header(&self) -> bool {
+        self.fail_body_against_header.load(Ordering::SeqCst)
+    }
+
     /// Update the body validation flag.
     pub fn set_fail_body_against_header(&self, val: bool) {
         self.fail_body_against_header.store(val, Ordering::SeqCst);
@@ -79,7 +84,7 @@ impl<H, B> Consensus<H, B> for TestConsensus {
         _body: &B,
         _header: &SealedHeader<H>,
     ) -> Result<(), ConsensusError> {
-        if self.fail_validation() {
+        if self.fail_body_against_header() {
             Err(ConsensusError::BaseFeeMissing)
         } else {
             Ok(())
