@@ -1,17 +1,20 @@
-#[cfg(feature = "reth-codec")]
-use crate::compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR};
-use crate::TxType;
 use alloc::{vec, vec::Vec};
-use alloy_consensus::constants::{
-    EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
+use core::{cmp::Ordering, ops::Deref};
+
+use alloy_consensus::{
+    constants::{EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID},
+    Eip658Value, TxReceipt,
 };
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{Bloom, Log, B256};
 use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
 use bytes::{Buf, BufMut};
-use core::{cmp::Ordering, ops::Deref};
 use derive_more::{DerefMut, From, IntoIterator};
 use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "reth-codec")]
+use crate::compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR};
+use crate::TxType;
 
 /// Receipt containing result of transaction execution.
 #[derive(
