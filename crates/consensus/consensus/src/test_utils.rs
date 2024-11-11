@@ -16,7 +16,10 @@ pub struct TestConsensus {
 
 impl Default for TestConsensus {
     fn default() -> Self {
-        Self { fail_validation: AtomicBool::new(false), fail_body_against_header: AtomicBool::new(false) }
+        Self {
+            fail_validation: AtomicBool::new(false),
+            fail_body_against_header: AtomicBool::new(false),
+        }
     }
 }
 
