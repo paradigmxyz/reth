@@ -1,6 +1,4 @@
-use crate::{
-    parallel_root::ParallelStateRootError, stats::ParallelTrieTracker, StorageRootTargets,
-};
+use crate::{root::ParallelStateRootError, stats::ParallelTrieTracker, StorageRootTargets};
 use alloy_primitives::{map::HashSet, B256};
 use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
