@@ -3,7 +3,7 @@
 //! Transaction wrapper that labels transaction with its origin.
 
 use alloy_primitives::B256;
-use alloy_rpc_types::TransactionInfo;
+use alloy_rpc_types_eth::TransactionInfo;
 use reth_primitives::TransactionSignedEcRecovered;
 use reth_rpc_types_compat::{
     transaction::{from_recovered, from_recovered_with_block_context},

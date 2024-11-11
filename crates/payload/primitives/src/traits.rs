@@ -1,18 +1,21 @@
-use crate::{PayloadEvents, PayloadKind, PayloadTypes};
-use alloy_eips::{eip4895::Withdrawal, eip7685::Requests};
+use crate::{PayloadBuilderError, PayloadEvents, PayloadKind, PayloadTypes};
+use alloy_eips::{
+    eip4895::{Withdrawal, Withdrawals},
+    eip7685::Requests,
+};
 use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
 use reth_chain_state::ExecutedBlock;
-use reth_primitives::{SealedBlock, Withdrawals};
+use reth_primitives::SealedBlock;
 use tokio::sync::oneshot;
 
 /// A type that can request, subscribe to and resolve payloads.
 #[async_trait::async_trait]
-pub trait PayloadBuilder: Send + Unpin {
+pub trait PayloadBuilder: Send + Sync + Unpin {
     /// The Payload type for the builder.
     type PayloadType: PayloadTypes;
     /// The error type returned by the builder.
-    type Error;
+    type Error: Into<PayloadBuilderError>;
 
     /// Sends a message to the service to start building a new payload for the given payload.
     ///
@@ -47,6 +50,12 @@ pub trait PayloadBuilder: Send + Unpin {
     /// Sends a message to the service to subscribe to payload events.
     /// Returns a receiver that will receive them.
     async fn subscribe(&self) -> Result<PayloadEvents<Self::PayloadType>, Self::Error>;
+
+    /// Returns the payload attributes associated with the given identifier.
+    async fn payload_attributes(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<<Self::PayloadType as PayloadTypes>::PayloadBuilderAttributes, Self::Error>>;
 }
 
 /// Represents a built payload type that contains a built [`SealedBlock`] and can be converted into

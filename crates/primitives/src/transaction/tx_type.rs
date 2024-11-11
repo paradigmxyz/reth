@@ -217,128 +217,74 @@ impl Decodable for TxType {
     }
 }
 
-impl From<alloy_consensus::TxType> for TxType {
-    fn from(value: alloy_consensus::TxType) -> Self {
-        match value {
-            alloy_consensus::TxType::Legacy => Self::Legacy,
-            alloy_consensus::TxType::Eip2930 => Self::Eip2930,
-            alloy_consensus::TxType::Eip1559 => Self::Eip1559,
-            alloy_consensus::TxType::Eip4844 => Self::Eip4844,
-            alloy_consensus::TxType::Eip7702 => Self::Eip7702,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use alloy_primitives::hex;
-    use rand::Rng;
     use reth_codecs::Compact;
+    use rstest::rstest;
 
     use super::*;
 
-    #[test]
-    fn test_u64_to_tx_type() {
-        // Test for Legacy transaction
-        assert_eq!(TxType::try_from(U64::from(LEGACY_TX_TYPE_ID)).unwrap(), TxType::Legacy);
-
-        // Test for EIP2930 transaction
-        assert_eq!(TxType::try_from(U64::from(EIP2930_TX_TYPE_ID)).unwrap(), TxType::Eip2930);
-
-        // Test for EIP1559 transaction
-        assert_eq!(TxType::try_from(U64::from(EIP1559_TX_TYPE_ID)).unwrap(), TxType::Eip1559);
-
-        // Test for EIP4844 transaction
-        assert_eq!(TxType::try_from(U64::from(EIP4844_TX_TYPE_ID)).unwrap(), TxType::Eip4844);
-
-        // Test for EIP7702 transaction
-        assert_eq!(TxType::try_from(U64::from(EIP7702_TX_TYPE_ID)).unwrap(), TxType::Eip7702);
-
-        // Test for Deposit transaction
-        #[cfg(feature = "optimism")]
-        assert_eq!(TxType::try_from(U64::from(DEPOSIT_TX_TYPE_ID)).unwrap(), TxType::Deposit);
-
-        // For transactions with unsupported values
-        assert!(TxType::try_from(U64::from(EIP7702_TX_TYPE_ID + 1)).is_err());
+    #[rstest]
+    #[case(U64::from(LEGACY_TX_TYPE_ID), Ok(TxType::Legacy))]
+    #[case(U64::from(EIP2930_TX_TYPE_ID), Ok(TxType::Eip2930))]
+    #[case(U64::from(EIP1559_TX_TYPE_ID), Ok(TxType::Eip1559))]
+    #[case(U64::from(EIP4844_TX_TYPE_ID), Ok(TxType::Eip4844))]
+    #[case(U64::from(EIP7702_TX_TYPE_ID), Ok(TxType::Eip7702))]
+    #[cfg_attr(feature = "optimism", case(U64::from(DEPOSIT_TX_TYPE_ID), Ok(TxType::Deposit)))]
+    #[case(U64::MAX, Err("invalid tx type"))]
+    fn test_u64_to_tx_type(#[case] input: U64, #[case] expected: Result<TxType, &'static str>) {
+        let tx_type_result = TxType::try_from(input);
+        assert_eq!(tx_type_result, expected);
     }
 
-    #[test]
-    fn test_txtype_to_compat() {
-        let cases = vec![
-            (TxType::Legacy, COMPACT_IDENTIFIER_LEGACY, vec![]),
-            (TxType::Eip2930, COMPACT_IDENTIFIER_EIP2930, vec![]),
-            (TxType::Eip1559, COMPACT_IDENTIFIER_EIP1559, vec![]),
-            (TxType::Eip4844, COMPACT_EXTENDED_IDENTIFIER_FLAG, vec![EIP4844_TX_TYPE_ID]),
-            (TxType::Eip7702, COMPACT_EXTENDED_IDENTIFIER_FLAG, vec![EIP7702_TX_TYPE_ID]),
-            #[cfg(feature = "optimism")]
-            (TxType::Deposit, COMPACT_EXTENDED_IDENTIFIER_FLAG, vec![DEPOSIT_TX_TYPE_ID]),
-        ];
+    #[rstest]
+    #[case(TxType::Legacy, COMPACT_IDENTIFIER_LEGACY, vec![])]
+    #[case(TxType::Eip2930, COMPACT_IDENTIFIER_EIP2930, vec![])]
+    #[case(TxType::Eip1559, COMPACT_IDENTIFIER_EIP1559, vec![])]
+    #[case(TxType::Eip4844, COMPACT_EXTENDED_IDENTIFIER_FLAG, vec![EIP4844_TX_TYPE_ID])]
+    #[case(TxType::Eip7702, COMPACT_EXTENDED_IDENTIFIER_FLAG, vec![EIP7702_TX_TYPE_ID])]
+    #[cfg_attr(feature = "optimism", case(TxType::Deposit, COMPACT_EXTENDED_IDENTIFIER_FLAG, vec![DEPOSIT_TX_TYPE_ID]))]
+    fn test_txtype_to_compact(
+        #[case] tx_type: TxType,
+        #[case] expected_identifier: usize,
+        #[case] expected_buf: Vec<u8>,
+    ) {
+        let mut buf = vec![];
+        let identifier = tx_type.to_compact(&mut buf);
 
-        for (tx_type, expected_identifier, expected_buf) in cases {
-            let mut buf = vec![];
-            let identifier = tx_type.to_compact(&mut buf);
-            assert_eq!(
-                identifier, expected_identifier,
-                "Unexpected identifier for TxType {tx_type:?}",
-            );
-            assert_eq!(buf, expected_buf, "Unexpected buffer for TxType {tx_type:?}");
-        }
+        assert_eq!(identifier, expected_identifier, "Unexpected identifier for TxType {tx_type:?}",);
+        assert_eq!(buf, expected_buf, "Unexpected buffer for TxType {tx_type:?}",);
     }
 
-    #[test]
-    fn test_txtype_from_compact() {
-        let cases = vec![
-            (TxType::Legacy, COMPACT_IDENTIFIER_LEGACY, vec![]),
-            (TxType::Eip2930, COMPACT_IDENTIFIER_EIP2930, vec![]),
-            (TxType::Eip1559, COMPACT_IDENTIFIER_EIP1559, vec![]),
-            (TxType::Eip4844, COMPACT_EXTENDED_IDENTIFIER_FLAG, vec![EIP4844_TX_TYPE_ID]),
-            (TxType::Eip7702, COMPACT_EXTENDED_IDENTIFIER_FLAG, vec![EIP7702_TX_TYPE_ID]),
-            #[cfg(feature = "optimism")]
-            (TxType::Deposit, COMPACT_EXTENDED_IDENTIFIER_FLAG, vec![DEPOSIT_TX_TYPE_ID]),
-        ];
+    #[rstest]
+    #[case(TxType::Legacy, COMPACT_IDENTIFIER_LEGACY, vec![])]
+    #[case(TxType::Eip2930, COMPACT_IDENTIFIER_EIP2930, vec![])]
+    #[case(TxType::Eip1559, COMPACT_IDENTIFIER_EIP1559, vec![])]
+    #[case(TxType::Eip4844, COMPACT_EXTENDED_IDENTIFIER_FLAG, vec![EIP4844_TX_TYPE_ID])]
+    #[case(TxType::Eip7702, COMPACT_EXTENDED_IDENTIFIER_FLAG, vec![EIP7702_TX_TYPE_ID])]
+    #[cfg_attr(feature = "optimism", case(TxType::Deposit, COMPACT_EXTENDED_IDENTIFIER_FLAG, vec![DEPOSIT_TX_TYPE_ID]))]
+    fn test_txtype_from_compact(
+        #[case] expected_type: TxType,
+        #[case] identifier: usize,
+        #[case] buf: Vec<u8>,
+    ) {
+        let (actual_type, remaining_buf) = TxType::from_compact(&buf, identifier);
 
-        for (expected_type, identifier, buf) in cases {
-            let (actual_type, remaining_buf) = TxType::from_compact(&buf, identifier);
-            assert_eq!(actual_type, expected_type, "Unexpected TxType for identifier {identifier}",);
-            assert!(
-                remaining_buf.is_empty(),
-                "Buffer not fully consumed for identifier {identifier}",
-            );
-        }
+        assert_eq!(actual_type, expected_type, "Unexpected TxType for identifier {identifier}");
+        assert!(remaining_buf.is_empty(), "Buffer not fully consumed for identifier {identifier}");
     }
 
-    #[test]
-    fn decode_tx_type() {
-        // Test for Legacy transaction
-        let tx_type = TxType::decode(&mut &hex!("80")[..]).unwrap();
-        assert_eq!(tx_type, TxType::Legacy);
-
-        // Test for EIP2930 transaction
-        let tx_type = TxType::decode(&mut &[EIP2930_TX_TYPE_ID][..]).unwrap();
-        assert_eq!(tx_type, TxType::Eip2930);
-
-        // Test for EIP1559 transaction
-        let tx_type = TxType::decode(&mut &[EIP1559_TX_TYPE_ID][..]).unwrap();
-        assert_eq!(tx_type, TxType::Eip1559);
-
-        // Test for EIP4844 transaction
-        let tx_type = TxType::decode(&mut &[EIP4844_TX_TYPE_ID][..]).unwrap();
-        assert_eq!(tx_type, TxType::Eip4844);
-
-        // Test for EIP7702 transaction
-        let tx_type = TxType::decode(&mut &[EIP7702_TX_TYPE_ID][..]).unwrap();
-        assert_eq!(tx_type, TxType::Eip7702);
-
-        // Test random byte not in range
-        let buf = [rand::thread_rng().gen_range(EIP7702_TX_TYPE_ID + 1..=u8::MAX)];
-        assert!(TxType::decode(&mut &buf[..]).is_err());
-
-        // Test for Deposit transaction
-        #[cfg(feature = "optimism")]
-        {
-            let buf = [DEPOSIT_TX_TYPE_ID];
-            let tx_type = TxType::decode(&mut &buf[..]).unwrap();
-            assert_eq!(tx_type, TxType::Deposit);
-        }
+    #[rstest]
+    #[case(&hex!("80"), Ok(TxType::Legacy))]
+    #[case(&[EIP2930_TX_TYPE_ID], Ok(TxType::Eip2930))]
+    #[case(&[EIP1559_TX_TYPE_ID], Ok(TxType::Eip1559))]
+    #[case(&[EIP4844_TX_TYPE_ID], Ok(TxType::Eip4844))]
+    #[case(&[EIP7702_TX_TYPE_ID], Ok(TxType::Eip7702))]
+    #[case(&[u8::MAX], Err(alloy_rlp::Error::InputTooShort))]
+    #[cfg_attr(feature = "optimism", case(&[DEPOSIT_TX_TYPE_ID], Ok(TxType::Deposit)))]
+    fn decode_tx_type(#[case] input: &[u8], #[case] expected: Result<TxType, alloy_rlp::Error>) {
+        let tx_type_result = TxType::decode(&mut &input[..]);
+        assert_eq!(tx_type_result, expected)
     }
 }

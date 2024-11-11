@@ -1,10 +1,13 @@
 //! Compatibility functions for rpc `Block` type.
 
 use alloy_consensus::Sealed;
+use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::{B256, U256};
 use alloy_rlp::Encodable;
-use alloy_rpc_types::{Block, BlockTransactions, BlockTransactionsKind, Header, TransactionInfo};
-use reth_primitives::{Block as PrimitiveBlock, BlockWithSenders, Withdrawals};
+use alloy_rpc_types_eth::{
+    Block, BlockTransactions, BlockTransactionsKind, Header, TransactionInfo,
+};
+use reth_primitives::{Block as PrimitiveBlock, BlockWithSenders};
 
 use crate::{transaction::from_recovered_with_block_context, TransactionCompat};
 

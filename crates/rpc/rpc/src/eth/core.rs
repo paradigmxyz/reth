@@ -151,6 +151,7 @@ where
     type Pool = Pool;
     type Evm = EvmConfig;
     type Network = Network;
+    type PayloadBuilder = ();
 
     fn pool(&self) -> &Self::Pool {
         self.inner.pool()
@@ -162,6 +163,10 @@ where
 
     fn network(&self) -> &Self::Network {
         self.inner.network()
+    }
+
+    fn payload_builder(&self) -> &Self::PayloadBuilder {
+        &()
     }
 
     fn provider(&self) -> &Self::Provider {

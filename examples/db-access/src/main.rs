@@ -1,5 +1,5 @@
 use alloy_primitives::{Address, Sealable, B256};
-use alloy_rpc_types::{Filter, FilteredParams};
+use alloy_rpc_types_eth::{Filter, FilteredParams};
 use reth_chainspec::ChainSpecBuilder;
 use reth_db::{open_db_read_only, DatabaseEnv};
 use reth_node_ethereum::EthereumNode;

@@ -4,7 +4,7 @@ use core::error;
 use std::fmt;
 
 use alloy_consensus::Transaction as _;
-use alloy_rpc_types::{
+use alloy_rpc_types_eth::{
     request::{TransactionInput, TransactionRequest},
     BlockError, TransactionInfo,
 };
