@@ -7517,6 +7517,7 @@ dependencies = [
  "rand 0.8.5",
  "reth-execution-errors",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-trie",
  "revm",
  "serde",
