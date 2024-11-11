@@ -23,7 +23,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
-use reth_trie_parallel::parallel_root::ParallelStateRoot;
+use reth_trie_parallel::root::ParallelStateRoot;
 use std::{
     collections::BTreeMap,
     ops::{Deref, DerefMut},

@@ -43,7 +43,7 @@ use reth_provider::{
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
-use reth_trie_parallel::parallel_root::{ParallelStateRoot, ParallelStateRootError};
+use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::ResultAndState;
 use std::{
     cmp::Ordering,
