@@ -22,7 +22,7 @@ pub mod account;
 pub use account::{Account, Bytecode};
 
 pub mod receipt;
-pub use receipt::Receipt;
+pub use receipt::{FullReceipt, Receipt};
 
 pub mod transaction;
 pub use transaction::{

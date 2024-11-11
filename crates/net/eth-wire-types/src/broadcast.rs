@@ -1,14 +1,14 @@
 //! Types for broadcasting new data.
 
-use crate::{EthMessage, EthVersion};
+use crate::{EthMessage, EthVersion, NetworkPrimitives};
 use alloy_rlp::{
     Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
 };
 
 use alloy_primitives::{Bytes, TxHash, B256, U128};
 use derive_more::{Constructor, Deref, DerefMut, From, IntoIterator};
-use reth_codecs_derive::add_arbitrary_tests;
-use reth_primitives::{Block, PooledTransactionsElement, TransactionSigned};
+use reth_codecs_derive::{add_arbitrary_tests, generate_tests};
+use reth_primitives::{PooledTransactionsElement, TransactionSigned};
 
 use std::{
     collections::{HashMap, HashSet},
@@ -75,13 +75,14 @@ impl From<NewBlockHashes> for Vec<BlockHashNumber> {
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-#[add_arbitrary_tests(rlp, 25)]
-pub struct NewBlock {
+pub struct NewBlock<B = reth_primitives::Block> {
     /// A new block.
-    pub block: Block,
+    pub block: B,
     /// The current total difficulty.
     pub td: U128,
 }
+
+generate_tests!(#[rlp, 25] NewBlock<reth_primitives::Block>, EthNewBlockTests);
 
 /// This informs peers of transactions that have appeared on the network and are not yet included
 /// in a block.
@@ -269,7 +270,7 @@ impl NewPooledTransactionHashes {
     }
 }
 
-impl From<NewPooledTransactionHashes> for EthMessage {
+impl<N: NetworkPrimitives> From<NewPooledTransactionHashes> for EthMessage<N> {
     fn from(value: NewPooledTransactionHashes) -> Self {
         match value {
             NewPooledTransactionHashes::Eth66(msg) => Self::NewPooledTransactionHashes66(msg),
