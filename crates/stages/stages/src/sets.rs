@@ -20,8 +20,9 @@
 //! # use reth_static_file::StaticFileProducer;
 //! # use reth_config::config::StageConfig;
 //! # use reth_evm::execute::BlockExecutorProvider;
+//! # use reth_node_types::AnyPrimitives;
 //!
-//! # fn create(exec: impl BlockExecutorProvider) {
+//! # fn create(exec: impl BlockExecutorProvider<AnyPrimitives>) {
 //!
 //! let provider_factory = create_test_provider_factory();
 //! let static_file_producer =
@@ -33,14 +34,9 @@
 //!
 //! # }
 //! ```
-use crate::{
-    stages::{
-        AccountHashingStage, BodyStage, ExecutionStage, FinishStage, HeaderStage,
-        IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, PruneSenderRecoveryStage,
-        PruneStage, SenderRecoveryStage, StorageHashingStage, TransactionLookupStage,
-    },
-    StageSet, StageSetBuilder,
-};
+
+use std::{ops::Not, sync::Arc};
+
 use alloy_primitives::B256;
 use reth_config::config::StageConfig;
 use reth_consensus::Consensus;
@@ -49,8 +45,16 @@ use reth_network_p2p::{bodies::downloader::BodyDownloader, headers::downloader::
 use reth_provider::HeaderSyncGapProvider;
 use reth_prune_types::PruneModes;
 use reth_stages_api::Stage;
-use std::{ops::Not, sync::Arc};
 use tokio::sync::watch;
+
+use crate::{
+    stages::{
+        AccountHashingStage, BodyStage, ExecutionStage, FinishStage, HeaderStage,
+        IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, PruneSenderRecoveryStage,
+        PruneStage, SenderRecoveryStage, StorageHashingStage, TransactionLookupStage,
+    },
+    StageSet, StageSetBuilder,
+};
 
 /// A set containing all stages to run a fully syncing instance of reth.
 ///

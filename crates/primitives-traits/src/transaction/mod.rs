@@ -1,13 +1,12 @@
 //! Transaction abstraction
 
+pub mod signed;
+
 use core::{fmt::Debug, hash::Hash};
 
 use alloy_primitives::{TxKind, B256};
-
 use reth_codecs::Compact;
 use serde::{Deserialize, Serialize};
-
-pub mod signed;
 
 #[allow(dead_code)]
 /// Abstraction of a transaction.
