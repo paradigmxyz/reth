@@ -64,6 +64,42 @@ impl Receipt {
     }
 }
 
+// todo: replace with alloy receipt
+impl TxReceipt for Receipt {
+    fn status_or_post_state(&self) -> Eip658Value {
+        self.success.into()
+    }
+
+    fn status(&self) -> bool {
+        self.success
+    }
+
+    fn bloom(&self) -> Bloom {
+        alloy_primitives::logs_bloom(self.logs.iter())
+    }
+
+    fn cumulative_gas_used(&self) -> u128 {
+        self.cumulative_gas_used as u128
+    }
+
+    fn logs(&self) -> &[Log] {
+        &self.logs
+    }
+}
+
+impl reth_primitives_traits::Receipt for Receipt {
+    fn tx_type(&self) -> u8 {
+        self.tx_type as u8
+    }
+
+    fn receipts_root(_receipts: &[&Self]) -> B256 {
+        #[cfg(feature = "optimism")]
+        panic!("This should not be called in optimism mode. Use `optimism_receipts_root_slow` instead.");
+        #[cfg(not(feature = "optimism"))]
+        crate::proofs::calculate_receipt_root_no_memo(_receipts)
+    }
+}
+
 /// A collection of receipts organized as a two-dimensional vector.
 #[derive(
     Clone,
