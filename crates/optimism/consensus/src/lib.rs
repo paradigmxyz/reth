@@ -20,7 +20,7 @@ use reth_consensus_common::validation::{
     validate_header_extradata, validate_header_gas, validate_shanghai_withdrawals,
 };
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_forks::OptimismHardforks;
+use reth_optimism_forks::OpHardforks;
 use reth_primitives::{
     BlockBody, BlockWithSenders, GotExpected, Header, SealedBlock, SealedHeader,
 };
