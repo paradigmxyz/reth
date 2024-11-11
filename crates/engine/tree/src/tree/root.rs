@@ -1,4 +1,4 @@
-//! State root computation related code.
+//! State root task related functionality.
 
 use reth_provider::providers::ConsistentDbView;
 use reth_trie::{updates::TrieUpdates, TrieInput};
@@ -60,7 +60,14 @@ impl StdReceiverStream {
     }
 }
 
-/// Synchronous implementation of the state root task
+/// Standalone task that receives a transaction state stream and updates relevant
+/// data structures to calculate state root.
+///
+/// It is responsible of  initializing a blinded sparse trie and subscribe to
+/// transaction state stream. As it receives transaction execution results, it
+/// fetches the proofs for relevant accounts from the database and reveal them
+/// to the tree.
+/// Then it updates relevant leaves according to the result of the transaction.
 #[allow(dead_code)]
 pub(crate) struct StateRootTask<Factory> {
     state_stream: StdReceiverStream,
