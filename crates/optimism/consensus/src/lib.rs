@@ -20,7 +20,7 @@ use reth_consensus_common::validation::{
     validate_shanghai_withdrawals,
 };
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_forks::OptimismHardforks;
+use reth_optimism_forks::OpHardforks;
 use reth_primitives::{BlockWithSenders, GotExpected, Header, SealedBlock, SealedHeader};
 use std::{sync::Arc, time::SystemTime};
 

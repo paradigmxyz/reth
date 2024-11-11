@@ -9,7 +9,7 @@ use op_alloy_rpc_types::{L1BlockInfo, OpTransactionReceipt, OpTransactionReceipt
 use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::RethL1BlockInfo;
-use reth_optimism_forks::OptimismHardforks;
+use reth_optimism_forks::OpHardforks;
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned, TxType};
 use reth_provider::ChainSpecProvider;
 use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError, RpcReceipt};

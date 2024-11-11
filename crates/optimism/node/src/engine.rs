@@ -14,7 +14,7 @@ use reth_node_api::{
     validate_version_specific_fields, EngineTypes, EngineValidator,
 };
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_forks::{OpHardfork, OptimismHardforks};
+use reth_optimism_forks::{OpHardfork, OpHardforks};
 use reth_optimism_payload_builder::{OpBuiltPayload, OpPayloadBuilderAttributes};
 
 /// The types used in the optimism beacon consensus engine.
