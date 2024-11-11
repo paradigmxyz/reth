@@ -1,12 +1,11 @@
 //! Implements the `GetPooledTransactions` and `PooledTransactions` message types.
 
+use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::B256;
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use derive_more::{Constructor, Deref, IntoIterator};
 use reth_codecs_derive::add_arbitrary_tests;
-use reth_primitives::{
-    transaction::TransactionConversionError, PooledTransactionsElement, TransactionSigned,
-};
+use reth_primitives::{transaction::TransactionConversionError, PooledTransactionsElement};
 
 /// A list of transaction hashes that the peer would like transaction bodies for.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
@@ -42,35 +41,43 @@ where
     Eq,
     RlpEncodableWrapper,
     RlpDecodableWrapper,
-    Default,
     IntoIterator,
     Deref,
     Constructor,
 )]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct PooledTransactions(
+pub struct PooledTransactions<T = PooledTransactionsElement>(
     /// The transaction bodies, each of which should correspond to a requested hash.
-    pub Vec<PooledTransactionsElement>,
+    pub Vec<T>,
 );
 
-impl PooledTransactions {
+impl<T: Encodable2718> PooledTransactions<T> {
     /// Returns an iterator over the transaction hashes in this response.
-    pub fn hashes(&self) -> impl Iterator<Item = &B256> + '_ {
-        self.0.iter().map(|tx| tx.hash())
+    pub fn hashes(&self) -> impl Iterator<Item = B256> + '_ {
+        self.0.iter().map(|tx| tx.trie_hash())
     }
 }
 
-impl TryFrom<Vec<TransactionSigned>> for PooledTransactions {
+impl<T, U> TryFrom<Vec<U>> for PooledTransactions<T>
+where
+    T: TryFrom<U, Error = TransactionConversionError>,
+{
     type Error = TransactionConversionError;
 
-    fn try_from(txs: Vec<TransactionSigned>) -> Result<Self, Self::Error> {
-        txs.into_iter().map(PooledTransactionsElement::try_from).collect()
+    fn try_from(txs: Vec<U>) -> Result<Self, Self::Error> {
+        txs.into_iter().map(T::try_from).collect()
     }
 }
 
-impl FromIterator<PooledTransactionsElement> for PooledTransactions {
-    fn from_iter<I: IntoIterator<Item = PooledTransactionsElement>>(iter: I) -> Self {
+impl<T> FromIterator<T> for PooledTransactions<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         Self(iter.into_iter().collect())
+    }
+}
+
+impl<T> Default for PooledTransactions<T> {
+    fn default() -> Self {
+        Self(Default::default())
     }
 }
 

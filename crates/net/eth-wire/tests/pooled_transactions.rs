@@ -12,7 +12,7 @@ use test_fuzz::test_fuzz;
 #[test_fuzz]
 fn roundtrip_pooled_transactions(hex_data: Vec<u8>) -> Result<(), alloy_rlp::Error> {
     let input_rlp = &mut &hex_data[..];
-    let txs = match PooledTransactions::decode(input_rlp) {
+    let txs: PooledTransactions = match PooledTransactions::decode(input_rlp) {
         Ok(txs) => txs,
         Err(e) => return Err(e),
     };
@@ -28,7 +28,7 @@ fn roundtrip_pooled_transactions(hex_data: Vec<u8>) -> Result<(), alloy_rlp::Err
     assert_eq!(expected_encoding, buf);
 
     // now do another decoding, on what we encoded - this should succeed
-    let txs2 = PooledTransactions::decode(&mut &buf[..]).unwrap();
+    let txs2: PooledTransactions = PooledTransactions::decode(&mut &buf[..]).unwrap();
 
     // ensure that the payload length is the same
     assert_eq!(txs.length(), txs2.length());
@@ -54,7 +54,8 @@ fn decode_request_pair_pooled_blob_transactions() {
         .join("testdata/request_pair_pooled_blob_transactions");
     let data = fs::read_to_string(network_data_path).expect("Unable to read file");
     let hex_data = hex::decode(data.trim()).unwrap();
-    let _txs = ProtocolMessage::decode_message(EthVersion::Eth68, &mut &hex_data[..]).unwrap();
+    let _txs: ProtocolMessage =
+        ProtocolMessage::decode_message(EthVersion::Eth68, &mut &hex_data[..]).unwrap();
 }
 
 #[test]
