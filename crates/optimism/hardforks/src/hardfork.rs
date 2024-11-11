@@ -356,7 +356,8 @@ mod tests {
 
     #[test]
     fn check_op_hardfork_from_str() {
-        let hardfork_str = ["beDrOck", "rEgOlITH", "cAnYoN", "eCoToNe", "FJorD", "GRaNiTe", "hOlOcEnE"];
+        let hardfork_str =
+            ["beDrOck", "rEgOlITH", "cAnYoN", "eCoToNe", "FJorD", "GRaNiTe", "hOlOcEnE"];
         let expected_hardforks = [
             OpHardfork::Bedrock,
             OpHardfork::Regolith,
