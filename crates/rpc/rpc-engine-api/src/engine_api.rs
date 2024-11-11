@@ -724,6 +724,7 @@ where
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
     ) -> RpcResult<PayloadStatus> {
+        trace!(target: "rpc::engine", "Serving engine_newPayloadV3");
         Ok(self.new_payload_v3_metered(payload, versioned_hashes, parent_beacon_block_root).await?)
     }
 
