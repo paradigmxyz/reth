@@ -1,17 +1,20 @@
-#[cfg(feature = "reth-codec")]
-use crate::compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR};
-use crate::TxType;
 use alloc::{vec, vec::Vec};
-use alloy_consensus::constants::{
-    EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
+use core::{cmp::Ordering, ops::Deref};
+
+use alloy_consensus::{
+    constants::{EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID},
+    Eip658Value, TxReceipt,
 };
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{Bloom, Log, B256};
 use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
 use bytes::{Buf, BufMut};
-use core::{cmp::Ordering, ops::Deref};
 use derive_more::{DerefMut, From, IntoIterator};
 use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "reth-codec")]
+use crate::compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR};
+use crate::TxType;
 
 /// Receipt containing result of transaction execution.
 #[derive(
@@ -61,6 +64,42 @@ impl Receipt {
     /// container type.
     pub fn with_bloom_ref(&self) -> ReceiptWithBloomRef<'_> {
         self.into()
+    }
+}
+
+// todo: replace with alloy receipt
+impl TxReceipt for Receipt {
+    fn status_or_post_state(&self) -> Eip658Value {
+        self.success.into()
+    }
+
+    fn status(&self) -> bool {
+        self.success
+    }
+
+    fn bloom(&self) -> Bloom {
+        alloy_primitives::logs_bloom(self.logs.iter())
+    }
+
+    fn cumulative_gas_used(&self) -> u128 {
+        self.cumulative_gas_used as u128
+    }
+
+    fn logs(&self) -> &[Log] {
+        &self.logs
+    }
+}
+
+impl reth_primitives_traits::Receipt for Receipt {
+    fn tx_type(&self) -> u8 {
+        self.tx_type as u8
+    }
+
+    fn receipts_root(_receipts: &[&Self]) -> B256 {
+        #[cfg(feature = "optimism")]
+        panic!("This should not be called in optimism mode. Use `optimism_receipts_root_slow` instead.");
+        #[cfg(not(feature = "optimism"))]
+        crate::proofs::calculate_receipt_root_no_memo(_receipts)
     }
 }
 
