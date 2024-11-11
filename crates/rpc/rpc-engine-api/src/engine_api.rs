@@ -233,6 +233,23 @@ where
             .inspect(|_| self.inner.on_new_payload_response())?)
     }
 
+    // Metrics version of `new_payload_v3`
+    async fn new_payload_v3_metered(
+        &self,
+        payload: ExecutionPayloadV3,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+    ) -> RpcResult<PayloadStatus> {
+        let start = Instant::now();
+        let gas_used = payload.payload_inner.payload_inner.gas_used;
+        let res =
+            Self::new_payload_v3(self, payload, versioned_hashes, parent_beacon_block_root).await;
+        let elapsed = start.elapsed();
+        self.inner.metrics.latency.new_payload_v3.record(elapsed);
+        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
+        Ok(res?)
+    }
+
     /// See also <https://github.com/ethereum/execution-apis/blob/7907424db935b93c2fe6a3c0faab943adebe8557/src/engine/prague.md#engine_newpayloadv4>
     pub async fn new_payload_v4(
         &self,
@@ -724,14 +741,7 @@ where
         parent_beacon_block_root: B256,
     ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV3");
-        let start = Instant::now();
-        let gas_used = payload.payload_inner.payload_inner.gas_used;
-        let res =
-            Self::new_payload_v3(self, payload, versioned_hashes, parent_beacon_block_root).await;
-        let elapsed = start.elapsed();
-        self.inner.metrics.latency.new_payload_v3.record(elapsed);
-        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
-        Ok(res?)
+        Ok(self.new_payload_v3_metered(payload, versioned_hashes, parent_beacon_block_root).await?)
     }
 
     /// Handler for `engine_newPayloadV4`
