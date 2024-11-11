@@ -24,6 +24,7 @@ use crate::{
 };
 use bytes::{Bytes, BytesMut};
 use futures::{Sink, SinkExt, Stream, StreamExt, TryStream, TryStreamExt};
+use reth_eth_wire_types::NetworkPrimitives;
 use reth_primitives::ForkFilter;
 use tokio::sync::{mpsc, mpsc::UnboundedSender};
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -204,11 +205,11 @@ impl<St> RlpxProtocolMultiplexer<St> {
 
     /// Converts this multiplexer into a [`RlpxSatelliteStream`] with eth protocol as the given
     /// primary protocol.
-    pub async fn into_eth_satellite_stream(
+    pub async fn into_eth_satellite_stream<N: NetworkPrimitives>(
         self,
         status: Status,
         fork_filter: ForkFilter,
-    ) -> Result<(RlpxSatelliteStream<St, EthStream<ProtocolProxy>>, Status), EthStreamError>
+    ) -> Result<(RlpxSatelliteStream<St, EthStream<ProtocolProxy, N>>, Status), EthStreamError>
     where
         St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
     {

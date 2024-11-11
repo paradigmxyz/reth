@@ -31,8 +31,6 @@ pub struct RawCapabilityMessage {
 #[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CapabilityMessage {
-    /// Eth sub-protocol message.
-    Eth(EthMessage),
     /// Any other capability message.
     Other(RawCapabilityMessage),
 }

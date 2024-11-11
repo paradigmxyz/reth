@@ -3,9 +3,7 @@
 use std::{fmt, net::SocketAddr, sync::Arc};
 
 use reth_eth_wire_types::{
-    message::RequestPair, BlockBodies, BlockHeaders, Capabilities, DisconnectReason, EthMessage,
-    EthVersion, GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts,
-    NodeData, PooledTransactions, Receipts, Status,
+    message::RequestPair, BlockBodies, BlockHeaders, Capabilities, DisconnectReason, EthMessage, EthVersion, GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts, NetworkPrimitives, NodeData, PooledTransactions, Receipts, Status
 };
 use reth_ethereum_forks::ForkId;
 use reth_network_p2p::error::{RequestError, RequestResult};
@@ -18,8 +16,11 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 /// Provides event subscription for the network.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait NetworkEventListenerProvider: Send + Sync {
+    /// Type of requests that can be sent to peers.
+    type PeerRequest: Send + Sync + 'static;
+
     /// Creates a new [`NetworkEvent`] listener channel.
-    fn event_listener(&self) -> EventStream<NetworkEvent>;
+    fn event_listener(&self) -> EventStream<NetworkEvent<Self::PeerRequest>>;
     /// Returns a new [`DiscoveryEvent`] stream.
     ///
     /// This stream yields [`DiscoveryEvent`]s for each peer that is discovered.
@@ -31,7 +32,7 @@ pub trait NetworkEventListenerProvider: Send + Sync {
 /// This includes any event types that may be relevant to tasks, for metrics, keep track of peers
 /// etc.
 #[derive(Debug, Clone)]
-pub enum NetworkEvent {
+pub enum NetworkEvent<R> {
     /// Closed the peer session.
     SessionClosed {
         /// The identifier of the peer to which a session was closed.
@@ -50,7 +51,7 @@ pub enum NetworkEvent {
         /// Capabilities the peer announced
         capabilities: Arc<Capabilities>,
         /// A request channel to the session task.
-        messages: PeerRequestSender,
+        messages: PeerRequestSender<R>,
         /// The status of the peer to which a session was established.
         status: Arc<Status>,
         /// negotiated eth version of the session
@@ -98,7 +99,7 @@ pub enum DiscoveredEvent {
 
 /// Protocol related request messages that expect a response
 #[derive(Debug)]
-pub enum PeerRequest {
+pub enum PeerRequest<N: NetworkPrimitives> {
     /// Requests block headers from the peer.
     ///
     /// The response should be sent through the channel.
@@ -106,7 +107,7 @@ pub enum PeerRequest {
         /// The request for block headers.
         request: GetBlockHeaders,
         /// The channel to send the response for block headers.
-        response: oneshot::Sender<RequestResult<BlockHeaders>>,
+        response: oneshot::Sender<RequestResult<BlockHeaders<N::BlockHeader>>>,
     },
     /// Requests block bodies from the peer.
     ///
@@ -115,7 +116,7 @@ pub enum PeerRequest {
         /// The request for block bodies.
         request: GetBlockBodies,
         /// The channel to send the response for block bodies.
-        response: oneshot::Sender<RequestResult<BlockBodies>>,
+        response: oneshot::Sender<RequestResult<BlockBodies<N::BlockBody>>>,
     },
     /// Requests pooled transactions from the peer.
     ///
@@ -148,7 +149,7 @@ pub enum PeerRequest {
 
 // === impl PeerRequest ===
 
-impl PeerRequest {
+impl<N: NetworkPrimitives> PeerRequest<N> {
     /// Invoked if we received a response which does not match the request
     pub fn send_bad_response(self) {
         self.send_err_response(RequestError::BadResponse)
@@ -166,7 +167,7 @@ impl PeerRequest {
     }
 
     /// Returns the [`EthMessage`] for this type
-    pub fn create_request_message(&self, request_id: u64) -> EthMessage {
+    pub fn create_request_message(&self, request_id: u64) -> EthMessage<N> {
         match self {
             Self::GetBlockHeaders { request, .. } => {
                 EthMessage::GetBlockHeaders(RequestPair { request_id, message: *request })
@@ -200,23 +201,23 @@ impl PeerRequest {
 
 /// A Cloneable connection for sending _requests_ directly to the session of a peer.
 #[derive(Clone)]
-pub struct PeerRequestSender {
+pub struct PeerRequestSender<R> {
     /// id of the remote node.
     pub peer_id: PeerId,
     /// The Sender half connected to a session.
-    pub to_session_tx: mpsc::Sender<PeerRequest>,
+    pub to_session_tx: mpsc::Sender<R>,
 }
 
 // === impl PeerRequestSender ===
 
-impl PeerRequestSender {
+impl<R> PeerRequestSender<R> {
     /// Constructs a new sender instance that's wired to a session
-    pub const fn new(peer_id: PeerId, to_session_tx: mpsc::Sender<PeerRequest>) -> Self {
+    pub const fn new(peer_id: PeerId, to_session_tx: mpsc::Sender<R>) -> Self {
         Self { peer_id, to_session_tx }
     }
 
     /// Attempts to immediately send a message on this Sender
-    pub fn try_send(&self, req: PeerRequest) -> Result<(), mpsc::error::TrySendError<PeerRequest>> {
+    pub fn try_send(&self, req: R) -> Result<(), mpsc::error::TrySendError<R>> {
         self.to_session_tx.try_send(req)
     }
 
@@ -226,7 +227,7 @@ impl PeerRequestSender {
     }
 }
 
-impl fmt::Debug for PeerRequestSender {
+impl<R> fmt::Debug for PeerRequestSender<R> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PeerRequestSender").field("peer_id", &self.peer_id).finish_non_exhaustive()
     }
