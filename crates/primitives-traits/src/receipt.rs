@@ -1,5 +1,7 @@
 //! Receipt abstraction
 
+use core::fmt;
+
 use alloy_consensus::TxReceipt;
 use reth_codecs::Compact;
 use serde::{Deserialize, Serialize};
@@ -11,8 +13,13 @@ impl<T> FullReceipt for T where T: Receipt + Compact {}
 
 /// Abstraction of a receipt.
 pub trait Receipt:
-    TxReceipt
+    Send
+    + Sync
+    + Unpin
+    + Clone
     + Default
+    + fmt::Debug
+    + TxReceipt
     + alloy_rlp::Encodable
     + alloy_rlp::Decodable
     + Serialize

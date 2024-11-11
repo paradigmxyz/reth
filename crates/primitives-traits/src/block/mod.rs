@@ -20,11 +20,14 @@ impl<T> FullBlock for T where T: Block<Header: Compact> + Compact {}
 // todo: make with senders extension trait, so block can be impl by block type already containing
 // senders
 pub trait Block:
-    fmt::Debug
+    Send
+    + Sync
+    + Unpin
     + Clone
+    + Default
+    + fmt::Debug
     + PartialEq
     + Eq
-    + Default
     + serde::Serialize
     + for<'a> serde::Deserialize<'a>
     + From<(Self::Header, Self::Body)>
