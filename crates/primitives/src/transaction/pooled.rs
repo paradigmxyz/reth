@@ -434,6 +434,10 @@ impl Encodable2718 for PooledTransactionsElement {
             }
         }
     }
+
+    fn trie_hash(&self) -> B256 {
+        *self.hash()
+    }
 }
 
 impl Decodable2718 for PooledTransactionsElement {
