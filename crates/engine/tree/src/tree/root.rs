@@ -70,7 +70,9 @@ impl StdReceiverStream {
 /// Then it updates relevant leaves according to the result of the transaction.
 #[allow(dead_code)]
 pub(crate) struct StateRootTask<Factory> {
+    /// Incoming state updates.
     state_stream: StdReceiverStream,
+    /// Task configuration.
     config: StateRootConfig<Factory>,
 }
 
@@ -79,6 +81,7 @@ impl<Factory> StateRootTask<Factory>
 where
     Factory: Send + 'static,
 {
+    /// Creates a new `StateRootTask`.
     pub(crate) const fn new(
         config: StateRootConfig<Factory>,
         state_stream: StdReceiverStream,
@@ -86,6 +89,7 @@ where
         Self { config, state_stream }
     }
 
+    /// Spawns the state root task and returns a handle to await its result.
     pub(crate) fn spawn(self) -> StateRootHandle {
         let (tx, rx) = mpsc::sync_channel(1);
         std::thread::Builder::new()
@@ -100,6 +104,7 @@ where
         StateRootHandle::new(rx)
     }
 
+    /// Handles state updates.
     fn on_state_update(
         _view: &reth_provider::providers::ConsistentDbView<impl Send + 'static>,
         _input: &std::sync::Arc<reth_trie::TrieInput>,
