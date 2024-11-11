@@ -1310,7 +1310,7 @@ mod tests {
     fn test_head_update() {
         let client = Arc::new(TestHeadersClient::default());
 
-        let header = SealedHeader::default();
+        let header: SealedHeader = SealedHeader::default();
 
         let mut downloader = ReverseHeadersDownloaderBuilder::default()
             .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
