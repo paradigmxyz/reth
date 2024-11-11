@@ -17,7 +17,7 @@ reth-chain-state.workspace = true
 reth-chainspec.workspace = true
 reth-eth-wire-types.workspace = true
 reth-primitives = { workspace = true, features = ["c-kzg", "secp256k1"] }
-reth-primitives-traits = { workspace = true, features = ["arbitrary"], optional = true }
+reth-primitives-traits.workspace = true
 reth-execution-types.workspace = true
 reth-fs-util.workspace = true
 reth-storage-api.workspace = true
@@ -60,7 +60,6 @@ proptest-arbitrary-interop = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-primitives = { workspace = true, features = ["arbitrary"] }
-reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
 paste.workspace = true
@@ -111,8 +110,8 @@ arbitrary = [
 	"alloy-primitives/arbitrary",
 	"bitflags/arbitrary",
 	"revm/arbitrary",
+	"reth-primitives-traits/arbitrary",
 	"smallvec/arbitrary",
-	"reth-primitives-traits",
 ]
 
 [[bench]]
