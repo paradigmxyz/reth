@@ -1,3 +1,5 @@
+use crate::InMemorySize;
+
 use super::Header;
 use alloy_consensus::Sealed;
 use alloy_eips::BlockNumHash;
@@ -59,10 +61,12 @@ impl SealedHeader {
     pub fn num_hash(&self) -> BlockNumHash {
         BlockNumHash::new(self.number, self.hash)
     }
+}
 
+impl InMemorySize for SealedHeader {
     /// Calculates a heuristic for the in-memory size of the [`SealedHeader`].
     #[inline]
-    pub fn size(&self) -> usize {
+    fn size(&self) -> usize {
         self.header.size() + mem::size_of::<BlockHash>()
     }
 }

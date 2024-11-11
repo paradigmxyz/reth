@@ -24,6 +24,7 @@ use once_cell::sync::Lazy as LazyLock;
 #[cfg(feature = "optimism")]
 use op_alloy_consensus::DepositTransaction;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+use reth_primitives_traits::InMemorySize;
 use serde::{Deserialize, Serialize};
 use signature::decode_with_eip155_chain_id;
 #[cfg(feature = "std")]
@@ -472,20 +473,6 @@ impl Transaction {
         }
     }
 
-    /// Calculates a heuristic for the in-memory size of the [Transaction].
-    #[inline]
-    pub fn size(&self) -> usize {
-        match self {
-            Self::Legacy(tx) => tx.size(),
-            Self::Eip2930(tx) => tx.size(),
-            Self::Eip1559(tx) => tx.size(),
-            Self::Eip4844(tx) => tx.size(),
-            Self::Eip7702(tx) => tx.size(),
-            #[cfg(feature = "optimism")]
-            Self::Deposit(tx) => tx.size(),
-        }
-    }
-
     /// Returns true if the transaction is a legacy transaction.
     #[inline]
     pub const fn is_legacy(&self) -> bool {
@@ -553,6 +540,22 @@ impl Transaction {
         match self {
             Self::Eip7702(tx) => Some(tx),
             _ => None,
+        }
+    }
+}
+
+impl InMemorySize for Transaction {
+    /// Calculates a heuristic for the in-memory size of the [Transaction].
+    #[inline]
+    fn size(&self) -> usize {
+        match self {
+            Self::Legacy(tx) => tx.size(),
+            Self::Eip2930(tx) => tx.size(),
+            Self::Eip1559(tx) => tx.size(),
+            Self::Eip4844(tx) => tx.size(),
+            Self::Eip7702(tx) => tx.size(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.size(),
         }
     }
 }
