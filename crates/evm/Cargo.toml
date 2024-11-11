@@ -57,6 +57,7 @@ std = [
     "alloy-consensus/std",
     "revm-primitives/std",
     "revm/std",
+    "reth-node-types/std",
 ]
 test-utils = [
     "dep:parking_lot",
