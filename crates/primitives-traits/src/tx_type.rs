@@ -1,7 +1,7 @@
-use alloy_eips::eip2718::Eip2718Error;
+use core::fmt;
+
 use alloy_primitives::{U64, U8};
 use alloy_rlp::{Decodable, Encodable};
-use core::fmt::{Debug, Display};
 
 /// Trait representing the behavior of a transaction type.
 pub trait TxType:
@@ -10,11 +10,11 @@ pub trait TxType:
     + PartialEq
     + Eq
     + PartialEq<u8>
-    + TryFrom<u8, Error = Eip2718Error>
-    + TryFrom<u64>
-    + TryFrom<U64>
-    + Debug
-    + Display
+    + TryFrom<u8, Error: fmt::Debug>
+    + TryFrom<u64, Error: fmt::Debug>
+    + TryFrom<U64, Error: fmt::Debug>
+    + fmt::Debug
+    + fmt::Display
     + Clone
     + Copy
     + Default
@@ -38,4 +38,26 @@ pub trait TxType:
 
     /// Returns `true` if this is an eip-7702 transaction.
     fn is_eip7702(&self) -> bool;
+}
+
+impl<T> TxType for T where
+    T: Into<u8>
+        + Into<U8>
+        + PartialEq
+        + Eq
+        + PartialEq<u8>
+        + TryFrom<u8, Error: fmt::Debug>
+        + TryFrom<u64, Error: fmt::Debug>
+        + TryFrom<U64, Error: fmt::Debug>
+        + fmt::Debug
+        + fmt::Display
+        + Clone
+        + Copy
+        + Default
+        + Encodable
+        + Decodable
+        + Send
+        + Sync
+        + 'static
+{
 }

@@ -75,10 +75,13 @@ pub mod serde_bincode_compat {
 }
 
 /// Helper trait that requires arbitrary implementation if the feature is enabled.
-#[cfg(feature = "arbitrary")]
+#[cfg(any(feature = "test-utils", feature = "arbitrary"))]
 pub trait MaybeArbitrary: for<'a> arbitrary::Arbitrary<'a> {}
-#[cfg(not(feature = "arbitrary"))]
+/// Helper trait that requires arbitrary implementation if the feature is enabled.
+#[cfg(not(any(feature = "test-utils", feature = "arbitrary")))]
 pub trait MaybeArbitrary {}
 
-#[cfg(feature = "arbitrary")]
+#[cfg(any(feature = "test-utils", feature = "arbitrary"))]
 impl<T> MaybeArbitrary for T where T: for<'a> arbitrary::Arbitrary<'a> {}
+#[cfg(not(any(feature = "test-utils", feature = "arbitrary")))]
+impl<T> MaybeArbitrary for T {}
