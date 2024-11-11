@@ -74,7 +74,7 @@ pub trait DebugApi {
     /// Similar to `debug_traceBlockByHash`, `debug_traceBlockByNumber` accepts a block number
     /// [BlockNumberOrTag] and will replay the block that is already present in the database.
     /// For the second parameter see [GethDebugTracingOptions].
-    #[method(name = "traceBlockByNumber")] 
+    #[method(name = "traceBlockByNumber")]
     async fn debug_trace_block_by_number(
         &self,
         block: BlockNumberOrTag,
