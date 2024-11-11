@@ -15,7 +15,6 @@ use std::convert::TryFrom;
 
 /// Wrapper type for `AlloyOpTxType` to implement `TxType` trait.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Display, Ord, Hash, From, Into)]
-#[from(AlloyOpTxType)]
 #[into(u8)]
 pub struct OpTxType(AlloyOpTxType);
 
