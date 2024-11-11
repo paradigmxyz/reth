@@ -174,6 +174,20 @@ where
             .inspect(|_| self.inner.on_new_payload_response())?)
     }
 
+    /// Metered version of `new_payload_v2`.
+    pub async fn new_payload_v2_metered(
+        &self,
+        payload: ExecutionPayloadInputV2,
+    ) -> EngineApiResult<PayloadStatus> {
+        let start = Instant::now();
+        let gas_used = payload.execution_payload.gas_used;
+        let res = Self::new_payload_v2(self, payload).await;
+        let elapsed = start.elapsed();
+        self.inner.metrics.latency.new_payload_v2.record(elapsed);
+        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
+        res
+    }
+
     /// See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_newpayloadv3>
     pub async fn new_payload_v3(
         &self,
@@ -690,13 +704,7 @@ where
     /// See also <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/shanghai.md#engine_newpayloadv2>
     async fn new_payload_v2(&self, payload: ExecutionPayloadInputV2) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV2");
-        let start = Instant::now();
-        let gas_used = payload.execution_payload.gas_used;
-        let res = Self::new_payload_v2(self, payload).await;
-        let elapsed = start.elapsed();
-        self.inner.metrics.latency.new_payload_v2.record(elapsed);
-        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
-        Ok(res?)
+        Ok(self.new_payload_v2_metered(payload).await?)
     }
 
     /// Handler for `engine_newPayloadV3`
