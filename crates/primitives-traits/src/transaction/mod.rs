@@ -2,10 +2,9 @@
 
 pub mod signed;
 
-use core::{fmt::Debug, hash::Hash};
+use core::{fmt, hash::Hash};
 
 use alloy_primitives::B256;
-
 use reth_codecs::Compact;
 use serde::{Deserialize, Serialize};
 
@@ -19,9 +18,12 @@ impl<T> FullTransaction for T where T: Transaction + Compact {}
 #[allow(dead_code)]
 /// Abstraction of a transaction.
 pub trait Transaction:
-    Debug
-    + Default
+    Send
+    + Sync
+    + Unpin
     + Clone
+    + Default
+    + fmt::Debug
     + Eq
     + PartialEq
     + Hash
@@ -33,9 +35,12 @@ pub trait Transaction:
 }
 
 impl<T> Transaction for T where
-    T: Debug
-        + Default
+    T: Send
+        + Sync
+        + Unpin
         + Clone
+        + Default
+        + fmt::Debug
         + Eq
         + PartialEq
         + Hash

@@ -1,17 +1,20 @@
-#[cfg(feature = "reth-codec")]
-use crate::compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR};
-use crate::TxType;
 use alloc::{vec, vec::Vec};
-use alloy_consensus::constants::{
-    EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
+use core::{cmp::Ordering, ops::Deref};
+
+use alloy_consensus::{
+    constants::{EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID},
+    Eip658Value, TxReceipt,
 };
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{Bloom, Log, B256};
 use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
 use bytes::{Buf, BufMut};
-use core::{cmp::Ordering, ops::Deref};
 use derive_more::{DerefMut, From, IntoIterator};
 use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "reth-codec")]
+use crate::compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR};
+use crate::TxType;
 
 /// Receipt containing result of transaction execution.
 #[derive(
@@ -64,6 +67,42 @@ impl Receipt {
     }
 }
 
+// todo: replace with alloy receipt
+impl TxReceipt for Receipt {
+    fn status_or_post_state(&self) -> Eip658Value {
+        self.success.into()
+    }
+
+    fn status(&self) -> bool {
+        self.success
+    }
+
+    fn bloom(&self) -> Bloom {
+        alloy_primitives::logs_bloom(self.logs.iter())
+    }
+
+    fn cumulative_gas_used(&self) -> u128 {
+        self.cumulative_gas_used as u128
+    }
+
+    fn logs(&self) -> &[Log] {
+        &self.logs
+    }
+}
+
+impl reth_primitives_traits::Receipt for Receipt {
+    fn tx_type(&self) -> u8 {
+        self.tx_type as u8
+    }
+
+    fn receipts_root(_receipts: &[&Self]) -> B256 {
+        #[cfg(feature = "optimism")]
+        panic!("This should not be called in optimism mode. Use `optimism_receipts_root_slow` instead.");
+        #[cfg(not(feature = "optimism"))]
+        crate::proofs::calculate_receipt_root_no_memo(_receipts)
+    }
+}
+
 /// A collection of receipts organized as a two-dimensional vector.
 #[derive(
     Clone,
@@ -78,12 +117,12 @@ impl Receipt {
     DerefMut,
     IntoIterator,
 )]
-pub struct Receipts {
+pub struct Receipts<T = Receipt> {
     /// A two-dimensional vector of optional `Receipt` instances.
-    pub receipt_vec: Vec<Vec<Option<Receipt>>>,
+    pub receipt_vec: Vec<Vec<Option<T>>>,
 }
 
-impl Receipts {
+impl<T> Receipts<T> {
     /// Returns the length of the `Receipts` vector.
     pub fn len(&self) -> usize {
         self.receipt_vec.len()
@@ -95,26 +134,26 @@ impl Receipts {
     }
 
     /// Push a new vector of receipts into the `Receipts` collection.
-    pub fn push(&mut self, receipts: Vec<Option<Receipt>>) {
+    pub fn push(&mut self, receipts: Vec<Option<T>>) {
         self.receipt_vec.push(receipts);
     }
 
     /// Retrieves all recorded receipts from index and calculates the root using the given closure.
-    pub fn root_slow(&self, index: usize, f: impl FnOnce(&[&Receipt]) -> B256) -> Option<B256> {
+    pub fn root_slow(&self, index: usize, f: impl FnOnce(&[&T]) -> B256) -> Option<B256> {
         let receipts =
             self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?;
         Some(f(receipts.as_slice()))
     }
 }
 
-impl From<Vec<Receipt>> for Receipts {
-    fn from(block_receipts: Vec<Receipt>) -> Self {
+impl<T> From<Vec<T>> for Receipts<T> {
+    fn from(block_receipts: Vec<T>) -> Self {
         Self { receipt_vec: vec![block_receipts.into_iter().map(Option::Some).collect()] }
     }
 }
 
-impl FromIterator<Vec<Option<Receipt>>> for Receipts {
-    fn from_iter<I: IntoIterator<Item = Vec<Option<Receipt>>>>(iter: I) -> Self {
+impl<T> FromIterator<Vec<Option<T>>> for Receipts<T> {
+    fn from_iter<I: IntoIterator<Item = Vec<Option<T>>>>(iter: I) -> Self {
         iter.into_iter().collect::<Vec<_>>().into()
     }
 }

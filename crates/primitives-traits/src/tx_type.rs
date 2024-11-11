@@ -1,49 +1,48 @@
 use core::fmt;
 
 use alloy_primitives::{U64, U8};
-use alloy_rlp::{Decodable, Encodable};
 
 /// Trait representing the behavior of a transaction type.
 pub trait TxType:
-    Into<u8>
-    + Into<U8>
-    + PartialEq
-    + Eq
-    + PartialEq<u8>
-    + TryFrom<u8, Error: fmt::Debug>
-    + TryFrom<u64, Error: fmt::Debug>
-    + TryFrom<U64, Error: fmt::Debug>
-    + fmt::Debug
-    + fmt::Display
+    Send
+    + Sync
+    + Unpin
     + Clone
     + Copy
     + Default
-    + Encodable
-    + Decodable
-    + Send
-    + Sync
-    + 'static
+    + fmt::Debug
+    + fmt::Display
+    + PartialEq
+    + Eq
+    + PartialEq<u8>
+    + Into<u8>
+    + Into<U8>
+    + TryFrom<u8, Error: fmt::Debug>
+    + TryFrom<u64, Error: fmt::Debug>
+    + TryFrom<U64>
+    + alloy_rlp::Encodable
+    + alloy_rlp::Decodable
 {
 }
 
 impl<T> TxType for T where
-    T: Into<u8>
-        + Into<U8>
-        + PartialEq
-        + Eq
-        + PartialEq<u8>
-        + TryFrom<u8, Error: fmt::Debug>
-        + TryFrom<u64, Error: fmt::Debug>
-        + TryFrom<U64, Error: fmt::Debug>
-        + fmt::Debug
-        + fmt::Display
+    T: Send
+        + Sync
+        + Unpin
         + Clone
         + Copy
         + Default
-        + Encodable
-        + Decodable
-        + Send
-        + Sync
-        + 'static
+        + fmt::Debug
+        + fmt::Display
+        + PartialEq
+        + Eq
+        + PartialEq<u8>
+        + Into<u8>
+        + Into<U8>
+        + TryFrom<u8, Error: fmt::Debug>
+        + TryFrom<u64, Error: fmt::Debug>
+        + TryFrom<U64>
+        + alloy_rlp::Encodable
+        + alloy_rlp::Decodable
 {
 }
