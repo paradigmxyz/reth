@@ -3,6 +3,7 @@
 use core::fmt;
 
 use alloy_consensus::TxReceipt;
+use alloy_primitives::B256;
 use reth_codecs::Compact;
 use serde::{Deserialize, Serialize};
 
@@ -27,4 +28,7 @@ pub trait Receipt:
 {
     /// Returns transaction type.
     fn tx_type(&self) -> u8;
+
+    /// Calculates the receipts root of all receipts in a block.
+    fn receipts_root(receipts: &[&Self]) -> B256;
 }
