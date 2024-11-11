@@ -957,7 +957,7 @@ where
 
     /// Handler for `debug_traceBlockByNumber`
     async fn debug_trace_block_by_number(
-        &self,
+        &self, 
         block: BlockNumberOrTag,
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
