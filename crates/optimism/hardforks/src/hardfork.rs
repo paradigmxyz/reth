@@ -158,7 +158,7 @@ impl OpHardfork {
                 Self::Ecotone => Some(1708534800),
                 Self::Fjord => Some(1716998400),
                 Self::Granite => Some(1723478400),
-                Self::Holocene => None,
+                Self::Holocene => Some(1732201200),
             },
         )
     }
@@ -257,6 +257,7 @@ impl OpHardfork {
             (Self::Ecotone.boxed(), ForkCondition::Timestamp(1708534800)),
             (Self::Fjord.boxed(), ForkCondition::Timestamp(1716998400)),
             (Self::Granite.boxed(), ForkCondition::Timestamp(1723478400)),
+            (Self::Holocene.boxed(), ForkCondition::Timestamp(1732201200)),
         ])
     }
 
@@ -288,6 +289,7 @@ impl OpHardfork {
             (Self::Ecotone.boxed(), ForkCondition::Timestamp(1708534800)),
             (Self::Fjord.boxed(), ForkCondition::Timestamp(1716998400)),
             (Self::Granite.boxed(), ForkCondition::Timestamp(1723478400)),
+            (Self::Holocene.boxed(), ForkCondition::Timestamp(1732201200)),
         ])
     }
 
@@ -354,7 +356,8 @@ mod tests {
 
     #[test]
     fn check_op_hardfork_from_str() {
-        let hardfork_str = ["beDrOck", "rEgOlITH", "cAnYoN", "eCoToNe", "FJorD", "GRaNiTe"];
+        let hardfork_str =
+            ["beDrOck", "rEgOlITH", "cAnYoN", "eCoToNe", "FJorD", "GRaNiTe", "hOlOcEnE"];
         let expected_hardforks = [
             OpHardfork::Bedrock,
             OpHardfork::Regolith,
@@ -362,6 +365,7 @@ mod tests {
             OpHardfork::Ecotone,
             OpHardfork::Fjord,
             OpHardfork::Granite,
+            OpHardfork::Holocene,
         ];
 
         let hardforks: Vec<OpHardfork> =

@@ -2,7 +2,7 @@
 
 pub mod signed;
 
-use core::{fmt::Debug, hash::Hash};
+use core::{fmt, hash::Hash};
 
 use alloy_primitives::{TxKind, B256};
 use reth_codecs::Compact;
@@ -11,9 +11,12 @@ use serde::{Deserialize, Serialize};
 #[allow(dead_code)]
 /// Abstraction of a transaction.
 pub trait Transaction:
-    Debug
-    + Default
+    Send
+    + Sync
+    + Unpin
     + Clone
+    + Default
+    + fmt::Debug
     + Eq
     + PartialEq
     + Hash

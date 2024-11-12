@@ -9,9 +9,12 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-pub use reth_primitives_traits::{Block, BlockBody};
+pub use reth_primitives::AnyPrimitives;
+pub use reth_primitives_traits::{
+    Block, BlockBody, FullBlock, FullNodePrimitives, FullReceipt, FullSignedTx, NodePrimitives,
+};
 
-use core::{fmt, marker::PhantomData};
+use core::marker::PhantomData;
 
 use reth_chainspec::EthChainSpec;
 use reth_db_api::{
@@ -20,32 +23,6 @@ use reth_db_api::{
 };
 use reth_engine_primitives::EngineTypes;
 use reth_trie_db::StateCommitment;
-
-/// Configures all the primitive types of the node.
-pub trait NodePrimitives: Send + Sync + Unpin + Clone + Default + fmt::Debug {
-    /// Block primitive.
-    type Block: Send + Sync + Unpin + Clone + Default + fmt::Debug + 'static;
-    /// Signed version of the transaction type.
-    type SignedTx: Send + Sync + Unpin + Clone + Default + fmt::Debug + 'static;
-    /// A receipt.
-    type Receipt: Send + Sync + Unpin + Clone + Default + fmt::Debug + 'static;
-}
-
-impl NodePrimitives for () {
-    type Block = ();
-    type SignedTx = ();
-    type Receipt = ();
-}
-
-/// Temp helper struct for integrating [`NodePrimitives`].
-#[derive(Debug, Clone, Default)]
-pub struct AnyPrimitives;
-
-impl NodePrimitives for AnyPrimitives {
-    type Block = reth_primitives::Block;
-    type SignedTx = reth_primitives::TransactionSigned;
-    type Receipt = reth_primitives::Receipt;
-}
 
 /// The type that configures the essential types of an Ethereum-like node.
 ///

@@ -338,7 +338,7 @@ impl CanonicalInMemoryState {
             // re-insert the blocks in natural order and connect them to their parent blocks
             for block in old_blocks {
                 let parent = blocks.get(&block.block().parent_hash).cloned();
-                let block_state = BlockState::with_parent(block.clone(), parent);
+                let block_state = BlockState::with_parent(block, parent);
                 let hash = block_state.hash();
                 let number = block_state.number();
 

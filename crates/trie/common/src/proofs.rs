@@ -234,11 +234,12 @@ impl StorageProof {
 #[cfg(any(test, feature = "test-utils"))]
 pub mod triehash {
     use alloy_primitives::{keccak256, B256};
+    use alloy_rlp::RlpEncodable;
     use hash_db::Hasher;
     use plain_hasher::PlainHasher;
 
     /// A [Hasher] that calculates a keccak256 hash of the given data.
-    #[derive(Default, Debug, Clone, PartialEq, Eq)]
+    #[derive(Default, Debug, Clone, PartialEq, Eq, RlpEncodable)]
     #[non_exhaustive]
     pub struct KeccakHasher;
 

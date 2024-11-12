@@ -7040,6 +7040,7 @@ dependencies = [
  "reth-network-p2p",
  "reth-network-peers",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-storage-api",
  "reth-tasks",
@@ -7844,6 +7845,7 @@ dependencies = [
  "reth-network-peers",
  "reth-network-types",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-storage-errors",
  "tokio",
  "tracing",
@@ -8209,6 +8211,7 @@ version = "1.1.1"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives",
+ "alloy-trie",
  "reth-chainspec",
  "reth-consensus",
  "reth-consensus-common",
@@ -8346,8 +8349,14 @@ name = "reth-optimism-primitives"
 version = "1.1.1"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
+ "alloy-rlp",
+ "bytes",
+ "derive_more 1.0.0",
+ "op-alloy-consensus",
  "reth-primitives",
+ "reth-primitives-traits",
 ]
 
 [[package]]
@@ -8464,6 +8473,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types",
  "alloy-serde",
+ "alloy-trie",
  "arbitrary",
  "assert_matches",
  "bincode",
@@ -8591,6 +8601,7 @@ dependencies = [
  "reth-errors",
  "reth-exex-types",
  "reth-metrics",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-prune-types",
  "reth-stages",
@@ -8971,6 +8982,7 @@ dependencies = [
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
  "alloy-serde",
+ "jsonrpsee-types",
  "reth-primitives",
  "reth-trie-common",
  "serde",
@@ -9217,6 +9229,7 @@ dependencies = [
  "reth-fs-util",
  "reth-metrics",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-storage-api",
  "reth-tasks",
@@ -9241,6 +9254,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-trie",
  "auto_impl",
  "bincode",
  "criterion",
