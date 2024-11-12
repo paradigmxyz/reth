@@ -1,20 +1,25 @@
 //! Transaction abstraction
 
-use core::{fmt::Debug, hash::Hash};
+use core::{fmt, hash::Hash};
 
 use alloy_primitives::{TxKind, B256};
 
 use reth_codecs::Compact;
 use serde::{Deserialize, Serialize};
 
+use crate::InMemorySize;
+
 pub mod signed;
 
 #[allow(dead_code)]
 /// Abstraction of a transaction.
 pub trait Transaction:
-    Debug
-    + Default
+    Send
+    + Sync
+    + Unpin
     + Clone
+    + Default
+    + fmt::Debug
     + Eq
     + PartialEq
     + Hash
@@ -23,6 +28,7 @@ pub trait Transaction:
     + alloy_rlp::Decodable
     + for<'de> Deserialize<'de>
     + alloy_consensus::Transaction
+    + InMemorySize
     + MaybeArbitrary
 {
     /// Heavy operation that return signature hash over rlp encoded transaction.
@@ -42,9 +48,6 @@ pub trait Transaction:
     /// This encodes the transaction _without_ the signature, and is only suitable for creating a
     /// hash intended for signing.
     fn encode_without_signature(&self, out: &mut dyn bytes::BufMut);
-
-    /// Calculates a heuristic for the in-memory size of the [Transaction].
-    fn size(&self) -> usize;
 }
 
 #[cfg(not(feature = "arbitrary"))]

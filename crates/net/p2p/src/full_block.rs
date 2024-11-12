@@ -6,10 +6,10 @@ use crate::{
     BlockClient,
 };
 use alloy_primitives::{Sealable, B256};
-use reth_consensus::{Consensus, ConsensusError};
+use reth_consensus::Consensus;
 use reth_eth_wire_types::HeadersDirection;
 use reth_network_peers::WithPeerId;
-use reth_primitives::{BlockBody, GotExpected, Header, SealedBlock, SealedHeader};
+use reth_primitives::{BlockBody, Header, SealedBlock, SealedHeader};
 use std::{
     cmp::Reverse,
     collections::{HashMap, VecDeque},
@@ -55,6 +55,7 @@ where
         let client = self.client.clone();
         FetchFullBlockFuture {
             hash,
+            consensus: self.consensus.clone(),
             request: FullBlockRequest {
                 header: Some(client.get_header(hash.into())),
                 body: Some(client.get_block_body(hash)),
@@ -110,6 +111,7 @@ where
     Client: BlockClient,
 {
     client: Client,
+    consensus: Arc<dyn Consensus>,
     hash: B256,
     request: FullBlockRequest<Client>,
     header: Option<SealedHeader>,
@@ -142,7 +144,8 @@ where
             BodyResponse::Validated(body) => Some(SealedBlock::new(header, body)),
             BodyResponse::PendingValidation(resp) => {
                 // ensure the block is valid, else retry
-                if let Err(err) = ensure_valid_body_response(&header, resp.data()) {
+                if let Err(err) = self.consensus.validate_body_against_header(resp.data(), &header)
+                {
                     debug!(target: "downloaders", %err, hash=?header.hash(), "Received wrong body");
                     self.client.report_bad_message(resp.peer_id());
                     self.header = Some(header);
@@ -156,7 +159,7 @@ where
 
     fn on_block_response(&mut self, resp: WithPeerId<BlockBody>) {
         if let Some(ref header) = self.header {
-            if let Err(err) = ensure_valid_body_response(header, resp.data()) {
+            if let Err(err) = self.consensus.validate_body_against_header(resp.data(), header) {
                 debug!(target: "downloaders", %err, hash=?header.hash(), "Received wrong body");
                 self.client.report_bad_message(resp.peer_id());
                 return
@@ -306,50 +309,6 @@ enum BodyResponse {
     /// Still needs to be validated against header
     PendingValidation(WithPeerId<BlockBody>),
 }
-
-/// Ensures the block response data matches the header.
-///
-/// This ensures the body response items match the header's hashes:
-///   - ommer hash
-///   - transaction root
-///   - withdrawals root
-fn ensure_valid_body_response(
-    header: &SealedHeader,
-    block: &BlockBody,
-) -> Result<(), ConsensusError> {
-    let ommers_hash = block.calculate_ommers_root();
-    if header.ommers_hash != ommers_hash {
-        return Err(ConsensusError::BodyOmmersHashDiff(
-            GotExpected { got: ommers_hash, expected: header.ommers_hash }.into(),
-        ))
-    }
-
-    let tx_root = block.calculate_tx_root();
-    if header.transactions_root != tx_root {
-        return Err(ConsensusError::BodyTransactionRootDiff(
-            GotExpected { got: tx_root, expected: header.transactions_root }.into(),
-        ))
-    }
-
-    match (header.withdrawals_root, &block.withdrawals) {
-        (Some(header_withdrawals_root), Some(withdrawals)) => {
-            let withdrawals = withdrawals.as_slice();
-            let withdrawals_root = reth_primitives::proofs::calculate_withdrawals_root(withdrawals);
-            if withdrawals_root != header_withdrawals_root {
-                return Err(ConsensusError::BodyWithdrawalsRootDiff(
-                    GotExpected { got: withdrawals_root, expected: header_withdrawals_root }.into(),
-                ))
-            }
-        }
-        (None, None) => {
-            // this is ok because we assume the fork is not active in this case
-        }
-        _ => return Err(ConsensusError::WithdrawalsRootUnexpected),
-    }
-
-    Ok(())
-}
-
 /// A future that downloads a range of full blocks from the network.
 ///
 /// This first fetches the headers for the given range using the inner `Client`. Once the request
@@ -446,7 +405,9 @@ where
                     BodyResponse::Validated(body) => body,
                     BodyResponse::PendingValidation(resp) => {
                         // ensure the block is valid, else retry
-                        if let Err(err) = ensure_valid_body_response(header, resp.data()) {
+                        if let Err(err) =
+                            self.consensus.validate_body_against_header(resp.data(), header)
+                        {
                             debug!(target: "downloaders", %err, hash=?header.hash(), "Received wrong body in range response");
                             self.client.report_bad_message(resp.peer_id());
 
@@ -695,7 +656,7 @@ mod tests {
     #[tokio::test]
     async fn download_single_full_block() {
         let client = TestFullBlockClient::default();
-        let header = SealedHeader::default();
+        let header: SealedHeader = SealedHeader::default();
         let body = BlockBody::default();
         client.insert(header.clone(), body.clone());
         let client = FullBlockClient::test_client(client);
@@ -707,7 +668,7 @@ mod tests {
     #[tokio::test]
     async fn download_single_full_block_range() {
         let client = TestFullBlockClient::default();
-        let header = SealedHeader::default();
+        let header: SealedHeader = SealedHeader::default();
         let body = BlockBody::default();
         client.insert(header.clone(), body.clone());
         let client = FullBlockClient::test_client(client);
@@ -722,7 +683,7 @@ mod tests {
         client: &TestFullBlockClient,
         range: Range<usize>,
     ) -> (SealedHeader, BlockBody) {
-        let mut sealed_header = SealedHeader::default();
+        let mut sealed_header: SealedHeader = SealedHeader::default();
         let body = BlockBody::default();
         for _ in range {
             let (mut header, hash) = sealed_header.split();
@@ -785,6 +746,7 @@ mod tests {
 
         let test_consensus = reth_consensus::test_utils::TestConsensus::default();
         test_consensus.set_fail_validation(true);
+        test_consensus.set_fail_body_against_header(false);
         let client = FullBlockClient::new(client, Arc::new(test_consensus));
 
         let received = client.get_full_block_range(header.hash(), range_length as u64).await;

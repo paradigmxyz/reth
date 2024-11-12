@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use alloy_eips::BlockId;
-use alloy_rpc_types::{Block, Header, Index};
+use alloy_rpc_types_eth::{Block, Header, Index};
 use futures::Future;
 use reth_primitives::{Receipt, SealedBlock, SealedBlockWithSenders};
 use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider};
@@ -64,8 +64,7 @@ pub trait EthBlocks: LoadBlock {
                 full.into(),
                 Some(block_hash),
                 self.tx_resp_builder(),
-            )
-            .map_err(Self::Error::from_eth_err)?;
+            )?;
             Ok(Some(block))
         }
     }

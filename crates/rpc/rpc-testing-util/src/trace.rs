@@ -2,8 +2,7 @@
 
 use alloy_eips::BlockId;
 use alloy_primitives::{map::HashSet, Bytes, TxHash, B256};
-use alloy_rpc_types::Index;
-use alloy_rpc_types_eth::transaction::TransactionRequest;
+use alloy_rpc_types_eth::{transaction::TransactionRequest, Index};
 use alloy_rpc_types_trace::{
     filter::TraceFilter,
     parity::{LocalizedTransactionTrace, TraceResults, TraceType},

@@ -1375,7 +1375,7 @@ where
 mod tests {
     use super::*;
     use alloy_consensus::{TxEip1559, EMPTY_ROOT_HASH};
-    use alloy_eips::eip1559::INITIAL_BASE_FEE;
+    use alloy_eips::{eip1559::INITIAL_BASE_FEE, eip4895::Withdrawals};
     use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_primitives::{keccak256, Address, PrimitiveSignature as Signature, Sealable, B256};
     use assert_matches::assert_matches;
@@ -1390,7 +1390,6 @@ mod tests {
         proofs::{calculate_receipt_root, calculate_transaction_root},
         revm_primitives::AccountInfo,
         Account, BlockBody, Header, Transaction, TransactionSigned, TransactionSignedEcRecovered,
-        Withdrawals,
     };
     use reth_provider::{
         test_utils::{

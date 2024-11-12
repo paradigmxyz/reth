@@ -1,6 +1,6 @@
 //! Contains types required for building a payload.
 
-use alloy_eips::{eip4844::BlobTransactionSidecar, eip7685::Requests};
+use alloy_eips::{eip4844::BlobTransactionSidecar, eip4895::Withdrawals, eip7685::Requests};
 use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{
@@ -9,7 +9,7 @@ use alloy_rpc_types_engine::{
 };
 use reth_chain_state::ExecutedBlock;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
-use reth_primitives::{SealedBlock, Withdrawals};
+use reth_primitives::SealedBlock;
 use reth_rpc_types_compat::engine::payload::{
     block_to_payload_v1, block_to_payload_v3, convert_block_to_payload_field_v2,
 };

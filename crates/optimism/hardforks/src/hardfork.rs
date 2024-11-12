@@ -18,7 +18,7 @@ hardfork!(
     ///
     /// When building a list of hardforks for a chain, it's still expected to mix with
     /// [`EthereumHardfork`].
-    OptimismHardfork {
+    OpHardfork {
         /// Bedrock: <https://blog.oplabs.co/introducing-optimism-bedrock>.
         Bedrock,
         /// Regolith: <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/superchain-upgrades.md#regolith>.
@@ -36,7 +36,7 @@ hardfork!(
     }
 );
 
-impl OptimismHardfork {
+impl OpHardfork {
     /// Retrieves the activation block for the specified hardfork on the given chain.
     pub fn activation_block<H: Hardfork>(self, fork: H, chain: Chain) -> Option<u64> {
         if chain == Chain::base_sepolia() {
@@ -158,7 +158,7 @@ impl OptimismHardfork {
                 Self::Ecotone => Some(1708534800),
                 Self::Fjord => Some(1716998400),
                 Self::Granite => Some(1723478400),
-                Self::Holocene => None,
+                Self::Holocene => Some(1732201200),
             },
         )
     }
@@ -257,6 +257,7 @@ impl OptimismHardfork {
             (Self::Ecotone.boxed(), ForkCondition::Timestamp(1708534800)),
             (Self::Fjord.boxed(), ForkCondition::Timestamp(1716998400)),
             (Self::Granite.boxed(), ForkCondition::Timestamp(1723478400)),
+            (Self::Holocene.boxed(), ForkCondition::Timestamp(1732201200)),
         ])
     }
 
@@ -288,6 +289,7 @@ impl OptimismHardfork {
             (Self::Ecotone.boxed(), ForkCondition::Timestamp(1708534800)),
             (Self::Fjord.boxed(), ForkCondition::Timestamp(1716998400)),
             (Self::Granite.boxed(), ForkCondition::Timestamp(1723478400)),
+            (Self::Holocene.boxed(), ForkCondition::Timestamp(1732201200)),
         ])
     }
 
@@ -328,13 +330,13 @@ fn match_hardfork<H, HF, OHF>(fork: H, hardfork_fn: HF, optimism_hardfork_fn: OH
 where
     H: Hardfork,
     HF: Fn(&EthereumHardfork) -> Option<u64>,
-    OHF: Fn(&OptimismHardfork) -> Option<u64>,
+    OHF: Fn(&OpHardfork) -> Option<u64>,
 {
     let fork: &dyn Any = &fork;
     if let Some(fork) = fork.downcast_ref::<EthereumHardfork>() {
         return hardfork_fn(fork)
     }
-    fork.downcast_ref::<OptimismHardfork>().and_then(optimism_hardfork_fn)
+    fork.downcast_ref::<OpHardfork>().and_then(optimism_hardfork_fn)
 }
 
 #[cfg(test)]
@@ -346,35 +348,34 @@ mod tests {
     #[test]
     fn test_match_hardfork() {
         assert_eq!(
-            OptimismHardfork::base_mainnet_activation_block(EthereumHardfork::Cancun),
+            OpHardfork::base_mainnet_activation_block(EthereumHardfork::Cancun),
             Some(11188936)
         );
-        assert_eq!(
-            OptimismHardfork::base_mainnet_activation_block(OptimismHardfork::Canyon),
-            Some(9101527)
-        );
+        assert_eq!(OpHardfork::base_mainnet_activation_block(OpHardfork::Canyon), Some(9101527));
     }
 
     #[test]
     fn check_op_hardfork_from_str() {
-        let hardfork_str = ["beDrOck", "rEgOlITH", "cAnYoN", "eCoToNe", "FJorD", "GRaNiTe"];
+        let hardfork_str =
+            ["beDrOck", "rEgOlITH", "cAnYoN", "eCoToNe", "FJorD", "GRaNiTe", "hOlOcEnE"];
         let expected_hardforks = [
-            OptimismHardfork::Bedrock,
-            OptimismHardfork::Regolith,
-            OptimismHardfork::Canyon,
-            OptimismHardfork::Ecotone,
-            OptimismHardfork::Fjord,
-            OptimismHardfork::Granite,
+            OpHardfork::Bedrock,
+            OpHardfork::Regolith,
+            OpHardfork::Canyon,
+            OpHardfork::Ecotone,
+            OpHardfork::Fjord,
+            OpHardfork::Granite,
+            OpHardfork::Holocene,
         ];
 
-        let hardforks: Vec<OptimismHardfork> =
-            hardfork_str.iter().map(|h| OptimismHardfork::from_str(h).unwrap()).collect();
+        let hardforks: Vec<OpHardfork> =
+            hardfork_str.iter().map(|h| OpHardfork::from_str(h).unwrap()).collect();
 
         assert_eq!(hardforks, expected_hardforks);
     }
 
     #[test]
     fn check_nonexistent_hardfork_from_str() {
-        assert!(OptimismHardfork::from_str("not a hardfork").is_err());
+        assert!(OpHardfork::from_str("not a hardfork").is_err());
     }
 }

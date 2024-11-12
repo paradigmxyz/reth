@@ -41,7 +41,8 @@ tokio-stream.workspace = true
 serde_json.workspace = true
 alloy-signer.workspace = true
 alloy-signer-local = { workspace = true, features = ["mnemonic"] }
-alloy-rpc-types.workspace = true
+alloy-rpc-types-eth.workspace = true
+alloy-rpc-types-engine.workspace = true
 alloy-network.workspace = true
 alloy-consensus = { workspace = true, features = ["kzg"] }
 tracing.workspace = true

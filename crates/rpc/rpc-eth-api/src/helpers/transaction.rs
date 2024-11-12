@@ -6,8 +6,7 @@ use alloy_dyn_abi::TypedData;
 use alloy_eips::{eip2718::Encodable2718, BlockId};
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{Address, Bytes, TxHash, B256};
-use alloy_rpc_types::{BlockNumberOrTag, TransactionInfo};
-use alloy_rpc_types_eth::transaction::TransactionRequest;
+use alloy_rpc_types_eth::{transaction::TransactionRequest, BlockNumberOrTag, TransactionInfo};
 use futures::Future;
 use reth_primitives::{Receipt, SealedBlockWithSenders, TransactionMeta, TransactionSigned};
 use reth_provider::{BlockNumReader, BlockReaderIdExt, ReceiptProvider, TransactionsProvider};
@@ -209,7 +208,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                         tx.clone().with_signer(*signer),
                         tx_info,
                         self.tx_resp_builder(),
-                    )))
+                    )?))
                 }
             }
 
@@ -234,7 +233,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     RpcNodeCore::pool(self).get_transaction_by_sender_and_nonce(sender, nonce)
                 {
                     let transaction = tx.transaction.clone().into_consensus();
-                    return Ok(Some(from_recovered(transaction.into(), self.tx_resp_builder())));
+                    return Ok(Some(from_recovered(transaction.into(), self.tx_resp_builder())?));
                 }
             }
 
@@ -292,7 +291,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                             )
                         })
                 })
-                .ok_or(EthApiError::HeaderNotFound(block_id).into())
+                .ok_or(EthApiError::HeaderNotFound(block_id))?
                 .map(Some)
         }
     }

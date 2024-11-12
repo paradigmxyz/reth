@@ -24,6 +24,7 @@ use once_cell::sync::Lazy as LazyLock;
 #[cfg(feature = "optimism")]
 use op_alloy_consensus::DepositTransaction;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+use reth_primitives_traits::InMemorySize;
 use serde::{Deserialize, Serialize};
 use signature::decode_with_eip155_chain_id;
 #[cfg(feature = "std")]
@@ -473,20 +474,6 @@ impl Transaction {
         }
     }
 
-    /// Calculates a heuristic for the in-memory size of the [Transaction].
-    #[inline]
-    pub fn size(&self) -> usize {
-        match self {
-            Self::Legacy(tx) => tx.size(),
-            Self::Eip2930(tx) => tx.size(),
-            Self::Eip1559(tx) => tx.size(),
-            Self::Eip4844(tx) => tx.size(),
-            Self::Eip7702(tx) => tx.size(),
-            #[cfg(feature = "optimism")]
-            Self::Deposit(tx) => tx.size(),
-        }
-    }
-
     /// Returns true if the transaction is a legacy transaction.
     #[inline]
     pub const fn is_legacy(&self) -> bool {
@@ -554,6 +541,22 @@ impl Transaction {
         match self {
             Self::Eip7702(tx) => Some(tx),
             _ => None,
+        }
+    }
+}
+
+impl InMemorySize for Transaction {
+    /// Calculates a heuristic for the in-memory size of the [Transaction].
+    #[inline]
+    fn size(&self) -> usize {
+        match self {
+            Self::Legacy(tx) => tx.size(),
+            Self::Eip2930(tx) => tx.size(),
+            Self::Eip1559(tx) => tx.size(),
+            Self::Eip4844(tx) => tx.size(),
+            Self::Eip7702(tx) => tx.size(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.size(),
         }
     }
 }
@@ -1298,96 +1301,35 @@ impl TransactionSigned {
     }
 }
 
-impl alloy_consensus::Transaction for TransactionSigned {
-    fn chain_id(&self) -> Option<ChainId> {
-        self.deref().chain_id()
-    }
-
-    fn nonce(&self) -> u64 {
-        self.deref().nonce()
-    }
-
-    fn gas_limit(&self) -> u64 {
-        self.deref().gas_limit()
-    }
-
-    fn gas_price(&self) -> Option<u128> {
-        self.deref().gas_price()
-    }
-
-    fn max_fee_per_gas(&self) -> u128 {
-        self.deref().max_fee_per_gas()
-    }
-
-    fn max_priority_fee_per_gas(&self) -> Option<u128> {
-        self.deref().max_priority_fee_per_gas()
-    }
-
-    fn max_fee_per_blob_gas(&self) -> Option<u128> {
-        self.deref().max_fee_per_blob_gas()
-    }
-
-    fn priority_fee_or_price(&self) -> u128 {
-        self.deref().priority_fee_or_price()
-    }
-
-    fn value(&self) -> U256 {
-        self.deref().value()
-    }
-
-    fn input(&self) -> &Bytes {
-        self.deref().input()
-    }
-
-    fn ty(&self) -> u8 {
-        self.deref().ty()
-    }
-
-    fn access_list(&self) -> Option<&AccessList> {
-        self.deref().access_list()
-    }
-
-    fn blob_versioned_hashes(&self) -> Option<&[B256]> {
-        alloy_consensus::Transaction::blob_versioned_hashes(self.deref())
-    }
-
-    fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
-        self.deref().authorization_list()
-    }
-
-    fn kind(&self) -> TxKind {
-        self.deref().kind()
-    }
-}
-
 impl SignedTransaction for TransactionSigned {
     type Transaction = Transaction;
 
     fn tx_hash(&self) -> &TxHash {
-        Self::hash_ref(self)
+        &self.hash
     }
 
     fn transaction(&self) -> &Self::Transaction {
-        Self::transaction(self)
+        &self.transaction
     }
 
     fn signature(&self) -> &Signature {
-        Self::signature(self)
+        &self.signature
     }
 
     fn recover_signer(&self) -> Option<Address> {
-        Self::recover_signer(self)
+        let signature_hash = self.signature_hash();
+        recover_signer(&self.signature, signature_hash)
     }
 
     fn recover_signer_unchecked(&self) -> Option<Address> {
-        Self::recover_signer_unchecked(self)
+        let signature_hash = self.signature_hash();
+        recover_signer_unchecked(&self.signature, signature_hash)
     }
 
-    fn from_transaction_and_signature(
-        transaction: Self::Transaction,
-        signature: Signature,
-    ) -> Self {
-        Self::from_transaction_and_signature(transaction, signature)
+    fn from_transaction_and_signature(transaction: Transaction, signature: Signature) -> Self {
+        let mut initial_tx = Self { transaction, hash: Default::default(), signature };
+        initial_tx.hash = initial_tx.recalculate_hash();
+        initial_tx
     }
 
     fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address) {
@@ -1467,6 +1409,68 @@ impl SignedTransaction for TransactionSigned {
             #[cfg(feature = "optimism")]
             Transaction::Deposit(_) => {}
         }
+    }
+}
+
+impl alloy_consensus::Transaction for TransactionSigned {
+    fn chain_id(&self) -> Option<ChainId> {
+        self.deref().chain_id()
+    }
+
+    fn nonce(&self) -> u64 {
+        self.deref().nonce()
+    }
+
+    fn gas_limit(&self) -> u64 {
+        self.deref().gas_limit()
+    }
+
+    fn gas_price(&self) -> Option<u128> {
+        self.deref().gas_price()
+    }
+
+    fn max_fee_per_gas(&self) -> u128 {
+        self.deref().max_fee_per_gas()
+    }
+
+    fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        self.deref().max_priority_fee_per_gas()
+    }
+
+    fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        self.deref().max_fee_per_blob_gas()
+    }
+
+    fn priority_fee_or_price(&self) -> u128 {
+        self.deref().priority_fee_or_price()
+    }
+
+    fn value(&self) -> U256 {
+        self.deref().value()
+    }
+
+    fn input(&self) -> &Bytes {
+        self.deref().input()
+    }
+
+    fn ty(&self) -> u8 {
+        self.deref().ty()
+    }
+
+    fn access_list(&self) -> Option<&AccessList> {
+        self.deref().access_list()
+    }
+
+    fn blob_versioned_hashes(&self) -> Option<&[B256]> {
+        alloy_consensus::Transaction::blob_versioned_hashes(self.deref())
+    }
+
+    fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
+        self.deref().authorization_list()
+    }
+
+    fn kind(&self) -> TxKind {
+        self.deref().kind()
     }
 }
 
@@ -1756,8 +1760,6 @@ pub mod serde_bincode_compat {
         TxEip4844,
     };
     use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
-    #[cfg(feature = "optimism")]
-    use op_alloy_consensus::serde_bincode_compat::TxDeposit;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -1785,8 +1787,7 @@ pub mod serde_bincode_compat {
         Eip4844(Cow<'a, TxEip4844>),
         Eip7702(TxEip7702<'a>),
         #[cfg(feature = "optimism")]
-        #[cfg(feature = "optimism")]
-        Deposit(TxDeposit<'a>),
+        Deposit(op_alloy_consensus::serde_bincode_compat::TxDeposit<'a>),
     }
 
     impl<'a> From<&'a super::Transaction> for Transaction<'a> {
@@ -1798,7 +1799,9 @@ pub mod serde_bincode_compat {
                 super::Transaction::Eip4844(tx) => Self::Eip4844(Cow::Borrowed(tx)),
                 super::Transaction::Eip7702(tx) => Self::Eip7702(TxEip7702::from(tx)),
                 #[cfg(feature = "optimism")]
-                super::Transaction::Deposit(tx) => Self::Deposit(TxDeposit::from(tx)),
+                super::Transaction::Deposit(tx) => {
+                    Self::Deposit(op_alloy_consensus::serde_bincode_compat::TxDeposit::from(tx))
+                }
             }
         }
     }
@@ -1901,7 +1904,6 @@ pub mod serde_bincode_compat {
     #[cfg(test)]
     mod tests {
         use super::super::{serde_bincode_compat, Transaction, TransactionSigned};
-
         use arbitrary::Arbitrary;
         use rand::Rng;
         use reth_testing_utils::generators;
