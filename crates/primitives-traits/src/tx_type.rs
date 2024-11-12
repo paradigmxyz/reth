@@ -26,3 +26,25 @@ pub trait TxType:
     + Decodable
 {
 }
+
+impl<T> TxType for T where
+    T: Send
+        + Sync
+        + Unpin
+        + Clone
+        + Copy
+        + Default
+        + fmt::Debug
+        + fmt::Display
+        + PartialEq
+        + Eq
+        + PartialEq<u8>
+        + Into<u8>
+        + Into<U8>
+        + TryFrom<u8, Error = Eip2718Error>
+        + TryFrom<u64>
+        + TryFrom<U64>
+        + Encodable
+        + Decodable
+{
+}
