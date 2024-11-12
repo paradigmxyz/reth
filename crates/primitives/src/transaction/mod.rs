@@ -751,6 +751,15 @@ impl alloy_consensus::Transaction for Transaction {
         }
     }
 
+    fn is_dynamic_fee(&self) -> bool {
+        match self {
+            Self::Legacy(_) | Self::Eip2930(_) => false,
+            Self::Eip1559(_) | Self::Eip4844(_) | Self::Eip7702(_) => true,
+            #[cfg(feature = "optimism")]
+            Self::Deposit(_) => false,
+        }
+    }
+
     fn value(&self) -> U256 {
         match self {
             Self::Legacy(tx) => tx.value(),
