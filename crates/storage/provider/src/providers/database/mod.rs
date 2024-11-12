@@ -624,8 +624,7 @@ mod tests {
     use crate::{
         providers::{StaticFileProvider, StaticFileWriter},
         test_utils::{blocks::TEST_BLOCK, create_test_provider_factory, MockNodeTypesWithDB},
-        BlockHashReader, BlockNumReader, BlockWriter, DBProvider, HeaderSyncGapProvider,
-        TransactionsProvider,
+        BlockHashReader, BlockNumReader, BlockWriter, HeaderSyncGapProvider, TransactionsProvider,
     };
     use alloy_primitives::{TxNumber, B256, U256};
     use assert_matches::assert_matches;

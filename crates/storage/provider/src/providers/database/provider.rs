@@ -25,7 +25,10 @@ use metrics::DurationsRecorder;
 use rayon::slice::ParallelSliceMut;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_db::{
-    common::KeyValue, cursor::{DbDupCursorRW, RangeWalker}, table::TableRow, tables, BlockNumberList, PlainAccountState, PlainStorageState
+    common::KeyValue,
+    cursor::{DbDupCursorRW, RangeWalker},
+    table::TableRow,
+    tables, BlockNumberList, PlainAccountState, PlainStorageState,
 };
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
@@ -685,7 +688,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         range: impl RangeBounds<BlockNumber> + Clone,
     ) -> ProviderResult<Vec<SealedBlockWithSenders>>
     where
-        Spec: EthereumHardforks,
+        N::ChainSpec: EthereumHardforks,
     {
         // For blocks we need:
         //
