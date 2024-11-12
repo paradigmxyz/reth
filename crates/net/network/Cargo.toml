@@ -16,6 +16,7 @@ workspace = true
 reth-chainspec.workspace = true
 reth-fs-util.workspace = true
 reth-primitives = { workspace = true, features = ["secp256k1"] }
+reth-primitives-traits.workspace = true
 reth-net-banlist.workspace = true
 reth-network-api.workspace = true
 reth-network-p2p.workspace = true
@@ -130,7 +131,8 @@ test-utils = [
 	"reth-discv4/test-utils",
 	"reth-network/test-utils",
 	"reth-network-p2p/test-utils",
-	"reth-primitives/test-utils"
+	"reth-primitives/test-utils",
+    "reth-primitives-traits/test-utils",
 ]
 
 [[bench]]
