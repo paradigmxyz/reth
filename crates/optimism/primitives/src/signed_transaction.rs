@@ -18,9 +18,7 @@ use serde::{Deserialize, Serialize};
 
 /// Signed transaction.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
-#[derive(
-    Debug, Clone, Default, PartialEq, Eq, Hash, AsRef, Deref, Serialize, Deserialize, Constructor,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Serialize, Deserialize, Constructor)]
 pub struct OpTransactionSigned {
     /// Transaction hash
     pub hash: TxHash,
@@ -273,6 +271,16 @@ impl Decodable2718 for OpTransactionSigned {
         let (transaction, hash, signature) =
             TransactionSigned::decode_rlp_legacy_transaction_tuple(buf)?;
         Ok(Self::new(hash, signature, OpTypedTransaction::Legacy(transaction)))
+    }
+}
+
+impl Default for OpTransactionSigned {
+    fn default() -> Self {
+        Self {
+            hash: Default::default(),
+            signature: PrimitiveSignature::test_signature(),
+            transaction: OpTypedTransaction::Legacy(Default::default()),
+        }
     }
 }
 
