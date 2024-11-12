@@ -131,7 +131,8 @@ test-utils = [
 	"reth-discv4/test-utils",
 	"reth-network/test-utils",
 	"reth-network-p2p/test-utils",
-	"reth-primitives/test-utils"
+	"reth-primitives/test-utils",
+    "reth-primitives-traits/test-utils",
 ]
 
 [[bench]]

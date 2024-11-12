@@ -37,9 +37,9 @@ pub trait Block:
     /// The block's body contains the transactions in the block.
     type Body: Send + Sync + Unpin + 'static;
 
-    /// Returns reference to [`BlockHeader`] type.
+    /// Returns reference to block header.
     fn header(&self) -> &Self::Header;
 
-    /// Returns reference to [`BlockBody`] type.
+    /// Returns reference to block body.
     fn body(&self) -> &Self::Body;
 }
