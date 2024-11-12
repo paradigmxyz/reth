@@ -1,7 +1,6 @@
 use core::fmt;
 
 use alloy_primitives::{U64, U8};
-use alloy_rlp::{Decodable, Encodable};
 use reth_codecs::Compact;
 
 /// Helper trait that unifies all behaviour required by transaction type ID to support full node
