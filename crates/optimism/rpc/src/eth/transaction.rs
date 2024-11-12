@@ -85,6 +85,7 @@ where
     ) -> Result<Self::Transaction, Self::Error> {
         let from = tx.signer();
         let TransactionSigned { transaction, signature, hash } = tx.into_signed();
+        let mut deposit_receipt_version = None;
 
         let inner = match transaction {
             reth_primitives::Transaction::Legacy(tx) => {
@@ -100,15 +101,22 @@ where
             reth_primitives::Transaction::Eip7702(tx) => {
                 Signed::new_unchecked(tx, signature, hash).into()
             }
-            reth_primitives::Transaction::Deposit(tx) => OpTxEnvelope::Deposit(tx),
-        };
+            reth_primitives::Transaction::Deposit(tx) => {
+                let deposit_info = self
+                    .inner
+                    .provider()
+                    .receipt_by_hash(hash)
+                    .map_err(Self::Error::from_eth_err)?
+                    .and_then(|receipt| receipt.deposit_receipt_version.zip(receipt.deposit_nonce));
 
-        let deposit_receipt_version = self
-            .inner
-            .provider()
-            .receipt_by_hash(hash)
-            .map_err(Self::Error::from_eth_err)?
-            .and_then(|receipt| receipt.deposit_receipt_version);
+                if let Some((version, _)) = deposit_info {
+                    deposit_receipt_version = Some(version);
+                    // TODO: set nonce
+                }
+
+                OpTxEnvelope::Deposit(tx)
+            }
+        };
 
         let TransactionInfo {
             block_hash, block_number, index: transaction_index, base_fee, ..
