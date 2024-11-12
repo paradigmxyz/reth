@@ -77,3 +77,7 @@ pub mod serde_bincode_compat {
 /// Heuristic size trait
 pub mod size;
 pub use size::InMemorySize;
+
+/// Node traits
+pub mod node;
+pub use node::{FullNodePrimitives, NodePrimitives};
