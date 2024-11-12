@@ -8191,6 +8191,7 @@ version = "1.1.1"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives",
+ "alloy-trie",
  "reth-chainspec",
  "reth-consensus",
  "reth-consensus-common",
@@ -8451,6 +8452,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types",
  "alloy-serde",
+ "alloy-trie",
  "arbitrary",
  "assert_matches",
  "bincode",
@@ -9226,6 +9228,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-trie",
  "auto_impl",
  "bincode",
  "criterion",
