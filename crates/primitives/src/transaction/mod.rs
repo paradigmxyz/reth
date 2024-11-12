@@ -64,7 +64,7 @@ use tx_type::{
 };
 
 use alloc::vec::Vec;
-use reth_primitives_traits::{transaction::AlloyTransactionExt, SignedTransaction};
+use reth_primitives_traits::{transaction::TransactionExt, SignedTransaction};
 use revm_primitives::{AuthorizationList, TxEnv};
 
 /// Either a transaction hash or number.
@@ -845,7 +845,7 @@ impl alloy_consensus::Transaction for Transaction {
     }
 }
 
-impl AlloyTransactionExt for Transaction {
+impl TransactionExt for Transaction {
     type Type = TxType;
 
     fn signature_hash(&self) -> B256 {

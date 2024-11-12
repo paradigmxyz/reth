@@ -27,7 +27,7 @@ pub use receipt::{FullReceipt, Receipt};
 pub mod transaction;
 pub use transaction::{
     signed::{FullSignedTx, SignedTransaction},
-    AlloyTransactionExt, FullTransaction, Transaction,
+    FullTransaction, Transaction, TransactionExt,
 };
 
 mod integer_list;

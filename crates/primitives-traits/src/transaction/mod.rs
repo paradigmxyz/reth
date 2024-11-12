@@ -28,7 +28,7 @@ pub trait Transaction:
     + Hash
     + Serialize
     + for<'de> Deserialize<'de>
-    + AlloyTransactionExt
+    + TransactionExt
     + InMemorySize
     + MaybeArbitrary
 {
@@ -46,14 +46,14 @@ impl<T> Transaction for T where
         + Hash
         + Serialize
         + for<'de> Deserialize<'de>
-        + AlloyTransactionExt
+        + TransactionExt
         + InMemorySize
         + MaybeArbitrary
 {
 }
 
 /// Extension trait of [`alloy_consensus::Transaction`].
-pub trait AlloyTransactionExt: alloy_consensus::Transaction {
+pub trait TransactionExt: alloy_consensus::Transaction {
     /// Transaction envelope type ID.
     type Type: TxType;
 

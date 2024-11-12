@@ -8,7 +8,7 @@ use alloy_primitives::{keccak256, Address, PrimitiveSignature, TxHash, B256};
 use reth_codecs::Compact;
 use revm_primitives::TxEnv;
 
-use crate::{transaction::AlloyTransactionExt, FullTransaction, MaybeArbitrary, Transaction};
+use crate::{transaction::TransactionExt, FullTransaction, MaybeArbitrary, Transaction};
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
 pub trait FullSignedTx: SignedTransaction<Transaction: FullTransaction> + Compact {}
@@ -32,7 +32,7 @@ pub trait SignedTransaction:
     + alloy_rlp::Decodable
     + Encodable2718
     + Decodable2718
-    + AlloyTransactionExt
+    + TransactionExt
     + MaybeArbitrary
 {
     /// Transaction type that is signed.
@@ -83,8 +83,8 @@ pub trait SignedTransaction:
     fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address);
 }
 
-impl<T: SignedTransaction> AlloyTransactionExt for T {
-    type Type = <T::Transaction as AlloyTransactionExt>::Type;
+impl<T: SignedTransaction> TransactionExt for T {
+    type Type = <T::Transaction as TransactionExt>::Type;
 
     fn signature_hash(&self) -> B256 {
         self.transaction().signature_hash()
