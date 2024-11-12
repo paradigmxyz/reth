@@ -428,8 +428,7 @@ impl SealedBlock {
     }
 }
 
-impl InMemorySize for SealedBlock {
-    /// Calculates a heuristic for the in-memory size of the [`SealedBlock`].
+impl<H: InMemorySize, B: InMemorySize> InMemorySize for SealedBlock<H, B> {
     #[inline]
     fn size(&self) -> usize {
         self.header.size() + self.body.size()

@@ -19,9 +19,8 @@ use tokio_stream::StreamExt;
 use tokio_util::codec::FramedRead;
 use tracing::{debug, trace, warn};
 
-use crate::receipt_file_client::FromReceiptReader;
-
 use super::file_codec::BlockFileCodec;
+use crate::receipt_file_client::FromReceiptReader;
 
 /// Default byte length of chunk to read from chain file.
 ///
@@ -265,6 +264,7 @@ impl FromReader for FileClient {
 }
 
 impl HeadersClient for FileClient {
+    type Header = Header;
     type Output = HeadersFut;
 
     fn get_headers_with_priority(
@@ -315,6 +315,7 @@ impl HeadersClient for FileClient {
 }
 
 impl BodiesClient for FileClient {
+    type Body = BlockBody;
     type Output = BodiesFut;
 
     fn get_block_bodies_with_priority(

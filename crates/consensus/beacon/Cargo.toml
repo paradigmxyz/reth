@@ -73,15 +73,16 @@ reth-exex-types.workspace = true
 reth-prune-types.workspace = true
 reth-chainspec.workspace = true
 alloy-genesis.workspace = true
-
 assert_matches.workspace = true
 
 [features]
 optimism = [
-    "reth-chainspec",
-    "reth-primitives/optimism",
-    "reth-provider/optimism",
-    "reth-blockchain-tree/optimism",
-    "reth-db/optimism",
-    "reth-db-api/optimism",
+	"reth-blockchain-tree/optimism",
+	"reth-chainspec",
+	"reth-db-api/optimism",
+	"reth-db/optimism",
+	"reth-downloaders/optimism",
+	"reth-primitives/optimism",
+	"reth-provider/optimism",
+	"reth-downloaders/optimism"
 ]

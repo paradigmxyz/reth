@@ -40,6 +40,7 @@ impl DownloadClient for NoopFullBlockClient {
 
 /// Implements the `BodiesClient` trait for the `NoopFullBlockClient` struct.
 impl BodiesClient for NoopFullBlockClient {
+    type Body = BlockBody;
     /// Defines the output type of the function.
     type Output = futures::future::Ready<PeerRequestResult<Vec<BlockBody>>>;
 
@@ -65,6 +66,7 @@ impl BodiesClient for NoopFullBlockClient {
 }
 
 impl HeadersClient for NoopFullBlockClient {
+    type Header = Header;
     /// The output type representing a future containing a peer request result with a vector of
     /// headers.
     type Output = futures::future::Ready<PeerRequestResult<Vec<Header>>>;
@@ -152,6 +154,7 @@ impl DownloadClient for TestFullBlockClient {
 
 /// Implements the `HeadersClient` trait for the `TestFullBlockClient` struct.
 impl HeadersClient for TestFullBlockClient {
+    type Header = Header;
     /// Specifies the associated output type.
     type Output = futures::future::Ready<PeerRequestResult<Vec<Header>>>;
 
@@ -205,6 +208,7 @@ impl HeadersClient for TestFullBlockClient {
 
 /// Implements the `BodiesClient` trait for the `TestFullBlockClient` struct.
 impl BodiesClient for TestFullBlockClient {
+    type Body = BlockBody;
     /// Defines the output type of the function.
     type Output = futures::future::Ready<PeerRequestResult<Vec<BlockBody>>>;
 
