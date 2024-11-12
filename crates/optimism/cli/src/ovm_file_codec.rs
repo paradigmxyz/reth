@@ -4,13 +4,11 @@ use alloy_consensus::{
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
-    eip2930::AccessList,
     eip4895::Withdrawals,
-    eip7702::SignedAuthorization,
 };
 use alloy_primitives::{
     bytes::{Buf, BytesMut},
-    keccak256, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
+    keccak256, PrimitiveSignature as Signature, TxHash, B256, U256,
 };
 use alloy_rlp::{Decodable, Error as RlpError, RlpDecodable};
 use derive_more::{AsRef, Deref};
@@ -194,72 +192,6 @@ impl TransactionSigned {
         let (transaction, hash, signature) = Self::decode_rlp_legacy_transaction_tuple(data)?;
         let signed = Self { transaction: Transaction::Legacy(transaction), hash, signature };
         Ok(signed)
-    }
-}
-
-impl alloy_consensus::Transaction for TransactionSigned {
-    fn chain_id(&self) -> Option<ChainId> {
-        self.deref().chain_id()
-    }
-
-    fn nonce(&self) -> u64 {
-        self.deref().nonce()
-    }
-
-    fn gas_limit(&self) -> u64 {
-        self.deref().gas_limit()
-    }
-
-    fn gas_price(&self) -> Option<u128> {
-        self.deref().gas_price()
-    }
-
-    fn max_fee_per_gas(&self) -> u128 {
-        self.deref().max_fee_per_gas()
-    }
-
-    fn max_priority_fee_per_gas(&self) -> Option<u128> {
-        self.deref().max_priority_fee_per_gas()
-    }
-
-    fn max_fee_per_blob_gas(&self) -> Option<u128> {
-        self.deref().max_fee_per_blob_gas()
-    }
-
-    fn priority_fee_or_price(&self) -> u128 {
-        self.deref().priority_fee_or_price()
-    }
-
-    fn is_dynamic_fee(&self) -> bool {
-        self.deref().is_dynamic_fee()
-    }
-
-    fn value(&self) -> U256 {
-        self.deref().value()
-    }
-
-    fn input(&self) -> &Bytes {
-        self.deref().input()
-    }
-
-    fn ty(&self) -> u8 {
-        self.deref().ty()
-    }
-
-    fn access_list(&self) -> Option<&AccessList> {
-        self.deref().access_list()
-    }
-
-    fn blob_versioned_hashes(&self) -> Option<&[B256]> {
-        alloy_consensus::Transaction::blob_versioned_hashes(self.deref())
-    }
-
-    fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
-        self.deref().authorization_list()
-    }
-
-    fn kind(&self) -> TxKind {
-        self.deref().kind()
     }
 }
 
