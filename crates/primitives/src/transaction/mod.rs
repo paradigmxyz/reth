@@ -871,19 +871,6 @@ impl AlloyTransactionExt for Transaction {
             _ => todo!("use op type for op"),
         }
     }
-
-    #[inline]
-    fn size(&self) -> usize {
-        match self {
-            Self::Legacy(tx) => tx.size(),
-            Self::Eip2930(tx) => tx.size(),
-            Self::Eip1559(tx) => tx.size(),
-            Self::Eip4844(tx) => tx.size(),
-            Self::Eip7702(tx) => tx.size(),
-            #[cfg(feature = "optimism")]
-            _ => todo!("use op type for op"),
-        }
-    }
 }
 
 /// Signed transaction without its Hash. Used type for inserting into the DB.

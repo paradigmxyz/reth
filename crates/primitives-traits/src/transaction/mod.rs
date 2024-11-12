@@ -15,7 +15,7 @@ pub trait FullTransaction: Transaction + Compact {}
 
 impl<T> FullTransaction for T where T: Transaction + Compact {}
 
-#[allow(dead_code)]
+/// Abstraction of a transaction.
 pub trait Transaction:
     Send
     + Sync

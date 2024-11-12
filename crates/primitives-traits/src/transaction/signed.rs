@@ -97,8 +97,4 @@ impl<T: SignedTransaction> AlloyTransactionExt for T {
     fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
         self.transaction().effective_gas_price(base_fee)
     }
-
-    fn size(&self) -> usize {
-        self.transaction().size()
-    }
 }
