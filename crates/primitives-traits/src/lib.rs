@@ -41,7 +41,6 @@ pub use block::{
 };
 
 mod withdrawal;
-pub use withdrawal::Withdrawal;
 
 mod error;
 pub use error::{GotExpected, GotExpectedBoxed};
