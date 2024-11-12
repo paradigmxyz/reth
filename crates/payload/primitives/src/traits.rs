@@ -50,6 +50,12 @@ pub trait PayloadBuilder: Send + Sync + Unpin {
     /// Sends a message to the service to subscribe to payload events.
     /// Returns a receiver that will receive them.
     async fn subscribe(&self) -> Result<PayloadEvents<Self::PayloadType>, Self::Error>;
+
+    /// Returns the payload attributes associated with the given identifier.
+    async fn payload_attributes(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<<Self::PayloadType as PayloadTypes>::PayloadBuilderAttributes, Self::Error>>;
 }
 
 /// Represents a built payload type that contains a built [`SealedBlock`] and can be converted into

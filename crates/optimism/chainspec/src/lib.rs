@@ -392,6 +392,7 @@ impl From<Genesis> for OpChainSpec {
             (OpHardfork::Ecotone.boxed(), genesis_info.ecotone_time),
             (OpHardfork::Fjord.boxed(), genesis_info.fjord_time),
             (OpHardfork::Granite.boxed(), genesis_info.granite_time),
+            (OpHardfork::Holocene.boxed(), genesis_info.holocene_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts
@@ -572,7 +573,11 @@ mod tests {
                 ),
                 (
                     Head { number: 0, timestamp: 1723478400, ..Default::default() },
-                    ForkId { hash: ForkHash([0x75, 0xde, 0xa4, 0x1e]), next: 0 },
+                    ForkId { hash: ForkHash([0x75, 0xde, 0xa4, 0x1e]), next: 1732201200 },
+                ),
+                (
+                    Head { number: 0, timestamp: 1732201200, ..Default::default() },
+                    ForkId { hash: ForkHash([0x98, 0x1c, 0x21, 0x69]), next: 0 },
                 ),
             ],
         );
@@ -639,7 +644,11 @@ mod tests {
                 ),
                 (
                     Head { number: 0, timestamp: 1723478400, ..Default::default() },
-                    ForkId { hash: ForkHash([0x5e, 0xdf, 0xa3, 0xb6]), next: 0 },
+                    ForkId { hash: ForkHash([0x5e, 0xdf, 0xa3, 0xb6]), next: 1732201200 },
+                ),
+                (
+                    Head { number: 0, timestamp: 1732201200, ..Default::default() },
+                    ForkId { hash: ForkHash([0x59, 0x5e, 0x2e, 0x6e]), next: 0 },
                 ),
             ],
         );
@@ -721,6 +730,7 @@ mod tests {
         "ecotoneTime": 40,
         "fjordTime": 50,
         "graniteTime": 51,
+        "holoceneTime": 52,
         "optimism": {
           "eip1559Elasticity": 60,
           "eip1559Denominator": 70
@@ -742,6 +752,8 @@ mod tests {
         assert_eq!(actual_fjord_timestamp, Some(serde_json::Value::from(50)).as_ref());
         let actual_granite_timestamp = genesis.config.extra_fields.get("graniteTime");
         assert_eq!(actual_granite_timestamp, Some(serde_json::Value::from(51)).as_ref());
+        let actual_holocene_timestamp = genesis.config.extra_fields.get("holoceneTime");
+        assert_eq!(actual_holocene_timestamp, Some(serde_json::Value::from(52)).as_ref());
 
         let optimism_object = genesis.config.extra_fields.get("optimism").unwrap();
         assert_eq!(
@@ -765,6 +777,7 @@ mod tests {
         assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Ecotone, 0));
         assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Fjord, 0));
         assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Granite, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Holocene, 0));
 
         assert!(chain_spec.is_fork_active_at_block(OpHardfork::Bedrock, 10));
         assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Regolith, 20));
@@ -772,6 +785,7 @@ mod tests {
         assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Ecotone, 40));
         assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Fjord, 50));
         assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Granite, 51));
+        assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Holocene, 52));
     }
 
     #[test]
@@ -785,6 +799,7 @@ mod tests {
         "ecotoneTime": 40,
         "fjordTime": 50,
         "graniteTime": 51,
+        "holoceneTime": 52,
         "optimism": {
           "eip1559Elasticity": 60,
           "eip1559Denominator": 70,
@@ -807,6 +822,8 @@ mod tests {
         assert_eq!(actual_fjord_timestamp, Some(serde_json::Value::from(50)).as_ref());
         let actual_granite_timestamp = genesis.config.extra_fields.get("graniteTime");
         assert_eq!(actual_granite_timestamp, Some(serde_json::Value::from(51)).as_ref());
+        let actual_holocene_timestamp = genesis.config.extra_fields.get("holoceneTime");
+        assert_eq!(actual_holocene_timestamp, Some(serde_json::Value::from(52)).as_ref());
 
         let optimism_object = genesis.config.extra_fields.get("optimism").unwrap();
         assert_eq!(
@@ -837,6 +854,7 @@ mod tests {
         assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Ecotone, 0));
         assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Fjord, 0));
         assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Granite, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Holocene, 0));
 
         assert!(chain_spec.is_fork_active_at_block(OpHardfork::Bedrock, 10));
         assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Regolith, 20));
@@ -844,6 +862,7 @@ mod tests {
         assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Ecotone, 40));
         assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Fjord, 50));
         assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Granite, 51));
+        assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Holocene, 52));
     }
 
     #[test]
@@ -955,6 +974,7 @@ mod tests {
                     (String::from("ecotoneTime"), 0.into()),
                     (String::from("fjordTime"), 0.into()),
                     (String::from("graniteTime"), 0.into()),
+                    (String::from("holoceneTime"), 0.into()),
                 ]
                 .into_iter()
                 .collect(),
@@ -988,6 +1008,7 @@ mod tests {
             OpHardfork::Ecotone.boxed(),
             OpHardfork::Fjord.boxed(),
             OpHardfork::Granite.boxed(),
+            OpHardfork::Holocene.boxed(),
         ];
 
         assert!(expected_hardforks
@@ -1036,7 +1057,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_base_fee_holocene_nonce_not_set() {
+    fn test_get_base_fee_holocene_extra_data_not_set() {
         let op_chain_spec = holocene_chainspec();
         let parent = Header {
             base_fee_per_gas: Some(1),
@@ -1058,7 +1079,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_base_fee_holocene_nonce_set() {
+    fn test_get_base_fee_holocene_extra_data_set() {
         let op_chain_spec = holocene_chainspec();
         let parent = Header {
             base_fee_per_gas: Some(1),

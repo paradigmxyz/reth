@@ -9,6 +9,7 @@ use reth_network_p2p::{
 };
 use reth_network_peers::{PeerId, WithPeerId};
 use reth_primitives::{BlockBody, GotExpected, SealedBlock, SealedHeader};
+use reth_primitives_traits::InMemorySize;
 use std::{
     collections::VecDeque,
     mem,
