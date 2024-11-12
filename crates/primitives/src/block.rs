@@ -290,13 +290,6 @@ impl<H, B> SealedBlock<H, B> {
     }
 }
 
-impl<H: InMemorySize, B: InMemorySize> InMemorySize for SealedBlock<H, B> {
-    #[inline]
-    fn size(&self) -> usize {
-        self.header.size() + self.body.size()
-    }
-}
-
 impl SealedBlock {
     /// Splits the sealed block into underlying components
     #[inline]
@@ -432,6 +425,13 @@ impl SealedBlock {
     /// [`alloy_eips::eip2718::Encodable2718::encoded_2718`].
     pub fn raw_transactions(&self) -> Vec<Bytes> {
         self.body.transactions().map(|tx| tx.encoded_2718().into()).collect()
+    }
+}
+
+impl<H: InMemorySize, B: InMemorySize> InMemorySize for SealedBlock<H, B> {
+    #[inline]
+    fn size(&self) -> usize {
+        self.header.size() + self.body.size()
     }
 }
 

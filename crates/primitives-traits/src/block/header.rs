@@ -5,6 +5,8 @@ use core::fmt;
 use alloy_primitives::Sealable;
 use reth_codecs::Compact;
 
+use crate::InMemorySize;
+
 /// Helper trait that unifies all behaviour required by block header to support full node
 /// operations.
 pub trait FullBlockHeader: BlockHeader + Compact {}
@@ -25,13 +27,25 @@ pub trait BlockHeader:
     + alloy_rlp::Decodable
     + alloy_consensus::BlockHeader
     + Sealable
+    + InMemorySize
 {
-    /// Calculates a heuristic for the in-memory size of the [`BlockHeader`].
-    fn size(&self) -> usize;
 }
 
-impl BlockHeader for alloy_consensus::Header {
-    fn size(&self) -> usize {
-        self.size()
-    }
+impl<T> BlockHeader for T where
+    T: Send
+        + Sync
+        + Unpin
+        + Clone
+        + Default
+        + fmt::Debug
+        + PartialEq
+        + Eq
+        + serde::Serialize
+        + for<'de> serde::Deserialize<'de>
+        + alloy_rlp::Encodable
+        + alloy_rlp::Decodable
+        + alloy_consensus::BlockHeader
+        + Sealable
+        + InMemorySize
+{
 }

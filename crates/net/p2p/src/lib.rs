@@ -49,18 +49,6 @@ pub use bodies::client::BodiesClient;
 pub use headers::client::HeadersClient;
 
 /// Helper trait that unifies network behaviour needed for fetching blocks.
-pub trait BlockClient:
-    HeadersClient<Header = reth_primitives::Header>
-    + BodiesClient<Body = reth_primitives::BlockBody>
-    + Unpin
-    + Clone
-{
-}
+pub trait BlockClient: HeadersClient + BodiesClient + Unpin + Clone {}
 
-impl<T> BlockClient for T where
-    T: HeadersClient<Header = reth_primitives::Header>
-        + BodiesClient<Body = reth_primitives::BlockBody>
-        + Unpin
-        + Clone
-{
-}
+impl<T> BlockClient for T where T: HeadersClient + BodiesClient + Unpin + Clone {}
