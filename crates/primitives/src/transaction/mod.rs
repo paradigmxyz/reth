@@ -330,21 +330,6 @@ impl Transaction {
         self.as_eip4844().map(TxEip4844::blob_gas)
     }
 
-    /// Returns the effective gas price for the given base fee.
-    ///
-    /// If the transaction is a legacy or EIP2930 transaction, the gas price is returned.
-    pub const fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
-        match self {
-            Self::Legacy(tx) => tx.gas_price,
-            Self::Eip2930(tx) => tx.gas_price,
-            Self::Eip1559(dynamic_tx) => dynamic_tx.effective_gas_price(base_fee),
-            Self::Eip4844(dynamic_tx) => dynamic_tx.effective_gas_price(base_fee),
-            Self::Eip7702(dynamic_tx) => dynamic_tx.effective_gas_price(base_fee),
-            #[cfg(feature = "optimism")]
-            Self::Deposit(_) => 0,
-        }
-    }
-
     /// Returns the effective miner gas tip cap (`gasTipCap`) for the given base fee:
     /// `min(maxFeePerGas - baseFee, maxPriorityFeePerGas)`
     ///
@@ -755,12 +740,36 @@ impl alloy_consensus::Transaction for Transaction {
         }
     }
 
+    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        match self {
+            Self::Legacy(tx) => tx.effective_gas_price(base_fee),
+            Self::Eip2930(tx) => tx.effective_gas_price(base_fee),
+            Self::Eip1559(tx) => tx.effective_gas_price(base_fee),
+            Self::Eip4844(tx) => tx.effective_gas_price(base_fee),
+            Self::Eip7702(tx) => tx.effective_gas_price(base_fee),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.effective_gas_price(base_fee),
+        }
+    }
+
     fn is_dynamic_fee(&self) -> bool {
         match self {
             Self::Legacy(_) | Self::Eip2930(_) => false,
             Self::Eip1559(_) | Self::Eip4844(_) | Self::Eip7702(_) => true,
             #[cfg(feature = "optimism")]
             Self::Deposit(_) => false,
+        }
+    }
+
+    fn kind(&self) -> TxKind {
+        match self {
+            Self::Legacy(tx) => tx.kind(),
+            Self::Eip2930(tx) => tx.kind(),
+            Self::Eip1559(tx) => tx.kind(),
+            Self::Eip4844(tx) => tx.kind(),
+            Self::Eip7702(tx) => tx.kind(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.kind(),
         }
     }
 
@@ -833,18 +842,6 @@ impl alloy_consensus::Transaction for Transaction {
             Self::Eip7702(tx) => tx.authorization_list(),
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => tx.authorization_list(),
-        }
-    }
-
-    fn kind(&self) -> TxKind {
-        match self {
-            Self::Legacy(tx) => tx.kind(),
-            Self::Eip2930(tx) => tx.kind(),
-            Self::Eip1559(tx) => tx.kind(),
-            Self::Eip4844(tx) => tx.kind(),
-            Self::Eip7702(tx) => tx.kind(),
-            #[cfg(feature = "optimism")]
-            Self::Deposit(tx) => tx.kind(),
         }
     }
 }
@@ -1457,8 +1454,16 @@ impl alloy_consensus::Transaction for TransactionSigned {
         self.deref().priority_fee_or_price()
     }
 
+    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        self.deref().effective_gas_price(base_fee)
+    }
+
     fn is_dynamic_fee(&self) -> bool {
         self.deref().is_dynamic_fee()
+    }
+
+    fn kind(&self) -> TxKind {
+        self.deref().kind()
     }
 
     fn value(&self) -> U256 {
@@ -1483,10 +1488,6 @@ impl alloy_consensus::Transaction for TransactionSigned {
 
     fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
         self.deref().authorization_list()
-    }
-
-    fn kind(&self) -> TxKind {
-        self.deref().kind()
     }
 }
 

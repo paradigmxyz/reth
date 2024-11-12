@@ -1,7 +1,7 @@
 //! Loads and formats OP transaction RPC response.
 
 use alloy_consensus::{Signed, Transaction as _};
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::{Bytes, Sealable, Sealed, B256};
 use alloy_rpc_types_eth::TransactionInfo;
 use op_alloy_consensus::OpTxEnvelope;
 use op_alloy_rpc_types::Transaction;
@@ -86,6 +86,7 @@ where
         let from = tx.signer();
         let TransactionSigned { transaction, signature, hash } = tx.into_signed();
         let mut deposit_receipt_version = None;
+        let mut deposit_nonce = None;
 
         let inner = match transaction {
             reth_primitives::Transaction::Legacy(tx) => {
@@ -102,19 +103,16 @@ where
                 Signed::new_unchecked(tx, signature, hash).into()
             }
             reth_primitives::Transaction::Deposit(tx) => {
-                let deposit_info = self
-                    .inner
+                self.inner
                     .provider()
                     .receipt_by_hash(hash)
                     .map_err(Self::Error::from_eth_err)?
-                    .and_then(|receipt| receipt.deposit_receipt_version.zip(receipt.deposit_nonce));
+                    .inspect(|receipt| {
+                        deposit_receipt_version = receipt.deposit_receipt_version;
+                        deposit_nonce = receipt.deposit_nonce;
+                    });
 
-                if let Some((version, _)) = deposit_info {
-                    deposit_receipt_version = Some(version);
-                    // TODO: set nonce
-                }
-
-                OpTxEnvelope::Deposit(tx)
+                OpTxEnvelope::Deposit(tx.seal_unchecked(hash))
             }
         };
 
@@ -144,6 +142,7 @@ where
                 from,
                 effective_gas_price: Some(effective_gas_price),
             },
+            deposit_nonce,
             deposit_receipt_version,
         })
     }
@@ -154,7 +153,17 @@ where
             OpTxEnvelope::Eip2930(tx) => &mut tx.tx_mut().input,
             OpTxEnvelope::Legacy(tx) => &mut tx.tx_mut().input,
             OpTxEnvelope::Eip7702(tx) => &mut tx.tx_mut().input,
-            OpTxEnvelope::Deposit(tx) => &mut tx.input,
+            OpTxEnvelope::Deposit(tx) => {
+                let (mut deposit, hash) = std::mem::replace(
+                    tx,
+                    Sealed::new_unchecked(Default::default(), Default::default()),
+                )
+                .split();
+                deposit.input = deposit.input.slice(..4);
+                let mut deposit = deposit.seal_unchecked(hash);
+                std::mem::swap(tx, &mut deposit);
+                return
+            }
             _ => return,
         };
         *input = input.slice(..4);
