@@ -122,11 +122,18 @@ where
             block_hash, block_number, index: transaction_index, base_fee, ..
         } = tx_info;
 
-        let effective_gas_price = base_fee
-            .map(|base_fee| {
-                inner.effective_tip_per_gas(base_fee as u64).unwrap_or_default() + base_fee
-            })
-            .unwrap_or_else(|| inner.max_fee_per_gas());
+        let effective_gas_price = if inner.is_deposit() {
+            // For deposits, we must always set the `gasPrice` field to 0 in rpc
+            // deposit tx don't have a gas price field, but serde of `Transaction` will take care of
+            // it
+            0
+        } else {
+            base_fee
+                .map(|base_fee| {
+                    inner.effective_tip_per_gas(base_fee as u64).unwrap_or_default() + base_fee
+                })
+                .unwrap_or_else(|| inner.max_fee_per_gas())
+        };
 
         Ok(Transaction {
             inner: alloy_rpc_types_eth::Transaction {
