@@ -265,6 +265,7 @@ impl FromReader for FileClient {
 }
 
 impl HeadersClient for FileClient {
+    type Header = Header;
     type Output = HeadersFut;
 
     fn get_headers_with_priority(
@@ -315,6 +316,7 @@ impl HeadersClient for FileClient {
 }
 
 impl BodiesClient for FileClient {
+    type Body = BlockBody;
     type Output = BodiesFut;
 
     fn get_block_bodies_with_priority(

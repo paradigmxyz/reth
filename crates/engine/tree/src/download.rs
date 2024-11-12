@@ -6,12 +6,13 @@ use futures::FutureExt;
 use reth_consensus::Consensus;
 use reth_network_p2p::{
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
-    BlockClient,
+    BlockClient, EthBlockClient,
 };
 use reth_primitives::{SealedBlock, SealedBlockWithSenders};
 use std::{
     cmp::{Ordering, Reverse},
     collections::{binary_heap::PeekMut, BinaryHeap, HashSet, VecDeque},
+    fmt::Debug,
     sync::Arc,
     task::{Context, Poll},
 };
@@ -72,10 +73,13 @@ where
 
 impl<Client> BasicBlockDownloader<Client>
 where
-    Client: BlockClient + 'static,
+    Client: EthBlockClient + 'static,
 {
     /// Create a new instance
-    pub fn new(client: Client, consensus: Arc<dyn Consensus>) -> Self {
+    pub fn new(
+        client: Client,
+        consensus: Arc<dyn Consensus<Client::Header, Client::Body>>,
+    ) -> Self {
         Self {
             full_block_client: FullBlockClient::new(client, consensus),
             inflight_full_block_requests: Vec::new(),
@@ -182,7 +186,7 @@ where
 
 impl<Client> BlockDownloader for BasicBlockDownloader<Client>
 where
-    Client: BlockClient + 'static,
+    Client: EthBlockClient,
 {
     /// Handles incoming download actions.
     fn on_action(&mut self, action: DownloadAction) {

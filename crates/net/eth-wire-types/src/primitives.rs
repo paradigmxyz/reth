@@ -2,6 +2,7 @@
 
 use std::fmt::Debug;
 
+use alloy_consensus::BlockHeader;
 use alloy_rlp::{Decodable, Encodable};
 
 /// Abstraction over primitive types which might appear in network messages. See
@@ -10,7 +11,8 @@ pub trait NetworkPrimitives:
     Send + Sync + Unpin + Clone + Debug + PartialEq + Eq + 'static
 {
     /// The block header type.
-    type BlockHeader: Encodable
+    type BlockHeader: BlockHeader
+        + Encodable
         + Decodable
         + Send
         + Sync
