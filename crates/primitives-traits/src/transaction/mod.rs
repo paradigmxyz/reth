@@ -62,6 +62,7 @@ pub trait TransactionExt: alloy_consensus::Transaction {
     fn signature_hash(&self) -> B256;
 
     /// Returns the effective gas price for the given base fee.
+    // todo: remove when released: https://github.com/alloy-rs/alloy/pull/1640
     fn effective_gas_price(&self, base_fee: Option<u64>) -> u128;
 
     /// Returns the transaction type.
