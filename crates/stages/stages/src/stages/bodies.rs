@@ -60,7 +60,7 @@ pub struct BodyStage<D: BodyDownloader> {
     /// The body downloader.
     downloader: D,
     /// Block response buffer.
-    buffer: Option<Vec<BlockResponse>>,
+    buffer: Option<Vec<BlockResponse<D::Body>>>,
 }
 
 impl<D: BodyDownloader> BodyStage<D> {
@@ -70,9 +70,10 @@ impl<D: BodyDownloader> BodyStage<D> {
     }
 }
 
-impl<Provider, D: BodyDownloader> Stage<Provider> for BodyStage<D>
+impl<Provider, D> Stage<Provider> for BodyStage<D>
 where
     Provider: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory + StatsReader + BlockReader,
+    D: BodyDownloader<Body = reth_primitives::BlockBody>,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {

@@ -3,9 +3,9 @@
 pub mod body;
 pub mod header;
 
-use alloc::{fmt, vec::Vec};
+use alloc::fmt;
 
-use alloy_primitives::{Address, B256};
+use alloy_primitives::B256;
 use reth_codecs::Compact;
 
 use crate::{BlockBody, BlockHeader, FullBlockHeader};
@@ -62,48 +62,6 @@ pub trait Block:
     // todo: can be default impl if sealed block type is made generic over header and body and
     // migrated to alloy
     fn seal(self, hash: B256) -> Self::SealedBlock<Self::Header, Self::Body>;
-
-    /// Expensive operation that recovers transaction signer. See
-    /// `SealedBlockWithSenders`.
-    fn senders(&self) -> Option<Vec<Address>> {
-        self.body().recover_signers()
-    }
-
-    /// Transform into a `BlockWithSenders`.
-    ///
-    /// # Panics
-    ///
-    /// If the number of senders does not match the number of transactions in the block
-    /// and the signer recovery for one of the transactions fails.
-    ///
-    /// Note: this is expected to be called with blocks read from disk.
-    #[track_caller]
-    fn with_senders_unchecked(self, senders: Vec<Address>) -> Self::BlockWithSenders<Self> {
-        self.try_with_senders_unchecked(senders).expect("stored block is valid")
-    }
-
-    /// Transform into a `BlockWithSenders` using the given senders.
-    ///
-    /// If the number of senders does not match the number of transactions in the block, this falls
-    /// back to manually recovery, but _without ensuring that the signature has a low `s` value_.
-    /// See also `SignedTransaction::recover_signer_unchecked`.
-    ///
-    /// Returns an error if a signature is invalid.
-    // todo: can be default impl if block with senders type is made generic over block and migrated
-    // to alloy
-    #[track_caller]
-    fn try_with_senders_unchecked(
-        self,
-        senders: Vec<Address>,
-    ) -> Result<Self::BlockWithSenders<Self>, Self>;
-
-    /// **Expensive**. Transform into a `BlockWithSenders` by recovering senders in the contained
-    /// transactions.
-    ///
-    /// Returns `None` if a transaction is invalid.
-    // todo: can be default impl if sealed block type is made generic over header and body and
-    // migrated to alloy
-    fn with_recovered_senders(self) -> Option<Self::BlockWithSenders<Self>>;
 
     /// Calculates a heuristic for the in-memory size of the [`Block`].
     fn size(&self) -> usize;

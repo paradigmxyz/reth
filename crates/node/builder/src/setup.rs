@@ -84,8 +84,8 @@ pub fn build_pipeline<N, H, B, Executor>(
 ) -> eyre::Result<Pipeline<N>>
 where
     N: ProviderNodeTypes,
-    H: HeaderDownloader + 'static,
-    B: BodyDownloader + 'static,
+    H: HeaderDownloader<Header = reth_primitives::Header> + 'static,
+    B: BodyDownloader<Body = reth_primitives::BlockBody> + 'static,
     Executor: BlockExecutorProvider,
 {
     let mut builder = Pipeline::<N>::builder();

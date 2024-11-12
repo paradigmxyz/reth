@@ -14,7 +14,10 @@ use std::{
 
 use alloy_primitives::B256;
 use rand::seq::SliceRandom;
-use reth_eth_wire::{BlockHashNumber, Capabilities, DisconnectReason, NewBlockHashes, Status};
+use reth_eth_wire::{
+    BlockHashNumber, Capabilities, DisconnectReason, EthNetworkPrimitives, NetworkPrimitives,
+    NewBlockHashes, Status,
+};
 use reth_network_api::{DiscoveredEvent, DiscoveryEvent, PeerRequest, PeerRequestSender};
 use reth_network_peers::PeerId;
 use reth_network_types::{PeerAddr, PeerKind};
@@ -69,9 +72,9 @@ impl Deref for BlockNumReader {
 ///
 /// This type is also responsible for responding for received request.
 #[derive(Debug)]
-pub struct NetworkState {
+pub struct NetworkState<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// All active peers and their state.
-    active_peers: HashMap<PeerId, ActivePeer>,
+    active_peers: HashMap<PeerId, ActivePeer<N>>,
     /// Manages connections to peers.
     peers_manager: PeersManager,
     /// Buffered messages until polled.
@@ -88,10 +91,10 @@ pub struct NetworkState {
     /// The fetcher streams `RLPx` related requests on a per-peer basis to this type. This type
     /// will then queue in the request and notify the fetcher once the result has been
     /// received.
-    state_fetcher: StateFetcher,
+    state_fetcher: StateFetcher<N>,
 }
 
-impl NetworkState {
+impl<N: NetworkPrimitives> NetworkState<N> {
     /// Create a new state instance with the given params
     pub(crate) fn new(
         client: BlockNumReader,
@@ -126,7 +129,7 @@ impl NetworkState {
     }
 
     /// Returns a new [`FetchClient`]
-    pub(crate) fn fetch_client(&self) -> FetchClient {
+    pub(crate) fn fetch_client(&self) -> FetchClient<N> {
         self.state_fetcher.client()
     }
 
@@ -144,7 +147,7 @@ impl NetworkState {
         peer: PeerId,
         capabilities: Arc<Capabilities>,
         status: Arc<Status>,
-        request_tx: PeerRequestSender,
+        request_tx: PeerRequestSender<PeerRequest<N>>,
         timeout: Arc<AtomicU64>,
     ) {
         debug_assert!(!self.active_peers.contains_key(&peer), "Already connected; not possible");
@@ -399,7 +402,11 @@ impl NetworkState {
     /// Delegates the response result to the fetcher which may return an outcome specific
     /// instruction that needs to be handled in [`Self::on_block_response_outcome`]. This could be
     /// a follow-up request or an instruction to slash the peer's reputation.
-    fn on_eth_response(&mut self, peer: PeerId, resp: PeerResponseResult) -> Option<StateAction> {
+    fn on_eth_response(
+        &mut self,
+        peer: PeerId,
+        resp: PeerResponseResult<N>,
+    ) -> Option<StateAction> {
         match resp {
             PeerResponseResult::BlockHeaders(res) => {
                 let outcome = self.state_fetcher.on_block_headers_response(peer, res)?;
@@ -492,16 +499,16 @@ impl NetworkState {
 ///
 /// For example known blocks,so we can decide what to announce.
 #[derive(Debug)]
-pub(crate) struct ActivePeer {
+pub(crate) struct ActivePeer<N: NetworkPrimitives> {
     /// Best block of the peer.
     pub(crate) best_hash: B256,
     /// The capabilities of the remote peer.
     #[allow(dead_code)]
     pub(crate) capabilities: Arc<Capabilities>,
     /// A communication channel directly to the session task.
-    pub(crate) request_tx: PeerRequestSender,
+    pub(crate) request_tx: PeerRequestSender<PeerRequest<N>>,
     /// The response receiver for a currently active request to that peer.
-    pub(crate) pending_response: Option<PeerResponse>,
+    pub(crate) pending_response: Option<PeerResponse<N>>,
     /// Blocks we know the peer has.
     pub(crate) blocks: LruCache<B256>,
 }

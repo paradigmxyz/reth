@@ -90,10 +90,8 @@ where
         // The max length for a status with TTD is: <msg id = 1 byte> + <rlp(status) = 88 byte>
         self.inner
             .send(
-                alloy_rlp::encode(ProtocolMessage::<N>::from(
-                    EthMessage::<N>::Status(status),
-                ))
-                .into(),
+                alloy_rlp::encode(ProtocolMessage::<N>::from(EthMessage::<N>::Status(status)))
+                    .into(),
             )
             .await?;
 
@@ -114,13 +112,13 @@ where
 
         let version = status.version;
         let msg = match ProtocolMessage::<N>::decode_message(version, &mut their_msg.as_ref()) {
-                Ok(m) => m,
-                Err(err) => {
-                    debug!("decode error in eth handshake: msg={their_msg:x}");
-                    self.inner.disconnect(DisconnectReason::DisconnectRequested).await?;
-                    return Err(EthStreamError::InvalidMessage(err))
-                }
-            };
+            Ok(m) => m,
+            Err(err) => {
+                debug!("decode error in eth handshake: msg={their_msg:x}");
+                self.inner.disconnect(DisconnectReason::DisconnectRequested).await?;
+                return Err(EthStreamError::InvalidMessage(err))
+            }
+        };
 
         // The following checks should match the checks in go-ethereum:
         // https://github.com/ethereum/go-ethereum/blob/9244d5cd61f3ea5a7645fdf2a1a96d53421e412f/eth/protocols/eth/handshake.go#L87-L89
@@ -194,7 +192,7 @@ where
 /// compatible with eth-networking protocol messages, which get RLP encoded/decoded.
 #[pin_project]
 #[derive(Debug)]
-pub struct EthStream<S, N> {
+pub struct EthStream<S, N = EthNetworkPrimitives> {
     /// Negotiated eth version.
     version: EthVersion,
     #[pin]
@@ -240,7 +238,7 @@ impl<S, E, N> EthStream<S, N>
 where
     S: Sink<Bytes, Error = E> + Unpin,
     EthStreamError: From<E>,
-    N: NetworkPrimitives
+    N: NetworkPrimitives,
 {
     /// Same as [`Sink::start_send`] but accepts a [`EthBroadcastMessage`] instead.
     pub fn start_send_broadcast(

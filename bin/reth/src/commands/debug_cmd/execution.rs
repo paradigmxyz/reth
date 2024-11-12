@@ -137,11 +137,14 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         Ok(network)
     }
 
-    async fn fetch_block_hash<Client: HeadersClient>(
+    async fn fetch_block_hash<Client>(
         &self,
         client: Client,
         block: BlockNumber,
-    ) -> eyre::Result<B256> {
+    ) -> eyre::Result<B256>
+    where
+        Client: HeadersClient<Header: reth_primitives_traits::BlockHeader>,
+    {
         info!(target: "reth::cli", ?block, "Fetching block from the network.");
         loop {
             match get_single_header(&client, BlockHashOrNumber::Number(block)).await {

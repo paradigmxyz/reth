@@ -5,7 +5,7 @@ use crate::{
     p2pstream::MAX_RESERVED_MESSAGE_ID,
     protocol::{ProtoVersion, Protocol},
     version::ParseVersionError,
-    Capability, EthMessage, EthMessageID, EthVersion,
+    Capability, EthMessageID, EthVersion,
 };
 use alloy_primitives::bytes::Bytes;
 use derive_more::{Deref, DerefMut};

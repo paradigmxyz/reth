@@ -35,7 +35,7 @@ pub enum MessageError {
 /// An `eth` protocol message, containing a message ID and payload.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ProtocolMessage<N: NetworkPrimitives> {
+pub struct ProtocolMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The unique identifier representing the type of the Ethereum message.
     pub message_type: EthMessageID,
     /// The content of the message, including specific data based on the message type.
@@ -148,7 +148,7 @@ impl<N: NetworkPrimitives> From<EthMessage<N>> for ProtocolMessage<N> {
 
 /// Represents messages that can be sent to multiple peers.
 #[derive(Clone, Debug)]
-pub struct ProtocolBroadcastMessage<N: NetworkPrimitives> {
+pub struct ProtocolBroadcastMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The unique identifier representing the type of the Ethereum message.
     pub message_type: EthMessageID,
     /// The content of the message to be broadcasted, including specific data based on the message
@@ -193,7 +193,7 @@ impl<N: NetworkPrimitives> From<EthBroadcastMessage<N>> for ProtocolBroadcastMes
 /// [`NewPooledTransactionHashes68`] is defined.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum EthMessage<N: NetworkPrimitives> {
+pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Represents a Status message required for the protocol handshake.
     Status(Status),
     /// Represents a `NewBlockHashes` message broadcast to the network.
@@ -317,7 +317,7 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
 ///
 /// Note: This is only useful for outgoing messages.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum EthBroadcastMessage<N: NetworkPrimitives> {
+pub enum EthBroadcastMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Represents a new block broadcast message.
     NewBlock(Arc<NewBlock<N::Block>>),
     /// Represents a transactions broadcast message.

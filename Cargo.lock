@@ -6381,6 +6381,7 @@ dependencies = [
  "reth-payload-primitives",
  "reth-payload-validator",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-prune",
  "reth-revm",
@@ -7019,6 +7020,7 @@ dependencies = [
 name = "reth-downloaders"
 version = "1.1.1"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
@@ -7337,6 +7339,7 @@ dependencies = [
  "reth-chainspec",
  "reth-codecs-derive",
  "reth-primitives",
+ "reth-primitives-traits",
  "serde",
  "thiserror",
 ]
@@ -7818,6 +7821,7 @@ dependencies = [
 name = "reth-network-p2p"
 version = "1.1.1"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "auto_impl",
@@ -7986,7 +7990,7 @@ dependencies = [
  "reth-chainspec",
  "reth-cli-util",
  "reth-config",
- "reth-consensus-common",
+ "reth-consensus",
  "reth-db",
  "reth-discv4",
  "reth-discv5",
@@ -7995,6 +7999,7 @@ dependencies = [
  "reth-network-p2p",
  "reth-network-peers",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-prune-types",
  "reth-rpc-eth-types",
  "reth-rpc-server-types",

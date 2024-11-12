@@ -21,29 +21,17 @@ pub trait BlockHeader:
     + fmt::Debug
     + PartialEq
     + Eq
-    + serde::Serialize
-    + for<'de> serde::Deserialize<'de>
     + alloy_rlp::Encodable
     + alloy_rlp::Decodable
     + alloy_consensus::BlockHeader
     + Sealable
 {
+    /// Calculates a heuristic for the in-memory size of the [`BlockHeader`].
+    fn size(&self) -> usize;
 }
 
-impl<T> BlockHeader for T where
-    T: Send
-        + Sync
-        + Unpin
-        + Clone
-        + Default
-        + fmt::Debug
-        + PartialEq
-        + Eq
-        + serde::Serialize
-        + for<'de> serde::Deserialize<'de>
-        + alloy_rlp::Encodable
-        + alloy_rlp::Decodable
-        + alloy_consensus::BlockHeader
-        + Sealable
-{
+impl BlockHeader for alloy_consensus::Header {
+    fn size(&self) -> usize {
+        self.size()
+    }
 }

@@ -290,6 +290,13 @@ impl<H, B> SealedBlock<H, B> {
     }
 }
 
+impl<H: InMemorySize, B: InMemorySize> InMemorySize for SealedBlock<H, B> {
+    #[inline]
+    fn size(&self) -> usize {
+        self.header.size() + self.body.size()
+    }
+}
+
 impl SealedBlock {
     /// Splits the sealed block into underlying components
     #[inline]
@@ -425,14 +432,6 @@ impl SealedBlock {
     /// [`alloy_eips::eip2718::Encodable2718::encoded_2718`].
     pub fn raw_transactions(&self) -> Vec<Bytes> {
         self.body.transactions().map(|tx| tx.encoded_2718().into()).collect()
-    }
-}
-
-impl InMemorySize for SealedBlock {
-    /// Calculates a heuristic for the in-memory size of the [`SealedBlock`].
-    #[inline]
-    fn size(&self) -> usize {
-        self.header.size() + self.body.size()
     }
 }
 
@@ -643,6 +642,14 @@ impl InMemorySize for BlockBody {
             self.withdrawals
                 .as_ref()
                 .map_or(core::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
+    }
+}
+
+impl reth_primitives_traits::BlockBody for BlockBody {
+    type Transaction = TransactionSigned;
+
+    fn transactions(&self) -> &[Self::Transaction] {
+        &self.transactions
     }
 }
 

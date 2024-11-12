@@ -194,7 +194,7 @@ where
 impl<Provider, P, D> Stage<Provider> for HeaderStage<P, D>
 where
     P: HeaderSyncGapProvider,
-    D: HeaderDownloader,
+    D: HeaderDownloader<Header = reth_primitives::Header>,
     Provider: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory,
 {
     /// Return the id of the stage

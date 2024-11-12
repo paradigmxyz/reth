@@ -3,7 +3,10 @@
 use std::{fmt, net::SocketAddr, sync::Arc};
 
 use reth_eth_wire_types::{
-    message::RequestPair, BlockBodies, BlockHeaders, Capabilities, DisconnectReason, EthMessage, EthVersion, GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts, NetworkPrimitives, NodeData, PooledTransactions, Receipts, Status
+    message::RequestPair, BlockBodies, BlockHeaders, Capabilities, DisconnectReason, EthMessage,
+    EthNetworkPrimitives, EthVersion, GetBlockBodies, GetBlockHeaders, GetNodeData,
+    GetPooledTransactions, GetReceipts, NetworkPrimitives, NodeData, PooledTransactions, Receipts,
+    Status,
 };
 use reth_ethereum_forks::ForkId;
 use reth_network_p2p::error::{RequestError, RequestResult};
@@ -16,11 +19,8 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 /// Provides event subscription for the network.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait NetworkEventListenerProvider: Send + Sync {
-    /// Type of requests that can be sent to peers.
-    type PeerRequest: Send + Sync + 'static;
-
     /// Creates a new [`NetworkEvent`] listener channel.
-    fn event_listener(&self) -> EventStream<NetworkEvent<Self::PeerRequest>>;
+    fn event_listener(&self) -> EventStream<NetworkEvent>;
     /// Returns a new [`DiscoveryEvent`] stream.
     ///
     /// This stream yields [`DiscoveryEvent`]s for each peer that is discovered.
@@ -31,8 +31,8 @@ pub trait NetworkEventListenerProvider: Send + Sync {
 ///
 /// This includes any event types that may be relevant to tasks, for metrics, keep track of peers
 /// etc.
-#[derive(Debug, Clone)]
-pub enum NetworkEvent<R> {
+#[derive(Debug)]
+pub enum NetworkEvent<R = PeerRequest> {
     /// Closed the peer session.
     SessionClosed {
         /// The identifier of the peer to which a session was closed.
@@ -61,6 +61,35 @@ pub enum NetworkEvent<R> {
     PeerAdded(PeerId),
     /// Event emitted when a new peer is removed
     PeerRemoved(PeerId),
+}
+
+impl<R> Clone for NetworkEvent<R> {
+    fn clone(&self) -> Self {
+        match self {
+            NetworkEvent::SessionClosed { peer_id, reason } => {
+                NetworkEvent::SessionClosed { peer_id: *peer_id, reason: reason.clone() }
+            }
+            NetworkEvent::SessionEstablished {
+                peer_id,
+                remote_addr,
+                client_version,
+                capabilities,
+                messages,
+                status,
+                version,
+            } => NetworkEvent::SessionEstablished {
+                peer_id: *peer_id,
+                remote_addr: *remote_addr,
+                client_version: client_version.clone(),
+                capabilities: capabilities.clone(),
+                messages: messages.clone(),
+                status: status.clone(),
+                version: *version,
+            },
+            NetworkEvent::PeerAdded(peer) => NetworkEvent::PeerAdded(peer.clone()),
+            NetworkEvent::PeerRemoved(peer) => NetworkEvent::PeerRemoved(peer.clone()),
+        }
+    }
 }
 
 /// Events produced by the `Discovery` manager.
@@ -99,7 +128,7 @@ pub enum DiscoveredEvent {
 
 /// Protocol related request messages that expect a response
 #[derive(Debug)]
-pub enum PeerRequest<N: NetworkPrimitives> {
+pub enum PeerRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Requests block headers from the peer.
     ///
     /// The response should be sent through the channel.
@@ -200,12 +229,17 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
 }
 
 /// A Cloneable connection for sending _requests_ directly to the session of a peer.
-#[derive(Clone)]
-pub struct PeerRequestSender<R> {
+pub struct PeerRequestSender<R = PeerRequest> {
     /// id of the remote node.
     pub peer_id: PeerId,
     /// The Sender half connected to a session.
     pub to_session_tx: mpsc::Sender<R>,
+}
+
+impl<R> Clone for PeerRequestSender<R> {
+    fn clone(&self) -> Self {
+        Self { peer_id: self.peer_id, to_session_tx: self.to_session_tx.clone() }
+    }
 }
 
 // === impl PeerRequestSender ===

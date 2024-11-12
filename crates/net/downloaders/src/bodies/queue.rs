@@ -57,9 +57,11 @@ where
     pub(crate) fn push_new_request(
         &mut self,
         client: Arc<B>,
-        consensus: Arc<dyn Consensus>,
+        consensus: Arc<dyn Consensus<reth_primitives::Header, B::Body>>,
         request: Vec<SealedHeader>,
-    ) {
+    ) where
+        B::Body: reth_primitives_traits::BlockBody,
+    {
         // Set last max requested block number
         self.last_requested_block_number = request
             .last()
@@ -77,9 +79,9 @@ where
 
 impl<B> Stream for BodiesRequestQueue<B>
 where
-    B: BodiesClient + 'static,
+    B: BodiesClient<Body: reth_primitives_traits::BlockBody> + 'static,
 {
-    type Item = DownloadResult<Vec<BlockResponse>>;
+    type Item = DownloadResult<Vec<BlockResponse<B::Body>>>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.get_mut().inner.poll_next_unpin(cx)
