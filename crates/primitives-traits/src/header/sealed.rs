@@ -56,7 +56,7 @@ impl<H> SealedHeader<H> {
     }
 }
 
-impl<H: crate::BlockHeader> SealedHeader<H> {
+impl<H: alloy_consensus::BlockHeader> SealedHeader<H> {
     /// Return the number hash tuple.
     pub fn num_hash(&self) -> BlockNumHash {
         BlockNumHash::new(self.number(), self.hash)

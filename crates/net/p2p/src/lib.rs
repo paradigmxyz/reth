@@ -52,3 +52,14 @@ pub use headers::client::HeadersClient;
 pub trait BlockClient: HeadersClient + BodiesClient + Unpin + Clone {}
 
 impl<T> BlockClient for T where T: HeadersClient + BodiesClient + Unpin + Clone {}
+
+/// The [`BlockClient`] providing Ethereum block parts.
+pub trait EthBlockClient:
+    BlockClient<Header = reth_primitives::Header, Body = reth_primitives::BlockBody>
+{
+}
+
+impl<T> EthBlockClient for T where
+    T: BlockClient<Header = reth_primitives::Header, Body = reth_primitives::BlockBody>
+{
+}

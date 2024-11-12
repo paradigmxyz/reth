@@ -21,7 +21,7 @@ use reth_downloaders::{
 use reth_exex::ExExManagerHandle;
 use reth_network::{BlockDownloaderProvider, NetworkEventListenerProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
-use reth_network_p2p::{headers::client::HeadersClient, BlockClient};
+use reth_network_p2p::{headers::client::HeadersClient, EthBlockClient};
 use reth_node_api::{NodeTypesWithDB, NodeTypesWithDBAdapter, NodeTypesWithEngine};
 use reth_node_ethereum::EthExecutorProvider;
 use reth_provider::{
@@ -68,7 +68,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     ) -> eyre::Result<Pipeline<N>>
     where
-        Client: BlockClient + 'static,
+        Client: EthBlockClient + 'static,
     {
         // building network downloaders using the fetch client
         let header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)

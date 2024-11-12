@@ -75,11 +75,11 @@ pub struct SingleHeaderRequest<Fut> {
     fut: Fut,
 }
 
-impl<Fut> Future for SingleHeaderRequest<Fut>
+impl<Fut, H> Future for SingleHeaderRequest<Fut>
 where
-    Fut: Future<Output = PeerRequestResult<Vec<Header>>> + Sync + Send + Unpin,
+    Fut: Future<Output = PeerRequestResult<Vec<H>>> + Sync + Send + Unpin,
 {
-    type Output = PeerRequestResult<Option<Header>>;
+    type Output = PeerRequestResult<Option<H>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let resp = ready!(self.get_mut().fut.poll_unpin(cx));
