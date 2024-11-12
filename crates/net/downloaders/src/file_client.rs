@@ -19,9 +19,8 @@ use tokio_stream::StreamExt;
 use tokio_util::codec::FramedRead;
 use tracing::{debug, trace, warn};
 
-use crate::receipt_file_client::FromReceiptReader;
-
 use super::file_codec::BlockFileCodec;
+use crate::receipt_file_client::FromReceiptReader;
 
 /// Default byte length of chunk to read from chain file.
 ///
