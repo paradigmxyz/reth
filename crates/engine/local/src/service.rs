@@ -9,7 +9,6 @@
 use core::fmt;
 use std::{
     fmt::{Debug, Formatter},
-    marker::PhantomData,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -45,7 +44,7 @@ use tracing::error;
 ///
 /// This service both produces and consumes [`BeaconEngineMessage`]s. This is done to allow
 /// modifications of the stream
-pub struct LocalEngineService<N, S>
+pub struct LocalEngineService<N>
 where
     N: EngineNodeTypes,
 {
@@ -55,17 +54,15 @@ where
     handler: EngineApiRequestHandler<EngineApiRequest<N::Engine>>,
     /// Receiver for incoming requests (from the engine API endpoint) that need to be processed.
     incoming_requests: EngineMessageStream<N::Engine>,
-    _marker: PhantomData<S>,
 }
 
-impl<N, S> LocalEngineService<N, S>
+impl<N> LocalEngineService<N>
 where
     N: EngineNodeTypes,
-    S: Send + Sync + 'static,
 {
     /// Constructor for [`LocalEngineService`].
     #[allow(clippy::too_many_arguments)]
-    pub fn new<B>(
+    pub fn new<B, S>(
         consensus: Arc<dyn Consensus>,
         executor_factory: impl BlockExecutorProvider,
         provider: ProviderFactory<N>,
@@ -82,6 +79,7 @@ where
     ) -> Self
     where
         B: PayloadAttributesBuilder<<N::Engine as PayloadTypes>::PayloadAttributes>,
+        S: Send + Sync + 'static,
     {
         let chain_spec = provider.chain_spec();
         let engine_kind =
@@ -116,14 +114,13 @@ where
             payload_builder,
         );
 
-        Self { handler, incoming_requests: from_engine, _marker: PhantomData }
+        Self { handler, incoming_requests: from_engine }
     }
 }
 
-impl<N, S> Stream for LocalEngineService<N, S>
+impl<N> Stream for LocalEngineService<N>
 where
     N: EngineNodeTypes,
-    S: Unpin,
 {
     type Item = ChainEvent<BeaconConsensusEngineEvent>;
 
@@ -156,7 +153,7 @@ where
     }
 }
 
-impl<N: EngineNodeTypes, S> Debug for LocalEngineService<N, S> {
+impl<N: EngineNodeTypes> Debug for LocalEngineService<N> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("LocalEngineService").finish_non_exhaustive()
     }

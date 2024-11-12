@@ -46,7 +46,7 @@ type EngineServiceType<N, Client> = ChainOrchestrator<
 /// The type that drives the chain forward and communicates progress.
 #[pin_project]
 #[allow(missing_debug_implementations)]
-pub struct EngineService<N, Client, E, S>
+pub struct EngineService<N, Client, E>
 where
     N: EngineNodeTypes,
     Client: BlockClient + 'static,
@@ -54,19 +54,17 @@ where
 {
     orchestrator: EngineServiceType<N, Client>,
     _marker: PhantomData<E>,
-    _marker_s: PhantomData<S>,
 }
 
-impl<N, Client, E, S> EngineService<N, Client, E, S>
+impl<N, Client, E> EngineService<N, Client, E>
 where
     N: EngineNodeTypes,
     Client: BlockClient + 'static,
     E: BlockExecutorProvider + 'static,
-    S: Send + Sync + 'static,
 {
     /// Constructor for `EngineService`.
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub fn new<S: Send + Sync + 'static>(
         consensus: Arc<dyn Consensus>,
         executor_factory: E,
         chain_spec: Arc<N::ChainSpec>,
@@ -114,7 +112,6 @@ where
         Self {
             orchestrator: ChainOrchestrator::new(handler, backfill_sync),
             _marker: Default::default(),
-            _marker_s: Default::default(),
         }
     }
 
@@ -124,7 +121,7 @@ where
     }
 }
 
-impl<N, Client, E, S> Stream for EngineService<N, Client, E, S>
+impl<N, Client, E> Stream for EngineService<N, Client, E>
 where
     N: EngineNodeTypes,
     Client: BlockClient + 'static,
