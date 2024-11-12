@@ -14,11 +14,10 @@ workspace = true
 # reth
 reth-provider.workspace = true
 reth-beacon-consensus.workspace = true
-reth-network = { workspace = true, features = ["serde"] }
 reth-network-api.workspace = true
 reth-stages.workspace = true
 reth-prune.workspace = true
-reth-static-file.workspace = true
+reth-static-file-types.workspace = true
 reth-primitives-traits.workspace = true
 
 # ethereum
