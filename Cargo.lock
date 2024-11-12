@@ -9082,6 +9082,7 @@ dependencies = [
  "alloy-primitives",
  "auto_impl",
  "reth-chainspec",
+ "reth-db",
  "reth-db-api",
  "reth-db-models",
  "reth-execution-types",
