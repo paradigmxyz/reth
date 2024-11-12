@@ -81,7 +81,7 @@ pub mod serde_bincode_compat {
     };
 }
 
-/// Temp helper struct for integrating [`NodePrimitives`].
+/// Temp helper struct for integrating [`NodePrimitives`](reth_primitives_traits::NodePrimitives).
 #[derive(Debug, Clone, Default)]
 pub struct AnyPrimitives;
 
