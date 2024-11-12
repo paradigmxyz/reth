@@ -29,9 +29,6 @@ pub use trie::{StorageTrieWriter, TrieWriter};
 mod static_file_provider;
 pub use static_file_provider::StaticFileProviderFactory;
 
-mod stats;
-pub use stats::StatsReader;
-
 mod full;
 pub use full::{FullProvider, FullRpcProvider};
 

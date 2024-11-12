@@ -56,3 +56,6 @@ pub mod noop;
 
 mod history;
 pub use history::*;
+
+mod stats;
+pub use stats::*;
