@@ -5,6 +5,7 @@ use alloy_consensus::{
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
     eip2930::AccessList,
+    eip4895::Withdrawals,
     eip7702::SignedAuthorization,
 };
 use alloy_primitives::{
@@ -15,10 +16,7 @@ use alloy_rlp::{Decodable, Error as RlpError, RlpDecodable};
 use derive_more::{AsRef, Deref};
 use op_alloy_consensus::TxDeposit;
 use reth_downloaders::file_client::FileClientError;
-use reth_primitives::{
-    transaction::{Transaction, TxType},
-    Withdrawals,
-};
+use reth_primitives::transaction::{Transaction, TxType};
 use serde::{Deserialize, Serialize};
 use tokio_util::codec::Decoder;
 
@@ -363,7 +361,7 @@ mod tests {
 
     #[test]
     fn test_decode_legacy_transactions() {
-        // Test Case 1: contract deposit (regular L2 transaction calling deposit() function)
+        // Test Case 1: contract deposit - regular L2 transaction calling deposit() function
         // tx: https://optimistic.etherscan.io/getRawTx?tx=0x7860252963a2df21113344f323035ef59648638a571eef742e33d789602c7a1c
         let deposit_tx_bytes = hex!("f88881f0830f481c830c6e4594a75127121d28a9bf848f3b70e7eea26570aa770080a4b6b55f2500000000000000000000000000000000000000000000000000000000000710b238a0d5c622d92ddf37f9c18a3465a572f74d8b1aeaf50c1cfb10b3833242781fd45fa02c4f1d5819bf8b70bf651e7a063b7db63c55bd336799c6ae3e5bc72ad6ef3def");
         let deposit_decoded = TransactionSigned::decode(&mut &deposit_tx_bytes[..]).unwrap();
