@@ -8950,7 +8950,6 @@ dependencies = [
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
  "alloy-serde",
- "reth-errors",
  "reth-primitives",
  "reth-trie-common",
  "serde",

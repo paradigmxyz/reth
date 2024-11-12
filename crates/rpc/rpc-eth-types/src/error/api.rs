@@ -1,8 +1,9 @@
 //! Helper traits to wrap generic l1 errors, in network specific error type configured in
-//! [`EthApiTypes`](crate::EthApiTypes).
+//! `reth_rpc_eth_api::EthApiTypes`.
 
-use reth_rpc_eth_types::EthApiError;
 use revm_primitives::EVMError;
+
+use crate::EthApiError;
 
 /// Helper trait to wrap core [`EthApiError`].
 pub trait FromEthApiError: From<EthApiError> {

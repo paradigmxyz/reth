@@ -6,9 +6,8 @@ use std::fmt;
 use alloy_consensus::Transaction as _;
 use alloy_rpc_types_eth::{
     request::{TransactionInput, TransactionRequest},
-    BlockError, TransactionInfo,
+    TransactionInfo,
 };
-use reth_errors::ProviderError;
 use reth_primitives::TransactionSignedEcRecovered;
 use serde::{Deserialize, Serialize};
 
@@ -46,7 +45,7 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + fmt::Debug {
         + fmt::Debug;
 
     /// RPC transaction error type.
-    type Error: error::Error + From<BlockError> + From<ProviderError>;
+    type Error: error::Error;
 
     /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
     /// environment related fields to `None`.

@@ -15,7 +15,6 @@ workspace = true
 # reth
 reth-primitives.workspace = true
 reth-trie-common.workspace = true
-reth-errors.workspace = true
 
 # ethereum
 alloy-serde.workspace = true
@@ -28,6 +27,7 @@ alloy-consensus.workspace = true
 
 # io
 serde.workspace = true
+jsonrpsee-types.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

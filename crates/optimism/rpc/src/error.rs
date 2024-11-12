@@ -4,7 +4,6 @@ use alloy_rpc_types_eth::{error::EthRpcErrorCode, BlockError};
 use jsonrpsee_types::error::INTERNAL_ERROR_CODE;
 use reth_optimism_evm::OpBlockExecutionError;
 use reth_primitives::revm_primitives::{InvalidTransaction, OptimismInvalidTransaction};
-use reth_provider::ProviderError;
 use reth_rpc_eth_api::AsEthApiError;
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::result::{internal_rpc_err, rpc_err};
@@ -117,12 +116,6 @@ impl From<SequencerClientError> for jsonrpsee_types::error::ErrorObject<'static>
 
 impl From<BlockError> for OpEthApiError {
     fn from(error: BlockError) -> Self {
-        Self::Eth(error.into())
-    }
-}
-
-impl From<ProviderError> for OpEthApiError {
-    fn from(error: ProviderError) -> Self {
         Self::Eth(error.into())
     }
 }

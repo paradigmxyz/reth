@@ -106,7 +106,8 @@ where
         let deposit_receipt_version = self
             .inner
             .provider()
-            .receipt_by_hash(hash)?
+            .receipt_by_hash(hash)
+            .map_err(Self::Error::from_eth_err)?
             .and_then(|receipt| receipt.deposit_receipt_version);
 
         let TransactionInfo {
