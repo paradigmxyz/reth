@@ -4,7 +4,7 @@ use alloy_consensus::{
     transaction::RlpEcdsaTx, SignableTransaction, TxEip1559, TxEip2930, TxEip7702,
 };
 use alloy_eips::eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718};
-use alloy_primitives::{keccak256, Address, PrimitiveSignature, TxHash, B256, U256};
+use alloy_primitives::{keccak256, Address, PrimitiveSignature as Signature, TxHash, B256, U256};
 use alloy_rlp::Header;
 use derive_more::{AsRef, Constructor, Deref};
 use op_alloy_consensus::{OpTxType, OpTypedTransaction, TxDeposit};
@@ -23,11 +23,11 @@ pub struct OpTransactionSigned {
     /// Transaction hash
     pub hash: TxHash,
     /// The transaction signature values
-    pub signature: PrimitiveSignature,
+    pub signature: Signature,
     /// Raw transaction info
     #[deref]
     #[as_ref]
-    pub transaction: OpTypedTransaction,
+    pub transaction: OpTypedTransaction, /* todo: replace with https://github.com/paradigmxyz/reth/issues/12473 */
 }
 
 impl SignedTransaction for OpTransactionSigned {
@@ -41,7 +41,7 @@ impl SignedTransaction for OpTransactionSigned {
         &self.transaction
     }
 
-    fn signature(&self) -> &PrimitiveSignature {
+    fn signature(&self) -> &Signature {
         &self.signature
     }
 
@@ -71,7 +71,7 @@ impl SignedTransaction for OpTransactionSigned {
 
     fn from_transaction_and_signature(
         transaction: Self::Transaction,
-        signature: PrimitiveSignature,
+        signature: Signature,
     ) -> Self {
         let mut initial_tx = Self { transaction, hash: Default::default(), signature };
         initial_tx.hash = initial_tx.recalculate_hash();
@@ -278,7 +278,7 @@ impl Default for OpTransactionSigned {
     fn default() -> Self {
         Self {
             hash: Default::default(),
-            signature: PrimitiveSignature::test_signature(),
+            signature: Signature::test_signature(),
             transaction: OpTypedTransaction::Legacy(Default::default()),
         }
     }
