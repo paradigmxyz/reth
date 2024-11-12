@@ -15,7 +15,7 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::utils::recover_raw_transaction;
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
-use crate::{OpEthApi, SequencerClient};
+use crate::{OpEthApi, OpEthApiError, SequencerClient};
 
 impl<N> EthTransactions for OpEthApi<N>
 where
@@ -76,12 +76,13 @@ where
     N: FullNodeComponents,
 {
     type Transaction = Transaction;
+    type Error = OpEthApiError;
 
     fn fill(
         &self,
         tx: TransactionSignedEcRecovered,
         tx_info: TransactionInfo,
-    ) -> Self::Transaction {
+    ) -> Result<Self::Transaction, Self::Error> {
         let from = tx.signer();
         let TransactionSigned { transaction, signature, hash } = tx.into_signed();
 
@@ -106,8 +107,7 @@ where
             .inner
             .provider()
             .receipt_by_hash(hash)
-            .ok() // todo: change sig to return result
-            .flatten()
+            .map_err(Self::Error::from_eth_err)?
             .and_then(|receipt| receipt.deposit_receipt_version);
 
         let TransactionInfo {
@@ -120,7 +120,7 @@ where
             })
             .unwrap_or_else(|| inner.max_fee_per_gas());
 
-        Transaction {
+        Ok(Transaction {
             inner: alloy_rpc_types_eth::Transaction {
                 inner,
                 block_hash,
@@ -130,7 +130,7 @@ where
                 effective_gas_price: Some(effective_gas_price),
             },
             deposit_receipt_version,
-        }
+        })
     }
 
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
