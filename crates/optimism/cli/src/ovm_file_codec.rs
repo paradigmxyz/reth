@@ -4,11 +4,13 @@ use alloy_consensus::{
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
+    eip2930::AccessList,
     eip4895::Withdrawals,
+    eip7702::SignedAuthorization,
 };
 use alloy_primitives::{
     bytes::{Buf, BytesMut},
-    keccak256, PrimitiveSignature as Signature, TxHash, B256, U256,
+    keccak256, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
 };
 use alloy_rlp::{Decodable, Error as RlpError, RlpDecodable};
 use derive_more::{AsRef, Deref};
@@ -195,6 +197,72 @@ impl TransactionSigned {
     }
 }
 
+impl alloy_consensus::Transaction for TransactionSigned {
+    fn chain_id(&self) -> Option<ChainId> {
+        self.deref().chain_id()
+    }
+
+    fn nonce(&self) -> u64 {
+        self.deref().nonce()
+    }
+
+    fn gas_limit(&self) -> u64 {
+        self.deref().gas_limit()
+    }
+
+    fn gas_price(&self) -> Option<u128> {
+        self.deref().gas_price()
+    }
+
+    fn max_fee_per_gas(&self) -> u128 {
+        self.deref().max_fee_per_gas()
+    }
+
+    fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        self.deref().max_priority_fee_per_gas()
+    }
+
+    fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        self.deref().max_fee_per_blob_gas()
+    }
+
+    fn priority_fee_or_price(&self) -> u128 {
+        self.deref().priority_fee_or_price()
+    }
+
+    fn is_dynamic_fee(&self) -> bool {
+        self.deref().is_dynamic_fee()
+    }
+
+    fn value(&self) -> U256 {
+        self.deref().value()
+    }
+
+    fn input(&self) -> &Bytes {
+        self.deref().input()
+    }
+
+    fn ty(&self) -> u8 {
+        self.deref().ty()
+    }
+
+    fn access_list(&self) -> Option<&AccessList> {
+        self.deref().access_list()
+    }
+
+    fn blob_versioned_hashes(&self) -> Option<&[B256]> {
+        alloy_consensus::Transaction::blob_versioned_hashes(self.deref())
+    }
+
+    fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
+        self.deref().authorization_list()
+    }
+
+    fn kind(&self) -> TxKind {
+        self.deref().kind()
+    }
+}
+
 impl Decodable for TransactionSigned {
     /// This `Decodable` implementation only supports decoding rlp encoded transactions as it's used
     /// by p2p.
@@ -377,6 +445,56 @@ mod tests {
         assert_eq!(
             system_decoded.hash,
             B256::from(hex!("e20b11349681dd049f8df32f5cdbb4c68d46b537685defcd86c7fa42cfe75b9e"))
+        );
+    }
+
+    #[test]
+    fn test_decode_typed_transaction_eip_1559() {
+        // Test case EIP-1559 transaction with tx
+        // https://optimistic.etherscan.io/getRawTx?tx=0x50088ae2fcc5db1dc37448e0692bfad4198932bdeaf9ed8b22324986ae131f89
+        let eip1559_tx_bytes = hex!("02f903330a80830186a083019ae3830a483d941231deb6f5749ef6ce6943a275a1d3e7486f4eae880494244fe776993cb902c01fd8010c00000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000200f669f066d77ca470a7fde26069902fd8df7ac97a2c361786373cef56ed6d55ad000000000000000000000000000000000000000000000000000000000000014000000000000000000000000000000000000000000000000000000000000001800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000050b1024786824fc7ceaa371193b4729638414e410000000000000000000000000000000000000000000000000494244fe776993c00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000066163726f73730000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f6a756d7065722e65786368616e67650000000000000000000000000000000000000000000000000000000000000000000000000000000000002de2ca349fd9a50000000000000000000000000000000000000000000000000000000067336ca30000000000000000000000000000000000000000000000000000000000000080ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff0000000000000000000000000000000000000000000000000000000000000000d00dfeeddeadbeef8932eb23bad9bddb5cf81426f78279a53c6c3b71c001a0e0bbed8fb43847bc87ed2c894e01c6472a78ca603e0bae7fd209ffa6d7952473a06cece66e39d28fe4a316e06409fd56ce7ec9b0f66e4126d59c37b4388262b508");
+        let eip1559_decoded = TransactionSigned::decode(&mut &eip1559_tx_bytes[..]).unwrap();
+
+        // Verify it's an EIP-1559 transaction
+        let tx = match &eip1559_decoded.transaction {
+            Transaction::Eip1559(tx) => tx,
+            _ => panic!("Expected EIP-1559 transaction"),
+        };
+
+        // Verify transaction fields
+        assert_eq!(tx.chain_id, 10);
+        assert_eq!(tx.nonce, 0);
+        assert_eq!(tx.gas_limit, 673853);
+
+        // EIP-1559 specific gas parameters
+        assert_eq!(tx.max_priority_fee_per_gas, 100000);
+        assert_eq!(tx.max_fee_per_gas, 105187);
+        assert_eq!(tx.to, TxKind::Call(address!("1231deb6f5749ef6ce6943a275a1d3e7486f4eae")));
+        assert_eq!(tx.value, U256::from_str_radix("0494244fe776993c", 16).unwrap());
+        assert!(tx.access_list.is_empty());
+
+        assert_eq!(
+            eip1559_decoded.signature.r(),
+            U256::from_str_radix(
+                "e0bbed8fb43847bc87ed2c894e01c6472a78ca603e0bae7fd209ffa6d7952473",
+                16
+            )
+            .unwrap()
+        );
+
+        assert_eq!(
+            eip1559_decoded.signature.s(),
+            U256::from_str_radix(
+                "6cece66e39d28fe4a316e06409fd56ce7ec9b0f66e4126d59c37b4388262b508",
+                16
+            )
+            .unwrap()
+        );
+
+        // Verify transaction hash
+        assert_eq!(
+            eip1559_decoded.hash,
+            B256::from(hex!("50088ae2fcc5db1dc37448e0692bfad4198932bdeaf9ed8b22324986ae131f89"))
         );
     }
 }
