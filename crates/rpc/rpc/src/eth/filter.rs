@@ -628,7 +628,10 @@ where
             match from_recovered(tx.transaction.to_recovered_transaction(), &self.tx_resp_builder) {
                 Ok(tx) => pending_txs.push(tx),
                 Err(err) => {
-                    error!(target: "rpc", %err, "Failed to fill txn with block context");
+                    error!(target: "rpc",
+                        %err,
+                        "Failed to fill txn with block context"
+                    );
                 }
             }
         }
