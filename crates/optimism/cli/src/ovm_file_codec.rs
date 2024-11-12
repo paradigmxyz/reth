@@ -230,6 +230,10 @@ impl alloy_consensus::Transaction for TransactionSigned {
         self.deref().priority_fee_or_price()
     }
 
+    fn is_dynamic_fee(&self) -> bool {
+        self.deref().is_dynamic_fee()
+    }
+
     fn value(&self) -> U256 {
         self.deref().value()
     }
