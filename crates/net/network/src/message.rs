@@ -8,6 +8,7 @@ use std::{
     task::{ready, Context, Poll},
 };
 
+use alloy_consensus::BlockHeader;
 use alloy_primitives::{Bytes, B256};
 use futures::FutureExt;
 use reth_eth_wire::{
@@ -23,30 +24,30 @@ use tokio::sync::oneshot;
 
 /// Internal form of a `NewBlock` message
 #[derive(Debug, Clone)]
-pub struct NewBlockMessage {
+pub struct NewBlockMessage<B = reth_primitives::Block> {
     /// Hash of the block
     pub hash: B256,
     /// Raw received message
-    pub block: Arc<NewBlock>,
+    pub block: Arc<NewBlock<B>>,
 }
 
 // === impl NewBlockMessage ===
 
-impl NewBlockMessage {
+impl<B: reth_primitives_traits::Block> NewBlockMessage<B> {
     /// Returns the block number of the block
     pub fn number(&self) -> u64 {
-        self.block.block.header.number
+        self.block.block.header().number()
     }
 }
 
 /// All Bi-directional eth-message variants that can be sent to a session or received from a
 /// session.
 #[derive(Debug)]
-pub enum PeerMessage {
+pub enum PeerMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Announce new block hashes
     NewBlockHashes(NewBlockHashes),
     /// Broadcast new block.
-    NewBlock(NewBlockMessage),
+    NewBlock(NewBlockMessage<N::Block>),
     /// Received transactions _from_ the peer
     ReceivedTransaction(Transactions),
     /// Broadcast transactions _from_ local _to_ a peer.
@@ -54,7 +55,7 @@ pub enum PeerMessage {
     /// Send new pooled transactions
     PooledTransactions(NewPooledTransactionHashes),
     /// All `eth` request variants.
-    EthRequest(PeerRequest),
+    EthRequest(PeerRequest<N>),
     /// Other than eth namespace message
     Other(RawCapabilityMessage),
 }

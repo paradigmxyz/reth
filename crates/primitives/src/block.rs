@@ -87,6 +87,19 @@ impl Block {
     }
 }
 
+impl reth_primitives_traits::Block for Block {
+    type Header = Header;
+    type Body = BlockBody;
+
+    fn body(&self) -> &Self::Body {
+        &self.body
+    }
+
+    fn header(&self) -> &Self::Header {
+        &self.header
+    }
+}
+
 impl InMemorySize for Block {
     /// Calculates a heuristic for the in-memory size of the [`Block`].
     #[inline]
