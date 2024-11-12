@@ -375,7 +375,7 @@ where
     // and 4788 contract call
     state.merge_transitions(BundleRetention::PlainState);
 
-    let outcome = ExecutionOutcome::new(
+    let outcome: ExecutionOutcome = ExecutionOutcome::new(
         state.take_bundle(),
         Receipts::from(vec![receipts]),
         reorg_target.number,
