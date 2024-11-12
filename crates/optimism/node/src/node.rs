@@ -7,7 +7,7 @@ use reth_chainspec::{EthChainSpec, Hardforks};
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, PeersInfo};
 use reth_node_api::{
-    AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, NodePrimitives,
+    AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, NodePrimitives, PayloadBuilder,
 };
 use reth_node_builder::{
     components::{
@@ -149,7 +149,10 @@ impl<N: FullNodeComponents> OpAddOns<N> {
 
 impl<N> NodeAddOns<N> for OpAddOns<N>
 where
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>,
+    N: FullNodeComponents<
+        Types: NodeTypes<ChainSpec = OpChainSpec>,
+        PayloadBuilder: PayloadBuilder<PayloadType = <N::Types as NodeTypesWithEngine>::Engine>,
+    >,
     OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
 {
     type Handle = RpcHandle<N, OpEthApi<N>>;
@@ -164,7 +167,10 @@ where
 
 impl<N> RethRpcAddOns<N> for OpAddOns<N>
 where
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>,
+    N: FullNodeComponents<
+        Types: NodeTypes<ChainSpec = OpChainSpec>,
+        PayloadBuilder: PayloadBuilder<PayloadType = <N::Types as NodeTypesWithEngine>::Engine>,
+    >,
     OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
 {
     type EthApi = OpEthApi<N>;

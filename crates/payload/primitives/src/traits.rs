@@ -59,6 +59,63 @@ pub trait PayloadBuilder: Debug + Send + Sync + Unpin {
     ) -> Option<Result<<Self::PayloadType as PayloadTypes>::PayloadBuilderAttributes, Self::Error>>;
 }
 
+/// A helper trait for internal usage to retrieve and resolve payloads.
+#[async_trait::async_trait]
+pub trait PayloadStoreExt<T: PayloadTypes>: Debug + Send + Sync + Unpin {
+    /// Resolves the payload job and returns the best payload that has been built so far.
+    async fn resolve_kind(
+        &self,
+        id: PayloadId,
+        kind: PayloadKind,
+    ) -> Option<Result<T::BuiltPayload, PayloadBuilderError>>;
+
+    /// Resolves the payload job as fast and possible and returns the best payload that has been
+    /// built so far.
+    async fn resolve(&self, id: PayloadId) -> Option<Result<T::BuiltPayload, PayloadBuilderError>> {
+        self.resolve_kind(id, PayloadKind::Earliest).await
+    }
+
+    /// Returns the best payload for the given identifier.
+    async fn best_payload(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<T::BuiltPayload, PayloadBuilderError>>;
+
+    /// Returns the payload attributes associated with the given identifier.
+    async fn payload_attributes(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<T::PayloadBuilderAttributes, PayloadBuilderError>>;
+}
+
+#[async_trait::async_trait]
+impl<T: PayloadTypes, P> PayloadStoreExt<T> for P
+where
+    P: PayloadBuilder<PayloadType = T>,
+{
+    async fn resolve_kind(
+        &self,
+        id: PayloadId,
+        kind: PayloadKind,
+    ) -> Option<Result<T::BuiltPayload, PayloadBuilderError>> {
+        Some(PayloadBuilder::resolve_kind(self, id, kind).await?.map_err(Into::into))
+    }
+
+    async fn best_payload(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<T::BuiltPayload, PayloadBuilderError>> {
+        Some(PayloadBuilder::best_payload(self, id).await?.map_err(Into::into))
+    }
+
+    async fn payload_attributes(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<T::PayloadBuilderAttributes, PayloadBuilderError>> {
+        Some(PayloadBuilder::payload_attributes(self, id).await?.map_err(Into::into))
+    }
+}
+
 /// Represents a built payload type that contains a built [`SealedBlock`] and can be converted into
 /// engine API execution payloads.
 pub trait BuiltPayload: Send + Sync + std::fmt::Debug {
