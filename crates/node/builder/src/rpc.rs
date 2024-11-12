@@ -17,6 +17,7 @@ use reth_node_core::{
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_payload_builder::PayloadStore;
+use reth_payload_primitives::PayloadBuilder;
 use reth_provider::providers::ProviderNodeTypes;
 use reth_rpc::{
     eth::{EthApiTypes, FullEthApiServer},
@@ -402,7 +403,7 @@ impl<N, EthApi, EV> NodeAddOns<N> for RpcAddOns<N, EthApi, EV>
 where
     N: FullNodeComponents<
         Types: ProviderNodeTypes,
-        PayloadBuilder: Into<PayloadStore<<N::Types as NodeTypesWithEngine>::Engine>>,
+        PayloadBuilder: PayloadBuilder<PayloadType = <N::Types as NodeTypesWithEngine>::Engine>,
     >,
     EthApi: EthApiTypes + FullEthApiServer + AddDevSigners + Unpin + 'static,
     EV: EngineValidatorBuilder<N>,
@@ -426,7 +427,7 @@ where
             node.provider().clone(),
             config.chain.clone(),
             beacon_engine_handle,
-            node.payload_builder().clone().into(),
+            PayloadStore::new(node.payload_builder().clone()),
             node.pool().clone(),
             Box::new(node.task_executor().clone()),
             client,

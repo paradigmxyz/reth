@@ -6,7 +6,7 @@ use alloy_consensus::{BlockHeader, Transaction, TxType};
 use alloy_eips::{eip4895::Withdrawal, eip7685::Requests};
 use alloy_primitives::{Address, B256};
 
-use crate::Block;
+use crate::{Block, InMemorySize};
 
 /// Abstraction for block's body.
 pub trait BlockBody:
@@ -22,6 +22,7 @@ pub trait BlockBody:
     + for<'de> serde::Deserialize<'de>
     + alloy_rlp::Encodable
     + alloy_rlp::Decodable
+    + InMemorySize
 {
     /// Ordered list of signed transactions as committed in block.
     // todo: requires trait for signed transaction
@@ -93,7 +94,4 @@ pub trait BlockBody:
     fn blob_versioned_hashes(&self) -> Vec<&B256> {
         self.blob_versioned_hashes_iter().collect()
     }
-
-    /// Calculates a heuristic for the in-memory size of the [`BlockBody`].
-    fn size(&self) -> usize;
 }

@@ -10,7 +10,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use reth_node_types::NodePrimitives;
-use reth_primitives::{Block, Receipt, TransactionSigned};
+use reth_primitives::{Block, Receipt, TransactionSigned, TxType};
 
 /// Ethereum primitive types.
 #[derive(Debug, Clone, Default)]
@@ -19,5 +19,6 @@ pub struct EthPrimitives;
 impl NodePrimitives for EthPrimitives {
     type Block = Block;
     type SignedTx = TransactionSigned;
+    type TxType = TxType;
     type Receipt = Receipt;
 }

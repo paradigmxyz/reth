@@ -88,5 +88,6 @@ pub struct AnyPrimitives;
 impl reth_primitives_traits::NodePrimitives for AnyPrimitives {
     type Block = crate::Block;
     type SignedTx = crate::TransactionSigned;
+    type TxType = crate::TxType;
     type Receipt = crate::Receipt;
 }
