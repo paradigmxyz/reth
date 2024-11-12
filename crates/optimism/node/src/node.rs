@@ -7,7 +7,7 @@ use reth_chainspec::{EthChainSpec, Hardforks};
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, PeersInfo};
 use reth_node_api::{
-    AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, NodePrimitives,
+    AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, NodePrimitives, PayloadBuilder,
 };
 use reth_node_builder::{
     components::{
@@ -23,7 +23,7 @@ use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_evm::{OpEvmConfig, OpExecutionStrategyFactory};
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_rpc::OpEthApi;
-use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService, PayloadStore};
+use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::{Block, Header, Receipt, TransactionSigned, TxType};
 use reth_provider::CanonStateSubscriptions;
 use reth_tracing::tracing::{debug, info};
@@ -152,7 +152,7 @@ impl<N> NodeAddOns<N> for OpAddOns<N>
 where
     N: FullNodeComponents<
         Types: NodeTypes<ChainSpec = OpChainSpec>,
-        PayloadBuilder: Into<PayloadStore<<N::Types as NodeTypesWithEngine>::Engine>>,
+        PayloadBuilder: PayloadBuilder<PayloadType = <N::Types as NodeTypesWithEngine>::Engine>,
     >,
     OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
 {
@@ -170,7 +170,7 @@ impl<N> RethRpcAddOns<N> for OpAddOns<N>
 where
     N: FullNodeComponents<
         Types: NodeTypes<ChainSpec = OpChainSpec>,
-        PayloadBuilder: Into<PayloadStore<<N::Types as NodeTypesWithEngine>::Engine>>,
+        PayloadBuilder: PayloadBuilder<PayloadType = <N::Types as NodeTypesWithEngine>::Engine>,
     >,
     OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
 {
