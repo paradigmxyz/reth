@@ -3,6 +3,13 @@ use core::fmt;
 use alloy_eips::eip2718::Eip2718Error;
 use alloy_primitives::{U64, U8};
 use alloy_rlp::{Decodable, Encodable};
+use reth_codecs::Compact;
+
+/// Helper trait that unifies all behaviour required by transaction type ID to support full node
+/// operations.
+pub trait FullTxType: TxType + Compact {}
+
+impl<T> FullTxType for T where T: TxType + Compact {}
 
 /// Trait representing the behavior of a transaction type.
 pub trait TxType:

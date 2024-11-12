@@ -1,5 +1,8 @@
 use crate::{root::ParallelStateRootError, stats::ParallelTrieTracker, StorageRootTargets};
-use alloy_primitives::{map::HashSet, B256};
+use alloy_primitives::{
+    map::{HashMap, HashSet},
+    B256,
+};
 use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
 use reth_db::DatabaseError;
@@ -18,7 +21,7 @@ use reth_trie::{
 };
 use reth_trie_common::proof::ProofRetainer;
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 use tracing::debug;
 
 #[cfg(feature = "metrics")]
@@ -208,5 +211,87 @@ where
         self.metrics.record_state_trie(tracker.finish());
 
         Ok(MultiProof { account_subtree: hash_builder.take_proof_nodes(), storages })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{keccak256, map::DefaultHashBuilder, Address, U256};
+    use rand::Rng;
+    use reth_primitives::{Account, StorageEntry};
+    use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
+    use reth_trie::proof::Proof;
+
+    #[test]
+    fn random_parallel_proof() {
+        let factory = create_test_provider_factory();
+        let consistent_view = ConsistentDbView::new(factory.clone(), None);
+
+        let mut rng = rand::thread_rng();
+        let state = (0..100)
+            .map(|_| {
+                let address = Address::random();
+                let account =
+                    Account { balance: U256::from(rng.gen::<u64>()), ..Default::default() };
+                let mut storage = HashMap::<B256, U256, DefaultHashBuilder>::default();
+                let has_storage = rng.gen_bool(0.7);
+                if has_storage {
+                    for _ in 0..100 {
+                        storage.insert(
+                            B256::from(U256::from(rng.gen::<u64>())),
+                            U256::from(rng.gen::<u64>()),
+                        );
+                    }
+                }
+                (address, (account, storage))
+            })
+            .collect::<HashMap<_, _, DefaultHashBuilder>>();
+
+        {
+            let provider_rw = factory.provider_rw().unwrap();
+            provider_rw
+                .insert_account_for_hashing(
+                    state.iter().map(|(address, (account, _))| (*address, Some(*account))),
+                )
+                .unwrap();
+            provider_rw
+                .insert_storage_for_hashing(state.iter().map(|(address, (_, storage))| {
+                    (
+                        *address,
+                        storage
+                            .iter()
+                            .map(|(slot, value)| StorageEntry { key: *slot, value: *value }),
+                    )
+                }))
+                .unwrap();
+            provider_rw.commit().unwrap();
+        }
+
+        let mut targets =
+            HashMap::<B256, HashSet<B256, DefaultHashBuilder>, DefaultHashBuilder>::default();
+        for (address, (_, storage)) in state.iter().take(10) {
+            let hashed_address = keccak256(*address);
+            let mut target_slots = HashSet::<B256, DefaultHashBuilder>::default();
+
+            for (slot, _) in storage.iter().take(5) {
+                target_slots.insert(*slot);
+            }
+
+            if !target_slots.is_empty() {
+                targets.insert(hashed_address, target_slots);
+            }
+        }
+
+        let provider_rw = factory.provider_rw().unwrap();
+        let trie_cursor_factory = DatabaseTrieCursorFactory::new(provider_rw.tx_ref());
+        let hashed_cursor_factory = DatabaseHashedCursorFactory::new(provider_rw.tx_ref());
+
+        assert_eq!(
+            ParallelProof::new(consistent_view, Default::default())
+                .multiproof(targets.clone())
+                .unwrap(),
+            Proof::new(trie_cursor_factory, hashed_cursor_factory).multiproof(targets).unwrap()
+        );
     }
 }

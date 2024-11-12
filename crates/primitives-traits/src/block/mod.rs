@@ -8,7 +8,7 @@ use alloc::{fmt, vec::Vec};
 use alloy_primitives::{Address, B256};
 use reth_codecs::Compact;
 
-use crate::{BlockBody, BlockHeader, FullBlockHeader};
+use crate::{BlockBody, BlockHeader, FullBlockHeader, InMemorySize};
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
 pub trait FullBlock: Block<Header: Compact> + Compact {}
@@ -32,6 +32,7 @@ pub trait Block:
     + for<'a> serde::Deserialize<'a>
     + From<(Self::Header, Self::Body)>
     + Into<(Self::Header, Self::Body)>
+    + InMemorySize
 {
     /// Header part of the block.
     type Header: BlockHeader;
@@ -104,7 +105,4 @@ pub trait Block:
     // todo: can be default impl if sealed block type is made generic over header and body and
     // migrated to alloy
     fn with_recovered_senders(self) -> Option<Self::BlockWithSenders<Self>>;
-
-    /// Calculates a heuristic for the in-memory size of the [`Block`].
-    fn size(&self) -> usize;
 }
