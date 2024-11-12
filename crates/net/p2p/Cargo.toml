@@ -56,5 +56,6 @@ std = [
 	"reth-primitives/std",
 	"alloy-eips/std",
 	"alloy-primitives/std",
-	"reth-primitives-traits/std"
+	"reth-primitives-traits/std",
+    "alloy-consensus/std",
 ]

@@ -897,7 +897,7 @@ where
     }
 }
 
-/// A future that returns a list of [`Header`] on success.
+/// A future that returns a list of headers on success.
 #[derive(Debug)]
 struct HeadersRequestFuture<F> {
     request: Option<HeadersRequest>,
