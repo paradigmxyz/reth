@@ -369,6 +369,7 @@ mod tests {
     use futures::{SinkExt, StreamExt};
     use reth_chainspec::NamedChain;
     use reth_ecies::stream::ECIESStream;
+    use reth_eth_wire_types::EthNetworkPrimitives;
     use reth_network_peers::pk2id;
     use reth_primitives::{ForkFilter, Head};
     use secp256k1::{SecretKey, SECP256K1};
@@ -401,7 +402,7 @@ mod tests {
             let (incoming, _) = listener.accept().await.unwrap();
             let stream = PassthroughCodec::default().framed(incoming);
             let (_, their_status) = UnauthedEthStream::new(stream)
-                .handshake(status_clone, fork_filter_clone)
+                .handshake::<EthNetworkPrimitives>(status_clone, fork_filter_clone)
                 .await
                 .unwrap();
 
@@ -413,8 +414,10 @@ mod tests {
         let sink = PassthroughCodec::default().framed(outgoing);
 
         // try to connect
-        let (_, their_status) =
-            UnauthedEthStream::new(sink).handshake(status, fork_filter).await.unwrap();
+        let (_, their_status) = UnauthedEthStream::new(sink)
+            .handshake::<EthNetworkPrimitives>(status, fork_filter)
+            .await
+            .unwrap();
 
         // their status is a clone of our status, these should be equal
         assert_eq!(their_status, status);
@@ -448,7 +451,7 @@ mod tests {
             let (incoming, _) = listener.accept().await.unwrap();
             let stream = PassthroughCodec::default().framed(incoming);
             let (_, their_status) = UnauthedEthStream::new(stream)
-                .handshake(status_clone, fork_filter_clone)
+                .handshake::<EthNetworkPrimitives>(status_clone, fork_filter_clone)
                 .await
                 .unwrap();
 
@@ -460,8 +463,10 @@ mod tests {
         let sink = PassthroughCodec::default().framed(outgoing);
 
         // try to connect
-        let (_, their_status) =
-            UnauthedEthStream::new(sink).handshake(status, fork_filter).await.unwrap();
+        let (_, their_status) = UnauthedEthStream::new(sink)
+            .handshake::<EthNetworkPrimitives>(status, fork_filter)
+            .await
+            .unwrap();
 
         // their status is a clone of our status, these should be equal
         assert_eq!(their_status, status);
@@ -494,8 +499,9 @@ mod tests {
             // roughly based off of the design of tokio::net::TcpListener
             let (incoming, _) = listener.accept().await.unwrap();
             let stream = PassthroughCodec::default().framed(incoming);
-            let handshake_res =
-                UnauthedEthStream::new(stream).handshake(status_clone, fork_filter_clone).await;
+            let handshake_res = UnauthedEthStream::new(stream)
+                .handshake::<EthNetworkPrimitives>(status_clone, fork_filter_clone)
+                .await;
 
             // make sure the handshake fails due to td too high
             assert!(matches!(
@@ -510,7 +516,9 @@ mod tests {
         let sink = PassthroughCodec::default().framed(outgoing);
 
         // try to connect
-        let handshake_res = UnauthedEthStream::new(sink).handshake(status, fork_filter).await;
+        let handshake_res = UnauthedEthStream::new(sink)
+            .handshake::<EthNetworkPrimitives>(status, fork_filter)
+            .await;
 
         // this handshake should also fail due to td too high
         assert!(matches!(
@@ -528,7 +536,7 @@ mod tests {
     async fn can_write_and_read_cleartext() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_addr = listener.local_addr().unwrap();
-        let test_msg = EthMessage::NewBlockHashes(
+        let test_msg: EthMessage = EthMessage::NewBlockHashes(
             vec![
                 BlockHashNumber { hash: B256::random(), number: 5 },
                 BlockHashNumber { hash: B256::random(), number: 6 },
@@ -563,7 +571,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_addr = listener.local_addr().unwrap();
         let server_key = SecretKey::new(&mut rand::thread_rng());
-        let test_msg = EthMessage::NewBlockHashes(
+        let test_msg: EthMessage = EthMessage::NewBlockHashes(
             vec![
                 BlockHashNumber { hash: B256::random(), number: 5 },
                 BlockHashNumber { hash: B256::random(), number: 6 },
@@ -605,7 +613,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_addr = listener.local_addr().unwrap();
         let server_key = SecretKey::new(&mut rand::thread_rng());
-        let test_msg = EthMessage::NewBlockHashes(
+        let test_msg: EthMessage = EthMessage::NewBlockHashes(
             vec![
                 BlockHashNumber { hash: B256::random(), number: 5 },
                 BlockHashNumber { hash: B256::random(), number: 6 },
@@ -709,7 +717,7 @@ mod tests {
             let (incoming, _) = listener.accept().await.unwrap();
             let stream = PassthroughCodec::default().framed(incoming);
             let (_, their_status) = UnauthedEthStream::new(stream)
-                .handshake(status_clone, fork_filter_clone)
+                .handshake::<EthNetworkPrimitives>(status_clone, fork_filter_clone)
                 .await
                 .unwrap();
 
@@ -722,7 +730,11 @@ mod tests {
 
         // try to connect
         let handshake_result = UnauthedEthStream::new(sink)
-            .handshake_with_timeout(status, fork_filter, Duration::from_secs(1))
+            .handshake_with_timeout::<EthNetworkPrimitives>(
+                status,
+                fork_filter,
+                Duration::from_secs(1),
+            )
             .await;
 
         // Assert that a timeout error occurred

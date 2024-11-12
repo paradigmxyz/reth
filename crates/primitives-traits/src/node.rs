@@ -21,7 +21,7 @@ impl NodePrimitives for () {
 /// Helper trait that sets trait bounds on [`NodePrimitives`].
 pub trait FullNodePrimitives: Send + Sync + Unpin + Clone + Default + fmt::Debug {
     /// Block primitive.
-    type Block: FullBlock<Body: BlockBody<Transaction = Self::SignedTx>>;
+    type Block: FullBlock<Body: BlockBody<SignedTransaction = Self::SignedTx>>;
     /// Signed version of the transaction type.
     type SignedTx: FullSignedTx;
     /// A receipt.

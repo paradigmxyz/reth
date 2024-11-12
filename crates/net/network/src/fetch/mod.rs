@@ -15,7 +15,7 @@ use std::{
 
 use alloy_primitives::B256;
 use futures::StreamExt;
-use reth_eth_wire::{GetBlockBodies, GetBlockHeaders, NetworkPrimitives};
+use reth_eth_wire::{EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, NetworkPrimitives};
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::{
     error::{EthResponseValidator, PeerRequestResult, RequestError, RequestResult},
@@ -29,6 +29,9 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::message::BlockRequest;
 
+type InflightHeadersRequest<H> = Request<HeadersRequest, PeerRequestResult<Vec<H>>>;
+type InflightBodiesRequest<B> = Request<Vec<B256>, PeerRequestResult<Vec<B>>>;
+
 /// Manages data fetching operations.
 ///
 /// This type is hooked into the staged sync pipeline and delegates download request to available
@@ -36,13 +39,11 @@ use crate::message::BlockRequest;
 ///
 /// This type maintains a list of connected peers that are available for requests.
 #[derive(Debug)]
-pub struct StateFetcher<N: NetworkPrimitives> {
+pub struct StateFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Currently active [`GetBlockHeaders`] requests
-    inflight_headers_requests:
-        HashMap<PeerId, Request<HeadersRequest, PeerRequestResult<Vec<N::BlockHeader>>>>,
+    inflight_headers_requests: HashMap<PeerId, InflightHeadersRequest<N::BlockHeader>>,
     /// Currently active [`GetBlockBodies`] requests
-    inflight_bodies_requests:
-        HashMap<PeerId, Request<Vec<B256>, PeerRequestResult<Vec<N::BlockBody>>>>,
+    inflight_bodies_requests: HashMap<PeerId, InflightBodiesRequest<N::BlockBody>>,
     /// The list of _available_ peers for requests.
     peers: HashMap<PeerId, Peer>,
     /// The handle to the peers manager
@@ -471,13 +472,14 @@ pub(crate) enum BlockResponseOutcome {
 mod tests {
     use super::*;
     use crate::{peers::PeersManager, PeersConfig};
+    use alloy_consensus::Header;
     use alloy_primitives::B512;
     use std::future::poll_fn;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_poll_fetcher() {
         let manager = PeersManager::new(PeersConfig::default());
-        let mut fetcher = StateFetcher::new(manager.handle(), Default::default());
+        let mut fetcher: StateFetcher = StateFetcher::new(manager.handle(), Default::default());
 
         poll_fn(move |cx| {
             assert!(fetcher.poll(cx).is_pending());
@@ -497,7 +499,7 @@ mod tests {
     #[tokio::test]
     async fn test_peer_rotation() {
         let manager = PeersManager::new(PeersConfig::default());
-        let mut fetcher = StateFetcher::new(manager.handle(), Default::default());
+        let mut fetcher: StateFetcher = StateFetcher::new(manager.handle(), Default::default());
         // Add a few random peers
         let peer1 = B512::random();
         let peer2 = B512::random();
@@ -520,7 +522,7 @@ mod tests {
     #[tokio::test]
     async fn test_peer_prioritization() {
         let manager = PeersManager::new(PeersConfig::default());
-        let mut fetcher = StateFetcher::new(manager.handle(), Default::default());
+        let mut fetcher: StateFetcher = StateFetcher::new(manager.handle(), Default::default());
         // Add a few random peers
         let peer1 = B512::random();
         let peer2 = B512::random();
@@ -545,7 +547,7 @@ mod tests {
     #[tokio::test]
     async fn test_on_block_headers_response() {
         let manager = PeersManager::new(PeersConfig::default());
-        let mut fetcher = StateFetcher::new(manager.handle(), Default::default());
+        let mut fetcher: StateFetcher = StateFetcher::new(manager.handle(), Default::default());
         let peer_id = B512::random();
 
         assert_eq!(fetcher.on_block_headers_response(peer_id, Ok(vec![Header::default()])), None);
@@ -575,7 +577,7 @@ mod tests {
     #[tokio::test]
     async fn test_header_response_outcome() {
         let manager = PeersManager::new(PeersConfig::default());
-        let mut fetcher = StateFetcher::new(manager.handle(), Default::default());
+        let mut fetcher: StateFetcher = StateFetcher::new(manager.handle(), Default::default());
         let peer_id = B512::random();
 
         let request_pair = || {
@@ -609,7 +611,10 @@ mod tests {
         let outcome =
             fetcher.on_block_headers_response(peer_id, Err(RequestError::Timeout)).unwrap();
 
-        assert!(EthResponseValidator::reputation_change_err(&Err(RequestError::Timeout)).is_some());
+        assert!(EthResponseValidator::reputation_change_err(&Err::<Vec<Header>, _>(
+            RequestError::Timeout
+        ))
+        .is_some());
 
         match outcome {
             BlockResponseOutcome::BadResponse(peer, _) => {

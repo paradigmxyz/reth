@@ -7339,7 +7339,6 @@ dependencies = [
  "reth-chainspec",
  "reth-codecs-derive",
  "reth-primitives",
- "reth-primitives-traits",
  "serde",
  "thiserror",
 ]

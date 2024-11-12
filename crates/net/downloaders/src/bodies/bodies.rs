@@ -66,7 +66,7 @@ pub struct BodiesDownloader<B: BodiesClient, Provider> {
 
 impl<B, Provider> BodiesDownloader<B, Provider>
 where
-    B: BodiesClient<Body: reth_primitives_traits::BlockBody> + 'static,
+    B: BodiesClient<Body: InMemorySize> + 'static,
     Provider: HeaderProvider + Unpin + 'static,
 {
     /// Returns the next contiguous request.
@@ -298,7 +298,7 @@ where
 
 impl<B, Provider> BodyDownloader for BodiesDownloader<B, Provider>
 where
-    B: BodiesClient<Body: reth_primitives_traits::BlockBody> + 'static,
+    B: BodiesClient<Body: InMemorySize> + 'static,
     Provider: HeaderProvider + Unpin + 'static,
 {
     type Body = B::Body;
@@ -348,7 +348,7 @@ where
 
 impl<B, Provider> Stream for BodiesDownloader<B, Provider>
 where
-    B: BodiesClient<Body: reth_primitives_traits::BlockBody> + 'static,
+    B: BodiesClient<Body: InMemorySize> + 'static,
     Provider: HeaderProvider + Unpin + 'static,
 {
     type Item = BodyDownloaderResult<B::Body>;

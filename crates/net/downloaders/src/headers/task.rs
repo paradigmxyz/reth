@@ -110,6 +110,7 @@ impl<H> Stream for TaskDownloader<H> {
 }
 
 /// A [`HeaderDownloader`] that runs on its own task
+#[expect(clippy::complexity)]
 struct SpawnedDownloader<T: HeaderDownloader> {
     updates: UnboundedReceiverStream<DownloaderUpdates<T::Header>>,
     headers_tx: PollSender<HeadersDownloaderResult<Vec<SealedHeader<T::Header>>, T::Header>>,

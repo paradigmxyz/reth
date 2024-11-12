@@ -9,6 +9,7 @@ use crate::{
 };
 use alloy_primitives::bytes::Bytes;
 use derive_more::{Deref, DerefMut};
+use reth_eth_wire_types::{EthMessage, EthNetworkPrimitives, NetworkPrimitives};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{
@@ -30,7 +31,13 @@ pub struct RawCapabilityMessage {
 /// network.
 #[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum CapabilityMessage {
+pub enum CapabilityMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
+    /// Eth sub-protocol message.
+    #[cfg_attr(
+        feature = "serde",
+        serde(bound = "EthMessage<N>: Serialize + serde::de::DeserializeOwned")
+    )]
+    Eth(EthMessage<N>),
     /// Any other capability message.
     Other(RawCapabilityMessage),
 }

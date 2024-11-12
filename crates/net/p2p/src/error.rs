@@ -217,6 +217,8 @@ impl From<ProviderError> for DownloadError {
 
 #[cfg(test)]
 mod tests {
+    use alloy_consensus::Header;
+
     use super::*;
 
     #[test]

@@ -16,7 +16,6 @@ workspace = true
 reth-chainspec.workspace = true
 reth-codecs-derive.workspace = true
 reth-primitives.workspace = true
-reth-primitives-traits.workspace = true
 
 # ethereum
 alloy-consensus.workspace = true

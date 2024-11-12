@@ -214,7 +214,7 @@ where
 
 impl<B> Future for BodiesRequestFuture<B>
 where
-    B: BodiesClient<Body: reth_primitives_traits::BlockBody> + 'static,
+    B: BodiesClient<Body: InMemorySize> + 'static,
 {
     type Output = DownloadResult<Vec<BlockResponse<B::Body>>>;
 

@@ -9,6 +9,7 @@ use reth_network_p2p::{
     error::DownloadResult,
 };
 use reth_primitives::SealedHeader;
+use reth_primitives_traits::InMemorySize;
 use std::{
     pin::Pin,
     sync::Arc,
@@ -59,9 +60,7 @@ where
         client: Arc<B>,
         consensus: Arc<dyn Consensus<reth_primitives::Header, B::Body>>,
         request: Vec<SealedHeader>,
-    ) where
-        B::Body: reth_primitives_traits::BlockBody,
-    {
+    ) {
         // Set last max requested block number
         self.last_requested_block_number = request
             .last()
@@ -79,7 +78,7 @@ where
 
 impl<B> Stream for BodiesRequestQueue<B>
 where
-    B: BodiesClient<Body: reth_primitives_traits::BlockBody> + 'static,
+    B: BodiesClient<Body: InMemorySize> + 'static,
 {
     type Item = DownloadResult<Vec<BlockResponse<B::Body>>>;
 

@@ -1,10 +1,10 @@
 use alloy_primitives::{BlockNumber, U256};
-use reth_primitives::{SealedBlock, SealedHeader};
+use reth_primitives::{BlockBody, SealedBlock, SealedHeader};
 use reth_primitives_traits::InMemorySize;
 
 /// The block response
 #[derive(PartialEq, Eq, Debug, Clone)]
-pub enum BlockResponse<B> {
+pub enum BlockResponse<B = BlockBody> {
     /// Full block response (with transactions or ommers)
     Full(SealedBlock<reth_primitives::Header, B>),
     /// The empty block response

@@ -890,6 +890,8 @@ mod tests {
         }
 
         impl BodyDownloader for TestBodyDownloader {
+            type Body = BlockBody;
+
             fn set_download_range(
                 &mut self,
                 range: RangeInclusive<BlockNumber>,
@@ -910,7 +912,7 @@ mod tests {
         }
 
         impl Stream for TestBodyDownloader {
-            type Item = BodyDownloaderResult;
+            type Item = BodyDownloaderResult<BlockBody>;
             fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
                 let this = self.get_mut();
 

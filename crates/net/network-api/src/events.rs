@@ -66,10 +66,10 @@ pub enum NetworkEvent<R = PeerRequest> {
 impl<R> Clone for NetworkEvent<R> {
     fn clone(&self) -> Self {
         match self {
-            NetworkEvent::SessionClosed { peer_id, reason } => {
-                NetworkEvent::SessionClosed { peer_id: *peer_id, reason: reason.clone() }
+            Self::SessionClosed { peer_id, reason } => {
+                Self::SessionClosed { peer_id: *peer_id, reason: *reason }
             }
-            NetworkEvent::SessionEstablished {
+            Self::SessionEstablished {
                 peer_id,
                 remote_addr,
                 client_version,
@@ -77,7 +77,7 @@ impl<R> Clone for NetworkEvent<R> {
                 messages,
                 status,
                 version,
-            } => NetworkEvent::SessionEstablished {
+            } => Self::SessionEstablished {
                 peer_id: *peer_id,
                 remote_addr: *remote_addr,
                 client_version: client_version.clone(),
@@ -86,8 +86,8 @@ impl<R> Clone for NetworkEvent<R> {
                 status: status.clone(),
                 version: *version,
             },
-            NetworkEvent::PeerAdded(peer) => NetworkEvent::PeerAdded(peer.clone()),
-            NetworkEvent::PeerRemoved(peer) => NetworkEvent::PeerRemoved(peer.clone()),
+            Self::PeerAdded(peer) => Self::PeerAdded(*peer),
+            Self::PeerRemoved(peer) => Self::PeerRemoved(*peer),
         }
     }
 }

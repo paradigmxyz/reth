@@ -19,7 +19,7 @@ pub trait HeaderDownloader:
     + Stream<Item = HeadersDownloaderResult<Vec<SealedHeader<Self::Header>>, Self::Header>>
     + Unpin
 {
-    /// The header type being downlaoded.
+    /// The header type being downloaded.
     type Header: Send + Sync + Unpin + 'static;
 
     /// Updates the gap to sync which ranges from local head to the sync target

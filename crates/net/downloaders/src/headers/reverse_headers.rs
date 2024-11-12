@@ -1232,6 +1232,7 @@ fn calc_next_request(
 mod tests {
     use super::*;
     use crate::headers::test_utils::child_header;
+    use alloy_consensus::Header;
     use assert_matches::assert_matches;
     use reth_consensus::test_utils::TestConsensus;
     use reth_network_p2p::test_utils::TestHeadersClient;
@@ -1314,7 +1315,7 @@ mod tests {
         assert!(downloader.sync_target_request.is_some());
 
         downloader.sync_target_request.take();
-        let target = SyncTarget::Gap(SealedHeader::new(Header::default(), B256::random()));
+        let target = SyncTarget::Gap(SealedHeader::new(Default::default(), B256::random()));
         downloader.update_sync_target(target);
         assert!(downloader.sync_target_request.is_none());
         assert_matches!(
@@ -1391,7 +1392,7 @@ mod tests {
     fn test_resp_order() {
         let mut heap = BinaryHeap::new();
         let hi = 1u64;
-        heap.push(OrderedHeadersResponse {
+        heap.push(OrderedHeadersResponse::<Header> {
             headers: vec![],
             request: HeadersRequest { start: hi.into(), limit: 0, direction: Default::default() },
             peer_id: Default::default(),
