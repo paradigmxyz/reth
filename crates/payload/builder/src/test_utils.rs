@@ -4,11 +4,9 @@ use crate::{
     traits::KeepPayloadJobAlive, EthBuiltPayload, EthPayloadBuilderAttributes,
     PayloadBuilderHandle, PayloadBuilderService, PayloadJob, PayloadJobGenerator,
 };
-
 use alloy_primitives::U256;
 use reth_chain_state::{CanonStateNotification, ExecutedBlock};
 use reth_payload_primitives::{PayloadBuilderError, PayloadKind, PayloadTypes};
-use reth_primitives::Block;
 use std::{
     future::Future,
     pin::Pin,
@@ -86,7 +84,7 @@ impl PayloadJob for TestPayloadJob {
     fn best_payload(&self) -> Result<EthBuiltPayload, PayloadBuilderError> {
         Ok(EthBuiltPayload::new(
             self.attr.payload_id(),
-            Arc::new(Block::default().seal_slow()),
+            Arc::new(Default::default()),
             U256::ZERO,
             Some(ExecutedBlock::default()),
             Some(Default::default()),
