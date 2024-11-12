@@ -760,6 +760,18 @@ impl alloy_consensus::Transaction for Transaction {
         }
     }
 
+    fn kind(&self) -> TxKind {
+        match self {
+            Self::Legacy(tx) => tx.kind(),
+            Self::Eip2930(tx) => tx.kind(),
+            Self::Eip1559(tx) => tx.kind(),
+            Self::Eip4844(tx) => tx.kind(),
+            Self::Eip7702(tx) => tx.kind(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.kind(),
+        }
+    }
+
     fn value(&self) -> U256 {
         match self {
             Self::Legacy(tx) => tx.value(),
@@ -829,27 +841,6 @@ impl alloy_consensus::Transaction for Transaction {
             Self::Eip7702(tx) => tx.authorization_list(),
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => tx.authorization_list(),
-        }
-    }
-
-    fn is_dynamic_fee(&self) -> bool {
-        match self {
-            Self::Legacy(_) | Self::Eip2930(_) => false,
-            Self::Eip1559(_) | Self::Eip4844(_) | Self::Eip7702(_) => true,
-            #[cfg(feature = "optimism")]
-            Self::Deposit(_) => false,
-        }
-    }
-
-    fn kind(&self) -> TxKind {
-        match self {
-            Self::Legacy(tx) => tx.kind(),
-            Self::Eip2930(tx) => tx.kind(),
-            Self::Eip1559(tx) => tx.kind(),
-            Self::Eip4844(tx) => tx.kind(),
-            Self::Eip7702(tx) => tx.kind(),
-            #[cfg(feature = "optimism")]
-            Self::Deposit(tx) => tx.kind(),
         }
     }
 }
@@ -1494,6 +1485,10 @@ impl alloy_consensus::Transaction for TransactionSigned {
         self.deref().is_dynamic_fee()
     }
 
+    fn kind(&self) -> TxKind {
+        self.deref().kind()
+    }
+
     fn value(&self) -> U256 {
         self.deref().value()
     }
@@ -1516,10 +1511,6 @@ impl alloy_consensus::Transaction for TransactionSigned {
 
     fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
         self.deref().authorization_list()
-    }
-
-    fn kind(&self) -> TxKind {
-        self.deref().kind()
     }
 }
 
