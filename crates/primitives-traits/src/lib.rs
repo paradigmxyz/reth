@@ -54,7 +54,7 @@ pub use storage::StorageEntry;
 
 /// Transaction types
 pub mod tx_type;
-pub use tx_type::TxType;
+pub use tx_type::{FullTxType, TxType};
 
 /// Common header types
 pub mod header;
