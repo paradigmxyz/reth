@@ -8145,7 +8145,6 @@ dependencies = [
  "futures-util",
  "op-alloy-consensus",
  "proptest",
- "rayon",
  "reth-chainspec",
  "reth-cli",
  "reth-cli-commands",

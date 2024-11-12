@@ -55,7 +55,6 @@ alloy-rlp.workspace = true
 # misc
 futures-util.workspace = true
 derive_more = { workspace = true, optional = true }
-rayon.workspace = true
 serde = { workspace = true, optional = true }
 clap = { workspace = true, features = ["derive", "env"] }
 

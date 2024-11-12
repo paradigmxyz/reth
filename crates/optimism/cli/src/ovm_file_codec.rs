@@ -9,19 +9,14 @@ use alloy_eips::{
 };
 use alloy_primitives::{
     bytes::{Buf, BytesMut},
-    keccak256, Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256,
-    U256,
+    keccak256, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
 };
 use alloy_rlp::{Decodable, Error as RlpError, RlpDecodable};
 use derive_more::{AsRef, Deref};
 use op_alloy_consensus::TxDeposit;
-use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_downloaders::file_client::FileClientError;
 use reth_primitives::{
-    transaction::{
-        signature::{recover_signer, recover_signer_unchecked},
-        Transaction, TxType, PARALLEL_SENDER_RECOVERY_THRESHOLD,
-    },
+    transaction::{Transaction, TxType},
     Withdrawals,
 };
 use serde::{Deserialize, Serialize};
@@ -113,77 +108,6 @@ impl AsRef<Self> for TransactionSigned {
 
 // === impl TransactionSigned ===
 impl TransactionSigned {
-    /// Recover signer from signature and hash.
-    ///
-    /// Returns `None` if the transaction's signature is invalid following [EIP-2](https://eips.ethereum.org/EIPS/eip-2), see also [`recover_signer`].
-    ///
-    /// Note:
-    ///
-    /// This can fail for some early ethereum mainnet transactions pre EIP-2, use
-    /// [`Self::recover_signer_unchecked`] if you want to recover the signer without ensuring that
-    /// the signature has a low `s` value.
-    /// Optimism's Deposit transaction does not have a signature
-    pub fn recover_signer(&self) -> Option<Address> {
-        // For deposit transactions, directly return `from`the ` address
-        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from);
-        }
-        // For pre-bedrock system transactions with empty signatures, return zero address
-        if self.is_legacy() && self.signature == TxDeposit::signature() {
-            return Some(Address::ZERO);
-        }
-
-        let signature_hash = self.signature_hash();
-        recover_signer(&self.signature, signature_hash)
-    }
-
-    /// Recover signer from signature and hash _without ensuring that the signature has a low `s`
-    /// value_.
-    ///
-    /// Returns `None` if the transaction's signature is invalid, see also
-    /// [`recover_signer_unchecked`].
-    pub fn recover_signer_unchecked(&self) -> Option<Address> {
-        // Optimism's Deposit transaction does not have a signature. Directly return the
-        // `from` address.
-        #[cfg(feature = "optimism")]
-        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from);
-        }
-        let signature_hash = self.signature_hash();
-        recover_signer_unchecked(&self.signature, signature_hash)
-    }
-
-    /// Recovers a list of signers from a transaction list iterator.
-    ///
-    /// Returns `None`, if some transaction's signature is invalid, see also
-    /// [`Self::recover_signer`].
-    pub fn recover_signers<'a, T>(txes: T, num_txes: usize) -> Option<Vec<Address>>
-    where
-        T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self> + Send,
-    {
-        if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
-            txes.into_iter().map(|tx| tx.recover_signer()).collect()
-        } else {
-            txes.into_par_iter().map(|tx| tx.recover_signer()).collect()
-        }
-    }
-
-    /// Recovers a list of signers from a transaction list iterator _without ensuring that the
-    /// signature has a low `s` value_.
-    ///
-    /// Returns `None`, if some transaction's signature is invalid, see also
-    /// [`Self::recover_signer_unchecked`].
-    pub fn recover_signers_unchecked<'a, T>(txes: T, num_txes: usize) -> Option<Vec<Address>>
-    where
-        T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self>,
-    {
-        if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
-            txes.into_iter().map(|tx| tx.recover_signer_unchecked()).collect()
-        } else {
-            txes.into_par_iter().map(|tx| tx.recover_signer_unchecked()).collect()
-        }
-    }
-
     /// Calculate transaction hash, eip2728 transaction does not contain rlp header and start with
     /// tx type.
     pub fn recalculate_hash(&self) -> B256 {
@@ -337,12 +261,6 @@ impl alloy_consensus::Transaction for TransactionSigned {
     }
 }
 
-impl From<TransactionSignedEcRecovered> for TransactionSigned {
-    fn from(recovered: TransactionSignedEcRecovered) -> Self {
-        recovered.signed_transaction
-    }
-}
-
 impl Decodable for TransactionSigned {
     /// This `Decodable` implementation only supports decoding rlp encoded transactions as it's used
     /// by p2p.
@@ -432,72 +350,6 @@ impl Decodable2718 for TransactionSigned {
 
     fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
         Ok(Self::decode_rlp_legacy_transaction(buf)?)
-    }
-}
-
-/// Signed transaction with recovered signer.
-#[derive(Debug, Clone, PartialEq, Hash, Eq, AsRef, Deref)]
-pub struct TransactionSignedEcRecovered {
-    /// Signer of the transaction
-    signer: Address,
-    /// Signed transaction
-    #[deref]
-    #[as_ref]
-    signed_transaction: TransactionSigned,
-}
-
-// === impl TransactionSignedEcRecovered ===
-
-impl TransactionSignedEcRecovered {
-    /// Signer of transaction recovered from signature
-    pub const fn signer(&self) -> Address {
-        self.signer
-    }
-
-    /// Returns a reference to [`TransactionSigned`]
-    pub const fn as_signed(&self) -> &TransactionSigned {
-        &self.signed_transaction
-    }
-
-    /// Transform back to [`TransactionSigned`]
-    pub fn into_signed(self) -> TransactionSigned {
-        self.signed_transaction
-    }
-
-    /// Dissolve Self to its component
-    pub fn to_components(self) -> (TransactionSigned, Address) {
-        (self.signed_transaction, self.signer)
-    }
-
-    /// Create [`TransactionSignedEcRecovered`] from [`TransactionSigned`] and [`Address`] of the
-    /// signer.
-    #[inline]
-    pub const fn from_signed_transaction(
-        signed_transaction: TransactionSigned,
-        signer: Address,
-    ) -> Self {
-        Self { signed_transaction, signer }
-    }
-}
-
-impl Decodable for TransactionSignedEcRecovered {
-    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let signed_transaction = TransactionSigned::decode(buf)?;
-        let signer = match &signed_transaction.transaction {
-            // For deposit transactions, use from address
-            Transaction::Deposit(TxDeposit { from, .. }) => *from,
-
-            // For system transactions with empty signatures
-            tx if tx.is_legacy() && signed_transaction.signature == TxDeposit::signature() => {
-                Address::ZERO
-            }
-
-            // Normal signature recovery for other type of transactions
-            _ => signed_transaction
-                .recover_signer()
-                .ok_or(RlpError::Custom("Unable to recover decoded transaction signer."))?,
-        };
-        Ok(Self { signer, signed_transaction })
     }
 }
 
@@ -592,17 +444,5 @@ mod tests {
             system_decoded.hash,
             B256::from(hex!("e20b11349681dd049f8df32f5cdbb4c68d46b537685defcd86c7fa42cfe75b9e"))
         );
-    }
-
-    #[test]
-    fn test_recover_legacy_singer() {
-        // tx https://optimistic.etherscan.io/getRawTx?tx=0x7860252963a2df21113344f323035ef59648638a571eef742e33d789602c7a1c
-        let tx_bytes = hex!("f88881f0830f481c830c6e4594a75127121d28a9bf848f3b70e7eea26570aa770080a4b6b55f2500000000000000000000000000000000000000000000000000000000000710b238a0d5c622d92ddf37f9c18a3465a572f74d8b1aeaf50c1cfb10b3833242781fd45fa02c4f1d5819bf8b70bf651e7a063b7db63c55bd336799c6ae3e5bc72ad6ef3def");
-        let tx =
-            TransactionSigned::decode_rlp_legacy_transaction(&mut tx_bytes.as_slice()).unwrap();
-        assert!(tx.is_legacy());
-        let sender = tx.recover_signer().unwrap();
-        println!("Sender: {:?}", sender);
-        assert_eq!(sender, address!("6d74af94c8e72805ba3f7ce357a5b12ecb3ad71a"));
     }
 }
