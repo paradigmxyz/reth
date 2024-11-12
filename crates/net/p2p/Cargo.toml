@@ -14,6 +14,7 @@ workspace = true
 [dependencies]
 # reth
 reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 reth-eth-wire-types.workspace = true
 reth-consensus.workspace = true
 reth-network-peers.workspace = true
@@ -32,7 +33,6 @@ tokio = { workspace = true, features = ["sync"] }
 auto_impl.workspace = true
 tracing.workspace = true
 derive_more.workspace = true
-
 parking_lot = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -47,11 +47,13 @@ test-utils = [
 	"reth-consensus/test-utils",
 	"parking_lot",
 	"reth-network-types/test-utils",
-	"reth-primitives/test-utils"
+	"reth-primitives/test-utils",
+	"reth-primitives-traits/test-utils"
 ]
 std = [
 	"reth-consensus/std",
 	"reth-primitives/std",
 	"alloy-eips/std",
-	"alloy-primitives/std"
+	"alloy-primitives/std",
+	"reth-primitives-traits/std"
 ]
