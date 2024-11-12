@@ -1,6 +1,6 @@
 //! RPC errors specific to OP.
 
-use alloy_rpc_types_eth::error::EthRpcErrorCode;
+use alloy_rpc_types_eth::{error::EthRpcErrorCode, BlockError};
 use jsonrpsee_types::error::INTERNAL_ERROR_CODE;
 use reth_optimism_evm::OpBlockExecutionError;
 use reth_primitives::revm_primitives::{InvalidTransaction, OptimismInvalidTransaction};
@@ -111,5 +111,11 @@ impl From<SequencerClientError> for jsonrpsee_types::error::ErrorObject<'static>
             err.to_string(),
             None::<String>,
         )
+    }
+}
+
+impl From<BlockError> for OpEthApiError {
+    fn from(error: BlockError) -> Self {
+        Self::Eth(error.into())
     }
 }

@@ -29,6 +29,6 @@ pub trait Receipt:
     /// Returns transaction type.
     fn tx_type(&self) -> u8;
 
-    /// Calculates the receipts root of all receipts in a block.
+    /// Calculates the receipts root of the given receipts.
     fn receipts_root(receipts: &[&Self]) -> B256;
 }
