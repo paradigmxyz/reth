@@ -1,6 +1,9 @@
 //! Implementation specific Errors for the `eth_` namespace.
 
-use std::time::Duration;
+pub mod api;
+pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
+
+use core::time::Duration;
 
 use alloy_eips::BlockId;
 use alloy_primitives::{Address, Bytes, U256};

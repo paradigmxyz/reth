@@ -4,6 +4,7 @@ use alloy_consensus::{Signed, Transaction as _, TxEip4844Variant, TxEnvelope};
 use alloy_network::{Ethereum, Network};
 use alloy_rpc_types_eth::{Transaction, TransactionInfo};
 use reth_primitives::{TransactionSigned, TransactionSignedEcRecovered};
+use reth_rpc_eth_types::EthApiError;
 use reth_rpc_types_compat::TransactionCompat;
 
 /// Builds RPC transaction response for l1.
@@ -16,11 +17,13 @@ where
 {
     type Transaction = <Ethereum as Network>::TransactionResponse;
 
+    type Error = EthApiError;
+
     fn fill(
         &self,
         tx: TransactionSignedEcRecovered,
         tx_info: TransactionInfo,
-    ) -> Self::Transaction {
+    ) -> Result<Self::Transaction, Self::Error> {
         let from = tx.signer();
         let TransactionSigned { transaction, signature, hash } = tx.into_signed();
 
@@ -54,14 +57,14 @@ where
             })
             .unwrap_or_else(|| inner.max_fee_per_gas());
 
-        Transaction {
+        Ok(Transaction {
             inner,
             block_hash,
             block_number,
             transaction_index,
             from,
             effective_gas_price: Some(effective_gas_price),
-        }
+        })
     }
 
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
