@@ -151,8 +151,4 @@ impl<T: Block> Body for T {
     fn blob_versioned_hashes(&self) -> &[B256] {
         self.body().blob_versioned_hashes()
     }
-
-    fn size(&self) -> usize {
-        self.body().size()
-    }
 }
