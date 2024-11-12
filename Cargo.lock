@@ -8958,6 +8958,7 @@ dependencies = [
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
  "alloy-serde",
+ "jsonrpsee-types",
  "reth-primitives",
  "reth-trie-common",
  "serde",

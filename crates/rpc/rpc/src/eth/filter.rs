@@ -34,7 +34,7 @@ use tokio::{
     sync::{mpsc::Receiver, Mutex},
     time::MissedTickBehavior,
 };
-use tracing::trace;
+use tracing::{error, trace};
 
 /// The maximum number of headers we read at once when handling a range filter.
 const MAX_HEADERS_RANGE: u64 = 1_000; // with ~530bytes per header this is ~500kb
@@ -625,10 +625,15 @@ where
         let mut prepared_stream = self.txs_stream.lock().await;
 
         while let Ok(tx) = prepared_stream.try_recv() {
-            pending_txs.push(from_recovered(
-                tx.transaction.to_recovered_transaction(),
-                &self.tx_resp_builder,
-            ))
+            match from_recovered(tx.transaction.to_recovered_transaction(), &self.tx_resp_builder) {
+                Ok(tx) => pending_txs.push(tx),
+                Err(err) => {
+                    error!(target: "rpc",
+                        %err,
+                        "Failed to fill txn with block context"
+                    );
+                }
+            }
         }
         FilterChanges::Transactions(pending_txs)
     }
