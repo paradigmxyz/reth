@@ -12,6 +12,7 @@ use std::{
     task::{Context, Poll},
 };
 
+use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
 use rand::seq::SliceRandom;
 use reth_eth_wire::{
@@ -22,6 +23,7 @@ use reth_network_api::{DiscoveredEvent, DiscoveryEvent, PeerRequest, PeerRequest
 use reth_network_peers::PeerId;
 use reth_network_types::{PeerAddr, PeerKind};
 use reth_primitives::ForkId;
+use reth_primitives_traits::Block;
 use tokio::sync::oneshot;
 use tracing::{debug, trace};
 
@@ -78,7 +80,7 @@ pub struct NetworkState<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Manages connections to peers.
     peers_manager: PeersManager,
     /// Buffered messages until polled.
-    queued_messages: VecDeque<StateAction>,
+    queued_messages: VecDeque<StateAction<N>>,
     /// The client type that can interact with the chain.
     ///
     /// This type is used to fetch the block number after we established a session and received the
@@ -185,12 +187,12 @@ impl<N: NetworkPrimitives> NetworkState<N> {
     /// > the total number of peers) using the `NewBlock` message.
     ///
     /// See also <https://github.com/ethereum/devp2p/blob/master/caps/eth.md>
-    pub(crate) fn announce_new_block(&mut self, msg: NewBlockMessage) {
+    pub(crate) fn announce_new_block(&mut self, msg: NewBlockMessage<N::Block>) {
         // send a `NewBlock` message to a fraction of the connected peers (square root of the total
         // number of peers)
         let num_propagate = (self.active_peers.len() as f64).sqrt() as u64 + 1;
 
-        let number = msg.block.block.header.number;
+        let number = msg.block.block.header().number();
         let mut count = 0;
 
         // Shuffle to propagate to a random sample of peers on every block announcement
@@ -227,8 +229,8 @@ impl<N: NetworkPrimitives> NetworkState<N> {
 
     /// Completes the block propagation process started in [`NetworkState::announce_new_block()`]
     /// but sending `NewBlockHash` broadcast to all peers that haven't seen it yet.
-    pub(crate) fn announce_new_block_hash(&mut self, msg: NewBlockMessage) {
-        let number = msg.block.block.header.number;
+    pub(crate) fn announce_new_block_hash(&mut self, msg: NewBlockMessage<N::Block>) {
+        let number = msg.block.block.header().number();
         let hashes = NewBlockHashes(vec![BlockHashNumber { hash: msg.hash, number }]);
         for (peer_id, peer) in &mut self.active_peers {
             if peer.blocks.contains(&msg.hash) {
@@ -385,7 +387,10 @@ impl<N: NetworkPrimitives> NetworkState<N> {
     }
 
     /// Handle the outcome of processed response, for example directly queue another request.
-    fn on_block_response_outcome(&mut self, outcome: BlockResponseOutcome) -> Option<StateAction> {
+    fn on_block_response_outcome(
+        &mut self,
+        outcome: BlockResponseOutcome,
+    ) -> Option<StateAction<N>> {
         match outcome {
             BlockResponseOutcome::Request(peer, request) => {
                 self.handle_block_request(peer, request);
@@ -406,7 +411,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
         &mut self,
         peer: PeerId,
         resp: PeerResponseResult<N>,
-    ) -> Option<StateAction> {
+    ) -> Option<StateAction<N>> {
         match resp {
             PeerResponseResult::BlockHeaders(res) => {
                 let outcome = self.state_fetcher.on_block_headers_response(peer, res)?;
@@ -421,7 +426,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
     }
 
     /// Advances the state
-    pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<StateAction> {
+    pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<StateAction<N>> {
         loop {
             // drain buffered messages
             if let Some(message) = self.queued_messages.pop_front() {
@@ -515,13 +520,13 @@ pub(crate) struct ActivePeer<N: NetworkPrimitives> {
 
 /// Message variants triggered by the [`NetworkState`]
 #[derive(Debug)]
-pub(crate) enum StateAction {
+pub(crate) enum StateAction<N: NetworkPrimitives> {
     /// Dispatch a `NewBlock` message to the peer
     NewBlock {
         /// Target of the message
         peer_id: PeerId,
         /// The `NewBlock` message
-        block: NewBlockMessage,
+        block: NewBlockMessage<N::Block>,
     },
     NewBlockHashes {
         /// Target of the message

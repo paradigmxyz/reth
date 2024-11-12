@@ -16,6 +16,7 @@ workspace = true
 reth-chainspec.workspace = true
 reth-fs-util.workspace = true
 reth-primitives = { workspace = true, features = ["secp256k1"] }
+reth-primitives-traits.workspace = true
 reth-net-banlist.workspace = true
 reth-network-api.workspace = true
 reth-network-p2p.workspace = true

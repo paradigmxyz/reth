@@ -7349,6 +7349,7 @@ dependencies = [
  "reth-chainspec",
  "reth-codecs-derive",
  "reth-primitives",
+ "reth-primitives-traits",
  "serde",
  "thiserror",
 ]
@@ -7784,6 +7785,7 @@ dependencies = [
  "reth-network-peers",
  "reth-network-types",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-storage-api",
  "reth-tasks",
