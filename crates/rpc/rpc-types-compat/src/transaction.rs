@@ -45,7 +45,7 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + fmt::Debug {
         + fmt::Debug;
 
     /// RPC transaction error type.
-    type Error: error::Error;
+    type Error: error::Error + Into<jsonrpsee_types::ErrorObject<'static>>;
 
     /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
     /// environment related fields to `None`.
