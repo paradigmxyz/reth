@@ -20,7 +20,7 @@ pub use crate::events::{Events, PayloadEvents};
 mod traits;
 pub use traits::{
     BuiltPayload, PayloadAttributes, PayloadAttributesBuilder, PayloadBuilder,
-    PayloadBuilderAttributes,
+    PayloadBuilderAttributes, PayloadStoreExt,
 };
 
 mod payload;

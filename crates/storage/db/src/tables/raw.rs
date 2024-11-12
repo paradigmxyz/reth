@@ -14,6 +14,7 @@ pub struct RawTable<T: Table> {
 
 impl<T: Table> Table for RawTable<T> {
     const NAME: &'static str = T::NAME;
+    const DUPSORT: bool = false;
 
     type Key = RawKey<T::Key>;
     type Value = RawValue<T::Value>;
@@ -28,6 +29,7 @@ pub struct RawDupSort<T: DupSort> {
 
 impl<T: DupSort> Table for RawDupSort<T> {
     const NAME: &'static str = T::NAME;
+    const DUPSORT: bool = true;
 
     type Key = RawKey<T::Key>;
     type Value = RawValue<T::Value>;

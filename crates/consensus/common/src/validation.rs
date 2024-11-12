@@ -4,7 +4,9 @@ use alloy_consensus::constants::MAXIMUM_EXTRA_DATA_SIZE;
 use alloy_eips::eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::ConsensusError;
-use reth_primitives::{EthereumHardfork, GotExpected, Header, SealedBlock, SealedHeader};
+use reth_primitives::{
+    BlockBody, EthereumHardfork, GotExpected, Header, SealedBlock, SealedHeader,
+};
 use revm_primitives::calc_excess_blob_gas;
 
 /// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
@@ -70,6 +72,49 @@ pub fn validate_cancun_gas(block: &SealedBlock) -> Result<(), ConsensusError> {
             expected: total_blob_gas,
         }));
     }
+    Ok(())
+}
+
+/// Ensures the block response data matches the header.
+///
+/// This ensures the body response items match the header's hashes:
+///   - ommer hash
+///   - transaction root
+///   - withdrawals root
+pub fn validate_body_against_header(
+    body: &BlockBody,
+    header: &SealedHeader,
+) -> Result<(), ConsensusError> {
+    let ommers_hash = body.calculate_ommers_root();
+    if header.ommers_hash != ommers_hash {
+        return Err(ConsensusError::BodyOmmersHashDiff(
+            GotExpected { got: ommers_hash, expected: header.ommers_hash }.into(),
+        ))
+    }
+
+    let tx_root = body.calculate_tx_root();
+    if header.transactions_root != tx_root {
+        return Err(ConsensusError::BodyTransactionRootDiff(
+            GotExpected { got: tx_root, expected: header.transactions_root }.into(),
+        ))
+    }
+
+    match (header.withdrawals_root, &body.withdrawals) {
+        (Some(header_withdrawals_root), Some(withdrawals)) => {
+            let withdrawals = withdrawals.as_slice();
+            let withdrawals_root = reth_primitives::proofs::calculate_withdrawals_root(withdrawals);
+            if withdrawals_root != header_withdrawals_root {
+                return Err(ConsensusError::BodyWithdrawalsRootDiff(
+                    GotExpected { got: withdrawals_root, expected: header_withdrawals_root }.into(),
+                ))
+            }
+        }
+        (None, None) => {
+            // this is ok because we assume the fork is not active in this case
+        }
+        _ => return Err(ConsensusError::WithdrawalsRootUnexpected),
+    }
+
     Ok(())
 }
 

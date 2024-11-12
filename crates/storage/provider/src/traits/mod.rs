@@ -26,14 +26,8 @@ pub use hashing::HashingWriter;
 mod trie;
 pub use trie::{StorageTrieWriter, TrieWriter};
 
-mod history;
-pub use history::HistoryWriter;
-
 mod static_file_provider;
 pub use static_file_provider::StaticFileProviderFactory;
-
-mod stats;
-pub use stats::StatsReader;
 
 mod full;
 pub use full::{FullProvider, FullRpcProvider};

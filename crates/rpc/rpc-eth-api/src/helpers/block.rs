@@ -64,8 +64,7 @@ pub trait EthBlocks: LoadBlock {
                 full.into(),
                 Some(block_hash),
                 self.tx_resp_builder(),
-            )
-            .map_err(Self::Error::from_eth_err)?;
+            )?;
             Ok(Some(block))
         }
     }

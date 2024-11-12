@@ -1129,7 +1129,8 @@ mod tests {
 
         let bundle = state.take_bundle();
 
-        let outcome = ExecutionOutcome::new(bundle, Receipts::default(), 1, Vec::new());
+        let outcome: ExecutionOutcome =
+            ExecutionOutcome::new(bundle, Receipts::default(), 1, Vec::new());
         let mut writer = UnifiedStorageWriter::from_database(&provider);
         writer
             .write_to_storage(outcome, OriginalValuesKnown::Yes)
@@ -1375,7 +1376,7 @@ mod tests {
 
     #[test]
     fn revert_to_indices() {
-        let base = ExecutionOutcome {
+        let base: ExecutionOutcome = ExecutionOutcome {
             bundle: BundleState::default(),
             receipts: vec![vec![Some(Receipt::default()); 2]; 7].into(),
             first_block: 10,
@@ -1441,7 +1442,7 @@ mod tests {
             assert_eq!(
                 StateRoot::overlay_root(
                     tx,
-                    ExecutionOutcome::new(
+                    ExecutionOutcome::<Receipt>::new(
                         state.bundle_state.clone(),
                         Receipts::default(),
                         0,
@@ -1592,7 +1593,7 @@ mod tests {
             .build();
         assert_eq!(previous_state.reverts.len(), 1);
 
-        let mut test = ExecutionOutcome {
+        let mut test: ExecutionOutcome = ExecutionOutcome {
             bundle: present_state,
             receipts: vec![vec![Some(Receipt::default()); 2]; 1].into(),
             first_block: 2,

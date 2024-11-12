@@ -9,6 +9,7 @@ use reth_network_p2p::{
 };
 use reth_network_peers::{PeerId, WithPeerId};
 use reth_primitives::{BlockBody, GotExpected, SealedBlock, SealedHeader};
+use reth_primitives_traits::InMemorySize;
 use std::{
     collections::VecDeque,
     mem,
@@ -38,7 +39,7 @@ use std::{
 /// and eventually disconnected.
 pub(crate) struct BodiesRequestFuture<B: BodiesClient> {
     client: Arc<B>,
-    consensus: Arc<dyn Consensus>,
+    consensus: Arc<dyn Consensus<reth_primitives::Header, B::Body>>,
     metrics: BodyDownloaderMetrics,
     /// Metrics for individual responses. This can be used to observe how the size (in bytes) of
     /// responses change while bodies are being downloaded.
@@ -46,7 +47,7 @@ pub(crate) struct BodiesRequestFuture<B: BodiesClient> {
     // Headers to download. The collection is shrunk as responses are buffered.
     pending_headers: VecDeque<SealedHeader>,
     /// Internal buffer for all blocks
-    buffer: Vec<BlockResponse>,
+    buffer: Vec<BlockResponse<B::Body>>,
     fut: Option<B::Output>,
     /// Tracks how many bodies we requested in the last request.
     last_request_len: Option<usize>,
@@ -59,7 +60,7 @@ where
     /// Returns an empty future. Use [`BodiesRequestFuture::with_headers`] to set the request.
     pub(crate) fn new(
         client: Arc<B>,
-        consensus: Arc<dyn Consensus>,
+        consensus: Arc<dyn Consensus<reth_primitives::Header, B::Body>>,
         metrics: BodyDownloaderMetrics,
     ) -> Self {
         Self {
@@ -114,7 +115,10 @@ where
 
     /// Process block response.
     /// Returns an error if the response is invalid.
-    fn on_block_response(&mut self, response: WithPeerId<Vec<BlockBody>>) -> DownloadResult<()> {
+    fn on_block_response(&mut self, response: WithPeerId<Vec<B::Body>>) -> DownloadResult<()>
+    where
+        B::Body: InMemorySize,
+    {
         let (peer_id, bodies) = response.split();
         let request_len = self.last_request_len.unwrap_or_default();
         let response_len = bodies.len();
@@ -157,7 +161,10 @@ where
     ///
     /// This method removes headers from the internal collection.
     /// If the response fails validation, then the header will be put back.
-    fn try_buffer_blocks(&mut self, bodies: Vec<BlockBody>) -> DownloadResult<()> {
+    fn try_buffer_blocks(&mut self, bodies: Vec<B::Body>) -> DownloadResult<()>
+    where
+        B::Body: InMemorySize,
+    {
         let bodies_capacity = bodies.capacity();
         let bodies_len = bodies.len();
         let mut bodies = bodies.into_iter().peekable();
@@ -207,9 +214,9 @@ where
 
 impl<B> Future for BodiesRequestFuture<B>
 where
-    B: BodiesClient + 'static,
+    B: BodiesClient<Body: InMemorySize> + 'static,
 {
-    type Output = DownloadResult<Vec<BlockResponse>>;
+    type Output = DownloadResult<Vec<BlockResponse<B::Body>>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();

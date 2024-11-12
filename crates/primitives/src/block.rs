@@ -6,6 +6,7 @@ use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
 pub use reth_primitives_traits::test_utils::{generate_valid_header, valid_header_strategy};
+use reth_primitives_traits::InMemorySize;
 use serde::{Deserialize, Serialize};
 
 /// Ethereum full block.
@@ -84,10 +85,25 @@ impl Block {
         let senders = self.senders()?;
         Some(BlockWithSenders { block: self, senders })
     }
+}
 
+impl reth_primitives_traits::Block for Block {
+    type Header = Header;
+    type Body = BlockBody;
+
+    fn body(&self) -> &Self::Body {
+        &self.body
+    }
+
+    fn header(&self) -> &Self::Header {
+        &self.header
+    }
+}
+
+impl InMemorySize for Block {
     /// Calculates a heuristic for the in-memory size of the [`Block`].
     #[inline]
-    pub fn size(&self) -> usize {
+    fn size(&self) -> usize {
         self.header.size() + self.body.size()
     }
 }
@@ -256,22 +272,21 @@ impl BlockWithSenders {
 /// Sealed Ethereum full block.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
-#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp, 32))]
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Deref, DerefMut)]
-pub struct SealedBlock {
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Deref, DerefMut)]
+pub struct SealedBlock<H = Header, B = BlockBody> {
     /// Locked block header.
     #[deref]
     #[deref_mut]
-    pub header: SealedHeader,
+    pub header: SealedHeader<H>,
     /// Block body.
-    pub body: BlockBody,
+    pub body: B,
 }
 
-impl SealedBlock {
+impl<H, B> SealedBlock<H, B> {
     /// Create a new sealed block instance using the sealed header and block body.
     #[inline]
-    pub const fn new(header: SealedHeader, body: BlockBody) -> Self {
+    pub const fn new(header: SealedHeader<H>, body: B) -> Self {
         Self { header, body }
     }
 
@@ -281,16 +296,18 @@ impl SealedBlock {
         self.header.hash()
     }
 
+    /// Splits the [`BlockBody`] and [`SealedHeader`] into separate components
+    #[inline]
+    pub fn split_header_body(self) -> (SealedHeader<H>, B) {
+        (self.header, self.body)
+    }
+}
+
+impl SealedBlock {
     /// Splits the sealed block into underlying components
     #[inline]
     pub fn split(self) -> (SealedHeader, Vec<TransactionSigned>, Vec<Header>) {
         (self.header, self.body.transactions, self.body.ommers)
-    }
-
-    /// Splits the [`BlockBody`] and [`SealedHeader`] into separate components
-    #[inline]
-    pub fn split_header_body(self) -> (SealedHeader, BlockBody) {
-        (self.header, self.body)
     }
 
     /// Returns an iterator over all blob transactions of the block
@@ -375,12 +392,6 @@ impl SealedBlock {
         Block { header: self.header.unseal(), body: self.body }
     }
 
-    /// Calculates a heuristic for the in-memory size of the [`SealedBlock`].
-    #[inline]
-    pub fn size(&self) -> usize {
-        self.header.size() + self.body.size()
-    }
-
     /// Calculates the total gas used by blob transactions in the sealed block.
     pub fn blob_gas_used(&self) -> u64 {
         self.blob_transactions().iter().filter_map(|tx| tx.blob_gas_used()).sum()
@@ -430,9 +441,37 @@ impl SealedBlock {
     }
 }
 
+impl<H: InMemorySize, B: InMemorySize> InMemorySize for SealedBlock<H, B> {
+    #[inline]
+    fn size(&self) -> usize {
+        self.header.size() + self.body.size()
+    }
+}
+
 impl From<SealedBlock> for Block {
     fn from(block: SealedBlock) -> Self {
         block.unseal()
+    }
+}
+
+impl<H, B> Default for SealedBlock<H, B>
+where
+    SealedHeader<H>: Default,
+    B: Default,
+{
+    fn default() -> Self {
+        Self { header: Default::default(), body: Default::default() }
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a, H, B> arbitrary::Arbitrary<'a> for SealedBlock<H, B>
+where
+    SealedHeader<H>: arbitrary::Arbitrary<'a>,
+    B: arbitrary::Arbitrary<'a>,
+{
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self { header: u.arbitrary()?, body: u.arbitrary()? })
     }
 }
 
@@ -503,7 +542,7 @@ impl SealedBlockWithSenders {
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for SealedBlockWithSenders {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let block = SealedBlock::arbitrary(u)?;
+        let block: SealedBlock = SealedBlock::arbitrary(u)?;
 
         let senders = block
             .body
@@ -603,10 +642,12 @@ impl BlockBody {
     pub fn transactions(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
         self.transactions.iter()
     }
+}
 
+impl InMemorySize for BlockBody {
     /// Calculates a heuristic for the in-memory size of the [`BlockBody`].
     #[inline]
-    pub fn size(&self) -> usize {
+    fn size(&self) -> usize {
         self.transactions.iter().map(TransactionSigned::size).sum::<usize>() +
             self.transactions.capacity() * core::mem::size_of::<TransactionSigned>() +
             self.ommers.iter().map(Header::size).sum::<usize>() +
@@ -1083,7 +1124,7 @@ mod tests {
 
     #[test]
     fn test_default_seal() {
-        let block = SealedBlock::default();
+        let block: SealedBlock = SealedBlock::default();
         let sealed = block.hash();
         let block = block.unseal();
         let block = block.seal_slow();
