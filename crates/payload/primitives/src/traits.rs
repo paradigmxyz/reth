@@ -7,11 +7,12 @@ use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
 use reth_chain_state::ExecutedBlock;
 use reth_primitives::SealedBlock;
+use std::fmt::Debug;
 use tokio::sync::oneshot;
 
 /// A type that can request, subscribe to and resolve payloads.
 #[async_trait::async_trait]
-pub trait PayloadBuilder: Send + Sync + Unpin {
+pub trait PayloadBuilder: Debug + Send + Sync + Unpin {
     /// The Payload type for the builder.
     type PayloadType: PayloadTypes;
     /// The error type returned by the builder.

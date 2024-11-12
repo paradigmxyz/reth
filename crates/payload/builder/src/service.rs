@@ -32,7 +32,7 @@ type PayloadFuture<P> = Pin<Box<dyn Future<Output = Result<P, PayloadBuilderErro
 /// A communication channel to the [`PayloadBuilderService`] that can retrieve payloads.
 #[derive(Debug)]
 pub struct PayloadStore<T: PayloadTypes> {
-    inner: PayloadBuilderHandle<T>,
+    inner: Box<dyn PayloadBuilder<PayloadType = T, Error = PayloadBuilderError>>,
 }
 
 // === impl PayloadStore ===
@@ -82,12 +82,15 @@ where
     }
 }
 
-impl<T> Clone for PayloadStore<T>
+impl<T> PayloadStore<T>
 where
     T: PayloadTypes,
 {
-    fn clone(&self) -> Self {
-        Self { inner: self.inner.clone() }
+    /// Create a new instance
+    pub fn new(
+        inner: Box<dyn PayloadBuilder<PayloadType = T, Error = PayloadBuilderError>>,
+    ) -> Self {
+        Self { inner }
     }
 }
 
@@ -96,7 +99,7 @@ where
     T: PayloadTypes,
 {
     fn from(inner: PayloadBuilderHandle<T>) -> Self {
-        Self { inner }
+        Self::new(Box::new(inner))
     }
 }
 
