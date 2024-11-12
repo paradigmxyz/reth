@@ -552,7 +552,8 @@ hyper-util = "0.1.5"
 pin-project = "1.0.12"
 reqwest = { version = "0.12", default-features = false }
 tower = "0.4"
-tower-http = "0.5"
+tower-http = "0.6"
+
 
 # p2p
 discv5 = "0.8.0"
@@ -567,6 +568,7 @@ jsonrpsee-types = "0.24"
 # http
 http = "1.0"
 http-body = "1.0"
+http-body-util = "0.1.2"
 jsonwebtoken = "9"
 proptest-arbitrary-interop = "0.1.0"
 
