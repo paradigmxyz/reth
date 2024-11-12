@@ -12,12 +12,13 @@ use futures_util::{future::FutureExt, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
 use reth_payload_primitives::{
     BuiltPayload, Events, PayloadBuilder, PayloadBuilderAttributes, PayloadBuilderError,
-    PayloadEvents, PayloadKind, PayloadTypes,
+    PayloadEvents, PayloadKind, PayloadStoreExt, PayloadTypes,
 };
 use std::{
     fmt,
     future::Future,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 use tokio::sync::{
@@ -30,12 +31,13 @@ use tracing::{debug, info, trace, warn};
 type PayloadFuture<P> = Pin<Box<dyn Future<Output = Result<P, PayloadBuilderError>> + Send + Sync>>;
 
 /// A communication channel to the [`PayloadBuilderService`] that can retrieve payloads.
+///
+/// This type is intended to be used to retrieve payloads from the service (e.g. from the engine
+/// API).
 #[derive(Debug)]
 pub struct PayloadStore<T: PayloadTypes> {
-    inner: PayloadBuilderHandle<T>,
+    inner: Arc<dyn PayloadStoreExt<T>>,
 }
-
-// === impl PayloadStore ===
 
 impl<T> PayloadStore<T>
 where
@@ -82,12 +84,16 @@ where
     }
 }
 
-impl<T> Clone for PayloadStore<T>
+impl<T> PayloadStore<T>
 where
     T: PayloadTypes,
 {
-    fn clone(&self) -> Self {
-        Self { inner: self.inner.clone() }
+    /// Create a new instance
+    pub fn new<P>(inner: P) -> Self
+    where
+        P: PayloadStoreExt<T> + 'static,
+    {
+        Self { inner: Arc::new(inner) }
     }
 }
 
@@ -96,7 +102,7 @@ where
     T: PayloadTypes,
 {
     fn from(inner: PayloadBuilderHandle<T>) -> Self {
-        Self { inner }
+        Self::new(inner)
     }
 }
 
