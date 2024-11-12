@@ -46,8 +46,8 @@ pub use reth_chain_state::{
     CanonStateNotifications, CanonStateSubscriptions,
 };
 
-// reexport HistoryWriter trait
-pub use reth_storage_api::HistoryWriter;
+// reexport traits to avoid breaking changes
+pub use reth_storage_api::{HistoryWriter, StatsReader};
 
 pub(crate) fn to_range<R: std::ops::RangeBounds<u64>>(bounds: R) -> std::ops::Range<u64> {
     let start = match bounds.start_bound() {
