@@ -9,7 +9,7 @@ use alloy_eips::eip7685::Requests;
 use alloy_primitives::{Address, B256};
 use reth_codecs::Compact;
 
-use crate::{BlockBody, BlockHeader, Body, FullBlockBody, FullBlockHeader};
+use crate::{BlockBody, BlockHeader, Body, FullBlockBody, FullBlockHeader, InMemorySize};
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
 pub trait FullBlock: Block<Header: FullBlockHeader, Body: FullBlockBody> + Compact {}
@@ -40,7 +40,7 @@ pub trait Block:
         Ommer = Self::Header,
         SignedTransaction = <Self::Body as Body>::SignedTransaction,
         Withdrawals = <Self::Body as Body>::Withdrawals,
-    >
+    > + InMemorySize
 {
     /// Header part of the block.
     type Header: BlockHeader;
@@ -109,9 +109,6 @@ pub trait Block:
     /// Returns `None` if a transaction is invalid.
     // todo: can be default impl with <https://github.com/paradigmxyz/reth/issues/11449>
     fn with_recovered_senders(self) -> Option<Self::BlockWithSenders<Self>>;
-
-    /// Calculates a heuristic for the in-memory size of the [`Block`].
-    fn size(&self) -> usize;
 }
 
 impl<T: Block> Body for T {

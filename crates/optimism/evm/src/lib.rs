@@ -820,7 +820,7 @@ mod tests {
         };
 
         // Create an empty Receipts object
-        let receipts_empty = Receipts { receipt_vec: vec![] };
+        let receipts_empty = Receipts::<Receipt> { receipt_vec: vec![] };
 
         // Define the first block number
         let first_block = 123;

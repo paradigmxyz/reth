@@ -7,8 +7,8 @@ use alloy_primitives::{Address, B256};
 use reth_codecs::Compact;
 
 use crate::{
-    AlloyTransactionExt, Block, BlockHeader, FullBlockHeader, FullSignedTx, SignedTransaction,
-    TxType,
+    AlloyTransactionExt, Block, BlockHeader, FullBlockHeader, FullSignedTx, InMemorySize,
+    SignedTransaction, TxType,
 };
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
@@ -37,6 +37,7 @@ pub trait BlockBody:
     + alloy_rlp::Encodable
     + alloy_rlp::Decodable
     + Body
+    + InMemorySize
 {
     /// Create a [`Block`] from the body and its header.
     fn into_block<T: Block<Header = Self::Ommer, Body = Self>>(self, header: Self::Ommer) -> T {
@@ -105,7 +106,4 @@ pub trait Body {
 
     /// Returns all blob versioned hashes from the block body.
     fn blob_versioned_hashes(&self) -> &[B256];
-
-    /// Calculates a heuristic for the in-memory size of the [`BlockBody`].
-    fn size(&self) -> usize;
 }

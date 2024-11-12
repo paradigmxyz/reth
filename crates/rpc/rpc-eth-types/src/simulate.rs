@@ -21,8 +21,9 @@ use revm::{db::CacheDB, Database};
 use revm_primitives::{keccak256, Address, BlockEnv, Bytes, ExecutionResult, TxKind, B256, U256};
 
 use crate::{
-    cache::db::StateProviderTraitObjWrapper, error::ToRpcError, EthApiError, RevertError,
-    RpcInvalidTransactionError,
+    cache::db::StateProviderTraitObjWrapper,
+    error::{api::FromEthApiError, ToRpcError},
+    EthApiError, RevertError, RpcInvalidTransactionError,
 };
 
 /// Errors which may occur during `eth_simulateV1` execution.
@@ -170,7 +171,7 @@ where
 
 /// Handles outputs of the calls execution and builds a [`SimulatedBlock`].
 #[expect(clippy::complexity)]
-pub fn build_block<T: TransactionCompat>(
+pub fn build_block<T: TransactionCompat<Error: FromEthApiError>>(
     results: Vec<(Address, ExecutionResult)>,
     transactions: Vec<TransactionSigned>,
     block_env: &BlockEnv,
@@ -179,7 +180,7 @@ pub fn build_block<T: TransactionCompat>(
     full_transactions: bool,
     db: &CacheDB<StateProviderDatabase<StateProviderTraitObjWrapper<'_>>>,
     tx_resp_builder: &T,
-) -> Result<SimulatedBlock<Block<T::Transaction>>, EthApiError> {
+) -> Result<SimulatedBlock<Block<T::Transaction>>, T::Error> {
     let mut calls: Vec<SimCallResult> = Vec::with_capacity(results.len());
     let mut senders = Vec::with_capacity(results.len());
     let mut receipts = Vec::with_capacity(results.len());
@@ -272,7 +273,7 @@ pub fn build_block<T: TransactionCompat>(
         }
     }
 
-    let state_root = db.db.state_root(hashed_state)?;
+    let state_root = db.db.state_root(hashed_state).map_err(T::Error::from_eth_err)?;
 
     let header = reth_primitives::Header {
         beneficiary: block_env.coinbase,

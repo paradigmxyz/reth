@@ -54,7 +54,7 @@ pub use storage::StorageEntry;
 
 /// Transaction types
 pub mod tx_type;
-pub use tx_type::TxType;
+pub use tx_type::{FullTxType, TxType};
 
 /// Common header types
 pub mod header;
@@ -73,6 +73,14 @@ pub use header::{Header, HeaderError, SealedHeader};
 pub mod serde_bincode_compat {
     pub use super::header::{serde_bincode_compat as header, serde_bincode_compat::*};
 }
+
+/// Heuristic size trait
+pub mod size;
+pub use size::InMemorySize;
+
+/// Node traits
+pub mod node;
+pub use node::{FullNodePrimitives, NodePrimitives};
 
 /// Helper trait that requires arbitrary implementation if the feature is enabled.
 #[cfg(any(feature = "test-utils", feature = "arbitrary"))]

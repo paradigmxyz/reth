@@ -16,7 +16,6 @@ workspace = true
 reth-primitives-traits.workspace = true
 reth-ethereum-forks.workspace = true
 reth-static-file-types.workspace = true
-reth-trie-common.workspace = true
 revm-primitives = { workspace = true, features = ["serde"] }
 reth-codecs = { workspace = true, optional = true }
 
@@ -28,6 +27,7 @@ alloy-rlp = { workspace = true, features = ["arrayvec"] }
 alloy-rpc-types = { workspace = true, optional = true }
 alloy-serde = { workspace = true, optional = true }
 alloy-eips = { workspace = true, features = ["serde"] }
+alloy-trie = { workspace = true, features = ["serde"] }
 
 # optimism
 op-alloy-rpc-types = { workspace = true, optional = true }
@@ -66,6 +66,7 @@ reth-chainspec.workspace = true
 reth-codecs = { workspace = true, features = ["test-utils"] }
 reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
 reth-testing-utils.workspace = true
+reth-trie-common.workspace = true
 revm-primitives = { workspace = true, features = ["arbitrary"] }
 
 alloy-eips = { workspace = true, features = ["arbitrary"] }
@@ -102,6 +103,7 @@ std = [
 	"revm-primitives/std",
 	"secp256k1?/std",
 	"serde/std",
+	"alloy-trie/std"
 ]
 reth-codec = ["dep:reth-codecs", "dep:zstd", "dep:modular-bitfield", "std"]
 asm-keccak = ["alloy-primitives/asm-keccak", "revm-primitives/asm-keccak"]
@@ -115,14 +117,15 @@ arbitrary = [
 	"revm-primitives/arbitrary",
 	"secp256k1",
 	"reth-chainspec/arbitrary",
-	"reth-trie-common/arbitrary",
 	"alloy-consensus/arbitrary",
 	"alloy-primitives/arbitrary",
 	"alloy-rpc-types?/arbitrary",
 	"alloy-serde?/arbitrary",
 	"op-alloy-consensus?/arbitrary",
 	"op-alloy-rpc-types?/arbitrary",
-	"reth-codecs?/arbitrary"
+	"reth-codecs?/arbitrary",
+	"alloy-trie/arbitrary",
+	"reth-trie-common/arbitrary"
 ]
 secp256k1 = ["dep:secp256k1"]
 c-kzg = [

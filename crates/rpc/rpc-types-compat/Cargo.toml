@@ -27,6 +27,7 @@ alloy-consensus.workspace = true
 
 # io
 serde.workspace = true
+jsonrpsee-types.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

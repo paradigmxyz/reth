@@ -8,14 +8,13 @@ use alloy_primitives::B256;
 use reth_codecs::Compact;
 use serde::{Deserialize, Serialize};
 
-use crate::{MaybeArbitrary, TxType};
+use crate::{InMemorySize, MaybeArbitrary, TxType};
 
 /// Helper trait that unifies all behaviour required by transaction to support full node operations.
 pub trait FullTransaction: Transaction + Compact {}
 
 impl<T> FullTransaction for T where T: Transaction + Compact {}
 
-#[allow(dead_code)]
 /// Abstraction of a transaction.
 pub trait Transaction:
     Send
@@ -30,6 +29,7 @@ pub trait Transaction:
     + Serialize
     + for<'de> Deserialize<'de>
     + AlloyTransactionExt
+    + InMemorySize
     + MaybeArbitrary
 {
 }
@@ -47,6 +47,7 @@ impl<T> Transaction for T where
         + Serialize
         + for<'de> Deserialize<'de>
         + AlloyTransactionExt
+        + InMemorySize
         + MaybeArbitrary
 {
 }
@@ -60,14 +61,8 @@ pub trait AlloyTransactionExt: alloy_consensus::Transaction {
     /// It is only for signature signing or signer recovery.
     fn signature_hash(&self) -> B256;
 
-    /// Returns `true` if the tx supports dynamic fees
-    fn is_dynamic_fee(&self) -> bool;
-
     /// Returns the effective gas price for the given base fee.
     fn effective_gas_price(&self, base_fee: Option<u64>) -> u128;
-
-    /// Calculates a heuristic for the in-memory size of the transaction.
-    fn size(&self) -> usize;
 
     /// Returns the transaction type.
     fn tx_type(&self) -> Self::Type {

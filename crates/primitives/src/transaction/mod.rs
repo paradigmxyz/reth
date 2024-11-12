@@ -24,6 +24,7 @@ use once_cell::sync::Lazy as LazyLock;
 #[cfg(feature = "optimism")]
 use op_alloy_consensus::DepositTransaction;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+use reth_primitives_traits::InMemorySize;
 use serde::{Deserialize, Serialize};
 use signature::decode_with_eip155_chain_id;
 #[cfg(feature = "std")]
@@ -472,20 +473,6 @@ impl Transaction {
         }
     }
 
-    /// Calculates a heuristic for the in-memory size of the [Transaction].
-    #[inline]
-    pub fn size(&self) -> usize {
-        match self {
-            Self::Legacy(tx) => tx.size(),
-            Self::Eip2930(tx) => tx.size(),
-            Self::Eip1559(tx) => tx.size(),
-            Self::Eip4844(tx) => tx.size(),
-            Self::Eip7702(tx) => tx.size(),
-            #[cfg(feature = "optimism")]
-            Self::Deposit(tx) => tx.size(),
-        }
-    }
-
     /// Returns true if the transaction is a legacy transaction.
     #[inline]
     pub const fn is_legacy(&self) -> bool {
@@ -553,6 +540,22 @@ impl Transaction {
         match self {
             Self::Eip7702(tx) => Some(tx),
             _ => None,
+        }
+    }
+}
+
+impl InMemorySize for Transaction {
+    /// Calculates a heuristic for the in-memory size of the [Transaction].
+    #[inline]
+    fn size(&self) -> usize {
+        match self {
+            Self::Legacy(tx) => tx.size(),
+            Self::Eip2930(tx) => tx.size(),
+            Self::Eip1559(tx) => tx.size(),
+            Self::Eip4844(tx) => tx.size(),
+            Self::Eip7702(tx) => tx.size(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.size(),
         }
     }
 }
@@ -820,6 +823,15 @@ impl alloy_consensus::Transaction for Transaction {
         }
     }
 
+    fn is_dynamic_fee(&self) -> bool {
+        match self {
+            Self::Legacy(_) | Self::Eip2930(_) => false,
+            Self::Eip1559(_) | Self::Eip4844(_) | Self::Eip7702(_) => true,
+            #[cfg(feature = "optimism")]
+            Self::Deposit(_) => false,
+        }
+    }
+
     fn kind(&self) -> TxKind {
         match self {
             Self::Legacy(tx) => tx.kind(),
@@ -848,15 +860,6 @@ impl AlloyTransactionExt for Transaction {
         }
     }
 
-    fn is_dynamic_fee(&self) -> bool {
-        match self {
-            Self::Legacy(_) | Self::Eip2930(_) => false,
-            Self::Eip1559(_) | Self::Eip4844(_) | Self::Eip7702(_) => true,
-            #[cfg(feature = "optimism")]
-            _ => todo!("use op type for op"),
-        }
-    }
-
     fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
         match self {
             Self::Legacy(tx) => tx.gas_price,
@@ -864,19 +867,6 @@ impl AlloyTransactionExt for Transaction {
             Self::Eip1559(dynamic_tx) => dynamic_tx.effective_gas_price(base_fee),
             Self::Eip4844(dynamic_tx) => dynamic_tx.effective_gas_price(base_fee),
             Self::Eip7702(dynamic_tx) => dynamic_tx.effective_gas_price(base_fee),
-            #[cfg(feature = "optimism")]
-            _ => todo!("use op type for op"),
-        }
-    }
-
-    #[inline]
-    fn size(&self) -> usize {
-        match self {
-            Self::Legacy(tx) => tx.size(),
-            Self::Eip2930(tx) => tx.size(),
-            Self::Eip1559(tx) => tx.size(),
-            Self::Eip4844(tx) => tx.size(),
-            Self::Eip7702(tx) => tx.size(),
             #[cfg(feature = "optimism")]
             _ => todo!("use op type for op"),
         }
@@ -1489,6 +1479,10 @@ impl alloy_consensus::Transaction for TransactionSigned {
 
     fn priority_fee_or_price(&self) -> u128 {
         self.deref().priority_fee_or_price()
+    }
+
+    fn is_dynamic_fee(&self) -> bool {
+        self.deref().is_dynamic_fee()
     }
 
     fn value(&self) -> U256 {
