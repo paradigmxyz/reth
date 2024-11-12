@@ -8158,9 +8158,12 @@ dependencies = [
 name = "reth-optimism-cli"
 version = "1.1.1"
 dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
  "clap",
+ "derive_more 1.0.0",
  "eyre",
  "futures-util",
  "op-alloy-consensus",
@@ -8194,6 +8197,7 @@ dependencies = [
  "reth-static-file",
  "reth-static-file-types",
  "reth-tracing",
+ "serde",
  "tempfile",
  "tokio",
  "tokio-util",

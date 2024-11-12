@@ -48,8 +48,12 @@ mod error;
 mod meta;
 mod pooled;
 mod sidecar;
-mod signature;
 mod tx_type;
+
+/// Handling transaction signature operations, including signature recovery,
+/// applying chain IDs, and EIP-2 validation.
+pub mod signature;
+
 pub(crate) mod util;
 mod variant;
 
@@ -70,9 +74,9 @@ use revm_primitives::{AuthorizationList, TxEnv};
 /// Either a transaction hash or number.
 pub type TxHashOrNumber = BlockHashOrNumber;
 
-// Expected number of transactions where we can expect a speed-up by recovering the senders in
-// parallel.
-pub(crate) static PARALLEL_SENDER_RECOVERY_THRESHOLD: LazyLock<usize> =
+/// Expected number of transactions where we can expect a speed-up by recovering the senders in
+/// parallel.
+pub static PARALLEL_SENDER_RECOVERY_THRESHOLD: LazyLock<usize> =
     LazyLock::new(|| match rayon::current_num_threads() {
         0..=1 => usize::MAX,
         2..=8 => 10,
