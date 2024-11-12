@@ -9,9 +9,15 @@ To sync OP mainnet, bedrock state needs to be imported as a starting point. Ther
 
 **The state snapshot at Bedrock block is required.** It can be exported from [op-geth](https://github.com/testinprod-io/op-erigon/blob/pcw109550/bedrock-db-migration/bedrock-migration.md#export-state) (**.jsonl**) or downloaded directly from [here](https://mega.nz/file/GdZ1xbAT#a9cBv3AqzsTGXYgX7nZc_3fl--tcBmOAIwIA5ND6kwc).
 
+Import the state snapshot
+
 ```sh
 $ op-reth init-state --without-ovm --chain optimism --datadir op-mainnet world_trie_state.jsonl
+```
 
+Sync the node to a recent finalized block (e.g. 125200000) to catch up close to the tip, before pairing with op-node.
+
+```sh
 $ op-reth node --chain optimism --datadir op-mainnet --debug.tip 0x098f87b75c8b861c775984f9d5dbe7b70cbbbc30fc15adb03a5044de0144f2d0 # block #125200000
 ```
 

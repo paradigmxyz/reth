@@ -4,7 +4,7 @@ use crate::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
     ChainInfoTracker, MemoryOverlayStateProvider,
 };
-use alloy_eips::BlockNumHash;
+use alloy_eips::{BlockHashOrNumber, BlockNumHash};
 use alloy_primitives::{map::HashMap, Address, TxHash, B256};
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
@@ -173,12 +173,13 @@ impl CanonicalInMemoryState {
         numbers: BTreeMap<u64, B256>,
         pending: Option<BlockState>,
         finalized: Option<SealedHeader>,
+        safe: Option<SealedHeader>,
     ) -> Self {
         let in_memory_state = InMemoryState::new(blocks, numbers, pending);
         let header = in_memory_state
             .head_state()
             .map_or_else(SealedHeader::default, |state| state.block_ref().block().header.clone());
-        let chain_info_tracker = ChainInfoTracker::new(header, finalized);
+        let chain_info_tracker = ChainInfoTracker::new(header, finalized, safe);
         let (canon_state_notification_sender, _) =
             broadcast::channel(CANON_STATE_NOTIFICATION_CHANNEL_SIZE);
 
@@ -193,13 +194,17 @@ impl CanonicalInMemoryState {
 
     /// Create an empty state.
     pub fn empty() -> Self {
-        Self::new(HashMap::default(), BTreeMap::new(), None, None)
+        Self::new(HashMap::default(), BTreeMap::new(), None, None, None)
     }
 
     /// Create a new in memory state with the given local head and finalized header
     /// if it exists.
-    pub fn with_head(head: SealedHeader, finalized: Option<SealedHeader>) -> Self {
-        let chain_info_tracker = ChainInfoTracker::new(head, finalized);
+    pub fn with_head(
+        head: SealedHeader,
+        finalized: Option<SealedHeader>,
+        safe: Option<SealedHeader>,
+    ) -> Self {
+        let chain_info_tracker = ChainInfoTracker::new(head, finalized, safe);
         let in_memory_state = InMemoryState::default();
         let (canon_state_notification_sender, _) =
             broadcast::channel(CANON_STATE_NOTIFICATION_CHANNEL_SIZE);
@@ -264,7 +269,7 @@ impl CanonicalInMemoryState {
             // insert the new blocks
             for block in new_blocks {
                 let parent = blocks.get(&block.block().parent_hash).cloned();
-                let block_state = BlockState::with_parent(block.clone(), parent);
+                let block_state = BlockState::with_parent(block, parent);
                 let hash = block_state.hash();
                 let number = block_state.number();
 
@@ -333,7 +338,7 @@ impl CanonicalInMemoryState {
             // re-insert the blocks in natural order and connect them to their parent blocks
             for block in old_blocks {
                 let parent = blocks.get(&block.block().parent_hash).cloned();
-                let block_state = BlockState::with_parent(block.clone(), parent);
+                let block_state = BlockState::with_parent(block, parent);
                 let hash = block_state.hash();
                 let number = block_state.number();
 
@@ -503,27 +508,13 @@ impl CanonicalInMemoryState {
     ///
     /// This merges the state of all blocks that are part of the chain that the requested block is
     /// the head of. This includes all blocks that connect back to the canonical block on disk.
-    pub fn state_provider_from_state(
-        &self,
-        state: &BlockState,
-        historical: StateProviderBox,
-    ) -> MemoryOverlayStateProvider {
-        let in_memory = state.chain().into_iter().map(|block_state| block_state.block()).collect();
-
-        MemoryOverlayStateProvider::new(historical, in_memory)
-    }
-
-    /// Return state provider with reference to in-memory blocks that overlay database state.
-    ///
-    /// This merges the state of all blocks that are part of the chain that the requested block is
-    /// the head of. This includes all blocks that connect back to the canonical block on disk.
     pub fn state_provider(
         &self,
         hash: B256,
         historical: StateProviderBox,
     ) -> MemoryOverlayStateProvider {
         let in_memory = if let Some(state) = self.state_by_hash(hash) {
-            state.chain().into_iter().map(|block_state| block_state.block()).collect()
+            state.chain().map(|block_state| block_state.block()).collect()
         } else {
             Vec::new()
         };
@@ -701,10 +692,8 @@ impl BlockState {
     /// Returns a vector of `BlockStates` representing the entire in memory chain.
     /// The block state order in the output vector is newest to oldest (highest to lowest),
     /// including self as the first element.
-    pub fn chain(&self) -> Vec<&Self> {
-        let mut chain = vec![self];
-        self.append_parent_chain(&mut chain);
-        chain
+    pub fn chain(&self) -> impl Iterator<Item = &Self> {
+        std::iter::successors(Some(self), |state| state.parent.as_deref())
     }
 
     /// Appends the parent chain of this [`BlockState`] to the given vector.
@@ -718,6 +707,65 @@ impl BlockState {
     pub fn iter(self: Arc<Self>) -> impl Iterator<Item = Arc<Self>> {
         std::iter::successors(Some(self), |state| state.parent.clone())
     }
+
+    /// Return state provider with reference to in-memory blocks that overlay database state.
+    ///
+    /// This merges the state of all blocks that are part of the chain that the this block is
+    /// the head of. This includes all blocks that connect back to the canonical block on disk.
+    pub fn state_provider(&self, historical: StateProviderBox) -> MemoryOverlayStateProvider {
+        let in_memory = self.chain().map(|block_state| block_state.block()).collect();
+
+        MemoryOverlayStateProvider::new(historical, in_memory)
+    }
+
+    /// Tries to find a block by [`BlockHashOrNumber`] in the chain ending at this block.
+    pub fn block_on_chain(&self, hash_or_num: BlockHashOrNumber) -> Option<&Self> {
+        self.chain().find(|block| match hash_or_num {
+            BlockHashOrNumber::Hash(hash) => block.hash() == hash,
+            BlockHashOrNumber::Number(number) => block.number() == number,
+        })
+    }
+
+    /// Tries to find a transaction by [`TxHash`] in the chain ending at this block.
+    pub fn transaction_on_chain(&self, hash: TxHash) -> Option<TransactionSigned> {
+        self.chain().find_map(|block_state| {
+            block_state
+                .block_ref()
+                .block()
+                .body
+                .transactions()
+                .find(|tx| tx.hash() == hash)
+                .cloned()
+        })
+    }
+
+    /// Tries to find a transaction with meta by [`TxHash`] in the chain ending at this block.
+    pub fn transaction_meta_on_chain(
+        &self,
+        tx_hash: TxHash,
+    ) -> Option<(TransactionSigned, TransactionMeta)> {
+        self.chain().find_map(|block_state| {
+            block_state
+                .block_ref()
+                .block()
+                .body
+                .transactions()
+                .enumerate()
+                .find(|(_, tx)| tx.hash() == tx_hash)
+                .map(|(index, tx)| {
+                    let meta = TransactionMeta {
+                        tx_hash,
+                        index: index as u64,
+                        block_hash: block_state.hash(),
+                        block_number: block_state.block_ref().block.number,
+                        base_fee: block_state.block_ref().block.header.base_fee_per_gas,
+                        timestamp: block_state.block_ref().block.timestamp,
+                        excess_blob_gas: block_state.block_ref().block.excess_blob_gas,
+                    };
+                    (tx.clone(), meta)
+                })
+        })
+    }
 }
 
 /// Represents an executed block stored in-memory.
@@ -729,7 +777,7 @@ pub struct ExecutedBlock {
     pub senders: Arc<Vec<Address>>,
     /// Block's execution outcome.
     pub execution_output: Arc<ExecutionOutcome>,
-    /// Block's hashedst state.
+    /// Block's hashed state.
     pub hashed_state: Arc<HashedPostState>,
     /// Trie updates that result of applying the block.
     pub trie: Arc<TrieUpdates>,
@@ -864,10 +912,11 @@ impl NewCanonicalChain {
 mod tests {
     use super::*;
     use crate::test_utils::TestBlockBuilder;
+    use alloy_eips::eip7685::Requests;
     use alloy_primitives::{map::HashSet, BlockNumber, Bytes, StorageKey, StorageValue};
     use rand::Rng;
     use reth_errors::ProviderResult;
-    use reth_primitives::{Account, Bytecode, Receipt, Requests};
+    use reth_primitives::{Account, Bytecode, Receipt};
     use reth_storage_api::{
         AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
         StorageRootProvider,
@@ -1255,7 +1304,7 @@ mod tests {
         numbers.insert(2, block2.block().hash());
         numbers.insert(3, block3.block().hash());
 
-        let canonical_state = CanonicalInMemoryState::new(blocks, numbers, None, None);
+        let canonical_state = CanonicalInMemoryState::new(blocks, numbers, None, None, None);
 
         let historical: StateProviderBox = Box::new(MockStateProvider);
 
@@ -1297,7 +1346,7 @@ mod tests {
         let mut numbers = BTreeMap::new();
         numbers.insert(1, hash);
 
-        let state = CanonicalInMemoryState::new(blocks, numbers, None, None);
+        let state = CanonicalInMemoryState::new(blocks, numbers, None, None, None);
         let chain: Vec<_> = state.canonical_chain().collect();
 
         assert_eq!(chain.len(), 1);
@@ -1380,7 +1429,7 @@ mod tests {
         let parents = single_block.parent_state_chain();
         assert_eq!(parents.len(), 0);
 
-        let block_state_chain = single_block.chain();
+        let block_state_chain = single_block.chain().collect::<Vec<_>>();
         assert_eq!(block_state_chain.len(), 1);
         assert_eq!(block_state_chain[0].block().block.number, single_block_number);
         assert_eq!(block_state_chain[0].block().block.hash(), single_block_hash);
@@ -1391,18 +1440,18 @@ mod tests {
         let mut test_block_builder = TestBlockBuilder::default();
         let chain = create_mock_state_chain(&mut test_block_builder, 3);
 
-        let block_state_chain = chain[2].chain();
+        let block_state_chain = chain[2].chain().collect::<Vec<_>>();
         assert_eq!(block_state_chain.len(), 3);
         assert_eq!(block_state_chain[0].block().block.number, 3);
         assert_eq!(block_state_chain[1].block().block.number, 2);
         assert_eq!(block_state_chain[2].block().block.number, 1);
 
-        let block_state_chain = chain[1].chain();
+        let block_state_chain = chain[1].chain().collect::<Vec<_>>();
         assert_eq!(block_state_chain.len(), 2);
         assert_eq!(block_state_chain[0].block().block.number, 2);
         assert_eq!(block_state_chain[1].block().block.number, 1);
 
-        let block_state_chain = chain[0].chain();
+        let block_state_chain = chain[0].chain().collect::<Vec<_>>();
         assert_eq!(block_state_chain.len(), 1);
         assert_eq!(block_state_chain[0].block().block.number, 1);
     }

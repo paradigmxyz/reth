@@ -1,17 +1,17 @@
 //! Transaction pool arguments
 
 use crate::cli::config::RethTransactionPoolConfig;
+use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE};
 use alloy_primitives::Address;
 use clap::Args;
-use reth_primitives::constants::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE};
 use reth_transaction_pool::{
     blobstore::disk::DEFAULT_MAX_CACHED_BLOBS,
     pool::{NEW_TX_LISTENER_BUFFER_SIZE, PENDING_TX_LISTENER_BUFFER_SIZE},
     validate::DEFAULT_MAX_TX_INPUT_BYTES,
     LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP,
-    DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS, REPLACE_BLOB_PRICE_BUMP,
-    TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER, TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
-    TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
+    DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS, MAX_NEW_PENDING_TXS_NOTIFICATIONS,
+    REPLACE_BLOB_PRICE_BUMP, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
+    TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT, TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
 };
 /// Parameters for debugging purposes
 #[derive(Debug, Clone, Args, PartialEq, Eq)]
@@ -86,6 +86,11 @@ pub struct TxPoolArgs {
     /// Maximum number of new transactions to buffer
     #[arg(long = "txpool.max-new-txns", alias = "txpool.max_new_txns", default_value_t = NEW_TX_LISTENER_BUFFER_SIZE)]
     pub new_tx_listener_buffer_size: usize,
+
+    /// How many new pending transactions to buffer and send to in progress pending transaction
+    /// iterators.
+    #[arg(long = "txpool.max-new-pending-txs-notifications", alias = "txpool.max-new-pending-txs-notifications", default_value_t = MAX_NEW_PENDING_TXS_NOTIFICATIONS)]
+    pub max_new_pending_txs_notifications: usize,
 }
 
 impl Default for TxPoolArgs {
@@ -110,6 +115,7 @@ impl Default for TxPoolArgs {
             additional_validation_tasks: DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS,
             pending_tx_listener_buffer_size: PENDING_TX_LISTENER_BUFFER_SIZE,
             new_tx_listener_buffer_size: NEW_TX_LISTENER_BUFFER_SIZE,
+            max_new_pending_txs_notifications: MAX_NEW_PENDING_TXS_NOTIFICATIONS,
         }
     }
 }
@@ -125,19 +131,19 @@ impl RethTransactionPoolConfig for TxPoolArgs {
             },
             pending_limit: SubPoolLimit {
                 max_txs: self.pending_max_count,
-                max_size: self.pending_max_size * 1024 * 1024,
+                max_size: self.pending_max_size.saturating_mul(1024 * 1024),
             },
             basefee_limit: SubPoolLimit {
                 max_txs: self.basefee_max_count,
-                max_size: self.basefee_max_size * 1024 * 1024,
+                max_size: self.basefee_max_size.saturating_mul(1024 * 1024),
             },
             queued_limit: SubPoolLimit {
                 max_txs: self.queued_max_count,
-                max_size: self.queued_max_size * 1024 * 1024,
+                max_size: self.queued_max_size.saturating_mul(1024 * 1024),
             },
             blob_limit: SubPoolLimit {
                 max_txs: self.queued_max_count,
-                max_size: self.queued_max_size * 1024 * 1024,
+                max_size: self.queued_max_size.saturating_mul(1024 * 1024),
             },
             max_account_slots: self.max_account_slots,
             price_bumps: PriceBumpConfig {
@@ -148,6 +154,7 @@ impl RethTransactionPoolConfig for TxPoolArgs {
             gas_limit: self.gas_limit,
             pending_tx_listener_buffer_size: self.pending_tx_listener_buffer_size,
             new_tx_listener_buffer_size: self.new_tx_listener_buffer_size,
+            max_new_pending_txs_notifications: self.max_new_pending_txs_notifications,
         }
     }
 }
@@ -169,5 +176,16 @@ mod tests {
         let default_args = TxPoolArgs::default();
         let args = CommandParser::<TxPoolArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
+    }
+
+    #[test]
+    fn txpool_parse_locals() {
+        let args = CommandParser::<TxPoolArgs>::parse_from([
+            "reth",
+            "--txpool.locals",
+            "0x0000000000000000000000000000000000000000",
+        ])
+        .args;
+        assert_eq!(args.locals, vec![Address::ZERO]);
     }
 }

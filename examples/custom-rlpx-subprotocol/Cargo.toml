@@ -13,8 +13,6 @@ reth-eth-wire.workspace = true
 reth-network.workspace = true
 reth-network-api.workspace = true
 reth-node-ethereum.workspace = true
-reth-provider = { workspace = true, features = ["test-utils"] }
-reth-primitives.workspace = true
 reth.workspace = true
 tokio-stream.workspace = true
 eyre.workspace = true

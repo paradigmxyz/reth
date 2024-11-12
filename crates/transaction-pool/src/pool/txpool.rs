@@ -18,14 +18,15 @@ use crate::{
     PoolConfig, PoolResult, PoolTransaction, PriceBumpConfig, TransactionOrdering,
     ValidPoolTransaction, U256,
 };
-use alloy_primitives::{Address, TxHash, B256};
-use reth_primitives::{
-    constants::{
-        eip4844::BLOB_TX_MIN_BLOB_GASPRICE, ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE,
-    },
+use alloy_consensus::constants::{
     EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
     LEGACY_TX_TYPE_ID,
 };
+use alloy_eips::{
+    eip1559::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE},
+    eip4844::BLOB_TX_MIN_BLOB_GASPRICE,
+};
+use alloy_primitives::{Address, TxHash, B256};
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use std::{
@@ -106,6 +107,35 @@ impl<T: TransactionOrdering> TxPool<T> {
         sender: SenderId,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         self.all().txs_iter(sender).last().map(|(_, tx)| Arc::clone(&tx.transaction))
+    }
+
+    /// Returns the transaction with the highest nonce that is executable given the on chain nonce.
+    ///
+    /// If the pool already tracks a higher nonce for the given sender, then this nonce is used
+    /// instead.
+    ///
+    /// Note: The next pending pooled transaction must have the on chain nonce.
+    pub(crate) fn get_highest_consecutive_transaction_by_sender(
+        &self,
+        mut on_chain: TransactionId,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let mut last_consecutive_tx = None;
+
+        // ensure this operates on the most recent
+        if let Some(current) = self.sender_info.get(&on_chain.sender) {
+            on_chain.nonce = on_chain.nonce.max(current.state_nonce);
+        }
+
+        let mut next_expected_nonce = on_chain.nonce;
+        for (id, tx) in self.all().descendant_txs_inclusive(&on_chain) {
+            if next_expected_nonce != id.nonce {
+                break
+            }
+            next_expected_nonce = id.next_nonce();
+            last_consecutive_tx = Some(tx);
+        }
+
+        last_consecutive_tx.map(|tx| Arc::clone(&tx.transaction))
     }
 
     /// Returns access to the [`AllTransactions`] container.
@@ -334,9 +364,32 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.pending_pool.all()
     }
 
+    /// Returns all pending transactions filtered by predicate
+    pub(crate) fn pending_transactions_with_predicate(
+        &self,
+        mut predicate: impl FnMut(&ValidPoolTransaction<T::Transaction>) -> bool,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.pending_transactions_iter().filter(|tx| predicate(tx)).collect()
+    }
+
+    /// Returns all pending transactions for the specified sender
+    pub(crate) fn pending_txs_by_sender(
+        &self,
+        sender: SenderId,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.pending_transactions_iter().filter(|tx| tx.sender_id() == sender).collect()
+    }
+
     /// Returns all transactions from parked pools
     pub(crate) fn queued_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         self.basefee_pool.all().chain(self.queued_pool.all()).collect()
+    }
+
+    /// Returns an iterator over all transactions from parked pools
+    pub(crate) fn queued_transactions_iter(
+        &self,
+    ) -> impl Iterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + '_ {
+        self.basefee_pool.all().chain(self.queued_pool.all())
     }
 
     /// Returns queued and pending transactions for the specified sender
@@ -345,6 +398,14 @@ impl<T: TransactionOrdering> TxPool<T> {
         sender: SenderId,
     ) -> (SmallVec<[TransactionId; TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER]>, Vec<TransactionId>) {
         (self.queued_pool.get_txs_by_sender(sender), self.pending_pool.get_txs_by_sender(sender))
+    }
+
+    /// Returns all queued transactions for the specified sender
+    pub(crate) fn queued_txs_by_sender(
+        &self,
+        sender: SenderId,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.queued_transactions_iter().filter(|tx| tx.sender_id() == sender).collect()
     }
 
     /// Returns `true` if the transaction with the given hash is already included in this pool.
@@ -575,8 +636,8 @@ impl<T: TransactionOrdering> TxPool<T> {
                         *transaction.hash(),
                         PoolErrorKind::InvalidTransaction(
                             InvalidPoolTransactionError::ExceedsGasLimit(
-                                block_gas_limit,
                                 tx_gas_limit,
+                                block_gas_limit,
                             ),
                         ),
                     )),
@@ -661,6 +722,38 @@ impl<T: TransactionOrdering> TxPool<T> {
             hashes.into_iter().filter_map(|hash| self.remove_transaction_by_hash(&hash)).collect();
         self.update_size_metrics();
         txs
+    }
+
+    /// Removes and returns all matching transactions and their descendants from the pool.
+    pub(crate) fn remove_transactions_and_descendants(
+        &mut self,
+        hashes: Vec<TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let mut removed = Vec::new();
+        for hash in hashes {
+            if let Some(tx) = self.remove_transaction_by_hash(&hash) {
+                removed.push(tx.clone());
+                self.remove_descendants(tx.id(), &mut removed);
+            }
+        }
+        self.update_size_metrics();
+        removed
+    }
+
+    /// Removes all transactions from the given sender.
+    pub(crate) fn remove_transactions_by_sender(
+        &mut self,
+        sender_id: SenderId,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let mut removed = Vec::new();
+        let txs = self.get_transactions_by_sender(sender_id);
+        for tx in txs {
+            if let Some(tx) = self.remove_transaction(tx.id()) {
+                removed.push(tx);
+            }
+        }
+        self.update_size_metrics();
+        removed
     }
 
     /// Remove the transaction from the __entire__ pool.
@@ -1344,12 +1437,9 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// Caution: This assumes that mutually exclusive invariant is always true for the same sender.
     #[inline]
     fn contains_conflicting_transaction(&self, tx: &ValidPoolTransaction<T>) -> bool {
-        let mut iter = self.txs_iter(tx.transaction_id.sender);
-        if let Some((_, existing)) = iter.next() {
-            return tx.tx_type_conflicts_with(&existing.transaction)
-        }
-        // no existing transaction for this sender
-        false
+        self.txs_iter(tx.transaction_id.sender)
+            .next()
+            .map_or(false, |(_, existing)| tx.tx_type_conflicts_with(&existing.transaction))
     }
 
     /// Additional checks for a new transaction.
@@ -1363,11 +1453,15 @@ impl<T: PoolTransaction> AllTransactions<T> {
     fn ensure_valid(
         &self,
         transaction: ValidPoolTransaction<T>,
+        on_chain_nonce: u64,
     ) -> Result<ValidPoolTransaction<T>, InsertErr<T>> {
         if !self.local_transactions_config.is_local(transaction.origin, transaction.sender()) {
             let current_txs =
                 self.tx_counter.get(&transaction.sender_id()).copied().unwrap_or_default();
-            if current_txs >= self.max_account_slots {
+
+            // Reject transactions if sender's capacity is exceeded.
+            // If transaction's nonce matches on-chain nonce always let it through
+            if current_txs >= self.max_account_slots && transaction.nonce() > on_chain_nonce {
                 return Err(InsertErr::ExceededSenderTransactionsCapacity {
                     transaction: Arc::new(transaction),
                 })
@@ -1449,52 +1543,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
         Ok(new_blob_tx)
     }
 
-    /// Returns true if the replacement candidate is underpriced and can't replace the existing
-    /// transaction.
-    #[inline]
-    fn is_underpriced(
-        existing_transaction: &ValidPoolTransaction<T>,
-        maybe_replacement: &ValidPoolTransaction<T>,
-        price_bumps: &PriceBumpConfig,
-    ) -> bool {
-        let price_bump = price_bumps.price_bump(existing_transaction.tx_type());
-
-        if maybe_replacement.max_fee_per_gas() <=
-            existing_transaction.max_fee_per_gas() * (100 + price_bump) / 100
-        {
-            return true
-        }
-
-        let existing_max_priority_fee_per_gas =
-            existing_transaction.transaction.max_priority_fee_per_gas().unwrap_or(0);
-        let replacement_max_priority_fee_per_gas =
-            maybe_replacement.transaction.max_priority_fee_per_gas().unwrap_or(0);
-
-        if replacement_max_priority_fee_per_gas <=
-            existing_max_priority_fee_per_gas * (100 + price_bump) / 100 &&
-            existing_max_priority_fee_per_gas != 0 &&
-            replacement_max_priority_fee_per_gas != 0
-        {
-            return true
-        }
-
-        // check max blob fee per gas
-        if let Some(existing_max_blob_fee_per_gas) =
-            existing_transaction.transaction.max_fee_per_blob_gas()
-        {
-            // this enforces that blob txs can only be replaced by blob txs
-            let replacement_max_blob_fee_per_gas =
-                maybe_replacement.transaction.max_fee_per_blob_gas().unwrap_or(0);
-            if replacement_max_blob_fee_per_gas <=
-                existing_max_blob_fee_per_gas * (100 + price_bump) / 100
-            {
-                return true
-            }
-        }
-
-        false
-    }
-
     /// Inserts a new _valid_ transaction into the pool.
     ///
     /// If the transaction already exists, it will be replaced if not underpriced.
@@ -1534,7 +1582,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     ) -> InsertResult<T> {
         assert!(on_chain_nonce <= transaction.nonce(), "Invalid transaction");
 
-        let mut transaction = self.ensure_valid(transaction)?;
+        let mut transaction = self.ensure_valid(transaction, on_chain_nonce)?;
 
         let inserted_tx_id = *transaction.id();
         let mut state = TxState::default();
@@ -1609,8 +1657,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 let maybe_replacement = transaction.as_ref();
 
                 // Ensure the new transaction is not underpriced
-                if Self::is_underpriced(existing_transaction, maybe_replacement, &self.price_bumps)
-                {
+                if existing_transaction.is_underpriced(maybe_replacement, &self.price_bumps) {
                     return Err(InsertErr::Underpriced {
                         transaction: pool_tx.transaction,
                         existing: *entry.get().transaction.hash(),
@@ -1629,29 +1676,17 @@ impl<T: PoolTransaction> AllTransactions<T> {
         // The next transaction of this sender
         let on_chain_id = TransactionId::new(transaction.sender_id(), on_chain_nonce);
         {
-            // get all transactions of the sender's account
-            let mut descendants = self.descendant_txs_mut(&on_chain_id).peekable();
-
             // Tracks the next nonce we expect if the transactions are gapless
             let mut next_nonce = on_chain_id.nonce;
 
             // We need to find out if the next transaction of the sender is considered pending
-            let mut has_parked_ancestor = if ancestor.is_none() {
-                // the new transaction is the next one
-                false
-            } else {
-                // The transaction was added above so the _inclusive_ descendants iterator
-                // returns at least 1 tx.
-                let (id, tx) = descendants.peek().expect("includes >= 1");
-                if id.nonce < inserted_tx_id.nonce {
-                    !tx.state.is_pending()
-                } else {
-                    true
-                }
-            };
+            // The direct descendant has _no_ parked ancestors because the `on_chain_nonce` is
+            // pending, so we can set this to `false`
+            let mut has_parked_ancestor = false;
 
-            // Traverse all transactions of the sender and update existing transactions
-            for (id, tx) in descendants {
+            // Traverse all future transactions of the sender starting with the on chain nonce, and
+            // update existing transactions: `[on_chain_nonce,..]`
+            for (id, tx) in self.descendant_txs_mut(&on_chain_id) {
                 let current_pool = tx.subpool;
 
                 // If there's a nonce gap, we can shortcircuit
@@ -1889,15 +1924,14 @@ impl SenderInfo {
 
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::address;
-    use reth_primitives::TxType;
-
     use super::*;
     use crate::{
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory, MockTransactionSet},
         traits::TransactionOrigin,
         SubPoolLimit,
     };
+    use alloy_primitives::address;
+    use reth_primitives::TxType;
 
     #[test]
     fn test_insert_blob() {
@@ -2573,6 +2607,7 @@ mod tests {
         let mut pool = AllTransactions::default();
 
         let mut tx = MockTransaction::eip1559();
+        let unblocked_tx = tx.clone();
         for _ in 0..pool.max_account_slots {
             tx = tx.next();
             pool.insert_tx(f.validated(tx.clone()), on_chain_balance, on_chain_nonce).unwrap();
@@ -2586,6 +2621,10 @@ mod tests {
         let err =
             pool.insert_tx(f.validated(tx.next()), on_chain_balance, on_chain_nonce).unwrap_err();
         assert!(matches!(err, InsertErr::ExceededSenderTransactionsCapacity { .. }));
+
+        assert!(pool
+            .insert_tx(f.validated(unblocked_tx), on_chain_balance, on_chain_nonce)
+            .is_ok());
     }
 
     #[test]
@@ -2724,6 +2763,47 @@ mod tests {
     }
 
     #[test]
+    fn get_highest_consecutive_transaction_by_sender() {
+        // Set up a mock transaction factory and a new transaction pool.
+        let mut pool = TxPool::new(MockOrdering::default(), PoolConfig::default());
+        let mut f = MockTransactionFactory::default();
+
+        // Create transactions with nonces 0, 1, 2, 4, 5.
+        let sender = Address::random();
+        let txs: Vec<_> = vec![0, 1, 2, 4, 5, 8, 9];
+        for nonce in txs {
+            let mut mock_tx = MockTransaction::eip1559();
+            mock_tx.set_sender(sender);
+            mock_tx.set_nonce(nonce);
+
+            let validated_tx = f.validated(mock_tx);
+            pool.add_transaction(validated_tx, U256::from(1000), 0).unwrap();
+        }
+
+        // Get last consecutive transaction
+        let sender_id = f.ids.sender_id(&sender).unwrap();
+        let next_tx =
+            pool.get_highest_consecutive_transaction_by_sender(sender_id.into_transaction_id(0));
+        assert_eq!(next_tx.map(|tx| tx.nonce()), Some(2), "Expected nonce 2 for on-chain nonce 0");
+
+        let next_tx =
+            pool.get_highest_consecutive_transaction_by_sender(sender_id.into_transaction_id(4));
+        assert_eq!(next_tx.map(|tx| tx.nonce()), Some(5), "Expected nonce 5 for on-chain nonce 4");
+
+        let next_tx =
+            pool.get_highest_consecutive_transaction_by_sender(sender_id.into_transaction_id(5));
+        assert_eq!(next_tx.map(|tx| tx.nonce()), Some(5), "Expected nonce 5 for on-chain nonce 5");
+
+        // update the tracked nonce
+        let mut info = SenderInfo::default();
+        info.update(8, U256::ZERO);
+        pool.sender_info.insert(sender_id, info);
+        let next_tx =
+            pool.get_highest_consecutive_transaction_by_sender(sender_id.into_transaction_id(5));
+        assert_eq!(next_tx.map(|tx| tx.nonce()), Some(9), "Expected nonce 9 for on-chain nonce 8");
+    }
+
+    #[test]
     fn discard_nonce_too_low() {
         let mut f = MockTransactionFactory::default();
         let mut pool = TxPool::new(MockOrdering::default(), Default::default());
@@ -2810,7 +2890,7 @@ mod tests {
         pool.update_basefee(pool_base_fee);
 
         // 2 txs, that should put the pool over the size limit but not max txs
-        let a_txs = MockTransactionSet::dependent(a_sender, 0, 2, TxType::Eip1559)
+        let a_txs = MockTransactionSet::dependent(a_sender, 0, 3, TxType::Eip1559)
             .into_iter()
             .map(|mut tx| {
                 tx.set_size(default_limits.max_size / 2 + 1);
@@ -2963,6 +3043,148 @@ mod tests {
         assert_eq!(vec![v1.nonce()], pool_txs);
     }
     #[test]
+    fn test_remove_transactions() {
+        let on_chain_balance = U256::from(10_000);
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let tx_0 = MockTransaction::eip1559().set_gas_price(100).inc_limit();
+        let tx_1 = tx_0.next();
+        let tx_2 = MockTransaction::eip1559().set_gas_price(100).inc_limit();
+        let tx_3 = tx_2.next();
+
+        // Create 4 transactions
+        let v0 = f.validated(tx_0);
+        let v1 = f.validated(tx_1);
+        let v2 = f.validated(tx_2);
+        let v3 = f.validated(tx_3);
+
+        // Add them to the pool
+        let _res = pool.add_transaction(v0.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v1.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v2.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v3.clone(), on_chain_balance, on_chain_nonce).unwrap();
+
+        assert_eq!(0, pool.queued_transactions().len());
+        assert_eq!(4, pool.pending_transactions().len());
+
+        pool.remove_transactions(vec![*v0.hash(), *v2.hash()]);
+
+        assert_eq!(0, pool.queued_transactions().len());
+        assert_eq!(2, pool.pending_transactions().len());
+        assert!(pool.contains(v1.hash()));
+        assert!(pool.contains(v3.hash()));
+    }
+
+    #[test]
+    fn test_remove_transactions_and_descendants() {
+        let on_chain_balance = U256::from(10_000);
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let tx_0 = MockTransaction::eip1559().set_gas_price(100).inc_limit();
+        let tx_1 = tx_0.next();
+        let tx_2 = MockTransaction::eip1559().set_gas_price(100).inc_limit();
+        let tx_3 = tx_2.next();
+        let tx_4 = tx_3.next();
+
+        // Create 5 transactions
+        let v0 = f.validated(tx_0);
+        let v1 = f.validated(tx_1);
+        let v2 = f.validated(tx_2);
+        let v3 = f.validated(tx_3);
+        let v4 = f.validated(tx_4);
+
+        // Add them to the pool
+        let _res = pool.add_transaction(v0.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v1, on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v2.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v3, on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v4, on_chain_balance, on_chain_nonce).unwrap();
+
+        assert_eq!(0, pool.queued_transactions().len());
+        assert_eq!(5, pool.pending_transactions().len());
+
+        pool.remove_transactions_and_descendants(vec![*v0.hash(), *v2.hash()]);
+
+        assert_eq!(0, pool.queued_transactions().len());
+        assert_eq!(0, pool.pending_transactions().len());
+    }
+    #[test]
+    fn test_remove_descendants() {
+        let on_chain_balance = U256::from(10_000);
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let tx_0 = MockTransaction::eip1559().set_gas_price(100).inc_limit();
+        let tx_1 = tx_0.next();
+        let tx_2 = tx_1.next();
+        let tx_3 = tx_2.next();
+
+        // Create 4 transactions
+        let v0 = f.validated(tx_0);
+        let v1 = f.validated(tx_1);
+        let v2 = f.validated(tx_2);
+        let v3 = f.validated(tx_3);
+
+        // Add them to the pool
+        let _res = pool.add_transaction(v0.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v1, on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v2, on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v3, on_chain_balance, on_chain_nonce).unwrap();
+
+        assert_eq!(0, pool.queued_transactions().len());
+        assert_eq!(4, pool.pending_transactions().len());
+
+        let mut removed = Vec::new();
+        pool.remove_transaction(v0.id());
+        pool.remove_descendants(v0.id(), &mut removed);
+
+        assert_eq!(0, pool.queued_transactions().len());
+        assert_eq!(0, pool.pending_transactions().len());
+        assert_eq!(3, removed.len());
+    }
+    #[test]
+    fn test_remove_transactions_by_sender() {
+        let on_chain_balance = U256::from(10_000);
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let tx_0 = MockTransaction::eip1559().set_gas_price(100).inc_limit();
+        let tx_1 = tx_0.next();
+        let tx_2 = MockTransaction::eip1559().set_gas_price(100).inc_limit();
+        let tx_3 = tx_2.next();
+        let tx_4 = tx_3.next();
+
+        // Create 5 transactions
+        let v0 = f.validated(tx_0);
+        let v1 = f.validated(tx_1);
+        let v2 = f.validated(tx_2);
+        let v3 = f.validated(tx_3);
+        let v4 = f.validated(tx_4);
+
+        // Add them to the pool
+        let _res = pool.add_transaction(v0.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v1.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v2.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v3, on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v4, on_chain_balance, on_chain_nonce).unwrap();
+
+        assert_eq!(0, pool.queued_transactions().len());
+        assert_eq!(5, pool.pending_transactions().len());
+
+        pool.remove_transactions_by_sender(v2.sender_id());
+
+        assert_eq!(0, pool.queued_transactions().len());
+        assert_eq!(2, pool.pending_transactions().len());
+        assert!(pool.contains(v0.hash()));
+        assert!(pool.contains(v1.hash()));
+    }
+    #[test]
     fn wrong_best_order_of_transactions() {
         let on_chain_balance = U256::from(10_000);
         let mut on_chain_nonce = 0;
@@ -3022,5 +3244,76 @@ mod tests {
             pool.best_transactions().map(|x| x.id().nonce).collect::<Vec<_>>(),
             vec![1, 2, 3]
         );
+    }
+
+    #[test]
+    fn test_pending_ordering() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let tx_0 = MockTransaction::eip1559().with_nonce(1).set_gas_price(100).inc_limit();
+        let tx_1 = tx_0.next();
+
+        let v0 = f.validated(tx_0);
+        let v1 = f.validated(tx_1);
+
+        // nonce gap, tx should be queued
+        pool.add_transaction(v0.clone(), U256::MAX, 0).unwrap();
+        assert_eq!(1, pool.queued_transactions().len());
+
+        // nonce gap is closed on-chain, both transactions should be moved to pending
+        pool.add_transaction(v1, U256::MAX, 1).unwrap();
+
+        assert_eq!(2, pool.pending_transactions().len());
+        assert_eq!(0, pool.queued_transactions().len());
+
+        assert_eq!(
+            pool.pending_pool.independent().get(&v0.sender_id()).unwrap().transaction.nonce(),
+            v0.nonce()
+        );
+    }
+
+    // <https://github.com/paradigmxyz/reth/issues/12286>
+    #[test]
+    fn one_sender_one_independent_transaction() {
+        let mut on_chain_balance = U256::from(4_999); // only enough for 4 txs
+        let mut on_chain_nonce = 40;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::mock();
+        let mut submitted_txs = Vec::new();
+
+        // We use a "template" because we want all txs to have the same sender.
+        let template =
+            MockTransaction::eip1559().inc_price().inc_limit().with_value(U256::from(1_001));
+
+        // Add 8 txs. Because the balance is only sufficient for 4, so the last 4 will be
+        // Queued.
+        for tx_nonce in 40..48 {
+            let tx = f.validated(template.clone().with_nonce(tx_nonce).rng_hash());
+            submitted_txs.push(*tx.id());
+            pool.add_transaction(tx, on_chain_balance, on_chain_nonce).unwrap();
+        }
+
+        // A block is mined with two txs (so nonce is changed from 40 to 42).
+        // Now the balance gets so high that it's enough to execute alltxs.
+        on_chain_balance = U256::from(999_999);
+        on_chain_nonce = 42;
+        pool.remove_transaction(&submitted_txs[0]);
+        pool.remove_transaction(&submitted_txs[1]);
+
+        // Add 4 txs.
+        for tx_nonce in 48..52 {
+            pool.add_transaction(
+                f.validated(template.clone().with_nonce(tx_nonce).rng_hash()),
+                on_chain_balance,
+                on_chain_nonce,
+            )
+            .unwrap();
+        }
+
+        let best_txs: Vec<_> = pool.pending().best().map(|tx| *tx.id()).collect();
+        assert_eq!(best_txs.len(), 10); // 8 - 2 + 4 = 10
+
+        assert_eq!(pool.pending_pool.independent().len(), 1);
     }
 }

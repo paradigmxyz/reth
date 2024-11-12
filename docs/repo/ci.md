@@ -7,8 +7,7 @@ The CI runs a couple of workflows:
 - **[unit]**: Runs unit tests (tests in `src/`) and doc tests
 - **[integration]**: Runs integration tests (tests in `tests/` and sync tests)
 - **[bench]**: Runs benchmarks
-- **[eth-sync]**: Runs Ethereum mainnet sync tests
-- **[op-sync]**: Runs base mainnet sync tests for Optimism
+- **[sync]**: Runs sync tests
 - **[stage]**: Runs all `stage run` commands
 
 ### Docs
@@ -26,7 +25,7 @@ The CI runs a couple of workflows:
 
 ### Integration Testing
 
-- **[assertoor]**: Runs Assertoor tests on Reth pairs.
+- **[kurtosis]**: Spins up a Kurtosis testnet and runs Assertoor tests on Reth pairs.
 - **[hive]**: Runs `ethereum/hive` tests.
 
 ### Linting and Checks
@@ -38,8 +37,7 @@ The CI runs a couple of workflows:
 [unit]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/unit.yml
 [integration]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/integration.yml
 [bench]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/bench.yml
-[eth-sync]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/eth-sync.yml
-[op-sync]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/op-sync.yml
+[sync]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/sync.yml
 [stage]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/stage.yml
 [book]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/book.yml
 [deny]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/deny.yml
@@ -48,7 +46,7 @@ The CI runs a couple of workflows:
 [dependencies]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/dependencies.yml
 [stale]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/stale.yml
 [docker]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/docker.yml
-[assertoor]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/assertoor.yml
+[kurtosis]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/kurtosis.yml
 [hive]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/hive.yml
 [lint]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/lint.yml
 [lint-actions]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/lint-actions.yml

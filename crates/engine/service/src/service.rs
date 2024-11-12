@@ -1,11 +1,12 @@
 use futures::{Stream, StreamExt};
 use pin_project::pin_project;
 use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage, EngineNodeTypes};
+use reth_chainspec::EthChainSpec;
 use reth_consensus::Consensus;
 use reth_engine_tree::{
     backfill::PipelineSync,
     download::BasicBlockDownloader,
-    engine::{EngineApiRequest, EngineApiRequestHandler, EngineHandler},
+    engine::{EngineApiKind, EngineApiRequest, EngineApiRequestHandler, EngineHandler},
     persistence::PersistenceHandle,
     tree::{EngineApiTreeHandler, InvalidBlockHook, TreeConfig},
 };
@@ -30,7 +31,7 @@ use std::{
 };
 
 /// Alias for consensus engine stream.
-type EngineMessageStream<T> = Pin<Box<dyn Stream<Item = BeaconEngineMessage<T>> + Send + Sync>>;
+pub type EngineMessageStream<T> = Pin<Box<dyn Stream<Item = BeaconEngineMessage<T>> + Send + Sync>>;
 
 /// Alias for chain orchestrator.
 type EngineServiceType<N, Client> = ChainOrchestrator<
@@ -79,6 +80,9 @@ where
         invalid_block_hook: Box<dyn InvalidBlockHook>,
         sync_metrics_tx: MetricEventsSender,
     ) -> Self {
+        let engine_kind =
+            if chain_spec.is_optimism() { EngineApiKind::OpStack } else { EngineApiKind::Ethereum };
+
         let downloader = BasicBlockDownloader::new(client, consensus.clone());
 
         let persistence_handle =
@@ -97,6 +101,7 @@ where
             canonical_in_memory_state,
             tree_config,
             invalid_block_hook,
+            engine_kind,
         );
 
         let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
@@ -146,7 +151,9 @@ mod tests {
     use reth_exex_types::FinishedExExHeight;
     use reth_network_p2p::test_utils::TestFullBlockClient;
     use reth_primitives::SealedHeader;
-    use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
+    use reth_provider::{
+        providers::BlockchainProvider2, test_utils::create_test_provider_factory_with_chain_spec,
+    };
     use reth_prune::Pruner;
     use reth_tasks::TokioTaskExecutor;
     use std::sync::Arc;

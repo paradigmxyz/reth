@@ -98,7 +98,10 @@ where
                 database_hash: block_hash,
             })
         }
-        Err(e) => return Err(dbg!(e).into()),
+        Err(e) => {
+            debug!(?e);
+            return Err(e.into());
+        }
     }
 
     debug!("Writing genesis block.");
@@ -581,6 +584,7 @@ struct GenesisAccountWithAddress {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::constants::{MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH};
     use alloy_genesis::Genesis;
     use reth_chainspec::{Chain, ChainSpec, HOLESKY, MAINNET, SEPOLIA};
     use reth_db::DatabaseEnv;
@@ -591,7 +595,7 @@ mod tests {
         transaction::DbTx,
         Database,
     };
-    use reth_primitives::{HOLESKY_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH};
+    use reth_primitives::HOLESKY_GENESIS_HASH;
     use reth_primitives_traits::IntegerList;
     use reth_provider::{
         test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},

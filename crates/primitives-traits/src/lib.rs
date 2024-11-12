@@ -14,35 +14,53 @@ extern crate alloc;
 
 /// Common constants.
 pub mod constants;
+
 pub use constants::gas_units::{format_gas, format_gas_throughput};
 
 /// Minimal account
 pub mod account;
 pub use account::{Account, Bytecode};
 
+pub mod receipt;
+pub use receipt::{FullReceipt, Receipt};
+
+pub mod transaction;
+pub use transaction::{
+    signed::{FullSignedTx, SignedTransaction},
+    FullTransaction, Transaction,
+};
+
 mod integer_list;
 pub use integer_list::{IntegerList, IntegerListError};
 
-pub mod request;
-pub use request::{Request, Requests};
+pub mod block;
+pub use block::{
+    body::BlockBody,
+    header::{BlockHeader, FullBlockHeader},
+    Block, FullBlock,
+};
 
 mod withdrawal;
-pub use withdrawal::{Withdrawal, Withdrawals};
+pub use withdrawal::Withdrawal;
 
 mod error;
 pub use error::{GotExpected, GotExpectedBoxed};
 
 mod log;
-pub use log::{logs_bloom, Log, LogData};
+pub use alloy_primitives::{logs_bloom, Log, LogData};
 
 mod storage;
 pub use storage::StorageEntry;
+
+/// Transaction types
+pub mod tx_type;
+pub use tx_type::{FullTxType, TxType};
 
 /// Common header types
 pub mod header;
 #[cfg(any(test, feature = "arbitrary", feature = "test-utils"))]
 pub use header::test_utils;
-pub use header::{BlockHeader, Header, HeaderError, SealedHeader};
+pub use header::{Header, HeaderError, SealedHeader};
 
 /// Bincode-compatible serde implementations for common abstracted types in Reth.
 ///
@@ -55,3 +73,11 @@ pub use header::{BlockHeader, Header, HeaderError, SealedHeader};
 pub mod serde_bincode_compat {
     pub use super::header::{serde_bincode_compat as header, serde_bincode_compat::*};
 }
+
+/// Heuristic size trait
+pub mod size;
+pub use size::InMemorySize;
+
+/// Node traits
+pub mod node;
+pub use node::{FullNodePrimitives, NodePrimitives};

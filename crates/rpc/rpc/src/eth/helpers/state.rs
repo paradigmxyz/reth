@@ -4,8 +4,10 @@ use reth_chainspec::EthereumHardforks;
 use reth_provider::{ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
 
-use reth_rpc_eth_api::helpers::{EthState, LoadState, SpawnBlocking};
-use reth_rpc_eth_types::EthStateCache;
+use reth_rpc_eth_api::{
+    helpers::{EthState, LoadState, SpawnBlocking},
+    RpcNodeCore,
+};
 
 use crate::EthApi;
 
@@ -18,38 +20,22 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> LoadState for EthApi<Provider, Pool, Network, EvmConfig>
-where
-    Self: Send + Sync,
-    Provider: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks>,
-    Pool: TransactionPool,
+impl<Provider, Pool, Network, EvmConfig> LoadState for EthApi<Provider, Pool, Network, EvmConfig> where
+    Self: RpcNodeCore<
+        Provider: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks>,
+        Pool: TransactionPool,
+    >
 {
-    #[inline]
-    fn provider(
-        &self,
-    ) -> impl StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks> {
-        self.inner.provider()
-    }
-
-    #[inline]
-    fn cache(&self) -> &EthStateCache {
-        self.inner.cache()
-    }
-
-    #[inline]
-    fn pool(&self) -> impl TransactionPool {
-        self.inner.pool()
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT;
     use alloy_primitives::{Address, StorageKey, StorageValue, U256};
     use reth_chainspec::MAINNET;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
-    use reth_primitives::constants::ETHEREUM_BLOCK_GAS_LIMIT;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider, NoopProvider};
     use reth_rpc_eth_api::helpers::EthState;
     use reth_rpc_eth_types::{

@@ -40,4 +40,10 @@ derive_more.workspace = true
 
 [features]
 default = ["serde"]
-serde = ["dep:serde"]
+serde = [
+	"dep:serde",
+	"reth-eth-wire-types/serde",
+	"reth-network-types/serde",
+	"alloy-primitives/serde",
+	"enr/serde"
+]

@@ -82,11 +82,10 @@ pub trait BlockIdReader: BlockNumReader + Send + Sync {
                 BlockNumberOrTag::Pending => self
                     .pending_block_num_hash()
                     .map(|res_opt| res_opt.map(|num_hash| num_hash.hash)),
-                _ => self
-                    .convert_block_number(num)?
-                    .map(|num| self.block_hash(num))
-                    .transpose()
-                    .map(|maybe_hash| maybe_hash.flatten()),
+                BlockNumberOrTag::Finalized => self.finalized_block_hash(),
+                BlockNumberOrTag::Safe => self.safe_block_hash(),
+                BlockNumberOrTag::Earliest => self.block_hash(0),
+                BlockNumberOrTag::Number(num) => self.block_hash(num),
             },
         }
     }
@@ -100,13 +99,13 @@ pub trait BlockIdReader: BlockNumReader + Send + Sync {
     }
 
     /// Get the current pending block number and hash.
-    fn pending_block_num_hash(&self) -> ProviderResult<Option<reth_primitives::BlockNumHash>>;
+    fn pending_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>>;
 
     /// Get the current safe block number and hash.
-    fn safe_block_num_hash(&self) -> ProviderResult<Option<reth_primitives::BlockNumHash>>;
+    fn safe_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>>;
 
     /// Get the current finalized block number and hash.
-    fn finalized_block_num_hash(&self) -> ProviderResult<Option<reth_primitives::BlockNumHash>>;
+    fn finalized_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>>;
 
     /// Get the safe block number.
     fn safe_block_number(&self) -> ProviderResult<Option<BlockNumber>> {

@@ -7,6 +7,7 @@ use crate::{
     traits::{CanonicalStateUpdate, TransactionPool, TransactionPoolExt},
     BlockInfo, PoolTransaction,
 };
+use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable};
 use futures_util::{
     future::{BoxFuture, Fuse, FusedFuture},
@@ -17,7 +18,7 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
 use reth_primitives::{
-    BlockNumberOrTag, PooledTransactionsElementEcRecovered, SealedHeader, TransactionSigned,
+    PooledTransactionsElementEcRecovered, SealedHeader, TransactionSigned,
     TransactionSignedEcRecovered,
 };
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
@@ -27,6 +28,7 @@ use std::{
     collections::HashSet,
     hash::{Hash, Hasher},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 use tokio::sync::oneshot;
 use tracing::{debug, error, info, trace, warn};
@@ -328,6 +330,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                             pool.get_blob(tx.hash)
                                 .ok()
                                 .flatten()
+                                .map(Arc::unwrap_or_clone)
                                 .and_then(|sidecar| {
                                     PooledTransactionsElementEcRecovered::try_from_blob_transaction(
                                         tx, sidecar,
@@ -454,21 +457,11 @@ impl FinalizedBlockTracker {
 
     /// Updates the tracked finalized block and returns the new finalized block if it changed
     fn update(&mut self, finalized_block: Option<BlockNumber>) -> Option<BlockNumber> {
-        match (self.last_finalized_block, finalized_block) {
-            (Some(last), Some(finalized)) => {
-                self.last_finalized_block = Some(finalized);
-                if last < finalized {
-                    Some(finalized)
-                } else {
-                    None
-                }
-            }
-            (None, Some(finalized)) => {
-                self.last_finalized_block = Some(finalized);
-                Some(finalized)
-            }
-            _ => None,
-        }
+        let finalized = finalized_block?;
+        self.last_finalized_block
+            .replace(finalized)
+            .map_or(true, |last| last < finalized)
+            .then_some(finalized)
     }
 }
 
@@ -490,7 +483,7 @@ impl MaintainedPoolState {
     }
 }
 
-/// A unique `ChangedAccount` identified by its address that can be used for deduplication
+/// A unique [`ChangedAccount`] identified by its address that can be used for deduplication
 #[derive(Eq)]
 struct ChangedAccountEntry(ChangedAccount);
 
@@ -585,7 +578,7 @@ where
             // Filter out errors
             <P::Transaction as PoolTransaction>::try_from_consensus(tx.into()).ok()
         })
-        .collect::<Vec<_>>();
+        .collect();
 
     let outcome = pool.add_transactions(crate::TransactionOrigin::Local, pool_transactions).await;
 

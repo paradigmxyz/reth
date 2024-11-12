@@ -8,7 +8,7 @@ use alloy_genesis::GenesisAccount;
 use alloy_primitives::{Address, Bytes, Log, B256, U256};
 use reth_codecs::{add_arbitrary_tests, Compact};
 use reth_primitives::{
-    Account, Bytecode, Header, Receipt, Requests, StorageEntry, TransactionSignedNoHash, TxType,
+    Account, Bytecode, Header, Receipt, StorageEntry, TransactionSignedNoHash, TxType,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
@@ -230,7 +230,6 @@ impl_compression_for_compact!(
     StageCheckpoint,
     PruneCheckpoint,
     ClientVersion,
-    Requests,
     // Non-DB
     GenesisAccount
 );
@@ -314,7 +313,7 @@ mod tests {
     fn test_ensure_backwards_compatibility() {
         use super::*;
         use reth_codecs::{test_utils::UnusedBits, validate_bitflag_backwards_compat};
-        use reth_primitives::{Account, Receipt, ReceiptWithBloom, Withdrawals};
+        use reth_primitives::{Account, Receipt, ReceiptWithBloom};
         use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
         use reth_stages_types::{
             AccountHashingCheckpoint, CheckpointBlockRange, EntitiesCheckpoint,
@@ -342,7 +341,6 @@ mod tests {
         assert_eq!(StoredBlockOmmers::bitflag_encoded_bytes(), 0);
         assert_eq!(StoredBlockWithdrawals::bitflag_encoded_bytes(), 0);
         assert_eq!(StorageHashingCheckpoint::bitflag_encoded_bytes(), 1);
-        assert_eq!(Withdrawals::bitflag_encoded_bytes(), 0);
 
         validate_bitflag_backwards_compat!(Account, UnusedBits::NotZero);
         validate_bitflag_backwards_compat!(AccountHashingCheckpoint, UnusedBits::NotZero);
@@ -365,7 +363,5 @@ mod tests {
         validate_bitflag_backwards_compat!(StoredBlockOmmers, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(StoredBlockWithdrawals, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(StorageHashingCheckpoint, UnusedBits::NotZero);
-        validate_bitflag_backwards_compat!(Withdrawals, UnusedBits::Zero);
-        validate_bitflag_backwards_compat!(Requests, UnusedBits::Zero);
     }
 }

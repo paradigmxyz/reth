@@ -1,6 +1,7 @@
 # Heavily inspired by Lighthouse: https://github.com/sigp/lighthouse/blob/693886b94176faa4cb450f024696cb69cda2fe58/Makefile
 .DEFAULT_GOAL := help
 
+GIT_SHA ?= $(shell git rev-parse HEAD)
 GIT_TAG ?= $(shell git describe --tags --abbrev=0)
 BIN_DIR = "dist/bin"
 
@@ -60,6 +61,16 @@ install-op: ## Build and install the op-reth binary under `~/.cargo/bin`.
 .PHONY: build
 build: ## Build the reth binary into `target` directory.
 	cargo build --bin reth --features "$(FEATURES)" --profile "$(PROFILE)"
+
+SOURCE_DATE_EPOCH ?= $(shell git log -1 --pretty=%ct)
+.PHONY: reproducible
+reproducible: ## Build the reth binary into `target` directory with reproducible builds. Only works for x86_64-unknown-linux-gnu currently
+	SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) \
+	CARGO_INCREMENTAL=0 \
+	LC_ALL=C \
+	TZ=UTC \
+	RUSTFLAGS="-C target-feature=+crt-static -C link-arg=-Wl,--build-id=none -Clink-arg=-static-libgcc -C metadata='' --remap-path-prefix $$(pwd)=." \
+	cargo build --bin reth --features "$(FEATURES)" --profile "reproducible" --locked --target x86_64-unknown-linux-gnu
 
 .PHONY: build-debug
 build-debug: ## Build the reth binary into `target/debug` directory.
@@ -203,6 +214,14 @@ docker-build-push: ## Build and push a cross-arch Docker image tagged with the l
 #
 # `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
 # `docker buildx create --use --driver docker-container --name cross-builder`
+.PHONY: docker-build-push-git-sha
+docker-build-push-git-sha: ## Build and push a cross-arch Docker image tagged with the latest git sha.
+	$(call docker_build_push,$(GIT_SHA),$(GIT_SHA))
+
+# Note: This requires a buildx builder with emulation support. For example:
+#
+# `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
+# `docker buildx create --use --driver docker-container --name cross-builder`
 .PHONY: docker-build-push-latest
 docker-build-push-latest: ## Build and push a cross-arch Docker image tagged with the latest git tag and `latest`.
 	$(call docker_build_push,$(GIT_TAG),latest)
@@ -242,6 +261,14 @@ endef
 .PHONY: op-docker-build-push
 op-docker-build-push: ## Build and push a cross-arch Docker image tagged with the latest git tag.
 	$(call op_docker_build_push,$(GIT_TAG),$(GIT_TAG))
+
+# Note: This requires a buildx builder with emulation support. For example:
+#
+# `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
+# `docker buildx create --use --driver docker-container --name cross-builder`
+.PHONY: op-docker-build-push-git-sha
+op-docker-build-push-git-sha: ## Build and push a cross-arch Docker image tagged with the latest git sha.
+	$(call op_docker_build_push,$(GIT_SHA),$(GIT_SHA))
 
 # Note: This requires a buildx builder with emulation support. For example:
 #
@@ -470,6 +497,7 @@ test:
 pr:
 	make lint && \
 	make update-book-cli && \
+	cargo docs --document-private-items && \
 	make test
 
 check-features:

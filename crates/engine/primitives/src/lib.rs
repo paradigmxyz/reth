@@ -23,22 +23,46 @@ use serde::{de::DeserializeOwned, ser::Serialize};
 /// payload job. Hence this trait is also [`PayloadTypes`].
 pub trait EngineTypes:
     PayloadTypes<
-        BuiltPayload: TryInto<Self::ExecutionPayloadV1>
-                          + TryInto<Self::ExecutionPayloadV2>
-                          + TryInto<Self::ExecutionPayloadV3>
-                          + TryInto<Self::ExecutionPayloadV4>,
+        BuiltPayload: TryInto<Self::ExecutionPayloadEnvelopeV1>
+                          + TryInto<Self::ExecutionPayloadEnvelopeV2>
+                          + TryInto<Self::ExecutionPayloadEnvelopeV3>
+                          + TryInto<Self::ExecutionPayloadEnvelopeV4>,
     > + DeserializeOwned
     + Serialize
     + 'static
 {
-    /// Execution Payload V1 type.
-    type ExecutionPayloadV1: DeserializeOwned + Serialize + Clone + Unpin + Send + Sync + 'static;
-    /// Execution Payload V2 type.
-    type ExecutionPayloadV2: DeserializeOwned + Serialize + Clone + Unpin + Send + Sync + 'static;
-    /// Execution Payload V3 type.
-    type ExecutionPayloadV3: DeserializeOwned + Serialize + Clone + Unpin + Send + Sync + 'static;
-    /// Execution Payload V4 type.
-    type ExecutionPayloadV4: DeserializeOwned + Serialize + Clone + Unpin + Send + Sync + 'static;
+    /// Execution Payload V1 envelope type.
+    type ExecutionPayloadEnvelopeV1: DeserializeOwned
+        + Serialize
+        + Clone
+        + Unpin
+        + Send
+        + Sync
+        + 'static;
+    /// Execution Payload V2  envelope type.
+    type ExecutionPayloadEnvelopeV2: DeserializeOwned
+        + Serialize
+        + Clone
+        + Unpin
+        + Send
+        + Sync
+        + 'static;
+    /// Execution Payload V3 envelope type.
+    type ExecutionPayloadEnvelopeV3: DeserializeOwned
+        + Serialize
+        + Clone
+        + Unpin
+        + Send
+        + Sync
+        + 'static;
+    /// Execution Payload V4 envelope type.
+    type ExecutionPayloadEnvelopeV4: DeserializeOwned
+        + Serialize
+        + Clone
+        + Unpin
+        + Send
+        + Sync
+        + 'static;
 }
 
 /// Type that validates the payloads sent to the engine.

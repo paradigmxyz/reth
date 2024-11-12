@@ -10,7 +10,6 @@ use reth_prune_types::{
     SegmentOutput, MINIMUM_PRUNING_DISTANCE,
 };
 use tracing::{instrument, trace};
-
 #[derive(Debug)]
 pub struct ReceiptsByLogs {
     config: ReceiptsLogPruneConfig,
@@ -223,6 +222,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db::tables;
     use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
+    use reth_primitives_traits::InMemorySize;
     use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader, TransactionsProvider};
     use reth_prune_types::{PruneLimiter, PruneMode, PruneSegment, ReceiptsLogPruneConfig};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
@@ -263,15 +263,12 @@ mod tests {
 
         let (deposit_contract_addr, _) = random_eoa_account(&mut rng);
         for block in &blocks {
+            receipts.reserve_exact(block.body.size());
             for (txi, transaction) in block.body.transactions.iter().enumerate() {
                 let mut receipt = random_receipt(&mut rng, transaction, Some(1));
                 receipt.logs.push(random_log(
                     &mut rng,
-                    if txi == (block.body.transactions.len() - 1) {
-                        Some(deposit_contract_addr)
-                    } else {
-                        None
-                    },
+                    (txi == (block.body.transactions.len() - 1)).then_some(deposit_contract_addr),
                     Some(1),
                 ));
                 receipts.push((receipts.len() as u64, receipt));

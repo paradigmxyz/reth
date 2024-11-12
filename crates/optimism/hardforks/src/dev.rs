@@ -1,9 +1,13 @@
 use alloy_primitives::U256;
-use once_cell::sync::Lazy;
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition};
 
+#[cfg(not(feature = "std"))]
+use once_cell::sync::Lazy as LazyLock;
+#[cfg(feature = "std")]
+use std::sync::LazyLock;
+
 /// Dev hardforks
-pub static DEV_HARDFORKS: Lazy<ChainHardforks> = Lazy::new(|| {
+pub static DEV_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
     ChainHardforks::new(vec![
         (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
@@ -20,13 +24,13 @@ pub static DEV_HARDFORKS: Lazy<ChainHardforks> = Lazy::new(|| {
             EthereumHardfork::Paris.boxed(),
             ForkCondition::TTD { fork_block: None, total_difficulty: U256::ZERO },
         ),
-        (crate::OptimismHardfork::Bedrock.boxed(), ForkCondition::Block(0)),
-        (crate::OptimismHardfork::Regolith.boxed(), ForkCondition::Timestamp(0)),
+        (crate::OpHardfork::Bedrock.boxed(), ForkCondition::Block(0)),
+        (crate::OpHardfork::Regolith.boxed(), ForkCondition::Timestamp(0)),
         (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(0)),
-        (crate::OptimismHardfork::Canyon.boxed(), ForkCondition::Timestamp(0)),
+        (crate::OpHardfork::Canyon.boxed(), ForkCondition::Timestamp(0)),
         (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(0)),
-        (crate::OptimismHardfork::Ecotone.boxed(), ForkCondition::Timestamp(0)),
-        (crate::OptimismHardfork::Fjord.boxed(), ForkCondition::Timestamp(0)),
-        (crate::OptimismHardfork::Granite.boxed(), ForkCondition::Timestamp(0)),
+        (crate::OpHardfork::Ecotone.boxed(), ForkCondition::Timestamp(0)),
+        (crate::OpHardfork::Fjord.boxed(), ForkCondition::Timestamp(0)),
+        (crate::OpHardfork::Granite.boxed(), ForkCondition::Timestamp(0)),
     ])
 });

@@ -18,6 +18,7 @@ reth-primitives = { workspace = true, features = ["secp256k1"] }
 reth-rpc-api.workspace = true
 reth-rpc-eth-api.workspace = true
 reth-errors.workspace = true
+reth-ethereum-consensus.workspace = true
 reth-provider.workspace = true
 reth-transaction-pool.workspace = true
 reth-network-api.workspace = true
@@ -31,27 +32,30 @@ reth-network-peers = { workspace = true, features = ["secp256k1"] }
 reth-evm.workspace = true
 reth-rpc-eth-types.workspace = true
 reth-rpc-server-types.workspace = true
-reth-node-api.workspace = true
 reth-network-types.workspace = true
 reth-trie.workspace = true
+reth-consensus.workspace = true
+reth-payload-validator.workspace = true
 
 # ethereum
 alloy-consensus.workspace = true
 alloy-signer.workspace = true
 alloy-signer-local.workspace = true
-alloy-eips.workspace = true
+alloy-eips = { workspace = true, features = ["kzg"] }
 alloy-dyn-abi.workspace = true
 alloy-genesis.workspace = true
 alloy-network.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
+alloy-rpc-types-beacon.workspace = true
 alloy-rpc-types.workspace = true
-alloy-rpc-types-eth = { workspace = true, features = ["jsonrpsee-types"] }
+alloy-rpc-types-eth = { workspace = true, features = ["jsonrpsee-types", "serde"] }
 alloy-rpc-types-debug.workspace = true
 alloy-rpc-types-trace.workspace = true
 alloy-rpc-types-mev.workspace = true
 alloy-rpc-types-txpool.workspace = true
 alloy-rpc-types-admin.workspace = true
+alloy-rpc-types-engine.workspace = true
 alloy-serde.workspace = true
 revm = { workspace = true, features = [
     "optional_block_gas_limit",
@@ -98,8 +102,3 @@ jsonrpsee = { workspace = true, features = ["client"] }
 
 [features]
 js-tracer = ["revm-inspectors/js-tracer", "reth-rpc-eth-types/js-tracer"]
-optimism = [
-    "reth-primitives/optimism",
-    "reth-provider/optimism",
-    "reth-revm/optimism",
-]

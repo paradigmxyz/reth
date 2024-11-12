@@ -1,30 +1,13 @@
-use crate::{
-    GotExpected, Header, SealedHeader, TransactionSigned, TransactionSignedEcRecovered, Withdrawals,
-};
+use crate::{GotExpected, Header, SealedHeader, TransactionSigned, TransactionSignedEcRecovered};
 use alloc::vec::Vec;
-pub use alloy_eips::eip1898::{
-    BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, ForkBlock, RpcBlockHash,
-};
-use alloy_eips::eip2718::Encodable2718;
+use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
 use alloy_primitives::{Address, Bytes, Sealable, B256};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
-use proptest::prelude::prop_compose;
-#[cfg(any(test, feature = "arbitrary"))]
 pub use reth_primitives_traits::test_utils::{generate_valid_header, valid_header_strategy};
-use reth_primitives_traits::Requests;
+use reth_primitives_traits::InMemorySize;
 use serde::{Deserialize, Serialize};
-
-// HACK(onbjerg): we need this to always set `requests` to `None` since we might otherwise generate
-// a block with `None` withdrawals and `Some` requests, in which case we end up trying to decode the
-// requests as withdrawals
-#[cfg(any(feature = "arbitrary", test))]
-prop_compose! {
-    pub fn empty_requests_strategy()(_ in 0..1) -> Option<Requests> {
-        None
-    }
-}
 
 /// Ethereum full block.
 ///
@@ -102,10 +85,12 @@ impl Block {
         let senders = self.senders()?;
         Some(BlockWithSenders { block: self, senders })
     }
+}
 
+impl InMemorySize for Block {
     /// Calculates a heuristic for the in-memory size of the [`Block`].
     #[inline]
-    pub fn size(&self) -> usize {
+    fn size(&self) -> usize {
         self.header.size() + self.body.size()
     }
 }
@@ -122,7 +107,6 @@ mod block_rlp {
         transactions: Vec<TransactionSigned>,
         ommers: Vec<Header>,
         withdrawals: Option<Withdrawals>,
-        requests: Option<Requests>,
     }
 
     #[derive(RlpEncodable)]
@@ -132,74 +116,58 @@ mod block_rlp {
         transactions: &'a Vec<TransactionSigned>,
         ommers: &'a Vec<Header>,
         withdrawals: Option<&'a Withdrawals>,
-        requests: Option<&'a Requests>,
     }
 
     impl<'a> From<&'a Block> for HelperRef<'a, Header> {
         fn from(block: &'a Block) -> Self {
-            let Block { header, body: BlockBody { transactions, ommers, withdrawals, requests } } =
-                block;
-            Self {
-                header,
-                transactions,
-                ommers,
-                withdrawals: withdrawals.as_ref(),
-                requests: requests.as_ref(),
-            }
+            let Block { header, body: BlockBody { transactions, ommers, withdrawals } } = block;
+            Self { header, transactions, ommers, withdrawals: withdrawals.as_ref() }
         }
     }
 
     impl<'a> From<&'a SealedBlock> for HelperRef<'a, SealedHeader> {
         fn from(block: &'a SealedBlock) -> Self {
-            let SealedBlock {
-                header,
-                body: BlockBody { transactions, ommers, withdrawals, requests },
-            } = block;
-            Self {
-                header,
-                transactions,
-                ommers,
-                withdrawals: withdrawals.as_ref(),
-                requests: requests.as_ref(),
-            }
+            let SealedBlock { header, body: BlockBody { transactions, ommers, withdrawals } } =
+                block;
+            Self { header, transactions, ommers, withdrawals: withdrawals.as_ref() }
         }
     }
 
     impl Decodable for Block {
         fn decode(b: &mut &[u8]) -> alloy_rlp::Result<Self> {
-            let Helper { header, transactions, ommers, withdrawals, requests } = Helper::decode(b)?;
-            Ok(Self { header, body: BlockBody { transactions, ommers, withdrawals, requests } })
+            let Helper { header, transactions, ommers, withdrawals } = Helper::decode(b)?;
+            Ok(Self { header, body: BlockBody { transactions, ommers, withdrawals } })
         }
     }
 
     impl Decodable for SealedBlock {
         fn decode(b: &mut &[u8]) -> alloy_rlp::Result<Self> {
-            let Helper { header, transactions, ommers, withdrawals, requests } = Helper::decode(b)?;
-            Ok(Self { header, body: BlockBody { transactions, ommers, withdrawals, requests } })
+            let Helper { header, transactions, ommers, withdrawals } = Helper::decode(b)?;
+            Ok(Self { header, body: BlockBody { transactions, ommers, withdrawals } })
         }
     }
 
     impl Encodable for Block {
-        fn length(&self) -> usize {
-            let helper: HelperRef<'_, _> = self.into();
-            helper.length()
-        }
-
         fn encode(&self, out: &mut dyn bytes::BufMut) {
             let helper: HelperRef<'_, _> = self.into();
             helper.encode(out)
+        }
+
+        fn length(&self) -> usize {
+            let helper: HelperRef<'_, _> = self.into();
+            helper.length()
         }
     }
 
     impl Encodable for SealedBlock {
-        fn length(&self) -> usize {
-            let helper: HelperRef<'_, _> = self.into();
-            helper.length()
-        }
-
         fn encode(&self, out: &mut dyn bytes::BufMut) {
             let helper: HelperRef<'_, _> = self.into();
             helper.encode(out)
+        }
+
+        fn length(&self) -> usize {
+            let helper: HelperRef<'_, _> = self.into();
+            helper.length()
         }
     }
 }
@@ -217,13 +185,7 @@ impl<'a> arbitrary::Arbitrary<'a> for Block {
 
         Ok(Self {
             header: u.arbitrary()?,
-            body: BlockBody {
-                transactions,
-                ommers,
-                // for now just generate empty requests, see HACK above
-                requests: u.arbitrary()?,
-                withdrawals: u.arbitrary()?,
-            },
+            body: BlockBody { transactions, ommers, withdrawals: u.arbitrary()? },
         })
     }
 }
@@ -297,22 +259,21 @@ impl BlockWithSenders {
 /// Sealed Ethereum full block.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
-#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp, 32))]
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Deref, DerefMut)]
-pub struct SealedBlock {
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Deref, DerefMut)]
+pub struct SealedBlock<H = Header, B = BlockBody> {
     /// Locked block header.
     #[deref]
     #[deref_mut]
-    pub header: SealedHeader,
+    pub header: SealedHeader<H>,
     /// Block body.
-    pub body: BlockBody,
+    pub body: B,
 }
 
-impl SealedBlock {
+impl<H, B> SealedBlock<H, B> {
     /// Create a new sealed block instance using the sealed header and block body.
     #[inline]
-    pub const fn new(header: SealedHeader, body: BlockBody) -> Self {
+    pub const fn new(header: SealedHeader<H>, body: B) -> Self {
         Self { header, body }
     }
 
@@ -322,16 +283,18 @@ impl SealedBlock {
         self.header.hash()
     }
 
+    /// Splits the [`BlockBody`] and [`SealedHeader`] into separate components
+    #[inline]
+    pub fn split_header_body(self) -> (SealedHeader<H>, B) {
+        (self.header, self.body)
+    }
+}
+
+impl SealedBlock {
     /// Splits the sealed block into underlying components
     #[inline]
     pub fn split(self) -> (SealedHeader, Vec<TransactionSigned>, Vec<Header>) {
         (self.header, self.body.transactions, self.body.ommers)
-    }
-
-    /// Splits the [`BlockBody`] and [`SealedHeader`] into separate components
-    #[inline]
-    pub fn split_header_body(self) -> (SealedHeader, BlockBody) {
-        (self.header, self.body)
     }
 
     /// Returns an iterator over all blob transactions of the block
@@ -416,12 +379,6 @@ impl SealedBlock {
         Block { header: self.header.unseal(), body: self.body }
     }
 
-    /// Calculates a heuristic for the in-memory size of the [`SealedBlock`].
-    #[inline]
-    pub fn size(&self) -> usize {
-        self.header.size() + self.body.size()
-    }
-
     /// Calculates the total gas used by blob transactions in the sealed block.
     pub fn blob_gas_used(&self) -> u64 {
         self.blob_transactions().iter().filter_map(|tx| tx.blob_gas_used()).sum()
@@ -471,9 +428,38 @@ impl SealedBlock {
     }
 }
 
+impl InMemorySize for SealedBlock {
+    /// Calculates a heuristic for the in-memory size of the [`SealedBlock`].
+    #[inline]
+    fn size(&self) -> usize {
+        self.header.size() + self.body.size()
+    }
+}
+
 impl From<SealedBlock> for Block {
     fn from(block: SealedBlock) -> Self {
         block.unseal()
+    }
+}
+
+impl<H, B> Default for SealedBlock<H, B>
+where
+    SealedHeader<H>: Default,
+    B: Default,
+{
+    fn default() -> Self {
+        Self { header: Default::default(), body: Default::default() }
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a, H, B> arbitrary::Arbitrary<'a> for SealedBlock<H, B>
+where
+    SealedHeader<H>: arbitrary::Arbitrary<'a>,
+    B: arbitrary::Arbitrary<'a>,
+{
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self { header: u.arbitrary()?, body: u.arbitrary()? })
     }
 }
 
@@ -544,7 +530,7 @@ impl SealedBlockWithSenders {
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for SealedBlockWithSenders {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let block = SealedBlock::arbitrary(u)?;
+        let block: SealedBlock = SealedBlock::arbitrary(u)?;
 
         let senders = block
             .body
@@ -572,8 +558,6 @@ pub struct BlockBody {
     pub ommers: Vec<Header>,
     /// Withdrawals in the block.
     pub withdrawals: Option<Withdrawals>,
-    /// Requests in the block.
-    pub requests: Option<Requests>,
 }
 
 impl BlockBody {
@@ -596,12 +580,6 @@ impl BlockBody {
     /// withdrawals, this will return `None`.
     pub fn calculate_withdrawals_root(&self) -> Option<B256> {
         self.withdrawals.as_ref().map(|w| crate::proofs::calculate_withdrawals_root(w))
-    }
-
-    /// Calculate the requests root for the block body, if requests exist. If there are no
-    /// requests, this will return `None`.
-    pub fn calculate_requests_root(&self) -> Option<B256> {
-        self.requests.as_ref().map(|r| crate::proofs::calculate_requests_root(&r.0))
     }
 
     /// Recover signer addresses for all transactions in the block body.
@@ -652,10 +630,12 @@ impl BlockBody {
     pub fn transactions(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
         self.transactions.iter()
     }
+}
 
+impl InMemorySize for BlockBody {
     /// Calculates a heuristic for the in-memory size of the [`BlockBody`].
     #[inline]
-    pub fn size(&self) -> usize {
+    fn size(&self) -> usize {
         self.transactions.iter().map(TransactionSigned::size).sum::<usize>() +
             self.transactions.capacity() * core::mem::size_of::<TransactionSigned>() +
             self.ommers.iter().map(Header::size).sum::<usize>() +
@@ -672,7 +652,6 @@ impl From<Block> for BlockBody {
             transactions: block.body.transactions,
             ommers: block.body.ommers,
             withdrawals: block.body.withdrawals,
-            requests: block.body.requests,
         }
     }
 }
@@ -694,8 +673,7 @@ impl<'a> arbitrary::Arbitrary<'a> for BlockBody {
             })
             .collect::<arbitrary::Result<Vec<_>>>()?;
 
-        // for now just generate empty requests, see HACK above
-        Ok(Self { transactions, ommers, requests: None, withdrawals: u.arbitrary()? })
+        Ok(Self { transactions, ommers, withdrawals: u.arbitrary()? })
     }
 }
 
@@ -704,8 +682,9 @@ impl<'a> arbitrary::Arbitrary<'a> for BlockBody {
 pub(super) mod serde_bincode_compat {
     use alloc::{borrow::Cow, vec::Vec};
     use alloy_consensus::serde_bincode_compat::Header;
+    use alloy_eips::eip4895::Withdrawals;
     use alloy_primitives::Address;
-    use reth_primitives_traits::{serde_bincode_compat::SealedHeader, Requests, Withdrawals};
+    use reth_primitives_traits::serde_bincode_compat::SealedHeader;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -731,7 +710,6 @@ pub(super) mod serde_bincode_compat {
         transactions: Vec<TransactionSigned<'a>>,
         ommers: Vec<Header<'a>>,
         withdrawals: Cow<'a, Option<Withdrawals>>,
-        requests: Cow<'a, Option<Requests>>,
     }
 
     impl<'a> From<&'a super::BlockBody> for BlockBody<'a> {
@@ -740,7 +718,6 @@ pub(super) mod serde_bincode_compat {
                 transactions: value.transactions.iter().map(Into::into).collect(),
                 ommers: value.ommers.iter().map(Into::into).collect(),
                 withdrawals: Cow::Borrowed(&value.withdrawals),
-                requests: Cow::Borrowed(&value.requests),
             }
         }
     }
@@ -751,7 +728,6 @@ pub(super) mod serde_bincode_compat {
                 transactions: value.transactions.into_iter().map(Into::into).collect(),
                 ommers: value.ommers.into_iter().map(Into::into).collect(),
                 withdrawals: value.withdrawals.into_owned(),
-                requests: value.requests.into_owned(),
             }
         }
     }
@@ -955,8 +931,11 @@ pub(super) mod serde_bincode_compat {
 
 #[cfg(test)]
 mod tests {
-    use super::{BlockNumberOrTag::*, *};
-    use alloy_eips::eip1898::HexStringMissingPrefixError;
+    use super::*;
+    use alloy_eips::{
+        eip1898::HexStringMissingPrefixError, BlockId, BlockNumberOrTag, BlockNumberOrTag::*,
+        RpcBlockHash,
+    };
     use alloy_primitives::hex_literal::hex;
     use alloy_rlp::{Decodable, Encodable};
     use std::str::FromStr;
@@ -1133,10 +1112,19 @@ mod tests {
 
     #[test]
     fn test_default_seal() {
-        let block = SealedBlock::default();
+        let block: SealedBlock = SealedBlock::default();
         let sealed = block.hash();
         let block = block.unseal();
         let block = block.seal_slow();
         assert_eq!(sealed, block.hash());
+    }
+
+    #[test]
+    fn empty_block_rlp() {
+        let body = BlockBody::default();
+        let mut buf = Vec::new();
+        body.encode(&mut buf);
+        let decoded = BlockBody::decode(&mut buf.as_slice()).unwrap();
+        assert_eq!(body, decoded);
     }
 }

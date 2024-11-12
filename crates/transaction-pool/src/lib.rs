@@ -151,12 +151,12 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use crate::{identifier::TransactionId, pool::PoolInner};
-use alloy_eips::eip4844::BlobAndProofV1;
+use alloy_eips::eip4844::{BlobAndProofV1, BlobTransactionSidecar};
 use alloy_primitives::{Address, TxHash, B256, U256};
 use aquamarine as _;
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
-use reth_primitives::{BlobTransactionSidecar, PooledTransactionsElement};
+use reth_primitives::PooledTransactionsElement;
 use reth_storage_api::StateProviderFactory;
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::mpsc::Receiver;
@@ -166,9 +166,9 @@ pub use crate::{
     blobstore::{BlobStore, BlobStoreError},
     config::{
         LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP,
-        DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS, REPLACE_BLOB_PRICE_BUMP,
-        TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER, TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
-        TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
+        DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS, MAX_NEW_PENDING_TXS_NOTIFICATIONS,
+        REPLACE_BLOB_PRICE_BUMP, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
+        TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT, TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
     },
     error::PoolResult,
     ordering::{CoinbaseTipOrdering, Priority, TransactionOrdering},
@@ -430,13 +430,6 @@ where
         Box::new(self.pool.best_transactions())
     }
 
-    fn best_transactions_with_base_fee(
-        &self,
-        base_fee: u64,
-    ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
-        self.pool.best_transactions_with_attributes(BestTransactionsAttributes::base_fee(base_fee))
-    }
-
     fn best_transactions_with_attributes(
         &self,
         best_transactions_attributes: BestTransactionsAttributes,
@@ -461,6 +454,20 @@ where
         hashes: Vec<TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.pool.remove_transactions(hashes)
+    }
+
+    fn remove_transactions_and_descendants(
+        &self,
+        hashes: Vec<TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.remove_transactions_and_descendants(hashes)
+    }
+
+    fn remove_transactions_by_sender(
+        &self,
+        sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.remove_transactions_by_sender(sender)
     }
 
     fn retain_unknown<A>(&self, announcement: &mut A)
@@ -489,11 +496,40 @@ where
         self.pool.get_transactions_by_sender(sender)
     }
 
+    fn get_pending_transactions_with_predicate(
+        &self,
+        predicate: impl FnMut(&ValidPoolTransaction<Self::Transaction>) -> bool,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.pending_transactions_with_predicate(predicate)
+    }
+
+    fn get_pending_transactions_by_sender(
+        &self,
+        sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.get_pending_transactions_by_sender(sender)
+    }
+
+    fn get_queued_transactions_by_sender(
+        &self,
+        sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.get_queued_transactions_by_sender(sender)
+    }
+
     fn get_highest_transaction_by_sender(
         &self,
         sender: Address,
     ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.pool.get_highest_transaction_by_sender(sender)
+    }
+
+    fn get_highest_consecutive_transaction_by_sender(
+        &self,
+        sender: Address,
+        on_chain_nonce: u64,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.get_highest_consecutive_transaction_by_sender(sender, on_chain_nonce)
     }
 
     fn get_transaction_by_sender_and_nonce(
@@ -525,21 +561,24 @@ where
         self.pool.unique_senders()
     }
 
-    fn get_blob(&self, tx_hash: TxHash) -> Result<Option<BlobTransactionSidecar>, BlobStoreError> {
+    fn get_blob(
+        &self,
+        tx_hash: TxHash,
+    ) -> Result<Option<Arc<BlobTransactionSidecar>>, BlobStoreError> {
         self.pool.blob_store().get(tx_hash)
     }
 
     fn get_all_blobs(
         &self,
         tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<(TxHash, BlobTransactionSidecar)>, BlobStoreError> {
+    ) -> Result<Vec<(TxHash, Arc<BlobTransactionSidecar>)>, BlobStoreError> {
         self.pool.blob_store().get_all(tx_hashes)
     }
 
     fn get_all_blobs_exact(
         &self,
         tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError> {
+    ) -> Result<Vec<Arc<BlobTransactionSidecar>>, BlobStoreError> {
         self.pool.blob_store().get_exact(tx_hashes)
     }
 

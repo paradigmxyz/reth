@@ -33,6 +33,8 @@ revm.workspace = true
 revm-primitives.workspace = true
 
 # alloy
+alloy-eips.workspace = true
+alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 
 # misc

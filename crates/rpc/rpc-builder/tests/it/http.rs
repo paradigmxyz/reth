@@ -2,12 +2,12 @@
 //! Standalone http tests
 
 use crate::utils::{launch_http, launch_http_ws, launch_ws};
+use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::{hex_literal::hex, Address, Bytes, TxHash, B256, B64, U256, U64};
-use alloy_rpc_types::{
-    Block, FeeHistory, Filter, Index, Log, PendingTransactionFilterKind, SyncStatus, Transaction,
-    TransactionReceipt,
+use alloy_rpc_types_eth::{
+    transaction::TransactionRequest, Block, FeeHistory, Filter, Index, Log,
+    PendingTransactionFilterKind, SyncStatus, Transaction, TransactionReceipt,
 };
-use alloy_rpc_types_eth::transaction::TransactionRequest;
 use alloy_rpc_types_trace::filter::TraceFilter;
 use jsonrpsee::{
     core::{
@@ -19,7 +19,7 @@ use jsonrpsee::{
     types::error::ErrorCode,
 };
 use reth_network_peers::NodeRecord;
-use reth_primitives::{BlockId, BlockNumberOrTag, Receipt};
+use reth_primitives::Receipt;
 use reth_rpc_api::{
     clients::{AdminApiClient, EthApiClient},
     DebugApiClient, EthFilterApiClient, NetApiClient, OtterscanClient, TraceApiClient,

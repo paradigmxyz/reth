@@ -5,7 +5,6 @@ use std::{sync::Arc, thread::available_parallelism};
 use alloy_primitives::{BlockNumber, B256};
 use eyre::{Context, OptionExt};
 use rayon::ThreadPoolBuilder;
-use reth_auto_seal_consensus::MiningMode;
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
@@ -16,6 +15,7 @@ use reth_consensus::Consensus;
 use reth_db_api::database::Database;
 use reth_db_common::init::{init_genesis, InitDatabaseError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
+use reth_engine_local::MiningMode;
 use reth_engine_tree::tree::{InvalidBlockHook, InvalidBlockHooks, NoopInvalidBlockHook};
 use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_fs_util as fs;
@@ -52,8 +52,9 @@ use reth_stages::{sets::DefaultStages, MetricEvent, PipelineBuilder, PipelineTar
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, error, info, warn};
+use reth_transaction_pool::TransactionPool;
 use tokio::sync::{
-    mpsc::{unbounded_channel, Receiver, UnboundedSender},
+    mpsc::{unbounded_channel, UnboundedSender},
     oneshot, watch,
 };
 
@@ -386,13 +387,11 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     }
 
     /// Returns the [`MiningMode`] intended for --dev mode.
-    pub fn dev_mining_mode(&self, pending_transactions_listener: Receiver<B256>) -> MiningMode {
+    pub fn dev_mining_mode(&self, pool: impl TransactionPool) -> MiningMode {
         if let Some(interval) = self.node_config().dev.block_time {
             MiningMode::interval(interval)
-        } else if let Some(max_transactions) = self.node_config().dev.block_max_transactions {
-            MiningMode::instant(max_transactions, pending_transactions_listener)
         } else {
-            MiningMode::instant(1, pending_transactions_listener)
+            MiningMode::instant(pool)
         }
     }
 }
@@ -806,6 +805,15 @@ where
         Ok(initial_target)
     }
 
+    /// Returns true if the node should terminate after the initial backfill run.
+    ///
+    /// This is the case if any of these configs are set:
+    ///  `--debug.max-block`
+    ///  `--debug.terminate`
+    pub const fn terminate_after_initial_backfill(&self) -> bool {
+        self.node_config().debug.terminate || self.node_config().debug.max_block.is_some()
+    }
+
     /// Check if the pipeline is consistent (all stages have the checkpoint block numbers no less
     /// than the checkpoint of the first stage).
     ///
@@ -1063,7 +1071,7 @@ mod tests {
             let node_config = NodeConfig {
                 pruning: PruningArgs {
                     full: true,
-                    block_interval: 0,
+                    block_interval: None,
                     sender_recovery_full: false,
                     sender_recovery_distance: None,
                     sender_recovery_before: None,
