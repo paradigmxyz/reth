@@ -60,7 +60,7 @@ pub struct BodyStage<D: BodyDownloader> {
     /// The body downloader.
     downloader: D,
     /// Block response buffer.
-    buffer: Option<Vec<BlockResponse>>,
+    buffer: Option<Vec<BlockResponse<D::Body>>>,
 }
 
 impl<D: BodyDownloader> BodyStage<D> {
@@ -70,9 +70,10 @@ impl<D: BodyDownloader> BodyStage<D> {
     }
 }
 
-impl<Provider, D: BodyDownloader> Stage<Provider> for BodyStage<D>
+impl<Provider, D> Stage<Provider> for BodyStage<D>
 where
     Provider: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory + StatsReader + BlockReader,
+    D: BodyDownloader<Body = reth_primitives::BlockBody>,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -889,6 +890,8 @@ mod tests {
         }
 
         impl BodyDownloader for TestBodyDownloader {
+            type Body = BlockBody;
+
             fn set_download_range(
                 &mut self,
                 range: RangeInclusive<BlockNumber>,
@@ -909,7 +912,7 @@ mod tests {
         }
 
         impl Stream for TestBodyDownloader {
-            type Item = BodyDownloaderResult;
+            type Item = BodyDownloaderResult<BlockBody>;
             fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
                 let this = self.get_mut();
 

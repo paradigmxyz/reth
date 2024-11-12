@@ -56,10 +56,10 @@ impl<H> SealedHeader<H> {
     }
 }
 
-impl SealedHeader {
+impl<H: alloy_consensus::BlockHeader> SealedHeader<H> {
     /// Return the number hash tuple.
     pub fn num_hash(&self) -> BlockNumHash {
-        BlockNumHash::new(self.number, self.hash)
+        BlockNumHash::new(self.number(), self.hash)
     }
 }
 
