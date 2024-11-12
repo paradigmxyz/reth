@@ -8327,8 +8327,14 @@ name = "reth-optimism-primitives"
 version = "1.1.1"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
+ "alloy-rlp",
+ "bytes",
+ "derive_more 1.0.0",
+ "op-alloy-consensus",
  "reth-primitives",
+ "reth-primitives-traits",
 ]
 
 [[package]]
