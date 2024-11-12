@@ -429,7 +429,7 @@ alloy-dyn-abi = "0.8.11"
 alloy-primitives = { version = "0.8.11", default-features = false }
 alloy-rlp = "0.3.4"
 alloy-sol-types = "0.8.11"
-alloy-trie = { version = "0.7", default-features = false }
+alloy-trie = { git = "https://github.com/fgimenez/trie", branch = "fgimenez/proof-nodes-extend", default-features = false }
 
 alloy-consensus = { version = "0.6.4", default-features = false }
 alloy-contract = { version = "0.6.4", default-features = false }

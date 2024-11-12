@@ -80,24 +80,13 @@ impl MultiProof {
     /// Extends this multiproof with another one, merging both account and storage
     /// proofs.
     pub fn extend(&mut self, other: Self) {
-        self.account_subtree = self
-            .account_subtree
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .chain(other.account_subtree.into_inner())
-            .collect::<ProofNodes>();
+        self.account_subtree.extend_from(other.account_subtree);
 
         for (hashed_address, storage) in other.storages {
             match self.storages.entry(hashed_address) {
                 hash_map::Entry::Occupied(mut entry) => {
                     debug_assert_eq!(entry.get().root, storage.root);
-                    entry.get_mut().subtree = entry
-                        .get()
-                        .subtree
-                        .iter()
-                        .map(|(k, v)| (k.clone(), v.clone()))
-                        .chain(storage.subtree.into_inner())
-                        .collect::<ProofNodes>();
+                    entry.get_mut().subtree.extend_from(storage.subtree);
                 }
                 hash_map::Entry::Vacant(entry) => {
                     entry.insert(storage);
