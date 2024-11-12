@@ -1,5 +1,6 @@
-use crate::{BlockBody, FullBlock, FullReceipt, FullSignedTx};
 use core::fmt;
+
+use crate::{BlockBody, FullBlock, FullReceipt, FullSignedTx};
 
 /// Configures all the primitive types of the node.
 pub trait NodePrimitives: Send + Sync + Unpin + Clone + Default + fmt::Debug {
