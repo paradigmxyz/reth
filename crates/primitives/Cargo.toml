@@ -103,6 +103,7 @@ std = [
 	"revm-primitives/std",
 	"secp256k1?/std",
 	"serde/std",
+	"alloy-trie/std"
 ]
 reth-codec = ["dep:reth-codecs", "dep:zstd", "dep:modular-bitfield", "std"]
 asm-keccak = ["alloy-primitives/asm-keccak", "revm-primitives/asm-keccak"]
@@ -122,7 +123,9 @@ arbitrary = [
 	"alloy-serde?/arbitrary",
 	"op-alloy-consensus?/arbitrary",
 	"op-alloy-rpc-types?/arbitrary",
-	"reth-codecs?/arbitrary"
+	"reth-codecs?/arbitrary",
+	"alloy-trie/arbitrary",
+	"reth-trie-common/arbitrary"
 ]
 secp256k1 = ["dep:secp256k1"]
 c-kzg = [

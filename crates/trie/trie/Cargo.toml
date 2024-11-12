@@ -69,7 +69,8 @@ serde = [
 	"dep:serde",
 	"alloy-consensus/serde",
 	"alloy-primitives/serde",
-	"revm/serde"
+	"revm/serde",
+	"alloy-trie/serde"
 ]
 serde-bincode-compat = [
 	"serde_with",
