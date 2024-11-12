@@ -751,6 +751,15 @@ impl alloy_consensus::Transaction for Transaction {
         }
     }
 
+    fn is_dynamic_fee(&self) -> bool {
+        match self {
+            Self::Legacy(_) | Self::Eip2930(_) => false,
+            Self::Eip1559(_) | Self::Eip4844(_) | Self::Eip7702(_) => true,
+            #[cfg(feature = "optimism")]
+            Self::Deposit(_) => false,
+        }
+    }
+
     fn value(&self) -> U256 {
         match self {
             Self::Legacy(tx) => tx.value(),
@@ -1442,6 +1451,10 @@ impl alloy_consensus::Transaction for TransactionSigned {
 
     fn priority_fee_or_price(&self) -> u128 {
         self.deref().priority_fee_or_price()
+    }
+
+    fn is_dynamic_fee(&self) -> bool {
+        self.deref().is_dynamic_fee()
     }
 
     fn value(&self) -> U256 {
