@@ -28,7 +28,6 @@ use reth_primitives::{
     transaction::TryFromRecoveredTransactionError, PooledTransactionsElementEcRecovered,
     Transaction, TransactionSigned, TransactionSignedEcRecovered, TxType,
 };
-
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
 
 /// A transaction pool implementation using [`MockOrdering`] for transaction ordering.
@@ -1007,6 +1006,7 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::Strategy;
         use proptest_arbitrary_interop::arb;
+        use reth_primitives_traits::size::InMemorySize;
 
         arb::<(Transaction, Address, B256)>()
             .prop_map(|(tx, sender, tx_hash)| match &tx {

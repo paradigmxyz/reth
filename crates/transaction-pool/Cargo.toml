@@ -17,6 +17,7 @@ reth-chain-state.workspace = true
 reth-chainspec.workspace = true
 reth-eth-wire-types.workspace = true
 reth-primitives = { workspace = true, features = ["c-kzg", "secp256k1"] }
+reth-primitives-traits.workspace = true
 reth-execution-types.workspace = true
 reth-fs-util.workspace = true
 reth-storage-api.workspace = true
@@ -49,6 +50,7 @@ serde = { workspace = true, features = ["derive", "rc"], optional = true }
 bitflags.workspace = true
 auto_impl.workspace = true
 smallvec.workspace = true
+
 
 # testing
 rand = { workspace = true, optional = true }
@@ -84,7 +86,7 @@ serde = [
 	"parking_lot/serde",
 	"rand?/serde",
 	"revm/serde",
-	"smallvec/serde"
+	"smallvec/serde",
 ]
 test-utils = [
 	"rand",
@@ -94,7 +96,8 @@ test-utils = [
 	"reth-chainspec/test-utils",
 	"reth-primitives/test-utils",
 	"reth-provider/test-utils",
-	"revm/test-utils"
+	"revm/test-utils",
+	"reth-primitives-traits/test-utils",
 ]
 arbitrary = [
 	"proptest",
@@ -107,7 +110,8 @@ arbitrary = [
 	"alloy-primitives/arbitrary",
 	"bitflags/arbitrary",
 	"revm/arbitrary",
-	"smallvec/arbitrary"
+	"reth-primitives-traits/arbitrary",
+	"smallvec/arbitrary",
 ]
 
 [[bench]]

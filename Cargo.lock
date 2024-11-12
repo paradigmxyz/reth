@@ -7039,6 +7039,7 @@ dependencies = [
  "reth-network-p2p",
  "reth-network-peers",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-storage-api",
  "reth-tasks",
@@ -7828,6 +7829,7 @@ dependencies = [
  "reth-network-peers",
  "reth-network-types",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-storage-errors",
  "tokio",
  "tracing",
@@ -8189,6 +8191,7 @@ version = "1.1.1"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives",
+ "alloy-trie",
  "reth-chainspec",
  "reth-consensus",
  "reth-consensus-common",
@@ -8325,8 +8328,14 @@ name = "reth-optimism-primitives"
 version = "1.1.1"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
+ "alloy-rlp",
+ "bytes",
+ "derive_more 1.0.0",
+ "op-alloy-consensus",
  "reth-primitives",
+ "reth-primitives-traits",
 ]
 
 [[package]]
@@ -8443,6 +8452,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types",
  "alloy-serde",
+ "alloy-trie",
  "arbitrary",
  "assert_matches",
  "bincode",
@@ -8570,6 +8580,7 @@ dependencies = [
  "reth-errors",
  "reth-exex-types",
  "reth-metrics",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-prune-types",
  "reth-stages",
@@ -9192,6 +9203,7 @@ dependencies = [
  "reth-fs-util",
  "reth-metrics",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-storage-api",
  "reth-tasks",
@@ -9216,6 +9228,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-trie",
  "auto_impl",
  "bincode",
  "criterion",
@@ -10548,18 +10561,18 @@ checksum = "a38c90d48152c236a3ab59271da4f4ae63d678c5d7ad6b7714d7cb9760be5e4b"
 
 [[package]]
 name = "thiserror"
-version = "1.0.68"
+version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02dd99dc800bbb97186339685293e1cc5d9df1f8fae2d0aecd9ff1c77efea892"
+checksum = "b6aaf5339b578ea85b50e080feb250a3e8ae8cfcdff9a461c9ec2904bc923f52"
 dependencies = [
  "thiserror-impl",
 ]
 
 [[package]]
 name = "thiserror-impl"
-version = "1.0.68"
+version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7c61ec9a6f64d2793d8a45faba21efbe3ced62a886d44c36a009b2b519b4c7e"
+checksum = "4fee6c4efc90059e10f81e6d42c60a18f76588c3d74cb83a0b242a2b6c7504c1"
 dependencies = [
  "proc-macro2",
  "quote",

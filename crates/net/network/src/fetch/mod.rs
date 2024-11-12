@@ -473,7 +473,6 @@ mod tests {
     use super::*;
     use crate::{peers::PeersManager, PeersConfig};
     use alloy_primitives::B512;
-    use reth_primitives::SealedHeader;
     use std::future::poll_fn;
 
     #[tokio::test(flavor = "multi_thread")]
@@ -590,8 +589,7 @@ mod tests {
                 },
                 response: tx,
             };
-            let mut header = SealedHeader::default().unseal();
-            header.number = 0u64;
+            let header = Header { number: 0, ..Default::default() };
             (req, header)
         };
 

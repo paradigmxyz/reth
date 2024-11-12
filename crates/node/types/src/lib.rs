@@ -7,11 +7,13 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
 
-pub use reth_primitives_traits::{Block, BlockBody};
+pub use reth_primitives_traits::{
+    Block, BlockBody, FullBlock, FullNodePrimitives, FullReceipt, FullSignedTx, NodePrimitives,
+};
 
-use core::fmt;
-use std::marker::PhantomData;
+use core::marker::PhantomData;
 
 use reth_chainspec::EthChainSpec;
 use reth_db_api::{
@@ -20,25 +22,6 @@ use reth_db_api::{
 };
 use reth_engine_primitives::EngineTypes;
 use reth_trie_db::StateCommitment;
-
-/// Configures all the primitive types of the node.
-pub trait NodePrimitives: Send + Sync + Unpin + Clone + Default + fmt::Debug {
-    /// Block primitive.
-    type Block: Send + Sync + Unpin + Clone + Default + fmt::Debug + 'static;
-    /// Signed version of the transaction type.
-    type SignedTx: Send + Sync + Unpin + Clone + Default + fmt::Debug + 'static;
-    /// Transaction envelope type ID.
-    type TxType: Send + Sync + Unpin + Clone + Default + fmt::Debug + 'static;
-    /// A receipt.
-    type Receipt: Send + Sync + Unpin + Clone + Default + fmt::Debug + 'static;
-}
-
-impl NodePrimitives for () {
-    type Block = ();
-    type SignedTx = ();
-    type TxType = ();
-    type Receipt = ();
-}
 
 /// The type that configures the essential types of an Ethereum-like node.
 ///
