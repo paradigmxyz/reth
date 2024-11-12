@@ -61,10 +61,6 @@ pub trait AlloyTransactionExt: alloy_consensus::Transaction {
     /// It is only for signature signing or signer recovery.
     fn signature_hash(&self) -> B256;
 
-    /// Returns `true` if the tx supports dynamic fees
-    // todo: remove when released https://github.com/alloy-rs/alloy/pull/1638
-    fn is_dynamic_fee(&self) -> bool;
-
     /// Returns the effective gas price for the given base fee.
     fn effective_gas_price(&self, base_fee: Option<u64>) -> u128;
 

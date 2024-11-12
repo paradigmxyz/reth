@@ -860,15 +860,6 @@ impl AlloyTransactionExt for Transaction {
         }
     }
 
-    fn is_dynamic_fee(&self) -> bool {
-        match self {
-            Self::Legacy(_) | Self::Eip2930(_) => false,
-            Self::Eip1559(_) | Self::Eip4844(_) | Self::Eip7702(_) => true,
-            #[cfg(feature = "optimism")]
-            _ => todo!("use op type for op"),
-        }
-    }
-
     fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
         match self {
             Self::Legacy(tx) => tx.gas_price,

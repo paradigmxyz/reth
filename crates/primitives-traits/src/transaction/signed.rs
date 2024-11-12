@@ -90,10 +90,6 @@ impl<T: SignedTransaction> AlloyTransactionExt for T {
         self.transaction().signature_hash()
     }
 
-    fn is_dynamic_fee(&self) -> bool {
-        self.transaction().is_dynamic_fee()
-    }
-
     fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
         self.transaction().effective_gas_price(base_fee)
     }
