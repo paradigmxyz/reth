@@ -42,6 +42,9 @@ pub use signature::{recover_signer, recover_signer_unchecked};
 pub use tx_type::TxType;
 pub use variant::TransactionSignedVariant;
 
+/// Handling transaction signature operations, including signature recovery,
+/// applying chain IDs, and EIP-2 validation.
+pub mod signature;
 pub mod util;
 
 pub(crate) mod access_list;
@@ -51,12 +54,6 @@ mod meta;
 mod pooled;
 mod sidecar;
 mod tx_type;
-
-/// Handling transaction signature operations, including signature recovery,
-/// applying chain IDs, and EIP-2 validation.
-pub mod signature;
-
-pub(crate) mod util;
 mod variant;
 
 #[cfg(feature = "optimism")]
