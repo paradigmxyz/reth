@@ -7,7 +7,7 @@ use reth_chainspec::{EthChainSpec, Hardforks};
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, PeersInfo};
 use reth_node_api::{
-    AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, NodePrimitives,
+    AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, NodePrimitives, PayloadBuilder,
 };
 use reth_node_builder::{
     components::{
@@ -24,7 +24,7 @@ use reth_optimism_evm::{OpEvmConfig, OpExecutionStrategyFactory};
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_rpc::OpEthApi;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::{Block, Header, Receipt};
+use reth_primitives::{Block, Header, Receipt, TransactionSigned, TxType};
 use reth_provider::CanonStateSubscriptions;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
@@ -41,11 +41,13 @@ use crate::{
 };
 
 /// Optimism primitive types.
-#[derive(Debug)]
+#[derive(Debug, Default, Clone)]
 pub struct OpPrimitives;
 
 impl NodePrimitives for OpPrimitives {
     type Block = Block;
+    type SignedTx = TransactionSigned;
+    type TxType = TxType;
     type Receipt = Receipt;
 }
 
@@ -148,7 +150,10 @@ impl<N: FullNodeComponents> OpAddOns<N> {
 
 impl<N> NodeAddOns<N> for OpAddOns<N>
 where
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>,
+    N: FullNodeComponents<
+        Types: NodeTypes<ChainSpec = OpChainSpec>,
+        PayloadBuilder: PayloadBuilder<PayloadType = <N::Types as NodeTypesWithEngine>::Engine>,
+    >,
     OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
 {
     type Handle = RpcHandle<N, OpEthApi<N>>;
@@ -163,7 +168,10 @@ where
 
 impl<N> RethRpcAddOns<N> for OpAddOns<N>
 where
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>,
+    N: FullNodeComponents<
+        Types: NodeTypes<ChainSpec = OpChainSpec>,
+        PayloadBuilder: PayloadBuilder<PayloadType = <N::Types as NodeTypesWithEngine>::Engine>,
+    >,
     OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
 {
     type EthApi = OpEthApi<N>;

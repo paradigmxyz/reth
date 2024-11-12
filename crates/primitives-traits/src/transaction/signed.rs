@@ -16,13 +16,15 @@ impl<T> FullSignedTx for T where T: SignedTransaction<Transaction: Compact> + Co
 
 /// A signed transaction.
 pub trait SignedTransaction:
-    fmt::Debug
+    Send
+    + Sync
+    + Unpin
     + Clone
+    + Default
+    + fmt::Debug
     + PartialEq
     + Eq
     + Hash
-    + Send
-    + Sync
     + serde::Serialize
     + for<'a> serde::Deserialize<'a>
     + alloy_rlp::Encodable
