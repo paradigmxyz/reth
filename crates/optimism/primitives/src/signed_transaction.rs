@@ -18,7 +18,9 @@ use serde::{Deserialize, Serialize};
 
 /// Signed transaction.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Serialize, Deserialize, Constructor)]
+#[derive(
+    Debug, Clone, Default, PartialEq, Eq, Hash, AsRef, Deref, Serialize, Deserialize, Constructor,
+)]
 pub struct OpTransactionSigned {
     /// Transaction hash
     pub hash: TxHash,

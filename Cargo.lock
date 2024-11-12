@@ -8343,6 +8343,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "arbitrary",
+ "bytes",
  "derive_more 1.0.0",
  "modular-bitfield",
  "op-alloy-consensus",
