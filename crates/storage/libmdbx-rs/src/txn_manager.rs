@@ -5,7 +5,10 @@ use crate::{
 };
 use std::{
     ptr,
-    sync::{mpsc::{sync_channel, Receiver, SyncSender}, Arc},
+    sync::{
+        mpsc::{sync_channel, Receiver, SyncSender},
+        Arc,
+    },
 };
 
 #[derive(Copy, Clone, Debug)]
