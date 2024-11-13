@@ -87,6 +87,8 @@ pub struct AnyPrimitives;
 
 impl reth_primitives_traits::NodePrimitives for AnyPrimitives {
     type Block = crate::Block;
+    type BlockHeader = alloy_consensus::Header;
+    type BlockBody = crate::BlockBody;
     type SignedTx = crate::TransactionSigned;
     type TxType = crate::TxType;
     type Receipt = crate::Receipt;

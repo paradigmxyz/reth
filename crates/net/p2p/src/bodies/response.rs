@@ -1,17 +1,17 @@
 use alloy_primitives::{BlockNumber, U256};
-use reth_primitives::{SealedBlock, SealedHeader};
+use reth_primitives::{BlockBody, SealedBlock, SealedHeader};
 use reth_primitives_traits::InMemorySize;
 
 /// The block response
 #[derive(PartialEq, Eq, Debug, Clone)]
-pub enum BlockResponse {
+pub enum BlockResponse<B = BlockBody> {
     /// Full block response (with transactions or ommers)
-    Full(SealedBlock),
+    Full(SealedBlock<reth_primitives::Header, B>),
     /// The empty block response
     Empty(SealedHeader),
 }
 
-impl BlockResponse {
+impl<B> BlockResponse<B> {
     /// Return the reference to the response header
     pub const fn header(&self) -> &SealedHeader {
         match self {
@@ -34,8 +34,7 @@ impl BlockResponse {
     }
 }
 
-impl InMemorySize for BlockResponse {
-    /// Calculates a heuristic for the in-memory size of the [`BlockResponse`].
+impl<B: InMemorySize> InMemorySize for BlockResponse<B> {
     #[inline]
     fn size(&self) -> usize {
         match self {

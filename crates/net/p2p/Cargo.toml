@@ -22,6 +22,7 @@ reth-network-types.workspace = true
 reth-storage-errors.workspace = true
 
 # ethereum
+alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 
@@ -55,5 +56,6 @@ std = [
 	"reth-primitives/std",
 	"alloy-eips/std",
 	"alloy-primitives/std",
-	"reth-primitives-traits/std"
+	"reth-primitives-traits/std",
+    "alloy-consensus/std",
 ]

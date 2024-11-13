@@ -12,8 +12,9 @@ use reth_downloaders::{
 use reth_evm::execute::BlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
 use reth_network_p2p::{
-    bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader, BlockClient,
+    bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader, EthBlockClient,
 };
+use reth_node_api::NodePrimitives;
 use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
 use reth_stages::{prelude::DefaultStages, stages::ExecutionStage, Pipeline, StageSet};
 use reth_static_file::StaticFileProducer;
@@ -38,7 +39,7 @@ pub fn build_networked_pipeline<N, Client, Executor>(
 ) -> eyre::Result<Pipeline<N>>
 where
     N: ProviderNodeTypes,
-    Client: BlockClient + 'static,
+    Client: EthBlockClient + 'static,
     Executor: BlockExecutorProvider<N::Primitives>,
 {
     // building network downloaders using the fetch client
@@ -84,8 +85,8 @@ pub fn build_pipeline<N, H, B, Executor>(
 ) -> eyre::Result<Pipeline<N>>
 where
     N: ProviderNodeTypes,
-    H: HeaderDownloader + 'static,
-    B: BodyDownloader + 'static,
+    H: HeaderDownloader<Header = <N::Primitives as NodePrimitives>::BlockHeader> + 'static,
+    B: BodyDownloader<Body = <N::Primitives as NodePrimitives>::BlockBody> + 'static,
     Executor: BlockExecutorProvider<N::Primitives>,
 {
     let mut builder = Pipeline::<N>::builder();

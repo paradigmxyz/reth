@@ -11,12 +11,17 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+# reth
 reth-primitives.workspace = true
 reth-node-types.workspace = true
+
+# ethereum
+alloy-consensus.workspace = true
 
 [features]
 default = ["std"]
 std = [
     "reth-primitives/std",
     "reth-node-types/std",
+    "alloy-consensus/std",
 ]

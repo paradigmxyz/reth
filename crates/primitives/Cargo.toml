@@ -150,6 +150,7 @@ test-utils = [
 	"reth-chainspec/test-utils",
 	"reth-codecs?/test-utils",
 	"reth-trie-common/test-utils",
+	"arbitrary",
 ]
 serde-bincode-compat = [
 	"alloy-consensus/serde-bincode-compat",

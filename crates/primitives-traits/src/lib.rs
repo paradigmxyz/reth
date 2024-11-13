@@ -27,7 +27,7 @@ pub use receipt::{FullReceipt, Receipt};
 pub mod transaction;
 pub use transaction::{
     signed::{FullSignedTx, SignedTransaction},
-    FullTransaction, Transaction,
+    FullTransaction, Transaction, TransactionExt,
 };
 
 mod integer_list;
@@ -35,13 +35,12 @@ pub use integer_list::{IntegerList, IntegerListError};
 
 pub mod block;
 pub use block::{
-    body::BlockBody,
+    body::{BlockBody, FullBlockBody},
     header::{BlockHeader, FullBlockHeader},
     Block, FullBlock,
 };
 
 mod withdrawal;
-pub use withdrawal::Withdrawal;
 
 mod error;
 pub use error::{GotExpected, GotExpectedBoxed};
@@ -81,3 +80,15 @@ pub use size::InMemorySize;
 /// Node traits
 pub mod node;
 pub use node::{FullNodePrimitives, NodePrimitives};
+
+/// Helper trait that requires arbitrary implementation if the feature is enabled.
+#[cfg(any(feature = "test-utils", feature = "arbitrary"))]
+pub trait MaybeArbitrary: for<'a> arbitrary::Arbitrary<'a> {}
+/// Helper trait that requires arbitrary implementation if the feature is enabled.
+#[cfg(not(any(feature = "test-utils", feature = "arbitrary")))]
+pub trait MaybeArbitrary {}
+
+#[cfg(any(feature = "test-utils", feature = "arbitrary"))]
+impl<T> MaybeArbitrary for T where T: for<'a> arbitrary::Arbitrary<'a> {}
+#[cfg(not(any(feature = "test-utils", feature = "arbitrary")))]
+impl<T> MaybeArbitrary for T {}

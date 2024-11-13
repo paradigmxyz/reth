@@ -1,11 +1,15 @@
 use core::fmt;
 
-use crate::{BlockBody, FullBlock, FullReceipt, FullSignedTx, FullTxType};
+use crate::{FullBlock, FullBlockBody, FullBlockHeader, FullReceipt, FullSignedTx, FullTxType};
 
 /// Configures all the primitive types of the node.
 pub trait NodePrimitives: Send + Sync + Unpin + Clone + Default + fmt::Debug {
     /// Block primitive.
     type Block: Send + Sync + Unpin + Clone + Default + fmt::Debug + 'static;
+    /// Block header primitive.
+    type BlockHeader: Send + Sync + Unpin + Clone + Default + fmt::Debug + 'static;
+    /// Block body primitive.
+    type BlockBody: Send + Sync + Unpin + Clone + Default + fmt::Debug + 'static;
     /// Signed version of the transaction type.
     type SignedTx: Send + Sync + Unpin + Clone + Default + fmt::Debug + 'static;
     /// Transaction envelope type ID.
@@ -16,6 +20,8 @@ pub trait NodePrimitives: Send + Sync + Unpin + Clone + Default + fmt::Debug {
 
 impl NodePrimitives for () {
     type Block = ();
+    type BlockHeader = ();
+    type BlockBody = ();
     type SignedTx = ();
     type TxType = ();
     type Receipt = ();
@@ -24,7 +30,11 @@ impl NodePrimitives for () {
 /// Helper trait that sets trait bounds on [`NodePrimitives`].
 pub trait FullNodePrimitives: Send + Sync + Unpin + Clone + Default + fmt::Debug {
     /// Block primitive.
-    type Block: FullBlock<Body: BlockBody<SignedTransaction = Self::SignedTx>>;
+    type Block: FullBlock<Header = Self::BlockHeader, Body = Self::BlockBody>;
+    /// Block header primitive.
+    type BlockHeader: FullBlockHeader;
+    /// Block body primitive.
+    type BlockBody: FullBlockBody<SignedTransaction = Self::SignedTx>;
     /// Signed version of the transaction type.
     type SignedTx: FullSignedTx;
     /// Transaction envelope type ID.
@@ -35,9 +45,18 @@ pub trait FullNodePrimitives: Send + Sync + Unpin + Clone + Default + fmt::Debug
 
 impl<T> NodePrimitives for T
 where
-    T: FullNodePrimitives<Block: 'static, SignedTx: 'static, Receipt: 'static, TxType: 'static>,
+    T: FullNodePrimitives<
+        Block: 'static,
+        BlockHeader: 'static,
+        BlockBody: 'static,
+        SignedTx: 'static,
+        Receipt: 'static,
+        TxType: 'static,
+    >,
 {
     type Block = T::Block;
+    type BlockHeader = T::BlockHeader;
+    type BlockBody = T::BlockBody;
     type SignedTx = T::SignedTx;
     type TxType = T::TxType;
     type Receipt = T::Receipt;

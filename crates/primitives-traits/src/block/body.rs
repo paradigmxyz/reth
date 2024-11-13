@@ -5,8 +5,14 @@ use alloc::{fmt, vec::Vec};
 use alloy_consensus::{BlockHeader, Transaction, TxType};
 use alloy_eips::{eip4895::Withdrawal, eip7685::Requests};
 use alloy_primitives::{Address, B256};
+use reth_codecs::Compact;
 
-use crate::{Block, InMemorySize};
+use crate::{FullSignedTx, InMemorySize};
+
+/// Helper trait that unifies all behaviour required by transaction to support full node operations.
+pub trait FullBlockBody: BlockBody<SignedTransaction: FullSignedTx> + Compact {}
+
+impl<T> FullBlockBody for T where T: BlockBody<SignedTransaction: FullSignedTx> + Compact {}
 
 /// Abstraction for block's body.
 pub trait BlockBody:
@@ -46,11 +52,6 @@ pub trait BlockBody:
 
     /// Returns [`Requests`] in block, if any.
     fn requests(&self) -> Option<&Requests>;
-
-    /// Create a [`Block`] from the body and its header.
-    fn into_block<T: Block<Header = Self::Header, Body = Self>>(self, header: Self::Header) -> T {
-        T::from((header, self))
-    }
 
     /// Calculate the transaction root for the block body.
     fn calculate_tx_root(&self) -> B256;

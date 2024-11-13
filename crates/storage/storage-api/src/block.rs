@@ -3,7 +3,7 @@ use crate::{
     TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
-use alloy_primitives::{BlockNumber, Sealable, B256};
+use alloy_primitives::{BlockNumber, B256};
 use reth_db_models::StoredBlockBodyIndices;
 use reth_primitives::{
     Block, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
@@ -243,14 +243,7 @@ pub trait BlockReaderIdExt: BlockReader + ReceiptProviderIdExt {
     ) -> ProviderResult<Option<SealedHeader>> {
         self.convert_block_number(id)?
             .map_or_else(|| Ok(None), |num| self.header_by_hash_or_number(num.into()))?
-            .map_or_else(
-                || Ok(None),
-                |h| {
-                    let sealed = h.seal_slow();
-                    let (header, seal) = sealed.into_parts();
-                    Ok(Some(SealedHeader::new(header, seal)))
-                },
-            )
+            .map_or_else(|| Ok(None), |h| Ok(Some(SealedHeader::seal(h))))
     }
 
     /// Returns the sealed header with the matching `BlockId` from the database.
