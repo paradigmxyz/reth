@@ -64,9 +64,7 @@ impl reth_codecs::Compact for OpTransaction {
             OpTypedTransaction::Eip2930(tx) => tx.to_compact(out),
             OpTypedTransaction::Eip1559(tx) => tx.to_compact(out),
             OpTypedTransaction::Eip7702(tx) => tx.to_compact(out),
-            OpTypedTransaction::Deposit(_) => {
-                todo!()
-            }
+            OpTypedTransaction::Deposit(tx) => tx.to_compact(out),
         }
     }
 
@@ -164,7 +162,7 @@ impl TransactionExt for OpTransaction {
             OpTypedTransaction::Eip2930(tx) => tx.signature_hash(),
             OpTypedTransaction::Eip1559(tx) => tx.signature_hash(),
             OpTypedTransaction::Eip7702(tx) => tx.signature_hash(),
-            OpTypedTransaction::Deposit(_) => B256::ZERO,
+            OpTypedTransaction::Deposit(tx) => tx.tx_hash(),
         }
     }
 }
