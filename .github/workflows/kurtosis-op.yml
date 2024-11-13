@@ -88,17 +88,17 @@ jobs:
           kurtosis engine start
           kurtosis run --enclave op-devnet github.com/ethpandaops/optimism-package --args-file .github/assets/kurtosis_op_network_params.yaml
           ENCLAVE_ID=$(curl http://127.0.0.1:9779/api/enclaves | jq --raw-output 'keys[0]')
-          RETH_PORT=$(curl "http://127.0.0.1:9779/api/enclaves/$ENCLAVE_ID/services" | jq '."op-el-1-op-reth-op-node-op-kurtosis".public_ports.rpc.number')
-          GETH_PORT=$(curl "http://127.0.0.1:9779/api/enclaves/$ENCLAVE_ID/services" | jq '."op-el-2-op-geth-op-node-op-kurtosis".public_ports.rpc.number')
-          echo "RETH_RPC=http://127.0.0.1:$RETH_PORT" >> $GITHUB_ENV
-          echo "GETH_RPC=http://127.0.0.1:$GETH_PORT" >> $GITHUB_ENV
+          GETH_PORT=$(curl "http://127.0.0.1:9779/api/enclaves/$ENCLAVE_ID/services" | jq '."op-el-1-op-geth-op-node-op-kurtosis".public_ports.rpc.number')
+          RETH_PORT=$(curl "http://127.0.0.1:9779/api/enclaves/$ENCLAVE_ID/services" | jq '."op-el-2-op-reth-op-node-op-kurtosis".public_ports.rpc.number')
+          echo "RETH_RPC=http://127.0.0.1:$GETH_PORT" >> $GITHUB_ENV
+          echo "GETH_RPC=http://127.0.0.1:$RETH_PORT" >> $GITHUB_ENV
 
       - name: Assert that clients advance
         run: |
           for i in {1..100}; do
             sleep 5
-            BLOCK_RETH=$(cast bn --rpc-url $RETH_RPC)
-            BLOCK_GETH=$(cast bn --rpc-url $GETH_RPC)
+            BLOCK_GETH=$(cast bn --rpc-url $RETH_RPC)
+            BLOCK_RETH=$(cast bn --rpc-url $GETH_RPC)
 
             if [ $BLOCK_GETH -ge 100 ] && [ $BLOCK_RETH -ge 100 ] ; then exit 0; fi
             echo "Waiting for clients to advance..., Reth: $BLOCK_RETH Geth: $BLOCK_GETH"
