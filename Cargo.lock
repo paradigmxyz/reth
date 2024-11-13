@@ -8421,6 +8421,7 @@ dependencies = [
 name = "reth-payload-builder"
 version = "1.1.1"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "alloy-rpc-types",
  "async-trait",
