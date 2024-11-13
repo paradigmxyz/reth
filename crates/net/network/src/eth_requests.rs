@@ -12,8 +12,8 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_rlp::Encodable;
 use futures::StreamExt;
 use reth_eth_wire::{
-    BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders, GetNodeData, GetReceipts,
-    HeadersDirection, NodeData, Receipts,
+    BlockBodies, BlockHeaders, EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, GetNodeData,
+    GetReceipts, HeadersDirection, NetworkPrimitives, NodeData, Receipts,
 };
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::error::RequestResult;
@@ -272,7 +272,7 @@ where
 
 /// All `eth` request related to blocks delegated by the network.
 #[derive(Debug)]
-pub enum IncomingEthRequest {
+pub enum IncomingEthRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Request Block headers from the peer.
     ///
     /// The response should be sent through the channel.
@@ -282,7 +282,7 @@ pub enum IncomingEthRequest {
         /// The specific block headers requested.
         request: GetBlockHeaders,
         /// The channel sender for the response containing block headers.
-        response: oneshot::Sender<RequestResult<BlockHeaders>>,
+        response: oneshot::Sender<RequestResult<BlockHeaders<N::BlockHeader>>>,
     },
     /// Request Block bodies from the peer.
     ///
@@ -293,7 +293,7 @@ pub enum IncomingEthRequest {
         /// The specific block bodies requested.
         request: GetBlockBodies,
         /// The channel sender for the response containing block bodies.
-        response: oneshot::Sender<RequestResult<BlockBodies>>,
+        response: oneshot::Sender<RequestResult<BlockBodies<N::BlockBody>>>,
     },
     /// Request Node Data from the peer.
     ///
