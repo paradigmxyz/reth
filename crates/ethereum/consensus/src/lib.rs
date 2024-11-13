@@ -236,7 +236,7 @@ impl<ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug> Consensu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{Sealable, B256};
+    use alloy_primitives::B256;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
     use reth_primitives::proofs;
 
@@ -321,16 +321,14 @@ mod tests {
         // that the header is valid
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().shanghai_activated().build());
 
-        let sealed = Header {
+        let header = Header {
             base_fee_per_gas: Some(1337),
             withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
             ..Default::default()
-        }
-        .seal_slow();
-        let (header, seal) = sealed.into_parts();
+        };
 
         assert_eq!(
-            EthBeaconConsensus::new(chain_spec).validate_header(&SealedHeader::new(header, seal)),
+            EthBeaconConsensus::new(chain_spec).validate_header(&SealedHeader::seal(header,)),
             Ok(())
         );
     }

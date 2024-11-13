@@ -309,7 +309,6 @@ impl BlockDownloader for NoopBlockDownloader {
 mod tests {
     use super::*;
     use crate::test_utils::insert_headers_into_client;
-    use alloy_primitives::Sealable;
     use assert_matches::assert_matches;
     use reth_beacon_consensus::EthBeaconConsensus;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
@@ -333,14 +332,12 @@ mod tests {
             );
 
             let client = TestFullBlockClient::default();
-            let sealed = Header {
+            let header = Header {
                 base_fee_per_gas: Some(7),
                 gas_limit: chain_spec.max_gas_limit,
                 ..Default::default()
-            }
-            .seal_slow();
-            let (header, seal) = sealed.into_parts();
-            let header = SealedHeader::new(header, seal);
+            };
+            let header = SealedHeader::seal(header);
 
             insert_headers_into_client(&client, header, 0..total_blocks);
             let consensus = Arc::new(EthBeaconConsensus::new(chain_spec));

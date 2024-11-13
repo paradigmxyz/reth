@@ -4,7 +4,7 @@ use crate::{
     BeaconConsensusEngineError, BeaconConsensusEngineHandle, BeaconForkChoiceUpdateError,
     BeaconOnNewPayloadError, EthBeaconConsensus, MIN_BLOCKS_FOR_PIPELINE_RUN,
 };
-use alloy_primitives::{BlockNumber, Sealable, B256};
+use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_types_engine::{
     ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
 };
@@ -402,9 +402,8 @@ where
             BlockchainTree::new(externals, BlockchainTreeConfig::new(1, 2, 3, 2))
                 .expect("failed to create tree"),
         ));
-        let sealed = self.base_config.chain_spec.genesis_header().clone().seal_slow();
-        let (header, seal) = sealed.into_parts();
-        let genesis_block = SealedHeader::new(header, seal);
+        let header = self.base_config.chain_spec.genesis_header().clone();
+        let genesis_block = SealedHeader::seal(header);
 
         let blockchain_provider = BlockchainProvider::with_blocks(
             provider_factory.clone(),

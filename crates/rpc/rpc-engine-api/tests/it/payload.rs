@@ -1,7 +1,7 @@
 //! Some payload tests
 
 use alloy_eips::eip4895::Withdrawals;
-use alloy_primitives::{Bytes, Sealable, U256};
+use alloy_primitives::{Bytes, U256};
 use alloy_rlp::{Decodable, Error as RlpError};
 use alloy_rpc_types_engine::{
     ExecutionPayload, ExecutionPayloadBodyV1, ExecutionPayloadSidecar, ExecutionPayloadV1,
@@ -24,10 +24,8 @@ fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> Executi
     transformed.header.transactions_root =
         proofs::calculate_transaction_root(&transformed.body.transactions);
     transformed.header.ommers_hash = proofs::calculate_ommers_root(&transformed.body.ommers);
-    let sealed = transformed.header.seal_slow();
-    let (header, seal) = sealed.into_parts();
     block_to_payload(SealedBlock {
-        header: SealedHeader::new(header, seal),
+        header: SealedHeader::seal(transformed.header),
         body: transformed.body,
     })
 }

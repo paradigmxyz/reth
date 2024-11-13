@@ -1,7 +1,7 @@
 use crate::{GotExpected, Header, SealedHeader, TransactionSigned, TransactionSignedEcRecovered};
 use alloc::vec::Vec;
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
-use alloy_primitives::{Address, Bytes, Sealable, B256};
+use alloy_primitives::{Address, Bytes, B256};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
@@ -25,9 +25,7 @@ pub struct Block {
 impl Block {
     /// Calculate the header hash and seal the block so that it can't be changed.
     pub fn seal_slow(self) -> SealedBlock {
-        let sealed = self.header.seal_slow();
-        let (header, seal) = sealed.into_parts();
-        SealedBlock { header: SealedHeader::new(header, seal), body: self.body }
+        SealedBlock { header: SealedHeader::seal(self.header), body: self.body }
     }
 
     /// Seal the block with a known hash.
