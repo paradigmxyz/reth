@@ -31,7 +31,7 @@ jobs:
           cache-on-failure: true
       - name: Build reth
         run: |
-          cargo build --features optimism,asm-keccak --profile hivetests --bin op-reth --locked
+          cargo build --features optimism,asm-keccak --profile hivetests --bin op-reth --manifest-path crates/optimism/bin/Cargo.toml --locked
           mkdir dist && cp ./target/hivetests/op-reth ./dist/reth
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
