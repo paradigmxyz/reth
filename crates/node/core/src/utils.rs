@@ -80,14 +80,12 @@ where
 {
     let (peer_id, response) = client.get_block_body(header.hash()).await?.split();
 
-    if response.is_none() {
+    let Some(body) = response else {
         client.report_bad_message(peer_id);
         eyre::bail!("Invalid number of bodies received. Expected: 1. Received: 0")
-    }
+    };
 
-    let body = response.unwrap();
     let block = SealedBlock { header, body };
-
     consensus.validate_block_pre_execution(&block)?;
 
     Ok(block)
