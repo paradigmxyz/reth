@@ -1,8 +1,8 @@
 //! Helper function for calculating Merkle proofs and hashes.
 
-use crate::{Header, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, TransactionSigned};
+use crate::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef, TransactionSigned};
 use alloc::vec::Vec;
-use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
+use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawal};
 use alloy_primitives::{keccak256, B256};
 use alloy_trie::root::{ordered_trie_root, ordered_trie_root_with_encoder};

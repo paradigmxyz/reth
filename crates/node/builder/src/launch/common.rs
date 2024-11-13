@@ -760,7 +760,7 @@ where
     /// necessary
     pub async fn max_block<C>(&self, client: C) -> eyre::Result<Option<BlockNumber>>
     where
-        C: HeadersClient<Header = reth_primitives::Header>,
+        C: HeadersClient<Header = alloy_consensus::Header>,
     {
         self.node_config().max_block(client, self.provider_factory().clone()).await
     }

@@ -163,7 +163,7 @@ pub trait EthBlocks: LoadBlock {
     fn ommers(
         &self,
         block_id: BlockId,
-    ) -> Result<Option<Vec<reth_primitives::Header>>, Self::Error> {
+    ) -> Result<Option<Vec<alloy_consensus::Header>>, Self::Error> {
         self.provider().ommers_by_id(block_id).map_err(Self::Error::from_eth_err)
     }
 

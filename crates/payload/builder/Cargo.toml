@@ -39,11 +39,12 @@ tracing.workspace = true
 reth-primitives.workspace = true
 alloy-primitives.workspace = true
 revm.workspace = true
+alloy-consensus.workspace = true
 
 [features]
 test-utils = [
-	"alloy-primitives",
-	"reth-chain-state/test-utils",
-	"reth-primitives/test-utils",
-	"revm/test-utils"
+    "alloy-primitives",
+    "reth-chain-state/test-utils",
+    "reth-primitives/test-utils",
+    "revm/test-utils",
 ]

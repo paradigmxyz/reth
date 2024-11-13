@@ -22,13 +22,13 @@ pub use payload::*;
 pub use pool::*;
 
 use crate::{ConfigureEvm, FullNodeTypes};
+use alloy_consensus::Header;
 use reth_consensus::Consensus;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network::NetworkHandle;
 use reth_network_api::FullNetwork;
 use reth_node_api::NodeTypesWithEngine;
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_primitives::Header;
 use reth_transaction_pool::TransactionPool;
 
 /// An abstraction over the components of a node, consisting of:

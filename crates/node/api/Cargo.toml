@@ -22,9 +22,9 @@ reth-payload-primitives.workspace = true
 reth-tasks.workspace = true
 reth-network-api.workspace = true
 reth-node-types.workspace = true
-reth-primitives.workspace = true
 reth-node-core.workspace = true
 
 alloy-rpc-types-engine.workspace = true
+alloy-consensus.workspace = true
 
 eyre.workspace = true
