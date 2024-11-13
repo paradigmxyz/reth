@@ -230,7 +230,7 @@ impl<N: ProviderNodeTypes> PipelineState<N> {
 mod tests {
     use super::*;
     use crate::test_utils::{insert_headers_into_client, TestPipelineBuilder};
-    use alloy_primitives::{BlockNumber, Sealable, B256};
+    use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
     use futures::poll;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
@@ -267,14 +267,12 @@ mod tests {
 
             let pipeline_sync = PipelineSync::new(pipeline, Box::<TokioTaskExecutor>::default());
             let client = TestFullBlockClient::default();
-            let sealed = Header {
+            let header = Header {
                 base_fee_per_gas: Some(7),
                 gas_limit: chain_spec.max_gas_limit,
                 ..Default::default()
-            }
-            .seal_slow();
-            let (header, seal) = sealed.into_parts();
-            let header = SealedHeader::new(header, seal);
+            };
+            let header = SealedHeader::seal(header);
             insert_headers_into_client(&client, header, 0..total_blocks);
 
             let tip = client.highest_block().expect("there should be blocks here").hash();

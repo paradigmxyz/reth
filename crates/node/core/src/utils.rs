@@ -3,7 +3,6 @@
 
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::Sealable;
 use alloy_rpc_types_engine::{JwtError, JwtSecret};
 use eyre::Result;
 use reth_consensus::Consensus;
@@ -44,13 +43,12 @@ where
 {
     let (peer_id, response) = client.get_header_with_priority(id, Priority::High).await?.split();
 
-    let Some(sealed_header) = response.map(|block| block.seal_slow()) else {
+    let Some(header) = response else {
         client.report_bad_message(peer_id);
         eyre::bail!("Invalid number of headers received. Expected: 1. Received: 0")
     };
 
-    let (header, seal) = sealed_header.into_parts();
-    let header = SealedHeader::new(header, seal);
+    let header = SealedHeader::seal(header);
 
     let valid = match id {
         BlockHashOrNumber::Hash(hash) => header.hash() == hash,

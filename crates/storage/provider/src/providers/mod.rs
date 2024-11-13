@@ -11,7 +11,7 @@ use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
 };
-use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable, TxHash, TxNumber, B256, U256};
+use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use reth_blockchain_tree_api::{
     error::{CanonicalError, InsertBlockError},
     BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
@@ -847,34 +847,20 @@ where
             BlockNumberOrTag::Latest => Ok(Some(self.chain_info.get_canonical_head())),
             BlockNumberOrTag::Finalized => Ok(self.chain_info.get_finalized_header()),
             BlockNumberOrTag::Safe => Ok(self.chain_info.get_safe_header()),
-            BlockNumberOrTag::Earliest => self.header_by_number(0)?.map_or_else(
-                || Ok(None),
-                |h| {
-                    let sealed = h.seal_slow();
-                    let (header, seal) = sealed.into_parts();
-                    Ok(Some(SealedHeader::new(header, seal)))
-                },
-            ),
+            BlockNumberOrTag::Earliest => self
+                .header_by_number(0)?
+                .map_or_else(|| Ok(None), |h| Ok(Some(SealedHeader::seal(h)))),
             BlockNumberOrTag::Pending => Ok(self.tree.pending_header()),
-            BlockNumberOrTag::Number(num) => self.header_by_number(num)?.map_or_else(
-                || Ok(None),
-                |h| {
-                    let sealed = h.seal_slow();
-                    let (header, seal) = sealed.into_parts();
-                    Ok(Some(SealedHeader::new(header, seal)))
-                },
-            ),
+            BlockNumberOrTag::Number(num) => self
+                .header_by_number(num)?
+                .map_or_else(|| Ok(None), |h| Ok(Some(SealedHeader::seal(h)))),
         }
     }
 
     fn sealed_header_by_id(&self, id: BlockId) -> ProviderResult<Option<SealedHeader>> {
         Ok(match id {
             BlockId::Number(num) => self.sealed_header_by_number_or_tag(num)?,
-            BlockId::Hash(hash) => self.header(&hash.block_hash)?.map(|h| {
-                let sealed = h.seal_slow();
-                let (header, seal) = sealed.into_parts();
-                SealedHeader::new(header, seal)
-            }),
+            BlockId::Hash(hash) => self.header(&hash.block_hash)?.map(SealedHeader::seal),
         })
     }
 

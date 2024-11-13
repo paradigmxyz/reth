@@ -4,7 +4,7 @@ use crate::{
 };
 use alloy_consensus::{Transaction as _, TxEip1559, EMPTY_ROOT_HASH};
 use alloy_eips::{eip1559::INITIAL_BASE_FEE, eip7685::Requests};
-use alloy_primitives::{Address, BlockNumber, Sealable, B256, U256};
+use alloy_primitives::{Address, BlockNumber, B256, U256};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
 use rand::{thread_rng, Rng};
@@ -160,11 +160,8 @@ impl TestBlockBuilder {
             ..Default::default()
         };
 
-        let sealed = header.seal_slow();
-        let (header, seal) = sealed.into_parts();
-
         let block = SealedBlock {
-            header: SealedHeader::new(header, seal),
+            header: SealedHeader::seal(header),
             body: BlockBody {
                 transactions: transactions.into_iter().map(|tx| tx.into_signed()).collect(),
                 ommers: Vec::new(),

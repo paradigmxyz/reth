@@ -4,7 +4,7 @@ use super::task::TaskDownloader;
 use crate::metrics::HeaderDownloaderMetrics;
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{BlockNumber, Sealable, B256};
+use alloy_primitives::{BlockNumber, B256};
 use futures::{stream::Stream, FutureExt};
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use rayon::prelude::*;
@@ -250,15 +250,7 @@ where
     ) -> Result<(), ReverseHeadersDownloaderError<H::Header>> {
         let mut validated = Vec::with_capacity(headers.len());
 
-        let sealed_headers = headers
-            .into_par_iter()
-            .map(|h| {
-                let sealed = h.seal_slow();
-                let (header, seal) = sealed.into_parts();
-
-                SealedHeader::new(header, seal)
-            })
-            .collect::<Vec<_>>();
+        let sealed_headers = headers.into_par_iter().map(SealedHeader::seal).collect::<Vec<_>>();
         for parent in sealed_headers {
             // Validate that the header is the parent header of the last validated header.
             if let Some(validated_header) =
@@ -384,9 +376,8 @@ where
                     .into())
                 }
 
-                let sealed_target = headers.swap_remove(0).seal_slow();
-                let (header, seal) = sealed_target.into_parts();
-                let target = SealedHeader::new(header, seal);
+                let header = headers.swap_remove(0);
+                let target = SealedHeader::seal(header);
 
                 match sync_target {
                     SyncTargetBlock::Hash(hash) | SyncTargetBlock::HashAndNumber { hash, .. } => {

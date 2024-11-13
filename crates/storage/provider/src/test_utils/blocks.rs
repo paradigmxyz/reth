@@ -2,8 +2,7 @@
 use crate::{DBProvider, DatabaseProviderRW, ExecutionOutcome};
 use alloy_consensus::{TxLegacy, EMPTY_OMMER_ROOT_HASH};
 use alloy_primitives::{
-    b256, hex_literal::hex, map::HashMap, Address, BlockNumber, Bytes, Log, Sealable, TxKind, B256,
-    U256,
+    b256, hex_literal::hex, map::HashMap, Address, BlockNumber, Bytes, Log, TxKind, B256, U256,
 };
 
 use alloy_eips::eip4895::{Withdrawal, Withdrawals};
@@ -233,9 +232,7 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, ExecutionOutcome) {
     header.number = number;
     header.state_root = state_root;
     header.parent_hash = B256::ZERO;
-    let sealed = header.seal_slow();
-    let (header, seal) = sealed.into_parts();
-    block.header = SealedHeader::new(header, seal);
+    block.header = SealedHeader::seal(header);
 
     (SealedBlockWithSenders { block, senders: vec![Address::new([0x30; 20])] }, execution_outcome)
 }
@@ -299,9 +296,7 @@ fn block2(
     header.state_root = state_root;
     // parent_hash points to block1 hash
     header.parent_hash = parent_hash;
-    let sealed = header.seal_slow();
-    let (header, seal) = sealed.into_parts();
-    block.header = SealedHeader::new(header, seal);
+    block.header = SealedHeader::seal(header);
 
     (SealedBlockWithSenders { block, senders: vec![Address::new([0x31; 20])] }, execution_outcome)
 }
@@ -365,9 +360,7 @@ fn block3(
     header.state_root = state_root;
     // parent_hash points to block1 hash
     header.parent_hash = parent_hash;
-    let sealed = header.seal_slow();
-    let (header, seal) = sealed.into_parts();
-    block.header = SealedHeader::new(header, seal);
+    block.header = SealedHeader::seal(header);
 
     (SealedBlockWithSenders { block, senders: vec![Address::new([0x31; 20])] }, execution_outcome)
 }
@@ -456,9 +449,7 @@ fn block4(
     header.state_root = state_root;
     // parent_hash points to block1 hash
     header.parent_hash = parent_hash;
-    let sealed = header.seal_slow();
-    let (header, seal) = sealed.into_parts();
-    block.header = SealedHeader::new(header, seal);
+    block.header = SealedHeader::seal(header);
 
     (SealedBlockWithSenders { block, senders: vec![Address::new([0x31; 20])] }, execution_outcome)
 }
@@ -544,9 +535,7 @@ fn block5(
     header.state_root = state_root;
     // parent_hash points to block1 hash
     header.parent_hash = parent_hash;
-    let sealed = header.seal_slow();
-    let (header, seal) = sealed.into_parts();
-    block.header = SealedHeader::new(header, seal);
+    block.header = SealedHeader::seal(header);
 
     (SealedBlockWithSenders { block, senders: vec![Address::new([0x31; 20])] }, execution_outcome)
 }

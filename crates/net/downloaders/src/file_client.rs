@@ -1,7 +1,7 @@
 use std::{collections::HashMap, io, path::Path};
 
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{BlockHash, BlockNumber, Sealable, B256};
+use alloy_primitives::{BlockHash, BlockNumber, B256};
 use futures::Future;
 use itertools::Either;
 use reth_network_p2p::{
@@ -114,11 +114,7 @@ impl FileClient {
     /// Clones and returns the highest header of this client has or `None` if empty. Seals header
     /// before returning.
     pub fn tip_header(&self) -> Option<SealedHeader> {
-        self.headers.get(&self.max_block()?).map(|h| {
-            let sealed = h.clone().seal_slow();
-            let (header, seal) = sealed.into_parts();
-            SealedHeader::new(header, seal)
-        })
+        self.headers.get(&self.max_block()?).map(|h| SealedHeader::seal(h.clone()))
     }
 
     /// Returns true if all blocks are canonical (no gaps)
