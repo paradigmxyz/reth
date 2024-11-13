@@ -113,4 +113,5 @@ arbitrary = [
     "reth-prune-types?/arbitrary",
     "reth-stages-types?/arbitrary",
     "reth-trie-common?/arbitrary",
+    "alloy-consensus/arbitrary",
 ]
