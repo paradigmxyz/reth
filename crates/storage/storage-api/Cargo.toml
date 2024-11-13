@@ -28,5 +28,6 @@ reth-db.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
+alloy-rpc-types-engine.workspace = true
 
 auto_impl.workspace = true
