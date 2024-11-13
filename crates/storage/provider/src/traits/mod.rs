@@ -9,9 +9,6 @@ pub use reth_evm::provider::EvmEnvProvider;
 mod block;
 pub use block::*;
 
-mod chain_info;
-pub use chain_info::CanonChainTracker;
-
 mod header_sync_gap;
 pub use header_sync_gap::{HeaderSyncGap, HeaderSyncGapProvider};
 
