@@ -34,9 +34,9 @@ pub fn get_or_create_jwt_secret_from_path(path: &Path) -> Result<JwtSecret, JwtE
 }
 
 /// Get a single header from network
-pub async fn one<Client>(client: Client, start: BlockHashOrNumber) -> Result<SealedHeader>
+pub async fn one<Client>(client: Client, start: BlockHashOrNumber) ->Result<SealedHeader<Client::Header>>
 where
-    Client: HeadersClient,
+    Client: HeadersClient<Header: reth_primitives_traits::BlockHeader>,
 {
     let request = HeadersRequest {
         direction: HeadersDirection::Rising,
@@ -51,9 +51,9 @@ pub async fn rising<Client>(
     client: Client,
     start: BlockHashOrNumber,
     limit: u64,
-) -> Result<SealedHeader>
+) -> Result<SealedHeader<Client::Header>>
 where
-    Client: HeadersClient,
+    Client: HeadersClient<Header: reth_primitives_traits::BlockHeader>,
 {
     let request = HeadersRequest {
         direction: HeadersDirection::Rising,
@@ -68,9 +68,9 @@ pub async fn falling<Client>(
     client: Client,
     start: BlockHashOrNumber,
     limit: u64,
-) -> Result<SealedHeader>
+) -> Result<SealedHeader<Client::Header>>
 where
-    Client: HeadersClient,
+    Client: HeadersClient<Header: reth_primitives_traits::BlockHeader>,
 {
     let request = HeadersRequest {
         direction: HeadersDirection::Falling,
@@ -85,29 +85,27 @@ async fn get_single_header_internal<Client>(
     client: Client,
     request: HeadersRequest,
     id: BlockHashOrNumber,
-) -> Result<SealedHeader>
+) -> Result<SealedHeader<Client::Header>>
 where
-    Client: HeadersClient,
+    Client: HeadersClient<Header: reth_primitives_traits::BlockHeader>,
 {
-    let (peer_id, response) = client.get_headers_with_priority(request, Priority::High).await?.split();
-    
+    let (peer_id, response) =
+        client.get_headers_with_priority(request, Priority::High).await?.split();
+
     if response.len() != 1 {
         client.report_bad_message(peer_id);
-        eyre::bail!(
-            "Invalid number of headers received. Expected: 1. Received: {}",
-            response.len()
-        )
+        eyre::bail!("Invalid number of headers received. Expected: 1. Received: {}", response.len())
     }
-    
+
     let sealed_header = response.into_iter().next().unwrap().seal_slow();
     let (header, seal) = sealed_header.into_parts();
     let header = SealedHeader::new(header, seal);
-    
+
     let valid = match id {
         BlockHashOrNumber::Hash(hash) => header.hash() == hash,
-        BlockHashOrNumber::Number(number) => header.number == number,
+        BlockHashOrNumber::Number(number) => header.number() == number,
     };
-    
+
     if !valid {
         client.report_bad_message(peer_id);
         eyre::bail!(
