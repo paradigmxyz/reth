@@ -1,5 +1,3 @@
-#![allow(deprecated)]
-
 use crate::{
     blobstore::BlobStoreError,
     error::{InvalidPoolTransactionError, PoolResult},
