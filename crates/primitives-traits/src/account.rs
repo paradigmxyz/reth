@@ -1,3 +1,5 @@
+use core::cmp::Ordering;
+
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{keccak256, Bytes, B256, U256};
@@ -54,6 +56,36 @@ impl Account {
     /// In case of no bytecode, returns [`KECCAK_EMPTY`].
     pub fn get_bytecode_hash(&self) -> B256 {
         self.bytecode_hash.unwrap_or(KECCAK_EMPTY)
+    }
+}
+
+impl Ord for Account {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // First compare nonces
+        match self.nonce.cmp(&other.nonce) {
+            Ordering::Equal => {}
+            ordering => return ordering,
+        }
+
+        // If nonces are equal, compare balances
+        match self.balance.cmp(&other.balance) {
+            Ordering::Equal => {}
+            ordering => return ordering,
+        }
+
+        // If balances are equal, compare bytecode hashes
+        match (&self.bytecode_hash, &other.bytecode_hash) {
+            (None, None) => Ordering::Equal,
+            (None, Some(_)) => Ordering::Less,
+            (Some(_), None) => Ordering::Greater,
+            (Some(a), Some(b)) => a.cmp(b),
+        }
+    }
+}
+
+impl PartialOrd for Account {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
