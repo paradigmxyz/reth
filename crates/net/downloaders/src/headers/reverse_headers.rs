@@ -715,13 +715,13 @@ where
                 }
             }
             SyncTarget::Gap(existing) => {
-                let target = existing.parent_hash;
+                let target = existing.parent;
                 if Some(target) != current_tip {
                     // there could be a sync target request in progress
                     self.sync_target_request.take();
                     // If the target has changed, update the request pointers based on the new
                     // targeted block number
-                    let parent_block_number = existing.number.saturating_sub(1);
+                    let parent_block_number = existing.block.number.saturating_sub(1);
 
                     trace!(target: "downloaders::headers", current=?current_tip, new=?target, %parent_block_number, "Updated sync target");
 

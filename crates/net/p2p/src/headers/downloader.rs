@@ -6,6 +6,7 @@ use alloy_primitives::B256;
 use futures::Stream;
 use reth_consensus::Consensus;
 use reth_primitives::SealedHeader;
+use reth_primitives_traits::BlockWithParent;
 /// A downloader capable of fetching and yielding block headers.
 ///
 /// A downloader represents a distinct strategy for submitting requests to download block headers,
@@ -57,7 +58,7 @@ pub enum SyncTarget {
     ///
     /// The benefit of this variant is, that this already provides the block number of the highest
     /// missing block.
-    Gap(SealedHeader),
+    Gap(BlockWithParent),
     /// This represents a tip by block number
     TipNum(u64),
 }
@@ -72,7 +73,7 @@ impl SyncTarget {
     pub fn tip(&self) -> BlockHashOrNumber {
         match self {
             Self::Tip(tip) => (*tip).into(),
-            Self::Gap(gap) => gap.parent_hash.into(),
+            Self::Gap(gap) => gap.parent.into(),
             Self::TipNum(num) => (*num).into(),
         }
     }

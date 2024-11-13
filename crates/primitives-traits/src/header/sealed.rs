@@ -3,15 +3,24 @@ use crate::InMemorySize;
 use super::Header;
 use alloy_consensus::Sealed;
 use alloy_eips::BlockNumHash;
-use alloy_primitives::{keccak256, BlockHash, Sealable};
+use alloy_primitives::{keccak256, BlockHash, Sealable, B256};
 #[cfg(any(test, feature = "test-utils"))]
-use alloy_primitives::{BlockNumber, B256, U256};
+use alloy_primitives::{BlockNumber, U256};
 use alloy_rlp::{Decodable, Encodable};
 use bytes::BufMut;
 use core::mem;
 use derive_more::{AsRef, Deref};
 use reth_codecs::add_arbitrary_tests;
 use serde::{Deserialize, Serialize};
+
+/// A helper struct to store the block number/hash and its parent hash.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct BlockWithParent {
+    /// Parent hash.
+    pub parent: B256,
+    /// Block number/hash.
+    pub block: BlockNumHash,
+}
 
 /// A [`Header`] that is sealed at a precalculated hash, use [`SealedHeader::unseal()`] if you want
 /// to modify header.
