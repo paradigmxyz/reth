@@ -106,14 +106,12 @@ struct InvalidHeaderCacheMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::Sealable;
 
     #[test]
     fn test_hit_eviction() {
         let mut cache = InvalidHeaderCache::new(10);
-        let sealed = Header::default().seal_slow();
-        let (header, seal) = sealed.into_parts();
-        let header = SealedHeader::new(header, seal);
+        let header = Header::default();
+        let header = SealedHeader::seal(header);
         cache.insert(header.clone());
         assert_eq!(cache.headers.get(&header.hash()).unwrap().hit_count, 0);
 

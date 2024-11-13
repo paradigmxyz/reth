@@ -10,7 +10,6 @@ use crate::{
     },
     priority::Priority,
 };
-use alloy_primitives::Sealable;
 use futures::{Future, FutureExt, Stream, StreamExt};
 use reth_consensus::{test_utils::TestConsensus, Consensus};
 use reth_eth_wire_types::HeadersDirection;
@@ -160,16 +159,8 @@ impl Stream for TestDownload {
             match ready!(this.get_or_init_fut().poll_unpin(cx)) {
                 Ok(resp) => {
                     // Skip head and seal headers
-                    let mut headers = resp
-                        .1
-                        .into_iter()
-                        .skip(1)
-                        .map(|header| {
-                            let sealed = header.seal_slow();
-                            let (header, seal) = sealed.into_parts();
-                            SealedHeader::new(header, seal)
-                        })
-                        .collect::<Vec<_>>();
+                    let mut headers =
+                        resp.1.into_iter().skip(1).map(SealedHeader::seal).collect::<Vec<_>>();
                     headers.sort_unstable_by_key(|h| h.number);
                     headers.into_iter().for_each(|h| this.buffer.push(h));
                     this.done = true;

@@ -1,6 +1,5 @@
-use crate::InMemorySize;
-
 use super::Header;
+use crate::InMemorySize;
 use alloy_consensus::Sealed;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{keccak256, BlockHash, Sealable, B256};
@@ -139,17 +138,17 @@ impl SealedHeader {
     }
 
     /// Updates the block number.
-    pub fn set_block_number(&mut self, number: BlockNumber) {
+    pub fn set_block_number(&mut self, number: alloy_primitives::BlockNumber) {
         self.header.number = number;
     }
 
     /// Updates the block state root.
-    pub fn set_state_root(&mut self, state_root: B256) {
+    pub fn set_state_root(&mut self, state_root: alloy_primitives::B256) {
         self.header.state_root = state_root;
     }
 
     /// Updates the block difficulty.
-    pub fn set_difficulty(&mut self, difficulty: U256) {
+    pub fn set_difficulty(&mut self, difficulty: alloy_primitives::U256) {
         self.header.difficulty = difficulty;
     }
 }
@@ -165,9 +164,7 @@ impl<'a> arbitrary::Arbitrary<'a> for SealedHeader {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let header = Header::arbitrary(u)?;
 
-        let sealed = header.seal_slow();
-        let (header, seal) = sealed.into_parts();
-        Ok(Self::new(header, seal))
+        Ok(Self::seal(header))
     }
 }
 
