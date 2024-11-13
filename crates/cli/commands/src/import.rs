@@ -13,6 +13,7 @@ use reth_db_api::transaction::DbTx;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     file_client::{ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
+    file_codec::BlockFileCodec,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_evm::execute::BlockExecutorProvider;
@@ -87,7 +88,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportComm
         let mut total_decoded_blocks = 0;
         let mut total_decoded_txns = 0;
 
-        while let Some(file_client) = reader.next_chunk::<FileClient>().await? {
+        while let Some(file_client) =
+            reader.next_chunk::<BlockFileCodec, FileClient<BlockFileCodec>>(BlockFileCodec).await?
+        {
             // create a new FileClient from chunk read from file
             info!(target: "reth::cli",
                 "Importing chain file chunk"
@@ -162,7 +165,7 @@ pub fn build_import_pipeline<N, C, E>(
     config: &Config,
     provider_factory: ProviderFactory<N>,
     consensus: &Arc<C>,
-    file_client: Arc<FileClient>,
+    file_client: Arc<FileClient<BlockFileCodec>>,
     static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     disable_exec: bool,
     executor: E,

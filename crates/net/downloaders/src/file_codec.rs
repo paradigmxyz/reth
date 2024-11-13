@@ -19,7 +19,8 @@ use tokio_util::codec::{Decoder, Encoder};
 ///
 /// It's recommended to use [`with_capacity`](tokio_util::codec::FramedRead::with_capacity) to set
 /// the capacity of the framed reader to the size of the file.
-pub(crate) struct BlockFileCodec;
+#[derive(Debug, Clone, Default)]
+pub struct BlockFileCodec;
 
 impl Decoder for BlockFileCodec {
     type Item = Block;

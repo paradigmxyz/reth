@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io, path::Path};
+use std::{collections::HashMap, fmt::Debug, io, path::Path};
 
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{BlockHash, BlockNumber, Sealable, B256};
@@ -16,7 +16,7 @@ use reth_primitives::{BlockBody, Header, SealedHeader};
 use thiserror::Error;
 use tokio::{fs::File, io::AsyncReadExt};
 use tokio_stream::StreamExt;
-use tokio_util::codec::FramedRead;
+use tokio_util::codec::{Decoder, FramedRead};
 use tracing::{debug, trace, warn};
 
 use crate::receipt_file_client::FromReceiptReader;
@@ -40,7 +40,7 @@ pub const DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE: u64 = 1_000_000_000;
 ///
 /// This reads the entire file into memory, so it is not suitable for large files.
 #[derive(Debug)]
-pub struct FileClient {
+pub struct FileClient<T> {
     /// The buffered headers retrieved when fetching new bodies.
     headers: HashMap<BlockNumber, Header>,
 
@@ -49,6 +49,10 @@ pub struct FileClient {
 
     /// The buffered bodies retrieved when fetching new headers.
     bodies: HashMap<BlockHash, BlockBody>,
+
+    /// The codec used to decode the file.
+    #[allow(dead_code)]
+    codec: T,
 }
 
 /// An error that can occur when constructing and using a [`FileClient`].
@@ -73,15 +77,18 @@ impl From<&'static str> for FileClientError {
     }
 }
 
-impl FileClient {
+impl<T> FileClient<T>
+where
+    T: Decoder + Clone + Debug + Send + Sync + 'static,
+{
     /// Create a new file client from a file path.
-    pub async fn new<P: AsRef<Path>>(path: P) -> Result<Self, FileClientError> {
+    pub async fn new<P: AsRef<Path>>(path: P, codec: T) -> Result<Self, FileClientError> {
         let file = File::open(path).await?;
-        Self::from_file(file).await
+        Self::from_file(file, codec).await
     }
 
     /// Initialize the [`FileClient`] with a file directly.
-    pub(crate) async fn from_file(mut file: File) -> Result<Self, FileClientError> {
+    pub(crate) async fn from_file(mut file: File, codec: T) -> Result<Self, FileClientError> {
         // get file len from metadata before reading
         let metadata = file.metadata().await?;
         let file_len = metadata.len();
@@ -89,7 +96,7 @@ impl FileClient {
         let mut reader = vec![];
         file.read_to_end(&mut reader).await?;
 
-        Ok(Self::from_reader(&reader[..], file_len).await?.file_client)
+        Ok(Self::from_reader(&reader[..], file_len, codec).await?.file_client)
     }
 
     /// Get the tip hash of the chain.
@@ -185,13 +192,14 @@ impl FileClient {
     }
 }
 
-impl FromReader for FileClient {
+impl<T> FromReader<T> for FileClient<T> {
     type Error = FileClientError;
 
     /// Initialize the [`FileClient`] from bytes that have been read from file.
     fn from_reader<B>(
         reader: B,
         num_bytes: u64,
+        codec: T,
     ) -> impl Future<Output = Result<DecodedFileChunk<Self>, Self::Error>>
     where
         B: AsyncReadExt + Unpin,
@@ -256,7 +264,7 @@ impl FromReader for FileClient {
             trace!(target: "downloaders::file", blocks = headers.len(), "Initialized file client");
 
             Ok(DecodedFileChunk {
-                file_client: Self { headers, hash_to_number, bodies },
+                file_client: Self { headers, hash_to_number, bodies, codec },
                 remaining_bytes,
                 highest_block: None,
             })
@@ -264,7 +272,10 @@ impl FromReader for FileClient {
     }
 }
 
-impl HeadersClient for FileClient {
+impl<T> HeadersClient for FileClient<T>
+where
+    T: Debug + Clone + Send + Sync + 'static,
+{
     type Output = HeadersFut;
 
     fn get_headers_with_priority(
@@ -314,7 +325,10 @@ impl HeadersClient for FileClient {
     }
 }
 
-impl BodiesClient for FileClient {
+impl<T> BodiesClient for FileClient<T>
+where
+    T: Debug + Clone + Send + Sync + 'static,
+{
     type Output = BodiesFut;
 
     fn get_block_bodies_with_priority(
@@ -338,7 +352,10 @@ impl BodiesClient for FileClient {
     }
 }
 
-impl DownloadClient for FileClient {
+impl<T> DownloadClient for FileClient<T>
+where
+    T: Debug + Clone + Send + Sync + 'static,
+{
     fn report_bad_message(&self, _peer_id: PeerId) {
         warn!("Reported a bad message on a file client, the file may be corrupted or invalid");
         // noop
@@ -447,15 +464,16 @@ impl ChunkedFileReader {
     }
 
     /// Read next chunk from file. Returns [`FileClient`] containing decoded chunk.
-    pub async fn next_chunk<T>(&mut self) -> Result<Option<T>, T::Error>
+    pub async fn next_chunk<T, F>(&mut self, codec: T) -> Result<Option<F>, F::Error>
     where
-        T: FromReader,
+        F: FromReader<T>,
+        T: Decoder,
     {
         let Some(next_chunk_byte_len) = self.read_next_chunk().await? else { return Ok(None) };
 
         // make new file client from chunk
         let DecodedFileChunk { file_client, remaining_bytes, .. } =
-            T::from_reader(&self.chunk[..], next_chunk_byte_len).await?;
+            F::from_reader(&self.chunk[..], next_chunk_byte_len, codec).await?;
 
         // save left over bytes
         self.chunk = remaining_bytes;
@@ -485,7 +503,7 @@ impl ChunkedFileReader {
 }
 
 /// Constructs a file client from a reader.
-pub trait FromReader {
+pub trait FromReader<T> {
     /// Error returned by file client type.
     type Error: From<io::Error>;
 
@@ -493,10 +511,12 @@ pub trait FromReader {
     fn from_reader<B>(
         reader: B,
         num_bytes: u64,
+        codec: T,
     ) -> impl Future<Output = Result<DecodedFileChunk<Self>, Self::Error>>
     where
         Self: Sized,
-        B: AsyncReadExt + Unpin;
+        B: AsyncReadExt + Unpin,
+        T: Decoder;
 }
 
 /// Output from decoding a file chunk with [`FromReader::from_reader`].
@@ -544,8 +564,12 @@ mod tests {
         // create an empty file
         let file = tempfile::tempfile().unwrap();
 
-        let client =
-            Arc::new(FileClient::from_file(file.into()).await.unwrap().with_bodies(bodies.clone()));
+        let client = Arc::new(
+            FileClient::from_file(file.into(), BlockFileCodec)
+                .await
+                .unwrap()
+                .with_bodies(bodies.clone()),
+        );
         let mut downloader = BodiesDownloaderBuilder::default().build(
             client.clone(),
             Arc::new(TestConsensus::default()),
@@ -569,14 +593,16 @@ mod tests {
         let p0 = child_header(&p1);
 
         let file = tempfile::tempfile().unwrap();
-        let client = Arc::new(FileClient::from_file(file.into()).await.unwrap().with_headers(
-            HashMap::from([
-                (0u64, p0.clone().unseal()),
-                (1, p1.clone().unseal()),
-                (2, p2.clone().unseal()),
-                (3, p3.clone().unseal()),
-            ]),
-        ));
+        let client = Arc::new(
+            FileClient::from_file(file.into(), BlockFileCodec).await.unwrap().with_headers(
+                HashMap::from([
+                    (0u64, p0.clone().unseal()),
+                    (1, p1.clone().unseal()),
+                    (2, p2.clone().unseal()),
+                    (3, p3.clone().unseal()),
+                ]),
+            ),
+        );
 
         let mut downloader = ReverseHeadersDownloaderBuilder::default()
             .stream_batch_size(3)
@@ -598,7 +624,7 @@ mod tests {
         // Generate some random blocks
         let (file, headers, _) = generate_bodies_file(0..=19).await;
         // now try to read them back
-        let client = Arc::new(FileClient::from_file(file).await.unwrap());
+        let client = Arc::new(FileClient::from_file(file, BlockFileCodec).await.unwrap());
 
         // construct headers downloader and use first header
         let mut header_downloader = ReverseHeadersDownloaderBuilder::default()
@@ -623,7 +649,7 @@ mod tests {
         let (file, headers, mut bodies) = generate_bodies_file(0..=19).await;
 
         // now try to read them back
-        let client = Arc::new(FileClient::from_file(file).await.unwrap());
+        let client = Arc::new(FileClient::from_file(file, BlockFileCodec).await.unwrap());
 
         // insert headers in db for the bodies downloader
         insert_headers(factory.db_ref().db(), &headers);
@@ -661,7 +687,11 @@ mod tests {
         let mut local_header = headers.first().unwrap().clone();
 
         // test
-        while let Some(client) = reader.next_chunk::<FileClient>().await.unwrap() {
+        while let Some(client) = reader
+            .next_chunk::<BlockFileCodec, FileClient<BlockFileCodec>>(BlockFileCodec)
+            .await
+            .unwrap()
+        {
             let sync_target = client.tip_header().unwrap();
 
             let sync_target_hash = sync_target.hash();
