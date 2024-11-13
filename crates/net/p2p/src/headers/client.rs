@@ -27,8 +27,10 @@ pub type HeadersFut = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<Header>>
 /// The block headers downloader client
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait HeadersClient: DownloadClient {
+    /// The header type this client fetches.
+    type Header: Send + Sync + Unpin;
     /// The headers future type
-    type Output: Future<Output = PeerRequestResult<Vec<Header>>> + Sync + Send + Unpin;
+    type Output: Future<Output = PeerRequestResult<Vec<Self::Header>>> + Sync + Send + Unpin;
 
     /// Sends the header request to the p2p network and returns the header response received from a
     /// peer.
@@ -73,11 +75,11 @@ pub struct SingleHeaderRequest<Fut> {
     fut: Fut,
 }
 
-impl<Fut> Future for SingleHeaderRequest<Fut>
+impl<Fut, H> Future for SingleHeaderRequest<Fut>
 where
-    Fut: Future<Output = PeerRequestResult<Vec<Header>>> + Sync + Send + Unpin,
+    Fut: Future<Output = PeerRequestResult<Vec<H>>> + Sync + Send + Unpin,
 {
-    type Output = PeerRequestResult<Option<Header>>;
+    type Output = PeerRequestResult<Option<H>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let resp = ready!(self.get_mut().fut.poll_unpin(cx));

@@ -8,7 +8,7 @@ use alloy_primitives::{BlockNumber, B256};
 use futures::FutureExt;
 use reth_network_p2p::{
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
-    BlockClient,
+    EthBlockClient,
 };
 use reth_primitives::SealedBlock;
 use reth_provider::providers::ProviderNodeTypes;
@@ -34,7 +34,7 @@ use tracing::trace;
 pub(crate) struct EngineSyncController<N, Client>
 where
     N: ProviderNodeTypes,
-    Client: BlockClient,
+    Client: EthBlockClient,
 {
     /// A downloader that can download full blocks from the network.
     full_block_client: FullBlockClient<Client>,
@@ -64,7 +64,7 @@ where
 impl<N, Client> EngineSyncController<N, Client>
 where
     N: ProviderNodeTypes,
-    Client: BlockClient + 'static,
+    Client: EthBlockClient + 'static,
 {
     /// Create a new instance
     pub(crate) fn new(
@@ -522,7 +522,7 @@ mod tests {
         ) -> EngineSyncController<N, Either<Client, TestFullBlockClient>>
         where
             N: ProviderNodeTypes,
-            Client: BlockClient + 'static,
+            Client: EthBlockClient + 'static,
         {
             let client = self
                 .client

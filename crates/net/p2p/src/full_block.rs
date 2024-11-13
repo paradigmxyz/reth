@@ -5,16 +5,18 @@ use crate::{
     headers::client::{HeadersClient, SingleHeaderRequest},
     BlockClient,
 };
+use alloy_consensus::BlockHeader;
 use alloy_primitives::{Sealable, B256};
 use reth_consensus::Consensus;
 use reth_eth_wire_types::HeadersDirection;
 use reth_network_peers::WithPeerId;
-use reth_primitives::{BlockBody, Header, SealedBlock, SealedHeader};
+use reth_primitives::{SealedBlock, SealedHeader};
 use std::{
     cmp::Reverse,
     collections::{HashMap, VecDeque},
     fmt::Debug,
     future::Future,
+    hash::Hash,
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
@@ -23,14 +25,23 @@ use tracing::debug;
 
 /// A Client that can fetch full blocks from the network.
 #[derive(Debug, Clone)]
-pub struct FullBlockClient<Client> {
+pub struct FullBlockClient<Client>
+where
+    Client: BlockClient,
+{
     client: Client,
-    consensus: Arc<dyn Consensus>,
+    consensus: Arc<dyn Consensus<Client::Header, Client::Body>>,
 }
 
-impl<Client> FullBlockClient<Client> {
+impl<Client> FullBlockClient<Client>
+where
+    Client: BlockClient,
+{
     /// Creates a new instance of `FullBlockClient`.
-    pub fn new(client: Client, consensus: Arc<dyn Consensus>) -> Self {
+    pub fn new(
+        client: Client,
+        consensus: Arc<dyn Consensus<Client::Header, Client::Body>>,
+    ) -> Self {
         Self { client, consensus }
     }
 
@@ -111,16 +122,16 @@ where
     Client: BlockClient,
 {
     client: Client,
-    consensus: Arc<dyn Consensus>,
+    consensus: Arc<dyn Consensus<Client::Header, Client::Body>>,
     hash: B256,
     request: FullBlockRequest<Client>,
-    header: Option<SealedHeader>,
-    body: Option<BodyResponse>,
+    header: Option<SealedHeader<Client::Header>>,
+    body: Option<BodyResponse<Client::Body>>,
 }
 
 impl<Client> FetchFullBlockFuture<Client>
 where
-    Client: BlockClient,
+    Client: BlockClient<Header: BlockHeader>,
 {
     /// Returns the hash of the block being requested.
     pub const fn hash(&self) -> &B256 {
@@ -129,11 +140,11 @@ where
 
     /// If the header request is already complete, this returns the block number
     pub fn block_number(&self) -> Option<u64> {
-        self.header.as_ref().map(|h| h.number)
+        self.header.as_ref().map(|h| h.number())
     }
 
     /// Returns the [`SealedBlock`] if the request is complete and valid.
-    fn take_block(&mut self) -> Option<SealedBlock> {
+    fn take_block(&mut self) -> Option<SealedBlock<Client::Header, Client::Body>> {
         if self.header.is_none() || self.body.is_none() {
             return None
         }
@@ -157,7 +168,7 @@ where
         }
     }
 
-    fn on_block_response(&mut self, resp: WithPeerId<BlockBody>) {
+    fn on_block_response(&mut self, resp: WithPeerId<Client::Body>) {
         if let Some(ref header) = self.header {
             if let Err(err) = self.consensus.validate_body_against_header(resp.data(), header) {
                 debug!(target: "downloaders", %err, hash=?header.hash(), "Received wrong body");
@@ -173,9 +184,9 @@ where
 
 impl<Client> Future for FetchFullBlockFuture<Client>
 where
-    Client: BlockClient + 'static,
+    Client: BlockClient<Header: BlockHeader + Sealable> + 'static,
 {
-    type Output = SealedBlock;
+    type Output = SealedBlock<Client::Header, Client::Body>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
@@ -252,7 +263,7 @@ where
 
 impl<Client> Debug for FetchFullBlockFuture<Client>
 where
-    Client: BlockClient,
+    Client: BlockClient<Header: Debug, Body: Debug>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FetchFullBlockFuture")
@@ -275,7 +286,7 @@ impl<Client> FullBlockRequest<Client>
 where
     Client: BlockClient,
 {
-    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<ResponseResult> {
+    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<ResponseResult<Client::Header, Client::Body>> {
         if let Some(fut) = Pin::new(&mut self.header).as_pin_mut() {
             if let Poll::Ready(res) = fut.poll(cx) {
                 self.header = None;
@@ -296,18 +307,18 @@ where
 
 /// The result of a request for a single header or body. This is yielded by the `FullBlockRequest`
 /// future.
-enum ResponseResult {
-    Header(PeerRequestResult<Option<Header>>),
-    Body(PeerRequestResult<Option<BlockBody>>),
+enum ResponseResult<H, B> {
+    Header(PeerRequestResult<Option<H>>),
+    Body(PeerRequestResult<Option<B>>),
 }
 
 /// The response of a body request.
 #[derive(Debug)]
-enum BodyResponse {
+enum BodyResponse<B> {
     /// Already validated against transaction root of header
-    Validated(BlockBody),
+    Validated(B),
     /// Still needs to be validated against header
-    PendingValidation(WithPeerId<BlockBody>),
+    PendingValidation(WithPeerId<B>),
 }
 /// A future that downloads a range of full blocks from the network.
 ///
@@ -330,7 +341,7 @@ where
     /// The client used to fetch headers and bodies.
     client: Client,
     /// The consensus instance used to validate the blocks.
-    consensus: Arc<dyn Consensus>,
+    consensus: Arc<dyn Consensus<Client::Header, Client::Body>>,
     /// The block hash to start fetching from (inclusive).
     start_hash: B256,
     /// How many blocks to fetch: `len([start_hash, ..]) == count`
@@ -338,16 +349,16 @@ where
     /// Requests for headers and bodies that are in progress.
     request: FullBlockRangeRequest<Client>,
     /// Fetched headers.
-    headers: Option<Vec<SealedHeader>>,
+    headers: Option<Vec<SealedHeader<Client::Header>>>,
     /// The next headers to request bodies for. This is drained as responses are received.
-    pending_headers: VecDeque<SealedHeader>,
+    pending_headers: VecDeque<SealedHeader<Client::Header>>,
     /// The bodies that have been received so far.
-    bodies: HashMap<SealedHeader, BodyResponse>,
+    bodies: HashMap<SealedHeader<Client::Header>, BodyResponse<Client::Body>>,
 }
 
 impl<Client> FetchFullBlockRangeFuture<Client>
 where
-    Client: BlockClient,
+    Client: BlockClient<Header: Debug + BlockHeader + Sealable + Clone + Hash + Eq>,
 {
     /// Returns the block hashes for the given range, if they are available.
     pub fn range_block_hashes(&self) -> Option<Vec<B256>> {
@@ -362,14 +373,14 @@ where
     /// Inserts a block body, matching it with the `next_header`.
     ///
     /// Note: this assumes the response matches the next header in the queue.
-    fn insert_body(&mut self, body_response: BodyResponse) {
+    fn insert_body(&mut self, body_response: BodyResponse<Client::Body>) {
         if let Some(header) = self.pending_headers.pop_front() {
             self.bodies.insert(header, body_response);
         }
     }
 
     /// Inserts multiple block bodies.
-    fn insert_bodies(&mut self, bodies: impl IntoIterator<Item = BodyResponse>) {
+    fn insert_bodies(&mut self, bodies: impl IntoIterator<Item = BodyResponse<Client::Body>>) {
         for body in bodies {
             self.insert_body(body);
         }
@@ -388,7 +399,7 @@ where
     ///
     /// These are returned in falling order starting with the requested `hash`, i.e. with
     /// descending block numbers.
-    fn take_blocks(&mut self) -> Option<Vec<SealedBlock>> {
+    fn take_blocks(&mut self) -> Option<Vec<SealedBlock<Client::Header, Client::Body>>> {
         if !self.is_bodies_complete() {
             // not done with bodies yet
             return None
@@ -445,7 +456,7 @@ where
         Some(valid_responses)
     }
 
-    fn on_headers_response(&mut self, headers: WithPeerId<Vec<Header>>) {
+    fn on_headers_response(&mut self, headers: WithPeerId<Vec<Client::Header>>) {
         let (peer, mut headers_falling) = headers
             .map(|h| {
                 h.into_iter()
@@ -461,7 +472,7 @@ where
         // fill in the response if it's the correct length
         if headers_falling.len() == self.count as usize {
             // sort headers from highest to lowest block number
-            headers_falling.sort_unstable_by_key(|h| Reverse(h.number));
+            headers_falling.sort_unstable_by_key(|h| Reverse(h.number()));
 
             // check the starting hash
             if headers_falling[0].hash() == self.start_hash {
@@ -512,9 +523,9 @@ where
 
 impl<Client> Future for FetchFullBlockRangeFuture<Client>
 where
-    Client: BlockClient + 'static,
+    Client: BlockClient<Header: Debug + BlockHeader + Sealable + Clone + Hash + Eq> + 'static,
 {
-    type Output = Vec<SealedBlock>;
+    type Output = Vec<SealedBlock<Client::Header, Client::Body>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
@@ -621,7 +632,10 @@ impl<Client> FullBlockRangeRequest<Client>
 where
     Client: BlockClient,
 {
-    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<RangeResponseResult> {
+    fn poll(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<RangeResponseResult<Client::Header, Client::Body>> {
         if let Some(fut) = Pin::new(&mut self.headers).as_pin_mut() {
             if let Poll::Ready(res) = fut.poll(cx) {
                 self.headers = None;
@@ -642,13 +656,15 @@ where
 
 // The result of a request for headers or block bodies. This is yielded by the
 // `FullBlockRangeRequest` future.
-enum RangeResponseResult {
-    Header(PeerRequestResult<Vec<Header>>),
-    Body(PeerRequestResult<Vec<BlockBody>>),
+enum RangeResponseResult<H, B> {
+    Header(PeerRequestResult<Vec<H>>),
+    Body(PeerRequestResult<Vec<B>>),
 }
 
 #[cfg(test)]
 mod tests {
+    use reth_primitives::BlockBody;
+
     use super::*;
     use crate::test_utils::TestFullBlockClient;
     use std::ops::Range;

@@ -14,7 +14,7 @@ use reth_engine_primitives::{EngineApiMessageVersion, EngineTypes, PayloadTypes}
 use reth_errors::{BlockValidationError, ProviderResult, RethError, RethResult};
 use reth_network_p2p::{
     sync::{NetworkSyncUpdater, SyncState},
-    BlockClient,
+    EthBlockClient,
 };
 use reth_node_types::NodeTypesWithEngine;
 use reth_payload_builder::PayloadBuilderHandle;
@@ -174,7 +174,7 @@ type PendingForkchoiceUpdate<PayloadAttributes> =
 pub struct BeaconConsensusEngine<N, BT, Client>
 where
     N: EngineNodeTypes,
-    Client: BlockClient,
+    Client: EthBlockClient,
     BT: BlockchainTreeEngine
         + BlockReader
         + BlockIdReader
@@ -237,7 +237,7 @@ where
         + StageCheckpointReader
         + ChainSpecProvider<ChainSpec = N::ChainSpec>
         + 'static,
-    Client: BlockClient + 'static,
+    Client: EthBlockClient + 'static,
 {
     /// Create a new instance of the [`BeaconConsensusEngine`].
     #[allow(clippy::too_many_arguments)]
@@ -1799,7 +1799,7 @@ where
 impl<N, BT, Client> Future for BeaconConsensusEngine<N, BT, Client>
 where
     N: EngineNodeTypes,
-    Client: BlockClient + 'static,
+    Client: EthBlockClient + 'static,
     BT: BlockchainTreeEngine
         + BlockReader
         + BlockIdReader

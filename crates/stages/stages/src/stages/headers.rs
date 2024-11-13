@@ -194,7 +194,7 @@ where
 impl<Provider, P, D> Stage<Provider> for HeaderStage<P, D>
 where
     P: HeaderSyncGapProvider,
-    D: HeaderDownloader,
+    D: HeaderDownloader<Header = reth_primitives::Header>,
     Provider: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory,
 {
     /// Return the id of the stage
@@ -441,7 +441,9 @@ mod tests {
             }
         }
 
-        impl<D: HeaderDownloader + 'static> StageTestRunner for HeadersTestRunner<D> {
+        impl<D: HeaderDownloader<Header = reth_primitives::Header> + 'static> StageTestRunner
+            for HeadersTestRunner<D>
+        {
             type S = HeaderStage<ProviderFactory<MockNodeTypesWithDB>, D>;
 
             fn db(&self) -> &TestStageDB {
@@ -459,7 +461,9 @@ mod tests {
             }
         }
 
-        impl<D: HeaderDownloader + 'static> ExecuteStageTestRunner for HeadersTestRunner<D> {
+        impl<D: HeaderDownloader<Header = reth_primitives::Header> + 'static> ExecuteStageTestRunner
+            for HeadersTestRunner<D>
+        {
             type Seed = Vec<SealedHeader>;
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
@@ -537,7 +541,9 @@ mod tests {
             }
         }
 
-        impl<D: HeaderDownloader + 'static> UnwindStageTestRunner for HeadersTestRunner<D> {
+        impl<D: HeaderDownloader<Header = reth_primitives::Header> + 'static> UnwindStageTestRunner
+            for HeadersTestRunner<D>
+        {
             fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
                 self.check_no_header_entry_above(input.unwind_to)
             }

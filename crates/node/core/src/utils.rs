@@ -1,22 +1,19 @@
 //! Utility functions for node startup and shutdown, for example path parsing and retrieving single
 //! blocks from the network.
 
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::Sealable;
 use alloy_rpc_types_engine::{JwtError, JwtSecret};
 use eyre::Result;
-use reth_chainspec::ChainSpec;
-use reth_consensus_common::validation::validate_block_pre_execution;
+use reth_consensus::Consensus;
 use reth_network_p2p::{
-    bodies::client::BodiesClient,
-    headers::client::{HeadersClient, HeadersDirection, HeadersRequest},
-    priority::Priority,
+    bodies::client::BodiesClient, headers::client::HeadersClient, priority::Priority,
 };
 use reth_primitives::{SealedBlock, SealedHeader};
 use std::{
     env::VarError,
     path::{Path, PathBuf},
-    sync::Arc,
 };
 use tracing::{debug, info};
 
@@ -41,27 +38,23 @@ pub fn get_or_create_jwt_secret_from_path(path: &Path) -> Result<JwtSecret, JwtE
 pub async fn get_single_header<Client>(
     client: Client,
     id: BlockHashOrNumber,
-) -> Result<SealedHeader>
+) -> Result<SealedHeader<Client::Header>>
 where
-    Client: HeadersClient,
+    Client: HeadersClient<Header: reth_primitives_traits::BlockHeader>,
 {
-    let request = HeadersRequest { direction: HeadersDirection::Rising, limit: 1, start: id };
+    let (peer_id, response) = client.get_header_with_priority(id, Priority::High).await?.split();
 
-    let (peer_id, response) =
-        client.get_headers_with_priority(request, Priority::High).await?.split();
-
-    if response.len() != 1 {
+    let Some(sealed_header) = response.map(|block| block.seal_slow()) else {
         client.report_bad_message(peer_id);
-        eyre::bail!("Invalid number of headers received. Expected: 1. Received: {}", response.len())
-    }
+        eyre::bail!("Invalid number of headers received. Expected: 1. Received: 0")
+    };
 
-    let sealed_header = response.into_iter().next().unwrap().seal_slow();
     let (header, seal) = sealed_header.into_parts();
     let header = SealedHeader::new(header, seal);
 
     let valid = match id {
         BlockHashOrNumber::Hash(hash) => header.hash() == hash,
-        BlockHashOrNumber::Number(number) => header.number == number,
+        BlockHashOrNumber::Number(number) => header.number() == number,
     };
 
     if !valid {
@@ -77,25 +70,23 @@ where
 }
 
 /// Get a body from network based on header
-pub async fn get_single_body<Client>(
+pub async fn get_single_body<H, Client>(
     client: Client,
-    chain_spec: Arc<ChainSpec>,
-    header: SealedHeader,
-) -> Result<SealedBlock>
+    header: SealedHeader<H>,
+    consensus: impl Consensus<H, Client::Body>,
+) -> Result<SealedBlock<H, Client::Body>>
 where
     Client: BodiesClient,
 {
     let (peer_id, response) = client.get_block_body(header.hash()).await?.split();
 
-    if response.is_none() {
+    let Some(body) = response else {
         client.report_bad_message(peer_id);
         eyre::bail!("Invalid number of bodies received. Expected: 1. Received: 0")
-    }
+    };
 
-    let body = response.unwrap();
     let block = SealedBlock { header, body };
-
-    validate_block_pre_execution(&block, &chain_spec)?;
+    consensus.validate_block_pre_execution(&block)?;
 
     Ok(block)
 }

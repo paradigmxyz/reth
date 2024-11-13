@@ -88,6 +88,9 @@ pub trait Table: Send + Sync + Debug + 'static {
     /// The table's name.
     const NAME: &'static str;
 
+    /// Whether the table is also a `DUPSORT` table.
+    const DUPSORT: bool;
+
     /// Key element of `Table`.
     ///
     /// Sorting should be taken into account when encoding this.

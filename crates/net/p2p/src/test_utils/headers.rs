@@ -62,6 +62,8 @@ impl TestHeaderDownloader {
 }
 
 impl HeaderDownloader for TestHeaderDownloader {
+    type Header = Header;
+
     fn update_local_head(&mut self, _head: SealedHeader) {}
 
     fn update_sync_target(&mut self, _target: SyncTarget) {}
@@ -72,7 +74,7 @@ impl HeaderDownloader for TestHeaderDownloader {
 }
 
 impl Stream for TestHeaderDownloader {
-    type Item = HeadersDownloaderResult<Vec<SealedHeader>>;
+    type Item = HeadersDownloaderResult<Vec<SealedHeader>, Header>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -229,6 +231,7 @@ impl DownloadClient for TestHeadersClient {
 }
 
 impl HeadersClient for TestHeadersClient {
+    type Header = Header;
     type Output = TestHeadersFut;
 
     fn get_headers_with_priority(
