@@ -13,7 +13,7 @@ use reth_consensus::Consensus;
 use reth_network_p2p::{
     error::{DownloadError, DownloadResult, PeerRequestResult},
     headers::{
-        client::{HeadersClient, HeadersDirection, HeadersRequest},
+        client::{HeadersClient, HeadersRequest},
         downloader::{validate_header_download, HeaderDownloader, SyncTarget},
         error::{HeadersDownloaderError, HeadersDownloaderResult},
     },
@@ -567,7 +567,7 @@ where
 
     /// Returns the request for the `sync_target` header.
     const fn get_sync_target_request(&self, start: BlockHashOrNumber) -> HeadersRequest {
-        HeadersRequest { start, limit: 1, direction: HeadersDirection::Falling }
+        HeadersRequest::falling(start, 1)
     }
 
     /// Starts a request future
@@ -1216,7 +1216,7 @@ fn calc_next_request(
     let diff = next_request_block_number - local_head;
     let limit = diff.min(request_limit);
     let start = next_request_block_number;
-    HeadersRequest { start: start.into(), limit, direction: HeadersDirection::Falling }
+    HeadersRequest::falling(start.into(), limit)
 }
 
 #[cfg(test)]

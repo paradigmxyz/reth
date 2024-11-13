@@ -7,7 +7,9 @@ use alloy_rpc_types_engine::{JwtError, JwtSecret};
 use eyre::Result;
 use reth_consensus::Consensus;
 use reth_network_p2p::{
-    bodies::client::BodiesClient, headers::client::HeadersClient, priority::Priority,
+    bodies::client::BodiesClient,
+    headers::client::{HeadersClient, HeadersRequest},
+    priority::Priority,
 };
 use reth_primitives::{SealedBlock, SealedHeader};
 use std::{
@@ -34,61 +36,15 @@ pub fn get_or_create_jwt_secret_from_path(path: &Path) -> Result<JwtSecret, JwtE
 }
 
 /// Get a single header from network
-pub async fn one<Client>(client: Client, start: BlockHashOrNumber) ->Result<SealedHeader<Client::Header>>
-where
-    Client: HeadersClient<Header: reth_primitives_traits::BlockHeader>,
-{
-    let request = HeadersRequest {
-        direction: HeadersDirection::Rising,
-        limit: 1,
-        start,
-    };
-    get_single_header_internal(client, request, start).await
-}
-
-/// Get headers in rising order (ascending block numbers)
-pub async fn rising<Client>(
+pub async fn get_single_header<Client>(
     client: Client,
-    start: BlockHashOrNumber,
-    limit: u64,
-) -> Result<SealedHeader<Client::Header>>
-where
-    Client: HeadersClient<Header: reth_primitives_traits::BlockHeader>,
-{
-    let request = HeadersRequest {
-        direction: HeadersDirection::Rising,
-        limit,
-        start,
-    };
-    get_single_header_internal(client, request, start).await
-}
-
-/// Get headers in falling order (descending block numbers)
-pub async fn falling<Client>(
-    client: Client,
-    start: BlockHashOrNumber,
-    limit: u64,
-) -> Result<SealedHeader<Client::Header>>
-where
-    Client: HeadersClient<Header: reth_primitives_traits::BlockHeader>,
-{
-    let request = HeadersRequest {
-        direction: HeadersDirection::Falling,
-        limit,
-        start,
-    };
-    get_single_header_internal(client, request, start).await
-}
-
-/// Internal helper function for header retrieval and validation
-async fn get_single_header_internal<Client>(
-    client: Client,
-    request: HeadersRequest,
     id: BlockHashOrNumber,
 ) -> Result<SealedHeader<Client::Header>>
 where
     Client: HeadersClient<Header: reth_primitives_traits::BlockHeader>,
 {
+    let request = HeadersRequest::one(id);
+
     let (peer_id, response) =
         client.get_headers_with_priority(request, Priority::High).await?.split();
 
@@ -114,7 +70,7 @@ where
             id
         );
     }
-    
+
     Ok(header)
 }
 

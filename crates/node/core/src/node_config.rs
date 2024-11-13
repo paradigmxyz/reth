@@ -6,7 +6,7 @@ use crate::{
         PruningArgs, RpcServerArgs, TxPoolArgs,
     },
     dirs::{ChainPath, DataDirPath},
-    utils::one,
+    utils::get_single_header,
 };
 use alloy_consensus::BlockHeader;
 use eyre::eyre;
@@ -360,7 +360,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         info!(target: "reth::cli", ?tip, "Fetching tip block from the network.");
         let mut fetch_failures = 0;
         loop {
-            match one(&client, tip).await {
+            match get_single_header(&client, tip).await {
                 Ok(tip_header) => {
                     info!(target: "reth::cli", ?tip, "Successfully fetched tip");
                     return tip_header

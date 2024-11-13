@@ -21,6 +21,34 @@ pub struct HeadersRequest {
     pub direction: HeadersDirection,
 }
 
+impl HeadersRequest {
+    /// Creates a request for a single header (direction doesn't matter).
+    ///
+    /// # Arguments
+    /// * `start` - The block hash or number to start from
+    pub const fn one(start: BlockHashOrNumber) -> Self {
+        Self { direction: HeadersDirection::Rising, limit: 1, start }
+    }
+
+    /// Creates a request for headers in rising direction (ascending block numbers).
+    ///
+    /// # Arguments
+    /// * `start` - The block hash or number to start from
+    /// * `limit` - Maximum number of headers to retrieve
+    pub const fn rising(start: BlockHashOrNumber, limit: u64) -> Self {
+        Self { direction: HeadersDirection::Rising, limit, start }
+    }
+
+    /// Creates a request for headers in falling direction (descending block numbers).
+    ///
+    /// # Arguments
+    /// * `start` - The block hash or number to start from
+    /// * `limit` - Maximum number of headers to retrieve
+    pub const fn falling(start: BlockHashOrNumber, limit: u64) -> Self {
+        Self { direction: HeadersDirection::Falling, limit, start }
+    }
+}
+
 /// The headers future type
 pub type HeadersFut = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<Header>>> + Send + Sync>>;
 
@@ -57,12 +85,7 @@ pub trait HeadersClient: DownloadClient {
         start: BlockHashOrNumber,
         priority: Priority,
     ) -> SingleHeaderRequest<Self::Output> {
-        let req = HeadersRequest {
-            start,
-            limit: 1,
-            // doesn't matter for a single header
-            direction: HeadersDirection::Rising,
-        };
+        let req = HeadersRequest::one(start);
         let fut = self.get_headers_with_priority(req, priority);
         SingleHeaderRequest { fut }
     }
