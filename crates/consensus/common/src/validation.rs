@@ -324,7 +324,7 @@ mod tests {
     };
     use alloy_primitives::{
         hex_literal::hex, Address, BlockHash, BlockNumber, Bytes, PrimitiveSignature as Signature,
-        Sealable, U256,
+        U256,
     };
     use mockall::mock;
     use rand::Rng;
@@ -493,12 +493,9 @@ mod tests {
         let ommers = Vec::new();
         let transactions = Vec::new();
 
-        let sealed = header.seal_slow();
-        let (header, seal) = sealed.into_parts();
-
         (
             SealedBlock {
-                header: SealedHeader::new(header, seal),
+                header: SealedHeader::seal(header),
                 body: BlockBody { transactions, ommers, withdrawals: None },
             },
             parent,
@@ -517,15 +514,13 @@ mod tests {
                     .collect(),
             );
 
-            let sealed = Header {
+            let header = Header {
                 withdrawals_root: Some(proofs::calculate_withdrawals_root(&withdrawals)),
                 ..Default::default()
-            }
-            .seal_slow();
-            let (header, seal) = sealed.into_parts();
+            };
 
             SealedBlock {
-                header: SealedHeader::new(header, seal),
+                header: SealedHeader::seal(header),
                 body: BlockBody { withdrawals: Some(withdrawals), ..Default::default() },
             }
         };
@@ -556,16 +551,14 @@ mod tests {
         // create a tx with 10 blobs
         let transaction = mock_blob_tx(1, 10);
 
-        let sealed = Header {
+        let header = Header {
             base_fee_per_gas: Some(1337),
             withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
             blob_gas_used: Some(1),
             transactions_root: proofs::calculate_transaction_root(&[transaction.clone()]),
             ..Default::default()
-        }
-        .seal_slow();
-        let (header, seal) = sealed.into_parts();
-        let header = SealedHeader::new(header, seal);
+        };
+        let header = SealedHeader::seal(header);
 
         let body = BlockBody {
             transactions: vec![transaction],

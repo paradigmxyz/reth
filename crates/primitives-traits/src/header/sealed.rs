@@ -156,9 +156,7 @@ impl<'a> arbitrary::Arbitrary<'a> for SealedHeader {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let header = Header::arbitrary(u)?;
 
-        let sealed = header.seal_slow();
-        let (header, seal) = sealed.into_parts();
-        Ok(Self::new(header, seal))
+        Ok(Self::seal(header))
     }
 }
 
