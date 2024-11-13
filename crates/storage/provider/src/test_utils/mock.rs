@@ -5,7 +5,7 @@ use crate::{
     ReceiptProviderIdExt, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
     StateRootProvider, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
-use alloy_consensus::constants::EMPTY_ROOT_HASH;
+use alloy_consensus::{constants::EMPTY_ROOT_HASH, Header};
 use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
     BlockHashOrNumber, BlockId, BlockNumberOrTag,
@@ -23,7 +23,7 @@ use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::NodeTypes;
 use reth_primitives::{
-    Account, Block, BlockWithSenders, Bytecode, GotExpected, Header, Receipt, SealedBlock,
+    Account, Block, BlockWithSenders, Bytecode, GotExpected, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
     TransactionSignedNoHash,
 };

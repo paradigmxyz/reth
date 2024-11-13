@@ -1,3 +1,4 @@
+use alloy_consensus::Header;
 use alloy_primitives::{hex, BlockHash};
 use clap::Parser;
 use reth_db::{
@@ -7,7 +8,6 @@ use reth_db::{
 use reth_db_api::table::{Decompress, DupSort, Table};
 use reth_db_common::DbTool;
 use reth_node_builder::NodeTypesWithDB;
-use reth_primitives::Header;
 use reth_provider::{providers::ProviderNodeTypes, StaticFileProviderFactory};
 use reth_static_file_types::StaticFileSegment;
 use tracing::error;

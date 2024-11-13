@@ -1,3 +1,4 @@
+use alloy_consensus::Header;
 use alloy_primitives::{hex, private::getrandom::getrandom};
 use arbitrary::Arbitrary;
 use eyre::Result;
@@ -10,7 +11,7 @@ use proptest_arbitrary_interop::arb;
 use reth_db::tables;
 use reth_db_api::table::{DupSort, Table, TableRow};
 use reth_fs_util as fs;
-use reth_primitives::{Header, TransactionSignedNoHash};
+use reth_primitives::TransactionSignedNoHash;
 use std::collections::HashSet;
 use tracing::error;
 

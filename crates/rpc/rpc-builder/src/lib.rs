@@ -16,9 +16,9 @@
 //! Configure only an http server with a selection of [`RethRpcModule`]s
 //!
 //! ```
+//! use alloy_consensus::Header;
 //! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_primitives::Header;
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
 //! use reth_rpc::EthApi;
 //! use reth_rpc_builder::{
@@ -73,10 +73,10 @@
 //!
 //!
 //! ```
+//! use alloy_consensus::Header;
 //! use reth_engine_primitives::EngineTypes;
 //! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_primitives::Header;
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
 //! use reth_rpc::EthApi;
 //! use reth_rpc_api::EngineApiServer;
@@ -167,6 +167,7 @@ use std::{
 };
 
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
+use alloy_consensus::Header;
 use error::{ConflictingModules, RpcError, ServerKind};
 use eth::DynEthApiBuilder;
 use http::{header::AUTHORIZATION, HeaderMap};
@@ -183,7 +184,6 @@ use reth_consensus::Consensus;
 use reth_engine_primitives::EngineTypes;
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
-use reth_primitives::Header;
 use reth_provider::{
     AccountReader, BlockReader, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
     EvmEnvProvider, FullRpcProvider, StateProviderFactory,
@@ -259,7 +259,7 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
-    EvmConfig: ConfigureEvm<Header = reth_primitives::Header>,
+    EvmConfig: ConfigureEvm<Header = alloy_consensus::Header>,
     EthApi: FullEthApiServer,
     BlockExecutor: BlockExecutorProvider,
 {
@@ -679,11 +679,11 @@ where
     /// # Example
     ///
     /// ```no_run
+    /// use alloy_consensus::Header;
     /// use reth_consensus::noop::NoopConsensus;
     /// use reth_evm::ConfigureEvm;
     /// use reth_evm_ethereum::execute::EthExecutorProvider;
     /// use reth_network_api::noop::NoopNetwork;
-    /// use reth_primitives::Header;
     /// use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
     /// use reth_rpc::EthApi;
     /// use reth_rpc_builder::RpcModuleBuilder;

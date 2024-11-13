@@ -194,7 +194,7 @@ where
 impl<Provider, P, D> Stage<Provider> for HeaderStage<P, D>
 where
     P: HeaderSyncGapProvider,
-    D: HeaderDownloader<Header = reth_primitives::Header>,
+    D: HeaderDownloader<Header = alloy_consensus::Header>,
     Provider: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory,
 {
     /// Return the id of the stage
@@ -441,7 +441,7 @@ mod tests {
             }
         }
 
-        impl<D: HeaderDownloader<Header = reth_primitives::Header> + 'static> StageTestRunner
+        impl<D: HeaderDownloader<Header = alloy_consensus::Header> + 'static> StageTestRunner
             for HeadersTestRunner<D>
         {
             type S = HeaderStage<ProviderFactory<MockNodeTypesWithDB>, D>;
@@ -461,7 +461,7 @@ mod tests {
             }
         }
 
-        impl<D: HeaderDownloader<Header = reth_primitives::Header> + 'static> ExecuteStageTestRunner
+        impl<D: HeaderDownloader<Header = alloy_consensus::Header> + 'static> ExecuteStageTestRunner
             for HeadersTestRunner<D>
         {
             type Seed = Vec<SealedHeader>;
@@ -539,7 +539,7 @@ mod tests {
             }
         }
 
-        impl<D: HeaderDownloader<Header = reth_primitives::Header> + 'static> UnwindStageTestRunner
+        impl<D: HeaderDownloader<Header = alloy_consensus::Header> + 'static> UnwindStageTestRunner
             for HeadersTestRunner<D>
         {
             fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {

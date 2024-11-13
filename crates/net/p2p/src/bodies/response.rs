@@ -6,7 +6,7 @@ use reth_primitives_traits::InMemorySize;
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum BlockResponse<B = BlockBody> {
     /// Full block response (with transactions or ommers)
-    Full(SealedBlock<reth_primitives::Header, B>),
+    Full(SealedBlock<alloy_consensus::Header, B>),
     /// The empty block response
     Empty(SealedHeader),
 }

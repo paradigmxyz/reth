@@ -7,11 +7,11 @@ use crate::{
     },
     BuilderContext, ConfigureEvm, FullNodeTypes,
 };
+use alloy_consensus::Header;
 use reth_consensus::Consensus;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_node_api::NodeTypesWithEngine;
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_primitives::Header;
 use reth_transaction_pool::TransactionPool;
 use std::{future::Future, marker::PhantomData};
 

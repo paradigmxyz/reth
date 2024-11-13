@@ -1,6 +1,7 @@
 //! Traits for configuring a node.
 
 use crate::ConfigureEvm;
+use alloy_consensus::Header;
 use alloy_rpc_types_engine::JwtSecret;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_consensus::Consensus;
@@ -9,7 +10,6 @@ use reth_network_api::FullNetwork;
 use reth_node_core::node_config::NodeConfig;
 use reth_node_types::{NodeTypes, NodeTypesWithDB, NodeTypesWithEngine};
 use reth_payload_primitives::PayloadBuilder;
-use reth_primitives::Header;
 use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::TransactionPool;

@@ -19,6 +19,7 @@ mod op_sepolia;
 
 use alloc::{boxed::Box, vec, vec::Vec};
 use alloy_chains::Chain;
+use alloy_consensus::Header;
 use alloy_genesis::Genesis;
 use alloy_primitives::{Bytes, B256, U256};
 pub use base::BASE_MAINNET;
@@ -36,7 +37,6 @@ use reth_chainspec::{
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 use reth_network_peers::NodeRecord;
 use reth_optimism_forks::OpHardforks;
-use reth_primitives_traits::Header;
 #[cfg(feature = "std")]
 pub(crate) use std::sync::LazyLock;
 
