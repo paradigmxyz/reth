@@ -46,6 +46,9 @@ pub use transactions::*;
 mod trie;
 pub use trie::*;
 
+mod chain_info;
+pub use chain_info::*;
+
 mod withdrawals;
 pub use withdrawals::*;
 
