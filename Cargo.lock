@@ -8091,10 +8091,10 @@ dependencies = [
  "reth-beacon-consensus",
  "reth-network-api",
  "reth-primitives-traits",
- "reth-provider",
  "reth-prune",
  "reth-stages",
  "reth-static-file-types",
+ "reth-storage-api",
  "tokio",
  "tracing",
 ]
