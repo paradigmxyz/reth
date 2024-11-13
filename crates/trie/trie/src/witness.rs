@@ -122,11 +122,11 @@ where
             account_trie_nodes.extend(target_nodes(
                 key.clone(),
                 value,
+                Some(&mut self.witness),
                 account_multiproof
                     .account_subtree
                     .matching_nodes_iter(&key)
                     .sorted_by(|a, b| a.0.cmp(b.0)),
-                Some(&mut self.witness),
             )?);
 
             // Gather and record storage trie nodes for this account.
@@ -141,11 +141,11 @@ where
                 storage_trie_nodes.extend(target_nodes(
                     slot_nibbles.clone(),
                     slot_value,
+                    Some(&mut self.witness),
                     storage_multiproof
                         .subtree
                         .matching_nodes_iter(&slot_nibbles)
                         .sorted_by(|a, b| a.0.cmp(b.0)),
-                    Some(&mut self.witness),
                 )?);
             }
 
@@ -232,8 +232,8 @@ where
 pub fn target_nodes<'b>(
     key: Nibbles,
     value: Option<Vec<u8>>,
-    proof: impl IntoIterator<Item = (&'b Nibbles, &'b Bytes)>,
     mut witness: Option<&mut HashMap<B256, Bytes>>,
+    proof: impl IntoIterator<Item = (&'b Nibbles, &'b Bytes)>,
 ) -> Result<BTreeMap<Nibbles, Either<B256, Vec<u8>>>, TrieWitnessError> {
     let mut trie_nodes = BTreeMap::default();
     let mut proof_iter = proof.into_iter().enumerate().peekable();
