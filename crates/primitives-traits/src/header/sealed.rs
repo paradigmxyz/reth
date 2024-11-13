@@ -3,8 +3,6 @@ use crate::InMemorySize;
 use alloy_consensus::Sealed;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{keccak256, BlockHash, Sealable, B256};
-#[cfg(any(test, feature = "test-utils"))]
-use alloy_primitives::{BlockNumber, U256};
 use alloy_rlp::{Decodable, Encodable};
 use bytes::BufMut;
 use core::mem;
