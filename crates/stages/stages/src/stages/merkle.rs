@@ -1,4 +1,4 @@
-use alloy_primitives::{BlockNumber, Sealable, B256};
+use alloy_primitives::{BlockNumber, B256};
 use reth_codecs::Compact;
 use reth_consensus::ConsensusError;
 use reth_db::tables;
@@ -276,10 +276,7 @@ where
         // Reset the checkpoint
         self.save_execution_checkpoint(provider, None)?;
 
-        let sealed = target_block.seal_slow();
-        let (header, seal) = sealed.into_parts();
-
-        validate_state_root(trie_root, SealedHeader::new(header, seal), to_block)?;
+        validate_state_root(trie_root, SealedHeader::seal(target_block), to_block)?;
 
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(to_block)
@@ -332,10 +329,7 @@ where
                 .header_by_number(input.unwind_to)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(input.unwind_to.into()))?;
 
-            let sealed = target.seal_slow();
-            let (header, seal) = sealed.into_parts();
-
-            validate_state_root(block_root, SealedHeader::new(header, seal), input.unwind_to)?;
+            validate_state_root(block_root, SealedHeader::seal(target), input.unwind_to)?;
 
             // Validation passed, apply unwind changes to the database.
             provider.write_trie_updates(&updates)?;
@@ -538,9 +532,7 @@ mod tests {
                     .into_iter()
                     .map(|(address, account)| (address, (account, std::iter::empty()))),
             );
-            let sealed = header.seal_slow();
-            let (header, seal) = sealed.into_parts();
-            let sealed_head = SealedBlock { header: SealedHeader::new(header, seal), body };
+            let sealed_head = SealedBlock { header: SealedHeader::seal(header), body };
 
             let head_hash = sealed_head.hash();
             let mut blocks = vec![sealed_head];

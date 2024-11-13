@@ -9,11 +9,14 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 mod compression;
+mod event;
 mod segment;
 
 use alloy_primitives::BlockNumber;
 pub use compression::Compression;
+pub use event::StaticFileProducerEvent;
 pub use segment::{SegmentConfig, SegmentHeader, SegmentRangeInclusive, StaticFileSegment};
+use std::ops::RangeInclusive;
 
 /// Default static file block count.
 pub const DEFAULT_BLOCKS_PER_STATIC_FILE: u64 = 500_000;
@@ -59,6 +62,43 @@ impl HighestStaticFiles {
     /// Returns the maximum block of all segments.
     pub fn max(&self) -> Option<u64> {
         [self.headers, self.transactions, self.receipts].iter().filter_map(|&option| option).max()
+    }
+}
+
+/// Static File targets, per data segment, measured in [`BlockNumber`].
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct StaticFileTargets {
+    /// Targeted range of headers.
+    pub headers: Option<RangeInclusive<BlockNumber>>,
+    /// Targeted range of receipts.
+    pub receipts: Option<RangeInclusive<BlockNumber>>,
+    /// Targeted range of transactions.
+    pub transactions: Option<RangeInclusive<BlockNumber>>,
+}
+
+impl StaticFileTargets {
+    /// Returns `true` if any of the targets are [Some].
+    pub const fn any(&self) -> bool {
+        self.headers.is_some() || self.receipts.is_some() || self.transactions.is_some()
+    }
+
+    /// Returns `true` if all targets are either [`None`] or has beginning of the range equal to the
+    /// highest static file.
+    pub fn is_contiguous_to_highest_static_files(&self, static_files: HighestStaticFiles) -> bool {
+        [
+            (self.headers.as_ref(), static_files.headers),
+            (self.receipts.as_ref(), static_files.receipts),
+            (self.transactions.as_ref(), static_files.transactions),
+        ]
+        .iter()
+        .all(|(target_block_range, highest_static_fileted_block)| {
+            target_block_range.map_or(true, |target_block_range| {
+                *target_block_range.start() ==
+                    highest_static_fileted_block.map_or(0, |highest_static_fileted_block| {
+                        highest_static_fileted_block + 1
+                    })
+            })
+        })
     }
 }
 

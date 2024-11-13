@@ -56,10 +56,18 @@ impl<H> SealedHeader<H> {
     }
 }
 
-impl SealedHeader {
+impl<H: Sealable> SealedHeader<H> {
+    /// Hashes the header and creates a sealed header.
+    pub fn seal(header: H) -> Self {
+        let hash = header.hash_slow();
+        Self::new(header, hash)
+    }
+}
+
+impl<H: alloy_consensus::BlockHeader> SealedHeader<H> {
     /// Return the number hash tuple.
     pub fn num_hash(&self) -> BlockNumHash {
-        BlockNumHash::new(self.number, self.hash)
+        BlockNumHash::new(self.number(), self.hash)
     }
 }
 
@@ -148,9 +156,7 @@ impl<'a> arbitrary::Arbitrary<'a> for SealedHeader {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let header = Header::arbitrary(u)?;
 
-        let sealed = header.seal_slow();
-        let (header, seal) = sealed.into_parts();
-        Ok(Self::new(header, seal))
+        Ok(Self::seal(header))
     }
 }
 

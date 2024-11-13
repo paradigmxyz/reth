@@ -1377,7 +1377,7 @@ mod tests {
     use alloy_consensus::{TxEip1559, EMPTY_ROOT_HASH};
     use alloy_eips::{eip1559::INITIAL_BASE_FEE, eip4895::Withdrawals};
     use alloy_genesis::{Genesis, GenesisAccount};
-    use alloy_primitives::{keccak256, Address, PrimitiveSignature as Signature, Sealable, B256};
+    use alloy_primitives::{keccak256, Address, PrimitiveSignature as Signature, B256};
     use assert_matches::assert_matches;
     use linked_hash_set::LinkedHashSet;
     use reth_chainspec::{ChainSpecBuilder, MAINNET, MIN_TRANSACTION_GAS};
@@ -1598,7 +1598,7 @@ mod tests {
             // receipts root computation is different for OP
             let receipts_root = calculate_receipt_root(&receipts);
 
-            let sealed = Header {
+            let header = Header {
                 number,
                 parent_hash: parent.unwrap_or_default(),
                 gas_used: body.len() as u64 * MIN_TRANSACTION_GAS,
@@ -1620,13 +1620,11 @@ mod tests {
                     ),
                 )])),
                 ..Default::default()
-            }
-            .seal_slow();
-            let (header, seal) = sealed.into_parts();
+            };
 
             SealedBlockWithSenders::new(
                 SealedBlock {
-                    header: SealedHeader::new(header, seal),
+                    header: SealedHeader::seal(header),
                     body: BlockBody {
                         transactions: body.clone().into_iter().map(|tx| tx.into_signed()).collect(),
                         ommers: Vec::new(),

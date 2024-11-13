@@ -140,6 +140,7 @@ macro_rules! tables {
                 $value: reth_db_api::table::Value + 'static
             {
                 const NAME: &'static str = table_names::$name;
+                const DUPSORT: bool = tables!(@bool $($subkey)?);
 
                 type Key = $key;
                 type Value = $value;
