@@ -60,9 +60,10 @@ impl<H> From<HeadersResponseError> for ReverseHeadersDownloaderError<H> {
 /// tries to fill the gap between the local head of the node and the chain tip by issuing multiple
 /// requests at a time but yielding them in batches on [`Stream::poll_next`].
 ///
-/// **Note:** This downloader downloads in reverse, see also [`reth_network_p2p::headers::client::HeadersDirection`], this
-/// means the batches of headers that this downloader yields will start at the chain tip and move
-/// towards the local head: falling block numbers.
+/// **Note:** This downloader downloads in reverse, see also
+/// [`reth_network_p2p::headers::client::HeadersDirection`], this means the batches of headers that
+/// this downloader yields will start at the chain tip and move towards the local head: falling
+/// block numbers.
 #[must_use = "Stream does nothing unless polled"]
 #[derive(Debug)]
 pub struct ReverseHeadersDownloader<H: HeadersClient> {
