@@ -149,7 +149,7 @@ impl TransactionSigned {
             chain_id: None,
         };
 
-        let v: u64 = Decodable::decode(data)?;
+        let v = Decodable::decode(data)?;
         let r: U256 = Decodable::decode(data)?;
         let s: U256 = Decodable::decode(data)?;
 
