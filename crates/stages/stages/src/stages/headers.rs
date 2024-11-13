@@ -392,7 +392,7 @@ mod tests {
     use crate::test_utils::{
         stage_test_suite, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
     };
-    use alloy_primitives::{Sealable, B256};
+    use alloy_primitives::B256;
     use assert_matches::assert_matches;
     use reth_execution_types::ExecutionOutcome;
     use reth_primitives::{BlockBody, SealedBlock, SealedBlockWithSenders};
@@ -509,9 +509,7 @@ mod tests {
                             // validate the header
                             let header = provider.header_by_number(block_num)?;
                             assert!(header.is_some());
-                            let sealed = header.unwrap().seal_slow();
-                            let (header, seal) = sealed.into_parts();
-                            let header = SealedHeader::new(header, seal);
+                            let header = SealedHeader::seal(header.unwrap());
                             assert_eq!(header.hash(), hash);
 
                             // validate the header total difficulty

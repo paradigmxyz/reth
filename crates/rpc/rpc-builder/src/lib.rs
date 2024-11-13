@@ -166,6 +166,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
 use error::{ConflictingModules, RpcError, ServerKind};
 use eth::DynEthApiBuilder;
 use http::{header::AUTHORIZATION, HeaderMap};
@@ -197,14 +198,12 @@ use reth_rpc_eth_api::{
     EthApiServer, EthApiTypes, FullEthApiServer, RpcBlock, RpcReceipt, RpcTransaction,
 };
 use reth_rpc_eth_types::{EthConfig, EthStateCache, EthSubscriptionIdProvider};
-use reth_rpc_layer::{AuthLayer, Claims, JwtAuthValidator, JwtSecret};
+use reth_rpc_layer::{AuthLayer, Claims, CompressionLayer, JwtAuthValidator, JwtSecret};
 use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
 use serde::{Deserialize, Serialize};
 use tower::Layer;
 use tower_http::cors::CorsLayer;
-
-use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
 
 pub use cors::CorsDomainError;
 
@@ -1647,6 +1646,12 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
         jwt_secret.map(|secret| AuthLayer::new(JwtAuthValidator::new(secret)))
     }
 
+    /// Returns a [`CompressionLayer`] that adds compression support (gzip, deflate, brotli, zstd)
+    /// based on the client's `Accept-Encoding` header
+    fn maybe_compression_layer() -> Option<CompressionLayer> {
+        Some(CompressionLayer::new())
+    }
+
     /// Builds and starts the configured server(s): http, ws, ipc.
     ///
     /// If both http and ws are on the same port, they are combined into one server.
@@ -1711,7 +1716,8 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                     .set_http_middleware(
                         tower::ServiceBuilder::new()
                             .option_layer(Self::maybe_cors_layer(cors)?)
-                            .option_layer(Self::maybe_jwt_layer(self.jwt_secret)),
+                            .option_layer(Self::maybe_jwt_layer(self.jwt_secret))
+                            .option_layer(Self::maybe_compression_layer()),
                     )
                     .set_rpc_middleware(
                         self.rpc_middleware.clone().layer(
@@ -1783,8 +1789,9 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                 .http_only()
                 .set_http_middleware(
                     tower::ServiceBuilder::new()
-                        .option_layer(Self::maybe_cors_layer(self.http_cors_domains.clone())?)
-                        .option_layer(Self::maybe_jwt_layer(self.jwt_secret)),
+                        .option_layer(Self::maybe_cors_layer(self.ws_cors_domains.clone())?)
+                        .option_layer(Self::maybe_jwt_layer(self.jwt_secret))
+                        .option_layer(Self::maybe_compression_layer()),
                 )
                 .set_rpc_middleware(
                     self.rpc_middleware.clone().layer(

@@ -16,9 +16,9 @@ workspace = true
 reth-chainspec.workspace = true
 reth-codecs-derive.workspace = true
 reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 
 # ethereum
-alloy-consensus.workspace = true
 alloy-chains = { workspace = true, features = ["rlp"] }
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
@@ -54,7 +54,8 @@ arbitrary = [
 	"reth-chainspec/arbitrary",
 	"alloy-consensus/arbitrary",
 	"alloy-eips/arbitrary",
-	"alloy-primitives/arbitrary"
+	"alloy-primitives/arbitrary",
+    "reth-primitives-traits/arbitrary",
 ]
 serde = [
 	"dep:serde",
