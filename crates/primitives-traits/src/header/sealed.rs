@@ -56,6 +56,14 @@ impl<H> SealedHeader<H> {
     }
 }
 
+impl<H: Sealable> SealedHeader<H> {
+    /// Hashes the header and creates a sealed header.
+    pub fn seal(header: H) -> Self {
+        let hash = header.hash_slow();
+        Self::new(header, hash)
+    }
+}
+
 impl<H: alloy_consensus::BlockHeader> SealedHeader<H> {
     /// Return the number hash tuple.
     pub fn num_hash(&self) -> BlockNumHash {
