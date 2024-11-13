@@ -17,6 +17,7 @@ reth-primitives.workspace = true
 # ethereum
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
+alloy-consensus.workspace = true
 
 # misc
 auto_impl.workspace = true
@@ -24,11 +25,5 @@ derive_more.workspace = true
 
 [features]
 default = ["std"]
-std = [
-	"reth-primitives/std",
-	"alloy-primitives/std",
-	"alloy-eips/std"
-]
-test-utils = [
-	"reth-primitives/test-utils"
-]
+std = ["reth-primitives/std", "alloy-primitives/std", "alloy-eips/std"]
+test-utils = ["reth-primitives/test-utils"]

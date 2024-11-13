@@ -1,8 +1,8 @@
 use crate::{download::DownloadClient, error::PeerRequestResult, priority::Priority};
+use alloy_consensus::Header;
 use alloy_eips::BlockHashOrNumber;
 use futures::{Future, FutureExt};
 pub use reth_eth_wire_types::{BlockHeaders, HeadersDirection};
-use reth_primitives::Header;
 use std::{
     fmt::Debug,
     pin::Pin,

@@ -2611,6 +2611,7 @@ dependencies = [
 name = "ef-tests"
 version = "1.1.1"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
@@ -2878,6 +2879,7 @@ dependencies = [
 name = "example-custom-evm"
 version = "0.0.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-genesis",
  "alloy-primitives",
  "eyre",
@@ -3063,6 +3065,7 @@ dependencies = [
 name = "example-stateful-precompile"
 version = "0.0.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-genesis",
  "alloy-primitives",
  "eyre",
@@ -6445,6 +6448,7 @@ dependencies = [
 name = "reth-beacon-consensus"
 version = "1.1.1"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
@@ -6647,6 +6651,7 @@ name = "reth-cli-commands"
 version = "1.1.1"
 dependencies = [
  "ahash",
+ "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
@@ -6788,6 +6793,7 @@ dependencies = [
 name = "reth-consensus"
 version = "1.1.1"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "auto_impl",
@@ -6838,6 +6844,7 @@ dependencies = [
 name = "reth-db"
 version = "1.1.1"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "arbitrary",
  "assert_matches",
@@ -6878,6 +6885,7 @@ dependencies = [
 name = "reth-db-api"
 version = "1.1.1"
 dependencies = [
+ "alloy-consensus",
  "alloy-genesis",
  "alloy-primitives",
  "arbitrary",
@@ -7206,6 +7214,7 @@ dependencies = [
 name = "reth-engine-tree"
 version = "1.1.1"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
@@ -7643,6 +7652,7 @@ dependencies = [
 name = "reth-invalid-block-hooks"
 version = "1.1.1"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-debug",
@@ -7902,6 +7912,7 @@ dependencies = [
 name = "reth-node-api"
 version = "1.1.1"
 dependencies = [
+ "alloy-consensus",
  "alloy-rpc-types-engine",
  "eyre",
  "reth-beacon-consensus",
@@ -7912,7 +7923,6 @@ dependencies = [
  "reth-node-core",
  "reth-node-types",
  "reth-payload-primitives",
- "reth-primitives",
  "reth-provider",
  "reth-tasks",
  "reth-transaction-pool",
@@ -7922,6 +7932,7 @@ dependencies = [
 name = "reth-node-builder"
 version = "1.1.1"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "alloy-rpc-types",
  "aquamarine",
@@ -8770,6 +8781,7 @@ dependencies = [
 name = "reth-rpc-builder"
 version = "1.1.1"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-engine",
@@ -8991,6 +9003,7 @@ dependencies = [
 name = "reth-stages"
 version = "1.1.1"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "alloy-rlp",
  "assert_matches",

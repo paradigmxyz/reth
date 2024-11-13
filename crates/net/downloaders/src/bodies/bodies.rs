@@ -37,7 +37,7 @@ pub struct BodiesDownloader<B: BodiesClient, Provider> {
     /// The bodies client
     client: Arc<B>,
     /// The consensus client
-    consensus: Arc<dyn Consensus<reth_primitives::Header, B::Body>>,
+    consensus: Arc<dyn Consensus<alloy_consensus::Header, B::Body>>,
     /// The database handle
     provider: Provider,
     /// The maximum number of non-empty blocks per one request
@@ -564,7 +564,7 @@ impl BodiesDownloaderBuilder {
     pub fn build<B, Provider>(
         self,
         client: B,
-        consensus: Arc<dyn Consensus<reth_primitives::Header, B::Body>>,
+        consensus: Arc<dyn Consensus<alloy_consensus::Header, B::Body>>,
         provider: Provider,
     ) -> BodiesDownloader<B, Provider>
     where
