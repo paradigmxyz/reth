@@ -1233,9 +1233,11 @@ mod tests {
     use super::*;
     use crate::headers::test_utils::child_header;
     use alloy_consensus::Header;
+    use alloy_eips::BlockNumHash;
     use assert_matches::assert_matches;
     use reth_consensus::test_utils::TestConsensus;
     use reth_network_p2p::test_utils::TestHeadersClient;
+    use reth_primitives_traits::BlockWithParent;
 
     /// Tests that `replace_number` works the same way as `Option::replace`
     #[test]
@@ -1315,7 +1317,10 @@ mod tests {
         assert!(downloader.sync_target_request.is_some());
 
         downloader.sync_target_request.take();
-        let target = SyncTarget::Gap(SealedHeader::new(Default::default(), B256::random()));
+        let target = SyncTarget::Gap(BlockWithParent {
+            block: BlockNumHash::new(0, B256::random()),
+            parent: Default::default(),
+        });
         downloader.update_sync_target(target);
         assert!(downloader.sync_target_request.is_none());
         assert_matches!(
