@@ -616,7 +616,7 @@ where
         if let Some(fut) = Pin::new(&mut this.maybe_better).as_pin_mut() {
             if let Poll::Ready(res) = fut.poll(cx) {
                 this.maybe_better = None;
-                if let Ok(BuildOutcome::Better { payload, .. }) = res {
+                if let Some(payload) = res.ok().and_then(|out| out.into_payload()) {
                     debug!(target: "payload_builder", "resolving better payload");
                     return Poll::Ready(Ok(payload))
                 }
