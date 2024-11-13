@@ -80,24 +80,24 @@ impl<H: BlockHeader> EthResponseValidator for RequestResult<Vec<H>> {
 #[derive(Clone, Debug, Eq, PartialEq, Display, Error)]
 pub enum RequestError {
     /// Closed channel to the peer.
-    #[display("closed channel to the peer")]
     /// Indicates the channel to the peer is closed.
+    #[display("closed channel to the peer")]
     ChannelClosed,
     /// Connection to a peer dropped while handling the request.
-    #[display("connection to a peer dropped while handling the request")]
     /// Represents a dropped connection while handling the request.
+    #[display("connection to a peer dropped while handling the request")]
     ConnectionDropped,
     /// Capability message is not supported by the remote peer.
-    #[display("capability message is not supported by remote peer")]
     /// Indicates an unsupported capability message from the remote peer.
+    #[display("capability message is not supported by remote peer")]
     UnsupportedCapability,
     /// Request timed out while awaiting response.
-    #[display("request timed out while awaiting response")]
     /// Represents a timeout while waiting for a response.
+    #[display("request timed out while awaiting response")]
     Timeout,
     /// Received bad response.
-    #[display("received bad response")]
     /// Indicates a bad response was received.
+    #[display("received bad response")]
     BadResponse,
 }
 
