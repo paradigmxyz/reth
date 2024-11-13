@@ -8,9 +8,7 @@ use alloy_rpc_types_engine::{JwtError, JwtSecret};
 use eyre::Result;
 use reth_consensus::Consensus;
 use reth_network_p2p::{
-    bodies::client::BodiesClient,
-    headers::client::{HeadersClient, HeadersDirection, HeadersRequest},
-    priority::Priority,
+    bodies::client::BodiesClient, headers::client::HeadersClient, priority::Priority,
 };
 use reth_primitives::{SealedBlock, SealedHeader};
 use std::{
@@ -44,17 +42,13 @@ pub async fn get_single_header<Client>(
 where
     Client: HeadersClient<Header: reth_primitives_traits::BlockHeader>,
 {
-    let request = HeadersRequest { direction: HeadersDirection::Rising, limit: 1, start: id };
+    let (peer_id, response) = client.get_header_with_priority(id, Priority::High).await?.split();
 
-    let (peer_id, response) =
-        client.get_headers_with_priority(request, Priority::High).await?.split();
-
-    if response.len() != 1 {
+    let Some(sealed_header) = response.map(|block| block.seal_slow()) else {
         client.report_bad_message(peer_id);
-        eyre::bail!("Invalid number of headers received. Expected: 1. Received: {}", response.len())
-    }
+        eyre::bail!("Invalid number of headers received. Expected: 1. Received: 0")
+    };
 
-    let sealed_header = response.into_iter().next().unwrap().seal_slow();
     let (header, seal) = sealed_header.into_parts();
     let header = SealedHeader::new(header, seal);
 
