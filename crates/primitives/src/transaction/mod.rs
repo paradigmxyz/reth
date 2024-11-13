@@ -870,6 +870,8 @@ impl TransactionExt for Transaction {
 pub struct TransactionSignedNoHash {
     /// The transaction signature values
     pub signature: Signature,
+    /// Raw transaction info
+    #[deref]
     #[as_ref]
     pub transaction: Transaction,
 }

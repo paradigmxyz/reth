@@ -61,10 +61,6 @@ pub trait TransactionExt: alloy_consensus::Transaction {
     /// It is only for signature signing or signer recovery.
     fn signature_hash(&self) -> B256;
 
-    /// Returns the effective gas price for the given base fee.
-    // todo: remove when released: https://github.com/alloy-rs/alloy/pull/1640
-    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128;
-
     /// Returns the transaction type.
     fn tx_type(&self) -> Self::Type {
         Self::Type::try_from(self.ty()).expect("should decode tx type id")

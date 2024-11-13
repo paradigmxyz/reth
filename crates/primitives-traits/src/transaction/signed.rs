@@ -89,8 +89,4 @@ impl<T: SignedTransaction> TransactionExt for T {
     fn signature_hash(&self) -> B256 {
         self.transaction().signature_hash()
     }
-
-    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
-        self.transaction().effective_gas_price(base_fee)
-    }
 }
