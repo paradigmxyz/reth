@@ -90,8 +90,8 @@ jobs:
           ENCLAVE_ID=$(curl http://127.0.0.1:9779/api/enclaves | jq --raw-output 'keys[0]')
           GETH_PORT=$(curl "http://127.0.0.1:9779/api/enclaves/$ENCLAVE_ID/services" | jq '."op-el-1-op-geth-op-node-op-kurtosis".public_ports.rpc.number')
           RETH_PORT=$(curl "http://127.0.0.1:9779/api/enclaves/$ENCLAVE_ID/services" | jq '."op-el-2-op-reth-op-node-op-kurtosis".public_ports.rpc.number')
-          echo "RETH_RPC=http://127.0.0.1:$GETH_PORT" >> $GITHUB_ENV
-          echo "GETH_RPC=http://127.0.0.1:$RETH_PORT" >> $GITHUB_ENV
+          echo "GETH_RPC=http://127.0.0.1:$GETH_PORT" >> $GITHUB_ENV
+          echo "RETH_RPC=http://127.0.0.1:$RETH_PORT" >> $GITHUB_ENV
 
       - name: Assert that clients advance
         run: |
