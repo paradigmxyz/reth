@@ -410,7 +410,6 @@ impl<N: ProviderNodeTypes> PipelineState<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::Sealable;
     use assert_matches::assert_matches;
     use futures::poll;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
@@ -599,9 +598,7 @@ mod tests {
             header.parent_hash = hash;
             header.number += 1;
             header.timestamp += 1;
-            let sealed = header.seal_slow();
-            let (header, seal) = sealed.into_parts();
-            sealed_header = SealedHeader::new(header, seal);
+            sealed_header = SealedHeader::seal(header);
             client.insert(sealed_header.clone(), body.clone());
         }
     }
@@ -617,14 +614,12 @@ mod tests {
         );
 
         let client = TestFullBlockClient::default();
-        let sealed = Header {
+        let header = Header {
             base_fee_per_gas: Some(7),
             gas_limit: chain_spec.max_gas_limit,
             ..Default::default()
-        }
-        .seal_slow();
-        let (header, seal) = sealed.into_parts();
-        let header = SealedHeader::new(header, seal);
+        };
+        let header = SealedHeader::seal(header);
         insert_headers_into_client(&client, header, 0..10);
 
         // set up a pipeline

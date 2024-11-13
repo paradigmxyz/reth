@@ -199,15 +199,8 @@ where
                 ResponseResult::Header(res) => {
                     match res {
                         Ok(maybe_header) => {
-                            let (peer, maybe_header) = maybe_header
-                                .map(|h| {
-                                    h.map(|h| {
-                                        let sealed = h.seal_slow();
-                                        let (header, seal) = sealed.into_parts();
-                                        SealedHeader::new(header, seal)
-                                    })
-                                })
-                                .split();
+                            let (peer, maybe_header) =
+                                maybe_header.map(|h| h.map(SealedHeader::seal)).split();
                             if let Some(header) = maybe_header {
                                 if header.hash() == this.hash {
                                     this.header = Some(header);
@@ -457,17 +450,8 @@ where
     }
 
     fn on_headers_response(&mut self, headers: WithPeerId<Vec<Client::Header>>) {
-        let (peer, mut headers_falling) = headers
-            .map(|h| {
-                h.into_iter()
-                    .map(|h| {
-                        let sealed = h.seal_slow();
-                        let (header, seal) = sealed.into_parts();
-                        SealedHeader::new(header, seal)
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .split();
+        let (peer, mut headers_falling) =
+            headers.map(|h| h.into_iter().map(SealedHeader::seal).collect::<Vec<_>>()).split();
 
         // fill in the response if it's the correct length
         if headers_falling.len() == self.count as usize {
@@ -707,9 +691,7 @@ mod tests {
             header.parent_hash = hash;
             header.number += 1;
 
-            let sealed = header.seal_slow();
-            let (header, seal) = sealed.into_parts();
-            sealed_header = SealedHeader::new(header, seal);
+            sealed_header = SealedHeader::seal(header);
 
             client.insert(sealed_header.clone(), body.clone());
         }

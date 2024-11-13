@@ -2597,7 +2597,7 @@ pub enum AdvancePersistenceError {
 mod tests {
     use super::*;
     use crate::persistence::PersistenceAction;
-    use alloy_primitives::{Bytes, Sealable};
+    use alloy_primitives::Bytes;
     use alloy_rlp::Decodable;
     use alloy_rpc_types_engine::{CancunPayloadFields, ExecutionPayloadSidecar};
     use assert_matches::assert_matches;
@@ -2709,9 +2709,8 @@ mod tests {
 
             let (from_tree_tx, from_tree_rx) = unbounded_channel();
 
-            let sealed = chain_spec.genesis_header().clone().seal_slow();
-            let (header, seal) = sealed.into_parts();
-            let header = SealedHeader::new(header, seal);
+            let header = chain_spec.genesis_header().clone();
+            let header = SealedHeader::seal(header);
             let engine_api_tree_state = EngineApiTreeState::new(10, 10, header.num_hash());
             let canonical_in_memory_state = CanonicalInMemoryState::with_head(header, None, None);
 
