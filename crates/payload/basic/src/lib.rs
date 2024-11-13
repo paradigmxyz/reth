@@ -769,7 +769,7 @@ impl<Payload> BuildOutcome<Payload> {
     /// Consumes the type and returns the payload if the outcome is `Better`.
     pub fn into_payload(self) -> Option<Payload> {
         match self {
-            Self::Better { payload, .. } => Some(payload),
+            Self::Better { payload, .. } | Self::Freeze(payload) => Some(payload),
             _ => None,
         }
     }
