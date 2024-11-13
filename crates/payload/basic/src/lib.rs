@@ -616,7 +616,9 @@ where
         if let Some(fut) = Pin::new(&mut this.maybe_better).as_pin_mut() {
             if let Poll::Ready(res) = fut.poll(cx) {
                 this.maybe_better = None;
-                if let Some(payload) = res.ok().and_then(|out| out.into_payload()) {
+                if let Ok(Some(payload)) = res.map(|out| out.into_payload())
+                    .inspect_err(|err| debug!(target: "payload_builder", %err, "failed to resolve pending payload"))
+                {
                     debug!(target: "payload_builder", "resolving better payload");
                     return Poll::Ready(Ok(payload))
                 }
