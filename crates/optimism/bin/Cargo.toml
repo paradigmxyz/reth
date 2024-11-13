@@ -9,7 +9,7 @@ repository.workspace = true
 exclude.workspace = true
 
 [dependencies]
-reth-node-builder.workspace = true
+reth-node-builder = { workspace = true, features = ["js-tracer"] }
 reth-cli-util.workspace = true
 reth-optimism-cli.workspace = true
 reth-provider.workspace = true
