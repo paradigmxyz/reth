@@ -4,7 +4,6 @@ name: kurtosis-op
 
 on:
   workflow_dispatch:
-  pull_request:
   schedule:
     # every day
     - cron: "0 1 * * *"
@@ -106,15 +105,15 @@ jobs:
           exit 1
 
 
-  # notify-on-error:
-  #   needs: test
-  #   if: failure()
-  #   runs-on:
-  #     group: Reth
-  #   steps:
-  #     - name: Slack Webhook Action
-  #       uses: rtCamp/action-slack-notify@v2
-  #       env:
-  #         SLACK_COLOR: ${{ job.status }}
-  #         SLACK_MESSAGE: "Failed run: https://github.com/paradigmxyz/reth/actions/runs/${{ github.run_id }}"
-  #         SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+  notify-on-error:
+    needs: test
+    if: failure()
+    runs-on:
+      group: Reth
+    steps:
+      - name: Slack Webhook Action
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_COLOR: ${{ job.status }}
+          SLACK_MESSAGE: "Failed run: https://github.com/paradigmxyz/reth/actions/runs/${{ github.run_id }}"
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
