@@ -1,11 +1,9 @@
 //! Block header data primitive.
 
-use core::fmt;
-
-use alloy_primitives::Sealable;
-use reth_codecs::Compact;
-
 use crate::InMemorySize;
+use alloy_primitives::Sealable;
+use core::fmt;
+use reth_codecs::Compact;
 
 /// Helper trait that unifies all behaviour required by block header to support full node
 /// operations.
@@ -28,6 +26,7 @@ pub trait BlockHeader:
     + alloy_consensus::BlockHeader
     + Sealable
     + InMemorySize
+    + 'static
 {
 }
 
@@ -47,5 +46,6 @@ impl<T> BlockHeader for T where
         + alloy_consensus::BlockHeader
         + Sealable
         + InMemorySize
+        + 'static
 {
 }
