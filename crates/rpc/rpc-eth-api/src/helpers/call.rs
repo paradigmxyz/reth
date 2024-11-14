@@ -1,9 +1,10 @@
 //! Loads a pending block from database. Helper trait for `eth_` transaction, call and trace RPC
 //! methods.
 
+use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace};
 use crate::{
-    AsEthApiError, FromEthApiError, FromEvmError, FullEthApiTypes, IntoEthApiError, RpcBlock,
-    RpcNodeCore,
+    helpers::estimate::update_estimated_gas_range, AsEthApiError, FromEthApiError, FromEvmError,
+    FullEthApiTypes, IntoEthApiError, RpcBlock, RpcNodeCore,
 };
 use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::{eip1559::calc_next_block_base_fee, eip2930::AccessListResult};
@@ -19,8 +20,8 @@ use reth_chainspec::{EthChainSpec, MIN_TRANSACTION_GAS};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
     revm_primitives::{
-        BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, HaltReason,
-        ResultAndState, TransactTo, TxEnv,
+        BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, ResultAndState,
+        TransactTo, TxEnv,
     },
     TransactionSigned,
 };
@@ -40,8 +41,6 @@ use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GA
 use revm::{Database, DatabaseCommit, GetInspector};
 use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
 use tracing::trace;
-
-use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace};
 
 /// Result type for `eth_simulateV1` RPC method.
 pub type SimulatedBlocksResult<N, E> = Result<Vec<SimulatedBlock<RpcBlock<N>>>, E>;
@@ -1124,52 +1123,4 @@ pub trait Call: LoadState<Evm: ConfigureEvm<Header = Header>> + SpawnBlocking {
 
         Ok(env)
     }
-}
-
-/// Updates the highest and lowest gas limits for binary search based on the execution result.
-///
-/// This function refines the gas limit estimates used in a binary search to find the optimal
-/// gas limit for a transaction. It adjusts the highest or lowest gas limits depending on
-/// whether the execution succeeded, reverted, or halted due to specific reasons.
-#[inline]
-pub fn update_estimated_gas_range(
-    result: ExecutionResult,
-    tx_gas_limit: u64,
-    highest_gas_limit: &mut u64,
-    lowest_gas_limit: &mut u64,
-) -> Result<(), EthApiError> {
-    match result {
-        ExecutionResult::Success { .. } => {
-            // Cap the highest gas limit with the succeeding gas limit.
-            *highest_gas_limit = tx_gas_limit;
-        }
-        ExecutionResult::Revert { .. } => {
-            // Increase the lowest gas limit.
-            *lowest_gas_limit = tx_gas_limit;
-        }
-        ExecutionResult::Halt { reason, .. } => {
-            match reason {
-                HaltReason::OutOfGas(_) | HaltReason::InvalidFEOpcode => {
-                    // Both `OutOfGas` and `InvalidEFOpcode` can occur dynamically if the gas
-                    // left is too low. Treat this as an out of gas
-                    // condition, knowing that the call succeeds with a
-                    // higher gas limit.
-                    //
-                    // Common usage of invalid opcode in OpenZeppelin:
-                    // <https://github.com/OpenZeppelin/openzeppelin-contracts/blob/94697be8a3f0dfcd95dfb13ffbd39b5973f5c65d/contracts/metatx/ERC2771Forwarder.sol#L360-L367>
-
-                    // Increase the lowest gas limit.
-                    *lowest_gas_limit = tx_gas_limit;
-                }
-                err => {
-                    // These cases should be unreachable because we know the transaction
-                    // succeeds, but if they occur, treat them as an
-                    // error.
-                    return Err(RpcInvalidTransactionError::EvmHalt(err).into_eth_err())
-                }
-            }
-        }
-    };
-
-    Ok(())
 }
