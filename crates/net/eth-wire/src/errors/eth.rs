@@ -3,8 +3,8 @@
 use crate::{
     errors::P2PStreamError, message::MessageError, version::ParseVersionError, DisconnectReason,
 };
+use alloy_chains::Chain;
 use alloy_primitives::B256;
-use reth_chainspec::Chain;
 use reth_eth_wire_types::EthVersion;
 use reth_primitives::{GotExpected, GotExpectedBoxed, ValidationError};
 use std::io;
