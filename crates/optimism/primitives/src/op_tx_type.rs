@@ -12,25 +12,11 @@ use derive_more::{
     Display,
 };
 use op_alloy_consensus::{OpTxType as AlloyOpTxType, DEPOSIT_TX_TYPE_ID};
+use reth_primitives::{
+    COMPACT_EXTENDED_IDENTIFIER_FLAG, COMPACT_IDENTIFIER_EIP1559, COMPACT_IDENTIFIER_EIP2930,
+    COMPACT_IDENTIFIER_LEGACY,
+};
 use std::convert::TryFrom;
-
-/// Identifier parameter for legacy transaction
-#[cfg(any(test, feature = "reth-codec"))]
-pub(crate) const COMPACT_IDENTIFIER_LEGACY: usize = 0;
-
-/// Identifier parameter for EIP-2930 transaction
-#[cfg(any(test, feature = "reth-codec"))]
-pub(crate) const COMPACT_IDENTIFIER_EIP2930: usize = 1;
-
-/// Identifier parameter for EIP-1559 transaction
-#[cfg(any(test, feature = "reth-codec"))]
-pub(crate) const COMPACT_IDENTIFIER_EIP1559: usize = 2;
-
-/// For backwards compatibility purposes only 2 bits of the type are encoded in the identifier
-/// parameter. In the case of a [`COMPACT_EXTENDED_IDENTIFIER_FLAG`], the full transaction type is
-/// read from the buffer as a single byte.
-#[cfg(any(test, feature = "reth-codec"))]
-pub(crate) const COMPACT_EXTENDED_IDENTIFIER_FLAG: usize = 3;
 
 /// Wrapper type for `AlloyOpTxType` to implement `TxType` trait.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Display, Ord, Hash, From, Into)]
