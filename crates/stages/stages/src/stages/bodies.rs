@@ -4,6 +4,8 @@ use std::{
 };
 
 use futures_util::TryStreamExt;
+use reth_codecs::Compact;
+use reth_primitives_traits::BlockBody;
 use tracing::*;
 
 use alloy_primitives::TxNumber;
@@ -75,8 +77,8 @@ where
         + StaticFileProviderFactory
         + StatsReader
         + BlockReader
-        + BlockWriter,
-    D: BodyDownloader<Body = reth_primitives::BlockBody>,
+        + BlockWriter<Body = D::Body>,
+    D: BodyDownloader<Body: BlockBody<Transaction: Compact>>,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -190,9 +192,9 @@ where
             match response {
                 BlockResponse::Full(block) => {
                     // Write transactions
-                    for transaction in &block.body.transactions {
-                        let appended_tx_number = static_file_producer
-                            .append_transaction(next_tx_num, &transaction.clone().into())?;
+                    for transaction in block.body.transactions() {
+                        let appended_tx_number =
+                            static_file_producer.append_transaction(next_tx_num, transaction)?;
 
                         if appended_tx_number != next_tx_num {
                             // This scenario indicates a critical error in the logic of adding new
@@ -702,9 +704,7 @@ mod tests {
 
                         body.tx_num_range().try_for_each(|tx_num| {
                             let transaction = random_signed_tx(&mut rng);
-                            static_file_producer
-                                .append_transaction(tx_num, &transaction.into())
-                                .map(drop)
+                            static_file_producer.append_transaction(tx_num, &transaction).map(drop)
                         })?;
 
                         if body.tx_count != 0 {
