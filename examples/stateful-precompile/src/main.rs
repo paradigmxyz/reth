@@ -2,6 +2,7 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use alloy_consensus::Header;
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, Bytes, U256};
 use parking_lot::RwLock;
@@ -26,7 +27,7 @@ use reth_node_ethereum::{
 };
 use reth_primitives::{
     revm_primitives::{SpecId, StatefulPrecompileMut},
-    Header, TransactionSigned,
+    TransactionSigned,
 };
 use reth_tracing::{RethTracer, Tracer};
 use schnellru::{ByLength, LruMap};

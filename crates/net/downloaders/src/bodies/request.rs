@@ -27,7 +27,7 @@ use std::{
 /// It then proceeds to verify the downloaded bodies. In case of an validation error,
 /// the future will start over.
 ///
-/// The future will filter out any empty headers (see [`reth_primitives::Header::is_empty`]) from
+/// The future will filter out any empty headers (see [`alloy_consensus::Header::is_empty`]) from
 /// the request. If [`BodiesRequestFuture`] was initialized with all empty headers, no request will
 /// be dispatched and they will be immediately returned upon polling.
 ///
@@ -39,7 +39,7 @@ use std::{
 /// and eventually disconnected.
 pub(crate) struct BodiesRequestFuture<B: BodiesClient> {
     client: Arc<B>,
-    consensus: Arc<dyn Consensus<reth_primitives::Header, B::Body>>,
+    consensus: Arc<dyn Consensus<alloy_consensus::Header, B::Body>>,
     metrics: BodyDownloaderMetrics,
     /// Metrics for individual responses. This can be used to observe how the size (in bytes) of
     /// responses change while bodies are being downloaded.
@@ -60,7 +60,7 @@ where
     /// Returns an empty future. Use [`BodiesRequestFuture::with_headers`] to set the request.
     pub(crate) fn new(
         client: Arc<B>,
-        consensus: Arc<dyn Consensus<reth_primitives::Header, B::Body>>,
+        consensus: Arc<dyn Consensus<alloy_consensus::Header, B::Body>>,
         metrics: BodyDownloaderMetrics,
     ) -> Self {
         Self {

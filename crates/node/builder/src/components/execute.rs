@@ -2,10 +2,10 @@
 
 use std::future::Future;
 
+use alloy_consensus::Header;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_node_api::ConfigureEvm;
 use reth_node_types::NodeTypes;
-use reth_primitives::Header;
 
 use crate::{BuilderContext, FullNodeTypes};
 

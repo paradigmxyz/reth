@@ -23,6 +23,7 @@ alloy-chains = { workspace = true, features = ["rlp"] }
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp = { workspace = true, features = ["derive"] }
+alloy-consensus.workspace = true
 
 bytes.workspace = true
 derive_more.workspace = true
@@ -42,27 +43,26 @@ arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 rand.workspace = true
-alloy-consensus.workspace = true
 
 [features]
 arbitrary = [
-	"reth-primitives/arbitrary",
-	"alloy-chains/arbitrary",
-	"dep:arbitrary",
-	"dep:proptest",
-	"dep:proptest-arbitrary-interop",
-	"reth-chainspec/arbitrary",
-	"alloy-consensus/arbitrary",
-	"alloy-eips/arbitrary",
-	"alloy-primitives/arbitrary",
+    "reth-primitives/arbitrary",
+    "alloy-chains/arbitrary",
+    "dep:arbitrary",
+    "dep:proptest",
+    "dep:proptest-arbitrary-interop",
+    "reth-chainspec/arbitrary",
+    "alloy-consensus/arbitrary",
+    "alloy-eips/arbitrary",
+    "alloy-primitives/arbitrary",
     "reth-primitives-traits/arbitrary",
 ]
 serde = [
-	"dep:serde",
-	"alloy-chains/serde",
-	"alloy-consensus/serde",
-	"alloy-eips/serde",
-	"alloy-primitives/serde",
-	"bytes/serde",
-	"rand/serde"
+    "dep:serde",
+    "alloy-chains/serde",
+    "alloy-consensus/serde",
+    "alloy-eips/serde",
+    "alloy-primitives/serde",
+    "bytes/serde",
+    "rand/serde",
 ]

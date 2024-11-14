@@ -1,5 +1,6 @@
-use crate::{GotExpected, Header, SealedHeader, TransactionSigned, TransactionSignedEcRecovered};
+use crate::{GotExpected, SealedHeader, TransactionSigned, TransactionSignedEcRecovered};
 use alloc::vec::Vec;
+use alloy_consensus::Header;
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
 use alloy_primitives::{Address, Bytes, B256};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};

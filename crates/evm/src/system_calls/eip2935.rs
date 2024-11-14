@@ -4,10 +4,10 @@ use alloc::{boxed::Box, string::ToString};
 use alloy_eips::eip2935::HISTORY_STORAGE_ADDRESS;
 
 use crate::ConfigureEvm;
+use alloy_consensus::Header;
 use alloy_primitives::B256;
 use reth_chainspec::EthereumHardforks;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
-use reth_primitives::Header;
 use revm::{interpreter::Host, Database, Evm};
 use revm_primitives::ResultAndState;
 

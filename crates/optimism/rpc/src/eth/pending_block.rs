@@ -1,11 +1,12 @@
 //! Loads OP pending block for a RPC response.
 
+use alloy_consensus::Header;
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{BlockNumber, B256};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
-use reth_primitives::{revm_primitives::BlockEnv, Header, Receipt, SealedBlockWithSenders};
+use reth_primitives::{revm_primitives::BlockEnv, Receipt, SealedBlockWithSenders};
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ExecutionOutcome,
     ReceiptProvider, StateProviderFactory,

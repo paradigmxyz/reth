@@ -2,7 +2,7 @@
 
 use crate::{l1::ensure_create2_deployer, OpBlockExecutionError, OpEvmConfig};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
-use alloy_consensus::Transaction as _;
+use alloy_consensus::{Header, Transaction as _};
 use alloy_eips::eip7685::Requests;
 use core::fmt::Display;
 use op_alloy_consensus::DepositTransaction;
@@ -20,7 +20,7 @@ use reth_evm::{
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::validate_block_post_execution;
 use reth_optimism_forks::OpHardfork;
-use reth_primitives::{BlockWithSenders, Header, Receipt, TxType};
+use reth_primitives::{BlockWithSenders, Receipt, TxType};
 use reth_revm::{Database, State};
 use revm_primitives::{
     db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState, U256,
