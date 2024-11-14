@@ -3,7 +3,7 @@
 use std::fmt::Debug;
 
 use alloy_rlp::{Decodable, Encodable};
-use reth_primitives_traits::{Block, BlockHeader};
+use reth_primitives_traits::{Block, BlockBody, BlockHeader};
 
 /// Abstraction over primitive types which might appear in network messages. See
 /// [`crate::EthMessage`] for more context.
@@ -23,7 +23,8 @@ pub trait NetworkPrimitives:
         + Eq
         + 'static;
     /// The block body type.
-    type BlockBody: Encodable
+    type BlockBody: BlockBody<Header = Self::BlockHeader>
+        + Encodable
         + Decodable
         + Send
         + Sync

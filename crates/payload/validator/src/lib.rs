@@ -64,7 +64,8 @@ impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
         sealed_block: &SealedBlock,
         cancun_fields: &MaybeCancunPayloadFields,
     ) -> Result<(), PayloadError> {
-        let num_blob_versioned_hashes = sealed_block.blob_versioned_hashes_iter().count();
+        let blob_versioned_hashes = sealed_block.blob_versioned_hashes();
+        let num_blob_versioned_hashes = blob_versioned_hashes.len();
         // Additional Cancun checks for blob transactions
         if let Some(versioned_hashes) = cancun_fields.versioned_hashes() {
             if num_blob_versioned_hashes != versioned_hashes.len() {
@@ -73,9 +74,9 @@ impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
             }
             // we can use `zip` safely here because we already compared their length
             for (payload_versioned_hash, block_versioned_hash) in
-                versioned_hashes.iter().zip(sealed_block.blob_versioned_hashes_iter())
+                versioned_hashes.iter().zip(blob_versioned_hashes.iter())
             {
-                if payload_versioned_hash != block_versioned_hash {
+                if payload_versioned_hash != *block_versioned_hash {
                     return Err(PayloadError::InvalidVersionedHashes)
                 }
             }

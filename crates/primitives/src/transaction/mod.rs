@@ -19,16 +19,12 @@ use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
 use core::mem;
 use derive_more::{AsRef, Deref};
 use once_cell as _;
-#[cfg(not(feature = "std"))]
-use once_cell::sync::Lazy as LazyLock;
 #[cfg(feature = "optimism")]
 use op_alloy_consensus::DepositTransaction;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
-use reth_primitives_traits::{PARALLEL_SENDER_RECOVERY_THRESHOLD, InMemorySize};
+use reth_primitives_traits::{InMemorySize, PARALLEL_SENDER_RECOVERY_THRESHOLD};
 use serde::{Deserialize, Serialize};
 use signature::decode_with_eip155_chain_id;
-#[cfg(feature = "std")]
-use std::sync::LazyLock;
 
 pub use error::{
     InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
@@ -833,22 +829,6 @@ impl alloy_consensus::Transaction for Transaction {
             Self::Eip7702(tx) => tx.authorization_list(),
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => tx.authorization_list(),
-        }
-    }
-}
-
-impl TransactionExt for Transaction {
-    type Type = TxType;
-
-    fn signature_hash(&self) -> B256 {
-        match self {
-            Self::Legacy(tx) => tx.signature_hash(),
-            Self::Eip2930(tx) => tx.signature_hash(),
-            Self::Eip1559(tx) => tx.signature_hash(),
-            Self::Eip4844(tx) => tx.signature_hash(),
-            Self::Eip7702(tx) => tx.signature_hash(),
-            #[cfg(feature = "optimism")]
-            _ => todo!("use op type for op"),
         }
     }
 }

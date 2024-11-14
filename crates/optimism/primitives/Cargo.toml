@@ -12,10 +12,20 @@ description = "OP primitive types"
 workspace = true
 
 [dependencies]
+# reth
+reth-primitives-traits.workspace = true
+
+# ethereum
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
-op-alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-rlp.workspace = true
-derive_more.workspace = true
+
+# op
+op-alloy-consensus.workspace = true
+
+# codec
 bytes.workspace = true
+
+# misc
+derive_more.workspace = true

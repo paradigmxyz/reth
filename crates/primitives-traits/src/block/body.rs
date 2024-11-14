@@ -6,19 +6,16 @@ use alloy_eips::{eip4895::Withdrawal, eip7685::Requests};
 use alloy_primitives::{Address, B256};
 use reth_codecs::Compact;
 
-use crate::{
-    BlockHeader, FullBlockHeader, FullSignedTx, InMemorySize, SignedTransaction,
-    TransactionExt, TxType,
-};
+use crate::{BlockHeader, FullBlockHeader, FullSignedTx, InMemorySize, SignedTransaction, TxType};
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
 pub trait FullBlockBody:
-    BlockBody<Ommer: FullBlockHeader, SignedTransaction: FullSignedTx> + Compact
+    BlockBody<Header: FullBlockHeader, SignedTransaction: FullSignedTx> + Compact
 {
 }
 
 impl<T> FullBlockBody for T where
-    T: BlockBody<Ommer: FullBlockHeader, SignedTransaction: FullSignedTx> + Compact
+    T: BlockBody<Header: FullBlockHeader, SignedTransaction: FullSignedTx> + Compact
 {
 }
 
@@ -36,26 +33,30 @@ pub trait BlockBody:
     + for<'de> serde::Deserialize<'de>
     + alloy_rlp::Encodable
     + alloy_rlp::Decodable
+    + Body<Self::Header, Self::SignedTransaction, Self::Withdrawals>
     + InMemorySize
 {
     /// Signed transaction.
     type SignedTransaction: SignedTransaction;
 
     /// Header type (uncle blocks).
-    type Ommer: BlockHeader;
+    type Header: BlockHeader;
 
     /// Withdrawals in block.
     type Withdrawals: IntoIterator<Item = Withdrawal>;
+}
 
+/// Block body functionality.
+pub trait Body<Header, SignedTx: SignedTransaction, Withdrawals> {
     /// Returns reference to transactions in block.
-    fn transactions(&self) -> &[Self::SignedTransaction];
+    fn transactions(&self) -> &[SignedTx];
 
     /// Returns `Withdrawals` in the block, if any.
     // todo: branch out into extension trait
-    fn withdrawals(&self) -> Option<&Self::Withdrawals>;
+    fn withdrawals(&self) -> Option<&Withdrawals>;
 
     /// Returns reference to uncle block headers.
-    fn ommers(&self) -> &[Self::Ommer];
+    fn ommers(&self) -> &[Header];
 
     /// Returns [`Requests`] in block, if any.
     fn requests(&self) -> Option<&Requests>;
@@ -75,7 +76,7 @@ pub trait BlockBody:
     /// Recover signer addresses for all transactions in the block body.
     fn recover_signers(&self) -> Option<Vec<Address>> {
         let num_txns = self.transactions().len();
-        Self::SignedTransaction::recover_signers(self.transactions(), num_txns)
+        SignedTx::recover_signers(self.transactions(), num_txns)
     }
 
     /// Returns whether or not the block body contains any blob transactions.
@@ -89,15 +90,21 @@ pub trait BlockBody:
     }
 
     /// Returns an iterator over all blob transactions of the block
-    fn blob_transactions_iter(&self) -> impl Iterator<Item = &Self::SignedTransaction> + '_ {
+    fn blob_transactions_iter<'a>(&'a self) -> impl Iterator<Item = &'a SignedTx> + 'a
+    where
+        SignedTx: 'a,
+    {
         self.transactions().iter().filter(|tx| tx.tx_type().is_eip4844())
     }
 
     /// Returns only the blob transactions, if any, from the block body.
-    fn blob_transactions(&self) -> Vec<&Self::SignedTransaction> {
+    fn blob_transactions(&self) -> Vec<&SignedTx> {
         self.blob_transactions_iter().collect()
     }
 
+    /// Returns references to all blob versioned hashes from the block body.
+    fn blob_versioned_hashes(&self) -> Vec<&B256>;
+
     /// Returns all blob versioned hashes from the block body.
-    fn blob_versioned_hashes(&self) -> &[B256];
+    fn blob_versioned_hashes_copied(&self) -> Vec<B256>;
 }

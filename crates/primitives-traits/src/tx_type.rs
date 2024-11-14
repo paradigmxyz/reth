@@ -45,25 +45,3 @@ pub trait TxType:
     /// Returns `true` if this is an eip-7702 transaction.
     fn is_eip7702(&self) -> bool;
 }
-
-impl<T> TxType for T where
-    T: Send
-        + Sync
-        + Unpin
-        + Clone
-        + Copy
-        + Default
-        + fmt::Debug
-        + fmt::Display
-        + PartialEq
-        + Eq
-        + PartialEq<u8>
-        + Into<u8>
-        + Into<U8>
-        + TryFrom<u8, Error: fmt::Debug>
-        + TryFrom<u64, Error: fmt::Debug>
-        + TryFrom<U64>
-        + alloy_rlp::Encodable
-        + alloy_rlp::Decodable
-{
-}

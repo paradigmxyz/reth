@@ -1,13 +1,13 @@
 use crate::{GotExpected, SealedHeader, TransactionSigned, TransactionSignedEcRecovered};
 use alloc::vec::Vec;
 use alloy_consensus::Header;
-use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
-use alloy_primitives::{Address, Bytes, B256};
+use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals, eip7685::Requests};
+use alloy_primitives::{Address, BlockNumber, Bloom, Bytes, B256, B64, U256};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
 pub use reth_primitives_traits::test_utils::{generate_valid_header, valid_header_strategy};
-use reth_primitives_traits::InMemorySize;
+use reth_primitives_traits::{Body, InMemorySize};
 use serde::{Deserialize, Serialize};
 
 /// Ethereum full block.
@@ -96,6 +96,92 @@ impl reth_primitives_traits::Block for Block {
 
     fn header(&self) -> &Self::Header {
         &self.header
+    }
+}
+
+impl alloy_consensus::BlockHeader for Block {
+    fn parent_hash(&self) -> B256 {
+        self.header.parent_hash()
+    }
+
+    fn ommers_hash(&self) -> B256 {
+        self.header.ommers_hash()
+    }
+
+    fn beneficiary(&self) -> Address {
+        self.header.beneficiary()
+    }
+
+    fn state_root(&self) -> B256 {
+        self.header.state_root()
+    }
+
+    fn transactions_root(&self) -> B256 {
+        self.header.transactions_root()
+    }
+
+    fn receipts_root(&self) -> B256 {
+        self.header.receipts_root()
+    }
+
+    fn withdrawals_root(&self) -> Option<B256> {
+        self.header.withdrawals_root()
+    }
+
+    fn logs_bloom(&self) -> Bloom {
+        self.header.logs_bloom()
+    }
+
+    fn difficulty(&self) -> U256 {
+        self.header.difficulty()
+    }
+
+    fn number(&self) -> BlockNumber {
+        self.header.number()
+    }
+
+    fn gas_limit(&self) -> u64 {
+        self.header.gas_limit()
+    }
+
+    fn gas_used(&self) -> u64 {
+        self.header.gas_used()
+    }
+
+    fn timestamp(&self) -> u64 {
+        self.header.timestamp()
+    }
+
+    fn mix_hash(&self) -> Option<B256> {
+        self.header.mix_hash()
+    }
+
+    fn nonce(&self) -> Option<B64> {
+        self.header.nonce()
+    }
+
+    fn base_fee_per_gas(&self) -> Option<u64> {
+        self.header.base_fee_per_gas()
+    }
+
+    fn blob_gas_used(&self) -> Option<u64> {
+        self.header.blob_gas_used()
+    }
+
+    fn excess_blob_gas(&self) -> Option<u64> {
+        self.header.excess_blob_gas()
+    }
+
+    fn parent_beacon_block_root(&self) -> Option<B256> {
+        self.header.parent_beacon_block_root()
+    }
+
+    fn requests_hash(&self) -> Option<B256> {
+        self.header.requests_hash()
+    }
+
+    fn extra_data(&self) -> &Bytes {
+        self.header.extra_data()
     }
 }
 
@@ -329,10 +415,21 @@ impl SealedBlock {
             .flatten()
     }
 
-    /// Returns all blob versioned hashes from the block body.
+    /// Returns references to all blob versioned hashes from the block body.
     #[inline]
     pub fn blob_versioned_hashes(&self) -> Vec<&B256> {
-        self.blob_versioned_hashes_iter().collect()
+        self.body.blob_versioned_hashes()
+    }
+
+    /// Returns all blob versioned hashes from the block body.
+    #[inline]
+    pub fn blob_versioned_hashes_copied(&self) -> Vec<B256> {
+        self.body
+            .transactions
+            .iter()
+            .filter_map(|tx| tx.blob_versioned_hashes())
+            .flatten()
+            .collect()
     }
 
     /// Expensive operation that recovers transaction signer. See [`SealedBlockWithSenders`].
@@ -640,6 +737,63 @@ impl BlockBody {
     #[inline]
     pub fn transactions(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
         self.transactions.iter()
+    }
+}
+
+impl reth_primitives_traits::BlockBody for BlockBody {
+    type SignedTransaction = TransactionSigned;
+    type Header = Header;
+    type Withdrawals = Withdrawals;
+}
+
+impl Body<Header, TransactionSigned, Withdrawals> for BlockBody {
+    #[inline]
+    fn transactions(&self) -> &[TransactionSigned] {
+        &self.transactions
+    }
+
+    #[inline]
+    fn withdrawals(&self) -> Option<&Withdrawals> {
+        self.withdrawals.as_ref()
+    }
+
+    #[inline]
+    fn ommers(&self) -> &[Header] {
+        &self.ommers
+    }
+
+    #[inline]
+    fn requests(&self) -> Option<&Requests> {
+        None
+    }
+
+    #[inline]
+    fn calculate_tx_root(&self) -> B256 {
+        crate::proofs::calculate_transaction_root(&self.transactions)
+    }
+
+    #[inline]
+    fn calculate_ommers_root(&self) -> B256 {
+        crate::proofs::calculate_ommers_root(&self.ommers)
+    }
+
+    #[inline]
+    fn calculate_withdrawals_root(&self) -> Option<B256> {
+        self.withdrawals.as_ref().map(|w| crate::proofs::calculate_withdrawals_root(w))
+    }
+
+    #[inline]
+    fn blob_versioned_hashes(&self) -> Vec<&B256> {
+        self.transactions
+            .iter()
+            .filter_map(|tx| tx.as_eip4844().map(|blob_tx| &blob_tx.blob_versioned_hashes))
+            .flatten()
+            .collect()
+    }
+
+    #[inline]
+    fn blob_versioned_hashes_copied(&self) -> Vec<B256> {
+        self.transactions.iter().filter_map(|tx| tx.blob_versioned_hashes()).flatten().collect()
     }
 }
 

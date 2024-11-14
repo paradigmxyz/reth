@@ -26,7 +26,7 @@ pub use receipt::{FullReceipt, Receipt};
 
 pub mod transaction;
 pub use transaction::{
-    signed::{FullSignedTx, PARALLEL_SENDER_RECOVERY_THRESHOLD, SignedTransaction},
+    signed::{FullSignedTx, SignedTransaction, PARALLEL_SENDER_RECOVERY_THRESHOLD},
     FullTransaction, Transaction, TransactionExt,
 };
 
@@ -35,7 +35,7 @@ pub use integer_list::{IntegerList, IntegerListError};
 
 pub mod block;
 pub use block::{
-    body::{BlockBody, FullBlockBody},
+    body::{BlockBody, Body, FullBlockBody},
     header::{BlockHeader, FullBlockHeader},
     Block, FullBlock,
 };

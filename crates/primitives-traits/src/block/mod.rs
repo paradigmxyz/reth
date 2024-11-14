@@ -9,7 +9,7 @@ use alloy_eips::eip7685::Requests;
 use alloy_primitives::{Address, B256};
 use reth_codecs::Compact;
 
-use crate::{BlockBody, BlockHeader, FullBlockBody, FullBlockHeader, InMemorySize};
+use crate::{BlockBody, BlockHeader, Body, FullBlockBody, FullBlockHeader, InMemorySize};
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
 pub trait FullBlock: Block<Header: FullBlockHeader, Body: FullBlockBody> + Compact {}
@@ -34,17 +34,17 @@ pub trait Block:
     + alloy_rlp::Encodable
     + alloy_rlp::Decodable
     + alloy_consensus::BlockHeader
-    + BlockBody<
-        Ommer = Self::Header,
-        SignedTransaction = <Self::Body as BlockBody>::SignedTransaction,
-        Withdrawals = <Self::Body as BlockBody>::Withdrawals,
+    + Body<
+        Self::Header,
+        <Self::Body as BlockBody>::SignedTransaction,
+        <Self::Body as BlockBody>::Withdrawals,
     > + InMemorySize
 {
     /// Header part of the block.
     type Header: BlockHeader;
 
     /// The block's body contains the transactions in the block.
-    type Body: BlockBody<Ommer = Self::Header>;
+    type Body: BlockBody<Header = Self::Header>;
 
     /// Returns reference to block header.
     fn header(&self) -> &Self::Header;
@@ -53,20 +53,19 @@ pub trait Block:
     fn body(&self) -> &Self::Body;
 }
 
-impl<T: Block> BlockBody for T {
-    type SignedTransaction = <T::Body as BlockBody>::SignedTransaction;
-    type Ommer = T::Header;
-    type Withdrawals = <T::Body as BlockBody>::Withdrawals;
-
-    fn transactions(&self) -> &[Self::SignedTransaction] {
+impl<T: Block>
+    Body<T::Header, <T::Body as BlockBody>::SignedTransaction, <T::Body as BlockBody>::Withdrawals>
+    for T
+{
+    fn transactions(&self) -> &[<T::Body as BlockBody>::SignedTransaction] {
         self.body().transactions()
     }
 
-    fn withdrawals(&self) -> Option<&Self::Withdrawals> {
+    fn withdrawals(&self) -> Option<&<T::Body as BlockBody>::Withdrawals> {
         self.body().withdrawals()
     }
 
-    fn ommers(&self) -> &[Self::Ommer] {
+    fn ommers(&self) -> &[T::Header] {
         self.body().ommers()
     }
 
@@ -90,7 +89,11 @@ impl<T: Block> BlockBody for T {
         self.body().recover_signers()
     }
 
-    fn blob_versioned_hashes(&self) -> &[B256] {
+    fn blob_versioned_hashes(&self) -> Vec<&B256> {
         self.body().blob_versioned_hashes()
+    }
+
+    fn blob_versioned_hashes_copied(&self) -> Vec<B256> {
+        self.body().blob_versioned_hashes_copied()
     }
 }

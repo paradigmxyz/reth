@@ -5,13 +5,13 @@ use core::hash::Hash;
 #[cfg(feature = "std")]
 use std::sync::LazyLock;
 
-#[cfg(not(feature = "std"))]
-use once_cell::sync::Lazy as LazyLock;
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
 use alloy_primitives::{keccak256, Address, PrimitiveSignature, TxHash, B256};
+#[cfg(not(feature = "std"))]
+use once_cell::sync::Lazy as LazyLock;
+use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_codecs::Compact;
 use revm_primitives::TxEnv;
-use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 
 use crate::{transaction::TransactionExt, FullTransaction, MaybeArbitrary, Transaction};
 
@@ -79,7 +79,6 @@ pub trait SignedTransaction:
     /// `reth_primitives::transaction::recover_signer_unchecked`.
     fn recover_signer_unchecked(&self) -> Option<Address>;
 
-
     /// Recovers a list of signers from a transaction list iterator.
     ///
     /// Returns `None`, if some transaction's signature is invalid, see also
@@ -94,7 +93,6 @@ pub trait SignedTransaction:
             txes.into_par_iter().map(|tx| tx.recover_signer()).collect()
         }
     }
-
 
     /// Create a new signed transaction from a transaction and its signature.
     ///
