@@ -16,6 +16,7 @@ use reth_db_api::{
 };
 use reth_network_p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
 use reth_primitives::StaticFileSegment;
+use reth_primitives_traits::Body as _;
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockReader, BlockWriter, DBProvider, ProviderError, StaticFileProviderFactory, StatsReader,
@@ -78,7 +79,7 @@ where
         + StatsReader
         + BlockReader
         + BlockWriter<Body = D::Body>,
-    D: BodyDownloader<Body: BlockBody<Transaction: Compact>>,
+    D: BodyDownloader<Body: BlockBody<Header = alloy_consensus::Header, Transaction: Compact>>,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -192,7 +193,7 @@ where
             match response {
                 BlockResponse::Full(block) => {
                     // Write transactions
-                    for transaction in block.body.transactions() {
+                    for transaction in block.transactions() {
                         let appended_tx_number =
                             static_file_producer.append_transaction(next_tx_num, transaction)?;
 

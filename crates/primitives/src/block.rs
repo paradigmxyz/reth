@@ -302,6 +302,23 @@ impl<H, B> SealedBlock<H, B> {
     }
 }
 
+impl<H, B> reth_primitives_traits::Block for SealedBlock<H, B>
+where
+    H: reth_primitives_traits::BlockHeader,
+    B: reth_primitives_traits::BlockBody<Header = H>,
+{
+    type Header = H;
+    type Body = B;
+
+    fn header(&self) -> &Self::Header {
+        self.header.header()
+    }
+
+    fn body(&self) -> &Self::Body {
+        &self.body
+    }
+}
+
 impl SealedBlock {
     /// Splits the sealed block into underlying components
     #[inline]

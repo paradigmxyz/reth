@@ -13,9 +13,21 @@ use reth_codecs::Compact;
 use crate::{BlockBody, BlockHeader, Body, FullBlockBody, FullBlockHeader, Header, InMemorySize};
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
-pub trait FullBlock: Block<Header: FullBlockHeader, Body: FullBlockBody> + Compact {}
+pub trait FullBlock:
+    Block<Header: FullBlockHeader, Body: FullBlockBody>
+    + Compact
+    + alloy_rlp::Encodable
+    + alloy_rlp::Decodable
+{
+}
 
-impl<T> FullBlock for T where T: Block<Header: FullBlockHeader, Body: FullBlockBody> + Compact {}
+impl<T> FullBlock for T where
+    T: Block<Header: FullBlockHeader, Body: FullBlockBody>
+        + Compact
+        + alloy_rlp::Encodable
+        + alloy_rlp::Decodable
+{
+}
 
 /// Abstraction of block data type.
 // todo: make sealable super-trait, depends on <https://github.com/paradigmxyz/reth/issues/11449>
@@ -32,8 +44,6 @@ pub trait Block:
     + Eq
     + serde::Serialize
     + for<'a> serde::Deserialize<'a>
-    + alloy_rlp::Encodable
-    + alloy_rlp::Decodable
     + Header
     + Body<
         Self::Header,
