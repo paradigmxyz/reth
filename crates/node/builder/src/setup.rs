@@ -84,7 +84,7 @@ pub fn build_pipeline<N, H, B, Executor>(
 ) -> eyre::Result<Pipeline<N>>
 where
     N: ProviderNodeTypes,
-    H: HeaderDownloader<Header = reth_primitives::Header> + 'static,
+    H: HeaderDownloader<Header = alloy_consensus::Header> + 'static,
     B: BodyDownloader<Body = reth_primitives::BlockBody> + 'static,
     Executor: BlockExecutorProvider,
 {

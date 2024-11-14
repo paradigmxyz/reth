@@ -7,6 +7,7 @@ use crate::{
     StageCheckpointReader, StateProviderBox, StateProviderFactory, StaticFileProviderFactory,
     TransactionVariant, TransactionsProvider, TreeViewer, WithdrawalsProvider,
 };
+use alloy_consensus::Header;
 use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
@@ -23,8 +24,8 @@ use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
-    Account, Block, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
+    Account, Block, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    TransactionMeta, TransactionSigned, TransactionSignedNoHash,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};

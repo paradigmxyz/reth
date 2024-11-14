@@ -2,6 +2,7 @@ use super::{
     manager::StaticFileProviderInner, metrics::StaticFileProviderMetrics, StaticFileProvider,
 };
 use crate::providers::static_file::metrics::StaticFileProviderOperation;
+use alloy_consensus::Header;
 use alloy_primitives::{BlockHash, BlockNumber, TxNumber, U256};
 use parking_lot::{lock_api::RwLockWriteGuard, RawRwLock, RwLock};
 use reth_codecs::Compact;
@@ -9,7 +10,7 @@ use reth_db_api::models::CompactU256;
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
 use reth_primitives::{
     static_file::{SegmentHeader, SegmentRangeInclusive},
-    Header, Receipt, StaticFileSegment, TransactionSignedNoHash,
+    Receipt, StaticFileSegment,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
@@ -543,7 +544,7 @@ impl StaticFileProviderRW {
     pub fn append_transaction(
         &mut self,
         tx_num: TxNumber,
-        tx: &TransactionSignedNoHash,
+        tx: impl Compact,
     ) -> ProviderResult<TxNumber> {
         let start = Instant::now();
         self.ensure_no_queued_prune()?;

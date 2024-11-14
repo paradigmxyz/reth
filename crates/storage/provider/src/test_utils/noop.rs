@@ -4,6 +4,7 @@ use std::{
     sync::Arc,
 };
 
+use alloy_consensus::Header;
 use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
     BlockHashOrNumber, BlockId, BlockNumberOrTag,
@@ -21,9 +22,8 @@ use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_errors::ProviderError;
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{
-    Account, Block, BlockWithSenders, Bytecode, Header, Receipt, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash,
+    Account, Block, BlockWithSenders, Bytecode, Receipt, SealedBlock, SealedBlockWithSenders,
+    SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};

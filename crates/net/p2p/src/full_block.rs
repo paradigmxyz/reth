@@ -96,11 +96,7 @@ where
             start_hash: hash,
             count,
             request: FullBlockRangeRequest {
-                headers: Some(client.get_headers(HeadersRequest {
-                    start: hash.into(),
-                    limit: count,
-                    direction: HeadersDirection::Falling,
-                })),
+                headers: Some(client.get_headers(HeadersRequest::falling(hash.into(), count))),
                 bodies: None,
             },
             client,

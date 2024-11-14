@@ -20,10 +20,11 @@ extern crate alloc;
 use core::convert::Infallible;
 
 use alloc::{sync::Arc, vec::Vec};
+use alloy_consensus::Header;
 use alloy_primitives::{Address, Bytes, TxKind, U256};
 use reth_chainspec::{ChainSpec, Head};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
-use reth_primitives::{transaction::FillTxEnv, Header, TransactionSigned};
+use reth_primitives::{transaction::FillTxEnv, TransactionSigned};
 use revm_primitives::{
     AnalysisKind, BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, Env, SpecId, TxEnv,
 };
@@ -195,15 +196,12 @@ impl ConfigureEvm for EthEvmConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::constants::KECCAK_EMPTY;
+    use alloy_consensus::{constants::KECCAK_EMPTY, Header};
     use alloy_genesis::Genesis;
     use alloy_primitives::{B256, U256};
     use reth_chainspec::{Chain, ChainSpec, MAINNET};
     use reth_evm::execute::ProviderError;
-    use reth_primitives::{
-        revm_primitives::{BlockEnv, CfgEnv, SpecId},
-        Header,
-    };
+    use reth_primitives::revm_primitives::{BlockEnv, CfgEnv, SpecId};
     use reth_revm::{
         db::{CacheDB, EmptyDBTyped},
         inspectors::NoOpInspector,

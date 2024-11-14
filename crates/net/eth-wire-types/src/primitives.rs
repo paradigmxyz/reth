@@ -78,7 +78,7 @@ pub trait NetworkPrimitives:
 pub struct EthNetworkPrimitives;
 
 impl NetworkPrimitives for EthNetworkPrimitives {
-    type BlockHeader = reth_primitives::Header;
+    type BlockHeader = alloy_consensus::Header;
     type BlockBody = reth_primitives::BlockBody;
     type Block = reth_primitives::Block;
     type BroadcastedTransaction = reth_primitives::TransactionSigned;

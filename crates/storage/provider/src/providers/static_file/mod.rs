@@ -56,7 +56,7 @@ impl Deref for LoadedJar {
 mod tests {
     use super::*;
     use crate::{test_utils::create_test_provider_factory, HeaderProvider};
-    use alloy_consensus::Transaction;
+    use alloy_consensus::{Header, Transaction};
     use alloy_primitives::{BlockHash, TxNumber, B256, U256};
     use rand::seq::SliceRandom;
     use reth_db::{
@@ -66,7 +66,7 @@ mod tests {
     use reth_db_api::transaction::DbTxMut;
     use reth_primitives::{
         static_file::{find_fixed_range, SegmentRangeInclusive, DEFAULT_BLOCKS_PER_STATIC_FILE},
-        Header, Receipt, TransactionSignedNoHash,
+        Receipt, TransactionSignedNoHash,
     };
     use reth_storage_api::{ReceiptProvider, TransactionsProvider};
     use reth_testing_utils::generators::{self, random_header_range};

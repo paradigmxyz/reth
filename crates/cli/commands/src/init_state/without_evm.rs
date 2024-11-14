@@ -1,8 +1,9 @@
 use alloy_primitives::{BlockNumber, B256, U256};
 use alloy_rlp::Decodable;
 
+use alloy_consensus::Header;
 use reth_primitives::{
-    BlockBody, Header, SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment,
+    BlockBody, SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment,
 };
 use reth_provider::{
     providers::StaticFileProvider, BlockWriter, StageCheckpointWriter, StaticFileWriter,

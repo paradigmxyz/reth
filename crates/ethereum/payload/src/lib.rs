@@ -9,7 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![allow(clippy::useless_let_if_seq)]
 
-use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
+use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{eip4844::MAX_DATA_GAS_PER_BLOCK, eip7685::Requests, merge::BEACON_NONCE};
 use alloy_primitives::U256;
 use reth_basic_payload_builder::{
@@ -27,7 +27,7 @@ use reth_payload_primitives::{PayloadBuilderAttributes, PayloadBuilderError};
 use reth_primitives::{
     proofs::{self},
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-    Block, BlockBody, EthereumHardforks, Header, Receipt,
+    Block, BlockBody, EthereumHardforks, Receipt,
 };
 use reth_provider::{ChainSpecProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;

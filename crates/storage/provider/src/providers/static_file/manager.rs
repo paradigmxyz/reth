@@ -7,6 +7,7 @@ use crate::{
     ReceiptProvider, StageCheckpointReader, StatsReader, TransactionVariant, TransactionsProvider,
     TransactionsProviderExt, WithdrawalsProvider,
 };
+use alloy_consensus::Header;
 use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
     BlockHashOrNumber,
@@ -33,7 +34,7 @@ use reth_primitives::{
         find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive,
         DEFAULT_BLOCKS_PER_STATIC_FILE,
     },
-    Block, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    Block, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
     StaticFileSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
 };
 use reth_stages_types::{PipelineTarget, StageId};

@@ -1,4 +1,5 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD;
+use alloy_consensus::Header;
 use alloy_primitives::BlockNumber;
 use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
@@ -10,14 +11,14 @@ use reth_evm::{
 };
 use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
-use reth_primitives::{Header, SealedHeader, StaticFileSegment};
+use reth_primitives::{SealedHeader, StaticFileSegment};
 use reth_primitives_traits::format_gas_throughput;
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
     writer::UnifiedStorageWriter,
-    BlockReader, DBProvider, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
-    ProviderError, StateChangeWriter, StateWriter, StaticFileProviderFactory, StatsReader,
-    TransactionVariant,
+    BlockHashReader, BlockReader, DBProvider, HeaderProvider, LatestStateProviderRef,
+    OriginalValuesKnown, ProviderError, StateChangeWriter, StateWriter, StaticFileProviderFactory,
+    StatsReader, TransactionVariant,
 };
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
@@ -174,8 +175,12 @@ impl<E> ExecutionStage<E> {
 impl<E, Provider> Stage<Provider> for ExecutionStage<E>
 where
     E: BlockExecutorProvider,
-    Provider:
-        DBProvider + BlockReader + StaticFileProviderFactory + StatsReader + StateChangeWriter,
+    Provider: DBProvider
+        + BlockReader
+        + StaticFileProviderFactory
+        + StatsReader
+        + StateChangeWriter
+        + BlockHashReader,
     for<'a> UnifiedStorageWriter<'a, Provider, StaticFileProviderRWRefMut<'a>>: StateWriter,
 {
     /// Return the id of the stage
@@ -219,10 +224,7 @@ where
             None
         };
 
-        let db = StateProviderDatabase(LatestStateProviderRef::new(
-            provider.tx_ref(),
-            provider.static_file_provider(),
-        ));
+        let db = StateProviderDatabase(LatestStateProviderRef::new(provider));
         let mut executor = self.executor_provider.batch_executor(db);
         executor.set_tip(max_block);
         executor.set_prune_modes(prune_modes);

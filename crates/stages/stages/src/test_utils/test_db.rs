@@ -265,7 +265,7 @@ impl TestStageDB {
 
                 let res = block.body.transactions.iter().try_for_each(|body_tx| {
                     if let Some(txs_writer) = &mut txs_writer {
-                        txs_writer.append_transaction(next_tx_num, &body_tx.clone().into())?;
+                        txs_writer.append_transaction(next_tx_num, body_tx)?;
                     } else {
                         tx.put::<tables::Transactions>(next_tx_num, body_tx.clone().into())?
                     }

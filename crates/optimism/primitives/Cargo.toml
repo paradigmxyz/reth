@@ -12,8 +12,6 @@ description = "OP primitive types"
 workspace = true
 
 [dependencies]
-reth-primitives.workspace = true
-reth-primitives-traits.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 op-alloy-consensus.workspace = true

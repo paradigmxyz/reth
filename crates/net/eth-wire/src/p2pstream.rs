@@ -14,7 +14,7 @@ use futures::{Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use reth_codecs::add_arbitrary_tests;
 use reth_metrics::metrics::counter;
-use reth_primitives::GotExpected;
+use reth_primitives_traits::GotExpected;
 use std::{
     collections::VecDeque,
     io,

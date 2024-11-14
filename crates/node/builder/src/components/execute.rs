@@ -1,8 +1,8 @@
 //! EVM component for the node builder.
 use crate::{BuilderContext, FullNodeTypes};
+use alloy_consensus::Header;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_node_api::ConfigureEvm;
-use reth_primitives::Header;
 use std::future::Future;
 
 /// A type that knows how to build the executor types.

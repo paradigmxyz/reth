@@ -54,7 +54,7 @@ impl<B: Send + Sync + Unpin + 'static> TaskDownloader<B> {
     ///     Provider: HeaderProvider + Unpin + 'static,
     /// >(
     ///     client: Arc<B>,
-    ///     consensus: Arc<dyn Consensus<reth_primitives::Header, B::Body>>,
+    ///     consensus: Arc<dyn Consensus<alloy_consensus::Header, B::Body>>,
     ///     provider: Provider,
     /// ) {
     ///     let downloader = BodiesDownloaderBuilder::default().build(client, consensus, provider);

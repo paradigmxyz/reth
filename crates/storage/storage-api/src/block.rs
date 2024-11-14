@@ -2,11 +2,12 @@ use crate::{
     BlockNumReader, HeaderProvider, ReceiptProvider, ReceiptProviderIdExt, TransactionVariant,
     TransactionsProvider, WithdrawalsProvider,
 };
+use alloy_consensus::Header;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{BlockNumber, B256};
 use reth_db_models::StoredBlockBodyIndices;
 use reth_primitives::{
-    Block, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    Block, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
 };
 use reth_storage_errors::provider::ProviderResult;
 use std::ops::RangeInclusive;

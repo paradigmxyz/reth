@@ -3,6 +3,7 @@ use crate::{
     writer::static_file::StaticFileWriter,
     BlockExecutionWriter, BlockWriter, HistoryWriter, StateChangeWriter, StateWriter, TrieWriter,
 };
+use alloy_consensus::Header;
 use alloy_primitives::{BlockNumber, B256, U256};
 use reth_chain_state::ExecutedBlock;
 use reth_db::{
@@ -13,7 +14,7 @@ use reth_db::{
 };
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{Header, SealedBlock, StaticFileSegment, TransactionSignedNoHash};
+use reth_primitives::{SealedBlock, StaticFileSegment, TransactionSignedNoHash};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     DBProvider, HeaderProvider, ReceiptWriter, StageCheckpointWriter, TransactionsProviderExt,

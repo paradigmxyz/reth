@@ -4,6 +4,7 @@ use crate::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
     ChainInfoTracker, MemoryOverlayStateProvider,
 };
+use alloy_consensus::Header;
 use alloy_eips::{BlockHashOrNumber, BlockNumHash};
 use alloy_primitives::{map::HashMap, Address, TxHash, B256};
 use parking_lot::RwLock;
@@ -11,7 +12,7 @@ use reth_chainspec::ChainInfo;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives::{
-    BlockWithSenders, Header, Receipt, Receipts, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    BlockWithSenders, Receipt, Receipts, SealedBlock, SealedBlockWithSenders, SealedHeader,
     TransactionMeta, TransactionSigned,
 };
 use reth_storage_api::StateProviderBox;

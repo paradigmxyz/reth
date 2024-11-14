@@ -410,11 +410,12 @@ impl<N: ProviderNodeTypes> PipelineState<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::Header;
     use assert_matches::assert_matches;
     use futures::poll;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
     use reth_network_p2p::{either::Either, test_utils::TestFullBlockClient};
-    use reth_primitives::{BlockBody, Header, SealedHeader};
+    use reth_primitives::{BlockBody, SealedHeader};
     use reth_provider::{
         test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
         ExecutionOutcome,

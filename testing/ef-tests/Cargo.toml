@@ -38,6 +38,7 @@ revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
 alloy-rlp.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
+alloy-consensus.workspace = true
 
 walkdir = "2.3.3"
 serde.workspace = true

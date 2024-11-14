@@ -2,11 +2,11 @@
 use alloc::{boxed::Box, string::ToString};
 
 use crate::ConfigureEvm;
+use alloy_consensus::Header;
 use alloy_eips::eip4788::BEACON_ROOTS_ADDRESS;
 use alloy_primitives::B256;
 use reth_chainspec::EthereumHardforks;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
-use reth_primitives::Header;
 use revm::{interpreter::Host, Database, Evm};
 use revm_primitives::ResultAndState;
 

@@ -5,7 +5,7 @@ use crate::{
     error::PoolError,
     metrics::MaintainPoolMetrics,
     traits::{CanonicalStateUpdate, TransactionPool, TransactionPoolExt},
-    BlockInfo, PoolTransaction,
+    BlockInfo, PoolTransaction, PoolUpdateKind,
 };
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Address, BlockHash, BlockNumber};
@@ -352,6 +352,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                     changed_accounts,
                     // all transactions mined in the new chain need to be removed from the pool
                     mined_transactions: new_blocks.transaction_hashes().collect(),
+                    update_kind: PoolUpdateKind::Reorg,
                 };
                 pool.on_canonical_state_change(update);
 
@@ -434,6 +435,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                     pending_block_blob_fee,
                     changed_accounts,
                     mined_transactions,
+                    update_kind: PoolUpdateKind::Commit,
                 };
                 pool.on_canonical_state_change(update);
 

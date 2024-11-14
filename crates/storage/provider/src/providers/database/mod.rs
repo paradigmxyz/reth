@@ -7,6 +7,7 @@ use crate::{
     PruneCheckpointReader, StageCheckpointReader, StateProviderBox, StaticFileProviderFactory,
     TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
+use alloy_consensus::Header;
 use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
     BlockHashOrNumber,
@@ -20,7 +21,7 @@ use reth_errors::{RethError, RethResult};
 use reth_evm::ConfigureEvmEnv;
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
-    Block, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    Block, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
     StaticFileSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
 };
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
@@ -159,7 +160,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     #[track_caller]
     pub fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::db", "Returning latest state provider");
-        Ok(Box::new(LatestStateProvider::new(self.db.tx()?, self.static_file_provider())))
+        Ok(Box::new(LatestStateProvider::new(self.database_provider_ro()?)))
     }
 
     /// Storage provider for state at that given block

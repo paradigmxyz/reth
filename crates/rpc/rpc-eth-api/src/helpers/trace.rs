@@ -3,12 +3,13 @@
 use std::{fmt::Display, sync::Arc};
 
 use crate::{FromEvmError, RpcNodeCore};
+use alloy_consensus::Header;
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::{BlockId, TransactionInfo};
 use futures::Future;
 use reth_chainspec::ChainSpecProvider;
 use reth_evm::{system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv};
-use reth_primitives::{Header, SealedBlockWithSenders};
+use reth_primitives::SealedBlockWithSenders;
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDb, StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
