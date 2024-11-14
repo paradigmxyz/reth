@@ -2,13 +2,27 @@
 
 use alloc::fmt;
 use core::hash::Hash;
+#[cfg(feature = "std")]
+use std::sync::LazyLock;
 
+#[cfg(not(feature = "std"))]
+use once_cell::sync::Lazy as LazyLock;
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
 use alloy_primitives::{keccak256, Address, PrimitiveSignature, TxHash, B256};
 use reth_codecs::Compact;
 use revm_primitives::TxEnv;
+use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 
 use crate::{transaction::TransactionExt, FullTransaction, MaybeArbitrary, Transaction};
+
+/// Expected number of transactions where we can expect a speed-up by recovering the senders in
+/// parallel.
+pub static PARALLEL_SENDER_RECOVERY_THRESHOLD: LazyLock<usize> =
+    LazyLock::new(|| match rayon::current_num_threads() {
+        0..=1 => usize::MAX,
+        2..=8 => 10,
+        _ => 5,
+    });
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
 pub trait FullSignedTx: SignedTransaction<Transaction: FullTransaction> + Compact {}
@@ -64,6 +78,23 @@ pub trait SignedTransaction:
     /// Returns `None` if the transaction's signature is invalid, see also
     /// `reth_primitives::transaction::recover_signer_unchecked`.
     fn recover_signer_unchecked(&self) -> Option<Address>;
+
+
+    /// Recovers a list of signers from a transaction list iterator.
+    ///
+    /// Returns `None`, if some transaction's signature is invalid, see also
+    /// [`Self::recover_signer`].
+    fn recover_signers<'a, T>(txes: T, num_txes: usize) -> Option<Vec<Address>>
+    where
+        T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self> + Send,
+    {
+        if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
+            txes.into_iter().map(|tx| tx.recover_signer()).collect()
+        } else {
+            txes.into_par_iter().map(|tx| tx.recover_signer()).collect()
+        }
+    }
+
 
     /// Create a new signed transaction from a transaction and its signature.
     ///

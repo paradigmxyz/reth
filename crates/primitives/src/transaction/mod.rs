@@ -24,7 +24,7 @@ use once_cell::sync::Lazy as LazyLock;
 #[cfg(feature = "optimism")]
 use op_alloy_consensus::DepositTransaction;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
-use reth_primitives_traits::InMemorySize;
+use reth_primitives_traits::{PARALLEL_SENDER_RECOVERY_THRESHOLD, InMemorySize};
 use serde::{Deserialize, Serialize};
 use signature::decode_with_eip155_chain_id;
 #[cfg(feature = "std")]
@@ -73,15 +73,6 @@ use revm_primitives::{AuthorizationList, TxEnv};
 
 /// Either a transaction hash or number.
 pub type TxHashOrNumber = BlockHashOrNumber;
-
-/// Expected number of transactions where we can expect a speed-up by recovering the senders in
-/// parallel.
-pub static PARALLEL_SENDER_RECOVERY_THRESHOLD: LazyLock<usize> =
-    LazyLock::new(|| match rayon::current_num_threads() {
-        0..=1 => usize::MAX,
-        2..=8 => 10,
-        _ => 5,
-    });
 
 /// A raw transaction.
 ///
@@ -862,7 +853,7 @@ impl TransactionExt for Transaction {
     }
 }
 
-impl AlloyTransactionExt for Transaction {
+impl TransactionExt for Transaction {
     type Type = TxType;
 
     fn signature_hash(&self) -> B256 {
@@ -872,18 +863,6 @@ impl AlloyTransactionExt for Transaction {
             Self::Eip1559(tx) => tx.signature_hash(),
             Self::Eip4844(tx) => tx.signature_hash(),
             Self::Eip7702(tx) => tx.signature_hash(),
-            #[cfg(feature = "optimism")]
-            _ => todo!("use op type for op"),
-        }
-    }
-
-    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
-        match self {
-            Self::Legacy(tx) => tx.gas_price,
-            Self::Eip2930(tx) => tx.gas_price,
-            Self::Eip1559(dynamic_tx) => dynamic_tx.effective_gas_price(base_fee),
-            Self::Eip4844(dynamic_tx) => dynamic_tx.effective_gas_price(base_fee),
-            Self::Eip7702(dynamic_tx) => dynamic_tx.effective_gas_price(base_fee),
             #[cfg(feature = "optimism")]
             _ => todo!("use op type for op"),
         }
@@ -2307,7 +2286,7 @@ mod tests {
         #[test]
         fn test_parallel_recovery_order(txes in proptest::collection::vec(
             proptest_arbitrary_interop::arb::<Transaction>(),
-            *crate::transaction::PARALLEL_SENDER_RECOVERY_THRESHOLD * 5
+            *reth_primitives_traits::PARALLEL_SENDER_RECOVERY_THRESHOLD * 5
         )) {
             let mut rng =rand::thread_rng();
             let secp = secp256k1::Secp256k1::new();
