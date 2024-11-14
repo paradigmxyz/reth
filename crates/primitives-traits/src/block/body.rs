@@ -2,9 +2,6 @@
 
 use alloc::fmt;
 
-use alloy_consensus::{BlockHeader, Transaction, TxType};
-use alloy_eips::{eip4895::Withdrawal, eip7685::Requests};
-use alloy_primitives::{Address, B256};
 use reth_codecs::Compact;
 
 use crate::{FullSignedTx, InMemorySize, SignedTransaction};
