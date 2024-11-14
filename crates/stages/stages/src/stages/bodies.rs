@@ -194,7 +194,7 @@ where
                     // Write transactions
                     for transaction in block.body.transactions() {
                         let appended_tx_number =
-                            static_file_producer.append_transaction(next_tx_num, &transaction)?;
+                            static_file_producer.append_transaction(next_tx_num, transaction)?;
 
                         if appended_tx_number != next_tx_num {
                             // This scenario indicates a critical error in the logic of adding new

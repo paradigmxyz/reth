@@ -544,7 +544,7 @@ impl StaticFileProviderRW {
     pub fn append_transaction(
         &mut self,
         tx_num: TxNumber,
-        tx: &impl Compact,
+        tx: impl Compact,
     ) -> ProviderResult<TxNumber> {
         let start = Instant::now();
         self.ensure_no_queued_prune()?;
