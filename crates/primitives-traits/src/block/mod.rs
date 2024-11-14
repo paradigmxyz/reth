@@ -57,42 +57,52 @@ impl<T: Block>
     Body<T::Header, <T::Body as BlockBody>::Transaction, <T::Body as BlockBody>::Withdrawals>
     for T
 {
+    #[inline]
     fn transactions(&self) -> &[<T::Body as BlockBody>::Transaction] {
         self.body().transactions()
     }
 
+    #[inline]
     fn withdrawals(&self) -> Option<&<T::Body as BlockBody>::Withdrawals> {
         self.body().withdrawals()
     }
 
+    #[inline]
     fn ommers(&self) -> &[T::Header] {
         self.body().ommers()
     }
 
+    #[inline]
     fn requests(&self) -> Option<&Requests> {
         self.body().requests()
     }
 
+    #[inline]
     fn calculate_tx_root(&self) -> B256 {
         self.body().calculate_tx_root()
     }
 
+    #[inline]
     fn calculate_ommers_root(&self) -> B256 {
         self.body().calculate_ommers_root()
     }
 
+    #[inline]
     fn calculate_withdrawals_root(&self) -> Option<B256> {
         self.body().calculate_withdrawals_root()
     }
 
+    #[inline]
     fn recover_signers(&self) -> Option<Vec<Address>> {
         self.body().recover_signers()
     }
 
+    #[inline]
     fn blob_versioned_hashes(&self) -> Vec<&B256> {
         self.body().blob_versioned_hashes()
     }
 
+    #[inline]
     fn blob_versioned_hashes_copied(&self) -> Vec<B256> {
         self.body().blob_versioned_hashes_copied()
     }
