@@ -2,10 +2,7 @@ use crate::segments::Segment;
 use alloy_primitives::BlockNumber;
 use reth_db::tables;
 use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
-use reth_provider::{
-    providers::{StaticFileProvider, StaticFileWriter},
-    DBProvider,
-};
+use reth_provider::{providers::StaticFileWriter, DBProvider, StaticFileProviderFactory};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::ProviderResult;
 use std::ops::RangeInclusive;
@@ -14,7 +11,7 @@ use std::ops::RangeInclusive;
 #[derive(Debug, Default)]
 pub struct Headers;
 
-impl<Provider: DBProvider> Segment<Provider> for Headers {
+impl<Provider: StaticFileProviderFactory + DBProvider> Segment<Provider> for Headers {
     fn segment(&self) -> StaticFileSegment {
         StaticFileSegment::Headers
     }
@@ -22,9 +19,9 @@ impl<Provider: DBProvider> Segment<Provider> for Headers {
     fn copy_to_static_files(
         &self,
         provider: Provider,
-        static_file_provider: StaticFileProvider,
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()> {
+        let static_file_provider = provider.static_file_provider();
         let mut static_file_writer =
             static_file_provider.get_writer(*block_range.start(), StaticFileSegment::Headers)?;
 
