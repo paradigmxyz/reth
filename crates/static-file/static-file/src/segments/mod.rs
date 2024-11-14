@@ -20,7 +20,8 @@ pub trait Segment<Provider: StaticFileProviderFactory>: Send + Sync {
     /// Returns the [`StaticFileSegment`].
     fn segment(&self) -> StaticFileSegment;
 
-    /// Move data to static files for the provided block range. [`StaticFileProvider`] will handle
+    /// Move data to static files for the provided block range.
+    /// [`StaticFileProvider`](reth_provider::providers::StaticFileProvider) will handle
     /// the management of and writing to files.
     fn copy_to_static_files(
         &self,
