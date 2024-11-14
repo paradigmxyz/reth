@@ -13,7 +13,6 @@ workspace = true
 
 [dependencies]
 # reth
-reth-chainspec.workspace = true
 reth-codecs.workspace = true
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
@@ -24,6 +23,7 @@ reth-network-peers.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
+alloy-chains.workspace = true
 
 # metrics
 reth-metrics.workspace = true
@@ -70,10 +70,10 @@ arbitrary = [
 	"reth-primitives/arbitrary",
 	"reth-eth-wire-types/arbitrary",
 	"dep:arbitrary",
-	"reth-chainspec/arbitrary",
 	"alloy-eips/arbitrary",
 	"alloy-primitives/arbitrary",
 	"reth-codecs/arbitrary",
+	"alloy-chains/arbitrary",
 	"reth-primitives-traits/arbitrary"
 ]
 serde = [
@@ -84,7 +84,8 @@ serde = [
 	"bytes/serde",
 	"rand/serde",
 	"secp256k1/serde",
-	"reth-codecs/serde"
+	"reth-codecs/serde",
+	"alloy-chains/serde"
 ]
 
 [[test]]

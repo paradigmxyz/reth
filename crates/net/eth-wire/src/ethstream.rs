@@ -365,9 +365,9 @@ mod tests {
         EthMessage, EthStream, EthVersion, HelloMessageWithProtocols, PassthroughCodec,
         ProtocolVersion, Status,
     };
+    use alloy_chains::NamedChain;
     use alloy_primitives::{B256, U256};
     use futures::{SinkExt, StreamExt};
-    use reth_chainspec::NamedChain;
     use reth_ecies::stream::ECIESStream;
     use reth_eth_wire_types::EthNetworkPrimitives;
     use reth_network_peers::pk2id;
