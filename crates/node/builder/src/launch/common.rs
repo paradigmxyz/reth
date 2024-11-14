@@ -823,7 +823,7 @@ where
             let latest = self.blockchain_db().last_block_number()?;
             // bedrock height
             if latest < 105235063 {
-                error!("Op-mainnet has been launched without importing the pre-Bedrock state. The chain can't progress without this.");
+                error!("Op-mainnet has been launched without importing the pre-Bedrock state. The chain can't progress without this. See also https://reth.rs/run/sync-op-mainnet.html?minimal-bootstrap-recommended");
                 return Err(ProviderError::BestBlockNotFound)
             }
         }
