@@ -1252,6 +1252,7 @@ where
             Arc::new(self.consensus.clone()),
             self.block_executor.clone(),
             self.config.flashbots.clone(),
+            Box::new(self.executor.clone()),
         )
     }
 }
@@ -1416,6 +1417,7 @@ where
                             Arc::new(self.consensus.clone()),
                             self.block_executor.clone(),
                             self.config.flashbots.clone(),
+                            Box::new(self.executor.clone()),
                         )
                         .into_rpc()
                         .into(),

@@ -24,14 +24,15 @@ use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
 use reth_rpc_api::BlockSubmissionValidationApiServer;
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
+use reth_tasks::TaskSpawner;
 use reth_trie::HashedPostState;
 use revm_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, sync::Arc};
-use tokio::sync::RwLock;
+use tokio::sync::{oneshot, RwLock};
 
 /// The type that implements the `validation` rpc namespace trait
-#[derive(Debug, derive_more::Deref)]
+#[derive(Clone, Debug, derive_more::Deref)]
 pub struct ValidationApi<Provider: ChainSpecProvider, E> {
     #[deref]
     inner: Arc<ValidationApiInner<Provider, E>>,
@@ -47,6 +48,7 @@ where
         consensus: Arc<dyn Consensus>,
         executor_provider: E,
         config: ValidationApiConfig,
+        task_spawner: Box<dyn TaskSpawner>,
     ) -> Self {
         let ValidationApiConfig { disallow } = config;
 
@@ -58,6 +60,7 @@ where
             executor_provider,
             disallow,
             cached_state: Default::default(),
+            task_spawner,
         });
 
         Self { inner }
@@ -388,14 +391,21 @@ where
             .try_seal_with_senders()
             .map_err(|_| EthApiError::InvalidTransactionSignature)?;
 
-        self.validate_message_against_block(
-            block,
-            request.request.message,
-            request.registered_gas_limit,
-        )
-        .await
-        .map_err(|e| RethError::Other(e.into()))
-        .to_rpc_result()
+        let (tx, rx) = oneshot::channel();
+        let this = self.clone();
+
+        self.task_spawner.spawn_blocking(Box::pin(async move {
+            let result = this
+                .validate_message_against_block(
+                    block,
+                    request.request.message,
+                    request.registered_gas_limit,
+                )
+                .await;
+            let _ = tx.send(result.map_err(|e| RethError::Other(e.into())).to_rpc_result());
+        }));
+
+        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
     }
 
     /// Validates a block submitted to the relay
@@ -422,14 +432,21 @@ where
             .try_seal_with_senders()
             .map_err(|_| EthApiError::InvalidTransactionSignature)?;
 
-        self.validate_message_against_block(
-            block,
-            request.request.message,
-            request.registered_gas_limit,
-        )
-        .await
-        .map_err(|e| RethError::Other(e.into()))
-        .to_rpc_result()
+        let (tx, rx) = oneshot::channel();
+        let this = self.clone();
+
+        self.task_spawner.spawn_blocking(Box::pin(async move {
+            let result = this
+                .validate_message_against_block(
+                    block,
+                    request.request.message,
+                    request.registered_gas_limit,
+                )
+                .await;
+            let _ = tx.send(result.map_err(|e| RethError::Other(e.into())).to_rpc_result());
+        }));
+
+        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
     }
 }
 
@@ -450,6 +467,8 @@ pub struct ValidationApiInner<Provider: ChainSpecProvider, E> {
     /// latest head block state. Uses async `RwLock` to safely handle concurrent validation
     /// requests.
     cached_state: RwLock<(B256, CachedReads)>,
+    /// Task spawner for blocking operations
+    task_spawner: Box<dyn TaskSpawner>,
 }
 
 /// Configuration for validation API.
