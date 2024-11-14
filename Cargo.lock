@@ -7330,6 +7330,7 @@ dependencies = [
  "reth-codecs",
  "reth-ecies",
  "reth-eth-wire-types",
+ "reth-ethereum-forks",
  "reth-metrics",
  "reth-network-peers",
  "reth-primitives",
