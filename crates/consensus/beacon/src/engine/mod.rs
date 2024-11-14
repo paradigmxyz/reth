@@ -11,7 +11,11 @@ use reth_blockchain_tree_api::{
     error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
     BlockStatus, BlockValidationKind, BlockchainTreeEngine, CanonicalOutcome, InsertPayloadOk,
 };
-use reth_engine_primitives::{EngineApiMessageVersion, EngineTypes, PayloadTypes};
+use reth_engine_primitives::{
+    BeaconEngineMessage, BeaconOnNewPayloadError, EngineApiMessageVersion, EngineTypes,
+    ForkchoiceStateHash, ForkchoiceStateTracker, ForkchoiceStatus, OnForkChoiceUpdated,
+    PayloadTypes,
+};
 use reth_errors::{BlockValidationError, ProviderResult, RethError, RethResult};
 use reth_network_p2p::{
     sync::{NetworkSyncUpdater, SyncState},
@@ -42,14 +46,8 @@ use tokio::sync::{
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
 
-mod message;
-pub use message::{BeaconEngineMessage, OnForkChoiceUpdated};
-
 mod error;
-pub use error::{
-    BeaconConsensusEngineError, BeaconEngineResult, BeaconForkChoiceUpdateError,
-    BeaconOnNewPayloadError,
-};
+pub use error::{BeaconConsensusEngineError, BeaconEngineResult, BeaconForkChoiceUpdateError};
 
 mod invalid_headers;
 pub use invalid_headers::InvalidHeaderCache;
@@ -59,9 +57,6 @@ pub use event::{BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress};
 
 mod handle;
 pub use handle::BeaconConsensusEngineHandle;
-
-mod forkchoice;
-pub use forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker, ForkchoiceStatus};
 
 mod metrics;
 use metrics::EngineMetrics;
