@@ -7,7 +7,7 @@ use reth_node_builder::{engine_tree_config::TreeConfig, EngineNodeLauncher};
 use reth_optimism_cli::{chainspec::OpChainSpecParser, Cli};
 use reth_optimism_node::{
     args::RollupArgs,
-    node::{OpStorage, OptimismAddOns},
+    node::{OpAddOns, OpStorage, OptimismAddOns},
     OpNode,
 };
 use reth_provider::providers::BlockchainProvider2;
@@ -40,7 +40,7 @@ fn main() {
                     let handle = builder
                         .with_types_and_provider::<OpNode, BlockchainProvider2<_, OpStorage>>()
                         .with_components(OpNode::components(rollup_args))
-                        .with_add_ons(OptimismAddOns::new(sequencer_http_arg))
+                        .with_add_ons(OpAddOns::new(sequencer_http_arg))
                         .launch_with_fn(|builder| {
                             let launcher = EngineNodeLauncher::new(
                                 builder.task_executor().clone(),

@@ -2,33 +2,38 @@
 
 use alloc::fmt;
 use core::hash::Hash;
-use reth_codecs::Compact;
 
-use alloy_consensus::Transaction;
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
-use alloy_primitives::{keccak256, Address, PrimitiveSignature as Signature, TxHash, B256};
+use alloy_primitives::{keccak256, Address, PrimitiveSignature, TxHash, B256};
+use reth_codecs::Compact;
 use revm_primitives::TxEnv;
 
-/// Helper trait that unifies all behaviour required by block to support full node operations.
-pub trait FullSignedTx: SignedTransaction<Transaction: Compact> + Compact {}
+use crate::{transaction::TransactionExt, FullTransaction, MaybeArbitrary, Transaction};
 
-impl<T> FullSignedTx for T where T: SignedTransaction<Transaction: Compact> + Compact {}
+/// Helper trait that unifies all behaviour required by block to support full node operations.
+pub trait FullSignedTx: SignedTransaction<Transaction: FullTransaction> + Compact {}
+
+impl<T> FullSignedTx for T where T: SignedTransaction<Transaction: FullTransaction> + Compact {}
 
 /// A signed transaction.
 pub trait SignedTransaction:
-    fmt::Debug
+    Send
+    + Sync
+    + Unpin
     + Clone
+    + Default
+    + fmt::Debug
     + PartialEq
     + Eq
     + Hash
-    + Send
-    + Sync
     + serde::Serialize
     + for<'a> serde::Deserialize<'a>
     + alloy_rlp::Encodable
     + alloy_rlp::Decodable
     + Encodable2718
     + Decodable2718
+    + TransactionExt
+    + MaybeArbitrary
 {
     /// Transaction type that is signed.
     type Transaction: Transaction;
@@ -40,7 +45,7 @@ pub trait SignedTransaction:
     fn transaction(&self) -> &Self::Transaction;
 
     /// Returns reference to signature.
-    fn signature(&self) -> &Signature;
+    fn signature(&self) -> &PrimitiveSignature;
 
     /// Recover signer from signature and hash.
     ///
@@ -63,8 +68,10 @@ pub trait SignedTransaction:
     /// Create a new signed transaction from a transaction and its signature.
     ///
     /// This will also calculate the transaction hash using its encoding.
-    fn from_transaction_and_signature(transaction: Self::Transaction, signature: Signature)
-        -> Self;
+    fn from_transaction_and_signature(
+        transaction: Self::Transaction,
+        signature: PrimitiveSignature,
+    ) -> Self;
 
     /// Calculate transaction hash, eip2728 transaction does not contain rlp header and start with
     /// tx type.
@@ -74,4 +81,12 @@ pub trait SignedTransaction:
 
     /// Fills [`TxEnv`] with an [`Address`] and transaction.
     fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address);
+}
+
+impl<T: SignedTransaction> TransactionExt for T {
+    type Type = <T::Transaction as TransactionExt>::Type;
+
+    fn signature_hash(&self) -> B256 {
+        self.transaction().signature_hash()
+    }
 }

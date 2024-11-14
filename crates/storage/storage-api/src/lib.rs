@@ -46,6 +46,9 @@ pub use transactions::*;
 mod trie;
 pub use trie::*;
 
+mod chain_info;
+pub use chain_info::*;
+
 mod withdrawals;
 pub use withdrawals::*;
 
@@ -56,3 +59,9 @@ pub mod noop;
 
 mod chain;
 pub use chain::*;
+
+mod history;
+pub use history::*;
+
+mod stats;
+pub use stats::*;

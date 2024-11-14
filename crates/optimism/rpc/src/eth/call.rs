@@ -1,10 +1,8 @@
+use alloy_consensus::Header;
 use alloy_primitives::{Bytes, TxKind, U256};
 use alloy_rpc_types_eth::transaction::TransactionRequest;
 use reth_evm::ConfigureEvm;
-use reth_primitives::{
-    revm_primitives::{BlockEnv, OptimismFields, TxEnv},
-    Header,
-};
+use reth_primitives::revm_primitives::{BlockEnv, OptimismFields, TxEnv};
 use reth_rpc_eth_api::{
     helpers::{Call, EthCall, LoadPendingBlock, LoadState, SpawnBlocking},
     FromEthApiError, IntoEthApiError, RpcNodeCore,

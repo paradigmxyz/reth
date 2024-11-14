@@ -13,7 +13,9 @@ workspace = true
 [dependencies]
 # reth
 reth-chainspec.workspace = true
+reth-consensus.workspace = true
 reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 reth-cli-util.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-storage-errors.workspace = true
@@ -30,7 +32,6 @@ reth-discv4.workspace = true
 reth-discv5.workspace = true
 reth-net-nat.workspace = true
 reth-network-peers.workspace = true
-reth-consensus-common.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 

@@ -1,9 +1,8 @@
 use super::Header;
+use crate::InMemorySize;
 use alloy_consensus::Sealed;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{keccak256, BlockHash, Sealable};
-#[cfg(any(test, feature = "test-utils"))]
-use alloy_primitives::{BlockNumber, B256, U256};
 use alloy_rlp::{Decodable, Encodable};
 use bytes::BufMut;
 use core::mem;
@@ -30,12 +29,10 @@ impl<H> SealedHeader<H> {
     pub const fn new(header: H, hash: BlockHash) -> Self {
         Self { header, hash }
     }
-}
 
-impl SealedHeader {
     /// Returns the sealed Header fields.
     #[inline]
-    pub const fn header(&self) -> &Header {
+    pub const fn header(&self) -> &H {
         &self.header
     }
 
@@ -46,30 +43,42 @@ impl SealedHeader {
     }
 
     /// Extract raw header that can be modified.
-    pub fn unseal(self) -> Header {
+    pub fn unseal(self) -> H {
         self.header
     }
 
     /// This is the inverse of [`Header::seal_slow`] which returns the raw header and hash.
-    pub fn split(self) -> (Header, BlockHash) {
+    pub fn split(self) -> (H, BlockHash) {
         (self.header, self.hash)
     }
+}
 
+impl<H: Sealable> SealedHeader<H> {
+    /// Hashes the header and creates a sealed header.
+    pub fn seal(header: H) -> Self {
+        let hash = header.hash_slow();
+        Self::new(header, hash)
+    }
+}
+
+impl<H: alloy_consensus::BlockHeader> SealedHeader<H> {
     /// Return the number hash tuple.
     pub fn num_hash(&self) -> BlockNumHash {
-        BlockNumHash::new(self.number, self.hash)
+        BlockNumHash::new(self.number(), self.hash)
     }
+}
 
+impl InMemorySize for SealedHeader {
     /// Calculates a heuristic for the in-memory size of the [`SealedHeader`].
     #[inline]
-    pub fn size(&self) -> usize {
+    fn size(&self) -> usize {
         self.header.size() + mem::size_of::<BlockHash>()
     }
 }
 
-impl Default for SealedHeader {
+impl<H: Sealable + Default> Default for SealedHeader<H> {
     fn default() -> Self {
-        let sealed = Header::default().seal_slow();
+        let sealed = H::default().seal_slow();
         let (header, hash) = sealed.into_parts();
         Self { header, hash }
     }
@@ -118,17 +127,17 @@ impl SealedHeader {
     }
 
     /// Updates the block number.
-    pub fn set_block_number(&mut self, number: BlockNumber) {
+    pub fn set_block_number(&mut self, number: alloy_primitives::BlockNumber) {
         self.header.number = number;
     }
 
     /// Updates the block state root.
-    pub fn set_state_root(&mut self, state_root: B256) {
+    pub fn set_state_root(&mut self, state_root: alloy_primitives::B256) {
         self.header.state_root = state_root;
     }
 
     /// Updates the block difficulty.
-    pub fn set_difficulty(&mut self, difficulty: U256) {
+    pub fn set_difficulty(&mut self, difficulty: alloy_primitives::U256) {
         self.header.difficulty = difficulty;
     }
 }
@@ -144,9 +153,7 @@ impl<'a> arbitrary::Arbitrary<'a> for SealedHeader {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let header = Header::arbitrary(u)?;
 
-        let sealed = header.seal_slow();
-        let (header, seal) = sealed.into_parts();
-        Ok(Self::new(header, seal))
+        Ok(Self::seal(header))
     }
 }
 

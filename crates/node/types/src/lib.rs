@@ -7,10 +7,13 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
 
-pub use reth_primitives_traits::{Block, BlockBody, NodePrimitives};
+pub use reth_primitives_traits::{
+    Block, BlockBody, FullBlock, FullNodePrimitives, FullReceipt, FullSignedTx, NodePrimitives,
+};
 
-use std::marker::PhantomData;
+use core::marker::PhantomData;
 
 use reth_chainspec::EthChainSpec;
 use reth_db_api::{

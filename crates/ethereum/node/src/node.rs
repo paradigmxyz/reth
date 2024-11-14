@@ -2,9 +2,9 @@
 
 use std::sync::Arc;
 
+use alloy_consensus::Header;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::BlockNumber;
-use reth_auto_seal_consensus::AutoSealConsensus;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
@@ -33,7 +33,7 @@ use reth_node_builder::{
     BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig, PayloadTypes,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::{Block, BlockBody, Header};
+use reth_primitives::{Block, BlockBody, Receipt, TransactionSigned, TxType};
 use reth_provider::{
     BlockNumReader, BlockReader, CanonStateSubscriptions, ChainSpecProvider, ChainStorageReader,
     ChainStorageWriter, DBProvider, HeaderProvider, ProviderResult, TransactionsProvider,
@@ -50,11 +50,14 @@ use reth_trie_db::MerklePatriciaTrie;
 use crate::{EthEngineTypes, EthEvmConfig};
 
 /// Ethereum primitive types.
-#[derive(Debug)]
+#[derive(Debug, Default, Clone)]
 pub struct EthPrimitives;
 
 impl NodePrimitives for EthPrimitives {
     type Block = Block;
+    type SignedTx = TransactionSigned;
+    type TxType = TxType;
+    type Receipt = Receipt;
 }
 
 /// Type configuration for a regular Ethereum node.
@@ -470,11 +473,7 @@ where
     type Consensus = Arc<dyn reth_consensus::Consensus>;
 
     async fn build_consensus(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
-        if ctx.is_dev() {
-            Ok(Arc::new(AutoSealConsensus::new(ctx.chain_spec())))
-        } else {
-            Ok(Arc::new(EthBeaconConsensus::new(ctx.chain_spec())))
-        }
+        Ok(Arc::new(EthBeaconConsensus::new(ctx.chain_spec())))
     }
 }
 

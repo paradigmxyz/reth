@@ -2,9 +2,9 @@
 
 use std::{fmt::Display, sync::Arc};
 
-use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
+use alloy_consensus::{Header, Transaction, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::merge::BEACON_NONCE;
-use alloy_primitives::{Address, Bytes, B64, U256};
+use alloy_primitives::{Address, Bytes, U256};
 use alloy_rpc_types_engine::PayloadId;
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
@@ -13,32 +13,32 @@ use reth_evm::{system_calls::SystemCaller, ConfigureEvm, NextBlockEnvAttributes}
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
-use reth_optimism_forks::OptimismHardforks;
+use reth_optimism_forks::OpHardforks;
 use reth_payload_primitives::{PayloadBuilderAttributes, PayloadBuilderError};
 use reth_primitives::{
     proofs,
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-    Block, BlockBody, Header, Receipt, SealedHeader, TransactionSigned, TxType,
+    Block, BlockBody, Receipt, SealedHeader, TransactionSigned, TxType,
 };
 use reth_provider::{ProviderError, StateProviderFactory, StateRootProvider};
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{
-    noop::NoopTransactionPool, BestTransactions, BestTransactionsAttributes, BestTransactionsFor,
-    TransactionPool,
+    noop::NoopTransactionPool, BestTransactionsAttributes, PayloadTransactions, TransactionPool,
 };
 use reth_trie::HashedPostState;
 use revm::{
     db::{states::bundle_state::BundleRetention, State},
-    primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
+    primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState, TxEnv},
     Database, DatabaseCommit,
 };
 use tracing::{debug, trace, warn};
 
 use crate::{
-    error::OptimismPayloadBuilderError,
+    error::OpPayloadBuilderError,
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
 };
 use op_alloy_consensus::DepositTransaction;
+use reth_transaction_pool::pool::BestPayloadTransactions;
 
 /// Optimism's payload builder
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -356,12 +356,12 @@ where
             },
         };
 
-        let sealed_block = block.seal_slow();
+        let sealed_block = Arc::new(block.seal_slow());
         debug!(target: "payload_builder", ?sealed_block, "sealed built block");
 
         // create the executed block data
         let executed = ExecutedBlock {
-            block: Arc::new(sealed_block.clone()),
+            block: sealed_block.clone(),
             senders: Arc::new(info.executed_senders),
             execution_output: Arc::new(execution_outcome),
             hashed_state: Arc::new(hashed_state),
@@ -390,7 +390,7 @@ where
     }
 }
 
-/// A type that returns a the [`BestTransactions`] that should be included in the pool.
+/// A type that returns a the [`PayloadTransactions`] that should be included in the pool.
 pub trait OpPayloadTransactions: Clone + Send + Sync + Unpin + 'static {
     /// Returns an iterator that yields the transaction in the order they should get included in the
     /// new payload.
@@ -398,7 +398,7 @@ pub trait OpPayloadTransactions: Clone + Send + Sync + Unpin + 'static {
         &self,
         pool: Pool,
         attr: BestTransactionsAttributes,
-    ) -> BestTransactionsFor<Pool>;
+    ) -> impl PayloadTransactions;
 }
 
 impl OpPayloadTransactions for () {
@@ -406,8 +406,8 @@ impl OpPayloadTransactions for () {
         &self,
         pool: Pool,
         attr: BestTransactionsAttributes,
-    ) -> BestTransactionsFor<Pool> {
-        pool.best_transactions_with_attributes(attr)
+    ) -> impl PayloadTransactions {
+        BestPayloadTransactions::new(pool.best_transactions_with_attributes(attr))
     }
 }
 
@@ -589,7 +589,7 @@ impl<EvmConfig> OpPayloadBuilderCtx<EvmConfig> {
         )
         .map_err(|err| {
             warn!(target: "payload_builder", %err, "missing create2 deployer, skipping block.");
-            PayloadBuilderError::other(OptimismPayloadBuilderError::ForceCreate2DeployerFail)
+            PayloadBuilderError::other(OpPayloadBuilderError::ForceCreate2DeployerFail)
         })
     }
 }
@@ -636,11 +636,18 @@ where
     {
         let mut info = ExecutionInfo::with_capacity(self.attributes().transactions.len());
 
+        let env = EnvWithHandlerCfg::new_with_cfg_env(
+            self.initialized_cfg.clone(),
+            self.initialized_block_env.clone(),
+            TxEnv::default(),
+        );
+        let mut evm = self.evm_config.evm_with_env(&mut *db, env);
+
         for sequencer_tx in &self.attributes().transactions {
             // A sequencer's block should never contain blob transactions.
             if sequencer_tx.value().is_eip4844() {
                 return Err(PayloadBuilderError::other(
-                    OptimismPayloadBuilderError::BlobTransactionRejected,
+                    OpPayloadBuilderError::BlobTransactionRejected,
                 ))
             }
 
@@ -650,9 +657,7 @@ where
             // will just pull in its `from` address.
             let sequencer_tx =
                 sequencer_tx.value().clone().try_into_ecrecovered().map_err(|_| {
-                    PayloadBuilderError::other(
-                        OptimismPayloadBuilderError::TransactionEcRecoverFailed,
-                    )
+                    PayloadBuilderError::other(OpPayloadBuilderError::TransactionEcRecoverFailed)
                 })?;
 
             // Cache the depositor account prior to the state transition for the deposit nonce.
@@ -662,23 +667,18 @@ where
             // nonces, so we don't need to touch the DB for those.
             let depositor = (self.is_regolith_active() && sequencer_tx.is_deposit())
                 .then(|| {
-                    db.load_cache_account(sequencer_tx.signer())
+                    evm.db_mut()
+                        .load_cache_account(sequencer_tx.signer())
                         .map(|acc| acc.account_info().unwrap_or_default())
                 })
                 .transpose()
                 .map_err(|_| {
-                    PayloadBuilderError::other(OptimismPayloadBuilderError::AccountLoadFailed(
+                    PayloadBuilderError::other(OpPayloadBuilderError::AccountLoadFailed(
                         sequencer_tx.signer(),
                     ))
                 })?;
 
-            let env = EnvWithHandlerCfg::new_with_cfg_env(
-                self.initialized_cfg.clone(),
-                self.initialized_block_env.clone(),
-                self.evm_config.tx_env(sequencer_tx.as_signed(), sequencer_tx.signer()),
-            );
-
-            let mut evm = self.evm_config.evm_with_env(&mut *db, env);
+            *evm.tx_mut() = self.evm_config.tx_env(sequencer_tx.as_signed(), sequencer_tx.signer());
 
             let ResultAndState { result, state } = match evm.transact() {
                 Ok(res) => res,
@@ -696,10 +696,8 @@ where
                 }
             };
 
-            // to release the db reference drop evm.
-            drop(evm);
             // commit changes
-            db.commit(state);
+            evm.db_mut().commit(state);
 
             let gas_used = result.gas_used();
 
@@ -732,7 +730,7 @@ where
         &self,
         info: &mut ExecutionInfo,
         db: &mut State<DB>,
-        mut best_txs: BestTransactionsFor<Pool>,
+        mut best_txs: impl PayloadTransactions,
     ) -> Result<Option<BuildOutcomeKind<OpBuiltPayload>>, PayloadBuilderError>
     where
         DB: Database<Error = ProviderError>,
@@ -740,19 +738,27 @@ where
     {
         let block_gas_limit = self.block_gas_limit();
         let base_fee = self.base_fee();
-        while let Some(pool_tx) = best_txs.next() {
+
+        let env = EnvWithHandlerCfg::new_with_cfg_env(
+            self.initialized_cfg.clone(),
+            self.initialized_block_env.clone(),
+            TxEnv::default(),
+        );
+        let mut evm = self.evm_config.evm_with_env(&mut *db, env);
+
+        while let Some(tx) = best_txs.next(()) {
             // ensure we still have capacity for this transaction
-            if info.cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
+            if info.cumulative_gas_used + tx.gas_limit() > block_gas_limit {
                 // we can't fit this transaction into the block, so we need to mark it as
                 // invalid which also removes all dependent transaction from
                 // the iterator before we can continue
-                best_txs.mark_invalid(&pool_tx);
+                best_txs.mark_invalid(tx.signer(), tx.nonce());
                 continue
             }
 
             // A sequencer's block should never contain blob or deposit transactions from the pool.
-            if pool_tx.is_eip4844() || pool_tx.tx_type() == TxType::Deposit as u8 {
-                best_txs.mark_invalid(&pool_tx);
+            if tx.is_eip4844() || tx.tx_type() == TxType::Deposit as u8 {
+                best_txs.mark_invalid(tx.signer(), tx.nonce());
                 continue
             }
 
@@ -761,16 +767,8 @@ where
                 return Ok(Some(BuildOutcomeKind::Cancelled))
             }
 
-            // convert tx to a signed transaction
-            let tx = pool_tx.to_recovered_transaction();
-            let env = EnvWithHandlerCfg::new_with_cfg_env(
-                self.initialized_cfg.clone(),
-                self.initialized_block_env.clone(),
-                self.evm_config.tx_env(tx.as_signed(), tx.signer()),
-            );
-
-            // Configure the environment for the block.
-            let mut evm = self.evm_config.evm_with_env(&mut *db, env);
+            // Configure the environment for the tx.
+            *evm.tx_mut() = self.evm_config.tx_env(tx.as_signed(), tx.signer());
 
             let ResultAndState { result, state } = match evm.transact() {
                 Ok(res) => res,
@@ -784,7 +782,7 @@ where
                                 // if the transaction is invalid, we can skip it and all of its
                                 // descendants
                                 trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
-                                best_txs.mark_invalid(&pool_tx);
+                                best_txs.mark_invalid(tx.signer(), tx.nonce());
                             }
 
                             continue
@@ -796,10 +794,9 @@ where
                     }
                 }
             };
-            // drop evm so db is released.
-            drop(evm);
+
             // commit changes
-            db.commit(state);
+            evm.db_mut().commit(state);
 
             let gas_used = result.gas_used();
 
@@ -819,7 +816,7 @@ where
 
             // update add to total fees
             let miner_fee = tx
-                .effective_tip_per_gas(Some(base_fee))
+                .effective_tip_per_gas(base_fee)
                 .expect("fee is always valid; execution succeeded");
             info.total_fees += U256::from(miner_fee) * U256::from(gas_used);
 
@@ -830,13 +827,4 @@ where
 
         Ok(None)
     }
-}
-
-/// Extracts the Holocene 1599 parameters from the encoded form:
-/// <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#eip1559params-encoding>
-pub fn decode_eip_1559_params(eip_1559_params: B64) -> (u32, u32) {
-    let denominator: [u8; 4] = eip_1559_params.0[..4].try_into().expect("sufficient length");
-    let elasticity: [u8; 4] = eip_1559_params.0[4..8].try_into().expect("sufficient length");
-
-    (u32::from_be_bytes(elasticity), u32::from_be_bytes(denominator))
 }

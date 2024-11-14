@@ -5,13 +5,15 @@ use crate::{
     ReceiptProviderIdExt, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
     StateRootProvider, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
-use alloy_consensus::constants::EMPTY_ROOT_HASH;
-use alloy_eips::{eip4895::Withdrawal, BlockHashOrNumber, BlockId, BlockNumberOrTag};
+use alloy_consensus::{constants::EMPTY_ROOT_HASH, Header};
+use alloy_eips::{
+    eip4895::{Withdrawal, Withdrawals},
+    BlockHashOrNumber, BlockId, BlockNumberOrTag,
+};
 use alloy_primitives::{
     keccak256,
     map::{HashMap, HashSet},
-    Address, BlockHash, BlockNumber, Bytes, Sealable, StorageKey, StorageValue, TxHash, TxNumber,
-    B256, U256,
+    Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
 use parking_lot::Mutex;
 use reth_chainspec::{ChainInfo, ChainSpec};
@@ -21,9 +23,9 @@ use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::NodeTypes;
 use reth_primitives::{
-    Account, Block, BlockWithSenders, Bytecode, GotExpected, Header, Receipt, SealedBlock,
+    Account, Block, BlockWithSenders, Bytecode, GotExpected, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash, Withdrawals,
+    TransactionSignedNoHash,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
@@ -215,11 +217,7 @@ impl HeaderProvider for MockEthProvider {
     }
 
     fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
-        Ok(self.header_by_number(number)?.map(|h| {
-            let sealed = h.seal_slow();
-            let (header, seal) = sealed.into_parts();
-            SealedHeader::new(header, seal)
-        }))
+        Ok(self.header_by_number(number)?.map(SealedHeader::seal))
     }
 
     fn sealed_headers_while(
@@ -230,11 +228,7 @@ impl HeaderProvider for MockEthProvider {
         Ok(self
             .headers_range(range)?
             .into_iter()
-            .map(|h| {
-                let sealed = h.seal_slow();
-                let (header, seal) = sealed.into_parts();
-                SealedHeader::new(header, seal)
-            })
+            .map(SealedHeader::seal)
             .take_while(|h| predicate(h))
             .collect())
     }
@@ -563,14 +557,7 @@ impl BlockReaderIdExt for MockEthProvider {
     }
 
     fn sealed_header_by_id(&self, id: BlockId) -> ProviderResult<Option<SealedHeader>> {
-        self.header_by_id(id)?.map_or_else(
-            || Ok(None),
-            |h| {
-                let sealed = h.seal_slow();
-                let (header, seal) = sealed.into_parts();
-                Ok(Some(SealedHeader::new(header, seal)))
-            },
-        )
+        self.header_by_id(id)?.map_or_else(|| Ok(None), |h| Ok(Some(SealedHeader::seal(h))))
     }
 
     fn header_by_id(&self, id: BlockId) -> ProviderResult<Option<Header>> {

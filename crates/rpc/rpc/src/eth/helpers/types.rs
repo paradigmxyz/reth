@@ -1,9 +1,10 @@
 //! L1 `eth` API types.
 
-use alloy_consensus::{Signed, TxEip4844Variant, TxEnvelope};
+use alloy_consensus::{Signed, Transaction as _, TxEip4844Variant, TxEnvelope};
 use alloy_network::{Ethereum, Network};
-use alloy_rpc_types::{Transaction, TransactionInfo};
+use alloy_rpc_types_eth::{Transaction, TransactionInfo};
 use reth_primitives::{TransactionSigned, TransactionSignedEcRecovered};
+use reth_rpc_eth_types::EthApiError;
 use reth_rpc_types_compat::TransactionCompat;
 
 /// Builds RPC transaction response for l1.
@@ -16,15 +17,17 @@ where
 {
     type Transaction = <Ethereum as Network>::TransactionResponse;
 
+    type Error = EthApiError;
+
     fn fill(
         &self,
         tx: TransactionSignedEcRecovered,
         tx_info: TransactionInfo,
-    ) -> Self::Transaction {
+    ) -> Result<Self::Transaction, Self::Error> {
         let from = tx.signer();
         let TransactionSigned { transaction, signature, hash } = tx.into_signed();
 
-        let inner = match transaction {
+        let inner: TxEnvelope = match transaction {
             reth_primitives::Transaction::Legacy(tx) => {
                 Signed::new_unchecked(tx, signature, hash).into()
             }
@@ -44,9 +47,24 @@ where
             _ => unreachable!(),
         };
 
-        let TransactionInfo { block_hash, block_number, index: transaction_index, .. } = tx_info;
+        let TransactionInfo {
+            block_hash, block_number, index: transaction_index, base_fee, ..
+        } = tx_info;
 
-        Transaction { inner, block_hash, block_number, transaction_index, from }
+        let effective_gas_price = base_fee
+            .map(|base_fee| {
+                inner.effective_tip_per_gas(base_fee as u64).unwrap_or_default() + base_fee
+            })
+            .unwrap_or_else(|| inner.max_fee_per_gas());
+
+        Ok(Transaction {
+            inner,
+            block_hash,
+            block_number,
+            transaction_index,
+            from,
+            effective_gas_price: Some(effective_gas_price),
+        })
     }
 
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {

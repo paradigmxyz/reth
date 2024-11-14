@@ -46,10 +46,7 @@ pub mod servers {
         rpc::RpcApiServer,
         trace::TraceApiServer,
         txpool::TxPoolApiServer,
-        validation::{
-            BlockSubmissionValidationApiServer, BuilderBlockValidationRequestV3,
-            BuilderBlockValidationRequestV4,
-        },
+        validation::BlockSubmissionValidationApiServer,
         web3::Web3ApiServer,
     };
     pub use reth_rpc_eth_api::{

@@ -13,13 +13,14 @@
 extern crate alloc;
 
 use alloc::{sync::Arc, vec::Vec};
+use alloy_consensus::Header;
 use alloy_primitives::{Address, U256};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
 use reth_optimism_chainspec::{DecodeError, OpChainSpec};
 use reth_primitives::{
     revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
     transaction::FillTxEnv,
-    Head, Header, TransactionSigned,
+    Head, TransactionSigned,
 };
 use reth_revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
 
@@ -31,7 +32,7 @@ pub mod l1;
 pub use l1::*;
 
 mod error;
-pub use error::OptimismBlockExecutionError;
+pub use error::OpBlockExecutionError;
 use revm_primitives::{
     BlobExcessGasAndPrice, BlockEnv, Bytes, CfgEnv, Env, HandlerCfg, OptimismFields, SpecId, TxKind,
 };
@@ -200,7 +201,7 @@ impl ConfigureEvm for OpEvmConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::constants::KECCAK_EMPTY;
+    use alloy_consensus::{constants::KECCAK_EMPTY, Header};
     use alloy_eips::eip7685::Requests;
     use alloy_genesis::Genesis;
     use alloy_primitives::{bytes, Address, LogData, B256, U256};
@@ -212,7 +213,7 @@ mod tests {
     use reth_optimism_chainspec::BASE_MAINNET;
     use reth_primitives::{
         revm_primitives::{AccountInfo, BlockEnv, CfgEnv, SpecId},
-        Account, Header, Log, Receipt, Receipts, SealedBlockWithSenders, TxType,
+        Account, Log, Receipt, Receipts, SealedBlockWithSenders, TxType,
     };
 
     use reth_revm::{
@@ -820,7 +821,7 @@ mod tests {
         };
 
         // Create an empty Receipts object
-        let receipts_empty = Receipts { receipt_vec: vec![] };
+        let receipts_empty = Receipts::<Receipt> { receipt_vec: vec![] };
 
         // Define the first block number
         let first_block = 123;

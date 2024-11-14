@@ -3,6 +3,7 @@ use crate::{
     writer::static_file::StaticFileWriter,
     BlockExecutionWriter, BlockWriter, HistoryWriter, StateChangeWriter, StateWriter, TrieWriter,
 };
+use alloy_consensus::Header;
 use alloy_primitives::{BlockNumber, B256, U256};
 use reth_chain_state::ExecutedBlock;
 use reth_db::{
@@ -13,7 +14,7 @@ use reth_db::{
 };
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{Header, SealedBlock, StaticFileSegment, TransactionSignedNoHash};
+use reth_primitives::{SealedBlock, StaticFileSegment, TransactionSignedNoHash};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     DBProvider, HeaderProvider, ReceiptWriter, StageCheckpointWriter, TransactionsProviderExt,
@@ -1129,7 +1130,8 @@ mod tests {
 
         let bundle = state.take_bundle();
 
-        let outcome = ExecutionOutcome::new(bundle, Receipts::default(), 1, Vec::new());
+        let outcome: ExecutionOutcome =
+            ExecutionOutcome::new(bundle, Receipts::default(), 1, Vec::new());
         let mut writer = UnifiedStorageWriter::from_database(&provider);
         writer
             .write_to_storage(outcome, OriginalValuesKnown::Yes)
@@ -1375,7 +1377,7 @@ mod tests {
 
     #[test]
     fn revert_to_indices() {
-        let base = ExecutionOutcome {
+        let base: ExecutionOutcome = ExecutionOutcome {
             bundle: BundleState::default(),
             receipts: vec![vec![Some(Receipt::default()); 2]; 7].into(),
             first_block: 10,
@@ -1441,7 +1443,7 @@ mod tests {
             assert_eq!(
                 StateRoot::overlay_root(
                     tx,
-                    ExecutionOutcome::new(
+                    ExecutionOutcome::<Receipt>::new(
                         state.bundle_state.clone(),
                         Receipts::default(),
                         0,
@@ -1592,7 +1594,7 @@ mod tests {
             .build();
         assert_eq!(previous_state.reverts.len(), 1);
 
-        let mut test = ExecutionOutcome {
+        let mut test: ExecutionOutcome = ExecutionOutcome {
             bundle: present_state,
             receipts: vec![vec![Some(Receipt::default()); 2]; 1].into(),
             first_block: 2,

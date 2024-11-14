@@ -5,12 +5,12 @@ use std::time::{Duration, Instant};
 
 use crate::{EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
 
-use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
+use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{
     eip4844::MAX_DATA_GAS_PER_BLOCK, eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE,
 };
 use alloy_primitives::{BlockNumber, B256, U256};
-use alloy_rpc_types::BlockNumberOrTag;
+use alloy_rpc_types_eth::BlockNumberOrTag;
 use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::{
@@ -24,8 +24,7 @@ use reth_primitives::{
         BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, EVMError, Env, ExecutionResult, InvalidTransaction,
         ResultAndState, SpecId,
     },
-    Block, BlockBody, Header, Receipt, SealedBlockWithSenders, SealedHeader,
-    TransactionSignedEcRecovered,
+    Block, BlockBody, Receipt, SealedBlockWithSenders, SealedHeader, TransactionSignedEcRecovered,
 };
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderError,

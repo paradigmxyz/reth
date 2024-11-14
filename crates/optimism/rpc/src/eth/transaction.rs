@@ -1,8 +1,8 @@
 //! Loads and formats OP transaction RPC response.
 
-use alloy_consensus::Signed;
-use alloy_primitives::{Bytes, B256};
-use alloy_rpc_types::TransactionInfo;
+use alloy_consensus::{Signed, Transaction as _};
+use alloy_primitives::{Bytes, Sealable, Sealed, B256};
+use alloy_rpc_types_eth::TransactionInfo;
 use op_alloy_consensus::OpTxEnvelope;
 use op_alloy_rpc_types::Transaction;
 use reth_node_api::FullNodeComponents;
@@ -15,7 +15,7 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::utils::recover_raw_transaction;
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
-use crate::{OpEthApi, SequencerClient};
+use crate::{OpEthApi, OpEthApiError, SequencerClient};
 
 impl<N> EthTransactions for OpEthApi<N>
 where
@@ -76,14 +76,17 @@ where
     N: FullNodeComponents,
 {
     type Transaction = Transaction;
+    type Error = OpEthApiError;
 
     fn fill(
         &self,
         tx: TransactionSignedEcRecovered,
         tx_info: TransactionInfo,
-    ) -> Self::Transaction {
+    ) -> Result<Self::Transaction, Self::Error> {
         let from = tx.signer();
         let TransactionSigned { transaction, signature, hash } = tx.into_signed();
+        let mut deposit_receipt_version = None;
+        let mut deposit_nonce = None;
 
         let inner = match transaction {
             reth_primitives::Transaction::Legacy(tx) => {
@@ -99,29 +102,49 @@ where
             reth_primitives::Transaction::Eip7702(tx) => {
                 Signed::new_unchecked(tx, signature, hash).into()
             }
-            reth_primitives::Transaction::Deposit(tx) => OpTxEnvelope::Deposit(tx),
+            reth_primitives::Transaction::Deposit(tx) => {
+                self.inner
+                    .provider()
+                    .receipt_by_hash(hash)
+                    .map_err(Self::Error::from_eth_err)?
+                    .inspect(|receipt| {
+                        deposit_receipt_version = receipt.deposit_receipt_version;
+                        deposit_nonce = receipt.deposit_nonce;
+                    });
+
+                OpTxEnvelope::Deposit(tx.seal_unchecked(hash))
+            }
         };
 
-        let deposit_receipt_version = self
-            .inner
-            .provider()
-            .receipt_by_hash(hash)
-            .ok() // todo: change sig to return result
-            .flatten()
-            .and_then(|receipt| receipt.deposit_receipt_version);
+        let TransactionInfo {
+            block_hash, block_number, index: transaction_index, base_fee, ..
+        } = tx_info;
 
-        let TransactionInfo { block_hash, block_number, index: transaction_index, .. } = tx_info;
+        let effective_gas_price = if inner.is_deposit() {
+            // For deposits, we must always set the `gasPrice` field to 0 in rpc
+            // deposit tx don't have a gas price field, but serde of `Transaction` will take care of
+            // it
+            0
+        } else {
+            base_fee
+                .map(|base_fee| {
+                    inner.effective_tip_per_gas(base_fee as u64).unwrap_or_default() + base_fee
+                })
+                .unwrap_or_else(|| inner.max_fee_per_gas())
+        };
 
-        Transaction {
-            inner: alloy_rpc_types::Transaction {
+        Ok(Transaction {
+            inner: alloy_rpc_types_eth::Transaction {
                 inner,
                 block_hash,
                 block_number,
                 transaction_index,
                 from,
+                effective_gas_price: Some(effective_gas_price),
             },
+            deposit_nonce,
             deposit_receipt_version,
-        }
+        })
     }
 
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
@@ -130,7 +153,17 @@ where
             OpTxEnvelope::Eip2930(tx) => &mut tx.tx_mut().input,
             OpTxEnvelope::Legacy(tx) => &mut tx.tx_mut().input,
             OpTxEnvelope::Eip7702(tx) => &mut tx.tx_mut().input,
-            OpTxEnvelope::Deposit(tx) => &mut tx.input,
+            OpTxEnvelope::Deposit(tx) => {
+                let (mut deposit, hash) = std::mem::replace(
+                    tx,
+                    Sealed::new_unchecked(Default::default(), Default::default()),
+                )
+                .split();
+                deposit.input = deposit.input.slice(..4);
+                let mut deposit = deposit.seal_unchecked(hash);
+                std::mem::swap(tx, &mut deposit);
+                return
+            }
             _ => return,
         };
         *input = input.slice(..4);

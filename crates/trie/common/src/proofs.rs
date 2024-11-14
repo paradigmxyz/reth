@@ -17,7 +17,7 @@ use std::collections::HashMap;
 /// The state multiproof of target accounts and multiproofs of their storage tries.
 /// Multiproof is effectively a state subtrie that only contains the nodes
 /// in the paths of target accounts.
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default, Debug, PartialEq, Eq)]
 pub struct MultiProof {
     /// State trie multiproof for requested accounts.
     pub account_subtree: ProofNodes,
@@ -79,7 +79,7 @@ impl MultiProof {
 }
 
 /// The merkle multiproof of storage trie.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StorageMultiProof {
     /// Storage trie root.
     pub root: B256,
@@ -234,11 +234,12 @@ impl StorageProof {
 #[cfg(any(test, feature = "test-utils"))]
 pub mod triehash {
     use alloy_primitives::{keccak256, B256};
+    use alloy_rlp::RlpEncodable;
     use hash_db::Hasher;
     use plain_hasher::PlainHasher;
 
     /// A [Hasher] that calculates a keccak256 hash of the given data.
-    #[derive(Default, Debug, Clone, PartialEq, Eq)]
+    #[derive(Default, Debug, Clone, PartialEq, Eq, RlpEncodable)]
     #[non_exhaustive]
     pub struct KeccakHasher;
 

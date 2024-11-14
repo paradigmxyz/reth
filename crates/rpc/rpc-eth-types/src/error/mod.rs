@@ -1,10 +1,13 @@
 //! Implementation specific Errors for the `eth_` namespace.
 
-use std::time::Duration;
+pub mod api;
+pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
+
+use core::time::Duration;
 
 use alloy_eips::BlockId;
 use alloy_primitives::{Address, Bytes, U256};
-use alloy_rpc_types::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
+use alloy_rpc_types_eth::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
 use alloy_sol_types::decode_revert_reason;
 use reth_errors::RethError;
 use reth_primitives::revm_primitives::InvalidHeader;

@@ -8,18 +8,18 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
+use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH};
 use alloy_primitives::U256;
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_consensus_common::validation::{
     validate_4844_header_standalone, validate_against_parent_4844,
     validate_against_parent_eip1559_base_fee, validate_against_parent_hash_number,
-    validate_against_parent_timestamp, validate_block_pre_execution, validate_header_base_fee,
-    validate_header_extradata, validate_header_gas,
+    validate_against_parent_timestamp, validate_block_pre_execution, validate_body_against_header,
+    validate_header_base_fee, validate_header_extradata, validate_header_gas,
 };
 use reth_primitives::{
-    constants::MINIMUM_GAS_LIMIT, BlockWithSenders, Header, SealedBlock, SealedHeader,
+    constants::MINIMUM_GAS_LIMIT, BlockBody, BlockWithSenders, SealedBlock, SealedHeader,
 };
 use std::{fmt::Debug, sync::Arc, time::SystemTime};
 
@@ -212,6 +212,14 @@ impl<ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug> Consensu
         Ok(())
     }
 
+    fn validate_body_against_header(
+        &self,
+        body: &BlockBody,
+        header: &SealedHeader,
+    ) -> Result<(), ConsensusError> {
+        validate_body_against_header(body, header)
+    }
+
     fn validate_block_pre_execution(&self, block: &SealedBlock) -> Result<(), ConsensusError> {
         validate_block_pre_execution(block, &self.chain_spec)
     }
@@ -228,7 +236,7 @@ impl<ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug> Consensu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{Sealable, B256};
+    use alloy_primitives::B256;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
     use reth_primitives::proofs;
 
@@ -313,16 +321,14 @@ mod tests {
         // that the header is valid
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().shanghai_activated().build());
 
-        let sealed = Header {
+        let header = Header {
             base_fee_per_gas: Some(1337),
             withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
             ..Default::default()
-        }
-        .seal_slow();
-        let (header, seal) = sealed.into_parts();
+        };
 
         assert_eq!(
-            EthBeaconConsensus::new(chain_spec).validate_header(&SealedHeader::new(header, seal)),
+            EthBeaconConsensus::new(chain_spec).validate_header(&SealedHeader::seal(header,)),
             Ok(())
         );
     }

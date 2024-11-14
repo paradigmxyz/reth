@@ -10,7 +10,7 @@
 
 use crate::metrics::PayloadBuilderMetrics;
 use alloy_consensus::constants::EMPTY_WITHDRAWALS;
-use alloy_eips::merge::SLOT_DURATION;
+use alloy_eips::{eip4895::Withdrawals, merge::SLOT_DURATION};
 use alloy_primitives::{Bytes, B256, U256};
 use futures_core::ready;
 use futures_util::FutureExt;
@@ -20,7 +20,7 @@ use reth_payload_builder::{KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJo
 use reth_payload_primitives::{
     BuiltPayload, PayloadBuilderAttributes, PayloadBuilderError, PayloadKind,
 };
-use reth_primitives::{constants::RETH_CLIENT_VERSION, proofs, SealedHeader, Withdrawals};
+use reth_primitives::{constants::RETH_CLIENT_VERSION, proofs, SealedHeader};
 use reth_provider::{BlockReaderIdExt, CanonStateNotification, StateProviderFactory};
 use reth_revm::cached::CachedReads;
 use reth_tasks::TaskSpawner;
@@ -42,6 +42,9 @@ use tokio::{
 use tracing::{debug, trace, warn};
 
 mod metrics;
+mod stack;
+
+pub use stack::PayloadBuilderStack;
 
 /// The [`PayloadJobGenerator`] that creates [`BasicPayloadJob`]s.
 #[derive(Debug)]
@@ -613,7 +616,9 @@ where
         if let Some(fut) = Pin::new(&mut this.maybe_better).as_pin_mut() {
             if let Poll::Ready(res) = fut.poll(cx) {
                 this.maybe_better = None;
-                if let Ok(BuildOutcome::Better { payload, .. }) = res {
+                if let Ok(Some(payload)) = res.map(|out| out.into_payload())
+                    .inspect_err(|err| warn!(target: "payload_builder", %err, "failed to resolve pending payload"))
+                {
                     debug!(target: "payload_builder", "resolving better payload");
                     return Poll::Ready(Ok(payload))
                 }
@@ -764,7 +769,7 @@ impl<Payload> BuildOutcome<Payload> {
     /// Consumes the type and returns the payload if the outcome is `Better`.
     pub fn into_payload(self) -> Option<Payload> {
         match self {
-            Self::Better { payload, .. } => Some(payload),
+            Self::Better { payload, .. } | Self::Freeze(payload) => Some(payload),
             _ => None,
         }
     }
@@ -782,6 +787,21 @@ impl<Payload> BuildOutcome<Payload> {
     /// Returns true if the outcome is `Cancelled`.
     pub const fn is_cancelled(&self) -> bool {
         matches!(self, Self::Cancelled)
+    }
+
+    /// Applies a fn on the current payload.
+    pub(crate) fn map_payload<F, P>(self, f: F) -> BuildOutcome<P>
+    where
+        F: FnOnce(Payload) -> P,
+    {
+        match self {
+            Self::Better { payload, cached_reads } => {
+                BuildOutcome::Better { payload: f(payload), cached_reads }
+            }
+            Self::Aborted { fees, cached_reads } => BuildOutcome::Aborted { fees, cached_reads },
+            Self::Cancelled => BuildOutcome::Cancelled,
+            Self::Freeze(payload) => BuildOutcome::Freeze(f(payload)),
+        }
     }
 }
 

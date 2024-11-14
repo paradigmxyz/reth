@@ -24,7 +24,6 @@ reth-network.workspace = true
 reth-evm.workspace = true
 reth-evm-ethereum.workspace = true
 reth-consensus.workspace = true
-reth-auto-seal-consensus.workspace = true
 reth-beacon-consensus.workspace = true
 reth-rpc.workspace = true
 reth-node-api.workspace = true
@@ -33,6 +32,8 @@ reth-primitives.workspace = true
 reth-revm = { workspace = true, features = ["std"] }
 reth-db.workspace = true
 reth-trie-db.workspace = true
+
+alloy-consensus.workspace = true
 
 # revm with required ethereum features
 revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
@@ -67,17 +68,17 @@ alloy-rpc-types-beacon.workspace = true
 [features]
 default = []
 test-utils = [
-	"reth-node-builder/test-utils",
-	"reth-chainspec/test-utils",
-	"reth-consensus/test-utils",
-	"reth-network/test-utils",
-	"reth-payload-builder/test-utils",
-	"reth-primitives/test-utils",
-	"reth-revm/test-utils",
-	"reth-db/test-utils",
-	"reth-provider/test-utils",
-	"reth-transaction-pool/test-utils",
-	"reth-trie-db/test-utils",
-	"revm/test-utils",
-	"reth-evm/test-utils"
+    "reth-node-builder/test-utils",
+    "reth-chainspec/test-utils",
+    "reth-consensus/test-utils",
+    "reth-network/test-utils",
+    "reth-payload-builder/test-utils",
+    "reth-primitives/test-utils",
+    "reth-revm/test-utils",
+    "reth-db/test-utils",
+    "reth-provider/test-utils",
+    "reth-transaction-pool/test-utils",
+    "reth-trie-db/test-utils",
+    "revm/test-utils",
+    "reth-evm/test-utils",
 ]

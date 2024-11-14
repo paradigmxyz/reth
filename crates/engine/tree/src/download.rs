@@ -6,12 +6,13 @@ use futures::FutureExt;
 use reth_consensus::Consensus;
 use reth_network_p2p::{
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
-    BlockClient,
+    BlockClient, EthBlockClient,
 };
 use reth_primitives::{SealedBlock, SealedBlockWithSenders};
 use std::{
     cmp::{Ordering, Reverse},
     collections::{binary_heap::PeekMut, BinaryHeap, HashSet, VecDeque},
+    fmt::Debug,
     sync::Arc,
     task::{Context, Poll},
 };
@@ -72,10 +73,13 @@ where
 
 impl<Client> BasicBlockDownloader<Client>
 where
-    Client: BlockClient + 'static,
+    Client: EthBlockClient + 'static,
 {
     /// Create a new instance
-    pub fn new(client: Client, consensus: Arc<dyn Consensus>) -> Self {
+    pub fn new(
+        client: Client,
+        consensus: Arc<dyn Consensus<Client::Header, Client::Body>>,
+    ) -> Self {
         Self {
             full_block_client: FullBlockClient::new(client, consensus),
             inflight_full_block_requests: Vec::new(),
@@ -182,7 +186,7 @@ where
 
 impl<Client> BlockDownloader for BasicBlockDownloader<Client>
 where
-    Client: BlockClient + 'static,
+    Client: EthBlockClient,
 {
     /// Handles incoming download actions.
     fn on_action(&mut self, action: DownloadAction) {
@@ -305,12 +309,12 @@ impl BlockDownloader for NoopBlockDownloader {
 mod tests {
     use super::*;
     use crate::test_utils::insert_headers_into_client;
-    use alloy_primitives::Sealable;
+    use alloy_consensus::Header;
     use assert_matches::assert_matches;
     use reth_beacon_consensus::EthBeaconConsensus;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_network_p2p::test_utils::TestFullBlockClient;
-    use reth_primitives::{Header, SealedHeader};
+    use reth_primitives::SealedHeader;
     use std::{future::poll_fn, sync::Arc};
 
     struct TestHarness {
@@ -329,14 +333,12 @@ mod tests {
             );
 
             let client = TestFullBlockClient::default();
-            let sealed = Header {
+            let header = Header {
                 base_fee_per_gas: Some(7),
                 gas_limit: chain_spec.max_gas_limit,
                 ..Default::default()
-            }
-            .seal_slow();
-            let (header, seal) = sealed.into_parts();
-            let header = SealedHeader::new(header, seal);
+            };
+            let header = SealedHeader::seal(header);
 
             insert_headers_into_client(&client, header, 0..total_blocks);
             let consensus = Arc::new(EthBeaconConsensus::new(chain_spec));
