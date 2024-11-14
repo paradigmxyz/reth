@@ -90,12 +90,12 @@ impl reth_primitives_traits::Block for Block {
     type Header = Header;
     type Body = BlockBody;
 
-    fn body(&self) -> &Self::Body {
-        &self.body
-    }
-
     fn header(&self) -> &Self::Header {
         &self.header
+    }
+
+    fn body(&self) -> &Self::Body {
+        &self.body
     }
 }
 
@@ -460,6 +460,24 @@ where
 {
     fn default() -> Self {
         Self { header: Default::default(), body: Default::default() }
+    }
+}
+
+impl<H, B> reth_primitives_traits::Block for SealedBlock<H, B>
+where
+    H: reth_primitives_traits::BlockHeader,
+    B: reth_primitives_traits::BlockBody,
+    Self: Serialize + for<'a> Deserialize<'a>,
+{
+    type Header = H;
+    type Body = B;
+
+    fn header(&self) -> &Self::Header {
+        self.header.header()
+    }
+
+    fn body(&self) -> &Self::Body {
+        &self.body
     }
 }
 
@@ -958,6 +976,12 @@ mod tests {
     use alloy_primitives::hex_literal::hex;
     use alloy_rlp::{Decodable, Encodable};
     use std::str::FromStr;
+
+    const fn _traits() {
+        const fn assert_block<T: reth_primitives_traits::Block>() {}
+        assert_block::<Block>();
+        assert_block::<SealedBlock>();
+    }
 
     /// Check parsing according to EIP-1898.
     #[test]
