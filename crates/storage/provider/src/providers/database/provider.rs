@@ -178,11 +178,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         let storage_history_prune_checkpoint =
             self.get_prune_checkpoint(PruneSegment::StorageHistory)?;
 
-        let mut state_provider = HistoricalStateProviderRef::new(
-            &self.tx,
-            block_number,
-            self.static_file_provider.clone(),
-        );
+        let mut state_provider = HistoricalStateProviderRef::new(self, block_number);
 
         // If we pruned account or storage history, we can't return state on every historical block.
         // Instead, we should cap it at the latest prune checkpoint for corresponding prune segment.
@@ -259,8 +255,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
         let storage_history_prune_checkpoint =
             self.get_prune_checkpoint(PruneSegment::StorageHistory)?;
 
-        let mut state_provider =
-            HistoricalStateProvider::new(self.tx, block_number, self.static_file_provider);
+        let mut state_provider = HistoricalStateProvider::new(self, block_number);
 
         // If we pruned account or storage history, we can't return state on every historical block.
         // Instead, we should cap it at the latest prune checkpoint for corresponding prune segment.
