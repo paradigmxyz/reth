@@ -8538,7 +8538,6 @@ dependencies = [
  "rand 0.8.5",
  "rayon",
  "reth-codecs",
- "reth-testing-utils",
  "revm-primitives",
  "roaring",
  "serde",

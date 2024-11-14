@@ -1,6 +1,6 @@
 //! Block body abstraction.
 
-use alloc::{fmt, vec::Vec};
+use alloc::fmt;
 
 use alloy_eips::{eip4895::Withdrawal, eip7685::Requests};
 use alloy_primitives::{Address, B256};
