@@ -1,6 +1,6 @@
 //! API of a signed transaction.
 
-use alloc::fmt;
+use alloc::{fmt, vec::Vec};
 use core::hash::Hash;
 #[cfg(feature = "std")]
 use std::sync::LazyLock;
