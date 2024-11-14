@@ -16,6 +16,7 @@ use reth_rpc_eth_types::{
     EthApiError, RevertError, RpcInvalidTransactionError,
 };
 use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO};
+use revm_primitives::{db::Database, EnvWithHandlerCfg};
 use tracing::trace;
 
 /// Gas execution estimates
@@ -267,6 +268,41 @@ pub trait EstimateCall: Call {
                 )
             })
             .await
+        }
+    }
+
+    /// Executes the requests again after an out of gas error to check if the error is gas related
+    /// or not
+    #[inline]
+    fn map_out_of_gas_err<DB>(
+        &self,
+        env_gas_limit: U256,
+        mut env: EnvWithHandlerCfg,
+        db: &mut DB,
+    ) -> Self::Error
+    where
+        DB: Database,
+        EthApiError: From<DB::Error>,
+    {
+        let req_gas_limit = env.tx.gas_limit;
+        env.tx.gas_limit = env_gas_limit.try_into().unwrap_or(u64::MAX);
+        let (res, _) = match self.transact(db, env) {
+            Ok(res) => res,
+            Err(err) => return err,
+        };
+        match res.result {
+            ExecutionResult::Success { .. } => {
+                // transaction succeeded by manually increasing the gas limit to
+                // highest, which means the caller lacks funds to pay for the tx
+                RpcInvalidTransactionError::BasicOutOfGas(req_gas_limit).into_eth_err()
+            }
+            ExecutionResult::Revert { output, .. } => {
+                // reverted again after bumping the limit
+                RpcInvalidTransactionError::Revert(RevertError::new(output)).into_eth_err()
+            }
+            ExecutionResult::Halt { reason, .. } => {
+                RpcInvalidTransactionError::EvmHalt(reason).into_eth_err()
+            }
         }
     }
 }

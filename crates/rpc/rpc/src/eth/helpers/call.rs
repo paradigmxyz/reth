@@ -1,13 +1,14 @@
 //! Contains RPC handler implementations specific to endpoints that call/execute within evm.
 
+use crate::EthApi;
 use alloy_consensus::Header;
 use reth_evm::ConfigureEvm;
-use reth_rpc_eth_api::helpers::{Call, EthCall, LoadPendingBlock, LoadState, SpawnBlocking};
-
-use crate::EthApi;
+use reth_rpc_eth_api::helpers::{
+    estimate::EstimateCall, Call, EthCall, LoadPendingBlock, LoadState, SpawnBlocking,
+};
 
 impl<Provider, Pool, Network, EvmConfig> EthCall for EthApi<Provider, Pool, Network, EvmConfig> where
-    Self: Call + LoadPendingBlock
+    Self: EstimateCall + LoadPendingBlock
 {
 }
 
@@ -25,4 +26,9 @@ where
     fn max_simulate_blocks(&self) -> u64 {
         self.inner.max_simulate_blocks()
     }
+}
+
+impl<Provider, Pool, Network, EvmConfig> EstimateCall for EthApi<Provider, Pool, Network, EvmConfig> where
+    Self: Call
+{
 }
