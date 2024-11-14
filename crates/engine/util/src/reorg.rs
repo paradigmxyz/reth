@@ -1,6 +1,6 @@
 //! Stream wrapper that simulates reorgs.
 
-use alloy_consensus::Transaction;
+use alloy_consensus::{Header, Transaction};
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState, PayloadStatus,
@@ -8,7 +8,7 @@ use alloy_rpc_types_engine::{
 use futures::{stream::FuturesUnordered, Stream, StreamExt, TryFutureExt};
 use itertools::Either;
 use reth_beacon_consensus::{BeaconEngineMessage, BeaconOnNewPayloadError, OnForkChoiceUpdated};
-use reth_engine_primitives::EngineTypes;
+use reth_engine_primitives::{EngineApiMessageVersion, EngineTypes};
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
 use reth_ethereum_forks::EthereumHardforks;
 use reth_evm::{
@@ -16,7 +16,7 @@ use reth_evm::{
     ConfigureEvm,
 };
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{proofs, Block, BlockBody, Header, Receipt, Receipts};
+use reth_primitives::{proofs, Block, BlockBody, Receipt, Receipts};
 use reth_provider::{BlockReader, ExecutionOutcome, ProviderError, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
@@ -211,18 +211,32 @@ where
                             state: reorg_forkchoice_state,
                             payload_attrs: None,
                             tx: reorg_fcu_tx,
+                            version: EngineApiMessageVersion::default(),
                         },
                     ]);
                     *this.state = EngineReorgState::Reorg { queue };
                     continue
                 }
-                (Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx }), _) => {
+                (
+                    Some(BeaconEngineMessage::ForkchoiceUpdated {
+                        state,
+                        payload_attrs,
+                        tx,
+                        version,
+                    }),
+                    _,
+                ) => {
                     // Record last forkchoice state forwarded to the engine.
                     // We do not care if it's valid since engine should be able to handle
                     // reorgs that rely on invalid forkchoice state.
                     *this.last_forkchoice_state = Some(state);
                     *this.forkchoice_states_forwarded += 1;
-                    Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx })
+                    Some(BeaconEngineMessage::ForkchoiceUpdated {
+                        state,
+                        payload_attrs,
+                        tx,
+                        version,
+                    })
                 }
                 (item, _) => item,
             };
@@ -289,7 +303,7 @@ where
     let mut evm = evm_config.evm_with_env(&mut state, env);
 
     // apply eip-4788 pre block contract call
-    let mut system_caller = SystemCaller::new(evm_config.clone(), chain_spec);
+    let mut system_caller = SystemCaller::new(evm_config.clone(), chain_spec.clone());
 
     system_caller.apply_beacon_root_contract_call(
         reorg_target.timestamp,
@@ -361,7 +375,7 @@ where
     // and 4788 contract call
     state.merge_transitions(BundleRetention::PlainState);
 
-    let outcome = ExecutionOutcome::new(
+    let outcome: ExecutionOutcome = ExecutionOutcome::new(
         state.take_bundle(),
         Receipts::from(vec![receipts]),
         reorg_target.number,

@@ -1,18 +1,20 @@
+use alloc::{vec, vec::Vec};
+use core::{cmp::Ordering, ops::Deref};
+
+use alloy_consensus::{
+    constants::{EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID},
+    Eip658Value, TxReceipt,
+};
+use alloy_eips::eip2718::Encodable2718;
+use alloy_primitives::{Bloom, Log, B256};
+use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
+use bytes::{Buf, BufMut};
+use derive_more::{DerefMut, From, IntoIterator};
+use serde::{Deserialize, Serialize};
+
 #[cfg(feature = "reth-codec")]
 use crate::compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR};
 use crate::TxType;
-use alloc::{vec, vec::Vec};
-use alloy_consensus::constants::{
-    EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
-};
-use alloy_primitives::{Bloom, Bytes, Log, B256};
-use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
-use bytes::{Buf, BufMut};
-use core::{cmp::Ordering, ops::Deref};
-use derive_more::{DerefMut, From, IntoIterator};
-#[cfg(feature = "reth-codec")]
-use reth_codecs::Compact;
-use serde::{Deserialize, Serialize};
 
 /// Receipt containing result of transaction execution.
 #[derive(
@@ -65,6 +67,42 @@ impl Receipt {
     }
 }
 
+// todo: replace with alloy receipt
+impl TxReceipt for Receipt {
+    fn status_or_post_state(&self) -> Eip658Value {
+        self.success.into()
+    }
+
+    fn status(&self) -> bool {
+        self.success
+    }
+
+    fn bloom(&self) -> Bloom {
+        alloy_primitives::logs_bloom(self.logs.iter())
+    }
+
+    fn cumulative_gas_used(&self) -> u128 {
+        self.cumulative_gas_used as u128
+    }
+
+    fn logs(&self) -> &[Log] {
+        &self.logs
+    }
+}
+
+impl reth_primitives_traits::Receipt for Receipt {
+    fn tx_type(&self) -> u8 {
+        self.tx_type as u8
+    }
+
+    fn receipts_root(_receipts: &[&Self]) -> B256 {
+        #[cfg(feature = "optimism")]
+        panic!("This should not be called in optimism mode. Use `optimism_receipts_root_slow` instead.");
+        #[cfg(not(feature = "optimism"))]
+        crate::proofs::calculate_receipt_root_no_memo(_receipts)
+    }
+}
+
 /// A collection of receipts organized as a two-dimensional vector.
 #[derive(
     Clone,
@@ -79,43 +117,43 @@ impl Receipt {
     DerefMut,
     IntoIterator,
 )]
-pub struct Receipts {
+pub struct Receipts<T = Receipt> {
     /// A two-dimensional vector of optional `Receipt` instances.
-    pub receipt_vec: Vec<Vec<Option<Receipt>>>,
+    pub receipt_vec: Vec<Vec<Option<T>>>,
 }
 
-impl Receipts {
+impl<T> Receipts<T> {
     /// Returns the length of the `Receipts` vector.
     pub fn len(&self) -> usize {
         self.receipt_vec.len()
     }
 
-    /// Returns `true` if the `Receipts` vector is empty.
+    /// Returns true if the `Receipts` vector is empty.
     pub fn is_empty(&self) -> bool {
         self.receipt_vec.is_empty()
     }
 
     /// Push a new vector of receipts into the `Receipts` collection.
-    pub fn push(&mut self, receipts: Vec<Option<Receipt>>) {
+    pub fn push(&mut self, receipts: Vec<Option<T>>) {
         self.receipt_vec.push(receipts);
     }
 
     /// Retrieves all recorded receipts from index and calculates the root using the given closure.
-    pub fn root_slow(&self, index: usize, f: impl FnOnce(&[&Receipt]) -> B256) -> Option<B256> {
+    pub fn root_slow(&self, index: usize, f: impl FnOnce(&[&T]) -> B256) -> Option<B256> {
         let receipts =
             self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?;
         Some(f(receipts.as_slice()))
     }
 }
 
-impl From<Vec<Receipt>> for Receipts {
-    fn from(block_receipts: Vec<Receipt>) -> Self {
+impl<T> From<Vec<T>> for Receipts<T> {
+    fn from(block_receipts: Vec<T>) -> Self {
         Self { receipt_vec: vec![block_receipts.into_iter().map(Option::Some).collect()] }
     }
 }
 
-impl FromIterator<Vec<Option<Receipt>>> for Receipts {
-    fn from_iter<I: IntoIterator<Item = Vec<Option<Receipt>>>>(iter: I) -> Self {
+impl<T> FromIterator<Vec<Option<T>>> for Receipts<T> {
+    fn from_iter<I: IntoIterator<Item = Vec<Option<T>>>>(iter: I) -> Self {
         iter.into_iter().collect::<Vec<_>>().into()
     }
 }
@@ -204,14 +242,20 @@ impl<'a> arbitrary::Arbitrary<'a> for Receipt {
     }
 }
 
-impl ReceiptWithBloom {
-    /// Returns the enveloped encoded receipt.
-    ///
-    /// See also [`ReceiptWithBloom::encode_enveloped`]
-    pub fn envelope_encoded(&self) -> Bytes {
-        let mut buf = Vec::new();
-        self.encode_enveloped(&mut buf);
-        buf.into()
+impl Encodable2718 for ReceiptWithBloom {
+    fn type_flag(&self) -> Option<u8> {
+        match self.receipt.tx_type {
+            TxType::Legacy => None,
+            tx_type => Some(tx_type as u8),
+        }
+    }
+
+    fn encode_2718_len(&self) -> usize {
+        let encoder = self.as_encoder();
+        match self.receipt.tx_type {
+            TxType::Legacy => encoder.receipt_length(),
+            _ => 1 + encoder.receipt_length(), // 1 byte for the type prefix
+        }
     }
 
     /// Encodes the receipt into its "raw" format.
@@ -223,10 +267,18 @@ impl ReceiptWithBloom {
     /// of the receipt:
     /// - EIP-1559, 2930 and 4844 transactions: `tx-type || rlp([status, cumulativeGasUsed,
     ///   logsBloom, logs])`
-    pub fn encode_enveloped(&self, out: &mut dyn bytes::BufMut) {
+    fn encode_2718(&self, out: &mut dyn BufMut) {
         self.encode_inner(out, false)
     }
 
+    fn encoded_2718(&self) -> Vec<u8> {
+        let mut out = vec![];
+        self.encode_2718(&mut out);
+        out
+    }
+}
+
+impl ReceiptWithBloom {
     /// Encode receipt with or without the header data.
     pub fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
         self.as_encoder().encode_inner(out, with_header)
@@ -501,7 +553,9 @@ impl Encodable for ReceiptWithBloomEncoder<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::revm_primitives::Bytes;
     use alloy_primitives::{address, b256, bytes, hex_literal::hex};
+    use reth_codecs::Compact;
 
     #[test]
     fn test_decode_receipt() {
@@ -660,5 +714,51 @@ mod tests {
         receipt.to_compact(&mut data);
         let (decoded, _) = Receipt::from_compact(&data[..], data.len());
         assert_eq!(decoded, receipt);
+    }
+
+    #[test]
+    fn test_encode_2718_length() {
+        let receipt = ReceiptWithBloom {
+            receipt: Receipt {
+                tx_type: TxType::Eip1559,
+                success: true,
+                cumulative_gas_used: 21000,
+                logs: vec![],
+                #[cfg(feature = "optimism")]
+                deposit_nonce: None,
+                #[cfg(feature = "optimism")]
+                deposit_receipt_version: None,
+            },
+            bloom: Bloom::default(),
+        };
+
+        let encoded = receipt.encoded_2718();
+        assert_eq!(
+            encoded.len(),
+            receipt.encode_2718_len(),
+            "Encoded length should match the actual encoded data length"
+        );
+
+        // Test for legacy receipt as well
+        let legacy_receipt = ReceiptWithBloom {
+            receipt: Receipt {
+                tx_type: TxType::Legacy,
+                success: true,
+                cumulative_gas_used: 21000,
+                logs: vec![],
+                #[cfg(feature = "optimism")]
+                deposit_nonce: None,
+                #[cfg(feature = "optimism")]
+                deposit_receipt_version: None,
+            },
+            bloom: Bloom::default(),
+        };
+
+        let legacy_encoded = legacy_receipt.encoded_2718();
+        assert_eq!(
+            legacy_encoded.len(),
+            legacy_receipt.encode_2718_len(),
+            "Encoded length for legacy receipt should match the actual encoded data length"
+        );
     }
 }

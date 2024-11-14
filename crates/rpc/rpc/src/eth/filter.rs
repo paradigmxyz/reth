@@ -10,17 +10,18 @@ use std::{
 };
 
 use alloy_primitives::TxHash;
-use alloy_rpc_types::{
+use alloy_rpc_types_eth::{
     BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
     PendingTransactionFilterKind,
 };
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_chainspec::ChainInfo;
-use reth_node_api::EthApiTypes;
 use reth_primitives::{Receipt, SealedBlockWithSenders, TransactionSignedEcRecovered};
-use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
-use reth_rpc_eth_api::{EthFilterApiServer, FullEthApiTypes, RpcTransaction, TransactionCompat};
+use reth_provider::{BlockIdReader, BlockReader, ProviderError};
+use reth_rpc_eth_api::{
+    EthApiTypes, EthFilterApiServer, FullEthApiTypes, RpcTransaction, TransactionCompat,
+};
 use reth_rpc_eth_types::{
     logs_utils::{self, append_matching_block_logs, ProviderOrBlock},
     EthApiError, EthFilterConfig, EthStateCache, EthSubscriptionIdProvider,
@@ -33,7 +34,7 @@ use tokio::{
     sync::{mpsc::Receiver, Mutex},
     time::MissedTickBehavior,
 };
-use tracing::trace;
+use tracing::{error, trace};
 
 /// The maximum number of headers we read at once when handling a range filter.
 const MAX_HEADERS_RANGE: u64 = 1_000; // with ~530bytes per header this is ~500kb
@@ -143,9 +144,8 @@ where
 
 impl<Provider, Pool, Eth> EthFilter<Provider, Pool, Eth>
 where
-    Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
-    Pool: TransactionPool + 'static,
-    <Pool as TransactionPool>::Transaction: 'static,
+    Provider: BlockReader + BlockIdReader + 'static,
+    Pool: TransactionPool<Transaction: 'static> + 'static,
     Eth: FullEthApiTypes,
 {
     /// Returns all the filter changes for the given id, if any
@@ -244,7 +244,7 @@ where
 impl<Provider, Pool, Eth> EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>>
     for EthFilter<Provider, Pool, Eth>
 where
-    Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
+    Provider: BlockReader + BlockIdReader + 'static,
     Pool: TransactionPool + 'static,
     Eth: FullEthApiTypes + 'static,
 {
@@ -367,7 +367,7 @@ struct EthFilterInner<Provider, Pool, Tx> {
 
 impl<Provider, Pool, Tx> EthFilterInner<Provider, Pool, Tx>
 where
-    Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
+    Provider: BlockReader + BlockIdReader + 'static,
     Pool: TransactionPool + 'static,
 {
     /// Returns logs matching given filter object.
@@ -625,10 +625,15 @@ where
         let mut prepared_stream = self.txs_stream.lock().await;
 
         while let Ok(tx) = prepared_stream.try_recv() {
-            pending_txs.push(from_recovered(
-                tx.transaction.to_recovered_transaction(),
-                &self.tx_resp_builder,
-            ))
+            match from_recovered(tx.transaction.to_recovered_transaction(), &self.tx_resp_builder) {
+                Ok(tx) => pending_txs.push(tx),
+                Err(err) => {
+                    error!(target: "rpc",
+                        %err,
+                        "Failed to fill txn with block context"
+                    );
+                }
+            }
         }
         FilterChanges::Transactions(pending_txs)
     }

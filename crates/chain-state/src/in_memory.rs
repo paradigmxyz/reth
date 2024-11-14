@@ -4,6 +4,7 @@ use crate::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
     ChainInfoTracker, MemoryOverlayStateProvider,
 };
+use alloy_consensus::Header;
 use alloy_eips::{BlockHashOrNumber, BlockNumHash};
 use alloy_primitives::{map::HashMap, Address, TxHash, B256};
 use parking_lot::RwLock;
@@ -11,7 +12,7 @@ use reth_chainspec::ChainInfo;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives::{
-    BlockWithSenders, Header, Receipt, Receipts, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    BlockWithSenders, Receipt, Receipts, SealedBlock, SealedBlockWithSenders, SealedHeader,
     TransactionMeta, TransactionSigned,
 };
 use reth_storage_api::StateProviderBox;
@@ -269,7 +270,7 @@ impl CanonicalInMemoryState {
             // insert the new blocks
             for block in new_blocks {
                 let parent = blocks.get(&block.block().parent_hash).cloned();
-                let block_state = BlockState::with_parent(block.clone(), parent);
+                let block_state = BlockState::with_parent(block, parent);
                 let hash = block_state.hash();
                 let number = block_state.number();
 
@@ -338,7 +339,7 @@ impl CanonicalInMemoryState {
             // re-insert the blocks in natural order and connect them to their parent blocks
             for block in old_blocks {
                 let parent = blocks.get(&block.block().parent_hash).cloned();
-                let block_state = BlockState::with_parent(block.clone(), parent);
+                let block_state = BlockState::with_parent(block, parent);
                 let hash = block_state.hash();
                 let number = block_state.number();
 
@@ -777,7 +778,7 @@ pub struct ExecutedBlock {
     pub senders: Arc<Vec<Address>>,
     /// Block's execution outcome.
     pub execution_output: Arc<ExecutionOutcome>,
-    /// Block's hashedst state.
+    /// Block's hashed state.
     pub hashed_state: Arc<HashedPostState>,
     /// Trie updates that result of applying the block.
     pub trie: Arc<TrieUpdates>,

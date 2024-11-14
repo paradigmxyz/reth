@@ -1,24 +1,25 @@
 //! Loads a pending block from database. Helper trait for `eth_` block, transaction, call and trace
 //! RPC methods.
 
-use alloy_consensus::constants::KECCAK_EMPTY;
+use alloy_consensus::{constants::KECCAK_EMPTY, Header};
+use alloy_eips::BlockId;
 use alloy_primitives::{Address, Bytes, B256, U256};
-use alloy_rpc_types::{serde_helpers::JsonStorageKey, Account, EIP1186AccountProofResponse};
+use alloy_rpc_types_eth::{Account, EIP1186AccountProofResponse};
+use alloy_serde::JsonStorageKey;
 use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
 use reth_evm::ConfigureEvmEnv;
-use reth_primitives::{BlockId, Header};
 use reth_provider::{
     BlockIdReader, BlockNumReader, ChainSpecProvider, StateProvider, StateProviderBox,
     StateProviderFactory,
 };
-use reth_rpc_eth_types::{EthApiError, EthStateCache, PendingBlockEnv, RpcInvalidTransactionError};
+use reth_rpc_eth_types::{EthApiError, PendingBlockEnv, RpcInvalidTransactionError};
 use reth_rpc_types_compat::proof::from_primitive_account_proof;
 use reth_transaction_pool::TransactionPool;
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
 
-use crate::{EthApiTypes, FromEthApiError};
+use crate::{EthApiTypes, FromEthApiError, RpcNodeCore, RpcNodeCoreExt};
 
 use super::{EthApiSpec, LoadPendingBlock, SpawnBlocking};
 
@@ -29,7 +30,7 @@ pub trait EthState: LoadState + SpawnBlocking {
 
     /// Returns the number of transactions sent from an address at the given block identifier.
     ///
-    /// If this is [`BlockNumberOrTag::Pending`](reth_primitives::BlockNumberOrTag) then this will
+    /// If this is [`BlockNumberOrTag::Pending`](alloy_eips::BlockNumberOrTag) then this will
     /// look up the highest transaction in pool and return the next nonce (highest + 1).
     fn transaction_count(
         &self,
@@ -73,7 +74,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         self.spawn_blocking_io(move |this| {
             Ok(B256::new(
                 this.state_at_block_id_or_latest(block_id)?
-                    .storage(address, index.0)
+                    .storage(address, index.as_b256())
                     .map_err(Self::Error::from_eth_err)?
                     .unwrap_or_default()
                     .to_be_bytes(),
@@ -105,7 +106,8 @@ pub trait EthState: LoadState + SpawnBlocking {
             let block_id = block_id.unwrap_or_default();
 
             // Check whether the distance to the block exceeds the maximum configured window.
-            let block_number = LoadState::provider(self)
+            let block_number = self
+                .provider()
                 .block_number_for_id(block_id)
                 .map_err(Self::Error::from_eth_err)?
                 .ok_or(EthApiError::HeaderNotFound(block_id))?;
@@ -116,11 +118,11 @@ pub trait EthState: LoadState + SpawnBlocking {
 
             self.spawn_blocking_io(move |this| {
                 let state = this.state_at_block_id(block_id)?;
-                let storage_keys = keys.iter().map(|key| key.0).collect::<Vec<_>>();
+                let storage_keys = keys.iter().map(|key| key.as_b256()).collect::<Vec<_>>();
                 let proof = state
                     .proof(Default::default(), address, &storage_keys)
                     .map_err(Self::Error::from_eth_err)?;
-                Ok(from_primitive_account_proof(proof))
+                Ok(from_primitive_account_proof(proof, keys))
             })
             .await
         })
@@ -138,9 +140,9 @@ pub trait EthState: LoadState + SpawnBlocking {
             let Some(account) = account else { return Ok(None) };
 
             // Check whether the distance to the block exceeds the maximum configured proof window.
-            let chain_info =
-                LoadState::provider(&this).chain_info().map_err(Self::Error::from_eth_err)?;
-            let block_number = LoadState::provider(&this)
+            let chain_info = this.provider().chain_info().map_err(Self::Error::from_eth_err)?;
+            let block_number = this
+                .provider()
                 .block_number_for_id(block_id)
                 .map_err(Self::Error::from_eth_err)?
                 .ok_or(EthApiError::HeaderNotFound(block_id))?;
@@ -167,24 +169,14 @@ pub trait EthState: LoadState + SpawnBlocking {
 /// Loads state from database.
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` state RPC methods.
-pub trait LoadState: EthApiTypes {
-    /// Returns a handle for reading state from database.
-    ///
-    /// Data access in default trait method implementations.
-    fn provider(
-        &self,
-    ) -> impl StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>;
-
-    /// Returns a handle for reading data from memory.
-    ///
-    /// Data access in default (L1) trait method implementations.
-    fn cache(&self) -> &EthStateCache;
-
-    /// Returns a handle for reading data from transaction pool.
-    ///
-    /// Data access in default trait method implementations.
-    fn pool(&self) -> impl TransactionPool;
-
+pub trait LoadState:
+    EthApiTypes
+    + RpcNodeCoreExt<
+        Provider: StateProviderFactory
+                      + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>,
+        Pool: TransactionPool,
+    >
+{
     /// Returns the state at the given block number
     fn state_at_hash(&self, block_hash: B256) -> Result<StateProviderBox, Self::Error> {
         self.provider().history_by_block_hash(block_hash).map_err(Self::Error::from_eth_err)
@@ -192,7 +184,7 @@ pub trait LoadState: EthApiTypes {
 
     /// Returns the state at the given [`BlockId`] enum.
     ///
-    /// Note: if not [`BlockNumberOrTag::Pending`](reth_primitives::BlockNumberOrTag) then this
+    /// Note: if not [`BlockNumberOrTag::Pending`](alloy_eips::BlockNumberOrTag) then this
     /// will only return canonical state. See also <https://github.com/paradigmxyz/reth/issues/4515>
     fn state_at_block_id(&self, at: BlockId) -> Result<StateProviderBox, Self::Error> {
         self.provider().state_by_block_id(at).map_err(Self::Error::from_eth_err)
@@ -237,7 +229,7 @@ pub trait LoadState: EthApiTypes {
                 Ok((cfg, block_env, origin.state_block_id()))
             } else {
                 // Use cached values if there is no pending block
-                let block_hash = LoadPendingBlock::provider(self)
+                let block_hash = RpcNodeCore::provider(self)
                     .block_hash_for_id(at)
                     .map_err(Self::Error::from_eth_err)?
                     .ok_or(EthApiError::HeaderNotFound(at))?;
@@ -310,7 +302,7 @@ pub trait LoadState: EthApiTypes {
 
     /// Returns the number of transactions sent from an address at the given block identifier.
     ///
-    /// If this is [`BlockNumberOrTag::Pending`](reth_primitives::BlockNumberOrTag) then this will
+    /// If this is [`BlockNumberOrTag::Pending`](alloy_eips::BlockNumberOrTag) then this will
     /// look up the highest transaction in pool and return the next nonce (highest + 1).
     fn transaction_count(
         &self,

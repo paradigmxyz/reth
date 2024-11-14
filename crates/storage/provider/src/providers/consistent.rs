@@ -6,8 +6,12 @@ use crate::{
     StageCheckpointReader, StateReader, StaticFileProviderFactory, TransactionVariant,
     TransactionsProvider, WithdrawalsProvider,
 };
-use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, HashOrNumber};
-use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable, TxHash, TxNumber, B256, U256};
+use alloy_consensus::Header;
+use alloy_eips::{
+    eip4895::{Withdrawal, Withdrawals},
+    BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, HashOrNumber,
+};
+use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStateProviderRef};
 use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_db::models::BlockNumberAddress;
@@ -15,9 +19,8 @@ use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::{BundleStateInit, ExecutionOutcome, RevertsInit};
 use reth_primitives::{
-    Account, Block, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
-    Withdrawal, Withdrawals,
+    Account, Block, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -296,7 +299,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     ) -> ProviderResult<Vec<T>>
     where
         F: FnOnce(
-            &DatabaseProviderRO<N::DB, N::ChainSpec>,
+            &DatabaseProviderRO<N::DB, N>,
             RangeInclusive<BlockNumber>,
             &mut P,
         ) -> ProviderResult<Vec<T>>,
@@ -413,7 +416,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     ) -> ProviderResult<Vec<R>>
     where
         S: FnOnce(
-            &DatabaseProviderRO<N::DB, N::ChainSpec>,
+            &DatabaseProviderRO<N::DB, N>,
             RangeInclusive<TxNumber>,
         ) -> ProviderResult<Vec<R>>,
         M: Fn(RangeInclusive<usize>, &BlockState) -> ProviderResult<Vec<R>>,
@@ -511,7 +514,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         fetch_from_block_state: M,
     ) -> ProviderResult<Option<R>>
     where
-        S: FnOnce(&DatabaseProviderRO<N::DB, N::ChainSpec>) -> ProviderResult<Option<R>>,
+        S: FnOnce(&DatabaseProviderRO<N::DB, N>) -> ProviderResult<Option<R>>,
         M: Fn(usize, TxNumber, &BlockState) -> ProviderResult<Option<R>>,
     {
         let in_mem_chain = self.head_block.iter().flat_map(|b| b.chain()).collect::<Vec<_>>();
@@ -578,7 +581,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         fetch_from_block_state: M,
     ) -> ProviderResult<R>
     where
-        S: FnOnce(&DatabaseProviderRO<N::DB, N::ChainSpec>) -> ProviderResult<R>,
+        S: FnOnce(&DatabaseProviderRO<N::DB, N>) -> ProviderResult<R>,
         M: Fn(&BlockState) -> ProviderResult<R>,
     {
         if let Some(Some(block_state)) = self.head_block.as_ref().map(|b| b.block_on_chain(id)) {
@@ -1322,34 +1325,20 @@ impl<N: ProviderNodeTypes> BlockReaderIdExt for ConsistentProvider<N> {
                 Ok(self.canonical_in_memory_state.get_finalized_header())
             }
             BlockNumberOrTag::Safe => Ok(self.canonical_in_memory_state.get_safe_header()),
-            BlockNumberOrTag::Earliest => self.header_by_number(0)?.map_or_else(
-                || Ok(None),
-                |h| {
-                    let sealed = h.seal_slow();
-                    let (header, seal) = sealed.into_parts();
-                    Ok(Some(SealedHeader::new(header, seal)))
-                },
-            ),
+            BlockNumberOrTag::Earliest => self
+                .header_by_number(0)?
+                .map_or_else(|| Ok(None), |h| Ok(Some(SealedHeader::seal(h)))),
             BlockNumberOrTag::Pending => Ok(self.canonical_in_memory_state.pending_sealed_header()),
-            BlockNumberOrTag::Number(num) => self.header_by_number(num)?.map_or_else(
-                || Ok(None),
-                |h| {
-                    let sealed = h.seal_slow();
-                    let (header, seal) = sealed.into_parts();
-                    Ok(Some(SealedHeader::new(header, seal)))
-                },
-            ),
+            BlockNumberOrTag::Number(num) => self
+                .header_by_number(num)?
+                .map_or_else(|| Ok(None), |h| Ok(Some(SealedHeader::seal(h)))),
         }
     }
 
     fn sealed_header_by_id(&self, id: BlockId) -> ProviderResult<Option<SealedHeader>> {
         Ok(match id {
             BlockId::Number(num) => self.sealed_header_by_number_or_tag(num)?,
-            BlockId::Hash(hash) => self.header(&hash.block_hash)?.map(|h| {
-                let sealed = h.seal_slow();
-                let (header, seal) = sealed.into_parts();
-                SealedHeader::new(header, seal)
-            }),
+            BlockId::Hash(hash) => self.header(&hash.block_hash)?.map(SealedHeader::seal),
         })
     }
 
@@ -1386,7 +1375,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                 .bundle
                 .reverts
                 .clone()
-                .into_plain_state_reverts()
+                .to_plain_state_reverts()
                 .storage
                 .into_iter()
                 .flatten()
@@ -1439,7 +1428,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
                 .bundle
                 .reverts
                 .clone()
-                .into_plain_state_reverts()
+                .to_plain_state_reverts()
                 .accounts
                 .into_iter()
                 .flatten()

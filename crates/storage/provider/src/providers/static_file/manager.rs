@@ -7,7 +7,11 @@ use crate::{
     ReceiptProvider, StageCheckpointReader, StatsReader, TransactionVariant, TransactionsProvider,
     TransactionsProviderExt, WithdrawalsProvider,
 };
-use alloy_eips::BlockHashOrNumber;
+use alloy_consensus::Header;
+use alloy_eips::{
+    eip4895::{Withdrawal, Withdrawals},
+    BlockHashOrNumber,
+};
 use alloy_primitives::{keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use dashmap::DashMap;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
@@ -30,9 +34,8 @@ use reth_primitives::{
         find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive,
         DEFAULT_BLOCKS_PER_STATIC_FILE,
     },
-    Block, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    StaticFileSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash, Withdrawal,
-    Withdrawals,
+    Block, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    StaticFileSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
 };
 use reth_stages_types::{PipelineTarget, StageId};
 use reth_storage_api::DBProvider;
@@ -1646,7 +1649,7 @@ impl StatsReader for StaticFileProvider {
     fn count_entries<T: Table>(&self) -> ProviderResult<usize> {
         match T::NAME {
             tables::CanonicalHeaders::NAME |
-            tables::Headers::NAME |
+            tables::Headers::<Header>::NAME |
             tables::HeaderTerminalDifficulties::NAME => Ok(self
                 .get_highest_static_file_block(StaticFileSegment::Headers)
                 .map(|block| block + 1)
@@ -1656,10 +1659,11 @@ impl StatsReader for StaticFileProvider {
                 .get_highest_static_file_tx(StaticFileSegment::Receipts)
                 .map(|receipts| receipts + 1)
                 .unwrap_or_default() as usize),
-            tables::Transactions::NAME => Ok(self
+            tables::Transactions::<TransactionSignedNoHash>::NAME => Ok(self
                 .get_highest_static_file_tx(StaticFileSegment::Transactions)
                 .map(|txs| txs + 1)
-                .unwrap_or_default() as usize),
+                .unwrap_or_default()
+                as usize),
             _ => Err(ProviderError::UnsupportedProvider),
         }
     }
@@ -1672,6 +1676,6 @@ fn calculate_hash(
     rlp_buf: &mut Vec<u8>,
 ) -> Result<(B256, TxNumber), Box<ProviderError>> {
     let (tx_id, tx) = entry;
-    tx.transaction.encode_with_signature(&tx.signature, rlp_buf, false);
+    tx.transaction.eip2718_encode(&tx.signature, rlp_buf);
     Ok((keccak256(rlp_buf), tx_id))
 }

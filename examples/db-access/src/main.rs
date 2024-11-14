@@ -1,5 +1,5 @@
-use alloy_primitives::{Address, Sealable, B256};
-use alloy_rpc_types::{Filter, FilteredParams};
+use alloy_primitives::{Address, B256};
+use alloy_rpc_types_eth::{Filter, FilteredParams};
 use reth_chainspec::ChainSpecBuilder;
 use reth_db::{open_db_read_only, DatabaseEnv};
 use reth_node_ethereum::EthereumNode;
@@ -63,9 +63,7 @@ fn header_provider_example<T: HeaderProvider>(provider: T, number: u64) -> eyre:
 
     // We can convert a header to a sealed header which contains the hash w/o needing to re-compute
     // it every time.
-    let sealed = header.seal_slow();
-    let (header, seal) = sealed.into_parts();
-    let sealed_header = SealedHeader::new(header, seal);
+    let sealed_header = SealedHeader::seal(header);
 
     // Can also query the header by hash!
     let header_by_hash =

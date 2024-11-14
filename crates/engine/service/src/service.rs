@@ -15,7 +15,7 @@ pub use reth_engine_tree::{
     engine::EngineApiEvent,
 };
 use reth_evm::execute::BlockExecutorProvider;
-use reth_network_p2p::BlockClient;
+use reth_network_p2p::EthBlockClient;
 use reth_node_types::NodeTypesWithEngine;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_validator::ExecutionPayloadValidator;
@@ -49,7 +49,7 @@ type EngineServiceType<N, Client> = ChainOrchestrator<
 pub struct EngineService<N, Client, E>
 where
     N: EngineNodeTypes,
-    Client: BlockClient + 'static,
+    Client: EthBlockClient + 'static,
     E: BlockExecutorProvider + 'static,
 {
     orchestrator: EngineServiceType<N, Client>,
@@ -59,7 +59,7 @@ where
 impl<N, Client, E> EngineService<N, Client, E>
 where
     N: EngineNodeTypes,
-    Client: BlockClient + 'static,
+    Client: EthBlockClient + 'static,
     E: BlockExecutorProvider + 'static,
 {
     /// Constructor for `EngineService`.
@@ -124,7 +124,7 @@ where
 impl<N, Client, E> Stream for EngineService<N, Client, E>
 where
     N: EngineNodeTypes,
-    Client: BlockClient + 'static,
+    Client: EthBlockClient + 'static,
     E: BlockExecutorProvider + 'static,
 {
     type Item = ChainEvent<BeaconConsensusEngineEvent>;

@@ -11,7 +11,6 @@ pub use exex::ExExLauncher;
 
 use std::{future::Future, sync::Arc};
 
-use alloy_primitives::utils::format_ether;
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
@@ -23,18 +22,16 @@ use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, 
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
 use reth_network::{BlockDownloaderProvider, NetworkEventListenerProvider};
-use reth_node_api::{
-    AddOnsContext, FullNodeComponents, FullNodeTypes, NodeTypesWithDB, NodeTypesWithEngine,
-};
+use reth_node_api::{AddOnsContext, FullNodeTypes, NodeTypesWithDB, NodeTypesWithEngine};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_provider::providers::BlockchainProvider;
+use reth_rpc::eth::RpcNodeCore;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
-use reth_transaction_pool::TransactionPool;
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -47,14 +44,14 @@ use crate::{
     AddOns, NodeBuilderWithComponents, NodeHandle,
 };
 
-/// Alias for [`reth_rpc_eth_types::EthApiBuilderCtx`], adapter for [`FullNodeComponents`].
+/// Alias for [`reth_rpc_eth_types::EthApiBuilderCtx`], adapter for [`RpcNodeCore`].
 pub type EthApiBuilderCtx<N> = reth_rpc_eth_types::EthApiBuilderCtx<
-    <N as FullNodeTypes>::Provider,
-    <N as FullNodeComponents>::Pool,
-    <N as FullNodeComponents>::Evm,
-    <N as FullNodeComponents>::Network,
+    <N as RpcNodeCore>::Provider,
+    <N as RpcNodeCore>::Pool,
+    <N as RpcNodeCore>::Evm,
+    <N as RpcNodeCore>::Network,
     TaskExecutor,
-    <N as FullNodeTypes>::Provider,
+    <N as RpcNodeCore>::Provider,
 >;
 
 /// A general purpose trait that launches a new node of any kind.
@@ -211,47 +208,7 @@ where
         let pipeline_exex_handle =
             exex_manager_handle.clone().unwrap_or_else(ExExManagerHandle::empty);
         let (pipeline, client) = if ctx.is_dev() {
-            info!(target: "reth::cli", "Starting Reth in dev mode");
-
-            for (idx, (address, alloc)) in ctx.chain_spec().genesis().alloc.iter().enumerate() {
-                info!(target: "reth::cli", "Allocated Genesis Account: {:02}. {} ({} ETH)", idx, address.to_string(), format_ether(alloc.balance));
-            }
-
-            // install auto-seal
-            let mining_mode =
-                ctx.dev_mining_mode(ctx.components().pool().pending_transactions_listener());
-            info!(target: "reth::cli", mode=%mining_mode, "configuring dev mining mode");
-
-            let (_, client, mut task) = reth_auto_seal_consensus::AutoSealBuilder::new(
-                ctx.chain_spec(),
-                ctx.blockchain_db().clone(),
-                ctx.components().pool().clone(),
-                consensus_engine_tx.clone(),
-                mining_mode,
-                ctx.components().block_executor().clone(),
-            )
-            .build();
-
-            let pipeline = crate::setup::build_networked_pipeline(
-                &ctx.toml_config().stages,
-                client.clone(),
-                ctx.consensus(),
-                ctx.provider_factory().clone(),
-                ctx.task_executor(),
-                ctx.sync_metrics_tx(),
-                ctx.prune_config(),
-                max_block,
-                static_file_producer,
-                ctx.components().block_executor().clone(),
-                pipeline_exex_handle,
-            )?;
-
-            let pipeline_events = pipeline.events();
-            task.set_pipeline_events(pipeline_events);
-            debug!(target: "reth::cli", "Spawning auto mine task");
-            ctx.task_executor().spawn(Box::pin(task));
-
-            (pipeline, Either::Left(client))
+            eyre::bail!("Dev mode is not supported for legacy engine")
         } else {
             let pipeline = crate::setup::build_networked_pipeline(
                 &ctx.toml_config().stages,
@@ -267,7 +224,7 @@ where
                 pipeline_exex_handle,
             )?;
 
-            (pipeline, Either::Right(network_client.clone()))
+            (pipeline, network_client.clone())
         };
 
         let pipeline_events = pipeline.events();
@@ -330,10 +287,10 @@ where
         let jwt_secret = ctx.auth_jwt_secret()?;
 
         let add_ons_ctx = AddOnsContext {
-            node: ctx.node_adapter(),
+            node: ctx.node_adapter().clone(),
             config: ctx.node_config(),
-            beacon_engine_handle: &beacon_engine_handle,
-            jwt_secret: &jwt_secret,
+            beacon_engine_handle,
+            jwt_secret,
         };
 
         let RpcHandle { rpc_server_handles, rpc_registry } =

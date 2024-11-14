@@ -15,6 +15,7 @@ use std::{
     task::Poll,
 };
 
+use alloy_eips::BlockNumHash;
 use futures_util::FutureExt;
 use reth_blockchain_tree::noop::NoopBlockchainTree;
 use reth_chainspec::{ChainSpec, MAINNET};
@@ -44,7 +45,7 @@ use reth_node_ethereum::{
     EthEngineTypes, EthEvmConfig,
 };
 use reth_payload_builder::noop::NoopPayloadBuilderService;
-use reth_primitives::{BlockNumHash, Head, SealedBlockWithSenders};
+use reth_primitives::{Head, SealedBlockWithSenders};
 use reth_provider::{
     providers::{BlockchainProvider, StaticFileProvider},
     BlockReader, ProviderFactory,
@@ -119,6 +120,7 @@ pub struct TestNode;
 impl NodeTypes for TestNode {
     type Primitives = ();
     type ChainSpec = ChainSpec;
+    type StateCommitment = reth_trie_db::MerklePatriciaTrie;
 }
 
 impl NodeTypesWithEngine for TestNode {

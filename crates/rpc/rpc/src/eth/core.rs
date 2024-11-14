@@ -3,14 +3,15 @@
 
 use std::sync::Arc;
 
-use alloy_network::AnyNetwork;
+use alloy_eips::BlockNumberOrTag;
+use alloy_network::Ethereum;
 use alloy_primitives::U256;
 use derive_more::Deref;
-use reth_primitives::BlockNumberOrTag;
 use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},
-    EthApiTypes,
+    node::RpcNodeCoreExt,
+    EthApiTypes, RpcNodeCore,
 };
 use reth_rpc_eth_types::{
     EthApiBuilderCtx, EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle,
@@ -131,12 +132,56 @@ where
     Self: Send + Sync,
 {
     type Error = EthApiError;
-    // todo: replace with alloy_network::Ethereum
-    type NetworkTypes = AnyNetwork;
+    type NetworkTypes = Ethereum;
     type TransactionCompat = EthTxBuilder;
 
     fn tx_resp_builder(&self) -> &Self::TransactionCompat {
         &self.tx_resp_builder
+    }
+}
+
+impl<Provider, Pool, Network, EvmConfig> RpcNodeCore for EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Provider: Send + Sync + Clone + Unpin,
+    Pool: Send + Sync + Clone + Unpin,
+    Network: Send + Sync + Clone,
+    EvmConfig: Send + Sync + Clone + Unpin,
+{
+    type Provider = Provider;
+    type Pool = Pool;
+    type Evm = EvmConfig;
+    type Network = Network;
+    type PayloadBuilder = ();
+
+    fn pool(&self) -> &Self::Pool {
+        self.inner.pool()
+    }
+
+    fn evm_config(&self) -> &Self::Evm {
+        self.inner.evm_config()
+    }
+
+    fn network(&self) -> &Self::Network {
+        self.inner.network()
+    }
+
+    fn payload_builder(&self) -> &Self::PayloadBuilder {
+        &()
+    }
+
+    fn provider(&self) -> &Self::Provider {
+        self.inner.provider()
+    }
+}
+
+impl<Provider, Pool, Network, EvmConfig> RpcNodeCoreExt
+    for EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Self: RpcNodeCore,
+{
+    #[inline]
+    fn cache(&self) -> &EthStateCache {
+        self.inner.cache()
     }
 }
 
@@ -360,13 +405,15 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
 
 #[cfg(test)]
 mod tests {
+    use alloy_consensus::Header;
+    use alloy_eips::BlockNumberOrTag;
     use alloy_primitives::{B256, U64};
     use alloy_rpc_types::FeeHistory;
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use reth_chainspec::{BaseFeeParams, ChainSpec, EthChainSpec};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
-    use reth_primitives::{Block, BlockBody, BlockNumberOrTag, Header, TransactionSigned};
+    use reth_primitives::{Block, BlockBody, TransactionSigned};
     use reth_provider::{
         test_utils::{MockEthProvider, NoopProvider},
         BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory,

@@ -1,3 +1,4 @@
+use alloy_consensus::Header;
 use alloy_primitives::{hex, private::getrandom::getrandom};
 use arbitrary::Arbitrary;
 use eyre::Result;
@@ -10,6 +11,7 @@ use proptest_arbitrary_interop::arb;
 use reth_db::tables;
 use reth_db_api::table::{DupSort, Table, TableRow};
 use reth_fs_util as fs;
+use reth_primitives::TransactionSignedNoHash;
 use std::collections::HashSet;
 use tracing::error;
 
@@ -31,16 +33,16 @@ pub fn generate_vectors(mut tables: Vec<String>) -> Result<()> {
     fs::create_dir_all(VECTORS_FOLDER)?;
 
     macro_rules! generate_vector {
-        ($table_type:ident, $per_table:expr, TABLE) => {
-            generate_table_vector::<tables::$table_type>(&mut runner, $per_table)?;
+        ($table_type:ident$(<$($generic:ident),+>)?, $per_table:expr, TABLE) => {
+            generate_table_vector::<tables::$table_type$(<$($generic),+>)?>(&mut runner, $per_table)?;
         };
-        ($table_type:ident, $per_table:expr, DUPSORT) => {
-            generate_dupsort_vector::<tables::$table_type>(&mut runner, $per_table)?;
+        ($table_type:ident$(<$($generic:ident),+>)?, $per_table:expr, DUPSORT) => {
+            generate_dupsort_vector::<tables::$table_type$(<$($generic),+>)?>(&mut runner, $per_table)?;
         };
     }
 
     macro_rules! generate {
-        ([$(($table_type:ident, $per_table:expr, $table_or_dup:tt)),*]) => {
+        ([$(($table_type:ident$(<$($generic:ident),+>)?, $per_table:expr, $table_or_dup:tt)),*]) => {
             let all_tables = vec![$(stringify!($table_type).to_string(),)*];
 
             if tables.is_empty() {
@@ -51,9 +53,9 @@ pub fn generate_vectors(mut tables: Vec<String>) -> Result<()> {
                 match table.as_str() {
                     $(
                         stringify!($table_type) => {
-                            println!("Generating test vectors for {} <{}>.", stringify!($table_or_dup), tables::$table_type::NAME);
+                            println!("Generating test vectors for {} <{}>.", stringify!($table_or_dup), tables::$table_type$(::<$($generic),+>)?::NAME);
 
-                            generate_vector!($table_type, $per_table, $table_or_dup);
+                            generate_vector!($table_type$(<$($generic),+>)?, $per_table, $table_or_dup);
                         },
                     )*
                     _ => {
@@ -68,11 +70,11 @@ pub fn generate_vectors(mut tables: Vec<String>) -> Result<()> {
         (CanonicalHeaders, PER_TABLE, TABLE),
         (HeaderTerminalDifficulties, PER_TABLE, TABLE),
         (HeaderNumbers, PER_TABLE, TABLE),
-        (Headers, PER_TABLE, TABLE),
+        (Headers<Header>, PER_TABLE, TABLE),
         (BlockBodyIndices, PER_TABLE, TABLE),
         (BlockOmmers, 100, TABLE),
         (TransactionHashNumbers, PER_TABLE, TABLE),
-        (Transactions, 100, TABLE),
+        (Transactions<TransactionSignedNoHash>, 100, TABLE),
         (PlainStorageState, PER_TABLE, DUPSORT),
         (PlainAccountState, PER_TABLE, TABLE)
     ]);

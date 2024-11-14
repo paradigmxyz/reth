@@ -25,6 +25,7 @@ revm.workspace = true
 alloy-rlp.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
+alloy-trie.workspace = true
 
 # tracing
 tracing.workspace = true
@@ -68,7 +69,8 @@ serde = [
 	"dep:serde",
 	"alloy-consensus/serde",
 	"alloy-primitives/serde",
-	"revm/serde"
+	"revm/serde",
+	"alloy-trie/serde"
 ]
 serde-bincode-compat = [
 	"serde_with",

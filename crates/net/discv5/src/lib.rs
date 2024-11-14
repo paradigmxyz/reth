@@ -95,14 +95,14 @@ impl Discv5 {
     /// CAUTION: The value **must** be rlp encoded
     pub fn set_eip868_in_local_enr(&self, key: Vec<u8>, rlp: Bytes) {
         let Ok(key_str) = std::str::from_utf8(&key) else {
-            error!(target: "discv5",
+            error!(target: "net::discv5",
                 err="key not utf-8",
                 "failed to update local enr"
             );
             return
         };
         if let Err(err) = self.discv5.enr_insert(key_str, &rlp) {
-            error!(target: "discv5",
+            error!(target: "net::discv5",
                 %err,
                 "failed to update local enr"
             );
@@ -131,7 +131,7 @@ impl Discv5 {
                 self.discv5.ban_node(&node_id, None);
                 self.ban_ip(ip);
             }
-            Err(err) => error!(target: "discv5",
+            Err(err) => error!(target: "net::discv5",
                 %err,
                 "failed to ban peer"
             ),
@@ -167,7 +167,7 @@ impl Discv5 {
         //
         let (enr, bc_enr, fork_key, rlpx_ip_mode) = build_local_enr(sk, &discv5_config);
 
-        trace!(target: "discv5",
+        trace!(target: "net::discv5",
             ?enr,
             "local ENR"
         );
@@ -271,7 +271,7 @@ impl Discv5 {
                 // to them over RLPx, to be compatible with EL discv5 implementations that don't
                 // enforce this security measure.
 
-                trace!(target: "discv5",
+                trace!(target: "net::discv5",
                     ?enr,
                     %socket,
                     "discovered unverifiable enr, source socket doesn't match socket advertised in ENR"
@@ -296,7 +296,7 @@ impl Discv5 {
         let node_record = match self.try_into_reachable(enr, socket) {
             Ok(enr_bc) => enr_bc,
             Err(err) => {
-                trace!(target: "discv5",
+                trace!(target: "net::discv5",
                     %err,
                     ?enr,
                     "discovered peer is unreachable"
@@ -308,7 +308,7 @@ impl Discv5 {
             }
         };
         if let FilterOutcome::Ignore { reason } = self.filter_discovered_peer(enr) {
-            trace!(target: "discv5",
+            trace!(target: "net::discv5",
                 ?enr,
                 reason,
                 "filtered out discovered peer"
@@ -324,7 +324,7 @@ impl Discv5 {
             .then(|| self.get_fork_id(enr).ok())
             .flatten();
 
-        trace!(target: "discv5",
+        trace!(target: "net::discv5",
             ?fork_id,
             ?enr,
             "discovered peer"
@@ -491,7 +491,7 @@ pub async fn bootstrap(
     bootstrap_nodes: HashSet<BootNode>,
     discv5: &Arc<discv5::Discv5>,
 ) -> Result<(), Error> {
-    trace!(target: "discv5",
+    trace!(target: "net::discv5",
         ?bootstrap_nodes,
         "adding bootstrap nodes .."
     );
@@ -508,7 +508,7 @@ pub async fn bootstrap(
                 let discv5 = discv5.clone();
                 enr_requests.push(async move {
                     if let Err(err) = discv5.request_enr(enode.to_string()).await {
-                        debug!(target: "discv5",
+                        debug!(target: "net::discv5",
                             ?enode,
                             %err,
                             "failed adding boot node"
@@ -545,7 +545,7 @@ pub fn spawn_populate_kbuckets_bg(
             for i in (0..bootstrap_lookup_countdown).rev() {
                 let target = discv5::enr::NodeId::random();
 
-                trace!(target: "discv5",
+                trace!(target: "net::discv5",
                     %target,
                     bootstrap_boost_runs_countdown=i,
                     lookup_interval=format!("{:#?}", pulse_lookup_interval),
@@ -563,7 +563,7 @@ pub fn spawn_populate_kbuckets_bg(
                 // selection (ref kademlia)
                 let target = get_lookup_target(kbucket_index, local_node_id);
 
-                trace!(target: "discv5",
+                trace!(target: "net::discv5",
                     %target,
                     lookup_interval=format!("{:#?}", lookup_interval),
                     "starting periodic lookup query"
@@ -628,11 +628,11 @@ pub async fn lookup(
     );
 
     match discv5.find_node(target).await {
-        Err(err) => trace!(target: "discv5",
+        Err(err) => trace!(target: "net::discv5",
             %err,
             "lookup query failed"
         ),
-        Ok(peers) => trace!(target: "discv5",
+        Ok(peers) => trace!(target: "net::discv5",
             target=format!("{:#?}", target),
             peers_count=peers.len(),
             peers=format!("[{:#}]", peers.iter()
@@ -645,7 +645,7 @@ pub async fn lookup(
     // `Discv5::connected_peers` can be subset of sessions, not all peers make it
     // into kbuckets, e.g. incoming sessions from peers with
     // unreachable enrs
-    debug!(target: "discv5",
+    debug!(target: "net::discv5",
         connected_peers=discv5.connected_peers(),
         "connected peers in routing table"
     );

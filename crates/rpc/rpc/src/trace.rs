@@ -1,9 +1,11 @@
+use alloy_consensus::Header;
+use alloy_eips::BlockId;
 use alloy_primitives::{map::HashSet, Bytes, B256, U256};
-use alloy_rpc_types::{
+use alloy_rpc_types_eth::{
     state::{EvmOverrides, StateOverride},
+    transaction::TransactionRequest,
     BlockOverrides, Index,
 };
-use alloy_rpc_types_eth::transaction::TransactionRequest;
 use alloy_rpc_types_trace::{
     filter::TraceFilter,
     opcode::{BlockOpcodeGas, TransactionOpcodeGas},
@@ -17,14 +19,10 @@ use reth_consensus_common::calc::{
     base_block_reward, base_block_reward_pre_merge, block_reward, ommer_reward,
 };
 use reth_evm::ConfigureEvmEnv;
-use reth_primitives::{BlockId, Header};
 use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::TraceApiServer;
-use reth_rpc_eth_api::{
-    helpers::{Call, TraceExt},
-    FromEthApiError,
-};
+use reth_rpc_eth_api::{helpers::TraceExt, FromEthApiError};
 use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction};
 use reth_tasks::pool::BlockingTaskGuard;
 use revm::{
@@ -124,7 +122,7 @@ where
         let env = EnvWithHandlerCfg::new_with_cfg_env(
             cfg,
             block,
-            Call::evm_config(self.eth_api()).tx_env(tx.as_signed(), tx.signer()),
+            self.eth_api().evm_config().tx_env(tx.as_signed(), tx.signer()),
         );
 
         let config = TracingInspectorConfig::from_parity_config(&trace_types);

@@ -86,9 +86,9 @@ use parking_lot::{Mutex, RwLock, RwLockReadGuard};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 
+use alloy_eips::eip4844::BlobTransactionSidecar;
 use reth_primitives::{
-    BlobTransaction, BlobTransactionSidecar, PooledTransactionsElement, TransactionSigned,
-    TransactionSignedEcRecovered,
+    BlobTransaction, PooledTransactionsElement, TransactionSigned, TransactionSignedEcRecovered,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -106,7 +106,10 @@ use crate::{
     traits::{GetPooledTransactionLimit, NewBlobSidecar, TransactionListenerKind},
     validate::ValidTransaction,
 };
-pub use best::BestTransactionFilter;
+pub use best::{
+    BestPayloadTransactions, BestTransactionFilter, BestTransactionsWithPrioritizedSenders,
+    PayloadTransactionsChain, PayloadTransactionsFixed,
+};
 pub use blob::{blob_tx_priority, fee_delta};
 pub use events::{FullTransactionEvent, TransactionEvent};
 pub use listener::{AllTransactionsEvents, TransactionEvents};
@@ -307,7 +310,9 @@ where
     /// Caution: this assumes the given transaction is eip-4844
     fn get_blob_transaction(&self, transaction: TransactionSigned) -> Option<BlobTransaction> {
         if let Ok(Some(sidecar)) = self.blob_store.get(transaction.hash()) {
-            if let Ok(blob) = BlobTransaction::try_from_signed(transaction, sidecar) {
+            if let Ok(blob) =
+                BlobTransaction::try_from_signed(transaction, Arc::unwrap_or_clone(sidecar))
+            {
                 return Some(blob)
             }
         }
@@ -389,7 +394,9 @@ where
         trace!(target: "txpool", ?update, "updating pool on canonical state change");
 
         let block_info = update.block_info();
-        let CanonicalStateUpdate { new_tip, changed_accounts, mined_transactions, .. } = update;
+        let CanonicalStateUpdate {
+            new_tip, changed_accounts, mined_transactions, update_kind, ..
+        } = update;
         self.validator.on_new_head_block(new_tip);
 
         let changed_senders = self.changed_senders(changed_accounts.into_iter());
@@ -399,6 +406,7 @@ where
             block_info,
             mined_transactions,
             changed_senders,
+            update_kind,
         );
 
         // This will discard outdated transactions based on the account's nonce
@@ -774,6 +782,32 @@ where
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let sender_id = self.get_sender_id(sender);
         self.get_pool_data().get_transactions_by_sender(sender_id)
+    }
+
+    /// Returns all queued transactions of the address by sender
+    pub(crate) fn get_queued_transactions_by_sender(
+        &self,
+        sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let sender_id = self.get_sender_id(sender);
+        self.get_pool_data().pending_txs_by_sender(sender_id)
+    }
+
+    /// Returns all pending transactions filtered by predicate
+    pub(crate) fn pending_transactions_with_predicate(
+        &self,
+        predicate: impl FnMut(&ValidPoolTransaction<T::Transaction>) -> bool,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.get_pool_data().pending_transactions_with_predicate(predicate)
+    }
+
+    /// Returns all pending transactions of the address by sender
+    pub(crate) fn get_pending_transactions_by_sender(
+        &self,
+        sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let sender_id = self.get_sender_id(sender);
+        self.get_pool_data().queued_txs_by_sender(sender_id)
     }
 
     /// Returns the highest transaction of the address
@@ -1218,7 +1252,8 @@ mod tests {
         validate::ValidTransaction,
         BlockInfo, PoolConfig, SubPoolLimit, TransactionOrigin, TransactionValidationOutcome, U256,
     };
-    use reth_primitives::{kzg::Blob, transaction::generate_blob_sidecar};
+    use alloy_eips::eip4844::BlobTransactionSidecar;
+    use reth_primitives::kzg::Blob;
     use std::{fs, path::PathBuf};
 
     #[test]
@@ -1253,7 +1288,7 @@ mod tests {
         .unwrap()];
 
         // Generate a BlobTransactionSidecar from the blobs.
-        let sidecar = generate_blob_sidecar(blobs);
+        let sidecar = BlobTransactionSidecar::try_from_blobs(blobs).unwrap();
 
         // Create an in-memory blob store.
         let blob_store = InMemoryBlobStore::default();

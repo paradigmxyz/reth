@@ -20,7 +20,7 @@ pub use crate::events::{Events, PayloadEvents};
 mod traits;
 pub use traits::{
     BuiltPayload, PayloadAttributes, PayloadAttributesBuilder, PayloadBuilder,
-    PayloadBuilderAttributes,
+    PayloadBuilderAttributes, PayloadStoreExt,
 };
 
 mod payload;
@@ -324,22 +324,23 @@ where
 }
 
 /// The version of Engine API message.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum EngineApiMessageVersion {
     /// Version 1
-    V1,
+    V1 = 1,
     /// Version 2
     ///
     /// Added in the Shanghai hardfork.
-    V2,
+    V2 = 2,
     /// Version 3
     ///
     /// Added in the Cancun hardfork.
-    V3,
+    #[default]
+    V3 = 3,
     /// Version 4
     ///
     /// Added in the Prague hardfork.
-    V4,
+    V4 = 4,
 }
 
 /// Determines how we should choose the payload to return.

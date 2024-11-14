@@ -1,5 +1,3 @@
-#![allow(deprecated)]
-
 use crate::{
     blobstore::BlobStoreError,
     error::{InvalidPoolTransactionError, PoolResult},
@@ -11,14 +9,17 @@ use alloy_consensus::{
     constants::{EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID},
     Transaction as _,
 };
-use alloy_eips::{eip2718::Encodable2718, eip2930::AccessList, eip4844::BlobAndProofV1};
+use alloy_eips::{
+    eip2718::Encodable2718,
+    eip2930::AccessList,
+    eip4844::{BlobAndProofV1, BlobTransactionSidecar, BlobTransactionValidationError},
+};
 use alloy_primitives::{Address, TxHash, TxKind, B256, U256};
 use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 use reth_primitives::{
-    kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, BlobTransactionSidecar,
-    BlobTransactionValidationError, PooledTransactionsElement,
+    kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, PooledTransactionsElement,
     PooledTransactionsElementEcRecovered, SealedBlock, Transaction, TransactionSignedEcRecovered,
 };
 #[cfg(feature = "serde")]
@@ -249,16 +250,6 @@ pub trait TransactionPool: Send + Sync + Clone {
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>>;
 
     /// Returns an iterator that yields transactions that are ready for block production with the
-    /// given base fee.
-    ///
-    /// Consumer: Block production
-    #[deprecated(note = "Use best_transactions_with_attributes instead.")]
-    fn best_transactions_with_base_fee(
-        &self,
-        base_fee: u64,
-    ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>>;
-
-    /// Returns an iterator that yields transactions that are ready for block production with the
     /// given base fee and optional blob fee attributes.
     ///
     /// Consumer: Block production
@@ -352,6 +343,24 @@ pub trait TransactionPool: Send + Sync + Clone {
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
+    /// Returns all pending transactions filtered by predicate
+    fn get_pending_transactions_with_predicate(
+        &self,
+        predicate: impl FnMut(&ValidPoolTransaction<Self::Transaction>) -> bool,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns all pending transactions sent by a given user
+    fn get_pending_transactions_by_sender(
+        &self,
+        sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns all queued transactions sent by a given user
+    fn get_queued_transactions_by_sender(
+        &self,
+        sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
     /// Returns the highest transaction sent by a given user
     fn get_highest_transaction_by_sender(
         &self,
@@ -431,7 +440,10 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Returns the [BlobTransactionSidecar] for the given transaction hash if it exists in the blob
     /// store.
-    fn get_blob(&self, tx_hash: TxHash) -> Result<Option<BlobTransactionSidecar>, BlobStoreError>;
+    fn get_blob(
+        &self,
+        tx_hash: TxHash,
+    ) -> Result<Option<Arc<BlobTransactionSidecar>>, BlobStoreError>;
 
     /// Returns all [BlobTransactionSidecar] for the given transaction hashes if they exists in the
     /// blob store.
@@ -441,7 +453,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     fn get_all_blobs(
         &self,
         tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<(TxHash, BlobTransactionSidecar)>, BlobStoreError>;
+    ) -> Result<Vec<(TxHash, Arc<BlobTransactionSidecar>)>, BlobStoreError>;
 
     /// Returns the exact [BlobTransactionSidecar] for the given transaction hashes in the order
     /// they were requested.
@@ -450,7 +462,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     fn get_all_blobs_exact(
         &self,
         tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError>;
+    ) -> Result<Vec<Arc<BlobTransactionSidecar>>, BlobStoreError>;
 
     /// Return the [`BlobTransactionSidecar`]s for a list of blob versioned hashes.
     fn get_blobs_for_versioned_hashes(
@@ -471,7 +483,7 @@ pub trait TransactionPoolExt: TransactionPool {
     ///
     /// ## Fee changes
     ///
-    /// The [CanonicalStateUpdate] includes the base and blob fee of the pending block, which
+    /// The [`CanonicalStateUpdate`] includes the base and blob fee of the pending block, which
     /// affects the dynamic fee requirement of pending transactions in the pool.
     ///
     /// ## EIP-4844 Blob transactions
@@ -657,6 +669,15 @@ impl TransactionOrigin {
     }
 }
 
+/// Represents the kind of update to the canonical state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PoolUpdateKind {
+    /// The update was due to a block commit.
+    Commit,
+    /// The update was due to a reorganization.
+    Reorg,
+}
+
 /// Represents changes after a new canonical block or range of canonical blocks was added to the
 /// chain.
 ///
@@ -681,6 +702,8 @@ pub struct CanonicalStateUpdate<'a> {
     pub changed_accounts: Vec<ChangedAccount>,
     /// All mined transactions in the block range.
     pub mined_transactions: Vec<B256>,
+    /// The kind of update to the canonical state.
+    pub update_kind: PoolUpdateKind,
 }
 
 impl CanonicalStateUpdate<'_> {
@@ -724,6 +747,11 @@ impl fmt::Display for CanonicalStateUpdate<'_> {
     }
 }
 
+/// Alias to restrict the [`BestTransactions`] items to the pool's transaction type.
+pub type BestTransactionsFor<Pool> = Box<
+    dyn BestTransactions<Item = Arc<ValidPoolTransaction<<Pool as TransactionPool>::Transaction>>>,
+>;
+
 /// An `Iterator` that only returns transactions that are ready to be executed.
 ///
 /// This makes no assumptions about the order of the transactions, but expects that _all_
@@ -764,7 +792,9 @@ pub trait BestTransactions: Iterator + Send {
     /// If called then the iterator will no longer yield blob transactions.
     ///
     /// Note: this will also exclude any transactions that depend on blob transactions.
-    fn skip_blobs(&mut self);
+    fn skip_blobs(&mut self) {
+        self.set_skip_blobs(true);
+    }
 
     /// Controls whether the iterator skips blob transactions or not.
     ///
@@ -1332,7 +1362,7 @@ impl TryFrom<TransactionSignedEcRecovered> for EthPooledTransaction {
             }
             EIP4844_TX_TYPE_ID => {
                 // doesn't have a blob sidecar
-                return Err(TryFromRecoveredTransactionError::BlobSidecarMissing)
+                return Err(TryFromRecoveredTransactionError::BlobSidecarMissing);
             }
             unsupported => {
                 // unsupported transaction type
@@ -1480,11 +1510,31 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
     }
 }
 
+/// Iterator that returns transactions for the block building process in the order they should be
+/// included in the block.
+///
+/// Can include transactions from the pool and other sources (alternative pools,
+/// sequencer-originated transactions, etc.).
+pub trait PayloadTransactions {
+    /// Returns the next transaction to include in the block.
+    fn next(
+        &mut self,
+        // In the future, `ctx` can include access to state for block building purposes.
+        ctx: (),
+    ) -> Option<TransactionSignedEcRecovered>;
+
+    /// Exclude descendants of the transaction with given sender and nonce from the iterator,
+    /// because this transaction won't be included in the block.
+    fn mark_invalid(&mut self, sender: Address, nonce: u64);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloy_consensus::{TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
-    use reth_primitives::{constants::eip4844::DATA_GAS_PER_BLOB, Signature, TransactionSigned};
+    use alloy_eips::eip4844::DATA_GAS_PER_BLOB;
+    use alloy_primitives::PrimitiveSignature as Signature;
+    use reth_primitives::TransactionSigned;
 
     #[test]
     fn test_pool_size_invariants() {
