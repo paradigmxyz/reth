@@ -203,13 +203,14 @@ impl<T> FromReader<T> for FileClient<T> {
     ) -> impl Future<Output = Result<DecodedFileChunk<Self>, Self::Error>>
     where
         B: AsyncReadExt + Unpin,
+        T: Decoder,
     {
         let mut headers = HashMap::default();
         let mut hash_to_number = HashMap::default();
         let mut bodies = HashMap::default();
 
         // use with_capacity to make sure the internal buffer contains the entire chunk
-        let mut stream = FramedRead::with_capacity(reader, BlockFileCodec, num_bytes as usize);
+        let mut stream = FramedRead::with_capacity(reader, codec, num_bytes as usize);
 
         trace!(target: "downloaders::file",
             target_num_bytes=num_bytes,
