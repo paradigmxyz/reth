@@ -31,4 +31,12 @@ pub trait Receipt:
 
     /// Calculates the receipts root of the given receipts.
     fn receipts_root(receipts: &[&Self]) -> B256;
+
+    /// Returns the cumulative gas used by the transaction.
+    fn cumulative_gas_used(&self) -> u64;
+
+    /// If transaction is executed successfully.
+    ///
+    /// This is euqivalent to `statusCode`
+    fn is_successful(&self) -> bool;
 }

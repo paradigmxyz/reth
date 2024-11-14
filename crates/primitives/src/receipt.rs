@@ -101,6 +101,14 @@ impl reth_primitives_traits::Receipt for Receipt {
         #[cfg(not(feature = "optimism"))]
         crate::proofs::calculate_receipt_root_no_memo(_receipts)
     }
+
+    fn cumulative_gas_used(&self) -> u64 {
+        self.cumulative_gas_used
+    }
+
+    fn is_successful(&self) -> bool {
+        self.success
+    }
 }
 
 /// A collection of receipts organized as a two-dimensional vector.
