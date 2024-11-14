@@ -20,7 +20,8 @@ use reth_payload_builder::{KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJo
 use reth_payload_primitives::{
     BuiltPayload, PayloadBuilderAttributes, PayloadBuilderError, PayloadKind,
 };
-use reth_primitives::{constants::RETH_CLIENT_VERSION, proofs, SealedHeader};
+use reth_primitives::{proofs, SealedHeader};
+use reth_primitives_traits::constants::RETH_CLIENT_VERSION;
 use reth_provider::{BlockReaderIdExt, CanonStateNotification, StateProviderFactory};
 use reth_revm::cached::CachedReads;
 use reth_tasks::TaskSpawner;
