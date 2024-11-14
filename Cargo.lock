@@ -8365,6 +8365,7 @@ dependencies = [
  "bytes",
  "derive_more 1.0.0",
  "op-alloy-consensus",
+ "reth-primitives-traits",
 ]
 
 [[package]]
