@@ -30,29 +30,22 @@ impl NodePrimitives for () {
 /// Helper trait that sets trait bounds on [`NodePrimitives`].
 pub trait FullNodePrimitives: Send + Sync + Unpin + Clone + Default + fmt::Debug {
     /// Block primitive.
-    type Block: FullBlock<Header = Self::BlockHeader, Body = Self::BlockBody>;
+    type Block: FullBlock<Header = Self::BlockHeader, Body = Self::BlockBody> + 'static;
     /// Block header primitive.
-    type BlockHeader: FullBlockHeader;
+    type BlockHeader: FullBlockHeader + 'static;
     /// Block body primitive.
-    type BlockBody: FullBlockBody<SignedTransaction = Self::SignedTx>;
+    type BlockBody: FullBlockBody<SignedTransaction = Self::SignedTx> + 'static;
     /// Signed version of the transaction type.
-    type SignedTx: FullSignedTx;
+    type SignedTx: FullSignedTx + 'static;
     /// Transaction envelope type ID.
-    type TxType: FullTxType;
+    type TxType: FullTxType + 'static;
     /// A receipt.
-    type Receipt: FullReceipt;
+    type Receipt: FullReceipt + 'static;
 }
 
 impl<T> NodePrimitives for T
 where
-    T: FullNodePrimitives<
-        Block: 'static,
-        BlockHeader: 'static,
-        BlockBody: 'static,
-        SignedTx: 'static,
-        Receipt: 'static,
-        TxType: 'static,
-    >,
+    T: FullNodePrimitives
 {
     type Block = T::Block;
     type BlockHeader = T::BlockHeader;
