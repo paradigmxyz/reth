@@ -33,11 +33,11 @@ use reth_node_builder::{
     BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig, PayloadTypes,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::{Block, BlockBody, Receipt, TransactionSigned, TxType};
+use reth_primitives::{Block, BlockBody, Receipt, StaticFileSegment, TransactionSigned, TxType};
 use reth_provider::{
     BlockNumReader, BlockReader, CanonStateSubscriptions, ChainSpecProvider, ChainStorageReader,
-    ChainStorageWriter, DBProvider, HeaderProvider, ProviderResult, TransactionsProvider,
-    WithdrawalsProvider,
+    ChainStorageWriter, DBProvider, HeaderProvider, ProviderResult, StaticFileProviderFactory,
+    TransactionsProvider, WithdrawalsProvider,
 };
 use reth_rpc::EthApi;
 use reth_tracing::tracing::{debug, info};
@@ -169,7 +169,8 @@ where
         + WithdrawalsProvider
         + HeaderProvider
         + ChainSpecProvider<ChainSpec: EthereumHardforks>
-        + BlockNumReader,
+        + BlockNumReader
+        + StaticFileProviderFactory,
 {
     type Primitives = EthPrimitives;
 
@@ -207,11 +208,12 @@ where
         range: std::ops::RangeInclusive<BlockNumber>,
     ) -> ProviderResult<impl IntoIterator<Item = Option<<Self::Primitives as NodePrimitives>::Block>>>
     {
-        let mut _tx_cursor = provider.tx_ref().cursor_read::<tables::Transactions>()?;
+        let mut tx_cursor = provider.tx_ref().cursor_read::<tables::Transactions>()?;
         let mut ommers_cursor = provider.tx_ref().cursor_read::<tables::BlockOmmers>()?;
         let mut withdrawals_cursor = provider.tx_ref().cursor_read::<tables::BlockWithdrawals>()?;
         let mut block_body_cursor = provider.tx_ref().cursor_read::<tables::BlockBodyIndices>()?;
         let chain_spec = provider.chain_spec();
+        let static_file_provider = provider.static_file_provider();
 
         Ok(provider.headers_range(range)?.into_iter().map(move |header| {
             let header_ref = header.as_ref();
@@ -223,7 +225,7 @@ where
             if let Some((_, block_body_indices)) =
                 block_body_cursor.seek_exact(header_ref.number).ok()?
             {
-                let _tx_range = block_body_indices.tx_num_range();
+                let tx_range = block_body_indices.tx_num_range();
 
                 // If we are past shanghai, then all blocks should have a withdrawal list,
                 // even if empty
@@ -249,14 +251,19 @@ where
                         .unwrap_or_default()
                 };
 
-                // TODO: move `transactions_by_tx_range_with_cursor` to a provider trait
-                // let transactions = provider
-                //     .transactions_by_tx_range_with_cursor(tx_range.clone(), &mut tx_cursor)?
-                //     .into_iter()
-                //     .map(Into::into)
-                //     .collect::<Vec<TransactionSigned>>();
+                let transactions = static_file_provider
+                    .get_range_with_static_file_or_database(
+                        StaticFileSegment::Transactions,
+                        tx_range,
+                        |static_file, range, _| static_file.transactions_by_tx_range(range),
+                        |range, _| provider.cursor_collect(&mut tx_cursor, range),
+                        |_| true,
+                    )
+                    .ok()?
+                    .into_iter()
+                    .map(Into::into)
+                    .collect::<Vec<TransactionSigned>>();
 
-                let transactions = vec![];
                 return Some(Block {
                     header: header.clone(),
                     body: BlockBody { transactions, ommers, withdrawals },

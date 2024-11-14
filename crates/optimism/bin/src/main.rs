@@ -7,7 +7,7 @@ use reth_node_builder::{engine_tree_config::TreeConfig, EngineNodeLauncher};
 use reth_optimism_cli::{chainspec::OpChainSpecParser, Cli};
 use reth_optimism_node::{
     args::RollupArgs,
-    node::{OpAddOns, OpStorage, OptimismAddOns},
+    node::{OpAddOns, OpStorage},
     OpNode,
 };
 use reth_provider::providers::BlockchainProvider2;
