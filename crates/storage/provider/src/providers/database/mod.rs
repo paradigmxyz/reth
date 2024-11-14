@@ -160,7 +160,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     #[track_caller]
     pub fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::db", "Returning latest state provider");
-        Ok(Box::new(LatestStateProvider::new(self.db.tx()?, self.static_file_provider())))
+        Ok(Box::new(LatestStateProvider::new(self.database_provider_ro()?)))
     }
 
     /// Storage provider for state at that given block
