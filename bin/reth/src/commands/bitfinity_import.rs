@@ -139,6 +139,7 @@ impl BitfinityImportCommand {
                 start_block,
                 self.bitfinity.end_block,
                 self.bitfinity.batch_size,
+                self.bitfinity.max_fetch_blocks,
                 Some(CertificateCheckSettings {
                     evmc_principal: self.bitfinity.evmc_principal.clone(),
                     ic_root_key: self.bitfinity.ic_root_key.clone(),
