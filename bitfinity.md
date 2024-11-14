@@ -34,7 +34,7 @@ reth node -vvv --http --http.port 8080 --http.addr 0.0.0.0 --http.api "debug,eth
 With cargo: 
 
 ```sh
-cargo run -p reth -- node -vvv --http --http.port 8080 --http.addr 0.0.0.0 --http.api "debug,eth,net,trace,txpool,web3" --disable-discovery --ipcdisable --no-persist-peers -r https://orca-app-5yyst.ondigitalocean.app -i 30 -b 100 --datadir ./target/reth
+cargo run -p reth -- node -vvv --http --http.port 8080 --http.addr 0.0.0.0 --http.api "debug,eth,net,trace,txpool,web3" --disable-discovery --ipcdisable --no-persist-peers -r https://orca-app-5yyst.ondigitalocean.app -i 30 -b 100 --max-fetch-blocks 5000 --datadir ./target/reth
 ```
 
 You can query the node using the JSON-RPC API. For example, to get the block number, you can use the following command:

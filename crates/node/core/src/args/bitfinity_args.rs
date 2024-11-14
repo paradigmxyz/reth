@@ -31,6 +31,11 @@ pub struct BitfinityImportArgs {
     #[arg(long, short = 'b', value_name = "BATCH_SIZE", default_value = "500")]
     pub batch_size: usize,
 
+    /// Sets the number of block to fetch on each block importer run
+    /// Default: 10_000
+    #[arg(long, value_name = "MAX_FETCH_BLOCKS", default_value = "10000")]
+    pub max_fetch_blocks: u64,
+
     /// Canister principal
     /// Default value corresponds to testnet
     #[arg(long, value_name = "EVMC_PRINCIPAL", default_value = "4fe7g-7iaaa-aaaak-aegcq-cai")]

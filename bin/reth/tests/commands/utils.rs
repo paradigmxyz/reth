@@ -141,6 +141,7 @@ pub async fn bitfinity_import_config_data(
         end_block: Some(100),
         import_interval: 1,
         batch_size: 1000,
+        max_fetch_blocks: 10000,
         evmc_principal: LOCAL_EVM_CANISTER_ID.to_string(),
         ic_root_key: IC_MAINNET_KEY.to_string(),
     };

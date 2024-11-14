@@ -805,6 +805,9 @@ where
                 match this.on_headers_outcome(outcome) {
                     Ok(()) => (),
                     Err(ReverseHeadersDownloaderError::Response(error)) => {
+
+                        error!(target: "downloaders::headers", %error, "invalid headers response");
+
                         if error.is_channel_closed() {
                             // download channel closed which means the network was dropped
                             return Poll::Ready(None)

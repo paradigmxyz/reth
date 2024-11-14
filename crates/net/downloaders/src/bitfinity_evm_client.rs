@@ -80,6 +80,7 @@ impl BitfinityEvmClient {
         start_block: u64,
         end_block: Option<u64>,
         batch_size: usize,
+        max_blocks: u64,
         certificate_settings: Option<CertificateCheckSettings>,
     ) -> Result<Self, RemoteClientError> {
         let mut headers = HashMap::new();
@@ -94,15 +95,13 @@ impl BitfinityEvmClient {
             Some(settings) => Some(BlockCertificateChecker::new(&provider, settings).await?),
         };
 
-        const MAX_BLOCKS: u64 = 10_000;
-
         let latest_remote_block = provider
             .get_block_number()
             .await
             .map_err(|e| RemoteClientError::ProviderError(e.to_string()))?;
 
         let mut end_block =
-            min(end_block.unwrap_or(latest_remote_block), start_block + MAX_BLOCKS - 1);
+            min(end_block.unwrap_or(latest_remote_block), start_block + max_blocks - 1);
 
         if let Some(block_checker) = &block_checker {
             end_block = min(end_block, block_checker.get_block_number());
@@ -399,7 +398,7 @@ impl HeadersClient for BitfinityEvmClient {
             BlockHashOrNumber::Hash(hash) => match self.hash_to_number.get(&hash) {
                 Some(num) => *num,
                 None => {
-                    warn!(%hash, "Could not find starting block number for requested header hash");
+                    error!(%hash, "Could not find starting block number for requested header hash");
                     return Box::pin(async move { Err(RequestError::BadResponse) });
                 }
             },
@@ -423,7 +422,7 @@ impl HeadersClient for BitfinityEvmClient {
             match self.headers.get(&block_number).cloned() {
                 Some(header) => headers.push(header),
                 None => {
-                    warn!(number=%block_number, "Could not find header");
+                    error!(number=%block_number, "Could not find header");
                     return Box::pin(async move { Err(RequestError::BadResponse) });
                 }
             }
@@ -449,7 +448,10 @@ impl BodiesClient for BitfinityEvmClient {
         for hash in hashes {
             match self.bodies.get(&hash).cloned() {
                 Some(body) => bodies.push(body),
-                None => return Box::pin(async move { Err(RequestError::BadResponse) }),
+                None => {
+                    error!(%hash, "Could not find body for requested block hash");
+                    return Box::pin(async move { Err(RequestError::BadResponse) })
+                },
             }
         }
 
@@ -476,7 +478,7 @@ mod tests {
     #[tokio::test]
     async fn bitfinity_remote_client_from_rpc_url() {
         let client =
-            BitfinityEvmClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5, None)
+            BitfinityEvmClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5, 1000, None)
                 .await
                 .unwrap();
         assert!(client.max_block().is_some());
@@ -485,7 +487,7 @@ mod tests {
     #[tokio::test]
     async fn bitfinity_test_headers_client() {
         let client =
-            BitfinityEvmClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5, None)
+            BitfinityEvmClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5, 1000, None)
                 .await
                 .unwrap();
         let headers = client
@@ -505,7 +507,7 @@ mod tests {
     #[tokio::test]
     async fn bitfinity_test_bodies_client() {
         let client =
-            BitfinityEvmClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5, None)
+            BitfinityEvmClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5, 1000, None)
                 .await
                 .unwrap();
         let headers = client
