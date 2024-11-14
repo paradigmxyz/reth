@@ -7,7 +7,7 @@ use alloy_primitives::{Address, B256};
 use reth_codecs::Compact;
 
 use crate::{
-    Block, BlockHeader, FullBlockHeader, FullSignedTx, InMemorySize, SignedTransaction,
+    BlockHeader, FullBlockHeader, FullSignedTx, InMemorySize, SignedTransaction,
     TransactionExt, TxType,
 };
 
@@ -22,7 +22,7 @@ impl<T> FullBlockBody for T where
 {
 }
 
-/// Abstraction for block's body.
+/// Abstraction of block's body.
 pub trait BlockBody:
     Send
     + Sync
@@ -36,17 +36,8 @@ pub trait BlockBody:
     + for<'de> serde::Deserialize<'de>
     + alloy_rlp::Encodable
     + alloy_rlp::Decodable
-    + Body
     + InMemorySize
 {
-    /// Create a [`Block`] from the body and its header.
-    fn into_block<T: Block<Header = Self::Ommer, Body = Self>>(self, header: Self::Ommer) -> T {
-        T::from((header, self))
-    }
-}
-
-/// Block body functionality.
-pub trait Body {
     /// Signed transaction.
     type SignedTransaction: SignedTransaction;
 
@@ -54,7 +45,7 @@ pub trait Body {
     type Ommer: BlockHeader;
 
     /// Withdrawals in block.
-    type Withdrawals: Iterator<Item = Withdrawal>;
+    type Withdrawals: IntoIterator<Item = Withdrawal>;
 
     /// Returns reference to transactions in block.
     fn transactions(&self) -> &[Self::SignedTransaction];
@@ -82,7 +73,10 @@ pub trait Body {
     fn calculate_withdrawals_root(&self) -> Option<B256>;
 
     /// Recover signer addresses for all transactions in the block body.
-    fn recover_signers(&self) -> Option<Vec<Address>>;
+    fn recover_signers(&self) -> Option<Vec<Address>> {
+        let num_txns = self.transactions().len();
+        Self::SignedTransaction::recover_signers(self.transactions(), num_txns)
+    }
 
     /// Returns whether or not the block body contains any blob transactions.
     fn has_blob_transactions(&self) -> bool {

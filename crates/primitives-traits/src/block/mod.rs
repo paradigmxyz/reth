@@ -9,7 +9,7 @@ use alloy_eips::eip7685::Requests;
 use alloy_primitives::{Address, B256};
 use reth_codecs::Compact;
 
-use crate::{BlockBody, BlockHeader, Body, FullBlockBody, FullBlockHeader, InMemorySize};
+use crate::{BlockBody, BlockHeader, FullBlockBody, FullBlockHeader, InMemorySize};
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
 pub trait FullBlock: Block<Header: FullBlockHeader, Body: FullBlockBody> + Compact {}
@@ -31,15 +31,13 @@ pub trait Block:
     + Eq
     + serde::Serialize
     + for<'a> serde::Deserialize<'a>
-    + From<(Self::Header, Self::Body)>
-    + Into<(Self::Header, Self::Body)>
     + alloy_rlp::Encodable
     + alloy_rlp::Decodable
     + alloy_consensus::BlockHeader
-    + Body<
+    + BlockBody<
         Ommer = Self::Header,
-        SignedTransaction = <Self::Body as Body>::SignedTransaction,
-        Withdrawals = <Self::Body as Body>::Withdrawals,
+        SignedTransaction = <Self::Body as BlockBody>::SignedTransaction,
+        Withdrawals = <Self::Body as BlockBody>::Withdrawals,
     > + InMemorySize
 {
     /// Header part of the block.
@@ -55,10 +53,10 @@ pub trait Block:
     fn body(&self) -> &Self::Body;
 }
 
-impl<T: Block> Body for T {
-    type SignedTransaction = <T::Body as Body>::SignedTransaction;
+impl<T: Block> BlockBody for T {
+    type SignedTransaction = <T::Body as BlockBody>::SignedTransaction;
     type Ommer = T::Header;
-    type Withdrawals = <T::Body as Body>::Withdrawals;
+    type Withdrawals = <T::Body as BlockBody>::Withdrawals;
 
     fn transactions(&self) -> &[Self::SignedTransaction] {
         self.body().transactions()
