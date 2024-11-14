@@ -73,7 +73,8 @@ arbitrary = [
 	"reth-chainspec/arbitrary",
 	"alloy-eips/arbitrary",
 	"alloy-primitives/arbitrary",
-	"reth-codecs/arbitrary"
+	"reth-codecs/arbitrary",
+	"reth-primitives-traits/arbitrary"
 ]
 serde = [
 	"dep:serde",
