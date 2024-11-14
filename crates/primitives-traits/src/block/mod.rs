@@ -55,94 +55,117 @@ pub trait Block:
 }
 
 impl<T: Block> Header for T {
+    #[inline]
     fn parent_hash(&self) -> B256 {
         self.header().parent_hash()
     }
 
+    #[inline]
     fn ommers_hash(&self) -> B256 {
         self.header().ommers_hash()
     }
 
+    #[inline]
     fn beneficiary(&self) -> Address {
         self.header().beneficiary()
     }
 
+    #[inline]
     fn state_root(&self) -> B256 {
         self.header().state_root()
     }
 
+    #[inline]
     fn transactions_root(&self) -> B256 {
         self.header().transactions_root()
     }
 
+    #[inline]
     fn receipts_root(&self) -> B256 {
         self.header().receipts_root()
     }
 
+    #[inline]
     fn withdrawals_root(&self) -> Option<B256> {
         self.header().withdrawals_root()
     }
 
+    #[inline]
     fn logs_bloom(&self) -> Bloom {
         self.header().logs_bloom()
     }
 
+    #[inline]
     fn difficulty(&self) -> U256 {
         self.header().difficulty()
     }
 
+    #[inline]
     fn number(&self) -> BlockNumber {
         self.header().number()
     }
 
+    #[inline]
     fn gas_limit(&self) -> u64 {
         self.header().gas_limit()
     }
 
+    #[inline]
     fn gas_used(&self) -> u64 {
         self.header().gas_used()
     }
 
+    #[inline]
     fn timestamp(&self) -> u64 {
         self.header().timestamp()
     }
 
+    #[inline]
     fn mix_hash(&self) -> Option<B256> {
         self.header().mix_hash()
     }
 
+    #[inline]
     fn nonce(&self) -> Option<B64> {
         self.header().nonce()
     }
 
+    #[inline]
     fn base_fee_per_gas(&self) -> Option<u64> {
         self.header().base_fee_per_gas()
     }
 
+    #[inline]
     fn blob_gas_used(&self) -> Option<u64> {
         self.header().blob_gas_used()
     }
 
+    #[inline]
     fn excess_blob_gas(&self) -> Option<u64> {
         self.header().excess_blob_gas()
     }
 
+    #[inline]
     fn parent_beacon_block_root(&self) -> Option<B256> {
         self.header().parent_beacon_block_root()
     }
 
+    #[inline]
     fn requests_hash(&self) -> Option<B256> {
         self.header().requests_hash()
     }
 
+    #[inline]
     fn extra_data(&self) -> &Bytes {
         self.header().extra_data()
     }
 
+    #[inline]
     fn next_block_excess_blob_gas(&self) -> Option<u64> {
         self.header().next_block_excess_blob_gas()
     }
 
+    #[inline]
     fn next_block_blob_fee(&self) -> Option<u128> {
         self.header().next_block_blob_fee()
     }
