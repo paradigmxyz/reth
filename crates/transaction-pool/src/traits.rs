@@ -483,7 +483,7 @@ pub trait TransactionPoolExt: TransactionPool {
     ///
     /// ## Fee changes
     ///
-    /// The [CanonicalStateUpdate] includes the base and blob fee of the pending block, which
+    /// The [`CanonicalStateUpdate`] includes the base and blob fee of the pending block, which
     /// affects the dynamic fee requirement of pending transactions in the pool.
     ///
     /// ## EIP-4844 Blob transactions
@@ -669,6 +669,15 @@ impl TransactionOrigin {
     }
 }
 
+/// Represents the kind of update to the canonical state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PoolUpdateKind {
+    /// The update was due to a block commit.
+    Commit,
+    /// The update was due to a reorganization.
+    Reorg,
+}
+
 /// Represents changes after a new canonical block or range of canonical blocks was added to the
 /// chain.
 ///
@@ -693,6 +702,8 @@ pub struct CanonicalStateUpdate<'a> {
     pub changed_accounts: Vec<ChangedAccount>,
     /// All mined transactions in the block range.
     pub mined_transactions: Vec<B256>,
+    /// The kind of update to the canonical state.
+    pub update_kind: PoolUpdateKind,
 }
 
 impl CanonicalStateUpdate<'_> {
