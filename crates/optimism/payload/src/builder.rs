@@ -2,7 +2,7 @@
 
 use std::{fmt::Display, sync::Arc};
 
-use alloy_consensus::{Transaction, EMPTY_OMMER_ROOT_HASH};
+use alloy_consensus::{Header, Transaction, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::merge::BEACON_NONCE;
 use alloy_primitives::{Address, Bytes, U256};
 use alloy_rpc_types_engine::PayloadId;
@@ -18,7 +18,7 @@ use reth_payload_primitives::{PayloadBuilderAttributes, PayloadBuilderError};
 use reth_primitives::{
     proofs,
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-    Block, BlockBody, Header, Receipt, SealedHeader, TransactionSigned, TxType,
+    Block, BlockBody, Receipt, SealedHeader, TransactionSigned, TxType,
 };
 use reth_provider::{ProviderError, StateProviderFactory, StateRootProvider};
 use reth_revm::database::StateProviderDatabase;

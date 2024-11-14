@@ -2,9 +2,9 @@ use crate::{
     in_memory::ExecutedBlock, CanonStateNotification, CanonStateNotifications,
     CanonStateSubscriptions,
 };
-use alloy_consensus::{Transaction as _, TxEip1559, EMPTY_ROOT_HASH};
+use alloy_consensus::{Header, Transaction as _, TxEip1559, EMPTY_ROOT_HASH};
 use alloy_eips::{eip1559::INITIAL_BASE_FEE, eip7685::Requests};
-use alloy_primitives::{Address, BlockNumber, Sealable, B256, U256};
+use alloy_primitives::{Address, BlockNumber, B256, U256};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
 use rand::{thread_rng, Rng};
@@ -12,8 +12,8 @@ use reth_chainspec::{ChainSpec, EthereumHardfork, MIN_TRANSACTION_GAS};
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{
     proofs::{calculate_receipt_root, calculate_transaction_root, calculate_withdrawals_root},
-    BlockBody, Header, Receipt, Receipts, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    Transaction, TransactionSigned, TransactionSignedEcRecovered,
+    BlockBody, Receipt, Receipts, SealedBlock, SealedBlockWithSenders, SealedHeader, Transaction,
+    TransactionSigned, TransactionSignedEcRecovered,
 };
 use reth_trie::{root::state_root_unhashed, updates::TrieUpdates, HashedPostState};
 use revm::{db::BundleState, primitives::AccountInfo};
@@ -160,11 +160,8 @@ impl TestBlockBuilder {
             ..Default::default()
         };
 
-        let sealed = header.seal_slow();
-        let (header, seal) = sealed.into_parts();
-
         let block = SealedBlock {
-            header: SealedHeader::new(header, seal),
+            header: SealedHeader::seal(header),
             body: BlockBody {
                 transactions: transactions.into_iter().map(|tx| tx.into_signed()).collect(),
                 ommers: Vec::new(),

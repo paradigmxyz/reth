@@ -1,3 +1,4 @@
+use alloy_consensus::Header;
 use futures::Stream;
 use reth_network_p2p::headers::{
     downloader::{HeaderDownloader, SyncTarget},
@@ -11,6 +12,8 @@ use reth_primitives::SealedHeader;
 pub struct NoopHeaderDownloader;
 
 impl HeaderDownloader for NoopHeaderDownloader {
+    type Header = Header;
+
     fn update_local_head(&mut self, _: SealedHeader) {}
 
     fn update_sync_target(&mut self, _: SyncTarget) {}
@@ -19,7 +22,7 @@ impl HeaderDownloader for NoopHeaderDownloader {
 }
 
 impl Stream for NoopHeaderDownloader {
-    type Item = Result<Vec<SealedHeader>, HeadersDownloaderError>;
+    type Item = Result<Vec<SealedHeader>, HeadersDownloaderError<Header>>;
 
     fn poll_next(
         self: std::pin::Pin<&mut Self>,

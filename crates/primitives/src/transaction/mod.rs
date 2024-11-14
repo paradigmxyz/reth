@@ -48,8 +48,12 @@ mod error;
 mod meta;
 mod pooled;
 mod sidecar;
-mod signature;
 mod tx_type;
+
+/// Handling transaction signature operations, including signature recovery,
+/// applying chain IDs, and EIP-2 validation.
+pub mod signature;
+
 pub(crate) mod util;
 mod variant;
 
@@ -64,15 +68,15 @@ use tx_type::{
 };
 
 use alloc::vec::Vec;
-use reth_primitives_traits::{transaction::AlloyTransactionExt, SignedTransaction};
+use reth_primitives_traits::{SignedTransaction, TransactionExt};
 use revm_primitives::{AuthorizationList, TxEnv};
 
 /// Either a transaction hash or number.
 pub type TxHashOrNumber = BlockHashOrNumber;
 
-// Expected number of transactions where we can expect a speed-up by recovering the senders in
-// parallel.
-pub(crate) static PARALLEL_SENDER_RECOVERY_THRESHOLD: LazyLock<usize> =
+/// Expected number of transactions where we can expect a speed-up by recovering the senders in
+/// parallel.
+pub static PARALLEL_SENDER_RECOVERY_THRESHOLD: LazyLock<usize> =
     LazyLock::new(|| match rayon::current_num_threads() {
         0..=1 => usize::MAX,
         2..=8 => 10,
@@ -324,21 +328,6 @@ impl Transaction {
     /// [`DATA_GAS_PER_BLOB`](alloy_eips::eip4844::DATA_GAS_PER_BLOB) a single blob consumes.
     pub fn blob_gas_used(&self) -> Option<u64> {
         self.as_eip4844().map(TxEip4844::blob_gas)
-    }
-
-    /// Returns the effective gas price for the given base fee.
-    ///
-    /// If the transaction is a legacy or EIP2930 transaction, the gas price is returned.
-    pub const fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
-        match self {
-            Self::Legacy(tx) => tx.gas_price,
-            Self::Eip2930(tx) => tx.gas_price,
-            Self::Eip1559(dynamic_tx) => dynamic_tx.effective_gas_price(base_fee),
-            Self::Eip4844(dynamic_tx) => dynamic_tx.effective_gas_price(base_fee),
-            Self::Eip7702(dynamic_tx) => dynamic_tx.effective_gas_price(base_fee),
-            #[cfg(feature = "optimism")]
-            Self::Deposit(_) => 0,
-        }
     }
 
     /// Returns the effective miner gas tip cap (`gasTipCap`) for the given base fee:
@@ -751,6 +740,39 @@ impl alloy_consensus::Transaction for Transaction {
         }
     }
 
+    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        match self {
+            Self::Legacy(tx) => tx.effective_gas_price(base_fee),
+            Self::Eip2930(tx) => tx.effective_gas_price(base_fee),
+            Self::Eip1559(tx) => tx.effective_gas_price(base_fee),
+            Self::Eip4844(tx) => tx.effective_gas_price(base_fee),
+            Self::Eip7702(tx) => tx.effective_gas_price(base_fee),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.effective_gas_price(base_fee),
+        }
+    }
+
+    fn is_dynamic_fee(&self) -> bool {
+        match self {
+            Self::Legacy(_) | Self::Eip2930(_) => false,
+            Self::Eip1559(_) | Self::Eip4844(_) | Self::Eip7702(_) => true,
+            #[cfg(feature = "optimism")]
+            Self::Deposit(_) => false,
+        }
+    }
+
+    fn kind(&self) -> TxKind {
+        match self {
+            Self::Legacy(tx) => tx.kind(),
+            Self::Eip2930(tx) => tx.kind(),
+            Self::Eip1559(tx) => tx.kind(),
+            Self::Eip4844(tx) => tx.kind(),
+            Self::Eip7702(tx) => tx.kind(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.kind(),
+        }
+    }
+
     fn value(&self) -> U256 {
         match self {
             Self::Legacy(tx) => tx.value(),
@@ -822,25 +844,20 @@ impl alloy_consensus::Transaction for Transaction {
             Self::Deposit(tx) => tx.authorization_list(),
         }
     }
+}
 
-    fn is_dynamic_fee(&self) -> bool {
-        match self {
-            Self::Legacy(_) | Self::Eip2930(_) => false,
-            Self::Eip1559(_) | Self::Eip4844(_) | Self::Eip7702(_) => true,
-            #[cfg(feature = "optimism")]
-            Self::Deposit(_) => false,
-        }
-    }
+impl TransactionExt for Transaction {
+    type Type = TxType;
 
-    fn kind(&self) -> TxKind {
+    fn signature_hash(&self) -> B256 {
         match self {
-            Self::Legacy(tx) => tx.kind(),
-            Self::Eip2930(tx) => tx.kind(),
-            Self::Eip1559(tx) => tx.kind(),
-            Self::Eip4844(tx) => tx.kind(),
-            Self::Eip7702(tx) => tx.kind(),
+            Self::Legacy(tx) => tx.signature_hash(),
+            Self::Eip2930(tx) => tx.signature_hash(),
+            Self::Eip1559(tx) => tx.signature_hash(),
+            Self::Eip4844(tx) => tx.signature_hash(),
+            Self::Eip7702(tx) => tx.signature_hash(),
             #[cfg(feature = "optimism")]
-            Self::Deposit(tx) => tx.kind(),
+            _ => todo!("use op type for op"),
         }
     }
 }
@@ -1481,8 +1498,16 @@ impl alloy_consensus::Transaction for TransactionSigned {
         self.deref().priority_fee_or_price()
     }
 
+    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        self.deref().effective_gas_price(base_fee)
+    }
+
     fn is_dynamic_fee(&self) -> bool {
         self.deref().is_dynamic_fee()
+    }
+
+    fn kind(&self) -> TxKind {
+        self.deref().kind()
     }
 
     fn value(&self) -> U256 {
@@ -1507,10 +1532,6 @@ impl alloy_consensus::Transaction for TransactionSigned {
 
     fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
         self.deref().authorization_list()
-    }
-
-    fn kind(&self) -> TxKind {
-        self.deref().kind()
     }
 }
 

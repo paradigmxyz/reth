@@ -1,3 +1,4 @@
+use alloy_consensus::Header;
 use alloy_eips::{merge::EPOCH_SLOTS, BlockNumHash};
 use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_types_engine::{
@@ -14,13 +15,13 @@ use reth_engine_primitives::{EngineApiMessageVersion, EngineTypes, PayloadTypes}
 use reth_errors::{BlockValidationError, ProviderResult, RethError, RethResult};
 use reth_network_p2p::{
     sync::{NetworkSyncUpdater, SyncState},
-    BlockClient,
+    EthBlockClient,
 };
 use reth_node_types::NodeTypesWithEngine;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilder, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{Head, Header, SealedBlock, SealedHeader};
+use reth_primitives::{Head, SealedBlock, SealedHeader};
 use reth_provider::{
     providers::ProviderNodeTypes, BlockIdReader, BlockReader, BlockSource, CanonChainTracker,
     ChainSpecProvider, ProviderError, StageCheckpointReader,
@@ -174,7 +175,7 @@ type PendingForkchoiceUpdate<PayloadAttributes> =
 pub struct BeaconConsensusEngine<N, BT, Client>
 where
     N: EngineNodeTypes,
-    Client: BlockClient,
+    Client: EthBlockClient,
     BT: BlockchainTreeEngine
         + BlockReader
         + BlockIdReader
@@ -237,7 +238,7 @@ where
         + StageCheckpointReader
         + ChainSpecProvider<ChainSpec = N::ChainSpec>
         + 'static,
-    Client: BlockClient + 'static,
+    Client: EthBlockClient + 'static,
 {
     /// Create a new instance of the [`BeaconConsensusEngine`].
     #[allow(clippy::too_many_arguments)]
@@ -1799,7 +1800,7 @@ where
 impl<N, BT, Client> Future for BeaconConsensusEngine<N, BT, Client>
 where
     N: EngineNodeTypes,
-    Client: BlockClient + 'static,
+    Client: EthBlockClient + 'static,
     BT: BlockchainTreeEngine
         + BlockReader
         + BlockIdReader

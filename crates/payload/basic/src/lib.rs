@@ -616,7 +616,9 @@ where
         if let Some(fut) = Pin::new(&mut this.maybe_better).as_pin_mut() {
             if let Poll::Ready(res) = fut.poll(cx) {
                 this.maybe_better = None;
-                if let Ok(BuildOutcome::Better { payload, .. }) = res {
+                if let Ok(Some(payload)) = res.map(|out| out.into_payload())
+                    .inspect_err(|err| warn!(target: "payload_builder", %err, "failed to resolve pending payload"))
+                {
                     debug!(target: "payload_builder", "resolving better payload");
                     return Poll::Ready(Ok(payload))
                 }
@@ -767,7 +769,7 @@ impl<Payload> BuildOutcome<Payload> {
     /// Consumes the type and returns the payload if the outcome is `Better`.
     pub fn into_payload(self) -> Option<Payload> {
         match self {
-            Self::Better { payload, .. } => Some(payload),
+            Self::Better { payload, .. } | Self::Freeze(payload) => Some(payload),
             _ => None,
         }
     }

@@ -28,7 +28,7 @@ pub trait Transaction:
     + Hash
     + Serialize
     + for<'de> Deserialize<'de>
-    + AlloyTransactionExt
+    + TransactionExt
     + InMemorySize
     + MaybeArbitrary
 {
@@ -46,23 +46,20 @@ impl<T> Transaction for T where
         + Hash
         + Serialize
         + for<'de> Deserialize<'de>
-        + AlloyTransactionExt
+        + TransactionExt
         + InMemorySize
         + MaybeArbitrary
 {
 }
 
 /// Extension trait of [`alloy_consensus::Transaction`].
-pub trait AlloyTransactionExt: alloy_consensus::Transaction {
+pub trait TransactionExt: alloy_consensus::Transaction {
     /// Transaction envelope type ID.
     type Type: TxType;
 
     /// Heavy operation that return signature hash over rlp encoded transaction.
     /// It is only for signature signing or signer recovery.
     fn signature_hash(&self) -> B256;
-
-    /// Returns the effective gas price for the given base fee.
-    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128;
 
     /// Returns the transaction type.
     fn tx_type(&self) -> Self::Type {

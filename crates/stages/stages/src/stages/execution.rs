@@ -1,5 +1,6 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD;
-use alloy_primitives::{BlockNumber, Sealable};
+use alloy_consensus::Header;
+use alloy_primitives::BlockNumber;
 use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
 use reth_db::{static_file::HeaderMask, tables};
@@ -10,7 +11,7 @@ use reth_evm::{
 };
 use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
-use reth_primitives::{Header, SealedHeader, StaticFileSegment};
+use reth_primitives::{SealedHeader, StaticFileSegment};
 use reth_primitives_traits::format_gas_throughput;
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
@@ -276,11 +277,8 @@ where
             let execute_start = Instant::now();
 
             self.metrics.metered_one((&block, td).into(), |input| {
-                let sealed = block.header.clone().seal_slow();
-                let (header, seal) = sealed.into_parts();
-
                 executor.execute_and_verify_one(input).map_err(|error| StageError::Block {
-                    block: Box::new(SealedHeader::new(header, seal)),
+                    block: Box::new(SealedHeader::seal(block.header.clone())),
                     error: BlockErrorKind::Execution(error),
                 })
             })?;

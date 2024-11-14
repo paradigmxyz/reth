@@ -7,6 +7,7 @@ use crate::{
 use alloy_eips::BlockHashOrNumber;
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
+use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
@@ -124,7 +125,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
         let client = fetch_client.clone();
         let chain = provider_factory.chain_spec();
-        let block = (move || get_single_body(client.clone(), Arc::clone(&chain), header.clone()))
+        let consensus = Arc::new(EthBeaconConsensus::new(chain.clone()));
+        let block = (move || get_single_body(client.clone(), header.clone(), consensus.clone()))
             .retry(backoff)
             .notify(
                 |err, _| warn!(target: "reth::cli", "Error requesting body: {err}. Retrying..."),

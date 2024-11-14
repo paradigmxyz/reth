@@ -1,12 +1,10 @@
+use alloy_consensus::Header;
 use alloy_primitives::{Bytes, TxKind, U256};
 use alloy_rpc_types_eth::transaction::TransactionRequest;
 use reth_evm::ConfigureEvm;
-use reth_primitives::{
-    revm_primitives::{BlockEnv, OptimismFields, TxEnv},
-    Header,
-};
+use reth_primitives::revm_primitives::{BlockEnv, OptimismFields, TxEnv};
 use reth_rpc_eth_api::{
-    helpers::{Call, EthCall, LoadPendingBlock, LoadState, SpawnBlocking},
+    helpers::{estimate::EstimateCall, Call, EthCall, LoadPendingBlock, LoadState, SpawnBlocking},
     FromEthApiError, IntoEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{revm_utils::CallFees, RpcInvalidTransactionError};
@@ -15,7 +13,15 @@ use crate::{OpEthApi, OpEthApiError};
 
 impl<N> EthCall for OpEthApi<N>
 where
-    Self: Call + LoadPendingBlock,
+    Self: EstimateCall + LoadPendingBlock,
+    N: RpcNodeCore,
+{
+}
+
+impl<N> EstimateCall for OpEthApi<N>
+where
+    Self: Call,
+    Self::Error: From<OpEthApiError>,
     N: RpcNodeCore,
 {
 }

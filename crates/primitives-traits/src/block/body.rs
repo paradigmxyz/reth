@@ -7,8 +7,8 @@ use alloy_primitives::{Address, B256};
 use reth_codecs::Compact;
 
 use crate::{
-    AlloyTransactionExt, Block, BlockHeader, FullBlockHeader, FullSignedTx, InMemorySize,
-    SignedTransaction, TxType,
+    Block, BlockHeader, FullBlockHeader, FullSignedTx, InMemorySize, SignedTransaction,
+    TransactionExt, TxType,
 };
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.

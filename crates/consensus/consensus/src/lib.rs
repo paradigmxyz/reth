@@ -12,11 +12,12 @@
 extern crate alloc;
 
 use alloc::{fmt::Debug, vec::Vec};
+use alloy_consensus::Header;
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256, U256};
 use reth_primitives::{
     constants::MINIMUM_GAS_LIMIT, BlockBody, BlockWithSenders, GotExpected, GotExpectedBoxed,
-    Header, InvalidTransactionError, Receipt, SealedBlock, SealedHeader,
+    InvalidTransactionError, Receipt, SealedBlock, SealedHeader,
 };
 
 /// A consensus implementation that does nothing.

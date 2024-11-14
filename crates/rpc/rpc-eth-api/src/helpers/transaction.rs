@@ -18,13 +18,12 @@ use reth_rpc_types_compat::transaction::{from_recovered, from_recovered_with_blo
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 use std::sync::Arc;
 
-use crate::{
-    FromEthApiError, FullEthApiTypes, IntoEthApiError, RpcNodeCore, RpcNodeCoreExt, RpcReceipt,
-    RpcTransaction,
-};
-
 use super::{
-    Call, EthApiSpec, EthSigner, LoadBlock, LoadPendingBlock, LoadReceipt, LoadState, SpawnBlocking,
+    EthApiSpec, EthSigner, LoadBlock, LoadPendingBlock, LoadReceipt, LoadState, SpawnBlocking,
+};
+use crate::{
+    helpers::estimate::EstimateCall, FromEthApiError, FullEthApiTypes, IntoEthApiError,
+    RpcNodeCore, RpcNodeCoreExt, RpcReceipt, RpcTransaction,
 };
 
 /// Transaction related functions for the [`EthApiServer`](crate::EthApiServer) trait in
@@ -348,7 +347,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         mut request: TransactionRequest,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send
     where
-        Self: EthApiSpec + LoadBlock + LoadPendingBlock + Call,
+        Self: EthApiSpec + LoadBlock + LoadPendingBlock + EstimateCall,
     {
         async move {
             let from = match request.from {
@@ -400,16 +399,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         txn: TransactionRequest,
     ) -> impl Future<Output = Result<TransactionSigned, Self::Error>> + Send {
         async move {
-            let signers: Vec<_> = self.signers().read().iter().cloned().collect();
-            for signer in signers {
-                if signer.is_signer_for(from) {
-                    return match signer.sign_transaction(txn, from).await {
-                        Ok(tx) => Ok(tx),
-                        Err(e) => Err(e.into_eth_err()),
-                    }
-                }
-            }
-            Err(EthApiError::InvalidTransactionSignature.into())
+            self.find_signer(from)?
+                .sign_transaction(txn, from)
+                .await
+                .map_err(Self::Error::from_eth_err)
         }
     }
 
@@ -427,6 +420,22 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 .map_err(Self::Error::from_eth_err)?
                 .as_bytes()
                 .into())
+        }
+    }
+
+    /// Signs a transaction request using the given account in request
+    /// Returns the EIP-2718 encoded signed transaction.
+    fn sign_transaction(
+        &self,
+        request: TransactionRequest,
+    ) -> impl Future<Output = Result<Bytes, Self::Error>> + Send {
+        async move {
+            let from = match request.from {
+                Some(from) => from,
+                None => return Err(SignError::NoAccount.into_eth_err()),
+            };
+
+            Ok(self.sign_request(&from, request).await?.encoded_2718().into())
         }
     }
 

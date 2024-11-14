@@ -1,7 +1,7 @@
 //! Standalone Conversion Functions for Handling Different Versions of Execution Payloads in
 //! Ethereum's Engine
 
-use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, EMPTY_OMMER_ROOT_HASH};
+use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, Header, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{
     eip2718::{Decodable2718, Encodable2718},
     eip4895::Withdrawals,
@@ -15,7 +15,7 @@ use alloy_rpc_types_engine::{
 };
 use reth_primitives::{
     proofs::{self},
-    Block, BlockBody, Header, SealedBlock, TransactionSigned,
+    Block, BlockBody, SealedBlock, TransactionSigned,
 };
 
 /// Converts [`ExecutionPayloadV1`] to [`Block`]

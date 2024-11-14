@@ -9,13 +9,16 @@ use futures::{Future, FutureExt};
 use reth_primitives::BlockBody;
 
 /// The bodies future type
-pub type BodiesFut = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<BlockBody>>> + Send + Sync>>;
+pub type BodiesFut<B = BlockBody> =
+    Pin<Box<dyn Future<Output = PeerRequestResult<Vec<B>>> + Send + Sync>>;
 
 /// A client capable of downloading block bodies.
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait BodiesClient: DownloadClient {
+    /// The body type this client fetches.
+    type Body: Send + Sync + Unpin + 'static;
     /// The output of the request future for querying block bodies.
-    type Output: Future<Output = PeerRequestResult<Vec<BlockBody>>> + Sync + Send + Unpin;
+    type Output: Future<Output = PeerRequestResult<Vec<Self::Body>>> + Sync + Send + Unpin;
 
     /// Fetches the block body for the requested block.
     fn get_block_bodies(&self, hashes: Vec<B256>) -> Self::Output {
@@ -49,11 +52,11 @@ pub struct SingleBodyRequest<Fut> {
     fut: Fut,
 }
 
-impl<Fut> Future for SingleBodyRequest<Fut>
+impl<Fut, B> Future for SingleBodyRequest<Fut>
 where
-    Fut: Future<Output = PeerRequestResult<Vec<BlockBody>>> + Sync + Send + Unpin,
+    Fut: Future<Output = PeerRequestResult<Vec<B>>> + Sync + Send + Unpin,
 {
-    type Output = PeerRequestResult<Option<BlockBody>>;
+    type Output = PeerRequestResult<Option<B>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let resp = ready!(self.get_mut().fut.poll_unpin(cx));

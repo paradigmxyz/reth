@@ -194,7 +194,7 @@ where
 impl<Provider, P, D> Stage<Provider> for HeaderStage<P, D>
 where
     P: HeaderSyncGapProvider,
-    D: HeaderDownloader,
+    D: HeaderDownloader<Header = alloy_consensus::Header>,
     Provider: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory,
 {
     /// Return the id of the stage
@@ -392,7 +392,7 @@ mod tests {
     use crate::test_utils::{
         stage_test_suite, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
     };
-    use alloy_primitives::{Sealable, B256};
+    use alloy_primitives::B256;
     use assert_matches::assert_matches;
     use reth_execution_types::ExecutionOutcome;
     use reth_primitives::{BlockBody, SealedBlock, SealedBlockWithSenders};
@@ -441,7 +441,9 @@ mod tests {
             }
         }
 
-        impl<D: HeaderDownloader + 'static> StageTestRunner for HeadersTestRunner<D> {
+        impl<D: HeaderDownloader<Header = alloy_consensus::Header> + 'static> StageTestRunner
+            for HeadersTestRunner<D>
+        {
             type S = HeaderStage<ProviderFactory<MockNodeTypesWithDB>, D>;
 
             fn db(&self) -> &TestStageDB {
@@ -459,7 +461,9 @@ mod tests {
             }
         }
 
-        impl<D: HeaderDownloader + 'static> ExecuteStageTestRunner for HeadersTestRunner<D> {
+        impl<D: HeaderDownloader<Header = alloy_consensus::Header> + 'static> ExecuteStageTestRunner
+            for HeadersTestRunner<D>
+        {
             type Seed = Vec<SealedHeader>;
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
@@ -505,9 +509,7 @@ mod tests {
                             // validate the header
                             let header = provider.header_by_number(block_num)?;
                             assert!(header.is_some());
-                            let sealed = header.unwrap().seal_slow();
-                            let (header, seal) = sealed.into_parts();
-                            let header = SealedHeader::new(header, seal);
+                            let header = SealedHeader::seal(header.unwrap());
                             assert_eq!(header.hash(), hash);
 
                             // validate the header total difficulty
@@ -537,7 +539,9 @@ mod tests {
             }
         }
 
-        impl<D: HeaderDownloader + 'static> UnwindStageTestRunner for HeadersTestRunner<D> {
+        impl<D: HeaderDownloader<Header = alloy_consensus::Header> + 'static> UnwindStageTestRunner
+            for HeadersTestRunner<D>
+        {
             fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
                 self.check_no_header_entry_above(input.unwind_to)
             }
