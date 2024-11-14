@@ -17,11 +17,14 @@
 
 extern crate alloc;
 
+use core::convert::Infallible;
+
 use alloc::{sync::Arc, vec::Vec};
+use alloy_consensus::Header;
 use alloy_primitives::{Address, Bytes, TxKind, U256};
 use reth_chainspec::{ChainSpec, Head};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
-use reth_primitives::{transaction::FillTxEnv, Header, TransactionSigned};
+use reth_primitives::{transaction::FillTxEnv, TransactionSigned};
 use revm_primitives::{
     AnalysisKind, BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, Env, SpecId, TxEnv,
 };
@@ -59,6 +62,7 @@ impl EthEvmConfig {
 
 impl ConfigureEvmEnv for EthEvmConfig {
     type Header = Header;
+    type Error = Infallible;
 
     fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
         transaction.fill_tx_env(tx_env, sender);
@@ -131,7 +135,7 @@ impl ConfigureEvmEnv for EthEvmConfig {
         &self,
         parent: &Self::Header,
         attributes: NextBlockEnvAttributes,
-    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), Self::Error> {
         // configure evm env based on parent block
         let cfg = CfgEnv::default().with_chain_id(self.chain_spec.chain().id());
 
@@ -179,7 +183,7 @@ impl ConfigureEvmEnv for EthEvmConfig {
             blob_excess_gas_and_price,
         };
 
-        (CfgEnvWithHandlerCfg::new_with_spec_id(cfg, spec_id), block_env)
+        Ok((CfgEnvWithHandlerCfg::new_with_spec_id(cfg, spec_id), block_env))
     }
 }
 
@@ -192,15 +196,12 @@ impl ConfigureEvm for EthEvmConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::constants::KECCAK_EMPTY;
+    use alloy_consensus::{constants::KECCAK_EMPTY, Header};
     use alloy_genesis::Genesis;
     use alloy_primitives::{B256, U256};
     use reth_chainspec::{Chain, ChainSpec, MAINNET};
     use reth_evm::execute::ProviderError;
-    use reth_primitives::{
-        revm_primitives::{BlockEnv, CfgEnv, SpecId},
-        Header,
-    };
+    use reth_primitives::revm_primitives::{BlockEnv, CfgEnv, SpecId};
     use reth_revm::{
         db::{CacheDB, EmptyDBTyped},
         inspectors::NoOpInspector,

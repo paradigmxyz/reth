@@ -1,0 +1,15 @@
+ethereum_package:
+  participants:
+    - el_type: reth
+      cl_type: lighthouse
+optimism_package:
+  chains:
+    - participants:
+      - el_type: op-geth
+        cl_type: op-node
+      - el_type: op-reth
+        el_image: "ghcr.io/paradigmxyz/op-reth:kurtosis-ci"
+        cl_type: op-node
+      batcher_params:
+        extra_params:
+          - "--throttle-interval=0"

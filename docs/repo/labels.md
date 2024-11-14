@@ -30,7 +30,7 @@ For easier at-a-glance communication of the status of issues and PRs the followi
 - https://github.com/paradigmxyz/reth/labels/S-duplicate
 - https://github.com/paradigmxyz/reth/labels/S-wontfix
 
-**Misc.**
+**Miscellaneous**
 
 - https://github.com/paradigmxyz/reth/labels/S-needs-triage
 - https://github.com/paradigmxyz/reth/labels/S-controversial

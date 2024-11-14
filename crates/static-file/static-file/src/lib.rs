@@ -7,14 +7,12 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-mod event;
 pub mod segments;
 mod static_file_producer;
 
-pub use event::StaticFileProducerEvent;
 pub use static_file_producer::{
     StaticFileProducer, StaticFileProducerInner, StaticFileProducerResult,
-    StaticFileProducerWithResult, StaticFileTargets,
+    StaticFileProducerWithResult,
 };
 
 // Re-export for convenience.

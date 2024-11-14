@@ -1,12 +1,11 @@
 //! Implements the `GetPooledTransactions` and `PooledTransactions` message types.
 
+use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::B256;
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use derive_more::{Constructor, Deref, IntoIterator};
 use reth_codecs_derive::add_arbitrary_tests;
-use reth_primitives::{
-    transaction::TransactionConversionError, PooledTransactionsElement, TransactionSigned,
-};
+use reth_primitives::{transaction::TransactionConversionError, PooledTransactionsElement};
 
 /// A list of transaction hashes that the peer would like transaction bodies for.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
@@ -42,35 +41,43 @@ where
     Eq,
     RlpEncodableWrapper,
     RlpDecodableWrapper,
-    Default,
     IntoIterator,
     Deref,
     Constructor,
 )]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct PooledTransactions(
+pub struct PooledTransactions<T = PooledTransactionsElement>(
     /// The transaction bodies, each of which should correspond to a requested hash.
-    pub Vec<PooledTransactionsElement>,
+    pub Vec<T>,
 );
 
-impl PooledTransactions {
+impl<T: Encodable2718> PooledTransactions<T> {
     /// Returns an iterator over the transaction hashes in this response.
-    pub fn hashes(&self) -> impl Iterator<Item = &B256> + '_ {
-        self.0.iter().map(|tx| tx.hash())
+    pub fn hashes(&self) -> impl Iterator<Item = B256> + '_ {
+        self.0.iter().map(|tx| tx.trie_hash())
     }
 }
 
-impl TryFrom<Vec<TransactionSigned>> for PooledTransactions {
+impl<T, U> TryFrom<Vec<U>> for PooledTransactions<T>
+where
+    T: TryFrom<U, Error = TransactionConversionError>,
+{
     type Error = TransactionConversionError;
 
-    fn try_from(txs: Vec<TransactionSigned>) -> Result<Self, Self::Error> {
-        txs.into_iter().map(PooledTransactionsElement::try_from).collect()
+    fn try_from(txs: Vec<U>) -> Result<Self, Self::Error> {
+        txs.into_iter().map(T::try_from).collect()
     }
 }
 
-impl FromIterator<PooledTransactionsElement> for PooledTransactions {
-    fn from_iter<I: IntoIterator<Item = PooledTransactionsElement>>(iter: I) -> Self {
+impl<T> FromIterator<T> for PooledTransactions<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         Self(iter.into_iter().collect())
+    }
+}
+
+impl<T> Default for PooledTransactions<T> {
+    fn default() -> Self {
+        Self(Default::default())
     }
 }
 
@@ -78,10 +85,10 @@ impl FromIterator<PooledTransactionsElement> for PooledTransactions {
 mod tests {
     use crate::{message::RequestPair, GetPooledTransactions, PooledTransactions};
     use alloy_consensus::{TxEip1559, TxLegacy};
-    use alloy_primitives::{hex, Parity, TxKind, U256};
+    use alloy_primitives::{hex, PrimitiveSignature as Signature, TxKind, U256};
     use alloy_rlp::{Decodable, Encodable};
     use reth_chainspec::MIN_TRANSACTION_GAS;
-    use reth_primitives::{PooledTransactionsElement, Signature, Transaction, TransactionSigned};
+    use reth_primitives::{PooledTransactionsElement, Transaction, TransactionSigned};
     use std::str::FromStr;
 
     #[test]
@@ -142,7 +149,7 @@ mod tests {
                         "0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10",
                     )
                     .unwrap(),
-                    Parity::Parity(false),
+                    false,
                 ),
             ),
             TransactionSigned::from_transaction_and_signature(
@@ -164,7 +171,7 @@ mod tests {
                         "0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb",
                     )
                     .unwrap(),
-                    Parity::Parity(false),
+                    false,
                 ),
             ),
         ];
@@ -208,7 +215,7 @@ mod tests {
                         "0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10",
                     )
                     .unwrap(),
-                    Parity::Eip155(37),
+                    false,
                 ),
             ),
             TransactionSigned::from_transaction_and_signature(
@@ -230,7 +237,7 @@ mod tests {
                         "0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb",
                     )
                     .unwrap(),
-                    Parity::Eip155(37),
+                    false,
                 ),
             ),
         ];
@@ -275,7 +282,7 @@ mod tests {
                         "0x612638fb29427ca33b9a3be2a0a561beecfe0269655be160d35e72d366a6a860",
                     )
                     .unwrap(),
-                    Parity::Eip155(44),
+                    true,
                 ),
             ),
             TransactionSigned::from_transaction_and_signature(
@@ -299,7 +306,7 @@ mod tests {
                         "0x016b83f4f980694ed2eee4d10667242b1f40dc406901b34125b008d334d47469",
                     )
                     .unwrap(),
-                    Parity::Parity(true),
+                    true,
                 ),
             ),
             TransactionSigned::from_transaction_and_signature(
@@ -321,7 +328,7 @@ mod tests {
                         "0x3ca3ae86580e94550d7c071e3a02eadb5a77830947c9225165cf9100901bee88",
                     )
                     .unwrap(),
-                    Parity::Eip155(43),
+                    false,
                 ),
             ),
             TransactionSigned::from_transaction_and_signature(
@@ -343,7 +350,7 @@ mod tests {
                         "0x5406ad177223213df262cb66ccbb2f46bfdccfdfbbb5ffdda9e2c02d977631da",
                     )
                     .unwrap(),
-                    Parity::Eip155(43),
+                    false,
                 ),
             ),
             TransactionSigned::from_transaction_and_signature(
@@ -365,7 +372,7 @@ mod tests {
                         "0x3a456401896b1b6055311536bf00a718568c744d8c1f9df59879e8350220ca18",
                     )
                     .unwrap(),
-                    Parity::Eip155(43),
+                    false,
                 ),
             ),
         ];
@@ -414,7 +421,7 @@ mod tests {
                         "0x612638fb29427ca33b9a3be2a0a561beecfe0269655be160d35e72d366a6a860",
                     )
                     .unwrap(),
-                    Parity::Parity(true),
+                    true,
                 ),
             ),
             TransactionSigned::from_transaction_and_signature(
@@ -438,7 +445,7 @@ mod tests {
                         "0x016b83f4f980694ed2eee4d10667242b1f40dc406901b34125b008d334d47469",
                     )
                     .unwrap(),
-                    Parity::Parity(true),
+                    true,
                 ),
             ),
             TransactionSigned::from_transaction_and_signature(
@@ -460,7 +467,7 @@ mod tests {
                         "0x3ca3ae86580e94550d7c071e3a02eadb5a77830947c9225165cf9100901bee88",
                     )
                     .unwrap(),
-                    Parity::Parity(false),
+                    false,
                 ),
             ),
             TransactionSigned::from_transaction_and_signature(
@@ -482,7 +489,7 @@ mod tests {
                         "0x5406ad177223213df262cb66ccbb2f46bfdccfdfbbb5ffdda9e2c02d977631da",
                     )
                     .unwrap(),
-                    Parity::Parity(false),
+                    false,
                 ),
             ),
             TransactionSigned::from_transaction_and_signature(
@@ -504,7 +511,7 @@ mod tests {
                         "0x3a456401896b1b6055311536bf00a718568c744d8c1f9df59879e8350220ca18",
                     )
                     .unwrap(),
-                    Parity::Parity(false),
+                    false,
                 ),
             ),
         ];

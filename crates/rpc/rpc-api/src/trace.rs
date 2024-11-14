@@ -1,13 +1,14 @@
+use alloy_eips::BlockId;
 use alloy_primitives::{map::HashSet, Bytes, B256};
-use alloy_rpc_types::{state::StateOverride, BlockOverrides, Index};
-use alloy_rpc_types_eth::transaction::TransactionRequest;
+use alloy_rpc_types_eth::{
+    state::StateOverride, transaction::TransactionRequest, BlockOverrides, Index,
+};
 use alloy_rpc_types_trace::{
     filter::TraceFilter,
     opcode::{BlockOpcodeGas, TransactionOpcodeGas},
     parity::*,
 };
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::BlockId;
 
 /// Ethereum trace API
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "trace"))]

@@ -17,10 +17,11 @@ http.workspace = true
 jsonrpsee-http-client.workspace = true
 pin-project.workspace = true
 tower.workspace = true
-
+tower-http = { workspace = true, features = ["full"] }
 tracing.workspace = true
 
 [dev-dependencies]
 reqwest.workspace = true
 tokio = { workspace = true, features = ["macros"] }
 jsonrpsee = { workspace = true, features = ["server"] }
+http-body-util.workspace=true

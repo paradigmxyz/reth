@@ -3,8 +3,8 @@
 
 use std::sync::Arc;
 
-use alloy_consensus::TxEip2930;
-use alloy_primitives::{Bytes, Parity, TxKind, U256};
+use alloy_consensus::{Header, TxEip2930};
+use alloy_primitives::{Bytes, PrimitiveSignature as Signature, TxKind, U256};
 use rand::Rng;
 use reth_eth_wire::HeadersDirection;
 use reth_network::{
@@ -16,7 +16,7 @@ use reth_network_p2p::{
     bodies::client::BodiesClient,
     headers::client::{HeadersClient, HeadersRequest},
 };
-use reth_primitives::{Block, Header, Signature, Transaction, TransactionSigned};
+use reth_primitives::{Block, Transaction, TransactionSigned};
 use reth_provider::test_utils::MockEthProvider;
 
 /// Returns a new [`TransactionSigned`] with some random parameters
@@ -31,7 +31,7 @@ pub fn rng_transaction(rng: &mut impl rand::RngCore) -> TransactionSigned {
         input: Bytes::from(vec![1, 2]),
         access_list: Default::default(),
     });
-    let signature = Signature::new(U256::default(), U256::default(), Parity::Parity(true));
+    let signature = Signature::new(U256::default(), U256::default(), true);
 
     TransactionSigned::from_transaction_and_signature(request, signature)
 }

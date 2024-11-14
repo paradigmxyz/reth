@@ -14,53 +14,53 @@ use reth_node_api::{
     validate_version_specific_fields, EngineTypes, EngineValidator,
 };
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_forks::OptimismHardfork;
-use reth_optimism_payload_builder::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes};
+use reth_optimism_forks::{OpHardfork, OpHardforks};
+use reth_optimism_payload_builder::{OpBuiltPayload, OpPayloadBuilderAttributes};
 
 /// The types used in the optimism beacon consensus engine.
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]
-pub struct OptimismEngineTypes<T: PayloadTypes = OptimismPayloadTypes> {
+pub struct OpEngineTypes<T: PayloadTypes = OpPayloadTypes> {
     _marker: std::marker::PhantomData<T>,
 }
 
-impl<T: PayloadTypes> PayloadTypes for OptimismEngineTypes<T> {
+impl<T: PayloadTypes> PayloadTypes for OpEngineTypes<T> {
     type BuiltPayload = T::BuiltPayload;
     type PayloadAttributes = T::PayloadAttributes;
     type PayloadBuilderAttributes = T::PayloadBuilderAttributes;
 }
 
-impl<T: PayloadTypes> EngineTypes for OptimismEngineTypes<T>
+impl<T: PayloadTypes> EngineTypes for OpEngineTypes<T>
 where
     T::BuiltPayload: TryInto<ExecutionPayloadV1>
         + TryInto<ExecutionPayloadEnvelopeV2>
         + TryInto<OpExecutionPayloadEnvelopeV3>
         + TryInto<OpExecutionPayloadEnvelopeV4>,
 {
-    type ExecutionPayloadV1 = ExecutionPayloadV1;
+    type ExecutionPayloadEnvelopeV1 = ExecutionPayloadV1;
     type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadEnvelopeV3 = OpExecutionPayloadEnvelopeV3;
     type ExecutionPayloadEnvelopeV4 = OpExecutionPayloadEnvelopeV4;
 }
 
-/// A default payload type for [`OptimismEngineTypes`]
+/// A default payload type for [`OpEngineTypes`]
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]
-pub struct OptimismPayloadTypes;
+pub struct OpPayloadTypes;
 
-impl PayloadTypes for OptimismPayloadTypes {
-    type BuiltPayload = OptimismBuiltPayload;
+impl PayloadTypes for OpPayloadTypes {
+    type BuiltPayload = OpBuiltPayload;
     type PayloadAttributes = OpPayloadAttributes;
-    type PayloadBuilderAttributes = OptimismPayloadBuilderAttributes;
+    type PayloadBuilderAttributes = OpPayloadBuilderAttributes;
 }
 
 /// Validator for Optimism engine API.
 #[derive(Debug, Clone)]
-pub struct OptimismEngineValidator {
+pub struct OpEngineValidator {
     chain_spec: Arc<OpChainSpec>,
 }
 
-impl OptimismEngineValidator {
+impl OpEngineValidator {
     /// Instantiates a new validator.
     pub const fn new(chain_spec: Arc<OpChainSpec>) -> Self {
         Self { chain_spec }
@@ -81,7 +81,7 @@ pub fn validate_withdrawals_presence(
     timestamp: u64,
     has_withdrawals: bool,
 ) -> Result<(), EngineObjectValidationError> {
-    let is_shanghai = chain_spec.fork(OptimismHardfork::Canyon).active_at_timestamp(timestamp);
+    let is_shanghai = chain_spec.fork(OpHardfork::Canyon).active_at_timestamp(timestamp);
 
     match version {
         EngineApiMessageVersion::V1 => {
@@ -109,7 +109,7 @@ pub fn validate_withdrawals_presence(
     Ok(())
 }
 
-impl<Types> EngineValidator<Types> for OptimismEngineValidator
+impl<Types> EngineValidator<Types> for OpEngineValidator
 where
     Types: EngineTypes<PayloadAttributes = OpPayloadAttributes>,
 {
@@ -147,6 +147,132 @@ where
             ))
         }
 
+        if self.chain_spec.is_holocene_active_at_timestamp(attributes.payload_attributes.timestamp)
+        {
+            let (elasticity, denominator) =
+                attributes.decode_eip_1559_params().ok_or_else(|| {
+                    EngineObjectValidationError::InvalidParams(
+                        "MissingEip1559ParamsInPayloadAttributes".to_string().into(),
+                    )
+                })?;
+            if elasticity != 0 && denominator == 0 {
+                return Err(EngineObjectValidationError::InvalidParams(
+                    "Eip1559ParamsDenominatorZero".to_string().into(),
+                ))
+            }
+        }
+
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+
+    use crate::engine;
+    use alloy_primitives::{b64, Address, B256, B64};
+    use alloy_rpc_types_engine::PayloadAttributes;
+    use reth_optimism_chainspec::BASE_SEPOLIA;
+
+    use super::*;
+
+    fn get_chainspec() -> Arc<OpChainSpec> {
+        let hardforks = OpHardfork::base_sepolia();
+        Arc::new(OpChainSpec {
+            inner: ChainSpec {
+                chain: BASE_SEPOLIA.inner.chain,
+                genesis: BASE_SEPOLIA.inner.genesis.clone(),
+                genesis_hash: BASE_SEPOLIA.inner.genesis_hash.clone(),
+                paris_block_and_final_difficulty: BASE_SEPOLIA
+                    .inner
+                    .paris_block_and_final_difficulty,
+                hardforks,
+                base_fee_params: BASE_SEPOLIA.inner.base_fee_params.clone(),
+                max_gas_limit: BASE_SEPOLIA.inner.max_gas_limit,
+                prune_delete_limit: 10000,
+                ..Default::default()
+            },
+        })
+    }
+
+    const fn get_attributes(eip_1559_params: Option<B64>, timestamp: u64) -> OpPayloadAttributes {
+        OpPayloadAttributes {
+            gas_limit: Some(1000),
+            eip_1559_params,
+            transactions: None,
+            no_tx_pool: None,
+            payload_attributes: PayloadAttributes {
+                timestamp,
+                prev_randao: B256::ZERO,
+                suggested_fee_recipient: Address::ZERO,
+                withdrawals: Some(vec![]),
+                parent_beacon_block_root: Some(B256::ZERO),
+            },
+        }
+    }
+
+    #[test]
+    fn test_well_formed_attributes_pre_holocene() {
+        let validator = OpEngineValidator::new(get_chainspec());
+        let attributes = get_attributes(None, 1732633199);
+
+        let result = <engine::OpEngineValidator as reth_node_builder::EngineValidator<
+            OpEngineTypes,
+        >>::ensure_well_formed_attributes(
+            &validator, EngineApiMessageVersion::V3, &attributes
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_well_formed_attributes_holocene_no_eip1559_params() {
+        let validator = OpEngineValidator::new(get_chainspec());
+        let attributes = get_attributes(None, 1732633200);
+
+        let result = <engine::OpEngineValidator as reth_node_builder::EngineValidator<
+            OpEngineTypes,
+        >>::ensure_well_formed_attributes(
+            &validator, EngineApiMessageVersion::V3, &attributes
+        );
+        assert!(matches!(result, Err(EngineObjectValidationError::InvalidParams(_))));
+    }
+
+    #[test]
+    fn test_well_formed_attributes_holocene_eip1559_params_zero_denominator() {
+        let validator = OpEngineValidator::new(get_chainspec());
+        let attributes = get_attributes(Some(b64!("0000000000000008")), 1732633200);
+
+        let result = <engine::OpEngineValidator as reth_node_builder::EngineValidator<
+            OpEngineTypes,
+        >>::ensure_well_formed_attributes(
+            &validator, EngineApiMessageVersion::V3, &attributes
+        );
+        assert!(matches!(result, Err(EngineObjectValidationError::InvalidParams(_))));
+    }
+
+    #[test]
+    fn test_well_formed_attributes_holocene_valid() {
+        let validator = OpEngineValidator::new(get_chainspec());
+        let attributes = get_attributes(Some(b64!("0000000800000008")), 1732633200);
+
+        let result = <engine::OpEngineValidator as reth_node_builder::EngineValidator<
+            OpEngineTypes,
+        >>::ensure_well_formed_attributes(
+            &validator, EngineApiMessageVersion::V3, &attributes
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_well_formed_attributes_holocene_valid_all_zero() {
+        let validator = OpEngineValidator::new(get_chainspec());
+        let attributes = get_attributes(Some(b64!("0000000000000000")), 1732633200);
+
+        let result = <engine::OpEngineValidator as reth_node_builder::EngineValidator<
+            OpEngineTypes,
+        >>::ensure_well_formed_attributes(
+            &validator, EngineApiMessageVersion::V3, &attributes
+        );
+        assert!(result.is_ok());
     }
 }

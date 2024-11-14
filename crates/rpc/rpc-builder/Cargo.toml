@@ -15,6 +15,7 @@ workspace = true
 # reth
 reth-ipc.workspace = true
 reth-chainspec.workspace = true
+reth-consensus.workspace = true
 reth-network-api.workspace = true
 reth-node-core.workspace = true
 reth-provider.workspace = true
@@ -28,12 +29,8 @@ reth-tasks = { workspace = true, features = ["rayon"] }
 reth-transaction-pool.workspace = true
 reth-evm.workspace = true
 reth-engine-primitives.workspace = true
-reth-primitives.workspace = true
 
-# ethereum
-alloy-network.workspace = true
-alloy-rpc-types.workspace = true
-alloy-serde.workspace = true
+alloy-consensus.workspace = true
 
 # rpc/net
 jsonrpsee = { workspace = true, features = ["server"] }
@@ -67,11 +64,13 @@ reth-rpc-engine-api.workspace = true
 reth-tracing.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 reth-rpc-types-compat.workspace = true
+reth-primitives.workspace = true
 
 alloy-primitives.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-rpc-types-trace.workspace = true
 alloy-rpc-types-engine.workspace = true
+alloy-eips.workspace = true
 
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 serde_json.workspace = true

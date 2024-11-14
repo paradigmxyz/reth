@@ -12,6 +12,10 @@ description = "OP primitive types"
 workspace = true
 
 [dependencies]
-reth-primitives.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
+op-alloy-consensus.workspace = true
+alloy-eips.workspace = true
+alloy-rlp.workspace = true
+derive_more.workspace = true
+bytes.workspace = true

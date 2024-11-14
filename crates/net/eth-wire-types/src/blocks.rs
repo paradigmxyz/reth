@@ -5,8 +5,7 @@ use crate::HeadersDirection;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::B256;
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
-use reth_codecs_derive::add_arbitrary_tests;
-use reth_primitives::{BlockBody, Header};
+use reth_codecs_derive::{add_arbitrary_tests, generate_tests};
 
 /// A request for a peer to return block headers starting at the requested block.
 /// The peer must return at most [`limit`](#structfield.limit) headers.
@@ -41,34 +40,16 @@ pub struct GetBlockHeaders {
 /// The response to [`GetBlockHeaders`], containing headers if any headers were found.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[add_arbitrary_tests(rlp, 10)]
-pub struct BlockHeaders(
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+pub struct BlockHeaders<H = alloy_consensus::Header>(
     /// The requested headers.
-    pub Vec<Header>,
+    pub Vec<H>,
 );
 
-#[cfg(any(test, feature = "arbitrary"))]
-impl<'a> arbitrary::Arbitrary<'a> for BlockHeaders {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let headers_count: usize = u.int_in_range(0..=10)?;
-        let mut headers = Vec::with_capacity(headers_count);
+generate_tests!(#[rlp, 10] BlockHeaders<alloy_consensus::Header>, EthBlockHeadersTests);
 
-        for _ in 0..headers_count {
-            headers.push(reth_primitives::generate_valid_header(
-                u.arbitrary()?,
-                u.arbitrary()?,
-                u.arbitrary()?,
-                u.arbitrary()?,
-                u.arbitrary()?,
-            ))
-        }
-
-        Ok(Self(headers))
-    }
-}
-
-impl From<Vec<Header>> for BlockHeaders {
-    fn from(headers: Vec<Header>) -> Self {
+impl<H> From<Vec<H>> for BlockHeaders<H> {
+    fn from(headers: Vec<H>) -> Self {
         Self(headers)
     }
 }
@@ -94,14 +75,15 @@ impl From<Vec<B256>> for GetBlockBodies {
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-#[add_arbitrary_tests(rlp, 16)]
-pub struct BlockBodies(
+pub struct BlockBodies<B = reth_primitives::BlockBody>(
     /// The requested block bodies, each of which should correspond to a hash in the request.
-    pub Vec<BlockBody>,
+    pub Vec<B>,
 );
 
-impl From<Vec<BlockBody>> for BlockBodies {
-    fn from(bodies: Vec<BlockBody>) -> Self {
+generate_tests!(#[rlp, 16] BlockBodies<reth_primitives::BlockBody>, EthBlockBodiesTests);
+
+impl<B> From<Vec<B>> for BlockBodies<B> {
+    fn from(bodies: Vec<B>) -> Self {
         Self(bodies)
     }
 }
@@ -112,13 +94,12 @@ mod tests {
         message::RequestPair, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
         HeadersDirection,
     };
-    use alloy_consensus::TxLegacy;
-    use alloy_primitives::{hex, Parity, TxKind, U256};
+    use alloy_consensus::{Header, TxLegacy};
+    use alloy_eips::BlockHashOrNumber;
+    use alloy_primitives::{hex, PrimitiveSignature as Signature, TxKind, U256};
     use alloy_rlp::{Decodable, Encodable};
-    use reth_primitives::{BlockHashOrNumber, Header, Signature, Transaction, TransactionSigned};
+    use reth_primitives::{BlockBody, Transaction, TransactionSigned};
     use std::str::FromStr;
-
-    use super::BlockBody;
 
     #[test]
     fn decode_hash() {
@@ -253,7 +234,7 @@ mod tests {
         // [ (f90202) 0x0457 = 1111, [ (f901fc) [ (f901f9) header ] ] ]
         let expected = hex!("f90202820457f901fcf901f9a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008208ae820d0582115c8215b3821a0a827788a00000000000000000000000000000000000000000000000000000000000000000880000000000000000");
         let mut data = vec![];
-        RequestPair::<BlockHeaders> {
+        RequestPair::<BlockHeaders<_>> {
             request_id: 1111,
             message: BlockHeaders(vec![
                 Header {
@@ -288,7 +269,7 @@ mod tests {
     #[test]
     fn decode_block_header() {
         let data = hex!("f90202820457f901fcf901f9a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008208ae820d0582115c8215b3821a0a827788a00000000000000000000000000000000000000000000000000000000000000000880000000000000000");
-        let expected = RequestPair::<BlockHeaders> {
+        let expected = RequestPair::<BlockHeaders<_>> {
             request_id: 1111,
             message: BlockHeaders(vec![
                 Header {
@@ -356,7 +337,7 @@ mod tests {
     fn encode_block_bodies() {
         let expected = hex!("f902dc820457f902d6f902d3f8d2f867088504a817c8088302e2489435353535353535353535353535353535353535358202008025a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10f867098504a817c809830334509435353535353535353535353535353535353535358202d98025a052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afba052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afbf901fcf901f9a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008208ae820d0582115c8215b3821a0a827788a00000000000000000000000000000000000000000000000000000000000000000880000000000000000");
         let mut data = vec![];
-        let request = RequestPair::<BlockBodies> {
+        let request = RequestPair::<BlockBodies<_>> {
             request_id: 1111,
             message: BlockBodies(vec![
                 BlockBody {
@@ -372,7 +353,7 @@ mod tests {
                         }), Signature::new(
                                 U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12").unwrap(),
                                 U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10").unwrap(),
-                                Parity::Parity(false),
+                                false,
                             ),
                         ),
                         TransactionSigned::from_transaction_and_signature(Transaction::Legacy(TxLegacy {
@@ -386,7 +367,7 @@ mod tests {
                         }), Signature::new(
                                 U256::from_str("0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
                                 U256::from_str("0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
-                                Parity::Parity(false),
+                                false,
                             ),
                         ),
                     ],
@@ -427,7 +408,7 @@ mod tests {
     #[test]
     fn decode_block_bodies() {
         let data = hex!("f902dc820457f902d6f902d3f8d2f867088504a817c8088302e2489435353535353535353535353535353535353535358202008025a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10f867098504a817c809830334509435353535353535353535353535353535353535358202d98025a052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afba052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afbf901fcf901f9a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008208ae820d0582115c8215b3821a0a827788a00000000000000000000000000000000000000000000000000000000000000000880000000000000000");
-        let expected = RequestPair::<BlockBodies> {
+        let expected = RequestPair::<BlockBodies<_>> {
             request_id: 1111,
             message: BlockBodies(vec![
                 BlockBody {
@@ -445,7 +426,7 @@ mod tests {
                             Signature::new(
                                 U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12").unwrap(),
                                 U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10").unwrap(),
-                                Parity::Eip155(37),
+                                false,
                             ),
                         ),
                         TransactionSigned::from_transaction_and_signature(
@@ -461,7 +442,7 @@ mod tests {
                             Signature::new(
                                 U256::from_str("0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
                                 U256::from_str("0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
-                                Parity::Eip155(37),
+                                false,
                             ),
                         ),
                     ],
@@ -503,7 +484,7 @@ mod tests {
         let body = BlockBodies::default();
         let mut buf = Vec::new();
         body.encode(&mut buf);
-        let decoded = BlockBodies::decode(&mut buf.as_slice()).unwrap();
+        let decoded = BlockBodies::<BlockBody>::decode(&mut buf.as_slice()).unwrap();
         assert_eq!(body, decoded);
     }
 }
