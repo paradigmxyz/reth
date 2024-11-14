@@ -32,6 +32,14 @@ impl<B> BlockResponse<B> {
             Self::Empty(header) => header.difficulty,
         }
     }
+
+    /// Return the reference to the response body
+    pub fn into_body(self) -> Option<B> {
+        match self {
+            Self::Full(block) => Some(block.body),
+            Self::Empty(_) => None,
+        }
+    }
 }
 
 impl<B: InMemorySize> InMemorySize for BlockResponse<B> {
