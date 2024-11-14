@@ -5,7 +5,7 @@ use std::{
 
 use futures_util::TryStreamExt;
 use reth_codecs::Compact;
-use reth_primitives_traits::{BlockBody, Body as _};
+use reth_primitives_traits::BlockBody;
 use tracing::*;
 
 use alloy_primitives::TxNumber;

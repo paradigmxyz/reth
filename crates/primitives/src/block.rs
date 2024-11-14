@@ -7,7 +7,7 @@ use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
 pub use reth_primitives_traits::test_utils::{generate_valid_header, valid_header_strategy};
-use reth_primitives_traits::{Body, InMemorySize};
+use reth_primitives_traits::InMemorySize;
 use serde::{Deserialize, Serialize};
 
 /// Ethereum full block.
@@ -744,21 +744,19 @@ impl reth_primitives_traits::BlockBody for BlockBody {
     type Transaction = TransactionSigned;
     type Header = Header;
     type Withdrawals = Withdrawals;
-}
 
-impl Body<Header, TransactionSigned, Withdrawals> for BlockBody {
     #[inline]
-    fn transactions(&self) -> &[TransactionSigned] {
+    fn transactions(&self) -> &[Self::Transaction] {
         &self.transactions
     }
 
     #[inline]
-    fn withdrawals(&self) -> Option<&Withdrawals> {
+    fn withdrawals(&self) -> Option<&Self::Withdrawals> {
         self.withdrawals.as_ref()
     }
 
     #[inline]
-    fn ommers(&self) -> &[Header] {
+    fn ommers(&self) -> &[Self::Header] {
         &self.ommers
     }
 
