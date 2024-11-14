@@ -977,7 +977,7 @@ mod tests {
     use alloy_rlp::{Decodable, Encodable};
     use std::str::FromStr;
 
-    fn _traits() {
+    const fn _traits() {
         const fn assert_block<T: reth_primitives_traits::Block>() {}
         assert_block::<Block>();
         assert_block::<SealedBlock>();
