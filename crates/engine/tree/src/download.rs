@@ -309,11 +309,12 @@ impl BlockDownloader for NoopBlockDownloader {
 mod tests {
     use super::*;
     use crate::test_utils::insert_headers_into_client;
+    use alloy_consensus::Header;
     use assert_matches::assert_matches;
     use reth_beacon_consensus::EthBeaconConsensus;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_network_p2p::test_utils::TestFullBlockClient;
-    use reth_primitives::{Header, SealedHeader};
+    use reth_primitives::SealedHeader;
     use std::{future::poll_fn, sync::Arc};
 
     struct TestHarness {

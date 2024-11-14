@@ -2,12 +2,13 @@
 
 use crate::ConfigureEvm;
 use alloc::{boxed::Box, sync::Arc, vec};
+use alloy_consensus::Header;
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::Bytes;
 use core::fmt::Display;
 use reth_chainspec::EthereumHardforks;
 use reth_execution_errors::BlockExecutionError;
-use reth_primitives::{Block, Header};
+use reth_primitives::Block;
 use revm::{Database, DatabaseCommit, Evm};
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState, B256};
 

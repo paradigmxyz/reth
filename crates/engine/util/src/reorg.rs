@@ -1,6 +1,6 @@
 //! Stream wrapper that simulates reorgs.
 
-use alloy_consensus::Transaction;
+use alloy_consensus::{Header, Transaction};
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState, PayloadStatus,
@@ -16,7 +16,7 @@ use reth_evm::{
     ConfigureEvm,
 };
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{proofs, Block, BlockBody, Header, Receipt, Receipts};
+use reth_primitives::{proofs, Block, BlockBody, Receipt, Receipts};
 use reth_provider::{BlockReader, ExecutionOutcome, ProviderError, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
