@@ -8536,7 +8536,6 @@ dependencies = [
  "proptest-arbitrary-interop",
  "rand 0.8.5",
  "reth-codecs",
- "reth-testing-utils",
  "revm-primitives",
  "roaring",
  "serde",
