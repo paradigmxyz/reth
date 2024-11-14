@@ -32,6 +32,9 @@ pub trait StateReader: Send + Sync {
 /// Block Writer
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait BlockWriter: Send + Sync {
+    /// The body this writer can write.
+    type Body: Send + Sync;
+
     /// Insert full block and make it canonical. Parent tx num and transition id is taken from
     /// parent block in database.
     ///
@@ -39,6 +42,16 @@ pub trait BlockWriter: Send + Sync {
     /// transition in the block.
     fn insert_block(&self, block: SealedBlockWithSenders)
         -> ProviderResult<StoredBlockBodyIndices>;
+
+    /// Appends a batch of block bodies extending the canonical chain. This is invoked during
+    /// `Bodies` stage and does not write to `TransactionHashNumbers` and `TransactionSenders`
+    /// tables which are populated on later stages.
+    ///
+    /// Bodies are passed as [`Option`]s, if body is `None` the corresponding block is empty.
+    fn append_block_bodies(
+        &self,
+        bodies: impl Iterator<Item = (BlockNumber, Option<Self::Body>)>,
+    ) -> ProviderResult<()>;
 
     /// Appends a batch of sealed blocks to the blockchain, including sender information, and
     /// updates the post-state.

@@ -34,7 +34,8 @@ pub trait FullNodePrimitives: Send + Sync + Unpin + Clone + Default + fmt::Debug
     /// Block header primitive.
     type BlockHeader: FullBlockHeader + 'static;
     /// Block body primitive.
-    type BlockBody: FullBlockBody<SignedTransaction = Self::SignedTx> + 'static;
+    type BlockBody: FullBlockBody<Header = Self::BlockHeader, Transaction = Self::SignedTx>
+        + 'static;
     /// Signed version of the transaction type.
     type SignedTx: FullSignedTx + 'static;
     /// Transaction envelope type ID.
@@ -45,7 +46,7 @@ pub trait FullNodePrimitives: Send + Sync + Unpin + Clone + Default + fmt::Debug
 
 impl<T> NodePrimitives for T
 where
-    T: FullNodePrimitives
+    T: FullNodePrimitives,
 {
     type Block = T::Block;
     type BlockHeader = T::BlockHeader;
