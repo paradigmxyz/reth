@@ -7,17 +7,16 @@ use futures_util::TryStreamExt;
 use tracing::*;
 
 use alloy_primitives::TxNumber;
-use reth_db::tables;
+use reth_db::{tables, transaction::DbTx};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
-    models::{StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals},
     transaction::DbTxMut,
 };
 use reth_network_p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
 use reth_primitives::StaticFileSegment;
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockReader, DBProvider, ProviderError, StaticFileProviderFactory, StatsReader,
+    BlockReader, BlockWriter, DBProvider, ProviderError, StaticFileProviderFactory, StatsReader,
 };
 use reth_stages_api::{
     EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId,
@@ -72,7 +71,11 @@ impl<D: BodyDownloader> BodyStage<D> {
 
 impl<Provider, D> Stage<Provider> for BodyStage<D>
 where
-    Provider: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory + StatsReader + BlockReader,
+    Provider: DBProvider<Tx: DbTxMut>
+        + StaticFileProviderFactory
+        + StatsReader
+        + BlockReader
+        + BlockWriter,
     D: BodyDownloader<Body = reth_primitives::BlockBody>,
 {
     /// Return the id of the stage
@@ -116,15 +119,13 @@ where
         }
         let (from_block, to_block) = input.next_block_range().into_inner();
 
-        // Cursors used to write bodies, ommers and transactions
-        let tx = provider.tx_ref();
-        let mut block_indices_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
-        let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlocks>()?;
-        let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
-        let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
-
         // Get id for the next tx_num of zero if there are no transactions.
-        let mut next_tx_num = tx_block_cursor.last()?.map(|(id, _)| id + 1).unwrap_or_default();
+        let mut next_tx_num = provider
+            .tx_ref()
+            .cursor_read::<tables::TransactionBlocks>()?
+            .last()?
+            .map(|(id, _)| id + 1)
+            .unwrap_or_default();
 
         let static_file_provider = provider.static_file_provider();
         let mut static_file_producer =
@@ -166,17 +167,10 @@ where
         let buffer = self.buffer.take().ok_or(StageError::MissingDownloadBuffer)?;
         trace!(target: "sync::stages::bodies", bodies_len = buffer.len(), "Writing blocks");
         let mut highest_block = from_block;
-        for response in buffer {
-            // Write block
-            let block_number = response.block_number();
 
-            let block_indices = StoredBlockBodyIndices {
-                first_tx_num: next_tx_num,
-                tx_count: match &response {
-                    BlockResponse::Full(block) => block.body.transactions.len() as u64,
-                    BlockResponse::Empty(_) => 0,
-                },
-            };
+        // Firstly, write transactions to static files
+        for response in &buffer {
+            let block_number = response.block_number();
 
             // Increment block on static file header.
             if block_number > 0 {
@@ -195,15 +189,10 @@ where
 
             match response {
                 BlockResponse::Full(block) => {
-                    // write transaction block index
-                    if !block.body.transactions.is_empty() {
-                        tx_block_cursor.append(block_indices.last_tx_num(), block.number)?;
-                    }
-
                     // Write transactions
-                    for transaction in block.body.transactions {
+                    for transaction in &block.body.transactions {
                         let appended_tx_number = static_file_producer
-                            .append_transaction(next_tx_num, &transaction.into())?;
+                            .append_transaction(next_tx_num, &transaction.clone().into())?;
 
                         if appended_tx_number != next_tx_num {
                             // This scenario indicates a critical error in the logic of adding new
@@ -218,31 +207,18 @@ where
                         // Increment transaction id for each transaction.
                         next_tx_num += 1;
                     }
-
-                    // Write ommers if any
-                    if !block.body.ommers.is_empty() {
-                        ommers_cursor.append(
-                            block_number,
-                            StoredBlockOmmers { ommers: block.body.ommers },
-                        )?;
-                    }
-
-                    // Write withdrawals if any
-                    if let Some(withdrawals) = block.body.withdrawals {
-                        if !withdrawals.is_empty() {
-                            withdrawals_cursor
-                                .append(block_number, StoredBlockWithdrawals { withdrawals })?;
-                        }
-                    }
                 }
                 BlockResponse::Empty(_) => {}
             };
 
-            // insert block meta
-            block_indices_cursor.append(block_number, block_indices)?;
-
             highest_block = block_number;
         }
+
+        // Write bodies to database. This will NOT write transactions to database as we've already
+        // written them directly to static files.
+        provider.append_block_bodies(
+            buffer.into_iter().map(|response| (response.block_number(), response.into_body())),
+        )?;
 
         // The stage is "done" if:
         // - We got fewer blocks than our target
