@@ -7,6 +7,7 @@ use std::sync::LazyLock;
 
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
 use alloy_primitives::{keccak256, Address, PrimitiveSignature, TxHash, B256};
+use once_cell as _;
 #[cfg(not(feature = "std"))]
 use once_cell::sync::Lazy as LazyLock;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
