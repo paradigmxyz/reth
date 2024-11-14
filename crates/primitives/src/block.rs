@@ -2,7 +2,7 @@ use crate::{GotExpected, SealedHeader, TransactionSigned, TransactionSignedEcRec
 use alloc::vec::Vec;
 use alloy_consensus::Header;
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals, eip7685::Requests};
-use alloy_primitives::{Address, BlockNumber, Bloom, Bytes, B256, B64, U256};
+use alloy_primitives::{Address, Bytes, B256};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
@@ -96,92 +96,6 @@ impl reth_primitives_traits::Block for Block {
 
     fn header(&self) -> &Self::Header {
         &self.header
-    }
-}
-
-impl alloy_consensus::BlockHeader for Block {
-    fn parent_hash(&self) -> B256 {
-        self.header.parent_hash()
-    }
-
-    fn ommers_hash(&self) -> B256 {
-        self.header.ommers_hash()
-    }
-
-    fn beneficiary(&self) -> Address {
-        self.header.beneficiary()
-    }
-
-    fn state_root(&self) -> B256 {
-        self.header.state_root()
-    }
-
-    fn transactions_root(&self) -> B256 {
-        self.header.transactions_root()
-    }
-
-    fn receipts_root(&self) -> B256 {
-        self.header.receipts_root()
-    }
-
-    fn withdrawals_root(&self) -> Option<B256> {
-        self.header.withdrawals_root()
-    }
-
-    fn logs_bloom(&self) -> Bloom {
-        self.header.logs_bloom()
-    }
-
-    fn difficulty(&self) -> U256 {
-        self.header.difficulty()
-    }
-
-    fn number(&self) -> BlockNumber {
-        self.header.number()
-    }
-
-    fn gas_limit(&self) -> u64 {
-        self.header.gas_limit()
-    }
-
-    fn gas_used(&self) -> u64 {
-        self.header.gas_used()
-    }
-
-    fn timestamp(&self) -> u64 {
-        self.header.timestamp()
-    }
-
-    fn mix_hash(&self) -> Option<B256> {
-        self.header.mix_hash()
-    }
-
-    fn nonce(&self) -> Option<B64> {
-        self.header.nonce()
-    }
-
-    fn base_fee_per_gas(&self) -> Option<u64> {
-        self.header.base_fee_per_gas()
-    }
-
-    fn blob_gas_used(&self) -> Option<u64> {
-        self.header.blob_gas_used()
-    }
-
-    fn excess_blob_gas(&self) -> Option<u64> {
-        self.header.excess_blob_gas()
-    }
-
-    fn parent_beacon_block_root(&self) -> Option<B256> {
-        self.header.parent_beacon_block_root()
-    }
-
-    fn requests_hash(&self) -> Option<B256> {
-        self.header.requests_hash()
-    }
-
-    fn extra_data(&self) -> &Bytes {
-        self.header.extra_data()
     }
 }
 

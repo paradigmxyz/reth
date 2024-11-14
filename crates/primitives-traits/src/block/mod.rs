@@ -5,11 +5,12 @@ pub mod header;
 
 use alloc::fmt;
 
+use alloy_consensus::BlockHeader as _;
 use alloy_eips::eip7685::Requests;
-use alloy_primitives::{Address, B256};
+use alloy_primitives::{Address, BlockNumber, Bloom, Bytes, B256, B64, U256};
 use reth_codecs::Compact;
 
-use crate::{BlockBody, BlockHeader, Body, FullBlockBody, FullBlockHeader, InMemorySize};
+use crate::{BlockBody, BlockHeader, Body, FullBlockBody, FullBlockHeader, Header, InMemorySize};
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
 pub trait FullBlock: Block<Header: FullBlockHeader, Body: FullBlockBody> + Compact {}
@@ -33,7 +34,7 @@ pub trait Block:
     + for<'a> serde::Deserialize<'a>
     + alloy_rlp::Encodable
     + alloy_rlp::Decodable
-    + alloy_consensus::BlockHeader
+    + Header
     + Body<
         Self::Header,
         <Self::Body as BlockBody>::Transaction,
@@ -51,6 +52,100 @@ pub trait Block:
 
     /// Returns reference to block body.
     fn body(&self) -> &Self::Body;
+}
+
+impl<T: Block> Header for T {
+    fn parent_hash(&self) -> B256 {
+        self.header().parent_hash()
+    }
+
+    fn ommers_hash(&self) -> B256 {
+        self.header().ommers_hash()
+    }
+
+    fn beneficiary(&self) -> Address {
+        self.header().beneficiary()
+    }
+
+    fn state_root(&self) -> B256 {
+        self.header().state_root()
+    }
+
+    fn transactions_root(&self) -> B256 {
+        self.header().transactions_root()
+    }
+
+    fn receipts_root(&self) -> B256 {
+        self.header().receipts_root()
+    }
+
+    fn withdrawals_root(&self) -> Option<B256> {
+        self.header().withdrawals_root()
+    }
+
+    fn logs_bloom(&self) -> Bloom {
+        self.header().logs_bloom()
+    }
+
+    fn difficulty(&self) -> U256 {
+        self.header().difficulty()
+    }
+
+    fn number(&self) -> BlockNumber {
+        self.header().number()
+    }
+
+    fn gas_limit(&self) -> u64 {
+        self.header().gas_limit()
+    }
+
+    fn gas_used(&self) -> u64 {
+        self.header().gas_used()
+    }
+
+    fn timestamp(&self) -> u64 {
+        self.header().timestamp()
+    }
+
+    fn mix_hash(&self) -> Option<B256> {
+        self.header().mix_hash()
+    }
+
+    fn nonce(&self) -> Option<B64> {
+        self.header().nonce()
+    }
+
+    fn base_fee_per_gas(&self) -> Option<u64> {
+        self.header().base_fee_per_gas()
+    }
+
+    fn blob_gas_used(&self) -> Option<u64> {
+        self.header().blob_gas_used()
+    }
+
+    fn excess_blob_gas(&self) -> Option<u64> {
+        self.header().excess_blob_gas()
+    }
+
+    fn parent_beacon_block_root(&self) -> Option<B256> {
+        self.header().parent_beacon_block_root()
+    }
+
+    fn requests_hash(&self) -> Option<B256> {
+        self.header().requests_hash()
+    }
+
+    fn extra_data(&self) -> &Bytes {
+        self.header().extra_data()
+    }
+
+    fn next_block_excess_blob_gas(&self) -> Option<u64> {
+        self.header().next_block_excess_blob_gas()
+    }
+
+    fn next_block_blob_fee(&self) -> Option<u128> {
+        self.header().next_block_blob_fee()
+    }
 }
 
 impl<T: Block>

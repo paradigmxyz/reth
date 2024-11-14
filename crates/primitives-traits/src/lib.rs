@@ -36,7 +36,7 @@ pub use integer_list::{IntegerList, IntegerListError};
 pub mod block;
 pub use block::{
     body::{BlockBody, Body, FullBlockBody},
-    header::{BlockHeader, FullBlockHeader},
+    header::{BlockHeader, FullBlockHeader, Header},
     Block, FullBlock,
 };
 
