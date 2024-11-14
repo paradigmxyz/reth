@@ -22,7 +22,7 @@ use reth_node_ethereum::EthExecutorProvider;
 use reth_provider::{
     writer::UnifiedStorageWriter, BlockNumReader, BlockWriter, ChainSpecProvider,
     DatabaseProviderFactory, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
-    ProviderError, ProviderFactory, StateWriter, StaticFileProviderFactory,
+    ProviderError, ProviderFactory, StateWriter,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::{
@@ -153,10 +153,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
             td += sealed_block.difficulty;
             let mut executor = executor_provider.batch_executor(StateProviderDatabase::new(
-                LatestStateProviderRef::new(
-                    provider_rw.tx_ref(),
-                    provider_rw.static_file_provider().clone(),
-                ),
+                LatestStateProviderRef::new(&provider_rw),
             ));
             executor.execute_and_verify_one((&sealed_block.clone().unseal(), td).into())?;
             let execution_outcome = executor.finalize();
