@@ -18,9 +18,8 @@ use reth_consensus_common::validation::{
     validate_against_parent_timestamp, validate_block_pre_execution, validate_body_against_header,
     validate_header_base_fee, validate_header_extradata, validate_header_gas,
 };
-use reth_primitives::{
-    constants::MINIMUM_GAS_LIMIT, BlockBody, BlockWithSenders, SealedBlock, SealedHeader,
-};
+use reth_primitives::{BlockBody, BlockWithSenders, SealedBlock, SealedHeader};
+use reth_primitives_traits::constants::MINIMUM_GAS_LIMIT;
 use std::{fmt::Debug, sync::Arc, time::SystemTime};
 
 /// The bound divisor of the gas limit, used in update calculations.

@@ -6438,6 +6438,7 @@ dependencies = [
  "reth-payload-builder",
  "reth-payload-primitives",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-revm",
  "reth-tasks",
@@ -6526,6 +6527,7 @@ dependencies = [
  "reth-node-api",
  "reth-node-core",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-rpc-types-compat",
  "reth-tracing",
  "serde",
@@ -6802,6 +6804,7 @@ dependencies = [
  "auto_impl",
  "derive_more 1.0.0",
  "reth-primitives",
+ "reth-primitives-traits",
 ]
 
 [[package]]
@@ -7330,6 +7333,7 @@ dependencies = [
  "reth-metrics",
  "reth-network-peers",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-tracing",
  "secp256k1",
  "serde",
@@ -7388,6 +7392,7 @@ dependencies = [
  "reth-consensus",
  "reth-consensus-common",
  "reth-primitives",
+ "reth-primitives-traits",
  "tracing",
 ]
 

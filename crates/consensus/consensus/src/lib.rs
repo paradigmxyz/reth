@@ -16,9 +16,10 @@ use alloy_consensus::Header;
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256, U256};
 use reth_primitives::{
-    constants::MINIMUM_GAS_LIMIT, BlockBody, BlockWithSenders, GotExpected, GotExpectedBoxed,
-    InvalidTransactionError, Receipt, SealedBlock, SealedHeader,
+    BlockBody, BlockWithSenders, GotExpected, GotExpectedBoxed, InvalidTransactionError, Receipt,
+    SealedBlock, SealedHeader,
 };
+use reth_primitives_traits::constants::MINIMUM_GAS_LIMIT;
 
 /// A consensus implementation that does nothing.
 pub mod noop;

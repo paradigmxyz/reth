@@ -15,6 +15,7 @@ workspace = true
 # reth
 reth-codecs.workspace = true
 reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 reth-ecies.workspace = true
 alloy-rlp = { workspace = true, features = ["derive"] }
 reth-eth-wire-types.workspace = true
@@ -72,7 +73,8 @@ arbitrary = [
 	"alloy-eips/arbitrary",
 	"alloy-primitives/arbitrary",
 	"reth-codecs/arbitrary",
-	"alloy-chains/arbitrary"
+	"alloy-chains/arbitrary",
+	"reth-primitives-traits/arbitrary"
 ]
 serde = [
 	"dep:serde",
