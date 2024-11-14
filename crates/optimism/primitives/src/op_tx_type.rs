@@ -138,14 +138,14 @@ impl reth_codecs::Compact for OpTxType {
         use bytes::Buf;
         (
             match identifier {
-                COMPACT_IDENTIFIER_LEGACY => OpTxType(AlloyOpTxType::Legacy),
-                COMPACT_IDENTIFIER_EIP2930 => OpTxType(AlloyOpTxType::Eip2930),
-                COMPACT_IDENTIFIER_EIP1559 => OpTxType(AlloyOpTxType::Eip1559),
+                COMPACT_IDENTIFIER_LEGACY => Self(AlloyOpTxType::Legacy),
+                COMPACT_IDENTIFIER_EIP2930 => Self(AlloyOpTxType::Eip2930),
+                COMPACT_IDENTIFIER_EIP1559 => Self(AlloyOpTxType::Eip1559),
                 COMPACT_EXTENDED_IDENTIFIER_FLAG => {
                     let extended_identifier = buf.get_u8();
                     match extended_identifier {
-                        EIP7702_TX_TYPE_ID => OpTxType(AlloyOpTxType::Eip7702),
-                        DEPOSIT_TX_TYPE_ID => OpTxType(AlloyOpTxType::Deposit),
+                        EIP7702_TX_TYPE_ID => Self(AlloyOpTxType::Eip7702),
+                        DEPOSIT_TX_TYPE_ID => Self(AlloyOpTxType::Deposit),
                         _ => panic!("Unsupported OpTxType identifier: {extended_identifier}"),
                     }
                 }
