@@ -657,6 +657,14 @@ impl InMemorySize for BlockBody {
     }
 }
 
+impl reth_primitives_traits::BlockBody for BlockBody {
+    type Transaction = TransactionSigned;
+
+    fn transactions(&self) -> &[Self::Transaction] {
+        &self.transactions
+    }
+}
+
 impl From<Block> for BlockBody {
     fn from(block: Block) -> Self {
         Self {

@@ -20,6 +20,7 @@ use tracing::debug;
 /// This is a wrapper around [`BestTransactions`] that also enforces a specific basefee.
 ///
 /// This iterator guarantees that all transaction it returns satisfy both the base fee and blob fee!
+#[derive(Debug)]
 pub(crate) struct BestTransactionsWithFees<T: TransactionOrdering> {
     pub(crate) best: BestTransactions<T>,
     pub(crate) base_fee: u64,
@@ -72,6 +73,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactionsWithFees<T> {
 /// be executed on the current state, but only yields transactions that are ready to be executed
 /// now. While it contains all gapless transactions of a sender, it _always_ only returns the
 /// transaction with the current on chain nonce.
+#[derive(Debug)]
 pub(crate) struct BestTransactions<T: TransactionOrdering> {
     /// Contains a copy of _all_ transactions of the pending pool at the point in time this
     /// iterator was created.

@@ -6,10 +6,10 @@ use crate::{
     hello::DEFAULT_TCP_PORT, EthVersion, HelloMessageWithProtocols, P2PStream, ProtocolVersion,
     Status, UnauthedP2PStream,
 };
+use alloy_chains::Chain;
 use alloy_primitives::{B256, U256};
-use reth_chainspec::Chain;
+use reth_ethereum_forks::{ForkFilter, Head};
 use reth_network_peers::pk2id;
-use reth_primitives::{ForkFilter, Head};
 use secp256k1::{SecretKey, SECP256K1};
 use std::net::SocketAddr;
 use tokio::net::TcpStream;

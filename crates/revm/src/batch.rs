@@ -1,10 +1,12 @@
 //! Helper for handling execution of multiple blocks.
 
 use alloc::vec::Vec;
+
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{map::HashSet, Address, BlockNumber};
 use reth_execution_errors::{BlockExecutionError, InternalBlockExecutionError};
-use reth_primitives::{Receipt, Receipts};
+use reth_primitives::Receipts;
+use reth_primitives_traits::Receipt;
 use reth_prune_types::{PruneMode, PruneModes, PruneSegmentError, MINIMUM_PRUNING_DISTANCE};
 use revm::db::states::bundle_state::BundleRetention;
 
@@ -13,7 +15,7 @@ use revm::db::states::bundle_state::BundleRetention;
 ///  - pruning receipts according to the pruning configuration.
 ///  - batch range if known
 #[derive(Debug, Default)]
-pub struct BlockBatchRecord {
+pub struct BlockBatchRecord<T = reth_primitives::Receipt> {
     /// Pruning configuration.
     prune_modes: PruneModes,
     /// The collection of receipts.
@@ -21,7 +23,7 @@ pub struct BlockBatchRecord {
     /// The inner vector stores receipts ordered by transaction number.
     ///
     /// If receipt is None it means it is pruned.
-    receipts: Receipts,
+    receipts: Receipts<T>,
     /// The collection of EIP-7685 requests.
     /// Outer vector stores requests for each block sequentially.
     /// The inner vector stores requests ordered by transaction number.
@@ -41,9 +43,12 @@ pub struct BlockBatchRecord {
     tip: Option<BlockNumber>,
 }
 
-impl BlockBatchRecord {
+impl<T> BlockBatchRecord<T> {
     /// Create a new receipts recorder with the given pruning configuration.
-    pub fn new(prune_modes: PruneModes) -> Self {
+    pub fn new(prune_modes: PruneModes) -> Self
+    where
+        T: Default,
+    {
         Self { prune_modes, ..Default::default() }
     }
 
@@ -73,12 +78,15 @@ impl BlockBatchRecord {
     }
 
     /// Returns the recorded receipts.
-    pub const fn receipts(&self) -> &Receipts {
+    pub const fn receipts(&self) -> &Receipts<T> {
         &self.receipts
     }
 
     /// Returns all recorded receipts.
-    pub fn take_receipts(&mut self) -> Receipts {
+    pub fn take_receipts(&mut self) -> Receipts<T>
+    where
+        T: Default,
+    {
         core::mem::take(&mut self.receipts)
     }
 
@@ -111,7 +119,10 @@ impl BlockBatchRecord {
     }
 
     /// Save receipts to the executor.
-    pub fn save_receipts(&mut self, receipts: Vec<Receipt>) -> Result<(), BlockExecutionError> {
+    pub fn save_receipts(&mut self, receipts: Vec<T>) -> Result<(), BlockExecutionError>
+    where
+        T: Receipt,
+    {
         let mut receipts = receipts.into_iter().map(Some).collect();
         // Prune receipts if necessary.
         self.prune_receipts(&mut receipts).map_err(InternalBlockExecutionError::from)?;
@@ -121,10 +132,10 @@ impl BlockBatchRecord {
     }
 
     /// Prune receipts according to the pruning configuration.
-    fn prune_receipts(
-        &mut self,
-        receipts: &mut Vec<Option<Receipt>>,
-    ) -> Result<(), PruneSegmentError> {
+    fn prune_receipts(&mut self, receipts: &mut Vec<Option<T>>) -> Result<(), PruneSegmentError>
+    where
+        T: Receipt,
+    {
         let (Some(first_block), Some(tip)) = (self.first_block, self.tip) else { return Ok(()) };
 
         let block_number = first_block + self.receipts.len() as u64;
@@ -161,7 +172,7 @@ impl BlockBatchRecord {
                 // If there is an address_filter, it does not contain any of the
                 // contract addresses, then remove this receipt.
                 let inner_receipt = receipt.as_ref().expect("receipts have not been pruned");
-                if !inner_receipt.logs.iter().any(|log| filter.contains(&log.address)) {
+                if !inner_receipt.logs().iter().any(|log| filter.contains(&log.address)) {
                     receipt.take();
                 }
             }
@@ -186,7 +197,7 @@ mod tests {
 
     #[test]
     fn test_save_receipts_empty() {
-        let mut recorder = BlockBatchRecord::default();
+        let mut recorder: BlockBatchRecord = BlockBatchRecord::default();
         // Create an empty vector of receipts
         let receipts = vec![];
 
