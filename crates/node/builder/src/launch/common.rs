@@ -37,13 +37,12 @@ use reth_node_metrics::{
     server::{MetricServer, MetricServerConfig},
     version::VersionInfo,
 };
-use reth_optimism_forks::OptimismHardfork;
-use reth_primitives::{Hardforks, Head};
+use reth_primitives::Head;
 use reth_provider::{
     providers::{BlockchainProvider, BlockchainProvider2, ProviderNodeTypes, StaticFileProvider},
-    BlockHashReader, CanonStateNotificationSender, ChainSpecProvider, ProviderFactory,
-    ProviderResult, StageCheckpointReader, StateProviderFactory, StaticFileProviderFactory,
-    TreeViewer,
+    BlockHashReader, BlockNumReader, CanonStateNotificationSender, ChainSpecProvider,
+    ProviderError, ProviderFactory, ProviderResult, StageCheckpointReader, StateProviderFactory,
+    StaticFileProviderFactory, TreeViewer,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_api::clients::EthApiClient;
@@ -816,9 +815,21 @@ where
         self.node_config().debug.terminate || self.node_config().debug.max_block.is_some()
     }
 
-    /// Returns true if the chain is op-mainnet
-    pub fn chain_specific_db_checks(&self) -> bool {
-        self.chain_spec().chain_id() == 10
+    /// Ensures that the database matches chain-specific requirements.
+    ///
+    /// This checks for OP-Mainnet and ensures we have all the necessary data to progress (past
+    /// bedrock height)
+    fn ensure_chain_specific_db_checks(&self) -> ProviderResult<()> {
+        if self.chain_id() == Chain::optimism_mainnet() {
+            let latest = self.blockchain_db().last_block_number()?;
+            // bedrock height
+            if latest < 105235063 {
+                error!("Op-mainnet has been launched without importing the pre-Bedrock state. The chain can't progress without this.");
+                return Err(ProviderError::BestBlockNotFound)
+            }
+        }
+
+        Ok(())
     }
 
     /// Check if the pipeline is consistent (all stages have the checkpoint block numbers no less
@@ -864,14 +875,7 @@ where
             }
         }
 
-        let db_checks_passed = self.chain_specific_db_checks();
-        let chain_spec = self.chain_spec();
-        let is_bedrock_active =
-            chain_spec.fork(OptimismHardfork::Bedrock).active_at_block(105235063);
-
-        if db_checks_passed && !is_bedrock_active {
-            warn!("Op-mainnet has been launched without importing the pre-Bedrock state. The chain won't progress without this.");
-        }
+        self.ensure_chain_specific_db_checks()?;
 
         Ok(None)
     }

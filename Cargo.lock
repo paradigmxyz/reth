@@ -7911,8 +7911,6 @@ dependencies = [
  "reth-node-core",
  "reth-node-events",
  "reth-node-metrics",
- "reth-optimism-chainspec",
- "reth-optimism-forks",
  "reth-payload-builder",
  "reth-payload-primitives",
  "reth-payload-validator",

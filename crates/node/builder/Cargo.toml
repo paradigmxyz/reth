@@ -60,10 +60,6 @@ reth-tokio-util.workspace = true
 reth-tracing.workspace = true
 reth-transaction-pool.workspace = true
 
-# op-reth
-reth-optimism-forks.workspace = true
-reth-optimism-chainspec.workspace = true
-
 ## ethereum
 alloy-primitives.workspace = true
 alloy-rpc-types = { workspace = true, features = ["engine"] }
