@@ -51,17 +51,18 @@ async fn bitfinity_test_node_forward_ic_or_eth_get_last_certified_block() {
     // Assert
     assert!(result.is_ok());
 
-    // Try with `ic_getLastCertifiedBlock` alias
+    // Try with `eth_getLastCertifiedBlock` alias
     let result: CertifiedResult<Block<H256>> = reth_client
         .single_request(
-            "ic_getLastCertifiedBlock".to_owned(),
+            "eth_getLastCertifiedBlock".to_owned(),
             ethereum_json_rpc_client::Params::None,
             ethereum_json_rpc_client::Id::Num(1),
         )
         .await
         .unwrap();
 
-    assert!(!result.certificate.is_empty());
+    assert_eq!(result.certificate, vec![1u8, 3, 11]);
+
 }
 
 #[tokio::test]
@@ -290,6 +291,7 @@ pub mod eth_server {
 
     use alloy_rlp::Bytes;
     use did::keccak;
+    use ethereum_json_rpc_client::{Block, CertifiedResult, H256};
     use jsonrpsee::{core::RpcResult, proc_macros::rpc};
     use revm_primitives::{Address, B256, U256};
 
@@ -306,6 +308,10 @@ pub mod eth_server {
 
         #[method(name = "getGenesisBalances", aliases = ["ic_getGenesisBalances"])]
         async fn get_genesis_balances(&self) -> RpcResult<Vec<(Address, U256)>>;
+
+        #[method(name = "getLastCertifiedBlock", aliases = ["ic_getLastCertifiedBlock"])]
+        async fn get_last_certified_block(&self) -> RpcResult<CertifiedResult<Block<H256>>>;
+
     }
 
     #[derive(Debug)]
@@ -347,6 +353,14 @@ pub mod eth_server {
                 (Address::from_slice(&[2u8; 20]), U256::from(20)),
                 (Address::from_slice(&[3u8; 20]), U256::from(30)),
             ])
+        }
+
+        async fn get_last_certified_block(&self) -> RpcResult<CertifiedResult<Block<H256>>> {
+            Ok(CertifiedResult { 
+                data: Default::default(), 
+                witness: vec![], 
+                certificate: vec![1u8, 3, 11] 
+            })
         }
     }
 }
