@@ -1,5 +1,5 @@
 use alloc::{vec, vec::Vec};
-use core::{cmp::Ordering, ops::Deref};
+use core::cmp::Ordering;
 
 use alloy_consensus::{
     constants::{EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID},
@@ -15,6 +15,9 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "reth-codec")]
 use crate::compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR};
 use crate::TxType;
+
+/// Retrieves gas spent by transactions as a vector of tuples (transaction index, gas used).
+pub use reth_primitives_traits::receipt::gas_spent_by_transactions;
 
 /// Receipt containing result of transaction execution.
 #[derive(
@@ -197,17 +200,6 @@ impl ReceiptWithBloom {
     const fn as_encoder(&self) -> ReceiptWithBloomEncoder<'_> {
         ReceiptWithBloomEncoder { receipt: &self.receipt, bloom: &self.bloom }
     }
-}
-
-/// Retrieves gas spent by transactions as a vector of tuples (transaction index, gas used).
-pub fn gas_spent_by_transactions<T: Deref<Target = Receipt>>(
-    receipts: impl IntoIterator<Item = T>,
-) -> Vec<(u64, u64)> {
-    receipts
-        .into_iter()
-        .enumerate()
-        .map(|(id, receipt)| (id as u64, receipt.deref().cumulative_gas_used))
-        .collect()
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
