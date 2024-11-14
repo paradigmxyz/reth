@@ -10,12 +10,12 @@ use crate::{BlockHeader, FullBlockHeader, FullSignedTx, InMemorySize, SignedTran
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
 pub trait FullBlockBody:
-    BlockBody<Header: FullBlockHeader, SignedTransaction: FullSignedTx> + Compact
+    BlockBody<Header: FullBlockHeader, Transaction: FullSignedTx> + Compact
 {
 }
 
 impl<T> FullBlockBody for T where
-    T: BlockBody<Header: FullBlockHeader, SignedTransaction: FullSignedTx> + Compact
+    T: BlockBody<Header: FullBlockHeader, Transaction: FullSignedTx> + Compact
 {
 }
 
@@ -33,11 +33,11 @@ pub trait BlockBody:
     + for<'de> serde::Deserialize<'de>
     + alloy_rlp::Encodable
     + alloy_rlp::Decodable
-    + Body<Self::Header, Self::SignedTransaction, Self::Withdrawals>
+    + Body<Self::Header, Self::Transaction, Self::Withdrawals>
     + InMemorySize
 {
     /// Signed transaction.
-    type SignedTransaction: SignedTransaction;
+    type Transaction: SignedTransaction;
 
     /// Header type (uncle blocks).
     type Header: BlockHeader;

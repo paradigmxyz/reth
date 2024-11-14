@@ -36,7 +36,7 @@ pub trait Block:
     + alloy_consensus::BlockHeader
     + Body<
         Self::Header,
-        <Self::Body as BlockBody>::SignedTransaction,
+        <Self::Body as BlockBody>::Transaction,
         <Self::Body as BlockBody>::Withdrawals,
     > + InMemorySize
 {
@@ -54,10 +54,10 @@ pub trait Block:
 }
 
 impl<T: Block>
-    Body<T::Header, <T::Body as BlockBody>::SignedTransaction, <T::Body as BlockBody>::Withdrawals>
+    Body<T::Header, <T::Body as BlockBody>::Transaction, <T::Body as BlockBody>::Withdrawals>
     for T
 {
-    fn transactions(&self) -> &[<T::Body as BlockBody>::SignedTransaction] {
+    fn transactions(&self) -> &[<T::Body as BlockBody>::Transaction] {
         self.body().transactions()
     }
 

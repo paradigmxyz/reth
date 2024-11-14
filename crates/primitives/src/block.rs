@@ -741,7 +741,7 @@ impl BlockBody {
 }
 
 impl reth_primitives_traits::BlockBody for BlockBody {
-    type SignedTransaction = TransactionSigned;
+    type Transaction = TransactionSigned;
     type Header = Header;
     type Withdrawals = Withdrawals;
 }
@@ -808,14 +808,6 @@ impl InMemorySize for BlockBody {
             self.withdrawals
                 .as_ref()
                 .map_or(core::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
-    }
-}
-
-impl reth_primitives_traits::BlockBody for BlockBody {
-    type Transaction = TransactionSigned;
-
-    fn transactions(&self) -> &[Self::Transaction] {
-        &self.transactions
     }
 }
 
