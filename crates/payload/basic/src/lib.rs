@@ -10,20 +10,18 @@
 
 use crate::metrics::PayloadBuilderMetrics;
 use alloy_consensus::constants::EMPTY_WITHDRAWALS;
-use alloy_eips::{merge::SLOT_DURATION, BlockNumberOrTag};
+use alloy_eips::{eip4895::Withdrawals, merge::SLOT_DURATION};
 use alloy_primitives::{Bytes, B256, U256};
 use futures_core::ready;
 use futures_util::FutureExt;
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_chainspec::EthereumHardforks;
 use reth_evm::state_change::post_block_withdrawals_balance_increments;
 use reth_payload_builder::{KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJobGenerator};
 use reth_payload_primitives::{
     BuiltPayload, PayloadBuilderAttributes, PayloadBuilderError, PayloadKind,
 };
-use reth_primitives::{constants::RETH_CLIENT_VERSION, proofs, SealedHeader, Withdrawals};
-use reth_provider::{
-    BlockReaderIdExt, BlockSource, CanonStateNotification, ProviderError, StateProviderFactory,
-};
+use reth_primitives::{constants::RETH_CLIENT_VERSION, proofs, SealedHeader};
+use reth_provider::{BlockReaderIdExt, CanonStateNotification, StateProviderFactory};
 use reth_revm::cached::CachedReads;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
@@ -44,6 +42,9 @@ use tokio::{
 use tracing::{debug, trace, warn};
 
 mod metrics;
+mod stack;
+
+pub use stack::PayloadBuilderStack;
 
 /// The [`PayloadJobGenerator`] that creates [`BasicPayloadJob`]s.
 #[derive(Debug)]
@@ -144,33 +145,30 @@ where
         &self,
         attributes: <Self::Job as PayloadJob>::PayloadAttributes,
     ) -> Result<Self::Job, PayloadBuilderError> {
-        let parent_block = if attributes.parent().is_zero() {
-            // use latest block if parent is zero: genesis block
+        let parent_header = if attributes.parent().is_zero() {
+            // Use latest header for genesis block case
             self.client
-                .block_by_number_or_tag(BlockNumberOrTag::Latest)?
-                .ok_or_else(|| PayloadBuilderError::MissingParentBlock(attributes.parent()))?
-                .seal_slow()
+                .latest_header()
+                .map_err(PayloadBuilderError::from)?
+                .ok_or_else(|| PayloadBuilderError::MissingParentHeader(B256::ZERO))?
         } else {
-            let block = self
-                .client
-                .find_block_by_hash(attributes.parent(), BlockSource::Any)?
-                .ok_or_else(|| PayloadBuilderError::MissingParentBlock(attributes.parent()))?;
-
-            // we already know the hash, so we can seal it
-            block.seal(attributes.parent())
+            // Fetch specific header by hash
+            self.client
+                .sealed_header_by_hash(attributes.parent())
+                .map_err(PayloadBuilderError::from)?
+                .ok_or_else(|| PayloadBuilderError::MissingParentHeader(attributes.parent()))?
         };
 
-        let hash = parent_block.hash();
-        let parent_header = parent_block.header();
-        let header = SealedHeader::new(parent_header.clone(), hash);
-
-        let config =
-            PayloadConfig::new(Arc::new(header), self.config.extradata.clone(), attributes);
+        let config = PayloadConfig::new(
+            Arc::new(parent_header.clone()),
+            self.config.extradata.clone(),
+            attributes,
+        );
 
         let until = self.job_deadline(config.attributes.timestamp());
         let deadline = Box::pin(tokio::time::sleep_until(until));
 
-        let cached_reads = self.maybe_pre_cached(hash);
+        let cached_reads = self.maybe_pre_cached(parent_header.hash());
 
         let mut job = BasicPayloadJob {
             config,
@@ -618,7 +616,9 @@ where
         if let Some(fut) = Pin::new(&mut this.maybe_better).as_pin_mut() {
             if let Poll::Ready(res) = fut.poll(cx) {
                 this.maybe_better = None;
-                if let Ok(BuildOutcome::Better { payload, .. }) = res {
+                if let Ok(Some(payload)) = res.map(|out| out.into_payload())
+                    .inspect_err(|err| warn!(target: "payload_builder", %err, "failed to resolve pending payload"))
+                {
                     debug!(target: "payload_builder", "resolving better payload");
                     return Poll::Ready(Ok(payload))
                 }
@@ -769,7 +769,7 @@ impl<Payload> BuildOutcome<Payload> {
     /// Consumes the type and returns the payload if the outcome is `Better`.
     pub fn into_payload(self) -> Option<Payload> {
         match self {
-            Self::Better { payload, .. } => Some(payload),
+            Self::Better { payload, .. } | Self::Freeze(payload) => Some(payload),
             _ => None,
         }
     }
@@ -787,6 +787,21 @@ impl<Payload> BuildOutcome<Payload> {
     /// Returns true if the outcome is `Cancelled`.
     pub const fn is_cancelled(&self) -> bool {
         matches!(self, Self::Cancelled)
+    }
+
+    /// Applies a fn on the current payload.
+    pub(crate) fn map_payload<F, P>(self, f: F) -> BuildOutcome<P>
+    where
+        F: FnOnce(Payload) -> P,
+    {
+        match self {
+            Self::Better { payload, cached_reads } => {
+                BuildOutcome::Better { payload: f(payload), cached_reads }
+            }
+            Self::Aborted { fees, cached_reads } => BuildOutcome::Aborted { fees, cached_reads },
+            Self::Cancelled => BuildOutcome::Cancelled,
+            Self::Freeze(payload) => BuildOutcome::Freeze(f(payload)),
+        }
     }
 }
 
@@ -994,12 +1009,16 @@ impl WithdrawalsOutcome {
 /// Returns the withdrawals root.
 ///
 /// Returns `None` values pre shanghai
-pub fn commit_withdrawals<DB: Database<Error = ProviderError>>(
+pub fn commit_withdrawals<DB, ChainSpec>(
     db: &mut State<DB>,
     chain_spec: &ChainSpec,
     timestamp: u64,
     withdrawals: Withdrawals,
-) -> Result<WithdrawalsOutcome, DB::Error> {
+) -> Result<WithdrawalsOutcome, DB::Error>
+where
+    DB: Database,
+    ChainSpec: EthereumHardforks,
+{
     if !chain_spec.is_shanghai_active_at_timestamp(timestamp) {
         return Ok(WithdrawalsOutcome::pre_shanghai())
     }
@@ -1026,7 +1045,7 @@ pub fn commit_withdrawals<DB: Database<Error = ProviderError>>(
 ///
 /// This compares the total fees of the blocks, higher is better.
 #[inline(always)]
-pub fn is_better_payload(best_payload: Option<impl BuiltPayload>, new_fees: U256) -> bool {
+pub fn is_better_payload<T: BuiltPayload>(best_payload: Option<&T>, new_fees: U256) -> bool {
     if let Some(best_payload) = best_payload {
         new_fees > best_payload.fees()
     } else {

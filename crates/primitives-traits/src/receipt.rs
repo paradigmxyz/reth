@@ -1,6 +1,9 @@
 //! Receipt abstraction
 
+use core::fmt;
+
 use alloy_consensus::TxReceipt;
+use alloy_primitives::B256;
 use reth_codecs::Compact;
 use serde::{Deserialize, Serialize};
 
@@ -11,8 +14,13 @@ impl<T> FullReceipt for T where T: Receipt + Compact {}
 
 /// Abstraction of a receipt.
 pub trait Receipt:
-    TxReceipt
+    Send
+    + Sync
+    + Unpin
+    + Clone
     + Default
+    + fmt::Debug
+    + TxReceipt
     + alloy_rlp::Encodable
     + alloy_rlp::Decodable
     + Serialize
@@ -20,4 +28,7 @@ pub trait Receipt:
 {
     /// Returns transaction type.
     fn tx_type(&self) -> u8;
+
+    /// Calculates the receipts root of the given receipts.
+    fn receipts_root(receipts: &[&Self]) -> B256;
 }

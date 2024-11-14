@@ -11,6 +11,7 @@ pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
 
 use std::{fmt, sync::Arc};
 
+use alloy_consensus::Header;
 use alloy_primitives::U256;
 use derive_more::Deref;
 use op_alloy_network::Optimism;
@@ -18,7 +19,6 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_node_builder::EthApiBuilderCtx;
-use reth_primitives::Header;
 use reth_provider::{
     BlockNumReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, EvmEnvProvider,
     StageCheckpointReader, StateProviderFactory,
@@ -121,6 +121,7 @@ where
     type Pool = N::Pool;
     type Evm = <N as RpcNodeCore>::Evm;
     type Network = <N as RpcNodeCore>::Network;
+    type PayloadBuilder = ();
 
     #[inline]
     fn pool(&self) -> &Self::Pool {
@@ -135,6 +136,11 @@ where
     #[inline]
     fn network(&self) -> &Self::Network {
         self.inner.network()
+    }
+
+    #[inline]
+    fn payload_builder(&self) -> &Self::PayloadBuilder {
+        &()
     }
 
     #[inline]

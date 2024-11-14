@@ -1,12 +1,12 @@
 //! Utilities for serving `eth_simulateV1`
 
 use alloy_consensus::{Transaction as _, TxEip4844Variant, TxType, TypedTransaction};
-use alloy_primitives::{Parity, Signature};
-use alloy_rpc_types::{
+use alloy_primitives::PrimitiveSignature as Signature;
+use alloy_rpc_types_eth::{
     simulate::{SimCallResult, SimulateError, SimulatedBlock},
+    transaction::TransactionRequest,
     Block, BlockTransactionsKind,
 };
-use alloy_rpc_types_eth::transaction::TransactionRequest;
 use jsonrpsee_types::ErrorObject;
 use reth_primitives::{
     proofs::{calculate_receipt_root, calculate_transaction_root},
@@ -21,8 +21,9 @@ use revm::{db::CacheDB, Database};
 use revm_primitives::{keccak256, Address, BlockEnv, Bytes, ExecutionResult, TxKind, B256, U256};
 
 use crate::{
-    cache::db::StateProviderTraitObjWrapper, error::ToRpcError, EthApiError, RevertError,
-    RpcInvalidTransactionError,
+    cache::db::StateProviderTraitObjWrapper,
+    error::{api::FromEthApiError, ToRpcError},
+    EthApiError, RevertError, RpcInvalidTransactionError,
 };
 
 /// Errors which may occur during `eth_simulateV1` execution.
@@ -133,8 +134,7 @@ where
         };
 
         // Create an empty signature for the transaction.
-        let signature =
-            Signature::new(Default::default(), Default::default(), Parity::Parity(false));
+        let signature = Signature::new(Default::default(), Default::default(), false);
 
         let tx = match tx {
             TypedTransaction::Legacy(tx) => {
@@ -170,8 +170,8 @@ where
 }
 
 /// Handles outputs of the calls execution and builds a [`SimulatedBlock`].
-#[expect(clippy::too_many_arguments)]
-pub fn build_block<T: TransactionCompat>(
+#[expect(clippy::complexity)]
+pub fn build_block<T: TransactionCompat<Error: FromEthApiError>>(
     results: Vec<(Address, ExecutionResult)>,
     transactions: Vec<TransactionSigned>,
     block_env: &BlockEnv,
@@ -180,7 +180,7 @@ pub fn build_block<T: TransactionCompat>(
     full_transactions: bool,
     db: &CacheDB<StateProviderDatabase<StateProviderTraitObjWrapper<'_>>>,
     tx_resp_builder: &T,
-) -> Result<SimulatedBlock<Block<T::Transaction>>, EthApiError> {
+) -> Result<SimulatedBlock<Block<T::Transaction>>, T::Error> {
     let mut calls: Vec<SimCallResult> = Vec::with_capacity(results.len());
     let mut senders = Vec::with_capacity(results.len());
     let mut receipts = Vec::with_capacity(results.len());
@@ -226,7 +226,7 @@ pub fn build_block<T: TransactionCompat>(
                     .into_iter()
                     .map(|log| {
                         log_index += 1;
-                        alloy_rpc_types::Log {
+                        alloy_rpc_types_eth::Log {
                             inner: log,
                             log_index: Some(log_index - 1),
                             transaction_index: Some(transaction_index as u64),
@@ -273,9 +273,9 @@ pub fn build_block<T: TransactionCompat>(
         }
     }
 
-    let state_root = db.db.state_root(hashed_state)?;
+    let state_root = db.db.state_root(hashed_state).map_err(T::Error::from_eth_err)?;
 
-    let header = reth_primitives::Header {
+    let header = alloy_consensus::Header {
         beneficiary: block_env.coinbase,
         difficulty: block_env.difficulty,
         number: block_env.number.to(),
@@ -306,6 +306,6 @@ pub fn build_block<T: TransactionCompat>(
     let txs_kind =
         if full_transactions { BlockTransactionsKind::Full } else { BlockTransactionsKind::Hashes };
 
-    let block = from_block(block, total_difficulty, txs_kind, None, tx_resp_builder)?;
+    let block = from_block::<T>(block, total_difficulty, txs_kind, None, tx_resp_builder)?;
     Ok(SimulatedBlock { inner: block, calls })
 }

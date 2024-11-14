@@ -8,7 +8,7 @@ use alloy_primitives::{BlockNumber, B256};
 use futures::FutureExt;
 use reth_network_p2p::{
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
-    BlockClient,
+    EthBlockClient,
 };
 use reth_primitives::SealedBlock;
 use reth_provider::providers::ProviderNodeTypes;
@@ -34,7 +34,7 @@ use tracing::trace;
 pub(crate) struct EngineSyncController<N, Client>
 where
     N: ProviderNodeTypes,
-    Client: BlockClient,
+    Client: EthBlockClient,
 {
     /// A downloader that can download full blocks from the network.
     full_block_client: FullBlockClient<Client>,
@@ -64,7 +64,7 @@ where
 impl<N, Client> EngineSyncController<N, Client>
 where
     N: ProviderNodeTypes,
-    Client: BlockClient + 'static,
+    Client: EthBlockClient + 'static,
 {
     /// Create a new instance
     pub(crate) fn new(
@@ -410,12 +410,12 @@ impl<N: ProviderNodeTypes> PipelineState<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::Sealable;
+    use alloy_consensus::Header;
     use assert_matches::assert_matches;
     use futures::poll;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
     use reth_network_p2p::{either::Either, test_utils::TestFullBlockClient};
-    use reth_primitives::{BlockBody, Header, SealedHeader};
+    use reth_primitives::{BlockBody, SealedHeader};
     use reth_provider::{
         test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
         ExecutionOutcome,
@@ -522,7 +522,7 @@ mod tests {
         ) -> EngineSyncController<N, Either<Client, TestFullBlockClient>>
         where
             N: ProviderNodeTypes,
-            Client: BlockClient + 'static,
+            Client: EthBlockClient + 'static,
         {
             let client = self
                 .client
@@ -599,9 +599,7 @@ mod tests {
             header.parent_hash = hash;
             header.number += 1;
             header.timestamp += 1;
-            let sealed = header.seal_slow();
-            let (header, seal) = sealed.into_parts();
-            sealed_header = SealedHeader::new(header, seal);
+            sealed_header = SealedHeader::seal(header);
             client.insert(sealed_header.clone(), body.clone());
         }
     }
@@ -617,14 +615,12 @@ mod tests {
         );
 
         let client = TestFullBlockClient::default();
-        let sealed = Header {
+        let header = Header {
             base_fee_per_gas: Some(7),
             gas_limit: chain_spec.max_gas_limit,
             ..Default::default()
-        }
-        .seal_slow();
-        let (header, seal) = sealed.into_parts();
-        let header = SealedHeader::new(header, seal);
+        };
+        let header = SealedHeader::seal(header);
         insert_headers_into_client(&client, header, 0..10);
 
         // set up a pipeline

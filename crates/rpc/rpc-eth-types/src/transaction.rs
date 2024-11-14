@@ -3,7 +3,7 @@
 //! Transaction wrapper that labels transaction with its origin.
 
 use alloy_primitives::B256;
-use alloy_rpc_types::TransactionInfo;
+use alloy_rpc_types_eth::TransactionInfo;
 use reth_primitives::TransactionSignedEcRecovered;
 use reth_rpc_types_compat::{
     transaction::{from_recovered, from_recovered_with_block_context},
@@ -41,7 +41,10 @@ impl TransactionSource {
     }
 
     /// Conversion into network specific transaction type.
-    pub fn into_transaction<T: TransactionCompat>(self, resp_builder: &T) -> T::Transaction {
+    pub fn into_transaction<T: TransactionCompat>(
+        self,
+        resp_builder: &T,
+    ) -> Result<T::Transaction, T::Error> {
         match self {
             Self::Pool(tx) => from_recovered(tx, resp_builder),
             Self::Block { transaction, index, block_hash, block_number, base_fee } => {

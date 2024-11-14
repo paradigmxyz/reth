@@ -26,6 +26,7 @@ reth-optimism-chainspec.workspace = true
 # ethereum
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
+alloy-trie.workspace = true
 
 tracing.workspace = true
 

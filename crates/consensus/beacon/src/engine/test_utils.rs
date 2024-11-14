@@ -4,7 +4,7 @@ use crate::{
     BeaconConsensusEngineError, BeaconConsensusEngineHandle, BeaconForkChoiceUpdateError,
     BeaconOnNewPayloadError, EthBeaconConsensus, MIN_BLOCKS_FOR_PIPELINE_RUN,
 };
-use alloy_primitives::{BlockNumber, Sealable, B256};
+use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_types_engine::{
     ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
 };
@@ -24,7 +24,9 @@ use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_evm::{either::Either, test_utils::MockExecutorProvider};
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_exex_types::FinishedExExHeight;
-use reth_network_p2p::{sync::NoopSyncStateUpdater, test_utils::NoopFullBlockClient, BlockClient};
+use reth_network_p2p::{
+    sync::NoopSyncStateUpdater, test_utils::NoopFullBlockClient, EthBlockClient,
+};
 use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_primitives::SealedHeader;
 use reth_provider::{
@@ -237,7 +239,7 @@ impl TestConsensusEngineBuilder {
         client: Client,
     ) -> NetworkedTestConsensusEngineBuilder<Client>
     where
-        Client: BlockClient + 'static,
+        Client: EthBlockClient + 'static,
     {
         NetworkedTestConsensusEngineBuilder { base_config: self, client: Some(client) }
     }
@@ -264,7 +266,7 @@ pub struct NetworkedTestConsensusEngineBuilder<Client> {
 
 impl<Client> NetworkedTestConsensusEngineBuilder<Client>
 where
-    Client: BlockClient + 'static,
+    Client: EthBlockClient + 'static,
 {
     /// Set the pipeline execution outputs to use for the test consensus engine.
     #[allow(dead_code)]
@@ -319,7 +321,7 @@ where
         client: ClientType,
     ) -> NetworkedTestConsensusEngineBuilder<ClientType>
     where
-        ClientType: BlockClient + 'static,
+        ClientType: EthBlockClient + 'static,
     {
         NetworkedTestConsensusEngineBuilder { base_config: self.base_config, client: Some(client) }
     }
@@ -400,9 +402,8 @@ where
             BlockchainTree::new(externals, BlockchainTreeConfig::new(1, 2, 3, 2))
                 .expect("failed to create tree"),
         ));
-        let sealed = self.base_config.chain_spec.genesis_header().clone().seal_slow();
-        let (header, seal) = sealed.into_parts();
-        let genesis_block = SealedHeader::new(header, seal);
+        let header = self.base_config.chain_spec.genesis_header().clone();
+        let genesis_block = SealedHeader::seal(header);
 
         let blockchain_provider = BlockchainProvider::with_blocks(
             provider_factory.clone(),
@@ -450,7 +451,7 @@ pub fn spawn_consensus_engine<Client>(
     engine: TestBeaconConsensusEngine<Client>,
 ) -> oneshot::Receiver<Result<(), BeaconConsensusEngineError>>
 where
-    Client: BlockClient + 'static,
+    Client: EthBlockClient + 'static,
 {
     let (tx, rx) = oneshot::channel();
     tokio::spawn(async move {

@@ -6,7 +6,7 @@ use alloy_chains::Chain;
 use alloy_primitives::{b256, U256};
 use reth_chainspec::{once_cell_set, BaseFeeParams, BaseFeeParamsKind, ChainSpec};
 use reth_ethereum_forks::EthereumHardfork;
-use reth_optimism_forks::OptimismHardfork;
+use reth_optimism_forks::OpHardfork;
 
 use crate::{LazyLock, OpChainSpec};
 
@@ -21,11 +21,11 @@ pub static BASE_SEPOLIA: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
                 "0dcc9e089e30b90ddfc55be9a37dd15bc551aeee999d2e2b51414c54eaf934e4"
             )),
             paris_block_and_final_difficulty: Some((0, U256::from(0))),
-            hardforks: OptimismHardfork::base_sepolia(),
+            hardforks: OpHardfork::base_sepolia(),
             base_fee_params: BaseFeeParamsKind::Variable(
                 vec![
                     (EthereumHardfork::London.boxed(), BaseFeeParams::base_sepolia()),
-                    (OptimismHardfork::Canyon.boxed(), BaseFeeParams::base_sepolia_canyon()),
+                    (OpHardfork::Canyon.boxed(), BaseFeeParams::base_sepolia_canyon()),
                 ]
                 .into(),
             ),

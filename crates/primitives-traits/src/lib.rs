@@ -22,19 +22,25 @@ pub mod account;
 pub use account::{Account, Bytecode};
 
 pub mod receipt;
-pub use receipt::Receipt;
+pub use receipt::{FullReceipt, Receipt};
 
 pub mod transaction;
-pub use transaction::{signed::SignedTransaction, FullTransaction, Transaction};
+pub use transaction::{
+    signed::{FullSignedTx, SignedTransaction},
+    FullTransaction, Transaction, TransactionExt,
+};
 
 mod integer_list;
 pub use integer_list::{IntegerList, IntegerListError};
 
 pub mod block;
-pub use block::{body::BlockBody, Block};
+pub use block::{
+    body::BlockBody,
+    header::{BlockHeader, FullBlockHeader},
+    Block, FullBlock,
+};
 
 mod withdrawal;
-pub use withdrawal::Withdrawals;
 
 mod error;
 pub use error::{GotExpected, GotExpectedBoxed};
@@ -47,13 +53,13 @@ pub use storage::StorageEntry;
 
 /// Transaction types
 pub mod tx_type;
-pub use tx_type::TxType;
+pub use tx_type::{FullTxType, TxType};
 
 /// Common header types
 pub mod header;
 #[cfg(any(test, feature = "arbitrary", feature = "test-utils"))]
 pub use header::test_utils;
-pub use header::{BlockHeader, Header, HeaderError, SealedHeader};
+pub use header::{HeaderError, SealedHeader};
 
 /// Bincode-compatible serde implementations for common abstracted types in Reth.
 ///
@@ -66,3 +72,23 @@ pub use header::{BlockHeader, Header, HeaderError, SealedHeader};
 pub mod serde_bincode_compat {
     pub use super::header::{serde_bincode_compat as header, serde_bincode_compat::*};
 }
+
+/// Heuristic size trait
+pub mod size;
+pub use size::InMemorySize;
+
+/// Node traits
+pub mod node;
+pub use node::{FullNodePrimitives, NodePrimitives};
+
+/// Helper trait that requires arbitrary implementation if the feature is enabled.
+#[cfg(any(feature = "test-utils", feature = "arbitrary"))]
+pub trait MaybeArbitrary: for<'a> arbitrary::Arbitrary<'a> {}
+/// Helper trait that requires arbitrary implementation if the feature is enabled.
+#[cfg(not(any(feature = "test-utils", feature = "arbitrary")))]
+pub trait MaybeArbitrary {}
+
+#[cfg(any(feature = "test-utils", feature = "arbitrary"))]
+impl<T> MaybeArbitrary for T where T: for<'a> arbitrary::Arbitrary<'a> {}
+#[cfg(not(any(feature = "test-utils", feature = "arbitrary")))]
+impl<T> MaybeArbitrary for T {}

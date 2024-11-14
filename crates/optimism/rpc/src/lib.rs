@@ -14,6 +14,6 @@ pub mod error;
 pub mod eth;
 pub mod sequencer;
 
-pub use error::{OpEthApiError, OptimismInvalidTransactionError, SequencerClientError};
+pub use error::{OpEthApiError, OpInvalidTransactionError, SequencerClientError};
 pub use eth::{OpEthApi, OpReceiptBuilder};
 pub use sequencer::SequencerClient;

@@ -1,5 +1,3 @@
-#![allow(deprecated)]
-
 use crate::{
     blobstore::BlobStoreError,
     error::{InvalidPoolTransactionError, PoolResult},
@@ -485,7 +483,7 @@ pub trait TransactionPoolExt: TransactionPool {
     ///
     /// ## Fee changes
     ///
-    /// The [CanonicalStateUpdate] includes the base and blob fee of the pending block, which
+    /// The [`CanonicalStateUpdate`] includes the base and blob fee of the pending block, which
     /// affects the dynamic fee requirement of pending transactions in the pool.
     ///
     /// ## EIP-4844 Blob transactions
@@ -671,6 +669,15 @@ impl TransactionOrigin {
     }
 }
 
+/// Represents the kind of update to the canonical state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PoolUpdateKind {
+    /// The update was due to a block commit.
+    Commit,
+    /// The update was due to a reorganization.
+    Reorg,
+}
+
 /// Represents changes after a new canonical block or range of canonical blocks was added to the
 /// chain.
 ///
@@ -695,6 +702,8 @@ pub struct CanonicalStateUpdate<'a> {
     pub changed_accounts: Vec<ChangedAccount>,
     /// All mined transactions in the block range.
     pub mined_transactions: Vec<B256>,
+    /// The kind of update to the canonical state.
+    pub update_kind: PoolUpdateKind,
 }
 
 impl CanonicalStateUpdate<'_> {
@@ -1501,12 +1510,30 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
     }
 }
 
+/// Iterator that returns transactions for the block building process in the order they should be
+/// included in the block.
+///
+/// Can include transactions from the pool and other sources (alternative pools,
+/// sequencer-originated transactions, etc.).
+pub trait PayloadTransactions {
+    /// Returns the next transaction to include in the block.
+    fn next(
+        &mut self,
+        // In the future, `ctx` can include access to state for block building purposes.
+        ctx: (),
+    ) -> Option<TransactionSignedEcRecovered>;
+
+    /// Exclude descendants of the transaction with given sender and nonce from the iterator,
+    /// because this transaction won't be included in the block.
+    fn mark_invalid(&mut self, sender: Address, nonce: u64);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloy_consensus::{TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
     use alloy_eips::eip4844::DATA_GAS_PER_BLOB;
-    use alloy_primitives::Signature;
+    use alloy_primitives::PrimitiveSignature as Signature;
     use reth_primitives::TransactionSigned;
 
     #[test]

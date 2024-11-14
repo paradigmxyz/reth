@@ -151,6 +151,7 @@ where
     type Pool = Pool;
     type Evm = EvmConfig;
     type Network = Network;
+    type PayloadBuilder = ();
 
     fn pool(&self) -> &Self::Pool {
         self.inner.pool()
@@ -162,6 +163,10 @@ where
 
     fn network(&self) -> &Self::Network {
         self.inner.network()
+    }
+
+    fn payload_builder(&self) -> &Self::PayloadBuilder {
+        &()
     }
 
     fn provider(&self) -> &Self::Provider {
@@ -400,6 +405,7 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
 
 #[cfg(test)]
 mod tests {
+    use alloy_consensus::Header;
     use alloy_eips::BlockNumberOrTag;
     use alloy_primitives::{B256, U64};
     use alloy_rpc_types::FeeHistory;
@@ -407,7 +413,7 @@ mod tests {
     use reth_chainspec::{BaseFeeParams, ChainSpec, EthChainSpec};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
-    use reth_primitives::{Block, BlockBody, Header, TransactionSigned};
+    use reth_primitives::{Block, BlockBody, TransactionSigned};
     use reth_provider::{
         test_utils::{MockEthProvider, NoopProvider},
         BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory,

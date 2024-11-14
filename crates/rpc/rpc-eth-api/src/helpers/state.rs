@@ -1,15 +1,15 @@
 //! Loads a pending block from database. Helper trait for `eth_` block, transaction, call and trace
 //! RPC methods.
 
-use alloy_consensus::constants::KECCAK_EMPTY;
+use alloy_consensus::{constants::KECCAK_EMPTY, Header};
 use alloy_eips::BlockId;
 use alloy_primitives::{Address, Bytes, B256, U256};
-use alloy_rpc_types::{serde_helpers::JsonStorageKey, Account, EIP1186AccountProofResponse};
+use alloy_rpc_types_eth::{Account, EIP1186AccountProofResponse};
+use alloy_serde::JsonStorageKey;
 use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
 use reth_evm::ConfigureEvmEnv;
-use reth_primitives::Header;
 use reth_provider::{
     BlockIdReader, BlockNumReader, ChainSpecProvider, StateProvider, StateProviderBox,
     StateProviderFactory,
@@ -74,7 +74,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         self.spawn_blocking_io(move |this| {
             Ok(B256::new(
                 this.state_at_block_id_or_latest(block_id)?
-                    .storage(address, index.0)
+                    .storage(address, index.as_b256())
                     .map_err(Self::Error::from_eth_err)?
                     .unwrap_or_default()
                     .to_be_bytes(),
@@ -118,11 +118,11 @@ pub trait EthState: LoadState + SpawnBlocking {
 
             self.spawn_blocking_io(move |this| {
                 let state = this.state_at_block_id(block_id)?;
-                let storage_keys = keys.iter().map(|key| key.0).collect::<Vec<_>>();
+                let storage_keys = keys.iter().map(|key| key.as_b256()).collect::<Vec<_>>();
                 let proof = state
                     .proof(Default::default(), address, &storage_keys)
                     .map_err(Self::Error::from_eth_err)?;
-                Ok(from_primitive_account_proof(proof))
+                Ok(from_primitive_account_proof(proof, keys))
             })
             .await
         })
