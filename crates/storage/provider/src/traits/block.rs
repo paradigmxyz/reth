@@ -1,7 +1,7 @@
 use alloy_primitives::BlockNumber;
 use reth_db_api::models::StoredBlockBodyIndices;
 use reth_execution_types::{Chain, ExecutionOutcome};
-use reth_primitives::SealedBlockWithSenders;
+use reth_primitives::{BlockBody, SealedBlockWithSenders};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{updates::TrieUpdates, HashedPostStateSorted};
 use std::ops::RangeInclusive;
@@ -39,6 +39,16 @@ pub trait BlockWriter: Send + Sync {
     /// transition in the block.
     fn insert_block(&self, block: SealedBlockWithSenders)
         -> ProviderResult<StoredBlockBodyIndices>;
+
+    /// Appends a batch of block bodies extending the canonical chain. This is invoked during
+    /// `Bodies` stage and does not write to `TransactionHashNumbers` and `TransactionSenders`
+    /// tables which are populated on later stages.
+    ///
+    /// Bodies are passed as [`Option`]s, if body is `None` the corresponding block is empty.
+    fn append_block_bodies(
+        &self,
+        bodies: impl Iterator<Item = (BlockNumber, Option<BlockBody>)>,
+    ) -> ProviderResult<()>;
 
     /// Appends a batch of sealed blocks to the blockchain, including sender information, and
     /// updates the post-state.

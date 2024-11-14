@@ -3250,7 +3250,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks> + 
         }
 
         let block_indices = StoredBlockBodyIndices { first_tx_num, tx_count };
-        self.tx.put::<tables::BlockBodyIndices>(block_number, block_indices.clone())?;
+        self.tx.put::<tables::BlockBodyIndices>(block_number, block_indices)?;
         durations_recorder.record_relative(metrics::Action::InsertBlockBodyIndices);
 
         if !block_indices.is_empty() {
@@ -3266,6 +3266,50 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks> + 
         );
 
         Ok(block_indices)
+    }
+
+    fn append_block_bodies(
+        &self,
+        bodies: impl Iterator<Item = (BlockNumber, Option<BlockBody>)>,
+    ) -> ProviderResult<()> {
+        let mut block_indices_cursor = self.tx.cursor_write::<tables::BlockBodyIndices>()?;
+        let mut tx_block_cursor = self.tx.cursor_write::<tables::TransactionBlocks>()?;
+        let mut ommers_cursor = self.tx.cursor_write::<tables::BlockOmmers>()?;
+        let mut withdrawals_cursor = self.tx.cursor_write::<tables::BlockWithdrawals>()?;
+
+        // Get id for the next tx_num of zero if there are no transactions.
+        let mut next_tx_num = tx_block_cursor.last()?.map(|(id, _)| id + 1).unwrap_or_default();
+
+        for (block_number, body) in bodies {
+            let tx_count = body.as_ref().map(|b| b.transactions.len() as u64).unwrap_or_default();
+            let block_indices = StoredBlockBodyIndices { first_tx_num: next_tx_num, tx_count };
+
+            // insert block meta
+            block_indices_cursor.append(block_number, block_indices)?;
+
+            next_tx_num += tx_count;
+            let Some(body) = body else { continue };
+
+            // write transaction block index
+            if !body.transactions.is_empty() {
+                tx_block_cursor.append(block_indices.last_tx_num(), block_number)?;
+            }
+
+            // Write ommers if any
+            if !body.ommers.is_empty() {
+                ommers_cursor.append(block_number, StoredBlockOmmers { ommers: body.ommers })?;
+            }
+
+            // Write withdrawals if any
+            if let Some(withdrawals) = body.withdrawals {
+                if !withdrawals.is_empty() {
+                    withdrawals_cursor
+                        .append(block_number, StoredBlockWithdrawals { withdrawals })?;
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// TODO(joshie): this fn should be moved to `UnifiedStorageWriter` eventually
