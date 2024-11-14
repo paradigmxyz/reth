@@ -19,3 +19,12 @@ alloy-eips.workspace = true
 alloy-rlp.workspace = true
 derive_more.workspace = true
 bytes.workspace = true
+reth-codecs = { workspace = true, optional = true }
+
+[features]
+default = ["reth-codec"]
+reth-codec = ["dep:reth-codecs"]
+
+[dev-dependencies]
+reth-codecs = { workspace = true, features = ["test-utils"] }
+rstest.workspace = true
