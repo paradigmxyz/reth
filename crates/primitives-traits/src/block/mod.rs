@@ -3,7 +3,7 @@
 pub mod body;
 pub mod header;
 
-use alloc::fmt;
+use alloc::{fmt, vec::Vec};
 
 use alloy_consensus::BlockHeader as _;
 use alloy_eips::eip7685::Requests;
