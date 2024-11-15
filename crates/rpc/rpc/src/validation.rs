@@ -342,7 +342,7 @@ where
         Ok(versioned_hashes)
     }
 
-    /// Native, synchronous core logic for validating the builder submission v3.
+    /// Core logic for validating the builder submission v3
     async fn validate_builder_submission_v3(
         &self,
         request: BuilderBlockValidationRequestV3,
@@ -373,7 +373,7 @@ where
         .to_rpc_result()
     }
 
-    /// Native, synchronous core logic for validating the builder submission v4.
+    /// Core logic for validating the builder submission v4
     async fn validate_builder_submission_v4(
         &self,
         request: BuilderBlockValidationRequestV4,
