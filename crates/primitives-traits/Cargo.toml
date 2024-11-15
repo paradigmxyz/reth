@@ -12,14 +12,15 @@ description = "Common types in reth."
 workspace = true
 
 [dependencies]
+# reth
 reth-codecs.workspace = true
 
+# ethereum
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
-
 revm-primitives.workspace = true
 
 # misc
@@ -88,4 +89,5 @@ serde = [
     "reth-codecs/serde",
     "revm-primitives/serde",
     "roaring/serde",
+	"revm-primitives/serde",
 ]
