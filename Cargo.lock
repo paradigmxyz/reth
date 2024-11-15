@@ -7284,7 +7284,6 @@ dependencies = [
  "futures",
  "itertools 0.13.0",
  "pin-project",
- "reth-beacon-consensus",
  "reth-engine-primitives",
  "reth-errors",
  "reth-ethereum-forks",
