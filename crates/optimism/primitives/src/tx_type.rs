@@ -23,7 +23,7 @@ use reth_primitives::transaction::{
 };
 use reth_primitives_traits::TxType;
 
-/// Wrapper type for [`alloy_consensus::OpTxType`] to implement [`TxType`] trait.
+/// Wrapper type for [`op_alloy_consensus::OpTxType`] to implement [`TxType`] trait.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Display, Ord, Hash, From, Into)]
 #[into(u8)]
 pub struct OpTxType(AlloyOpTxType);
