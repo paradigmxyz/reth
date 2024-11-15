@@ -35,6 +35,7 @@ exclude_crates=(
   reth-ethereum-engine-primitives
   reth-ethereum-payload-builder
   reth-etl
+  reth-evm
   reth-exex
   reth-exex-test-utils
   reth-ipc
