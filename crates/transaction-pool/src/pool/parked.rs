@@ -1031,7 +1031,7 @@ mod tests {
         // Add two transactions with different max fees
         let tx1 = f.validated_arc(MockTransaction::eip1559().set_max_fee(100).clone());
         let tx2 = f.validated_arc(MockTransaction::eip1559().set_max_fee(200).clone());
-        pool.add_transaction(tx1.clone());
+        pool.add_transaction(tx1);
         pool.add_transaction(tx2.clone());
 
         // Check that only the second transaction satisfies the base fee requirement
