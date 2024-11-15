@@ -24,6 +24,7 @@ reth-discv4.workspace = true
 reth-discv5.workspace = true
 reth-dns-discovery.workspace = true
 reth-eth-wire.workspace = true
+reth-eth-wire-types.workspace = true
 reth-ecies.workspace = true
 reth-tasks.workspace = true
 reth-transaction-pool.workspace = true

@@ -11,9 +11,9 @@
 //! Credits to: <https://blog.merkle.io/blog/fastest-transaction-network-eth-polygon-bsc>
 use chain_cfg::{boot_nodes, head, polygon_chain_spec};
 use reth_discv4::Discv4ConfigBuilder;
-use reth_eth_wire_types::EthNetworkPrimitives;
 use reth_network::{
-    config::NetworkMode, NetworkConfig, NetworkEvent, NetworkEventListenerProvider, NetworkManager,
+    config::NetworkMode, EthNetworkPrimitives, NetworkConfig, NetworkEvent,
+    NetworkEventListenerProvider, NetworkManager,
 };
 use reth_tracing::{
     tracing::info, tracing_subscriber::filter::LevelFilter, LayerInfo, LogFormat, RethTracer,

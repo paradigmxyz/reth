@@ -14,8 +14,9 @@
 
 use chainspec::{boot_nodes, bsc_chain_spec};
 use reth_discv4::Discv4ConfigBuilder;
-use reth_eth_wire_types::EthNetworkPrimitives;
-use reth_network::{NetworkConfig, NetworkEvent, NetworkEventListenerProvider, NetworkManager};
+use reth_network::{
+    EthNetworkPrimitives, NetworkConfig, NetworkEvent, NetworkEventListenerProvider, NetworkManager,
+};
 use reth_network_api::PeersInfo;
 use reth_primitives::{ForkHash, ForkId};
 use reth_tracing::{

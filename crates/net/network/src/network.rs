@@ -189,9 +189,8 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
 
 // === API Implementations ===
 
-impl<N: NetworkPrimitives> NetworkEventListenerProvider for NetworkHandle<N> {
-    type NetworkPrimitives = N;
-    fn event_listener(&self) -> EventStream<NetworkEvent<PeerRequest<N>>> {
+impl NetworkEventListenerProvider for NetworkHandle<EthNetworkPrimitives> {
+    fn event_listener(&self) -> EventStream<NetworkEvent<PeerRequest<EthNetworkPrimitives>>> {
         self.inner.event_sender.new_listener()
     }
 

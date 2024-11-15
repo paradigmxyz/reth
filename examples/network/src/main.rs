@@ -7,9 +7,9 @@
 //! ```
 
 use futures::StreamExt;
-use reth_eth_wire_types::EthNetworkPrimitives;
 use reth_network::{
-    config::rng_secret_key, NetworkConfig, NetworkEventListenerProvider, NetworkManager,
+    config::rng_secret_key, EthNetworkPrimitives, NetworkConfig, NetworkEventListenerProvider,
+    NetworkManager,
 };
 use reth_provider::test_utils::NoopProvider;
 

@@ -138,6 +138,7 @@ mod state;
 mod swarm;
 
 pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};
+pub use reth_eth_wire_types::{EthNetworkPrimitives, NetworkPrimitives};
 pub use reth_network_api::{
     BlockDownloaderProvider, DiscoveredEvent, DiscoveryEvent, NetworkEvent,
     NetworkEventListenerProvider, NetworkInfo, PeerRequest, PeerRequestSender, Peers, PeersInfo,

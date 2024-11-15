@@ -22,4 +22,3 @@ reth-tracing.workspace = true
 tokio-stream.workspace = true
 reth-discv4 = { workspace = true, features = ["test-utils"] }
 alloy-primitives.workspace = true
-reth-eth-wire-types.workspace = true
