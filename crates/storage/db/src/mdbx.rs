@@ -7,7 +7,7 @@ use std::path::Path;
 pub use crate::implementation::mdbx::*;
 pub use reth_libmdbx::*;
 
-/// Creates a new database at the specified path if it doesn't exist. Does NOT create tables. Check
+/// Creates the new database at the specified path if it doesn't exist. Does NOT create tables. Check
 /// [`init_db`].
 pub fn create_db<P: AsRef<Path>>(path: P, args: DatabaseArguments) -> eyre::Result<DatabaseEnv> {
     use crate::version::{check_db_version_file, create_db_version_file, DatabaseVersionError};
