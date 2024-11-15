@@ -97,7 +97,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateC
             if last_block_number == 0 {
                 without_evm::setup_without_evm(
                     &provider_rw,
-                    &static_file_provider,
                     // &header,
                     // header_hash,
                     SealedHeader::new(header, header_hash),

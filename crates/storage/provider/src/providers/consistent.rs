@@ -612,7 +612,9 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> StaticFileProviderFactory for ConsistentProvider<N> {
-    fn static_file_provider(&self) -> StaticFileProvider {
+    type Primitives = N::Primitives;
+
+    fn static_file_provider(&self) -> StaticFileProvider<N::Primitives> {
         self.storage_provider.static_file_provider()
     }
 }

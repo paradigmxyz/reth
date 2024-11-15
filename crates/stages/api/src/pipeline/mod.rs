@@ -9,7 +9,7 @@ use reth_primitives_traits::constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH;
 use reth_provider::{
     providers::ProviderNodeTypes, writer::UnifiedStorageWriter, ChainStateBlockReader,
     ChainStateBlockWriter, DatabaseProviderFactory, ProviderFactory, StageCheckpointReader,
-    StageCheckpointWriter, StaticFileProviderFactory,
+    StageCheckpointWriter,
 };
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
@@ -358,10 +358,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                             ))?;
                         }
 
-                        UnifiedStorageWriter::commit_unwind(
-                            provider_rw,
-                            self.provider_factory.static_file_provider(),
-                        )?;
+                        UnifiedStorageWriter::commit_unwind(provider_rw)?;
 
                         stage.post_unwind_commit()?;
 
@@ -469,10 +466,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                         result: out.clone(),
                     });
 
-                    UnifiedStorageWriter::commit(
-                        provider_rw,
-                        self.provider_factory.static_file_provider(),
-                    )?;
+                    UnifiedStorageWriter::commit(provider_rw)?;
 
                     stage.post_execute_commit()?;
 
@@ -533,7 +527,7 @@ fn on_stage_error<N: ProviderNodeTypes>(
                     prev_checkpoint.unwrap_or_default(),
                 )?;
 
-                UnifiedStorageWriter::commit(provider_rw, factory.static_file_provider())?;
+                UnifiedStorageWriter::commit(provider_rw)?;
 
                 // We unwind because of a validation error. If the unwind itself
                 // fails, we bail entirely,

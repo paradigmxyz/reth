@@ -53,7 +53,7 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     /// Chain spec
     chain_spec: Arc<N::ChainSpec>,
     /// Static File Provider
-    static_file_provider: StaticFileProvider,
+    static_file_provider: StaticFileProvider<N::Primitives>,
     /// Optional pruning configuration
     prune_modes: PruneModes,
 }
@@ -78,7 +78,7 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     pub fn new(
         db: N::DB,
         chain_spec: Arc<N::ChainSpec>,
-        static_file_provider: StaticFileProvider,
+        static_file_provider: StaticFileProvider<N::Primitives>,
     ) -> Self {
         Self { db, chain_spec, static_file_provider, prune_modes: PruneModes::none() }
     }
@@ -114,7 +114,7 @@ impl<N: NodeTypesWithDB<DB = Arc<DatabaseEnv>>> ProviderFactory<N> {
         path: P,
         chain_spec: Arc<N::ChainSpec>,
         args: DatabaseArguments,
-        static_file_provider: StaticFileProvider,
+        static_file_provider: StaticFileProvider<N::Primitives>,
     ) -> RethResult<Self> {
         Ok(Self {
             db: Arc::new(init_db(path, args).map_err(RethError::msg)?),
@@ -202,8 +202,10 @@ impl<N: ProviderNodeTypes> DatabaseProviderFactory for ProviderFactory<N> {
 }
 
 impl<N: NodeTypesWithDB> StaticFileProviderFactory for ProviderFactory<N> {
+    type Primitives = N::Primitives;
+
     /// Returns static file provider
-    fn static_file_provider(&self) -> StaticFileProvider {
+    fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         self.static_file_provider.clone()
     }
 }

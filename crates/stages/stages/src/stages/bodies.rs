@@ -311,11 +311,11 @@ where
 
 fn missing_static_data_error<Provider>(
     last_tx_num: TxNumber,
-    static_file_provider: &StaticFileProvider,
+    static_file_provider: &StaticFileProvider<Provider::Primitives>,
     provider: &Provider,
 ) -> Result<StageError, ProviderError>
 where
-    Provider: BlockReader,
+    Provider: BlockReader + StaticFileProviderFactory,
 {
     let mut last_block = static_file_provider
         .get_highest_static_file_block(StaticFileSegment::Transactions)
