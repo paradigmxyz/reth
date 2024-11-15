@@ -397,7 +397,7 @@ pub trait DebugExecutionWitnessApi<Attributes> {
     /// The `debug_executePayload` method allows for re-execution of a group of transactions with
     /// the purpose of generating an execution witness. The witness comprises of a map of all
     /// hashed trie nodes to their preimages that were required during the execution of the block,
-    ///  including during state root recomputation.
+    /// including during state root recomputation.
     ///
     /// The first argument is the block number or block hash. The second argument is the payload
     /// attributes for the new block. The third argument is a list of transactions to be included.
