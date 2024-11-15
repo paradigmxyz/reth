@@ -87,7 +87,8 @@ serde = [
 	"rand/serde",
 	"secp256k1/serde",
 	"reth-codecs/serde",
-	"alloy-chains/serde"
+	"alloy-chains/serde",
+	"reth-primitives-traits/serde",
 ]
 
 [[test]]
