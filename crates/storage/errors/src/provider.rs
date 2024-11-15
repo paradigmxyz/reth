@@ -133,6 +133,9 @@ pub enum ProviderError {
     /// Trying to insert data from an unexpected block number.
     #[display("trying to append data to {_0} as block #{_1} but expected block #{_2}")]
     UnexpectedStaticFileBlockNumber(StaticFileSegment, BlockNumber, BlockNumber),
+    /// Trying to insert data from an unexpected block number.
+    #[display("trying to append row to {_0} at index #{_1} but expected index #{_2}")]
+    UnexpectedStaticFileTxNumber(StaticFileSegment, TxNumber, TxNumber),
     /// Static File Provider was initialized as read-only.
     #[display("cannot get a writer on a read-only environment.")]
     ReadOnlyStaticFileAccess,

@@ -498,16 +498,24 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         &mut self,
         tx_num: TxNumber,
         value: V,
-    ) -> ProviderResult<TxNumber> {
-        if self.writer.user_header().tx_range().is_none() {
-            self.writer.user_header_mut().set_tx_range(tx_num, tx_num);
-        } else {
+    ) -> ProviderResult<()> {
+        if let Some(range) = self.writer.user_header().tx_range() {
+            let next_tx = range.end() + 1;
+            if next_tx != tx_num {
+                return Err(ProviderError::UnexpectedStaticFileTxNumber(
+                    self.writer.user_header().segment(),
+                    tx_num,
+                    next_tx,
+                ))
+            }
             self.writer.user_header_mut().increment_tx();
+        } else {
+            self.writer.user_header_mut().set_tx_range(tx_num, tx_num);
         }
 
         self.append_column(value)?;
 
-        Ok(self.writer.user_header().tx_end().expect("qed"))
+        Ok(())
     }
 
     /// Appends header to static file.
@@ -550,16 +558,12 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// empty blocks and this function wouldn't be called.
     ///
     /// Returns the current [`TxNumber`] as seen in the static file.
-    pub fn append_transaction(
-        &mut self,
-        tx_num: TxNumber,
-        tx: impl Compact,
-    ) -> ProviderResult<TxNumber> {
+    pub fn append_transaction(&mut self, tx_num: TxNumber, tx: impl Compact) -> ProviderResult<()> {
         let start = Instant::now();
         self.ensure_no_queued_prune()?;
 
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Transactions);
-        let result = self.append_with_tx_number(tx_num, tx)?;
+        self.append_with_tx_number(tx_num, tx)?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
@@ -569,7 +573,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             );
         }
 
-        Ok(result)
+        Ok(())
     }
 
     /// Appends receipt to static file.
@@ -578,16 +582,12 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// empty blocks and this function wouldn't be called.
     ///
     /// Returns the current [`TxNumber`] as seen in the static file.
-    pub fn append_receipt(
-        &mut self,
-        tx_num: TxNumber,
-        receipt: &Receipt,
-    ) -> ProviderResult<TxNumber> {
+    pub fn append_receipt(&mut self, tx_num: TxNumber, receipt: &Receipt) -> ProviderResult<()> {
         let start = Instant::now();
         self.ensure_no_queued_prune()?;
 
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Receipts);
-        let result = self.append_with_tx_number(tx_num, receipt)?;
+        self.append_with_tx_number(tx_num, receipt)?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
@@ -597,7 +597,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             );
         }
 
-        Ok(result)
+        Ok(())
     }
 
     /// Appends multiple receipts to the static file.
@@ -625,7 +625,8 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
 
         for receipt_result in receipts_iter {
             let (tx_num, receipt) = receipt_result?;
-            tx_number = self.append_with_tx_number(tx_num, receipt.borrow())?;
+            self.append_with_tx_number(tx_num, receipt.borrow())?;
+            tx_number = tx_num;
             count += 1;
         }
 
