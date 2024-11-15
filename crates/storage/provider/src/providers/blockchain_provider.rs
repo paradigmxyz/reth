@@ -163,7 +163,9 @@ impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider2<N> {
 }
 
 impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider2<N> {
-    fn static_file_provider(&self) -> StaticFileProvider {
+    type Primitives = N::Primitives;
+
+    fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         self.database.static_file_provider()
     }
 }
@@ -911,7 +913,7 @@ mod tests {
         )?;
 
         // Commit to both storages: database and static files
-        UnifiedStorageWriter::commit(provider_rw, factory.static_file_provider())?;
+        UnifiedStorageWriter::commit(provider_rw)?;
 
         let provider = BlockchainProvider2::new(factory)?;
 
@@ -999,8 +1001,7 @@ mod tests {
                     UnifiedStorageWriter::from(&provider_rw, &hook_provider.static_file_provider())
                         .save_blocks(&[lowest_memory_block])
                         .unwrap();
-                    UnifiedStorageWriter::commit(provider_rw, hook_provider.static_file_provider())
-                        .unwrap();
+                    UnifiedStorageWriter::commit(provider_rw).unwrap();
 
                     // Remove from memory
                     hook_provider.canonical_in_memory_state.remove_persisted_blocks(num_hash);

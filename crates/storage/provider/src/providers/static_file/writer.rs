@@ -8,6 +8,7 @@ use parking_lot::{lock_api::RwLockWriteGuard, RawRwLock, RwLock};
 use reth_codecs::Compact;
 use reth_db_api::models::CompactU256;
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
+use reth_node_types::NodePrimitives;
 use reth_primitives::{
     static_file::{SegmentHeader, SegmentRangeInclusive},
     Receipt, StaticFileSegment,
@@ -15,6 +16,7 @@ use reth_primitives::{
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     borrow::Borrow,
+    fmt::Debug,
     path::{Path, PathBuf},
     sync::{Arc, Weak},
     time::Instant,
@@ -25,19 +27,29 @@ use tracing::debug;
 ///
 /// WARNING: Trying to use more than one writer for the same segment type **will result in a
 /// deadlock**.
-#[derive(Debug, Default)]
-pub(crate) struct StaticFileWriters {
-    headers: RwLock<Option<StaticFileProviderRW>>,
-    transactions: RwLock<Option<StaticFileProviderRW>>,
-    receipts: RwLock<Option<StaticFileProviderRW>>,
+#[derive(Debug)]
+pub(crate) struct StaticFileWriters<N> {
+    headers: RwLock<Option<StaticFileProviderRW<N>>>,
+    transactions: RwLock<Option<StaticFileProviderRW<N>>>,
+    receipts: RwLock<Option<StaticFileProviderRW<N>>>,
 }
 
-impl StaticFileWriters {
+impl<N> Default for StaticFileWriters<N> {
+    fn default() -> Self {
+        Self {
+            headers: Default::default(),
+            transactions: Default::default(),
+            receipts: Default::default(),
+        }
+    }
+}
+
+impl<N: NodePrimitives> StaticFileWriters<N> {
     pub(crate) fn get_or_create(
         &self,
         segment: StaticFileSegment,
-        create_fn: impl FnOnce() -> ProviderResult<StaticFileProviderRW>,
-    ) -> ProviderResult<StaticFileProviderRWRefMut<'_>> {
+        create_fn: impl FnOnce() -> ProviderResult<StaticFileProviderRW<N>>,
+    ) -> ProviderResult<StaticFileProviderRWRefMut<'_, N>> {
         let mut write_guard = match segment {
             StaticFileSegment::Headers => self.headers.write(),
             StaticFileSegment::Transactions => self.transactions.write(),
@@ -64,19 +76,19 @@ impl StaticFileWriters {
 
 /// Mutable reference to a [`StaticFileProviderRW`] behind a [`RwLockWriteGuard`].
 #[derive(Debug)]
-pub struct StaticFileProviderRWRefMut<'a>(
-    pub(crate) RwLockWriteGuard<'a, RawRwLock, Option<StaticFileProviderRW>>,
+pub struct StaticFileProviderRWRefMut<'a, N>(
+    pub(crate) RwLockWriteGuard<'a, RawRwLock, Option<StaticFileProviderRW<N>>>,
 );
 
-impl std::ops::DerefMut for StaticFileProviderRWRefMut<'_> {
+impl<N> std::ops::DerefMut for StaticFileProviderRWRefMut<'_, N> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         // This is always created by [`StaticFileWriters::get_or_create`]
         self.0.as_mut().expect("static file writer provider should be init")
     }
 }
 
-impl std::ops::Deref for StaticFileProviderRWRefMut<'_> {
-    type Target = StaticFileProviderRW;
+impl<N> std::ops::Deref for StaticFileProviderRWRefMut<'_, N> {
+    type Target = StaticFileProviderRW<N>;
 
     fn deref(&self) -> &Self::Target {
         // This is always created by [`StaticFileWriters::get_or_create`]
@@ -86,11 +98,11 @@ impl std::ops::Deref for StaticFileProviderRWRefMut<'_> {
 
 #[derive(Debug)]
 /// Extends `StaticFileProvider` with writing capabilities
-pub struct StaticFileProviderRW {
+pub struct StaticFileProviderRW<N> {
     /// Reference back to the provider. We need [Weak] here because [`StaticFileProviderRW`] is
     /// stored in a [`dashmap::DashMap`] inside the parent [`StaticFileProvider`].which is an
     /// [Arc]. If we were to use an [Arc] here, we would create a reference cycle.
-    reader: Weak<StaticFileProviderInner>,
+    reader: Weak<StaticFileProviderInner<N>>,
     /// A [`NippyJarWriter`] instance.
     writer: NippyJarWriter<SegmentHeader>,
     /// Path to opened file.
@@ -104,7 +116,7 @@ pub struct StaticFileProviderRW {
     prune_on_commit: Option<(u64, Option<BlockNumber>)>,
 }
 
-impl StaticFileProviderRW {
+impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// Creates a new [`StaticFileProviderRW`] for a [`StaticFileSegment`].
     ///
     /// Before use, transaction based segments should ensure the block end range is the expected
@@ -112,7 +124,7 @@ impl StaticFileProviderRW {
     pub fn new(
         segment: StaticFileSegment,
         block: BlockNumber,
-        reader: Weak<StaticFileProviderInner>,
+        reader: Weak<StaticFileProviderInner<N>>,
         metrics: Option<Arc<StaticFileProviderMetrics>>,
     ) -> ProviderResult<Self> {
         let (writer, data_path) = Self::open(segment, block, reader.clone(), metrics.clone())?;
@@ -133,7 +145,7 @@ impl StaticFileProviderRW {
     fn open(
         segment: StaticFileSegment,
         block: u64,
-        reader: Weak<StaticFileProviderInner>,
+        reader: Weak<StaticFileProviderInner<N>>,
         metrics: Option<Arc<StaticFileProviderMetrics>>,
     ) -> ProviderResult<(NippyJarWriter<SegmentHeader>, PathBuf)> {
         let start = Instant::now();
@@ -751,7 +763,7 @@ impl StaticFileProviderRW {
         Ok(())
     }
 
-    fn reader(&self) -> StaticFileProvider {
+    fn reader(&self) -> StaticFileProvider<N> {
         Self::upgrade_provider_to_strong_reference(&self.reader)
     }
 
@@ -764,8 +776,8 @@ impl StaticFileProviderRW {
     /// active. In reality, it's impossible to detach the [`StaticFileProviderRW`] from the
     /// [`StaticFileProvider`].
     fn upgrade_provider_to_strong_reference(
-        provider: &Weak<StaticFileProviderInner>,
-    ) -> StaticFileProvider {
+        provider: &Weak<StaticFileProviderInner<N>>,
+    ) -> StaticFileProvider<N> {
         provider.upgrade().map(StaticFileProvider).expect("StaticFileProvider is dropped")
     }
 

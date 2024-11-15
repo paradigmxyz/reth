@@ -24,7 +24,7 @@ use reth_provider::{
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_testing_utils::generators::ChangeSet;
-use std::{collections::BTreeMap, path::Path};
+use std::{collections::BTreeMap, fmt::Debug, path::Path};
 use tempfile::TempDir;
 
 /// Test database that is used for testing stage implementations.
@@ -142,7 +142,7 @@ impl TestStageDB {
 
     /// Insert header to static file if `writer` exists, otherwise to DB.
     pub fn insert_header<TX: DbTx + DbTxMut>(
-        writer: Option<&mut StaticFileProviderRWRefMut<'_>>,
+        writer: Option<&mut StaticFileProviderRWRefMut<'_, ()>>,
         tx: &TX,
         header: &SealedHeader,
         td: U256,

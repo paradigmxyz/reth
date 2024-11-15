@@ -12,7 +12,7 @@ use reth_db::{
     tables,
     transaction::DbTxMut,
 };
-use reth_provider::{providers::StaticFileProvider, DBProvider};
+use reth_provider::{providers::StaticFileProvider, DBProvider, StaticFileProviderFactory};
 use reth_prune_types::{
     PruneLimiter, PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput,
     SegmentOutputCheckpoint,
@@ -24,17 +24,19 @@ use tracing::trace;
 const HEADER_TABLES_TO_PRUNE: usize = 3;
 
 #[derive(Debug)]
-pub struct Headers {
-    static_file_provider: StaticFileProvider,
+pub struct Headers<N> {
+    static_file_provider: StaticFileProvider<N>,
 }
 
-impl Headers {
-    pub const fn new(static_file_provider: StaticFileProvider) -> Self {
+impl<N> Headers<N> {
+    pub const fn new(static_file_provider: StaticFileProvider<N>) -> Self {
         Self { static_file_provider }
     }
 }
 
-impl<Provider: DBProvider<Tx: DbTxMut>> Segment<Provider> for Headers {
+impl<Provider: StaticFileProviderFactory + DBProvider<Tx: DbTxMut>> Segment<Provider>
+    for Headers<Provider::Primitives>
+{
     fn segment(&self) -> PruneSegment {
         PruneSegment::Headers
     }

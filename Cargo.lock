@@ -8140,6 +8140,7 @@ dependencies = [
  "reqwest",
  "reth-db-api",
  "reth-metrics",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-tasks",
  "socket2",
