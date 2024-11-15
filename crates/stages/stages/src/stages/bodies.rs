@@ -183,18 +183,7 @@ where
                 BlockResponse::Full(block) => {
                     // Write transactions
                     for transaction in block.body.transactions() {
-                        let appended_tx_number =
-                            static_file_producer.append_transaction(next_tx_num, transaction)?;
-
-                        if appended_tx_number != next_tx_num {
-                            // This scenario indicates a critical error in the logic of adding new
-                            // items. It should be treated as an `expect()` failure.
-                            return Err(StageError::InconsistentTxNumber {
-                                segment: StaticFileSegment::Transactions,
-                                database: next_tx_num,
-                                static_file: appended_tx_number,
-                            })
-                        }
+                        static_file_producer.append_transaction(next_tx_num, transaction)?;
 
                         // Increment transaction id for each transaction.
                         next_tx_num += 1;
