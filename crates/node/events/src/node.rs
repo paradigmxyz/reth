@@ -5,11 +5,9 @@ use alloy_consensus::constants::GWEI_TO_WEI;
 use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use futures::Stream;
-use reth_beacon_consensus::{
-    BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress, ForkchoiceStatus,
-};
-use reth_eth_wire_types::{EthNetworkPrimitives, NetworkPrimitives};
-use reth_network_api::{NetworkEvent, PeerRequest, PeersInfo};
+use reth_beacon_consensus::{BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress};
+use reth_engine_primitives::ForkchoiceStatus;
+use reth_network_api::{NetworkEvent, PeersInfo};
 use reth_primitives_traits::{format_gas, format_gas_throughput};
 use reth_prune::PrunerEvent;
 use reth_stages::{EntitiesCheckpoint, ExecOutput, PipelineEvent, StageCheckpoint, StageId};
@@ -355,9 +353,9 @@ struct CurrentStage {
 
 /// A node event.
 #[derive(Debug)]
-pub enum NodeEvent<N: NetworkPrimitives = EthNetworkPrimitives> {
+pub enum NodeEvent {
     /// A network event.
-    Network(NetworkEvent<PeerRequest<N>>),
+    Network(NetworkEvent),
     /// A sync pipeline event.
     Pipeline(PipelineEvent),
     /// A consensus engine event.
@@ -373,8 +371,8 @@ pub enum NodeEvent<N: NetworkPrimitives = EthNetworkPrimitives> {
     Other(String),
 }
 
-impl<N: NetworkPrimitives> From<NetworkEvent<PeerRequest<N>>> for NodeEvent<N> {
-    fn from(event: NetworkEvent<PeerRequest<N>>) -> Self {
+impl From<NetworkEvent> for NodeEvent {
+    fn from(event: NetworkEvent) -> Self {
         Self::Network(event)
     }
 }

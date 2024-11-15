@@ -12,39 +12,49 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, 
 use reth_chainspec::ChainInfo;
 use reth_db::static_file::{HeaderMask, ReceiptMask, StaticFileCursor, TransactionMask};
 use reth_db_api::models::CompactU256;
+use reth_node_types::NodePrimitives;
 use reth_primitives::{
     Receipt, SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
+    fmt::Debug,
     ops::{Deref, RangeBounds},
     sync::Arc,
 };
 
 /// Provider over a specific `NippyJar` and range.
 #[derive(Debug)]
-pub struct StaticFileJarProvider<'a> {
+pub struct StaticFileJarProvider<'a, N> {
     /// Main static file segment
     jar: LoadedJarRef<'a>,
     /// Another kind of static file segment to help query data from the main one.
     auxiliary_jar: Option<Box<Self>>,
+    /// Metrics for the static files.
     metrics: Option<Arc<StaticFileProviderMetrics>>,
+    /// Node primitives
+    _pd: std::marker::PhantomData<N>,
 }
 
-impl<'a> Deref for StaticFileJarProvider<'a> {
+impl<'a, N: NodePrimitives> Deref for StaticFileJarProvider<'a, N> {
     type Target = LoadedJarRef<'a>;
     fn deref(&self) -> &Self::Target {
         &self.jar
     }
 }
 
-impl<'a> From<LoadedJarRef<'a>> for StaticFileJarProvider<'a> {
+impl<'a, N: NodePrimitives> From<LoadedJarRef<'a>> for StaticFileJarProvider<'a, N> {
     fn from(value: LoadedJarRef<'a>) -> Self {
-        StaticFileJarProvider { jar: value, auxiliary_jar: None, metrics: None }
+        StaticFileJarProvider {
+            jar: value,
+            auxiliary_jar: None,
+            metrics: None,
+            _pd: Default::default(),
+        }
     }
 }
 
-impl<'a> StaticFileJarProvider<'a> {
+impl<'a, N: NodePrimitives> StaticFileJarProvider<'a, N> {
     /// Provides a cursor for more granular data access.
     pub fn cursor<'b>(&'b self) -> ProviderResult<StaticFileCursor<'a>>
     where
@@ -76,7 +86,7 @@ impl<'a> StaticFileJarProvider<'a> {
     }
 }
 
-impl HeaderProvider for StaticFileJarProvider<'_> {
+impl<N: NodePrimitives> HeaderProvider for StaticFileJarProvider<'_, N> {
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
         Ok(self
             .cursor()?
@@ -148,7 +158,7 @@ impl HeaderProvider for StaticFileJarProvider<'_> {
     }
 }
 
-impl BlockHashReader for StaticFileJarProvider<'_> {
+impl<N: NodePrimitives> BlockHashReader for StaticFileJarProvider<'_, N> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.cursor()?.get_one::<HeaderMask<BlockHash>>(number.into())
     }
@@ -170,7 +180,7 @@ impl BlockHashReader for StaticFileJarProvider<'_> {
     }
 }
 
-impl BlockNumReader for StaticFileJarProvider<'_> {
+impl<N: NodePrimitives> BlockNumReader for StaticFileJarProvider<'_, N> {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
         // Information on live database
         Err(ProviderError::UnsupportedProvider)
@@ -195,7 +205,7 @@ impl BlockNumReader for StaticFileJarProvider<'_> {
     }
 }
 
-impl TransactionsProvider for StaticFileJarProvider<'_> {
+impl<N: NodePrimitives> TransactionsProvider for StaticFileJarProvider<'_, N> {
     fn transaction_id(&self, hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         let mut cursor = self.cursor()?;
 
@@ -291,7 +301,7 @@ impl TransactionsProvider for StaticFileJarProvider<'_> {
     }
 }
 
-impl ReceiptProvider for StaticFileJarProvider<'_> {
+impl<N: NodePrimitives> ReceiptProvider for StaticFileJarProvider<'_, N> {
     fn receipt(&self, num: TxNumber) -> ProviderResult<Option<Receipt>> {
         self.cursor()?.get_one::<ReceiptMask<Receipt>>(num.into())
     }

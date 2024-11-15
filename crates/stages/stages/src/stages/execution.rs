@@ -12,7 +12,7 @@ use reth_evm::{
 use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives::{SealedHeader, StaticFileSegment};
-use reth_primitives_traits::format_gas_throughput;
+use reth_primitives_traits::{format_gas_throughput, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
     writer::UnifiedStorageWriter,
@@ -181,7 +181,8 @@ where
         + StatsReader
         + StateChangeWriter
         + BlockHashReader,
-    for<'a> UnifiedStorageWriter<'a, Provider, StaticFileProviderRWRefMut<'a>>: StateWriter,
+    for<'a> UnifiedStorageWriter<'a, Provider, StaticFileProviderRWRefMut<'a, Provider::Primitives>>:
+        StateWriter,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -485,8 +486,8 @@ where
     }
 }
 
-fn execution_checkpoint(
-    provider: &StaticFileProvider,
+fn execution_checkpoint<N: NodePrimitives>(
+    provider: &StaticFileProvider<N>,
     start_block: BlockNumber,
     max_block: BlockNumber,
     checkpoint: StageCheckpoint,
@@ -552,8 +553,8 @@ fn execution_checkpoint(
     })
 }
 
-fn calculate_gas_used_from_headers(
-    provider: &StaticFileProvider,
+fn calculate_gas_used_from_headers<N: NodePrimitives>(
+    provider: &StaticFileProvider<N>,
     range: RangeInclusive<BlockNumber>,
 ) -> Result<u64, ProviderError> {
     debug!(target: "sync::stages::execution", ?range, "Calculating gas used from headers");
@@ -587,11 +588,11 @@ fn calculate_gas_used_from_headers(
 /// (by returning [`StageError`]) until the heights in both the database and static file match.
 fn prepare_static_file_producer<'a, 'b, Provider>(
     provider: &'b Provider,
-    static_file_provider: &'a StaticFileProvider,
+    static_file_provider: &'a StaticFileProvider<Provider::Primitives>,
     start_block: u64,
-) -> Result<StaticFileProviderRWRefMut<'a>, StageError>
+) -> Result<StaticFileProviderRWRefMut<'a, Provider::Primitives>, StageError>
 where
-    Provider: DBProvider + BlockReader + HeaderProvider,
+    Provider: StaticFileProviderFactory + DBProvider + BlockReader + HeaderProvider,
     'b: 'a,
 {
     // Get next expected receipt number
