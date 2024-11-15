@@ -8383,8 +8383,8 @@ dependencies = [
  "op-alloy-consensus",
  "reth-codecs",
  "reth-primitives",
- "rstest",
  "reth-primitives-traits",
+ "rstest",
 ]
 
 [[package]]
