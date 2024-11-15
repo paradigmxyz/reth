@@ -5,7 +5,7 @@ use std::future::Future;
 use alloy_consensus::Header;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_node_api::ConfigureEvm;
-use reth_node_types::NodeTypes;
+use reth_node_types::Prims;
 
 use crate::{BuilderContext, FullNodeTypes};
 
@@ -17,7 +17,7 @@ pub trait ExecutorBuilder<Node: FullNodeTypes>: Send {
     type EVM: ConfigureEvm<Header = Header>;
 
     /// The type that knows how to execute blocks.
-    type Executor: BlockExecutorProvider<<Node::Types as NodeTypes>::Primitives>;
+    type Executor: BlockExecutorProvider<Primitives = Prims<Node::Types>>;
 
     /// Creates the EVM config.
     fn build_evm(
@@ -30,7 +30,7 @@ impl<Node, F, Fut, EVM, Executor> ExecutorBuilder<Node> for F
 where
     Node: FullNodeTypes,
     EVM: ConfigureEvm<Header = Header>,
-    Executor: BlockExecutorProvider<<Node::Types as NodeTypes>::Primitives>,
+    Executor: BlockExecutorProvider<Primitives = Prims<Node::Types>>,
     F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
     Fut: Future<Output = eyre::Result<(EVM, Executor)>> + Send,
 {

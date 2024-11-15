@@ -6,7 +6,7 @@ use alloy_consensus::Header;
 use reth_consensus::Consensus;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_node_api::NodeTypesWithEngine;
-use reth_node_types::NodeTypes;
+use reth_node_types::Prims;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_transaction_pool::TransactionPool;
 
@@ -380,7 +380,7 @@ where
     Fut: Future<Output = eyre::Result<Components<Node, Pool, EVM, Executor, Cons>>> + Send,
     Pool: TransactionPool + Unpin + 'static,
     EVM: ConfigureEvm<Header = Header>,
-    Executor: BlockExecutorProvider<<Node::Types as NodeTypes>::Primitives>,
+    Executor: BlockExecutorProvider<Primitives = Prims<Node::Types>>,
     Cons: Consensus + Clone + Unpin + 'static,
 {
     type Components = Components<Node, Pool, EVM, Executor, Cons>;

@@ -44,7 +44,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
     pub async fn execute<N, E, F>(self, ctx: CliContext, executor: F) -> eyre::Result<()>
     where
         N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>,
-        E: BlockExecutorProvider<N::Primitives>,
+        E: BlockExecutorProvider<Primitives = N::Primitives>,
         F: FnOnce(Arc<C::ChainSpec>) -> E,
     {
         match self.command {

@@ -40,7 +40,7 @@ pub fn build_networked_pipeline<N, Client, Executor>(
 where
     N: ProviderNodeTypes,
     Client: EthBlockClient + 'static,
-    Executor: BlockExecutorProvider<N::Primitives>,
+    Executor: BlockExecutorProvider<Primitives = N::Primitives>,
 {
     // building network downloaders using the fetch client
     let header_downloader = ReverseHeadersDownloaderBuilder::new(config.headers)
@@ -87,7 +87,7 @@ where
     N: ProviderNodeTypes,
     H: HeaderDownloader<Header = <N::Primitives as NodePrimitives>::BlockHeader> + 'static,
     B: BodyDownloader<Body = <N::Primitives as NodePrimitives>::BlockBody> + 'static,
-    Executor: BlockExecutorProvider<N::Primitives>,
+    Executor: BlockExecutorProvider<Primitives = N::Primitives>,
 {
     let mut builder = Pipeline::<N>::builder();
 

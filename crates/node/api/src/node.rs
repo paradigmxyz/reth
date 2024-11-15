@@ -8,7 +8,7 @@ use reth_consensus::Consensus;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network_api::FullNetwork;
 use reth_node_core::node_config::NodeConfig;
-use reth_node_types::{NodeTypes, NodeTypesWithDB, NodeTypesWithEngine};
+use reth_node_types::{NodeTypes, NodeTypesWithDB, NodeTypesWithEngine, Prims};
 use reth_payload_primitives::PayloadBuilder;
 use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
@@ -53,7 +53,7 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     type Evm: ConfigureEvm<Header = Header>;
 
     /// The type that knows how to execute blocks.
-    type Executor: BlockExecutorProvider<<Self::Types as NodeTypes>::Primitives>;
+    type Executor: BlockExecutorProvider<Primitives = Prims<Self::Types>>;
 
     /// The consensus type of the node.
     type Consensus: Consensus + Clone + Unpin + 'static;

@@ -33,7 +33,9 @@ impl<T> MockExecutorProvider<T> {
     }
 }
 
-impl<N: NodePrimitives> BlockExecutorProvider<N> for MockExecutorProvider<N::Receipt> {
+impl BlockExecutorProvider for MockExecutorProvider {
+    type Primitives = reth_primitives::AnyPrimitives;
+
     type Executor<DB: Database<Error: Into<ProviderError> + Display>> = Self;
 
     type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> = Self;

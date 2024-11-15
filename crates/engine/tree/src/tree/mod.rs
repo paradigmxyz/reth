@@ -537,7 +537,7 @@ impl<P, E, T, Spec> EngineApiTreeHandler<P, E, T, Spec>
 where
     P: DatabaseProviderFactory + BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     <P as DatabaseProviderFactory>::Provider: BlockReader,
-    E: BlockExecutorProvider<reth_node_types::AnyPrimitives>,
+    E: BlockExecutorProvider<Primitives = reth_node_types::AnyPrimitives>,
     T: EngineTypes,
     Spec: Send + Sync + EthereumHardforks + 'static,
 {

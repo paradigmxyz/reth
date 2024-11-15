@@ -20,12 +20,13 @@ use crate::{
 pub use futures_util::future::Either;
 use revm::State;
 
-impl<A, B, N> BlockExecutorProvider<N> for Either<A, B>
+impl<A, B> BlockExecutorProvider for Either<A, B>
 where
-    A: BlockExecutorProvider<N>,
-    B: BlockExecutorProvider<N>,
-    N: NodePrimitives,
+    A: BlockExecutorProvider,
+    B: BlockExecutorProvider<Primitives = A::Primitives>,
 {
+    type Primitives = A::Primitives;
+
     type Executor<DB: Database<Error: Into<ProviderError> + Display>> =
         Either<A::Executor<DB>, B::Executor<DB>>;
 

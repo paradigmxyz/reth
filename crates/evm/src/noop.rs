@@ -24,7 +24,9 @@ const UNAVAILABLE_FOR_NOOP: &str = "execution unavailable for noop";
 #[non_exhaustive]
 pub struct NoopBlockExecutorProvider;
 
-impl<N: NodePrimitives> BlockExecutorProvider<N> for NoopBlockExecutorProvider {
+impl BlockExecutorProvider for NoopBlockExecutorProvider {
+    type Primitives = reth_primitives::AnyPrimitives;
+
     type Executor<DB: Database<Error: Into<ProviderError> + Display>> = Self;
 
     type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> = Self;

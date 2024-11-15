@@ -70,3 +70,6 @@ where
     type TxType = T::TxType;
     type Receipt = T::Receipt;
 }
+
+/// Helper adapter type for accessing [`NodePrimitives`] receipt type.
+pub type Rcpt<N> = <N as NodePrimitives>::Receipt;

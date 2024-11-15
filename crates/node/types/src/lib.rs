@@ -189,3 +189,6 @@ where
 {
     type Engine = E;
 }
+
+/// Helper adapter type for accessing data primitives aggregator type on [`NodeTypes`].
+pub type Prims<N> = <N as NodeTypes>::Primitives;

@@ -51,7 +51,7 @@ pub struct EngineService<N, Client, E>
 where
     N: EngineNodeTypes,
     Client: EthBlockClient + 'static,
-    E: BlockExecutorProvider<N::Primitives> + 'static,
+    E: BlockExecutorProvider<Primitives = N::Primitives> + 'static,
 {
     orchestrator: EngineServiceType<N, Client>,
     _marker: PhantomData<E>,
@@ -61,7 +61,7 @@ impl<N, Client, E> EngineService<N, Client, E>
 where
     N: EngineNodeTypes,
     Client: EthBlockClient + 'static,
-    E: BlockExecutorProvider<N::Primitives> + 'static,
+    E: BlockExecutorProvider<Primitives = N::Primitives> + 'static,
 {
     /// Constructor for `EngineService`.
     #[allow(clippy::too_many_arguments)]
@@ -126,7 +126,7 @@ impl<N, Client, E> Stream for EngineService<N, Client, E>
 where
     N: EngineNodeTypes,
     Client: EthBlockClient + 'static,
-    E: BlockExecutorProvider<N::Primitives> + 'static,
+    E: BlockExecutorProvider<Primitives = N::Primitives> + 'static,
 {
     type Item = ChainEvent<BeaconConsensusEngineEvent>;
 

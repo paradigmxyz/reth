@@ -77,7 +77,7 @@ impl AppendableChain {
     ) -> Result<Self, InsertBlockErrorKind>
     where
         N: ProviderNodeTypes,
-        E: BlockExecutorProvider<N::Primitives>,
+        E: BlockExecutorProvider<Primitives = N::Primitives>,
     {
         let execution_outcome = ExecutionOutcome::default();
         let empty = BTreeMap::new();
@@ -115,7 +115,7 @@ impl AppendableChain {
     ) -> Result<Self, InsertBlockErrorKind>
     where
         N: ProviderNodeTypes,
-        E: BlockExecutorProvider<N::Primitives>,
+        E: BlockExecutorProvider<Primitives = N::Primitives>,
     {
         let parent_number =
             block.number.checked_sub(1).ok_or(BlockchainTreeError::GenesisBlockHasNoParent)?;
@@ -178,7 +178,7 @@ impl AppendableChain {
     where
         EDP: FullExecutionDataProvider,
         N: ProviderNodeTypes,
-        E: BlockExecutorProvider<N::Primitives>,
+        E: BlockExecutorProvider<Primitives = N::Primitives>,
     {
         // some checks are done before blocks comes here.
         externals.consensus.validate_header_against_parent(&block, parent_block)?;
@@ -285,7 +285,7 @@ impl AppendableChain {
     ) -> Result<(), InsertBlockErrorKind>
     where
         N: ProviderNodeTypes,
-        E: BlockExecutorProvider<N::Primitives>,
+        E: BlockExecutorProvider<Primitives = N::Primitives>,
     {
         let parent_block = self.chain.tip();
 

@@ -15,7 +15,7 @@ use alloy_primitives::BlockNumber;
 use reth_consensus::ConsensusError;
 use reth_node_types::NodePrimitives;
 use reth_primitives::BlockWithSenders;
-use reth_primitives_traits::Receipt;
+use reth_primitives_traits::{Rcpt, Receipt};
 use reth_prune_types::PruneModes;
 use reth_revm::batch::BlockBatchRecord;
 use revm::{
@@ -130,7 +130,10 @@ pub trait BatchExecutor<DB, N> {
 }
 
 /// A type that can create a new executor for block execution.
-pub trait BlockExecutorProvider<N: NodePrimitives>: Send + Sync + Clone + Unpin + 'static {
+pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
+    /// Data primitives.
+    type Primitives: NodePrimitives;
+
     /// An executor that can execute a single block given a database.
     ///
     /// # Verification
@@ -144,18 +147,18 @@ pub trait BlockExecutorProvider<N: NodePrimitives>: Send + Sync + Clone + Unpin 
     /// the returned state.
     type Executor<DB: Database<Error: Into<ProviderError> + Display>>: for<'a> Executor<
         DB,
-        N,
+        Self::Primitives,
         Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
-        Output = BlockExecutionOutput<N::Receipt>,
+        Output = BlockExecutionOutput<Rcpt<Self::Primitives>>,
         Error = BlockExecutionError,
     >;
 
     /// An executor that can execute a batch of blocks given a database.
     type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>>: for<'a> BatchExecutor<
         DB,
-        N,
+        Self::Primitives,
         Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
-        Output = ExecutionOutcome<N::Receipt>,
+        Output = ExecutionOutcome<Rcpt<Self::Primitives>>,
         Error = BlockExecutionError,
     >;
 
@@ -281,16 +284,17 @@ impl<F> BasicBlockExecutorProvider<F> {
     }
 }
 
-impl<F, N> BlockExecutorProvider<N> for BasicBlockExecutorProvider<F>
+impl<F> BlockExecutorProvider for BasicBlockExecutorProvider<F>
 where
-    F: BlockExecutionStrategyFactory<Primitives = N>,
-    N: NodePrimitives<Receipt: Receipt>,
+    F: BlockExecutionStrategyFactory<Primitives: NodePrimitives<Receipt: Receipt>>,
 {
+    type Primitives = F::Primitives;
+
     type Executor<DB: Database<Error: Into<ProviderError> + Display>> =
-        BasicBlockExecutor<F::Strategy<DB>, DB, N>;
+        BasicBlockExecutor<F::Strategy<DB>, DB, Self::Primitives>;
 
     type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> =
-        BasicBatchExecutor<F::Strategy<DB>, DB, N>;
+        BasicBatchExecutor<F::Strategy<DB>, DB, Self::Primitives>;
 
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
@@ -506,10 +510,13 @@ mod tests {
     #[derive(Clone, Default)]
     struct TestExecutorProvider;
 
-    impl<N: NodePrimitives> BlockExecutorProvider<N> for TestExecutorProvider {
-        type Executor<DB: Database<Error: Into<ProviderError> + Display>> = TestExecutor<DB, N>;
+    impl BlockExecutorProvider for TestExecutorProvider {
+        type Primitives = reth_node_types::AnyPrimitives;
+
+        type Executor<DB: Database<Error: Into<ProviderError> + Display>> =
+            TestExecutor<DB, Self::Primitives>;
         type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> =
-            TestExecutor<DB, N>;
+            TestExecutor<DB, Self::Primitives>;
 
         fn executor<DB>(&self, _db: DB) -> Self::Executor<DB>
         where

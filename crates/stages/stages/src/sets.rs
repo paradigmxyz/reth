@@ -105,7 +105,7 @@ impl<Provider, H, B, E> DefaultStages<Provider, H, B, E> {
         prune_modes: PruneModes,
     ) -> Self
     where
-        E: BlockExecutorProvider<reth_node_types::AnyPrimitives>,
+        E: BlockExecutorProvider<Primitives = reth_node_types::AnyPrimitives>,
     {
         Self {
             online: OnlineStages::new(
@@ -125,7 +125,7 @@ impl<Provider, H, B, E> DefaultStages<Provider, H, B, E> {
 
 impl<P, H, B, E> DefaultStages<P, H, B, E>
 where
-    E: BlockExecutorProvider<reth_node_types::AnyPrimitives>,
+    E: BlockExecutorProvider<Primitives = reth_node_types::AnyPrimitives>,
 {
     /// Appends the default offline stages and default finish stage to the given builder.
     pub fn add_offline_stages<Provider>(
@@ -149,7 +149,7 @@ where
     P: HeaderSyncGapProvider + 'static,
     H: HeaderDownloader + 'static,
     B: BodyDownloader + 'static,
-    E: BlockExecutorProvider<reth_node_types::AnyPrimitives>,
+    E: BlockExecutorProvider<Primitives = reth_node_types::AnyPrimitives>,
     OnlineStages<P, H, B>: StageSet<Provider>,
     OfflineStages<E>: StageSet<Provider>,
 {
@@ -294,7 +294,7 @@ impl<EF> OfflineStages<EF> {
 
 impl<E, Provider> StageSet<Provider> for OfflineStages<E>
 where
-    E: BlockExecutorProvider<reth_node_types::AnyPrimitives>,
+    E: BlockExecutorProvider<Primitives = reth_node_types::AnyPrimitives>,
     ExecutionStages<E>: StageSet<Provider>,
     PruneSenderRecoveryStage: Stage<Provider>,
     HashingStages: StageSet<Provider>,
@@ -351,7 +351,7 @@ impl<E> ExecutionStages<E> {
 
 impl<E, Provider> StageSet<Provider> for ExecutionStages<E>
 where
-    E: BlockExecutorProvider<reth_node_types::AnyPrimitives>,
+    E: BlockExecutorProvider<Primitives = reth_node_types::AnyPrimitives>,
     SenderRecoveryStage: Stage<Provider>,
     ExecutionStage<E>: Stage<Provider>,
 {

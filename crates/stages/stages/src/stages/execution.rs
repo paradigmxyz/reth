@@ -182,7 +182,7 @@ where
         + BlockHashReader,
     for<'a> UnifiedStorageWriter<'a, Provider, StaticFileProviderRWRefMut<'a, Provider::Primitives>>:
         StateWriter,
-    E: BlockExecutorProvider<Provider::Primitives>,
+    E: BlockExecutorProvider<Primitives = Provider::Primitives>,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {

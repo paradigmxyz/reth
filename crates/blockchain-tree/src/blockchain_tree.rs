@@ -96,7 +96,7 @@ impl<N: NodeTypesWithDB, E> BlockchainTree<N, E> {
 impl<N, E> BlockchainTree<N, E>
 where
     N: ProviderNodeTypes,
-    E: BlockExecutorProvider<N::Primitives>,
+    E: BlockExecutorProvider<Primitives = N::Primitives>,
 {
     /// Builds the blockchain tree for the node.
     ///
@@ -1499,7 +1499,7 @@ mod tests {
             self
         }
 
-        fn assert<N: NodeTypesWithDB, E: BlockExecutorProvider<N::Primitives>>(
+        fn assert<N: NodeTypesWithDB, E: BlockExecutorProvider<Primitives = N::Primitives>>(
             self,
             tree: &BlockchainTree<N, E>,
         ) {
