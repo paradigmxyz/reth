@@ -8,7 +8,7 @@ use reth_chainspec::{EthChainSpec, Hardforks};
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, PeersInfo};
 use reth_node_api::{
-    AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, NodePrimitives, PayloadBuilder,
+    AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, PayloadBuilder,
 };
 use reth_node_builder::{
     components::{
@@ -23,10 +23,8 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_evm::{OpEvmConfig, OpExecutionStrategyFactory};
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
-use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::OpEthApi;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::{Block, Receipt, TransactionSigned, TxType};
 use reth_provider::CanonStateSubscriptions;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
