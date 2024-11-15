@@ -239,7 +239,7 @@ where
     /// Executes the payload and returns the outcome.
     pub fn execute<EvmConfig, DB>(
         self,
-        db: &mut State<DB>,
+        state: &mut State<DB>,
         ctx: &OpPayloadBuilderCtx<EvmConfig>,
     ) -> Result<BuildOutcomeKind<ExecutedPayload>, PayloadBuilderError>
     where
@@ -250,18 +250,18 @@ where
         debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
 
         // 1. apply eip-4788 pre block contract call
-        ctx.apply_pre_beacon_root_contract_call(db)?;
+        ctx.apply_pre_beacon_root_contract_call(state)?;
 
         // 2. ensure create2deployer is force deployed
-        ctx.ensure_create2_deployer(db)?;
+        ctx.ensure_create2_deployer(state)?;
 
         // 3. execute sequencer transactions
-        let mut info = ctx.execute_sequencer_transactions(db)?;
+        let mut info = ctx.execute_sequencer_transactions(state)?;
 
         // 4. if mem pool transactions are requested we execute them
         if !ctx.attributes().no_tx_pool {
             let best_txs = best.best_transactions(pool, ctx.best_transaction_attributes());
-            if ctx.execute_best_transactions::<_, Pool>(&mut info, db, best_txs)?.is_some() {
+            if ctx.execute_best_transactions::<_, Pool>(&mut info, state, best_txs)?.is_some() {
                 return Ok(BuildOutcomeKind::Cancelled)
             }
 
@@ -272,7 +272,11 @@ where
             }
         }
 
-        let withdrawals_outcome = ctx.commit_withdrawals(db)?;
+        let withdrawals_outcome = ctx.commit_withdrawals(state)?;
+
+        // merge all transitions into bundle state, this would apply the withdrawal balance changes
+        // and 4788 contract call
+        state.merge_transitions(BundleRetention::Reverts);
 
         Ok(BuildOutcomeKind::Better { payload: ExecutedPayload { info, withdrawals_outcome } })
     }
@@ -296,10 +300,6 @@ where
             BuildOutcomeKind::Cancelled => return Ok(BuildOutcomeKind::Cancelled),
             BuildOutcomeKind::Aborted { fees } => return Ok(BuildOutcomeKind::Aborted { fees }),
         };
-
-        // merge all transitions into bundle state, this would apply the withdrawal balance changes
-        // and 4788 contract call
-        state.merge_transitions(BundleRetention::Reverts);
 
         let block_number = ctx.block_number();
         let execution_outcome = ExecutionOutcome::new(
