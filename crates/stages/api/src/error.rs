@@ -1,5 +1,5 @@
 use crate::PipelineEvent;
-use alloy_primitives::{BlockNumber, TxNumber};
+use alloy_primitives::BlockNumber;
 use reth_consensus::ConsensusError;
 use reth_errors::{BlockExecutionError, DatabaseError, RethError};
 use reth_network_p2p::error::DownloadError;
@@ -100,18 +100,6 @@ pub enum StageError {
         /// Static File segment
         segment: StaticFileSegment,
     },
-    /// Unrecoverable inconsistency error related to a transaction number in a static file segment.
-    #[error(
-        "inconsistent transaction number for {segment}. db: {database}, static_file: {static_file}"
-    )]
-    InconsistentTxNumber {
-        /// Static File segment where this error was encountered.
-        segment: StaticFileSegment,
-        /// Expected database transaction number.
-        database: TxNumber,
-        /// Expected static file transaction number.
-        static_file: TxNumber,
-    },
     /// Unrecoverable inconsistency error related to a block number in a static file segment.
     #[error("inconsistent block number for {segment}. db: {database}, static_file: {static_file}")]
     InconsistentBlockNumber {
@@ -157,7 +145,6 @@ impl StageError {
                 Self::MissingSyncGap |
                 Self::ChannelClosed |
                 Self::InconsistentBlockNumber { .. } |
-                Self::InconsistentTxNumber { .. } |
                 Self::Internal(_) |
                 Self::Fatal(_)
         )
