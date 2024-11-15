@@ -176,17 +176,7 @@ where
 
             // Increment block on static file header.
             if block_number > 0 {
-                let appended_block_number = static_file_producer.increment_block(block_number)?;
-
-                if appended_block_number != block_number {
-                    // This scenario indicates a critical error in the logic of adding new
-                    // items. It should be treated as an `expect()` failure.
-                    return Err(StageError::InconsistentBlockNumber {
-                        segment: StaticFileSegment::Transactions,
-                        database: block_number,
-                        static_file: appended_block_number,
-                    })
-                }
+                static_file_producer.increment_block(block_number)?;
             }
 
             match response {

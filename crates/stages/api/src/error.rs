@@ -1,5 +1,4 @@
 use crate::PipelineEvent;
-use alloy_primitives::BlockNumber;
 use reth_consensus::ConsensusError;
 use reth_errors::{BlockExecutionError, DatabaseError, RethError};
 use reth_network_p2p::error::DownloadError;
@@ -100,16 +99,6 @@ pub enum StageError {
         /// Static File segment
         segment: StaticFileSegment,
     },
-    /// Unrecoverable inconsistency error related to a block number in a static file segment.
-    #[error("inconsistent block number for {segment}. db: {database}, static_file: {static_file}")]
-    InconsistentBlockNumber {
-        /// Static File segment where this error was encountered.
-        segment: StaticFileSegment,
-        /// Expected database block number.
-        database: BlockNumber,
-        /// Expected static file block number.
-        static_file: BlockNumber,
-    },
     /// The prune checkpoint for the given segment is missing.
     #[error("missing prune checkpoint for {0}")]
     MissingPruneCheckpoint(PruneSegment),
@@ -144,7 +133,6 @@ impl StageError {
                 Self::MissingDownloadBuffer |
                 Self::MissingSyncGap |
                 Self::ChannelClosed |
-                Self::InconsistentBlockNumber { .. } |
                 Self::Internal(_) |
                 Self::Fatal(_)
         )
