@@ -54,7 +54,7 @@ const SOFT_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
 /// This can be spawned to another task and is supposed to be run as background service.
 #[derive(Debug)]
 #[must_use = "Manager does nothing unless polled."]
-pub struct EthRequestHandler<C> {
+pub struct EthRequestHandler<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The client type that can interact with the chain.
     client: C,
     /// Used for reporting peers.
@@ -62,15 +62,15 @@ pub struct EthRequestHandler<C> {
     #[allow(dead_code)]
     peers: PeersHandle,
     /// Incoming request from the [`NetworkManager`](crate::NetworkManager).
-    incoming_requests: ReceiverStream<IncomingEthRequest>,
+    incoming_requests: ReceiverStream<IncomingEthRequest<N>>,
     /// Metrics for the eth request handler.
     metrics: EthRequestHandlerMetrics,
 }
 
 // === impl EthRequestHandler ===
-impl<C> EthRequestHandler<C> {
+impl<C, N: NetworkPrimitives> EthRequestHandler<C, N> {
     /// Create a new instance
-    pub fn new(client: C, peers: PeersHandle, incoming: Receiver<IncomingEthRequest>) -> Self {
+    pub fn new(client: C, peers: PeersHandle, incoming: Receiver<IncomingEthRequest<N>>) -> Self {
         Self {
             client,
             peers,
@@ -148,7 +148,7 @@ where
         &self,
         _peer_id: PeerId,
         request: GetBlockHeaders,
-        response: oneshot::Sender<RequestResult<BlockHeaders>>,
+        response: oneshot::Sender<RequestResult<BlockHeaders<Header>>>,
     ) {
         self.metrics.eth_headers_requests_received_total.increment(1);
         let headers = self.get_headers_response(request);
@@ -159,7 +159,7 @@ where
         &self,
         _peer_id: PeerId,
         request: GetBlockBodies,
-        response: oneshot::Sender<RequestResult<BlockBodies>>,
+        response: oneshot::Sender<RequestResult<BlockBodies<BlockBody>>>,
     ) {
         self.metrics.eth_bodies_requests_received_total.increment(1);
         let mut bodies = Vec::new();

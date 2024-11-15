@@ -1,5 +1,6 @@
 //! Builder support for configuring the entire setup.
 
+use reth_eth_wire::{EthNetworkPrimitives, NetworkPrimitives};
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_transaction_pool::TransactionPool;
 use tokio::sync::mpsc;
@@ -16,38 +17,38 @@ pub(crate) const ETH_REQUEST_CHANNEL_CAPACITY: usize = 256;
 
 /// A builder that can configure all components of the network.
 #[allow(missing_debug_implementations)]
-pub struct NetworkBuilder<Tx, Eth> {
-    pub(crate) network: NetworkManager,
+pub struct NetworkBuilder<Tx, Eth, N: NetworkPrimitives = EthNetworkPrimitives> {
+    pub(crate) network: NetworkManager<N>,
     pub(crate) transactions: Tx,
     pub(crate) request_handler: Eth,
 }
 
 // === impl NetworkBuilder ===
 
-impl<Tx, Eth> NetworkBuilder<Tx, Eth> {
+impl<Tx, Eth, N: NetworkPrimitives> NetworkBuilder<Tx, Eth, N> {
     /// Consumes the type and returns all fields.
-    pub fn split(self) -> (NetworkManager, Tx, Eth) {
+    pub fn split(self) -> (NetworkManager<N>, Tx, Eth) {
         let Self { network, transactions, request_handler } = self;
         (network, transactions, request_handler)
     }
 
     /// Returns the network manager.
-    pub const fn network(&self) -> &NetworkManager {
+    pub const fn network(&self) -> &NetworkManager<N> {
         &self.network
     }
 
     /// Returns the mutable network manager.
-    pub fn network_mut(&mut self) -> &mut NetworkManager {
+    pub fn network_mut(&mut self) -> &mut NetworkManager<N> {
         &mut self.network
     }
 
     /// Returns the handle to the network.
-    pub fn handle(&self) -> NetworkHandle {
+    pub fn handle(&self) -> NetworkHandle<N> {
         self.network.handle().clone()
     }
 
     /// Consumes the type and returns all fields and also return a [`NetworkHandle`].
-    pub fn split_with_handle(self) -> (NetworkHandle, NetworkManager, Tx, Eth) {
+    pub fn split_with_handle(self) -> (NetworkHandle<N>, NetworkManager<N>, Tx, Eth) {
         let Self { network, transactions, request_handler } = self;
         let handle = network.handle().clone();
         (handle, network, transactions, request_handler)
@@ -58,7 +59,7 @@ impl<Tx, Eth> NetworkBuilder<Tx, Eth> {
         self,
         pool: Pool,
         transactions_manager_config: TransactionsManagerConfig,
-    ) -> NetworkBuilder<TransactionsManager<Pool>, Eth> {
+    ) -> NetworkBuilder<TransactionsManager<Pool, N>, Eth, N> {
         let Self { mut network, request_handler, .. } = self;
         let (tx, rx) = mpsc::unbounded_channel();
         network.set_transactions(tx);
@@ -71,7 +72,7 @@ impl<Tx, Eth> NetworkBuilder<Tx, Eth> {
     pub fn request_handler<Client>(
         self,
         client: Client,
-    ) -> NetworkBuilder<Tx, EthRequestHandler<Client>> {
+    ) -> NetworkBuilder<Tx, EthRequestHandler<Client, N>, N> {
         let Self { mut network, transactions, .. } = self;
         let (tx, rx) = mpsc::channel(ETH_REQUEST_CHANNEL_CAPACITY);
         network.set_eth_request_handler(tx);
