@@ -886,7 +886,7 @@ impl<T> TransactionFilter for NoopTransactionFilter<T> {
     }
 }
 
-/// A Helper type thaPayloadTransactionst bundles the best transactions attributes together.
+/// A Helper type that bundles the best transactions attributes together.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct BestTransactionsAttributes {
     /// The base fee attribute for best transactions.
