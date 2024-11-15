@@ -23,16 +23,19 @@ reth-prune-types.workspace = true
 reth-consensus.workspace = true
 reth-node-types.workspace = true
 
-# ethereum
-alloy-eips.workspace = true
-alloy-primitives.workspace = true
-op-alloy-consensus.workspace = true
-alloy-consensus.workspace = true
-
-# Optimism
+# op-reth
 reth-optimism-consensus.workspace = true
 reth-optimism-chainspec.workspace = true
 reth-optimism-forks.workspace = true
+reth-optimism-primitives.workspace = true
+
+# ethereum
+alloy-eips.workspace = true
+alloy-primitives.workspace = true
+alloy-consensus.workspace = true
+
+# op
+op-alloy-consensus.workspace = true
 
 # revm
 revm.workspace = true

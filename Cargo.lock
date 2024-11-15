@@ -8288,6 +8288,7 @@ dependencies = [
  "reth-optimism-chainspec",
  "reth-optimism-consensus",
  "reth-optimism-forks",
+ "reth-optimism-primitives",
  "reth-primitives",
  "reth-prune-types",
  "reth-revm",
@@ -8342,6 +8343,7 @@ dependencies = [
  "reth-optimism-forks",
  "reth-optimism-node",
  "reth-optimism-payload-builder",
+ "reth-optimism-primitives",
  "reth-optimism-rpc",
  "reth-payload-builder",
  "reth-primitives",
@@ -8401,6 +8403,8 @@ dependencies = [
  "bytes",
  "derive_more 1.0.0",
  "op-alloy-consensus",
+ "reth-node-types",
+ "reth-primitives",
 ]
 
 [[package]]

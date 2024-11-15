@@ -23,6 +23,7 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_evm::{OpEvmConfig, OpExecutionStrategyFactory};
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
+use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::OpEthApi;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::{Block, Receipt, TransactionSigned, TxType};
@@ -40,19 +41,6 @@ use crate::{
     txpool::{OpTransactionPool, OpTransactionValidator},
     OpEngineTypes,
 };
-
-/// Optimism primitive types.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct OpPrimitives;
-
-impl NodePrimitives for OpPrimitives {
-    type Block = Block;
-    type BlockHeader = Header;
-    type BlockBody = Block;
-    type SignedTx = TransactionSigned;
-    type TxType = TxType;
-    type Receipt = Receipt;
-}
 
 /// Type configuration for a regular Optimism node.
 #[derive(Debug, Default, Clone)]
