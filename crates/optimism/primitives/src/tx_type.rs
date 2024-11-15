@@ -2,21 +2,50 @@
 //! `OpTxType` implements `reth_primitives_traits::TxType`.
 //! This type is required because a `Compact` impl is needed on the deposit tx type.
 
+use core::fmt::Debug;
+use std::convert::TryFrom;
+
 use alloy_primitives::{U64, U8};
 use alloy_rlp::{Decodable, Encodable, Error};
 use bytes::BufMut;
-use core::fmt::Debug;
 use derive_more::{
     derive::{From, Into},
     Display,
 };
 use op_alloy_consensus::OpTxType as AlloyOpTxType;
-use std::convert::TryFrom;
+use reth_primitives_traits::TxType;
 
 /// Wrapper type for `AlloyOpTxType` to implement `TxType` trait.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Display, Ord, Hash, From, Into)]
 #[into(u8)]
 pub struct OpTxType(AlloyOpTxType);
+
+impl TxType for OpTxType {
+    #[inline]
+    fn is_legacy(&self) -> bool {
+        matches!(self.0, AlloyOpTxType::Legacy)
+    }
+
+    #[inline]
+    fn is_eip2930(&self) -> bool {
+        matches!(self.0, AlloyOpTxType::Eip2930)
+    }
+
+    #[inline]
+    fn is_eip1559(&self) -> bool {
+        matches!(self.0, AlloyOpTxType::Eip1559)
+    }
+
+    #[inline]
+    fn is_eip4844(&self) -> bool {
+        false
+    }
+
+    #[inline]
+    fn is_eip7702(&self) -> bool {
+        matches!(self.0, AlloyOpTxType::Eip7702)
+    }
+}
 
 impl From<OpTxType> for U8 {
     fn from(tx_type: OpTxType) -> Self {

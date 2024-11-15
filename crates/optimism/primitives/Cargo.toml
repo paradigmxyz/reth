@@ -19,3 +19,4 @@ alloy-eips.workspace = true
 alloy-rlp.workspace = true
 derive_more.workspace = true
 bytes.workspace = true
+reth-primitives-traits.workspace = true
