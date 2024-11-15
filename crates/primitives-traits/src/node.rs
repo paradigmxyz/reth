@@ -9,7 +9,7 @@ pub trait NodePrimitives: Send + Sync + Unpin + Clone + Default + fmt::Debug + '
     /// Signed version of the transaction type.
     type SignedTx: Send + Sync + Unpin + Clone + Default + fmt::Debug + MaybeSerialize + 'static;
     /// Transaction envelope type ID.
-    type TxType: Send + Sync + Unpin + Clone + Default + fmt::Debug + MaybeSerialize + 'static;
+    type TxType: Send + Sync + Unpin + Clone + Default + fmt::Debug + 'static;
     /// A receipt.
     type Receipt: Send + Sync + Unpin + Clone + Default + fmt::Debug + MaybeSerialize + 'static;
 }

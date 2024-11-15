@@ -28,15 +28,13 @@ pub trait SignedTransaction:
     + PartialEq
     + Eq
     + Hash
-    + serde::Serialize
-    + for<'a> serde::Deserialize<'a>
     + alloy_rlp::Encodable
     + alloy_rlp::Decodable
     + Encodable2718
     + Decodable2718
     + TransactionExt
-    + MaybeArbitrary
     + MaybeSerialize
+    + MaybeArbitrary
 {
     /// Transaction type that is signed.
     type Transaction: Transaction;

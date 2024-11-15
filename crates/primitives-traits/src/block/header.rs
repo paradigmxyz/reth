@@ -42,13 +42,12 @@ impl<T> BlockHeader for T where
         + fmt::Debug
         + PartialEq
         + Eq
-        + serde::Serialize
-        + for<'de> serde::Deserialize<'de>
         + alloy_rlp::Encodable
         + alloy_rlp::Decodable
         + alloy_consensus::BlockHeader
         + Sealable
         + InMemorySize
+        + MaybeSerialize
         + 'static
 {
 }

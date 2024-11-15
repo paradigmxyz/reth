@@ -14,13 +14,13 @@ workspace = true
 [dependencies]
 reth-codecs.workspace = true
 
-alloy-consensus = { workspace = true, features = ["serde"] }
+alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 
-revm-primitives = { workspace = true, features = ["serde"] }
+revm-primitives.workspace = true
 
 # misc
 byteorder = "1"

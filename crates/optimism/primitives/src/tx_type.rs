@@ -3,7 +3,6 @@
 //! This type is required because a `Compact` impl is needed on the deposit tx type.
 
 use core::fmt::Debug;
-use std::convert::TryFrom;
 
 use alloy_primitives::{U64, U8};
 use alloy_rlp::{Decodable, Encodable, Error};
@@ -15,7 +14,7 @@ use derive_more::{
 use op_alloy_consensus::OpTxType as AlloyOpTxType;
 use reth_primitives_traits::TxType;
 
-/// Wrapper type for `AlloyOpTxType` to implement `TxType` trait.
+/// Wrapper type for [`alloy_consensus::OpTxType`] to implement [`TxType`] trait.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Display, Ord, Hash, From, Into)]
 #[into(u8)]
 pub struct OpTxType(AlloyOpTxType);
