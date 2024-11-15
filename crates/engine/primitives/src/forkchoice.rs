@@ -58,13 +58,13 @@ impl ForkchoiceStateTracker {
 
     /// Returns whether the latest received FCU is syncing: [`ForkchoiceStatus::Invalid`]
     #[allow(dead_code)]
-    pub(crate) fn is_latest_invalid(&self) -> bool {
+    pub fn is_latest_invalid(&self) -> bool {
         self.latest_status().map_or(false, |s| s.is_invalid())
     }
 
     /// Returns the last valid head hash.
     #[allow(dead_code)]
-    pub(crate) fn last_valid_head(&self) -> Option<B256> {
+    pub fn last_valid_head(&self) -> Option<B256> {
         self.last_valid.as_ref().map(|s| s.head_block_hash)
     }
 
@@ -188,7 +188,7 @@ pub enum ForkchoiceStateHash {
 
 impl ForkchoiceStateHash {
     /// Tries to find a matching hash in the given [`ForkchoiceState`].
-    pub(crate) fn find(state: &ForkchoiceState, hash: B256) -> Option<Self> {
+    pub fn find(state: &ForkchoiceState, hash: B256) -> Option<Self> {
         if state.head_block_hash == hash {
             Some(Self::Head(hash))
         } else if state.safe_block_hash == hash {
@@ -201,7 +201,7 @@ impl ForkchoiceStateHash {
     }
 
     /// Returns true if this is the head hash of the [`ForkchoiceState`]
-    pub(crate) const fn is_head(&self) -> bool {
+    pub const fn is_head(&self) -> bool {
         matches!(self, Self::Head(_))
     }
 }

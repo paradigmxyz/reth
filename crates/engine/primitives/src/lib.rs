@@ -8,6 +8,15 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+mod error;
+pub use error::BeaconOnNewPayloadError;
+
+mod forkchoice;
+pub use forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker, ForkchoiceStatus};
+
+mod message;
+pub use message::{BeaconEngineMessage, OnForkChoiceUpdated};
+
 mod invalid_block_hook;
 pub use invalid_block_hook::InvalidBlockHook;
 

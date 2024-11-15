@@ -1023,8 +1023,9 @@ mod tests {
     use super::*;
     use alloy_rpc_types_engine::{ClientCode, ClientVersionV1};
     use assert_matches::assert_matches;
-    use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage};
+    use reth_beacon_consensus::BeaconConsensusEngineEvent;
     use reth_chainspec::{ChainSpec, MAINNET};
+    use reth_engine_primitives::BeaconEngineMessage;
     use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::SealedBlock;

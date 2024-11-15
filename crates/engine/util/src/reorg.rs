@@ -7,8 +7,10 @@ use alloy_rpc_types_engine::{
 };
 use futures::{stream::FuturesUnordered, Stream, StreamExt, TryFutureExt};
 use itertools::Either;
-use reth_beacon_consensus::{BeaconEngineMessage, BeaconOnNewPayloadError, OnForkChoiceUpdated};
-use reth_engine_primitives::{EngineApiMessageVersion, EngineTypes};
+use reth_engine_primitives::{
+    BeaconEngineMessage, BeaconOnNewPayloadError, EngineApiMessageVersion, EngineTypes,
+    OnForkChoiceUpdated,
+};
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
 use reth_ethereum_forks::EthereumHardforks;
 use reth_evm::{

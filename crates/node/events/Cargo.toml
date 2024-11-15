@@ -19,6 +19,7 @@ reth-stages.workspace = true
 reth-prune.workspace = true
 reth-static-file-types.workspace = true
 reth-primitives-traits.workspace = true
+reth-engine-primitives.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
