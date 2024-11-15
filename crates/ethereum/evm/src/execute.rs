@@ -8,8 +8,6 @@ use alloy_eips::eip7685::Requests;
 use reth_chainspec::{ChainSpec, EthereumHardfork, EthereumHardforks, MAINNET};
 use reth_consensus::ConsensusError;
 use reth_ethereum_consensus::validate_block_post_execution;
-#[allow(unused_imports)] // todo: replace use of AnyPrimitives
-use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{
     execute::{
         BasicBlockExecutorProvider, BlockExecutionError, BlockExecutionStrategy,

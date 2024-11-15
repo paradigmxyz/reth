@@ -7470,15 +7470,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-ethereum-primitives"
-version = "1.1.1"
-dependencies = [
- "alloy-consensus",
- "reth-node-types",
- "reth-primitives",
-]
-
-[[package]]
 name = "reth-etl"
 version = "1.1.1"
 dependencies = [
@@ -7530,7 +7521,6 @@ dependencies = [
  "reth-consensus",
  "reth-ethereum-consensus",
  "reth-ethereum-forks",
- "reth-ethereum-primitives",
  "reth-evm",
  "reth-execution-types",
  "reth-node-types",
@@ -8099,7 +8089,6 @@ dependencies = [
  "reth-e2e-test-utils",
  "reth-ethereum-engine-primitives",
  "reth-ethereum-payload-builder",
- "reth-ethereum-primitives",
  "reth-evm",
  "reth-evm-ethereum",
  "reth-exex",
