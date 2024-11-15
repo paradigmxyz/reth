@@ -24,7 +24,8 @@ const EOF_BYTECODE_ID: u8 = 3;
 const EIP7702_BYTECODE_ID: u8 = 4;
 
 /// An Ethereum account.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Compact)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Compact)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(compact)]
 pub struct Account {
@@ -60,7 +61,8 @@ impl Account {
 /// Bytecode for an account.
 ///
 /// A wrapper around [`revm::primitives::Bytecode`][RevmBytecode] with encoding/decoding support.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Deref)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deref)]
 pub struct Bytecode(pub RevmBytecode);
 
 impl Bytecode {
