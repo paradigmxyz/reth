@@ -20,3 +20,13 @@ alloy-rlp.workspace = true
 derive_more.workspace = true
 bytes.workspace = true
 reth-primitives-traits.workspace = true
+reth-codecs = { workspace = true, optional = true }
+reth-primitives = { workspace = true, features = ["reth-codec"], optional = true }
+
+[features]
+default = ["reth-codec"]
+reth-codec = ["dep:reth-codecs", "dep:reth-primitives"]
+
+[dev-dependencies]
+reth-codecs = { workspace = true, features = ["test-utils"] }
+rstest.workspace = true
