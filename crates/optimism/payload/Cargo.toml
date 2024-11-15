@@ -15,7 +15,7 @@ workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-primitives.workspace = true
-reth-revm.workspace = true
+reth-revm = { workspace = true, features = ["witness"] }
 reth-transaction-pool.workspace = true
 reth-provider.workspace = true
 reth-rpc-types-compat.workspace = true
@@ -41,6 +41,7 @@ alloy-rlp.workspace = true
 op-alloy-rpc-types-engine.workspace = true
 op-alloy-consensus.workspace = true
 alloy-rpc-types-engine.workspace = true
+alloy-rpc-types-debug.workspace = true
 alloy-consensus.workspace = true
 
 # misc

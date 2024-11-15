@@ -14,6 +14,8 @@ workspace = true
 [dependencies]
 # reth
 reth-primitives-traits.workspace = true
+reth-codecs = { workspace = true, optional = true }
+reth-primitives = { workspace = true, features = ["reth-codec"], optional = true }
 
 # ethereum
 alloy-primitives.workspace = true
@@ -31,7 +33,16 @@ serde = { workspace = true, optional = true }
 # misc
 derive_more.workspace = true
 
+[dev-dependencies]
+reth-codecs = { workspace = true, features = ["test-utils"] }
+rstest.workspace = true
+
 [features]
+default = ["reth-codec"]
+reth-codec = [
+    "dep:reth-codecs",
+    "dep:reth-primitives"
+]
 serde = [
     "dep:serde",
     "reth-primitives-traits/serde",
