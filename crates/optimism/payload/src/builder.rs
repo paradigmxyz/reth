@@ -16,6 +16,7 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_forks::OpHardforks;
 use reth_payload_primitives::{PayloadBuilderAttributes, PayloadBuilderError};
+use reth_payload_util::PayloadTransactions;
 use reth_primitives::{
     proofs,
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
@@ -24,7 +25,7 @@ use reth_primitives::{
 use reth_provider::{ProviderError, StateProofProvider, StateProviderFactory, StateRootProvider};
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{
-    noop::NoopTransactionPool, BestTransactionsAttributes, PayloadTransactions, TransactionPool,
+    noop::NoopTransactionPool, BestTransactionsAttributes, TransactionPool,
 };
 use reth_trie::HashedPostState;
 use revm::{
