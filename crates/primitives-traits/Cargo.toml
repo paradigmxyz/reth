@@ -79,3 +79,4 @@ serde-bincode-compat = [
 	"alloy-consensus/serde-bincode-compat",
 	"alloy-eips/serde-bincode-compat"
 ]
+serde = []

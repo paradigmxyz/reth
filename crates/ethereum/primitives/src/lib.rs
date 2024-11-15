@@ -14,7 +14,7 @@ use reth_node_types::NodePrimitives;
 use reth_primitives::{Block, BlockBody, Receipt, TransactionSigned, TxType};
 
 /// Ethereum primitive types.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EthPrimitives;
 
 impl NodePrimitives for EthPrimitives {

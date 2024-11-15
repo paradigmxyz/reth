@@ -20,6 +20,8 @@ pub trait Receipt:
     + Clone
     + Default
     + fmt::Debug
+    + PartialEq
+    + Eq
     + TxReceipt
     + alloy_rlp::Encodable
     + alloy_rlp::Decodable

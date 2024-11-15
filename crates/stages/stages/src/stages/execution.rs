@@ -174,15 +174,15 @@ impl<E> ExecutionStage<E> {
 
 impl<E, Provider> Stage<Provider> for ExecutionStage<E>
 where
-    E: BlockExecutorProvider<Provider::Primitives>,
     Provider: DBProvider
         + BlockReader
-        + StaticFileProviderFactory
+        + StaticFileProviderFactory<Primitives = reth_primitives::AnyPrimitives>
         + StatsReader
         + StateChangeWriter
         + BlockHashReader,
     for<'a> UnifiedStorageWriter<'a, Provider, StaticFileProviderRWRefMut<'a, Provider::Primitives>>:
         StateWriter,
+    E: BlockExecutorProvider<Provider::Primitives>,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -348,7 +348,11 @@ where
             });
 
             let previous_input =
-                self.post_execute_commit_input.replace(Chain::new(blocks, state.clone(), None));
+                self.post_execute_commit_input.replace(Chain::<Provider::Primitives>::new(
+                    blocks,
+                    state.clone(),
+                    None,
+                ));
 
             if previous_input.is_some() {
                 // Not processing the previous post execute commit input is a critical error, as it

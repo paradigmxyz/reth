@@ -42,7 +42,7 @@ use crate::{
 };
 
 /// Optimism primitive types.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct OpPrimitives;
 
 impl NodePrimitives for OpPrimitives {

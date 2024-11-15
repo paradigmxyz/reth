@@ -1,21 +1,35 @@
 use core::fmt;
 
-use crate::{FullBlock, FullBlockBody, FullBlockHeader, FullReceipt, FullSignedTx, FullTxType};
+use crate::{
+    FullBlock, FullBlockBody, FullBlockHeader, FullReceipt, FullSignedTx, FullTxType,
+    MaybeSerialize,
+};
 
 /// Configures all the primitive types of the node.
-pub trait NodePrimitives: Send + Sync + Unpin + Clone + Default + fmt::Debug + 'static {
+pub trait NodePrimitives:
+    Send + Sync + Unpin + Clone + Default + fmt::Debug + PartialEq + Eq + 'static
+{
     /// Block primitive.
-    type Block: Send + Sync + Unpin + Clone + Default + fmt::Debug + 'static;
+    type Block: Send + Sync + Unpin + Clone + Default + fmt::Debug + PartialEq + Eq + 'static;
     /// Block header primitive.
-    type BlockHeader: Send + Sync + Unpin + Clone + Default + fmt::Debug + 'static;
+    type BlockHeader: Send + Sync + Unpin + Clone + Default + fmt::Debug + PartialEq + Eq + 'static;
     /// Block body primitive.
-    type BlockBody: Send + Sync + Unpin + Clone + Default + fmt::Debug + 'static;
+    type BlockBody: Send + Sync + Unpin + Clone + Default + fmt::Debug + PartialEq + Eq + 'static;
     /// Signed version of the transaction type.
-    type SignedTx: Send + Sync + Unpin + Clone + Default + fmt::Debug + 'static;
+    type SignedTx: Send + Sync + Unpin + Clone + Default + fmt::Debug + PartialEq + Eq + 'static;
     /// Transaction envelope type ID.
-    type TxType: Send + Sync + Unpin + Clone + Default + fmt::Debug + 'static;
+    type TxType: Send + Sync + Unpin + Clone + Default + fmt::Debug + PartialEq + Eq + 'static;
     /// A receipt.
-    type Receipt: Send + Sync + Unpin + Clone + Default + fmt::Debug + 'static;
+    type Receipt: Send
+        + Sync
+        + Unpin
+        + Clone
+        + Default
+        + fmt::Debug
+        + PartialEq
+        + Eq
+        + MaybeSerialize
+        + 'static;
 }
 
 impl NodePrimitives for () {
@@ -28,7 +42,9 @@ impl NodePrimitives for () {
 }
 
 /// Helper trait that sets trait bounds on [`NodePrimitives`].
-pub trait FullNodePrimitives: Send + Sync + Unpin + Clone + Default + fmt::Debug + 'static {
+pub trait FullNodePrimitives:
+    Send + Sync + Unpin + Clone + Default + fmt::Debug + PartialEq + Eq + 'static
+{
     /// Block primitive.
     type Block: FullBlock<Header = Self::BlockHeader, Body = Self::BlockBody> + 'static;
     /// Block header primitive.
