@@ -8,9 +8,9 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 pub mod bedrock;
-pub mod op_tx_type;
+pub mod tx_type;
 
-pub use op_tx_type::OpTxType;
+pub use tx_type::OpTxType;
 
 use alloy_consensus::Header;
 use reth_node_types::NodePrimitives;
