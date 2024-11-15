@@ -24,7 +24,7 @@ use reth_node_ethereum::EthExecutorProvider;
 use reth_provider::{
     writer::UnifiedStorageWriter, AccountExtReader, ChainSpecProvider, HashingWriter,
     HeaderProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderFactory,
-    StageCheckpointReader, StateWriter, StaticFileProviderFactory, StorageReader,
+    StageCheckpointReader, StateWriter, StorageReader,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::StageId;
@@ -133,10 +133,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             )
             .await?;
 
-        let db = StateProviderDatabase::new(LatestStateProviderRef::new(
-            provider.tx_ref(),
-            provider_factory.static_file_provider(),
-        ));
+        let db = StateProviderDatabase::new(LatestStateProviderRef::new(&provider));
 
         let executor = EthExecutorProvider::ethereum(provider_factory.chain_spec()).executor(db);
 
