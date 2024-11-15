@@ -1,5 +1,3 @@
-use std::{collections::HashMap, fmt::Debug, io, path::Path};
-
 use alloy_consensus::Header;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{BlockHash, BlockNumber, B256};
@@ -13,14 +11,14 @@ use reth_network_p2p::{
     priority::Priority,
 };
 use reth_network_peers::PeerId;
-use reth_primitives::{BlockBody, SealedHeader};
+use reth_primitives::{Block, BlockBody, SealedHeader};
+use std::{collections::HashMap, fmt::Debug, io, path::Path};
 use thiserror::Error;
 use tokio::{fs::File, io::AsyncReadExt};
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Decoder, FramedRead};
 use tracing::{debug, trace, warn};
 
-use super::file_codec::BlockFileCodec;
 use crate::receipt_file_client::FromReceiptReader;
 
 /// Default byte length of chunk to read from chain file.
@@ -79,7 +77,7 @@ impl From<&'static str> for FileClientError {
 
 impl<T> FileClient<T>
 where
-    T: Decoder + Clone + Debug + Send + Sync + 'static,
+    T: Decoder<Item = Block, Error = FileClientError> + Clone + Debug + Send + Sync + 'static,
 {
     /// Create a new file client from a file path.
     pub async fn new<P: AsRef<Path>>(path: P, codec: T) -> Result<Self, FileClientError> {
@@ -199,14 +197,14 @@ impl<T> FromReader<T> for FileClient<T> {
     ) -> impl Future<Output = Result<DecodedFileChunk<Self>, Self::Error>>
     where
         B: AsyncReadExt + Unpin,
-        T: Decoder,
+        T: Decoder<Error = FileClientError, Item = Block> + Clone + Debug + Send + Sync + 'static,
     {
         let mut headers = HashMap::default();
         let mut hash_to_number = HashMap::default();
         let mut bodies = HashMap::default();
 
         // use with_capacity to make sure the internal buffer contains the entire chunk
-        let mut stream = FramedRead::with_capacity(reader, codec, num_bytes as usize);
+        let mut stream = FramedRead::with_capacity(reader, codec.clone(), num_bytes as usize);
 
         trace!(target: "downloaders::file",
             target_num_bytes=num_bytes,
@@ -273,7 +271,6 @@ impl<T> HeadersClient for FileClient<T>
 where
     T: Debug + Clone + Send + Sync + 'static,
 {
-impl HeadersClient for FileClient {
     type Header = Header;
     type Output = HeadersFut;
 
@@ -328,7 +325,6 @@ impl<T> BodiesClient for FileClient<T>
 where
     T: Debug + Clone + Send + Sync + 'static,
 {
-impl BodiesClient for FileClient {
     type Body = BlockBody;
     type Output = BodiesFut;
 
@@ -467,8 +463,8 @@ impl ChunkedFileReader {
     /// Read next chunk from file. Returns [`FileClient`] containing decoded chunk.
     pub async fn next_chunk<T, F>(&mut self, codec: T) -> Result<Option<F>, F::Error>
     where
-        F: FromReader<T>,
-        T: Decoder,
+        F: FromReader<T, Error = FileClientError>,
+        T: Decoder<Error = FileClientError, Item = Block> + Clone + Debug + Send + Sync + 'static,
     {
         let Some(next_chunk_byte_len) = self.read_next_chunk().await? else { return Ok(None) };
 
@@ -513,11 +509,11 @@ pub trait FromReader<T> {
         reader: B,
         num_bytes: u64,
         codec: T,
-    ) -> impl Future<Output = Result<DecodedFileChunk<Self>, Self::Error>>
+    ) -> impl Future<Output = Result<DecodedFileChunk<Self>, T::Error>>
     where
         Self: Sized,
         B: AsyncReadExt + Unpin,
-        T: Decoder;
+        T: Decoder<Error = FileClientError, Item = Block> + Clone + Debug + Send + Sync + 'static;
 }
 
 /// Output from decoding a file chunk with [`FromReader::from_reader`].
@@ -540,6 +536,7 @@ mod tests {
             bodies::BodiesDownloaderBuilder,
             test_utils::{insert_headers, zip_blocks},
         },
+        file_codec::BlockFileCodec,
         headers::{reverse_headers::ReverseHeadersDownloaderBuilder, test_utils::child_header},
         test_utils::{generate_bodies, generate_bodies_file},
     };
