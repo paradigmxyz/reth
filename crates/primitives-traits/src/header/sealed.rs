@@ -2,13 +2,22 @@ use super::Header;
 use crate::InMemorySize;
 use alloy_consensus::Sealed;
 use alloy_eips::BlockNumHash;
-use alloy_primitives::{keccak256, BlockHash, Sealable};
+use alloy_primitives::{keccak256, BlockHash, Sealable, B256};
 use alloy_rlp::{Decodable, Encodable};
 use bytes::BufMut;
 use core::mem;
 use derive_more::{AsRef, Deref};
 use reth_codecs::add_arbitrary_tests;
 use serde::{Deserialize, Serialize};
+
+/// A helper struct to store the block number/hash and its parent hash.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct BlockWithParent {
+    /// Parent hash.
+    pub parent: B256,
+    /// Block number/hash.
+    pub block: BlockNumHash,
+}
 
 /// A [`Header`] that is sealed at a precalculated hash, use [`SealedHeader::unseal()`] if you want
 /// to modify header.
@@ -78,9 +87,7 @@ impl InMemorySize for SealedHeader {
 
 impl<H: Sealable + Default> Default for SealedHeader<H> {
     fn default() -> Self {
-        let sealed = H::default().seal_slow();
-        let (header, hash) = sealed.into_parts();
-        Self { header, hash }
+        Self::seal(H::default())
     }
 }
 
@@ -219,10 +226,8 @@ pub(super) mod serde_bincode_compat {
     #[cfg(test)]
     mod tests {
         use super::super::{serde_bincode_compat, SealedHeader};
-
         use arbitrary::Arbitrary;
         use rand::Rng;
-        use reth_testing_utils::generators;
         use serde::{Deserialize, Serialize};
         use serde_with::serde_as;
 
@@ -236,7 +241,7 @@ pub(super) mod serde_bincode_compat {
             }
 
             let mut bytes = [0u8; 1024];
-            generators::rng().fill(bytes.as_mut_slice());
+            rand::thread_rng().fill(&mut bytes[..]);
             let data = Data {
                 transaction: SealedHeader::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
                     .unwrap(),

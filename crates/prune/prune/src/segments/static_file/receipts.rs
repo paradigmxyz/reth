@@ -5,25 +5,29 @@ use crate::{
 use reth_db::transaction::DbTxMut;
 use reth_provider::{
     errors::provider::ProviderResult, providers::StaticFileProvider, BlockReader, DBProvider,
-    PruneCheckpointWriter, TransactionsProvider,
+    PruneCheckpointWriter, StaticFileProviderFactory, TransactionsProvider,
 };
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, SegmentOutput};
 use reth_static_file_types::StaticFileSegment;
 
 #[derive(Debug)]
-pub struct Receipts {
-    static_file_provider: StaticFileProvider,
+pub struct Receipts<N> {
+    static_file_provider: StaticFileProvider<N>,
 }
 
-impl Receipts {
-    pub const fn new(static_file_provider: StaticFileProvider) -> Self {
+impl<N> Receipts<N> {
+    pub const fn new(static_file_provider: StaticFileProvider<N>) -> Self {
         Self { static_file_provider }
     }
 }
 
-impl<Provider> Segment<Provider> for Receipts
+impl<Provider> Segment<Provider> for Receipts<Provider::Primitives>
 where
-    Provider: DBProvider<Tx: DbTxMut> + PruneCheckpointWriter + TransactionsProvider + BlockReader,
+    Provider: StaticFileProviderFactory
+        + DBProvider<Tx: DbTxMut>
+        + PruneCheckpointWriter
+        + TransactionsProvider
+        + BlockReader,
 {
     fn segment(&self) -> PruneSegment {
         PruneSegment::Receipts

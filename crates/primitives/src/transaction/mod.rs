@@ -1058,6 +1058,22 @@ impl reth_codecs::Compact for TransactionSignedNoHash {
     }
 }
 
+#[cfg(any(test, feature = "reth-codec"))]
+impl reth_codecs::Compact for TransactionSigned {
+    fn to_compact<B>(&self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        let tx: TransactionSignedNoHash = self.clone().into();
+        tx.to_compact(buf)
+    }
+
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+        let (tx, buf) = TransactionSignedNoHash::from_compact(buf, len);
+        (tx.into(), buf)
+    }
+}
+
 impl From<TransactionSignedNoHash> for TransactionSigned {
     fn from(tx: TransactionSignedNoHash) -> Self {
         tx.with_hash()

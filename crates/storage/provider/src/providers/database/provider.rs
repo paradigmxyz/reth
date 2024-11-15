@@ -135,7 +135,7 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     /// Chain spec
     chain_spec: Arc<N::ChainSpec>,
     /// Static File provider
-    static_file_provider: StaticFileProvider,
+    static_file_provider: StaticFileProvider<N::Primitives>,
     /// Pruning configuration
     prune_modes: PruneModes,
 }
@@ -151,7 +151,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     /// State provider for latest block
     pub fn latest<'a>(&'a self) -> ProviderResult<Box<dyn StateProvider + 'a>> {
         trace!(target: "providers::db", "Returning latest state provider");
-        Ok(Box::new(LatestStateProviderRef::new(&self.tx, self.static_file_provider.clone())))
+        Ok(Box::new(LatestStateProviderRef::new(self)))
     }
 
     /// Storage provider for state at that given block hash
@@ -164,10 +164,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         if block_number == self.best_block_number().unwrap_or_default() &&
             block_number == self.last_block_number().unwrap_or_default()
         {
-            return Ok(Box::new(LatestStateProviderRef::new(
-                &self.tx,
-                self.static_file_provider.clone(),
-            )))
+            return Ok(Box::new(LatestStateProviderRef::new(self)))
         }
 
         // +1 as the changeset that we want is the one that was applied after this block.
@@ -178,11 +175,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         let storage_history_prune_checkpoint =
             self.get_prune_checkpoint(PruneSegment::StorageHistory)?;
 
-        let mut state_provider = HistoricalStateProviderRef::new(
-            &self.tx,
-            block_number,
-            self.static_file_provider.clone(),
-        );
+        let mut state_provider = HistoricalStateProviderRef::new(self, block_number);
 
         // If we pruned account or storage history, we can't return state on every historical block.
         // Instead, we should cap it at the latest prune checkpoint for corresponding prune segment.
@@ -206,8 +199,10 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 }
 
 impl<TX, N: NodeTypes> StaticFileProviderFactory for DatabaseProvider<TX, N> {
+    type Primitives = N::Primitives;
+
     /// Returns a static file provider
-    fn static_file_provider(&self) -> StaticFileProvider {
+    fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         self.static_file_provider.clone()
     }
 }
@@ -227,7 +222,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
     pub const fn new_rw(
         tx: TX,
         chain_spec: Arc<N::ChainSpec>,
-        static_file_provider: StaticFileProvider,
+        static_file_provider: StaticFileProvider<N::Primitives>,
         prune_modes: PruneModes,
     ) -> Self {
         Self { tx, chain_spec, static_file_provider, prune_modes }
@@ -248,7 +243,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
         if block_number == self.best_block_number().unwrap_or_default() &&
             block_number == self.last_block_number().unwrap_or_default()
         {
-            return Ok(Box::new(LatestStateProvider::new(self.tx, self.static_file_provider)))
+            return Ok(Box::new(LatestStateProvider::new(self)))
         }
 
         // +1 as the changeset that we want is the one that was applied after this block.
@@ -259,8 +254,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
         let storage_history_prune_checkpoint =
             self.get_prune_checkpoint(PruneSegment::StorageHistory)?;
 
-        let mut state_provider =
-            HistoricalStateProvider::new(self.tx, block_number, self.static_file_provider);
+        let mut state_provider = HistoricalStateProvider::new(self, block_number);
 
         // If we pruned account or storage history, we can't return state on every historical block.
         // Instead, we should cap it at the latest prune checkpoint for corresponding prune segment.
@@ -371,7 +365,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     pub const fn new(
         tx: TX,
         chain_spec: Arc<N::ChainSpec>,
-        static_file_provider: StaticFileProvider,
+        static_file_provider: StaticFileProvider<N::Primitives>,
         prune_modes: PruneModes,
     ) -> Self {
         Self { tx, chain_spec, static_file_provider, prune_modes }
@@ -3110,6 +3104,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks> + 
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks> + 'static> BlockWriter
     for DatabaseProvider<TX, N>
 {
+    type Body = BlockBody;
+
     /// Inserts the block into the database, always modifying the following tables:
     /// * [`CanonicalHeaders`](tables::CanonicalHeaders)
     /// * [`Headers`](tables::Headers)
@@ -3250,7 +3246,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks> + 
         }
 
         let block_indices = StoredBlockBodyIndices { first_tx_num, tx_count };
-        self.tx.put::<tables::BlockBodyIndices>(block_number, block_indices.clone())?;
+        self.tx.put::<tables::BlockBodyIndices>(block_number, block_indices)?;
         durations_recorder.record_relative(metrics::Action::InsertBlockBodyIndices);
 
         if !block_indices.is_empty() {
@@ -3266,6 +3262,50 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks> + 
         );
 
         Ok(block_indices)
+    }
+
+    fn append_block_bodies(
+        &self,
+        bodies: impl Iterator<Item = (BlockNumber, Option<BlockBody>)>,
+    ) -> ProviderResult<()> {
+        let mut block_indices_cursor = self.tx.cursor_write::<tables::BlockBodyIndices>()?;
+        let mut tx_block_cursor = self.tx.cursor_write::<tables::TransactionBlocks>()?;
+        let mut ommers_cursor = self.tx.cursor_write::<tables::BlockOmmers>()?;
+        let mut withdrawals_cursor = self.tx.cursor_write::<tables::BlockWithdrawals>()?;
+
+        // Get id for the next tx_num of zero if there are no transactions.
+        let mut next_tx_num = tx_block_cursor.last()?.map(|(id, _)| id + 1).unwrap_or_default();
+
+        for (block_number, body) in bodies {
+            let tx_count = body.as_ref().map(|b| b.transactions.len() as u64).unwrap_or_default();
+            let block_indices = StoredBlockBodyIndices { first_tx_num: next_tx_num, tx_count };
+
+            // insert block meta
+            block_indices_cursor.append(block_number, block_indices)?;
+
+            next_tx_num += tx_count;
+            let Some(body) = body else { continue };
+
+            // write transaction block index
+            if !body.transactions.is_empty() {
+                tx_block_cursor.append(block_indices.last_tx_num(), block_number)?;
+            }
+
+            // Write ommers if any
+            if !body.ommers.is_empty() {
+                ommers_cursor.append(block_number, StoredBlockOmmers { ommers: body.ommers })?;
+            }
+
+            // Write withdrawals if any
+            if let Some(withdrawals) = body.withdrawals {
+                if !withdrawals.is_empty() {
+                    withdrawals_cursor
+                        .append(block_number, StoredBlockWithdrawals { withdrawals })?;
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// TODO(joshie): this fn should be moved to `UnifiedStorageWriter` eventually

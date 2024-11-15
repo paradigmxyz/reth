@@ -2,11 +2,13 @@ use alloy_primitives::{BlockNumber, B256, U256};
 use alloy_rlp::Decodable;
 
 use alloy_consensus::Header;
+use reth_node_builder::NodePrimitives;
 use reth_primitives::{
     BlockBody, SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment,
 };
 use reth_provider::{
-    providers::StaticFileProvider, BlockWriter, StageCheckpointWriter, StaticFileWriter,
+    providers::StaticFileProvider, BlockWriter, StageCheckpointWriter, StaticFileProviderFactory,
+    StaticFileWriter,
 };
 use reth_stages::{StageCheckpoint, StageId};
 
@@ -27,21 +29,21 @@ pub(crate) fn read_header_from_file(path: PathBuf) -> Result<Header, eyre::Error
 /// first valid block.
 pub fn setup_without_evm<Provider>(
     provider_rw: &Provider,
-    static_file_provider: &StaticFileProvider,
     header: SealedHeader,
     total_difficulty: U256,
 ) -> Result<(), eyre::Error>
 where
-    Provider: StageCheckpointWriter + BlockWriter,
+    Provider: StaticFileProviderFactory + StageCheckpointWriter + BlockWriter,
 {
     info!(target: "reth::cli", "Setting up dummy EVM chain before importing state.");
 
+    let static_file_provider = provider_rw.static_file_provider();
     // Write EVM dummy data up to `header - 1` block
-    append_dummy_chain(static_file_provider, header.number - 1)?;
+    append_dummy_chain(&static_file_provider, header.number - 1)?;
 
     info!(target: "reth::cli", "Appending first valid block.");
 
-    append_first_block(provider_rw, static_file_provider, &header, total_difficulty)?;
+    append_first_block(provider_rw, &header, total_difficulty)?;
 
     for stage in StageId::ALL {
         provider_rw.save_stage_checkpoint(stage, StageCheckpoint::new(header.number))?;
@@ -56,16 +58,20 @@ where
 ///
 /// By appending it, static file writer also verifies that all segments are at the same
 /// height.
-fn append_first_block(
-    provider_rw: impl BlockWriter,
-    sf_provider: &StaticFileProvider,
+fn append_first_block<Provider>(
+    provider_rw: &Provider,
     header: &SealedHeader,
     total_difficulty: U256,
-) -> Result<(), eyre::Error> {
+) -> Result<(), eyre::Error>
+where
+    Provider: BlockWriter + StaticFileProviderFactory,
+{
     provider_rw.insert_block(
         SealedBlockWithSenders::new(SealedBlock::new(header.clone(), BlockBody::default()), vec![])
             .expect("no senders or txes"),
     )?;
+
+    let sf_provider = provider_rw.static_file_provider();
 
     sf_provider.latest_writer(StaticFileSegment::Headers)?.append_header(
         header,
@@ -85,8 +91,8 @@ fn append_first_block(
 /// * Headers: It will push an empty block.
 /// * Transactions: It will not push any tx, only increments the end block range.
 /// * Receipts: It will not push any receipt, only increments the end block range.
-fn append_dummy_chain(
-    sf_provider: &StaticFileProvider,
+fn append_dummy_chain<N: NodePrimitives>(
+    sf_provider: &StaticFileProvider<N>,
     target_height: BlockNumber,
 ) -> Result<(), eyre::Error> {
     let (tx, rx) = std::sync::mpsc::channel();

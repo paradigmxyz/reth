@@ -8,12 +8,12 @@ use alloy_primitives::B256;
 use reth_codecs::Compact;
 use serde::{Deserialize, Serialize};
 
-use crate::{InMemorySize, MaybeArbitrary, TxType};
+use crate::{FullTxType, InMemorySize, MaybeArbitrary, TxType};
 
 /// Helper trait that unifies all behaviour required by transaction to support full node operations.
-pub trait FullTransaction: Transaction + Compact {}
+pub trait FullTransaction: Transaction<Type: FullTxType> + Compact {}
 
-impl<T> FullTransaction for T where T: Transaction + Compact {}
+impl<T> FullTransaction for T where T: Transaction<Type: FullTxType> + Compact {}
 
 /// Abstraction of a transaction.
 pub trait Transaction:

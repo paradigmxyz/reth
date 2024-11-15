@@ -329,10 +329,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 }
 
                 if self.commit {
-                    UnifiedStorageWriter::commit_unwind(
-                        provider_rw,
-                        provider_factory.static_file_provider(),
-                    )?;
+                    UnifiedStorageWriter::commit_unwind(provider_rw)?;
                     provider_rw = provider_factory.database_provider_rw()?;
                 }
             }
@@ -355,7 +352,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 provider_rw.save_stage_checkpoint(exec_stage.id(), checkpoint)?;
             }
             if self.commit {
-                UnifiedStorageWriter::commit(provider_rw, provider_factory.static_file_provider())?;
+                UnifiedStorageWriter::commit(provider_rw)?;
                 provider_rw = provider_factory.database_provider_rw()?;
             }
 

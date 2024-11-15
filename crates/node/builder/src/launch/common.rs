@@ -495,7 +495,7 @@ where
     }
 
     /// Returns the static file provider to interact with the static files.
-    pub fn static_file_provider(&self) -> StaticFileProvider {
+    pub fn static_file_provider(&self) -> StaticFileProvider<T::Primitives> {
         self.right().static_file_provider()
     }
 
@@ -766,7 +766,7 @@ where
     }
 
     /// Returns the static file provider to interact with the static files.
-    pub fn static_file_provider(&self) -> StaticFileProvider {
+    pub fn static_file_provider(&self) -> StaticFileProvider<<T::Types as NodeTypes>::Primitives> {
         self.provider_factory().static_file_provider()
     }
 

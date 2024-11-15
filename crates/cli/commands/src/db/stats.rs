@@ -9,7 +9,9 @@ use reth_db::{mdbx, static_file::iter_static_files, DatabaseEnv, TableViewer, Ta
 use reth_db_api::database::Database;
 use reth_db_common::DbTool;
 use reth_fs_util as fs;
-use reth_node_builder::{NodeTypesWithDB, NodeTypesWithDBAdapter, NodeTypesWithEngine};
+use reth_node_builder::{
+    NodePrimitives, NodeTypesWithDB, NodeTypesWithDBAdapter, NodeTypesWithEngine,
+};
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::providers::{ProviderNodeTypes, StaticFileProvider};
 use reth_static_file_types::SegmentRangeInclusive;
@@ -49,7 +51,7 @@ impl Command {
             println!("\n");
         }
 
-        let static_files_stats_table = self.static_files_stats_table(data_dir)?;
+        let static_files_stats_table = self.static_files_stats_table::<N::Primitives>(data_dir)?;
         println!("{static_files_stats_table}");
 
         println!("\n");
@@ -143,7 +145,7 @@ impl Command {
         Ok(table)
     }
 
-    fn static_files_stats_table(
+    fn static_files_stats_table<N: NodePrimitives>(
         &self,
         data_dir: ChainPath<DataDirPath>,
     ) -> eyre::Result<ComfyTable> {
@@ -173,7 +175,8 @@ impl Command {
         }
 
         let static_files = iter_static_files(data_dir.static_files())?;
-        let static_file_provider = StaticFileProvider::read_only(data_dir.static_files(), false)?;
+        let static_file_provider =
+            StaticFileProvider::<N>::read_only(data_dir.static_files(), false)?;
 
         let mut total_data_size = 0;
         let mut total_index_size = 0;

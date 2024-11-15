@@ -91,6 +91,33 @@ impl TxType {
     }
 }
 
+impl reth_primitives_traits::TxType for TxType {
+    #[inline]
+    fn is_legacy(&self) -> bool {
+        matches!(self, Self::Legacy)
+    }
+
+    #[inline]
+    fn is_eip2930(&self) -> bool {
+        matches!(self, Self::Eip2930)
+    }
+
+    #[inline]
+    fn is_eip1559(&self) -> bool {
+        matches!(self, Self::Eip1559)
+    }
+
+    #[inline]
+    fn is_eip4844(&self) -> bool {
+        matches!(self, Self::Eip4844)
+    }
+
+    #[inline]
+    fn is_eip7702(&self) -> bool {
+        matches!(self, Self::Eip7702)
+    }
+}
+
 impl From<TxType> for u8 {
     fn from(value: TxType) -> Self {
         match value {

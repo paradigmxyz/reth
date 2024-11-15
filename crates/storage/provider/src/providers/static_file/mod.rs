@@ -55,7 +55,9 @@ impl Deref for LoadedJar {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{test_utils::create_test_provider_factory, HeaderProvider};
+    use crate::{
+        test_utils::create_test_provider_factory, HeaderProvider, StaticFileProviderFactory,
+    };
     use alloy_consensus::{Header, Transaction};
     use alloy_primitives::{BlockHash, TxNumber, B256, U256};
     use rand::seq::SliceRandom;
@@ -116,7 +118,7 @@ mod tests {
 
         // Create StaticFile
         {
-            let manager = StaticFileProvider::read_write(static_files_path.path()).unwrap();
+            let manager = factory.static_file_provider();
             let mut writer = manager.latest_writer(StaticFileSegment::Headers).unwrap();
             let mut td = U256::ZERO;
 
@@ -131,7 +133,7 @@ mod tests {
         // Use providers to query Header data and compare if it matches
         {
             let db_provider = factory.provider().unwrap();
-            let manager = StaticFileProvider::read_write(static_files_path.path()).unwrap();
+            let manager = db_provider.static_file_provider();
             let jar_provider = manager
                 .get_segment_provider_from_block(StaticFileSegment::Headers, 0, Some(&static_file))
                 .unwrap();
@@ -170,7 +172,7 @@ mod tests {
 
         // [ Headers Creation and Commit ]
         {
-            let sf_rw = StaticFileProvider::read_write(&static_dir)
+            let sf_rw = StaticFileProvider::<()>::read_write(&static_dir)
                 .expect("Failed to create static file provider")
                 .with_custom_blocks_per_file(blocks_per_file);
 
@@ -189,8 +191,8 @@ mod tests {
 
         // Helper function to prune headers and validate truncation results
         fn prune_and_validate(
-            writer: &mut StaticFileProviderRWRefMut<'_>,
-            sf_rw: &StaticFileProvider,
+            writer: &mut StaticFileProviderRWRefMut<'_, ()>,
+            sf_rw: &StaticFileProvider<()>,
             static_dir: impl AsRef<Path>,
             prune_count: u64,
             expected_tip: Option<u64>,
@@ -302,13 +304,13 @@ mod tests {
     /// * `10..=19`: no txs/receipts
     /// * `20..=29`: only one tx/receipt
     fn setup_tx_based_scenario(
-        sf_rw: &StaticFileProvider,
+        sf_rw: &StaticFileProvider<()>,
         segment: StaticFileSegment,
         blocks_per_file: u64,
     ) {
         fn setup_block_ranges(
-            writer: &mut StaticFileProviderRWRefMut<'_>,
-            sf_rw: &StaticFileProvider,
+            writer: &mut StaticFileProviderRWRefMut<'_, ()>,
+            sf_rw: &StaticFileProvider<()>,
             segment: StaticFileSegment,
             block_range: &Range<u64>,
             mut tx_count: u64,
@@ -413,7 +415,7 @@ mod tests {
 
         #[allow(clippy::too_many_arguments)]
         fn prune_and_validate(
-            sf_rw: &StaticFileProvider,
+            sf_rw: &StaticFileProvider<()>,
             static_dir: impl AsRef<Path>,
             segment: StaticFileSegment,
             prune_count: u64,
