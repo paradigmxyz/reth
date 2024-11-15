@@ -28,7 +28,7 @@ use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_payload_util::{PayloadTransactions, PayloadTransactionsChain, PayloadTransactionsFixed};
 use reth_primitives::{SealedBlock, Transaction, TransactionSigned, TransactionSignedEcRecovered};
 use reth_provider::providers::BlockchainProvider2;
-use reth_transaction_pool::BestPayloadTransactions;
+use reth_transaction_pool::pool::BestPayloadTransactions;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
