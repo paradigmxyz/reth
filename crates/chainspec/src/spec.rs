@@ -12,7 +12,9 @@ use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
 use derive_more::From;
 
 use alloy_consensus::{
-    constants::{DEV_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH},
+    constants::{
+        DEV_GENESIS_HASH, HOLESKY_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
+    },
     Header,
 };
 use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT;
@@ -24,7 +26,7 @@ use reth_network_peers::{
     base_nodes, base_testnet_nodes, holesky_nodes, mainnet_nodes, op_nodes, op_testnet_nodes,
     sepolia_nodes, NodeRecord,
 };
-use reth_primitives_traits::{constants::HOLESKY_GENESIS_HASH, SealedHeader};
+use reth_primitives_traits::SealedHeader;
 use reth_trie_common::root::state_root_ref_unhashed;
 
 use crate::{constants::MAINNET_DEPOSIT_CONTRACT, once_cell_set, EthChainSpec, LazyLock, OnceLock};
