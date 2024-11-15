@@ -169,7 +169,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     /// state of the entire network.
     pub async fn new<C: BlockNumReader + 'static>(
         config: NetworkConfig<C, N>,
-    ) -> Result<NetworkManager<N>, NetworkError> {
+    ) -> Result<Self, NetworkError> {
         let NetworkConfig {
             client,
             secret_key,

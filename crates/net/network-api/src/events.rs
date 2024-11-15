@@ -19,6 +19,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 /// Provides event subscription for the network.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait NetworkEventListenerProvider: Send + Sync {
+    /// The network primitives used by the network.
     type NetworkPrimitives: NetworkPrimitives;
     /// Creates a new [`NetworkEvent`] listener channel.
     fn event_listener(&self) -> EventStream<NetworkEvent<PeerRequest<Self::NetworkPrimitives>>>;

@@ -102,7 +102,6 @@ where
     T: FullNodeTypes<Provider = BlockchainProvider<Types>, Types = Types>,
     CB: NodeComponentsBuilder<T>,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>,
-    NodeEvent: From<NetworkEvent<PeerRequest<<<<CB as components::builder::NodeComponentsBuilder<T>>::Components as NodeComponents<T>>::Network as NetworkEventListenerProvider>::NetworkPrimitives>>>
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
 

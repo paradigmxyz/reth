@@ -77,7 +77,6 @@ where
     LocalPayloadAttributesBuilder<Types::ChainSpec>: PayloadAttributesBuilder<
         <<Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
     >,
-    NodeEvent: From<NetworkEvent<PeerRequest<<<<CB as components::builder::NodeComponentsBuilder<T>>::Components as NodeComponents<T>>::Network as NetworkEventListenerProvider>::NetworkPrimitives>>>
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
 
