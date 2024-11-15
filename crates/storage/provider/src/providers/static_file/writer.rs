@@ -320,10 +320,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// and create the next one if we are past the end range.
     ///
     /// Returns the current [`BlockNumber`] as seen in the static file.
-    pub fn increment_block(
-        &mut self,
-        expected_block_number: BlockNumber,
-    ) -> ProviderResult<BlockNumber> {
+    pub fn increment_block(&mut self, expected_block_number: BlockNumber) -> ProviderResult<()> {
         let segment = self.writer.user_header().segment();
 
         self.check_next_block_number(expected_block_number)?;
@@ -350,7 +347,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             }
         }
 
-        let block = self.writer.user_header_mut().increment_block();
+        self.writer.user_header_mut().increment_block();
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
                 segment,
@@ -359,7 +356,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             );
         }
 
-        Ok(block)
+        Ok(())
     }
 
     /// Verifies if the incoming block number matches the next expected block number
@@ -524,13 +521,13 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         header: &Header,
         total_difficulty: U256,
         hash: &BlockHash,
-    ) -> ProviderResult<BlockNumber> {
+    ) -> ProviderResult<()> {
         let start = Instant::now();
         self.ensure_no_queued_prune()?;
 
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Headers);
 
-        let block_number = self.increment_block(header.number)?;
+        self.increment_block(header.number)?;
 
         self.append_column(header)?;
         self.append_column(CompactU256::from(total_difficulty))?;
@@ -544,7 +541,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             );
         }
 
-        Ok(block_number)
+        Ok(())
     }
 
     /// Appends transaction to static file.
