@@ -50,4 +50,6 @@ serde = [
     "alloy-consensus/serde",
     "alloy-eips/serde",
     "bytes/serde",
+    "reth-codecs/serde",
+    "op-alloy-consensus/serde",
 ]
