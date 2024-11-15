@@ -46,7 +46,9 @@
 //!
 //! ```
 //! # async fn launch() {
-//! use reth_network::{config::rng_secret_key, NetworkConfig, NetworkManager};
+//! use reth_network::{
+//!     config::rng_secret_key, EthNetworkPrimitives, NetworkConfig, NetworkManager,
+//! };
 //! use reth_network_peers::mainnet_nodes;
 //! use reth_provider::test_utils::NoopProvider;
 //!
@@ -59,7 +61,7 @@
 //! let config = NetworkConfig::builder(local_key).boot_nodes(mainnet_nodes()).build(client);
 //!
 //! // create the network instance
-//! let network = NetworkManager::new(config).await.unwrap();
+//! let network = NetworkManager::<EthNetworkPrimitives>::new(config).await.unwrap();
 //!
 //! // keep a handle to the network and spawn it
 //! let handle = network.handle().clone();
