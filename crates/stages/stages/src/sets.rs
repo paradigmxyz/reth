@@ -22,7 +22,7 @@
 //! # use reth_evm::execute::BlockExecutorProvider;
 //! # use reth_node_types::AnyPrimitives;
 //!
-//! # fn create(exec: impl BlockExecutorProvider<AnyPrimitives>) {
+//! # fn create(exec: impl BlockExecutorProvider<Primitives = AnyPrimitives>) {
 //!
 //! let provider_factory = create_test_provider_factory();
 //! let static_file_producer =
