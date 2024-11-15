@@ -79,17 +79,17 @@ impl<N: ProviderNodeTypes> TableViewer<(u64, Duration)> for ChecksumViewer<'_, N
         let mut cursor = tx.cursor_read::<RawTable<T>>()?;
         let walker = match (self.start_key.as_deref(), self.end_key.as_deref()) {
             (Some(start), Some(end)) => {
-                let start_key = table_key::<T>(start).map(RawKey::<T::Key>::new)?;
-                let end_key = table_key::<T>(end).map(RawKey::<T::Key>::new)?;
+                let start_key = table_key::<T>(start).map(RawKey::new)?;
+                let end_key = table_key::<T>(end).map(RawKey::new)?;
                 cursor.walk_range(start_key..=end_key)?
             }
             (None, Some(end)) => {
-                let end_key = table_key::<T>(end).map(RawKey::<T::Key>::new)?;
+                let end_key = table_key::<T>(end).map(RawKey::new)?;
 
                 cursor.walk_range(..=end_key)?
             }
             (Some(start), None) => {
-                let start_key = table_key::<T>(start).map(RawKey::<T::Key>::new)?;
+                let start_key = table_key::<T>(start).map(RawKey::new)?;
                 cursor.walk_range(start_key..)?
             }
             (None, None) => cursor.walk_range(..)?,

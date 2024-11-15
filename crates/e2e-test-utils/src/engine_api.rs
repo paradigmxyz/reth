@@ -33,7 +33,7 @@ impl<E: EngineTypes, ChainSpec: EthereumHardforks> EngineApiTestContext<E, Chain
         &self,
         payload_id: PayloadId,
     ) -> eyre::Result<E::ExecutionPayloadEnvelopeV3> {
-        Ok(EngineApiClient::<E>::get_payload_v3(&self.engine_api_client, payload_id).await?)
+        Ok(EngineApiClient::get_payload_v3(&self.engine_api_client, payload_id).await?)
     }
 
     /// Retrieves a v3 payload from the engine api as serde value

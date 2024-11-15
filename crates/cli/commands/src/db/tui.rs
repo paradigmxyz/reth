@@ -365,7 +365,7 @@ where
             .map(|(i, k)| {
                 ListItem::new(format!("[{:0>width$}]: {k:?}", i + app.skip, width = key_length))
             })
-            .collect::<Vec<ListItem<'_>>>();
+            .collect::<Vec<_>>();
 
         let key_list = List::new(formatted_keys)
             .block(Block::default().borders(Borders::ALL).title(format!(
