@@ -8,4 +8,4 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 pub mod bedrock;
-pub mod op_tx_type;
+pub mod tx_type;
