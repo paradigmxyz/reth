@@ -78,9 +78,7 @@ impl InMemorySize for SealedHeader {
 
 impl<H: Sealable + Default> Default for SealedHeader<H> {
     fn default() -> Self {
-        let sealed = H::default().seal_slow();
-        let (header, hash) = sealed.into_parts();
-        Self { header, hash }
+        Self::seal(H::default())
     }
 }
 
