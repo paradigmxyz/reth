@@ -15,8 +15,7 @@ use alloy_rpc_types_engine::{
     PayloadValidationError,
 };
 use reth_beacon_consensus::{
-    BeaconConsensusEngineEvent, BeaconEngineMessage, ForkchoiceStateTracker, InvalidHeaderCache,
-    OnForkChoiceUpdated, MIN_BLOCKS_FOR_PIPELINE_RUN,
+    BeaconConsensusEngineEvent, InvalidHeaderCache, MIN_BLOCKS_FOR_PIPELINE_RUN,
 };
 use reth_blockchain_tree::{
     error::{InsertBlockErrorKindTwo, InsertBlockErrorTwo, InsertBlockFatalError},
@@ -27,7 +26,10 @@ use reth_chain_state::{
 };
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::{Consensus, PostExecutionInput};
-use reth_engine_primitives::{EngineApiMessageVersion, EngineTypes};
+use reth_engine_primitives::{
+    BeaconEngineMessage, BeaconOnNewPayloadError, EngineApiMessageVersion, EngineTypes,
+    ForkchoiceStateTracker, OnForkChoiceUpdated,
+};
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::execute::BlockExecutorProvider;
 use reth_payload_builder::PayloadBuilderHandle;
@@ -1246,11 +1248,11 @@ where
                             }
                             BeaconEngineMessage::NewPayload { payload, sidecar, tx } => {
                                 let output = self.on_new_payload(payload, sidecar);
-                                if let Err(err) = tx.send(output.map(|o| o.outcome).map_err(|e| {
-                                    reth_beacon_consensus::BeaconOnNewPayloadError::Internal(
-                                        Box::new(e),
-                                    )
-                                })) {
+                                if let Err(err) =
+                                    tx.send(output.map(|o| o.outcome).map_err(|e| {
+                                        BeaconOnNewPayloadError::Internal(Box::new(e))
+                                    }))
+                                {
                                     error!(target: "engine::tree", "Failed to send event: {err:?}");
                                     self.metrics
                                         .engine
@@ -2600,9 +2602,10 @@ mod tests {
     use alloy_rlp::Decodable;
     use alloy_rpc_types_engine::{CancunPayloadFields, ExecutionPayloadSidecar};
     use assert_matches::assert_matches;
-    use reth_beacon_consensus::{EthBeaconConsensus, ForkchoiceStatus};
+    use reth_beacon_consensus::EthBeaconConsensus;
     use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
     use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
+    use reth_engine_primitives::ForkchoiceStatus;
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm::test_utils::MockExecutorProvider;
     use reth_provider::test_utils::MockEthProvider;

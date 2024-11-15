@@ -2,7 +2,7 @@
 use crate::{
     engine::hooks::PruneHook, hooks::EngineHooks, BeaconConsensusEngine,
     BeaconConsensusEngineError, BeaconConsensusEngineHandle, BeaconForkChoiceUpdateError,
-    BeaconOnNewPayloadError, EthBeaconConsensus, MIN_BLOCKS_FOR_PIPELINE_RUN,
+    EthBeaconConsensus, MIN_BLOCKS_FOR_PIPELINE_RUN,
 };
 use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_types_engine::{
@@ -19,7 +19,7 @@ use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
-use reth_engine_primitives::EngineApiMessageVersion;
+use reth_engine_primitives::{BeaconOnNewPayloadError, EngineApiMessageVersion};
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_evm::{either::Either, test_utils::MockExecutorProvider};
 use reth_evm_ethereum::execute::EthExecutorProvider;

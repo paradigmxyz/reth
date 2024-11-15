@@ -7181,11 +7181,16 @@ name = "reth-engine-primitives"
 version = "1.1.1"
 dependencies = [
  "alloy-primitives",
+ "alloy-rpc-types-engine",
+ "futures",
+ "reth-errors",
  "reth-execution-types",
  "reth-payload-primitives",
  "reth-primitives",
  "reth-trie",
  "serde",
+ "thiserror 1.0.69",
+ "tokio",
 ]
 
 [[package]]
@@ -7197,6 +7202,7 @@ dependencies = [
  "reth-beacon-consensus",
  "reth-chainspec",
  "reth-consensus",
+ "reth-engine-primitives",
  "reth-engine-tree",
  "reth-ethereum-engine-primitives",
  "reth-evm",
@@ -7278,7 +7284,6 @@ dependencies = [
  "futures",
  "itertools 0.13.0",
  "pin-project",
- "reth-beacon-consensus",
  "reth-engine-primitives",
  "reth-errors",
  "reth-ethereum-forks",
@@ -8109,6 +8114,7 @@ dependencies = [
  "humantime",
  "pin-project",
  "reth-beacon-consensus",
+ "reth-engine-primitives",
  "reth-network-api",
  "reth-primitives-traits",
  "reth-prune",
