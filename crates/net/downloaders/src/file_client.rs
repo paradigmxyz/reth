@@ -49,7 +49,6 @@ pub struct FileClient<T> {
     bodies: HashMap<BlockHash, BlockBody>,
 
     /// The codec used to decode the file.
-    #[allow(dead_code)]
     codec: T,
 }
 
