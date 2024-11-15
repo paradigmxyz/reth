@@ -8360,6 +8360,7 @@ dependencies = [
  "reth-optimism-forks",
  "reth-payload-builder",
  "reth-payload-primitives",
+ "reth-payload-util",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
