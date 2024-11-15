@@ -46,9 +46,7 @@ impl<Provider: StaticFileProviderFactory + DBProvider> Segment<Provider> for Hea
             debug_assert_eq!(header_block, header_td_block);
             debug_assert_eq!(header_td_block, canonical_header_block);
 
-            let _static_file_block =
-                static_file_writer.append_header(&header, header_td.0, &canonical_header)?;
-            debug_assert_eq!(_static_file_block, header_block);
+            static_file_writer.append_header(&header, header_td.0, &canonical_header)?;
         }
 
         Ok(())
