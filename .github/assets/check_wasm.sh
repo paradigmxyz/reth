@@ -35,6 +35,8 @@ exclude_crates=(
   reth-ethereum-engine-primitives
   reth-ethereum-payload-builder
   reth-etl
+  reth-evm
+  reth-evm-ethereum
   reth-exex
   reth-exex-test-utils
   reth-ipc
@@ -48,6 +50,8 @@ exclude_crates=(
   reth-node-events
   reth-node-metrics
   reth-optimism-cli
+  reth-optimism-evm
+  reth-optimism-primitives
   reth-optimism-node
   reth-optimism-payload-builder
   reth-optimism-rpc
