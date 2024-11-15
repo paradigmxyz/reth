@@ -30,8 +30,7 @@ impl<Provider: StaticFileProviderFactory + DBProvider + BlockReader> Segment<Pro
             static_file_provider.get_writer(*block_range.start(), StaticFileSegment::Receipts)?;
 
         for block in block_range {
-            let _static_file_block = static_file_writer.increment_block(block)?;
-            debug_assert_eq!(_static_file_block, block);
+            static_file_writer.increment_block(block)?;
 
             let block_body_indices = provider
                 .block_body_indices(block)?
