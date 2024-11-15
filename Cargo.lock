@@ -8344,6 +8344,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-rpc-types-debug",
  "alloy-rpc-types-engine",
  "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
