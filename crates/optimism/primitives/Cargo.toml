@@ -16,6 +16,7 @@ workspace = true
 reth-node-types.workspace = true
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
+reth-codecs = { workspace = true, optional = true }
 
 # ethereum
 alloy-primitives.workspace = true
@@ -31,3 +32,14 @@ bytes.workspace = true
 
 # misc
 derive_more.workspace = true
+
+[dev-dependencies]
+reth-codecs = { workspace = true, features = ["test-utils"] }
+rstest.workspace = true
+
+[features]
+default = ["reth-codec"]
+reth-codec = [
+    "dep:reth-codecs",
+    "reth-primitives/reth-codec"
+]

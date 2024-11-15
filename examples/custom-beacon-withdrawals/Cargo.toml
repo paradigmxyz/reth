@@ -12,6 +12,7 @@ reth-evm-ethereum.workspace = true
 reth-chainspec.workspace = true
 reth-evm.workspace = true
 reth-primitives.workspace = true
+reth-node-types.workspace = true
 
 alloy-sol-macro = "0.8.9"
 alloy-sol-types.workspace = true

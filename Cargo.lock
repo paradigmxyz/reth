@@ -2818,6 +2818,7 @@ dependencies = [
  "reth-evm",
  "reth-evm-ethereum",
  "reth-node-ethereum",
+ "reth-node-types",
  "reth-primitives",
 ]
 
@@ -8342,6 +8343,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-rpc-types-debug",
  "alloy-rpc-types-engine",
  "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
@@ -8379,9 +8381,11 @@ dependencies = [
  "bytes",
  "derive_more 1.0.0",
  "op-alloy-consensus",
+ "reth-codecs",
  "reth-node-types",
  "reth-primitives",
  "reth-primitives-traits",
+ "rstest",
 ]
 
 [[package]]
