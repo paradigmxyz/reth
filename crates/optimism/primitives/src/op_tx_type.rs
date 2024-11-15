@@ -2,7 +2,6 @@
 //! `OpTxType` implements `reth_primitives_traits::TxType`.
 //! This type is required because a `Compact` impl is needed on the deposit tx type.
 
-use alloy_consensus::constants::EIP7702_TX_TYPE_ID;
 use alloy_primitives::{U64, U8};
 use alloy_rlp::{Decodable, Encodable, Error};
 use bytes::BufMut;
@@ -11,12 +10,18 @@ use derive_more::{
     derive::{From, Into},
     Display,
 };
-use op_alloy_consensus::{OpTxType as AlloyOpTxType, DEPOSIT_TX_TYPE_ID};
-use reth_primitives::{
+use op_alloy_consensus::OpTxType as AlloyOpTxType;
+use std::convert::TryFrom;
+
+#[cfg(feature = "reth-codec")]
+use alloy_consensus::constants::EIP7702_TX_TYPE_ID;
+#[cfg(feature = "reth-codec")]
+use op_alloy_consensus::DEPOSIT_TX_TYPE_ID;
+#[cfg(feature = "reth-codec")]
+use reth_primitives::transaction::{
     COMPACT_EXTENDED_IDENTIFIER_FLAG, COMPACT_IDENTIFIER_EIP1559, COMPACT_IDENTIFIER_EIP2930,
     COMPACT_IDENTIFIER_LEGACY,
 };
-use std::convert::TryFrom;
 
 /// Wrapper type for `AlloyOpTxType` to implement `TxType` trait.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Display, Ord, Hash, From, Into)]

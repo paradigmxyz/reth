@@ -56,12 +56,6 @@ pub use transaction::{
     TransactionSignedEcRecovered, TransactionSignedNoHash, TxHashOrNumber, TxType,
 };
 
-#[cfg(feature = "reth-codec")]
-pub use transaction::{
-    COMPACT_EXTENDED_IDENTIFIER_FLAG, COMPACT_IDENTIFIER_EIP1559, COMPACT_IDENTIFIER_EIP2930,
-    COMPACT_IDENTIFIER_LEGACY,
-};
-
 // Re-exports
 pub use reth_ethereum_forks::*;
 pub use revm_primitives::{self, JumpTable};
