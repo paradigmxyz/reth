@@ -556,7 +556,9 @@ impl PruneCheckpointReader for NoopProvider {
 }
 
 impl StaticFileProviderFactory for NoopProvider {
-    fn static_file_provider(&self) -> StaticFileProvider {
+    type Primitives = ();
+
+    fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         StaticFileProvider::read_only(PathBuf::default(), false).unwrap()
     }
 }

@@ -3,7 +3,7 @@ use core::fmt;
 use crate::{BlockBody, FullBlock, FullReceipt, FullSignedTx, FullTxType};
 
 /// Configures all the primitive types of the node.
-pub trait NodePrimitives: Send + Sync + Unpin + Clone + Default + fmt::Debug {
+pub trait NodePrimitives: Send + Sync + Unpin + Clone + Default + fmt::Debug + 'static {
     /// Block primitive.
     type Block: Send + Sync + Unpin + Clone + Default + fmt::Debug + 'static;
     /// Signed version of the transaction type.
@@ -22,7 +22,7 @@ impl NodePrimitives for () {
 }
 
 /// Helper trait that sets trait bounds on [`NodePrimitives`].
-pub trait FullNodePrimitives: Send + Sync + Unpin + Clone + Default + fmt::Debug {
+pub trait FullNodePrimitives: Send + Sync + Unpin + Clone + Default + fmt::Debug + 'static {
     /// Block primitive.
     type Block: FullBlock<Body: BlockBody<Transaction = Self::SignedTx>>;
     /// Signed version of the transaction type.

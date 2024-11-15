@@ -4,7 +4,10 @@ use crate::{
     PrunerError,
 };
 use reth_db::{tables, transaction::DbTxMut};
-use reth_provider::{providers::StaticFileProvider, BlockReader, DBProvider, TransactionsProvider};
+use reth_provider::{
+    providers::StaticFileProvider, BlockReader, DBProvider, StaticFileProviderFactory,
+    TransactionsProvider,
+};
 use reth_prune_types::{
     PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
 };
@@ -12,19 +15,20 @@ use reth_static_file_types::StaticFileSegment;
 use tracing::trace;
 
 #[derive(Debug)]
-pub struct Transactions {
-    static_file_provider: StaticFileProvider,
+pub struct Transactions<N> {
+    static_file_provider: StaticFileProvider<N>,
 }
 
-impl Transactions {
-    pub const fn new(static_file_provider: StaticFileProvider) -> Self {
+impl<N> Transactions<N> {
+    pub const fn new(static_file_provider: StaticFileProvider<N>) -> Self {
         Self { static_file_provider }
     }
 }
 
-impl<Provider> Segment<Provider> for Transactions
+impl<Provider> Segment<Provider> for Transactions<Provider::Primitives>
 where
-    Provider: DBProvider<Tx: DbTxMut> + TransactionsProvider + BlockReader,
+    Provider:
+        DBProvider<Tx: DbTxMut> + TransactionsProvider + BlockReader + StaticFileProviderFactory,
 {
     fn segment(&self) -> PruneSegment {
         PruneSegment::Transactions
