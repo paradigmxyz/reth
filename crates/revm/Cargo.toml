@@ -44,6 +44,7 @@ std = [
     "alloy-consensus/std",
     "reth-primitives-traits/std",
 ]
+witness = ["dep:reth-trie"]
 test-utils = [
 	"dep:reth-trie",
 	"reth-primitives/test-utils",

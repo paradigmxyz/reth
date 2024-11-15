@@ -29,3 +29,7 @@ pub use revm::{self, *};
 
 /// Either type for flexible usage of different database types in the same context.
 pub mod either;
+
+/// Helper types for execution witness generation.
+#[cfg(feature = "witness")]
+pub mod witness;
