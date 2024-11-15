@@ -150,7 +150,7 @@ where
         }
     }
 
-    let provider = provider_factory.provider_rw()?;
+    let provider = provider_factory.database_provider_rw()?;
     let mut total_decoded_receipts = 0;
     let mut total_receipts = 0;
     let mut total_filtered_out_dup_txns = 0;
@@ -247,7 +247,7 @@ where
     provider
         .save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(highest_block_receipts))?;
 
-    UnifiedStorageWriter::commit(provider, static_file_provider)?;
+    UnifiedStorageWriter::commit(provider)?;
 
     Ok(ImportReceiptsResult { total_decoded_receipts, total_filtered_out_dup_txns })
 }

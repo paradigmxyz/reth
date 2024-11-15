@@ -10,9 +10,7 @@ use reth_db_api::{transaction::DbTxMut, DatabaseError};
 use reth_etl::Collector;
 use reth_primitives::{Account, Bytecode, GotExpected, Receipts, StaticFileSegment, StorageEntry};
 use reth_provider::{
-    errors::provider::ProviderResult,
-    providers::{StaticFileProvider, StaticFileWriter},
-    writer::UnifiedStorageWriter,
+    errors::provider::ProviderResult, providers::StaticFileWriter, writer::UnifiedStorageWriter,
     BlockHashReader, BlockNumReader, BundleStateInit, ChainSpecProvider, DBProvider,
     DatabaseProviderFactory, ExecutionOutcome, HashingWriter, HeaderProvider, HistoryWriter,
     OriginalValuesKnown, ProviderError, RevertsInit, StageCheckpointWriter, StateChangeWriter,
@@ -72,7 +70,8 @@ impl From<DatabaseError> for InitDatabaseError {
 pub fn init_genesis<PF>(factory: &PF) -> Result<B256, InitDatabaseError>
 where
     PF: DatabaseProviderFactory + StaticFileProviderFactory + ChainSpecProvider + BlockHashReader,
-    PF::ProviderRW: StageCheckpointWriter
+    PF::ProviderRW: StaticFileProviderFactory
+        + StageCheckpointWriter
         + HistoryWriter
         + HeaderProvider
         + HashingWriter
@@ -114,8 +113,7 @@ where
     insert_genesis_history(&provider_rw, alloc.iter())?;
 
     // Insert header
-    let static_file_provider = factory.static_file_provider();
-    insert_genesis_header(&provider_rw, &static_file_provider, &chain)?;
+    insert_genesis_header(&provider_rw, &chain)?;
 
     insert_genesis_state(&provider_rw, alloc.iter())?;
 
@@ -124,6 +122,7 @@ where
         provider_rw.save_stage_checkpoint(stage, Default::default())?;
     }
 
+    let static_file_provider = provider_rw.static_file_provider();
     // Static file segments start empty, so we need to initialize the genesis block.
     let segment = StaticFileSegment::Receipts;
     static_file_provider.latest_writer(segment)?.increment_block(0)?;
@@ -133,7 +132,7 @@ where
 
     // `commit_unwind`` will first commit the DB and then the static file provider, which is
     // necessary on `init_genesis`.
-    UnifiedStorageWriter::commit_unwind(provider_rw, static_file_provider)?;
+    UnifiedStorageWriter::commit_unwind(provider_rw)?;
 
     Ok(hash)
 }
@@ -144,7 +143,11 @@ pub fn insert_genesis_state<'a, 'b, Provider>(
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
 ) -> ProviderResult<()>
 where
-    Provider: DBProvider<Tx: DbTxMut> + StateChangeWriter + HeaderProvider + AsRef<Provider>,
+    Provider: StaticFileProviderFactory
+        + DBProvider<Tx: DbTxMut>
+        + StateChangeWriter
+        + HeaderProvider
+        + AsRef<Provider>,
 {
     insert_state(provider, alloc, 0)
 }
@@ -156,7 +159,11 @@ pub fn insert_state<'a, 'b, Provider>(
     block: u64,
 ) -> ProviderResult<()>
 where
-    Provider: DBProvider<Tx: DbTxMut> + StateChangeWriter + HeaderProvider + AsRef<Provider>,
+    Provider: StaticFileProviderFactory
+        + DBProvider<Tx: DbTxMut>
+        + StateChangeWriter
+        + HeaderProvider
+        + AsRef<Provider>,
 {
     let capacity = alloc.size_hint().1.unwrap_or(0);
     let mut state_init: BundleStateInit = HashMap::with_capacity(capacity);
@@ -296,14 +303,14 @@ where
 /// Inserts header for the genesis state.
 pub fn insert_genesis_header<Provider, Spec>(
     provider: &Provider,
-    static_file_provider: &StaticFileProvider,
     chain: &Spec,
 ) -> ProviderResult<()>
 where
-    Provider: DBProvider<Tx: DbTxMut>,
+    Provider: StaticFileProviderFactory + DBProvider<Tx: DbTxMut>,
     Spec: EthChainSpec,
 {
     let (header, block_hash) = (chain.genesis_header(), chain.genesis_hash());
+    let static_file_provider = provider.static_file_provider();
 
     match static_file_provider.block_hash(0) {
         Ok(None) | Err(ProviderError::MissingStaticFileBlock(StaticFileSegment::Headers, 0)) => {
@@ -333,7 +340,8 @@ pub fn init_from_state_dump<Provider>(
     etl_config: EtlConfig,
 ) -> eyre::Result<B256>
 where
-    Provider: DBProvider<Tx: DbTxMut>
+    Provider: StaticFileProviderFactory
+        + DBProvider<Tx: DbTxMut>
         + BlockNumReader
         + BlockHashReader
         + ChainSpecProvider
@@ -457,7 +465,8 @@ fn dump_state<Provider>(
     block: u64,
 ) -> Result<(), eyre::Error>
 where
-    Provider: DBProvider<Tx: DbTxMut>
+    Provider: StaticFileProviderFactory
+        + DBProvider<Tx: DbTxMut>
         + HeaderProvider
         + HashingWriter
         + HistoryWriter

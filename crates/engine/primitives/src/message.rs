@@ -1,10 +1,9 @@
-use crate::engine::{error::BeaconOnNewPayloadError, forkchoice::ForkchoiceStatus};
+use crate::{BeaconOnNewPayloadError, EngineApiMessageVersion, EngineTypes, ForkchoiceStatus};
 use alloy_rpc_types_engine::{
     ExecutionPayload, ExecutionPayloadSidecar, ForkChoiceUpdateResult, ForkchoiceState,
     ForkchoiceUpdateError, ForkchoiceUpdated, PayloadId, PayloadStatus, PayloadStatusEnum,
 };
 use futures::{future::Either, FutureExt};
-use reth_engine_primitives::{EngineApiMessageVersion, EngineTypes};
 use reth_errors::RethResult;
 use reth_payload_primitives::PayloadBuilderError;
 use std::{

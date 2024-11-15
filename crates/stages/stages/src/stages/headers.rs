@@ -13,9 +13,8 @@ use reth_network_p2p::headers::{downloader::HeaderDownloader, error::HeadersDown
 use reth_primitives::{SealedHeader, StaticFileSegment};
 use reth_primitives_traits::serde_bincode_compat;
 use reth_provider::{
-    providers::{StaticFileProvider, StaticFileWriter},
-    BlockHashReader, DBProvider, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
-    StaticFileProviderFactory,
+    providers::StaticFileWriter, BlockHashReader, DBProvider, HeaderProvider, HeaderSyncGap,
+    HeaderSyncGapProvider, StaticFileProviderFactory,
 };
 use reth_stages_api::{
     BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput,
@@ -90,14 +89,15 @@ where
     ///
     /// Writes to static files ( `Header | HeaderTD | HeaderHash` ) and [`tables::HeaderNumbers`]
     /// database table.
-    fn write_headers(
+    fn write_headers<P: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory>(
         &mut self,
-        provider: &impl DBProvider<Tx: DbTxMut>,
-        static_file_provider: StaticFileProvider,
+        provider: &P,
     ) -> Result<BlockNumber, StageError> {
         let total_headers = self.header_collector.len();
 
         info!(target: "sync::stages::headers", total = total_headers, "Writing headers");
+
+        let static_file_provider = provider.static_file_provider();
 
         // Consistency check of expected headers in static files vs DB is done on provider::sync_gap
         // when poll_execute_ready is polled.
@@ -293,7 +293,7 @@ where
 
         // Write the headers and related tables to DB from ETL space
         let to_be_processed = self.hash_collector.len() as u64;
-        let last_header_number = self.write_headers(provider, provider.static_file_provider())?;
+        let last_header_number = self.write_headers(provider)?;
 
         // Clear ETL collectors
         self.hash_collector.clear();

@@ -23,7 +23,7 @@ use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProofProvider, StateProviderFactory,
     TransactionVariant,
 };
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{
     helpers::{EthApiSpec, EthTransactions, TraceExt},
@@ -32,7 +32,6 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_tasks::pool::BlockingTaskGuard;
-use reth_trie::{HashedPostState, HashedStorage};
 use revm::{
     db::{CacheDB, State},
     primitives::{db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg},
@@ -40,7 +39,6 @@ use revm::{
 use revm_inspectors::tracing::{
     FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig, TransactionContext,
 };
-use revm_primitives::{keccak256, HashMap};
 use std::sync::Arc;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
@@ -613,59 +611,18 @@ where
                 let db = StateProviderDatabase::new(&state_provider);
                 let block_executor = this.inner.block_executor.executor(db);
 
-                let mut hashed_state = HashedPostState::default();
-                let mut keys = HashMap::default();
-                let mut codes = HashMap::default();
+                let mut witness_record = ExecutionWitnessRecord::default();
 
                 let _ = block_executor
                     .execute_with_state_closure(
                         (&(*block).clone().unseal(), block.difficulty).into(),
                         |statedb: &State<_>| {
-                            codes = statedb
-                                .cache
-                                .contracts
-                                .iter()
-                                .map(|(hash, code)| (*hash, code.original_bytes()))
-                                .chain(
-                                    // cache state does not have all the contracts, especially when
-                                    // a contract is created within the block
-                                    // the contract only exists in bundle state, therefore we need
-                                    // to include them as well
-                                    statedb
-                                        .bundle_state
-                                        .contracts
-                                        .iter()
-                                        .map(|(hash, code)| (*hash, code.original_bytes())),
-                                )
-                                .collect();
-
-                            for (address, account) in &statedb.cache.accounts {
-                                let hashed_address = keccak256(address);
-                                hashed_state.accounts.insert(
-                                    hashed_address,
-                                    account.account.as_ref().map(|a| a.info.clone().into()),
-                                );
-
-                                let storage =
-                                    hashed_state.storages.entry(hashed_address).or_insert_with(
-                                        || HashedStorage::new(account.status.was_destroyed()),
-                                    );
-
-                                if let Some(account) = &account.account {
-                                    keys.insert(hashed_address, address.to_vec().into());
-
-                                    for (slot, value) in &account.storage {
-                                        let slot = B256::from(*slot);
-                                        let hashed_slot = keccak256(slot);
-                                        storage.storage.insert(hashed_slot, *value);
-
-                                        keys.insert(hashed_slot, slot.into());
-                                    }
-                                }
-                            }
+                            witness_record.record_executed_state(statedb);
                         },
                     )
                     .map_err(|err| EthApiError::Internal(err.into()))?;
+
+                let ExecutionWitnessRecord { hashed_state, codes, keys } = witness_record;
 
                 let state =
                     state_provider.witness(Default::default(), hashed_state).map_err(Into::into)?;

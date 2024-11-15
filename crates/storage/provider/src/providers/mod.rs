@@ -216,7 +216,9 @@ impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider<N> {
-    fn static_file_provider(&self) -> StaticFileProvider {
+    type Primitives = N::Primitives;
+
+    fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         self.database.static_file_provider()
     }
 }

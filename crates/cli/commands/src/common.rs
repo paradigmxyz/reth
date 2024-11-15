@@ -109,7 +109,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Environmen
         &self,
         config: &Config,
         db: Arc<DatabaseEnv>,
-        static_file_provider: StaticFileProvider,
+        static_file_provider: StaticFileProvider<N::Primitives>,
     ) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>> {
         let has_receipt_pruning = config.prune.as_ref().map_or(false, |a| a.has_receipts_pruning());
         let prune_modes =

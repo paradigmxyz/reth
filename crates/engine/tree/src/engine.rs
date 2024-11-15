@@ -7,9 +7,9 @@ use crate::{
 };
 use alloy_primitives::B256;
 use futures::{Stream, StreamExt};
-use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage};
+use reth_beacon_consensus::BeaconConsensusEngineEvent;
 use reth_chain_state::ExecutedBlock;
-use reth_engine_primitives::EngineTypes;
+use reth_engine_primitives::{BeaconEngineMessage, EngineTypes};
 use reth_primitives::SealedBlockWithSenders;
 use std::{
     collections::HashSet,

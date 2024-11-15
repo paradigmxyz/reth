@@ -26,6 +26,7 @@ pub trait BlockBody:
     + alloy_rlp::Encodable
     + alloy_rlp::Decodable
     + InMemorySize
+    + 'static
 {
     /// Signed transaction, committed in block.
     type Transaction: SignedTransaction;

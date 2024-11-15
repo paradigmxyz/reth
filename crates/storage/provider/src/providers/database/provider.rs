@@ -135,7 +135,7 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     /// Chain spec
     chain_spec: Arc<N::ChainSpec>,
     /// Static File provider
-    static_file_provider: StaticFileProvider,
+    static_file_provider: StaticFileProvider<N::Primitives>,
     /// Pruning configuration
     prune_modes: PruneModes,
 }
@@ -151,7 +151,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     /// State provider for latest block
     pub fn latest<'a>(&'a self) -> ProviderResult<Box<dyn StateProvider + 'a>> {
         trace!(target: "providers::db", "Returning latest state provider");
-        Ok(Box::new(LatestStateProviderRef::new(&self.tx, self.static_file_provider.clone())))
+        Ok(Box::new(LatestStateProviderRef::new(self)))
     }
 
     /// Storage provider for state at that given block hash
@@ -164,10 +164,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         if block_number == self.best_block_number().unwrap_or_default() &&
             block_number == self.last_block_number().unwrap_or_default()
         {
-            return Ok(Box::new(LatestStateProviderRef::new(
-                &self.tx,
-                self.static_file_provider.clone(),
-            )))
+            return Ok(Box::new(LatestStateProviderRef::new(self)))
         }
 
         // +1 as the changeset that we want is the one that was applied after this block.
@@ -178,11 +175,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         let storage_history_prune_checkpoint =
             self.get_prune_checkpoint(PruneSegment::StorageHistory)?;
 
-        let mut state_provider = HistoricalStateProviderRef::new(
-            &self.tx,
-            block_number,
-            self.static_file_provider.clone(),
-        );
+        let mut state_provider = HistoricalStateProviderRef::new(self, block_number);
 
         // If we pruned account or storage history, we can't return state on every historical block.
         // Instead, we should cap it at the latest prune checkpoint for corresponding prune segment.
@@ -206,8 +199,10 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 }
 
 impl<TX, N: NodeTypes> StaticFileProviderFactory for DatabaseProvider<TX, N> {
+    type Primitives = N::Primitives;
+
     /// Returns a static file provider
-    fn static_file_provider(&self) -> StaticFileProvider {
+    fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         self.static_file_provider.clone()
     }
 }
@@ -227,7 +222,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
     pub const fn new_rw(
         tx: TX,
         chain_spec: Arc<N::ChainSpec>,
-        static_file_provider: StaticFileProvider,
+        static_file_provider: StaticFileProvider<N::Primitives>,
         prune_modes: PruneModes,
     ) -> Self {
         Self { tx, chain_spec, static_file_provider, prune_modes }
@@ -248,7 +243,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
         if block_number == self.best_block_number().unwrap_or_default() &&
             block_number == self.last_block_number().unwrap_or_default()
         {
-            return Ok(Box::new(LatestStateProvider::new(self.tx, self.static_file_provider)))
+            return Ok(Box::new(LatestStateProvider::new(self)))
         }
 
         // +1 as the changeset that we want is the one that was applied after this block.
@@ -259,8 +254,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
         let storage_history_prune_checkpoint =
             self.get_prune_checkpoint(PruneSegment::StorageHistory)?;
 
-        let mut state_provider =
-            HistoricalStateProvider::new(self.tx, block_number, self.static_file_provider);
+        let mut state_provider = HistoricalStateProvider::new(self, block_number);
 
         // If we pruned account or storage history, we can't return state on every historical block.
         // Instead, we should cap it at the latest prune checkpoint for corresponding prune segment.
@@ -371,7 +365,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     pub const fn new(
         tx: TX,
         chain_spec: Arc<N::ChainSpec>,
-        static_file_provider: StaticFileProvider,
+        static_file_provider: StaticFileProvider<N::Primitives>,
         prune_modes: PruneModes,
     ) -> Self {
         Self { tx, chain_spec, static_file_provider, prune_modes }
