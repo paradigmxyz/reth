@@ -18,9 +18,10 @@ use reth_beacon_consensus::{
     BeaconConsensusEngineEvent, BeaconEngineMessage, ForkchoiceStateTracker, InvalidHeaderCache,
     OnForkChoiceUpdated, MIN_BLOCKS_FOR_PIPELINE_RUN,
 };
-use reth_blockchain_tree::{
+use reth_blockchain_tree::BlockBuffer;
+use reth_blockchain_tree_api::{
     error::{InsertBlockErrorKindTwo, InsertBlockErrorTwo, InsertBlockFatalError},
-    BlockBuffer, BlockStatus2, InsertPayloadOk2,
+    BlockStatus2, InsertPayloadOk2,
 };
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, MemoryOverlayStateProvider, NewCanonicalChain,
