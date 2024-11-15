@@ -30,60 +30,6 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::RwLock;
 
-/// Configuration for validation API.
-#[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
-pub struct ValidationApiConfig {
-    /// Disallowed addresses.
-    pub disallow: HashSet<Address>,
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum ValidationApiError {
-    #[error("block gas limit mismatch: {_0}")]
-    GasLimitMismatch(GotExpected<u64>),
-    #[error("block gas used mismatch: {_0}")]
-    GasUsedMismatch(GotExpected<u64>),
-    #[error("block parent hash mismatch: {_0}")]
-    ParentHashMismatch(GotExpected<B256>),
-    #[error("block hash mismatch: {_0}")]
-    BlockHashMismatch(GotExpected<B256>),
-    #[error("missing latest block in database")]
-    MissingLatestBlock,
-    #[error("could not verify proposer payment")]
-    ProposerPayment,
-    #[error("invalid blobs bundle")]
-    InvalidBlobsBundle,
-    #[error("block accesses blacklisted address: {_0}")]
-    Blacklist(Address),
-    #[error(transparent)]
-    Blob(#[from] BlobTransactionValidationError),
-    #[error(transparent)]
-    Consensus(#[from] ConsensusError),
-    #[error(transparent)]
-    Provider(#[from] ProviderError),
-    #[error(transparent)]
-    Execution(#[from] BlockExecutionError),
-}
-
-#[derive(Debug)]
-pub struct ValidationApiInner<Provider: ChainSpecProvider, E> {
-    /// The provider that can interact with the chain.
-    provider: Provider,
-    /// Consensus implementation.
-    consensus: Arc<dyn Consensus>,
-    /// Execution payload validator.
-    payload_validator: ExecutionPayloadValidator<Provider::ChainSpec>,
-    /// Block executor factory.
-    executor_provider: E,
-    /// Set of disallowed addresses
-    disallow: HashSet<Address>,
-    /// Cached state reads to avoid redundant disk I/O across multiple validation attempts
-    /// targeting the same state. Stores a tuple of (`block_hash`, `cached_reads`) for the
-    /// latest head block state. Uses async `RwLock` to safely handle concurrent validation
-    /// requests.
-    cached_state: RwLock<(B256, CachedReads)>,
-}
-
 /// The type that implements the `validation` rpc namespace trait
 #[derive(Debug, derive_more::Deref)]
 pub struct ValidationApi<Provider: ChainSpecProvider, E> {
@@ -485,4 +431,59 @@ where
         .map_err(|e| RethError::Other(e.into()))
         .to_rpc_result()
     }
+}
+
+#[derive(Debug)]
+pub struct ValidationApiInner<Provider: ChainSpecProvider, E> {
+    /// The provider that can interact with the chain.
+    provider: Provider,
+    /// Consensus implementation.
+    consensus: Arc<dyn Consensus>,
+    /// Execution payload validator.
+    payload_validator: ExecutionPayloadValidator<Provider::ChainSpec>,
+    /// Block executor factory.
+    executor_provider: E,
+    /// Set of disallowed addresses
+    disallow: HashSet<Address>,
+    /// Cached state reads to avoid redundant disk I/O across multiple validation attempts
+    /// targeting the same state. Stores a tuple of (`block_hash`, `cached_reads`) for the
+    /// latest head block state. Uses async `RwLock` to safely handle concurrent validation
+    /// requests.
+    cached_state: RwLock<(B256, CachedReads)>,
+}
+
+/// Configuration for validation API.
+#[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ValidationApiConfig {
+    /// Disallowed addresses.
+    pub disallow: HashSet<Address>,
+}
+
+/// Errors thrown by the validation API.
+#[derive(Debug, thiserror::Error)]
+pub enum ValidationApiError {
+    #[error("block gas limit mismatch: {_0}")]
+    GasLimitMismatch(GotExpected<u64>),
+    #[error("block gas used mismatch: {_0}")]
+    GasUsedMismatch(GotExpected<u64>),
+    #[error("block parent hash mismatch: {_0}")]
+    ParentHashMismatch(GotExpected<B256>),
+    #[error("block hash mismatch: {_0}")]
+    BlockHashMismatch(GotExpected<B256>),
+    #[error("missing latest block in database")]
+    MissingLatestBlock,
+    #[error("could not verify proposer payment")]
+    ProposerPayment,
+    #[error("invalid blobs bundle")]
+    InvalidBlobsBundle,
+    #[error("block accesses blacklisted address: {_0}")]
+    Blacklist(Address),
+    #[error(transparent)]
+    Blob(#[from] BlobTransactionValidationError),
+    #[error(transparent)]
+    Consensus(#[from] ConsensusError),
+    #[error(transparent)]
+    Provider(#[from] ProviderError),
+    #[error(transparent)]
+    Execution(#[from] BlockExecutionError),
 }

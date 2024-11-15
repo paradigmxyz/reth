@@ -5,15 +5,13 @@ use alloy_consensus::constants::GWEI_TO_WEI;
 use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use futures::Stream;
-use reth_beacon_consensus::{
-    BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress, ForkchoiceStatus,
-};
-use reth_network::NetworkEvent;
-use reth_network_api::PeersInfo;
+use reth_beacon_consensus::{BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress};
+use reth_engine_primitives::ForkchoiceStatus;
+use reth_network_api::{NetworkEvent, PeersInfo};
 use reth_primitives_traits::{format_gas, format_gas_throughput};
 use reth_prune::PrunerEvent;
 use reth_stages::{EntitiesCheckpoint, ExecOutput, PipelineEvent, StageCheckpoint, StageId};
-use reth_static_file::StaticFileProducerEvent;
+use reth_static_file_types::StaticFileProducerEvent;
 use std::{
     fmt::{Display, Formatter},
     future::Future,

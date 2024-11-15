@@ -158,7 +158,7 @@ impl OpHardfork {
                 Self::Ecotone => Some(1708534800),
                 Self::Fjord => Some(1716998400),
                 Self::Granite => Some(1723478400),
-                Self::Holocene => Some(1732201200),
+                Self::Holocene => Some(1732633200),
             },
         )
     }
@@ -257,7 +257,7 @@ impl OpHardfork {
             (Self::Ecotone.boxed(), ForkCondition::Timestamp(1708534800)),
             (Self::Fjord.boxed(), ForkCondition::Timestamp(1716998400)),
             (Self::Granite.boxed(), ForkCondition::Timestamp(1723478400)),
-            (Self::Holocene.boxed(), ForkCondition::Timestamp(1732201200)),
+            (Self::Holocene.boxed(), ForkCondition::Timestamp(1732633200)),
         ])
     }
 
@@ -289,7 +289,7 @@ impl OpHardfork {
             (Self::Ecotone.boxed(), ForkCondition::Timestamp(1708534800)),
             (Self::Fjord.boxed(), ForkCondition::Timestamp(1716998400)),
             (Self::Granite.boxed(), ForkCondition::Timestamp(1723478400)),
-            (Self::Holocene.boxed(), ForkCondition::Timestamp(1732201200)),
+            (Self::Holocene.boxed(), ForkCondition::Timestamp(1732633200)),
         ])
     }
 

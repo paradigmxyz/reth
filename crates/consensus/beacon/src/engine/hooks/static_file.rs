@@ -33,7 +33,10 @@ impl<Provider> StaticFileHook<Provider>
 where
     Provider: StaticFileProviderFactory
         + DatabaseProviderFactory<
-            Provider: StageCheckpointReader + BlockReader + ChainStateBlockReader,
+            Provider: StaticFileProviderFactory
+                          + StageCheckpointReader
+                          + BlockReader
+                          + ChainStateBlockReader,
         > + 'static,
 {
     /// Create a new instance
@@ -145,7 +148,10 @@ impl<Provider> EngineHook for StaticFileHook<Provider>
 where
     Provider: StaticFileProviderFactory
         + DatabaseProviderFactory<
-            Provider: StageCheckpointReader + BlockReader + ChainStateBlockReader,
+            Provider: StaticFileProviderFactory
+                          + StageCheckpointReader
+                          + BlockReader
+                          + ChainStateBlockReader,
         > + 'static,
 {
     fn name(&self) -> &'static str {

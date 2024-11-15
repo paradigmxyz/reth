@@ -4,6 +4,7 @@ use alloy_consensus::constants::{
 };
 use alloy_primitives::{U64, U8};
 use alloy_rlp::{Decodable, Encodable};
+use derive_more::Display;
 use serde::{Deserialize, Serialize};
 
 /// Identifier parameter for legacy transaction
@@ -36,24 +37,42 @@ pub const DEPOSIT_TX_TYPE_ID: u8 = 126;
 ///
 /// Other required changes when adding a new type can be seen on [PR#3953](https://github.com/paradigmxyz/reth/pull/3953/files).
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize, Hash,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Default,
+    Serialize,
+    Deserialize,
+    Hash,
+    Display,
 )]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
+#[display("tx type: {_variant}")]
 pub enum TxType {
     /// Legacy transaction pre EIP-2929
     #[default]
+    #[display("legacy (0)")]
     Legacy = 0_isize,
     /// AccessList transaction
+    #[display("eip2930 (1)")]
     Eip2930 = 1_isize,
     /// Transaction with Priority fee
+    #[display("eip1559 (2)")]
     Eip1559 = 2_isize,
     /// Shard Blob Transactions - EIP-4844
+    #[display("eip4844 (3)")]
     Eip4844 = 3_isize,
     /// EOA Contract Code Transactions - EIP-7702
+    #[display("eip7702 (4)")]
     Eip7702 = 4_isize,
     /// Optimism Deposit transaction.
     #[cfg(feature = "optimism")]
+    #[display("deposit (126)")]
     Deposit = 126_isize,
 }
 

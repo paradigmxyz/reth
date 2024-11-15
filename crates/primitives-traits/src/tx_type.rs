@@ -1,8 +1,6 @@
 use core::fmt;
 
-use alloy_eips::eip2718::Eip2718Error;
 use alloy_primitives::{U64, U8};
-use alloy_rlp::{Decodable, Encodable};
 use reth_codecs::Compact;
 
 /// Helper trait that unifies all behaviour required by transaction type ID to support full node
@@ -26,11 +24,11 @@ pub trait TxType:
     + PartialEq<u8>
     + Into<u8>
     + Into<U8>
-    + TryFrom<u8, Error = Eip2718Error>
-    + TryFrom<u64>
+    + TryFrom<u8, Error: fmt::Debug>
+    + TryFrom<u64, Error: fmt::Debug>
     + TryFrom<U64>
-    + Encodable
-    + Decodable
+    + alloy_rlp::Encodable
+    + alloy_rlp::Decodable
 {
 }
 
@@ -48,10 +46,10 @@ impl<T> TxType for T where
         + PartialEq<u8>
         + Into<u8>
         + Into<U8>
-        + TryFrom<u8, Error = Eip2718Error>
-        + TryFrom<u64>
+        + TryFrom<u8, Error: fmt::Debug>
+        + TryFrom<u64, Error: fmt::Debug>
         + TryFrom<U64>
-        + Encodable
-        + Decodable
+        + alloy_rlp::Encodable
+        + alloy_rlp::Decodable
 {
 }

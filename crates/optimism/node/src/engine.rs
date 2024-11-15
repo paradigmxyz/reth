@@ -214,7 +214,7 @@ mod test {
     #[test]
     fn test_well_formed_attributes_pre_holocene() {
         let validator = OpEngineValidator::new(get_chainspec());
-        let attributes = get_attributes(None, 1732201199);
+        let attributes = get_attributes(None, 1732633199);
 
         let result = <engine::OpEngineValidator as reth_node_builder::EngineValidator<
             OpEngineTypes,
@@ -227,7 +227,7 @@ mod test {
     #[test]
     fn test_well_formed_attributes_holocene_no_eip1559_params() {
         let validator = OpEngineValidator::new(get_chainspec());
-        let attributes = get_attributes(None, 1732201200);
+        let attributes = get_attributes(None, 1732633200);
 
         let result = <engine::OpEngineValidator as reth_node_builder::EngineValidator<
             OpEngineTypes,
@@ -240,7 +240,7 @@ mod test {
     #[test]
     fn test_well_formed_attributes_holocene_eip1559_params_zero_denominator() {
         let validator = OpEngineValidator::new(get_chainspec());
-        let attributes = get_attributes(Some(b64!("0000000000000008")), 1732201200);
+        let attributes = get_attributes(Some(b64!("0000000000000008")), 1732633200);
 
         let result = <engine::OpEngineValidator as reth_node_builder::EngineValidator<
             OpEngineTypes,
@@ -253,7 +253,7 @@ mod test {
     #[test]
     fn test_well_formed_attributes_holocene_valid() {
         let validator = OpEngineValidator::new(get_chainspec());
-        let attributes = get_attributes(Some(b64!("0000000800000008")), 1732201200);
+        let attributes = get_attributes(Some(b64!("0000000800000008")), 1732633200);
 
         let result = <engine::OpEngineValidator as reth_node_builder::EngineValidator<
             OpEngineTypes,
@@ -266,7 +266,7 @@ mod test {
     #[test]
     fn test_well_formed_attributes_holocene_valid_all_zero() {
         let validator = OpEngineValidator::new(get_chainspec());
-        let attributes = get_attributes(Some(b64!("0000000000000000")), 1732201200);
+        let attributes = get_attributes(Some(b64!("0000000000000000")), 1732633200);
 
         let result = <engine::OpEngineValidator as reth_node_builder::EngineValidator<
             OpEngineTypes,

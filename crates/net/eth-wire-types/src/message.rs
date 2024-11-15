@@ -148,7 +148,7 @@ impl<N: NetworkPrimitives> From<EthMessage<N>> for ProtocolMessage<N> {
 
 /// Represents messages that can be sent to multiple peers.
 #[derive(Clone, Debug)]
-pub struct ProtocolBroadcastMessage<N: NetworkPrimitives> {
+pub struct ProtocolBroadcastMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The unique identifier representing the type of the Ethereum message.
     pub message_type: EthMessageID,
     /// The content of the message to be broadcasted, including specific data based on the message

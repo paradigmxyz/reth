@@ -21,9 +21,6 @@ pub enum PayloadBuilderError {
     /// If there's no payload to resolve.
     #[error("missing payload")]
     MissingPayload,
-    /// Build cancelled
-    #[error("build outcome cancelled")]
-    BuildOutcomeCancelled,
     /// Error occurring in the blob store.
     #[error(transparent)]
     BlobStore(#[from] BlobStoreError),
@@ -33,9 +30,6 @@ pub enum PayloadBuilderError {
     /// Unrecoverable error during evm execution.
     #[error("evm execution error: {0}")]
     EvmExecutionError(EVMError<ProviderError>),
-    /// Thrown if the payload requests withdrawals before Shanghai activation.
-    #[error("withdrawals set before Shanghai activation")]
-    WithdrawalsBeforeShanghai,
     /// Any other payload building errors.
     #[error(transparent)]
     Other(Box<dyn core::error::Error + Send + Sync>),

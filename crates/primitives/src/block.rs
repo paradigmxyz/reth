@@ -1,7 +1,8 @@
-use crate::{GotExpected, Header, SealedHeader, TransactionSigned, TransactionSignedEcRecovered};
+use crate::{GotExpected, SealedHeader, TransactionSigned, TransactionSignedEcRecovered};
 use alloc::vec::Vec;
+use alloy_consensus::Header;
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
-use alloy_primitives::{Address, Bytes, Sealable, B256};
+use alloy_primitives::{Address, Bytes, B256};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
@@ -25,9 +26,7 @@ pub struct Block {
 impl Block {
     /// Calculate the header hash and seal the block so that it can't be changed.
     pub fn seal_slow(self) -> SealedBlock {
-        let sealed = self.header.seal_slow();
-        let (header, seal) = sealed.into_parts();
-        SealedBlock { header: SealedHeader::new(header, seal), body: self.body }
+        SealedBlock { header: SealedHeader::seal(self.header), body: self.body }
     }
 
     /// Seal the block with a known hash.
@@ -84,6 +83,19 @@ impl Block {
     pub fn with_recovered_senders(self) -> Option<BlockWithSenders> {
         let senders = self.senders()?;
         Some(BlockWithSenders { block: self, senders })
+    }
+}
+
+impl reth_primitives_traits::Block for Block {
+    type Header = Header;
+    type Body = BlockBody;
+
+    fn header(&self) -> &Self::Header {
+        &self.header
+    }
+
+    fn body(&self) -> &Self::Body {
+        &self.body
     }
 }
 
@@ -428,8 +440,7 @@ impl SealedBlock {
     }
 }
 
-impl InMemorySize for SealedBlock {
-    /// Calculates a heuristic for the in-memory size of the [`SealedBlock`].
+impl<H: InMemorySize, B: InMemorySize> InMemorySize for SealedBlock<H, B> {
     #[inline]
     fn size(&self) -> usize {
         self.header.size() + self.body.size()
@@ -449,6 +460,24 @@ where
 {
     fn default() -> Self {
         Self { header: Default::default(), body: Default::default() }
+    }
+}
+
+impl<H, B> reth_primitives_traits::Block for SealedBlock<H, B>
+where
+    H: reth_primitives_traits::BlockHeader,
+    B: reth_primitives_traits::BlockBody,
+    Self: Serialize + for<'a> Deserialize<'a>,
+{
+    type Header = H;
+    type Body = B;
+
+    fn header(&self) -> &Self::Header {
+        self.header.header()
+    }
+
+    fn body(&self) -> &Self::Body {
+        &self.body
     }
 }
 
@@ -643,6 +672,14 @@ impl InMemorySize for BlockBody {
             self.withdrawals
                 .as_ref()
                 .map_or(core::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
+    }
+}
+
+impl reth_primitives_traits::BlockBody for BlockBody {
+    type Transaction = TransactionSigned;
+
+    fn transactions(&self) -> &[Self::Transaction] {
+        &self.transactions
     }
 }
 
@@ -939,6 +976,12 @@ mod tests {
     use alloy_primitives::hex_literal::hex;
     use alloy_rlp::{Decodable, Encodable};
     use std::str::FromStr;
+
+    const fn _traits() {
+        const fn assert_block<T: reth_primitives_traits::Block>() {}
+        assert_block::<Block>();
+        assert_block::<SealedBlock>();
+    }
 
     /// Check parsing according to EIP-1898.
     #[test]

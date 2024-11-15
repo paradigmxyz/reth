@@ -3,6 +3,7 @@
 use std::fmt::Debug;
 
 use alloy_rlp::{Decodable, Encodable};
+use reth_primitives_traits::{Block, BlockHeader};
 
 /// Abstraction over primitive types which might appear in network messages. See
 /// [`crate::EthMessage`] for more context.
@@ -10,7 +11,8 @@ pub trait NetworkPrimitives:
     Send + Sync + Unpin + Clone + Debug + PartialEq + Eq + 'static
 {
     /// The block header type.
-    type BlockHeader: Encodable
+    type BlockHeader: BlockHeader
+        + Encodable
         + Decodable
         + Send
         + Sync
@@ -32,7 +34,8 @@ pub trait NetworkPrimitives:
         + Eq
         + 'static;
     /// Full block type.
-    type Block: Encodable
+    type Block: Block<Header = Self::BlockHeader, Body = Self::BlockBody>
+        + Encodable
         + Decodable
         + Send
         + Sync
@@ -75,7 +78,7 @@ pub trait NetworkPrimitives:
 pub struct EthNetworkPrimitives;
 
 impl NetworkPrimitives for EthNetworkPrimitives {
-    type BlockHeader = reth_primitives::Header;
+    type BlockHeader = alloy_consensus::Header;
     type BlockBody = reth_primitives::BlockBody;
     type Block = reth_primitives::Block;
     type BroadcastedTransaction = reth_primitives::TransactionSigned;

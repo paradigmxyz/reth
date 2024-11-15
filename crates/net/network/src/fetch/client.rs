@@ -7,6 +7,7 @@ use std::sync::{
 
 use alloy_primitives::B256;
 use futures::{future, future::Either};
+use reth_eth_wire::{EthNetworkPrimitives, NetworkPrimitives};
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::{
     bodies::client::{BodiesClient, BodiesFut},
@@ -17,7 +18,6 @@ use reth_network_p2p::{
 };
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
-use reth_primitives::Header;
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 use crate::{fetch::DownloadRequest, flattened_response::FlattenedResponse};
@@ -30,16 +30,16 @@ use crate::{fetch::DownloadRequest, flattened_response::FlattenedResponse};
 ///
 /// include_mmd!("docs/mermaid/fetch-client.mmd")
 #[derive(Debug, Clone)]
-pub struct FetchClient {
+pub struct FetchClient<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Sender half of the request channel.
-    pub(crate) request_tx: UnboundedSender<DownloadRequest>,
+    pub(crate) request_tx: UnboundedSender<DownloadRequest<N>>,
     /// The handle to the peers
     pub(crate) peers_handle: PeersHandle,
     /// Number of active peer sessions the node's currently handling.
     pub(crate) num_active_peers: Arc<AtomicUsize>,
 }
 
-impl DownloadClient for FetchClient {
+impl<N: NetworkPrimitives> DownloadClient for FetchClient<N> {
     fn report_bad_message(&self, peer_id: PeerId) {
         self.peers_handle.reputation_change(peer_id, ReputationChangeKind::BadMessage);
     }
@@ -53,8 +53,9 @@ impl DownloadClient for FetchClient {
 // or an error.
 type HeadersClientFuture<T> = Either<FlattenedResponse<T>, future::Ready<T>>;
 
-impl HeadersClient for FetchClient {
-    type Output = HeadersClientFuture<PeerRequestResult<Vec<Header>>>;
+impl<N: NetworkPrimitives> HeadersClient for FetchClient<N> {
+    type Header = N::BlockHeader;
+    type Output = HeadersClientFuture<PeerRequestResult<Vec<N::BlockHeader>>>;
 
     /// Sends a `GetBlockHeaders` request to an available peer.
     fn get_headers_with_priority(
@@ -75,8 +76,9 @@ impl HeadersClient for FetchClient {
     }
 }
 
-impl BodiesClient for FetchClient {
-    type Output = BodiesFut;
+impl<N: NetworkPrimitives> BodiesClient for FetchClient<N> {
+    type Body = N::BlockBody;
+    type Output = BodiesFut<N::BlockBody>;
 
     /// Sends a `GetBlockBodies` request to an available peer.
     fn get_block_bodies_with_priority(

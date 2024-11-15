@@ -38,6 +38,7 @@ reth-node-types.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
+alloy-consensus.workspace = true
 revm.workspace = true
 
 # optimism
@@ -65,7 +66,6 @@ strum.workspace = true
 
 # test-utils
 reth-ethereum-engine-primitives = { workspace = true, optional = true }
-alloy-consensus = { workspace = true, optional = true }
 
 # parallel utils
 rayon.workspace = true
@@ -88,44 +88,43 @@ alloy-consensus.workspace = true
 
 [features]
 optimism = [
-	"reth-primitives/optimism",
-	"reth-execution-types/optimism",
-	"reth-optimism-primitives",
-	"reth-codecs/optimism",
-	"reth-db/optimism",
-	"reth-db-api/optimism",
-	"revm/optimism"
+    "reth-primitives/optimism",
+    "reth-execution-types/optimism",
+    "reth-optimism-primitives",
+    "reth-codecs/optimism",
+    "reth-db/optimism",
+    "reth-db-api/optimism",
+    "revm/optimism",
 ]
 serde = [
-	"reth-execution-types/serde",
-	"reth-trie-db/serde",
-	"reth-trie/serde",
-	"alloy-consensus?/serde",
-	"alloy-eips/serde",
-	"alloy-primitives/serde",
-	"alloy-rpc-types-engine/serde",
-	"dashmap/serde",
-	"notify/serde",
-	"parking_lot/serde",
-	"rand/serde",
-	"revm/serde",
-	"reth-codecs/serde"
+    "reth-execution-types/serde",
+    "reth-trie-db/serde",
+    "reth-trie/serde",
+    "alloy-consensus/serde",
+    "alloy-eips/serde",
+    "alloy-primitives/serde",
+    "alloy-rpc-types-engine/serde",
+    "dashmap/serde",
+    "notify/serde",
+    "parking_lot/serde",
+    "rand/serde",
+    "revm/serde",
+    "reth-codecs/serde",
 ]
 test-utils = [
-	"reth-db/test-utils",
-	"reth-nippy-jar/test-utils",
-	"reth-trie/test-utils",
-	"reth-chain-state/test-utils",
-	"reth-ethereum-engine-primitives",
-	"alloy-consensus",
-	"reth-chainspec/test-utils",
-	"reth-evm/test-utils",
-	"reth-network-p2p/test-utils",
-	"reth-primitives/test-utils",
-	"reth-codecs/test-utils",
-	"reth-db-api/test-utils",
-	"reth-trie-db/test-utils",
-	"revm/test-utils",
-	"reth-prune-types/test-utils",
-	"reth-stages-types/test-utils"
+    "reth-db/test-utils",
+    "reth-nippy-jar/test-utils",
+    "reth-trie/test-utils",
+    "reth-chain-state/test-utils",
+    "reth-ethereum-engine-primitives",
+    "reth-chainspec/test-utils",
+    "reth-evm/test-utils",
+    "reth-network-p2p/test-utils",
+    "reth-primitives/test-utils",
+    "reth-codecs/test-utils",
+    "reth-db-api/test-utils",
+    "reth-trie-db/test-utils",
+    "revm/test-utils",
+    "reth-prune-types/test-utils",
+    "reth-stages-types/test-utils",
 ]

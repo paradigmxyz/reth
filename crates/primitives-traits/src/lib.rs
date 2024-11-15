@@ -27,7 +27,7 @@ pub use receipt::{FullReceipt, Receipt};
 pub mod transaction;
 pub use transaction::{
     signed::{FullSignedTx, SignedTransaction},
-    FullTransaction, Transaction,
+    FullTransaction, Transaction, TransactionExt,
 };
 
 mod integer_list;
@@ -41,7 +41,6 @@ pub use block::{
 };
 
 mod withdrawal;
-pub use withdrawal::Withdrawal;
 
 mod error;
 pub use error::{GotExpected, GotExpectedBoxed};
@@ -60,7 +59,7 @@ pub use tx_type::{FullTxType, TxType};
 pub mod header;
 #[cfg(any(test, feature = "arbitrary", feature = "test-utils"))]
 pub use header::test_utils;
-pub use header::{Header, HeaderError, SealedHeader};
+pub use header::{BlockWithParent, HeaderError, SealedHeader};
 
 /// Bincode-compatible serde implementations for common abstracted types in Reth.
 ///
@@ -81,3 +80,15 @@ pub use size::InMemorySize;
 /// Node traits
 pub mod node;
 pub use node::{FullNodePrimitives, NodePrimitives};
+
+/// Helper trait that requires arbitrary implementation if the feature is enabled.
+#[cfg(any(feature = "test-utils", feature = "arbitrary"))]
+pub trait MaybeArbitrary: for<'a> arbitrary::Arbitrary<'a> {}
+/// Helper trait that requires arbitrary implementation if the feature is enabled.
+#[cfg(not(any(feature = "test-utils", feature = "arbitrary")))]
+pub trait MaybeArbitrary {}
+
+#[cfg(any(feature = "test-utils", feature = "arbitrary"))]
+impl<T> MaybeArbitrary for T where T: for<'a> arbitrary::Arbitrary<'a> {}
+#[cfg(not(any(feature = "test-utils", feature = "arbitrary")))]
+impl<T> MaybeArbitrary for T {}

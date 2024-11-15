@@ -1,7 +1,7 @@
 //! Contains various benchmark output formats, either for logging or for
 //! serialization to / from files.
 
-use reth_primitives::constants::gas_units::GIGAGAS;
+use reth_primitives_traits::constants::GIGAGAS;
 use serde::{ser::SerializeStruct, Serialize};
 use std::time::Duration;
 

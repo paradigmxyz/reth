@@ -1,7 +1,8 @@
 use std::{collections::HashMap, fmt::Debug, io, path::Path};
 
+use alloy_consensus::Header;
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{BlockHash, BlockNumber, Sealable, B256};
+use alloy_primitives::{BlockHash, BlockNumber, B256};
 use futures::Future;
 use itertools::Either;
 use reth_network_p2p::{
@@ -12,16 +13,15 @@ use reth_network_p2p::{
     priority::Priority,
 };
 use reth_network_peers::PeerId;
-use reth_primitives::{BlockBody, Header, SealedHeader};
+use reth_primitives::{BlockBody, SealedHeader};
 use thiserror::Error;
 use tokio::{fs::File, io::AsyncReadExt};
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Decoder, FramedRead};
 use tracing::{debug, trace, warn};
 
-use crate::receipt_file_client::FromReceiptReader;
-
 use super::file_codec::BlockFileCodec;
+use crate::receipt_file_client::FromReceiptReader;
 
 /// Default byte length of chunk to read from chain file.
 ///
@@ -122,11 +122,7 @@ where
     /// Clones and returns the highest header of this client has or `None` if empty. Seals header
     /// before returning.
     pub fn tip_header(&self) -> Option<SealedHeader> {
-        self.headers.get(&self.max_block()?).map(|h| {
-            let sealed = h.clone().seal_slow();
-            let (header, seal) = sealed.into_parts();
-            SealedHeader::new(header, seal)
-        })
+        self.headers.get(&self.max_block()?).map(|h| SealedHeader::seal(h.clone()))
     }
 
     /// Returns true if all blocks are canonical (no gaps)
@@ -277,6 +273,8 @@ impl<T> HeadersClient for FileClient<T>
 where
     T: Debug + Clone + Send + Sync + 'static,
 {
+impl HeadersClient for FileClient {
+    type Header = Header;
     type Output = HeadersFut;
 
     fn get_headers_with_priority(
@@ -330,6 +328,8 @@ impl<T> BodiesClient for FileClient<T>
 where
     T: Debug + Clone + Send + Sync + 'static,
 {
+impl BodiesClient for FileClient {
+    type Body = BlockBody;
     type Output = BodiesFut;
 
     fn get_block_bodies_with_priority(

@@ -41,12 +41,12 @@ pub struct GetBlockHeaders {
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-pub struct BlockHeaders<H = reth_primitives::Header>(
+pub struct BlockHeaders<H = alloy_consensus::Header>(
     /// The requested headers.
     pub Vec<H>,
 );
 
-generate_tests!(#[rlp, 10] BlockHeaders<reth_primitives::Header>, EthBlockHeadersTests);
+generate_tests!(#[rlp, 10] BlockHeaders<alloy_consensus::Header>, EthBlockHeadersTests);
 
 impl<H> From<Vec<H>> for BlockHeaders<H> {
     fn from(headers: Vec<H>) -> Self {
@@ -94,11 +94,11 @@ mod tests {
         message::RequestPair, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
         HeadersDirection,
     };
-    use alloy_consensus::TxLegacy;
+    use alloy_consensus::{Header, TxLegacy};
     use alloy_eips::BlockHashOrNumber;
     use alloy_primitives::{hex, PrimitiveSignature as Signature, TxKind, U256};
     use alloy_rlp::{Decodable, Encodable};
-    use reth_primitives::{BlockBody, Header, Transaction, TransactionSigned};
+    use reth_primitives::{BlockBody, Transaction, TransactionSigned};
     use std::str::FromStr;
 
     #[test]

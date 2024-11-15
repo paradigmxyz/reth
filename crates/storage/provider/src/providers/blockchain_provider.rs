@@ -9,6 +9,7 @@ use crate::{
     StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
+use alloy_consensus::Header;
 use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
@@ -26,8 +27,8 @@ use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
-    Account, Block, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
+    Account, Block, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -162,7 +163,9 @@ impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider2<N> {
 }
 
 impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider2<N> {
-    fn static_file_provider(&self) -> StaticFileProvider {
+    type Primitives = N::Primitives;
+
+    fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         self.database.static_file_provider()
     }
 }
@@ -910,7 +913,7 @@ mod tests {
         )?;
 
         // Commit to both storages: database and static files
-        UnifiedStorageWriter::commit(provider_rw, factory.static_file_provider())?;
+        UnifiedStorageWriter::commit(provider_rw)?;
 
         let provider = BlockchainProvider2::new(factory)?;
 
@@ -998,8 +1001,7 @@ mod tests {
                     UnifiedStorageWriter::from(&provider_rw, &hook_provider.static_file_provider())
                         .save_blocks(&[lowest_memory_block])
                         .unwrap();
-                    UnifiedStorageWriter::commit(provider_rw, hook_provider.static_file_provider())
-                        .unwrap();
+                    UnifiedStorageWriter::commit(provider_rw).unwrap();
 
                     // Remove from memory
                     hook_provider.canonical_in_memory_state.remove_persisted_blocks(num_hash);

@@ -2,6 +2,7 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use alloy_consensus::Header;
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, Address, Bytes, U256};
 use reth::{
@@ -35,7 +36,7 @@ use reth_node_ethereum::{
 };
 use reth_primitives::{
     revm_primitives::{CfgEnvWithHandlerCfg, TxEnv},
-    Header, TransactionSigned,
+    TransactionSigned,
 };
 use reth_tracing::{RethTracer, Tracer};
 use std::{convert::Infallible, sync::Arc};

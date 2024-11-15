@@ -1,8 +1,9 @@
 use futures::{Stream, StreamExt};
 use pin_project::pin_project;
-use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage, EngineNodeTypes};
+use reth_beacon_consensus::{BeaconConsensusEngineEvent, EngineNodeTypes};
 use reth_chainspec::EthChainSpec;
 use reth_consensus::Consensus;
+use reth_engine_primitives::BeaconEngineMessage;
 use reth_engine_tree::{
     backfill::PipelineSync,
     download::BasicBlockDownloader,
@@ -15,7 +16,7 @@ pub use reth_engine_tree::{
     engine::EngineApiEvent,
 };
 use reth_evm::execute::BlockExecutorProvider;
-use reth_network_p2p::BlockClient;
+use reth_network_p2p::EthBlockClient;
 use reth_node_types::NodeTypesWithEngine;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_validator::ExecutionPayloadValidator;
@@ -49,7 +50,7 @@ type EngineServiceType<N, Client> = ChainOrchestrator<
 pub struct EngineService<N, Client, E>
 where
     N: EngineNodeTypes,
-    Client: BlockClient + 'static,
+    Client: EthBlockClient + 'static,
     E: BlockExecutorProvider + 'static,
 {
     orchestrator: EngineServiceType<N, Client>,
@@ -59,7 +60,7 @@ where
 impl<N, Client, E> EngineService<N, Client, E>
 where
     N: EngineNodeTypes,
-    Client: BlockClient + 'static,
+    Client: EthBlockClient + 'static,
     E: BlockExecutorProvider + 'static,
 {
     /// Constructor for `EngineService`.
@@ -124,7 +125,7 @@ where
 impl<N, Client, E> Stream for EngineService<N, Client, E>
 where
     N: EngineNodeTypes,
-    Client: BlockClient + 'static,
+    Client: EthBlockClient + 'static,
     E: BlockExecutorProvider + 'static,
 {
     type Item = ChainEvent<BeaconConsensusEngineEvent>;
@@ -145,6 +146,7 @@ mod tests {
     use super::*;
     use reth_beacon_consensus::EthBeaconConsensus;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
+    use reth_engine_primitives::BeaconEngineMessage;
     use reth_engine_tree::{test_utils::TestPipelineBuilder, tree::NoopInvalidBlockHook};
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm_ethereum::execute::EthExecutorProvider;

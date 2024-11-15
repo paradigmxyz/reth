@@ -1,17 +1,23 @@
-use crate::InMemorySize;
-
 use super::Header;
+use crate::InMemorySize;
 use alloy_consensus::Sealed;
 use alloy_eips::BlockNumHash;
-use alloy_primitives::{keccak256, BlockHash, Sealable};
-#[cfg(any(test, feature = "test-utils"))]
-use alloy_primitives::{BlockNumber, B256, U256};
+use alloy_primitives::{keccak256, BlockHash, Sealable, B256};
 use alloy_rlp::{Decodable, Encodable};
 use bytes::BufMut;
 use core::mem;
 use derive_more::{AsRef, Deref};
 use reth_codecs::add_arbitrary_tests;
 use serde::{Deserialize, Serialize};
+
+/// A helper struct to store the block number/hash and its parent hash.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct BlockWithParent {
+    /// Parent hash.
+    pub parent: B256,
+    /// Block number/hash.
+    pub block: BlockNumHash,
+}
 
 /// A [`Header`] that is sealed at a precalculated hash, use [`SealedHeader::unseal()`] if you want
 /// to modify header.
@@ -56,10 +62,18 @@ impl<H> SealedHeader<H> {
     }
 }
 
-impl SealedHeader {
+impl<H: Sealable> SealedHeader<H> {
+    /// Hashes the header and creates a sealed header.
+    pub fn seal(header: H) -> Self {
+        let hash = header.hash_slow();
+        Self::new(header, hash)
+    }
+}
+
+impl<H: alloy_consensus::BlockHeader> SealedHeader<H> {
     /// Return the number hash tuple.
     pub fn num_hash(&self) -> BlockNumHash {
-        BlockNumHash::new(self.number, self.hash)
+        BlockNumHash::new(self.number(), self.hash)
     }
 }
 
@@ -73,9 +87,7 @@ impl InMemorySize for SealedHeader {
 
 impl<H: Sealable + Default> Default for SealedHeader<H> {
     fn default() -> Self {
-        let sealed = H::default().seal_slow();
-        let (header, hash) = sealed.into_parts();
-        Self { header, hash }
+        Self::seal(H::default())
     }
 }
 
@@ -122,17 +134,17 @@ impl SealedHeader {
     }
 
     /// Updates the block number.
-    pub fn set_block_number(&mut self, number: BlockNumber) {
+    pub fn set_block_number(&mut self, number: alloy_primitives::BlockNumber) {
         self.header.number = number;
     }
 
     /// Updates the block state root.
-    pub fn set_state_root(&mut self, state_root: B256) {
+    pub fn set_state_root(&mut self, state_root: alloy_primitives::B256) {
         self.header.state_root = state_root;
     }
 
     /// Updates the block difficulty.
-    pub fn set_difficulty(&mut self, difficulty: U256) {
+    pub fn set_difficulty(&mut self, difficulty: alloy_primitives::U256) {
         self.header.difficulty = difficulty;
     }
 }
@@ -148,9 +160,7 @@ impl<'a> arbitrary::Arbitrary<'a> for SealedHeader {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let header = Header::arbitrary(u)?;
 
-        let sealed = header.seal_slow();
-        let (header, seal) = sealed.into_parts();
-        Ok(Self::new(header, seal))
+        Ok(Self::seal(header))
     }
 }
 
@@ -216,10 +226,8 @@ pub(super) mod serde_bincode_compat {
     #[cfg(test)]
     mod tests {
         use super::super::{serde_bincode_compat, SealedHeader};
-
         use arbitrary::Arbitrary;
         use rand::Rng;
-        use reth_testing_utils::generators;
         use serde::{Deserialize, Serialize};
         use serde_with::serde_as;
 
@@ -233,7 +241,7 @@ pub(super) mod serde_bincode_compat {
             }
 
             let mut bytes = [0u8; 1024];
-            generators::rng().fill(bytes.as_mut_slice());
+            rand::thread_rng().fill(&mut bytes[..]);
             let data = Data {
                 transaction: SealedHeader::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
                     .unwrap(),

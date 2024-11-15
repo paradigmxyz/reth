@@ -18,7 +18,7 @@ use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_chainspec::ChainInfo;
 use reth_primitives::{Receipt, SealedBlockWithSenders, TransactionSignedEcRecovered};
-use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
+use reth_provider::{BlockIdReader, BlockReader, ProviderError};
 use reth_rpc_eth_api::{
     EthApiTypes, EthFilterApiServer, FullEthApiTypes, RpcTransaction, TransactionCompat,
 };
@@ -144,7 +144,7 @@ where
 
 impl<Provider, Pool, Eth> EthFilter<Provider, Pool, Eth>
 where
-    Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
+    Provider: BlockReader + BlockIdReader + 'static,
     Pool: TransactionPool<Transaction: 'static> + 'static,
     Eth: FullEthApiTypes,
 {
@@ -244,7 +244,7 @@ where
 impl<Provider, Pool, Eth> EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>>
     for EthFilter<Provider, Pool, Eth>
 where
-    Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
+    Provider: BlockReader + BlockIdReader + 'static,
     Pool: TransactionPool + 'static,
     Eth: FullEthApiTypes + 'static,
 {
@@ -367,7 +367,7 @@ struct EthFilterInner<Provider, Pool, Tx> {
 
 impl<Provider, Pool, Tx> EthFilterInner<Provider, Pool, Tx>
 where
-    Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
+    Provider: BlockReader + BlockIdReader + 'static,
     Pool: TransactionPool + 'static,
 {
     /// Returns logs matching given filter object.

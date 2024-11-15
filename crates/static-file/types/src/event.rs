@@ -1,7 +1,7 @@
 use crate::StaticFileTargets;
 use std::time::Duration;
 
-/// An event emitted by a [`StaticFileProducer`][crate::StaticFileProducer].
+/// An event emitted by the static file producer.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum StaticFileProducerEvent {
     /// Emitted when static file producer started running.

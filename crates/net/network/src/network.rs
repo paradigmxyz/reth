@@ -18,10 +18,7 @@ use reth_network_api::{
     NetworkEventListenerProvider, NetworkInfo, NetworkStatus, PeerInfo, PeerRequest, Peers,
     PeersInfo,
 };
-use reth_network_p2p::{
-    sync::{NetworkSyncUpdater, SyncState, SyncStateProvider},
-    BlockClient,
-};
+use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState, SyncStateProvider};
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::{PeerAddr, PeerKind, Reputation, ReputationChangeKind};
 use reth_primitives::{Head, TransactionSigned};
@@ -400,7 +397,9 @@ impl NetworkSyncUpdater for NetworkHandle {
 }
 
 impl BlockDownloaderProvider for NetworkHandle {
-    async fn fetch_client(&self) -> Result<impl BlockClient + 'static, oneshot::error::RecvError> {
+    type Client = FetchClient;
+
+    async fn fetch_client(&self) -> Result<Self::Client, oneshot::error::RecvError> {
         let (tx, rx) = oneshot::channel();
         let _ = self.manager().send(NetworkHandleMessage::FetchClient(tx));
         rx.await
