@@ -58,12 +58,13 @@ impl<EvmConfig> EthExecutionStrategyFactory<EvmConfig> {
 }
 
 // todo: replace with EthPrimitives
-impl<EvmConfig> BlockExecutionStrategyFactory<reth_node_types::AnyPrimitives>
-    for EthExecutionStrategyFactory<EvmConfig>
+impl<EvmConfig> BlockExecutionStrategyFactory for EthExecutionStrategyFactory<EvmConfig>
 where
     EvmConfig:
         Clone + Unpin + Sync + Send + 'static + ConfigureEvm<Header = alloy_consensus::Header>,
 {
+    type Primitives = reth_node_types::AnyPrimitives;
+
     type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
         EthExecutionStrategy<DB, EvmConfig>;
 

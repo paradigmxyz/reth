@@ -242,13 +242,14 @@ where
 }
 
 /// A strategy factory that can create block execution strategies.
-pub trait BlockExecutionStrategyFactory<N: NodePrimitives>:
-    Send + Sync + Clone + Unpin + 'static
-{
+pub trait BlockExecutionStrategyFactory: Send + Sync + Clone + Unpin + 'static {
+    /// Data primitives.
+    type Primitives: NodePrimitives;
+
     /// Associated strategy type.
     type Strategy<DB: Database<Error: Into<ProviderError> + Display>>: BlockExecutionStrategy<
         DB,
-        N,
+        Self::Primitives,
         Error = BlockExecutionError,
     >;
 
@@ -282,7 +283,7 @@ impl<F> BasicBlockExecutorProvider<F> {
 
 impl<F, N> BlockExecutorProvider<N> for BasicBlockExecutorProvider<F>
 where
-    F: BlockExecutionStrategyFactory<N>,
+    F: BlockExecutionStrategyFactory<Primitives = N>,
     N: NodePrimitives<Receipt: Receipt>,
 {
     type Executor<DB: Database<Error: Into<ProviderError> + Display>> =
@@ -609,10 +610,12 @@ mod tests {
         finish_result: BundleState,
     }
 
-    impl<N> BlockExecutionStrategyFactory<N> for TestExecutorStrategyFactory<N>
+    impl<N> BlockExecutionStrategyFactory for TestExecutorStrategyFactory<N>
     where
         N: NodePrimitives + 'static,
     {
+        type Primitives = N;
+
         type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
             TestExecutorStrategy<DB, TestEvmConfig, N>;
 
