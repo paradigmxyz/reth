@@ -76,6 +76,7 @@ arbitrary = [
 	"reth-codecs/arbitrary"
 ]
 serde-bincode-compat = [
+	"serde",
 	"serde_with",
 	"alloy-consensus/serde-bincode-compat",
 	"alloy-eips/serde-bincode-compat"
