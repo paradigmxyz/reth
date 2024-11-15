@@ -13,6 +13,7 @@
 pub mod error;
 pub mod eth;
 pub mod sequencer;
+pub mod witness;
 
 pub use error::{OpEthApiError, OpInvalidTransactionError, SequencerClientError};
 pub use eth::{OpEthApi, OpReceiptBuilder};

@@ -401,8 +401,8 @@ pub trait DebugExecutionWitnessApi<Attributes> {
     ///
     /// The first argument is the block number or block hash. The second argument is the payload
     /// attributes for the new block. The third argument is a list of transactions to be included.
-    #[method(name = "executePayload")]
-    async fn execute_payload(
+    #[method(name = "executePayload", blocking)]
+    fn execute_payload(
         &self,
         parent_block_hash: B256,
         attributes: Attributes,
