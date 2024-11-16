@@ -545,8 +545,7 @@ impl Encodable for ReceiptWithBloomEncoder<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::revm_primitives::Bytes;
-    use alloy_primitives::{address, b256, bytes, hex_literal::hex};
+    use alloy_primitives::{address, b256, bytes, hex_literal::hex, Bytes};
     use reth_codecs::Compact;
 
     #[test]
