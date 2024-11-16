@@ -564,14 +564,16 @@ impl Future for ActiveSession {
                         return this.close_on_error(err, cx)
                     }
                     
-                    if let Poll::Ready(Err(err)) = this.conn.poll_flush_unpin(cx) {
-                        debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "failed to flush connection");
-                        return this.close_on_error(err, cx)
-                    }
+
                 } else {
                     // no more messages to send over the wire
                     break
                 }
+            }
+
+            if let Poll::Ready(Err(err)) = this.conn.poll_flush_unpin(cx) {
+                debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "failed to flush connection");
+                return this.close_on_error(err, cx)
             }
 
             // read incoming messages from the wire
