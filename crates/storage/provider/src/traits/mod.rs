@@ -20,9 +20,6 @@ pub use reth_chainspec::ChainSpecProvider;
 mod hashing;
 pub use hashing::HashingWriter;
 
-mod trie;
-pub use trie::{StorageTrieWriter, TrieWriter};
-
 mod static_file_provider;
 pub use static_file_provider::StaticFileProviderFactory;
 
