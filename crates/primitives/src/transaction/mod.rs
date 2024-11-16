@@ -1088,10 +1088,11 @@ impl From<TransactionSigned> for TransactionSignedNoHash {
 
 /// Signed transaction.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Serialize, Deserialize)]
+#[derive(Debug, AsRef, Deref, Serialize, Deserialize)]
 pub struct TransactionSigned {
     /// Transaction hash
-    pub hash: TxHash,
+    #[serde(skip)]
+    pub hash: LazyLock<TxHash>,
     /// The transaction signature values
     pub signature: Signature,
     /// Raw transaction info
@@ -1100,10 +1101,38 @@ pub struct TransactionSigned {
     pub transaction: Transaction,
 }
 
+impl Clone for TransactionSigned {
+    fn clone(&self) -> Self {
+        Self {
+            hash: LazyLock::new(|| Default::default()),
+            signature: self.signature.clone(),
+            transaction: self.transaction.clone(),
+        }
+    }
+}
+
+impl PartialEq for TransactionSigned {
+    fn eq(&self, other: &Self) -> bool {
+        *self.hash == *other.hash &&
+            self.signature == other.signature &&
+            self.transaction == other.transaction
+    }
+}
+
+impl Eq for TransactionSigned {}
+
+impl std::hash::Hash for TransactionSigned {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        (*self.hash).hash(state);
+        self.signature.hash(state);
+        self.transaction.hash(state);
+    }
+}
+
 impl Default for TransactionSigned {
     fn default() -> Self {
         Self {
-            hash: Default::default(),
+            hash: LazyLock::new(|| Default::default()),
             signature: Signature::test_signature(),
             transaction: Default::default(),
         }
@@ -1130,12 +1159,12 @@ impl TransactionSigned {
     }
 
     /// Transaction hash. Used to identify transaction.
-    pub const fn hash(&self) -> TxHash {
-        self.hash
+    pub fn hash(&self) -> TxHash {
+        *self.hash
     }
 
     /// Reference to transaction hash. Used to identify transaction.
-    pub const fn hash_ref(&self) -> &TxHash {
+    pub fn hash_ref(&self) -> &TxHash {
         &self.hash
     }
 
@@ -1261,13 +1290,10 @@ impl TransactionSigned {
 
     /// Calculate transaction hash, eip2728 transaction does not contain rlp header and start with
     /// tx type.
-    pub fn recalculate_hash(&self) -> B256 {
-        keccak256(self.encoded_2718())
+    pub fn recalculate_hash(&self) -> LazyLock<B256> {
+        LazyLock::new(|| keccak256(self.encoded_2718()))
     }
 
-    /// Create a new signed transaction from a transaction and its signature.
-    ///
-    /// This will also calculate the transaction hash using its encoding.
     pub fn from_transaction_and_signature(transaction: Transaction, signature: Signature) -> Self {
         let mut initial_tx = Self { transaction, hash: Default::default(), signature };
         initial_tx.hash = initial_tx.recalculate_hash();
@@ -1336,8 +1362,12 @@ impl TransactionSigned {
     // TODO: make buf advancement semantics consistent with `decode_enveloped_typed_transaction`,
     // so decoding methods do not need to manually advance the buffer
     pub fn decode_rlp_legacy_transaction(data: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let (transaction, hash, signature) = Self::decode_rlp_legacy_transaction_tuple(data)?;
-        let signed = Self { transaction: Transaction::Legacy(transaction), hash, signature };
+        let (transaction, _hash, signature) = Self::decode_rlp_legacy_transaction_tuple(data)?;
+        let signed = Self {
+            transaction: Transaction::Legacy(transaction),
+            hash: LazyLock::new(|| Default::default()),
+            signature,
+        };
         Ok(signed)
     }
 }
@@ -1619,20 +1649,36 @@ impl Decodable2718 for TransactionSigned {
         match ty.try_into().map_err(|_| Eip2718Error::UnexpectedType(ty))? {
             TxType::Legacy => Err(Eip2718Error::UnexpectedType(0)),
             TxType::Eip2930 => {
-                let (tx, signature, hash) = TxEip2930::rlp_decode_signed(buf)?.into_parts();
-                Ok(Self { transaction: Transaction::Eip2930(tx), signature, hash })
+                let (tx, signature, _hash) = TxEip2930::rlp_decode_signed(buf)?.into_parts();
+                Ok(Self {
+                    transaction: Transaction::Eip2930(tx),
+                    signature,
+                    hash: LazyLock::new(|| Default::default()),
+                })
             }
             TxType::Eip1559 => {
-                let (tx, signature, hash) = TxEip1559::rlp_decode_signed(buf)?.into_parts();
-                Ok(Self { transaction: Transaction::Eip1559(tx), signature, hash })
+                let (tx, signature, _hash) = TxEip1559::rlp_decode_signed(buf)?.into_parts();
+                Ok(Self {
+                    transaction: Transaction::Eip1559(tx),
+                    signature,
+                    hash: LazyLock::new(|| Default::default()),
+                })
             }
             TxType::Eip7702 => {
-                let (tx, signature, hash) = TxEip7702::rlp_decode_signed(buf)?.into_parts();
-                Ok(Self { transaction: Transaction::Eip7702(tx), signature, hash })
+                let (tx, signature, _hash) = TxEip7702::rlp_decode_signed(buf)?.into_parts();
+                Ok(Self {
+                    transaction: Transaction::Eip7702(tx),
+                    signature,
+                    hash: LazyLock::new(|| Default::default()),
+                })
             }
             TxType::Eip4844 => {
-                let (tx, signature, hash) = TxEip4844::rlp_decode_signed(buf)?.into_parts();
-                Ok(Self { transaction: Transaction::Eip4844(tx), signature, hash })
+                let (tx, signature, _hash) = TxEip4844::rlp_decode_signed(buf)?.into_parts();
+                Ok(Self {
+                    transaction: Transaction::Eip4844(tx),
+                    signature,
+                    hash: LazyLock::new(|| Default::default()),
+                })
             }
             #[cfg(feature = "optimism")]
             TxType::Deposit => Ok(Self::from_transaction_and_signature(
@@ -1811,6 +1857,7 @@ pub mod serde_bincode_compat {
     use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
+    use std::sync::LazyLock;
 
     /// Bincode-compatible [`super::Transaction`] serde implementation.
     ///
@@ -1904,7 +1951,8 @@ pub mod serde_bincode_compat {
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
     pub struct TransactionSigned<'a> {
-        hash: TxHash,
+        #[serde(skip)]
+        hash: LazyLock<TxHash>,
         signature: Signature,
         transaction: Transaction<'a>,
     }
@@ -1912,7 +1960,7 @@ pub mod serde_bincode_compat {
     impl<'a> From<&'a super::TransactionSigned> for TransactionSigned<'a> {
         fn from(value: &'a super::TransactionSigned) -> Self {
             Self {
-                hash: value.hash,
+                hash: LazyLock::new(|| Default::default()),
                 signature: value.signature,
                 transaction: Transaction::from(&value.transaction),
             }

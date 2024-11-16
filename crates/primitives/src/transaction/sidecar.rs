@@ -5,6 +5,7 @@ use alloy_consensus::{transaction::RlpEcdsaTx, TxEip4844WithSidecar};
 use alloy_eips::eip4844::BlobTransactionSidecar;
 use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
 use serde::{Deserialize, Serialize};
+use std::sync::LazyLock;
 
 /// A response to `GetPooledTransactions` that includes blob data, their commitments, and their
 /// corresponding proofs.
@@ -34,7 +35,7 @@ impl BlobTransaction {
         let TransactionSigned { transaction, signature, hash } = tx;
         match transaction {
             Transaction::Eip4844(transaction) => Ok(Self {
-                hash,
+                hash: *hash,
                 transaction: TxEip4844WithSidecar { tx: transaction, sidecar },
                 signature,
             }),
@@ -61,7 +62,7 @@ impl BlobTransaction {
     pub fn into_parts(self) -> (TransactionSigned, BlobTransactionSidecar) {
         let transaction = TransactionSigned {
             transaction: Transaction::Eip4844(self.transaction.tx),
-            hash: self.hash,
+            hash: LazyLock::new(|| Default::default()),
             signature: self.signature,
         };
 
