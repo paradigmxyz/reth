@@ -15,7 +15,6 @@ exclude_crates=(
   reth-beacon-consensus
   reth-bench
   reth-blockchain-tree
-  reth-chain-state
   reth-cli
   reth-cli-commands
   reth-cli-runner
@@ -26,13 +25,11 @@ exclude_crates=(
   reth-dns-discovery
   reth-downloaders
   reth-e2e-test-utils
-  reth-engine-primitives
   reth-engine-service
   reth-engine-tree
   reth-engine-util
   reth-eth-wire
   reth-ethereum-cli
-  reth-ethereum-engine-primitives
   reth-ethereum-payload-builder
   reth-etl
   reth-exex
@@ -41,7 +38,6 @@ exclude_crates=(
   reth-net-nat
   reth-network
   reth-node-api
-  reth-node-types
   reth-node-builder
   reth-node-core
   reth-node-ethereum
@@ -51,9 +47,6 @@ exclude_crates=(
   reth-optimism-node
   reth-optimism-payload-builder
   reth-optimism-rpc
-  reth-payload-builder
-  reth-payload-builder-primitives
-  reth-payload-primitives
   reth-rpc
   reth-rpc-api
   reth-rpc-api-testing-util
