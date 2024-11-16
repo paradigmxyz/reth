@@ -416,7 +416,7 @@ where
         .with_static_files_metrics();
 
         let has_receipt_pruning =
-            self.toml_config().prune.as_ref().map_or(false, |a| a.has_receipts_pruning());
+            self.toml_config().prune.as_ref().is_some_and(|a| a.has_receipts_pruning());
 
         // Check for consistency between database and static files. If it fails, it unwinds to
         // the first block that's consistent between database and static files.

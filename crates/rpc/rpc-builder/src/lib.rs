@@ -1941,17 +1941,17 @@ impl TransportRpcModuleConfig {
 
     /// Returns true if the given module is configured for the http transport.
     pub fn contains_http(&self, module: &RethRpcModule) -> bool {
-        self.http.as_ref().map_or(false, |http| http.contains(module))
+        self.http.as_ref().is_some_and(|http| http.contains(module))
     }
 
     /// Returns true if the given module is configured for the ws transport.
     pub fn contains_ws(&self, module: &RethRpcModule) -> bool {
-        self.ws.as_ref().map_or(false, |ws| ws.contains(module))
+        self.ws.as_ref().is_some_and(|ws| ws.contains(module))
     }
 
     /// Returns true if the given module is configured for the ipc transport.
     pub fn contains_ipc(&self, module: &RethRpcModule) -> bool {
-        self.ipc.as_ref().map_or(false, |ipc| ipc.contains(module))
+        self.ipc.as_ref().is_some_and(|ipc| ipc.contains(module))
     }
 
     /// Ensures that both http and ws are configured and that they are configured to use the same

@@ -32,7 +32,7 @@ impl SparseStateTrie {
 
     /// Returns `true` if storage slot for account was already revealed.
     pub fn is_storage_slot_revealed(&self, account: &B256, slot: &B256) -> bool {
-        self.revealed.get(account).map_or(false, |slots| slots.contains(slot))
+        self.revealed.get(account).is_some_and(|slots| slots.contains(slot))
     }
 
     /// Reveal unknown trie paths from provided leaf path and its proof for the account.

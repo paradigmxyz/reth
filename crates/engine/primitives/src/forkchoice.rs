@@ -47,19 +47,19 @@ impl ForkchoiceStateTracker {
     /// Returns whether the latest received FCU is valid: [`ForkchoiceStatus::Valid`]
     #[allow(dead_code)]
     pub(crate) fn is_latest_valid(&self) -> bool {
-        self.latest_status().map_or(false, |s| s.is_valid())
+        self.latest_status().is_some_and(|s| s.is_valid())
     }
 
     /// Returns whether the latest received FCU is syncing: [`ForkchoiceStatus::Syncing`]
     #[allow(dead_code)]
     pub(crate) fn is_latest_syncing(&self) -> bool {
-        self.latest_status().map_or(false, |s| s.is_syncing())
+        self.latest_status().is_some_and(|s| s.is_syncing())
     }
 
     /// Returns whether the latest received FCU is syncing: [`ForkchoiceStatus::Invalid`]
     #[allow(dead_code)]
     pub fn is_latest_invalid(&self) -> bool {
-        self.latest_status().map_or(false, |s| s.is_invalid())
+        self.latest_status().is_some_and(|s| s.is_invalid())
     }
 
     /// Returns the last valid head hash.

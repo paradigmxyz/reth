@@ -91,7 +91,7 @@ impl<Provider: StaticFileProviderFactory + DBProvider<Tx: DbTxMut>> Segment<Prov
             pruned += entries_pruned;
         }
 
-        let done = last_pruned_block.map_or(false, |block| block == block_range_end);
+        let done = last_pruned_block == Some(block_range_end);
         let progress = PruneProgress::new(done, &limiter);
 
         Ok(SegmentOutput {
