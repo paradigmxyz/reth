@@ -189,6 +189,7 @@ impl AccessRights {
     }
 }
 
-/// Helper trait with a common set of requirements for the [`NodeTypes`] in CLI.
+/// Helper trait with a common set of requirements for the
+/// [`NodeTypes`](reth_node_builder::NodeTypes) in CLI.
 pub trait CliNodeTypes: NodeTypesWithEngine<ChainSpec: EthereumHardforks> {}
 impl<N> CliNodeTypes for N where N: NodeTypesWithEngine<ChainSpec: EthereumHardforks> {}
