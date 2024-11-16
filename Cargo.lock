@@ -8324,6 +8324,7 @@ dependencies = [
  "reth-optimism-payload-builder",
  "reth-optimism-rpc",
  "reth-payload-builder",
+ "reth-payload-util",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -8359,6 +8360,7 @@ dependencies = [
  "reth-optimism-forks",
  "reth-payload-builder",
  "reth-payload-primitives",
+ "reth-payload-util",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -8484,6 +8486,15 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
+]
+
+[[package]]
+name = "reth-payload-util"
+version = "1.1.1"
+dependencies = [
+ "alloy-consensus",
+ "alloy-primitives",
+ "reth-primitives",
 ]
 
 [[package]]
@@ -9265,6 +9276,7 @@ dependencies = [
  "reth-execution-types",
  "reth-fs-util",
  "reth-metrics",
+ "reth-payload-util",
  "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",
