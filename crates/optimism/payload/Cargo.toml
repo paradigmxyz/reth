@@ -22,6 +22,7 @@ reth-rpc-types-compat.workspace = true
 reth-evm.workspace = true
 reth-execution-types.workspace = true
 reth-payload-builder.workspace = true
+reth-payload-builder-primitives.workspace = true
 reth-payload-util.workspace = true
 reth-payload-primitives = { workspace = true, features = ["op"] }
 reth-basic-payload-builder.workspace = true

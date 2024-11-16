@@ -80,6 +80,7 @@ members = [
     "crates/optimism/storage",
     "crates/payload/basic/",
     "crates/payload/builder/",
+    "crates/payload/builder-primitives/",
     "crates/payload/primitives/",
     "crates/payload/validator/",
     "crates/payload/util/",
@@ -380,6 +381,7 @@ reth-optimism-primitives = { path = "crates/optimism/primitives" }
 reth-optimism-rpc = { path = "crates/optimism/rpc" }
 reth-optimism-storage = { path = "crates/optimism/storage" }
 reth-payload-builder = { path = "crates/payload/builder" }
+reth-payload-builder-primitives = { path = "crates/payload/builder-primitives" }
 reth-payload-primitives = { path = "crates/payload/primitives" }
 reth-payload-validator = { path = "crates/payload/validator" }
 reth-payload-util = { path = "crates/payload/util" }

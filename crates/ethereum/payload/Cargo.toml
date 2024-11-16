@@ -18,6 +18,7 @@ reth-revm.workspace = true
 reth-transaction-pool.workspace = true
 reth-provider.workspace = true
 reth-payload-builder.workspace = true
+reth-payload-builder-primitives.workspace = true
 reth-payload-primitives.workspace = true
 reth-execution-types.workspace = true
 reth-basic-payload-builder.workspace = true

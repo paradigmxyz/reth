@@ -113,7 +113,8 @@ pub mod noop;
 pub mod test_utils;
 
 pub use alloy_rpc_types::engine::PayloadId;
-pub use reth_payload_primitives::{PayloadBuilderError, PayloadKind};
+pub use reth_payload_builder_primitives::PayloadBuilderError;
+pub use reth_payload_primitives::PayloadKind;
 pub use service::{
     PayloadBuilderHandle, PayloadBuilderService, PayloadServiceCommand, PayloadStore,
 };
