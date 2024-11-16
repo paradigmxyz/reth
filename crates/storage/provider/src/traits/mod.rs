@@ -17,9 +17,6 @@ pub use state::{StateChangeWriter, StateWriter};
 
 pub use reth_chainspec::ChainSpecProvider;
 
-mod hashing;
-pub use hashing::HashingWriter;
-
 mod trie;
 pub use trie::{StorageTrieWriter, TrieWriter};
 
