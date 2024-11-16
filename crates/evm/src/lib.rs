@@ -193,8 +193,8 @@ pub trait InitializeEvm<H: BlockHeader = alloy_consensus::Header>: Send + Sync {
         }
     }
 
-    /// Convenience function to call both [`fill_cfg_env`](ConfigureEvmEnv::fill_cfg_env) and
-    /// [`ConfigureEvmEnv::fill_block_env`].
+    /// Convenience function to call both [`fill_cfg_env`](InitializeEvm::fill_cfg_env) and
+    /// [`InitializeEvm::fill_block_env`].
     ///
     /// Note: Implementers should ensure that all fields are required fields are filled.
     fn fill_cfg_and_block_env(
