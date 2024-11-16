@@ -879,7 +879,7 @@ where
                     .into_iter()
                     .map(PooledTransactionsElement::try_from_broadcast)
                     .filter_map(Result::ok)
-                    .collect::<PooledTransactions>();
+                    .collect();
 
                 self.import_transactions(peer_id, non_blob_txs, TransactionSource::Broadcast);
 

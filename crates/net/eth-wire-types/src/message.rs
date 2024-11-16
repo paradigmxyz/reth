@@ -77,52 +77,30 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                     )?)
                 }
             }
-            EthMessageID::GetBlockHeaders => {
-                let request_pair = RequestPair::<GetBlockHeaders>::decode(buf)?;
-                EthMessage::GetBlockHeaders(request_pair)
-            }
-            EthMessageID::BlockHeaders => {
-                let request_pair = RequestPair::<BlockHeaders<_>>::decode(buf)?;
-                EthMessage::BlockHeaders(request_pair)
-            }
-            EthMessageID::GetBlockBodies => {
-                let request_pair = RequestPair::<GetBlockBodies>::decode(buf)?;
-                EthMessage::GetBlockBodies(request_pair)
-            }
-            EthMessageID::BlockBodies => {
-                let request_pair = RequestPair::<BlockBodies<_>>::decode(buf)?;
-                EthMessage::BlockBodies(request_pair)
-            }
+            EthMessageID::GetBlockHeaders => EthMessage::GetBlockHeaders(RequestPair::decode(buf)?),
+            EthMessageID::BlockHeaders => EthMessage::BlockHeaders(RequestPair::decode(buf)?),
+            EthMessageID::GetBlockBodies => EthMessage::GetBlockBodies(RequestPair::decode(buf)?),
+            EthMessageID::BlockBodies => EthMessage::BlockBodies(RequestPair::decode(buf)?),
             EthMessageID::GetPooledTransactions => {
-                let request_pair = RequestPair::<GetPooledTransactions>::decode(buf)?;
-                EthMessage::GetPooledTransactions(request_pair)
+                EthMessage::GetPooledTransactions(RequestPair::decode(buf)?)
             }
             EthMessageID::PooledTransactions => {
-                let request_pair = RequestPair::<PooledTransactions>::decode(buf)?;
-                EthMessage::PooledTransactions(request_pair)
+                EthMessage::PooledTransactions(RequestPair::decode(buf)?)
             }
             EthMessageID::GetNodeData => {
                 if version >= EthVersion::Eth67 {
                     return Err(MessageError::Invalid(version, EthMessageID::GetNodeData))
                 }
-                let request_pair = RequestPair::<GetNodeData>::decode(buf)?;
-                EthMessage::GetNodeData(request_pair)
+                EthMessage::GetNodeData(RequestPair::decode(buf)?)
             }
             EthMessageID::NodeData => {
                 if version >= EthVersion::Eth67 {
                     return Err(MessageError::Invalid(version, EthMessageID::GetNodeData))
                 }
-                let request_pair = RequestPair::<NodeData>::decode(buf)?;
-                EthMessage::NodeData(request_pair)
+                EthMessage::NodeData(RequestPair::decode(buf)?)
             }
-            EthMessageID::GetReceipts => {
-                let request_pair = RequestPair::<GetReceipts>::decode(buf)?;
-                EthMessage::GetReceipts(request_pair)
-            }
-            EthMessageID::Receipts => {
-                let request_pair = RequestPair::<Receipts>::decode(buf)?;
-                EthMessage::Receipts(request_pair)
-            }
+            EthMessageID::GetReceipts => EthMessage::GetReceipts(RequestPair::decode(buf)?),
+            EthMessageID::Receipts => EthMessage::Receipts(RequestPair::decode(buf)?),
         };
         Ok(Self { message_type, message })
     }

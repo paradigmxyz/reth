@@ -733,7 +733,7 @@ impl RequestTxHashes {
 
 impl FromIterator<(TxHash, Eth68TxMetadata)> for RequestTxHashes {
     fn from_iter<I: IntoIterator<Item = (TxHash, Eth68TxMetadata)>>(iter: I) -> Self {
-        Self::new(iter.into_iter().map(|(hash, _)| hash).collect::<HashSet<_>>())
+        Self::new(iter.into_iter().map(|(hash, _)| hash).collect())
     }
 }
 
