@@ -31,5 +31,4 @@ test-fuzz.workspace = true
 
 [features]
 arbitrary = ["reth-primitives-traits/arbitrary"]
-test-utils = ["reth-primitives-traits/test-utils"]
 serde = ["op-alloy-consensus/serde"]

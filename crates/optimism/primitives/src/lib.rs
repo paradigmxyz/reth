@@ -12,21 +12,18 @@ pub mod op_tx_type;
 
 use alloy_primitives::{bytes, Bytes, TxKind, Uint, B256};
 
-use alloy_consensus::{SignableTransaction, TxLegacy};
-use alloy_rlp::{Decodable, Encodable, Result};
+use alloy_consensus::{constants::EIP7702_TX_TYPE_ID, SignableTransaction, TxLegacy};
 use op_tx_type::OpTxType;
 use reth_primitives::revm_primitives::{AccessList, SignedAuthorization};
 use reth_primitives_traits::{InMemorySize, TransactionExt};
 
-use op_alloy_consensus::{OpTxEnvelope, OpTypedTransaction};
+use op_alloy_consensus::{OpTypedTransaction, DEPOSIT_TX_TYPE_ID};
+use reth_codecs::Compact;
 
-#[cfg(feature = "arbitrary")]
-use arbitrary::Arbitrary;
-
-#[cfg_attr(feature = "arbitrary", derive(Arbitrary))]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-/// Optimistic transaction type.
+#[derive(Debug, Clone, PartialEq, Eq, derive_more::Deref, Hash, derive_more::From)]
+/// Optimistic transaction.
 pub struct OpTransaction(OpTypedTransaction);
 
 impl Default for OpTransaction {
@@ -35,26 +32,7 @@ impl Default for OpTransaction {
     }
 }
 
-impl Encodable for OpTransaction {
-    fn encode(&self, out: &mut dyn bytes::BufMut) {
-        match &self.0 {
-            OpTypedTransaction::Legacy(tx) => tx.encode(out),
-            OpTypedTransaction::Eip2930(tx) => tx.encode(out),
-            OpTypedTransaction::Eip1559(tx) => tx.encode(out),
-            OpTypedTransaction::Eip7702(tx) => tx.encode(out),
-            OpTypedTransaction::Deposit(tx) => tx.encode(out),
-        }
-    }
-}
-
-impl Decodable for OpTransaction {
-    fn decode(data: &mut &[u8]) -> Result<Self> {
-        let tx_envelope = OpTxEnvelope::decode(data)?;
-        Ok(Self(tx_envelope.into()))
-    }
-}
-
-impl reth_codecs::Compact for OpTransaction {
+impl Compact for OpTransaction {
     fn to_compact<B>(&self, out: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
@@ -68,16 +46,50 @@ impl reth_codecs::Compact for OpTransaction {
         }
     }
 
-    fn from_compact(_buf: &[u8], _len: usize) -> (Self, &[u8]) {
-        todo!()
+    fn from_compact(mut buf: &[u8], identifier: usize) -> (Self, &[u8]) {
+        use bytes::Buf;
+
+        match identifier {
+            COMPACT_IDENTIFIER_LEGACY => {
+                let (tx, buf) = TxLegacy::from_compact(buf, buf.len());
+                (Self(OpTypedTransaction::Legacy(tx)), buf)
+            }
+            COMPACT_IDENTIFIER_EIP2930 => {
+                let (tx, buf) =
+                    alloy_consensus::transaction::TxEip2930::from_compact(buf, buf.len());
+                (Self(OpTypedTransaction::Eip2930(tx)), buf)
+            }
+            COMPACT_IDENTIFIER_EIP1559 => {
+                let (tx, buf) =
+                    alloy_consensus::transaction::TxEip1559::from_compact(buf, buf.len());
+                (Self(OpTypedTransaction::Eip1559(tx)), buf)
+            }
+            COMPACT_EXTENDED_IDENTIFIER_FLAG => {
+                // An identifier of 3 indicates that the transaction type did not fit into
+                // the backwards compatible 2 bit identifier, their transaction types are
+                // larger than 2 bits (eg. 4844 and Deposit Transactions). In this case,
+                // we need to read the concrete transaction type from the buffer by
+                // reading the full 8 bits (single byte) and match on this transaction type.
+                let identifier = buf.get_u8();
+                match identifier {
+                    EIP7702_TX_TYPE_ID => {
+                        let (tx, buf) =
+                            alloy_consensus::transaction::TxEip7702::from_compact(buf, buf.len());
+                        (Self(OpTypedTransaction::Eip7702(tx)), buf)
+                    }
+                    DEPOSIT_TX_TYPE_ID => {
+                        let (tx, buf) = op_alloy_consensus::TxDeposit::from_compact(buf, buf.len());
+                        (Self(OpTypedTransaction::Deposit(tx)), buf)
+                    }
+                    _ => unreachable!(
+                        "Junk data in database: unknown Transaction variant: {identifier}"
+                    ),
+                }
+            }
+            _ => unreachable!("Junk data in database: unknown Transaction variant: {identifier}"),
+        }
     }
 }
-
-#[cfg(any(feature = "test-utils", feature = "arbitrary"))]
-impl MaybeArbitrary for OpTransaction {}
-
-#[cfg(any(feature = "test-utils", feature = "arbitrary"))]
-impl MaybeArbitrary for OpTransaction {}
 
 impl alloy_consensus::Transaction for OpTransaction {
     fn chain_id(&self) -> Option<u64> {
@@ -178,3 +190,17 @@ impl InMemorySize for OpTransaction {
         }
     }
 }
+
+/// Identifier parameter for legacy transaction
+pub(crate) const COMPACT_IDENTIFIER_LEGACY: usize = 0;
+
+/// Identifier parameter for EIP-2930 transaction
+pub(crate) const COMPACT_IDENTIFIER_EIP2930: usize = 1;
+
+/// Identifier parameter for EIP-1559 transaction
+pub(crate) const COMPACT_IDENTIFIER_EIP1559: usize = 2;
+
+/// For backwards compatibility purposes only 2 bits of the type are encoded in the identifier
+/// parameter. In the case of a [`COMPACT_EXTENDED_IDENTIFIER_FLAG`], the full transaction type is
+/// read from the buffer as a single byte.
+pub(crate) const COMPACT_EXTENDED_IDENTIFIER_FLAG: usize = 3;
