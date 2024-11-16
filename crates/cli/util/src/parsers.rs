@@ -23,11 +23,11 @@ pub fn parse_duration_from_secs_or_ms(
     arg: &str,
 ) -> eyre::Result<Duration, std::num::ParseIntError> {
     if arg.ends_with("ms") {
-        arg.trim_end_matches("ms").parse::<u64>().map(Duration::from_millis)
+        arg.trim_end_matches("ms").parse().map(Duration::from_millis)
     } else if arg.ends_with('s') {
-        arg.trim_end_matches('s').parse::<u64>().map(Duration::from_secs)
+        arg.trim_end_matches('s').parse().map(Duration::from_secs)
     } else {
-        arg.parse::<u64>().map(Duration::from_secs)
+        arg.parse().map(Duration::from_secs)
     }
 }
 
@@ -75,7 +75,7 @@ pub fn parse_socket_address(value: &str) -> eyre::Result<SocketAddr, SocketAddre
         let port: u16 = port.parse()?;
         return Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
     }
-    if let Ok(port) = value.parse::<u16>() {
+    if let Ok(port) = value.parse() {
         return Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
     }
     value
