@@ -1,10 +1,8 @@
 //! Loads a pending block from database. Helper trait for `eth_` block, transaction, call and trace
 //! RPC methods.
 
-use std::time::{Duration, Instant};
-
+use super::SpawnBlocking;
 use crate::{EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
-
 use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{
     eip4844::MAX_DATA_GAS_PER_BLOCK, eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE,
@@ -19,26 +17,27 @@ use reth_evm::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    proofs::calculate_transaction_root,
-    revm_primitives::{
-        BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, EVMError, Env, ExecutionResult, InvalidTransaction,
-        ResultAndState, SpecId,
-    },
-    Block, BlockBody, Receipt, SealedBlockWithSenders, SealedHeader, TransactionSignedEcRecovered,
+    proofs::calculate_transaction_root, Block, BlockBody, Receipt, SealedBlockWithSenders,
+    SealedHeader, TransactionSignedEcRecovered,
 };
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderError,
     ReceiptProvider, StateProviderFactory,
 };
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{
+    database::StateProviderDatabase,
+    primitives::{
+        BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, EVMError, Env, ExecutionResult, InvalidTransaction,
+        ResultAndState, SpecId,
+    },
+};
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use reth_trie::HashedPostState;
 use revm::{db::states::bundle_state::BundleRetention, DatabaseCommit, State};
+use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use tracing::debug;
-
-use super::SpawnBlocking;
 
 /// Loads a pending block from database.
 ///
