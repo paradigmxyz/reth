@@ -30,7 +30,7 @@ use serde_json::json;
 use std::{self, cmp::min, collections::HashMap};
 use thiserror::Error;
 
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, trace};
 
 /// Front-end API for fetching chain data from remote sources.
 ///
@@ -461,7 +461,9 @@ impl BodiesClient for BitfinityEvmClient {
 
 impl DownloadClient for BitfinityEvmClient {
     fn report_bad_message(&self, _peer_id: PeerId) {
-        warn!("Reported a bad message on a remote client, the client may be corrupted or invalid");
+        error!("Reported a bad message on a remote client, the client may be corrupted or invalid");
+        // This panic stops the import job and prints the stacktrace or the error
+        panic!("Reported a bad message on a remote client, the client may be corrupted or invalid");
         // noop
     }
 

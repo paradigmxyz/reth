@@ -86,7 +86,7 @@ where
 
     fn on_error(&mut self, error: DownloadError, peer_id: Option<PeerId>) {
         self.metrics.increment_errors(&error);
-        tracing::debug!(target: "downloaders::bodies", ?peer_id, %error, "Error requesting bodies");
+        tracing::error!(target: "downloaders::bodies", ?peer_id, %error, "Error requesting bodies");
         if let Some(peer_id) = peer_id {
             self.client.report_bad_message(peer_id);
         }
@@ -128,10 +128,12 @@ where
         // next one exceed the soft response limit, if not then peer either does not have the next
         // block or deliberately sent a single block.
         if bodies.is_empty() {
+            tracing::error!("Received empty response from peer");
             return Err(DownloadError::EmptyResponse)
         }
 
         if response_len > request_len {
+            tracing::error!("Received empty response from peer. Expected {} bodies, got {}", request_len, response_len);
             return Err(DownloadError::TooManyBodies(GotExpected {
                 got: response_len,
                 expected: request_len,
