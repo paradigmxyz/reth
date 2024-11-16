@@ -1934,6 +1934,26 @@ impl TransportRpcModuleConfig {
         self.config.as_ref()
     }
 
+    /// Returns true if the given module is configured for any transport.
+    pub fn contains_any(&self, module: &RethRpcModule) -> bool {
+        self.contains_http(module) || self.contains_ws(module) || self.contains_ipc(module)
+    }
+
+    /// Returns true if the given module is configured for the http transport.
+    pub fn contains_http(&self, module: &RethRpcModule) -> bool {
+        self.http.as_ref().map_or(false, |http| http.contains(module))
+    }
+
+    /// Returns true if the given module is configured for the ws transport.
+    pub fn contains_ws(&self, module: &RethRpcModule) -> bool {
+        self.ws.as_ref().map_or(false, |ws| ws.contains(module))
+    }
+
+    /// Returns true if the given module is configured for the ipc transport.
+    pub fn contains_ipc(&self, module: &RethRpcModule) -> bool {
+        self.ipc.as_ref().map_or(false, |ipc| ipc.contains(module))
+    }
+
     /// Ensures that both http and ws are configured and that they are configured to use the same
     /// port.
     fn ensure_ws_http_identical(&self) -> Result<(), WsHttpSamePortError> {
