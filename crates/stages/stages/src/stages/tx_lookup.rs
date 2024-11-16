@@ -400,7 +400,7 @@ mod tests {
                         blocks[..=max_pruned_block as usize]
                             .iter()
                             .map(|block| block.body.transactions.len() as u64)
-                            .sum()
+                            .sum::<u64>()
                             .sub(1), // `TxNumber` is 0-indexed
                     ),
                     prune_mode: PruneMode::Full,
