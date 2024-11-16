@@ -213,7 +213,7 @@ where
         }
 
         // Update total_receipts after all filtering
-        total_receipts += receipts.iter().map(|v| v.len()).sum();
+        total_receipts += receipts.iter().map(|v| v.len()).sum::<usize>();
 
         // We're reusing receipt writing code internal to
         // `UnifiedStorageWriter::append_receipts_from_blocks`, so we just use a default empty
