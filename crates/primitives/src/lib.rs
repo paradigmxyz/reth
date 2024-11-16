@@ -53,7 +53,6 @@ pub use transaction::{
 
 // Re-exports
 pub use reth_ethereum_forks::*;
-pub use revm_primitives::{self, JumpTable};
 
 #[cfg(any(test, feature = "arbitrary"))]
 pub use arbitrary;

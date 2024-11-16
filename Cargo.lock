@@ -7463,7 +7463,6 @@ dependencies = [
  "reth-transaction-pool",
  "reth-trie",
  "revm",
- "revm-primitives",
  "tracing",
 ]
 
@@ -8001,6 +8000,7 @@ dependencies = [
  "reth-tokio-util",
  "reth-tracing",
  "reth-transaction-pool",
+ "revm-primitives",
  "secp256k1",
  "tempfile",
  "tokio",
@@ -8482,6 +8482,7 @@ dependencies = [
  "reth-errors",
  "reth-primitives",
  "reth-transaction-pool",
+ "revm-primitives",
  "serde",
  "thiserror 1.0.69",
  "tokio",
