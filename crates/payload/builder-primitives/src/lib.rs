@@ -14,7 +14,6 @@ pub use error::PayloadBuilderError;
 mod events;
 pub use crate::events::{Events, PayloadEvents};
 
-/// Contains the payload builder trait to abstract over payload attributes types and default
-/// implementations of the [`PayloadAttributes`] trait for ethereum mainnet and optimism types.
+/// Contains the payload builder trait to abstract over payload attributes.
 mod traits;
 pub use traits::{PayloadBuilder, PayloadStoreExt};
