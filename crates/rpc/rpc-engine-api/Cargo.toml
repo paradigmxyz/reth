@@ -19,6 +19,7 @@ reth-rpc-api.workspace = true
 reth-storage-api.workspace = true
 reth-beacon-consensus.workspace = true
 reth-payload-builder.workspace = true
+reth-payload-builder-primitives.workspace = true
 reth-payload-primitives.workspace = true
 reth-tasks.workspace = true
 reth-rpc-types-compat.workspace = true

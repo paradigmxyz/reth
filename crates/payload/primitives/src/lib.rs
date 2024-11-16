@@ -9,18 +9,13 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 mod error;
-
-pub use error::{EngineObjectValidationError, PayloadBuilderError, VersionSpecificValidationError};
-
-mod events;
-pub use crate::events::{Events, PayloadEvents};
+pub use error::{EngineObjectValidationError, VersionSpecificValidationError};
 
 /// Contains traits to abstract over payload attributes types and default implementations of the
 /// [`PayloadAttributes`] trait for ethereum mainnet and optimism types.
 mod traits;
 pub use traits::{
-    BuiltPayload, PayloadAttributes, PayloadAttributesBuilder, PayloadBuilder,
-    PayloadBuilderAttributes, PayloadStoreExt,
+    BuiltPayload, PayloadAttributes, PayloadAttributesBuilder, PayloadBuilderAttributes,
 };
 
 mod payload;

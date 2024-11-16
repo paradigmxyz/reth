@@ -23,7 +23,8 @@ use reth_evm::{system_calls::SystemCaller, ConfigureEvm, NextBlockEnvAttributes}
 use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
-use reth_payload_primitives::{PayloadBuilderAttributes, PayloadBuilderError};
+use reth_payload_builder_primitives::PayloadBuilderError;
+use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_primitives::{
     proofs::{self},
     Block, BlockBody, EthereumHardforks, Receipt,
