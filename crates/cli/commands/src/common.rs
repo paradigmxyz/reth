@@ -15,7 +15,10 @@ use reth_node_core::{
     args::{DatabaseArgs, DatadirArgs},
     dirs::{ChainPath, DataDirPath},
 };
-use reth_provider::{providers::StaticFileProvider, ProviderFactory, StaticFileProviderFactory};
+use reth_provider::{
+    providers::{ProviderNodeTypesForDB, StaticFileProvider},
+    ProviderFactory, StaticFileProviderFactory,
+};
 use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
@@ -53,7 +56,7 @@ pub struct EnvironmentArgs<C: ChainSpecParser> {
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> EnvironmentArgs<C> {
     /// Initializes environment according to [`AccessRights`] and returns an instance of
     /// [`Environment`].
-    pub fn init<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+    pub fn init<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
         &self,
         access: AccessRights,
     ) -> eyre::Result<Environment<N>> {
@@ -105,7 +108,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Environmen
     /// If it's a read-write environment and an issue is found, it will attempt to heal (including a
     /// pipeline unwind). Otherwise, it will print out an warning, advising the user to restart the
     /// node to heal.
-    fn create_provider_factory<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+    fn create_provider_factory<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
         &self,
         config: &Config,
         db: Arc<DatabaseEnv>,
@@ -188,3 +191,7 @@ impl AccessRights {
         matches!(self, Self::RW)
     }
 }
+
+/// Helper trait with a common set of requirements for the [`NodeTypes`] in CLI.
+pub trait CliNodeTypes: NodeTypesWithEngine + ProviderNodeTypesForDB<Arc<DatabaseEnv>> {}
+impl<N> CliNodeTypes for N where N: NodeTypesWithEngine + ProviderNodeTypesForDB<Arc<DatabaseEnv>> {}
