@@ -20,7 +20,7 @@ use reth_node_core::dirs::{DataDirPath, MaybePlatformPath};
 use reth_primitives::StorageEntry;
 use reth_provider::providers::StaticFileProvider;
 use reth_provider::{BlockNumReader, BlockReader, ProviderFactory};
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 /// Builder for the `bitfinity reset evm state` command
 #[derive(Debug, Parser)]
@@ -135,15 +135,21 @@ impl BitfinityResetEvmStateCommand {
                 let plain_accounts_recovered_count = plain_accounts_recovered_count.clone();
                 task_handles.push(tokio::spawn(async move {
                     while let Ok(accounts) = receiver.recv().await {
-                        split_and_send_add_accout_request(
+                        let result = split_and_send_add_accout_request(
                             &executor,
                             accounts,
                             start,
                             plain_accounts_total_count,
                             &plain_accounts_recovered_count,
                         )
-                        .await
-                        .expect("Failed to send account data");
+                        .await;
+
+                        if let Err(err) = &result {
+                            let error_message = format!("Failed to send account data: {:?}", err);
+                            error!(target: "reth::cli", "{}", &error_message);
+                            result.expect(&error_message);
+                        }
+                        
                     }
                 }));
             }
