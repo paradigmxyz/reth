@@ -53,7 +53,7 @@ pub struct EnvironmentArgs<C: ChainSpecParser> {
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> EnvironmentArgs<C> {
     /// Initializes environment according to [`AccessRights`] and returns an instance of
     /// [`Environment`].
-    pub fn init<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+    pub fn init<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
         &self,
         access: AccessRights,
     ) -> eyre::Result<Environment<N>> {
@@ -105,7 +105,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Environmen
     /// If it's a read-write environment and an issue is found, it will attempt to heal (including a
     /// pipeline unwind). Otherwise, it will print out an warning, advising the user to restart the
     /// node to heal.
-    fn create_provider_factory<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+    fn create_provider_factory<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
         &self,
         config: &Config,
         db: Arc<DatabaseEnv>,
@@ -188,3 +188,8 @@ impl AccessRights {
         matches!(self, Self::RW)
     }
 }
+
+/// Helper trait with a common set of requirements for the
+/// [`NodeTypes`](reth_node_builder::NodeTypes) in CLI.
+pub trait CliNodeTypes: NodeTypesWithEngine<ChainSpec: EthereumHardforks> {}
+impl<N> CliNodeTypes for N where N: NodeTypesWithEngine<ChainSpec: EthereumHardforks> {}
