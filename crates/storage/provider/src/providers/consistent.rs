@@ -1,10 +1,10 @@
 use super::{DatabaseProviderRO, ProviderFactory, ProviderNodeTypes};
 use crate::{
-    providers::StaticFileProvider, AccountReader, BlockHashReader, BlockIdReader, BlockNumReader,
-    BlockReader, BlockReaderIdExt, BlockSource, ChainSpecProvider, ChangeSetReader, EvmEnvProvider,
-    HeaderProvider, ProviderError, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
-    StageCheckpointReader, StateReader, StaticFileProviderFactory, TransactionVariant,
-    TransactionsProvider, WithdrawalsProvider,
+    providers::StaticFileProvider, AccountReader, AsLatestStateProviderRef, BlockHashReader,
+    BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource, ChainSpecProvider,
+    ChangeSetReader, EvmEnvProvider, HeaderProvider, ProviderError, PruneCheckpointReader,
+    ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateReader,
+    StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_consensus::Header;
 use alloy_eips::{
@@ -109,7 +109,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             Ok(self.block_state_provider_ref(state)?.boxed())
         } else {
             trace!(target: "providers::blockchain", "Using database state for latest state provider");
-            self.storage_provider.latest()
+            Ok(self.storage_provider.latest())
         }
     }
 

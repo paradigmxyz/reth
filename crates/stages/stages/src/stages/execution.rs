@@ -16,7 +16,7 @@ use reth_primitives_traits::{format_gas_throughput, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
     writer::UnifiedStorageWriter,
-    BlockHashReader, BlockReader, DBProvider, HeaderProvider, LatestStateProviderRef,
+    AsLatestStateProviderRef, BlockHashReader, BlockReader, DBProvider, HeaderProvider,
     OriginalValuesKnown, ProviderError, StateChangeWriter, StateWriter, StaticFileProviderFactory,
     StatsReader, TransactionVariant,
 };
@@ -46,8 +46,9 @@ use tracing::*;
 /// - [`tables::BlockBodyIndices`] to get tx number
 /// - [`tables::Transactions`] to execute
 ///
-/// For state access [`LatestStateProviderRef`] provides us latest state and history state
-/// For latest most recent state [`LatestStateProviderRef`] would need (Used for execution Stage):
+/// For state access [`reth_provider::LatestStateProviderRef`] provides us latest state and history
+/// state For latest most recent state [`reth_provider::LatestStateProviderRef`] would need (Used
+/// for execution Stage):
 /// - [`tables::PlainAccountState`]
 /// - [`tables::Bytecodes`]
 /// - [`tables::PlainStorageState`]
@@ -180,7 +181,8 @@ where
         + StaticFileProviderFactory
         + StatsReader
         + StateChangeWriter
-        + BlockHashReader,
+        + BlockHashReader
+        + AsLatestStateProviderRef,
     for<'a> UnifiedStorageWriter<'a, Provider, StaticFileProviderRWRefMut<'a, Provider::Primitives>>:
         StateWriter,
 {
@@ -225,7 +227,7 @@ where
             None
         };
 
-        let db = StateProviderDatabase(LatestStateProviderRef::new(provider));
+        let db = StateProviderDatabase(provider.latest());
         let mut executor = self.executor_provider.batch_executor(db);
         executor.set_tip(max_block);
         executor.set_prune_modes(prune_modes);

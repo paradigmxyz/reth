@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use crate::{
     providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
     StateProvider, StateRootProvider,
@@ -24,14 +26,15 @@ use reth_trie_db::{
 
 /// State provider over latest state that takes tx reference.
 ///
-/// Wraps a [`DBProvider`] to get access to database.
+/// Wraps a [`DBProvider`] to get access to database and [`reth_trie_db::StateCommitment`]
+/// (`PhantomData<SC>`) to get access to state commitment operations.
 #[derive(Debug)]
-pub struct LatestStateProviderRef<'b, Provider>(&'b Provider);
+pub struct LatestStateProviderRef<'b, Provider, SC>(&'b Provider, PhantomData<SC>);
 
-impl<'b, Provider: DBProvider> LatestStateProviderRef<'b, Provider> {
+impl<'b, Provider: DBProvider, SC> LatestStateProviderRef<'b, Provider, SC> {
     /// Create new state provider
     pub const fn new(provider: &'b Provider) -> Self {
-        Self(provider)
+        Self(provider, PhantomData)
     }
 
     fn tx(&self) -> &Provider::Tx {
@@ -39,14 +42,18 @@ impl<'b, Provider: DBProvider> LatestStateProviderRef<'b, Provider> {
     }
 }
 
-impl<Provider: DBProvider> AccountReader for LatestStateProviderRef<'_, Provider> {
+impl<Provider: DBProvider, SC: Send + Sync> AccountReader
+    for LatestStateProviderRef<'_, Provider, SC>
+{
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
         self.tx().get::<tables::PlainAccountState>(address).map_err(Into::into)
     }
 }
 
-impl<Provider: BlockHashReader> BlockHashReader for LatestStateProviderRef<'_, Provider> {
+impl<Provider: BlockHashReader, SC: Send + Sync> BlockHashReader
+    for LatestStateProviderRef<'_, Provider, SC>
+{
     /// Get block hash by number.
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.0.block_hash(number)
@@ -61,7 +68,9 @@ impl<Provider: BlockHashReader> BlockHashReader for LatestStateProviderRef<'_, P
     }
 }
 
-impl<Provider: DBProvider> StateRootProvider for LatestStateProviderRef<'_, Provider> {
+impl<Provider: DBProvider, SC: Send + Sync> StateRootProvider
+    for LatestStateProviderRef<'_, Provider, SC>
+{
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         StateRoot::overlay_root(self.tx(), hashed_state)
             .map_err(|err| ProviderError::Database(err.into()))
@@ -89,7 +98,9 @@ impl<Provider: DBProvider> StateRootProvider for LatestStateProviderRef<'_, Prov
     }
 }
 
-impl<Provider: DBProvider> StorageRootProvider for LatestStateProviderRef<'_, Provider> {
+impl<Provider: DBProvider, SC: Send + Sync> StorageRootProvider
+    for LatestStateProviderRef<'_, Provider, SC>
+{
     fn storage_root(
         &self,
         address: Address,
@@ -110,7 +121,9 @@ impl<Provider: DBProvider> StorageRootProvider for LatestStateProviderRef<'_, Pr
     }
 }
 
-impl<Provider: DBProvider> StateProofProvider for LatestStateProviderRef<'_, Provider> {
+impl<Provider: DBProvider, SC: Send + Sync> StateProofProvider
+    for LatestStateProviderRef<'_, Provider, SC>
+{
     fn proof(
         &self,
         input: TrieInput,
@@ -138,8 +151,8 @@ impl<Provider: DBProvider> StateProofProvider for LatestStateProviderRef<'_, Pro
     }
 }
 
-impl<Provider: DBProvider + BlockHashReader> StateProvider
-    for LatestStateProviderRef<'_, Provider>
+impl<Provider: DBProvider + BlockHashReader, SC: Send + Sync> StateProvider
+    for LatestStateProviderRef<'_, Provider, SC>
 {
     /// Get storage.
     fn storage(
@@ -164,23 +177,23 @@ impl<Provider: DBProvider + BlockHashReader> StateProvider
 
 /// State provider for the latest state.
 #[derive(Debug)]
-pub struct LatestStateProvider<Provider>(Provider);
+pub struct LatestStateProvider<Provider, SC>(Provider, PhantomData<SC>);
 
-impl<Provider: DBProvider> LatestStateProvider<Provider> {
+impl<Provider: DBProvider, SC> LatestStateProvider<Provider, SC> {
     /// Create new state provider
     pub const fn new(db: Provider) -> Self {
-        Self(db)
+        Self(db, PhantomData)
     }
 
     /// Returns a new provider that takes the `TX` as reference
     #[inline(always)]
-    const fn as_ref(&self) -> LatestStateProviderRef<'_, Provider> {
+    const fn as_ref(&self) -> LatestStateProviderRef<'_, Provider, SC> {
         LatestStateProviderRef::new(&self.0)
     }
 }
 
 // Delegates all provider impls to [LatestStateProviderRef]
-delegate_provider_impls!(LatestStateProvider<Provider> where [Provider: DBProvider + BlockHashReader]);
+delegate_provider_impls!(LatestStateProvider<Provider, SC> where [Provider: DBProvider + BlockHashReader, SC: Send + Sync]);
 
 #[cfg(test)]
 mod tests {
@@ -188,7 +201,7 @@ mod tests {
 
     const fn assert_state_provider<T: StateProvider>() {}
     #[allow(dead_code)]
-    const fn assert_latest_state_provider<T: DBProvider + BlockHashReader>() {
-        assert_state_provider::<LatestStateProvider<T>>();
+    const fn assert_latest_state_provider<T: DBProvider + BlockHashReader, SC: Send + Sync>() {
+        assert_state_provider::<LatestStateProvider<T, SC>>();
     }
 }
