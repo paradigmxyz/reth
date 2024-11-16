@@ -957,7 +957,7 @@ mod tests {
         assert_eq!(pool.len(), 1);
 
         // Attempt to add the same transaction again, which should be ignored
-        pool.add_transaction(tx.clone(), 0);
+        pool.add_transaction(tx, 0);
     }
 
     #[test]
