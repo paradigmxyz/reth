@@ -41,8 +41,10 @@ impl<Node: FullNodeComponents> Future for MyExEx<Node> {
             if let Some(committed_chain) = notification.committed_chain() {
                 this.first_block.get_or_insert(committed_chain.first().number);
 
-                this.transactions +=
-                    committed_chain.blocks_iter().map(|b| b.body.transactions.len() as u64).sum::<u64>();
+                this.transactions += committed_chain
+                    .blocks_iter()
+                    .map(|b| b.body.transactions.len() as u64)
+                    .sum::<u64>();
 
                 this.ctx
                     .events
