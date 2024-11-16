@@ -177,7 +177,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                 self.progress
                     .minimum_block_number
                     .zip(self.max_block)
-                    .map_or(false, |(progress, target)| progress >= target)
+                    .is_some_and(|(progress, target)| progress >= target)
             {
                 trace!(
                     target: "sync::pipeline",
@@ -393,7 +393,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
 
             let stage_reached_max_block = prev_checkpoint
                 .zip(self.max_block)
-                .map_or(false, |(prev_progress, target)| prev_progress.block_number >= target);
+                .is_some_and(|(prev_progress, target)| prev_progress.block_number >= target);
             if stage_reached_max_block {
                 warn!(
                     target: "sync::pipeline",
