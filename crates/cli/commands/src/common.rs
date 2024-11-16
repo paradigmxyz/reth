@@ -111,7 +111,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Environmen
         db: Arc<DatabaseEnv>,
         static_file_provider: StaticFileProvider<N::Primitives>,
     ) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>> {
-        let has_receipt_pruning = config.prune.as_ref().map_or(false, |a| a.has_receipts_pruning());
+        let has_receipt_pruning = config.prune.as_ref().is_some_and(|a| a.has_receipts_pruning());
         let prune_modes =
             config.prune.as_ref().map(|prune| prune.segments.clone()).unwrap_or_default();
         let factory = ProviderFactory::<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>::new(

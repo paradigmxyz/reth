@@ -12,10 +12,7 @@ use test_fuzz::test_fuzz;
 #[test_fuzz]
 fn roundtrip_pooled_transactions(hex_data: Vec<u8>) -> Result<(), alloy_rlp::Error> {
     let input_rlp = &mut &hex_data[..];
-    let txs: PooledTransactions = match PooledTransactions::decode(input_rlp) {
-        Ok(txs) => txs,
-        Err(e) => return Err(e),
-    };
+    let txs: PooledTransactions = PooledTransactions::decode(input_rlp)?;
 
     // get the amount of bytes decoded in `decode` by subtracting the length of the original buf,
     // from the length of the remaining bytes
