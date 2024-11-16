@@ -10,10 +10,10 @@ use crate::{
 use alloy_rpc_types::engine::PayloadId;
 use futures_util::{future::FutureExt, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
-use reth_payload_primitives::{
-    BuiltPayload, Events, PayloadBuilder, PayloadBuilderAttributes, PayloadBuilderError,
-    PayloadEvents, PayloadKind, PayloadStoreExt, PayloadTypes,
+use reth_payload_builder_primitives::{
+    Events, PayloadBuilder, PayloadBuilderError, PayloadEvents, PayloadStoreExt,
 };
+use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadKind, PayloadTypes};
 use std::{
     fmt,
     future::Future,

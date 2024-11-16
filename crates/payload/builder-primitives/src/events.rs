@@ -1,4 +1,4 @@
-use crate::PayloadTypes;
+use reth_payload_primitives::PayloadTypes;
 use std::{
     pin::Pin,
     task::{ready, Context, Poll},

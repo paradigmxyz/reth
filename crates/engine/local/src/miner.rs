@@ -7,9 +7,8 @@ use futures_util::{stream::Fuse, StreamExt};
 use reth_chainspec::EthereumHardforks;
 use reth_engine_primitives::{BeaconEngineMessage, EngineApiMessageVersion, EngineTypes};
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_payload_primitives::{
-    BuiltPayload, PayloadAttributesBuilder, PayloadBuilder, PayloadKind, PayloadTypes,
-};
+use reth_payload_builder_primitives::PayloadBuilder;
+use reth_payload_primitives::{BuiltPayload, PayloadAttributesBuilder, PayloadKind, PayloadTypes};
 use reth_provider::{BlockReader, ChainSpecProvider};
 use reth_rpc_types_compat::engine::payload::block_to_payload;
 use reth_transaction_pool::TransactionPool;
