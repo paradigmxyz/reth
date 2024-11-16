@@ -301,8 +301,24 @@ impl<C: CanisterClient + Sync + 'static> ResetStateExecutor for EvmCanisterReset
         let client = self.client.clone();
         Box::pin(async move {
             info!(target: "reth::cli", "Send EvmResetState::AddAccounts request with {} accounts...", accounts.data.len());
-            client.reset_state(EvmResetState::AddAccounts(accounts)).await??;
-            info!(target: "reth::cli", "EvmResetState::AddAccounts request sent");
+
+            // send reset state request and retry 3 times if it fails
+            for _ in 0..3 {
+                match client.reset_state(EvmResetState::AddAccounts(accounts.clone())).await {
+                    Ok(_) => {
+                        info!(target: "reth::cli", "EvmResetState::AddAccounts request sent");
+                        return Ok(());
+                    }
+                    Err(err) => {
+                        warn!(target: "reth::cli", "Failed to send EvmResetState::AddAccounts request: {:?} - Retry in 3 seconds", err);
+                        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    }
+                }
+            }
+
+            // if we reach here, we have failed to send the request. Last retry
+            client.reset_state(EvmResetState::AddAccounts(accounts.clone())).await??;
+
             Ok(())
         })
     }
