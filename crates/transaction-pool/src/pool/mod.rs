@@ -108,7 +108,6 @@ use crate::{
 };
 pub use best::{
     BestPayloadTransactions, BestTransactionFilter, BestTransactionsWithPrioritizedSenders,
-    PayloadTransactionsChain, PayloadTransactionsFixed,
 };
 pub use blob::{blob_tx_priority, fee_delta};
 pub use events::{FullTransactionEvent, TransactionEvent};
