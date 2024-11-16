@@ -416,8 +416,8 @@ mod tests {
                 processed: blocks[..=max_processed_block]
                     .iter()
                     .map(|block| block.body.transactions.len() as u64)
-                    .sum::<u64>(),
-                total: blocks.iter().map(|block| block.body.transactions.len() as u64).sum::<u64>()
+                    .sum(),
+                total: blocks.iter().map(|block| block.body.transactions.len() as u64).sum()
             }
         );
     }

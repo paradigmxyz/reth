@@ -11,7 +11,10 @@ use enr::Enr;
 use parking_lot::Mutex;
 use reth_discv4::{Discv4, NatResolver};
 use reth_discv5::Discv5;
-use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
+use reth_eth_wire::{
+    DisconnectReason, EthNetworkPrimitives, NetworkPrimitives, NewBlock,
+    NewPooledTransactionHashes, SharedTransactions,
+};
 use reth_network_api::{
     test_utils::{PeersHandle, PeersHandleProvider},
     BlockDownloaderProvider, DiscoveryEvent, NetworkError, NetworkEvent,
@@ -39,20 +42,20 @@ use crate::{
 ///
 /// See also [`NetworkManager`](crate::NetworkManager).
 #[derive(Clone, Debug)]
-pub struct NetworkHandle {
+pub struct NetworkHandle<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The Arc'ed delegate that contains the state.
-    inner: Arc<NetworkInner>,
+    inner: Arc<NetworkInner<N>>,
 }
 
 // === impl NetworkHandle ===
 
-impl NetworkHandle {
+impl<N: NetworkPrimitives> NetworkHandle<N> {
     /// Creates a single new instance.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         num_active_peers: Arc<AtomicUsize>,
         listener_address: Arc<Mutex<SocketAddr>>,
-        to_manager_tx: UnboundedSender<NetworkHandleMessage>,
+        to_manager_tx: UnboundedSender<NetworkHandleMessage<N>>,
         secret_key: SecretKey,
         local_peer_id: PeerId,
         peers: PeersHandle,
@@ -61,7 +64,7 @@ impl NetworkHandle {
         tx_gossip_disabled: bool,
         discv4: Option<Discv4>,
         discv5: Option<Discv5>,
-        event_sender: EventSender<NetworkEvent>,
+        event_sender: EventSender<NetworkEvent<PeerRequest<N>>>,
         nat: Option<NatResolver>,
     ) -> Self {
         let inner = NetworkInner {
@@ -89,7 +92,7 @@ impl NetworkHandle {
         &self.inner.local_peer_id
     }
 
-    fn manager(&self) -> &UnboundedSender<NetworkHandleMessage> {
+    fn manager(&self) -> &UnboundedSender<NetworkHandleMessage<N>> {
         &self.inner.to_manager_tx
     }
 
@@ -99,7 +102,7 @@ impl NetworkHandle {
     }
 
     /// Sends a [`NetworkHandleMessage`] to the manager
-    pub(crate) fn send_message(&self, msg: NetworkHandleMessage) {
+    pub(crate) fn send_message(&self, msg: NetworkHandleMessage<N>) {
         let _ = self.inner.to_manager_tx.send(msg);
     }
 
@@ -113,12 +116,12 @@ impl NetworkHandle {
     /// Caution: in `PoS` this is a noop because new blocks are no longer announced over devp2p.
     /// Instead they are sent to the node by CL and can be requested over devp2p.
     /// Broadcasting new blocks is considered a protocol violation.
-    pub fn announce_block(&self, block: NewBlock, hash: B256) {
+    pub fn announce_block(&self, block: NewBlock<N::Block>, hash: B256) {
         self.send_message(NetworkHandleMessage::AnnounceBlock(block, hash))
     }
 
     /// Sends a [`PeerRequest`] to the given peer's session.
-    pub fn send_request(&self, peer_id: PeerId, request: PeerRequest) {
+    pub fn send_request(&self, peer_id: PeerId, request: PeerRequest<N>) {
         self.send_message(NetworkHandleMessage::EthRequest { peer_id, request })
     }
 
@@ -186,8 +189,8 @@ impl NetworkHandle {
 
 // === API Implementations ===
 
-impl NetworkEventListenerProvider for NetworkHandle {
-    fn event_listener(&self) -> EventStream<NetworkEvent> {
+impl NetworkEventListenerProvider for NetworkHandle<EthNetworkPrimitives> {
+    fn event_listener(&self) -> EventStream<NetworkEvent<PeerRequest<EthNetworkPrimitives>>> {
         self.inner.event_sender.new_listener()
     }
 
@@ -198,13 +201,13 @@ impl NetworkEventListenerProvider for NetworkHandle {
     }
 }
 
-impl NetworkProtocols for NetworkHandle {
+impl<N: NetworkPrimitives> NetworkProtocols for NetworkHandle<N> {
     fn add_rlpx_sub_protocol(&self, protocol: RlpxSubProtocol) {
         self.send_message(NetworkHandleMessage::AddRlpxSubProtocol(protocol))
     }
 }
 
-impl PeersInfo for NetworkHandle {
+impl<N: NetworkPrimitives> PeersInfo for NetworkHandle<N> {
     fn num_connected_peers(&self) -> usize {
         self.inner.num_active_peers.load(Ordering::Relaxed)
     }
@@ -337,13 +340,13 @@ impl Peers for NetworkHandle {
     }
 }
 
-impl PeersHandleProvider for NetworkHandle {
+impl<N: NetworkPrimitives> PeersHandleProvider for NetworkHandle<N> {
     fn peers_handle(&self) -> &PeersHandle {
         &self.inner.peers
     }
 }
 
-impl NetworkInfo for NetworkHandle {
+impl<N: NetworkPrimitives> NetworkInfo for NetworkHandle<N> {
     fn local_addr(&self) -> SocketAddr {
         *self.inner.listener_address.lock()
     }
@@ -367,7 +370,7 @@ impl NetworkInfo for NetworkHandle {
     }
 }
 
-impl SyncStateProvider for NetworkHandle {
+impl<N: NetworkPrimitives> SyncStateProvider for NetworkHandle<N> {
     fn is_syncing(&self) -> bool {
         self.inner.is_syncing.load(Ordering::Relaxed)
     }
@@ -380,7 +383,7 @@ impl SyncStateProvider for NetworkHandle {
     }
 }
 
-impl NetworkSyncUpdater for NetworkHandle {
+impl<N: NetworkPrimitives> NetworkSyncUpdater for NetworkHandle<N> {
     fn update_sync_state(&self, state: SyncState) {
         let future_state = state.is_syncing();
         let prev_state = self.inner.is_syncing.swap(future_state, Ordering::Relaxed);
@@ -396,8 +399,8 @@ impl NetworkSyncUpdater for NetworkHandle {
     }
 }
 
-impl BlockDownloaderProvider for NetworkHandle {
-    type Client = FetchClient;
+impl<N: NetworkPrimitives> BlockDownloaderProvider for NetworkHandle<N> {
+    type Client = FetchClient<N>;
 
     async fn fetch_client(&self) -> Result<Self::Client, oneshot::error::RecvError> {
         let (tx, rx) = oneshot::channel();
@@ -407,11 +410,11 @@ impl BlockDownloaderProvider for NetworkHandle {
 }
 
 #[derive(Debug)]
-struct NetworkInner {
+struct NetworkInner<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Number of active peer sessions the node's currently handling.
     num_active_peers: Arc<AtomicUsize>,
     /// Sender half of the message channel to the [`crate::NetworkManager`].
-    to_manager_tx: UnboundedSender<NetworkHandleMessage>,
+    to_manager_tx: UnboundedSender<NetworkHandleMessage<N>>,
     /// The local address that accepts incoming connections.
     listener_address: Arc<Mutex<SocketAddr>>,
     /// The secret key used for authenticating sessions.
@@ -435,7 +438,7 @@ struct NetworkInner {
     /// The instance of the discv5 service
     discv5: Option<Discv5>,
     /// Sender for high level network events.
-    event_sender: EventSender<NetworkEvent>,
+    event_sender: EventSender<NetworkEvent<PeerRequest<N>>>,
     /// The NAT resolver
     nat: Option<NatResolver>,
 }
@@ -448,7 +451,7 @@ pub trait NetworkProtocols: Send + Sync {
 
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).
 #[derive(Debug)]
-pub(crate) enum NetworkHandleMessage {
+pub(crate) enum NetworkHandleMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Marks a peer as trusted.
     AddTrustedPeerId(PeerId),
     /// Adds an address for a peer, including its ID, kind, and socket address.
@@ -458,7 +461,7 @@ pub(crate) enum NetworkHandleMessage {
     /// Disconnects a connection to a peer if it exists, optionally providing a disconnect reason.
     DisconnectPeer(PeerId, Option<DisconnectReason>),
     /// Broadcasts an event to announce a new block to all nodes.
-    AnnounceBlock(NewBlock, B256),
+    AnnounceBlock(NewBlock<N::Block>, B256),
     /// Sends a list of transactions to the given peer.
     SendTransaction {
         /// The ID of the peer to which the transactions are sent.
@@ -478,12 +481,12 @@ pub(crate) enum NetworkHandleMessage {
         /// The peer to send the request to.
         peer_id: PeerId,
         /// The request to send to the peer's sessions.
-        request: PeerRequest,
+        request: PeerRequest<N>,
     },
     /// Applies a reputation change to the given peer.
     ReputationChange(PeerId, ReputationChangeKind),
     /// Returns the client that can be used to interact with the network.
-    FetchClient(oneshot::Sender<FetchClient>),
+    FetchClient(oneshot::Sender<FetchClient<N>>),
     /// Applies a status update.
     StatusUpdate {
         /// The head status to apply.

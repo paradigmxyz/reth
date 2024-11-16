@@ -2,8 +2,8 @@
 
 use alloy_primitives::B256;
 use reth_errors::{ProviderError, RethError};
-use reth_primitives::revm_primitives::EVMError;
 use reth_transaction_pool::BlobStoreError;
+use revm_primitives::EVMError;
 use tokio::sync::oneshot;
 
 /// Possible error variants during payload building.

@@ -282,7 +282,7 @@ pub fn build_block<T: TransactionCompat<Error: FromEthApiError>>(
         timestamp: block_env.timestamp.to(),
         base_fee_per_gas: Some(block_env.basefee.to()),
         gas_limit: block_env.gas_limit.to(),
-        gas_used: calls.iter().map(|c| c.gas_used).sum::<u64>(),
+        gas_used: calls.iter().map(|c| c.gas_used).sum(),
         blob_gas_used: Some(0),
         parent_hash,
         receipts_root: calculate_receipt_root(&receipts),
@@ -306,6 +306,6 @@ pub fn build_block<T: TransactionCompat<Error: FromEthApiError>>(
     let txs_kind =
         if full_transactions { BlockTransactionsKind::Full } else { BlockTransactionsKind::Hashes };
 
-    let block = from_block::<T>(block, total_difficulty, txs_kind, None, tx_resp_builder)?;
+    let block = from_block(block, total_difficulty, txs_kind, None, tx_resp_builder)?;
     Ok(SimulatedBlock { inner: block, calls })
 }

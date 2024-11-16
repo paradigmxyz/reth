@@ -318,7 +318,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                 // blob pool that are valid with the lower blob fee
                 if best_transactions_attributes
                     .blob_fee
-                    .map_or(false, |fee| fee < self.all_transactions.pending_fees.blob_fee as u64)
+                    .is_some_and(|fee| fee < self.all_transactions.pending_fees.blob_fee as u64)
                 {
                     let unlocked_by_blob_fee =
                         self.blob_pool.satisfy_attributes(best_transactions_attributes);
@@ -1446,7 +1446,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     fn contains_conflicting_transaction(&self, tx: &ValidPoolTransaction<T>) -> bool {
         self.txs_iter(tx.transaction_id.sender)
             .next()
-            .map_or(false, |(_, existing)| tx.tx_type_conflicts_with(&existing.transaction))
+            .is_some_and(|(_, existing)| tx.tx_type_conflicts_with(&existing.transaction))
     }
 
     /// Additional checks for a new transaction.

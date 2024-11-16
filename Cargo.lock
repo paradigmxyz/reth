@@ -7463,7 +7463,6 @@ dependencies = [
  "reth-transaction-pool",
  "reth-trie",
  "revm",
- "revm-primitives",
  "tracing",
 ]
 
@@ -7800,6 +7799,7 @@ dependencies = [
  "reth-dns-discovery",
  "reth-ecies",
  "reth-eth-wire",
+ "reth-eth-wire-types",
  "reth-fs-util",
  "reth-metrics",
  "reth-net-banlist",
@@ -8000,6 +8000,7 @@ dependencies = [
  "reth-tokio-util",
  "reth-tracing",
  "reth-transaction-pool",
+ "revm-primitives",
  "secp256k1",
  "tempfile",
  "tokio",
@@ -8324,6 +8325,7 @@ dependencies = [
  "reth-optimism-payload-builder",
  "reth-optimism-rpc",
  "reth-payload-builder",
+ "reth-payload-util",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -8344,6 +8346,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-rpc-types-debug",
  "alloy-rpc-types-engine",
  "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
@@ -8358,6 +8361,7 @@ dependencies = [
  "reth-optimism-forks",
  "reth-payload-builder",
  "reth-payload-primitives",
+ "reth-payload-util",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -8381,6 +8385,10 @@ dependencies = [
  "bytes",
  "derive_more 1.0.0",
  "op-alloy-consensus",
+ "reth-codecs",
+ "reth-primitives",
+ "reth-primitives-traits",
+ "rstest",
 ]
 
 [[package]]
@@ -8390,12 +8398,15 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
+ "alloy-rpc-types-debug",
  "alloy-rpc-types-eth",
  "derive_more 1.0.0",
+ "jsonrpsee-core",
  "jsonrpsee-types",
  "op-alloy-consensus",
  "op-alloy-network",
  "op-alloy-rpc-types",
+ "op-alloy-rpc-types-engine",
  "parking_lot",
  "reqwest",
  "reth-chainspec",
@@ -8407,9 +8418,11 @@ dependencies = [
  "reth-optimism-consensus",
  "reth-optimism-evm",
  "reth-optimism-forks",
+ "reth-optimism-payload-builder",
  "reth-primitives",
  "reth-provider",
  "reth-rpc",
+ "reth-rpc-api",
  "reth-rpc-eth-api",
  "reth-rpc-eth-types",
  "reth-rpc-server-types",
@@ -8469,11 +8482,21 @@ dependencies = [
  "reth-errors",
  "reth-primitives",
  "reth-transaction-pool",
+ "revm-primitives",
  "serde",
  "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
  "tracing",
+]
+
+[[package]]
+name = "reth-payload-util"
+version = "1.1.1"
+dependencies = [
+ "alloy-consensus",
+ "alloy-primitives",
+ "reth-primitives",
 ]
 
 [[package]]
@@ -9255,6 +9278,7 @@ dependencies = [
  "reth-execution-types",
  "reth-fs-util",
  "reth-metrics",
+ "reth-payload-util",
  "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",

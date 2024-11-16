@@ -25,6 +25,8 @@ alloy-primitives.workspace = true
 alloy-rpc-types-engine = { workspace = true, features = ["serde"] }
 op-alloy-rpc-types-engine = { workspace = true, optional = true }
 
+revm-primitives.workspace = true
+
 # async
 async-trait.workspace = true
 tokio = { workspace = true, features = ["sync"] }

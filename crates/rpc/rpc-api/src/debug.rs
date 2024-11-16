@@ -385,3 +385,26 @@ pub trait DebugApi {
     #[method(name = "writeMutexProfile")]
     async fn debug_write_mutex_profile(&self, file: String) -> RpcResult<()>;
 }
+
+/// An extension to the `debug_` namespace that provides additional methods for retrieving
+/// witnesses.
+///
+/// This is separate from the regular `debug_` api, because this depends on the network specific
+/// params. For optimism this will expect the optimism specific payload attributes
+#[cfg_attr(not(feature = "client"), rpc(server, namespace = "debug"))]
+#[cfg_attr(feature = "client", rpc(server, client, namespace = "debug"))]
+pub trait DebugExecutionWitnessApi<Attributes> {
+    /// The `debug_executePayload` method allows for re-execution of a group of transactions with
+    /// the purpose of generating an execution witness. The witness comprises of a map of all
+    /// hashed trie nodes to their preimages that were required during the execution of the block,
+    /// including during state root recomputation.
+    ///
+    /// The first argument is the parent block hash. The second argument is the payload
+    /// attributes for the new block.
+    #[method(name = "executePayload", blocking)]
+    fn execute_payload(
+        &self,
+        parent_block_hash: B256,
+        attributes: Attributes,
+    ) -> RpcResult<ExecutionWitness>;
+}

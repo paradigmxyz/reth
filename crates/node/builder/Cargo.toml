@@ -63,6 +63,7 @@ reth-transaction-pool.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types = { workspace = true, features = ["engine"] }
 alloy-consensus.workspace = true
+revm-primitives.workspace = true
 
 ## async
 futures.workspace = true

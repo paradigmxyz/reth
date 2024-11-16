@@ -25,15 +25,19 @@ use reth_fs_util as fs;
 use reth_node_api::{EngineApiMessageVersion, PayloadBuilderAttributes};
 use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider};
 use reth_primitives::{
-    revm_primitives::KzgSettings, BlobTransaction, PooledTransactionsElement, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, Transaction, TransactionSigned,
+    BlobTransaction, PooledTransactionsElement, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    Transaction, TransactionSigned,
 };
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
     BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider, ProviderFactory,
     StageCheckpointReader, StateProviderFactory,
 };
-use reth_revm::{cached::CachedReads, database::StateProviderDatabase, primitives::EnvKzgSettings};
+use reth_revm::{
+    cached::CachedReads,
+    database::StateProviderDatabase,
+    primitives::{EnvKzgSettings, KzgSettings},
+};
 use reth_stages::StageId;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, BlobStore, EthPooledTransaction, PoolConfig, TransactionOrigin,

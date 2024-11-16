@@ -320,10 +320,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// and create the next one if we are past the end range.
     ///
     /// Returns the current [`BlockNumber`] as seen in the static file.
-    pub fn increment_block(
-        &mut self,
-        expected_block_number: BlockNumber,
-    ) -> ProviderResult<BlockNumber> {
+    pub fn increment_block(&mut self, expected_block_number: BlockNumber) -> ProviderResult<()> {
         let segment = self.writer.user_header().segment();
 
         self.check_next_block_number(expected_block_number)?;
@@ -350,7 +347,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             }
         }
 
-        let block = self.writer.user_header_mut().increment_block();
+        self.writer.user_header_mut().increment_block();
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
                 segment,
@@ -359,7 +356,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             );
         }
 
-        Ok(block)
+        Ok(())
     }
 
     /// Verifies if the incoming block number matches the next expected block number
@@ -501,16 +498,24 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         &mut self,
         tx_num: TxNumber,
         value: V,
-    ) -> ProviderResult<TxNumber> {
-        if self.writer.user_header().tx_range().is_none() {
-            self.writer.user_header_mut().set_tx_range(tx_num, tx_num);
-        } else {
+    ) -> ProviderResult<()> {
+        if let Some(range) = self.writer.user_header().tx_range() {
+            let next_tx = range.end() + 1;
+            if next_tx != tx_num {
+                return Err(ProviderError::UnexpectedStaticFileTxNumber(
+                    self.writer.user_header().segment(),
+                    tx_num,
+                    next_tx,
+                ))
+            }
             self.writer.user_header_mut().increment_tx();
+        } else {
+            self.writer.user_header_mut().set_tx_range(tx_num, tx_num);
         }
 
         self.append_column(value)?;
 
-        Ok(self.writer.user_header().tx_end().expect("qed"))
+        Ok(())
     }
 
     /// Appends header to static file.
@@ -524,13 +529,13 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         header: &Header,
         total_difficulty: U256,
         hash: &BlockHash,
-    ) -> ProviderResult<BlockNumber> {
+    ) -> ProviderResult<()> {
         let start = Instant::now();
         self.ensure_no_queued_prune()?;
 
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Headers);
 
-        let block_number = self.increment_block(header.number)?;
+        self.increment_block(header.number)?;
 
         self.append_column(header)?;
         self.append_column(CompactU256::from(total_difficulty))?;
@@ -544,7 +549,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             );
         }
 
-        Ok(block_number)
+        Ok(())
     }
 
     /// Appends transaction to static file.
@@ -553,16 +558,12 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// empty blocks and this function wouldn't be called.
     ///
     /// Returns the current [`TxNumber`] as seen in the static file.
-    pub fn append_transaction(
-        &mut self,
-        tx_num: TxNumber,
-        tx: impl Compact,
-    ) -> ProviderResult<TxNumber> {
+    pub fn append_transaction(&mut self, tx_num: TxNumber, tx: impl Compact) -> ProviderResult<()> {
         let start = Instant::now();
         self.ensure_no_queued_prune()?;
 
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Transactions);
-        let result = self.append_with_tx_number(tx_num, tx)?;
+        self.append_with_tx_number(tx_num, tx)?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
@@ -572,7 +573,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             );
         }
 
-        Ok(result)
+        Ok(())
     }
 
     /// Appends receipt to static file.
@@ -581,16 +582,12 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// empty blocks and this function wouldn't be called.
     ///
     /// Returns the current [`TxNumber`] as seen in the static file.
-    pub fn append_receipt(
-        &mut self,
-        tx_num: TxNumber,
-        receipt: &Receipt,
-    ) -> ProviderResult<TxNumber> {
+    pub fn append_receipt(&mut self, tx_num: TxNumber, receipt: &Receipt) -> ProviderResult<()> {
         let start = Instant::now();
         self.ensure_no_queued_prune()?;
 
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Receipts);
-        let result = self.append_with_tx_number(tx_num, receipt)?;
+        self.append_with_tx_number(tx_num, receipt)?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
@@ -600,7 +597,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             );
         }
 
-        Ok(result)
+        Ok(())
     }
 
     /// Appends multiple receipts to the static file.
@@ -628,7 +625,8 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
 
         for receipt_result in receipts_iter {
             let (tx_num, receipt) = receipt_result?;
-            tx_number = self.append_with_tx_number(tx_num, receipt.borrow())?;
+            self.append_with_tx_number(tx_num, receipt.borrow())?;
+            tx_number = tx_num;
             count += 1;
         }
 
