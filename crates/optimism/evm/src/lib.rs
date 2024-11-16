@@ -15,7 +15,7 @@ extern crate alloc;
 use alloc::{sync::Arc, vec::Vec};
 use alloy_consensus::Header;
 use alloy_primitives::{Address, U256};
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv, InitializeEvm, NextBlockEnvAttributes};
 use reth_optimism_chainspec::{DecodeError, OpChainSpec};
 use reth_primitives::{transaction::FillTxEnv, Head, TransactionSigned};
 use reth_revm::{
@@ -55,10 +55,7 @@ impl OpEvmConfig {
     }
 }
 
-impl ConfigureEvmEnv for OpEvmConfig {
-    type Header = Header;
-    type Error = DecodeError;
-
+impl InitializeEvm for OpEvmConfig {
     fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
         transaction.fill_tx_env(tx_env, sender);
     }
@@ -111,7 +108,7 @@ impl ConfigureEvmEnv for OpEvmConfig {
     fn fill_cfg_env(
         &self,
         cfg_env: &mut CfgEnvWithHandlerCfg,
-        header: &Self::Header,
+        header: &Header,
         total_difficulty: U256,
     ) {
         let spec_id = revm_spec(
@@ -131,6 +128,11 @@ impl ConfigureEvmEnv for OpEvmConfig {
         cfg_env.handler_cfg.spec_id = spec_id;
         cfg_env.handler_cfg.is_optimism = true;
     }
+}
+
+impl ConfigureEvmEnv for OpEvmConfig {
+    type Header = Header;
+    type Error = DecodeError;
 
     fn next_cfg_and_block_env(
         &self,

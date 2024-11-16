@@ -57,6 +57,8 @@ impl<DB> Executor<DB> for MockExecutorProvider {
     type Output = BlockExecutionOutput<Receipt>;
     type Error = BlockExecutionError;
 
+    fn init(&mut self, _evm_config: Box<dyn crate::InitializeEvm>) {}
+
     fn execute(self, _: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
         let ExecutionOutcome { bundle, receipts, requests, first_block: _ } =
             self.exec_results.lock().pop().unwrap();

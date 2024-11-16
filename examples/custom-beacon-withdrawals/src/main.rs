@@ -9,7 +9,7 @@ use alloy_sol_types::SolCall;
 #[cfg(feature = "optimism")]
 use reth::revm::primitives::OptimismFields;
 use reth::{
-    api::{ConfigureEvm, ConfigureEvmEnv, NodeTypesWithEngine},
+    api::{ConfigureEvm, NodeTypesWithEngine},
     builder::{components::ExecutorBuilder, BuilderContext, FullNodeTypes},
     cli::Cli,
     providers::ProviderError,
@@ -23,9 +23,12 @@ use reth::{
     },
 };
 use reth_chainspec::{ChainSpec, EthereumHardforks};
-use reth_evm::execute::{
-    BlockExecutionError, BlockExecutionStrategy, BlockExecutionStrategyFactory, ExecuteOutput,
-    InternalBlockExecutionError,
+use reth_evm::{
+    execute::{
+        BlockExecutionError, BlockExecutionStrategy, BlockExecutionStrategyFactory, ExecuteOutput,
+        InternalBlockExecutionError,
+    },
+    InitializeEvm,
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_node_ethereum::{node::EthereumAddOns, BasicBlockExecutorProvider, EthereumNode};

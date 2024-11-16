@@ -70,6 +70,13 @@ where
     type Output = BlockExecutionOutput<Receipt>;
     type Error = BlockExecutionError;
 
+    fn init(&mut self, evm_config: Box<dyn crate::InitializeEvm>) {
+        match self {
+            Self::Left(a) => a.init(evm_config),
+            Self::Right(b) => b.init(evm_config),
+        }
+    }
+
     fn execute(self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
         match self {
             Self::Left(a) => a.execute(input),

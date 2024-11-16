@@ -15,7 +15,7 @@ use reth_evm::{
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, SystemCaller},
-    ConfigureEvm,
+    ConfigureEvm, InitializeEvm,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::validate_block_post_execution;
@@ -78,6 +78,8 @@ where
     chain_spec: Arc<OpChainSpec>,
     /// How to create an EVM.
     evm_config: EvmConfig,
+    /// How to initialize an EVM.
+    evm_initializer: Box<dyn InitializeEvm>,
     /// Current state for block execution.
     state: State<DB>,
     /// Utility to call system smart contracts.
@@ -86,12 +88,18 @@ where
 
 impl<DB, EvmConfig> OpExecutionStrategy<DB, EvmConfig>
 where
-    EvmConfig: Clone,
+    EvmConfig: Clone + ConfigureEvm<Header = alloy_consensus::Header>,
 {
     /// Creates a new [`OpExecutionStrategy`]
     pub fn new(state: State<DB>, chain_spec: Arc<OpChainSpec>, evm_config: EvmConfig) -> Self {
         let system_caller = SystemCaller::new(evm_config.clone(), chain_spec.clone());
-        Self { state, chain_spec, evm_config, system_caller }
+        Self {
+            state,
+            chain_spec,
+            evm_config: evm_config.clone(),
+            system_caller,
+            evm_initializer: Box::new(evm_config),
+        }
     }
 }
 
@@ -118,6 +126,10 @@ where
     EvmConfig: ConfigureEvm<Header = alloy_consensus::Header>,
 {
     type Error = BlockExecutionError;
+
+    fn init(&mut self, evm_initializer: Box<dyn InitializeEvm>) {
+        self.evm_initializer = evm_initializer;
+    }
 
     fn apply_pre_execution_changes(
         &mut self,
@@ -195,7 +207,7 @@ where
                 .transpose()
                 .map_err(|_| OpBlockExecutionError::AccountLoadFailed(*sender))?;
 
-            self.evm_config.fill_tx_env(evm.tx_mut(), transaction, *sender);
+            self.evm_initializer.fill_tx_env(evm.tx_mut(), transaction, *sender);
 
             // Execute transaction.
             let result_and_state = evm.transact().map_err(move |err| {

@@ -25,7 +25,7 @@ use reth::{
 use reth_chainspec::{Chain, ChainSpec};
 use reth_evm_ethereum::EthEvmConfig;
 use reth_node_api::{
-    ConfigureEvm, ConfigureEvmEnv, FullNodeTypes, NextBlockEnvAttributes, NodeTypes,
+    ConfigureEvm, ConfigureEvmEnv, FullNodeTypes, InitializeEvm, NextBlockEnvAttributes, NodeTypes,
     NodeTypesWithEngine, PayloadTypes,
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
@@ -82,10 +82,7 @@ impl MyEvmConfig {
     }
 }
 
-impl ConfigureEvmEnv for MyEvmConfig {
-    type Header = Header;
-    type Error = Infallible;
-
+impl InitializeEvm for MyEvmConfig {
     fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
         self.inner.fill_tx_env(tx_env, transaction, sender);
     }
@@ -103,11 +100,16 @@ impl ConfigureEvmEnv for MyEvmConfig {
     fn fill_cfg_env(
         &self,
         cfg_env: &mut CfgEnvWithHandlerCfg,
-        header: &Self::Header,
+        header: &Header,
         total_difficulty: U256,
     ) {
         self.inner.fill_cfg_env(cfg_env, header, total_difficulty);
     }
+}
+
+impl ConfigureEvmEnv for MyEvmConfig {
+    type Header = Header;
+    type Error = Infallible;
 
     fn next_cfg_and_block_env(
         &self,

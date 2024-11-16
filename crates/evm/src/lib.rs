@@ -17,7 +17,6 @@
 
 extern crate alloc;
 
-use alloy_consensus::BlockHeader as _;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use reth_primitives::TransactionSigned;
 use reth_primitives_traits::BlockHeader;
@@ -113,7 +112,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
 ///
 /// Default trait method  implementation is done w.r.t. L1.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
+pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static + InitializeEvm {
     /// The header type used by the EVM.
     type Header: BlockHeader;
 
@@ -127,6 +126,34 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
         tx_env
     }
 
+    /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for `parent + 1` block.
+    ///
+    /// This is intended for usage in block building after the merge and requires additional
+    /// attributes that can't be derived from the parent block: attributes that are determined by
+    /// the CL, such as the timestamp, suggested fee recipient, and randomness value.
+    fn next_cfg_and_block_env(
+        &self,
+        parent: &Self::Header,
+        attributes: NextBlockEnvAttributes,
+    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), Self::Error>;
+}
+
+/// Represents additional attributes required to configure the next block.
+/// This is used to configure the next block's environment
+/// [`ConfigureEvmEnv::next_cfg_and_block_env`] and contains fields that can't be derived from the
+/// parent header alone (attributes that are determined by the CL.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NextBlockEnvAttributes {
+    /// The timestamp of the next block.
+    pub timestamp: u64,
+    /// The suggested fee recipient for the next block.
+    pub suggested_fee_recipient: Address,
+    /// The randomness value for the next block.
+    pub prev_randao: B256,
+}
+
+/// An object-safe subset of `ConfigureEvmEnv` focusing only on configuration.
+pub trait InitializeEvm<H: BlockHeader = alloy_consensus::Header>: Send + Sync {
     /// Fill transaction environment from a [`TransactionSigned`] and the given sender address.
     fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address);
 
@@ -143,15 +170,10 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     ///
     /// This must set the corresponding spec id in the handler cfg, based on timestamp or total
     /// difficulty
-    fn fill_cfg_env(
-        &self,
-        cfg_env: &mut CfgEnvWithHandlerCfg,
-        header: &Self::Header,
-        total_difficulty: U256,
-    );
+    fn fill_cfg_env(&self, cfg_env: &mut CfgEnvWithHandlerCfg, header: &H, total_difficulty: U256);
 
     /// Fill [`BlockEnv`] field according to the chain spec and given header
-    fn fill_block_env(&self, block_env: &mut BlockEnv, header: &Self::Header, after_merge: bool) {
+    fn fill_block_env(&self, block_env: &mut BlockEnv, header: &H, after_merge: bool) {
         block_env.number = U256::from(header.number());
         block_env.coinbase = header.beneficiary();
         block_env.timestamp = U256::from(header.timestamp());
@@ -179,36 +201,11 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,
         block_env: &mut BlockEnv,
-        header: &Self::Header,
+        header: &H,
         total_difficulty: U256,
     ) {
         self.fill_cfg_env(cfg, header, total_difficulty);
         let after_merge = cfg.handler_cfg.spec_id >= SpecId::MERGE;
         self.fill_block_env(block_env, header, after_merge);
     }
-
-    /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for `parent + 1` block.
-    ///
-    /// This is intended for usage in block building after the merge and requires additional
-    /// attributes that can't be derived from the parent block: attributes that are determined by
-    /// the CL, such as the timestamp, suggested fee recipient, and randomness value.
-    fn next_cfg_and_block_env(
-        &self,
-        parent: &Self::Header,
-        attributes: NextBlockEnvAttributes,
-    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), Self::Error>;
-}
-
-/// Represents additional attributes required to configure the next block.
-/// This is used to configure the next block's environment
-/// [`ConfigureEvmEnv::next_cfg_and_block_env`] and contains fields that can't be derived from the
-/// parent header alone (attributes that are determined by the CL.)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct NextBlockEnvAttributes {
-    /// The timestamp of the next block.
-    pub timestamp: u64,
-    /// The suggested fee recipient for the next block.
-    pub suggested_fee_recipient: Address,
-    /// The randomness value for the next block.
-    pub prev_randao: B256,
 }

@@ -6,9 +6,8 @@ pub use reth_execution_errors::{
 };
 pub use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
 pub use reth_storage_errors::provider::ProviderError;
-use revm::db::states::bundle_state::BundleRetention;
 
-use crate::system_calls::OnStateHook;
+use crate::{system_calls::OnStateHook, InitializeEvm};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::BlockNumber;
@@ -17,7 +16,10 @@ use reth_consensus::ConsensusError;
 use reth_primitives::{BlockWithSenders, Receipt};
 use reth_prune_types::PruneModes;
 use reth_revm::batch::BlockBatchRecord;
-use revm::{db::BundleState, State};
+use revm::{
+    db::{states::bundle_state::BundleRetention, BundleState},
+    State,
+};
 use revm_primitives::{db::Database, U256};
 
 /// A general purpose executor trait that executes an input (e.g. block) and produces an output
@@ -31,6 +33,9 @@ pub trait Executor<DB> {
     type Output;
     /// The error type returned by the executor.
     type Error;
+
+    /// Initialize the executor with the given EVM configurator.
+    fn init(&mut self, _evm_config: Box<dyn InitializeEvm>) {}
 
     /// Consumes the type and executes the block.
     ///
@@ -184,6 +189,9 @@ where
     /// The error type returned by this strategy's methods.
     type Error: From<ProviderError> + core::error::Error;
 
+    /// Initialize the strategy with the given EVM configurator.
+    fn init(&mut self, _evm_config: Box<dyn InitializeEvm>) {}
+
     /// Applies any necessary changes before executing the block's transactions.
     fn apply_pre_execution_changes(
         &mut self,
@@ -328,6 +336,10 @@ where
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
     type Output = BlockExecutionOutput<Receipt>;
     type Error = S::Error;
+
+    fn init(&mut self, evm_config: Box<dyn InitializeEvm>) {
+        self.strategy.init(evm_config);
+    }
 
     fn execute(mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
@@ -615,6 +627,8 @@ mod tests {
         DB: Database,
     {
         type Error = BlockExecutionError;
+
+        fn init(&mut self, _evm_config: Box<dyn InitializeEvm>) {}
 
         fn apply_pre_execution_changes(
             &mut self,

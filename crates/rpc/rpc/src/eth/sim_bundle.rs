@@ -9,7 +9,7 @@ use alloy_rpc_types_mev::{
 };
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthChainSpec;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
+use reth_evm::{ConfigureEvm, InitializeEvm};
 use reth_primitives::TransactionSigned;
 use reth_provider::{ChainSpecProvider, HeaderProvider};
 use reth_revm::database::StateProviderDatabase;

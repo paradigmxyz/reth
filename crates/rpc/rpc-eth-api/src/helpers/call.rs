@@ -17,7 +17,7 @@ use alloy_rpc_types_eth::{
 };
 use futures::Future;
 use reth_chainspec::EthChainSpec;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv, InitializeEvm};
 use reth_primitives::TransactionSigned;
 use reth_provider::{BlockIdReader, ChainSpecProvider, HeaderProvider};
 use reth_revm::{
