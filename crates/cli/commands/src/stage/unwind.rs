@@ -1,6 +1,6 @@
 //! Unwinding a certain block range
 
-use crate::common::{AccessRights, Environment, EnvironmentArgs};
+use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{BlockNumber, B256};
 use clap::{Parser, Subcommand};
@@ -13,7 +13,6 @@ use reth_db::DatabaseEnv;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
-use reth_node_builder::{NodeTypesWithDB, NodeTypesWithEngine};
 use reth_node_core::args::NetworkArgs;
 use reth_provider::{
     providers::ProviderNodeTypes, BlockExecutionWriter, BlockNumReader, ChainSpecProvider,
@@ -50,9 +49,7 @@ pub struct Command<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
     /// Execute `db stage unwind` command
-    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
-        self,
-    ) -> eyre::Result<()> {
+    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(self) -> eyre::Result<()> {
         let Environment { provider_factory, config, .. } = self.env.init::<N>(AccessRights::RW)?;
 
         let range = self.command.unwind_range(provider_factory.clone())?;
@@ -116,7 +113,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         Ok(())
     }
 
-    fn build_pipeline<N: NodeTypesWithDB<ChainSpec = C::ChainSpec>>(
+    fn build_pipeline<N: ProviderNodeTypes<ChainSpec = C::ChainSpec>>(
         self,
         config: Config,
         provider_factory: ProviderFactory<N>,

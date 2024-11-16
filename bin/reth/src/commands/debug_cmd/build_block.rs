@@ -15,24 +15,23 @@ use reth_blockchain_tree::{
 };
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
-use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
+use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
 use reth_consensus::Consensus;
 use reth_errors::RethResult;
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
-use reth_node_api::{
-    EngineApiMessageVersion, NodeTypesWithDB, NodeTypesWithEngine, PayloadBuilderAttributes,
-};
+use reth_node_api::{EngineApiMessageVersion, PayloadBuilderAttributes};
 use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider};
 use reth_primitives::{
     BlobTransaction, PooledTransactionsElement, SealedBlock, SealedBlockWithSenders, SealedHeader,
     Transaction, TransactionSigned,
 };
 use reth_provider::{
-    providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider,
-    ProviderFactory, StageCheckpointReader, StateProviderFactory,
+    providers::{BlockchainProvider, ProviderNodeTypes},
+    BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider, ProviderFactory,
+    StageCheckpointReader, StateProviderFactory,
 };
 use reth_revm::{
     cached::CachedReads,
@@ -88,7 +87,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Fetches the best block block from the database.
     ///
     /// If the database is empty, returns the genesis block.
-    fn lookup_best_block<N: NodeTypesWithDB<ChainSpec = C::ChainSpec>>(
+    fn lookup_best_block<N: ProviderNodeTypes<ChainSpec = C::ChainSpec>>(
         &self,
         factory: ProviderFactory<N>,
     ) -> RethResult<Arc<SealedBlock>> {
@@ -123,7 +122,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     }
 
     /// Execute `debug in-memory-merkle` command
-    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
         self,
         ctx: CliContext,
     ) -> eyre::Result<()> {
