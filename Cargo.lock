@@ -7800,6 +7800,7 @@ dependencies = [
  "reth-dns-discovery",
  "reth-ecies",
  "reth-eth-wire",
+ "reth-eth-wire-types",
  "reth-fs-util",
  "reth-metrics",
  "reth-net-banlist",

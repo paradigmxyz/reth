@@ -14,7 +14,9 @@
 
 use chainspec::{boot_nodes, bsc_chain_spec};
 use reth_discv4::Discv4ConfigBuilder;
-use reth_network::{NetworkConfig, NetworkEvent, NetworkEventListenerProvider, NetworkManager};
+use reth_network::{
+    EthNetworkPrimitives, NetworkConfig, NetworkEvent, NetworkEventListenerProvider, NetworkManager,
+};
 use reth_network_api::PeersInfo;
 use reth_primitives::{ForkHash, ForkId};
 use reth_tracing::{
@@ -62,7 +64,7 @@ async fn main() {
     // latest BSC forkId, we need to override this to allow connections from BSC nodes
     let fork_id = ForkId { hash: ForkHash([0x07, 0xb5, 0x43, 0x28]), next: 0 };
     net_cfg.fork_filter.set_current_fork_id(fork_id);
-    let net_manager = NetworkManager::new(net_cfg).await.unwrap();
+    let net_manager = NetworkManager::<EthNetworkPrimitives>::new(net_cfg).await.unwrap();
 
     // The network handle is our entrypoint into the network.
     let net_handle = net_manager.handle().clone();
