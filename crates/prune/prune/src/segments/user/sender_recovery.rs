@@ -123,7 +123,7 @@ mod tests {
 
         assert_eq!(
             db.table::<tables::Transactions>().unwrap().len(),
-            blocks.iter().map(|block| block.body.transactions.len()).sum::<usize>()
+            blocks.iter().map(|block| block.body.transactions.len()).sum()
         );
         assert_eq!(
             db.table::<tables::Transactions>().unwrap().len(),

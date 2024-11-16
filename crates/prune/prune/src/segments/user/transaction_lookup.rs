@@ -150,7 +150,7 @@ mod tests {
 
         assert_eq!(
             db.table::<tables::Transactions>().unwrap().len(),
-            blocks.iter().map(|block| block.body.transactions.len()).sum::<usize>()
+            blocks.iter().map(|block| block.body.transactions.len()).sum()
         );
         assert_eq!(
             db.table::<tables::Transactions>().unwrap().len(),
@@ -186,7 +186,7 @@ mod tests {
                 .iter()
                 .take(to_block as usize)
                 .map(|block| block.body.transactions.len())
-                .sum::<usize>()
+                .sum()
                 .min(
                     next_tx_number_to_prune as usize +
                         input.limiter.deleted_entries_limit().unwrap(),

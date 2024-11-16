@@ -400,7 +400,7 @@ mod tests {
                         blocks[..=max_pruned_block as usize]
                             .iter()
                             .map(|block| block.body.transactions.len() as u64)
-                            .sum::<u64>()
+                            .sum()
                             .sub(1), // `TxNumber` is 0-indexed
                     ),
                     prune_mode: PruneMode::Full,
@@ -416,8 +416,8 @@ mod tests {
                 processed: blocks[..=max_processed_block]
                     .iter()
                     .map(|block| block.body.transactions.len() as u64)
-                    .sum::<u64>(),
-                total: blocks.iter().map(|block| block.body.transactions.len() as u64).sum::<u64>()
+                    .sum(),
+                total: blocks.iter().map(|block| block.body.transactions.len() as u64).sum()
             }
         );
     }
