@@ -6,6 +6,7 @@ use crate::{
     execute::{BatchExecutor, BlockExecutorProvider, Executor},
     system_calls::OnStateHook,
 };
+use alloc::boxed::Box;
 use alloy_primitives::BlockNumber;
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
