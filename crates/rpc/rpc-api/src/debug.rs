@@ -399,10 +399,10 @@ pub trait DebugExecutionWitnessApi<Attributes> {
     /// hashed trie nodes to their preimages that were required during the execution of the block,
     /// including during state root recomputation.
     ///
-    /// The first argument is the block number or block hash. The second argument is the payload
-    /// attributes for the new block. The third argument is a list of transactions to be included.
-    #[method(name = "executePayload")]
-    async fn execute_payload(
+    /// The first argument is the parent block hash. The second argument is the payload
+    /// attributes for the new block.
+    #[method(name = "executePayload", blocking)]
+    fn execute_payload(
         &self,
         parent_block_hash: B256,
         attributes: Attributes,

@@ -6,7 +6,6 @@ use eyre::Result;
 use reth_db::{tables, DatabaseEnv};
 use reth_db_api::{database::Database, table::TableImporter};
 use reth_db_common::DbTool;
-use reth_node_builder::NodeTypesWithDBAdapter;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::{
     providers::{ProviderNodeTypes, StaticFileProvider},
@@ -15,7 +14,7 @@ use reth_provider::{
 use reth_stages::{stages::AccountHashingStage, Stage, StageCheckpoint, UnwindInput};
 use tracing::info;
 
-pub(crate) async fn dump_hashing_account_stage<N: ProviderNodeTypes>(
+pub(crate) async fn dump_hashing_account_stage<N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>>(
     db_tool: &DbTool<N>,
     from: BlockNumber,
     to: BlockNumber,
@@ -37,7 +36,7 @@ pub(crate) async fn dump_hashing_account_stage<N: ProviderNodeTypes>(
 
     if should_run {
         dry_run(
-            ProviderFactory::<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>::new(
+            ProviderFactory::<N>::new(
                 Arc::new(output_db),
                 db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,

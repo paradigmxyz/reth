@@ -15,21 +15,22 @@ use reth_execution_types::ExecutionOutcome;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_forks::OpHardforks;
-use reth_payload_primitives::{PayloadBuilderAttributes, PayloadBuilderError};
-use reth_primitives::{
-    proofs,
-    revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-    Block, BlockBody, Receipt, SealedHeader, TransactionSigned, TxType,
-};
+use reth_payload_builder_primitives::PayloadBuilderError;
+use reth_payload_primitives::PayloadBuilderAttributes;
+use reth_payload_util::PayloadTransactions;
+use reth_primitives::{proofs, Block, BlockBody, Receipt, SealedHeader, TransactionSigned, TxType};
 use reth_provider::{ProviderError, StateProofProvider, StateProviderFactory, StateRootProvider};
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{
-    noop::NoopTransactionPool, BestTransactionsAttributes, PayloadTransactions, TransactionPool,
+    noop::NoopTransactionPool, BestTransactionsAttributes, TransactionPool,
 };
 use reth_trie::HashedPostState;
 use revm::{
     db::{states::bundle_state::BundleRetention, State},
-    primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState, TxEnv},
+    primitives::{
+        BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, InvalidTransaction,
+        ResultAndState, TxEnv,
+    },
     Database, DatabaseCommit,
 };
 use tracing::{debug, trace, warn};
@@ -39,6 +40,7 @@ use crate::{
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
 };
 use op_alloy_consensus::DepositTransaction;
+use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_revm::witness::ExecutionWitnessRecord;
 use reth_transaction_pool::pool::BestPayloadTransactions;
 
@@ -94,21 +96,6 @@ where
     EvmConfig: ConfigureEvm<Header = Header>,
     Txs: OpPayloadTransactions,
 {
-    /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the targeted payload
-    /// (that has the `parent` as its parent).
-    pub fn cfg_and_block_env(
-        &self,
-        config: &PayloadConfig<OpPayloadBuilderAttributes>,
-        parent: &Header,
-    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), EvmConfig::Error> {
-        let next_attributes = NextBlockEnvAttributes {
-            timestamp: config.attributes.timestamp(),
-            suggested_fee_recipient: config.attributes.suggested_fee_recipient(),
-            prev_randao: config.attributes.prev_randao(),
-        };
-        self.evm_config.next_cfg_and_block_env(parent, next_attributes)
-    }
-
     /// Constructs an Optimism payload from the transactions sent via the
     /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
     /// the payload attributes, the transaction pool will be ignored and the only transactions
@@ -126,7 +113,7 @@ where
         Pool: TransactionPool,
     {
         let (initialized_cfg, initialized_block_env) = self
-            .cfg_and_block_env(&args.config, &args.config.parent_header)
+            .cfg_and_block_env(&args.config.attributes, &args.config.parent_header)
             .map_err(PayloadBuilderError::other)?;
 
         let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
@@ -158,6 +145,65 @@ where
             builder.build(db, ctx)
         }
         .map(|out| out.with_cached_reads(cached_reads))
+    }
+}
+
+impl<EvmConfig, Txs> OpPayloadBuilder<EvmConfig, Txs>
+where
+    EvmConfig: ConfigureEvm<Header = Header>,
+{
+    /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the targeted payload
+    /// (that has the `parent` as its parent).
+    pub fn cfg_and_block_env(
+        &self,
+        attributes: &OpPayloadBuilderAttributes,
+        parent: &Header,
+    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), EvmConfig::Error> {
+        let next_attributes = NextBlockEnvAttributes {
+            timestamp: attributes.timestamp(),
+            suggested_fee_recipient: attributes.suggested_fee_recipient(),
+            prev_randao: attributes.prev_randao(),
+        };
+        self.evm_config.next_cfg_and_block_env(parent, next_attributes)
+    }
+
+    /// Computes the witness for the payload.
+    pub fn payload_witness<Client>(
+        &self,
+        client: &Client,
+        parent: SealedHeader,
+        attributes: OpPayloadAttributes,
+    ) -> Result<ExecutionWitness, PayloadBuilderError>
+    where
+        Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
+    {
+        let attributes = OpPayloadBuilderAttributes::try_new(parent.hash(), attributes, 3)
+            .map_err(PayloadBuilderError::other)?;
+
+        let (initialized_cfg, initialized_block_env) =
+            self.cfg_and_block_env(&attributes, &parent).map_err(PayloadBuilderError::other)?;
+
+        let config = PayloadConfig {
+            parent_header: Arc::new(parent),
+            attributes,
+            extra_data: Default::default(),
+        };
+        let ctx = OpPayloadBuilderCtx {
+            evm_config: self.evm_config.clone(),
+            chain_spec: client.chain_spec(),
+            config,
+            initialized_cfg,
+            initialized_block_env,
+            cancel: Default::default(),
+            best_payload: Default::default(),
+        };
+
+        let state_provider = client.state_by_block_hash(ctx.parent().hash())?;
+        let state = StateProviderDatabase::new(state_provider);
+        let mut state = State::builder().with_database(state).with_bundle_update().build();
+
+        let builder = OpBuilder { pool: NoopTransactionPool::default(), best: () };
+        builder.witness(&mut state, &ctx)
     }
 }
 

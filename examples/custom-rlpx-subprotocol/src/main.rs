@@ -14,8 +14,8 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
 use reth::builder::NodeHandle;
 use reth_network::{
-    config::SecretKey, protocol::IntoRlpxSubProtocol, NetworkConfig, NetworkManager,
-    NetworkProtocols,
+    config::SecretKey, protocol::IntoRlpxSubProtocol, EthNetworkPrimitives, NetworkConfig,
+    NetworkManager, NetworkProtocols,
 };
 use reth_network_api::{test_utils::PeersHandleProvider, NetworkInfo};
 use reth_node_ethereum::EthereumNode;
@@ -53,7 +53,7 @@ fn main() -> eyre::Result<()> {
             .build_with_noop_provider(node.chain_spec());
 
         // spawn the second network instance
-        let subnetwork = NetworkManager::new(net_cfg).await?;
+        let subnetwork = NetworkManager::<EthNetworkPrimitives>::new(net_cfg).await?;
         let subnetwork_peer_id = *subnetwork.peer_id();
         let subnetwork_peer_addr = subnetwork.local_addr();
         let subnetwork_handle = subnetwork.peers_handle();

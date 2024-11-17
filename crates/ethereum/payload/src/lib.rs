@@ -23,10 +23,10 @@ use reth_evm::{system_calls::SystemCaller, ConfigureEvm, NextBlockEnvAttributes}
 use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
-use reth_payload_primitives::{PayloadBuilderAttributes, PayloadBuilderError};
+use reth_payload_builder_primitives::PayloadBuilderError;
+use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_primitives::{
     proofs::{self},
-    revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
     Block, BlockBody, EthereumHardforks, Receipt,
 };
 use reth_provider::{ChainSpecProvider, StateProviderFactory};
@@ -38,10 +38,12 @@ use reth_transaction_pool::{
 use reth_trie::HashedPostState;
 use revm::{
     db::{states::bundle_state::BundleRetention, State},
-    primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
+    primitives::{
+        calc_excess_blob_gas, BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg,
+        InvalidTransaction, ResultAndState, TxEnv,
+    },
     DatabaseCommit,
 };
-use revm_primitives::{calc_excess_blob_gas, TxEnv};
 use std::sync::Arc;
 use tracing::{debug, trace, warn};
 
@@ -395,9 +397,11 @@ where
     // only determine cancun fields when active
     if chain_spec.is_cancun_active_at_timestamp(attributes.timestamp) {
         // grab the blob sidecars from the executed txs
-        blob_sidecars = pool.get_all_blobs_exact(
-            executed_txs.iter().filter(|tx| tx.is_eip4844()).map(|tx| tx.hash).collect(),
-        )?;
+        blob_sidecars = pool
+            .get_all_blobs_exact(
+                executed_txs.iter().filter(|tx| tx.is_eip4844()).map(|tx| tx.hash).collect(),
+            )
+            .map_err(PayloadBuilderError::other)?;
 
         excess_blob_gas = if chain_spec.is_cancun_active_at_timestamp(parent_header.timestamp) {
             let parent_excess_blob_gas = parent_header.excess_blob_gas.unwrap_or_default();

@@ -46,7 +46,9 @@
 //!
 //! ```
 //! # async fn launch() {
-//! use reth_network::{config::rng_secret_key, NetworkConfig, NetworkManager};
+//! use reth_network::{
+//!     config::rng_secret_key, EthNetworkPrimitives, NetworkConfig, NetworkManager,
+//! };
 //! use reth_network_peers::mainnet_nodes;
 //! use reth_provider::test_utils::NoopProvider;
 //!
@@ -59,7 +61,7 @@
 //! let config = NetworkConfig::builder(local_key).boot_nodes(mainnet_nodes()).build(client);
 //!
 //! // create the network instance
-//! let network = NetworkManager::new(config).await.unwrap();
+//! let network = NetworkManager::<EthNetworkPrimitives>::new(config).await.unwrap();
 //!
 //! // keep a handle to the network and spawn it
 //! let handle = network.handle().clone();
@@ -138,6 +140,7 @@ mod state;
 mod swarm;
 
 pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};
+pub use reth_eth_wire_types::{EthNetworkPrimitives, NetworkPrimitives};
 pub use reth_network_api::{
     BlockDownloaderProvider, DiscoveredEvent, DiscoveryEvent, NetworkEvent,
     NetworkEventListenerProvider, NetworkInfo, PeerRequest, PeerRequestSender, Peers, PeersInfo,

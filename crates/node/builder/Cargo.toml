@@ -41,7 +41,6 @@ reth-node-core.workspace = true
 reth-node-events.workspace = true
 reth-node-metrics.workspace = true
 reth-payload-builder.workspace = true
-reth-payload-primitives.workspace = true
 reth-payload-validator.workspace = true
 reth-primitives.workspace = true
 reth-provider.workspace = true
@@ -63,6 +62,7 @@ reth-transaction-pool.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types = { workspace = true, features = ["engine"] }
 alloy-consensus.workspace = true
+revm-primitives.workspace = true
 
 ## async
 futures.workspace = true

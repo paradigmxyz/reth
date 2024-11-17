@@ -1107,7 +1107,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         };
 
         if static_file_upper_bound
-            .map_or(false, |static_file_upper_bound| static_file_upper_bound >= number)
+            .is_some_and(|static_file_upper_bound| static_file_upper_bound >= number)
         {
             return fetch_from_static_file(self)
         }
