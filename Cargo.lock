@@ -8479,15 +8479,10 @@ dependencies = [
 name = "reth-payload-builder-primitives"
 version = "1.1.1"
 dependencies = [
- "alloy-primitives",
  "alloy-rpc-types-engine",
  "async-trait",
  "pin-project",
- "reth-errors",
  "reth-payload-primitives",
- "reth-transaction-pool",
- "revm-primitives",
- "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -8503,9 +8498,12 @@ dependencies = [
  "op-alloy-rpc-types-engine",
  "reth-chain-state",
  "reth-chainspec",
+ "reth-errors",
  "reth-primitives",
+ "revm-primitives",
  "serde",
  "thiserror 1.0.69",
+ "tokio",
 ]
 
 [[package]]
