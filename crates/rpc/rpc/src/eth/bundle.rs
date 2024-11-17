@@ -1,31 +1,26 @@
 //! `Eth` bundle implementation and helpers.
 
-use std::sync::Arc;
-
 use alloy_primitives::{Keccak256, U256};
 use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
-use reth_primitives::{
-    revm_primitives::db::{DatabaseCommit, DatabaseRef},
-    PooledTransactionsElement,
-};
+use reth_primitives::PooledTransactionsElement;
+use reth_provider::{ChainSpecProvider, HeaderProvider};
 use reth_revm::database::StateProviderDatabase;
-use reth_rpc_eth_api::{FromEthApiError, FromEvmError, RpcNodeCore};
+use reth_rpc_eth_api::{
+    helpers::{Call, EthTransactions, LoadPendingBlock},
+    EthCallBundleApiServer, FromEthApiError, FromEvmError, RpcNodeCore,
+};
+use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError, RpcInvalidTransactionError};
 use reth_tasks::pool::BlockingTaskGuard;
 use revm::{
-    db::CacheDB,
+    db::{CacheDB, DatabaseCommit, DatabaseRef},
     primitives::{ResultAndState, TxEnv},
 };
 use revm_primitives::{EnvKzgSettings, EnvWithHandlerCfg, SpecId, MAX_BLOB_GAS_PER_BLOCK};
+use std::sync::Arc;
 
-use reth_provider::{ChainSpecProvider, HeaderProvider};
-use reth_rpc_eth_api::{
-    helpers::{Call, EthTransactions, LoadPendingBlock},
-    EthCallBundleApiServer,
-};
-use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError, RpcInvalidTransactionError};
 /// `Eth` bundle implementation.
 pub struct EthBundle<Eth> {
     /// All nested fields bundled together.
@@ -106,7 +101,7 @@ where
             .into())
         }
 
-        let block_id: alloy_rpc_types::BlockId = state_block_number.into();
+        let block_id: alloy_rpc_types_eth::BlockId = state_block_number.into();
         // Note: the block number is considered the `parent` block: <https://github.com/flashbots/mev-geth/blob/fddf97beec5877483f879a77b7dea2e58a58d653/internal/ethapi/api.go#L2104>
         let (cfg, mut block_env, at) = self.eth_api().evm_env_at(block_id).await?;
 
@@ -156,7 +151,8 @@ where
                 let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, TxEnv::default());
                 let db = CacheDB::new(StateProviderDatabase::new(state));
 
-                let initial_coinbase = DatabaseRef::basic_ref(&db, coinbase)
+                let initial_coinbase = db
+                    .basic_ref(coinbase)
                     .map_err(Eth::Error::from_eth_err)?
                     .map(|acc| acc.balance)
                     .unwrap_or_default();
@@ -166,7 +162,7 @@ where
                 let mut total_gas_fess = U256::ZERO;
                 let mut hasher = Keccak256::new();
 
-                let mut evm = RpcNodeCore::evm_config(&eth_api).evm_with_env(db, env);
+                let mut evm = eth_api.evm_config().evm_with_env(db, env);
 
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut transactions = transactions.into_iter().peekable();
@@ -187,7 +183,7 @@ where
                         .effective_tip_per_gas(basefee)
                         .ok_or_else(|| RpcInvalidTransactionError::FeeCapTooLow)
                         .map_err(Eth::Error::from_eth_err)?;
-                    RpcNodeCore::evm_config(&eth_api).fill_tx_env(evm.tx_mut(), &tx, signer);
+                    eth_api.evm_config().fill_tx_env(evm.tx_mut(), &tx, signer);
                     let ResultAndState { result, state } =
                         evm.transact().map_err(Eth::Error::from_evm_err)?;
 

@@ -99,13 +99,13 @@ pub trait BlockIdReader: BlockNumReader + Send + Sync {
     }
 
     /// Get the current pending block number and hash.
-    fn pending_block_num_hash(&self) -> ProviderResult<Option<reth_primitives::BlockNumHash>>;
+    fn pending_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>>;
 
     /// Get the current safe block number and hash.
-    fn safe_block_num_hash(&self) -> ProviderResult<Option<reth_primitives::BlockNumHash>>;
+    fn safe_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>>;
 
     /// Get the current finalized block number and hash.
-    fn finalized_block_num_hash(&self) -> ProviderResult<Option<reth_primitives::BlockNumHash>>;
+    fn finalized_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>>;
 
     /// Get the safe block number.
     fn safe_block_number(&self) -> ProviderResult<Option<BlockNumber>> {

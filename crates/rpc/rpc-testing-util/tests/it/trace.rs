@@ -1,7 +1,7 @@
 //! Integration tests for the trace API.
 
 use alloy_primitives::map::HashSet;
-use alloy_rpc_types::{Block, Transaction};
+use alloy_rpc_types_eth::{Block, Transaction};
 use alloy_rpc_types_trace::{
     filter::TraceFilter, parity::TraceType, tracerequest::TraceCallRequest,
 };

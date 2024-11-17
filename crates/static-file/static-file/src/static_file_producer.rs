@@ -10,7 +10,7 @@ use reth_provider::{
 };
 use reth_prune_types::PruneModes;
 use reth_stages_types::StageId;
-use reth_static_file_types::HighestStaticFiles;
+use reth_static_file_types::{HighestStaticFiles, StaticFileTargets};
 use reth_storage_errors::provider::ProviderResult;
 use reth_tokio_util::{EventSender, EventStream};
 use std::{
@@ -66,40 +66,6 @@ pub struct StaticFileProducerInner<Provider> {
     event_sender: EventSender<StaticFileProducerEvent>,
 }
 
-/// Static File targets, per data segment, measured in [`BlockNumber`].
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct StaticFileTargets {
-    headers: Option<RangeInclusive<BlockNumber>>,
-    receipts: Option<RangeInclusive<BlockNumber>>,
-    transactions: Option<RangeInclusive<BlockNumber>>,
-}
-
-impl StaticFileTargets {
-    /// Returns `true` if any of the targets are [Some].
-    pub const fn any(&self) -> bool {
-        self.headers.is_some() || self.receipts.is_some() || self.transactions.is_some()
-    }
-
-    // Returns `true` if all targets are either [`None`] or has beginning of the range equal to the
-    // highest static_file.
-    fn is_contiguous_to_highest_static_files(&self, static_files: HighestStaticFiles) -> bool {
-        [
-            (self.headers.as_ref(), static_files.headers),
-            (self.receipts.as_ref(), static_files.receipts),
-            (self.transactions.as_ref(), static_files.transactions),
-        ]
-        .iter()
-        .all(|(target_block_range, highest_static_fileted_block)| {
-            target_block_range.map_or(true, |target_block_range| {
-                *target_block_range.start() ==
-                    highest_static_fileted_block.map_or(0, |highest_static_fileted_block| {
-                        highest_static_fileted_block + 1
-                    })
-            })
-        })
-    }
-}
-
 impl<Provider> StaticFileProducerInner<Provider> {
     fn new(provider: Provider, prune_modes: PruneModes) -> Self {
         Self { provider, prune_modes, event_sender: Default::default() }
@@ -119,7 +85,9 @@ where
 impl<Provider> StaticFileProducerInner<Provider>
 where
     Provider: StaticFileProviderFactory
-        + DatabaseProviderFactory<Provider: StageCheckpointReader + BlockReader>,
+        + DatabaseProviderFactory<
+            Provider: StaticFileProviderFactory + StageCheckpointReader + BlockReader,
+        >,
 {
     /// Listen for events on the `static_file_producer`.
     pub fn events(&self) -> EventStream<StaticFileProducerEvent> {
@@ -170,7 +138,7 @@ where
             // Create a new database transaction on every segment to prevent long-lived read-only
             // transactions
             let provider = self.provider.database_provider_ro()?.disable_long_read_transaction_safety();
-            segment.copy_to_static_files(provider, self.provider.static_file_provider(), block_range.clone())?;
+            segment.copy_to_static_files(provider,  block_range.clone())?;
 
             let elapsed = start.elapsed(); // TODO(alexey): track in metrics
             debug!(target: "static_file", segment = %segment.segment(), ?block_range, ?elapsed, "Finished StaticFileProducer segment");

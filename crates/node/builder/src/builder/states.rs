@@ -5,16 +5,6 @@
 //! The node builder process is essentially a state machine that transitions through various states
 //! before the node can be launched.
 
-use std::{fmt, future::Future};
-
-use reth_exex::ExExContext;
-use reth_node_api::{
-    FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes, NodeTypesWithDB, NodeTypesWithEngine,
-};
-use reth_node_core::node_config::NodeConfig;
-use reth_payload_builder::PayloadBuilderHandle;
-use reth_tasks::TaskExecutor;
-
 use crate::{
     components::{NodeComponents, NodeComponentsBuilder},
     hooks::NodeHooks,
@@ -22,6 +12,13 @@ use crate::{
     rpc::{RethRpcAddOns, RethRpcServerHandles, RpcContext},
     AddOns, FullNode,
 };
+use reth_exex::ExExContext;
+use reth_node_api::{
+    FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes, NodeTypesWithDB, PayloadBuilder,
+};
+use reth_node_core::node_config::NodeConfig;
+use reth_tasks::TaskExecutor;
+use std::{fmt, future::Future};
 
 /// A node builder that also has the configured types.
 pub struct NodeBuilderWithTypes<T: FullNodeTypes> {
@@ -91,12 +88,16 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeTypes for NodeAdapter<T, C>
     type Provider = T::Provider;
 }
 
-impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<T, C> {
+impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<T, C>
+where
+    C::PayloadBuilder: PayloadBuilder,
+{
     type Pool = C::Pool;
     type Evm = C::Evm;
     type Executor = C::Executor;
     type Consensus = C::Consensus;
     type Network = C::Network;
+    type PayloadBuilder = C::PayloadBuilder;
 
     fn pool(&self) -> &Self::Pool {
         self.components.pool()
@@ -118,7 +119,7 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<
         self.components.network()
     }
 
-    fn payload_builder(&self) -> &PayloadBuilderHandle<<T::Types as NodeTypesWithEngine>::Engine> {
+    fn payload_builder(&self) -> &Self::PayloadBuilder {
         self.components.payload_builder()
     }
 

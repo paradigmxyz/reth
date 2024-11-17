@@ -1,5 +1,6 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD;
-use alloy_primitives::{BlockNumber, Sealable};
+use alloy_consensus::Header;
+use alloy_primitives::BlockNumber;
 use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
 use reth_db::{static_file::HeaderMask, tables};
@@ -8,16 +9,16 @@ use reth_evm::{
     execute::{BatchExecutor, BlockExecutorProvider},
     metrics::ExecutorMetrics,
 };
-use reth_execution_types::{Chain, ExecutionOutcome};
+use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
-use reth_primitives::{Header, SealedHeader, StaticFileSegment};
-use reth_primitives_traits::format_gas_throughput;
+use reth_primitives::{SealedHeader, StaticFileSegment};
+use reth_primitives_traits::{format_gas_throughput, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
     writer::UnifiedStorageWriter,
-    BlockReader, DBProvider, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
-    ProviderError, StateChangeWriter, StateWriter, StaticFileProviderFactory, StatsReader,
-    TransactionVariant,
+    BlockHashReader, BlockReader, DBProvider, HeaderProvider, LatestStateProviderRef,
+    OriginalValuesKnown, ProviderError, StateChangeWriter, StateWriter, StaticFileProviderFactory,
+    StatsReader, TransactionVariant,
 };
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
@@ -174,9 +175,14 @@ impl<E> ExecutionStage<E> {
 impl<E, Provider> Stage<Provider> for ExecutionStage<E>
 where
     E: BlockExecutorProvider,
-    Provider:
-        DBProvider + BlockReader + StaticFileProviderFactory + StatsReader + StateChangeWriter,
-    for<'a> UnifiedStorageWriter<'a, Provider, StaticFileProviderRWRefMut<'a>>: StateWriter,
+    Provider: DBProvider
+        + BlockReader
+        + StaticFileProviderFactory
+        + StatsReader
+        + StateChangeWriter
+        + BlockHashReader,
+    for<'a> UnifiedStorageWriter<'a, Provider, StaticFileProviderRWRefMut<'a, Provider::Primitives>>:
+        StateWriter,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -219,10 +225,7 @@ where
             None
         };
 
-        let db = StateProviderDatabase(LatestStateProviderRef::new(
-            provider.tx_ref(),
-            provider.static_file_provider(),
-        ));
+        let db = StateProviderDatabase(LatestStateProviderRef::new(provider));
         let mut executor = self.executor_provider.batch_executor(db);
         executor.set_tip(max_block);
         executor.set_prune_modes(prune_modes);
@@ -276,11 +279,8 @@ where
             let execute_start = Instant::now();
 
             self.metrics.metered_one((&block, td).into(), |input| {
-                let sealed = block.header.clone().seal_slow();
-                let (header, seal) = sealed.into_parts();
-
                 executor.execute_and_verify_one(input).map_err(|error| StageError::Block {
-                    block: Box::new(SealedHeader::new(header, seal)),
+                    block: Box::new(SealedHeader::seal(block.header.clone())),
                     error: BlockErrorKind::Execution(error),
                 })
             })?;
@@ -325,8 +325,7 @@ where
 
         // prepare execution output for writing
         let time = Instant::now();
-        let ExecutionOutcome { bundle, receipts, requests, first_block } = executor.finalize();
-        let state = ExecutionOutcome::new(bundle, receipts, first_block, requests);
+        let state = executor.finalize();
         let write_preparation_duration = time.elapsed();
 
         // log the gas per second for the range we just executed
@@ -487,8 +486,8 @@ where
     }
 }
 
-fn execution_checkpoint(
-    provider: &StaticFileProvider,
+fn execution_checkpoint<N: NodePrimitives>(
+    provider: &StaticFileProvider<N>,
     start_block: BlockNumber,
     max_block: BlockNumber,
     checkpoint: StageCheckpoint,
@@ -554,8 +553,8 @@ fn execution_checkpoint(
     })
 }
 
-fn calculate_gas_used_from_headers(
-    provider: &StaticFileProvider,
+fn calculate_gas_used_from_headers<N: NodePrimitives>(
+    provider: &StaticFileProvider<N>,
     range: RangeInclusive<BlockNumber>,
 ) -> Result<u64, ProviderError> {
     debug!(target: "sync::stages::execution", ?range, "Calculating gas used from headers");
@@ -589,11 +588,11 @@ fn calculate_gas_used_from_headers(
 /// (by returning [`StageError`]) until the heights in both the database and static file match.
 fn prepare_static_file_producer<'a, 'b, Provider>(
     provider: &'b Provider,
-    static_file_provider: &'a StaticFileProvider,
+    static_file_provider: &'a StaticFileProvider<Provider::Primitives>,
     start_block: u64,
-) -> Result<StaticFileProviderRWRefMut<'a>, StageError>
+) -> Result<StaticFileProviderRWRefMut<'a, Provider::Primitives>, StageError>
 where
-    Provider: DBProvider + BlockReader + HeaderProvider,
+    Provider: StaticFileProviderFactory + DBProvider + BlockReader + HeaderProvider,
     'b: 'a,
 {
     // Get next expected receipt number

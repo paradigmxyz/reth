@@ -85,12 +85,11 @@ mod tests {
             nonce: 1,
         }
         .into_signed(
-            alloy_primitives::Signature::from_rs_and_parity(
+            alloy_primitives::PrimitiveSignature::new(
                 b256!("1fd474b1f9404c0c5df43b7620119ffbc3a1c3f942c73b6e14e9f55255ed9b1d").into(),
                 b256!("29aca24813279a901ec13b5f7bb53385fa1fc627b946592221417ff74a49600d").into(),
                 false,
             )
-            .unwrap(),
         );
         let mut compacted_authorization = Vec::<u8>::new();
         let len = authorization.to_compact(&mut compacted_authorization);

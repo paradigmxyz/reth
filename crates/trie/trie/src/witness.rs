@@ -292,7 +292,7 @@ where
         let mut keys = trie_nodes.keys().peekable();
         let mut ignored = HashSet::<Nibbles>::default();
         while let Some(key) = keys.next() {
-            if keys.peek().map_or(false, |next| next.starts_with(key)) {
+            if keys.peek().is_some_and(|next| next.starts_with(key)) {
                 ignored.insert(key.clone());
             }
         }
@@ -306,7 +306,7 @@ where
                     if hash_builder.key.starts_with(&parent_branch_path) ||
                         trie_nodes
                             .peek()
-                            .map_or(false, |next| next.0.starts_with(&parent_branch_path))
+                            .is_some_and(|next| next.0.starts_with(&parent_branch_path))
                     {
                         hash_builder.add_branch(path, branch_hash, false);
                     } else {

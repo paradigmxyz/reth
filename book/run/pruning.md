@@ -18,7 +18,7 @@ the steps for running Reth as a full node, what caveats to expect and how to con
 - Full Node – Reth node that has the latest state and historical data for only the last 10064 blocks available
   for querying in the same way as an archive node.
 
-The node type that was chosen when first [running a node](./run-a-node.md) **can not** be changed after
+The node type that was chosen when first [running a node](./run-a-node.md) **cannot** be changed after
 the initial sync. Turning Archive into Pruned, or Pruned into Full is not supported.
 
 ## Modes

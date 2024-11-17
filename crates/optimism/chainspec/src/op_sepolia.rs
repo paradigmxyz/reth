@@ -7,7 +7,7 @@ use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT;
 use alloy_primitives::{b256, U256};
 use reth_chainspec::{once_cell_set, BaseFeeParams, BaseFeeParamsKind, ChainSpec};
 use reth_ethereum_forks::EthereumHardfork;
-use reth_optimism_forks::OptimismHardfork;
+use reth_optimism_forks::OpHardfork;
 
 use crate::{LazyLock, OpChainSpec};
 
@@ -22,11 +22,11 @@ pub static OP_SEPOLIA: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
                 "102de6ffb001480cc9b8b548fd05c34cd4f46ae4aa91759393db90ea0409887d"
             )),
             paris_block_and_final_difficulty: Some((0, U256::from(0))),
-            hardforks: OptimismHardfork::op_sepolia(),
+            hardforks: OpHardfork::op_sepolia(),
             base_fee_params: BaseFeeParamsKind::Variable(
                 vec![
                     (EthereumHardfork::London.boxed(), BaseFeeParams::optimism_sepolia()),
-                    (OptimismHardfork::Canyon.boxed(), BaseFeeParams::optimism_sepolia_canyon()),
+                    (OpHardfork::Canyon.boxed(), BaseFeeParams::optimism_sepolia_canyon()),
                 ]
                 .into(),
             ),

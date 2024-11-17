@@ -1,3 +1,4 @@
+use alloy_consensus::Header;
 use alloy_primitives::{hex, BlockHash};
 use clap::Parser;
 use reth_db::{
@@ -7,7 +8,6 @@ use reth_db::{
 use reth_db_api::table::{Decompress, DupSort, Table};
 use reth_db_common::DbTool;
 use reth_node_builder::NodeTypesWithDB;
-use reth_primitives::Header;
 use reth_provider::{providers::ProviderNodeTypes, StaticFileProviderFactory};
 use reth_static_file_types::StaticFileSegment;
 use tracing::error;
@@ -128,12 +128,12 @@ impl Command {
 
 /// Get an instance of key for given table
 pub(crate) fn table_key<T: Table>(key: &str) -> Result<T::Key, eyre::Error> {
-    serde_json::from_str::<T::Key>(key).map_err(|e| eyre::eyre!(e))
+    serde_json::from_str(key).map_err(|e| eyre::eyre!(e))
 }
 
 /// Get an instance of subkey for given dupsort table
 fn table_subkey<T: DupSort>(subkey: Option<&str>) -> Result<T::SubKey, eyre::Error> {
-    serde_json::from_str::<T::SubKey>(subkey.unwrap_or_default()).map_err(|e| eyre::eyre!(e))
+    serde_json::from_str(subkey.unwrap_or_default()).map_err(|e| eyre::eyre!(e))
 }
 
 struct GetValueViewer<'a, N: NodeTypesWithDB> {

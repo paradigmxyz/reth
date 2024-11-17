@@ -120,7 +120,7 @@ impl<N: ProviderNodeTypes> PersistenceService<N> {
 
         let new_tip_hash = provider_rw.block_hash(new_tip_num)?;
         UnifiedStorageWriter::from(&provider_rw, &sf_provider).remove_blocks_above(new_tip_num)?;
-        UnifiedStorageWriter::commit_unwind(provider_rw, sf_provider)?;
+        UnifiedStorageWriter::commit_unwind(provider_rw)?;
 
         debug!(target: "engine::persistence", ?new_tip_num, ?new_tip_hash, "Removed blocks from disk");
         self.metrics.remove_blocks_above_duration_seconds.record(start_time.elapsed());
@@ -142,7 +142,7 @@ impl<N: ProviderNodeTypes> PersistenceService<N> {
             let static_file_provider = self.provider.static_file_provider();
 
             UnifiedStorageWriter::from(&provider_rw, &static_file_provider).save_blocks(&blocks)?;
-            UnifiedStorageWriter::commit(provider_rw, static_file_provider)?;
+            UnifiedStorageWriter::commit(provider_rw)?;
         }
         self.metrics.save_blocks_duration_seconds.record(start_time.elapsed());
         Ok(last_block_hash_num)

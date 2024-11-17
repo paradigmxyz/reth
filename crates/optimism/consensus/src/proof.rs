@@ -1,10 +1,10 @@
 //! Helper function for Receipt root calculation for Optimism hardforks.
 
 use alloy_primitives::B256;
+use alloy_trie::root::ordered_trie_root_with_encoder;
 use reth_chainspec::ChainSpec;
-use reth_optimism_forks::OptimismHardfork;
+use reth_optimism_forks::OpHardfork;
 use reth_primitives::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef};
-use reth_trie_common::root::ordered_trie_root_with_encoder;
 
 /// Calculates the receipt root for a header.
 pub(crate) fn calculate_receipt_root_optimism(
@@ -17,8 +17,8 @@ pub(crate) fn calculate_receipt_root_optimism(
     // encoding. In the Regolith Hardfork, we must strip the deposit nonce from the
     // receipts before calculating the receipt root. This was corrected in the Canyon
     // hardfork.
-    if chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Regolith, timestamp) &&
-        !chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, timestamp)
+    if chain_spec.is_fork_active_at_timestamp(OpHardfork::Regolith, timestamp) &&
+        !chain_spec.is_fork_active_at_timestamp(OpHardfork::Canyon, timestamp)
     {
         let receipts = receipts
             .iter()
@@ -50,8 +50,8 @@ pub fn calculate_receipt_root_no_memo_optimism(
     // encoding. In the Regolith Hardfork, we must strip the deposit nonce from the
     // receipts before calculating the receipt root. This was corrected in the Canyon
     // hardfork.
-    if chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Regolith, timestamp) &&
-        !chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, timestamp)
+    if chain_spec.is_fork_active_at_timestamp(OpHardfork::Regolith, timestamp) &&
+        !chain_spec.is_fork_active_at_timestamp(OpHardfork::Canyon, timestamp)
     {
         let receipts = receipts
             .iter()

@@ -1,13 +1,14 @@
 //! Command for debugging execution.
 
 use crate::{args::NetworkArgs, utils::get_single_header};
+use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{BlockNumber, B256};
 use clap::Parser;
 use futures::{stream::select as stream_select, StreamExt};
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
-use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
+use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
 use reth_config::Config;
@@ -20,12 +21,12 @@ use reth_downloaders::{
 use reth_exex::ExExManagerHandle;
 use reth_network::{BlockDownloaderProvider, NetworkEventListenerProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
-use reth_network_p2p::{headers::client::HeadersClient, BlockClient};
-use reth_node_api::{NodeTypesWithDB, NodeTypesWithDBAdapter, NodeTypesWithEngine};
+use reth_network_p2p::{headers::client::HeadersClient, EthBlockClient};
+use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_ethereum::EthExecutorProvider;
-use reth_primitives::BlockHashOrNumber;
 use reth_provider::{
-    BlockExecutionWriter, ChainSpecProvider, ProviderFactory, StageCheckpointReader,
+    providers::ProviderNodeTypes, BlockExecutionWriter, ChainSpecProvider, ProviderFactory,
+    StageCheckpointReader,
 };
 use reth_prune::PruneModes;
 use reth_stages::{
@@ -58,7 +59,7 @@ pub struct Command<C: ChainSpecParser> {
 }
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
-    fn build_pipeline<N: NodeTypesWithDB<ChainSpec = C::ChainSpec>, Client>(
+    fn build_pipeline<N: ProviderNodeTypes<ChainSpec = C::ChainSpec>, Client>(
         &self,
         config: &Config,
         client: Client,
@@ -68,7 +69,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     ) -> eyre::Result<Pipeline<N>>
     where
-        Client: BlockClient + 'static,
+        Client: EthBlockClient + 'static,
     {
         // building network downloaders using the fetch client
         let header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
@@ -116,7 +117,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         Ok(pipeline)
     }
 
-    async fn build_network<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+    async fn build_network<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
         &self,
         config: &Config,
         task_executor: TaskExecutor,
@@ -137,11 +138,14 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         Ok(network)
     }
 
-    async fn fetch_block_hash<Client: HeadersClient>(
+    async fn fetch_block_hash<Client>(
         &self,
         client: Client,
         block: BlockNumber,
-    ) -> eyre::Result<B256> {
+    ) -> eyre::Result<B256>
+    where
+        Client: HeadersClient<Header: reth_primitives_traits::BlockHeader>,
+    {
         info!(target: "reth::cli", ?block, "Fetching block from the network.");
         loop {
             match get_single_header(&client, BlockHashOrNumber::Number(block)).await {
@@ -157,7 +161,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     }
 
     /// Execute `execution-debug` command
-    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
         self,
         ctx: CliContext,
     ) -> eyre::Result<()> {

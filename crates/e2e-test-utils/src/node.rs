@@ -1,7 +1,7 @@
 use std::{marker::PhantomData, pin::Pin};
 
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
-use alloy_rpc_types::BlockNumberOrTag;
+use alloy_rpc_types_eth::BlockNumberOrTag;
 use eyre::Ok;
 use futures_util::Future;
 use reth::{

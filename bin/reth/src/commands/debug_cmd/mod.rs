@@ -3,8 +3,8 @@
 use clap::{Parser, Subcommand};
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
+use reth_cli_commands::common::CliNodeTypes;
 use reth_cli_runner::CliContext;
-use reth_node_api::NodeTypesWithEngine;
 use reth_node_ethereum::EthEngineTypes;
 
 mod build_block;
@@ -37,9 +37,7 @@ pub enum Subcommands<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Execute `debug` command
-    pub async fn execute<
-        N: NodeTypesWithEngine<Engine = EthEngineTypes, ChainSpec = C::ChainSpec>,
-    >(
+    pub async fn execute<N: CliNodeTypes<Engine = EthEngineTypes, ChainSpec = C::ChainSpec>>(
         self,
         ctx: CliContext,
     ) -> eyre::Result<()> {

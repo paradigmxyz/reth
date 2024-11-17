@@ -1,12 +1,13 @@
 use crate::providers::StaticFileProviderRWRefMut;
 use alloy_primitives::{BlockNumber, TxNumber};
 use reth_errors::ProviderResult;
+use reth_node_types::NodePrimitives;
 use reth_primitives::Receipt;
 use reth_storage_api::ReceiptWriter;
 
 pub(crate) struct StaticFileWriter<'a, W>(pub(crate) &'a mut W);
 
-impl ReceiptWriter for StaticFileWriter<'_, StaticFileProviderRWRefMut<'_>> {
+impl<N: NodePrimitives> ReceiptWriter for StaticFileWriter<'_, StaticFileProviderRWRefMut<'_, N>> {
     fn append_block_receipts(
         &mut self,
         first_tx_index: TxNumber,

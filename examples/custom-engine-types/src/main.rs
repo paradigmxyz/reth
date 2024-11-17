@@ -22,6 +22,7 @@ use std::{convert::Infallible, sync::Arc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use alloy_eips::eip4895::Withdrawals;
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, B256};
 use alloy_rpc_types::{
@@ -68,7 +69,6 @@ use reth_payload_builder::{
     EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderError, PayloadBuilderHandle,
     PayloadBuilderService,
 };
-use reth_primitives::Withdrawals;
 use reth_tracing::{RethTracer, Tracer};
 use reth_trie_db::MerklePatriciaTrie;
 

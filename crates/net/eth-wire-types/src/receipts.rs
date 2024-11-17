@@ -54,7 +54,7 @@ mod tests {
     fn encode_get_receipts() {
         let expected = hex!("f847820457f842a000000000000000000000000000000000000000000000000000000000deadc0dea000000000000000000000000000000000000000000000000000000000feedbeef");
         let mut data = vec![];
-        let request = RequestPair::<GetReceipts> {
+        let request = RequestPair {
             request_id: 1111,
             message: GetReceipts(vec![
                 hex!("00000000000000000000000000000000000000000000000000000000deadc0de").into(),
@@ -72,7 +72,7 @@ mod tests {
         let request = RequestPair::<GetReceipts>::decode(&mut &data[..]).unwrap();
         assert_eq!(
             request,
-            RequestPair::<GetReceipts> {
+            RequestPair {
                 request_id: 1111,
                 message: GetReceipts(vec![
                     hex!("00000000000000000000000000000000000000000000000000000000deadc0de").into(),
@@ -88,7 +88,7 @@ mod tests {
     fn encode_receipts() {
         let expected = hex!("f90172820457f9016cf90169f901668001b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f85ff85d940000000000000000000000000000000000000011f842a0000000000000000000000000000000000000000000000000000000000000deada0000000000000000000000000000000000000000000000000000000000000beef830100ff");
         let mut data = vec![];
-        let request = RequestPair::<Receipts> {
+        let request = RequestPair {
             request_id: 1111,
             message: Receipts(vec![vec![
                 ReceiptWithBloom {
@@ -124,7 +124,7 @@ mod tests {
         let request = RequestPair::<Receipts>::decode(&mut &data[..]).unwrap();
         assert_eq!(
             request,
-            RequestPair::<Receipts> {
+            RequestPair {
                 request_id: 1111,
                 message: Receipts(vec![
                     vec![

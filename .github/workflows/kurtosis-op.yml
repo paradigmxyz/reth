@@ -1,0 +1,119 @@
+# Runs simple OP stack setup in Kurtosis
+
+name: kurtosis-op
+
+on:
+  workflow_dispatch:
+  schedule:
+    # every day
+    - cron: "0 1 * * *"
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  prepare-reth:
+    if: github.repository == 'paradigmxyz/reth'
+    timeout-minutes: 45
+    runs-on:
+      group: Reth
+    steps:
+      - uses: actions/checkout@v4
+      - run: mkdir artifacts
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - name: Build reth
+        run: |
+          cargo build --features optimism,asm-keccak --profile hivetests --bin op-reth --manifest-path crates/optimism/bin/Cargo.toml --locked
+          mkdir dist && cp ./target/hivetests/op-reth ./dist/reth
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build and export reth image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: .github/assets/hive/Dockerfile
+          tags: ghcr.io/paradigmxyz/op-reth:kurtosis-ci
+          outputs: type=docker,dest=./artifacts/reth_image.tar
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Upload reth image
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts
+          path: ./artifacts
+
+  test:
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+    name: run kurtosis
+    runs-on:
+      group: Reth
+    needs:
+      - prepare-reth
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download reth image
+        uses: actions/download-artifact@v4
+        with:
+          name: artifacts
+          path: /tmp
+
+      - name: Load Docker image
+        run: |
+          docker load -i /tmp/reth_image.tar &
+          wait
+          docker image ls -a
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Run kurtosis
+        run: |
+          echo "deb [trusted=yes] https://apt.fury.io/kurtosis-tech/ /" | sudo tee /etc/apt/sources.list.d/kurtosis.list
+          sudo apt update
+          sudo apt install kurtosis-cli
+          kurtosis engine start
+          kurtosis run --enclave op-devnet github.com/ethpandaops/optimism-package --args-file .github/assets/kurtosis_op_network_params.yaml
+          ENCLAVE_ID=$(curl http://127.0.0.1:9779/api/enclaves | jq --raw-output 'keys[0]')
+          GETH_PORT=$(curl "http://127.0.0.1:9779/api/enclaves/$ENCLAVE_ID/services" | jq '."op-el-1-op-geth-op-node-op-kurtosis".public_ports.rpc.number')
+          RETH_PORT=$(curl "http://127.0.0.1:9779/api/enclaves/$ENCLAVE_ID/services" | jq '."op-el-2-op-reth-op-node-op-kurtosis".public_ports.rpc.number')
+          echo "GETH_RPC=http://127.0.0.1:$GETH_PORT" >> $GITHUB_ENV
+          echo "RETH_RPC=http://127.0.0.1:$RETH_PORT" >> $GITHUB_ENV
+
+      - name: Assert that clients advance
+        run: |
+          for i in {1..100}; do
+            sleep 5
+            BLOCK_GETH=$(cast bn --rpc-url $GETH_RPC)
+            BLOCK_RETH=$(cast bn --rpc-url $RETH_RPC)
+
+            if [ $BLOCK_GETH -ge 100 ] && [ $BLOCK_RETH -ge 100 ] ; then exit 0; fi
+            echo "Waiting for clients to advance..., Reth: $BLOCK_RETH Geth: $BLOCK_GETH"
+          done
+          exit 1
+
+
+  notify-on-error:
+    needs: test
+    if: failure()
+    runs-on:
+      group: Reth
+    steps:
+      - name: Slack Webhook Action
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_COLOR: ${{ job.status }}
+          SLACK_MESSAGE: "Failed run: https://github.com/paradigmxyz/reth/actions/runs/${{ github.run_id }}"
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}

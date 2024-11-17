@@ -1,7 +1,9 @@
 #![allow(missing_docs)]
 
 use alloy_consensus::TxEip4844;
-use alloy_eips::eip4844::{env_settings::EnvKzgSettings, MAX_BLOBS_PER_BLOCK};
+use alloy_eips::eip4844::{
+    env_settings::EnvKzgSettings, BlobTransactionSidecar, MAX_BLOBS_PER_BLOCK,
+};
 use alloy_primitives::hex;
 use criterion::{
     criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
@@ -12,7 +14,6 @@ use proptest::{
     test_runner::{RngAlgorithm, TestRng, TestRunner},
 };
 use proptest_arbitrary_interop::arb;
-use reth_primitives::BlobTransactionSidecar;
 
 // constant seed to use for the rng
 const SEED: [u8; 32] = hex!("1337133713371337133713371337133713371337133713371337133713371337");

@@ -1,6 +1,7 @@
+use alloy_consensus::Header;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{BlockHash, BlockNumber, U256};
-use reth_primitives::{Header, SealedHeader};
+use reth_primitives::SealedHeader;
 use reth_storage_errors::provider::ProviderResult;
 use std::ops::RangeBounds;
 

@@ -1,10 +1,11 @@
 use alloy_consensus::{BlobTransactionValidationError, EnvKzgSettings, Transaction};
 use alloy_eips::eip4844::kzg_to_versioned_hash;
-use alloy_rpc_types::engine::{
-    BlobsBundleV1, CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar,
-};
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequest, BuilderBlockValidationRequestV2,
+    BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
+};
+use alloy_rpc_types_engine::{
+    BlobsBundleV1, CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar,
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
@@ -19,69 +20,18 @@ use reth_provider::{
     AccountReader, BlockExecutionInput, BlockExecutionOutput, BlockReaderIdExt, HeaderProvider,
     StateProviderFactory, WithdrawalsProvider,
 };
-use reth_revm::database::StateProviderDatabase;
-use reth_rpc_api::{
-    BlockSubmissionValidationApiServer, BuilderBlockValidationRequestV3,
-    BuilderBlockValidationRequestV4,
-};
+use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
+use reth_rpc_api::BlockSubmissionValidationApiServer;
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_trie::HashedPostState;
 use revm_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, sync::Arc};
-
-/// Configuration for validation API.
-#[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
-pub struct ValidationApiConfig {
-    /// Disallowed addresses.
-    pub disallow: HashSet<Address>,
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum ValidationApiError {
-    #[error("block gas limit mismatch: {_0}")]
-    GasLimitMismatch(GotExpected<u64>),
-    #[error("block gas used mismatch: {_0}")]
-    GasUsedMismatch(GotExpected<u64>),
-    #[error("block parent hash mismatch: {_0}")]
-    ParentHashMismatch(GotExpected<B256>),
-    #[error("block hash mismatch: {_0}")]
-    BlockHashMismatch(GotExpected<B256>),
-    #[error("missing latest block in database")]
-    MissingLatestBlock,
-    #[error("could not verify proposer payment")]
-    ProposerPayment,
-    #[error("invalid blobs bundle")]
-    InvalidBlobsBundle,
-    #[error("block accesses blacklisted address: {_0}")]
-    Blacklist(Address),
-    #[error(transparent)]
-    Blob(#[from] BlobTransactionValidationError),
-    #[error(transparent)]
-    Consensus(#[from] ConsensusError),
-    #[error(transparent)]
-    Provider(#[from] ProviderError),
-    #[error(transparent)]
-    Execution(#[from] BlockExecutionError),
-}
-
-#[derive(Debug, Clone)]
-pub struct ValidationApiInner<Provider: ChainSpecProvider, E> {
-    /// The provider that can interact with the chain.
-    provider: Provider,
-    /// Consensus implementation.
-    consensus: Arc<dyn Consensus>,
-    /// Execution payload validator.
-    payload_validator: ExecutionPayloadValidator<Provider::ChainSpec>,
-    /// Block executor factory.
-    executor_provider: E,
-    /// Set of disallowed addresses
-    disallow: HashSet<Address>,
-}
+use tokio::sync::RwLock;
 
 /// The type that implements the `validation` rpc namespace trait
-#[derive(Clone, Debug, derive_more::Deref)]
+#[derive(Debug, derive_more::Deref)]
 pub struct ValidationApi<Provider: ChainSpecProvider, E> {
     #[deref]
     inner: Arc<ValidationApiInner<Provider, E>>,
@@ -107,9 +57,30 @@ where
             payload_validator,
             executor_provider,
             disallow,
+            cached_state: Default::default(),
         });
 
         Self { inner }
+    }
+
+    /// Returns the cached reads for the given head hash.
+    async fn cached_reads(&self, head: B256) -> CachedReads {
+        let cache = self.inner.cached_state.read().await;
+        if cache.0 == head {
+            cache.1.clone()
+        } else {
+            Default::default()
+        }
+    }
+
+    /// Updates the cached state for the given head hash.
+    async fn update_cached_reads(&self, head: B256, cached_state: CachedReads) {
+        let mut cache = self.inner.cached_state.write().await;
+        if cache.0 == head {
+            cache.1.extend(cached_state);
+        } else {
+            *cache = (head, cached_state)
+        }
     }
 }
 
@@ -121,12 +92,11 @@ where
         + HeaderProvider
         + AccountReader
         + WithdrawalsProvider
-        + Clone
         + 'static,
     E: BlockExecutorProvider,
 {
     /// Validates the given block and a [`BidTrace`] against it.
-    pub fn validate_message_against_block(
+    pub async fn validate_message_against_block(
         &self,
         block: SealedBlockWithSenders,
         message: BidTrace,
@@ -170,8 +140,13 @@ where
         self.consensus.validate_header_against_parent(&block.header, &latest_header)?;
         self.validate_gas_limit(registered_gas_limit, &latest_header, &block.header)?;
 
-        let state_provider = self.provider.state_by_block_hash(latest_header.hash())?;
-        let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
+        let latest_header_hash = latest_header.hash();
+        let state_provider = self.provider.state_by_block_hash(latest_header_hash)?;
+
+        let mut request_cache = self.cached_reads(latest_header_hash).await;
+
+        let cached_db = request_cache.as_db_mut(StateProviderDatabase::new(&state_provider));
+        let executor = self.executor_provider.executor(cached_db);
 
         let block = block.unseal();
         let mut accessed_blacklisted = None;
@@ -187,6 +162,9 @@ where
                 }
             },
         )?;
+
+        // update the cached reads
+        self.update_cached_reads(latest_header_hash, request_cache).await;
 
         if let Some(account) = accessed_blacklisted {
             return Err(ValidationApiError::Blacklist(account))
@@ -415,6 +393,7 @@ where
             request.request.message,
             request.registered_gas_limit,
         )
+        .await
         .map_err(|e| RethError::Other(e.into()))
         .to_rpc_result()
     }
@@ -448,7 +427,63 @@ where
             request.request.message,
             request.registered_gas_limit,
         )
+        .await
         .map_err(|e| RethError::Other(e.into()))
         .to_rpc_result()
     }
+}
+
+#[derive(Debug)]
+pub struct ValidationApiInner<Provider: ChainSpecProvider, E> {
+    /// The provider that can interact with the chain.
+    provider: Provider,
+    /// Consensus implementation.
+    consensus: Arc<dyn Consensus>,
+    /// Execution payload validator.
+    payload_validator: ExecutionPayloadValidator<Provider::ChainSpec>,
+    /// Block executor factory.
+    executor_provider: E,
+    /// Set of disallowed addresses
+    disallow: HashSet<Address>,
+    /// Cached state reads to avoid redundant disk I/O across multiple validation attempts
+    /// targeting the same state. Stores a tuple of (`block_hash`, `cached_reads`) for the
+    /// latest head block state. Uses async `RwLock` to safely handle concurrent validation
+    /// requests.
+    cached_state: RwLock<(B256, CachedReads)>,
+}
+
+/// Configuration for validation API.
+#[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ValidationApiConfig {
+    /// Disallowed addresses.
+    pub disallow: HashSet<Address>,
+}
+
+/// Errors thrown by the validation API.
+#[derive(Debug, thiserror::Error)]
+pub enum ValidationApiError {
+    #[error("block gas limit mismatch: {_0}")]
+    GasLimitMismatch(GotExpected<u64>),
+    #[error("block gas used mismatch: {_0}")]
+    GasUsedMismatch(GotExpected<u64>),
+    #[error("block parent hash mismatch: {_0}")]
+    ParentHashMismatch(GotExpected<B256>),
+    #[error("block hash mismatch: {_0}")]
+    BlockHashMismatch(GotExpected<B256>),
+    #[error("missing latest block in database")]
+    MissingLatestBlock,
+    #[error("could not verify proposer payment")]
+    ProposerPayment,
+    #[error("invalid blobs bundle")]
+    InvalidBlobsBundle,
+    #[error("block accesses blacklisted address: {_0}")]
+    Blacklist(Address),
+    #[error(transparent)]
+    Blob(#[from] BlobTransactionValidationError),
+    #[error(transparent)]
+    Consensus(#[from] ConsensusError),
+    #[error(transparent)]
+    Provider(#[from] ProviderError),
+    #[error(transparent)]
+    Execution(#[from] BlockExecutionError),
 }

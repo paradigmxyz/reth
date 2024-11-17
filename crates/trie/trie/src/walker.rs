@@ -88,7 +88,7 @@ impl<C> TrieWalker<C> {
 
     /// Indicates whether the children of the current node are present in the trie.
     pub fn children_are_in_trie(&self) -> bool {
-        self.stack.last().map_or(false, |n| n.tree_flag())
+        self.stack.last().is_some_and(|n| n.tree_flag())
     }
 
     /// Returns the next unprocessed key in the trie.
@@ -112,7 +112,7 @@ impl<C> TrieWalker<C> {
         self.can_skip_current_node = self
             .stack
             .last()
-            .map_or(false, |node| !self.changes.contains(node.full_key()) && node.hash_flag());
+            .is_some_and(|node| !self.changes.contains(node.full_key()) && node.hash_flag());
     }
 }
 
