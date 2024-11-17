@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{Address, BlockNumber, Bloom, Log, B256, U256};
 use reth_primitives::{logs_bloom, Account, Bytecode, Receipts, StorageEntry};
-use reth_primitives_traits::Receipt;
+use reth_primitives_traits::{receipt::ReceiptExt, Receipt};
 use reth_trie::HashedPostState;
 use revm::{
     db::{states::BundleState, BundleAccount},
@@ -182,36 +182,6 @@ impl<T> ExecutionOutcome<T> {
         Some(index as usize)
     }
 
-    /// Returns an iterator over all block logs.
-    pub fn logs(&self, block_number: BlockNumber) -> Option<impl Iterator<Item = &Log>>
-    where
-        T: Receipt,
-    {
-        let index = self.block_number_to_index(block_number)?;
-        Some(self.receipts[index].iter().filter_map(|r| Some(r.as_ref()?.logs().iter())).flatten())
-    }
-
-    /// Return blocks logs bloom
-    pub fn block_logs_bloom(&self, block_number: BlockNumber) -> Option<Bloom>
-    where
-        T: Receipt,
-    {
-        Some(logs_bloom(self.logs(block_number)?))
-    }
-
-    /// Returns the receipt root for all recorded receipts.
-    /// Note: this function calculated Bloom filters for every receipt and created merkle trees
-    /// of receipt. This is a expensive operation.
-    pub fn receipts_root_slow(&self, _block_number: BlockNumber) -> Option<B256>
-    where
-        T: Receipt,
-    {
-        #[cfg(feature = "optimism")]
-        panic!("This should not be called in optimism mode. Use `optimism_receipts_root_slow` instead.");
-        #[cfg(not(feature = "optimism"))]
-        self.receipts.root_slow(self.block_number_to_index(_block_number)?, T::receipts_root)
-    }
-
     /// Returns the receipt root for all recorded receipts.
     /// Note: this function calculated Bloom filters for every receipt and created merkle trees
     /// of receipt. This is a expensive operation.
@@ -361,6 +331,32 @@ impl<T> ExecutionOutcome<T> {
         self.accounts_iter().filter_map(|(addr, acc)| acc.map(|acc| (addr, acc))).map(
             |(address, acc)| ChangedAccount { address, nonce: acc.nonce, balance: acc.balance },
         )
+    }
+}
+
+impl<T: Receipt> ExecutionOutcome<T> {
+    /// Returns an iterator over all block logs.
+    pub fn logs(&self, block_number: BlockNumber) -> Option<impl Iterator<Item = &Log>> {
+        let index = self.block_number_to_index(block_number)?;
+        Some(self.receipts[index].iter().filter_map(|r| Some(r.as_ref()?.logs().iter())).flatten())
+    }
+
+    /// Return blocks logs bloom
+    pub fn block_logs_bloom(&self, block_number: BlockNumber) -> Option<Bloom> {
+        Some(logs_bloom(self.logs(block_number)?))
+    }
+
+    /// Returns the receipt root for all recorded receipts.
+    /// Note: this function calculated Bloom filters for every receipt and created merkle trees
+    /// of receipt. This is a expensive operation.
+    pub fn receipts_root_slow(&self, _block_number: BlockNumber) -> Option<B256>
+    where
+        T: ReceiptExt,
+    {
+        #[cfg(feature = "optimism")]
+        panic!("This should not be called in optimism mode. Use `optimism_receipts_root_slow` instead.");
+        #[cfg(not(feature = "optimism"))]
+        self.receipts.root_slow(self.block_number_to_index(_block_number)?, T::receipts_root)
     }
 }
 

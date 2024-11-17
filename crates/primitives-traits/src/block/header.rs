@@ -29,7 +29,6 @@ pub trait BlockHeader:
     + Sealable
     + InMemorySize
     + MaybeSerde
-    + 'static
 {
 }
 
@@ -48,6 +47,5 @@ impl<T> BlockHeader for T where
         + Sealable
         + InMemorySize
         + MaybeSerde
-        + 'static
 {
 }

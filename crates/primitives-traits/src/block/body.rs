@@ -7,6 +7,7 @@ use alloy_consensus::Transaction;
 use crate::{InMemorySize, MaybeSerde};
 
 /// Abstraction for block's body.
+#[auto_impl::auto_impl(&, Arc)]
 pub trait BlockBody:
     Send
     + Sync
@@ -20,7 +21,6 @@ pub trait BlockBody:
     + alloy_rlp::Decodable
     + InMemorySize
     + MaybeSerde
-    + 'static
 {
     /// Ordered list of signed transactions as committed in block.
     // todo: requires trait for signed transaction
