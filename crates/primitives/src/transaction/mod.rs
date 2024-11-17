@@ -1372,7 +1372,79 @@ impl SignedTransaction for TransactionSigned {
         initial_tx.hash = initial_tx.recalculate_hash();
         initial_tx
     }
+}
 
+impl alloy_consensus::Transaction for TransactionSigned {
+    fn chain_id(&self) -> Option<ChainId> {
+        self.deref().chain_id()
+    }
+
+    fn nonce(&self) -> u64 {
+        self.deref().nonce()
+    }
+
+    fn gas_limit(&self) -> u64 {
+        self.deref().gas_limit()
+    }
+
+    fn gas_price(&self) -> Option<u128> {
+        self.deref().gas_price()
+    }
+
+    fn max_fee_per_gas(&self) -> u128 {
+        self.deref().max_fee_per_gas()
+    }
+
+    fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        self.deref().max_priority_fee_per_gas()
+    }
+
+    fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        self.deref().max_fee_per_blob_gas()
+    }
+
+    fn priority_fee_or_price(&self) -> u128 {
+        self.deref().priority_fee_or_price()
+    }
+
+    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        self.deref().effective_gas_price(base_fee)
+    }
+
+    fn is_dynamic_fee(&self) -> bool {
+        self.deref().is_dynamic_fee()
+    }
+
+    fn kind(&self) -> TxKind {
+        self.deref().kind()
+    }
+
+    fn value(&self) -> U256 {
+        self.deref().value()
+    }
+
+    fn input(&self) -> &Bytes {
+        self.deref().input()
+    }
+
+    fn ty(&self) -> u8 {
+        self.deref().ty()
+    }
+
+    fn access_list(&self) -> Option<&AccessList> {
+        self.deref().access_list()
+    }
+
+    fn blob_versioned_hashes(&self) -> Option<&[B256]> {
+        alloy_consensus::Transaction::blob_versioned_hashes(self.deref())
+    }
+
+    fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
+        self.deref().authorization_list()
+    }
+}
+
+impl reth_primitives_traits::FillTxEnv for TransactionSigned {
     fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address) {
         tx_env.caller = sender;
         match self.as_ref() {
@@ -1450,76 +1522,6 @@ impl SignedTransaction for TransactionSigned {
             #[cfg(feature = "optimism")]
             Transaction::Deposit(_) => {}
         }
-    }
-}
-
-impl alloy_consensus::Transaction for TransactionSigned {
-    fn chain_id(&self) -> Option<ChainId> {
-        self.deref().chain_id()
-    }
-
-    fn nonce(&self) -> u64 {
-        self.deref().nonce()
-    }
-
-    fn gas_limit(&self) -> u64 {
-        self.deref().gas_limit()
-    }
-
-    fn gas_price(&self) -> Option<u128> {
-        self.deref().gas_price()
-    }
-
-    fn max_fee_per_gas(&self) -> u128 {
-        self.deref().max_fee_per_gas()
-    }
-
-    fn max_priority_fee_per_gas(&self) -> Option<u128> {
-        self.deref().max_priority_fee_per_gas()
-    }
-
-    fn max_fee_per_blob_gas(&self) -> Option<u128> {
-        self.deref().max_fee_per_blob_gas()
-    }
-
-    fn priority_fee_or_price(&self) -> u128 {
-        self.deref().priority_fee_or_price()
-    }
-
-    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
-        self.deref().effective_gas_price(base_fee)
-    }
-
-    fn is_dynamic_fee(&self) -> bool {
-        self.deref().is_dynamic_fee()
-    }
-
-    fn kind(&self) -> TxKind {
-        self.deref().kind()
-    }
-
-    fn value(&self) -> U256 {
-        self.deref().value()
-    }
-
-    fn input(&self) -> &Bytes {
-        self.deref().input()
-    }
-
-    fn ty(&self) -> u8 {
-        self.deref().ty()
-    }
-
-    fn access_list(&self) -> Option<&AccessList> {
-        self.deref().access_list()
-    }
-
-    fn blob_versioned_hashes(&self) -> Option<&[B256]> {
-        alloy_consensus::Transaction::blob_versioned_hashes(self.deref())
-    }
-
-    fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
-        self.deref().authorization_list()
     }
 }
 
