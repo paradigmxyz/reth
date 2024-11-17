@@ -32,6 +32,7 @@ pub trait SignedTransaction:
     + Encodable2718
     + Decodable2718
     + alloy_consensus::Transaction
+    + MaybeSerde
     + MaybeArbitrary
 {
     /// Transaction type that is signed.
