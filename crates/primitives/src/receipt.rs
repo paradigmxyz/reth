@@ -120,10 +120,8 @@ impl InMemorySize for Receipt {
             self.logs.capacity() * core::mem::size_of::<Log>();
 
         #[cfg(feature = "optimism")]
-        {
-            return total_size + 2 * core::mem::size_of::<Option<u64>>();
-        }
-
+        return total_size + 2 * core::mem::size_of::<Option<u64>>();
+        #[cfg(not(feature = "optimism"))]
         total_size
     }
 }
