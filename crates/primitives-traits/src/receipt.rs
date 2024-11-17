@@ -7,6 +7,8 @@ use core::fmt;
 use reth_codecs::Compact;
 use serde::{Deserialize, Serialize};
 
+use crate::InMemorySize;
+
 /// Helper trait that unifies all behaviour required by receipt to support full node operations.
 pub trait FullReceipt: Receipt + Compact {}
 
@@ -25,6 +27,7 @@ pub trait Receipt:
     + alloy_rlp::Encodable
     + alloy_rlp::Decodable
     + Serialize
+    + InMemorySize
     + for<'de> Deserialize<'de>
 {
     /// Returns transaction type.
