@@ -18,6 +18,7 @@ impl<T> FullBlock for T where T: Block<Header: FullBlockHeader> + Compact {}
 // todo: make sealable super-trait, depends on <https://github.com/paradigmxyz/reth/issues/11449>
 // todo: make with senders extension trait, so block can be impl by block type already containing
 // senders
+#[auto_impl::auto_impl(&, Arc)]
 pub trait Block:
     Send
     + Sync
@@ -32,7 +33,7 @@ pub trait Block:
     + InMemorySize
 {
     /// Header part of the block.
-    type Header: BlockHeader;
+    type Header: BlockHeader + 'static;
 
     /// The block's body contains the transactions in the block.
     type Body: Send + Sync + Unpin + 'static;

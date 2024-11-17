@@ -10,9 +10,10 @@ use serde::{Deserialize, Serialize};
 /// Helper trait that unifies all behaviour required by receipt to support full node operations.
 pub trait FullReceipt: Receipt + Compact {}
 
-impl<T> FullReceipt for T where T: Receipt + Compact {}
+impl<T> FullReceipt for T where T: ReceiptExt + Compact {}
 
 /// Abstraction of a receipt.
+#[auto_impl::auto_impl(&, Arc)]
 pub trait Receipt:
     Send
     + Sync
@@ -28,7 +29,10 @@ pub trait Receipt:
 {
     /// Returns transaction type.
     fn tx_type(&self) -> u8;
+}
 
+/// Extension if [`Receipt`] used in block execution.
+pub trait ReceiptExt: Receipt {
     /// Calculates the receipts root of the given receipts.
     fn receipts_root(receipts: &[&Self]) -> B256;
 }

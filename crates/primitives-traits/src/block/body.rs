@@ -5,6 +5,7 @@ use alloc::fmt;
 use alloy_consensus::Transaction;
 
 /// Abstraction for block's body.
+#[auto_impl::auto_impl(&, Arc)]
 pub trait BlockBody:
     Send
     + Sync
@@ -19,7 +20,6 @@ pub trait BlockBody:
     + alloy_rlp::Encodable
     + alloy_rlp::Decodable
     + InMemorySize
-    + 'static
 {
     /// Ordered list of signed transactions as committed in block.
     // todo: requires trait for signed transaction

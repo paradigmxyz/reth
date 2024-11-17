@@ -10,6 +10,7 @@ use alloy_primitives::{Bloom, Log, B256};
 use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
 use bytes::{Buf, BufMut};
 use derive_more::{DerefMut, From, IntoIterator};
+use reth_primitives_traits::receipt::ReceiptExt;
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "reth-codec")]
@@ -97,7 +98,9 @@ impl reth_primitives_traits::Receipt for Receipt {
     fn tx_type(&self) -> u8 {
         self.tx_type as u8
     }
+}
 
+impl ReceiptExt for Receipt {
     fn receipts_root(_receipts: &[&Self]) -> B256 {
         #[cfg(feature = "optimism")]
         panic!("This should not be called in optimism mode. Use `optimism_receipts_root_slow` instead.");
