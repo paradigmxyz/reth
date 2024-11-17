@@ -98,6 +98,13 @@ pub trait TableViewer<R> {
     }
 }
 
+/// General trait for defining the set of tables
+/// Used to initialize database
+trait TableSet {
+    fn table_names(&self) -> Vec<&'static str>;
+    fn is_dupsort(&self, idx: usize) -> bool;
+}
+
 /// Defines all the tables in the database.
 #[macro_export]
 macro_rules! tables {
@@ -239,6 +246,18 @@ macro_rules! tables {
                     )*
                     s => Err(format!("unknown table: {s:?}")),
                 }
+            }
+        }
+
+        impl TableSet for Tables {
+            fn table_names(&self) -> Vec<&'static str> {
+                //vec![$(table_names::$name,)*]
+                Self::ALL.iter().map(|t| t.name()).collect()
+            }
+
+            fn is_dupsort(&self, idx: usize) -> bool {
+                let table: Self = self.table_names()[idx].parse().expect("should be valid table name");
+                table.is_dupsort()
             }
         }
 
