@@ -123,6 +123,7 @@ test-utils = [
     "reth-evm/test-utils",
     "reth-network-p2p/test-utils",
     "reth-primitives/test-utils",
+    "reth-primitives-traits/test-utils",
     "reth-codecs/test-utils",
     "reth-db-api/test-utils",
     "reth-trie-db/test-utils",
