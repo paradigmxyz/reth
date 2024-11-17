@@ -84,7 +84,7 @@ where
     /// How to create an EVM.
     evm_config: EvmConfig,
     /// How to initialize the EVM.
-    evm_initializer: Box<dyn InitializeEvm>,
+    evm_initializer: Option<Box<dyn InitializeEvm>>,
     /// Current state for block execution.
     state: State<DB>,
     /// Utility to call system smart contracts.
@@ -98,13 +98,7 @@ where
     /// Creates a new [`EthExecutionStrategy`]
     pub fn new(state: State<DB>, chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
         let system_caller = SystemCaller::new(evm_config.clone(), chain_spec.clone());
-        Self {
-            state,
-            chain_spec,
-            evm_config: evm_config.clone(),
-            system_caller,
-            evm_initializer: Box::new(evm_config),
-        }
+        Self { state, chain_spec, evm_config, system_caller, evm_initializer: None }
     }
 }
 
@@ -139,7 +133,7 @@ where
     type Error = BlockExecutionError;
 
     fn init(&mut self, evm_initializer: Box<dyn InitializeEvm>) {
-        self.evm_initializer = evm_initializer;
+        self.evm_initializer = Some(evm_initializer);
     }
 
     fn apply_pre_execution_changes(
@@ -182,7 +176,11 @@ where
                 .into())
             }
 
-            self.evm_initializer.fill_tx_env(evm.tx_mut(), transaction, *sender);
+            if let Some(evm_initializer) = &self.evm_initializer {
+                evm_initializer.fill_tx_env(evm.tx_mut(), transaction, *sender);
+            } else {
+                self.evm_config.fill_tx_env(evm.tx_mut(), transaction, *sender);
+            }
 
             // Execute transaction.
             let result_and_state = evm.transact().map_err(move |err| {
