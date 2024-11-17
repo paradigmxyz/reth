@@ -13,13 +13,9 @@ workspace = true
 
 [dependencies]
 # reth
-reth-errors.workspace = true
 reth-payload-primitives.workspace = true
-reth-transaction-pool.workspace = true
-revm-primitives.workspace = true
 
 # alloy
-alloy-primitives.workspace = true
 alloy-rpc-types-engine = { workspace = true, features = ["serde"] }
 
 # async
@@ -29,5 +25,4 @@ tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true
 
 # misc
-thiserror.workspace = true
 tracing.workspace = true

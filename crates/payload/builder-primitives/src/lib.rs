@@ -8,12 +8,11 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-mod error;
-pub use error::PayloadBuilderError;
-
 mod events;
 pub use crate::events::{Events, PayloadEvents};
 
 /// Contains the payload builder trait to abstract over payload attributes.
 mod traits;
 pub use traits::{PayloadBuilder, PayloadStoreExt};
+
+pub use reth_payload_primitives::PayloadBuilderError;
