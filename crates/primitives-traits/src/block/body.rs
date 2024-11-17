@@ -4,7 +4,7 @@ use alloc::fmt;
 
 use alloy_consensus::Transaction;
 
-use crate::{InMemorySize, MaybeSerialize};
+use crate::{InMemorySize, MaybeSerde};
 
 /// Abstraction for block's body.
 pub trait BlockBody:
@@ -19,7 +19,7 @@ pub trait BlockBody:
     + alloy_rlp::Encodable
     + alloy_rlp::Decodable
     + InMemorySize
-    + MaybeSerialize
+    + MaybeSerde
     + 'static
 {
     /// Ordered list of signed transactions as committed in block.

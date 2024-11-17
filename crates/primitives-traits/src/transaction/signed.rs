@@ -9,7 +9,7 @@ use reth_codecs::Compact;
 use revm_primitives::TxEnv;
 
 use crate::{
-    transaction::TransactionExt, FullTransaction, MaybeArbitrary, MaybeSerialize, Transaction,
+    transaction::TransactionExt, FullTransaction, MaybeArbitrary, MaybeSerde, Transaction,
 };
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
@@ -33,7 +33,7 @@ pub trait SignedTransaction:
     + Encodable2718
     + Decodable2718
     + TransactionExt
-    + MaybeSerialize
+    + MaybeSerde
     + MaybeArbitrary
 {
     /// Transaction type that is signed.

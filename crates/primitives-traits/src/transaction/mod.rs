@@ -7,7 +7,7 @@ use core::{fmt, hash::Hash};
 use alloy_primitives::B256;
 use reth_codecs::Compact;
 
-use crate::{FullTxType, InMemorySize, MaybeArbitrary, MaybeSerialize, TxType};
+use crate::{FullTxType, InMemorySize, MaybeArbitrary, MaybeSerde, TxType};
 
 /// Helper trait that unifies all behaviour required by transaction to support full node operations.
 pub trait FullTransaction: Transaction<Type: FullTxType> + Compact {}
@@ -27,7 +27,7 @@ pub trait Transaction:
     + Hash
     + TransactionExt
     + InMemorySize
-    + MaybeSerialize
+    + MaybeSerde
     + MaybeArbitrary
 {
 }
@@ -44,7 +44,7 @@ impl<T> Transaction for T where
         + Hash
         + TransactionExt
         + InMemorySize
-        + MaybeSerialize
+        + MaybeSerde
         + MaybeArbitrary
 {
 }
