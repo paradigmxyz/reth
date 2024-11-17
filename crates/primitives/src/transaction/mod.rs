@@ -1367,12 +1367,6 @@ impl SignedTransaction for TransactionSigned {
         recover_signer_unchecked(&self.signature, signature_hash)
     }
 
-    fn from_transaction_and_signature(transaction: Transaction, signature: Signature) -> Self {
-        let mut initial_tx = Self { transaction, hash: Default::default(), signature };
-        initial_tx.hash = initial_tx.recalculate_hash();
-        initial_tx
-    }
-
     fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address) {
         tx_env.caller = sender;
         match self.as_ref() {

@@ -8,7 +8,7 @@ use alloy_primitives::{keccak256, Address, PrimitiveSignature, TxHash, B256};
 use reth_codecs::Compact;
 use revm_primitives::TxEnv;
 
-use crate::{transaction::TransactionExt, FullTransaction, MaybeArbitrary, Transaction};
+use crate::{FullTransaction, MaybeArbitrary, Transaction};
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
 pub trait FullSignedTx: SignedTransaction<Transaction: FullTransaction> + Compact {}
@@ -16,6 +16,7 @@ pub trait FullSignedTx: SignedTransaction<Transaction: FullTransaction> + Compac
 impl<T> FullSignedTx for T where T: SignedTransaction<Transaction: FullTransaction> + Compact {}
 
 /// A signed transaction.
+#[auto_impl::auto_impl(&, Arc)]
 pub trait SignedTransaction:
     Send
     + Sync
@@ -32,7 +33,7 @@ pub trait SignedTransaction:
     + alloy_rlp::Decodable
     + Encodable2718
     + Decodable2718
-    + TransactionExt
+    + alloy_consensus::Transaction
     + MaybeArbitrary
 {
     /// Transaction type that is signed.
@@ -65,14 +66,6 @@ pub trait SignedTransaction:
     /// `reth_primitives::transaction::recover_signer_unchecked`.
     fn recover_signer_unchecked(&self) -> Option<Address>;
 
-    /// Create a new signed transaction from a transaction and its signature.
-    ///
-    /// This will also calculate the transaction hash using its encoding.
-    fn from_transaction_and_signature(
-        transaction: Self::Transaction,
-        signature: PrimitiveSignature,
-    ) -> Self;
-
     /// Calculate transaction hash, eip2728 transaction does not contain rlp header and start with
     /// tx type.
     fn recalculate_hash(&self) -> B256 {
@@ -83,10 +76,14 @@ pub trait SignedTransaction:
     fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address);
 }
 
-impl<T: SignedTransaction> TransactionExt for T {
-    type Type = <T::Transaction as TransactionExt>::Type;
-
-    fn signature_hash(&self) -> B256 {
-        self.transaction().signature_hash()
-    }
+/// Helper trait used in testing.
+#[cfg(feature = "test-utils")]
+pub trait SignedTransactionTesting: SignedTransaction {
+    /// Create a new signed transaction from a transaction and its signature.
+    ///
+    /// This will also calculate the transaction hash using its encoding.
+    fn from_transaction_and_signature(
+        transaction: Self::Transaction,
+        signature: PrimitiveSignature,
+    ) -> Self;
 }

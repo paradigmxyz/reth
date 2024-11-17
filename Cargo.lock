@@ -8582,6 +8582,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "arbitrary",
+ "auto_impl",
  "bincode",
  "byteorder",
  "bytes",

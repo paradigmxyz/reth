@@ -53,6 +53,7 @@ impl<T> Transaction for T where
 }
 
 /// Extension trait of [`alloy_consensus::Transaction`].
+#[auto_impl::auto_impl(&, Arc)]
 pub trait TransactionExt: alloy_consensus::Transaction {
     /// Transaction envelope type ID.
     type Type: TxType;
