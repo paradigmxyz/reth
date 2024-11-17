@@ -17,18 +17,18 @@ use reth_beacon_consensus::{
     BeaconConsensusEngine,
 };
 use reth_blockchain_tree::{noop::NoopBlockchainTree, BlockchainTreeConfig};
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_chainspec::EthChainSpec;
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider};
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
 use reth_network::{BlockDownloaderProvider, NetworkEventListenerProvider};
-use reth_node_api::{AddOnsContext, FullNodeTypes, NodeTypesWithDB, NodeTypesWithEngine};
+use reth_node_api::{AddOnsContext, FullNodePrimitives, FullNodeTypes, NodeTypesWithEngine};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
-use reth_provider::providers::BlockchainProvider;
+use reth_provider::providers::{BlockchainProvider, ProviderNodeTypes};
 use reth_rpc::eth::RpcNodeCore;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
@@ -98,10 +98,12 @@ impl DefaultNodeLauncher {
 
 impl<Types, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for DefaultNodeLauncher
 where
-    Types: NodeTypesWithDB<ChainSpec: EthereumHardforks + EthChainSpec> + NodeTypesWithEngine,
+    Types: ProviderNodeTypes + NodeTypesWithEngine,
     T: FullNodeTypes<Provider = BlockchainProvider<Types>, Types = Types>,
     CB: NodeComponentsBuilder<T>,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>,
+    Types::Primitives:
+        FullNodePrimitives<Block: reth_node_api::Block<Body = reth_primitives::BlockBody>>,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
 

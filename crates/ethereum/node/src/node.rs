@@ -26,7 +26,7 @@ use reth_node_builder::{
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::EthPrimitives;
-use reth_provider::CanonStateSubscriptions;
+use reth_provider::{CanonStateSubscriptions, EthStorage};
 use reth_rpc::EthApi;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
@@ -74,6 +74,7 @@ impl NodeTypes for EthereumNode {
     type Primitives = EthPrimitives;
     type ChainSpec = ChainSpec;
     type StateCommitment = MerklePatriciaTrie;
+    type Storage = EthStorage;
 }
 
 impl NodeTypesWithEngine for EthereumNode {
@@ -94,7 +95,13 @@ pub type EthereumAddOns<N> = RpcAddOns<
 
 impl<Types, N> Node<N> for EthereumNode
 where
-    Types: NodeTypesWithDB + NodeTypesWithEngine<Engine = EthEngineTypes, ChainSpec = ChainSpec>,
+    Types: NodeTypesWithDB
+        + NodeTypesWithEngine<
+            Engine = EthEngineTypes,
+            ChainSpec = ChainSpec,
+            Primitives = EthPrimitives,
+            Storage = EthStorage,
+        >,
     N: FullNodeTypes<Types = Types>,
 {
     type ComponentsBuilder = ComponentsBuilder<

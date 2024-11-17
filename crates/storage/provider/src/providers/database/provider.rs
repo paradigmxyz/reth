@@ -1,19 +1,24 @@
 use crate::{
     bundle_state::StorageRevertsIter,
-    providers::{database::metrics, static_file::StaticFileWriter, StaticFileProvider},
+    providers::{
+        database::{chain::ChainStorage, metrics},
+        static_file::StaticFileWriter,
+        ProviderNodeTypes, StaticFileProvider,
+    },
     to_range,
     traits::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
     },
     writer::UnifiedStorageWriter,
-    AccountReader, BlockExecutionWriter, BlockHashReader, BlockNumReader, BlockReader, BlockWriter,
-    BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter, DBProvider, EvmEnvProvider,
-    HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HistoricalStateProvider,
-    HistoricalStateProviderRef, HistoryWriter, LatestStateProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderError, PruneCheckpointReader, PruneCheckpointWriter, RevertsInit,
-    StageCheckpointReader, StateChangeWriter, StateProviderBox, StateReader, StateWriter,
-    StaticFileProviderFactory, StatsReader, StorageReader, StorageTrieWriter, TransactionVariant,
-    TransactionsProvider, TransactionsProviderExt, TrieWriter, WithdrawalsProvider,
+    AccountReader, BlockBodyWriter, BlockExecutionWriter, BlockHashReader, BlockNumReader,
+    BlockReader, BlockWriter, BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter,
+    DBProvider, EvmEnvProvider, HashingWriter, HeaderProvider, HeaderSyncGap,
+    HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter,
+    LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError,
+    PruneCheckpointReader, PruneCheckpointWriter, RevertsInit, StageCheckpointReader,
+    StateChangeWriter, StateProviderBox, StateReader, StateWriter, StaticFileProviderFactory,
+    StatsReader, StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
+    TransactionsProviderExt, TrieWriter, WithdrawalsProvider,
 };
 use alloy_consensus::Header;
 use alloy_eips::{
@@ -47,6 +52,7 @@ use reth_primitives::{
     SealedBlockWithSenders, SealedHeader, StaticFileSegment, StorageEntry, TransactionMeta,
     TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
 };
+use reth_primitives_traits::{BlockBody as _, FullNodePrimitives};
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{StateProvider, StorageChangeSetReader, TryIntoHistoricalStateProvider};
@@ -138,6 +144,8 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     static_file_provider: StaticFileProvider<N::Primitives>,
     /// Pruning configuration
     prune_modes: PruneModes,
+    /// Node storage handler.
+    storage: Arc<N::Storage>,
 }
 
 impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
@@ -224,8 +232,9 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider<N::Primitives>,
         prune_modes: PruneModes,
+        storage: Arc<N::Storage>,
     ) -> Self {
-        Self { tx, chain_spec, static_file_provider, prune_modes }
+        Self { tx, chain_spec, static_file_provider, prune_modes, storage }
     }
 }
 
@@ -277,9 +286,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
     }
 }
 
-impl<Tx: DbTx + DbTxMut + 'static, N: NodeTypes<ChainSpec: EthereumHardforks> + 'static>
-    DatabaseProvider<Tx, N>
-{
+impl<Tx: DbTx + DbTxMut + 'static, N: ProviderNodeTypes + 'static> DatabaseProvider<Tx, N> {
     // TODO: uncomment below, once `reth debug_cmd` has been feature gated with dev.
     // #[cfg(any(test, feature = "test-utils"))]
     /// Inserts an historical block. **Used for setting up test environments**
@@ -367,8 +374,9 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider<N::Primitives>,
         prune_modes: PruneModes,
+        storage: Arc<N::Storage>,
     ) -> Self {
-        Self { tx, chain_spec, static_file_provider, prune_modes }
+        Self { tx, chain_spec, static_file_provider, prune_modes, storage }
     }
 
     /// Consume `DbTx` or `DbTxMut`.
@@ -2899,8 +2907,8 @@ impl<TX: DbTx + 'static, N: NodeTypes> StateReader for DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks> + 'static>
-    BlockExecutionWriter for DatabaseProvider<TX, N>
+impl<TX: DbTxMut + DbTx + 'static, N: ProviderNodeTypes + 'static> BlockExecutionWriter
+    for DatabaseProvider<TX, N>
 {
     fn take_block_and_execution_range(
         &self,
@@ -3101,10 +3109,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks> + 
     }
 }
 
-impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks> + 'static> BlockWriter
+impl<TX: DbTxMut + DbTx + 'static, N: ProviderNodeTypes + 'static> BlockWriter
     for DatabaseProvider<TX, N>
 {
-    type Body = BlockBody;
+    type Body =
+        <<N::Primitives as FullNodePrimitives>::Block as reth_primitives_traits::Block>::Body;
 
     /// Inserts the block into the database, always modifying the following tables:
     /// * [`CanonicalHeaders`](tables::CanonicalHeaders)
@@ -3266,44 +3275,31 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks> + 
 
     fn append_block_bodies(
         &self,
-        bodies: impl Iterator<Item = (BlockNumber, Option<BlockBody>)>,
+        bodies: Vec<(BlockNumber, Option<Self::Body>)>,
     ) -> ProviderResult<()> {
         let mut block_indices_cursor = self.tx.cursor_write::<tables::BlockBodyIndices>()?;
         let mut tx_block_cursor = self.tx.cursor_write::<tables::TransactionBlocks>()?;
-        let mut ommers_cursor = self.tx.cursor_write::<tables::BlockOmmers>()?;
-        let mut withdrawals_cursor = self.tx.cursor_write::<tables::BlockWithdrawals>()?;
 
         // Get id for the next tx_num of zero if there are no transactions.
         let mut next_tx_num = tx_block_cursor.last()?.map(|(id, _)| id + 1).unwrap_or_default();
 
-        for (block_number, body) in bodies {
-            let tx_count = body.as_ref().map(|b| b.transactions.len() as u64).unwrap_or_default();
+        for (block_number, body) in &bodies {
+            let tx_count = body.as_ref().map(|b| b.transactions().len() as u64).unwrap_or_default();
             let block_indices = StoredBlockBodyIndices { first_tx_num: next_tx_num, tx_count };
 
             // insert block meta
-            block_indices_cursor.append(block_number, block_indices)?;
+            block_indices_cursor.append(*block_number, block_indices)?;
 
             next_tx_num += tx_count;
             let Some(body) = body else { continue };
 
             // write transaction block index
-            if !body.transactions.is_empty() {
-                tx_block_cursor.append(block_indices.last_tx_num(), block_number)?;
-            }
-
-            // Write ommers if any
-            if !body.ommers.is_empty() {
-                ommers_cursor.append(block_number, StoredBlockOmmers { ommers: body.ommers })?;
-            }
-
-            // Write withdrawals if any
-            if let Some(withdrawals) = body.withdrawals {
-                if !withdrawals.is_empty() {
-                    withdrawals_cursor
-                        .append(block_number, StoredBlockWithdrawals { withdrawals })?;
-                }
+            if !body.transactions().is_empty() {
+                tx_block_cursor.append(block_indices.last_tx_num(), *block_number)?;
             }
         }
+
+        self.storage.writer().write_block_bodies(self, bodies)?;
 
         Ok(())
     }

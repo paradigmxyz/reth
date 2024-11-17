@@ -113,7 +113,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         Ok(())
     }
 
-    fn build_pipeline<N: ProviderNodeTypes<ChainSpec = C::ChainSpec>>(
+    fn build_pipeline<N: ProviderNodeTypes<ChainSpec = C::ChainSpec> + CliNodeTypes>(
         self,
         config: Config,
         provider_factory: ProviderFactory<N>,

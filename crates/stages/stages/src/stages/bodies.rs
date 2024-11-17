@@ -198,7 +198,10 @@ where
         // Write bodies to database. This will NOT write transactions to database as we've already
         // written them directly to static files.
         provider.append_block_bodies(
-            buffer.into_iter().map(|response| (response.block_number(), response.into_body())),
+            buffer
+                .into_iter()
+                .map(|response| (response.block_number(), response.into_body()))
+                .collect(),
         )?;
 
         // The stage is "done" if:

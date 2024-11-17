@@ -79,7 +79,7 @@ pub mod serde_bincode_compat {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EthPrimitives;
 
-impl NodePrimitives for EthPrimitives {
+impl reth_primitives_traits::FullNodePrimitives for EthPrimitives {
     type Block = crate::Block;
     type SignedTx = crate::TransactionSigned;
     type TxType = crate::TxType;
