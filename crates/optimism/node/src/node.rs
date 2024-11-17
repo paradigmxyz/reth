@@ -75,11 +75,13 @@ impl<Provider: DBProvider<Tx: DbTxMut>> BlockBodyWriter<Provider, BlockBody> for
 }
 
 impl ChainStorage<OpPrimitives> for OpStorage {
-    type Writer<TX: DbTxMut + DbTx + 'static, Types: NodeTypes<Primitives = OpPrimitives>> = Self;
-
-    fn writer<TX: DbTxMut + DbTx + 'static, Types: NodeTypes<Primitives = OpPrimitives>>(
+    fn writer<TX, Types>(
         &self,
-    ) -> &Self::Writer<TX, Types> {
+    ) -> impl reth_provider::ChainStorageWriter<reth_provider::DatabaseProvider<TX, Types>, OpPrimitives>
+    where
+        TX: DbTxMut + DbTx + 'static,
+        Types: NodeTypes<Primitives = OpPrimitives>,
+    {
         self
     }
 }
