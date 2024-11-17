@@ -1290,13 +1290,17 @@ impl TransactionSigned {
 
     /// Calculate transaction hash, eip2728 transaction does not contain rlp header and start with
     /// tx type.
-    pub fn recalculate_hash(&self) -> LazyLock<B256> {
-        LazyLock::new(|| keccak256(self.encoded_2718()))
+    pub fn recalculate_hash(&self) -> B256 {
+        keccak256(self.encoded_2718())
     }
 
+    /// Create a new signed transaction from a transaction and its signature.
+    ///
+    /// This will also calculate the transaction hash using its encoding.
     pub fn from_transaction_and_signature(transaction: Transaction, signature: Signature) -> Self {
-        let mut initial_tx = Self { transaction, hash: Default::default(), signature };
-        initial_tx.hash = initial_tx.recalculate_hash();
+        let mut initial_tx = Self { transaction, hash: LazyLock::new(|| B256::ZERO), signature };
+        let hash = initial_tx.recalculate_hash();
+        initial_tx.hash = LazyLock::new(|| hash);
         initial_tx
     }
 
