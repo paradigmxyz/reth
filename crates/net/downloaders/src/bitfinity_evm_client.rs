@@ -462,9 +462,8 @@ impl BodiesClient for BitfinityEvmClient {
 impl DownloadClient for BitfinityEvmClient {
     fn report_bad_message(&self, _peer_id: PeerId) {
         error!("Reported a bad message on a remote client, the client may be corrupted or invalid");
-        // This panic stops the import job and prints the stacktrace or the error
-        panic!("Reported a bad message on a remote client, the client may be corrupted or invalid");
-        // noop
+        // Uncomment this panic to stop the import job and print the stacktrace of the error
+        // panic!("Reported a bad message on a remote client, the client may be corrupted or invalid");
     }
 
     fn num_connected_peers(&self) -> usize {
