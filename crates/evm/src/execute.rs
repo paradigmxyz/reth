@@ -682,6 +682,52 @@ mod tests {
     #[derive(Clone)]
     struct TestEvmConfig {}
 
+    struct EvmInitializer;
+
+    impl InitializeEvm for EvmInitializer {
+        fn fill_block_env(
+            &self,
+            _block_env: &mut revm_primitives::BlockEnv,
+            _header: &alloy_consensus::Header,
+            _after_merge: bool,
+        ) {
+        }
+
+        fn fill_tx_env(
+            &self,
+            _tx_env: &mut revm_primitives::TxEnv,
+            _transaction: &reth_primitives::TransactionSigned,
+            _sender: revm_primitives::Address,
+        ) {
+        }
+
+        fn fill_cfg_and_block_env(
+            &self,
+            _cfg: &mut revm_primitives::CfgEnvWithHandlerCfg,
+            _block_env: &mut revm_primitives::BlockEnv,
+            _header: &alloy_consensus::Header,
+            _total_difficulty: U256,
+        ) {
+        }
+
+        fn fill_cfg_env(
+            &self,
+            _cfg_env: &mut revm_primitives::CfgEnvWithHandlerCfg,
+            _header: &alloy_consensus::Header,
+            _total_difficulty: U256,
+        ) {
+        }
+
+        fn fill_tx_env_system_contract_call(
+            &self,
+            _env: &mut revm_primitives::Env,
+            _caller: revm_primitives::Address,
+            _contract: revm_primitives::Address,
+            _data: revm_primitives::Bytes,
+        ) {
+        }
+    }
+
     #[test]
     fn test_provider() {
         let provider = TestExecutorProvider;
@@ -716,5 +762,24 @@ mod tests {
         assert_eq!(block_execution_output.receipts, expected_receipts);
         assert_eq!(block_execution_output.requests, expected_apply_post_execution_changes_result);
         assert_eq!(block_execution_output.state, expected_finish_result);
+    }
+
+    #[test]
+    fn test_evm_initializer() {
+        let strategy_factory = TestExecutorStrategyFactory {
+            execute_transactions_result: ExecuteOutput {
+                receipts: vec![Receipt::default()],
+                gas_used: 10,
+            },
+            apply_post_execution_changes_result: Requests::new(vec![bytes!("deadbeef")]),
+            finish_result: BundleState::default(),
+        };
+        let provider = BasicBlockExecutorProvider::new(strategy_factory);
+        let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
+        let mut executor = provider.executor(db);
+        let evm_initializer = EvmInitializer {};
+        executor.init(Box::new(evm_initializer));
+        let result = executor.execute(BlockExecutionInput::new(&Default::default(), U256::ZERO));
+        assert!(result.is_ok());
     }
 }
