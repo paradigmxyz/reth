@@ -60,5 +60,7 @@ pub mod noop;
 mod history;
 pub use history::*;
 
+mod hashing;
+pub use hashing::*;
 mod stats;
 pub use stats::*;

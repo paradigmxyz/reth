@@ -106,11 +106,11 @@ impl<T> BlockBatchRecord<T> {
             !self
                 .prune_modes
                 .account_history
-                .map_or(false, |mode| mode.should_prune(block_number, tip)) &&
+                .is_some_and(|mode| mode.should_prune(block_number, tip)) &&
                 !self
                     .prune_modes
                     .storage_history
-                    .map_or(false, |mode| mode.should_prune(block_number, tip))
+                    .is_some_and(|mode| mode.should_prune(block_number, tip))
         }) {
             BundleRetention::Reverts
         } else {
@@ -143,7 +143,7 @@ impl<T> BlockBatchRecord<T> {
         // Block receipts should not be retained
         if self.prune_modes.receipts == Some(PruneMode::Full) ||
             // [`PruneSegment::Receipts`] takes priority over [`PruneSegment::ContractLogs`]
-            self.prune_modes.receipts.map_or(false, |mode| mode.should_prune(block_number, tip))
+            self.prune_modes.receipts.is_some_and(|mode| mode.should_prune(block_number, tip))
         {
             receipts.clear();
             return Ok(())

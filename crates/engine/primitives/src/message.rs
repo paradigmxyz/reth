@@ -5,7 +5,7 @@ use alloy_rpc_types_engine::{
 };
 use futures::{future::Either, FutureExt};
 use reth_errors::RethResult;
-use reth_payload_primitives::PayloadBuilderError;
+use reth_payload_builder_primitives::PayloadBuilderError;
 use std::{
     fmt::Display,
     future::Future,

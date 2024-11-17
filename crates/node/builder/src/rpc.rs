@@ -11,13 +11,13 @@ use alloy_rpc_types::engine::ClientVersionV1;
 use futures::TryFutureExt;
 use reth_node_api::{
     AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, NodeTypes, NodeTypesWithEngine,
+    PayloadBuilder,
 };
 use reth_node_core::{
     node_config::NodeConfig,
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_payload_builder::PayloadStore;
-use reth_payload_primitives::PayloadBuilder;
 use reth_provider::providers::ProviderNodeTypes;
 use reth_rpc::{
     eth::{EthApiTypes, FullEthApiServer},

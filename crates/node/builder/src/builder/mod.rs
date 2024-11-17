@@ -2,13 +2,6 @@
 
 #![allow(clippy::type_complexity, missing_debug_implementations)]
 
-pub mod add_ons;
-mod states;
-
-pub use states::*;
-
-use std::sync::Arc;
-
 use crate::{
     common::WithConfigs,
     components::NodeComponentsBuilder,
@@ -38,12 +31,18 @@ use reth_node_core::{
     node_config::NodeConfig,
     primitives::Head,
 };
-use reth_primitives::revm_primitives::EnvKzgSettings;
 use reth_provider::{providers::BlockchainProvider, ChainSpecProvider, FullProvider};
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, TransactionPool};
+use revm_primitives::EnvKzgSettings;
 use secp256k1::SecretKey;
+use std::sync::Arc;
 use tracing::{info, trace, warn};
+
+pub mod add_ons;
+
+mod states;
+pub use states::*;
 
 /// The adapter type for a reth node with the builtin provider type
 // Note: we need to hardcode this because custom components might depend on it in associated types.

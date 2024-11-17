@@ -18,14 +18,16 @@ use alloy_rpc_types_eth::{
 use futures::Future;
 use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
-use reth_primitives::{
-    revm_primitives::{
+use reth_primitives::TransactionSigned;
+use reth_provider::{BlockIdReader, ChainSpecProvider, HeaderProvider};
+use reth_revm::{
+    database::StateProviderDatabase,
+    db::CacheDB,
+    primitives::{
         BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, ResultAndState, TxEnv,
     },
-    TransactionSigned,
+    DatabaseRef,
 };
-use reth_provider::{BlockIdReader, ChainSpecProvider, HeaderProvider};
-use reth_revm::{database::StateProviderDatabase, db::CacheDB, DatabaseRef};
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
     error::ensure_success,
@@ -690,7 +692,7 @@ pub trait Call: LoadState<Evm: ConfigureEvm<Header = Header>> + SpawnBlocking {
         request: TransactionRequest,
     ) -> Result<TxEnv, Self::Error> {
         // Ensure that if versioned hashes are set, they're not empty
-        if request.blob_versioned_hashes.as_ref().map_or(false, |hashes| hashes.is_empty()) {
+        if request.blob_versioned_hashes.as_ref().is_some_and(|hashes| hashes.is_empty()) {
             return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into_eth_err())
         }
 

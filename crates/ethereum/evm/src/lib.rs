@@ -201,10 +201,10 @@ mod tests {
     use alloy_primitives::{B256, U256};
     use reth_chainspec::{Chain, ChainSpec, MAINNET};
     use reth_evm::execute::ProviderError;
-    use reth_primitives::revm_primitives::{BlockEnv, CfgEnv, SpecId};
     use reth_revm::{
         db::{CacheDB, EmptyDBTyped},
         inspectors::NoOpInspector,
+        primitives::{BlockEnv, CfgEnv, SpecId},
         JournaledState,
     };
     use revm_primitives::{CfgEnvWithHandlerCfg, EnvWithHandlerCfg, HandlerCfg};

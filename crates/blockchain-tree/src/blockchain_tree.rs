@@ -1390,7 +1390,6 @@ mod tests {
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_primitives::{
         proofs::{calculate_receipt_root, calculate_transaction_root},
-        revm_primitives::AccountInfo,
         Account, BlockBody, Transaction, TransactionSigned, TransactionSignedEcRecovered,
     };
     use reth_provider::{
@@ -1400,6 +1399,7 @@ mod tests {
         },
         ProviderFactory,
     };
+    use reth_revm::primitives::AccountInfo;
     use reth_stages_api::StageCheckpoint;
     use reth_trie::{root::state_root_unhashed, StateRoot};
     use std::collections::HashMap;
