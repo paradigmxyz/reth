@@ -27,6 +27,7 @@ byteorder = "1"
 derive_more.workspace = true
 roaring = "0.10.2"
 serde_with = { workspace = true, optional = true }
+auto_impl.workspace = true
 
 # required by reth-codecs
 bytes.workspace = true
