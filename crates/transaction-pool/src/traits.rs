@@ -551,6 +551,11 @@ impl<T: PoolTransaction> AllPoolTransactions<T> {
     pub fn queued_recovered(&self) -> impl Iterator<Item = T::Consensus> + '_ {
         self.queued.iter().map(|tx| tx.transaction.clone().into())
     }
+
+    /// Returns an iterator over all transactions, both pending and queued.
+    pub fn all(&self) -> impl Iterator<Item = T::Consensus> + '_ {
+        self.pending.iter().chain(self.queued.iter()).map(|tx| tx.transaction.clone().into())
+    }
 }
 
 impl<T: PoolTransaction> Default for AllPoolTransactions<T> {
