@@ -95,13 +95,13 @@ impl<T> MaybeArbitrary for T {}
 
 /// Helper trait that requires de-/serialize implementation since `serde` feature is enabled.
 #[cfg(feature = "serde")]
-pub trait MaybeSerialize: serde::Serialize + for<'de> serde::Deserialize<'de> {}
+pub trait MaybeSerde: serde::Serialize + for<'de> serde::Deserialize<'de> {}
 /// Noop. Helper trait that would require de-/serialize implementation if `serde` feature were
 /// enabled.
 #[cfg(not(feature = "serde"))]
-pub trait MaybeSerialize {}
+pub trait MaybeSerde {}
 
 #[cfg(feature = "serde")]
-impl<T> MaybeSerialize for T where T: serde::Serialize + for<'de> serde::Deserialize<'de> {}
+impl<T> MaybeSerde for T where T: serde::Serialize + for<'de> serde::Deserialize<'de> {}
 #[cfg(not(feature = "serde"))]
-impl<T> MaybeSerialize for T {}
+impl<T> MaybeSerde for T {}

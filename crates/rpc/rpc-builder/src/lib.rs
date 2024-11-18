@@ -1999,6 +1999,29 @@ impl TransportRpcModules {
         &self.config
     }
 
+    /// Merge the given [`Methods`] in all configured transport modules if the given
+    /// [`RethRpcModule`] is configured for the transport.
+    ///
+    /// Fails if any of the methods in other is present already.
+    pub fn merge_if_module_configured(
+        &mut self,
+        module: RethRpcModule,
+        other: impl Into<Methods>,
+    ) -> Result<(), RegisterMethodError> {
+        let other = other.into();
+        if self.module_config().contains_http(&module) {
+            self.merge_http(other.clone())?;
+        }
+        if self.module_config().contains_ws(&module) {
+            self.merge_ws(other.clone())?;
+        }
+        if self.module_config().contains_ipc(&module) {
+            self.merge_ipc(other)?;
+        }
+
+        Ok(())
+    }
+
     /// Merge the given [Methods] in the configured http methods.
     ///
     /// Fails if any of the methods in other is present already.

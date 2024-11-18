@@ -31,6 +31,7 @@ reth-chainspec.workspace = true
 reth-revm = { workspace = true, features = ["std"] }
 reth-trie-db.workspace = true
 reth-node-types.workspace = true
+reth-primitives.workspace = true
 
 alloy-consensus.workspace = true
 
@@ -77,4 +78,5 @@ test-utils = [
     "reth-trie-db/test-utils",
     "revm/test-utils",
     "reth-evm/test-utils",
+    
 ]

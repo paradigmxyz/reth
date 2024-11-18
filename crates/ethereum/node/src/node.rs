@@ -24,7 +24,9 @@ use reth_node_builder::{
     rpc::{EngineValidatorBuilder, RpcAddOns},
     BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig, PayloadTypes,
 };
+use reth_node_types::NodePrimitives;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
+use reth_primitives::{Block, BlockBody, Receipt, TransactionSigned, TxType};
 use reth_provider::CanonStateSubscriptions;
 use reth_rpc::EthApi;
 use reth_tracing::tracing::{debug, info};
@@ -35,6 +37,19 @@ use reth_transaction_pool::{
 use reth_trie_db::MerklePatriciaTrie;
 
 use crate::{EthEngineTypes, EthEvmConfig};
+
+/// Ethereum primitive types.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct EthPrimitives;
+
+impl NodePrimitives for EthPrimitives {
+    type Block = Block;
+    type BlockHeader = Header;
+    type BlockBody = BlockBody;
+    type SignedTx = TransactionSigned;
+    type TxType = TxType;
+    type Receipt = Receipt;
+}
 
 /// Type configuration for a regular Ethereum node.
 #[derive(Debug, Default, Clone, Copy)]

@@ -1,8 +1,7 @@
 use core::fmt;
 
 use crate::{
-    FullBlock, FullBlockBody, FullBlockHeader, FullReceipt, FullSignedTx, FullTxType,
-    MaybeSerialize,
+    FullBlock, FullBlockBody, FullBlockHeader, FullReceipt, FullSignedTx, FullTxType, MaybeSerde,
 };
 
 /// Configures all the primitive types of the node.
@@ -10,13 +9,49 @@ pub trait NodePrimitives:
     Send + Sync + Unpin + Clone + Default + fmt::Debug + PartialEq + Eq + 'static
 {
     /// Block primitive.
-    type Block: Send + Sync + Unpin + Clone + Default + fmt::Debug + PartialEq + Eq + 'static;
+    type Block: Send
+        + Sync
+        + Unpin
+        + Clone
+        + Default
+        + fmt::Debug
+        + PartialEq
+        + Eq
+        + MaybeSerde
+        + 'static;
     /// Block header primitive.
-    type BlockHeader: Send + Sync + Unpin + Clone + Default + fmt::Debug + PartialEq + Eq + 'static;
+    type BlockHeader: Send
+        + Sync
+        + Unpin
+        + Clone
+        + Default
+        + fmt::Debug
+        + PartialEq
+        + Eq
+        + MaybeSerde
+        + 'static;
     /// Block body primitive.
-    type BlockBody: Send + Sync + Unpin + Clone + Default + fmt::Debug + PartialEq + Eq + 'static;
+    type BlockBody: Send
+        + Sync
+        + Unpin
+        + Clone
+        + Default
+        + fmt::Debug
+        + PartialEq
+        + Eq
+        + MaybeSerde
+        + 'static;
     /// Signed version of the transaction type.
-    type SignedTx: Send + Sync + Unpin + Clone + Default + fmt::Debug + PartialEq + Eq + 'static;
+    type SignedTx: Send
+        + Sync
+        + Unpin
+        + Clone
+        + Default
+        + fmt::Debug
+        + PartialEq
+        + Eq
+        + MaybeSerde
+        + 'static;
     /// Transaction envelope type ID.
     type TxType: Send + Sync + Unpin + Clone + Default + fmt::Debug + PartialEq + Eq + 'static;
     /// A receipt.
@@ -28,7 +63,7 @@ pub trait NodePrimitives:
         + fmt::Debug
         + PartialEq
         + Eq
-        + MaybeSerialize
+        + MaybeSerde
         + 'static;
 }
 

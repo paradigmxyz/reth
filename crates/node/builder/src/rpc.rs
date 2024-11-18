@@ -399,7 +399,7 @@ where
     }
 }
 
-impl<N, EthApi, EV> NodeAddOns<N> for RpcAddOns<N, EthApi, EV>
+impl<N, EthApi, EV> RpcAddOns<N, EthApi, EV>
 where
     N: FullNodeComponents<
         Types: ProviderNodeTypes,
@@ -408,9 +408,16 @@ where
     EthApi: EthApiTypes + FullEthApiServer + AddDevSigners + Unpin + 'static,
     EV: EngineValidatorBuilder<N>,
 {
-    type Handle = RpcHandle<N, EthApi>;
-
-    async fn launch_add_ons(self, ctx: AddOnsContext<'_, N>) -> eyre::Result<Self::Handle> {
+    /// Launches the RPC servers with the given context and an additional hook for extending
+    /// modules.
+    pub async fn launch_add_ons_with<F>(
+        self,
+        ctx: AddOnsContext<'_, N>,
+        ext: F,
+    ) -> eyre::Result<RpcHandle<N, EthApi>>
+    where
+        F: FnOnce(&mut TransportRpcModules) -> eyre::Result<()>,
+    {
         let Self { eth_api_builder, engine_validator_builder, hooks, _pd: _ } = self;
 
         let engine_validator = engine_validator_builder.build(&ctx).await?;
@@ -467,6 +474,7 @@ where
 
         let RpcHooks { on_rpc_started, extend_rpc_modules } = hooks;
 
+        ext(ctx.modules)?;
         extend_rpc_modules.extend_rpc_modules(ctx)?;
 
         let server_config = config.rpc.rpc_server_config();
@@ -510,6 +518,22 @@ where
         on_rpc_started.on_rpc_started(ctx, handles.clone())?;
 
         Ok(RpcHandle { rpc_server_handles: handles, rpc_registry: registry })
+    }
+}
+
+impl<N, EthApi, EV> NodeAddOns<N> for RpcAddOns<N, EthApi, EV>
+where
+    N: FullNodeComponents<
+        Types: ProviderNodeTypes,
+        PayloadBuilder: PayloadBuilder<PayloadType = <N::Types as NodeTypesWithEngine>::Engine>,
+    >,
+    EthApi: EthApiTypes + FullEthApiServer + AddDevSigners + Unpin + 'static,
+    EV: EngineValidatorBuilder<N>,
+{
+    type Handle = RpcHandle<N, EthApi>;
+
+    async fn launch_add_ons(self, ctx: AddOnsContext<'_, N>) -> eyre::Result<Self::Handle> {
+        self.launch_add_ons_with(ctx, |_| Ok(())).await
     }
 }
 
