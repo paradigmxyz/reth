@@ -289,7 +289,7 @@ impl TransactionFetcher {
 
             // tx is really big, pack request with single tx
             if size >= self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request {
-                return hashes_from_announcement_iter.collect::<RequestTxHashes>()
+                return hashes_from_announcement_iter.collect()
             }
             acc_size_response = size;
         }
@@ -688,10 +688,8 @@ impl TransactionFetcher {
         }
 
         let (response, rx) = oneshot::channel();
-        let req: PeerRequest = PeerRequest::GetPooledTransactions {
-            request: GetPooledTransactions(
-                new_announced_hashes.iter().copied().collect::<Vec<_>>(),
-            ),
+        let req = PeerRequest::GetPooledTransactions {
+            request: GetPooledTransactions(new_announced_hashes.iter().copied().collect()),
             response,
         };
 
@@ -1012,8 +1010,7 @@ impl TransactionFetcher {
                 //
                 self.try_buffer_hashes_for_retry(requested_hashes, &peer_id);
 
-                let transactions =
-                    valid_payload.into_data().into_values().collect::<PooledTransactions>();
+                let transactions = valid_payload.into_data().into_values().collect();
 
                 FetchEvent::TransactionsFetched { peer_id, transactions }
             }
@@ -1202,13 +1199,10 @@ impl DedupPayload for VerifiedPooledTransactions {
     }
 
     fn dedup(self) -> PartiallyValidData<Self::Value> {
-        let Self { txns } = self;
-        let unique_fetched = txns
-            .into_iter()
-            .map(|tx| (*tx.hash(), tx))
-            .collect::<HashMap<TxHash, PooledTransactionsElement>>();
-
-        PartiallyValidData::from_raw_data(unique_fetched, None)
+        PartiallyValidData::from_raw_data(
+            self.txns.into_iter().map(|tx| (*tx.hash(), tx)).collect(),
+            None,
+        )
     }
 }
 

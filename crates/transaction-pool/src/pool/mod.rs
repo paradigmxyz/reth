@@ -108,7 +108,6 @@ use crate::{
 };
 pub use best::{
     BestPayloadTransactions, BestTransactionFilter, BestTransactionsWithPrioritizedSenders,
-    PayloadTransactionsChain, PayloadTransactionsFixed,
 };
 pub use blob::{blob_tx_priority, fee_delta};
 pub use events::{FullTransactionEvent, TransactionEvent};
@@ -394,7 +393,9 @@ where
         trace!(target: "txpool", ?update, "updating pool on canonical state change");
 
         let block_info = update.block_info();
-        let CanonicalStateUpdate { new_tip, changed_accounts, mined_transactions, .. } = update;
+        let CanonicalStateUpdate {
+            new_tip, changed_accounts, mined_transactions, update_kind, ..
+        } = update;
         self.validator.on_new_head_block(new_tip);
 
         let changed_senders = self.changed_senders(changed_accounts.into_iter());
@@ -404,6 +405,7 @@ where
             block_info,
             mined_transactions,
             changed_senders,
+            update_kind,
         );
 
         // This will discard outdated transactions based on the account's nonce
@@ -1300,7 +1302,7 @@ mod tests {
 
             // Insert the sidecar into the blob store if the current index is within the blob limit.
             if n < blob_limit.max_txs {
-                blob_store.insert(tx.get_hash(), sidecar.clone()).unwrap();
+                blob_store.insert(*tx.get_hash(), sidecar.clone()).unwrap();
             }
 
             // Add the transaction to the pool with external origin and valid outcome.

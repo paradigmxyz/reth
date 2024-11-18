@@ -40,7 +40,8 @@ serde = [
 	"revm/serde",
 	"alloy-eips/serde",
 	"alloy-primitives/serde",
-	"rand/serde"
+	"rand/serde",
+	"reth-primitives-traits/serde",
 ]
 serde-bincode-compat = [
 	"reth-primitives/serde-bincode-compat",

@@ -10,7 +10,8 @@
 #![cfg(feature = "optimism")]
 
 pub mod bedrock;
-pub mod op_tx_type;
 pub mod signed_transaction;
+pub mod tx_type;
 
 pub use signed_transaction::OpTransactionSigned;
+pub use tx_type::OpTxType;

@@ -1,5 +1,5 @@
 //! Database debugging tool
-use crate::common::{AccessRights, Environment, EnvironmentArgs};
+use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use clap::Parser;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
@@ -10,7 +10,7 @@ use reth_db_api::{
 };
 use reth_db_common::DbTool;
 use reth_evm::execute::BlockExecutorProvider;
-use reth_node_builder::{NodeTypesWithDB, NodeTypesWithEngine};
+use reth_node_builder::NodeTypesWithDB;
 use reth_node_core::{
     args::DatadirArgs,
     dirs::{DataDirPath, PlatformPath},
@@ -92,7 +92,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
     /// Execute `dump-stage` command
     pub async fn execute<N, E, F>(self, executor: F) -> eyre::Result<()>
     where
-        N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>,
+        N: CliNodeTypes<ChainSpec = C::ChainSpec>,
         E: BlockExecutorProvider,
         F: FnOnce(Arc<C::ChainSpec>) -> E,
     {

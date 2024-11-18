@@ -10,7 +10,6 @@ reth.workspace = true
 reth-chainspec.workspace = true
 reth-node-api.workspace = true
 reth-node-core.workspace = true
-reth-primitives.workspace = true
 reth-payload-builder.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-ethereum-payload-builder.workspace = true

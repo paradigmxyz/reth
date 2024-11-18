@@ -9,7 +9,7 @@ use reth_primitives_traits::constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH;
 use reth_provider::{
     providers::ProviderNodeTypes, writer::UnifiedStorageWriter, ChainStateBlockReader,
     ChainStateBlockWriter, DatabaseProviderFactory, ProviderFactory, StageCheckpointReader,
-    StageCheckpointWriter, StaticFileProviderFactory,
+    StageCheckpointWriter,
 };
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
@@ -177,7 +177,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                 self.progress
                     .minimum_block_number
                     .zip(self.max_block)
-                    .map_or(false, |(progress, target)| progress >= target)
+                    .is_some_and(|(progress, target)| progress >= target)
             {
                 trace!(
                     target: "sync::pipeline",
@@ -358,10 +358,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                             ))?;
                         }
 
-                        UnifiedStorageWriter::commit_unwind(
-                            provider_rw,
-                            self.provider_factory.static_file_provider(),
-                        )?;
+                        UnifiedStorageWriter::commit_unwind(provider_rw)?;
 
                         stage.post_unwind_commit()?;
 
@@ -396,7 +393,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
 
             let stage_reached_max_block = prev_checkpoint
                 .zip(self.max_block)
-                .map_or(false, |(prev_progress, target)| prev_progress.block_number >= target);
+                .is_some_and(|(prev_progress, target)| prev_progress.block_number >= target);
             if stage_reached_max_block {
                 warn!(
                     target: "sync::pipeline",
@@ -469,10 +466,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                         result: out.clone(),
                     });
 
-                    UnifiedStorageWriter::commit(
-                        provider_rw,
-                        self.provider_factory.static_file_provider(),
-                    )?;
+                    UnifiedStorageWriter::commit(provider_rw)?;
 
                     stage.post_execute_commit()?;
 
@@ -533,7 +527,7 @@ fn on_stage_error<N: ProviderNodeTypes>(
                     prev_checkpoint.unwrap_or_default(),
                 )?;
 
-                UnifiedStorageWriter::commit(provider_rw, factory.static_file_provider())?;
+                UnifiedStorageWriter::commit(provider_rw)?;
 
                 // We unwind because of a validation error. If the unwind itself
                 // fails, we bail entirely,

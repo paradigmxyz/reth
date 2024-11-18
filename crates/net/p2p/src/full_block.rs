@@ -96,11 +96,7 @@ where
             start_hash: hash,
             count,
             request: FullBlockRangeRequest {
-                headers: Some(client.get_headers(HeadersRequest {
-                    start: hash.into(),
-                    limit: count,
-                    direction: HeadersDirection::Falling,
-                })),
+                headers: Some(client.get_headers(HeadersRequest::falling(hash.into(), count))),
                 bodies: None,
             },
             client,
@@ -355,7 +351,7 @@ where
 {
     /// Returns the block hashes for the given range, if they are available.
     pub fn range_block_hashes(&self) -> Option<Vec<B256>> {
-        self.headers.as_ref().map(|h| h.iter().map(|h| h.hash()).collect::<Vec<_>>())
+        self.headers.as_ref().map(|h| h.iter().map(|h| h.hash()).collect())
     }
 
     /// Returns whether or not the bodies map is fully populated with requested headers and bodies.

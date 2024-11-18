@@ -231,13 +231,13 @@ mod tests {
     use crate::wal::{cache::CachedBlock, Wal};
 
     fn read_notifications(wal: &Wal) -> eyre::Result<Vec<ExExNotification>> {
-        let Some(files_range) = wal.inner.storage.files_range()? else { return Ok(Vec::new()) };
-
-        wal.inner
-            .storage
-            .iter_notifications(files_range)
-            .map(|entry| Ok(entry?.2))
-            .collect::<eyre::Result<_>>()
+        wal.inner.storage.files_range()?.map_or(Ok(Vec::new()), |range| {
+            wal.inner
+                .storage
+                .iter_notifications(range)
+                .map(|entry| entry.map(|(_, _, n)| n))
+                .collect()
+        })
     }
 
     fn sort_committed_blocks(

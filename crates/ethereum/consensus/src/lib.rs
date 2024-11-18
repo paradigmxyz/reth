@@ -8,7 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
+use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH};
 use alloy_primitives::U256;
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
@@ -18,9 +18,8 @@ use reth_consensus_common::validation::{
     validate_against_parent_timestamp, validate_block_pre_execution, validate_body_against_header,
     validate_header_base_fee, validate_header_extradata, validate_header_gas,
 };
-use reth_primitives::{
-    constants::MINIMUM_GAS_LIMIT, BlockBody, BlockWithSenders, Header, SealedBlock, SealedHeader,
-};
+use reth_primitives::{BlockBody, BlockWithSenders, SealedBlock, SealedHeader};
+use reth_primitives_traits::constants::MINIMUM_GAS_LIMIT;
 use std::{fmt::Debug, sync::Arc, time::SystemTime};
 
 /// The bound divisor of the gas limit, used in update calculations.

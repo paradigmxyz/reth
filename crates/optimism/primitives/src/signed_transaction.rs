@@ -12,7 +12,7 @@ use reth_primitives::{
     transaction::{recover_signer, recover_signer_unchecked},
     TransactionSigned,
 };
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use revm_primitives::{AuthorizationList, TxEnv};
 use serde::{Deserialize, Serialize};
 
@@ -67,15 +67,6 @@ impl SignedTransaction for OpTransactionSigned {
         let Self { transaction, signature, .. } = self;
         let signature_hash = signature_hash(transaction);
         recover_signer_unchecked(signature, signature_hash)
-    }
-
-    fn from_transaction_and_signature(
-        transaction: Self::Transaction,
-        signature: Signature,
-    ) -> Self {
-        let mut initial_tx = Self { transaction, hash: Default::default(), signature };
-        initial_tx.hash = initial_tx.recalculate_hash();
-        initial_tx
     }
 
     fn recalculate_hash(&self) -> B256 {
@@ -172,6 +163,13 @@ impl SignedTransaction for OpTransactionSigned {
             is_system_transaction: Some(false),
             enveloped_tx: Some(envelope.into()),
         }
+    }
+}
+
+impl InMemorySize for OpTransactionSigned {
+    #[inline]
+    fn size(&self) -> usize {
+        mem::size_of::<TxHash>() + self.transaction.size() + mem::size_of::<Signature>()
     }
 }
 

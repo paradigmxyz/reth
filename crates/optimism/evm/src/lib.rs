@@ -13,15 +13,16 @@
 extern crate alloc;
 
 use alloc::{sync::Arc, vec::Vec};
+use alloy_consensus::Header;
 use alloy_primitives::{Address, U256};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
 use reth_optimism_chainspec::{DecodeError, OpChainSpec};
-use reth_primitives::{
-    revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
-    transaction::FillTxEnv,
-    Head, Header, TransactionSigned,
+use reth_primitives::{transaction::FillTxEnv, Head, TransactionSigned};
+use reth_revm::{
+    inspector_handle_register,
+    primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
+    Database, Evm, EvmBuilder, GetInspector,
 };
-use reth_revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
 
 mod config;
 pub use config::{revm_spec, revm_spec_by_timestamp_after_bedrock};
@@ -200,7 +201,7 @@ impl ConfigureEvm for OpEvmConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::constants::KECCAK_EMPTY;
+    use alloy_consensus::{constants::KECCAK_EMPTY, Header};
     use alloy_eips::eip7685::Requests;
     use alloy_genesis::Genesis;
     use alloy_primitives::{bytes, Address, LogData, B256, U256};
@@ -210,14 +211,12 @@ mod tests {
         AccountRevertInit, BundleStateInit, Chain, ExecutionOutcome, RevertsInit,
     };
     use reth_optimism_chainspec::BASE_MAINNET;
-    use reth_primitives::{
-        revm_primitives::{AccountInfo, BlockEnv, CfgEnv, SpecId},
-        Account, Header, Log, Receipt, Receipts, SealedBlockWithSenders, TxType,
-    };
+    use reth_primitives::{Account, Log, Receipt, Receipts, SealedBlockWithSenders, TxType};
 
     use reth_revm::{
         db::{BundleState, CacheDB, EmptyDBTyped},
         inspectors::NoOpInspector,
+        primitives::{AccountInfo, BlockEnv, CfgEnv, SpecId},
         JournaledState,
     };
     use revm_primitives::{CfgEnvWithHandlerCfg, EnvWithHandlerCfg, HandlerCfg};

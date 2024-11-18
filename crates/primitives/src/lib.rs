@@ -26,7 +26,6 @@ mod alloy_compat;
 mod block;
 #[cfg(feature = "reth-codec")]
 mod compression;
-pub mod constants;
 pub mod proofs;
 mod receipt;
 pub use reth_static_file_types as static_file;
@@ -36,29 +35,24 @@ pub use block::{generate_valid_header, valid_header_strategy};
 pub use block::{Block, BlockBody, BlockWithSenders, SealedBlock, SealedBlockWithSenders};
 #[cfg(feature = "reth-codec")]
 pub use compression::*;
-pub use constants::HOLESKY_GENESIS_HASH;
 pub use receipt::{
     gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,
 };
 pub use reth_primitives_traits::{
-    logs_bloom, Account, Bytecode, GotExpected, GotExpectedBoxed, Header, HeaderError, Log,
-    LogData, SealedHeader, StorageEntry,
+    logs_bloom, Account, Bytecode, GotExpected, GotExpectedBoxed, HeaderError, Log, LogData,
+    SealedHeader, StorageEntry,
 };
 pub use static_file::StaticFileSegment;
 
 pub use transaction::{
-    BlobTransaction, PooledTransactionsElement, PooledTransactionsElementEcRecovered,
-};
-
-pub use transaction::{
     util::secp256k1::{public_key_to_address, recover_signer_unchecked, sign_message},
-    InvalidTransactionError, Transaction, TransactionMeta, TransactionSigned,
+    BlobTransaction, InvalidTransactionError, PooledTransactionsElement,
+    PooledTransactionsElementEcRecovered, Transaction, TransactionMeta, TransactionSigned,
     TransactionSignedEcRecovered, TransactionSignedNoHash, TxHashOrNumber, TxType,
 };
 
 // Re-exports
 pub use reth_ethereum_forks::*;
-pub use revm_primitives::{self, JumpTable};
 
 #[cfg(any(test, feature = "arbitrary"))]
 pub use arbitrary;

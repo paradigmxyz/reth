@@ -1,0 +1,27 @@
+[package]
+name = "reth-ethereum-primitives"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
+
+# alloy
+alloy-consensus.workspace = true
+
+[features]
+default = []
+std = [
+    "reth-primitives/std",
+    "reth-primitives-traits/std",
+    "alloy-consensus/std",
+]

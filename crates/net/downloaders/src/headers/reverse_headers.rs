@@ -13,7 +13,7 @@ use reth_consensus::Consensus;
 use reth_network_p2p::{
     error::{DownloadError, DownloadResult, PeerRequestResult},
     headers::{
-        client::{HeadersClient, HeadersDirection, HeadersRequest},
+        client::{HeadersClient, HeadersRequest},
         downloader::{validate_header_download, HeaderDownloader, SyncTarget},
         error::{HeadersDownloaderError, HeadersDownloaderResult},
     },
@@ -60,9 +60,10 @@ impl<H> From<HeadersResponseError> for ReverseHeadersDownloaderError<H> {
 /// tries to fill the gap between the local head of the node and the chain tip by issuing multiple
 /// requests at a time but yielding them in batches on [`Stream::poll_next`].
 ///
-/// **Note:** This downloader downloads in reverse, see also [`HeadersDirection::Falling`], this
-/// means the batches of headers that this downloader yields will start at the chain tip and move
-/// towards the local head: falling block numbers.
+/// **Note:** This downloader downloads in reverse, see also
+/// [`reth_network_p2p::headers::client::HeadersDirection`], this means the batches of headers that
+/// this downloader yields will start at the chain tip and move towards the local head: falling
+/// block numbers.
 #[must_use = "Stream does nothing unless polled"]
 #[derive(Debug)]
 pub struct ReverseHeadersDownloader<H: HeadersClient> {
@@ -567,7 +568,7 @@ where
 
     /// Returns the request for the `sync_target` header.
     const fn get_sync_target_request(&self, start: BlockHashOrNumber) -> HeadersRequest {
-        HeadersRequest { start, limit: 1, direction: HeadersDirection::Falling }
+        HeadersRequest::falling(start, 1)
     }
 
     /// Starts a request future
@@ -706,13 +707,13 @@ where
                 }
             }
             SyncTarget::Gap(existing) => {
-                let target = existing.parent_hash;
+                let target = existing.parent;
                 if Some(target) != current_tip {
                     // there could be a sync target request in progress
                     self.sync_target_request.take();
                     // If the target has changed, update the request pointers based on the new
                     // targeted block number
-                    let parent_block_number = existing.number.saturating_sub(1);
+                    let parent_block_number = existing.block.number.saturating_sub(1);
 
                     trace!(target: "downloaders::headers", current=?current_tip, new=?target, %parent_block_number, "Updated sync target");
 
@@ -1216,7 +1217,7 @@ fn calc_next_request(
     let diff = next_request_block_number - local_head;
     let limit = diff.min(request_limit);
     let start = next_request_block_number;
-    HeadersRequest { start: start.into(), limit, direction: HeadersDirection::Falling }
+    HeadersRequest::falling(start.into(), limit)
 }
 
 #[cfg(test)]
@@ -1224,9 +1225,11 @@ mod tests {
     use super::*;
     use crate::headers::test_utils::child_header;
     use alloy_consensus::Header;
+    use alloy_eips::BlockNumHash;
     use assert_matches::assert_matches;
     use reth_consensus::test_utils::TestConsensus;
     use reth_network_p2p::test_utils::TestHeadersClient;
+    use reth_primitives_traits::BlockWithParent;
 
     /// Tests that `replace_number` works the same way as `Option::replace`
     #[test]
@@ -1306,7 +1309,10 @@ mod tests {
         assert!(downloader.sync_target_request.is_some());
 
         downloader.sync_target_request.take();
-        let target = SyncTarget::Gap(SealedHeader::new(Default::default(), B256::random()));
+        let target = SyncTarget::Gap(BlockWithParent {
+            block: BlockNumHash::new(0, B256::random()),
+            parent: Default::default(),
+        });
         downloader.update_sync_target(target);
         assert!(downloader.sync_target_request.is_none());
         assert_matches!(

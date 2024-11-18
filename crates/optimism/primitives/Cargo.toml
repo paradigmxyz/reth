@@ -32,9 +32,7 @@ op-alloy-consensus.workspace = true
 modular-bitfield = { workspace = true, optional = true }
 zstd = { workspace = true, optional = true }
 bytes.workspace = true
-
-# io
-serde.workspace = true
+serde = { workspace = true, optional = true }
 
 # misc
 derive_more = { workspace = true, features = ["deref", "from", "constructor"] }
@@ -46,6 +44,8 @@ arbitrary = { workspace = true, features = ["derive"], optional = true }
 
 [dev-dependencies]
 proptest-arbitrary-interop.workspace = true
+reth-codecs = { workspace = true, features = ["test-utils"] }
+rstest.workspace = true
 
 [features]
 default = ["std", "reth-codec"]
@@ -67,6 +67,7 @@ reth-codec = [
     "rand",
     "dep:proptest",
     "dep:arbitrary",
+    "reth-primitives/reth-codec", 
 ]
 arbitrary = [
     "reth-codec",
@@ -85,4 +86,14 @@ optimism = [
     "reth-primitives/optimism",
     "reth-codecs/optimism",
     "revm-primitives/optimism",
+]
+serde = [
+    "dep:serde",
+    "reth-primitives-traits/serde",
+    "alloy-primitives/serde",
+    "alloy-consensus/serde",
+    "alloy-eips/serde",
+    "bytes/serde",
+    "reth-codecs/serde",
+    "op-alloy-consensus/serde",
 ]

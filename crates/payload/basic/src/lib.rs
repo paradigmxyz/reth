@@ -17,10 +17,10 @@ use futures_util::FutureExt;
 use reth_chainspec::EthereumHardforks;
 use reth_evm::state_change::post_block_withdrawals_balance_increments;
 use reth_payload_builder::{KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJobGenerator};
-use reth_payload_primitives::{
-    BuiltPayload, PayloadBuilderAttributes, PayloadBuilderError, PayloadKind,
-};
-use reth_primitives::{constants::RETH_CLIENT_VERSION, proofs, SealedHeader};
+use reth_payload_builder_primitives::PayloadBuilderError;
+use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadKind};
+use reth_primitives::{proofs, SealedHeader};
+use reth_primitives_traits::constants::RETH_CLIENT_VERSION;
 use reth_provider::{BlockReaderIdExt, CanonStateNotification, StateProviderFactory};
 use reth_revm::cached::CachedReads;
 use reth_tasks::TaskSpawner;
@@ -616,7 +616,9 @@ where
         if let Some(fut) = Pin::new(&mut this.maybe_better).as_pin_mut() {
             if let Poll::Ready(res) = fut.poll(cx) {
                 this.maybe_better = None;
-                if let Ok(BuildOutcome::Better { payload, .. }) = res {
+                if let Ok(Some(payload)) = res.map(|out| out.into_payload())
+                    .inspect_err(|err| warn!(target: "payload_builder", %err, "failed to resolve pending payload"))
+                {
                     debug!(target: "payload_builder", "resolving better payload");
                     return Poll::Ready(Ok(payload))
                 }
@@ -767,7 +769,7 @@ impl<Payload> BuildOutcome<Payload> {
     /// Consumes the type and returns the payload if the outcome is `Better`.
     pub fn into_payload(self) -> Option<Payload> {
         match self {
-            Self::Better { payload, .. } => Some(payload),
+            Self::Better { payload, .. } | Self::Freeze(payload) => Some(payload),
             _ => None,
         }
     }

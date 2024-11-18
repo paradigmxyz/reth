@@ -15,7 +15,7 @@ use crate::{
         AddedPendingTransaction, AddedTransaction, OnNewCanonicalStateOutcome,
     },
     traits::{BestTransactionsAttributes, BlockInfo, PoolSize},
-    PoolConfig, PoolResult, PoolTransaction, PriceBumpConfig, TransactionOrdering,
+    PoolConfig, PoolResult, PoolTransaction, PoolUpdateKind, PriceBumpConfig, TransactionOrdering,
     ValidPoolTransaction, U256,
 };
 use alloy_consensus::constants::{
@@ -76,6 +76,8 @@ pub struct TxPool<T: TransactionOrdering> {
     all_transactions: AllTransactions<T::Transaction>,
     /// Transaction pool metrics
     metrics: TxPoolMetrics,
+    /// The last update kind that was applied to the pool.
+    latest_update_kind: Option<PoolUpdateKind>,
 }
 
 // === impl TxPool ===
@@ -92,6 +94,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             all_transactions: AllTransactions::new(&config),
             config,
             metrics: Default::default(),
+            latest_update_kind: None,
         }
     }
 
@@ -315,7 +318,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                 // blob pool that are valid with the lower blob fee
                 if best_transactions_attributes
                     .blob_fee
-                    .map_or(false, |fee| fee < self.all_transactions.pending_fees.blob_fee as u64)
+                    .is_some_and(|fee| fee < self.all_transactions.pending_fees.blob_fee as u64)
                 {
                     let unlocked_by_blob_fee =
                         self.blob_pool.satisfy_attributes(best_transactions_attributes);
@@ -479,6 +482,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         block_info: BlockInfo,
         mined_transactions: Vec<TxHash>,
         changed_senders: HashMap<SenderId, SenderInfo>,
+        update_kind: PoolUpdateKind,
     ) -> OnNewCanonicalStateOutcome<T::Transaction> {
         // update block info
         let block_hash = block_info.last_seen_block_hash;
@@ -496,6 +500,9 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         self.update_transaction_type_metrics();
         self.metrics.performed_state_updates.increment(1);
+
+        // Update the latest update kind
+        self.latest_update_kind = Some(update_kind);
 
         OnNewCanonicalStateOutcome { block_hash, mined: mined_transactions, promoted, discarded }
     }
@@ -1439,7 +1446,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     fn contains_conflicting_transaction(&self, tx: &ValidPoolTransaction<T>) -> bool {
         self.txs_iter(tx.transaction_id.sender)
             .next()
-            .map_or(false, |(_, existing)| tx.tx_type_conflicts_with(&existing.transaction))
+            .is_some_and(|(_, existing)| tx.tx_type_conflicts_with(&existing.transaction))
     }
 
     /// Additional checks for a new transaction.
@@ -2479,8 +2486,7 @@ mod tests {
         let tx = MockTransaction::eip1559().inc_price().inc_limit();
         let first = f.validated(tx.clone());
         pool.insert_tx(first, on_chain_balance, on_chain_nonce).unwrap();
-        let tx =
-            MockTransaction::eip4844().set_sender(tx.get_sender()).inc_price_by(100).inc_limit();
+        let tx = MockTransaction::eip4844().set_sender(tx.sender()).inc_price_by(100).inc_limit();
         let blob = f.validated(tx);
         let err = pool.insert_tx(blob, on_chain_balance, on_chain_nonce).unwrap_err();
         assert!(matches!(err, InsertErr::TxTypeConflict { .. }), "{err:?}");
@@ -2495,8 +2501,7 @@ mod tests {
         let tx = MockTransaction::eip4844().inc_price().inc_limit();
         let first = f.validated(tx.clone());
         pool.insert_tx(first, on_chain_balance, on_chain_nonce).unwrap();
-        let tx =
-            MockTransaction::eip1559().set_sender(tx.get_sender()).inc_price_by(100).inc_limit();
+        let tx = MockTransaction::eip1559().set_sender(tx.sender()).inc_price_by(100).inc_limit();
         let tx = f.validated(tx);
         let err = pool.insert_tx(tx, on_chain_balance, on_chain_nonce).unwrap_err();
         assert!(matches!(err, InsertErr::TxTypeConflict { .. }), "{err:?}");
@@ -2615,7 +2620,7 @@ mod tests {
 
         assert_eq!(
             pool.max_account_slots,
-            pool.tx_count(f.ids.sender_id(&tx.get_sender()).unwrap())
+            pool.tx_count(f.ids.sender_id(tx.get_sender()).unwrap())
         );
 
         let err =
@@ -2647,7 +2652,7 @@ mod tests {
 
         assert_eq!(
             pool.max_account_slots,
-            pool.tx_count(f.ids.sender_id(&tx.get_sender()).unwrap())
+            pool.tx_count(f.ids.sender_id(tx.get_sender()).unwrap())
         );
 
         pool.insert_tx(
@@ -2822,7 +2827,7 @@ mod tests {
         let mut changed_senders = HashMap::default();
         changed_senders.insert(
             id.sender,
-            SenderInfo { state_nonce: next.get_nonce(), balance: U256::from(1_000) },
+            SenderInfo { state_nonce: next.nonce(), balance: U256::from(1_000) },
         );
         let outcome = pool.update_accounts(changed_senders);
         assert_eq!(outcome.discarded.len(), 1);
