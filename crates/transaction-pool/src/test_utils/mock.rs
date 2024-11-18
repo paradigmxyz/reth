@@ -69,7 +69,7 @@ macro_rules! get_value {
             MockTransaction::Legacy { $field, .. } |
             MockTransaction::Eip1559 { $field, .. } |
             MockTransaction::Eip4844 { $field, .. } |
-            MockTransaction::Eip2930 { $field, .. } => $field.clone(),
+            MockTransaction::Eip2930 { $field, .. } => $field,
         }
     };
 }
@@ -91,7 +91,7 @@ macro_rules! make_setters_getters {
             }
 
             /// Gets the value of the specified field.
-            pub fn [<get_ $name>](&self) -> $t {
+            pub const fn [<get_ $name>](&self) -> &$t {
                 get_value!(self => $name)
             }
         )*}
@@ -582,30 +582,15 @@ impl PoolTransaction for MockTransaction {
     }
 
     fn hash(&self) -> &TxHash {
-        match self {
-            Self::Legacy { hash, .. } |
-            Self::Eip1559 { hash, .. } |
-            Self::Eip4844 { hash, .. } |
-            Self::Eip2930 { hash, .. } => hash,
-        }
+        self.get_hash()
     }
 
     fn sender(&self) -> Address {
-        match self {
-            Self::Legacy { sender, .. } |
-            Self::Eip1559 { sender, .. } |
-            Self::Eip4844 { sender, .. } |
-            Self::Eip2930 { sender, .. } => *sender,
-        }
+        *self.get_sender()
     }
 
     fn nonce(&self) -> u64 {
-        match self {
-            Self::Legacy { nonce, .. } |
-            Self::Eip1559 { nonce, .. } |
-            Self::Eip4844 { nonce, .. } |
-            Self::Eip2930 { nonce, .. } => *nonce,
-        }
+        *self.get_nonce()
     }
 
     fn cost(&self) -> U256 {
@@ -622,7 +607,7 @@ impl PoolTransaction for MockTransaction {
     }
 
     fn gas_limit(&self) -> u64 {
-        self.get_gas_limit()
+        *self.get_gas_limit()
     }
 
     fn max_fee_per_gas(&self) -> u128 {
@@ -703,22 +688,12 @@ impl PoolTransaction for MockTransaction {
 
     /// Returns the input data associated with the transaction.
     fn input(&self) -> &[u8] {
-        match self {
-            Self::Legacy { .. } => &[],
-            Self::Eip1559 { input, .. } |
-            Self::Eip4844 { input, .. } |
-            Self::Eip2930 { input, .. } => input,
-        }
+        self.get_input()
     }
 
     /// Returns the size of the transaction.
     fn size(&self) -> usize {
-        match self {
-            Self::Legacy { size, .. } |
-            Self::Eip1559 { size, .. } |
-            Self::Eip4844 { size, .. } |
-            Self::Eip2930 { size, .. } => *size,
-        }
+        *self.get_size()
     }
 
     /// Returns the transaction type as a byte identifier.
@@ -1007,109 +982,14 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::Strategy;
         use proptest_arbitrary_interop::arb;
-        use reth_primitives_traits::size::InMemorySize;
 
-        arb::<(Transaction, Address, B256)>()
-            .prop_map(|(tx, sender, tx_hash)| match &tx {
-                Transaction::Legacy(TxLegacy {
-                    chain_id,
-                    nonce,
-                    gas_price,
-                    gas_limit,
-                    to,
-                    value,
-                    input,
-                }) => Self::Legacy {
-                    chain_id: *chain_id,
-                    sender,
-                    hash: tx_hash,
-                    nonce: *nonce,
-                    gas_price: *gas_price,
-                    gas_limit: { *gas_limit },
-                    to: *to,
-                    value: *value,
-                    input: input.clone(),
-                    size: tx.size(),
-                },
-
-                Transaction::Eip2930(TxEip2930 {
-                    chain_id,
-                    nonce,
-                    gas_price,
-                    gas_limit,
-                    to,
-                    value,
-                    access_list,
-                    input,
-                }) => Self::Eip2930 {
-                    chain_id: *chain_id,
-                    sender,
-                    hash: tx_hash,
-                    nonce: *nonce,
-                    gas_price: *gas_price,
-                    gas_limit: { *gas_limit },
-                    to: *to,
-                    value: *value,
-                    input: input.clone(),
-                    access_list: access_list.clone(),
-                    size: tx.size(),
-                },
-                Transaction::Eip1559(TxEip1559 {
-                    chain_id,
-                    nonce,
-                    gas_limit,
-                    max_fee_per_gas,
-                    max_priority_fee_per_gas,
-                    to,
-                    value,
-                    input,
-                    access_list,
-                }) => Self::Eip1559 {
-                    chain_id: *chain_id,
-                    sender,
-                    hash: tx_hash,
-                    nonce: *nonce,
-                    max_fee_per_gas: *max_fee_per_gas,
-                    max_priority_fee_per_gas: *max_priority_fee_per_gas,
-                    gas_limit: { *gas_limit },
-                    to: *to,
-                    value: *value,
-                    input: input.clone(),
-                    access_list: access_list.clone(),
-                    size: tx.size(),
-                },
-                Transaction::Eip4844(TxEip4844 {
-                    chain_id,
-                    nonce,
-                    gas_limit,
-                    max_fee_per_gas,
-                    max_priority_fee_per_gas,
-                    to,
-                    value,
-                    input,
-                    max_fee_per_blob_gas,
-                    access_list,
-                    blob_versioned_hashes: _,
-                }) => Self::Eip4844 {
-                    chain_id: *chain_id,
-                    sender,
-                    hash: tx_hash,
-                    nonce: *nonce,
-                    max_fee_per_gas: *max_fee_per_gas,
-                    max_priority_fee_per_gas: *max_priority_fee_per_gas,
-                    max_fee_per_blob_gas: *max_fee_per_blob_gas,
-                    gas_limit: { *gas_limit },
-                    to: *to,
-                    value: *value,
-                    input: input.clone(),
-                    access_list: access_list.clone(),
-                    // only generate a sidecar if it is a 4844 tx - also for the sake of
-                    // performance just use a default sidecar
-                    sidecar: BlobTransactionSidecar::default(),
-                    size: tx.size(),
-                },
-                #[allow(unreachable_patterns)]
-                _ => unimplemented!(),
+        arb::<(TransactionSigned, Address)>()
+            .prop_map(|(signed_transaction, signer)| {
+                TransactionSignedEcRecovered::from_signed_transaction(signed_transaction, signer)
+                    .try_into()
+                    .expect(
+                        "Failed to create an Arbitrary MockTransaction via TransactionSignedEcRecovered",
+                    )
             })
             .boxed()
     }
@@ -1128,8 +1008,8 @@ pub struct MockTransactionFactory {
 impl MockTransactionFactory {
     /// Generates a transaction ID for the given [`MockTransaction`].
     pub fn tx_id(&mut self, tx: &MockTransaction) -> TransactionId {
-        let sender = self.ids.sender_id_or_create(tx.get_sender());
-        TransactionId::new(sender, tx.get_nonce())
+        let sender = self.ids.sender_id_or_create(tx.sender());
+        TransactionId::new(sender, tx.nonce())
     }
 
     /// Validates a [`MockTransaction`] and returns a [`MockValidTx`].
