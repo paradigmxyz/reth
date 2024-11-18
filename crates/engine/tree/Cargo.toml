@@ -21,6 +21,7 @@ reth-consensus.workspace = true
 reth-engine-primitives.workspace = true
 reth-errors.workspace = true
 reth-evm.workspace = true
+reth-execution-errors.workspace = true
 reth-network-p2p.workspace = true
 reth-payload-builder-primitives.workspace = true
 reth-payload-builder.workspace = true
@@ -33,6 +34,7 @@ reth-prune.workspace = true
 reth-revm.workspace = true
 reth-stages-api.workspace = true
 reth-tasks.workspace = true
+reth-trie-db.workspace = true
 reth-trie-parallel.workspace = true
 reth-trie-sparse.workspace = true
 reth-trie.workspace = true
@@ -56,6 +58,7 @@ metrics.workspace = true
 reth-metrics = { workspace = true, features = ["common"] }
 
 # misc
+rayon.workspace = true
 tracing.workspace = true
 
 # optional deps for test-utils
@@ -112,4 +115,7 @@ test-utils = [
     "reth-static-file",
     "reth-tracing",
     "reth-trie/test-utils",
+    "reth-prune-types?/test-utils",
+    "reth-primitives-traits/test-utils",
+    "reth-trie-db/test-utils",
 ]
