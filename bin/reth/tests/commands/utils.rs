@@ -102,8 +102,13 @@ pub async fn bitfinity_import_config_data(
     backup_evm_datasource_url: Option<String>,
     data_dir: Option<PathBuf>,
 ) -> eyre::Result<(TempDir, ImportData)> {
-    let chain =
-        Arc::new(BitfinityEvmClient::fetch_chain_spec(evm_datasource_url.to_owned()).await?);
+    let chain = Arc::new(
+        BitfinityEvmClient::fetch_chain_spec_with_fallback(
+            evm_datasource_url.to_owned(),
+            backup_evm_datasource_url.clone(),
+        )
+        .await?,
+    );
 
     let temp_dir = TempDir::new().unwrap();
 
