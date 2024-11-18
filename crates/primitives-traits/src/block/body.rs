@@ -1,10 +1,8 @@
 //! Block body abstraction.
 
-use alloc::fmt;
-
-use alloy_consensus::Transaction;
-
 use crate::{InMemorySize, MaybeSerde};
+use alloc::fmt;
+use alloy_consensus::Transaction;
 
 /// Abstraction for block's body.
 #[auto_impl::auto_impl(&, Arc)]
