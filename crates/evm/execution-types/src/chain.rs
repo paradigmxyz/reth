@@ -26,7 +26,7 @@ use revm::db::BundleState;
 /// A chain of blocks should not be empty.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Chain<N: NodePrimitives = reth_primitives::AnyPrimitives> {
+pub struct Chain<N: NodePrimitives = reth_primitives::EthPrimitives> {
     /// All blocks in this chain.
     blocks: BTreeMap<BlockNumber, SealedBlockWithSenders>,
     /// The outcome of block execution for this chain.
@@ -487,7 +487,7 @@ impl From<BlockHash> for ChainSplitTarget {
 
 /// Result of a split chain.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ChainSplit<N: NodePrimitives = reth_primitives::AnyPrimitives> {
+pub enum ChainSplit<N: NodePrimitives = reth_primitives::EthPrimitives> {
     /// Chain is not split. Pending chain is returned.
     /// Given block split is higher than last block.
     /// Or in case of split by hash when hash is unknown.

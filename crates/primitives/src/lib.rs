@@ -40,7 +40,7 @@ pub use receipt::{
 };
 pub use reth_primitives_traits::{
     logs_bloom, Account, Bytecode, GotExpected, GotExpectedBoxed, HeaderError, Log, LogData,
-    SealedHeader, StorageEntry,
+    NodePrimitives, SealedHeader, StorageEntry,
 };
 pub use static_file::StaticFileSegment;
 
@@ -75,11 +75,11 @@ pub mod serde_bincode_compat {
     };
 }
 
-/// Temp helper struct for integrating [`NodePrimitives`](reth_primitives_traits::NodePrimitives).
+/// Temp helper struct for integrating [`NodePrimitives`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct AnyPrimitives;
+pub struct EthPrimitives;
 
-impl reth_primitives_traits::NodePrimitives for AnyPrimitives {
+impl NodePrimitives for EthPrimitives {
     type Block = crate::Block;
     type SignedTx = crate::TransactionSigned;
     type TxType = crate::TxType;
