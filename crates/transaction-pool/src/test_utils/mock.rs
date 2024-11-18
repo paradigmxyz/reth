@@ -28,6 +28,7 @@ use reth_primitives::{
     transaction::TryFromRecoveredTransactionError, PooledTransactionsElementEcRecovered,
     Transaction, TransactionSigned, TransactionSignedEcRecovered, TxType,
 };
+use reth_primitives_traits::InMemorySize;
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
 
 /// A transaction pool implementation using [`MockOrdering`] for transaction ordering.

@@ -13,7 +13,7 @@ use derive_more::{
     Display,
 };
 use op_alloy_consensus::OpTxType as AlloyOpTxType;
-use reth_primitives_traits::TxType;
+use reth_primitives_traits::{InMemorySize, TxType};
 
 #[cfg(feature = "reth-codec")]
 use alloy_consensus::constants::EIP7702_TX_TYPE_ID;
@@ -54,6 +54,14 @@ impl TxType for OpTxType {
     #[inline]
     fn is_eip7702(&self) -> bool {
         matches!(self.0, AlloyOpTxType::Eip7702)
+    }
+}
+
+impl InMemorySize for OpTxType {
+    /// Calculates a heuristic for the in-memory size of the [`OpTxType`].
+    #[inline]
+    fn size(&self) -> usize {
+        core::mem::size_of::<Self>()
     }
 }
 
