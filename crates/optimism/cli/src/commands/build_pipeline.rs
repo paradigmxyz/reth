@@ -3,7 +3,7 @@ use futures_util::{Stream, StreamExt};
 use reth_config::Config;
 use reth_consensus::Consensus;
 use reth_downloaders::{
-    bodies::bodies::BodiesDownloaderBuilder, file_client::FileClient, file_codec::BlockFileCodec,
+    bodies::bodies::BodiesDownloaderBuilder, file_client::FileClient,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_errors::ProviderError;
@@ -31,7 +31,7 @@ pub(crate) async fn build_import_pipeline<N, C>(
     config: &Config,
     provider_factory: ProviderFactory<N>,
     consensus: &Arc<C>,
-    file_client: Arc<FileClient<BlockFileCodec>>,
+    file_client: Arc<FileClient>,
     static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     disable_exec: bool,
 ) -> eyre::Result<(Pipeline<N>, impl Stream<Item = NodeEvent>)>

@@ -38,7 +38,7 @@ pub const DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE: u64 = 1_000_000_000;
 ///
 /// This reads the entire file into memory, so it is not suitable for large files.
 #[derive(Debug)]
-pub struct FileClient<T> {
+pub struct FileClient {
     /// The buffered headers retrieved when fetching new bodies.
     headers: HashMap<BlockNumber, Header>,
 
@@ -47,9 +47,6 @@ pub struct FileClient<T> {
 
     /// The buffered bodies retrieved when fetching new headers.
     bodies: HashMap<BlockHash, BlockBody>,
-
-    /// The codec used to decode the file.
-    codec: T,
 }
 
 /// An error that can occur when constructing and using a [`FileClient`].
@@ -74,18 +71,22 @@ impl From<&'static str> for FileClientError {
     }
 }
 
-impl<T> FileClient<T>
-where
-    T: Decoder<Item = Block, Error = FileClientError> + Clone + Debug + Send + Sync + 'static,
-{
+impl FileClient {
     /// Create a new file client from a file path.
-    pub async fn new<P: AsRef<Path>>(path: P, codec: T) -> Result<Self, FileClientError> {
+    pub async fn new<P, T>(path: P, codec: T) -> Result<Self, FileClientError>
+    where
+        P: AsRef<Path>,
+        T: Decoder<Item = Block, Error = FileClientError> + Clone + Debug + Send + Sync + 'static,
+    {
         let file = File::open(path).await?;
         Self::from_file(file, codec).await
     }
 
     /// Initialize the [`FileClient`] with a file directly.
-    pub(crate) async fn from_file(mut file: File, codec: T) -> Result<Self, FileClientError> {
+    pub(crate) async fn from_file<T>(mut file: File, codec: T) -> Result<Self, FileClientError>
+    where
+        T: Decoder<Item = Block, Error = FileClientError> + Clone + Debug + Send + Sync + 'static,
+    {
         // get file len from metadata before reading
         let metadata = file.metadata().await?;
         let file_len = metadata.len();
@@ -185,11 +186,11 @@ where
     }
 }
 
-impl<T> FromReader<T> for FileClient<T> {
+impl FromReader for FileClient {
     type Error = FileClientError;
 
     /// Initialize the [`FileClient`] from bytes that have been read from file.
-    fn from_reader<B>(
+    fn from_reader<B, T>(
         reader: B,
         num_bytes: u64,
         codec: T,
@@ -203,7 +204,7 @@ impl<T> FromReader<T> for FileClient<T> {
         let mut bodies = HashMap::default();
 
         // use with_capacity to make sure the internal buffer contains the entire chunk
-        let mut stream = FramedRead::with_capacity(reader, codec.clone(), num_bytes as usize);
+        let mut stream = FramedRead::with_capacity(reader, codec, num_bytes as usize);
 
         trace!(target: "downloaders::file",
             target_num_bytes=num_bytes,
@@ -258,7 +259,7 @@ impl<T> FromReader<T> for FileClient<T> {
             trace!(target: "downloaders::file", blocks = headers.len(), "Initialized file client");
 
             Ok(DecodedFileChunk {
-                file_client: Self { headers, hash_to_number, bodies, codec },
+                file_client: Self { headers, hash_to_number, bodies },
                 remaining_bytes,
                 highest_block: None,
             })
@@ -266,10 +267,7 @@ impl<T> FromReader<T> for FileClient<T> {
     }
 }
 
-impl<T> HeadersClient for FileClient<T>
-where
-    T: Debug + Clone + Send + Sync + 'static,
-{
+impl HeadersClient for FileClient {
     type Header = Header;
     type Output = HeadersFut;
 
@@ -320,10 +318,7 @@ where
     }
 }
 
-impl<T> BodiesClient for FileClient<T>
-where
-    T: Debug + Clone + Send + Sync + 'static,
-{
+impl BodiesClient for FileClient {
     type Body = BlockBody;
     type Output = BodiesFut;
 
@@ -348,10 +343,7 @@ where
     }
 }
 
-impl<T> DownloadClient for FileClient<T>
-where
-    T: Debug + Clone + Send + Sync + 'static,
-{
+impl DownloadClient for FileClient {
     fn report_bad_message(&self, _peer_id: PeerId) {
         warn!("Reported a bad message on a file client, the file may be corrupted or invalid");
         // noop
@@ -462,7 +454,7 @@ impl ChunkedFileReader {
     /// Read next chunk from file. Returns [`FileClient`] containing decoded chunk.
     pub async fn next_chunk<T, F>(&mut self, codec: T) -> Result<Option<F>, F::Error>
     where
-        F: FromReader<T, Error = FileClientError>,
+        F: FromReader<Error = FileClientError>,
         T: Decoder<Error = FileClientError, Item = Block> + Clone + Debug + Send + Sync + 'static,
     {
         let Some(next_chunk_byte_len) = self.read_next_chunk().await? else { return Ok(None) };
@@ -499,12 +491,12 @@ impl ChunkedFileReader {
 }
 
 /// Constructs a file client from a reader.
-pub trait FromReader<T> {
+pub trait FromReader {
     /// Error returned by file client type.
     type Error: From<io::Error>;
 
     /// Returns a file client
-    fn from_reader<B>(
+    fn from_reader<B, T>(
         reader: B,
         num_bytes: u64,
         codec: T,
@@ -684,11 +676,7 @@ mod tests {
         let mut local_header = headers.first().unwrap().clone();
 
         // test
-        while let Some(client) = reader
-            .next_chunk::<BlockFileCodec, FileClient<BlockFileCodec>>(BlockFileCodec)
-            .await
-            .unwrap()
-        {
+        while let Some(client) = reader.next_chunk::<_, FileClient>(BlockFileCodec).await.unwrap() {
             let sync_target = client.tip_header().unwrap();
 
             let sync_target_hash = sync_target.hash();

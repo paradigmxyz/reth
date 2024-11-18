@@ -67,8 +67,7 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> ImportOpCommand<C> {
         let mut total_decoded_txns = 0;
         let mut total_filtered_out_dup_txns = 0;
 
-        while let Some(mut file_client) =
-            reader.next_chunk::<BlockFileCodec, FileClient<BlockFileCodec>>(BlockFileCodec).await?
+        while let Some(mut file_client) = reader.next_chunk::<_, FileClient>(BlockFileCodec).await?
         {
             // create a new FileClient from chunk read from file
             info!(target: "reth::cli",

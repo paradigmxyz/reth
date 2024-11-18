@@ -88,9 +88,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportComm
         let mut total_decoded_blocks = 0;
         let mut total_decoded_txns = 0;
 
-        while let Some(file_client) =
-            reader.next_chunk::<BlockFileCodec, FileClient<BlockFileCodec>>(BlockFileCodec).await?
-        {
+        while let Some(file_client) = reader.next_chunk::<_, FileClient>(BlockFileCodec).await? {
             // create a new FileClient from chunk read from file
             info!(target: "reth::cli",
                 "Importing chain file chunk"
@@ -165,7 +163,7 @@ pub fn build_import_pipeline<N, C, E>(
     config: &Config,
     provider_factory: ProviderFactory<N>,
     consensus: &Arc<C>,
-    file_client: Arc<FileClient<BlockFileCodec>>,
+    file_client: Arc<FileClient>,
     static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     disable_exec: bool,
     executor: E,
