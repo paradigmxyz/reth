@@ -76,6 +76,7 @@ pub use config::TreeConfig;
 pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
 pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::InvalidBlockHook;
+pub use root::calculate_state_root_from_proofs;
 
 mod root;
 

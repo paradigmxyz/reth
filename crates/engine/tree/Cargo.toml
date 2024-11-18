@@ -91,6 +91,10 @@ crossbeam-channel = "0.5.13"
 name = "channel_perf"
 harness = false
 
+[[bench]]
+name = "state_root_from_proofs"
+harness = false
+
 [features]
 test-utils = [
   "reth-db/test-utils",

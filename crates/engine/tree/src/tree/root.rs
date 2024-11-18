@@ -304,7 +304,8 @@ where
     }
 }
 
-fn calculate_state_root_from_proofs<Factory>(
+/// Calculate state root from proofs.
+pub fn calculate_state_root_from_proofs<Factory>(
     view: ConsistentDbView<Factory>,
     input_nodes_sorted: &TrieUpdatesSorted,
     input_state_sorted: &HashedPostStateSorted,
@@ -397,14 +398,12 @@ where
             });
             let key = Nibbles::unpack(hashed_address);
             let proof = multiproof.account_subtree.iter().filter(|e| key.starts_with(e.0));
-            Ok(target_nodes(key.clone(), value, None, proof)?)
+            target_nodes(key.clone(), value, None, proof)
         })
-        .collect::<Vec<ProviderResult<BTreeMap<_, _>>>>()
-        .into_iter()
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .flatten()
-        .collect::<BTreeMap<_, _>>();
+        .try_reduce(BTreeMap::new, |mut acc, map| {
+            acc.extend(map.into_iter());
+            Ok(acc)
+        })?;
 
     let state_root = next_root_from_proofs(account_trie_nodes, |key: Nibbles| {
         // Right pad the target with 0s.
