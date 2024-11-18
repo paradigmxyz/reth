@@ -88,6 +88,7 @@ serde = [
 	"rand?/serde",
 	"revm/serde",
 	"smallvec/serde",
+	"reth-primitives-traits/serde",
 ]
 test-utils = [
 	"rand",

@@ -13,7 +13,7 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives-traits.workspace = true
+reth-primitives-traits = { workspace = true, features = ["serde"] }
 reth-ethereum-forks.workspace = true
 reth-static-file-types.workspace = true
 revm-primitives = { workspace = true, features = ["serde"] }
