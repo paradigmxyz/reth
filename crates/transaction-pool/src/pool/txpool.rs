@@ -2486,8 +2486,7 @@ mod tests {
         let tx = MockTransaction::eip1559().inc_price().inc_limit();
         let first = f.validated(tx.clone());
         pool.insert_tx(first, on_chain_balance, on_chain_nonce).unwrap();
-        let tx =
-            MockTransaction::eip4844().set_sender(tx.get_sender()).inc_price_by(100).inc_limit();
+        let tx = MockTransaction::eip4844().set_sender(tx.sender()).inc_price_by(100).inc_limit();
         let blob = f.validated(tx);
         let err = pool.insert_tx(blob, on_chain_balance, on_chain_nonce).unwrap_err();
         assert!(matches!(err, InsertErr::TxTypeConflict { .. }), "{err:?}");
@@ -2502,8 +2501,7 @@ mod tests {
         let tx = MockTransaction::eip4844().inc_price().inc_limit();
         let first = f.validated(tx.clone());
         pool.insert_tx(first, on_chain_balance, on_chain_nonce).unwrap();
-        let tx =
-            MockTransaction::eip1559().set_sender(tx.get_sender()).inc_price_by(100).inc_limit();
+        let tx = MockTransaction::eip1559().set_sender(tx.sender()).inc_price_by(100).inc_limit();
         let tx = f.validated(tx);
         let err = pool.insert_tx(tx, on_chain_balance, on_chain_nonce).unwrap_err();
         assert!(matches!(err, InsertErr::TxTypeConflict { .. }), "{err:?}");
@@ -2622,7 +2620,7 @@ mod tests {
 
         assert_eq!(
             pool.max_account_slots,
-            pool.tx_count(f.ids.sender_id(&tx.get_sender()).unwrap())
+            pool.tx_count(f.ids.sender_id(tx.get_sender()).unwrap())
         );
 
         let err =
@@ -2654,7 +2652,7 @@ mod tests {
 
         assert_eq!(
             pool.max_account_slots,
-            pool.tx_count(f.ids.sender_id(&tx.get_sender()).unwrap())
+            pool.tx_count(f.ids.sender_id(tx.get_sender()).unwrap())
         );
 
         pool.insert_tx(
@@ -2829,7 +2827,7 @@ mod tests {
         let mut changed_senders = HashMap::default();
         changed_senders.insert(
             id.sender,
-            SenderInfo { state_nonce: next.get_nonce(), balance: U256::from(1_000) },
+            SenderInfo { state_nonce: next.nonce(), balance: U256::from(1_000) },
         );
         let outcome = pool.update_accounts(changed_senders);
         assert_eq!(outcome.discarded.len(), 1);
