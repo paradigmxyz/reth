@@ -757,23 +757,29 @@ impl RevealedSparseTrie {
                             let (_, child, calculated, node_type) =
                                 buffers.rlp_node_stack.pop().unwrap();
 
-                            // Set the trie mask
-                            if node_type.store_in_db_trie() {
-                                // A branch or an extension node explicitly set the
-                                // `store_in_db_trie` flag
-                                tree_mask_values.push(true);
-                            } else {
-                                // Set the flag according to whether a child node was pre-calculated
-                                // (`calculated = false`), meaning that it wasn't in the database
-                                tree_mask_values.push(!calculated);
-                            }
+                            // Update the masks only if we need to retain trie updates
+                            if self.updates.is_some() {
+                                // Set the trie mask
+                                if node_type.store_in_db_trie() {
+                                    // A branch or an extension node explicitly set the
+                                    // `store_in_db_trie` flag
+                                    tree_mask_values.push(true);
+                                } else {
+                                    // Set the flag according to whether a child node was
+                                    // pre-calculated
+                                    // (`calculated = false`), meaning that it wasn't in the
+                                    // database
+                                    tree_mask_values.push(!calculated);
+                                }
 
-                            // Set the hash mask. If a child node has a hash value AND is a branch
-                            // node, set the hash mask and save the hash.
-                            let hash = child.as_hash().filter(|_| node_type.is_branch());
-                            hash_mask_values.push(hash.is_some());
-                            if let Some(hash) = hash {
-                                hashes.push(hash);
+                                // Set the hash mask. If a child node has a hash value AND is a
+                                // branch node, set the hash mask
+                                // and save the hash.
+                                let hash = child.as_hash().filter(|_| node_type.is_branch());
+                                hash_mask_values.push(hash.is_some());
+                                if let Some(hash) = hash {
+                                    hashes.push(hash);
+                                }
                             }
 
                             // Insert children in the resulting buffer in a normal order,
@@ -790,7 +796,6 @@ impl RevealedSparseTrie {
                             continue 'main
                         }
                     }
-                    hashes.reverse();
 
                     self.rlp_buf.clear();
                     let branch_node_ref =
@@ -798,27 +803,27 @@ impl RevealedSparseTrie {
                     let rlp_node = branch_node_ref.rlp(&mut self.rlp_buf);
                     *hash = rlp_node.as_hash();
 
-                    let mut tree_mask_values = tree_mask_values.into_iter().rev();
-                    let mut hash_mask_values = hash_mask_values.into_iter().rev();
-                    let mut tree_mask = TrieMask::default();
-                    let mut hash_mask = TrieMask::default();
-                    for (i, child) in branch_node_ref.children() {
-                        if child.is_some() {
-                            if hash_mask_values.next().unwrap() {
-                                hash_mask.set_bit(i);
-                            }
-                            if tree_mask_values.next().unwrap() {
-                                tree_mask.set_bit(i);
+                    let store_in_db_trie = if let Some(updates) = self.updates.as_mut() {
+                        let mut tree_mask_values = tree_mask_values.into_iter().rev();
+                        let mut hash_mask_values = hash_mask_values.into_iter().rev();
+                        let mut tree_mask = TrieMask::default();
+                        let mut hash_mask = TrieMask::default();
+                        for (i, child) in branch_node_ref.children() {
+                            if child.is_some() {
+                                if hash_mask_values.next().unwrap() {
+                                    hash_mask.set_bit(i);
+                                }
+                                if tree_mask_values.next().unwrap() {
+                                    tree_mask.set_bit(i);
+                                }
                             }
                         }
-                    }
 
-                    // Store in DB trie if there are either any children that are stored in the DB
-                    // trie, or any children represent hashed values
-                    let store_in_db_trie = !tree_mask.is_empty() || !hash_mask.is_empty();
-
-                    if let Some(updates) = self.updates.as_mut() {
+                        // Store in DB trie if there are either any children that are stored in the
+                        // DB trie, or any children represent hashed values
+                        let store_in_db_trie = !tree_mask.is_empty() || !hash_mask.is_empty();
                         if store_in_db_trie {
+                            hashes.reverse();
                             let branch_node = BranchNodeCompact::new(
                                 *state_mask,
                                 tree_mask,
@@ -828,7 +833,11 @@ impl RevealedSparseTrie {
                             );
                             updates.updated_nodes.insert(path.clone(), branch_node);
                         }
-                    }
+
+                        store_in_db_trie
+                    } else {
+                        false
+                    };
 
                     (rlp_node, true, SparseNodeType::Branch { store_in_db_trie })
                 }
