@@ -1360,7 +1360,9 @@ impl SignedTransaction for TransactionSigned {
         let signature_hash = self.signature_hash();
         recover_signer_unchecked(&self.signature, signature_hash)
     }
+}
 
+impl reth_primitives_traits::FillTxEnv for TransactionSigned {
     fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address) {
         tx_env.caller = sender;
         match self.as_ref() {
