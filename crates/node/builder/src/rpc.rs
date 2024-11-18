@@ -33,7 +33,7 @@ use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 
-use crate::EthApiBuilderCtx;
+use crate::{DynEthApiBuilder, EthApiBuilderCtx};
 
 /// Contains the handles to the spawned RPC servers.
 ///
@@ -335,7 +335,7 @@ pub struct RpcAddOns<Node: FullNodeComponents, EthApi: EthApiTypes, EV> {
     /// Additional RPC add-ons.
     pub hooks: RpcHooks<Node, EthApi>,
     /// Builder for `EthApi`
-    eth_api_builder: Box<dyn FnOnce(&EthApiBuilderCtx<Node>) -> EthApi + Send + Sync>,
+    eth_api_builder: Box<DynEthApiBuilder<Node, EthApi>>,
     /// Engine validator
     engine_validator_builder: EV,
     _pd: PhantomData<(Node, EthApi)>,
@@ -356,12 +356,12 @@ impl<Node: FullNodeComponents, EthApi: EthApiTypes, EV: Debug> Debug
 impl<Node: FullNodeComponents, EthApi: EthApiTypes, EV> RpcAddOns<Node, EthApi, EV> {
     /// Creates a new instance of the RPC add-ons.
     pub fn new(
-        eth_api_builder: impl FnOnce(&EthApiBuilderCtx<Node>) -> EthApi + Send + Sync + 'static,
+        eth_api_builder: Box<DynEthApiBuilder<Node, EthApi>>,
         engine_validator_builder: EV,
     ) -> Self {
         Self {
             hooks: RpcHooks::default(),
-            eth_api_builder: Box::new(eth_api_builder),
+            eth_api_builder,
             engine_validator_builder,
             _pd: PhantomData,
         }
@@ -395,7 +395,7 @@ where
     EV: Default,
 {
     fn default() -> Self {
-        Self::new(EthApi::build, EV::default())
+        Self::new(Box::new(EthApi::build), EV::default())
     }
 }
 

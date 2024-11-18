@@ -147,7 +147,10 @@ impl<N: FullNodeComponents> Default for OpAddOns<N> {
 impl<N: FullNodeComponents> OpAddOns<N> {
     /// Create a new instance with the given `sequencer_http` URL.
     pub fn new(sequencer_http: Option<String>) -> Self {
-        Self(RpcAddOns::new(move |ctx| OpEthApi::new(ctx, sequencer_http), Default::default()))
+        Self(RpcAddOns::new(
+            Box::new(move |ctx| OpEthApi::new(ctx, sequencer_http)),
+            Default::default(),
+        ))
     }
 }
 

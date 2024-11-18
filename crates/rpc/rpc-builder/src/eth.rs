@@ -9,8 +9,17 @@ use reth_rpc_eth_types::{
 use reth_tasks::TaskSpawner;
 
 /// Alias for `eth` namespace API builder.
-pub type DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi> =
-    Box<dyn FnOnce(&EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>) -> EthApi>;
+pub type DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi> = Box<
+    dyn reth_rpc_eth_types::DynEthApiBuilder<
+        Provider,
+        Pool,
+        EvmConfig,
+        Network,
+        Tasks,
+        Events,
+        EthApi,
+    >,
+>;
 
 /// Handlers for core, filter and pubsub `eth` namespace APIs.
 #[derive(Debug, Clone)]
@@ -86,7 +95,7 @@ where
             cache,
         };
 
-        let api = eth_api_builder(&ctx);
+        let api = eth_api_builder.call(&ctx);
 
         let filter = EthFilter::new(
             ctx.provider.clone(),

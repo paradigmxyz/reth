@@ -54,6 +54,16 @@ pub type EthApiBuilderCtx<N> = reth_rpc_eth_types::EthApiBuilderCtx<
     <N as RpcNodeCore>::Provider,
 >;
 
+pub type DynEthApiBuilder<N, EthApi> = dyn reth_rpc_eth_types::DynEthApiBuilder<
+    <N as RpcNodeCore>::Provider,
+    <N as RpcNodeCore>::Pool,
+    <N as RpcNodeCore>::Evm,
+    <N as RpcNodeCore>::Network,
+    TaskExecutor,
+    <N as RpcNodeCore>::Provider,
+    EthApi,
+>;
+
 /// A general purpose trait that launches a new node of any kind.
 ///
 /// Acts as a node factory that targets a certain node configuration and returns a handle to the

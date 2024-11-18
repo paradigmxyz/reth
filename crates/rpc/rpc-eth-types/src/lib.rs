@@ -25,6 +25,7 @@ pub mod utils;
 pub use builder::{
     config::{EthConfig, EthFilterConfig},
     ctx::EthApiBuilderCtx,
+    DynEthApiBuilder,
 };
 pub use cache::{
     config::EthStateCacheConfig, db::StateCacheDb, multi_consumer::MultiConsumerLruCache,
