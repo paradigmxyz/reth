@@ -47,6 +47,7 @@ use reth_stages_api::ControlFlow;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::ResultAndState;
+use root::{StateRootConfig, StateRootTask, StdReceiverStream};
 use std::{
     cmp::Ordering,
     collections::{btree_map, hash_map, BTreeMap, VecDeque},
@@ -2196,13 +2197,24 @@ where
 
         let exec_time = Instant::now();
 
-        // TODO: create StateRootTask with the receiving end of a channel and
-        // pass the sending end of the channel to the state hook.
-        let noop_state_hook = |_result_and_state: &ResultAndState| {};
+        let (state_root_tx, state_root_rx) = std::sync::mpsc::channel();
+        // TODO: create consistent_view using `new_with_latest_tip` when we
+        // switch to `StateRootTask`.
+        let consistent_view = ConsistentDbView::new(self.provider.clone(), None);
+        // TODO: calculate `TrieInput` like in `self.compute_state_root_parallel`.
+        let input = Arc::new(TrieInput::default());
+        let state_root_config = StateRootConfig { consistent_view, input };
+        let receiver_stream = StdReceiverStream::new(state_root_rx);
+        let state_root_task = StateRootTask::new(state_root_config, receiver_stream);
+        let state_root_handle = state_root_task.spawn();
+        let state_hook = move |result_and_state: &ResultAndState| {
+            let _ = state_root_tx.send(result_and_state.state.clone());
+        };
+
         let output = self.metrics.executor.execute_metered(
             executor,
             (&block, U256::MAX).into(),
-            Box::new(noop_state_hook),
+            Box::new(state_hook),
         )?;
 
         trace!(target: "engine::tree", elapsed=?exec_time.elapsed(), ?block_number, "Executed block");
@@ -2249,6 +2261,9 @@ where
         }
 
         let (state_root, trie_output) = if let Some(result) = state_root_result {
+            if let Ok(state_root_task_result) = state_root_handle.wait_for_result() {
+                debug!(target: "engine::tree", block=?sealed_block.num_hash(), state_root_task_result=?state_root_task_result.0,  regular_state_root_result = ?result.0);
+            }
             result
         } else {
             debug!(target: "engine::tree", block=?sealed_block.num_hash(), persistence_in_progress, "Failed to compute state root in parallel");
