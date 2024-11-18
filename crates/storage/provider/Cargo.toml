@@ -110,6 +110,7 @@ serde = [
     "rand/serde",
     "revm/serde",
     "reth-codecs/serde",
+    "reth-optimism-primitives?/serde",
 ]
 test-utils = [
     "reth-db/test-utils",

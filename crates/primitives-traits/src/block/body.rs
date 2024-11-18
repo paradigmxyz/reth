@@ -1,6 +1,6 @@
 //! Block body abstraction.
 
-use crate::InMemorySize;
+use crate::{InMemorySize, MaybeSerde};
 use alloc::fmt;
 use alloy_consensus::Transaction;
 
@@ -15,11 +15,10 @@ pub trait BlockBody:
     + fmt::Debug
     + PartialEq
     + Eq
-    + serde::Serialize
-    + for<'de> serde::Deserialize<'de>
     + alloy_rlp::Encodable
     + alloy_rlp::Decodable
     + InMemorySize
+    + MaybeSerde
 {
     /// Ordered list of signed transactions as committed in block.
     // todo: requires trait for signed transaction

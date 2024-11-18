@@ -119,5 +119,6 @@ serde = [
 	"alloy-primitives/serde",
 	"op-alloy-consensus?/serde",
 	"reth-execution-types/serde",
-	"reth-provider/serde"
+	"reth-provider/serde",
+	"reth-optimism-primitives/serde",
 ]

@@ -121,6 +121,7 @@ serde = [
 	"rand/serde",
 	"smallvec/serde",
 	"url/serde",
+	"reth-primitives-traits/serde",
 ]
 test-utils = [
 	"dep:reth-provider",

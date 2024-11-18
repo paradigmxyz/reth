@@ -12,15 +12,16 @@ description = "Common types in reth."
 workspace = true
 
 [dependencies]
+# reth
 reth-codecs.workspace = true
 
-alloy-consensus = { workspace = true, features = ["serde"] }
+# ethereum
+alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
-
-revm-primitives = { workspace = true, features = ["serde"] }
+revm-primitives.workspace = true
 
 # misc
 byteorder = "1"
@@ -76,7 +77,19 @@ arbitrary = [
 	"reth-codecs/arbitrary"
 ]
 serde-bincode-compat = [
+	"serde",
 	"serde_with",
 	"alloy-consensus/serde-bincode-compat",
 	"alloy-eips/serde-bincode-compat"
+]
+serde = [
+	"alloy-consensus/serde",
+    "alloy-eips/serde",
+    "alloy-primitives/serde",
+    "bytes/serde",
+    "rand/serde",
+    "reth-codecs/serde",
+    "revm-primitives/serde",
+    "roaring/serde",
+	"revm-primitives/serde",
 ]
