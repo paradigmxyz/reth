@@ -71,7 +71,6 @@ impl Wal {
     pub fn num_blocks(&self) -> u64 {
         self.inner.block_cache().num_blocks()
     }
-
 }
 
 /// Inner type for the WAL.
