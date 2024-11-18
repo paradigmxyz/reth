@@ -93,7 +93,7 @@ where
         + AccountReader
         + WithdrawalsProvider
         + 'static,
-    E: BlockExecutorProvider<Primitives = reth_node_types::AnyPrimitives>,
+    E: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
 {
     /// Validates the given block and a [`BidTrace`] against it.
     pub async fn validate_message_against_block(
@@ -351,7 +351,7 @@ where
         + WithdrawalsProvider
         + Clone
         + 'static,
-    E: BlockExecutorProvider<Primitives = reth_node_types::AnyPrimitives>,
+    E: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
 {
     async fn validate_builder_submission_v1(
         &self,

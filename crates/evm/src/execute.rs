@@ -511,7 +511,7 @@ mod tests {
     struct TestExecutorProvider;
 
     impl BlockExecutorProvider for TestExecutorProvider {
-        type Primitives = reth_node_types::AnyPrimitives;
+        type Primitives = reth_primitives::EthPrimitives;
 
         type Executor<DB: Database<Error: Into<ProviderError> + Display>> =
             TestExecutor<DB, Self::Primitives>;
@@ -712,7 +712,7 @@ mod tests {
     fn test_provider() {
         let provider = TestExecutorProvider;
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
-        let executor: TestExecutor<_, reth_node_types::AnyPrimitives> = provider.executor(db);
+        let executor: TestExecutor<_, reth_primitives::EthPrimitives> = provider.executor(db);
         let _ = executor.execute(BlockExecutionInput::new(&Default::default(), U256::ZERO));
     }
 
@@ -725,7 +725,7 @@ mod tests {
         let expected_apply_post_execution_changes_result = Requests::new(vec![bytes!("deadbeef")]);
         let expected_finish_result = BundleState::default();
 
-        let strategy_factory = TestExecutorStrategyFactory::<reth_node_types::AnyPrimitives> {
+        let strategy_factory = TestExecutorStrategyFactory::<reth_primitives::EthPrimitives> {
             execute_transactions_result: expected_execute_transactions_result,
             apply_post_execution_changes_result: expected_apply_post_execution_changes_result
                 .clone(),

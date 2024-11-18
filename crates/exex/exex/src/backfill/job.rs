@@ -36,7 +36,7 @@ pub struct BackfillJob<E, P> {
 
 impl<E, P> Iterator for BackfillJob<E, P>
 where
-    E: BlockExecutorProvider<Primitives = reth_node_types::AnyPrimitives>,
+    E: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
     P: HeaderProvider + BlockReader + StateProviderFactory,
 {
     type Item = BackfillJobResult<Chain>;
@@ -52,7 +52,7 @@ where
 
 impl<E, P> BackfillJob<E, P>
 where
-    E: BlockExecutorProvider<Primitives = reth_node_types::AnyPrimitives>,
+    E: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
     P: BlockReader + HeaderProvider + StateProviderFactory,
 {
     /// Converts the backfill job into a single block backfill job.
@@ -164,7 +164,7 @@ pub struct SingleBlockBackfillJob<E, P> {
 
 impl<E, P> Iterator for SingleBlockBackfillJob<E, P>
 where
-    E: BlockExecutorProvider<Primitives = reth_node_types::AnyPrimitives>,
+    E: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
     P: HeaderProvider + BlockReader + StateProviderFactory,
 {
     type Item = BackfillJobResult<(BlockWithSenders, BlockExecutionOutput<Receipt>)>;
@@ -176,7 +176,7 @@ where
 
 impl<E, P> SingleBlockBackfillJob<E, P>
 where
-    E: BlockExecutorProvider<Primitives = reth_node_types::AnyPrimitives>,
+    E: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
     P: HeaderProvider + BlockReader + StateProviderFactory,
 {
     /// Converts the single block backfill job into a stream.

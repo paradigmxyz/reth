@@ -56,7 +56,7 @@ where
     EvmConfig:
         Clone + Unpin + Sync + Send + 'static + ConfigureEvm<Header = alloy_consensus::Header>,
 {
-    type Primitives = reth_node_types::AnyPrimitives;
+    type Primitives = reth_primitives::EthPrimitives;
 
     type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
         OpExecutionStrategy<DB, EvmConfig>;
@@ -115,8 +115,8 @@ where
     }
 }
 
-// replace with OpPrimitives
-impl<DB, EvmConfig> BlockExecutionStrategy<DB, reth_node_types::AnyPrimitives>
+// todo: replace with OpPrimitives
+impl<DB, EvmConfig> BlockExecutionStrategy<DB, reth_primitives::EthPrimitives>
     for OpExecutionStrategy<DB, EvmConfig>
 where
     DB: Database<Error: Into<ProviderError> + Display>,

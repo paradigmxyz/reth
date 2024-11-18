@@ -159,7 +159,7 @@ impl MockEthProvider {
 pub struct MockNode;
 
 impl NodeTypes for MockNode {
-    type Primitives = reth_node_types::AnyPrimitives;
+    type Primitives = reth_primitives::EthPrimitives;
     type ChainSpec = ChainSpec;
     type StateCommitment = MerklePatriciaTrie;
 }

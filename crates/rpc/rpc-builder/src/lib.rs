@@ -41,7 +41,7 @@
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions + Clone + 'static,
 //!     EvmConfig: ConfigureEvm<Header = Header>,
-//!     BlockExecutor: BlockExecutorProvider<Primitives = reth_node_types::AnyPrimitives>,
+//!     BlockExecutor: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
 //!     Consensus: reth_consensus::Consensus + Clone + 'static,
 //! {
 //!     // configure the rpc module per transport
@@ -116,7 +116,7 @@
 //!     EngineApi: EngineApiServer<EngineT>,
 //!     EngineT: EngineTypes,
 //!     EvmConfig: ConfigureEvm<Header = Header>,
-//!     BlockExecutor: BlockExecutorProvider<Primitives = reth_node_types::AnyPrimitives>,
+//!     BlockExecutor: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
 //!     Consensus: reth_consensus::Consensus + Clone + 'static,
 //! {
 //!     // configure the rpc module per transport
@@ -261,7 +261,7 @@ where
     Events: CanonStateSubscriptions + Clone + 'static,
     EvmConfig: ConfigureEvm<Header = alloy_consensus::Header>,
     EthApi: FullEthApiServer,
-    BlockExecutor: BlockExecutorProvider<Primitives = reth_node_types::AnyPrimitives>,
+    BlockExecutor: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
 {
     let module_config = module_config.into();
     server_config
@@ -569,7 +569,7 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig, BlockExecutor, Consensus
         block_executor: BE,
     ) -> RpcModuleBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig, BE, Consensus>
     where
-        BE: BlockExecutorProvider<Primitives = reth_node_types::AnyPrimitives>,
+        BE: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
     {
         let Self { provider, network, pool, executor, events, evm_config, consensus, .. } = self;
         RpcModuleBuilder {
@@ -613,7 +613,7 @@ where
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
     EvmConfig: ConfigureEvm<Header = Header>,
-    BlockExecutor: BlockExecutorProvider<Primitives = reth_node_types::AnyPrimitives>,
+    BlockExecutor: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
     Consensus: reth_consensus::Consensus + Clone + 'static,
 {
     /// Configures all [`RpcModule`]s specific to the given [`TransportRpcModuleConfig`] which can
@@ -909,7 +909,7 @@ where
     Events: CanonStateSubscriptions + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     EthApi: EthApiTypes + 'static,
-    BlockExecutor: BlockExecutorProvider<Primitives = reth_node_types::AnyPrimitives>,
+    BlockExecutor: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
 {
     /// Creates a new, empty instance.
     #[allow(clippy::too_many_arguments)]
@@ -1029,7 +1029,7 @@ where
     Network: NetworkInfo + Clone + 'static,
     EthApi: EthApiTypes,
     Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
-    BlockExecutor: BlockExecutorProvider<Primitives = reth_node_types::AnyPrimitives>,
+    BlockExecutor: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
 {
     /// Instantiates `AdminApi`
     pub fn admin_api(&self) -> AdminApi<Network, Provider::ChainSpec>
@@ -1073,7 +1073,7 @@ where
             RpcBlock<EthApi::NetworkTypes>,
             RpcReceipt<EthApi::NetworkTypes>,
         > + EthApiTypes,
-    BlockExecutor: BlockExecutorProvider<Primitives = reth_node_types::AnyPrimitives>,
+    BlockExecutor: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
 {
     /// Register Eth Namespace
     ///
@@ -1175,7 +1175,7 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     EthApi: EthApiTypes,
-    BlockExecutor: BlockExecutorProvider<Primitives = reth_node_types::AnyPrimitives>,
+    BlockExecutor: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
 {
     /// Instantiates `TraceApi`
     ///
@@ -1214,7 +1214,7 @@ where
     pub fn debug_api(&self) -> DebugApi<Provider, EthApi, BlockExecutor>
     where
         EthApi: EthApiSpec + EthTransactions + TraceExt,
-        BlockExecutor: BlockExecutorProvider<Primitives = reth_node_types::AnyPrimitives>,
+        BlockExecutor: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
     {
         DebugApi::new(
             self.provider.clone(),
@@ -1265,7 +1265,7 @@ where
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
     EthApi: FullEthApiServer,
-    BlockExecutor: BlockExecutorProvider<Primitives = reth_node_types::AnyPrimitives>,
+    BlockExecutor: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
     Consensus: reth_consensus::Consensus + Clone + 'static,
 {
     /// Configures the auth module that includes the

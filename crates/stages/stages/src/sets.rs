@@ -20,9 +20,9 @@
 //! # use reth_static_file::StaticFileProducer;
 //! # use reth_config::config::StageConfig;
 //! # use reth_evm::execute::BlockExecutorProvider;
-//! # use reth_node_types::AnyPrimitives;
+//! # use reth_primitives::EthPrimitives;
 //!
-//! # fn create(exec: impl BlockExecutorProvider<Primitives = AnyPrimitives>) {
+//! # fn create(exec: impl BlockExecutorProvider<Primitives = EthPrimitives>) {
 //!
 //! let provider_factory = create_test_provider_factory();
 //! let static_file_producer =
@@ -105,7 +105,7 @@ impl<Provider, H, B, E> DefaultStages<Provider, H, B, E> {
         prune_modes: PruneModes,
     ) -> Self
     where
-        E: BlockExecutorProvider<Primitives = reth_node_types::AnyPrimitives>,
+        E: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
     {
         Self {
             online: OnlineStages::new(
@@ -125,7 +125,7 @@ impl<Provider, H, B, E> DefaultStages<Provider, H, B, E> {
 
 impl<P, H, B, E> DefaultStages<P, H, B, E>
 where
-    E: BlockExecutorProvider<Primitives = reth_node_types::AnyPrimitives>,
+    E: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
 {
     /// Appends the default offline stages and default finish stage to the given builder.
     pub fn add_offline_stages<Provider>(
@@ -149,7 +149,7 @@ where
     P: HeaderSyncGapProvider + 'static,
     H: HeaderDownloader + 'static,
     B: BodyDownloader + 'static,
-    E: BlockExecutorProvider<Primitives = reth_node_types::AnyPrimitives>,
+    E: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
     OnlineStages<P, H, B>: StageSet<Provider>,
     OfflineStages<E>: StageSet<Provider>,
 {
@@ -294,7 +294,7 @@ impl<EF> OfflineStages<EF> {
 
 impl<E, Provider> StageSet<Provider> for OfflineStages<E>
 where
-    E: BlockExecutorProvider<Primitives = reth_node_types::AnyPrimitives>,
+    E: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
     ExecutionStages<E>: StageSet<Provider>,
     PruneSenderRecoveryStage: Stage<Provider>,
     HashingStages: StageSet<Provider>,
@@ -351,7 +351,7 @@ impl<E> ExecutionStages<E> {
 
 impl<E, Provider> StageSet<Provider> for ExecutionStages<E>
 where
-    E: BlockExecutorProvider<Primitives = reth_node_types::AnyPrimitives>,
+    E: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
     SenderRecoveryStage: Stage<Provider>,
     ExecutionStage<E>: Stage<Provider>,
 {

@@ -17,7 +17,7 @@ use reth_evm::{
     system_calls::{OnStateHook, SystemCaller},
     ConfigureEvm,
 };
-use reth_primitives::{BlockWithSenders, Receipt};
+use reth_primitives::{BlockWithSenders, EthPrimitives, Receipt};
 use reth_revm::db::State;
 use revm_primitives::{
     db::{Database, DatabaseCommit},
@@ -63,7 +63,7 @@ where
     EvmConfig:
         Clone + Unpin + Sync + Send + 'static + ConfigureEvm<Header = alloy_consensus::Header>,
 {
-    type Primitives = reth_node_types::AnyPrimitives;
+    type Primitives = EthPrimitives;
 
     type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
         EthExecutionStrategy<DB, EvmConfig>;
@@ -129,7 +129,7 @@ where
 }
 
 // replace with EthPrimitives
-impl<DB, EvmConfig> BlockExecutionStrategy<DB, reth_node_types::AnyPrimitives>
+impl<DB, EvmConfig> BlockExecutionStrategy<DB, EthPrimitives>
     for EthExecutionStrategy<DB, EvmConfig>
 where
     DB: Database<Error: Into<ProviderError> + Display>,

@@ -25,7 +25,7 @@ const UNAVAILABLE_FOR_NOOP: &str = "execution unavailable for noop";
 pub struct NoopBlockExecutorProvider;
 
 impl BlockExecutorProvider for NoopBlockExecutorProvider {
-    type Primitives = reth_primitives::AnyPrimitives;
+    type Primitives = reth_primitives::EthPrimitives;
 
     type Executor<DB: Database<Error: Into<ProviderError> + Display>> = Self;
 

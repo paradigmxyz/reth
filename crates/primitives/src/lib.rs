@@ -75,11 +75,11 @@ pub mod serde_bincode_compat {
     };
 }
 
-/// Temp helper struct for integrating [`NodePrimitives`](reth_primitives_traits::NodePrimitives).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct AnyPrimitives;
+/// Ethereum primitive types.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct EthPrimitives;
 
-impl reth_primitives_traits::NodePrimitives for AnyPrimitives {
+impl reth_primitives_traits::NodePrimitives for EthPrimitives {
     type Block = crate::Block;
     type BlockHeader = alloy_consensus::Header;
     type BlockBody = crate::BlockBody;

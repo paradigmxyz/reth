@@ -34,7 +34,7 @@ impl<T> MockExecutorProvider<T> {
 }
 
 impl BlockExecutorProvider for MockExecutorProvider {
-    type Primitives = reth_primitives::AnyPrimitives;
+    type Primitives = reth_primitives::EthPrimitives;
 
     type Executor<DB: Database<Error: Into<ProviderError> + Display>> = Self;
 

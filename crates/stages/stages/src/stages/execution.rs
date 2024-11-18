@@ -176,7 +176,7 @@ impl<E, Provider> Stage<Provider> for ExecutionStage<E>
 where
     Provider: DBProvider
         + BlockReader
-        + StaticFileProviderFactory<Primitives = reth_primitives::AnyPrimitives>
+        + StaticFileProviderFactory<Primitives = reth_primitives::EthPrimitives>
         + StatsReader
         + StateChangeWriter
         + BlockHashReader,

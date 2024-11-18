@@ -91,7 +91,7 @@ pub struct CustomExecutorStrategyFactory {
 }
 
 impl BlockExecutionStrategyFactory for CustomExecutorStrategyFactory {
-    type Primitives = reth_node_types::AnyPrimitives;
+    type Primitives = reth_primitives::EthPrimitives;
 
     type Strategy<DB: Database<Error: Into<ProviderError> + Display>> = CustomExecutorStrategy<DB>;
 

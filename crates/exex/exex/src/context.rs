@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 
 use reth_exex_types::ExExHead;
-use reth_node_api::{AnyPrimitives, FullNodeComponents, NodeTypes};
+use reth_node_api::{EthPrimitives, FullNodeComponents, NodeTypes};
 use reth_node_core::node_config::NodeConfig;
 use reth_primitives::Head;
 use reth_tasks::TaskExecutor;
@@ -39,7 +39,7 @@ pub struct ExExContext<Node: FullNodeComponents> {
 
 impl<Node> Debug for ExExContext<Node>
 where
-    Node: FullNodeComponents<Types: NodeTypes<Primitives = AnyPrimitives>>,
+    Node: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>,
     Node::Provider: Debug,
     Node::Executor: Debug,
 {
@@ -57,7 +57,7 @@ where
 
 impl<Node> ExExContext<Node>
 where
-    Node: FullNodeComponents<Types: NodeTypes<Primitives = AnyPrimitives>>,
+    Node: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>,
     Node::Provider: Debug,
     Node::Executor: Debug,
 {
@@ -69,7 +69,7 @@ where
 
 impl<Node> ExExContext<Node>
 where
-    Node: FullNodeComponents<Types: NodeTypes<Primitives = AnyPrimitives>>,
+    Node: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>,
 {
     /// Returns the transaction pool of the node.
     pub fn pool(&self) -> &Node::Pool {

@@ -19,7 +19,6 @@ reth-primitives = { workspace = true, features = ["reth-codec"] }
 reth-revm.workspace = true
 reth-ethereum-consensus.workspace = true
 reth-consensus.workspace = true
-reth-node-types.workspace = true
 
 # Ethereum
 revm-primitives.workspace = true
@@ -52,5 +51,4 @@ std = [
 	"alloy-primitives/std",
 	"revm-primitives/std",
 	"secp256k1/std",
-	"reth-node-types/std",
 ]

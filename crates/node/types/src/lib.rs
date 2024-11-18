@@ -9,7 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-pub use reth_primitives::AnyPrimitives;
+pub use reth_primitives::EthPrimitives;
 pub use reth_primitives_traits::{
     Block, BlockBody, FullBlock, FullNodePrimitives, FullReceipt, FullSignedTx, NodePrimitives,
 };
@@ -39,7 +39,7 @@ pub trait NodeTypes: Send + Sync + Unpin + 'static {
 }
 
 /// The type that configures an Ethereum-like node with an engine for consensus.
-pub trait NodeTypesWithEngine: NodeTypes<Primitives = AnyPrimitives> {
+pub trait NodeTypesWithEngine: NodeTypes<Primitives = EthPrimitives> {
     /// The node's engine types, defining the interaction with the consensus engine.
     type Engine: EngineTypes;
 }
@@ -48,7 +48,7 @@ pub trait NodeTypesWithEngine: NodeTypes<Primitives = AnyPrimitives> {
 /// node.
 ///
 /// Its types are configured by node internally and are not intended to be user configurable.
-pub trait NodeTypesWithDB: NodeTypes<Primitives = AnyPrimitives> {
+pub trait NodeTypesWithDB: NodeTypes<Primitives = EthPrimitives> {
     /// Underlying database type used by the node to store and retrieve data.
     type DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static;
 }
@@ -99,7 +99,7 @@ where
 
 impl<Types, DB> NodeTypesWithDB for NodeTypesWithDBAdapter<Types, DB>
 where
-    Types: NodeTypes<Primitives = AnyPrimitives>,
+    Types: NodeTypes<Primitives = EthPrimitives>,
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
 {
     type DB = DB;
@@ -168,19 +168,19 @@ impl<P, E, C, S> AnyNodeTypesWithEngine<P, E, C, S> {
     }
 }
 
-impl<E, C, S> NodeTypes for AnyNodeTypesWithEngine<AnyPrimitives, E, C, S>
+impl<E, C, S> NodeTypes for AnyNodeTypesWithEngine<EthPrimitives, E, C, S>
 where
     //P: NodePrimitives<Receipt = reth_primitives::Receipt> + Send + Sync + Unpin + 'static,
     E: EngineTypes + Send + Sync + Unpin,
     C: EthChainSpec + 'static,
     S: StateCommitment,
 {
-    type Primitives = AnyPrimitives;
+    type Primitives = EthPrimitives;
     type ChainSpec = C;
     type StateCommitment = S;
 }
 
-impl<E, C, S> NodeTypesWithEngine for AnyNodeTypesWithEngine<AnyPrimitives, E, C, S>
+impl<E, C, S> NodeTypesWithEngine for AnyNodeTypesWithEngine<EthPrimitives, E, C, S>
 where
     //P: NodePrimitives<Receipt = reth_primitives::Receipt> + Send + Sync + Unpin + 'static,
     E: EngineTypes + Send + Sync + Unpin,
