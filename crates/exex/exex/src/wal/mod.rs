@@ -66,6 +66,12 @@ impl Wal {
     ) -> eyre::Result<Box<dyn Iterator<Item = eyre::Result<ExExNotification>> + '_>> {
         self.inner.iter_notifications()
     }
+
+    /// Returns the number of blocks in the WAL.
+    pub fn num_blocks(&self) -> u64 {
+        self.inner.block_cache().num_blocks()
+    }
+
 }
 
 /// Inner type for the WAL.

@@ -35,6 +35,11 @@ impl BlockCache {
         self.notification_max_blocks.is_empty()
     }
 
+    /// Returns the number of blocks in the cache.
+    pub (super) fn num_blocks(&self) -> u64 {
+        self.committed_blocks.len() as u64
+    }
+
     /// Removes all files from the cache that has notifications with a tip block less than or equal
     /// to the given block number.
     ///
