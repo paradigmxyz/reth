@@ -36,6 +36,7 @@ impl<F> BodiesClient for TestBodiesClient<F>
 where
     F: Fn(Vec<B256>) -> PeerRequestResult<Vec<BlockBody>> + Send + Sync,
 {
+    type Body = BlockBody;
     type Output = BodiesFut;
 
     fn get_block_bodies_with_priority(

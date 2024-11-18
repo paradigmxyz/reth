@@ -1,5 +1,6 @@
 use std::{collections::HashMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
 
+use alloy_consensus::Header;
 use alloy_primitives::{keccak256, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use eyre::OptionExt;
@@ -9,7 +10,7 @@ use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{
     state_change::post_block_balance_increments, system_calls::SystemCaller, ConfigureEvm,
 };
-use reth_primitives::{Header, Receipt, SealedBlockWithSenders, SealedHeader};
+use reth_primitives::{Receipt, SealedBlockWithSenders, SealedHeader};
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,

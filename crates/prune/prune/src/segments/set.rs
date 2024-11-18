@@ -5,7 +5,7 @@ use crate::segments::{
 use reth_db::transaction::DbTxMut;
 use reth_provider::{
     providers::StaticFileProvider, BlockReader, DBProvider, PruneCheckpointWriter,
-    TransactionsProvider,
+    StaticFileProviderFactory, TransactionsProvider,
 };
 use reth_prune_types::PruneModes;
 
@@ -45,12 +45,16 @@ impl<Provider> SegmentSet<Provider> {
 
 impl<Provider> SegmentSet<Provider>
 where
-    Provider: DBProvider<Tx: DbTxMut> + TransactionsProvider + PruneCheckpointWriter + BlockReader,
+    Provider: StaticFileProviderFactory
+        + DBProvider<Tx: DbTxMut>
+        + TransactionsProvider
+        + PruneCheckpointWriter
+        + BlockReader,
 {
     /// Creates a [`SegmentSet`] from an existing components, such as [`StaticFileProvider`] and
     /// [`PruneModes`].
     pub fn from_components(
-        static_file_provider: StaticFileProvider,
+        static_file_provider: StaticFileProvider<Provider::Primitives>,
         prune_modes: PruneModes,
     ) -> Self {
         let PruneModes {

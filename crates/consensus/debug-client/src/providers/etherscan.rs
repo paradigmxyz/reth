@@ -1,6 +1,6 @@
 use crate::BlockProvider;
 use alloy_eips::BlockNumberOrTag;
-use alloy_rpc_types::Block;
+use alloy_rpc_types_eth::Block;
 use reqwest::Client;
 use reth_tracing::tracing::warn;
 use serde::Deserialize;

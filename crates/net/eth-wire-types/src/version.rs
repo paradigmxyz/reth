@@ -15,6 +15,8 @@ pub struct ParseVersionError(String);
 /// The `eth` protocol version.
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Display)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 pub enum EthVersion {
     /// The `eth` protocol version 66.
     Eth66 = 66,
@@ -61,6 +63,26 @@ impl EthVersion {
     /// Returns true if the version is eth/69
     pub const fn is_eth69(&self) -> bool {
         matches!(self, Self::Eth69)
+    }
+}
+
+/// RLP encodes `EthVersion` as a single byte (66-69).
+impl Encodable for EthVersion {
+    fn encode(&self, out: &mut dyn BufMut) {
+        (*self as u8).encode(out)
+    }
+
+    fn length(&self) -> usize {
+        (*self as u8).length()
+    }
+}
+
+/// RLP decodes a single byte into `EthVersion`.
+/// Returns error if byte is not a valid version (66-69).
+impl Decodable for EthVersion {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let version = u8::decode(buf)?;
+        Self::try_from(version).map_err(|_| RlpError::Custom("invalid eth version"))
     }
 }
 
@@ -183,6 +205,8 @@ impl Decodable for ProtocolVersion {
 #[cfg(test)]
 mod tests {
     use super::{EthVersion, ParseVersionError};
+    use alloy_rlp::{Decodable, Encodable, Error as RlpError};
+    use bytes::BytesMut;
 
     #[test]
     fn test_eth_version_try_from_str() {
@@ -200,5 +224,46 @@ mod tests {
         assert_eq!(EthVersion::Eth68, "68".parse().unwrap());
         assert_eq!(EthVersion::Eth69, "69".parse().unwrap());
         assert_eq!(Err(ParseVersionError("70".to_string())), "70".parse::<EthVersion>());
+    }
+
+    #[test]
+    fn test_eth_version_rlp_encode() {
+        let versions = [EthVersion::Eth66, EthVersion::Eth67, EthVersion::Eth68, EthVersion::Eth69];
+
+        for version in versions {
+            let mut encoded = BytesMut::new();
+            version.encode(&mut encoded);
+
+            assert_eq!(encoded.len(), 1);
+            assert_eq!(encoded[0], version as u8);
+        }
+    }
+    #[test]
+    fn test_eth_version_rlp_decode() {
+        let test_cases = [
+            (66_u8, Ok(EthVersion::Eth66)),
+            (67_u8, Ok(EthVersion::Eth67)),
+            (68_u8, Ok(EthVersion::Eth68)),
+            (69_u8, Ok(EthVersion::Eth69)),
+            (70_u8, Err(RlpError::Custom("invalid eth version"))),
+            (65_u8, Err(RlpError::Custom("invalid eth version"))),
+        ];
+
+        for (input, expected) in test_cases {
+            let mut encoded = BytesMut::new();
+            input.encode(&mut encoded);
+
+            let mut slice = encoded.as_ref();
+            let result = EthVersion::decode(&mut slice);
+            assert_eq!(result, expected);
+        }
+    }
+
+    #[test]
+    fn test_eth_version_total_messages() {
+        assert_eq!(EthVersion::Eth66.total_messages(), 15);
+        assert_eq!(EthVersion::Eth67.total_messages(), 13);
+        assert_eq!(EthVersion::Eth68.total_messages(), 13);
+        assert_eq!(EthVersion::Eth69.total_messages(), 11);
     }
 }

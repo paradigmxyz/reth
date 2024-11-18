@@ -78,7 +78,7 @@ impl PruneLimiter {
     /// Returns `true` if the limit on the number of deleted entries (rows in the database) is
     /// reached.
     pub fn is_deleted_entries_limit_reached(&self) -> bool {
-        self.deleted_entries_limit.as_ref().map_or(false, |limit| limit.is_limit_reached())
+        self.deleted_entries_limit.as_ref().is_some_and(|limit| limit.is_limit_reached())
     }
 
     /// Increments the number of deleted entries by the given number.
@@ -112,7 +112,7 @@ impl PruneLimiter {
 
     /// Returns `true` if time limit is reached.
     pub fn is_time_limit_reached(&self) -> bool {
-        self.time_limit.as_ref().map_or(false, |limit| limit.is_limit_reached())
+        self.time_limit.as_ref().is_some_and(|limit| limit.is_limit_reached())
     }
 
     /// Returns `true` if any limit is reached.

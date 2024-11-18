@@ -8,6 +8,15 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+mod error;
+pub use error::BeaconOnNewPayloadError;
+
+mod forkchoice;
+pub use forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker, ForkchoiceStatus};
+
+mod message;
+pub use message::{BeaconEngineMessage, OnForkChoiceUpdated};
+
 mod invalid_block_hook;
 pub use invalid_block_hook::InvalidBlockHook;
 
@@ -23,7 +32,7 @@ use serde::{de::DeserializeOwned, ser::Serialize};
 /// payload job. Hence this trait is also [`PayloadTypes`].
 pub trait EngineTypes:
     PayloadTypes<
-        BuiltPayload: TryInto<Self::ExecutionPayloadV1>
+        BuiltPayload: TryInto<Self::ExecutionPayloadEnvelopeV1>
                           + TryInto<Self::ExecutionPayloadEnvelopeV2>
                           + TryInto<Self::ExecutionPayloadEnvelopeV3>
                           + TryInto<Self::ExecutionPayloadEnvelopeV4>,
@@ -31,9 +40,15 @@ pub trait EngineTypes:
     + Serialize
     + 'static
 {
-    /// Execution Payload V1 type.
-    type ExecutionPayloadV1: DeserializeOwned + Serialize + Clone + Unpin + Send + Sync + 'static;
-    /// Execution Payload V2 type.
+    /// Execution Payload V1 envelope type.
+    type ExecutionPayloadEnvelopeV1: DeserializeOwned
+        + Serialize
+        + Clone
+        + Unpin
+        + Send
+        + Sync
+        + 'static;
+    /// Execution Payload V2  envelope type.
     type ExecutionPayloadEnvelopeV2: DeserializeOwned
         + Serialize
         + Clone
@@ -41,7 +56,7 @@ pub trait EngineTypes:
         + Send
         + Sync
         + 'static;
-    /// Execution Payload V3 type.
+    /// Execution Payload V3 envelope type.
     type ExecutionPayloadEnvelopeV3: DeserializeOwned
         + Serialize
         + Clone
@@ -49,7 +64,7 @@ pub trait EngineTypes:
         + Send
         + Sync
         + 'static;
-    /// Execution Payload V4 type.
+    /// Execution Payload V4 envelope type.
     type ExecutionPayloadEnvelopeV4: DeserializeOwned
         + Serialize
         + Clone

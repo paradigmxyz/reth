@@ -7,7 +7,7 @@ use reth_db_api::{
 };
 use reth_db_common::DbTool;
 use reth_evm::{execute::BlockExecutorProvider, noop::NoopBlockExecutorProvider};
-use reth_node_builder::{NodeTypesWithDB, NodeTypesWithDBAdapter};
+use reth_node_builder::NodeTypesWithDB;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::{
     providers::{ProviderNodeTypes, StaticFileProvider},
@@ -25,7 +25,7 @@ pub(crate) async fn dump_execution_stage<N, E>(
     executor: E,
 ) -> eyre::Result<()>
 where
-    N: ProviderNodeTypes,
+    N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>,
     E: BlockExecutorProvider,
 {
     let (output_db, tip_block_number) = setup(from, to, &output_datadir.db(), db_tool)?;
@@ -36,7 +36,7 @@ where
 
     if should_run {
         dry_run(
-            ProviderFactory::<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>::new(
+            ProviderFactory::<N>::new(
                 Arc::new(output_db),
                 db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,

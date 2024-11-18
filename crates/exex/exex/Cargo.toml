@@ -25,7 +25,6 @@ reth-fs-util.workspace = true
 reth-metrics.workspace = true
 reth-node-api.workspace = true
 reth-node-core.workspace = true
-reth-payload-builder.workspace = true
 reth-primitives = { workspace = true, features = ["secp256k1"] }
 reth-primitives-traits.workspace = true
 reth-provider.workspace = true

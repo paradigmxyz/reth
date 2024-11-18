@@ -559,7 +559,7 @@ impl RevealedSparseTrie {
                     let unset_branch_nibble = self
                         .nodes
                         .get(&child_path)
-                        .map_or(false, move |node| match node {
+                        .is_some_and(move |node| match node {
                             SparseNode::Leaf { key, .. } => {
                                 // Get full path of the leaf node
                                 child_path.extend_from_slice_unchecked(key);
@@ -701,7 +701,7 @@ impl RevealedSparseTrie {
                             false,
                             SparseNodeType::Extension { store_in_db_trie: true },
                         )
-                    } else if buffers.rlp_node_stack.last().map_or(false, |e| e.0 == child_path) {
+                    } else if buffers.rlp_node_stack.last().is_some_and(|e| e.0 == child_path) {
                         let (_, child, _, node_type) = buffers.rlp_node_stack.pop().unwrap();
                         self.rlp_buf.clear();
                         let rlp_node = ExtensionNodeRef::new(key, &child).rlp(&mut self.rlp_buf);
@@ -753,7 +753,7 @@ impl RevealedSparseTrie {
                     let mut hash_mask_values = Vec::new();
                     let mut hashes = Vec::new();
                     for (i, child_path) in buffers.branch_child_buf.iter().enumerate() {
-                        if buffers.rlp_node_stack.last().map_or(false, |e| &e.0 == child_path) {
+                        if buffers.rlp_node_stack.last().is_some_and(|e| &e.0 == child_path) {
                             let (_, child, calculated, node_type) =
                                 buffers.rlp_node_stack.pop().unwrap();
 

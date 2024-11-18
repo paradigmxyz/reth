@@ -43,7 +43,7 @@ where
         + TryInto<ExecutionPayloadEnvelopeV3>
         + TryInto<ExecutionPayloadEnvelopeV4>,
 {
-    type ExecutionPayloadV1 = ExecutionPayloadV1;
+    type ExecutionPayloadEnvelopeV1 = ExecutionPayloadV1;
     type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadEnvelopeV3 = ExecutionPayloadEnvelopeV3;
     type ExecutionPayloadEnvelopeV4 = ExecutionPayloadEnvelopeV4;

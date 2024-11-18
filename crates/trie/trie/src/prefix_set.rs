@@ -211,8 +211,8 @@ impl PrefixSet {
 }
 
 impl<'a> IntoIterator for &'a PrefixSet {
-    type IntoIter = std::slice::Iter<'a, reth_trie_common::Nibbles>;
     type Item = &'a reth_trie_common::Nibbles;
+    type IntoIter = std::slice::Iter<'a, reth_trie_common::Nibbles>;
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
     }

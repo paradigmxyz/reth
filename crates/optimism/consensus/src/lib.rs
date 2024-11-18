@@ -9,19 +9,19 @@
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
-use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
+use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH};
 use alloy_primitives::{B64, U256};
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_consensus_common::validation::{
     validate_against_parent_4844, validate_against_parent_eip1559_base_fee,
-    validate_against_parent_hash_number, validate_against_parent_timestamp, validate_cancun_gas,
-    validate_header_base_fee, validate_header_extradata, validate_header_gas,
-    validate_shanghai_withdrawals,
+    validate_against_parent_hash_number, validate_against_parent_timestamp,
+    validate_body_against_header, validate_cancun_gas, validate_header_base_fee,
+    validate_header_extradata, validate_header_gas, validate_shanghai_withdrawals,
 };
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_forks::OptimismHardforks;
-use reth_primitives::{BlockWithSenders, GotExpected, Header, SealedBlock, SealedHeader};
+use reth_optimism_forks::OpHardforks;
+use reth_primitives::{BlockBody, BlockWithSenders, GotExpected, SealedBlock, SealedHeader};
 use std::{sync::Arc, time::SystemTime};
 
 mod proof;
@@ -34,19 +34,19 @@ pub use validation::validate_block_post_execution;
 ///
 /// Provides basic checks as outlined in the execution specs.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OptimismBeaconConsensus {
+pub struct OpBeaconConsensus {
     /// Configuration
     chain_spec: Arc<OpChainSpec>,
 }
 
-impl OptimismBeaconConsensus {
-    /// Create a new instance of [`OptimismBeaconConsensus`]
+impl OpBeaconConsensus {
+    /// Create a new instance of [`OpBeaconConsensus`]
     pub const fn new(chain_spec: Arc<OpChainSpec>) -> Self {
         Self { chain_spec }
     }
 }
 
-impl Consensus for OptimismBeaconConsensus {
+impl Consensus for OpBeaconConsensus {
     fn validate_header(&self, header: &SealedHeader) -> Result<(), ConsensusError> {
         validate_header_gas(header)?;
         validate_header_base_fee(header, &self.chain_spec)
@@ -117,6 +117,14 @@ impl Consensus for OptimismBeaconConsensus {
         }
 
         Ok(())
+    }
+
+    fn validate_body_against_header(
+        &self,
+        body: &BlockBody,
+        header: &SealedHeader,
+    ) -> Result<(), ConsensusError> {
+        validate_body_against_header(body, header)
     }
 
     fn validate_block_pre_execution(&self, block: &SealedBlock) -> Result<(), ConsensusError> {

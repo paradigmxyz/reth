@@ -7,7 +7,7 @@ macro_rules! cond_mod {
             #[cfg(feature = "test-utils")]
             pub mod $mod_name;
             #[cfg(not(feature = "test-utils"))]
-            mod $mod_name;
+            pub(crate) mod $mod_name;
         )*
     };
 }

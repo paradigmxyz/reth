@@ -108,11 +108,6 @@ where
         });
     }
 
-    fn without_head(mut self) -> Self {
-        self.set_without_head();
-        self
-    }
-
     fn set_with_head(&mut self, exex_head: ExExHead) {
         let current = std::mem::replace(&mut self.inner, ExExNotificationsInner::Invalid);
         self.inner = ExExNotificationsInner::WithHead(match current {
@@ -129,6 +124,11 @@ where
             ),
             ExExNotificationsInner::Invalid => unreachable!(),
         });
+    }
+
+    fn without_head(mut self) -> Self {
+        self.set_without_head();
+        self
     }
 
     fn with_head(mut self, exex_head: ExExHead) -> Self {

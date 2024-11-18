@@ -1,16 +1,13 @@
-use crate::{
-    GotExpected, Header, SealedHeader, TransactionSigned, TransactionSignedEcRecovered, Withdrawals,
-};
+use crate::{GotExpected, SealedHeader, TransactionSigned, TransactionSignedEcRecovered};
 use alloc::vec::Vec;
-pub use alloy_eips::eip1898::{
-    BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, ForkBlock, RpcBlockHash,
-};
-use alloy_eips::eip2718::Encodable2718;
-use alloy_primitives::{Address, Bytes, Sealable, B256};
+use alloy_consensus::Header;
+use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
+use alloy_primitives::{Address, Bytes, B256};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
 pub use reth_primitives_traits::test_utils::{generate_valid_header, valid_header_strategy};
+use reth_primitives_traits::InMemorySize;
 use serde::{Deserialize, Serialize};
 
 /// Ethereum full block.
@@ -29,9 +26,7 @@ pub struct Block {
 impl Block {
     /// Calculate the header hash and seal the block so that it can't be changed.
     pub fn seal_slow(self) -> SealedBlock {
-        let sealed = self.header.seal_slow();
-        let (header, seal) = sealed.into_parts();
-        SealedBlock { header: SealedHeader::new(header, seal), body: self.body }
+        SealedBlock { header: SealedHeader::seal(self.header), body: self.body }
     }
 
     /// Seal the block with a known hash.
@@ -89,10 +84,25 @@ impl Block {
         let senders = self.senders()?;
         Some(BlockWithSenders { block: self, senders })
     }
+}
 
+impl reth_primitives_traits::Block for Block {
+    type Header = Header;
+    type Body = BlockBody;
+
+    fn header(&self) -> &Self::Header {
+        &self.header
+    }
+
+    fn body(&self) -> &Self::Body {
+        &self.body
+    }
+}
+
+impl InMemorySize for Block {
     /// Calculates a heuristic for the in-memory size of the [`Block`].
     #[inline]
-    pub fn size(&self) -> usize {
+    fn size(&self) -> usize {
         self.header.size() + self.body.size()
     }
 }
@@ -150,26 +160,26 @@ mod block_rlp {
     }
 
     impl Encodable for Block {
-        fn length(&self) -> usize {
-            let helper: HelperRef<'_, _> = self.into();
-            helper.length()
-        }
-
         fn encode(&self, out: &mut dyn bytes::BufMut) {
             let helper: HelperRef<'_, _> = self.into();
             helper.encode(out)
+        }
+
+        fn length(&self) -> usize {
+            let helper: HelperRef<'_, _> = self.into();
+            helper.length()
         }
     }
 
     impl Encodable for SealedBlock {
-        fn length(&self) -> usize {
-            let helper: HelperRef<'_, _> = self.into();
-            helper.length()
-        }
-
         fn encode(&self, out: &mut dyn bytes::BufMut) {
             let helper: HelperRef<'_, _> = self.into();
             helper.encode(out)
+        }
+
+        fn length(&self) -> usize {
+            let helper: HelperRef<'_, _> = self.into();
+            helper.length()
         }
     }
 }
@@ -261,22 +271,21 @@ impl BlockWithSenders {
 /// Sealed Ethereum full block.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
-#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp, 32))]
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Deref, DerefMut)]
-pub struct SealedBlock {
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Deref, DerefMut)]
+pub struct SealedBlock<H = Header, B = BlockBody> {
     /// Locked block header.
     #[deref]
     #[deref_mut]
-    pub header: SealedHeader,
+    pub header: SealedHeader<H>,
     /// Block body.
-    pub body: BlockBody,
+    pub body: B,
 }
 
-impl SealedBlock {
+impl<H, B> SealedBlock<H, B> {
     /// Create a new sealed block instance using the sealed header and block body.
     #[inline]
-    pub const fn new(header: SealedHeader, body: BlockBody) -> Self {
+    pub const fn new(header: SealedHeader<H>, body: B) -> Self {
         Self { header, body }
     }
 
@@ -286,16 +295,18 @@ impl SealedBlock {
         self.header.hash()
     }
 
+    /// Splits the [`BlockBody`] and [`SealedHeader`] into separate components
+    #[inline]
+    pub fn split_header_body(self) -> (SealedHeader<H>, B) {
+        (self.header, self.body)
+    }
+}
+
+impl SealedBlock {
     /// Splits the sealed block into underlying components
     #[inline]
     pub fn split(self) -> (SealedHeader, Vec<TransactionSigned>, Vec<Header>) {
         (self.header, self.body.transactions, self.body.ommers)
-    }
-
-    /// Splits the [`BlockBody`] and [`SealedHeader`] into separate components
-    #[inline]
-    pub fn split_header_body(self) -> (SealedHeader, BlockBody) {
-        (self.header, self.body)
     }
 
     /// Returns an iterator over all blob transactions of the block
@@ -380,12 +391,6 @@ impl SealedBlock {
         Block { header: self.header.unseal(), body: self.body }
     }
 
-    /// Calculates a heuristic for the in-memory size of the [`SealedBlock`].
-    #[inline]
-    pub fn size(&self) -> usize {
-        self.header.size() + self.body.size()
-    }
-
     /// Calculates the total gas used by blob transactions in the sealed block.
     pub fn blob_gas_used(&self) -> u64 {
         self.blob_transactions().iter().filter_map(|tx| tx.blob_gas_used()).sum()
@@ -435,9 +440,55 @@ impl SealedBlock {
     }
 }
 
+impl<H: InMemorySize, B: InMemorySize> InMemorySize for SealedBlock<H, B> {
+    #[inline]
+    fn size(&self) -> usize {
+        self.header.size() + self.body.size()
+    }
+}
+
 impl From<SealedBlock> for Block {
     fn from(block: SealedBlock) -> Self {
         block.unseal()
+    }
+}
+
+impl<H, B> Default for SealedBlock<H, B>
+where
+    SealedHeader<H>: Default,
+    B: Default,
+{
+    fn default() -> Self {
+        Self { header: Default::default(), body: Default::default() }
+    }
+}
+
+impl<H, B> reth_primitives_traits::Block for SealedBlock<H, B>
+where
+    H: reth_primitives_traits::BlockHeader + 'static,
+    B: reth_primitives_traits::BlockBody + 'static,
+    Self: Serialize + for<'a> Deserialize<'a>,
+{
+    type Header = H;
+    type Body = B;
+
+    fn header(&self) -> &Self::Header {
+        self.header.header()
+    }
+
+    fn body(&self) -> &Self::Body {
+        &self.body
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a, H, B> arbitrary::Arbitrary<'a> for SealedBlock<H, B>
+where
+    SealedHeader<H>: arbitrary::Arbitrary<'a>,
+    B: arbitrary::Arbitrary<'a>,
+{
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self { header: u.arbitrary()?, body: u.arbitrary()? })
     }
 }
 
@@ -508,7 +559,7 @@ impl SealedBlockWithSenders {
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for SealedBlockWithSenders {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let block = SealedBlock::arbitrary(u)?;
+        let block: SealedBlock = SealedBlock::arbitrary(u)?;
 
         let senders = block
             .body
@@ -608,10 +659,12 @@ impl BlockBody {
     pub fn transactions(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
         self.transactions.iter()
     }
+}
 
+impl InMemorySize for BlockBody {
     /// Calculates a heuristic for the in-memory size of the [`BlockBody`].
     #[inline]
-    pub fn size(&self) -> usize {
+    fn size(&self) -> usize {
         self.transactions.iter().map(TransactionSigned::size).sum::<usize>() +
             self.transactions.capacity() * core::mem::size_of::<TransactionSigned>() +
             self.ommers.iter().map(Header::size).sum::<usize>() +
@@ -619,6 +672,14 @@ impl BlockBody {
             self.withdrawals
                 .as_ref()
                 .map_or(core::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
+    }
+}
+
+impl reth_primitives_traits::BlockBody for BlockBody {
+    type Transaction = TransactionSigned;
+
+    fn transactions(&self) -> &[Self::Transaction] {
+        &self.transactions
     }
 }
 
@@ -658,8 +719,9 @@ impl<'a> arbitrary::Arbitrary<'a> for BlockBody {
 pub(super) mod serde_bincode_compat {
     use alloc::{borrow::Cow, vec::Vec};
     use alloy_consensus::serde_bincode_compat::Header;
+    use alloy_eips::eip4895::Withdrawals;
     use alloy_primitives::Address;
-    use reth_primitives_traits::{serde_bincode_compat::SealedHeader, Withdrawals};
+    use reth_primitives_traits::serde_bincode_compat::SealedHeader;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -906,11 +968,20 @@ pub(super) mod serde_bincode_compat {
 
 #[cfg(test)]
 mod tests {
-    use super::{BlockNumberOrTag::*, *};
-    use alloy_eips::eip1898::HexStringMissingPrefixError;
+    use super::*;
+    use alloy_eips::{
+        eip1898::HexStringMissingPrefixError, BlockId, BlockNumberOrTag, BlockNumberOrTag::*,
+        RpcBlockHash,
+    };
     use alloy_primitives::hex_literal::hex;
     use alloy_rlp::{Decodable, Encodable};
     use std::str::FromStr;
+
+    const fn _traits() {
+        const fn assert_block<T: reth_primitives_traits::Block>() {}
+        assert_block::<Block>();
+        assert_block::<SealedBlock>();
+    }
 
     /// Check parsing according to EIP-1898.
     #[test]
@@ -1084,7 +1155,7 @@ mod tests {
 
     #[test]
     fn test_default_seal() {
-        let block = SealedBlock::default();
+        let block: SealedBlock = SealedBlock::default();
         let sealed = block.hash();
         let block = block.unseal();
         let block = block.seal_slow();

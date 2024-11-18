@@ -1,11 +1,13 @@
 //! clap [Args](clap::Args) for RPC related arguments.
 
 use std::{
+    collections::HashSet,
     ffi::OsStr,
     net::{IpAddr, Ipv4Addr},
     path::PathBuf,
 };
 
+use alloy_primitives::Address;
 use alloy_rpc_types_engine::JwtSecret;
 use clap::{
     builder::{PossibleValue, RangedU64ValueParser, TypedValueParser},
@@ -183,6 +185,11 @@ pub struct RpcServerArgs {
     #[arg(long = "rpc.proof-permits", alias = "rpc-proof-permits", value_name = "COUNT", default_value_t = constants::DEFAULT_PROOF_PERMITS)]
     pub rpc_proof_permits: usize,
 
+    /// Path to file containing disallowed addresses, json-encoded list of strings. Block
+    /// validation API will reject blocks containing transactions from these addresses.
+    #[arg(long = "builder.disallow", value_name = "PATH", value_parser = reth_cli_util::parsers::read_json_from_file::<HashSet<Address>>)]
+    pub builder_disallow: Option<HashSet<Address>>,
+
     /// State cache configuration.
     #[command(flatten)]
     pub rpc_state_cache: RpcStateCacheArgs,
@@ -196,6 +203,12 @@ impl RpcServerArgs {
     /// Enables the HTTP-RPC server.
     pub const fn with_http(mut self) -> Self {
         self.http = true;
+        self
+    }
+
+    /// Configures modules for the HTTP-RPC server.
+    pub fn with_http_api(mut self, http_api: RpcModuleSelection) -> Self {
+        self.http_api = Some(http_api);
         self
     }
 
@@ -318,6 +331,7 @@ impl Default for RpcServerArgs {
             gas_price_oracle: GasPriceOracleArgs::default(),
             rpc_state_cache: RpcStateCacheArgs::default(),
             rpc_proof_permits: constants::DEFAULT_PROOF_PERMITS,
+            builder_disallow: Default::default(),
         }
     }
 }

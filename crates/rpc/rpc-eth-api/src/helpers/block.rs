@@ -2,11 +2,12 @@
 
 use std::sync::Arc;
 
-use alloy_rpc_types::{Header, Index};
+use alloy_eips::BlockId;
+use alloy_rpc_types_eth::{Block, Header, Index};
 use futures::Future;
-use reth_primitives::{BlockId, Receipt, SealedBlock, SealedBlockWithSenders};
+use reth_primitives::{Receipt, SealedBlock, SealedBlockWithSenders};
 use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider};
-use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
+use reth_rpc_types_compat::block::from_block;
 
 use crate::{node::RpcNodeCoreExt, FromEthApiError, FullEthApiTypes, RpcBlock, RpcReceipt};
 
@@ -63,8 +64,7 @@ pub trait EthBlocks: LoadBlock {
                 full.into(),
                 Some(block_hash),
                 self.tx_resp_builder(),
-            )
-            .map_err(Self::Error::from_eth_err)?;
+            )?;
             Ok(Some(block))
         }
     }
@@ -163,7 +163,7 @@ pub trait EthBlocks: LoadBlock {
     fn ommers(
         &self,
         block_id: BlockId,
-    ) -> Result<Option<Vec<reth_primitives::Header>>, Self::Error> {
+    ) -> Result<Option<Vec<alloy_consensus::Header>>, Self::Error> {
         self.provider().ommers_by_id(block_id).map_err(Self::Error::from_eth_err)
     }
 
@@ -188,7 +188,7 @@ pub trait EthBlocks: LoadBlock {
             }
             .unwrap_or_default();
 
-            Ok(uncles.into_iter().nth(index.into()).map(uncle_block_from_header))
+            Ok(uncles.into_iter().nth(index.into()).map(Block::uncle_from_header))
         }
     }
 }

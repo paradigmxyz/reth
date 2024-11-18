@@ -1,17 +1,14 @@
 //! Compatibility functions for rpc `Transaction` type.
-mod signature;
 
-pub use signature::*;
-
+use core::error;
 use std::fmt;
 
 use alloy_consensus::Transaction as _;
-use alloy_rpc_types::{
+use alloy_rpc_types_eth::{
     request::{TransactionInput, TransactionRequest},
-    Transaction, TransactionInfo,
+    TransactionInfo,
 };
-use alloy_serde::WithOtherFields;
-use reth_primitives::{TransactionSigned, TransactionSignedEcRecovered, TxType};
+use reth_primitives::TransactionSignedEcRecovered;
 use serde::{Deserialize, Serialize};
 
 /// Create a new rpc transaction result for a mined transaction, using the given block hash,
@@ -23,7 +20,7 @@ pub fn from_recovered_with_block_context<T: TransactionCompat>(
     tx: TransactionSignedEcRecovered,
     tx_info: TransactionInfo,
     resp_builder: &T,
-) -> T::Transaction {
+) -> Result<T::Transaction, T::Error> {
     resp_builder.fill(tx, tx_info)
 }
 
@@ -32,7 +29,7 @@ pub fn from_recovered_with_block_context<T: TransactionCompat>(
 pub fn from_recovered<T: TransactionCompat>(
     tx: TransactionSignedEcRecovered,
     resp_builder: &T,
-) -> T::Transaction {
+) -> Result<T::Transaction, T::Error> {
     resp_builder.fill(tx, TransactionInfo::default())
 }
 
@@ -45,77 +42,23 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + fmt::Debug {
         + Sync
         + Unpin
         + Clone
-        + Default
         + fmt::Debug;
 
-    ///
-    /// Formats gas price and max fee per gas for RPC transaction response w.r.t. network specific
-    /// transaction type.
-    fn gas_price(signed_tx: &TransactionSigned, base_fee: Option<u64>) -> GasPrice {
-        #[allow(unreachable_patterns)]
-        match signed_tx.tx_type() {
-            TxType::Legacy | TxType::Eip2930 => {
-                GasPrice { gas_price: Some(signed_tx.max_fee_per_gas()), max_fee_per_gas: None }
-            }
-            TxType::Eip1559 | TxType::Eip4844 | TxType::Eip7702 => {
-                // the gas price field for EIP1559 is set to `min(tip, gasFeeCap - baseFee) +
-                // baseFee`
-                let gas_price = base_fee
-                    .and_then(|base_fee| {
-                        signed_tx.effective_tip_per_gas(base_fee).map(|tip| tip + base_fee as u128)
-                    })
-                    .unwrap_or_else(|| signed_tx.max_fee_per_gas());
-
-                GasPrice {
-                    gas_price: Some(gas_price),
-                    max_fee_per_gas: Some(signed_tx.max_fee_per_gas()),
-                }
-            }
-            _ => GasPrice::default(),
-        }
-    }
+    /// RPC transaction error type.
+    type Error: error::Error + Into<jsonrpsee_types::ErrorObject<'static>>;
 
     /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
     /// environment related fields to `None`.
-    fn fill(&self, tx: TransactionSignedEcRecovered, tx_inf: TransactionInfo) -> Self::Transaction;
+    fn fill(
+        &self,
+        tx: TransactionSignedEcRecovered,
+        tx_inf: TransactionInfo,
+    ) -> Result<Self::Transaction, Self::Error>;
 
     /// Truncates the input of a transaction to only the first 4 bytes.
     // todo: remove in favour of using constructor on `TransactionResponse` or similar
     // <https://github.com/alloy-rs/alloy/issues/1315>.
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction);
-
-    /// Returns the transaction type.
-    // todo: remove when alloy TransactionResponse trait it updated.
-    fn tx_type(tx: &Self::Transaction) -> u8;
-}
-
-impl TransactionCompat for () {
-    // this noop impl depends on integration in `reth_rpc_eth_api::EthApiTypes` noop impl, and
-    // `alloy_network::AnyNetwork`
-    type Transaction = WithOtherFields<Transaction>;
-
-    fn fill(
-        &self,
-        _tx: TransactionSignedEcRecovered,
-        _tx_info: TransactionInfo,
-    ) -> Self::Transaction {
-        WithOtherFields::default()
-    }
-
-    fn otterscan_api_truncate_input(_tx: &mut Self::Transaction) {}
-
-    fn tx_type(_tx: &Self::Transaction) -> u8 {
-        0
-    }
-}
-
-/// Gas price and max fee per gas for a transaction. Helper type to format transaction RPC response.
-#[derive(Debug, Default)]
-pub struct GasPrice {
-    /// Gas price for transaction.
-    pub gas_price: Option<u128>,
-    /// Max fee per gas for transaction.
-    pub max_fee_per_gas: Option<u128>,
 }
 
 /// Convert [`TransactionSignedEcRecovered`] to [`TransactionRequest`]
