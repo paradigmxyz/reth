@@ -59,4 +59,5 @@ serde = [
     "alloy-eips/serde",
     "alloy-primitives/serde",
     "alloy-consensus/serde",
+    "reth-primitives-traits/serde",
 ]

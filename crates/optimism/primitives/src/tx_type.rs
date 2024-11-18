@@ -3,8 +3,9 @@
 //! This type is required because a `Compact` impl is needed on the deposit tx type.
 
 use core::fmt::Debug;
-use std::convert::TryFrom;
 
+#[cfg(feature = "reth-codec")]
+use alloy_consensus::constants::EIP7702_TX_TYPE_ID;
 use alloy_primitives::{U64, U8};
 use alloy_rlp::{Decodable, Encodable, Error};
 use bytes::BufMut;
@@ -13,10 +14,6 @@ use derive_more::{
     Display,
 };
 use op_alloy_consensus::OpTxType as AlloyOpTxType;
-use reth_primitives_traits::{InMemorySize, TxType};
-
-#[cfg(feature = "reth-codec")]
-use alloy_consensus::constants::EIP7702_TX_TYPE_ID;
 #[cfg(feature = "reth-codec")]
 use op_alloy_consensus::DEPOSIT_TX_TYPE_ID;
 #[cfg(feature = "reth-codec")]
@@ -24,8 +21,9 @@ use reth_primitives::transaction::{
     COMPACT_EXTENDED_IDENTIFIER_FLAG, COMPACT_IDENTIFIER_EIP1559, COMPACT_IDENTIFIER_EIP2930,
     COMPACT_IDENTIFIER_LEGACY,
 };
+use reth_primitives_traits::{InMemorySize, TxType};
 
-/// Wrapper type for `AlloyOpTxType` to implement `TxType` trait.
+/// Wrapper type for [`op_alloy_consensus::OpTxType`] to implement [`TxType`] trait.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Display, Ord, Hash, From, Into)]
 #[into(u8)]
 pub struct OpTxType(AlloyOpTxType);

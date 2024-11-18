@@ -81,7 +81,7 @@ serde = [
 	"alloy-primitives/serde",
 	"alloy-trie?/serde",
 	"bytes/serde",
-	"op-alloy-consensus?/serde"
+	"op-alloy-consensus?/serde",
 ]
 arbitrary = [
 	"alloy-consensus?/arbitrary",

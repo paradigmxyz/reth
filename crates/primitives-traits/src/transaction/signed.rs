@@ -8,7 +8,7 @@ use alloy_primitives::{keccak256, Address, PrimitiveSignature, TxHash, B256};
 use reth_codecs::Compact;
 use revm_primitives::TxEnv;
 
-use crate::{FullTransaction, InMemorySize, MaybeArbitrary, Transaction};
+use crate::{FullTransaction, InMemorySize, MaybeArbitrary, MaybeSerde, Transaction};
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
 pub trait FullSignedTx: SignedTransaction<Transaction: FullTransaction> + Compact {}
@@ -27,13 +27,12 @@ pub trait SignedTransaction:
     + PartialEq
     + Eq
     + Hash
-    + serde::Serialize
-    + for<'a> serde::Deserialize<'a>
     + alloy_rlp::Encodable
     + alloy_rlp::Decodable
     + Encodable2718
     + Decodable2718
     + alloy_consensus::Transaction
+    + MaybeSerde
     + MaybeArbitrary
     + InMemorySize
 {
