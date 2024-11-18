@@ -7224,9 +7224,10 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types-engine",
  "assert_matches",
+ "criterion",
+ "crossbeam-channel",
  "futures",
  "metrics",
- "pin-project",
  "reth-beacon-consensus",
  "reth-blockchain-tree",
  "reth-blockchain-tree-api",
@@ -7261,7 +7262,6 @@ dependencies = [
  "revm-primitives",
  "thiserror 1.0.69",
  "tokio",
- "tokio-stream",
  "tracing",
 ]
 
