@@ -29,6 +29,7 @@ reth-evm.workspace = true
 reth-revm = { workspace = true, features = ["std"] }
 reth-beacon-consensus.workspace = true
 reth-trie-db.workspace = true
+reth-rpc-server-types.workspace = true
 
 # op-reth
 reth-optimism-payload-builder.workspace = true

@@ -68,6 +68,7 @@ exclude_crates=(
   reth-static-file # tokio
   reth-transaction-pool # c-kzg
   reth-trie-parallel # tokio
+  reth-testing-utils
 )
 
 # Array to hold the results

@@ -21,7 +21,7 @@ use reth_primitives::transaction::{
     COMPACT_EXTENDED_IDENTIFIER_FLAG, COMPACT_IDENTIFIER_EIP1559, COMPACT_IDENTIFIER_EIP2930,
     COMPACT_IDENTIFIER_LEGACY,
 };
-use reth_primitives_traits::TxType;
+use reth_primitives_traits::{InMemorySize, TxType};
 
 /// Wrapper type for [`op_alloy_consensus::OpTxType`] to implement [`TxType`] trait.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Display, Ord, Hash, From, Into)]
@@ -52,6 +52,14 @@ impl TxType for OpTxType {
     #[inline]
     fn is_eip7702(&self) -> bool {
         matches!(self.0, AlloyOpTxType::Eip7702)
+    }
+}
+
+impl InMemorySize for OpTxType {
+    /// Calculates a heuristic for the in-memory size of the [`OpTxType`].
+    #[inline]
+    fn size(&self) -> usize {
+        core::mem::size_of::<Self>()
     }
 }
 

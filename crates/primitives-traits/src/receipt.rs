@@ -2,12 +2,11 @@
 
 use alloc::vec::Vec;
 use core::fmt;
-
 use alloy_consensus::TxReceipt;
 use alloy_primitives::B256;
 use reth_codecs::Compact;
-
 use crate::MaybeSerde;
+use crate::InMemorySize;
 
 /// Helper trait that unifies all behaviour required by receipt to support full node operations.
 pub trait FullReceipt: Receipt + Compact {}
@@ -27,6 +26,7 @@ pub trait Receipt:
     + alloy_rlp::Encodable
     + alloy_rlp::Decodable
     + MaybeSerde
+    + InMemorySize
 {
     /// Returns transaction type.
     fn tx_type(&self) -> u8;
