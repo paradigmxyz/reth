@@ -76,6 +76,8 @@ pub mod serde_bincode_compat {
 }
 
 /// Ethereum primitive types.
+// todo: move to new crate reth-ethereum-primitives when EthPrimitives is only used in
+// reth-ethereum-* crates
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct EthPrimitives;
 

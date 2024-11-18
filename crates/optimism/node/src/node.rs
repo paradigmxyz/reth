@@ -113,7 +113,7 @@ where
 }
 
 impl NodeTypes for OpNode {
-    type Primitives = reth_primitives::EthPrimitives; // todo: replace with OpPrimitives
+    type Primitives = reth_primitives::EthPrimitives; // todo: replace with OpPrimitives when EthPrimitives is only used in reth-ethereum-* crates
     type ChainSpec = OpChainSpec;
     type StateCommitment = MerklePatriciaTrie;
 }
