@@ -399,39 +399,43 @@ where
             let proof = multiproof.account_subtree.iter().filter(|e| key.starts_with(e.0));
             Ok(target_nodes(key.clone(), value, None, proof)?)
         })
-        .collect::<ProviderResult<BTreeMap<_, _>>>()?;
+        .collect::<Vec<ProviderResult<BTreeMap<_, _>>>>()
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .flatten()
+        .collect::<BTreeMap<_, _>>();
 
-    let state_root =
-        next_root_from_proofs(account_trie_nodes.into_iter().flatten(), |key: Nibbles| {
-            // Right pad the target with 0s.
-            let mut padded_key = key.pack();
-            padded_key.resize(32, 0);
-            let mut targets = HashMap::with_hasher(DefaultHashBuilder::default());
-            targets.insert(
-                B256::from_slice(&padded_key),
-                HashSet::with_hasher(DefaultHashBuilder::default()),
-            );
-            let proof = Proof::new(
-                InMemoryTrieCursorFactory::new(
-                    DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
-                    input_nodes_sorted,
-                ),
-                HashedPostStateCursorFactory::new(
-                    DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
-                    input_state_sorted,
-                ),
-            )
-            .multiproof(targets)
-            .unwrap();
+    let state_root = next_root_from_proofs(account_trie_nodes, |key: Nibbles| {
+        // Right pad the target with 0s.
+        let mut padded_key = key.pack();
+        padded_key.resize(32, 0);
+        let mut targets = HashMap::with_hasher(DefaultHashBuilder::default());
+        targets.insert(
+            B256::from_slice(&padded_key),
+            HashSet::with_hasher(DefaultHashBuilder::default()),
+        );
+        let proof = Proof::new(
+            InMemoryTrieCursorFactory::new(
+                DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
+                input_nodes_sorted,
+            ),
+            HashedPostStateCursorFactory::new(
+                DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
+                input_state_sorted,
+            ),
+        )
+        .multiproof(targets)
+        .unwrap();
 
-            // The subtree only contains the proof for a single target.
-            let node = proof
-                .account_subtree
-                .get(&key)
-                .cloned()
-                .ok_or(TrieWitnessError::MissingTargetNode(key))?;
-            Ok(node)
-        })?;
+        // The subtree only contains the proof for a single target.
+        let node = proof
+            .account_subtree
+            .get(&key)
+            .cloned()
+            .ok_or(TrieWitnessError::MissingTargetNode(key))?;
+        Ok(node)
+    })?;
 
     Ok((state_root, multiproof, Default::default(), started_at.elapsed()))
 }
