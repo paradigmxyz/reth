@@ -2230,7 +2230,7 @@ mod tests {
             .add_transaction(reth_transaction_pool::TransactionOrigin::External, tx.clone())
             .await;
 
-        let request = GetPooledTransactions(vec![tx.get_hash()]);
+        let request = GetPooledTransactions(vec![*tx.get_hash()]);
 
         let (send, receive) = oneshot::channel::<RequestResult<PooledTransactions>>();
 
