@@ -39,7 +39,7 @@ async fn bitfinity_manual_test_should_reset_evm_state() {
     let end_block = 30_000;
     let data_dir = Some(format!("../../target/reth_{end_block}").into());
     let (_temp_dir, mut import_data) =
-        bitfinity_import_config_data(evm_datasource_url, data_dir).await.unwrap();
+        bitfinity_import_config_data(evm_datasource_url, None, data_dir).await.unwrap();
 
     let fetch_block_timeout_secs = std::cmp::max(20, end_block / 100);
 
@@ -99,7 +99,7 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
     let end_block = 30_000;
     let data_dir = Some(format!("../../target/reth_{end_block}").into());
     let (_temp_dir, mut import_data) =
-        bitfinity_import_config_data(evm_datasource_url, data_dir).await.unwrap();
+        bitfinity_import_config_data(evm_datasource_url, None, data_dir).await.unwrap();
 
     let fetch_block_timeout_secs = std::cmp::max(20, end_block / 100);
 

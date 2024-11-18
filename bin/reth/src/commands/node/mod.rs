@@ -65,7 +65,7 @@ pub struct NodeCommand<Ext: clap::Args + fmt::Debug = NoArgs> {
     /// Bitfinity Args
     #[command(flatten)]
     pub bitfinity: crate::args::BitfinityImportArgs,
-    
+
     /// All datadir related arguments
     #[command(flatten)]
     pub datadir: DatadirArgs,
@@ -155,7 +155,7 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
         } = self;
 
         let chain = {
-            let mut chain = reth_downloaders::bitfinity_evm_client::BitfinityEvmClient::fetch_chain_spec(bitfinity.rpc_url.to_owned()).await?;
+            let mut chain = reth_downloaders::bitfinity_evm_client::BitfinityEvmClient::fetch_chain_spec_with_fallback(bitfinity.rpc_url.to_owned(), bitfinity.backup_rpc_url.clone()).await?;
             if let Some(send_raw_transaction_rpc_url) = &bitfinity.send_raw_transaction_rpc_url {
                 chain.bitfinity_evm_url = Some(send_raw_transaction_rpc_url.to_owned());
             }
@@ -197,7 +197,7 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
         let builder = NodeBuilder::new(node_config)
             .with_database(database)
             .with_launch_context(ctx.task_executor);
-        
+
         launcher(builder, ext).await
     }
 }

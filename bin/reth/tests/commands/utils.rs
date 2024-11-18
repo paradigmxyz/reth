@@ -99,6 +99,7 @@ pub async fn import_blocks(
 /// If a `data_dir` is provided, it will be used, otherwise a temporary directory will be created.
 pub async fn bitfinity_import_config_data(
     evm_datasource_url: &str,
+    backup_evm_datasource_url: Option<String>,
     data_dir: Option<PathBuf>,
 ) -> eyre::Result<(TempDir, ImportData)> {
     let chain =
@@ -144,9 +145,15 @@ pub async fn bitfinity_import_config_data(
         max_fetch_blocks: 10000,
         evmc_principal: LOCAL_EVM_CANISTER_ID.to_string(),
         ic_root_key: IC_MAINNET_KEY.to_string(),
+        backup_rpc_url: backup_evm_datasource_url,
+        max_retries: 3,
+        retry_delay_secs: 3,
     };
 
-    Ok((temp_dir, ImportData { data_dir, database, chain, provider_factory, blockchain_db, bitfinity_args }))
+    Ok((
+        temp_dir,
+        ImportData { data_dir, database, chain, provider_factory, blockchain_db, bitfinity_args },
+    ))
 }
 
 /// Waits until the block is imported.

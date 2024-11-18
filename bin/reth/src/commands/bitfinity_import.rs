@@ -10,6 +10,7 @@ use reth_db::DatabaseEnv;
 
 use reth_consensus::Consensus;
 use reth_db::database::Database;
+use reth_downloaders::bitfinity_evm_client::RpcClientConfig;
 use reth_downloaders::{
     bitfinity_evm_client::{BitfinityEvmClient, CertificateCheckSettings},
     bodies::bodies::BodiesDownloaderBuilder,
@@ -133,9 +134,16 @@ impl BitfinityImportCommand {
 
         debug!(target: "reth::cli - BitfinityImportCommand", "Starting block: {}", start_block);
 
+        let rpc_config = RpcClientConfig {
+            primary_url: self.bitfinity.rpc_url.clone(),
+            backup_url: self.bitfinity.backup_rpc_url.clone(),
+            max_retries: self.bitfinity.max_retries,
+            retry_delay: Duration::from_secs(self.bitfinity.retry_delay_secs),
+        };
+
         let remote_client = Arc::new(
             BitfinityEvmClient::from_rpc_url(
-                &self.bitfinity.rpc_url,
+                rpc_config,
                 start_block,
                 self.bitfinity.end_block,
                 self.bitfinity.batch_size,
