@@ -215,14 +215,6 @@ pub(crate) async fn call_new_payload<N, T, P: EngineApiValidWaitExt<N, T>>(
     versioned_hashes: Vec<B256>,
 ) -> TransportResult<EngineApiMessageVersion> {
     match payload {
-        ExecutionPayload::V4(_payload) => {
-            todo!("V4 payloads not supported yet");
-            // auth_provider
-            //     .new_payload_v4_wait(payload, versioned_hashes, parent_beacon_block_root, ...)
-            //     .await?;
-            //
-            // Ok(EngineApiMessageVersion::V4)
-        }
         ExecutionPayload::V3(payload) => {
             // We expect the caller
             let parent_beacon_block_root = parent_beacon_block_root

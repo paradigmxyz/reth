@@ -7,9 +7,9 @@ use crate::{
 };
 use alloy_primitives::B256;
 use futures::{Stream, StreamExt};
-use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage};
+use reth_beacon_consensus::BeaconConsensusEngineEvent;
 use reth_chain_state::ExecutedBlock;
-use reth_engine_primitives::EngineTypes;
+use reth_engine_primitives::{BeaconEngineMessage, EngineTypes};
 use reth_primitives::SealedBlockWithSenders;
 use std::{
     collections::HashSet,
@@ -113,9 +113,11 @@ where
             }
 
             // advance the downloader
-            if let Poll::Ready(DownloadOutcome::Blocks(blocks)) = self.downloader.poll(cx) {
-                // delegate the downloaded blocks to the handler
-                self.handler.on_event(FromEngine::DownloadedBlocks(blocks));
+            if let Poll::Ready(outcome) = self.downloader.poll(cx) {
+                if let DownloadOutcome::Blocks(blocks) = outcome {
+                    // delegate the downloaded blocks to the handler
+                    self.handler.on_event(FromEngine::DownloadedBlocks(blocks));
+                }
                 continue
             }
 

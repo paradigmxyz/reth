@@ -95,14 +95,14 @@ impl Discv5 {
     /// CAUTION: The value **must** be rlp encoded
     pub fn set_eip868_in_local_enr(&self, key: Vec<u8>, rlp: Bytes) {
         let Ok(key_str) = std::str::from_utf8(&key) else {
-            error!(target: "discv5",
+            error!(target: "net::discv5",
                 err="key not utf-8",
                 "failed to update local enr"
             );
             return
         };
         if let Err(err) = self.discv5.enr_insert(key_str, &rlp) {
-            error!(target: "discv5",
+            error!(target: "net::discv5",
                 %err,
                 "failed to update local enr"
             );
@@ -131,7 +131,7 @@ impl Discv5 {
                 self.discv5.ban_node(&node_id, None);
                 self.ban_ip(ip);
             }
-            Err(err) => error!(target: "discv5",
+            Err(err) => error!(target: "net::discv5",
                 %err,
                 "failed to ban peer"
             ),

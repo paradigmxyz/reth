@@ -1,11 +1,17 @@
 //! EIP-6110 deposit requests parsing
 use alloc::{string::ToString, vec::Vec};
-use alloy_eips::eip6110::{DepositRequest, MAINNET_DEPOSIT_CONTRACT_ADDRESS};
-use alloy_primitives::Log;
+use alloy_eips::eip6110::MAINNET_DEPOSIT_CONTRACT_ADDRESS;
+use alloy_primitives::{Address, Bytes, Log};
 use alloy_sol_types::{sol, SolEvent};
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, EthChainSpec};
 use reth_evm::execute::BlockValidationError;
-use reth_primitives::{Receipt, Request};
+use reth_primitives::Receipt;
+
+/// The size of a deposit request in bytes. While the event fields emit
+/// bytestrings, those bytestrings are fixed size. The fields are: 48-byte
+/// pubkey, 32-byte withdrawal credentials, 8-byte amount, 96-byte signature,
+/// and 8-byte index.
+const DEPOSIT_BYTES_SIZE: usize = 48 + 32 + 8 + 96 + 8;
 
 sol! {
     #[allow(missing_docs)]
@@ -18,75 +24,85 @@ sol! {
     );
 }
 
-/// Parse [deposit contract](https://etherscan.io/address/0x00000000219ab540356cbb839cbe05303d7705fa)
-/// (address is from the passed [`ChainSpec`]) deposits from receipts, and return them as a
-/// [vector](Vec) of (requests)[Request].
-pub fn parse_deposits_from_receipts<'a, I>(
-    chain_spec: &ChainSpec,
+/// Accumulate a deposit request from a log. containing a [`DepositEvent`].
+pub fn accumulate_deposit_from_log(log: &Log<DepositEvent>, out: &mut Vec<u8>) {
+    out.reserve(DEPOSIT_BYTES_SIZE);
+    out.extend_from_slice(log.pubkey.as_ref());
+    out.extend_from_slice(log.withdrawal_credentials.as_ref());
+    out.extend_from_slice(log.amount.as_ref());
+    out.extend_from_slice(log.signature.as_ref());
+    out.extend_from_slice(log.index.as_ref());
+}
+
+/// Accumulate deposits from an iterator of logs.
+pub fn accumulate_deposits_from_logs<'a>(
+    address: Address,
+    logs: impl IntoIterator<Item = &'a Log>,
+    out: &mut Vec<u8>,
+) -> Result<(), BlockValidationError> {
+    logs.into_iter().filter(|log| log.address == address).try_for_each(|log| {
+        // We assume that the log is valid because it was emitted by the
+        // deposit contract.
+        let decoded_log =
+            DepositEvent::decode_log(log, false).map_err(|err: alloy_sol_types::Error| {
+                BlockValidationError::DepositRequestDecode(err.to_string())
+            })?;
+        accumulate_deposit_from_log(&decoded_log, out);
+        Ok(())
+    })
+}
+
+/// Accumulate deposits from a receipt. Iterates over the logs in the receipt
+/// and accumulates the deposit request bytestrings.
+pub fn accumulate_deposits_from_receipt(
+    address: Address,
+    receipt: &Receipt,
+    out: &mut Vec<u8>,
+) -> Result<(), BlockValidationError> {
+    accumulate_deposits_from_logs(address, &receipt.logs, out)
+}
+
+/// Accumulate deposits from a list of receipts. Iterates over the logs in the
+/// receipts and accumulates the deposit request bytestrings.
+pub fn accumulate_deposits_from_receipts<'a, I>(
+    address: Address,
     receipts: I,
-) -> Result<Vec<Request>, BlockValidationError>
+    out: &mut Vec<u8>,
+) -> Result<(), BlockValidationError>
 where
     I: IntoIterator<Item = &'a Receipt>,
 {
-    let deposit_contract_address = chain_spec
-        .deposit_contract
-        .as_ref()
-        .map_or(MAINNET_DEPOSIT_CONTRACT_ADDRESS, |contract| contract.address);
     receipts
         .into_iter()
-        .flat_map(|receipt| receipt.logs.iter())
-        // No need to filter for topic because there's only one event and that's the Deposit event
-        // in the deposit contract.
-        .filter(|log| log.address == deposit_contract_address)
-        .map(|log| {
-            let decoded_log = DepositEvent::decode_log(log, false)?;
-            let deposit = parse_deposit_from_log(&decoded_log);
-            Ok(Request::DepositRequest(deposit))
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|err: alloy_sol_types::Error| {
-            BlockValidationError::DepositRequestDecode(err.to_string())
-        })
+        .try_for_each(|receipt| accumulate_deposits_from_receipt(address, receipt, out))
 }
 
-fn parse_deposit_from_log(log: &Log<DepositEvent>) -> DepositRequest {
-    // SAFETY: These `expect` https://github.com/ethereum/consensus-specs/blob/5f48840f4d768bf0e0a8156a3ed06ec333589007/solidity_deposit_contract/deposit_contract.sol#L107-L110
-    // are safe because the `DepositEvent` is the only event in the deposit contract and the length
-    // checks are done there.
-    DepositRequest {
-        pubkey: log
-            .pubkey
-            .as_ref()
-            .try_into()
-            .expect("pubkey length should be enforced in deposit contract"),
-        withdrawal_credentials: log
-            .withdrawal_credentials
-            .as_ref()
-            .try_into()
-            .expect("withdrawal_credentials length should be enforced in deposit contract"),
-        amount: u64::from_le_bytes(
-            log.amount
-                .as_ref()
-                .try_into()
-                .expect("amount length should be enforced in deposit contract"),
-        ),
-        signature: log
-            .signature
-            .as_ref()
-            .try_into()
-            .expect("signature length should be enforced in deposit contract"),
-        index: u64::from_le_bytes(
-            log.index
-                .as_ref()
-                .try_into()
-                .expect("deposit index length should be enforced in deposit contract"),
-        ),
-    }
+/// Find deposit logs in a list of receipts, and return the concatenated
+/// deposit request bytestring.
+///
+/// The address of the deposit contract is taken from the chain spec, and
+/// defaults to [`MAINNET_DEPOSIT_CONTRACT_ADDRESS`] if not specified in
+/// the chain spec.
+pub fn parse_deposits_from_receipts<'a, I>(
+    chainspec: &ChainSpec,
+    receipts: I,
+) -> Result<Bytes, BlockValidationError>
+where
+    I: IntoIterator<Item = &'a Receipt>,
+{
+    let mut out = Vec::new();
+    accumulate_deposits_from_receipts(
+        chainspec.deposit_contract().map(|c| c.address).unwrap_or(MAINNET_DEPOSIT_CONTRACT_ADDRESS),
+        receipts,
+        &mut out,
+    )?;
+    Ok(out.into())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::bytes;
     use reth_chainspec::MAINNET;
     use reth_primitives::TxType;
 
@@ -119,9 +135,12 @@ mod tests {
             },
         ];
 
-        let requests = parse_deposits_from_receipts(&MAINNET, &receipts).unwrap();
-        assert_eq!(requests.len(), 2);
-        assert_eq!(requests[0].as_deposit_request().unwrap().amount, 32e9 as u64);
-        assert_eq!(requests[1].as_deposit_request().unwrap().amount, 32e9 as u64);
+        let request_data = parse_deposits_from_receipts(&MAINNET, &receipts).unwrap();
+        assert_eq!(
+            request_data,
+            bytes!(
+                "998c8086669bf65e24581cda47d8537966e9f5066fc6ffdcba910a1bfb91eae7a4873fcce166a1c4ea217e6b1afd396201000000000000000000000001c340fb72ed14d4eaa71f7633ee9e33b88d4f39004059730700000098ddbffd700c1aac324cfdf0492ff289223661eb26718ce3651ba2469b22f480d56efab432ed91af05a006bde0c1ea68134e0acd8cacca0c13ad1f716db874b44abfcc966368019753174753bca3af2ea84bc569c46f76592a91e97f311eddece474160000000000a1a2ba870a90e889aa594a0cc1c6feffb94c2d8f65646c937f1f456a315ef649533e25a4614d8f4f66ebdb06481b90af0100000000000000000000000a0f04a231efbc29e1db7d086300ff550211c2f60040597307000000ad416d590e1a7f52baff770a12835b68904efad22cc9f8ba531e50cbbd26f32b9c7373cf6538a0577f501e4d3e3e63e208767bcccaae94e1e3720bfb734a286f9c017d17af46536545ccb7ca94d71f295e71f6d25bf978c09ada6f8d3f7ba039e374160000000000"
+            )
+        );
     }
 }

@@ -412,11 +412,13 @@ pub fn discv5_sockets_wrt_rlpx_addr(
                 discv5_addr_ipv6.map(|ip| SocketAddrV6::new(ip, discv5_port_ipv6, 0, 0));
 
             if let Some(discv5_addr) = discv5_addr_ipv4 {
-                warn!(target: "discv5",
-                    %discv5_addr,
-                    %rlpx_addr,
-                    "Overwriting discv5 IPv4 address with RLPx IPv4 address, limited to one advertised IP address per IP version"
-                );
+                if discv5_addr != rlpx_addr {
+                    warn!(target: "net::discv5",
+                        %discv5_addr,
+                        %rlpx_addr,
+                        "Overwriting discv5 IPv4 address with RLPx IPv4 address, limited to one advertised IP address per IP version"
+                    );
+                }
             }
 
             // overwrite discv5 ipv4 addr with RLPx address. this is since there is no
@@ -429,11 +431,13 @@ pub fn discv5_sockets_wrt_rlpx_addr(
                 discv5_addr_ipv4.map(|ip| SocketAddrV4::new(ip, discv5_port_ipv4));
 
             if let Some(discv5_addr) = discv5_addr_ipv6 {
-                warn!(target: "discv5",
-                    %discv5_addr,
-                    %rlpx_addr,
-                    "Overwriting discv5 IPv6 address with RLPx IPv6 address, limited to one advertised IP address per IP version"
-                );
+                if discv5_addr != rlpx_addr {
+                    warn!(target: "net::discv5",
+                        %discv5_addr,
+                        %rlpx_addr,
+                        "Overwriting discv5 IPv6 address with RLPx IPv6 address, limited to one advertised IP address per IP version"
+                    );
+                }
             }
 
             // overwrite discv5 ipv6 addr with RLPx address. this is since there is no
@@ -477,11 +481,9 @@ impl BootNode {
 
 #[cfg(test)]
 mod test {
-    use std::net::SocketAddrV4;
-
-    use alloy_primitives::hex;
-
     use super::*;
+    use alloy_primitives::hex;
+    use std::net::SocketAddrV4;
 
     const MULTI_ADDRESSES: &str = "/ip4/184.72.129.189/udp/30301/p2p/16Uiu2HAmSG2hdLwyQHQmG4bcJBgD64xnW63WMTLcrNq6KoZREfGb,/ip4/3.231.11.52/udp/30301/p2p/16Uiu2HAmMy4V8bi3XP7KDfSLQcLACSvTLroRRwEsTyFUKo8NCkkp,/ip4/54.198.153.150/udp/30301/p2p/16Uiu2HAmSVsb7MbRf1jg3Dvd6a3n5YNqKQwn1fqHCFgnbqCsFZKe,/ip4/3.220.145.177/udp/30301/p2p/16Uiu2HAm74pBDGdQ84XCZK27GRQbGFFwQ7RsSqsPwcGmCR3Cwn3B,/ip4/3.231.138.188/udp/30301/p2p/16Uiu2HAmMnTiJwgFtSVGV14ZNpwAvS1LUoF4pWWeNtURuV6C3zYB";
     const BOOT_NODES_OP_MAINNET_AND_BASE_MAINNET: &[&str] = &[

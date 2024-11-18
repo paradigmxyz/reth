@@ -9,6 +9,8 @@ use reth_exex_types::ExExNotification;
 use reth_tracing::tracing::debug;
 use tracing::instrument;
 
+static FILE_EXTENSION: &str = "wal";
+
 /// The underlying WAL storage backed by a directory of files.
 ///
 /// Each notification is represented by a single file that contains a MessagePack-encoded
@@ -29,7 +31,7 @@ impl Storage {
     }
 
     fn file_path(&self, id: u32) -> PathBuf {
-        self.path.join(format!("{id}.wal"))
+        self.path.join(format!("{id}.{FILE_EXTENSION}"))
     }
 
     fn parse_filename(filename: &str) -> eyre::Result<u32> {
@@ -70,11 +72,14 @@ impl Storage {
 
         for entry in reth_fs_util::read_dir(&self.path)? {
             let entry = entry?;
-            let file_name = entry.file_name();
-            let file_id = Self::parse_filename(&file_name.to_string_lossy())?;
 
-            min_id = min_id.map_or(Some(file_id), |min_id: u32| Some(min_id.min(file_id)));
-            max_id = max_id.map_or(Some(file_id), |max_id: u32| Some(max_id.max(file_id)));
+            if entry.path().extension() == Some(FILE_EXTENSION.as_ref()) {
+                let file_name = entry.file_name();
+                let file_id = Self::parse_filename(&file_name.to_string_lossy())?;
+
+                min_id = min_id.map_or(Some(file_id), |min_id: u32| Some(min_id.min(file_id)));
+                max_id = max_id.map_or(Some(file_id), |max_id: u32| Some(max_id.max(file_id)));
+            }
         }
 
         Ok(min_id.zip(max_id).map(|(min_id, max_id)| min_id..=max_id))
@@ -167,7 +172,7 @@ impl Storage {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{fs::File, sync::Arc};
 
     use eyre::OptionExt;
     use reth_exex_types::ExExNotification;
@@ -203,6 +208,26 @@ mod tests {
             deserialized_notification.map(|(notification, _)| notification),
             Some(notification)
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_files_range() -> eyre::Result<()> {
+        let temp_dir = tempfile::tempdir()?;
+        let storage = Storage::new(&temp_dir)?;
+
+        // Create WAL files
+        File::create(storage.file_path(1))?;
+        File::create(storage.file_path(2))?;
+        File::create(storage.file_path(3))?;
+
+        // Create non-WAL files that should be ignored
+        File::create(temp_dir.path().join("0.tmp"))?;
+        File::create(temp_dir.path().join("4.tmp"))?;
+
+        // Check files range
+        assert_eq!(storage.files_range()?, Some(1..=3));
 
         Ok(())
     }

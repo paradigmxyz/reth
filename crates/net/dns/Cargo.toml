@@ -48,4 +48,15 @@ reth-tracing.workspace = true
 rand.workspace = true
 
 [features]
-serde = ["dep:serde", "dep:serde_with"]
+serde = [
+	"dep:serde",
+	"dep:serde_with",
+	"alloy-chains/serde",
+	"alloy-primitives/serde",
+	"enr/serde",
+	"linked_hash_set/serde",
+	"parking_lot/serde",
+	"rand/serde",
+	"secp256k1/serde",
+	"trust-dns-resolver/serde"
+]

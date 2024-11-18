@@ -9,7 +9,7 @@ use reth_primitives_traits::constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH;
 use reth_provider::{
     providers::ProviderNodeTypes, writer::UnifiedStorageWriter, ChainStateBlockReader,
     ChainStateBlockWriter, DatabaseProviderFactory, ProviderFactory, StageCheckpointReader,
-    StageCheckpointWriter, StaticFileProviderFactory,
+    StageCheckpointWriter,
 };
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
@@ -78,6 +78,9 @@ pub struct Pipeline<N: ProviderNodeTypes> {
     /// A receiver for the current chain tip to sync to.
     tip_tx: Option<watch::Sender<B256>>,
     metrics_tx: Option<MetricEventsSender>,
+    /// Whether an unwind should fail the syncing process. Should only be set when downloading
+    /// blocks from trusted sources and expecting them to be valid.
+    fail_on_unwind: bool,
 }
 
 impl<N: ProviderNodeTypes> Pipeline<N> {
@@ -164,13 +167,17 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         loop {
             let next_action = self.run_loop().await?;
 
+            if next_action.is_unwind() && self.fail_on_unwind {
+                return Err(PipelineError::UnexpectedUnwind)
+            }
+
             // Terminate the loop early if it's reached the maximum user
             // configured block.
             if next_action.should_continue() &&
                 self.progress
                     .minimum_block_number
                     .zip(self.max_block)
-                    .map_or(false, |(progress, target)| progress >= target)
+                    .is_some_and(|(progress, target)| progress >= target)
             {
                 trace!(
                     target: "sync::pipeline",
@@ -276,6 +283,10 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         // Unwind stages in reverse order of execution
         let unwind_pipeline = self.stages.iter_mut().rev();
 
+        // Legacy Engine: This prevents a race condition in which the `StaticFileProducer` could
+        // attempt to proceed with a finalized block which has been unwinded
+        let _locked_sf_producer = self.static_file_producer.lock();
+
         let mut provider_rw = self.provider_factory.database_provider_rw()?;
 
         for stage in unwind_pipeline {
@@ -347,10 +358,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                             ))?;
                         }
 
-                        UnifiedStorageWriter::commit_unwind(
-                            provider_rw,
-                            self.provider_factory.static_file_provider(),
-                        )?;
+                        UnifiedStorageWriter::commit_unwind(provider_rw)?;
 
                         stage.post_unwind_commit()?;
 
@@ -385,7 +393,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
 
             let stage_reached_max_block = prev_checkpoint
                 .zip(self.max_block)
-                .map_or(false, |(prev_progress, target)| prev_progress.block_number >= target);
+                .is_some_and(|(prev_progress, target)| prev_progress.block_number >= target);
             if stage_reached_max_block {
                 warn!(
                     target: "sync::pipeline",
@@ -458,10 +466,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                         result: out.clone(),
                     });
 
-                    UnifiedStorageWriter::commit(
-                        provider_rw,
-                        self.provider_factory.static_file_provider(),
-                    )?;
+                    UnifiedStorageWriter::commit(provider_rw)?;
 
                     stage.post_execute_commit()?;
 
@@ -522,7 +527,7 @@ fn on_stage_error<N: ProviderNodeTypes>(
                     prev_checkpoint.unwrap_or_default(),
                 )?;
 
-                UnifiedStorageWriter::commit(provider_rw, factory.static_file_provider())?;
+                UnifiedStorageWriter::commit(provider_rw)?;
 
                 // We unwind because of a validation error. If the unwind itself
                 // fails, we bail entirely,
@@ -582,6 +587,7 @@ impl<N: ProviderNodeTypes> std::fmt::Debug for Pipeline<N> {
             .field("stages", &self.stages.iter().map(|stage| stage.id()).collect::<Vec<StageId>>())
             .field("max_block", &self.max_block)
             .field("event_sender", &self.event_sender)
+            .field("fail_on_unwind", &self.fail_on_unwind)
             .finish()
     }
 }

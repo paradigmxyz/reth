@@ -20,10 +20,13 @@ reth-revm.workspace = true
 reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
 reth-prune-types.workspace = true
+reth-consensus.workspace = true
 
 # ethereum
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 op-alloy-consensus.workspace = true
+alloy-consensus.workspace = true
 
 # Optimism
 reth-optimism-consensus.workspace = true
@@ -35,21 +38,34 @@ revm.workspace = true
 revm-primitives.workspace = true
 
 # misc
-thiserror.workspace = true
+derive_more.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-alloy-eips.workspace = true
-
+reth-evm = { workspace = true, features = ["test-utils"] }
 reth-revm = { workspace = true, features = ["test-utils"] }
+reth-primitives = { workspace = true, features = ["test-utils"] }
 reth-optimism-chainspec.workspace = true
 alloy-genesis.workspace = true
 alloy-consensus.workspace = true
 
 [features]
+default = ["std"]
+std = [
+	"reth-consensus/std",
+	"reth-primitives/std",
+	"reth-revm/std",
+	"alloy-consensus/std",
+	"alloy-eips/std",
+	"alloy-genesis/std",
+	"alloy-primitives/std",
+	"revm-primitives/std",
+	"revm/std"
+]
 optimism = [
-    "reth-primitives/optimism",
-    "reth-execution-types/optimism",
-    "reth-optimism-consensus/optimism",
-    "reth-revm/optimism",
+	"reth-primitives/optimism",
+	"reth-execution-types/optimism",
+	"reth-optimism-consensus/optimism",
+	"revm/optimism",
+	"revm-primitives/optimism"
 ]

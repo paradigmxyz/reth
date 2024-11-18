@@ -62,6 +62,14 @@ pub enum ECIESErrorImpl {
     /// The encrypted data is not large enough for all fields
     #[error("encrypted data is not large enough for all fields")]
     EncryptedDataTooSmall,
+    /// The initial header body is too large.
+    #[error("initial header body is {body_size} but the max is {max_body_size}")]
+    InitialHeaderBodyTooLarge {
+        /// The body size from the header
+        body_size: usize,
+        /// The max body size
+        max_body_size: usize,
+    },
     /// Error when trying to split an array beyond its length
     #[error("requested {idx} but array len is {len}")]
     OutOfBounds {

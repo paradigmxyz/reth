@@ -35,19 +35,19 @@ pub struct Command {
 impl Command {
     /// Execute `benchmark new-payload-only` command
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
-        let cloned_args = self.benchmark.clone();
         // TODO: this could be just a function I guess, but destructuring makes the code slightly
         // more readable than a 4 element tuple.
         let BenchContext { benchmark_mode, block_provider, auth_provider, mut next_block } =
-            BenchContext::new(&cloned_args, self.rpc_url).await?;
+            BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
         let (sender, mut receiver) = tokio::sync::mpsc::channel(1000);
         tokio::task::spawn(async move {
             while benchmark_mode.contains(next_block) {
-                let block_res = block_provider.get_block_by_number(next_block.into(), true).await;
+                let block_res =
+                    block_provider.get_block_by_number(next_block.into(), true.into()).await;
                 let block = block_res.unwrap().unwrap();
                 let block_hash = block.header.hash;
-                let block = Block::try_from(block.inner).unwrap().seal(block_hash);
+                let block = Block::try_from(block).unwrap().seal(block_hash);
 
                 next_block += 1;
                 sender.send(block).await.unwrap();

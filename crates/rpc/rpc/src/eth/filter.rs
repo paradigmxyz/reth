@@ -4,24 +4,24 @@ use std::{
     collections::HashMap,
     fmt,
     iter::StepBy,
-    marker::PhantomData,
     ops::RangeInclusive,
     sync::Arc,
     time::{Duration, Instant},
 };
 
 use alloy_primitives::TxHash;
-use alloy_rpc_types::{
+use alloy_rpc_types_eth::{
     BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
     PendingTransactionFilterKind,
 };
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_chainspec::ChainInfo;
-use reth_node_api::EthApiTypes;
 use reth_primitives::{Receipt, SealedBlockWithSenders, TransactionSignedEcRecovered};
-use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
-use reth_rpc_eth_api::{EthFilterApiServer, FullEthApiTypes, RpcTransaction, TransactionCompat};
+use reth_provider::{BlockIdReader, BlockReader, ProviderError};
+use reth_rpc_eth_api::{
+    EthApiTypes, EthFilterApiServer, FullEthApiTypes, RpcTransaction, TransactionCompat,
+};
 use reth_rpc_eth_types::{
     logs_utils::{self, append_matching_block_logs, ProviderOrBlock},
     EthApiError, EthFilterConfig, EthStateCache, EthSubscriptionIdProvider,
@@ -34,7 +34,7 @@ use tokio::{
     sync::{mpsc::Receiver, Mutex},
     time::MissedTickBehavior,
 };
-use tracing::trace;
+use tracing::{error, trace};
 
 /// The maximum number of headers we read at once when handling a range filter.
 const MAX_HEADERS_RANGE: u64 = 1_000; // with ~530bytes per header this is ~500kb
@@ -44,7 +44,7 @@ pub struct EthFilter<Provider, Pool, Eth: EthApiTypes> {
     /// All nested fields bundled together
     inner: Arc<EthFilterInner<Provider, Pool, RpcTransaction<Eth::NetworkTypes>>>,
     /// Assembles response data w.r.t. network.
-    _tx_resp_builder: PhantomData<Eth>,
+    tx_resp_builder: Eth::TransactionCompat,
 }
 
 impl<Provider, Pool, Eth> Clone for EthFilter<Provider, Pool, Eth>
@@ -52,7 +52,7 @@ where
     Eth: EthApiTypes,
 {
     fn clone(&self) -> Self {
-        Self { inner: self.inner.clone(), _tx_resp_builder: PhantomData }
+        Self { inner: self.inner.clone(), tx_resp_builder: self.tx_resp_builder.clone() }
     }
 }
 
@@ -76,6 +76,7 @@ where
         eth_cache: EthStateCache,
         config: EthFilterConfig,
         task_spawner: Box<dyn TaskSpawner>,
+        tx_resp_builder: Eth::TransactionCompat,
     ) -> Self {
         let EthFilterConfig { max_blocks_per_filter, max_logs_per_response, stale_filter_ttl } =
             config;
@@ -93,7 +94,7 @@ where
             max_logs_per_response: max_logs_per_response.unwrap_or(usize::MAX),
         };
 
-        let eth_filter = Self { inner: Arc::new(inner), _tx_resp_builder: PhantomData };
+        let eth_filter = Self { inner: Arc::new(inner), tx_resp_builder };
 
         let this = eth_filter.clone();
         eth_filter.inner.task_spawner.spawn_critical(
@@ -143,9 +144,8 @@ where
 
 impl<Provider, Pool, Eth> EthFilter<Provider, Pool, Eth>
 where
-    Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
-    Pool: TransactionPool + 'static,
-    <Pool as TransactionPool>::Transaction: 'static,
+    Provider: BlockReader + BlockIdReader + 'static,
+    Pool: TransactionPool<Transaction: 'static> + 'static,
     Eth: FullEthApiTypes,
 {
     /// Returns all the filter changes for the given id, if any
@@ -244,7 +244,7 @@ where
 impl<Provider, Pool, Eth> EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>>
     for EthFilter<Provider, Pool, Eth>
 where
-    Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
+    Provider: BlockReader + BlockIdReader + 'static,
     Pool: TransactionPool + 'static,
     Eth: FullEthApiTypes + 'static,
 {
@@ -278,7 +278,7 @@ where
             PendingTransactionFilterKind::Full => {
                 let stream = self.inner.pool.new_pending_pool_transactions_listener();
                 let full_txs_receiver =
-                    FullTransactionsReceiver::<_, Eth::TransactionCompat>::new(stream);
+                    FullTransactionsReceiver::new(stream, self.tx_resp_builder.clone());
                 FilterKind::PendingTransaction(PendingTransactionKind::FullTransaction(Arc::new(
                     full_txs_receiver,
                 )))
@@ -367,7 +367,7 @@ struct EthFilterInner<Provider, Pool, Tx> {
 
 impl<Provider, Pool, Tx> EthFilterInner<Provider, Pool, Tx>
 where
-    Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
+    Provider: BlockReader + BlockIdReader + 'static,
     Pool: TransactionPool + 'static,
 {
     /// Returns logs matching given filter object.
@@ -603,7 +603,7 @@ impl PendingTransactionsReceiver {
 #[derive(Debug, Clone)]
 struct FullTransactionsReceiver<T: PoolTransaction, TxCompat> {
     txs_stream: Arc<Mutex<NewSubpoolTransactionStream<T>>>,
-    _tx_resp_builder: PhantomData<TxCompat>,
+    tx_resp_builder: TxCompat,
 }
 
 impl<T, TxCompat> FullTransactionsReceiver<T, TxCompat>
@@ -612,8 +612,8 @@ where
     TxCompat: TransactionCompat,
 {
     /// Creates a new `FullTransactionsReceiver` encapsulating the provided transaction stream.
-    fn new(stream: NewSubpoolTransactionStream<T>) -> Self {
-        Self { txs_stream: Arc::new(Mutex::new(stream)), _tx_resp_builder: PhantomData }
+    fn new(stream: NewSubpoolTransactionStream<T>, tx_resp_builder: TxCompat) -> Self {
+        Self { txs_stream: Arc::new(Mutex::new(stream)), tx_resp_builder }
     }
 
     /// Returns all new pending transactions received since the last poll.
@@ -625,7 +625,15 @@ where
         let mut prepared_stream = self.txs_stream.lock().await;
 
         while let Ok(tx) = prepared_stream.try_recv() {
-            pending_txs.push(from_recovered::<TxCompat>(tx.transaction.to_recovered_transaction()))
+            match from_recovered(tx.transaction.to_recovered_transaction(), &self.tx_resp_builder) {
+                Ok(tx) => pending_txs.push(tx),
+                Err(err) => {
+                    error!(target: "rpc",
+                        %err,
+                        "Failed to fill txn with block context"
+                    );
+                }
+            }
         }
         FilterChanges::Transactions(pending_txs)
     }

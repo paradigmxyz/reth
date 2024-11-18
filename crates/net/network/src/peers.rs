@@ -84,6 +84,8 @@ pub struct PeersManager {
     max_backoff_count: u8,
     /// Tracks the connection state of the node
     net_connection_state: NetworkConnectionState,
+    /// How long to temporarily ban ip on an incoming connection attempt.
+    incoming_ip_throttle_duration: Duration,
 }
 
 impl PeersManager {
@@ -100,6 +102,7 @@ impl PeersManager {
             trusted_nodes_only,
             basic_nodes,
             max_backoff_count,
+            incoming_ip_throttle_duration,
         } = config;
         let (manager_tx, handle_rx) = mpsc::unbounded_channel();
         let now = Instant::now();
@@ -148,6 +151,7 @@ impl PeersManager {
             last_tick: Instant::now(),
             max_backoff_count,
             net_connection_state: NetworkConnectionState::default(),
+            incoming_ip_throttle_duration,
         }
     }
 
@@ -218,6 +222,11 @@ impl PeersManager {
         self.backed_off_peers.len()
     }
 
+    /// Returns the number of idle trusted peers.
+    fn num_idle_trusted_peers(&self) -> usize {
+        self.peers.iter().filter(|(_, peer)| peer.kind.is_trusted() && peer.state.is_idle()).count()
+    }
+
     /// Invoked when a new _incoming_ tcp connection is accepted.
     ///
     /// returns an error if the inbound ip address is on the ban list
@@ -229,11 +238,39 @@ impl PeersManager {
             return Err(InboundConnectionError::IpBanned)
         }
 
-        if !self.connection_info.has_in_capacity() && self.trusted_peer_ids.is_empty() {
-            // if we don't have any inbound slots and no trusted peers, we don't accept any new
-            // connections
+        // check if we even have slots for a new incoming connection
+        if !self.connection_info.has_in_capacity() {
+            if self.trusted_peer_ids.is_empty() {
+                // if we don't have any incoming slots and no trusted peers, we don't accept any new
+                // connections
+                return Err(InboundConnectionError::ExceedsCapacity)
+            }
+
+            // there's an edge case here where no incoming connections besides from trusted peers
+            // are allowed (max_inbound == 0), in which case we still need to allow new pending
+            // incoming connections until all trusted peers are connected.
+            let num_idle_trusted_peers = self.num_idle_trusted_peers();
+            if num_idle_trusted_peers <= self.trusted_peer_ids.len() {
+                // we still want to limit concurrent pending connections
+                let max_inbound =
+                    self.trusted_peer_ids.len().max(self.connection_info.config.max_inbound);
+                if self.connection_info.num_pending_in <= max_inbound {
+                    self.connection_info.inc_pending_in();
+                }
+                return Ok(())
+            }
+
+            // all trusted peers are either connected or connecting
             return Err(InboundConnectionError::ExceedsCapacity)
         }
+
+        // also cap the incoming connections we can process at once
+        if !self.connection_info.has_in_pending_capacity() {
+            return Err(InboundConnectionError::ExceedsCapacity)
+        }
+
+        // apply the rate limit
+        self.throttle_incoming_ip(addr);
 
         self.connection_info.inc_pending_in();
         Ok(())
@@ -351,6 +388,12 @@ impl PeersManager {
     /// Bans the IP temporarily with the configured ban timeout
     fn ban_ip(&mut self, ip: IpAddr) {
         self.ban_list.ban_ip_until(ip, std::time::Instant::now() + self.ban_duration);
+    }
+
+    /// Bans the IP temporarily to rate limit inbound connection attempts per IP.
+    fn throttle_incoming_ip(&mut self, ip: IpAddr) {
+        self.ban_list
+            .ban_ip_until(ip, std::time::Instant::now() + self.incoming_ip_throttle_duration);
     }
 
     /// Temporarily puts the peer in timeout by inserting it into the backedoff peers set
@@ -968,15 +1011,20 @@ impl ConnectionInfo {
         Self { config, num_outbound: 0, num_pending_out: 0, num_inbound: 0, num_pending_in: 0 }
     }
 
-    ///  Returns `true` if there's still capacity for a new outgoing connection.
+    ///  Returns `true` if there's still capacity to perform an outgoing connection.
     const fn has_out_capacity(&self) -> bool {
         self.num_pending_out < self.config.max_concurrent_outbound_dials &&
             self.num_outbound < self.config.max_outbound
     }
 
-    ///  Returns `true` if there's still capacity for a new incoming connection.
+    ///  Returns `true` if there's still capacity to accept a new incoming connection.
     const fn has_in_capacity(&self) -> bool {
         self.num_inbound < self.config.max_inbound
+    }
+
+    /// Returns `true` if we can handle an additional incoming pending connection.
+    const fn has_in_pending_capacity(&self) -> bool {
+        self.num_pending_in < self.config.max_inbound
     }
 
     fn decr_state(&mut self, state: PeerConnectionState) {
@@ -1094,15 +1142,6 @@ impl Display for InboundConnectionError {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        future::{poll_fn, Future},
-        io,
-        net::{IpAddr, Ipv4Addr, SocketAddr},
-        pin::Pin,
-        task::{Context, Poll},
-        time::Duration,
-    };
-
     use alloy_primitives::B512;
     use reth_eth_wire::{
         errors::{EthHandshakeError, EthStreamError, P2PHandshakeError, P2PStreamError},
@@ -1113,6 +1152,14 @@ mod tests {
     use reth_network_peers::{PeerId, TrustedPeer};
     use reth_network_types::{
         peers::reputation::DEFAULT_REPUTATION, BackoffKind, ReputationChangeKind,
+    };
+    use std::{
+        future::{poll_fn, Future},
+        io,
+        net::{IpAddr, Ipv4Addr, SocketAddr},
+        pin::Pin,
+        task::{Context, Poll},
+        time::Duration,
     };
     use url::Host;
 
@@ -1595,6 +1642,23 @@ mod tests {
         assert_eq!(peers.connection_info.num_pending_in, 1);
         peers.on_incoming_pending_session_rejected_internally();
         assert_eq!(peers.connection_info.num_pending_in, 0);
+    }
+
+    #[tokio::test]
+    async fn test_reject_incoming_at_pending_capacity() {
+        let mut peers = PeersManager::default();
+
+        for count in 1..=peers.connection_info.config.max_inbound {
+            let socket_addr =
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, count as u8)), 8008);
+            assert!(peers.on_incoming_pending_session(socket_addr.ip()).is_ok());
+            assert_eq!(peers.connection_info.num_pending_in, count);
+        }
+        assert!(peers.connection_info.has_in_capacity());
+        assert!(!peers.connection_info.has_in_pending_capacity());
+
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 100)), 8008);
+        assert!(peers.on_incoming_pending_session(socket_addr.ip()).is_err());
     }
 
     #[tokio::test]
@@ -2275,6 +2339,39 @@ mod tests {
         assert_eq!(
             peers.on_incoming_pending_session(addr.ip()).unwrap_err(),
             InboundConnectionError::ExceedsCapacity
+        );
+    }
+
+    #[tokio::test]
+    async fn test_incoming_rate_limit() {
+        let config = PeersConfig {
+            incoming_ip_throttle_duration: Duration::from_millis(100),
+            ..PeersConfig::test()
+        };
+        let mut peers = PeersManager::new(config);
+
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(168, 0, 1, 2)), 8009);
+        assert!(peers.on_incoming_pending_session(addr.ip()).is_ok());
+        assert_eq!(
+            peers.on_incoming_pending_session(addr.ip()).unwrap_err(),
+            InboundConnectionError::IpBanned
+        );
+
+        peers.release_interval.reset_immediately();
+        tokio::time::sleep(peers.incoming_ip_throttle_duration).await;
+
+        // await unban
+        poll_fn(|cx| loop {
+            if peers.poll(cx).is_pending() {
+                return Poll::Ready(());
+            }
+        })
+        .await;
+
+        assert!(peers.on_incoming_pending_session(addr.ip()).is_ok());
+        assert_eq!(
+            peers.on_incoming_pending_session(addr.ip()).unwrap_err(),
+            InboundConnectionError::IpBanned
         );
     }
 

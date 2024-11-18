@@ -19,6 +19,7 @@ reth-engine-tree.workspace = true
 reth-evm.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-payload-builder.workspace = true
+reth-payload-builder-primitives.workspace = true
 reth-payload-primitives.workspace = true
 reth-payload-validator.workspace = true
 reth-provider.workspace = true
@@ -46,4 +47,8 @@ op-alloy-rpc-types-engine = { workspace = true, optional = true }
 workspace = true
 
 [features]
-optimism = ["op-alloy-rpc-types-engine"]
+optimism = [
+    "op-alloy-rpc-types-engine",
+    "reth-beacon-consensus/optimism",
+    "reth-provider/optimism",
+]

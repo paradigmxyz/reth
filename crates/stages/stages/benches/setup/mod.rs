@@ -1,14 +1,15 @@
 #![allow(unreachable_pub)]
-use alloy_primitives::{Address, Sealable, B256, U256};
+use alloy_primitives::{Address, B256, U256};
 use itertools::concat;
-use reth_chainspec::ChainSpec;
 use reth_db::{tables, test_utils::TempDatabase, Database, DatabaseEnv};
 use reth_db_api::{
     cursor::DbCursorRO,
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{Account, SealedBlock, SealedHeader};
-use reth_provider::{DatabaseProvider, DatabaseProviderFactory, TrieWriter};
+use reth_provider::{
+    test_utils::MockNodeTypesWithDB, DatabaseProvider, DatabaseProviderFactory, TrieWriter,
+};
 use reth_stages::{
     stages::{AccountHashingStage, StorageHashingStage},
     test_utils::{StorageKind, TestStageDB},
@@ -31,7 +32,8 @@ use reth_trie_db::DatabaseStateRoot;
 pub(crate) type StageRange = (ExecInput, UnwindInput);
 
 pub(crate) fn stage_unwind<
-    S: Clone + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, ChainSpec>>,
+    S: Clone
+        + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, MockNodeTypesWithDB>>,
 >(
     stage: S,
     db: &TestStageDB,
@@ -63,7 +65,8 @@ pub(crate) fn stage_unwind<
 
 pub(crate) fn unwind_hashes<S>(stage: S, db: &TestStageDB, range: StageRange)
 where
-    S: Clone + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, ChainSpec>>,
+    S: Clone
+        + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, MockNodeTypesWithDB>>,
 {
     let (input, unwind) = range;
 
@@ -144,9 +147,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
         let cloned_second = second_block.clone();
         let mut updated_header = cloned_second.header.unseal();
         updated_header.state_root = root;
-        let sealed = updated_header.seal_slow();
-        let (header, seal) = sealed.into_parts();
-        *second_block = SealedBlock { header: SealedHeader::new(header, seal), ..cloned_second };
+        *second_block = SealedBlock { header: SealedHeader::seal(updated_header), ..cloned_second };
 
         let offset = transitions.len() as u64;
 
@@ -179,9 +180,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
         let cloned_last = last_block.clone();
         let mut updated_header = cloned_last.header.unseal();
         updated_header.state_root = root;
-        let sealed = updated_header.seal_slow();
-        let (header, seal) = sealed.into_parts();
-        *last_block = SealedBlock { header: SealedHeader::new(header, seal), ..cloned_last };
+        *last_block = SealedBlock { header: SealedHeader::seal(updated_header), ..cloned_last };
 
         db.insert_blocks(blocks.iter(), StorageKind::Static).unwrap();
 

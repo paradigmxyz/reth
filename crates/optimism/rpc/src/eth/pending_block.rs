@@ -1,54 +1,40 @@
 //! Loads OP pending block for a RPC response.
 
+use crate::OpEthApi;
+use alloy_consensus::Header;
+use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{BlockNumber, B256};
-use reth_chainspec::EthereumHardforks;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
-use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
-use reth_primitives::{
-    revm_primitives::BlockEnv, BlockNumberOrTag, Header, Receipt, SealedBlockWithSenders,
-};
+use reth_primitives::{Receipt, SealedBlockWithSenders};
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ExecutionOutcome,
     ReceiptProvider, StateProviderFactory,
 };
 use reth_rpc_eth_api::{
     helpers::{LoadPendingBlock, SpawnBlocking},
-    FromEthApiError,
+    FromEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
 use reth_transaction_pool::TransactionPool;
-
-use crate::OpEthApi;
+use revm::primitives::BlockEnv;
 
 impl<N> LoadPendingBlock for OpEthApi<N>
 where
     Self: SpawnBlocking,
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
+    N: RpcNodeCore<
+        Provider: BlockReaderIdExt
+                      + EvmEnvProvider
+                      + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
+                      + StateProviderFactory,
+        Pool: TransactionPool,
+        Evm: ConfigureEvm<Header = Header>,
+    >,
 {
-    #[inline]
-    fn provider(
-        &self,
-    ) -> impl BlockReaderIdExt
-           + EvmEnvProvider
-           + ChainSpecProvider<ChainSpec: EthereumHardforks>
-           + StateProviderFactory {
-        self.inner.provider()
-    }
-
-    #[inline]
-    fn pool(&self) -> impl TransactionPool {
-        self.inner.pool()
-    }
-
     #[inline]
     fn pending_block(&self) -> &tokio::sync::Mutex<Option<PendingBlock>> {
         self.inner.pending_block()
-    }
-
-    #[inline]
-    fn evm_config(&self) -> &impl ConfigureEvm<Header = Header> {
-        self.inner.evm_config()
     }
 
     /// Returns the locally built pending block

@@ -82,7 +82,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        engine: [regular, experimental]
         # ethereum/rpc to be deprecated:
         # https://github.com/ethereum/hive/pull/1117
         scenario:
@@ -181,7 +180,7 @@ jobs:
     needs:
       - prepare-reth
       - prepare-hive
-    name: run ${{ matrix.engine }} - ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
+    name: run ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
     runs-on:
       group: Reth
     permissions:
@@ -218,11 +217,6 @@ jobs:
           ref: master
           path: hivetests
 
-      - name: Modify client for experimental engine
-        if: matrix.engine == 'experimental'
-        run: |
-          sed -ie 's/RUST_LOG=info $reth node $FLAGS/RUST_LOG=info $reth node --engine.experimental $FLAGS/' hivetests/clients/reth/reth.sh
-
       - name: Run simulator
         run: |
           LIMIT="${{ matrix.scenario.limit }}"
@@ -241,8 +235,7 @@ jobs:
 
       - name: Parse hive output
         run: |
-          FAILURE_FILE="${{ matrix.engine == 'experimental' && '.github/assets/hive/expected_failures_experimental.yaml' || '.github/assets/hive/expected_failures.yaml' }}"
-          find hivetests/workspace/logs -type f -name "*.json" ! -name "hive.json" | xargs -I {} python .github/assets/hive/parse.py {} --exclusion $FAILURE_FILE
+          find hivetests/workspace/logs -type f -name "*.json" ! -name "hive.json" | xargs -I {} python .github/assets/hive/parse.py {} --exclusion .github/assets/hive/expected_failures.yaml
 
       - name: Print simulator output
         if: ${{ failure() }}

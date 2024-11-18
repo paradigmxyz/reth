@@ -8,10 +8,15 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+use reth_revm as _;
+use revm as _;
+
 pub use reth_ethereum_engine_primitives::EthEngineTypes;
 
 pub mod evm;
-pub use evm::{EthEvmConfig, EthExecutorProvider};
+pub use evm::{
+    BasicBlockExecutorProvider, EthEvmConfig, EthExecutionStrategyFactory, EthExecutorProvider,
+};
 
 pub mod node;
 pub use node::EthereumNode;

@@ -17,7 +17,6 @@ reth-primitives.workspace = true
 reth-execution-errors.workspace = true
 reth-db.workspace = true
 reth-db-api.workspace = true
-reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
 reth-trie.workspace = true
@@ -32,10 +31,7 @@ alloy-primitives.workspace = true
 tracing.workspace = true
 
 # misc
-rayon.workspace = true
 derive_more.workspace = true
-auto_impl.workspace = true
-itertools.workspace = true
 
 # `metrics` feature
 reth-metrics = { workspace = true, optional = true }
@@ -56,7 +52,8 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 reth-storage-errors.workspace = true
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-trie = { workspace = true, features = ["test-utils"] }
-reth-node-types.workspace = true
+
+alloy-consensus.workspace = true
 
 # trie
 triehash = "0.8"
@@ -64,16 +61,28 @@ triehash = "0.8"
 # misc
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
-tokio = { workspace = true, default-features = false, features = [
-    "sync",
-    "rt",
-    "macros",
-] }
-tokio-stream.workspace = true
 serde_json.workspace = true
 similar-asserts.workspace = true
 
 [features]
 metrics = ["reth-metrics", "reth-trie/metrics", "dep:metrics"]
-serde = ["dep:serde"]
-test-utils = ["triehash", "reth-trie-common/test-utils"]
+serde = [
+	"dep:serde",
+	"reth-provider/serde",
+	"reth-trie/serde",
+	"alloy-consensus/serde",
+	"alloy-primitives/serde",
+	"revm/serde",
+	"similar-asserts/serde"
+]
+test-utils = [
+	"triehash",
+	"reth-trie-common/test-utils",
+	"reth-chainspec/test-utils",
+	"reth-primitives/test-utils",
+	"reth-db/test-utils",
+	"reth-db-api/test-utils",
+	"reth-provider/test-utils",
+	"reth-trie/test-utils",
+	"revm/test-utils"
+]

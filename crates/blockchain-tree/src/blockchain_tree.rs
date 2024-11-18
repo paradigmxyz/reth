@@ -23,8 +23,8 @@ use reth_primitives::{
 use reth_provider::{
     providers::ProviderNodeTypes, BlockExecutionWriter, BlockNumReader, BlockWriter,
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
-    ChainSpecProvider, ChainSplit, ChainSplitTarget, DisplayBlocksChain, HeaderProvider,
-    ProviderError, StaticFileProviderFactory,
+    ChainSpecProvider, ChainSplit, ChainSplitTarget, DBProvider, DisplayBlocksChain,
+    HeaderProvider, ProviderError, StaticFileProviderFactory,
 };
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
@@ -113,9 +113,6 @@ where
     ///       is crucial for the correct execution of transactions.
     /// - `tree_config`: Configuration for the blockchain tree, including any parameters that affect
     ///   its structure or performance.
-    /// - `prune_modes`: Configuration for pruning old blockchain data. This helps in managing the
-    ///   storage space efficiently. It's important to validate this configuration to ensure it does
-    ///   not lead to unintended data loss.
     pub fn new(
         externals: TreeExternals<N, E>,
         config: BlockchainTreeConfig,
@@ -902,6 +899,7 @@ where
         // check unconnected block buffer for children of the chains
         let mut all_chain_blocks = Vec::new();
         for chain in self.state.chains.values() {
+            all_chain_blocks.reserve_exact(chain.blocks().len());
             for (&number, block) in chain.blocks() {
                 all_chain_blocks.push(BlockNumHash { number, hash: block.hash() })
             }
@@ -1376,9 +1374,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::TxEip1559;
+    use alloy_consensus::{Header, TxEip1559, EMPTY_ROOT_HASH};
+    use alloy_eips::{eip1559::INITIAL_BASE_FEE, eip4895::Withdrawals};
     use alloy_genesis::{Genesis, GenesisAccount};
-    use alloy_primitives::{keccak256, Address, Sealable, B256};
+    use alloy_primitives::{keccak256, Address, PrimitiveSignature as Signature, B256};
     use assert_matches::assert_matches;
     use linked_hash_set::LinkedHashSet;
     use reth_chainspec::{ChainSpecBuilder, MAINNET, MIN_TRANSACTION_GAS};
@@ -1388,11 +1387,8 @@ mod tests {
     use reth_evm::test_utils::MockExecutorProvider;
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_primitives::{
-        constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_ROOT_HASH},
         proofs::{calculate_receipt_root, calculate_transaction_root},
-        revm_primitives::AccountInfo,
-        Account, BlockBody, Header, Signature, Transaction, TransactionSigned,
-        TransactionSignedEcRecovered, Withdrawals,
+        Account, BlockBody, Transaction, TransactionSigned, TransactionSignedEcRecovered,
     };
     use reth_provider::{
         test_utils::{
@@ -1401,6 +1397,7 @@ mod tests {
         },
         ProviderFactory,
     };
+    use reth_revm::primitives::AccountInfo;
     use reth_stages_api::StageCheckpoint;
     use reth_trie::{root::state_root_unhashed, StateRoot};
     use std::collections::HashMap;
@@ -1562,7 +1559,7 @@ mod tests {
             provider_rw.commit().unwrap();
         }
 
-        let single_tx_cost = U256::from(EIP1559_INITIAL_BASE_FEE * MIN_TRANSACTION_GAS);
+        let single_tx_cost = U256::from(INITIAL_BASE_FEE * MIN_TRANSACTION_GAS);
         let mock_tx = |nonce: u64| -> TransactionSignedEcRecovered {
             TransactionSigned::from_transaction_and_signature(
                 Transaction::Eip1559(TxEip1559 {
@@ -1570,7 +1567,7 @@ mod tests {
                     nonce,
                     gas_limit: MIN_TRANSACTION_GAS,
                     to: Address::ZERO.into(),
-                    max_fee_per_gas: EIP1559_INITIAL_BASE_FEE as u128,
+                    max_fee_per_gas: INITIAL_BASE_FEE as u128,
                     ..Default::default()
                 }),
                 Signature::test_signature(),
@@ -1601,13 +1598,13 @@ mod tests {
             // receipts root computation is different for OP
             let receipts_root = calculate_receipt_root(&receipts);
 
-            let sealed = Header {
+            let header = Header {
                 number,
                 parent_hash: parent.unwrap_or_default(),
                 gas_used: body.len() as u64 * MIN_TRANSACTION_GAS,
                 gas_limit: chain_spec.max_gas_limit,
                 mix_hash: B256::random(),
-                base_fee_per_gas: Some(EIP1559_INITIAL_BASE_FEE),
+                base_fee_per_gas: Some(INITIAL_BASE_FEE),
                 transactions_root,
                 receipts_root,
                 state_root: state_root_unhashed(HashMap::from([(
@@ -1623,18 +1620,15 @@ mod tests {
                     ),
                 )])),
                 ..Default::default()
-            }
-            .seal_slow();
-            let (header, seal) = sealed.into_parts();
+            };
 
             SealedBlockWithSenders::new(
                 SealedBlock {
-                    header: SealedHeader::new(header, seal),
+                    header: SealedHeader::seal(header),
                     body: BlockBody {
                         transactions: body.clone().into_iter().map(|tx| tx.into_signed()).collect(),
                         ommers: Vec::new(),
                         withdrawals: Some(Withdrawals::default()),
-                        requests: None,
                     },
                 },
                 body.iter().map(|tx| tx.signer()).collect(),

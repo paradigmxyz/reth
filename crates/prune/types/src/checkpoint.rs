@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 /// Saves the pruning progress of a stage.
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize, Compact)]
-#[cfg_attr(test, derive(Default, arbitrary::Arbitrary))]
+#[cfg_attr(any(test, feature = "test-utils"), derive(Default, arbitrary::Arbitrary))]
 #[add_arbitrary_tests(compact)]
 pub struct PruneCheckpoint {
     /// Highest pruned block number. If it's [None], the pruning for block `0` is not finished yet.

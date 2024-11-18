@@ -49,7 +49,7 @@ impl From<StoredSubNode> for CursorSubNode {
 
 impl From<CursorSubNode> for StoredSubNode {
     fn from(value: CursorSubNode) -> Self {
-        let nibble = if value.nibble >= 0 { Some(value.nibble as u8) } else { None };
+        let nibble = (value.nibble >= 0).then_some(value.nibble as u8);
         Self { key: value.key.to_vec(), nibble, node: value.node }
     }
 }
@@ -89,7 +89,7 @@ impl CursorSubNode {
 
     /// Returns `true` if the current nibble has a root hash.
     pub fn hash_flag(&self) -> bool {
-        self.node.as_ref().map_or(false, |node| match self.nibble {
+        self.node.as_ref().is_some_and(|node| match self.nibble {
             // This guy has it
             -1 => node.root_hash.is_some(),
             // Or get it from the children

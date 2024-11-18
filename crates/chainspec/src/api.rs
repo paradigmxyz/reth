@@ -1,12 +1,12 @@
 use crate::{ChainSpec, DepositContract};
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 use alloy_chains::Chain;
+use alloy_consensus::Header;
 use alloy_eips::eip1559::BaseFeeParams;
 use alloy_genesis::Genesis;
 use alloy_primitives::B256;
 use core::fmt::{Debug, Display};
 use reth_network_peers::NodeRecord;
-use reth_primitives_traits::Header;
 
 /// Trait representing type configuring a chain spec.
 #[auto_impl::auto_impl(&, Arc)]
@@ -14,8 +14,13 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     // todo: make chain spec type generic over hardfork
     //type Hardfork: Clone + Copy + 'static;
 
-    /// Chain id.
+    /// Returns the [`Chain`] object this spec targets.
     fn chain(&self) -> Chain;
+
+    /// Returns the chain id number
+    fn chain_id(&self) -> u64 {
+        self.chain().id()
+    }
 
     /// Get the [`BaseFeeParams`] for the chain at the given block.
     fn base_fee_params_at_block(&self, block_number: u64) -> BaseFeeParams;
@@ -33,7 +38,7 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     fn prune_delete_limit(&self) -> usize;
 
     /// Returns a string representation of the hardforks.
-    fn display_hardforks(&self) -> impl Display;
+    fn display_hardforks(&self) -> Box<dyn Display>;
 
     /// The genesis header.
     fn genesis_header(&self) -> &Header;
@@ -50,6 +55,11 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     /// Returns `true` if this chain contains Optimism configuration.
     fn is_optimism(&self) -> bool {
         self.chain().is_optimism()
+    }
+
+    /// Returns `true` if this chain contains Ethereum configuration.
+    fn is_ethereum(&self) -> bool {
+        self.chain().is_ethereum()
     }
 }
 
@@ -78,8 +88,8 @@ impl EthChainSpec for ChainSpec {
         self.prune_delete_limit
     }
 
-    fn display_hardforks(&self) -> impl Display {
-        self.display_hardforks()
+    fn display_hardforks(&self) -> Box<dyn Display> {
+        Box::new(Self::display_hardforks(self))
     }
 
     fn genesis_header(&self) -> &Header {
@@ -99,6 +109,6 @@ impl EthChainSpec for ChainSpec {
     }
 
     fn is_optimism(&self) -> bool {
-        Self::is_optimism(self)
+        self.chain.is_optimism()
     }
 }

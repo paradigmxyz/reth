@@ -1,5 +1,6 @@
 //! An integration of [`reth-trie`] with [`reth-db`].
 
+mod commitment;
 mod hashed_cursor;
 mod prefix_set;
 mod proof;
@@ -8,6 +9,7 @@ mod storage;
 mod trie_cursor;
 mod witness;
 
+pub use commitment::{MerklePatriciaTrie, StateCommitment};
 pub use hashed_cursor::{
     DatabaseHashedAccountCursor, DatabaseHashedCursorFactory, DatabaseHashedStorageCursor,
 };

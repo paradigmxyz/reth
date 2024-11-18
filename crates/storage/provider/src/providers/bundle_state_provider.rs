@@ -43,7 +43,7 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> BundleStateProvider<SP, EDP>
                     account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
                 )
             })
-            .unwrap_or_else(|| HashedStorage::new(false))
+            .unwrap_or_default()
     }
 }
 

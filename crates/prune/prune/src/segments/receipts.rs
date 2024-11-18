@@ -109,12 +109,14 @@ mod tests {
 
         let mut receipts = Vec::new();
         for block in &blocks {
+            receipts.reserve_exact(block.body.transactions.len());
             for transaction in &block.body.transactions {
                 receipts
                     .push((receipts.len() as u64, random_receipt(&mut rng, transaction, Some(0))));
             }
         }
-        db.insert_receipts(receipts.clone()).expect("insert receipts");
+        let receipts_len = receipts.len();
+        db.insert_receipts(receipts).expect("insert receipts");
 
         assert_eq!(
             db.table::<tables::Transactions>().unwrap().len(),
@@ -194,7 +196,7 @@ mod tests {
 
             assert_eq!(
                 db.table::<tables::Receipts>().unwrap().len(),
-                receipts.len() - (last_pruned_tx_number + 1)
+                receipts_len - (last_pruned_tx_number + 1)
             );
             assert_eq!(
                 db.factory

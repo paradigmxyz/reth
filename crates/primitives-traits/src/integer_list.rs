@@ -9,8 +9,16 @@ use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
 };
 
-/// Uses Roaring Bitmaps to hold a list of integers. It provides really good compression with the
-/// capability to access its elements without decoding it.
+/// A data structure that uses Roaring Bitmaps to efficiently store a list of integers.
+///
+/// This structure provides excellent compression while allowing direct access to individual
+/// elements without the need for full decompression.
+///
+/// Key features:
+/// - Efficient compression: the underlying Roaring Bitmaps significantly reduce memory usage.
+/// - Direct access: elements can be accessed or queried without needing to decode the entire list.
+/// - [`RoaringTreemap`] backing: internally backed by [`RoaringTreemap`], which supports 64-bit
+///   integers.
 #[derive(Clone, PartialEq, Default, Deref)]
 pub struct IntegerList(pub RoaringTreemap);
 
@@ -22,12 +30,12 @@ impl fmt::Debug for IntegerList {
 }
 
 impl IntegerList {
-    /// Creates a new empty `IntegerList`.
+    /// Creates a new empty [`IntegerList`].
     pub fn empty() -> Self {
         Self(RoaringTreemap::new())
     }
 
-    /// Creates an `IntegerList` from a list of integers.
+    /// Creates an [`IntegerList`] from a list of integers.
     ///
     /// Returns an error if the list is not pre-sorted.
     pub fn new(list: impl IntoIterator<Item = u64>) -> Result<Self, IntegerListError> {
@@ -36,7 +44,7 @@ impl IntegerList {
             .map_err(|_| IntegerListError::UnsortedInput)
     }
 
-    // Creates an IntegerList from a pre-sorted list of integers.
+    /// Creates an [`IntegerList`] from a pre-sorted list of integers.
     ///
     /// # Panics
     ///
@@ -54,11 +62,7 @@ impl IntegerList {
 
     /// Pushes a new integer to the list.
     pub fn push(&mut self, value: u64) -> Result<(), IntegerListError> {
-        if self.0.push(value) {
-            Ok(())
-        } else {
-            Err(IntegerListError::UnsortedInput)
-        }
+        self.0.push(value).then_some(()).ok_or(IntegerListError::UnsortedInput)
     }
 
     /// Clears the list.
@@ -80,10 +84,9 @@ impl IntegerList {
 
     /// Deserializes a sequence of bytes into a proper [`IntegerList`].
     pub fn from_bytes(data: &[u8]) -> Result<Self, IntegerListError> {
-        Ok(Self(
-            RoaringTreemap::deserialize_from(data)
-                .map_err(|_| IntegerListError::FailedToDeserialize)?,
-        ))
+        RoaringTreemap::deserialize_from(data)
+            .map(Self)
+            .map_err(|_| IntegerListError::FailedToDeserialize)
     }
 }
 

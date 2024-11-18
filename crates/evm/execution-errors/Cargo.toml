@@ -26,4 +26,9 @@ derive_more.workspace = true
 
 [features]
 default = ["std"]
-std = ["reth-consensus/std"]
+std = [
+	"reth-consensus/std",
+	"alloy-eips/std",
+	"alloy-primitives/std",
+	"revm-primitives/std"
+]

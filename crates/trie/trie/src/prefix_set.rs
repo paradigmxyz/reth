@@ -82,7 +82,7 @@ pub struct TriePrefixSets {
 /// assert!(prefix_set.contains(&[0xa, 0xb]));
 /// assert!(prefix_set.contains(&[0xa, 0xb, 0xc]));
 /// ```
-#[derive(Clone, Default, Debug)]
+#[derive(PartialEq, Eq, Clone, Default, Debug)]
 pub struct PrefixSetMut {
     /// Flag indicating that any entry should be considered changed.
     /// If set, the keys will be discarded.
@@ -168,8 +168,7 @@ pub struct PrefixSet {
 }
 
 impl PrefixSet {
-    /// Returns `true` if any of the keys in the set has the given prefix or
-    /// if the given prefix is a prefix of any key in the set.
+    /// Returns `true` if any of the keys in the set has the given prefix
     #[inline]
     pub fn contains(&mut self, prefix: &[u8]) -> bool {
         if self.all {
@@ -212,8 +211,8 @@ impl PrefixSet {
 }
 
 impl<'a> IntoIterator for &'a PrefixSet {
-    type IntoIter = std::slice::Iter<'a, reth_trie_common::Nibbles>;
     type Item = &'a reth_trie_common::Nibbles;
+    type IntoIter = std::slice::Iter<'a, reth_trie_common::Nibbles>;
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
     }

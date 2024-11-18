@@ -1,6 +1,5 @@
-use alloy_primitives::{BlockNumber, TxNumber};
-
 use crate::{PruneCheckpoint, PruneLimiter, PruneMode, PruneSegment};
+use alloy_primitives::{BlockNumber, TxNumber};
 
 /// Pruner run output.
 #[derive(Debug)]
@@ -15,6 +14,17 @@ impl From<PruneProgress> for PrunerOutput {
     fn from(progress: PruneProgress) -> Self {
         Self { progress, segments: Vec::new() }
     }
+}
+
+/// Represents information of a pruner run for a segment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrunedSegmentInfo {
+    /// The pruned segment
+    pub segment: PruneSegment,
+    /// Number of pruned entries
+    pub pruned: usize,
+    /// Prune progress
+    pub progress: PruneProgress,
 }
 
 /// Segment pruning output.

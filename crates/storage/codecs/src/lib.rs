@@ -18,6 +18,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 pub use reth_codecs_derive::*;
+use serde as _;
 
 use alloy_primitives::{Address, Bloom, Bytes, FixedBytes, U256};
 use bytes::{Buf, BufMut};
@@ -25,6 +26,10 @@ use bytes::{Buf, BufMut};
 extern crate alloc;
 use alloc::vec::Vec;
 
+#[cfg(feature = "test-utils")]
+pub mod alloy;
+
+#[cfg(not(feature = "test-utils"))]
 #[cfg(any(test, feature = "alloy"))]
 mod alloy;
 
@@ -48,6 +53,12 @@ pub mod test_utils;
 /// Regarding the `specialized_to/from_compact` methods: Mainly used as a workaround for not being
 /// able to specialize an impl over certain types like `Vec<T>`/`Option<T>` where `T` is a fixed
 /// size array like `Vec<B256>`.
+///
+/// ## Caution
+///
+/// Due to the bitfields, every type change on the rust type (e.g. `U256` to `u64`) is a breaking
+/// change and will lead to a new, incompatible [`Compact`] implementation. Implementers must take
+/// special care when changing or rearranging fields.
 pub trait Compact: Sized {
     /// Takes a buffer which can be written to. *Ideally*, it returns the length written to.
     fn to_compact<B>(&self, buf: &mut B) -> usize
@@ -75,6 +86,21 @@ pub trait Compact: Sized {
     #[inline]
     fn specialized_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
         Self::from_compact(buf, len)
+    }
+}
+
+impl Compact for alloc::string::String {
+    fn to_compact<B>(&self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        self.as_bytes().to_compact(buf)
+    }
+
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+        let (vec, buf) = Vec::<u8>::from_compact(buf, len);
+        let string = Self::from_utf8(vec).unwrap(); // Safe conversion
+        (string, buf)
     }
 }
 
@@ -484,7 +510,7 @@ mod tests {
 
     #[test]
     fn compact_address() {
-        let mut buf = vec![];
+        let mut buf = Vec::with_capacity(21);
         assert_eq!(Address::ZERO.to_compact(&mut buf), 20);
         assert_eq!(buf, vec![0; 20]);
 
@@ -636,7 +662,8 @@ mod tests {
     }
 
     #[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Compact, arbitrary::Arbitrary)]
-    #[add_arbitrary_tests(compact)]
+    #[add_arbitrary_tests(crate, compact)]
+    #[reth_codecs(crate = "crate")]
     struct TestStruct {
         f_u64: u64,
         f_u256: U256,
@@ -688,7 +715,8 @@ mod tests {
     #[derive(
         Debug, PartialEq, Clone, Default, Serialize, Deserialize, Compact, arbitrary::Arbitrary,
     )]
-    #[add_arbitrary_tests(compact)]
+    #[add_arbitrary_tests(crate, compact)]
+    #[reth_codecs(crate = "crate")]
     enum TestEnum {
         #[default]
         Var0,

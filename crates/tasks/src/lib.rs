@@ -111,6 +111,13 @@ dyn_clone::clone_trait_object!(TaskSpawner);
 #[non_exhaustive]
 pub struct TokioTaskExecutor;
 
+impl TokioTaskExecutor {
+    /// Converts the instance to a boxed [`TaskSpawner`].
+    pub fn boxed(self) -> Box<dyn TaskSpawner> {
+        Box::new(self)
+    }
+}
+
 impl TaskSpawner for TokioTaskExecutor {
     fn spawn(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
         tokio::task::spawn(fut)
@@ -288,7 +295,7 @@ pub struct TaskExecutor {
     on_shutdown: Shutdown,
     /// Sender half for sending panic signals to this type
     panicked_tasks_tx: UnboundedSender<PanickedTaskError>,
-    // Task Executor Metrics
+    /// Task Executor Metrics
     metrics: TaskExecutorMetrics,
     /// How many [`GracefulShutdown`] tasks are currently active
     graceful_tasks: Arc<AtomicUsize>,

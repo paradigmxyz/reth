@@ -11,6 +11,12 @@
 
 extern crate alloc;
 
+use once_cell as _;
+#[cfg(not(feature = "std"))]
+pub(crate) use once_cell::sync::{Lazy as LazyLock, OnceCell as OnceLock};
+#[cfg(feature = "std")]
+pub(crate) use std::sync::{LazyLock, OnceLock};
+
 /// Chain specific constants
 pub(crate) mod constants;
 pub use constants::MIN_TRANSACTION_GAS;
@@ -27,16 +33,16 @@ pub use reth_ethereum_forks::*;
 
 pub use api::EthChainSpec;
 pub use info::ChainInfo;
-#[cfg(feature = "test-utils")]
+#[cfg(any(test, feature = "test-utils"))]
 pub use spec::test_fork_ids;
 pub use spec::{
     BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, ChainSpecProvider,
     DepositContract, ForkBaseFeeParams, DEV, HOLESKY, MAINNET, SEPOLIA,
 };
 
-/// Simple utility to create a `OnceCell` with a value set.
-pub fn once_cell_set<T>(value: T) -> once_cell::sync::OnceCell<T> {
-    let once = once_cell::sync::OnceCell::new();
+/// Simple utility to create a thread-safe sync cell with a value set.
+pub fn once_cell_set<T>(value: T) -> OnceLock<T> {
+    let once = OnceLock::new();
     let _ = once.set(value);
     once
 }

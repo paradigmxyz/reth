@@ -1,6 +1,6 @@
 //! Test utilities to generate random valid headers.
 
-use crate::Header;
+use alloy_consensus::Header;
 use alloy_primitives::B256;
 use proptest::{arbitrary::any, prop_compose};
 use proptest_arbitrary_interop::arb;
@@ -37,7 +37,7 @@ pub const fn generate_valid_header(
     }
 
     // Placeholder for future EIP adjustments
-    header.requests_root = None;
+    header.requests_hash = None;
 
     header
 }

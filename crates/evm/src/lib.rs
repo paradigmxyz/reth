@@ -1,4 +1,10 @@
 //! Traits for configuring an EVM specifics.
+//!
+//! # Revm features
+//!
+//! This crate does __not__ enforce specific revm features such as `blst` or `c-kzg`, which are
+//! critical for revm's evm internals, it is the responsibility of the implementer to ensure the
+//! proper features are selected.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -11,12 +17,14 @@
 
 extern crate alloc;
 
-use crate::builder::RethEvmBuilder;
+use alloy_consensus::BlockHeader as _;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use reth_primitives::TransactionSigned;
 use reth_primitives_traits::BlockHeader;
 use revm::{Database, Evm, GetInspector};
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, SpecId, TxEnv};
+
+use crate::builder::RethEvmBuilder;
 
 pub mod builder;
 pub mod either;
@@ -25,8 +33,8 @@ pub mod execute;
 pub mod metrics;
 pub mod noop;
 pub mod provider;
+pub mod state_change;
 pub mod system_calls;
-
 #[cfg(any(test, feature = "test-utils"))]
 /// test helpers for mocking executor
 pub mod test_utils;
@@ -109,6 +117,9 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     /// The header type used by the EVM.
     type Header: BlockHeader;
 
+    /// The error type that is returned by [`Self::next_cfg_and_block_env`].
+    type Error: core::error::Error + Send + Sync;
+
     /// Returns a [`TxEnv`] from a [`TransactionSigned`] and [`Address`].
     fn tx_env(&self, transaction: &TransactionSigned, signer: Address) -> TxEnv {
         let mut tx_env = TxEnv::default();
@@ -145,7 +156,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
         block_env.coinbase = header.beneficiary();
         block_env.timestamp = U256::from(header.timestamp());
         if after_merge {
-            block_env.prevrandao = Some(header.mix_hash());
+            block_env.prevrandao = header.mix_hash();
             block_env.difficulty = U256::ZERO;
         } else {
             block_env.difficulty = header.difficulty();
@@ -185,7 +196,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
         &self,
         parent: &Self::Header,
         attributes: NextBlockEnvAttributes,
-    ) -> (CfgEnvWithHandlerCfg, BlockEnv);
+    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), Self::Error>;
 }
 
 /// Represents additional attributes required to configure the next block.

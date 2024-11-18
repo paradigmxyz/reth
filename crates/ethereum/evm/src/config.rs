@@ -11,7 +11,9 @@ pub fn revm_spec_by_timestamp_after_merge(
     chain_spec: &ChainSpec,
     timestamp: u64,
 ) -> revm_primitives::SpecId {
-    if chain_spec.is_prague_active_at_timestamp(timestamp) {
+    if chain_spec.is_osaka_active_at_timestamp(timestamp) {
+        revm_primitives::OSAKA
+    } else if chain_spec.is_prague_active_at_timestamp(timestamp) {
         revm_primitives::PRAGUE
     } else if chain_spec.is_cancun_active_at_timestamp(timestamp) {
         revm_primitives::CANCUN

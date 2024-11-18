@@ -22,7 +22,7 @@ serde = { workspace = true, optional = true }
 humantime-serde = { workspace = true, optional = true }
 serde_json = { workspace = true }
 
-# misc 
+# misc
 tracing.workspace = true
 
 [features]

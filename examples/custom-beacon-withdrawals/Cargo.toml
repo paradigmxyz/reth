@@ -1,0 +1,26 @@
+[package]
+name = "example-custom-beacon-withdrawals"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reth.workspace = true
+reth-node-ethereum.workspace = true
+reth-evm-ethereum.workspace = true
+reth-chainspec.workspace = true
+reth-evm.workspace = true
+reth-primitives.workspace = true
+
+alloy-sol-macro = "0.8.9"
+alloy-sol-types.workspace = true
+alloy-eips.workspace = true
+alloy-consensus.workspace = true
+
+eyre.workspace = true
+
+[features]
+optimism = [
+  "reth-primitives/optimism"
+]

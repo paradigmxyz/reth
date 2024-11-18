@@ -1,5 +1,5 @@
+use alloy_eips::eip7685::Requests;
 use alloy_primitives::U256;
-use reth_primitives::Request;
 use revm::db::BundleState;
 
 /// A helper type for ethereum block inputs that consists of a block and the total difficulty.
@@ -33,8 +33,8 @@ pub struct BlockExecutionOutput<T> {
     pub state: BundleState,
     /// All the receipts of the transactions in the block.
     pub receipts: Vec<T>,
-    /// All the EIP-7685 requests of the transactions in the block.
-    pub requests: Vec<Request>,
+    /// All the EIP-7685 requests in the block.
+    pub requests: Requests,
     /// The total gas used by the block.
     pub gas_used: u64,
 }

@@ -1,8 +1,7 @@
 //! Stream wrapper that skips specified number of FCUs.
 
 use futures::{Stream, StreamExt};
-use reth_beacon_consensus::{BeaconEngineMessage, OnForkChoiceUpdated};
-use reth_engine_primitives::EngineTypes;
+use reth_engine_primitives::{BeaconEngineMessage, EngineTypes, OnForkChoiceUpdated};
 use std::{
     pin::Pin,
     task::{ready, Context, Poll},
@@ -45,7 +44,12 @@ where
         loop {
             let next = ready!(this.stream.poll_next_unpin(cx));
             let item = match next {
-                Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx }) => {
+                Some(BeaconEngineMessage::ForkchoiceUpdated {
+                    state,
+                    payload_attrs,
+                    tx,
+                    version,
+                }) => {
                     if this.skipped < this.threshold {
                         *this.skipped += 1;
                         tracing::warn!(target: "engine::stream::skip_fcu", ?state, ?payload_attrs, threshold=this.threshold, skipped=this.skipped, "Skipping FCU");
@@ -53,7 +57,12 @@ where
                         continue
                     }
                     *this.skipped = 0;
-                    Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx })
+                    Some(BeaconEngineMessage::ForkchoiceUpdated {
+                        state,
+                        payload_attrs,
+                        tx,
+                        version,
+                    })
                 }
                 next => next,
             };

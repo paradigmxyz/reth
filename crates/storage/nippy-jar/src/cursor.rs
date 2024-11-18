@@ -25,9 +25,10 @@ impl<H: NippyJarHeader> std::fmt::Debug for NippyJarCursor<'_, H> {
 }
 
 impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
+    /// Creates a new instance of [`NippyJarCursor`] for the given [`NippyJar`].
     pub fn new(jar: &'a NippyJar<H>) -> Result<Self, NippyJarError> {
         let max_row_size = jar.max_row_size;
-        Ok(NippyJarCursor {
+        Ok(Self {
             jar,
             reader: Arc::new(jar.open_data_reader()?),
             // Makes sure that we have enough buffer capacity to decompress any row of data.
@@ -36,12 +37,14 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
         })
     }
 
+    /// Creates a new instance of [`NippyJarCursor`] with the specified [`NippyJar`] and data
+    /// reader.
     pub fn with_reader(
         jar: &'a NippyJar<H>,
         reader: Arc<DataReader>,
     ) -> Result<Self, NippyJarError> {
         let max_row_size = jar.max_row_size;
-        Ok(NippyJarCursor {
+        Ok(Self {
             jar,
             reader,
             // Makes sure that we have enough buffer capacity to decompress any row of data.

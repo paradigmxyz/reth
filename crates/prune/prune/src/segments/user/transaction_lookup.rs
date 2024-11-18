@@ -140,11 +140,13 @@ mod tests {
 
         let mut tx_hash_numbers = Vec::new();
         for block in &blocks {
+            tx_hash_numbers.reserve_exact(block.body.transactions.len());
             for transaction in &block.body.transactions {
                 tx_hash_numbers.push((transaction.hash, tx_hash_numbers.len() as u64));
             }
         }
-        db.insert_tx_hash_numbers(tx_hash_numbers.clone()).expect("insert tx hash numbers");
+        let tx_hash_numbers_len = tx_hash_numbers.len();
+        db.insert_tx_hash_numbers(tx_hash_numbers).expect("insert tx hash numbers");
 
         assert_eq!(
             db.table::<tables::Transactions>().unwrap().len(),
@@ -228,7 +230,7 @@ mod tests {
 
             assert_eq!(
                 db.table::<tables::TransactionHashNumbers>().unwrap().len(),
-                tx_hash_numbers.len() - (last_pruned_tx_number + 1)
+                tx_hash_numbers_len - (last_pruned_tx_number + 1)
             );
             assert_eq!(
                 db.factory

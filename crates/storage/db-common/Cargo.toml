@@ -42,6 +42,7 @@ tracing.workspace = true
 [dev-dependencies]
 reth-primitives-traits.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
+alloy-consensus.workspace = true
 
 [lints]
 workspace = true

@@ -78,7 +78,7 @@ impl LogArgs {
             format,
             self.verbosity.directive().to_string(),
             filter,
-            if use_color { Some(self.color.to_string()) } else { None },
+            use_color.then(|| self.color.to_string()),
         )
     }
 

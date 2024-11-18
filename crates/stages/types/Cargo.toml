@@ -19,6 +19,7 @@ alloy-primitives.workspace = true
 modular-bitfield.workspace = true
 bytes.workspace = true
 serde.workspace = true
+arbitrary = { workspace = true, features = ["derive"], optional = true }
 
 [dev-dependencies]
 arbitrary = { workspace = true, features = ["derive"] }
@@ -26,3 +27,15 @@ proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 test-fuzz.workspace = true
 rand.workspace = true
+
+[features]
+test-utils = [
+	"dep:arbitrary",
+	"reth-codecs/test-utils",
+	"reth-trie-common/test-utils"
+]
+arbitrary = [
+	"alloy-primitives/arbitrary",
+	"reth-codecs/arbitrary",
+	"reth-trie-common/arbitrary"
+]

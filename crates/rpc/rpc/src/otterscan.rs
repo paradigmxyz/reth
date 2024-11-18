@@ -1,7 +1,8 @@
 use alloy_consensus::Transaction;
+use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_network::{ReceiptResponse, TransactionResponse};
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
-use alloy_rpc_types::{BlockTransactions, Header, TransactionReceipt};
+use alloy_rpc_types_eth::{BlockTransactions, Header, TransactionReceipt};
 use alloy_rpc_types_trace::{
     otterscan::{
         BlockDetails, ContractCreator, InternalOperation, OperationType, OtsBlockTransactions,
@@ -11,7 +12,6 @@ use alloy_rpc_types_trace::{
 };
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
-use reth_primitives::{BlockId, BlockNumberOrTag};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
@@ -165,7 +165,7 @@ where
     }
 
     /// Handler for `ots_getBlockDetails`
-    async fn get_block_details(&self, block_number: u64) -> RpcResult<BlockDetails> {
+    async fn get_block_details(&self, block_number: u64) -> RpcResult<BlockDetails<Header>> {
         let block_id = block_number.into();
         let block = self.eth.block_by_number(block_id, true);
         let block_id = block_id.into();
@@ -178,7 +178,7 @@ where
     }
 
     /// Handler for `getBlockDetailsByHash`
-    async fn get_block_details_by_hash(&self, block_hash: B256) -> RpcResult<BlockDetails> {
+    async fn get_block_details_by_hash(&self, block_hash: B256) -> RpcResult<BlockDetails<Header>> {
         let block = self.eth.block_by_hash(block_hash, true);
         let block_id = block_hash.into();
         let receipts = self.eth.block_receipts(block_id);
@@ -195,7 +195,7 @@ where
         block_number: u64,
         page_number: usize,
         page_size: usize,
-    ) -> RpcResult<OtsBlockTransactions<RpcTransaction<Eth::NetworkTypes>>> {
+    ) -> RpcResult<OtsBlockTransactions<RpcTransaction<Eth::NetworkTypes>, Header>> {
         let block_id = block_number.into();
         // retrieve full block and its receipts
         let block = self.eth.block_by_number(block_id, true);
@@ -227,7 +227,8 @@ where
         *transactions = transactions.drain(page_start..page_end).collect::<Vec<_>>();
 
         // The input field returns only the 4 bytes method selector instead of the entire
-        // calldata byte blob.
+        // calldata byte blob
+        // See also: <https://github.com/ledgerwatch/erigon/blob/aefb97b07d1c4fd32a66097a24eddd8f6ccacae0/turbo/jsonrpc/otterscan_api.go#L610-L617>
         for tx in transactions.iter_mut() {
             if tx.input().len() > 4 {
                 Eth::TransactionCompat::otterscan_api_truncate_input(tx);
@@ -238,7 +239,7 @@ where
         let timestamp = Some(block.header.timestamp);
         let receipts = receipts
             .drain(page_start..page_end)
-            .zip(transactions.iter().map(Eth::TransactionCompat::tx_type))
+            .zip(transactions.iter().map(Transaction::ty))
             .map(|(receipt, tx_ty)| {
                 let inner = OtsReceipt {
                     status: receipt.status(),
@@ -261,7 +262,6 @@ where
                     from: receipt.from(),
                     to: receipt.to(),
                     contract_address: receipt.contract_address(),
-                    state_root: receipt.state_root(),
                     authorization_list: receipt
                         .authorization_list()
                         .map(<[SignedAuthorization]>::to_vec),
@@ -334,6 +334,7 @@ where
             .eth
             .trace_block_with(
                 num.into(),
+                None,
                 TracingInspectorConfig::default_parity(),
                 |tx_info, inspector, _, _, _| {
                     Ok(inspector.into_parity_builder().into_localized_transaction_traces(tx_info))

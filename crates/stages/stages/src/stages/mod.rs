@@ -263,7 +263,7 @@ mod tests {
         );
         db.insert_blocks(blocks.iter(), StorageKind::Static)?;
 
-        let mut receipts = Vec::new();
+        let mut receipts = Vec::with_capacity(blocks.len());
         let mut tx_num = 0u64;
         for block in &blocks {
             let mut block_receipts = Vec::with_capacity(block.body.transactions.len());
@@ -296,8 +296,8 @@ mod tests {
     ) {
         // We recreate the static file provider, since consistency heals are done on fetching the
         // writer for the first time.
-        let static_file_provider =
-            StaticFileProvider::read_write(db.factory.static_file_provider().path()).unwrap();
+        let mut static_file_provider = db.factory.static_file_provider();
+        static_file_provider = StaticFileProvider::read_write(static_file_provider.path()).unwrap();
 
         // Simulate corruption by removing `prune_count` rows from the data file without updating
         // its offset list and configuration.
@@ -314,9 +314,10 @@ mod tests {
 
         // We recreate the static file provider, since consistency heals are done on fetching the
         // writer for the first time.
+        let mut static_file_provider = db.factory.static_file_provider();
+        static_file_provider = StaticFileProvider::read_write(static_file_provider.path()).unwrap();
         assert_eq!(
-            StaticFileProvider::read_write(db.factory.static_file_provider().path())
-                .unwrap()
+            static_file_provider
                 .check_consistency(&db.factory.database_provider_ro().unwrap(), is_full_node,),
             Ok(expected)
         );

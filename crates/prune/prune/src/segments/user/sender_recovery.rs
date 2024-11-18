@@ -110,6 +110,7 @@ mod tests {
 
         let mut transaction_senders = Vec::new();
         for block in &blocks {
+            transaction_senders.reserve_exact(block.body.transactions.len());
             for transaction in &block.body.transactions {
                 transaction_senders.push((
                     transaction_senders.len() as u64,
@@ -117,8 +118,8 @@ mod tests {
                 ));
             }
         }
-        db.insert_transaction_senders(transaction_senders.clone())
-            .expect("insert transaction senders");
+        let transaction_senders_len = transaction_senders.len();
+        db.insert_transaction_senders(transaction_senders).expect("insert transaction senders");
 
         assert_eq!(
             db.table::<tables::Transactions>().unwrap().len(),
@@ -202,7 +203,7 @@ mod tests {
 
             assert_eq!(
                 db.table::<tables::TransactionSenders>().unwrap().len(),
-                transaction_senders.len() - (last_pruned_tx_number + 1)
+                transaction_senders_len - (last_pruned_tx_number + 1)
             );
             assert_eq!(
                 db.factory

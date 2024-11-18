@@ -20,10 +20,7 @@ pub mod components;
 pub use components::{NodeComponents, NodeComponentsBuilder};
 
 mod builder;
-pub use builder::{
-    add_ons::{AddOns, RpcAddOns},
-    *,
-};
+pub use builder::{add_ons::AddOns, *};
 
 mod launch;
 pub use launch::{engine::EngineNodeLauncher, *};

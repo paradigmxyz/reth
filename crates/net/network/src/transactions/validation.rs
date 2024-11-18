@@ -336,7 +336,6 @@ impl FilterAnnouncement for EthMessageFilter {
 #[cfg(test)]
 mod test {
     use super::*;
-
     use alloy_primitives::B256;
     use reth_eth_wire::{NewPooledTransactionHashes66, NewPooledTransactionHashes68};
     use std::{collections::HashMap, str::FromStr};

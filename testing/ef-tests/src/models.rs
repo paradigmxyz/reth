@@ -1,6 +1,8 @@
 //! Shared models for <https://github.com/ethereum/tests>
 
 use crate::{assert::assert_equal, Error};
+use alloy_consensus::Header as RethHeader;
+use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::{keccak256, Address, Bloom, Bytes, B256, B64, U256};
 use reth_chainspec::{ChainSpec, ChainSpecBuilder};
 use reth_db::tables;
@@ -8,9 +10,7 @@ use reth_db_api::{
     cursor::DbDupCursorRO,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{
-    Account as RethAccount, Bytecode, Header as RethHeader, SealedHeader, StorageEntry, Withdrawals,
-};
+use reth_primitives::{Account as RethAccount, Bytecode, SealedHeader, StorageEntry};
 use serde::Deserialize;
 use std::{collections::BTreeMap, ops::Deref};
 
@@ -87,7 +87,7 @@ pub struct Header {
     /// Parent beacon block root.
     pub parent_beacon_block_root: Option<B256>,
     /// Requests root.
-    pub requests_root: Option<B256>,
+    pub requests_hash: Option<B256>,
 }
 
 impl From<Header> for SealedHeader {
@@ -113,7 +113,7 @@ impl From<Header> for SealedHeader {
             blob_gas_used: value.blob_gas_used.map(|v| v.to::<u64>()),
             excess_blob_gas: value.excess_blob_gas.map(|v| v.to::<u64>()),
             parent_beacon_block_root: value.parent_beacon_block_root,
-            requests_root: value.requests_root,
+            requests_hash: value.requests_hash,
         };
         Self::new(header, value.hash)
     }
@@ -257,7 +257,7 @@ impl Account {
 }
 
 /// Fork specification.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Hash, Ord, Clone, Deserialize)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Hash, Ord, Clone, Copy, Deserialize)]
 pub enum ForkSpec {
     /// Frontier
     Frontier,
