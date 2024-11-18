@@ -776,7 +776,10 @@ mod tests {
         };
         let provider = BasicBlockExecutorProvider::new(strategy_factory);
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
+        // if we want to change the evm initializer the executor must be mut.
         let mut executor = provider.executor(db);
+        // execute consumes the executor, so we can only call it once.
+        // let result = executor.execute(BlockExecutionInput::new(&Default::default(), U256::ZERO));
         let evm_initializer = EvmInitializer {};
         executor.init(Box::new(evm_initializer));
         let result = executor.execute(BlockExecutionInput::new(&Default::default(), U256::ZERO));
