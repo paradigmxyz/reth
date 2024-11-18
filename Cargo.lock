@@ -7721,6 +7721,7 @@ version = "1.0.0"
 dependencies = [
  "alloy-rlp",
  "assert_matches",
+ "backon",
  "candid",
  "did",
  "ethereum-json-rpc-client",
