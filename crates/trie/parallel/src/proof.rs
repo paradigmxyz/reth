@@ -33,7 +33,7 @@ pub struct ParallelProof<Factory> {
     /// Consistent view of the database.
     view: ConsistentDbView<Factory>,
     /// Trie input.
-    input: TrieInput,
+    input: Arc<TrieInput>,
     /// Parallel state root metrics.
     #[cfg(feature = "metrics")]
     metrics: ParallelStateRootMetrics,
@@ -41,7 +41,7 @@ pub struct ParallelProof<Factory> {
 
 impl<Factory> ParallelProof<Factory> {
     /// Create new state proof generator.
-    pub fn new(view: ConsistentDbView<Factory>, input: TrieInput) -> Self {
+    pub fn new(view: ConsistentDbView<Factory>, input: Arc<TrieInput>) -> Self {
         Self {
             view,
             input,
@@ -62,8 +62,8 @@ where
     ) -> Result<MultiProof, ParallelStateRootError> {
         let mut tracker = ParallelTrieTracker::default();
 
-        let trie_nodes_sorted = Arc::new(self.input.nodes.into_sorted());
-        let hashed_state_sorted = Arc::new(self.input.state.into_sorted());
+        let trie_nodes_sorted = self.input.nodes.clone().into_sorted();
+        let hashed_state_sorted = self.input.state.clone().into_sorted();
 
         // Extend prefix sets with targets
         let mut prefix_sets = self.input.prefix_sets.clone();
