@@ -13,7 +13,6 @@ use alloy_primitives::{
 };
 use alloy_rlp::{BufMut, Decodable, Encodable};
 use itertools::{Either, Itertools};
-use rayon::prelude::*;
 use reth_execution_errors::{StateProofError, TrieWitnessError};
 use reth_trie_common::{
     BranchNode, HashBuilder, Nibbles, StorageMultiProof, TrieAccount, TrieNode, CHILD_INDEX_RANGE,
@@ -99,7 +98,7 @@ where
         // Attempt to compute state root from proofs and gather additional
         // information for the witness.
         let mut account_rlp = Vec::with_capacity(128);
-        let mut account_trie_nodes = Vec::new();
+        let mut account_trie_nodes = BTreeMap::default();
         for (hashed_address, hashed_slots) in proof_targets {
             let storage_multiproof = account_multiproof
                 .storages
@@ -149,7 +148,7 @@ where
                 )?);
             }
 
-            next_root_from_proofs(storage_trie_nodes, false, |key: Nibbles| {
+            next_root_from_proofs(storage_trie_nodes, |key: Nibbles| {
                 // Right pad the target with 0s.
                 let mut padded_key = key.pack();
                 padded_key.resize(32, 0);
@@ -176,7 +175,7 @@ where
             })?;
         }
 
-        next_root_from_proofs(account_trie_nodes, false, |key: Nibbles| {
+        next_root_from_proofs(account_trie_nodes, |key: Nibbles| {
             // Right pad the target with 0s.
             let mut padded_key = key.pack();
             padded_key.resize(32, 0);
