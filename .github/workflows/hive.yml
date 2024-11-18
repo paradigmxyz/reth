@@ -85,7 +85,8 @@ jobs:
         # ethereum/rpc to be deprecated:
         # https://github.com/ethereum/hive/pull/1117
         scenario:
-          - sim: smoke/genesis
+          # TODO: uncomment when https://github.com/paradigmxyz/reth/issues/12620 is fixed
+          # - sim: smoke/genesis
           - sim: smoke/network
           - sim: ethereum/sync
           - sim: devp2p
