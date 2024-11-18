@@ -1,5 +1,6 @@
 use alloc::{vec, vec::Vec};
 use core::cmp::Ordering;
+use reth_primitives_traits::InMemorySize;
 
 use alloy_consensus::{
     constants::{EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID},
@@ -106,6 +107,22 @@ impl ReceiptExt for Receipt {
         panic!("This should not be called in optimism mode. Use `optimism_receipts_root_slow` instead.");
         #[cfg(not(feature = "optimism"))]
         crate::proofs::calculate_receipt_root_no_memo(_receipts)
+    }
+}
+
+impl InMemorySize for Receipt {
+    /// Calculates a heuristic for the in-memory size of the [Receipt].
+    #[inline]
+    fn size(&self) -> usize {
+        let total_size = self.tx_type.size() +
+            core::mem::size_of::<bool>() +
+            core::mem::size_of::<u64>() +
+            self.logs.capacity() * core::mem::size_of::<Log>();
+
+        #[cfg(feature = "optimism")]
+        return total_size + 2 * core::mem::size_of::<Option<u64>>();
+        #[cfg(not(feature = "optimism"))]
+        total_size
     }
 }
 

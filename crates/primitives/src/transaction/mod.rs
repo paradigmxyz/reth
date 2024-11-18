@@ -1274,12 +1274,6 @@ impl TransactionSigned {
         initial_tx
     }
 
-    /// Calculate a heuristic for the in-memory size of the [`TransactionSigned`].
-    #[inline]
-    pub fn size(&self) -> usize {
-        mem::size_of::<TxHash>() + self.transaction.size() + mem::size_of::<Signature>()
-    }
-
     /// Decodes legacy transaction from the data buffer into a tuple.
     ///
     /// This expects `rlp(legacy_tx)`
@@ -1444,6 +1438,14 @@ impl SignedTransaction for TransactionSigned {
             #[cfg(feature = "optimism")]
             Transaction::Deposit(_) => {}
         }
+    }
+}
+
+impl InMemorySize for TransactionSigned {
+    /// Calculate a heuristic for the in-memory size of the [`TransactionSigned`].
+    #[inline]
+    fn size(&self) -> usize {
+        mem::size_of::<TxHash>() + self.transaction.size() + mem::size_of::<Signature>()
     }
 }
 
