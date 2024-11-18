@@ -52,6 +52,7 @@ reth-trie-common = { workspace = true, optional = true }
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
+alloy-consensus.workspace = true
 
 itertools.workspace = true
 futures.workspace = true
@@ -94,22 +95,23 @@ reth-discv4.workspace = true
 [features]
 default = []
 arbitrary = [
-	"dep:proptest",
-	"dep:arbitrary",
-	"dep:proptest-arbitrary-interop",
-	"reth-primitives/arbitrary",
-	"reth-db-api/arbitrary",
-	"reth-eth-wire/arbitrary",
-	"reth-db/arbitrary",
-	"reth-chainspec/arbitrary",
-	"alloy-eips/arbitrary",
-	"alloy-primitives/arbitrary",
-	"reth-codecs/test-utils",
-	"reth-prune-types/test-utils",
-	"reth-stages-types/test-utils",
-	"reth-trie-common/test-utils",
-	"reth-codecs?/arbitrary",
-	"reth-prune-types?/arbitrary",
-	"reth-stages-types?/arbitrary",
-	"reth-trie-common?/arbitrary"
+    "dep:proptest",
+    "dep:arbitrary",
+    "dep:proptest-arbitrary-interop",
+    "reth-primitives/arbitrary",
+    "reth-db-api/arbitrary",
+    "reth-eth-wire/arbitrary",
+    "reth-db/arbitrary",
+    "reth-chainspec/arbitrary",
+    "alloy-eips/arbitrary",
+    "alloy-primitives/arbitrary",
+    "reth-codecs/test-utils",
+    "reth-prune-types/test-utils",
+    "reth-stages-types/test-utils",
+    "reth-trie-common/test-utils",
+    "reth-codecs?/arbitrary",
+    "reth-prune-types?/arbitrary",
+    "reth-stages-types?/arbitrary",
+    "reth-trie-common?/arbitrary",
+    "alloy-consensus/arbitrary",
 ]

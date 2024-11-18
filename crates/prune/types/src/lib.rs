@@ -19,7 +19,8 @@ pub use checkpoint::PruneCheckpoint;
 pub use limiter::PruneLimiter;
 pub use mode::PruneMode;
 pub use pruner::{
-    PruneInterruptReason, PruneProgress, PrunerOutput, SegmentOutput, SegmentOutputCheckpoint,
+    PruneInterruptReason, PruneProgress, PrunedSegmentInfo, PrunerOutput, SegmentOutput,
+    SegmentOutputCheckpoint,
 };
 pub use segment::{PrunePurpose, PruneSegment, PruneSegmentError};
 use serde::{Deserialize, Serialize};

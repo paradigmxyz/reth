@@ -1,7 +1,7 @@
 //! Loads fee history from database. Helper trait for `eth_` fee and transaction RPC methods.
 
 use alloy_primitives::U256;
-use alloy_rpc_types::{BlockNumberOrTag, FeeHistory};
+use alloy_rpc_types_eth::{BlockNumberOrTag, FeeHistory};
 use futures::Future;
 use reth_chainspec::EthChainSpec;
 use reth_provider::{BlockIdReader, ChainSpecProvider, HeaderProvider};

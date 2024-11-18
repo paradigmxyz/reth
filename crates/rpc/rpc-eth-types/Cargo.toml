@@ -35,7 +35,6 @@ alloy-rpc-types-eth.workspace = true
 revm.workspace = true
 revm-inspectors.workspace = true
 revm-primitives = { workspace = true, features = ["dev"] }
-alloy-rpc-types.workspace = true
 alloy-eips.workspace = true
 
 # rpc

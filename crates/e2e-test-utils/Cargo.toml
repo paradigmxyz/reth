@@ -17,6 +17,7 @@ reth-tracing.workspace = true
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-rpc-layer.workspace = true
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
+reth-payload-builder-primitives.workspace = true
 reth-payload-primitives.workspace = true
 reth-provider.workspace = true
 reth-node-builder = { workspace = true, features = ["test-utils"] }
@@ -41,7 +42,8 @@ tokio-stream.workspace = true
 serde_json.workspace = true
 alloy-signer.workspace = true
 alloy-signer-local = { workspace = true, features = ["mnemonic"] }
-alloy-rpc-types.workspace = true
+alloy-rpc-types-eth.workspace = true
+alloy-rpc-types-engine.workspace = true
 alloy-network.workspace = true
 alloy-consensus = { workspace = true, features = ["kzg"] }
 tracing.workspace = true

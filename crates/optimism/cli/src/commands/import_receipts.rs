@@ -5,14 +5,13 @@ use std::path::{Path, PathBuf};
 
 use clap::Parser;
 use reth_cli::chainspec::ChainSpecParser;
-use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
+use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use reth_db::tables;
 use reth_downloaders::{
     file_client::{ChunkedFileReader, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
     receipt_file_client::ReceiptFileClient,
 };
 use reth_execution_types::ExecutionOutcome;
-use reth_node_builder::{NodeTypesWithDB, NodeTypesWithEngine};
 use reth_node_core::version::SHORT_VERSION;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::bedrock::is_dup_tx;
@@ -48,9 +47,7 @@ pub struct ImportReceiptsOpCommand<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> ImportReceiptsOpCommand<C> {
     /// Execute `import` command
-    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
-        self,
-    ) -> eyre::Result<()> {
+    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
         debug!(target: "reth::cli",
@@ -88,7 +85,7 @@ pub async fn import_receipts_from_file<N, P, F>(
     filter: F,
 ) -> eyre::Result<()>
 where
-    N: NodeTypesWithDB<ChainSpec = OpChainSpec>,
+    N: ProviderNodeTypes<ChainSpec = OpChainSpec>,
     P: AsRef<Path>,
     F: FnMut(u64, &mut Receipts) -> usize,
 {
@@ -150,7 +147,7 @@ where
         }
     }
 
-    let provider = provider_factory.provider_rw()?;
+    let provider = provider_factory.database_provider_rw()?;
     let mut total_decoded_receipts = 0;
     let mut total_receipts = 0;
     let mut total_filtered_out_dup_txns = 0;
@@ -247,7 +244,7 @@ where
     provider
         .save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(highest_block_receipts))?;
 
-    UnifiedStorageWriter::commit(provider, static_file_provider)?;
+    UnifiedStorageWriter::commit(provider)?;
 
     Ok(ImportReceiptsResult { total_decoded_receipts, total_filtered_out_dup_txns })
 }

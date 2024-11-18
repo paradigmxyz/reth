@@ -1,7 +1,5 @@
-use crate::blobstore::{
-    BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize, BlobTransactionSidecar,
-};
-use alloy_eips::eip4844::BlobAndProofV1;
+use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize};
+use alloy_eips::eip4844::{BlobAndProofV1, BlobTransactionSidecar};
 use alloy_primitives::B256;
 use parking_lot::RwLock;
 use std::{collections::HashMap, sync::Arc};

@@ -3017,6 +3017,102 @@
           "legendFormat": "Gas/s",
           "range": true,
           "refId": "A"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+            },
+            "disableTextWrap": false,
+            "editorMode": "builder",
+            "expr": "avg_over_time(reth_sync_execution_gas_per_second{instance=~\"$instance\"}[1m])",
+            "fullMetaSearch": false,
+            "hide": false,
+            "includeNullMetadata": true,
+            "legendFormat": "Avg Gas/s (1m)",
+            "range": true,
+            "refId": "B",
+            "useBackend": false
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+            },
+            "disableTextWrap": false,
+            "editorMode": "builder",
+            "expr": "avg_over_time(reth_sync_execution_gas_per_second{instance=~\"$instance\"}[5m])",
+            "fullMetaSearch": false,
+            "hide": false,
+            "includeNullMetadata": true,
+            "legendFormat": "Avg Gas/s (5m)",
+            "range": true,
+            "refId": "C",
+            "useBackend": false
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+            },
+            "disableTextWrap": false,
+            "editorMode": "builder",
+            "expr": "avg_over_time(reth_sync_execution_gas_per_second{instance=~\"$instance\"}[10m])",
+            "fullMetaSearch": false,
+            "hide": false,
+            "includeNullMetadata": true,
+            "legendFormat": "Avg Gas/s (10m)",
+            "range": true,
+            "refId": "D",
+            "useBackend": false
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+            },
+            "disableTextWrap": false,
+            "editorMode": "builder",
+            "expr": "avg_over_time(reth_sync_execution_gas_per_second{instance=~\"$instance\"}[30m])",
+            "fullMetaSearch": false,
+            "hide": false,
+            "includeNullMetadata": true,
+            "legendFormat": "Avg Gas/s (30m)",
+            "range": true,
+            "refId": "E",
+            "useBackend": false
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+            },
+            "disableTextWrap": false,
+            "editorMode": "builder",
+            "expr": "avg_over_time(reth_sync_execution_gas_per_second{instance=~\"$instance\"}[1h])",
+            "fullMetaSearch": false,
+            "hide": false,
+            "includeNullMetadata": true,
+            "legendFormat": "Avg Gas/s (1h)",
+            "range": true,
+            "refId": "F",
+            "useBackend": false
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+            },
+            "disableTextWrap": false,
+            "editorMode": "builder",
+            "expr": "avg_over_time(reth_sync_execution_gas_per_second{instance=~\"$instance\"}[24h])",
+            "fullMetaSearch": false,
+            "hide": false,
+            "includeNullMetadata": true,
+            "legendFormat": "Avg Gas/s (24h)",
+            "range": true,
+            "refId": "G",
+            "useBackend": false
         }
       ],
       "title": "Execution throughput",
@@ -5064,6 +5160,80 @@
         }
       ],
       "title": "Pipeline runs",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Latency histogram for the engine_newPayload to Forkchoice Update",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 188
+      },
+      "id": 213,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_engine_rpc_new_payload_forkchoice_updated_time_diff{instance=~\"$instance\"}",
+          "legendFormat": "new_payload_forkchoice_updated",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Engine API newPayload Forkchoice Update Latency",
       "type": "timeseries"
     },
     {

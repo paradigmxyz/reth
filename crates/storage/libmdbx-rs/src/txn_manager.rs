@@ -5,7 +5,10 @@ use crate::{
 };
 use std::{
     ptr,
-    sync::mpsc::{sync_channel, Receiver, SyncSender},
+    sync::{
+        mpsc::{sync_channel, Receiver, SyncSender},
+        Arc,
+    },
 };
 
 #[derive(Copy, Clone, Debug)]
@@ -28,7 +31,7 @@ pub(crate) enum TxnManagerMessage {
 pub(crate) struct TxnManager {
     sender: SyncSender<TxnManagerMessage>,
     #[cfg(feature = "read-tx-timeouts")]
-    read_transactions: Option<std::sync::Arc<read_transactions::ReadTransactions>>,
+    read_transactions: Option<Arc<read_transactions::ReadTransactions>>,
 }
 
 impl TxnManager {
@@ -289,11 +292,11 @@ mod read_transactions {
 
                     // Sleep not more than `READ_TRANSACTIONS_CHECK_INTERVAL`, but at least until
                     // the closest deadline of an active read transaction
-                    let duration_until_closest_deadline =
-                        self.max_duration - max_active_transaction_duration.unwrap_or_default();
-                    std::thread::sleep(
-                        READ_TRANSACTIONS_CHECK_INTERVAL.min(duration_until_closest_deadline),
+                    let sleep_duration = READ_TRANSACTIONS_CHECK_INTERVAL.min(
+                        self.max_duration - max_active_transaction_duration.unwrap_or_default(),
                     );
+                    trace!(target: "libmdbx", ?sleep_duration, elapsed = ?now.elapsed(), "Putting transaction monitor to sleep");
+                    std::thread::sleep(sleep_duration);
                 }
             };
             std::thread::Builder::new()

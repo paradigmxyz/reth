@@ -2,7 +2,7 @@ use crate::{Capability, EthVersion, ProtocolVersion};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_codecs::add_arbitrary_tests;
 use reth_network_peers::PeerId;
-use reth_primitives::constants::RETH_CLIENT_VERSION;
+use reth_primitives_traits::constants::RETH_CLIENT_VERSION;
 
 /// The default tcp port for p2p.
 ///

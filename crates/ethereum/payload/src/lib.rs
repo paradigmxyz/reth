@@ -9,7 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![allow(clippy::useless_let_if_seq)]
 
-use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
+use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{eip4844::MAX_DATA_GAS_PER_BLOCK, eip7685::Requests, merge::BEACON_NONCE};
 use alloy_primitives::U256;
 use reth_basic_payload_builder::{
@@ -23,11 +23,11 @@ use reth_evm::{system_calls::SystemCaller, ConfigureEvm, NextBlockEnvAttributes}
 use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
-use reth_payload_primitives::{PayloadBuilderAttributes, PayloadBuilderError};
+use reth_payload_builder_primitives::PayloadBuilderError;
+use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_primitives::{
     proofs::{self},
-    revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-    Block, BlockBody, EthereumHardforks, Header, Receipt,
+    Block, BlockBody, EthereumHardforks, Receipt,
 };
 use reth_provider::{ChainSpecProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
@@ -38,10 +38,12 @@ use reth_transaction_pool::{
 use reth_trie::HashedPostState;
 use revm::{
     db::{states::bundle_state::BundleRetention, State},
-    primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
+    primitives::{
+        calc_excess_blob_gas, BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg,
+        InvalidTransaction, ResultAndState, TxEnv,
+    },
     DatabaseCommit,
 };
-use revm_primitives::calc_excess_blob_gas;
 use std::sync::Arc;
 use tracing::{debug, trace, warn};
 
@@ -212,6 +214,13 @@ where
         PayloadBuilderError::Internal(err.into())
     })?;
 
+    let env = EnvWithHandlerCfg::new_with_cfg_env(
+        initialized_cfg.clone(),
+        initialized_block_env.clone(),
+        TxEnv::default(),
+    );
+    let mut evm = evm_config.evm_with_env(&mut db, env);
+
     let mut receipts = Vec::new();
     while let Some(pool_tx) = best_txs.next() {
         // ensure we still have capacity for this transaction
@@ -246,14 +255,8 @@ where
             }
         }
 
-        let env = EnvWithHandlerCfg::new_with_cfg_env(
-            initialized_cfg.clone(),
-            initialized_block_env.clone(),
-            evm_config.tx_env(tx.as_signed(), tx.signer()),
-        );
-
-        // Configure the environment for the block.
-        let mut evm = evm_config.evm_with_env(&mut db, env);
+        // Configure the environment for the tx.
+        *evm.tx_mut() = evm_config.tx_env(tx.as_signed(), tx.signer());
 
         let ResultAndState { result, state } = match evm.transact() {
             Ok(res) => res,
@@ -279,10 +282,9 @@ where
                 }
             }
         };
-        // drop evm so db is released.
-        drop(evm);
+
         // commit changes
-        db.commit(state);
+        evm.db_mut().commit(state);
 
         // add to the total blob gas used if the transaction successfully executed
         if let Some(blob_tx) = tx.transaction.as_eip4844() {
@@ -320,6 +322,9 @@ where
         executed_senders.push(tx.signer());
         executed_txs.push(tx.into_signed());
     }
+
+    // Release db
+    drop(evm);
 
     // check if we have a better block
     if !is_better_payload(best_payload.as_ref(), total_fees) {
@@ -392,9 +397,11 @@ where
     // only determine cancun fields when active
     if chain_spec.is_cancun_active_at_timestamp(attributes.timestamp) {
         // grab the blob sidecars from the executed txs
-        blob_sidecars = pool.get_all_blobs_exact(
-            executed_txs.iter().filter(|tx| tx.is_eip4844()).map(|tx| tx.hash).collect(),
-        )?;
+        blob_sidecars = pool
+            .get_all_blobs_exact(
+                executed_txs.iter().filter(|tx| tx.is_eip4844()).map(|tx| tx.hash).collect(),
+            )
+            .map_err(PayloadBuilderError::other)?;
 
         excess_blob_gas = if chain_spec.is_cancun_active_at_timestamp(parent_header.timestamp) {
             let parent_excess_blob_gas = parent_header.excess_blob_gas.unwrap_or_default();
@@ -439,12 +446,12 @@ where
         body: BlockBody { transactions: executed_txs, ommers: vec![], withdrawals },
     };
 
-    let sealed_block = block.seal_slow();
+    let sealed_block = Arc::new(block.seal_slow());
     debug!(target: "payload_builder", ?sealed_block, "sealed built block");
 
     // create the executed block data
     let executed = ExecutedBlock {
-        block: Arc::new(sealed_block.clone()),
+        block: sealed_block.clone(),
         senders: Arc::new(executed_senders),
         execution_output: Arc::new(execution_outcome),
         hashed_state: Arc::new(hashed_state),

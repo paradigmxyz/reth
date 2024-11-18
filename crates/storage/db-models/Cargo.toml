@@ -18,6 +18,7 @@ reth-primitives-traits.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
+alloy-eips.workspace = true
 
 # codecs
 modular-bitfield.workspace = true
@@ -42,14 +43,15 @@ test-fuzz.workspace = true
 
 [features]
 test-utils = [
-	"reth-primitives-traits/test-utils",
-	"arbitrary",
-	"reth-codecs/test-utils"
+    "reth-primitives-traits/test-utils",
+    "arbitrary",
+    "reth-codecs/test-utils",
 ]
 arbitrary = [
-	"reth-primitives-traits/arbitrary",
-	"dep:arbitrary",
-	"dep:proptest",
-	"alloy-primitives/arbitrary",
-	"reth-codecs/arbitrary"
+    "reth-primitives-traits/arbitrary",
+    "dep:arbitrary",
+    "dep:proptest",
+    "alloy-primitives/arbitrary",
+    "alloy-eips/arbitrary",
+    "reth-codecs/arbitrary",
 ]

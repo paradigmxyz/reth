@@ -27,6 +27,7 @@ byteorder = "1"
 derive_more.workspace = true
 roaring = "0.10.2"
 serde_with = { workspace = true, optional = true }
+auto_impl.workspace = true
 
 # required by reth-codecs
 bytes.workspace = true
@@ -39,8 +40,6 @@ proptest = { workspace = true, optional = true }
 proptest-arbitrary-interop = { workspace = true, optional = true }
 
 [dev-dependencies]
-reth-testing-utils.workspace = true
-
 alloy-primitives = { workspace = true, features = ["arbitrary"] }
 alloy-consensus = { workspace = true, features = ["arbitrary"] }
 

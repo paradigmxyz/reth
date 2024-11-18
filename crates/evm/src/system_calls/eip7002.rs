@@ -1,10 +1,10 @@
 //! [EIP-7002](https://eips.ethereum.org/EIPS/eip-7002) system call implementation.
 use crate::ConfigureEvm;
 use alloc::{boxed::Box, format};
+use alloy_consensus::Header;
 use alloy_eips::eip7002::WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS;
 use alloy_primitives::Bytes;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
-use reth_primitives::Header;
 use revm::{interpreter::Host, Database, Evm};
 use revm_primitives::{ExecutionResult, ResultAndState};
 
