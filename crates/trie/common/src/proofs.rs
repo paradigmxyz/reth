@@ -51,10 +51,10 @@ impl MultiProof {
                     if nibbles.ends_with(&leaf.key) {
                         let account = TrieAccount::decode(&mut &leaf.value[..])?;
                         break 'info Some(Account {
-                            balance: account.balance,
-                            nonce: account.nonce,
-                            bytecode_hash: (account.code_hash != KECCAK_EMPTY)
-                                .then_some(account.code_hash),
+                            balance: account.balance(),
+                            nonce: account.nonce(),
+                            bytecode_hash: (account.code_hash() != KECCAK_EMPTY)
+                                .then_some(account.code_hash()),
                         })
                     }
                 }

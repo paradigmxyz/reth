@@ -1,5 +1,5 @@
 use crate::root::storage_root_unhashed;
-use alloy_consensus::constants::KECCAK_EMPTY;
+use alloy_consensus::{constants::KECCAK_EMPTY, Account as AlloyTrieAccount};
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{keccak256, B256, U256};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
@@ -9,21 +9,32 @@ use revm_primitives::AccountInfo;
 
 /// An Ethereum account as represented in the trie.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
-pub struct TrieAccount {
-    /// Account nonce.
-    pub nonce: u64,
-    /// Account balance.
-    pub balance: U256,
-    /// Account's storage root.
-    pub storage_root: B256,
-    /// Hash of the account's bytecode.
-    pub code_hash: B256,
-}
+pub struct TrieAccount(AlloyTrieAccount);
 
 impl TrieAccount {
+    /// Get account's nonce.
+    pub const fn nonce(&self) -> u64 {
+        self.0.nonce
+    }
+
+    /// Get account's balance.
+    pub const fn balance(&self) -> U256 {
+        self.0.balance
+    }
+
     /// Get account's storage root.
     pub const fn storage_root(&self) -> B256 {
-        self.storage_root
+        self.0.storage_root
+    }
+
+    /// Get account's code hash.
+    pub const fn code_hash(&self) -> B256 {
+        self.0.code_hash
+    }
+
+    /// Get inner alloy's trie account.
+    pub const fn into_inner(self) -> AlloyTrieAccount {
+        self.0
     }
 }
 
@@ -41,34 +52,34 @@ impl From<GenesisAccount> for TrieAccount {
             })
             .unwrap_or(EMPTY_ROOT_HASH);
 
-        Self {
+        Self(AlloyTrieAccount {
             nonce: account.nonce.unwrap_or_default(),
             balance: account.balance,
             storage_root,
             code_hash: account.code.map_or(KECCAK_EMPTY, keccak256),
-        }
+        })
     }
 }
 
 impl From<(Account, B256)> for TrieAccount {
     fn from((account, storage_root): (Account, B256)) -> Self {
-        Self {
+        Self(AlloyTrieAccount {
             nonce: account.nonce,
             balance: account.balance,
             storage_root,
             code_hash: account.bytecode_hash.unwrap_or(KECCAK_EMPTY),
-        }
+        })
     }
 }
 
 impl From<(AccountInfo, B256)> for TrieAccount {
     fn from((account, storage_root): (AccountInfo, B256)) -> Self {
-        Self {
+        Self(AlloyTrieAccount {
             nonce: account.nonce,
             balance: account.balance,
             storage_root,
             code_hash: account.code_hash,
-        }
+        })
     }
 }
 
@@ -86,10 +97,10 @@ mod tests {
         let trie_account: TrieAccount = genesis_account.into();
 
         // Check the fields are properly set.
-        assert_eq!(trie_account.nonce, 0);
-        assert_eq!(trie_account.balance, U256::default());
+        assert_eq!(trie_account.nonce(), 0);
+        assert_eq!(trie_account.balance(), U256::default());
         assert_eq!(trie_account.storage_root(), EMPTY_ROOT_HASH);
-        assert_eq!(trie_account.code_hash, KECCAK_EMPTY);
+        assert_eq!(trie_account.code_hash(), KECCAK_EMPTY);
 
         // Check that the default Account converts to the same TrieAccount
         assert_eq!(Into::<TrieAccount>::into((Account::default(), EMPTY_ROOT_HASH)), trie_account);
@@ -124,10 +135,10 @@ mod tests {
         )]));
 
         // Check that the fields are properly set.
-        assert_eq!(trie_account.nonce, 10);
-        assert_eq!(trie_account.balance, U256::from(1000));
+        assert_eq!(trie_account.nonce(), 10);
+        assert_eq!(trie_account.balance(), U256::from(1000));
         assert_eq!(trie_account.storage_root(), expected_storage_root);
-        assert_eq!(trie_account.code_hash, keccak256([0x60, 0x61]));
+        assert_eq!(trie_account.code_hash(), keccak256([0x60, 0x61]));
 
         // Check that the Account converts to the same TrieAccount
         assert_eq!(
@@ -174,11 +185,11 @@ mod tests {
         let trie_account: TrieAccount = genesis_account.into();
 
         // Check the fields are properly set.
-        assert_eq!(trie_account.nonce, 3);
-        assert_eq!(trie_account.balance, U256::from(300));
+        assert_eq!(trie_account.nonce(), 3);
+        assert_eq!(trie_account.balance(), U256::from(300));
         // Zero values in storage should result in EMPTY_ROOT_HASH
         assert_eq!(trie_account.storage_root(), EMPTY_ROOT_HASH);
         // No code provided, so code hash should be KECCAK_EMPTY
-        assert_eq!(trie_account.code_hash, KECCAK_EMPTY);
+        assert_eq!(trie_account.code_hash(), KECCAK_EMPTY);
     }
 }
