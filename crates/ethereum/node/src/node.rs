@@ -39,7 +39,7 @@ use reth_trie_db::MerklePatriciaTrie;
 use crate::{EthEngineTypes, EthEvmConfig};
 
 /// Ethereum primitive types.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct EthPrimitives;
 
 impl NodePrimitives for EthPrimitives {

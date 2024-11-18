@@ -74,3 +74,14 @@ pub mod serde_bincode_compat {
         transaction::{serde_bincode_compat as transaction, serde_bincode_compat::*},
     };
 }
+
+/// Temp helper struct for integrating [`NodePrimitives`](reth_primitives_traits::NodePrimitives).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AnyPrimitives;
+
+impl reth_primitives_traits::NodePrimitives for AnyPrimitives {
+    type Block = crate::Block;
+    type SignedTx = crate::TransactionSigned;
+    type TxType = crate::TxType;
+    type Receipt = crate::Receipt;
+}
