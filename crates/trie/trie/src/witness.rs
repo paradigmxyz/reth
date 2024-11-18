@@ -213,11 +213,10 @@ where
                 let mut storage_cursor =
                     self.hashed_cursor_factory.hashed_storage_cursor(*hashed_address)?;
                 // position cursor at the start
-                if let Some((hashed_slot, _)) = storage_cursor.seek(B256::ZERO)? {
+                let mut current_entry = storage_cursor.seek(B256::ZERO)?;
+                while let Some((hashed_slot, _)) = current_entry {
                     storage_keys.insert(hashed_slot);
-                }
-                while let Some((hashed_slot, _)) = storage_cursor.next()? {
-                    storage_keys.insert(hashed_slot);
+                    current_entry = storage_cursor.next()?;
                 }
             }
             proof_targets.insert(*hashed_address, storage_keys);
