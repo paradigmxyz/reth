@@ -8335,6 +8335,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-revm",
+ "reth-rpc-server-types",
  "reth-tracing",
  "reth-transaction-pool",
  "reth-trie-db",
