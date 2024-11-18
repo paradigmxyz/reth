@@ -1,7 +1,11 @@
 //! Optimism Node types config.
 
-use std::sync::Arc;
-
+use crate::{
+    args::RollupArgs,
+    engine::OpEngineValidator,
+    txpool::{OpTransactionPool, OpTransactionValidator},
+    OpEngineTypes,
+};
 use alloy_consensus::Header;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_chainspec::{EthChainSpec, Hardforks};
@@ -23,23 +27,21 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_evm::{OpEvmConfig, OpExecutionStrategyFactory};
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
-use reth_optimism_rpc::OpEthApi;
+use reth_optimism_rpc::{
+    witness::{DebugExecutionWitnessApiServer, OpDebugWitnessApi},
+    OpEthApi,
+};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::{Block, Receipt, TransactionSigned, TxType};
 use reth_provider::CanonStateSubscriptions;
+use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, CoinbaseTipOrdering, TransactionPool,
     TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
-
-use crate::{
-    args::RollupArgs,
-    engine::OpEngineValidator,
-    txpool::{OpTransactionPool, OpTransactionValidator},
-    OpEngineTypes,
-};
+use std::sync::Arc;
 
 /// Optimism primitive types.
 #[derive(Debug, Default, Clone)]
@@ -163,7 +165,17 @@ where
         self,
         ctx: reth_node_api::AddOnsContext<'_, N>,
     ) -> eyre::Result<Self::Handle> {
-        self.0.launch_add_ons(ctx).await
+        // install additional OP specific rpc methods
+        let debug_ext =
+            OpDebugWitnessApi::new(ctx.node.provider().clone(), ctx.node.evm_config().clone());
+
+        self.0
+            .launch_add_ons_with(ctx, move |modules| {
+                debug!(target: "reth::cli", "Installing debug payload witness rpc endpoint");
+                modules.merge_if_module_configured(RethRpcModule::Debug, debug_ext.into_rpc())?;
+                Ok(())
+            })
+            .await
     }
 }
 
