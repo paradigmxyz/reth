@@ -3,7 +3,7 @@ use crate::{
     prefix_set::TriePrefixSetsMut,
     proof::{Proof, StorageProof},
     trie_cursor::TrieCursorFactory,
-    HashedPostState,
+    HashedPostState, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::{
@@ -97,7 +97,7 @@ where
 
         // Attempt to compute state root from proofs and gather additional
         // information for the witness.
-        let mut account_rlp = Vec::with_capacity(128);
+        let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
         let mut account_trie_nodes = BTreeMap::default();
         for (hashed_address, hashed_slots) in proof_targets {
             let storage_multiproof = account_multiproof
