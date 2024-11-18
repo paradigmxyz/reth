@@ -12,7 +12,7 @@ use alloy_trie::{
 use itertools::Itertools;
 use reth_primitives_traits::Account;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{hash_map, HashMap};
 
 /// The state multiproof of target accounts and multiproofs of their storage tries.
 /// Multiproof is effectively a state subtrie that only contains the nodes
@@ -75,6 +75,24 @@ impl MultiProof {
             storage_proofs.push(proof);
         }
         Ok(AccountProof { address, info, proof, storage_root, storage_proofs })
+    }
+
+    /// Extends this multiproof with another one, merging both account and storage
+    /// proofs.
+    pub fn extend(&mut self, other: Self) {
+        self.account_subtree.extend_from(other.account_subtree);
+
+        for (hashed_address, storage) in other.storages {
+            match self.storages.entry(hashed_address) {
+                hash_map::Entry::Occupied(mut entry) => {
+                    debug_assert_eq!(entry.get().root, storage.root);
+                    entry.get_mut().subtree.extend_from(storage.subtree);
+                }
+                hash_map::Entry::Vacant(entry) => {
+                    entry.insert(storage);
+                }
+            }
+        }
     }
 }
 
@@ -253,5 +271,63 @@ pub mod triehash {
         fn hash(x: &[u8]) -> Self::Out {
             keccak256(x)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_multiproof_extend_account_proofs() {
+        let mut proof1 = MultiProof::default();
+        let mut proof2 = MultiProof::default();
+
+        let addr1 = B256::random();
+        let addr2 = B256::random();
+
+        proof1.account_subtree.insert(
+            Nibbles::unpack(addr1),
+            alloy_rlp::encode_fixed_size(&U256::from(42)).to_vec().into(),
+        );
+        proof2.account_subtree.insert(
+            Nibbles::unpack(addr2),
+            alloy_rlp::encode_fixed_size(&U256::from(43)).to_vec().into(),
+        );
+
+        proof1.extend(proof2);
+
+        assert!(proof1.account_subtree.contains_key(&Nibbles::unpack(addr1)));
+        assert!(proof1.account_subtree.contains_key(&Nibbles::unpack(addr2)));
+    }
+
+    #[test]
+    fn test_multiproof_extend_storage_proofs() {
+        let mut proof1 = MultiProof::default();
+        let mut proof2 = MultiProof::default();
+
+        let addr = B256::random();
+        let root = B256::random();
+
+        let mut subtree1 = ProofNodes::default();
+        subtree1.insert(
+            Nibbles::from_nibbles(vec![0]),
+            alloy_rlp::encode_fixed_size(&U256::from(42)).to_vec().into(),
+        );
+        proof1.storages.insert(addr, StorageMultiProof { root, subtree: subtree1 });
+
+        let mut subtree2 = ProofNodes::default();
+        subtree2.insert(
+            Nibbles::from_nibbles(vec![1]),
+            alloy_rlp::encode_fixed_size(&U256::from(43)).to_vec().into(),
+        );
+        proof2.storages.insert(addr, StorageMultiProof { root, subtree: subtree2 });
+
+        proof1.extend(proof2);
+
+        let storage = proof1.storages.get(&addr).unwrap();
+        assert_eq!(storage.root, root);
+        assert!(storage.subtree.contains_key(&Nibbles::from_nibbles(vec![0])));
+        assert!(storage.subtree.contains_key(&Nibbles::from_nibbles(vec![1])));
     }
 }

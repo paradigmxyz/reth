@@ -34,6 +34,7 @@ plain_hasher = { version = "0.2", optional = true }
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 
 [dev-dependencies]
+alloy-primitives = { workspace = true, features = ["getrandom"] }
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
