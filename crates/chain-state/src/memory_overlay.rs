@@ -18,11 +18,11 @@ use std::sync::OnceLock;
 /// A state provider that stores references to in-memory blocks along with their state as well as a
 /// reference of the historical state provider for fallback lookups.
 #[allow(missing_debug_implementations)]
-pub struct MemoryOverlayStateProviderRef<'a, P: NodePrimitives = reth_primitives::EthPrimitives> {
+pub struct MemoryOverlayStateProviderRef<'a, N: NodePrimitives = reth_primitives::EthPrimitives> {
     /// Historical state provider for state lookups that are not found in in-memory blocks.
     pub(crate) historical: Box<dyn StateProvider + 'a>,
     /// The collection of executed parent blocks. Expected order is newest to oldest.
-    pub(crate) in_memory: Vec<ExecutedBlock<P>>,
+    pub(crate) in_memory: Vec<ExecutedBlock<N>>,
     /// Lazy-loaded in-memory trie data.
     pub(crate) trie_state: OnceLock<MemoryOverlayTrieState>,
 }
@@ -30,11 +30,11 @@ pub struct MemoryOverlayStateProviderRef<'a, P: NodePrimitives = reth_primitives
 /// A state provider that stores references to in-memory blocks along with their state as well as
 /// the historical state provider for fallback lookups.
 #[allow(missing_debug_implementations)]
-pub struct MemoryOverlayStateProvider<P: NodePrimitives = reth_primitives::EthPrimitives> {
+pub struct MemoryOverlayStateProvider<N: NodePrimitives = reth_primitives::EthPrimitives> {
     /// Historical state provider for state lookups that are not found in in-memory blocks.
     pub(crate) historical: Box<dyn StateProvider>,
     /// The collection of executed parent blocks. Expected order is newest to oldest.
-    pub(crate) in_memory: Vec<ExecutedBlock<P>>,
+    pub(crate) in_memory: Vec<ExecutedBlock<N>>,
     /// Lazy-loaded in-memory trie data.
     pub(crate) trie_state: OnceLock<MemoryOverlayTrieState>,
 }
@@ -49,7 +49,7 @@ macro_rules! impl_state_provider {
             /// - `in_memory` - the collection of executed ancestor blocks in reverse.
             /// - `historical` - a historical state provider for the latest ancestor block stored in the
             ///   database.
-            pub fn new(historical: $historical_type, in_memory: Vec<ExecutedBlock<P>>) -> Self {
+            pub fn new(historical: $historical_type, in_memory: Vec<ExecutedBlock<N>>) -> Self {
                 Self { historical, in_memory, trie_state: OnceLock::new() }
             }
 
@@ -230,8 +230,8 @@ macro_rules! impl_state_provider {
     };
 }
 
-impl_state_provider!([<P: NodePrimitives>], MemoryOverlayStateProvider<P>, Box<dyn StateProvider>);
-impl_state_provider!([<'a, P: NodePrimitives>], MemoryOverlayStateProviderRef<'a, P>, Box<dyn StateProvider + 'a>);
+impl_state_provider!([<N: NodePrimitives>], MemoryOverlayStateProvider<N>, Box<dyn StateProvider>);
+impl_state_provider!([<'a, N: NodePrimitives>], MemoryOverlayStateProviderRef<'a, N>, Box<dyn StateProvider + 'a>);
 
 /// The collection of data necessary for trie-related operations for [`MemoryOverlayStateProvider`].
 #[derive(Clone, Default, Debug)]
