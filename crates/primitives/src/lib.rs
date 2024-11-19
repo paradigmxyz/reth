@@ -39,8 +39,8 @@ pub use receipt::{
     gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,
 };
 pub use reth_primitives_traits::{
-    logs_bloom, Account, Bytecode, GotExpected, GotExpectedBoxed, HeaderError, Log, LogData,
-    NodePrimitives, SealedHeader, StorageEntry,
+    logs_bloom, Account, Bytecode, GotExpected, GotExpectedBoxed, Header, HeaderError, Log,
+    LogData, NodePrimitives, SealedHeader, StorageEntry,
 };
 pub use static_file::StaticFileSegment;
 
@@ -79,6 +79,15 @@ pub mod serde_bincode_compat {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EthPrimitives;
 
+#[cfg(feature = "reth-codec")]
+impl reth_primitives_traits::FullNodePrimitives for EthPrimitives {
+    type Block = crate::Block;
+    type SignedTx = crate::TransactionSigned;
+    type TxType = crate::TxType;
+    type Receipt = crate::Receipt;
+}
+
+#[cfg(not(feature = "reth-codec"))]
 impl NodePrimitives for EthPrimitives {
     type Block = crate::Block;
     type SignedTx = crate::TransactionSigned;

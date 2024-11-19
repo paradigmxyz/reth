@@ -42,6 +42,10 @@ impl SparseStateTrie {
         account: B256,
         proof: impl IntoIterator<Item = (Nibbles, Bytes)>,
     ) -> SparseStateTrieResult<()> {
+        if self.revealed.contains_key(&account) {
+            return Ok(());
+        }
+
         let mut proof = proof.into_iter().peekable();
 
         let Some(root_node) = self.validate_proof(&mut proof)? else { return Ok(()) };
@@ -69,6 +73,10 @@ impl SparseStateTrie {
         slot: B256,
         proof: impl IntoIterator<Item = (Nibbles, Bytes)>,
     ) -> SparseStateTrieResult<()> {
+        if self.revealed.get(&account).is_some_and(|v| v.contains(&slot)) {
+            return Ok(());
+        }
+
         let mut proof = proof.into_iter().peekable();
 
         let Some(root_node) = self.validate_proof(&mut proof)? else { return Ok(()) };

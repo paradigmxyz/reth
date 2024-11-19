@@ -32,6 +32,7 @@ reth-fs-util.workspace = true
 reth-network = { workspace = true, features = ["serde"] }
 reth-network-p2p.workspace = true
 reth-network-peers = { workspace = true, features = ["secp256k1"] }
+reth-node-api.workspace = true
 reth-node-builder.workspace = true
 reth-node-core.workspace = true
 reth-node-events.workspace = true

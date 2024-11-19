@@ -45,10 +45,10 @@ use reth_node_ethereum::{
     EthEngineTypes, EthEvmConfig,
 };
 use reth_payload_builder::noop::NoopPayloadBuilderService;
-use reth_primitives::{Head, SealedBlockWithSenders};
+use reth_primitives::{EthPrimitives, Head, SealedBlockWithSenders};
 use reth_provider::{
     providers::{BlockchainProvider, StaticFileProvider},
-    BlockReader, ProviderFactory,
+    BlockReader, EthStorage, ProviderFactory,
 };
 use reth_tasks::TaskManager;
 use reth_transaction_pool::test_utils::{testing_pool, TestPool};
@@ -118,9 +118,10 @@ where
 pub struct TestNode;
 
 impl NodeTypes for TestNode {
-    type Primitives = ();
+    type Primitives = EthPrimitives;
     type ChainSpec = ChainSpec;
     type StateCommitment = reth_trie_db::MerklePatriciaTrie;
+    type Storage = EthStorage;
 }
 
 impl NodeTypesWithEngine for TestNode {
@@ -129,7 +130,14 @@ impl NodeTypesWithEngine for TestNode {
 
 impl<N> Node<N> for TestNode
 where
-    N: FullNodeTypes<Types: NodeTypesWithEngine<Engine = EthEngineTypes, ChainSpec = ChainSpec>>,
+    N: FullNodeTypes<
+        Types: NodeTypesWithEngine<
+            Engine = EthEngineTypes,
+            ChainSpec = ChainSpec,
+            Primitives = EthPrimitives,
+            Storage = EthStorage,
+        >,
+    >,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
