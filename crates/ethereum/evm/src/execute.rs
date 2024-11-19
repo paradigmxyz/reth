@@ -129,12 +129,12 @@ where
 }
 
 // replace with EthPrimitives
-impl<DB, EvmConfig> BlockExecutionStrategy<DB, EthPrimitives>
-    for EthExecutionStrategy<DB, EvmConfig>
+impl<DB, EvmConfig> BlockExecutionStrategy<DB> for EthExecutionStrategy<DB, EvmConfig>
 where
     DB: Database<Error: Into<ProviderError> + Display>,
     EvmConfig: ConfigureEvm<Header = alloy_consensus::Header>,
 {
+    type Primitives = EthPrimitives;
     type Error = BlockExecutionError;
 
     fn apply_pre_execution_changes(

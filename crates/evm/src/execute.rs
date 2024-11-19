@@ -188,11 +188,13 @@ pub struct ExecuteOutput<T = reth_primitives::Receipt> {
 }
 
 /// Defines the strategy for executing a single block.
-pub trait BlockExecutionStrategy<DB, N>
+pub trait BlockExecutionStrategy<DB>
 where
     DB: Database,
-    N: NodePrimitives,
 {
+    /// Data primitives, w.r.t network.
+    type Primitives: NodePrimitives;
+
     /// The error type returned by this strategy's methods.
     type Error: From<ProviderError> + core::error::Error;
 
@@ -208,14 +210,14 @@ where
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<ExecuteOutput<N::Receipt>, Self::Error>;
+    ) -> Result<ExecuteOutput<Rcpt<Self::Primitives>>, Self::Error>;
 
     /// Applies any necessary changes after executing the block's transactions.
     fn apply_post_execution_changes(
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-        receipts: &[N::Receipt],
+        receipts: &[Rcpt<Self::Primitives>],
     ) -> Result<Requests, Self::Error>;
 
     /// Returns a reference to the current state.
@@ -237,7 +239,7 @@ where
     fn validate_block_post_execution(
         &self,
         _block: &BlockWithSenders,
-        _receipts: &[N::Receipt],
+        _receipts: &[Rcpt<Self::Primitives>],
         _requests: &Requests,
     ) -> Result<(), ConsensusError> {
         Ok(())
@@ -252,7 +254,7 @@ pub trait BlockExecutionStrategyFactory: Send + Sync + Clone + Unpin + 'static {
     /// Associated strategy type.
     type Strategy<DB: Database<Error: Into<ProviderError> + Display>>: BlockExecutionStrategy<
         DB,
-        Self::Primitives,
+        Primitives = Self::Primitives,
         Error = BlockExecutionError,
     >;
 
@@ -319,7 +321,7 @@ where
 #[allow(missing_debug_implementations, dead_code)]
 pub struct BasicBlockExecutor<S, DB, N>
 where
-    S: BlockExecutionStrategy<DB, N>,
+    S: BlockExecutionStrategy<DB, Primitives = N>,
     DB: Database,
     N: NodePrimitives,
 {
@@ -330,7 +332,7 @@ where
 
 impl<S, DB, N> BasicBlockExecutor<S, DB, N>
 where
-    S: BlockExecutionStrategy<DB, N>,
+    S: BlockExecutionStrategy<DB, Primitives = N>,
     DB: Database,
     N: NodePrimitives,
 {
@@ -342,7 +344,7 @@ where
 
 impl<S, DB, N> Executor<DB, N> for BasicBlockExecutor<S, DB, N>
 where
-    S: BlockExecutionStrategy<DB, N>,
+    S: BlockExecutionStrategy<DB, Primitives = N>,
     DB: Database<Error: Into<ProviderError> + Display>,
     N: NodePrimitives,
 {
@@ -415,7 +417,7 @@ where
 #[allow(missing_debug_implementations)]
 pub struct BasicBatchExecutor<S, DB, N>
 where
-    S: BlockExecutionStrategy<DB, N>,
+    S: BlockExecutionStrategy<DB, Primitives = N>,
     DB: Database,
     N: NodePrimitives,
 {
@@ -428,7 +430,7 @@ where
 
 impl<S, DB, N> BasicBatchExecutor<S, DB, N>
 where
-    S: BlockExecutionStrategy<DB, N>,
+    S: BlockExecutionStrategy<DB, Primitives = N>,
     DB: Database,
     N: NodePrimitives,
 {
@@ -440,7 +442,7 @@ where
 
 impl<S, DB, N> BatchExecutor<DB, N> for BasicBatchExecutor<S, DB, N>
 where
-    S: BlockExecutionStrategy<DB, N, Error = BlockExecutionError>,
+    S: BlockExecutionStrategy<DB, Primitives = N, Error = BlockExecutionError>,
     DB: Database<Error: Into<ProviderError> + Display>,
     N: NodePrimitives<Receipt: Receipt>,
 {
@@ -649,11 +651,12 @@ mod tests {
         }
     }
 
-    impl<DB, N> BlockExecutionStrategy<DB, N> for TestExecutorStrategy<DB, TestEvmConfig, N>
+    impl<DB, N> BlockExecutionStrategy<DB> for TestExecutorStrategy<DB, TestEvmConfig, N>
     where
         DB: Database,
         N: NodePrimitives,
     {
+        type Primitives = N;
         type Error = BlockExecutionError;
 
         fn apply_pre_execution_changes(

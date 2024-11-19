@@ -127,7 +127,7 @@ where
 
 impl<S, DB, N> BasicBlockExecutor<S, DB, N>
 where
-    S: BlockExecutionStrategy<DB, N>,
+    S: BlockExecutionStrategy<DB, Primitives = N>,
     DB: Database,
     N: NodePrimitives,
 {
@@ -150,7 +150,7 @@ where
 
 impl<S, DB, N> BasicBatchExecutor<S, DB, N>
 where
-    S: BlockExecutionStrategy<DB, N>,
+    S: BlockExecutionStrategy<DB, Primitives = N>,
     DB: Database,
     N: NodePrimitives,
 {

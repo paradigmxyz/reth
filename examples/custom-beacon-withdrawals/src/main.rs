@@ -9,7 +9,7 @@ use alloy_sol_types::SolCall;
 #[cfg(feature = "optimism")]
 use reth::revm::primitives::OptimismFields;
 use reth::{
-    api::{ConfigureEvm, ConfigureEvmEnv, NodePrimitives, NodeTypesWithEngine},
+    api::{ConfigureEvm, ConfigureEvmEnv, NodeTypesWithEngine},
     builder::{components::ExecutorBuilder, BuilderContext, FullNodeTypes},
     cli::Cli,
     providers::ProviderError,
@@ -29,7 +29,7 @@ use reth_evm::execute::{
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_node_ethereum::{node::EthereumAddOns, BasicBlockExecutorProvider, EthereumNode};
-use reth_primitives::BlockWithSenders;
+use reth_primitives::{BlockWithSenders, EthPrimitives, Rcpt};
 use std::{fmt::Display, sync::Arc};
 
 pub const SYSTEM_ADDRESS: Address = address!("fffffffffffffffffffffffffffffffffffffffe");
@@ -143,11 +143,11 @@ where
     }
 }
 
-impl<DB, N> BlockExecutionStrategy<DB, N> for CustomExecutorStrategy<DB>
+impl<DB> BlockExecutionStrategy<DB> for CustomExecutorStrategy<DB>
 where
     DB: Database<Error: Into<ProviderError> + Display>,
-    N: NodePrimitives,
 {
+    type Primitives = EthPrimitives;
     type Error = BlockExecutionError;
 
     fn apply_pre_execution_changes(
@@ -167,7 +167,7 @@ where
         &mut self,
         _block: &BlockWithSenders,
         _total_difficulty: U256,
-    ) -> Result<ExecuteOutput<N::Receipt>, Self::Error> {
+    ) -> Result<ExecuteOutput<Rcpt<EthPrimitives>>, Self::Error> {
         Ok(ExecuteOutput { receipts: vec![], gas_used: 0 })
     }
 
@@ -175,7 +175,7 @@ where
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-        _receipts: &[N::Receipt],
+        _receipts: &[Rcpt<EthPrimitives>],
     ) -> Result<Requests, Self::Error> {
         let env = self.evm_env_for_block(&block.header, total_difficulty);
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);

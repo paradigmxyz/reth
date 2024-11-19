@@ -116,12 +116,12 @@ where
 }
 
 // todo: replace with OpPrimitives
-impl<DB, EvmConfig> BlockExecutionStrategy<DB, reth_primitives::EthPrimitives>
-    for OpExecutionStrategy<DB, EvmConfig>
+impl<DB, EvmConfig> BlockExecutionStrategy<DB> for OpExecutionStrategy<DB, EvmConfig>
 where
     DB: Database<Error: Into<ProviderError> + Display>,
     EvmConfig: ConfigureEvm<Header = alloy_consensus::Header>,
 {
+    type Primitives = reth_primitives::EthPrimitives;
     type Error = BlockExecutionError;
 
     fn apply_pre_execution_changes(
