@@ -114,7 +114,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 Historically, libmdbx inherits the API basis from LMDB, where it is often
 difficult to select flags/options and functions for the desired operation.
-So it is recommend using this hints.
+So it is recommended to use these hints.
 
 ## Databases with UNIQUE keys
 
