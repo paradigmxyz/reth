@@ -2198,12 +2198,14 @@ where
         let exec_time = Instant::now();
 
         let (state_root_tx, state_root_rx) = std::sync::mpsc::channel();
-        // TODO: create consistent_view using `new_with_latest_tip` when we
-        // switch to `StateRootTask`.
-        let consistent_view = ConsistentDbView::new(self.provider.clone(), None);
-        // TODO: calculate `TrieInput` like in `self.compute_state_root_parallel`.
-        let input = Arc::new(TrieInput::default());
-        let state_root_config = StateRootConfig { consistent_view, input };
+
+        let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
+
+        let input = self
+            .compute_trie_input(consistent_view.clone(), block.parent_hash)
+            .map_err(|e| InsertBlockErrorKindTwo::Other(Box::new(e)))?;
+        let state_root_config =
+            StateRootConfig { consistent_view: consistent_view.clone(), input: Arc::new(input) };
         let receiver_stream = StdReceiverStream::new(state_root_rx);
         let state_root_task = StateRootTask::new(state_root_config, receiver_stream);
         let state_root_handle = state_root_task.spawn();
@@ -2239,8 +2241,6 @@ where
         let root_time = Instant::now();
         let mut state_root_result = None;
 
-        // TODO: switch to calculate state root using `StateRootTask`.
-
         // We attempt to compute state root in parallel if we are currently not persisting anything
         // to database. This is safe, because the database state cannot change until we
         // finish parallel computation. It is important that nothing is being persisted as
@@ -2248,9 +2248,13 @@ where
         // per thread and it might end up with a different view of the database.
         let persistence_in_progress = self.persistence_state.in_progress();
         if !persistence_in_progress {
-            state_root_result = match self
-                .compute_state_root_parallel(block.parent_hash, &hashed_state)
-            {
+            let mut input = self
+                .compute_trie_input(consistent_view.clone(), block.parent_hash)
+                .map_err(|e| InsertBlockErrorKindTwo::Other(Box::new(e)))?;
+            // Extend with block we are validating root for.
+            input.append_ref(&hashed_state);
+
+            state_root_result = match self.compute_state_root_parallel(consistent_view, input) {
                 Ok((state_root, trie_output)) => Some((state_root, trie_output)),
                 Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(error))) => {
                     debug!(target: "engine", %error, "Parallel state root computation failed consistency check, falling back");
@@ -2318,23 +2322,11 @@ where
         Ok(InsertPayloadOk2::Inserted(BlockStatus2::Valid))
     }
 
-    /// Compute state root for the given hashed post state in parallel.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(_)` if computed successfully.
-    /// Returns `Err(_)` if error was encountered during computation.
-    /// `Err(ProviderError::ConsistentView(_))` can be safely ignored and fallback computation
-    /// should be used instead.
-    fn compute_state_root_parallel(
+    fn compute_trie_input(
         &self,
+        consistent_view: ConsistentDbView<P>,
         parent_hash: B256,
-        hashed_state: &HashedPostState,
-    ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
-        // TODO: when we switch to calculate state root using `StateRootTask` this
-        // method can be still useful to calculate the required `TrieInput` to
-        // create the task.
-        let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
+    ) -> Result<TrieInput, ParallelStateRootError> {
         let mut input = TrieInput::default();
 
         if let Some((historical, blocks)) = self.state.tree_state.blocks_by_hash(parent_hash) {
@@ -2354,9 +2346,22 @@ where
             input.append(revert_state);
         }
 
-        // Extend with block we are validating root for.
-        input.append_ref(hashed_state);
+        Ok(input)
+    }
 
+    /// Compute state root for the given hashed post state in parallel.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(_)` if computed successfully.
+    /// Returns `Err(_)` if error was encountered during computation.
+    /// `Err(ProviderError::ConsistentView(_))` can be safely ignored and fallback computation
+    /// should be used instead.
+    fn compute_state_root_parallel(
+        &self,
+        consistent_view: ConsistentDbView<P>,
+        input: TrieInput,
+    ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
         ParallelStateRoot::new(consistent_view, input).incremental_root_with_updates()
     }
 
