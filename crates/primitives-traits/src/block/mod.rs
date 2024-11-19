@@ -5,13 +5,10 @@ pub mod header;
 
 use alloc::fmt;
 
-use body::FullBlockBody;
-use reth_codecs::Compact;
-
-use crate::{BlockHeader, FullBlockHeader, InMemorySize, MaybeSerde};
+use crate::{BlockHeader, FullBlockBody, FullBlockHeader, InMemorySize, MaybeSerde};
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
-pub trait FullBlock: Block<Header: Compact> {}
+pub trait FullBlock: Block<Header: FullBlockHeader, Body: FullBlockBody> {}
 
 impl<T> FullBlock for T where T: Block<Header: FullBlockHeader, Body: FullBlockBody> {}
 
