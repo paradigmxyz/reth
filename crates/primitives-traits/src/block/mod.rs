@@ -9,7 +9,7 @@ use alloy_consensus::BlockHeader as _;
 use alloy_primitives::{Address, BlockNumber, Bloom, Bytes, B256, B64, U256};
 use reth_codecs::Compact;
 
-use crate::{BlockHeader, FullBlockBody, FullBlockHeader, Header, InMemorySize, MaybeSerde};
+use crate::{BlockHeader, FullBlockHeader, Header, InMemorySize, MaybeSerde};
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
 pub trait FullBlock: Block<Header: Compact> {}
