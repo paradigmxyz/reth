@@ -4,7 +4,7 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::B256;
 use futures::Stream;
-use reth_consensus::Consensus;
+use reth_consensus::HeaderValidator;
 use reth_primitives::SealedHeader;
 use reth_primitives_traits::BlockWithParent;
 /// A downloader capable of fetching and yielding block headers.
@@ -83,7 +83,7 @@ impl SyncTarget {
 ///
 /// Returns Ok(false) if the
 pub fn validate_header_download<H: BlockHeader>(
-    consensus: &dyn Consensus<H>,
+    consensus: &dyn HeaderValidator<H>,
     header: &SealedHeader<H>,
     parent: &SealedHeader<H>,
 ) -> DownloadResult<()> {
