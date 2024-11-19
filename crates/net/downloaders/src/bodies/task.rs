@@ -48,10 +48,10 @@ impl<B: Send + Sync + Unpin + 'static> TaskDownloader<B> {
     /// use reth_network_p2p::bodies::client::BodiesClient;
     /// use reth_primitives_traits::InMemorySize;
     /// use reth_storage_api::HeaderProvider;
-    /// use std::sync::Arc;
+    /// use std::{fmt::Debug, sync::Arc};
     ///
     /// fn t<
-    ///     B: BodiesClient<Body: InMemorySize> + 'static,
+    ///     B: BodiesClient<Body: Debug + InMemorySize> + 'static,
     ///     Provider: HeaderProvider + Unpin + 'static,
     /// >(
     ///     client: Arc<B>,
