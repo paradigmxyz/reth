@@ -7,7 +7,7 @@ pub use reth_execution_errors::{
 pub use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
 pub use reth_storage_errors::provider::ProviderError;
 
-use crate::{system_calls::OnStateHook, InitializeEvm};
+use crate::{system_calls::OnStateHook, TxEnvOverrides};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::BlockNumber;
@@ -34,8 +34,8 @@ pub trait Executor<DB> {
     /// The error type returned by the executor.
     type Error;
 
-    /// Initialize the executor with the given EVM configurator.
-    fn init(&mut self, _evm_config: Box<dyn InitializeEvm>) {}
+    /// Initialize the executor with the given transaction environment overrides.
+    fn init(&mut self, _tx_env_overrides: Box<dyn TxEnvOverrides>) {}
 
     /// Consumes the type and executes the block.
     ///
@@ -189,8 +189,8 @@ where
     /// The error type returned by this strategy's methods.
     type Error: From<ProviderError> + core::error::Error;
 
-    /// Initialize the strategy with the given EVM configurator.
-    fn init(&mut self, _evm_config: Box<dyn InitializeEvm>) {}
+    /// Initialize the strategy with the given transaction environment overrides.
+    fn init(&mut self, _tx_env_overrides: Box<dyn TxEnvOverrides>) {}
 
     /// Applies any necessary changes before executing the block's transactions.
     fn apply_pre_execution_changes(
@@ -337,8 +337,8 @@ where
     type Output = BlockExecutionOutput<Receipt>;
     type Error = S::Error;
 
-    fn init(&mut self, evm_config: Box<dyn InitializeEvm>) {
-        self.strategy.init(evm_config);
+    fn init(&mut self, env_overrides: Box<dyn TxEnvOverrides>) {
+        self.strategy.init(env_overrides);
     }
 
     fn execute(mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
@@ -492,7 +492,7 @@ mod tests {
     use alloy_primitives::U256;
     use reth_chainspec::{ChainSpec, MAINNET};
     use revm::db::{CacheDB, EmptyDBTyped};
-    use revm_primitives::bytes;
+    use revm_primitives::{bytes, TxEnv};
     use std::sync::Arc;
 
     #[derive(Clone, Default)]
@@ -628,7 +628,7 @@ mod tests {
     {
         type Error = BlockExecutionError;
 
-        fn init(&mut self, _evm_config: Box<dyn InitializeEvm>) {}
+        fn init(&mut self, _tx_env_config: Box<dyn TxEnvOverrides>) {}
 
         fn apply_pre_execution_changes(
             &mut self,
@@ -682,52 +682,6 @@ mod tests {
     #[derive(Clone)]
     struct TestEvmConfig {}
 
-    struct EvmInitializer;
-
-    impl InitializeEvm for EvmInitializer {
-        fn fill_block_env(
-            &self,
-            _block_env: &mut revm_primitives::BlockEnv,
-            _header: &alloy_consensus::Header,
-            _after_merge: bool,
-        ) {
-        }
-
-        fn fill_tx_env(
-            &self,
-            _tx_env: &mut revm_primitives::TxEnv,
-            _transaction: &reth_primitives::TransactionSigned,
-            _sender: revm_primitives::Address,
-        ) {
-        }
-
-        fn fill_cfg_and_block_env(
-            &self,
-            _cfg: &mut revm_primitives::CfgEnvWithHandlerCfg,
-            _block_env: &mut revm_primitives::BlockEnv,
-            _header: &alloy_consensus::Header,
-            _total_difficulty: U256,
-        ) {
-        }
-
-        fn fill_cfg_env(
-            &self,
-            _cfg_env: &mut revm_primitives::CfgEnvWithHandlerCfg,
-            _header: &alloy_consensus::Header,
-            _total_difficulty: U256,
-        ) {
-        }
-
-        fn fill_tx_env_system_contract_call(
-            &self,
-            _env: &mut revm_primitives::Env,
-            _caller: revm_primitives::Address,
-            _contract: revm_primitives::Address,
-            _data: revm_primitives::Bytes,
-        ) {
-        }
-    }
-
     #[test]
     fn test_provider() {
         let provider = TestExecutorProvider;
@@ -776,12 +730,14 @@ mod tests {
         };
         let provider = BasicBlockExecutorProvider::new(strategy_factory);
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
-        // if we want to change the evm initializer the executor must be mut.
+
+        // if we want to apply tx env overrides the executor must be mut.
         let mut executor = provider.executor(db);
         // execute consumes the executor, so we can only call it once.
         // let result = executor.execute(BlockExecutionInput::new(&Default::default(), U256::ZERO));
-        let evm_initializer = EvmInitializer {};
-        executor.init(Box::new(evm_initializer));
+        executor.init(Box::new(|tx_env: &mut TxEnv| {
+            tx_env.nonce.take();
+        }));
         let result = executor.execute(BlockExecutionInput::new(&Default::default(), U256::ZERO));
         assert!(result.is_ok());
     }

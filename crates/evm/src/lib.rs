@@ -17,6 +17,7 @@
 
 extern crate alloc;
 
+use alloy_consensus::BlockHeader as _;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use reth_primitives::TransactionSigned;
 use reth_primitives_traits::BlockHeader;
@@ -112,7 +113,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
 ///
 /// Default trait method  implementation is done w.r.t. L1.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static + InitializeEvm {
+pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     /// The header type used by the EVM.
     type Header: BlockHeader;
 
@@ -124,6 +125,66 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static + InitializeEvm
         let mut tx_env = TxEnv::default();
         self.fill_tx_env(&mut tx_env, transaction, signer);
         tx_env
+    }
+
+    /// Fill transaction environment from a [`TransactionSigned`] and the given sender address.
+    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address);
+
+    /// Fill transaction environment with a system contract call.
+    fn fill_tx_env_system_contract_call(
+        &self,
+        env: &mut Env,
+        caller: Address,
+        contract: Address,
+        data: Bytes,
+    );
+
+    /// Fill [`CfgEnvWithHandlerCfg`] fields according to the chain spec and given header.
+    ///
+    /// This must set the corresponding spec id in the handler cfg, based on timestamp or total
+    /// difficulty
+    fn fill_cfg_env(
+        &self,
+        cfg_env: &mut CfgEnvWithHandlerCfg,
+        header: &Self::Header,
+        total_difficulty: U256,
+    );
+
+    /// Fill [`BlockEnv`] field according to the chain spec and given header
+    fn fill_block_env(&self, block_env: &mut BlockEnv, header: &Self::Header, after_merge: bool) {
+        block_env.number = U256::from(header.number());
+        block_env.coinbase = header.beneficiary();
+        block_env.timestamp = U256::from(header.timestamp());
+        if after_merge {
+            block_env.prevrandao = header.mix_hash();
+            block_env.difficulty = U256::ZERO;
+        } else {
+            block_env.difficulty = header.difficulty();
+            block_env.prevrandao = None;
+        }
+        block_env.basefee = U256::from(header.base_fee_per_gas().unwrap_or_default());
+        block_env.gas_limit = U256::from(header.gas_limit());
+
+        // EIP-4844 excess blob gas of this block, introduced in Cancun
+        if let Some(excess_blob_gas) = header.excess_blob_gas() {
+            block_env.set_blob_excess_gas_and_price(excess_blob_gas);
+        }
+    }
+
+    /// Convenience function to call both [`fill_cfg_env`](ConfigureEvmEnv::fill_cfg_env) and
+    /// [`ConfigureEvmEnv::fill_block_env`].
+    ///
+    /// Note: Implementers should ensure that all fields are required fields are filled.
+    fn fill_cfg_and_block_env(
+        &self,
+        cfg: &mut CfgEnvWithHandlerCfg,
+        block_env: &mut BlockEnv,
+        header: &Self::Header,
+        total_difficulty: U256,
+    ) {
+        self.fill_cfg_env(cfg, header, total_difficulty);
+        let after_merge = cfg.handler_cfg.spec_id >= SpecId::MERGE;
+        self.fill_block_env(block_env, header, after_merge);
     }
 
     /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for `parent + 1` block.
@@ -152,60 +213,17 @@ pub struct NextBlockEnvAttributes {
     pub prev_randao: B256,
 }
 
-/// An object-safe subset of `ConfigureEvmEnv` focusing only on configuration.
-pub trait InitializeEvm<H: BlockHeader = alloy_consensus::Header>: Send + Sync {
-    /// Fill transaction environment from a [`TransactionSigned`] and the given sender address.
-    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address);
+/// Function hook that allows to modify a transaction environment.
+pub trait TxEnvOverrides {
+    /// Apply the overrides by modifying the given `TxEnv`.
+    fn apply(&mut self, env: &mut TxEnv);
+}
 
-    /// Fill transaction environment with a system contract call.
-    fn fill_tx_env_system_contract_call(
-        &self,
-        env: &mut Env,
-        caller: Address,
-        contract: Address,
-        data: Bytes,
-    );
-
-    /// Fill [`CfgEnvWithHandlerCfg`] fields according to the chain spec and given header.
-    ///
-    /// This must set the corresponding spec id in the handler cfg, based on timestamp or total
-    /// difficulty
-    fn fill_cfg_env(&self, cfg_env: &mut CfgEnvWithHandlerCfg, header: &H, total_difficulty: U256);
-
-    /// Fill [`BlockEnv`] field according to the chain spec and given header
-    fn fill_block_env(&self, block_env: &mut BlockEnv, header: &H, after_merge: bool) {
-        block_env.number = U256::from(header.number());
-        block_env.coinbase = header.beneficiary();
-        block_env.timestamp = U256::from(header.timestamp());
-        if after_merge {
-            block_env.prevrandao = header.mix_hash();
-            block_env.difficulty = U256::ZERO;
-        } else {
-            block_env.difficulty = header.difficulty();
-            block_env.prevrandao = None;
-        }
-        block_env.basefee = U256::from(header.base_fee_per_gas().unwrap_or_default());
-        block_env.gas_limit = U256::from(header.gas_limit());
-
-        // EIP-4844 excess blob gas of this block, introduced in Cancun
-        if let Some(excess_blob_gas) = header.excess_blob_gas() {
-            block_env.set_blob_excess_gas_and_price(excess_blob_gas);
-        }
-    }
-
-    /// Convenience function to call both [`fill_cfg_env`](InitializeEvm::fill_cfg_env) and
-    /// [`InitializeEvm::fill_block_env`].
-    ///
-    /// Note: Implementers should ensure that all fields are required fields are filled.
-    fn fill_cfg_and_block_env(
-        &self,
-        cfg: &mut CfgEnvWithHandlerCfg,
-        block_env: &mut BlockEnv,
-        header: &H,
-        total_difficulty: U256,
-    ) {
-        self.fill_cfg_env(cfg, header, total_difficulty);
-        let after_merge = cfg.handler_cfg.spec_id >= SpecId::MERGE;
-        self.fill_block_env(block_env, header, after_merge);
+impl<F> TxEnvOverrides for F
+where
+    F: FnMut(&mut TxEnv),
+{
+    fn apply(&mut self, env: &mut TxEnv) {
+        self(env)
     }
 }

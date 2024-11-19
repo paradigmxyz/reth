@@ -71,10 +71,10 @@ where
     type Output = BlockExecutionOutput<Receipt>;
     type Error = BlockExecutionError;
 
-    fn init(&mut self, evm_config: Box<dyn crate::InitializeEvm>) {
+    fn init(&mut self, tx_env_overrides: Box<dyn crate::TxEnvOverrides>) {
         match self {
-            Self::Left(a) => a.init(evm_config),
-            Self::Right(b) => b.init(evm_config),
+            Self::Left(a) => a.init(tx_env_overrides),
+            Self::Right(b) => b.init(tx_env_overrides),
         }
     }
 
