@@ -1,8 +1,7 @@
 use core::fmt;
 
 use crate::{
-    BlockBody, FullBlock, FullBlockBody, FullBlockHeader, FullReceipt, FullSignedTx, FullTxType,
-    MaybeSerde,
+    FullBlock, FullBlockBody, FullBlockHeader, FullReceipt, FullSignedTx, FullTxType, MaybeSerde,
 };
 
 /// Configures all the primitive types of the node.
@@ -82,14 +81,14 @@ pub trait FullNodePrimitives:
     Send + Sync + Unpin + Clone + Default + fmt::Debug + PartialEq + Eq + 'static
 {
     /// Block primitive.
-    type Block: FullBlock<Body: BlockBody<Transaction = Self::SignedTx>>;
-    /// Signed version of the transaction type.
-    type SignedTx: FullSignedTx;
+    type Block: FullBlock<Header = Self::BlockHeader, Body = Self::BlockBody>;
     /// Block header primitive.
     type BlockHeader: FullBlockHeader + 'static;
     /// Block body primitive.
     type BlockBody: FullBlockBody<Header = Self::BlockHeader, Transaction = Self::SignedTx>
         + 'static;
+    /// Signed version of the transaction type.
+    type SignedTx: FullSignedTx;
     /// Transaction envelope type ID.
     type TxType: FullTxType;
     /// A receipt.
