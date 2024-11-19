@@ -1328,7 +1328,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 id: *tx.transaction.id(),
                 hash: *tx.transaction.hash(),
                 current: current_pool,
-                destination: Destination::Pool(tx.subpool),
+                destination: tx.subpool.into(),
             })
         }
     }
@@ -1738,7 +1738,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                             id: *id,
                             hash: *tx.transaction.hash(),
                             current: current_pool,
-                            destination: Destination::Pool(tx.subpool),
+                            destination: tx.subpool.into(),
                         })
                     }
                 }
