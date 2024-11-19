@@ -68,7 +68,7 @@ impl<H> From<HeadersResponseError> for ReverseHeadersDownloaderError<H> {
 #[derive(Debug)]
 pub struct ReverseHeadersDownloader<H: HeadersClient> {
     /// Consensus client used to validate headers
-    consensus: Arc<dyn HeaderValidator<H::Header>>,
+    consensus: Arc<dyn Consensus<H::Header>>,
     /// Client used to download headers.
     client: Arc<H>,
     /// The local head of the chain.
@@ -1165,7 +1165,7 @@ impl ReverseHeadersDownloaderBuilder {
     pub fn build<H>(
         self,
         client: H,
-        consensus: Arc<dyn HeaderValidator<H::Header>>,
+        consensus: Arc<dyn Consensus<H::Header>>,
     ) -> ReverseHeadersDownloader<H>
     where
         H: HeadersClient + 'static,

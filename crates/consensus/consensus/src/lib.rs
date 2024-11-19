@@ -46,7 +46,7 @@ impl<'a> PostExecutionInput<'a> {
 
 /// Consensus is a protocol that chooses canonical chain.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait Consensus<H = Header, B = Body>: HeaderValidator<H> Debug + Send + Sync {
+pub trait Consensus<H = Header, B = BlockBody>: HeaderValidator<H> + Debug + Send + Sync {
     /// Ensures that body field values match the header.
     fn validate_body_against_header(
         &self,
