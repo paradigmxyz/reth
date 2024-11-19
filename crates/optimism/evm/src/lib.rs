@@ -602,7 +602,7 @@ mod tests {
 
         // Create a Chain object with a BTreeMap of blocks mapped to their block numbers,
         // including block1_hash and block2_hash, and the execution_outcome
-        let chain = Chain::new([block1, block2], execution_outcome.clone(), None);
+        let chain: Chain = Chain::new([block1, block2], execution_outcome.clone(), None);
 
         // Assert that the proper receipt vector is returned for block1_hash
         assert_eq!(chain.receipts_by_block_hash(block1_hash), Some(vec![&receipt1]));

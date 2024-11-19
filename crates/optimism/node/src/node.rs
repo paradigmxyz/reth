@@ -44,7 +44,7 @@ use reth_trie_db::MerklePatriciaTrie;
 use std::sync::Arc;
 
 /// Optimism primitive types.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct OpPrimitives;
 
 impl NodePrimitives for OpPrimitives {
