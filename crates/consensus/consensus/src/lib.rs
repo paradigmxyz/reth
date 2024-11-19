@@ -11,7 +11,7 @@
 
 extern crate alloc;
 
-use alloc::{fmt::Debug, vec::Vec};
+use alloc::{fmt::Debug, sync::Arc, vec::Vec};
 use alloy_consensus::Header;
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256, U256};
@@ -20,7 +20,6 @@ use reth_primitives::{
     SealedBlock, SealedHeader,
 };
 use reth_primitives_traits::constants::MINIMUM_GAS_LIMIT;
-use std::sync::Arc;
 
 /// A consensus implementation that does nothing.
 pub mod noop;
