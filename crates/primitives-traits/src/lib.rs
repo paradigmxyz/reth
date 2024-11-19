@@ -26,6 +26,7 @@ pub use receipt::{FullReceipt, Receipt};
 
 pub mod transaction;
 pub use transaction::{
+    execute::FillTxEnv,
     signed::{FullSignedTx, SignedTransaction},
     FullTransaction, Transaction, TransactionExt,
 };
