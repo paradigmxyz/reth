@@ -442,60 +442,168 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::{prelude::SliceRandom, Rng};
+    use reth_primitives::{Account as RethAccount, StorageEntry};
     use reth_provider::{
-        providers::ConsistentDbView,
-        test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
-        ProviderFactory,
+        providers::ConsistentDbView, test_utils::create_test_provider_factory, HashingWriter,
     };
-    use reth_trie::TrieInput;
+    use reth_trie::{test_utils::state_root, TrieInput};
     use revm_primitives::{
-        Account, AccountInfo, AccountStatus, Address, EvmState, EvmStorage, EvmStorageSlot,
-        HashMap, B256, U256,
+        Account as RevmAccount, AccountInfo, AccountStatus, Address, EvmState, EvmStorageSlot,
+        HashMap, B256, KECCAK_EMPTY, U256,
     };
     use std::sync::Arc;
 
-    fn create_mock_config() -> StateRootConfig<ProviderFactory<MockNodeTypesWithDB>> {
-        let factory = create_test_provider_factory();
-        let view = ConsistentDbView::new(factory, None);
-        let input = Arc::new(TrieInput::default());
-        StateRootConfig { consistent_view: view, input }
+    fn convert_revm_to_reth_account(revm_account: &RevmAccount) -> RethAccount {
+        RethAccount {
+            balance: revm_account.info.balance,
+            nonce: revm_account.info.nonce,
+            bytecode_hash: if revm_account.info.code_hash == KECCAK_EMPTY {
+                None
+            } else {
+                Some(revm_account.info.code_hash)
+            },
+        }
     }
 
-    fn create_mock_state() -> revm_primitives::EvmState {
-        let mut state_changes: EvmState = HashMap::default();
-        let storage = EvmStorage::from_iter([(U256::from(1), EvmStorageSlot::new(U256::from(2)))]);
-        let account = Account {
-            info: AccountInfo {
-                balance: U256::from(100),
-                nonce: 10,
-                code_hash: B256::random(),
-                code: Default::default(),
-            },
-            storage,
-            status: AccountStatus::Loaded,
-        };
+    fn create_mock_state_updates(num_accounts: usize, updates_per_account: usize) -> Vec<EvmState> {
+        let mut rng = rand::thread_rng();
+        let mut all_addresses: Vec<Address> =
+            (0..num_accounts).map(|_| Address::random()).collect();
+        let mut updates = Vec::new();
 
-        let address = Address::random();
-        state_changes.insert(address, account);
+        for _ in 0..updates_per_account {
+            let num_accounts_in_update = rng.gen_range(1..=num_accounts);
+            let mut state_update = EvmState::default();
 
-        state_changes
+            all_addresses.shuffle(&mut rng);
+            let selected_addresses = &all_addresses[0..num_accounts_in_update];
+
+            for &address in selected_addresses {
+                let mut storage = HashMap::default();
+                if rng.gen_bool(0.7) {
+                    for _ in 0..rng.gen_range(1..10) {
+                        let slot = U256::from(rng.gen::<u64>());
+                        storage.insert(
+                            slot,
+                            EvmStorageSlot::new_changed(U256::ZERO, U256::from(rng.gen::<u64>())),
+                        );
+                    }
+                }
+
+                let account = RevmAccount {
+                    info: AccountInfo {
+                        balance: U256::from(rng.gen::<u64>()),
+                        nonce: rng.gen::<u64>(),
+                        code_hash: KECCAK_EMPTY,
+                        code: Some(Default::default()),
+                    },
+                    storage,
+                    status: AccountStatus::Touched,
+                };
+
+                state_update.insert(address, account);
+            }
+
+            updates.push(state_update);
+        }
+
+        updates
     }
 
     #[test]
     fn test_state_root_task() {
-        let config = create_mock_config();
+        let factory = create_test_provider_factory();
         let (tx, rx) = std::sync::mpsc::channel();
         let stream = StdReceiverStream::new(rx);
 
+        let state_updates = create_mock_state_updates(100, 10);
+        let mut hashed_state = HashedPostState::default();
+        let mut accumulated_state: HashMap<Address, (RethAccount, HashMap<B256, U256>)> =
+            HashMap::default();
+
+        {
+            let provider_rw = factory.provider_rw().expect("failed to get provider");
+
+            for update in &state_updates {
+                let account_updates = update.iter().map(|(address, account)| {
+                    (*address, Some(convert_revm_to_reth_account(account)))
+                });
+                provider_rw
+                    .insert_account_for_hashing(account_updates)
+                    .expect("failed to insert accounts");
+
+                let storage_updates = update.iter().map(|(address, account)| {
+                    let storage_entries = account.storage.iter().map(|(slot, value)| {
+                        StorageEntry { key: B256::from(*slot), value: value.present_value }
+                    });
+                    (*address, storage_entries)
+                });
+                provider_rw
+                    .insert_storage_for_hashing(storage_updates)
+                    .expect("failed to insert storage");
+            }
+            provider_rw.commit().expect("failed to commit changes");
+        }
+
+        for update in &state_updates {
+            for (address, account) in update {
+                let hashed_address = keccak256(*address);
+
+                if account.is_touched() {
+                    let destroyed = account.is_selfdestructed();
+                    hashed_state.accounts.insert(
+                        hashed_address,
+                        if destroyed || account.is_empty() {
+                            None
+                        } else {
+                            Some(account.info.clone().into())
+                        },
+                    );
+
+                    if destroyed || !account.storage.is_empty() {
+                        let storage = account
+                            .storage
+                            .iter()
+                            .filter(|&(_slot, value)| (!destroyed && value.is_changed()))
+                            .map(|(slot, value)| {
+                                (keccak256(B256::from(*slot)), value.present_value)
+                            });
+                        hashed_state
+                            .storages
+                            .insert(hashed_address, HashedStorage::from_iter(destroyed, storage));
+                    }
+                }
+
+                let storage: HashMap<B256, U256> = account
+                    .storage
+                    .iter()
+                    .map(|(k, v)| (B256::from(*k), v.present_value))
+                    .collect();
+
+                accumulated_state
+                    .insert(*address, (convert_revm_to_reth_account(account), storage));
+            }
+        }
+
+        let config = StateRootConfig {
+            consistent_view: ConsistentDbView::new(factory, None),
+            input: Arc::new(TrieInput::from_state(hashed_state)),
+        };
         let task = StateRootTask::new(config, stream);
         let handle = task.spawn();
 
-        for _ in 0..10 {
-            tx.send(create_mock_state()).expect("failed to send state");
+        for update in state_updates {
+            tx.send(update).expect("failed to send state");
         }
         drop(tx);
 
-        let result = handle.wait_for_result();
-        assert!(result.is_ok(), "sync block execution failed");
+        let (root_from_task, _) = handle.wait_for_result().expect("task failed");
+        let root_from_base = state_root(accumulated_state);
+
+        assert_eq!(
+            root_from_task, root_from_base,
+            "State root mismatch: task={root_from_task:?}, base={root_from_base:?}"
+        );
     }
 }
