@@ -95,7 +95,8 @@ pub trait HeaderValidator<H = Header>: Debug + Send + Sync {
     ///
     /// **This should not be called for the genesis block**.
     ///
-    /// Note: Validating header against its parent does not include other HeaderValidator validations.
+    /// Note: Validating header against its parent does not include other HeaderValidator
+    /// validations.
     fn validate_header_against_parent(
         &self,
         header: &SealedHeader<H>,

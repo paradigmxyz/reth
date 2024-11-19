@@ -1,4 +1,4 @@
-use crate::{Consensus, ConsensusError, PostExecutionInput, HeaderValidator};
+use crate::{Consensus, ConsensusError, HeaderValidator, PostExecutionInput};
 use alloy_primitives::U256;
 use core::sync::atomic::{AtomicBool, Ordering};
 use reth_primitives::{BlockWithSenders, SealedBlock, SealedHeader};

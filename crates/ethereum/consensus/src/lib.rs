@@ -11,7 +11,7 @@
 use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH};
 use alloy_primitives::U256;
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
-use reth_consensus::{Consensus, ConsensusError, PostExecutionInput, HeaderValidator};
+use reth_consensus::{Consensus, ConsensusError, HeaderValidator, PostExecutionInput};
 use reth_consensus_common::validation::{
     validate_4844_header_standalone, validate_against_parent_4844,
     validate_against_parent_eip1559_base_fee, validate_against_parent_hash_number,

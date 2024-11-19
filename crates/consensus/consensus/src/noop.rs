@@ -1,4 +1,4 @@
-use crate::{Consensus, ConsensusError, PostExecutionInput, HeaderValidator};
+use crate::{Consensus, ConsensusError, HeaderValidator, PostExecutionInput};
 use alloy_primitives::U256;
 use reth_primitives::{BlockWithSenders, SealedBlock, SealedHeader};
 
@@ -8,7 +8,6 @@ use reth_primitives::{BlockWithSenders, SealedBlock, SealedHeader};
 pub struct NoopConsensus;
 
 impl<H> HeaderValidator<H> for NoopConsensus {
-
     fn validate_header(&self, _header: &SealedHeader<H>) -> Result<(), ConsensusError> {
         Ok(())
     }
@@ -31,7 +30,6 @@ impl<H> HeaderValidator<H> for NoopConsensus {
 }
 
 impl<H, B> Consensus<H, B> for NoopConsensus {
-
     fn validate_body_against_header(
         &self,
         _body: &B,
