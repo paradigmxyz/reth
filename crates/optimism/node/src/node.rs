@@ -1,18 +1,14 @@
 //! Optimism Node types config.
 
-use crate::{
-    args::RollupArgs,
-    engine::OpEngineValidator,
-    txpool::{OpTransactionPool, OpTransactionValidator},
-    OpEngineTypes,
-};
+use std::sync::Arc;
+
 use alloy_consensus::Header;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_chainspec::{EthChainSpec, Hardforks};
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, PeersInfo};
 use reth_node_api::{
-    AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, NodePrimitives, PayloadBuilder,
+    AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, PayloadBuilder,
 };
 use reth_node_builder::{
     components::{
@@ -32,7 +28,6 @@ use reth_optimism_rpc::{
     OpEthApi,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::{Block, Receipt, TransactionSigned, TxType};
 use reth_provider::CanonStateSubscriptions;
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
@@ -41,18 +36,13 @@ use reth_transaction_pool::{
     TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
-use std::sync::Arc;
 
-/// Optimism primitive types.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct OpPrimitives;
-
-impl NodePrimitives for OpPrimitives {
-    type Block = Block;
-    type SignedTx = TransactionSigned;
-    type TxType = TxType;
-    type Receipt = Receipt;
-}
+use crate::{
+    args::RollupArgs,
+    engine::OpEngineValidator,
+    txpool::{OpTransactionPool, OpTransactionValidator},
+    OpEngineTypes,
+};
 
 /// Type configuration for a regular Optimism node.
 #[derive(Debug, Default, Clone)]
@@ -125,7 +115,7 @@ where
 }
 
 impl NodeTypes for OpNode {
-    type Primitives = OpPrimitives;
+    type Primitives = reth_primitives::EthPrimitives; // todo: replace with OpPrimitives when EthPrimitives is only used in reth-ethereum-* crates
     type ChainSpec = OpChainSpec;
     type StateCommitment = MerklePatriciaTrie;
 }
