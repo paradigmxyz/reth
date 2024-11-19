@@ -73,10 +73,17 @@ pub fn from_block_full<T: TransactionCompat>(
     // `from_block_with_transactions`, however we need to compute the length before
     let block_length = block.block.length();
     let transactions = std::mem::take(&mut block.block.body.transactions);
-    let transactions_with_senders = transactions.into_iter().zip(block.senders);
-    let transactions = transactions_with_senders
+
+    let transactions = transactions
+        .into_iter()
         .enumerate()
-        .map(|(idx, (tx, sender))| {
+        .map(|(idx, tx)| {
+            // try to get sender from block.senders first, fall back to unchecked recovery
+            let sender =
+                block.senders.get(idx).copied().or_else(|| tx.recover_signer_unchecked()).expect(
+                    "this should be a safe unwrap as these are transactions included in a block",
+                );
+
             let tx_hash = tx.hash();
             let signed_tx_ec_recovered = tx.with_signer(sender);
             let tx_info = TransactionInfo {
