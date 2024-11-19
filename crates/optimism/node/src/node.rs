@@ -43,19 +43,6 @@ use reth_transaction_pool::{
 use reth_trie_db::MerklePatriciaTrie;
 use std::sync::Arc;
 
-/// Optimism primitive types.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct OpPrimitives;
-
-impl NodePrimitives for OpPrimitives {
-    type Block = Block;
-    type BlockHeader = Header;
-    type BlockBody = BlockBody;
-    type SignedTx = TransactionSigned;
-    type TxType = TxType;
-    type Receipt = Receipt;
-}
-
 /// Type configuration for a regular Optimism node.
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
@@ -127,7 +114,7 @@ where
 }
 
 impl NodeTypes for OpNode {
-    type Primitives = OpPrimitives;
+    type Primitives = reth_primitives::EthPrimitives; // todo: replace with OpPrimitives when EthPrimitives is only used in reth-ethereum-* crates
     type ChainSpec = OpChainSpec;
     type StateCommitment = MerklePatriciaTrie;
 }
