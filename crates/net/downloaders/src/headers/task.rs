@@ -8,6 +8,7 @@ use reth_network_p2p::headers::{
 use reth_primitives::SealedHeader;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
+    fmt::Debug,
     future::Future,
     pin::Pin,
     task::{ready, Context, Poll},
@@ -82,7 +83,7 @@ impl<H: Send + Sync + Unpin + 'static> TaskDownloader<H> {
     }
 }
 
-impl<H: Send + Sync + Unpin + 'static> HeaderDownloader for TaskDownloader<H> {
+impl<H: Debug + Send + Sync + Unpin + 'static> HeaderDownloader for TaskDownloader<H> {
     type Header = H;
 
     fn update_sync_gap(&mut self, head: SealedHeader<H>, target: SyncTarget) {

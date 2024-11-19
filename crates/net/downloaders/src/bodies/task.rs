@@ -8,6 +8,7 @@ use reth_network_p2p::{
 };
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
+    fmt::Debug,
     future::Future,
     ops::RangeInclusive,
     pin::Pin,
@@ -90,7 +91,7 @@ impl<B: Send + Sync + Unpin + 'static> TaskDownloader<B> {
     }
 }
 
-impl<B: Send + Sync + Unpin + 'static> BodyDownloader for TaskDownloader<B> {
+impl<B: Debug + Send + Sync + Unpin + 'static> BodyDownloader for TaskDownloader<B> {
     type Body = B;
 
     fn set_download_range(&mut self, range: RangeInclusive<BlockNumber>) -> DownloadResult<()> {

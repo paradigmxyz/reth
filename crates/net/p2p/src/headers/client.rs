@@ -50,7 +50,8 @@ impl HeadersRequest {
 }
 
 /// The headers future type
-pub type HeadersFut = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<Header>>> + Send + Sync>>;
+pub type HeadersFut<H = Header> =
+    Pin<Box<dyn Future<Output = PeerRequestResult<Vec<H>>> + Send + Sync>>;
 
 /// The block headers downloader client
 #[auto_impl::auto_impl(&, Arc, Box)]

@@ -20,6 +20,7 @@ use reth_primitives::{
     SealedBlock, SealedHeader,
 };
 use reth_primitives_traits::constants::MINIMUM_GAS_LIMIT;
+use std::sync::Arc;
 
 /// A consensus implementation that does nothing.
 pub mod noop;
@@ -46,7 +47,9 @@ impl<'a> PostExecutionInput<'a> {
 
 /// Consensus is a protocol that chooses canonical chain.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait Consensus<H = Header, B = BlockBody>: HeaderValidator<H> + Debug + Send + Sync {
+pub trait Consensus<H = Header, B = BlockBody>:
+    AsHeaderValidator<H> + HeaderValidator<H> + Debug + Send + Sync
+{
     /// Ensures that body field values match the header.
     fn validate_body_against_header(
         &self,
@@ -141,6 +144,23 @@ pub trait HeaderValidator<H = Header>: Debug + Send + Sync {
         header: &H,
         total_difficulty: U256,
     ) -> Result<(), ConsensusError>;
+}
+
+/// Helper trait to cast `Arc<dyn Consensus>` to `Arc<dyn HeaderValidator>`
+pub trait AsHeaderValidator<H>: HeaderValidator<H> {
+    /// Converts the [`Arc`] of self to [`Arc`] of [`HeaderValidator`]
+    fn as_header_validator<'a>(self: Arc<Self>) -> Arc<dyn HeaderValidator<H> + 'a>
+    where
+        Self: 'a;
+}
+
+impl<T: HeaderValidator<H>, H> AsHeaderValidator<H> for T {
+    fn as_header_validator<'a>(self: Arc<Self>) -> Arc<dyn HeaderValidator<H> + 'a>
+    where
+        Self: 'a,
+    {
+        self
+    }
 }
 
 /// Consensus Errors
