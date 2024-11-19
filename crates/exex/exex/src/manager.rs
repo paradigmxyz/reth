@@ -10,7 +10,7 @@ use reth_chainspec::Head;
 use reth_metrics::{metrics::Counter, Metrics};
 use reth_primitives::SealedHeader;
 use reth_provider::HeaderProvider;
-use reth_tracing::tracing::debug;
+use reth_tracing::tracing::{debug, warn};
 use std::{
     collections::VecDeque,
     fmt::Debug,
@@ -34,6 +34,12 @@ use tokio_util::sync::{PollSendError, PollSender, ReusableBoxFuture};
 /// 1024 notifications in the buffer is 3.5 hours of mainnet blocks,
 /// or 17 minutes of 1-second blocks.
 pub const DEFAULT_EXEX_MANAGER_CAPACITY: usize = 1024;
+
+/// The maximum number of blocks allowed in the WAL before emitting a warning.
+///
+/// This constant defines the threshold for the Write-Ahead Log (WAL) size. If the number of blocks
+/// in the WAL exceeds this limit, a warning is logged to indicate potential issues.
+pub const WAL_BLOCKS_WARNING: usize = 128;
 
 /// The source of the notification.
 ///
@@ -377,6 +383,13 @@ where
                 .unwrap();
 
             self.wal.finalize(lowest_finished_height)?;
+            if self.wal.num_blocks() > WAL_BLOCKS_WARNING {
+                warn!(
+                    target: "exex::manager",
+                    blocks = ?self.wal.num_blocks(),
+                    "WAL contains too many blocks and is not getting cleared. That will lead to increased disk space usage. Check that you emit the FinishedHeight event from your ExExes."
+                );
+            }
         } else {
             let unfinalized_exexes = exex_finished_heights
                 .into_iter()
