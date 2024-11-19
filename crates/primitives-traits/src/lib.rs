@@ -14,7 +14,7 @@ extern crate alloc;
 
 /// Helper traits for calling block header and body methods directly on block type.
 pub mod block_prelude {
-    pub use crate::{Block, Header};
+    pub use crate::{Block, Header as _};
 }
 
 /// Common constants.
