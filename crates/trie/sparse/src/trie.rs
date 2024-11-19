@@ -174,7 +174,11 @@ impl RevealedSparseTrie {
                     Some(SparseNode::Hash(_)) | None => {
                         self.nodes.insert(
                             path,
-                            SparseNode::Branch { state_mask: branch.state_mask, hash: None },
+                            SparseNode::Branch {
+                                state_mask: branch.state_mask,
+                                hash: None,
+                                store_in_db_trie: None,
+                            },
                         );
                     }
                     // Branch node already exists, or an extension node was placed where a
@@ -416,7 +420,7 @@ impl RevealedSparseTrie {
                         SparseNode::Branch { .. } => removed_node.node,
                     }
                 }
-                SparseNode::Branch { mut state_mask, hash: _ } => {
+                SparseNode::Branch { mut state_mask, hash: _, store_in_db_trie: _ } => {
                     // If the node is a branch node, we need to check the number of children left
                     // after deleting the child at the given nibble.
 
@@ -638,7 +642,7 @@ impl RevealedSparseTrie {
                         paths.push((path, level + 1));
                     }
                 }
-                SparseNode::Branch { state_mask, hash } => {
+                SparseNode::Branch { state_mask, hash, .. } => {
                     if hash.is_some() && !prefix_set.contains(&path) {
                         continue
                     }
@@ -722,13 +726,15 @@ impl RevealedSparseTrie {
                         continue
                     }
                 }
-                SparseNode::Branch { state_mask, hash } => {
-                    if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path)) {
+                SparseNode::Branch { state_mask, hash, store_in_db_trie } => {
+                    if let Some((hash, store_in_db_trie)) =
+                        hash.zip(*store_in_db_trie).filter(|_| !prefix_set_contains(&path))
+                    {
                         buffers.rlp_node_stack.push((
                             path,
                             RlpNode::word_rlp(&hash),
                             false,
-                            SparseNodeType::Branch { store_in_db_trie: true },
+                            SparseNodeType::Branch { store_in_db_trie },
                         ));
                         continue
                     }
@@ -804,7 +810,7 @@ impl RevealedSparseTrie {
                     let rlp_node = branch_node_ref.rlp(&mut self.rlp_buf);
                     *hash = rlp_node.as_hash();
 
-                    let store_in_db_trie = if let Some(updates) = self.updates.as_mut() {
+                    let store_in_db_trie_value = if let Some(updates) = self.updates.as_mut() {
                         let mut tree_mask_values = tree_mask_values.into_iter().rev();
                         let mut hash_mask_values = hash_mask_values.into_iter().rev();
                         let mut tree_mask = TrieMask::default();
@@ -839,8 +845,13 @@ impl RevealedSparseTrie {
                     } else {
                         false
                     };
+                    *store_in_db_trie = Some(store_in_db_trie_value);
 
-                    (rlp_node, true, SparseNodeType::Branch { store_in_db_trie })
+                    (
+                        rlp_node,
+                        true,
+                        SparseNodeType::Branch { store_in_db_trie: store_in_db_trie_value },
+                    )
                 }
             };
             buffers.rlp_node_stack.push((path, rlp_node, calculated, node_type));
@@ -917,6 +928,9 @@ pub enum SparseNode {
         /// Pre-computed hash of the sparse node.
         /// Can be reused unless this trie path has been updated.
         hash: Option<B256>,
+        /// Pre-computed flag indicating whether the trie node should be stored in the database.
+        /// Can be reused unless this trie path has been updated.
+        store_in_db_trie: Option<bool>,
     },
 }
 
@@ -933,7 +947,7 @@ impl SparseNode {
 
     /// Create new [`SparseNode::Branch`] from state mask.
     pub const fn new_branch(state_mask: TrieMask) -> Self {
-        Self::Branch { state_mask, hash: None }
+        Self::Branch { state_mask, hash: None, store_in_db_trie: None }
     }
 
     /// Create new [`SparseNode::Branch`] with two bits set.
@@ -942,7 +956,7 @@ impl SparseNode {
             // set bits for both children
             (1u16 << bit_a) | (1u16 << bit_b),
         );
-        Self::Branch { state_mask, hash: None }
+        Self::Branch { state_mask, hash: None, store_in_db_trie: None }
     }
 
     /// Create new [`SparseNode::Extension`] from the key slice.
@@ -1874,7 +1888,7 @@ mod tests {
         // Check that the extension node was turned into a branch node
         assert_matches!(
             sparse.nodes.get(&Nibbles::default()),
-            Some(SparseNode::Branch { state_mask, hash: None }) if *state_mask == TrieMask::new(0b11)
+            Some(SparseNode::Branch { state_mask, hash: None, store_in_db_trie: None }) if *state_mask == TrieMask::new(0b11)
         );
 
         // Generate the proof for the first key and reveal it in the sparse trie
@@ -1887,7 +1901,7 @@ mod tests {
         // Check that the branch node wasn't overwritten by the extension node in the proof
         assert_matches!(
             sparse.nodes.get(&Nibbles::default()),
-            Some(SparseNode::Branch { state_mask, hash: None }) if *state_mask == TrieMask::new(0b11)
+            Some(SparseNode::Branch { state_mask, hash: None, store_in_db_trie: None }) if *state_mask == TrieMask::new(0b11)
         );
     }
 
