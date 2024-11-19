@@ -86,3 +86,11 @@ impl reth_primitives_traits::FullNodePrimitives for EthPrimitives {
     type TxType = crate::TxType;
     type Receipt = crate::Receipt;
 }
+
+#[cfg(not(feature = "reth-codec"))]
+impl NodePrimitives for EthPrimitives {
+    type Block = crate::Block;
+    type SignedTx = crate::TransactionSigned;
+    type TxType = crate::TxType;
+    type Receipt = crate::Receipt;
+}
