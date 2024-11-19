@@ -1,7 +1,7 @@
 //! `Eth` bundle implementation and helpers.
 
 use alloy_consensus::Transaction as _;
-use alloy_primitives::{Keccak256, U256};
+use alloy_primitives::{Address, Keccak256, U256};
 use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthChainSpec;
@@ -61,6 +61,8 @@ where
             difficulty,
             base_fee,
         } = bundle;
+        // TODO: pull from bundle args once we update alloy (or copy/paste struct for now)
+        let coinbase: Option<Address> = None;
         if txs.is_empty() {
             return Err(EthApiError::InvalidParams(
                 EthBundleError::EmptyBundleTransactions.to_string(),
@@ -106,6 +108,10 @@ where
         // Note: the block number is considered the `parent` block: <https://github.com/flashbots/mev-geth/blob/fddf97beec5877483f879a77b7dea2e58a58d653/internal/ethapi/api.go#L2104>
         let (cfg, mut block_env, at) = self.eth_api().evm_env_at(block_id).await?;
 
+        if let Some(coinbase) = coinbase {
+            block_env.coinbase = coinbase;
+        }
+
         // need to adjust the timestamp for the next block
         if let Some(timestamp) = timestamp {
             block_env.timestamp = U256::from(timestamp);
@@ -117,8 +123,16 @@ where
             block_env.difficulty = U256::from(difficulty);
         }
 
+        // default to call gas limit unless user requests a smaller limit
+        block_env.gas_limit = U256::from(self.inner.eth_api.call_gas_limit());
         if let Some(gas_limit) = gas_limit {
-            block_env.gas_limit = U256::from(gas_limit);
+            let gas_limit = U256::from(gas_limit);
+            if gas_limit > block_env.gas_limit {
+                return Err(
+                    EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh).into()
+                )
+            }
+            block_env.gas_limit = gas_limit;
         }
 
         if let Some(base_fee) = base_fee {
