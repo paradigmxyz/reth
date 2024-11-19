@@ -39,7 +39,13 @@ reth-codecs = { workspace = true, features = ["test-utils"] }
 rstest.workspace = true
 
 [features]
-default = ["reth-codec"]
+default = ["std", "reth-codec"]
+std = [
+    "reth-primitives-traits/std",
+    "reth-primitives/std",
+    "reth-node-types/std",
+    "reth-codecs/std",
+]
 reth-codec = [
     "dep:reth-codecs",
     "reth-primitives/reth-codec"
