@@ -206,6 +206,7 @@ const fn describe_io_stats() {}
 mod tests {
     use super::*;
     use reqwest::Client;
+    use reth_db_api::database_metrics::DatabaseMetrics;
     use reth_provider::{test_utils::create_test_provider_factory, StaticFileProviderFactory};
     use reth_tasks::TaskManager;
     use socket2::{Domain, Socket, Type};
@@ -237,7 +238,20 @@ mod tests {
         let executor = tasks.executor();
 
         let factory = create_test_provider_factory();
-        let hooks = Hooks::new(factory.db_ref().clone(), factory.static_file_provider());
+        let hooks = Hooks::builder()
+            .with_hook({
+                let db = factory.db_ref().clone();
+                move || db.report_metrics()
+            })
+            .with_hook({
+                let sfp = factory.static_file_provider();
+                move || {
+                    if let Err(error) = sfp.report_metrics() {
+                        tracing::error!(%error, "Failed to report metrics for the static file provider");
+                    }
+                }
+            })
+            .build();
 
         let listen_addr = get_random_available_addr();
         let config =
