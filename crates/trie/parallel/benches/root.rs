@@ -5,12 +5,12 @@ use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use proptest_arbitrary_interop::arb;
 use reth_primitives::Account;
 use reth_provider::{
-    providers::ConsistentDbView, test_utils::create_test_provider_factory, StateChangeWriter,
-    TrieWriter,
+    providers::ConsistentDbView, test_utils::create_test_provider_factory, BlockHashReader,
+    BlockNumReader, StateChangeWriter, TrieWriter,
 };
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, HashedPostState, HashedStorage, StateRoot,
-    TrieInput,
+    TrieInput, TrieOverlayInput,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseStateRoot};
 use reth_trie_parallel::root::ParallelStateRoot;
@@ -25,6 +25,8 @@ pub fn calculate_state_root(c: &mut Criterion) {
     for size in [1_000, 3_000, 5_000, 10_000] {
         let (db_state, updated_state) = generate_test_data(size);
         let provider_factory = create_test_provider_factory();
+        let tip_num = provider_factory.best_block_number().unwrap();
+        let tip_hash = provider_factory.block_hash(tip_num).unwrap().unwrap();
         {
             let provider_rw = provider_factory.provider_rw().unwrap();
             provider_rw.write_hashed_state(&db_state.into_sorted()).unwrap();
@@ -58,6 +60,9 @@ pub fn calculate_state_root(c: &mut Criterion) {
             )
         });
 
+        let trie_input = TrieInput::from_state(updated_state.clone());
+        let overlay_input = TrieOverlayInput::new(trie_input.clone(), tip_hash);
+
         // parallel root
         group.bench_function(BenchmarkId::new("parallel root", size), |b| {
             b.to_async(&runtime).iter_with_setup(
@@ -65,6 +70,7 @@ pub fn calculate_state_root(c: &mut Criterion) {
                     ParallelStateRoot::new(
                         view.clone(),
                         TrieInput::from_state(updated_state.clone()),
+                        overlay_input,
                     )
                 },
                 |calculator| async { calculator.incremental_root() },

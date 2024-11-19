@@ -44,7 +44,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
-use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
+use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput, TrieOverlayInput};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::ResultAndState;
 use std::{
@@ -2315,28 +2315,40 @@ where
         // create the task.
         let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
         let mut input = TrieInput::default();
+        let mut mirror_input = TrieInput::default();
 
+        let mut anchor = parent_hash;
         if let Some((historical, blocks)) = self.state.tree_state.blocks_by_hash(parent_hash) {
             debug!(target: "engine::tree", %parent_hash, %historical, "Calculating state root in parallel, parent found in memory");
             // Retrieve revert state for historical block.
             let revert_state = consistent_view.revert_state(historical)?;
-            input.append(revert_state);
+            input.append(revert_state.clone());
+            mirror_input.append(revert_state);
+
+            // set the anchor to historical, since we do have an anchor
+            anchor = historical;
 
             // Extend with contents of parent in-memory blocks.
             for block in blocks.iter().rev() {
-                input.append_cached_ref(block.trie_updates(), block.hashed_state())
+                input.append_cached_ref(block.trie_updates(), block.hashed_state());
+                mirror_input.append_cached_ref(block.trie_updates(), block.hashed_state());
             }
         } else {
             // The block attaches to canonical persisted parent.
             debug!(target: "engine::tree", %parent_hash, "Calculating state root in parallel, parent found in disk");
             let revert_state = consistent_view.revert_state(parent_hash)?;
-            input.append(revert_state);
+            input.append(revert_state.clone());
+            mirror_input.append(revert_state);
         }
 
         // Extend with block we are validating root for.
         input.append_ref(hashed_state);
+        mirror_input.append_ref(hashed_state);
 
-        ParallelStateRoot::new(consistent_view, input).incremental_root_with_updates()
+        let overlay_input = TrieOverlayInput::new(input.clone(), anchor);
+
+        ParallelStateRoot::new(consistent_view, input, overlay_input)
+            .incremental_root_with_updates()
     }
 
     /// Handles an error that occurred while inserting a block.

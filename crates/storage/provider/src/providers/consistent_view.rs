@@ -63,6 +63,31 @@ where
         }
     }
 
+    /// Creates a new read-only provider, and constructs revert state from the database transaction
+    /// created, for the given anchor hash.
+    ///
+    /// Does not perform consistency checks. The revert state should be added to any trie
+    /// input used for future trie operations that the provider needs to perform.
+    pub fn revert_state_provider(
+        &self,
+        block_hash: B256,
+    ) -> ProviderResult<(Factory::Provider, HashedPostState)> {
+        // Create a new provider.
+        let provider = self.factory.database_provider_ro()?;
+        let block_number = provider
+            .block_number(block_hash)?
+            .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
+        if block_number == provider.best_block_number()? &&
+            block_number == provider.last_block_number()?
+        {
+            Ok((provider, HashedPostState::default()))
+        } else {
+            let hashed_post_state =
+                HashedPostState::from_reverts(provider.tx_ref(), block_number + 1)?;
+            Ok((provider, hashed_post_state))
+        }
+    }
+
     /// Creates new read-only provider and performs consistency checks on the current tip.
     pub fn provider_ro(&self) -> ProviderResult<Factory::Provider> {
         // Create a new provider.
