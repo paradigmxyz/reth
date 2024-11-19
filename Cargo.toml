@@ -566,6 +566,7 @@ if-addrs = "0.13"
 # rpc
 jsonrpsee = "0.24"
 jsonrpsee-core = "0.24"
+jsonrpsee-server = "0.24"
 jsonrpsee-http-client = "0.24"
 jsonrpsee-types = "0.24"
 

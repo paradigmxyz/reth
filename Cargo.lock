@@ -8128,7 +8128,7 @@ version = "1.1.2"
 dependencies = [
  "eyre",
  "http",
- "jsonrpsee",
+ "jsonrpsee-server",
  "metrics",
  "metrics-exporter-prometheus",
  "metrics-process",
