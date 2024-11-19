@@ -107,7 +107,7 @@ impl<T> MaybeSerde for T where T: serde::Serialize + for<'de> serde::Deserialize
 #[cfg(not(feature = "serde"))]
 impl<T> MaybeSerde for T {}
 
-/// Helper trait that requires databse encoding implementation since `reth-codec` feature is
+/// Helper trait that requires database encoding implementation since `reth-codec` feature is
 /// enabled.
 #[cfg(feature = "reth-codec")]
 pub trait MaybeCompact: reth_codecs::Compact {}
