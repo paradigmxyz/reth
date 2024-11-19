@@ -48,6 +48,7 @@ reth-primitives = { workspace = true, features = ["test-utils"] }
 reth-optimism-chainspec.workspace = true
 alloy-genesis.workspace = true
 alloy-consensus.workspace = true
+reth-optimism-primitives.workspace = true
 
 [features]
 default = ["std"]
