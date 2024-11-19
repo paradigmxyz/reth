@@ -42,7 +42,7 @@ impl SparseStateTrie {
         account: B256,
         proof: impl IntoIterator<Item = (Nibbles, Bytes)>,
     ) -> SparseStateTrieResult<()> {
-        if self.revealed.contains_key(&account) {
+        if self.is_account_revealed(&account) {
             return Ok(());
         }
 
@@ -73,7 +73,7 @@ impl SparseStateTrie {
         slot: B256,
         proof: impl IntoIterator<Item = (Nibbles, Bytes)>,
     ) -> SparseStateTrieResult<()> {
-        if self.revealed.get(&account).is_some_and(|v| v.contains(&slot)) {
+        if self.is_storage_slot_revealed(&account, &slot) {
             return Ok(());
         }
 
@@ -121,6 +121,12 @@ impl SparseStateTrie {
     /// Update the leaf node.
     pub fn update_leaf(&mut self, path: Nibbles, value: Vec<u8>) -> SparseStateTrieResult<()> {
         self.state.update_leaf(path, value)?;
+        Ok(())
+    }
+
+    /// Remove the leaf node.
+    pub fn remove_leaf(&mut self, path: &Nibbles) -> SparseStateTrieResult<()> {
+        self.state.remove_leaf(path)?;
         Ok(())
     }
 
