@@ -8262,6 +8262,7 @@ dependencies = [
  "reth-optimism-chainspec",
  "reth-optimism-consensus",
  "reth-optimism-forks",
+ "reth-optimism-primitives",
  "reth-primitives",
  "reth-prune-types",
  "reth-revm",
