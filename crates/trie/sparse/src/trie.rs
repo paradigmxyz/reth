@@ -749,6 +749,7 @@ impl RevealedSparseTrie {
                         .resize(buffers.branch_child_buf.len(), Default::default());
                     let mut added_children = false;
 
+                    // TODO(alexey): set the `TrieMask` bits directly
                     let mut tree_mask_values = Vec::new();
                     let mut hash_mask_values = Vec::new();
                     let mut hashes = Vec::new();
