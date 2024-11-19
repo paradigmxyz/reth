@@ -81,8 +81,6 @@ pub struct EthPrimitives;
 
 impl NodePrimitives for EthPrimitives {
     type Block = crate::Block;
-    type BlockHeader = alloy_consensus::Header;
-    type BlockBody = crate::BlockBody;
     type SignedTx = crate::TransactionSigned;
     type TxType = crate::TxType;
     type Receipt = crate::Receipt;
