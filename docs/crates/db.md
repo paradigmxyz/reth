@@ -267,7 +267,7 @@ let mut headers_cursor = provider.tx_ref().cursor_read::<tables::Headers>()?;
 let headers_walker = headers_cursor.walk_range(block_range.clone())?;
 ```
 
-Let's look at an examples of how cursors are used. The code snippet below contains the `unwind` method from the `BodyStage` defined in the `stages` crate. This function is responsible for unwinding any changes to the database if there is an error when executing the body stage within the Reth pipeline.
+Let's look at an example of how cursors are used. The code snippet below contains the `unwind` method from the `BodyStage` defined in the `stages` crate. This function is responsible for unwinding any changes to the database if there is an error when executing the body stage within the Reth pipeline.
 
 [File: crates/stages/stages/src/stages/bodies.rs](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/stages/stages/src/stages/bodies.rs#L267-L345)
 
