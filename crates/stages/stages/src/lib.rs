@@ -30,11 +30,11 @@
 //! # use reth_provider::test_utils::{create_test_provider_factory, MockNodeTypesWithDB};
 //! # use reth_static_file::StaticFileProducer;
 //! # use reth_config::config::StageConfig;
-//! # use reth_consensus::Consensus;
+//! # use reth_consensus::HeaderValidator;
 //! # use reth_consensus::test_utils::TestConsensus;
 //! #
 //! # let chain_spec = MAINNET.clone();
-//! # let consensus: Arc<dyn Consensus> = Arc::new(TestConsensus::default());
+//! # let consensus: Arc<dyn HeaderValidator> = Arc::new(TestConsensus::default());
 //! # let headers_downloader = ReverseHeadersDownloaderBuilder::default().build(
 //! #    Arc::new(TestHeadersClient::default()),
 //! #    consensus.clone()
