@@ -61,7 +61,7 @@
 #if _MSC_FULL_VER < 190024234
 /* Actually libmdbx was not tested with compilers older than 19.00.24234 (Visual
  * Studio 2015 Update 3). But you could remove this #error and try to continue
- * at your own risk. In such case please don't rise up an issues related ONLY to
+ * at your own risk. In such case please don't raise issues related ONLY to
  * old compilers.
  *
  * NOTE:
@@ -34875,7 +34875,7 @@ __cold MDBX_INTERNAL_FUNC int osal_lck_seize(MDBX_env *env) {
   if (unlikely(mdbx_RunningOnWSL1)) {
     rc = ENOLCK /* No record locks available */;
     ERROR("%s, err %u",
-          "WSL1 (Windows Subsystem for Linux) is mad and trouble-full, "
+          "WSL1 (Windows Subsystem for Linux) is mad and troublesome, "
           "injecting failure to avoid data loss",
           rc);
     return rc;
