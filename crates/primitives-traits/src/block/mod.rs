@@ -10,9 +10,9 @@ use reth_codecs::Compact;
 use crate::{BlockHeader, FullBlockHeader, InMemorySize, MaybeSerde};
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
-pub trait FullBlock: Block<Header: Compact> + Compact {}
+pub trait FullBlock: Block<Header: Compact> {}
 
-impl<T> FullBlock for T where T: Block<Header: FullBlockHeader> + Compact {}
+impl<T> FullBlock for T where T: Block<Header: FullBlockHeader> {}
 
 /// Abstraction of block data type.
 // todo: make sealable super-trait, depends on <https://github.com/paradigmxyz/reth/issues/11449>

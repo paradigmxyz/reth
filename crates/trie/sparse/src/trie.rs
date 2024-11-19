@@ -63,6 +63,13 @@ impl SparseTrie {
         Ok(())
     }
 
+    /// Remove the leaf node.
+    pub fn remove_leaf(&mut self, path: &Nibbles) -> SparseTrieResult<()> {
+        let revealed = self.as_revealed_mut().ok_or(SparseTrieError::Blind)?;
+        revealed.remove_leaf(path)?;
+        Ok(())
+    }
+
     /// Calculates and returns the trie root if the trie has been revealed.
     pub fn root(&mut self) -> Option<B256> {
         Some(self.as_revealed_mut()?.root())

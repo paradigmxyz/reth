@@ -44,6 +44,9 @@ use super::ProviderNodeTypes;
 
 mod metrics;
 
+mod chain;
+pub use chain::*;
+
 /// A common provider that fetches data from a database or static file.
 ///
 /// This provider implements most provider or provider factory traits.
@@ -56,19 +59,22 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     static_file_provider: StaticFileProvider<N::Primitives>,
     /// Optional pruning configuration
     prune_modes: PruneModes,
+    /// The node storage handler.
+    storage: Arc<N::Storage>,
 }
 
 impl<N> fmt::Debug for ProviderFactory<N>
 where
-    N: NodeTypesWithDB<DB: fmt::Debug, ChainSpec: fmt::Debug>,
+    N: NodeTypesWithDB<DB: fmt::Debug, ChainSpec: fmt::Debug, Storage: fmt::Debug>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { db, chain_spec, static_file_provider, prune_modes } = self;
+        let Self { db, chain_spec, static_file_provider, prune_modes, storage } = self;
         f.debug_struct("ProviderFactory")
             .field("db", &db)
             .field("chain_spec", &chain_spec)
             .field("static_file_provider", &static_file_provider)
             .field("prune_modes", &prune_modes)
+            .field("storage", &storage)
             .finish()
     }
 }
@@ -80,7 +86,13 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider<N::Primitives>,
     ) -> Self {
-        Self { db, chain_spec, static_file_provider, prune_modes: PruneModes::none() }
+        Self {
+            db,
+            chain_spec,
+            static_file_provider,
+            prune_modes: PruneModes::none(),
+            storage: Default::default(),
+        }
     }
 
     /// Enables metrics on the static file provider.
@@ -121,6 +133,7 @@ impl<N: NodeTypesWithDB<DB = Arc<DatabaseEnv>>> ProviderFactory<N> {
             chain_spec,
             static_file_provider,
             prune_modes: PruneModes::none(),
+            storage: Default::default(),
         })
     }
 }
@@ -139,6 +152,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.chain_spec.clone(),
             self.static_file_provider.clone(),
             self.prune_modes.clone(),
+            self.storage.clone(),
         ))
     }
 
@@ -153,6 +167,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.chain_spec.clone(),
             self.static_file_provider.clone(),
             self.prune_modes.clone(),
+            self.storage.clone(),
         )))
     }
 
@@ -617,6 +632,7 @@ impl<N: NodeTypesWithDB> Clone for ProviderFactory<N> {
             chain_spec: self.chain_spec.clone(),
             static_file_provider: self.static_file_provider.clone(),
             prune_modes: self.prune_modes.clone(),
+            storage: self.storage.clone(),
         }
     }
 }

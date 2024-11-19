@@ -9,3 +9,19 @@
 
 pub mod bedrock;
 pub mod tx_type;
+
+pub use tx_type::OpTxType;
+
+use reth_node_types::NodePrimitives;
+use reth_primitives::{Block, Receipt, TransactionSigned};
+
+/// Optimism primitive types.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct OpPrimitives;
+
+impl NodePrimitives for OpPrimitives {
+    type Block = Block;
+    type SignedTx = TransactionSigned;
+    type TxType = OpTxType;
+    type Receipt = Receipt;
+}

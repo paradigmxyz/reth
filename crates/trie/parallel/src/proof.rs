@@ -17,7 +17,7 @@ use reth_trie::{
     proof::StorageProof,
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     walker::TrieWalker,
-    HashBuilder, MultiProof, Nibbles, TrieAccount, TrieInput,
+    HashBuilder, MultiProof, Nibbles, TrieAccount, TrieInput, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::proof::ProofRetainer;
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
@@ -153,7 +153,7 @@ where
         let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
 
         let mut storages = HashMap::default();
-        let mut account_rlp = Vec::with_capacity(128);
+        let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
         let mut account_node_iter = TrieNodeIter::new(
             walker,
             hashed_cursor_factory.hashed_account_cursor().map_err(ProviderError::Database)?,
