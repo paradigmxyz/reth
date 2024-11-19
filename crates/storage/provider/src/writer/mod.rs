@@ -285,7 +285,8 @@ where
         let tx_range = self
             .database()
             .transaction_range_by_block_range(block_number + 1..=highest_static_file_block)?;
-        let total_txs = tx_range.end().saturating_sub(*tx_range.start());
+        // We are using end + 1 - start here because the returned range is inclusive.
+        let total_txs = (tx_range.end() + 1).saturating_sub(*tx_range.start());
 
         // IMPORTANT: we use `block_number+1` to make sure we remove only what is ABOVE the block
         debug!(target: "provider::storage_writer", ?block_number, "Removing blocks from database above block_number");

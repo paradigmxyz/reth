@@ -15,7 +15,7 @@ use reth_db_api::{
     DatabaseError as DbError,
 };
 use reth_primitives::{
-    Account, Receipt, SealedBlock, SealedHeader, StaticFileSegment, StorageEntry,
+    Account, EthPrimitives, Receipt, SealedBlock, SealedHeader, StaticFileSegment, StorageEntry,
 };
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
@@ -142,7 +142,7 @@ impl TestStageDB {
 
     /// Insert header to static file if `writer` exists, otherwise to DB.
     pub fn insert_header<TX: DbTx + DbTxMut>(
-        writer: Option<&mut StaticFileProviderRWRefMut<'_, ()>>,
+        writer: Option<&mut StaticFileProviderRWRefMut<'_, EthPrimitives>>,
         tx: &TX,
         header: &SealedHeader,
         td: U256,

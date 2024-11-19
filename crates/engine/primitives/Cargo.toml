@@ -14,6 +14,7 @@ workspace = true
 # reth
 reth-execution-types.workspace = true
 reth-payload-primitives.workspace = true
+reth-payload-builder-primitives.workspace = true
 reth-primitives.workspace = true
 reth-trie.workspace = true
 reth-errors.workspace = true

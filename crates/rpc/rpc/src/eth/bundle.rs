@@ -1,31 +1,26 @@
 //! `Eth` bundle implementation and helpers.
 
-use std::sync::Arc;
-
 use alloy_primitives::{Keccak256, U256};
 use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
-use reth_primitives::{
-    revm_primitives::db::{DatabaseCommit, DatabaseRef},
-    PooledTransactionsElement,
-};
+use reth_primitives::PooledTransactionsElement;
+use reth_provider::{ChainSpecProvider, HeaderProvider};
 use reth_revm::database::StateProviderDatabase;
-use reth_rpc_eth_api::{FromEthApiError, FromEvmError, RpcNodeCore};
+use reth_rpc_eth_api::{
+    helpers::{Call, EthTransactions, LoadPendingBlock},
+    EthCallBundleApiServer, FromEthApiError, FromEvmError, RpcNodeCore,
+};
+use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError, RpcInvalidTransactionError};
 use reth_tasks::pool::BlockingTaskGuard;
 use revm::{
-    db::CacheDB,
+    db::{CacheDB, DatabaseCommit, DatabaseRef},
     primitives::{ResultAndState, TxEnv},
 };
 use revm_primitives::{EnvKzgSettings, EnvWithHandlerCfg, SpecId, MAX_BLOB_GAS_PER_BLOCK};
+use std::sync::Arc;
 
-use reth_provider::{ChainSpecProvider, HeaderProvider};
-use reth_rpc_eth_api::{
-    helpers::{Call, EthTransactions, LoadPendingBlock},
-    EthCallBundleApiServer,
-};
-use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError, RpcInvalidTransactionError};
 /// `Eth` bundle implementation.
 pub struct EthBundle<Eth> {
     /// All nested fields bundled together.

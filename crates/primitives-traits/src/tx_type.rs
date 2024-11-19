@@ -3,6 +3,8 @@ use core::fmt;
 use alloy_primitives::{U64, U8};
 use reth_codecs::Compact;
 
+use crate::InMemorySize;
+
 /// Helper trait that unifies all behaviour required by transaction type ID to support full node
 /// operations.
 pub trait FullTxType: TxType + Compact {}
@@ -29,6 +31,7 @@ pub trait TxType:
     + TryFrom<U64>
     + alloy_rlp::Encodable
     + alloy_rlp::Decodable
+    + InMemorySize
 {
     /// Returns `true` if this is a legacy transaction.
     fn is_legacy(&self) -> bool;

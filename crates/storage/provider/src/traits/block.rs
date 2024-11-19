@@ -50,7 +50,7 @@ pub trait BlockWriter: Send + Sync {
     /// Bodies are passed as [`Option`]s, if body is `None` the corresponding block is empty.
     fn append_block_bodies(
         &self,
-        bodies: impl Iterator<Item = (BlockNumber, Option<Self::Body>)>,
+        bodies: Vec<(BlockNumber, Option<Self::Body>)>,
     ) -> ProviderResult<()>;
 
     /// Appends a batch of sealed blocks to the blockchain, including sender information, and
