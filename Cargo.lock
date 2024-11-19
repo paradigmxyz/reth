@@ -7644,6 +7644,7 @@ dependencies = [
  "reth-chain-state",
  "reth-execution-types",
  "reth-primitives",
+ "reth-primitives-traits",
  "serde",
  "serde_with",
 ]
