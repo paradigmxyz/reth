@@ -386,9 +386,8 @@ where
             if self.wal.num_blocks() > (WAL_BLOCKS_WARNING as u64) {
                 warn!(
                     target: "exex::manager",
-                    "WAL contains {} blocks, exceeding the limit of {}",
-                    self.wal.num_blocks(),
-                    WAL_BLOCKS_WARNING,
+                    blocks = ?self.wal.num_blocks(),
+                    "WAL contains too many blocks and is not getting cleared. That will lead to increased disk space usage. Check that you emit the FinishedHeight event from your ExExes."
                 );
             }
         } else {
