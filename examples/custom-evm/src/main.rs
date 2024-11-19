@@ -103,7 +103,7 @@ impl ConfigureEvmEnv for MyEvmConfig {
     fn fill_cfg_env(
         &self,
         cfg_env: &mut CfgEnvWithHandlerCfg,
-        header: &Header,
+        header: &Self::Header,
         total_difficulty: U256,
     ) {
         self.inner.fill_cfg_env(cfg_env, header, total_difficulty);
