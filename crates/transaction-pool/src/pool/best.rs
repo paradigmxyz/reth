@@ -971,7 +971,7 @@ mod tests {
 
         // Add a blob transaction
         let tx_blob = MockTransaction::eip4844().rng_hash().with_nonce(0).with_blob_fee(100);
-        let valid_blob_tx = f.validated(tx_blob.clone());
+        let valid_blob_tx = f.validated(tx_blob);
         pool.add_transaction(Arc::new(valid_blob_tx), 0);
 
         // Add a non-blob transaction
@@ -999,7 +999,7 @@ mod tests {
 
         // Add a transaction
         let tx = MockTransaction::eip1559().rng_hash().with_nonce(0).with_max_fee(100);
-        let valid_tx = f.validated(tx.clone());
+        let valid_tx = f.validated(tx);
         pool.add_transaction(Arc::new(valid_tx), 0);
 
         let mut best = pool.best();
