@@ -45,6 +45,10 @@ std = [
     "reth-primitives/std",
     "reth-node-types/std",
     "reth-codecs/std",
+    "alloy-consensus/std",
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "serde/std",
 ]
 reth-codec = [
     "dep:reth-codecs",
