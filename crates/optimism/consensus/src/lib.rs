@@ -12,7 +12,7 @@
 use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH};
 use alloy_primitives::{B64, U256};
 use reth_chainspec::EthereumHardforks;
-use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
+use reth_consensus::{Consensus, ConsensusError, HeaderValidator, PostExecutionInput};
 use reth_consensus_common::validation::{
     validate_against_parent_4844, validate_against_parent_eip1559_base_fee,
     validate_against_parent_hash_number, validate_against_parent_timestamp,
@@ -47,6 +47,50 @@ impl OpBeaconConsensus {
 }
 
 impl Consensus for OpBeaconConsensus {
+    fn validate_body_against_header(
+        &self,
+        body: &BlockBody,
+        header: &SealedHeader,
+    ) -> Result<(), ConsensusError> {
+        validate_body_against_header(body, header)
+    }
+
+    fn validate_block_pre_execution(&self, block: &SealedBlock) -> Result<(), ConsensusError> {
+        // Check ommers hash
+        let ommers_hash = reth_primitives::proofs::calculate_ommers_root(&block.body.ommers);
+        if block.header.ommers_hash != ommers_hash {
+            return Err(ConsensusError::BodyOmmersHashDiff(
+                GotExpected { got: ommers_hash, expected: block.header.ommers_hash }.into(),
+            ))
+        }
+
+        // Check transaction root
+        if let Err(error) = block.ensure_transaction_root_valid() {
+            return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
+        }
+
+        // EIP-4895: Beacon chain push withdrawals as operations
+        if self.chain_spec.is_shanghai_active_at_timestamp(block.timestamp) {
+            validate_shanghai_withdrawals(block)?;
+        }
+
+        if self.chain_spec.is_cancun_active_at_timestamp(block.timestamp) {
+            validate_cancun_gas(block)?;
+        }
+
+        Ok(())
+    }
+
+    fn validate_block_post_execution(
+        &self,
+        block: &BlockWithSenders,
+        input: PostExecutionInput<'_>,
+    ) -> Result<(), ConsensusError> {
+        validate_block_post_execution(block, &self.chain_spec, input.receipts)
+    }
+}
+
+impl HeaderValidator for OpBeaconConsensus {
     fn validate_header(&self, header: &SealedHeader) -> Result<(), ConsensusError> {
         validate_header_gas(header)?;
         validate_header_base_fee(header, &self.chain_spec)
@@ -117,47 +161,5 @@ impl Consensus for OpBeaconConsensus {
         }
 
         Ok(())
-    }
-
-    fn validate_body_against_header(
-        &self,
-        body: &BlockBody,
-        header: &SealedHeader,
-    ) -> Result<(), ConsensusError> {
-        validate_body_against_header(body, header)
-    }
-
-    fn validate_block_pre_execution(&self, block: &SealedBlock) -> Result<(), ConsensusError> {
-        // Check ommers hash
-        let ommers_hash = reth_primitives::proofs::calculate_ommers_root(&block.body.ommers);
-        if block.header.ommers_hash != ommers_hash {
-            return Err(ConsensusError::BodyOmmersHashDiff(
-                GotExpected { got: ommers_hash, expected: block.header.ommers_hash }.into(),
-            ))
-        }
-
-        // Check transaction root
-        if let Err(error) = block.ensure_transaction_root_valid() {
-            return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
-        }
-
-        // EIP-4895: Beacon chain push withdrawals as operations
-        if self.chain_spec.is_shanghai_active_at_timestamp(block.timestamp) {
-            validate_shanghai_withdrawals(block)?;
-        }
-
-        if self.chain_spec.is_cancun_active_at_timestamp(block.timestamp) {
-            validate_cancun_gas(block)?;
-        }
-
-        Ok(())
-    }
-
-    fn validate_block_post_execution(
-        &self,
-        block: &BlockWithSenders,
-        input: PostExecutionInput<'_>,
-    ) -> Result<(), ConsensusError> {
-        validate_block_post_execution(block, &self.chain_spec, input.receipts)
     }
 }
