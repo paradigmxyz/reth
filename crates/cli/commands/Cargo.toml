@@ -92,6 +92,7 @@ proptest-arbitrary-interop = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-discv4.workspace = true
+alloy-chains.workspace = true
 
 [features]
 default = []

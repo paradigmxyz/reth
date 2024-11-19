@@ -2790,6 +2790,7 @@ dependencies = [
 name = "example-bsc-p2p"
 version = "0.0.0"
 dependencies = [
+ "alloy-chains",
  "alloy-primitives",
  "reth-chainspec",
  "reth-discv4",
@@ -2841,6 +2842,7 @@ dependencies = [
 name = "example-custom-engine-types"
 version = "0.0.0"
 dependencies = [
+ "alloy-chains",
  "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
@@ -2865,6 +2867,7 @@ dependencies = [
 name = "example-custom-evm"
 version = "0.0.0"
 dependencies = [
+ "alloy-chains",
  "alloy-consensus",
  "alloy-genesis",
  "alloy-primitives",
@@ -2960,6 +2963,7 @@ dependencies = [
 name = "example-manual-p2p"
 version = "0.0.0"
 dependencies = [
+ "alloy-chains",
  "alloy-consensus",
  "eyre",
  "futures",
@@ -3020,6 +3024,7 @@ dependencies = [
 name = "example-polygon-p2p"
 version = "0.0.0"
 dependencies = [
+ "alloy-chains",
  "alloy-primitives",
  "reth-chainspec",
  "reth-discv4",
@@ -3051,6 +3056,7 @@ dependencies = [
 name = "example-stateful-precompile"
 version = "0.0.0"
 dependencies = [
+ "alloy-chains",
  "alloy-consensus",
  "alloy-genesis",
  "alloy-primitives",
@@ -6644,6 +6650,7 @@ name = "reth-cli-commands"
 version = "1.1.2"
 dependencies = [
  "ahash",
+ "alloy-chains",
  "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
@@ -6908,6 +6915,7 @@ dependencies = [
 name = "reth-db-common"
 version = "1.1.2"
 dependencies = [
+ "alloy-chains",
  "alloy-consensus",
  "alloy-genesis",
  "alloy-primitives",
@@ -7504,6 +7512,7 @@ dependencies = [
 name = "reth-evm-ethereum"
 version = "1.1.2"
 dependencies = [
+ "alloy-chains",
  "alloy-consensus",
  "alloy-eips",
  "alloy-genesis",
@@ -7770,6 +7779,7 @@ dependencies = [
 name = "reth-network"
 version = "1.1.2"
 dependencies = [
+ "alloy-chains",
  "alloy-consensus",
  "alloy-eips",
  "alloy-node-bindings",
@@ -7944,6 +7954,7 @@ dependencies = [
 name = "reth-node-builder"
 version = "1.1.2"
 dependencies = [
+ "alloy-chains",
  "alloy-consensus",
  "alloy-primitives",
  "alloy-rpc-types",
@@ -8009,6 +8020,7 @@ dependencies = [
 name = "reth-node-core"
 version = "1.1.2"
 dependencies = [
+ "alloy-chains",
  "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
@@ -8251,6 +8263,7 @@ dependencies = [
 name = "reth-optimism-evm"
 version = "1.1.2"
 dependencies = [
+ "alloy-chains",
  "alloy-consensus",
  "alloy-eips",
  "alloy-genesis",
@@ -8599,6 +8612,7 @@ dependencies = [
 name = "reth-provider"
 version = "1.1.2"
 dependencies = [
+ "alloy-chains",
  "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
@@ -9371,6 +9385,7 @@ dependencies = [
 name = "reth-trie-db"
 version = "1.1.2"
 dependencies = [
+ "alloy-chains",
  "alloy-consensus",
  "alloy-primitives",
  "alloy-rlp",

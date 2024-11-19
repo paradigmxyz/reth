@@ -22,6 +22,7 @@ use std::{convert::Infallible, sync::Arc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use alloy_chains::Chain;
 use alloy_eips::eip4895::Withdrawals;
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, B256};
@@ -52,7 +53,7 @@ use reth_basic_payload_builder::{
     BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig, BuildArguments, BuildOutcome,
     PayloadBuilder, PayloadConfig,
 };
-use reth_chainspec::{Chain, ChainSpec, ChainSpecProvider};
+use reth_chainspec::{ChainSpec, ChainSpecProvider};
 use reth_node_api::{
     payload::{EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes},
     validate_version_specific_fields, AddOnsContext, EngineTypes, EngineValidator,

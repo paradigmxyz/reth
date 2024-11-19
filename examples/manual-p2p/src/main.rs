@@ -8,9 +8,10 @@
 
 use std::time::Duration;
 
+use alloy_chains::Chain;
 use alloy_consensus::constants::MAINNET_GENESIS_HASH;
 use futures::StreamExt;
-use reth_chainspec::{Chain, MAINNET};
+use reth_chainspec::MAINNET;
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4ConfigBuilder, DEFAULT_DISCOVERY_ADDRESS};
 use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{

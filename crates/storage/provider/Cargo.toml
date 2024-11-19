@@ -41,6 +41,7 @@ alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
 revm.workspace = true
+alloy-chains = { workspace = true, optional = true }
 
 # optimism
 reth-optimism-primitives = { workspace = true, optional = true }
@@ -96,6 +97,7 @@ optimism = [
     "reth-db/optimism",
     "reth-db-api/optimism",
     "revm/optimism",
+    "alloy-chains",
 ]
 serde = [
     "reth-execution-types/serde",

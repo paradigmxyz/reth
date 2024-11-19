@@ -89,7 +89,7 @@ mod tests {
     fn test_revm_spec_by_timestamp_after_merge() {
         #[inline(always)]
         fn op_cs(f: impl FnOnce(OpChainSpecBuilder) -> OpChainSpecBuilder) -> OpChainSpec {
-            let cs = ChainSpecBuilder::mainnet().chain(reth_chainspec::Chain::from_id(10)).into();
+            let cs = ChainSpecBuilder::mainnet().chain(alloy_chains::Chain::from_id(10)).into();
             f(cs).build()
         }
         assert_eq!(
@@ -122,7 +122,7 @@ mod tests {
     fn test_to_revm_spec() {
         #[inline(always)]
         fn op_cs(f: impl FnOnce(OpChainSpecBuilder) -> OpChainSpecBuilder) -> OpChainSpec {
-            let cs = ChainSpecBuilder::mainnet().chain(reth_chainspec::Chain::from_id(10)).into();
+            let cs = ChainSpecBuilder::mainnet().chain(alloy_chains::Chain::from_id(10)).into();
             f(cs).build()
         }
         assert_eq!(

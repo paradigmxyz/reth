@@ -635,8 +635,9 @@ impl NetworkMode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_chains::Chain;
     use rand::thread_rng;
-    use reth_chainspec::{Chain, MAINNET};
+    use reth_chainspec::MAINNET;
     use reth_dns_discovery::tree::LinkEntry;
     use reth_primitives::ForkHash;
     use reth_provider::test_utils::NoopProvider;

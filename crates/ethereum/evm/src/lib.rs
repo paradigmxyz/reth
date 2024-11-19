@@ -196,10 +196,11 @@ impl ConfigureEvm for EthEvmConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_chains::Chain;
     use alloy_consensus::{constants::KECCAK_EMPTY, Header};
     use alloy_genesis::Genesis;
     use alloy_primitives::{B256, U256};
-    use reth_chainspec::{Chain, ChainSpec, MAINNET};
+    use reth_chainspec::{ChainSpec, MAINNET};
     use reth_evm::execute::ProviderError;
     use reth_revm::{
         db::{CacheDB, EmptyDBTyped},

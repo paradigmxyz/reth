@@ -2,6 +2,7 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use alloy_chains::Chain;
 use alloy_consensus::Header;
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, Bytes, U256};
@@ -21,7 +22,7 @@ use reth::{
     },
     tasks::TaskManager,
 };
-use reth_chainspec::{Chain, ChainSpec};
+use reth_chainspec::ChainSpec;
 use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeTypes, NodeTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{

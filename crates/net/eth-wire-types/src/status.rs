@@ -138,9 +138,10 @@ impl Default for Status {
 ///
 /// # Example
 /// ```
+/// use alloy_chains::Chain;
 /// use alloy_consensus::constants::MAINNET_GENESIS_HASH;
 /// use alloy_primitives::{B256, U256};
-/// use reth_chainspec::{Chain, EthereumHardfork, MAINNET};
+/// use reth_chainspec::{EthereumHardfork, MAINNET};
 /// use reth_eth_wire_types::{EthVersion, Status};
 ///
 /// // this is just an example status message!
@@ -216,12 +217,13 @@ impl StatusBuilder {
 #[cfg(test)]
 mod tests {
     use crate::{EthVersion, Status};
+    use alloy_chains::{Chain, NamedChain};
     use alloy_consensus::constants::MAINNET_GENESIS_HASH;
     use alloy_genesis::Genesis;
     use alloy_primitives::{hex, B256, U256};
     use alloy_rlp::{Decodable, Encodable};
     use rand::Rng;
-    use reth_chainspec::{Chain, ChainSpec, ForkCondition, NamedChain};
+    use reth_chainspec::{ChainSpec, ForkCondition};
     use reth_primitives::{EthereumHardfork, ForkHash, ForkId, Head};
     use std::str::FromStr;
 

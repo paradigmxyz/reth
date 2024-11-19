@@ -38,17 +38,18 @@ reth-execution-types.workspace = true
 secp256k1.workspace = true
 serde_json.workspace = true
 alloy-genesis.workspace = true
+alloy-chains.workspace = true
 
 [features]
 default = ["std"]
 std = [
-	"reth-consensus/std",
-	"reth-primitives/std",
-	"reth-revm/std",
-	"alloy-consensus/std",
-	"alloy-eips/std",
-	"alloy-genesis/std",
-	"alloy-primitives/std",
-	"revm-primitives/std",
-	"secp256k1/std"
+    "reth-consensus/std",
+    "reth-primitives/std",
+    "reth-revm/std",
+    "alloy-consensus/std",
+    "alloy-eips/std",
+    "alloy-genesis/std",
+    "alloy-primitives/std",
+    "revm-primitives/std",
+    "secp256k1/std",
 ]

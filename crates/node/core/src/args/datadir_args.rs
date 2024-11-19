@@ -1,8 +1,8 @@
 //! clap [Args](clap::Args) for datadir config
 
 use crate::dirs::{ChainPath, DataDirPath, MaybePlatformPath};
+use alloy_chains::Chain;
 use clap::Args;
-use reth_chainspec::Chain;
 use std::path::PathBuf;
 
 /// Parameters for datadir configuration

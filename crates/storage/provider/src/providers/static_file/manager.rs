@@ -660,7 +660,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         // More on [#11099](https://github.com/paradigmxyz/reth/pull/11099).
         #[cfg(feature = "optimism")]
         if reth_chainspec::EthChainSpec::chain(&provider.chain_spec()) ==
-            reth_chainspec::Chain::optimism_mainnet() &&
+            alloy_chains::Chain::optimism_mainnet() &&
             provider
                 .block_number(reth_optimism_primitives::bedrock::OVM_HEADER_1_HASH)?
                 .is_some()

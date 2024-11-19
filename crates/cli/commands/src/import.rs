@@ -240,7 +240,7 @@ mod tests {
                 ImportCommand::parse_from(["reth", "--chain", chain, "."]);
             assert_eq!(
                 Ok(args.env.chain.chain),
-                chain.parse::<reth_chainspec::Chain>(),
+                chain.parse::<alloy_chains::Chain>(),
                 "failed to parse chain {chain}"
             );
         }

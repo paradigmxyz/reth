@@ -63,6 +63,7 @@ alloy-primitives.workspace = true
 alloy-rpc-types = { workspace = true, features = ["engine"] }
 alloy-consensus.workspace = true
 revm-primitives.workspace = true
+alloy-chains.workspace = true
 
 ## async
 futures.workspace = true

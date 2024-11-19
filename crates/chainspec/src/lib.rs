@@ -27,7 +27,6 @@ mod info;
 /// The chain spec module.
 mod spec;
 
-pub use alloy_chains::{Chain, ChainKind, NamedChain};
 /// Re-export for convenience
 pub use reth_ethereum_forks::*;
 
@@ -49,7 +48,7 @@ pub fn once_cell_set<T>(value: T) -> OnceLock<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use alloy_chains::{Chain, NamedChain};
     use alloy_primitives::U256;
     use alloy_rlp::Encodable;
     use std::str::FromStr;

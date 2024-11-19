@@ -7,6 +7,7 @@ use crate::{
     hooks::OnComponentInitializedHook,
     BuilderContext, NodeAdapter,
 };
+use alloy_chains::Chain;
 use alloy_primitives::{BlockNumber, B256};
 use eyre::{Context, OptionExt};
 use rayon::ThreadPoolBuilder;
@@ -14,7 +15,7 @@ use reth_beacon_consensus::EthBeaconConsensus;
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
-use reth_chainspec::{Chain, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_consensus::Consensus;
 use reth_db_api::database::Database;
