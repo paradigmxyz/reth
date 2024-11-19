@@ -18,6 +18,14 @@ use reth_primitives_traits::{InMemorySize, TxType};
 #[into(u8)]
 pub struct OpTxType(AlloyOpTxType);
 
+impl<'a> reth_primitives::arbitrary::Arbitrary<'a> for OpTxType {
+    fn arbitrary(
+        u: &mut reth_primitives::arbitrary::Unstructured<'a>,
+    ) -> reth_primitives::arbitrary::Result<Self> {
+        Ok(AlloyOpTxType::arbitrary(u)?.into())
+    }
+}
+
 impl TxType for OpTxType {
     #[inline]
     fn is_legacy(&self) -> bool {

@@ -1,6 +1,6 @@
 //! Receipt abstraction
 
-use crate::{InMemorySize, MaybeSerde};
+use crate::{InMemorySize, MaybeSerde, MaybeArbitrary};
 use alloc::vec::Vec;
 use alloy_consensus::TxReceipt;
 use alloy_primitives::B256;
@@ -26,6 +26,7 @@ pub trait Receipt:
     + alloy_rlp::Decodable
     + MaybeSerde
     + InMemorySize
+    + MaybeArbitrary
 {
     /// Returns transaction type.
     fn tx_type(&self) -> u8;

@@ -3,7 +3,7 @@ use core::fmt;
 use alloy_primitives::{U64, U8};
 use reth_codecs::Compact;
 
-use crate::InMemorySize;
+use crate::{InMemorySize, MaybeArbitrary};
 
 /// Helper trait that unifies all behaviour required by transaction type ID to support full node
 /// operations.
@@ -32,6 +32,7 @@ pub trait TxType:
     + alloy_rlp::Encodable
     + alloy_rlp::Decodable
     + InMemorySize
+    + MaybeArbitrary
 {
     /// Returns `true` if this is a legacy transaction.
     fn is_legacy(&self) -> bool;
