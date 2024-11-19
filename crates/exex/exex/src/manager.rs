@@ -383,7 +383,7 @@ where
                 .unwrap();
 
             self.wal.finalize(lowest_finished_height)?;
-            if self.wal.num_blocks() > (WAL_BLOCKS_WARNING as u64) {
+            if self.wal.num_blocks() > WAL_BLOCKS_WARNING {
                 warn!(
                     target: "exex::manager",
                     blocks = ?self.wal.num_blocks(),

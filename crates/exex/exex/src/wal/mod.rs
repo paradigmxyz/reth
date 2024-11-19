@@ -68,7 +68,7 @@ impl Wal {
     }
 
     /// Returns the number of blocks in the WAL.
-    pub fn num_blocks(&self) -> u64 {
+    pub fn num_blocks(&self) -> usize {
         self.inner.block_cache().num_blocks()
     }
 }
