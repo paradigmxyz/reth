@@ -8,9 +8,6 @@ homepage.workspace = true
 repository.workspace = true
 
 [dependencies]
-reth-db-api.workspace = true
-reth-primitives-traits.workspace = true
-reth-provider.workspace = true
 reth-metrics.workspace = true
 reth-tasks.workspace = true
 
