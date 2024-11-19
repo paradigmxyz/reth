@@ -14,7 +14,7 @@ pub use tx_type::OpTxType;
 
 use alloy_consensus::Header;
 use reth_node_types::NodePrimitives;
-use reth_primitives::{Block, Receipt, TransactionSigned};
+use reth_primitives::{Block, BlockBody, Receipt, TransactionSigned};
 
 /// Optimism primitive types.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -23,7 +23,7 @@ pub struct OpPrimitives;
 impl NodePrimitives for OpPrimitives {
     type Block = Block;
     type BlockHeader = Header;
-    type BlockBody = Block;
+    type BlockBody = BlockBody;
     type SignedTx = TransactionSigned;
     type TxType = OpTxType;
     type Receipt = Receipt;
