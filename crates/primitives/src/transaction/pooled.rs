@@ -16,7 +16,6 @@ use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
 use bytes::Buf;
 use derive_more::{AsRef, Deref};
 use serde::{Deserialize, Serialize};
-use std::sync::LazyLock;
 
 /// A response to `GetPooledTransactions`. This can include either a blob transaction, or a
 /// non-4844 signed transaction.
@@ -71,33 +70,17 @@ impl PooledTransactionsElement {
     /// p2p, return an err if `tx` is [`Transaction::Eip4844`].
     pub fn try_from_broadcast(tx: TransactionSigned) -> Result<Self, TransactionSigned> {
         match tx {
-            TransactionSigned { transaction: Transaction::Legacy(tx), signature, hash: _ } => {
-                Ok(Self::Legacy {
-                    transaction: tx,
-                    signature,
-                    hash: *LazyLock::new(|| Default::default()),
-                })
+            TransactionSigned { transaction: Transaction::Legacy(tx), signature, hash } => {
+                Ok(Self::Legacy { transaction: tx, signature, hash: *hash.get().unwrap() })
             }
-            TransactionSigned { transaction: Transaction::Eip2930(tx), signature, hash: _ } => {
-                Ok(Self::Eip2930 {
-                    transaction: tx,
-                    signature,
-                    hash: *LazyLock::new(|| Default::default()),
-                })
+            TransactionSigned { transaction: Transaction::Eip2930(tx), signature, hash } => {
+                Ok(Self::Eip2930 { transaction: tx, signature, hash: *hash.get().unwrap() })
             }
-            TransactionSigned { transaction: Transaction::Eip1559(tx), signature, hash: _ } => {
-                Ok(Self::Eip1559 {
-                    transaction: tx,
-                    signature,
-                    hash: *LazyLock::new(|| Default::default()),
-                })
+            TransactionSigned { transaction: Transaction::Eip1559(tx), signature, hash } => {
+                Ok(Self::Eip1559 { transaction: tx, signature, hash: *hash.get().unwrap() })
             }
-            TransactionSigned { transaction: Transaction::Eip7702(tx), signature, hash: _ } => {
-                Ok(Self::Eip7702 {
-                    transaction: tx,
-                    signature,
-                    hash: *LazyLock::new(|| Default::default()),
-                })
+            TransactionSigned { transaction: Transaction::Eip7702(tx), signature, hash } => {
+                Ok(Self::Eip7702 { transaction: tx, signature, hash: *hash.get().unwrap() })
             }
             // Not supported because missing blob sidecar
             tx @ TransactionSigned { transaction: Transaction::Eip4844(_), .. } => Err(tx),
@@ -118,11 +101,11 @@ impl PooledTransactionsElement {
     ) -> Result<Self, TransactionSigned> {
         Ok(match tx {
             // If the transaction is an EIP-4844 transaction...
-            TransactionSigned { transaction: Transaction::Eip4844(tx), signature, hash: _ } => {
+            TransactionSigned { transaction: Transaction::Eip4844(tx), signature, hash } => {
                 // Construct a `PooledTransactionsElement::BlobTransaction` with provided sidecar.
                 Self::BlobTransaction(BlobTransaction {
                     signature,
-                    hash: *LazyLock::new(|| Default::default()),
+                    hash: *hash.get().unwrap(),
                     transaction: TxEip4844WithSidecar { tx, sidecar },
                 })
             }
@@ -204,25 +187,25 @@ impl PooledTransactionsElement {
     /// Returns the inner [`TransactionSigned`].
     pub fn into_transaction(self) -> TransactionSigned {
         match self {
-            Self::Legacy { transaction, signature, hash: _ } => TransactionSigned {
+            Self::Legacy { transaction, signature, hash } => TransactionSigned {
                 transaction: Transaction::Legacy(transaction),
                 signature,
-                hash: LazyLock::new(|| Default::default()),
+                hash: hash.into(),
             },
-            Self::Eip2930 { transaction, signature, hash: _ } => TransactionSigned {
+            Self::Eip2930 { transaction, signature, hash } => TransactionSigned {
                 transaction: Transaction::Eip2930(transaction),
                 signature,
-                hash: LazyLock::new(|| Default::default()),
+                hash: hash.into(),
             },
-            Self::Eip1559 { transaction, signature, hash: _ } => TransactionSigned {
+            Self::Eip1559 { transaction, signature, hash } => TransactionSigned {
                 transaction: Transaction::Eip1559(transaction),
                 signature,
-                hash: LazyLock::new(|| Default::default()),
+                hash: hash.into(),
             },
-            Self::Eip7702 { transaction, signature, hash: _ } => TransactionSigned {
+            Self::Eip7702 { transaction, signature, hash } => TransactionSigned {
                 transaction: Transaction::Eip7702(transaction),
                 signature,
-                hash: LazyLock::new(|| Default::default()),
+                hash: hash.into(),
             },
             Self::BlobTransaction(blob_tx) => blob_tx.into_parts().0,
         }
@@ -492,17 +475,17 @@ impl Decodable2718 for PooledTransactionsElement {
                     Transaction::Eip2930(tx) => Ok(Self::Eip2930 {
                         transaction: tx,
                         signature: typed_tx.signature,
-                        hash: *typed_tx.hash,
+                        hash: *typed_tx.hash.get().unwrap(),
                     }),
                     Transaction::Eip1559(tx) => Ok(Self::Eip1559 {
                         transaction: tx,
                         signature: typed_tx.signature,
-                        hash: *typed_tx.hash,
+                        hash: *typed_tx.hash.get().unwrap(),
                     }),
                     Transaction::Eip7702(tx) => Ok(Self::Eip7702 {
                         transaction: tx,
                         signature: typed_tx.signature,
-                        hash: *typed_tx.hash,
+                        hash: *typed_tx.hash.get().unwrap(),
                     }),
                     #[cfg(feature = "optimism")]
                     Transaction::Deposit(_) => Err(RlpError::Custom("Optimism deposit transaction cannot be decoded to PooledTransactionsElement").into())

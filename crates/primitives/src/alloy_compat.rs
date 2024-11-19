@@ -6,7 +6,6 @@ use alloy_consensus::{constants::EMPTY_TRANSACTIONS, Header, TxEnvelope};
 use alloy_network::{AnyHeader, AnyRpcBlock, AnyRpcTransaction, AnyTxEnvelope};
 use alloy_serde::WithOtherFields;
 use op_alloy_rpc_types as _;
-use std::sync::LazyLock;
 
 impl TryFrom<AnyRpcBlock> for Block {
     type Error = alloy_rpc_types::ConversionError;
@@ -103,7 +102,7 @@ impl TryFrom<AnyRpcTransaction> for TransactionSigned {
 
         let WithOtherFields { inner: tx, other: _ } = tx;
 
-        let (transaction, signature, _hash) = match tx.inner {
+        let (transaction, signature, hash) = match tx.inner {
             AnyTxEnvelope::Ethereum(TxEnvelope::Legacy(tx)) => {
                 let (tx, signature, hash) = tx.into_parts();
                 (Transaction::Legacy(tx), signature, hash)
@@ -157,7 +156,7 @@ impl TryFrom<AnyRpcTransaction> for TransactionSigned {
             _ => return Err(ConversionError::Custom("unknown transaction type".to_string())),
         };
 
-        Ok(Self { transaction, signature, hash: LazyLock::new(|| Default::default()) })
+        Ok(Self { transaction, signature, hash: hash.into() })
     }
 }
 
