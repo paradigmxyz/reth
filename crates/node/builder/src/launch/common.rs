@@ -26,7 +26,7 @@ use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_fs_util as fs;
 use reth_invalid_block_hooks::InvalidBlockWitnessHook;
 use reth_network_p2p::headers::client::HeadersClient;
-use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithDB};
+use reth_node_api::{FullNodePrimitives, FullNodeTypes, NodeTypes, NodeTypesWithDB};
 use reth_node_core::{
     args::InvalidBlockHookType,
     dirs::{ChainPath, DataDirPath},
@@ -404,9 +404,12 @@ where
     /// Returns the [`ProviderFactory`] for the attached storage after executing a consistent check
     /// between the database and static files. **It may execute a pipeline unwind if it fails this
     /// check.**
-    pub async fn create_provider_factory<N: NodeTypesWithDB<DB = DB, ChainSpec = ChainSpec>>(
-        &self,
-    ) -> eyre::Result<ProviderFactory<N>> {
+    pub async fn create_provider_factory<N>(&self) -> eyre::Result<ProviderFactory<N>>
+    where
+        N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
+        N::Primitives:
+            FullNodePrimitives<Block: reth_node_api::Block<Body = reth_primitives::BlockBody>>,
+    {
         let factory = ProviderFactory::new(
             self.right().clone(),
             self.chain_spec(),
@@ -467,9 +470,14 @@ where
     }
 
     /// Creates a new [`ProviderFactory`] and attaches it to the launch context.
-    pub async fn with_provider_factory<N: NodeTypesWithDB<DB = DB, ChainSpec = ChainSpec>>(
+    pub async fn with_provider_factory<N>(
         self,
-    ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<ChainSpec>, ProviderFactory<N>>>> {
+    ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<ChainSpec>, ProviderFactory<N>>>>
+    where
+        N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
+        N::Primitives:
+            FullNodePrimitives<Block: reth_node_api::Block<Body = reth_primitives::BlockBody>>,
+    {
         let factory = self.create_provider_factory().await?;
         let ctx = LaunchContextWith {
             inner: self.inner,
@@ -482,7 +490,7 @@ where
 
 impl<T> LaunchContextWith<Attached<WithConfigs<T::ChainSpec>, ProviderFactory<T>>>
 where
-    T: NodeTypesWithDB<ChainSpec: EthereumHardforks + EthChainSpec>,
+    T: ProviderNodeTypes,
 {
     /// Returns access to the underlying database.
     pub const fn database(&self) -> &T::DB {
@@ -748,10 +756,7 @@ impl<T, CB>
         Attached<WithConfigs<<T::Types as NodeTypes>::ChainSpec>, WithComponents<T, CB>>,
     >
 where
-    T: FullNodeTypes<
-        Provider: WithTree,
-        Types: NodeTypes<ChainSpec: EthChainSpec + EthereumHardforks>,
-    >,
+    T: FullNodeTypes<Provider: WithTree, Types: ProviderNodeTypes>,
     CB: NodeComponentsBuilder<T>,
 {
     /// Returns the configured `ProviderFactory`.
@@ -913,7 +918,7 @@ impl<T, CB>
 where
     T: FullNodeTypes<
         Provider: WithTree + StateProviderFactory + ChainSpecProvider,
-        Types: NodeTypes<ChainSpec: EthereumHardforks>,
+        Types: ProviderNodeTypes,
     >,
     CB: NodeComponentsBuilder<T>,
 {
