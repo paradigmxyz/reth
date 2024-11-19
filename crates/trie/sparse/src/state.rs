@@ -73,7 +73,7 @@ impl SparseStateTrie {
         slot: B256,
         proof: impl IntoIterator<Item = (Nibbles, Bytes)>,
     ) -> SparseStateTrieResult<()> {
-        if self.revealed.get(&account).map_or(false, |v| v.contains(&slot)) {
+        if self.revealed.get(&account).is_some_and(|v| v.contains(&slot)) {
             return Ok(());
         }
 
