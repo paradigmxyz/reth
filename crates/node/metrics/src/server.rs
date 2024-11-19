@@ -103,7 +103,7 @@ impl MetricServer {
                 let hook = hook.clone();
                 let service = tower::service_fn(move |_| {
                     (hook)();
-                    let metrics = handle.render();
+                    let metrics = handle.handle().render();
                     let mut response = Response::new(metrics);
                     response
                         .headers_mut()
