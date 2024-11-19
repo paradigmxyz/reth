@@ -17,6 +17,7 @@ reth-chainspec.workspace = true
 reth-blockchain-tree-api.workspace = true
 reth-execution-types.workspace = true
 reth-primitives = { workspace = true, features = ["reth-codec", "secp256k1"] }
+reth-primitives-traits.workspace = true
 reth-fs-util.workspace = true
 reth-errors.workspace = true
 reth-storage-errors.workspace = true
@@ -111,6 +112,7 @@ serde = [
     "revm/serde",
     "reth-codecs/serde",
     "reth-optimism-primitives?/serde",
+    "reth-primitives-traits/serde",
 ]
 test-utils = [
     "reth-db/test-utils",
@@ -122,6 +124,7 @@ test-utils = [
     "reth-evm/test-utils",
     "reth-network-p2p/test-utils",
     "reth-primitives/test-utils",
+    "reth-primitives-traits/test-utils",
     "reth-codecs/test-utils",
     "reth-db-api/test-utils",
     "reth-trie-db/test-utils",

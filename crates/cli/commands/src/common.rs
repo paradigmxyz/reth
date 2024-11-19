@@ -10,12 +10,16 @@ use reth_db::{init_db, open_db_read_only, DatabaseEnv};
 use reth_db_common::init::init_genesis;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_evm::noop::NoopBlockExecutorProvider;
+use reth_node_api::FullNodePrimitives;
 use reth_node_builder::{NodeTypesWithDBAdapter, NodeTypesWithEngine};
 use reth_node_core::{
     args::{DatabaseArgs, DatadirArgs},
     dirs::{ChainPath, DataDirPath},
 };
-use reth_provider::{providers::StaticFileProvider, ProviderFactory, StaticFileProviderFactory};
+use reth_provider::{
+    providers::{NodeTypesForProvider, StaticFileProvider},
+    ProviderFactory, StaticFileProviderFactory,
+};
 use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
@@ -191,5 +195,21 @@ impl AccessRights {
 
 /// Helper trait with a common set of requirements for the
 /// [`NodeTypes`](reth_node_builder::NodeTypes) in CLI.
-pub trait CliNodeTypes: NodeTypesWithEngine<ChainSpec: EthereumHardforks> {}
-impl<N> CliNodeTypes for N where N: NodeTypesWithEngine<ChainSpec: EthereumHardforks> {}
+pub trait CliNodeTypes:
+    NodeTypesWithEngine
+    + NodeTypesForProvider<
+        Primitives: FullNodePrimitives<
+            Block: reth_node_api::Block<Body = reth_primitives::BlockBody>,
+        >,
+    >
+{
+}
+impl<N> CliNodeTypes for N where
+    N: NodeTypesWithEngine
+        + NodeTypesForProvider<
+            Primitives: FullNodePrimitives<
+                Block: reth_node_api::Block<Body = reth_primitives::BlockBody>,
+            >,
+        >
+{
+}

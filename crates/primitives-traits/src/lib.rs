@@ -60,7 +60,7 @@ pub use tx_type::{FullTxType, TxType};
 pub mod header;
 #[cfg(any(test, feature = "arbitrary", feature = "test-utils"))]
 pub use header::test_utils;
-pub use header::{BlockWithParent, HeaderError, SealedHeader};
+pub use header::{BlockWithParent, Header, HeaderError, SealedHeader};
 
 /// Bincode-compatible serde implementations for common abstracted types in Reth.
 ///
@@ -80,7 +80,7 @@ pub use size::InMemorySize;
 
 /// Node traits
 pub mod node;
-pub use node::{FullNodePrimitives, NodePrimitives};
+pub use node::{FullNodePrimitives, NodePrimitives, ReceiptTy};
 
 /// Helper trait that requires arbitrary implementation if the feature is enabled.
 #[cfg(any(feature = "test-utils", feature = "arbitrary"))]
