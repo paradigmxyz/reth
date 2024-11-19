@@ -88,7 +88,7 @@ where
 
 impl<DB, EvmConfig> OpExecutionStrategy<DB, EvmConfig>
 where
-    EvmConfig: Clone + ConfigureEvm<Header = alloy_consensus::Header>,
+    EvmConfig: Clone,
 {
     /// Creates a new [`OpExecutionStrategy`]
     pub fn new(state: State<DB>, chain_spec: Arc<OpChainSpec>, evm_config: EvmConfig) -> Self {

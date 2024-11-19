@@ -111,7 +111,7 @@ impl ConfigureEvmEnv for OpEvmConfig {
     fn fill_cfg_env(
         &self,
         cfg_env: &mut CfgEnvWithHandlerCfg,
-        header: &Header,
+        header: &Self::Header,
         total_difficulty: U256,
     ) {
         let spec_id = revm_spec(

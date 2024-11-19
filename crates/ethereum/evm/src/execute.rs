@@ -93,7 +93,7 @@ where
 
 impl<DB, EvmConfig> EthExecutionStrategy<DB, EvmConfig>
 where
-    EvmConfig: Clone + ConfigureEvm<Header = alloy_consensus::Header>,
+    EvmConfig: Clone,
 {
     /// Creates a new [`EthExecutionStrategy`]
     pub fn new(state: State<DB>, chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {

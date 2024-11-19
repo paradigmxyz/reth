@@ -628,8 +628,6 @@ mod tests {
     {
         type Error = BlockExecutionError;
 
-        fn init(&mut self, _tx_env_config: Box<dyn TxEnvOverrides>) {}
-
         fn apply_pre_execution_changes(
             &mut self,
             _block: &BlockWithSenders,
@@ -719,7 +717,7 @@ mod tests {
     }
 
     #[test]
-    fn test_evm_initializer() {
+    fn test_tx_env_overrider() {
         let strategy_factory = TestExecutorStrategyFactory {
             execute_transactions_result: ExecuteOutput {
                 receipts: vec![Receipt::default()],
