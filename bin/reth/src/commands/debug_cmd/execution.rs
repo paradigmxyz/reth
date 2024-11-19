@@ -59,7 +59,7 @@ pub struct Command<C: ChainSpecParser> {
 }
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
-    fn build_pipeline<N: ProviderNodeTypes<ChainSpec = C::ChainSpec>, Client>(
+    fn build_pipeline<N: ProviderNodeTypes<ChainSpec = C::ChainSpec> + CliNodeTypes, Client>(
         &self,
         config: &Config,
         client: Client,

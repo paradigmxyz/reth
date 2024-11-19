@@ -79,6 +79,15 @@ pub mod serde_bincode_compat {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EthPrimitives;
 
+#[cfg(feature = "reth-codec")]
+impl reth_primitives_traits::FullNodePrimitives for EthPrimitives {
+    type Block = crate::Block;
+    type SignedTx = crate::TransactionSigned;
+    type TxType = crate::TxType;
+    type Receipt = crate::Receipt;
+}
+
+#[cfg(not(feature = "reth-codec"))]
 impl NodePrimitives for EthPrimitives {
     type Block = crate::Block;
     type SignedTx = crate::TransactionSigned;
