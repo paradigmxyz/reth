@@ -252,7 +252,7 @@ impl<N: NetworkPrimitives> PeersInfo for NetworkHandle<N> {
     }
 }
 
-impl Peers for NetworkHandle {
+impl<N: NetworkPrimitives> Peers for NetworkHandle<N> {
     fn add_trusted_peer_id(&self, peer: PeerId) {
         self.send_message(NetworkHandleMessage::AddTrustedPeerId(peer));
     }
