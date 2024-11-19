@@ -15,7 +15,7 @@ use reth_evm::{
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, SystemCaller},
-    ConfigureEvm,
+    ConfigureEvm, TxEnvOverrides,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::validate_block_post_execution;
@@ -78,6 +78,8 @@ where
     chain_spec: Arc<OpChainSpec>,
     /// How to create an EVM.
     evm_config: EvmConfig,
+    /// Optional overrides for the transactions environment.
+    tx_env_overrides: Option<Box<dyn TxEnvOverrides>>,
     /// Current state for block execution.
     state: State<DB>,
     /// Utility to call system smart contracts.
@@ -91,7 +93,7 @@ where
     /// Creates a new [`OpExecutionStrategy`]
     pub fn new(state: State<DB>, chain_spec: Arc<OpChainSpec>, evm_config: EvmConfig) -> Self {
         let system_caller = SystemCaller::new(evm_config.clone(), chain_spec.clone());
-        Self { state, chain_spec, evm_config, system_caller }
+        Self { state, chain_spec, evm_config, system_caller, tx_env_overrides: None }
     }
 }
 
@@ -118,6 +120,10 @@ where
     EvmConfig: ConfigureEvm<Header = alloy_consensus::Header>,
 {
     type Error = BlockExecutionError;
+
+    fn init(&mut self, tx_env_overrides: Box<dyn TxEnvOverrides>) {
+        self.tx_env_overrides = Some(tx_env_overrides);
+    }
 
     fn apply_pre_execution_changes(
         &mut self,
@@ -196,6 +202,10 @@ where
                 .map_err(|_| OpBlockExecutionError::AccountLoadFailed(*sender))?;
 
             self.evm_config.fill_tx_env(evm.tx_mut(), transaction, *sender);
+
+            if let Some(tx_env_overrides) = &mut self.tx_env_overrides {
+                tx_env_overrides.apply(evm.tx_mut());
+            }
 
             // Execute transaction.
             let result_and_state = evm.transact().map_err(move |err| {
