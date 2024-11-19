@@ -1449,9 +1449,9 @@ impl PropagationMode {
 
 /// A transaction that's about to be propagated to multiple peers.
 #[derive(Debug, Clone)]
-struct PropagateTransaction {
+struct PropagateTransaction<T = TransactionSigned> {
     size: usize,
-    transaction: Arc<TransactionSigned>,
+    transaction: Arc<T>,
 }
 
 // === impl PropagateTransaction ===
@@ -1477,9 +1477,9 @@ impl PropagateTransaction {
 /// Helper type to construct the appropriate message to send to the peer based on whether the peer
 /// should receive them in full or as pooled
 #[derive(Debug, Clone)]
-enum PropagateTransactionsBuilder {
+enum PropagateTransactionsBuilder<T = TransactionSigned> {
     Pooled(PooledTransactionsHashesBuilder),
-    Full(FullTransactionsBuilder),
+    Full(FullTransactionsBuilder<T>),
 }
 
 impl PropagateTransactionsBuilder {
@@ -1528,11 +1528,11 @@ impl PropagateTransactionsBuilder {
 }
 
 /// Represents how the transactions should be sent to a peer if any.
-struct PropagateTransactions {
+struct PropagateTransactions<T = TransactionSigned> {
     /// The pooled transaction hashes to send.
     pooled: Option<NewPooledTransactionHashes>,
     /// The transactions to send in full.
-    full: Option<Vec<Arc<TransactionSigned>>>,
+    full: Option<Vec<Arc<T>>>,
 }
 
 /// Helper type for constructing the full transaction message that enforces the
@@ -1540,11 +1540,11 @@ struct PropagateTransactions {
 /// and enforces other propagation rules for EIP-4844 and tracks those transactions that can't be
 /// broadcasted in full.
 #[derive(Debug, Clone)]
-struct FullTransactionsBuilder {
+struct FullTransactionsBuilder<T = TransactionSigned> {
     /// The soft limit to enforce for a single broadcast message of full transactions.
     total_size: usize,
     /// All transactions to be broadcasted.
-    transactions: Vec<Arc<TransactionSigned>>,
+    transactions: Vec<Arc<T>>,
     /// Transactions that didn't fit into the broadcast message
     pooled: PooledTransactionsHashesBuilder,
 }
