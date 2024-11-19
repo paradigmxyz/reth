@@ -7250,6 +7250,7 @@ dependencies = [
  "crossbeam-channel",
  "futures",
  "metrics",
+ "rand 0.8.5",
  "rayon",
  "reth-beacon-consensus",
  "reth-blockchain-tree",
