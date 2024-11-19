@@ -76,7 +76,7 @@ pub mod serde_bincode_compat {
 }
 
 /// Temp helper struct for integrating [`NodePrimitives`].
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EthPrimitives;
 
 #[cfg(feature = "reth-codec")]

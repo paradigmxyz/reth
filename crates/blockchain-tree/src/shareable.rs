@@ -13,8 +13,8 @@ use reth_evm::execute::BlockExecutorProvider;
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader};
 use reth_provider::{
-    providers::ProviderNodeTypes, BlockchainTreePendingStateProvider, CanonStateSubscriptions,
-    FullExecutionDataProvider, ProviderError,
+    providers::ProviderNodeTypes, BlockchainTreePendingStateProvider, CanonStateNotifications,
+    CanonStateSubscriptions, FullExecutionDataProvider, ProviderError,
 };
 use reth_storage_errors::provider::ProviderResult;
 use std::{collections::BTreeMap, sync::Arc};
@@ -188,7 +188,7 @@ where
     N: ProviderNodeTypes,
     E: Send + Sync,
 {
-    fn subscribe_to_canonical_state(&self) -> reth_provider::CanonStateNotifications {
+    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
         trace!(target: "blockchain_tree", "Registered subscriber for canonical state");
         self.tree.read().subscribe_canon_state()
     }
