@@ -35,11 +35,11 @@ use tokio_util::sync::{PollSendError, PollSender, ReusableBoxFuture};
 /// or 17 minutes of 1-second blocks.
 pub const DEFAULT_EXEX_MANAGER_CAPACITY: usize = 1024;
 
-/// The default maximum number of blocks allowed in the WAL before emitting a warning.
+/// The maximum number of blocks allowed in the WAL before emitting a warning.
 ///
 /// This constant defines the threshold for the Write-Ahead Log (WAL) size. If the number of blocks
 /// in the WAL exceeds this limit, a warning is logged to indicate potential issues.
-pub const DEFAULT_MAX_WAL_BLOCKS_WARNING: usize = 128;
+pub const WAL_BLOCKS_WARNING: usize = 128;
 
 /// The source of the notification.
 ///
@@ -383,12 +383,12 @@ where
                 .unwrap();
 
             self.wal.finalize(lowest_finished_height)?;
-            if self.wal.num_blocks() > (DEFAULT_MAX_WAL_BLOCKS_WARNING as u64) {
+            if self.wal.num_blocks() > (WAL_BLOCKS_WARNING as u64) {
                 warn!(
                     target: "exex::manager",
                     "WAL contains {} blocks, exceeding the limit of {}",
                     self.wal.num_blocks(),
-                    DEFAULT_MAX_WAL_BLOCKS_WARNING,
+                    WAL_BLOCKS_WARNING,
                 );
             }
         } else {
