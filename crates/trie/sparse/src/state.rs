@@ -3,7 +3,7 @@ use std::iter::Peekable;
 use crate::{SparseStateTrieError, SparseStateTrieResult, SparseTrie};
 use alloy_primitives::{
     map::{HashMap, HashSet},
-    Bytes, B256,
+    Bytes, B256, U256,
 };
 use alloy_rlp::Decodable;
 use reth_trie::{Nibbles, TrieNode};
@@ -133,6 +133,20 @@ impl SparseStateTrie {
     /// Returns sparse trie root if the trie has been revealed.
     pub fn root(&mut self) -> Option<B256> {
         self.state.root()
+    }
+
+    pub fn update_storage_leaf(
+        &mut self,
+        address: B256,
+        slot: Nibbles,
+        value: Vec<u8>,
+    ) -> SparseStateTrieResult<()> {
+        self.storages.get_mut(&address).unwrap().update_leaf(slot, value)?;
+        Ok(())
+    }
+
+    pub fn wipe_storage(&mut self, address: B256) {
+        self.storages.remove(&address);
     }
 
     /// Returns storage sparse trie root if the trie has been revealed.

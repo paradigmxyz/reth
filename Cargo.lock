@@ -7265,6 +7265,7 @@ dependencies = [
  "reth-trie",
  "reth-trie-db",
  "reth-trie-parallel",
+ "reth-trie-sparse",
  "revm-primitives",
  "thiserror 1.0.69",
  "tokio",

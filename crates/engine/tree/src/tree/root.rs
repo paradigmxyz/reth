@@ -19,6 +19,7 @@ use reth_trie::{
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_trie_parallel::{proof::ParallelProof, root::ParallelStateRootError};
+use reth_trie_sparse::{SparseStateTrie, SparseStateTrieResult};
 use revm_primitives::{keccak256, EvmState, B256};
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -80,6 +81,9 @@ impl StdReceiverStream {
     }
 }
 
+type PendingProofs =
+    VecDeque<Receiver<(HashMap<B256, HashSet<B256>>, Result<MultiProof, ParallelStateRootError>)>>;
+
 type StateRootProofResult = (B256, MultiProof, TrieUpdates, Duration);
 type StateRootProofReceiver = mpsc::Receiver<ProviderResult<StateRootProofResult>>;
 
@@ -93,6 +97,38 @@ impl StateRootTaskState {
         match self {
             Self::Idle(multiproof, _) | Self::Pending(multiproof, _) => {
                 multiproof.extend(proofs);
+            }
+        }
+    }
+}
+
+type SparseStateRootProofResult = (Box<SparseStateTrie>, B256, Duration);
+type SparseStateRootProofReceiver =
+    mpsc::Receiver<SparseStateTrieResult<SparseStateRootProofResult>>;
+
+enum SparseStateRootTaskState {
+    Idle {
+        trie: Box<SparseStateTrie>,
+        targets: HashMap<B256, HashSet<B256>>,
+        multiproof: MultiProof,
+        state_root: B256,
+    },
+    Pending {
+        targets: HashMap<B256, HashSet<B256>>,
+        multiproof: MultiProof,
+        rx: SparseStateRootProofReceiver,
+    },
+}
+
+impl SparseStateRootTaskState {
+    fn add_proofs(&mut self, targets: HashMap<B256, HashSet<B256>>, multiproof: MultiProof) {
+        match self {
+            Self::Idle { targets: self_targets, multiproof: self_multiproof, .. } |
+            Self::Pending { targets: self_targets, multiproof: self_multiproof, .. } => {
+                for (address, slots) in targets {
+                    self_targets.entry(address).or_default().extend(slots);
+                }
+                self_multiproof.extend(multiproof);
             }
         }
     }
@@ -114,8 +150,9 @@ pub(crate) struct StateRootTask<Factory> {
     config: StateRootConfig<Factory>,
     /// Current state.
     state: HashedPostState,
+    updated_state: HashedPostState,
     /// Channels to retrieve proof calculation results from.
-    pending_proofs: VecDeque<Receiver<Result<MultiProof, ParallelStateRootError>>>,
+    pending_proofs: PendingProofs,
 }
 
 #[allow(dead_code)]
@@ -125,7 +162,13 @@ where
 {
     /// Creates a new `StateRootTask`.
     pub(crate) fn new(config: StateRootConfig<Factory>, state_stream: StdReceiverStream) -> Self {
-        Self { config, state_stream, state: Default::default(), pending_proofs: Default::default() }
+        Self {
+            config,
+            state_stream,
+            state: Default::default(),
+            updated_state: Default::default(),
+            pending_proofs: Default::default(),
+        }
     }
 
     /// Spawns the state root task and returns a handle to await its result.
@@ -149,7 +192,7 @@ where
         input: Arc<TrieInput>,
         update: EvmState,
         state: &mut HashedPostState,
-        pending_proofs: &mut VecDeque<Receiver<Result<MultiProof, ParallelStateRootError>>>,
+        pending_proofs: &mut PendingProofs,
     ) {
         let mut hashed_state_update = HashedPostState::default();
         for (address, account) in update {
@@ -190,8 +233,8 @@ where
 
         let (tx, rx) = mpsc::sync_channel(1);
         rayon::spawn(move || {
-            let result = ParallelProof::new(view, input).multiproof(targets);
-            let _ = tx.send(result);
+            let result = ParallelProof::new(view, input).multiproof(targets.clone());
+            let _ = tx.send((targets.clone(), result));
         });
 
         pending_proofs.push_back(rx);
@@ -201,6 +244,12 @@ where
 
     fn run(mut self) -> StateRootResult {
         let mut task_state = StateRootTaskState::Idle(MultiProof::default(), B256::default());
+        let mut sparse_task_state = SparseStateRootTaskState::Idle {
+            trie: Box::default(),
+            targets: HashMap::default(),
+            multiproof: MultiProof::default(),
+            state_root: B256::default(),
+        };
         let mut trie_updates = TrieUpdates::default();
 
         loop {
@@ -208,13 +257,16 @@ where
             match self.state_stream.rx.try_recv() {
                 Ok(update) => {
                     debug!(target: "engine::root", len = update.len(), "Received new state update");
+                    let mut state = HashedPostState::default();
                     Self::on_state_update(
                         self.config.consistent_view.clone(),
                         self.config.input.clone(),
                         update,
-                        &mut self.state,
+                        &mut state,
                         &mut self.pending_proofs,
                     );
+                    self.state.extend(state.clone());
+                    self.updated_state.extend(state);
                     continue;
                 }
                 Err(mpsc::TryRecvError::Empty) => {
@@ -223,7 +275,14 @@ where
                 Err(mpsc::TryRecvError::Disconnected) => {
                     // state stream closed, check if we can finish
                     if self.pending_proofs.is_empty() {
-                        if let StateRootTaskState::Idle(_multiproof, state_root) = &task_state {
+                        if let (
+                            StateRootTaskState::Idle(_multiproof, state_root),
+                            SparseStateRootTaskState::Idle {
+                                state_root: sparse_state_root, ..
+                            },
+                        ) = (&task_state, &sparse_task_state)
+                        {
+                            assert_eq!(state_root, sparse_state_root);
                             return Ok((*state_root, trie_updates));
                         }
                     }
@@ -233,9 +292,10 @@ where
             // check pending proofs
             while let Some(proof_rx) = self.pending_proofs.front() {
                 match proof_rx.try_recv() {
-                    Ok(result) => {
+                    Ok((targets, result)) => {
                         let multiproof = result?;
-                        task_state.add_proofs(multiproof);
+                        task_state.add_proofs(multiproof.clone());
+                        sparse_task_state.add_proofs(targets, multiproof);
                         self.pending_proofs.pop_front();
                         continue;
                     }
@@ -297,6 +357,121 @@ where
                     });
 
                     task_state = StateRootTaskState::Pending(Default::default(), rx);
+                    continue;
+                }
+            }
+
+            match &mut sparse_task_state {
+                SparseStateRootTaskState::Pending { targets, multiproof, rx } => {
+                    match rx.try_recv() {
+                        Ok(result) => match result {
+                            Ok((trie, state_root, elapsed)) => {
+                                debug!(target: "engine::root", %state_root, ?elapsed, "Computed intermediate root");
+                                sparse_task_state = SparseStateRootTaskState::Idle {
+                                    trie,
+                                    targets: std::mem::take(targets),
+                                    multiproof: std::mem::take(multiproof),
+                                    state_root,
+                                };
+                                continue;
+                            }
+                            // TODO(alexey): proper error variant
+                            Err(e) => return Err(ParallelStateRootError::Other(e.to_string())),
+                        },
+                        Err(mpsc::TryRecvError::Empty) => {
+                            // root calculation not ready yet
+                        }
+                        Err(mpsc::TryRecvError::Disconnected) => {
+                            return Err(ParallelStateRootError::Other(
+                                "Root calculation task terminated unexpectedly".into(),
+                            ));
+                        }
+                    }
+                }
+                SparseStateRootTaskState::Idle { trie, targets, multiproof, .. } => {
+                    debug!(target: "engine::root", accounts_len = self.state.accounts.len(), "Spawning state root calculation from proofs task");
+                    let mut trie = std::mem::take(trie);
+                    let targets = std::mem::take(targets);
+                    let multiproof = std::mem::take(multiproof);
+                    let updated_state = std::mem::take(&mut self.updated_state);
+                    let (tx, rx) = mpsc::sync_channel(1);
+
+                    rayon::spawn(move || {
+                        let result = || {
+                            let started_at = Instant::now();
+
+                            // Reveal new accounts and storage slots.
+                            for (address, slots) in targets {
+                                let path = Nibbles::unpack(address);
+                                trie.reveal_account(
+                                    address,
+                                    multiproof.account_proof_nodes(&path),
+                                )?;
+
+                                let storage_proofs = multiproof.storage_proof_nodes(address, slots);
+
+                                for (slot, proof) in storage_proofs {
+                                    trie.reveal_storage_slot(address, slot, proof)?;
+                                }
+                            }
+
+                            // Update storage slots with new values and calculate storage roots.
+                            let mut storage_roots =
+                                HashMap::with_capacity(updated_state.storages.len());
+                            for (address, storage) in updated_state.storages {
+                                if storage.wiped {
+                                    trie.wipe_storage(address);
+                                    storage_roots.insert(address, EMPTY_ROOT_HASH);
+                                } else {
+                                    for (slot, value) in storage.storage {
+                                        let slot_path = Nibbles::unpack(slot);
+                                        trie.update_storage_leaf(
+                                            address,
+                                            slot_path,
+                                            alloy_rlp::encode_fixed_size(&value).to_vec(),
+                                        )?;
+                                    }
+
+                                    storage_roots
+                                        .insert(address, trie.storage_root(address).unwrap());
+                                }
+                            }
+
+                            // Update accounts with new values and include updated storage roots
+                            for (address, account) in updated_state.accounts {
+                                let path = Nibbles::unpack(address);
+
+                                if let Some(account) = account {
+                                    let storage_root = storage_roots
+                                        .remove(&address)
+                                        .map(Some)
+                                        .unwrap_or_else(|| trie.storage_root(address))
+                                        .unwrap_or(EMPTY_ROOT_HASH);
+
+                                    let mut encoded = Vec::with_capacity(128);
+                                    TrieAccount::from((account, storage_root))
+                                        .encode(&mut encoded as &mut dyn BufMut);
+                                    trie.update_leaf(path, encoded)?;
+                                } else {
+                                    trie.remove_leaf(&path)?;
+                                }
+                            }
+
+                            // TODO(alexey): calculate using `update_rlp_node_level` and then
+                            // finalize in the end
+                            let root = trie.root().unwrap();
+                            let elapsed = started_at.elapsed();
+
+                            Ok((trie, root, elapsed))
+                        };
+                        let _ = tx.send(result());
+                    });
+
+                    sparse_task_state = SparseStateRootTaskState::Pending {
+                        targets: HashMap::default(),
+                        multiproof: MultiProof::default(),
+                        rx,
+                    };
                     continue;
                 }
             }
