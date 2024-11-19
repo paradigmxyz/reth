@@ -54,6 +54,7 @@ reth-codec = [
     "dep:reth-codecs",
     "reth-primitives/reth-codec",
     "reth-primitives-traits/reth-codec",
+    "reth-optimism-primitives/reth-codec",
 ]
 serde = [
     "dep:serde",
