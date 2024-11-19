@@ -32,7 +32,7 @@ use reth_optimism_rpc::{
     OpEthApi,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::{Block, Receipt, TransactionSigned, TxType};
+use reth_primitives::{Block, BlockBody, Receipt, TransactionSigned, TxType};
 use reth_provider::CanonStateSubscriptions;
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
@@ -49,6 +49,8 @@ pub struct OpPrimitives;
 
 impl NodePrimitives for OpPrimitives {
     type Block = Block;
+    type BlockHeader = Header;
+    type BlockBody = BlockBody;
     type SignedTx = TransactionSigned;
     type TxType = TxType;
     type Receipt = Receipt;

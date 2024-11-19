@@ -26,7 +26,7 @@ use reth_node_builder::{
     BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig, PayloadTypes,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::{Block, Receipt, TransactionSigned, TxType};
+use reth_primitives::{Block, BlockBody, Receipt, TransactionSigned, TxType};
 use reth_provider::CanonStateSubscriptions;
 use reth_rpc::EthApi;
 use reth_tracing::tracing::{debug, info};
@@ -44,6 +44,8 @@ pub struct EthPrimitives;
 
 impl NodePrimitives for EthPrimitives {
     type Block = Block;
+    type BlockHeader = Header;
+    type BlockBody = BlockBody;
     type SignedTx = TransactionSigned;
     type TxType = TxType;
     type Receipt = Receipt;
