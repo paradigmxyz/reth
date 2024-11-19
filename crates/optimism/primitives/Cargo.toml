@@ -12,9 +12,9 @@ description = "OP primitive types"
 workspace = true
 
 [dependencies]
-reth-primitives.workspace = true
+reth-primitives = { workspace = true, features = ["reth-codec", "optimism"] }
 reth-primitives-traits.workspace = true
-reth-codecs = { workspace = true, features = ["optimism"] }
+reth-codecs.workspace = true 
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 op-alloy-consensus.workspace = true

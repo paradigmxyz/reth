@@ -20,6 +20,11 @@ use reth_primitives_traits::{InMemorySize, TransactionExt};
 use op_alloy_consensus::{OpTypedTransaction, DEPOSIT_TX_TYPE_ID};
 use reth_codecs::Compact;
 
+use reth_primitives::transaction::{
+    COMPACT_EXTENDED_IDENTIFIER_FLAG, COMPACT_IDENTIFIER_EIP1559, COMPACT_IDENTIFIER_EIP2930,
+    COMPACT_IDENTIFIER_LEGACY,
+};
+
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, derive_more::Deref, Hash, derive_more::From)]
@@ -190,17 +195,3 @@ impl InMemorySize for OpTransaction {
         }
     }
 }
-
-/// Identifier parameter for legacy transaction
-pub(crate) const COMPACT_IDENTIFIER_LEGACY: usize = 0;
-
-/// Identifier parameter for EIP-2930 transaction
-pub(crate) const COMPACT_IDENTIFIER_EIP2930: usize = 1;
-
-/// Identifier parameter for EIP-1559 transaction
-pub(crate) const COMPACT_IDENTIFIER_EIP1559: usize = 2;
-
-/// For backwards compatibility purposes only 2 bits of the type are encoded in the identifier
-/// parameter. In the case of a [`COMPACT_EXTENDED_IDENTIFIER_FLAG`], the full transaction type is
-/// read from the buffer as a single byte.
-pub(crate) const COMPACT_EXTENDED_IDENTIFIER_FLAG: usize = 3;
