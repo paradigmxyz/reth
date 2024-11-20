@@ -133,6 +133,7 @@ serde = [
     "smallvec/serde",
     "url/serde",
     "reth-primitives-traits/serde",
+    "alloy-chains/serde",
 ]
 test-utils = [
     "dep:reth-provider",

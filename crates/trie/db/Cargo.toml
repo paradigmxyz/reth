@@ -75,6 +75,7 @@ serde = [
     "alloy-primitives/serde",
     "revm/serde",
     "similar-asserts/serde",
+    "alloy-chains/serde",
 ]
 test-utils = [
     "triehash",
