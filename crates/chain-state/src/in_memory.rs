@@ -619,7 +619,7 @@ impl<N: NodePrimitives> BlockState<N> {
     pub fn block_with_senders(&self) -> BlockWithSenders {
         let block = self.block.block().clone();
         let senders = self.block.senders().clone();
-        BlockWithSenders { block: block.unseal(), senders }
+        BlockWithSenders::new(block.unseal(), senders).unwrap()
     }
 
     /// Returns the sealed block with senders for the state.

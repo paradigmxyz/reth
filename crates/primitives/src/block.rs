@@ -73,7 +73,7 @@ impl Block {
             senders
         };
 
-        Ok(BlockWithSenders { block: self, senders })
+        Ok(BlockWithSenders::new(self, senders).unwrap())
     }
 
     /// **Expensive**. Transform into a [`BlockWithSenders`] by recovering senders in the contained
@@ -82,7 +82,7 @@ impl Block {
     /// Returns `None` if a transaction is invalid.
     pub fn with_recovered_senders(self) -> Option<BlockWithSenders> {
         let senders = self.senders()?;
-        Some(BlockWithSenders { block: self, senders })
+        Some(BlockWithSenders::new(self, senders).unwrap())
     }
 }
 
@@ -519,7 +519,7 @@ impl SealedBlockWithSenders {
     #[inline]
     pub fn unseal(self) -> BlockWithSenders {
         let Self { block, senders } = self;
-        BlockWithSenders { block: block.unseal(), senders }
+        BlockWithSenders::new(block.unseal(), senders).unwrap()
     }
 
     /// Returns an iterator over all transactions in the block.
