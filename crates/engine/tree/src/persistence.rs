@@ -2,6 +2,8 @@ use crate::metrics::PersistenceMetrics;
 use alloy_eips::BlockNumHash;
 use reth_chain_state::ExecutedBlock;
 use reth_errors::ProviderError;
+use reth_primitives::BlockBody;
+use reth_primitives_traits::{Block, FullNodePrimitives};
 use reth_provider::{
     providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockHashReader,
     ChainStateBlockWriter, DatabaseProviderFactory, ProviderFactory, StaticFileProviderFactory,
@@ -16,6 +18,16 @@ use thiserror::Error;
 use tokio::sync::oneshot;
 use tracing::{debug, error};
 
+/// A helper trait with requirements for [`ProviderNodeTypes`] to be used within
+/// [`PersistenceService`].
+pub trait PersistenceNodeTypes:
+    ProviderNodeTypes<Primitives: FullNodePrimitives<Block: Block<Body = BlockBody>>>
+{
+}
+impl<T> PersistenceNodeTypes for T where
+    T: ProviderNodeTypes<Primitives: FullNodePrimitives<Block: Block<Body = BlockBody>>>
+{
+}
 /// Writes parts of reth's in memory tree state to the database and static files.
 ///
 /// This is meant to be a spawned service that listens for various incoming persistence operations,
@@ -60,7 +72,7 @@ impl<N: ProviderNodeTypes> PersistenceService<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> PersistenceService<N> {
+impl<N: PersistenceNodeTypes> PersistenceService<N> {
     /// This is the main loop, that will listen to database events and perform the requested
     /// database actions
     pub fn run(mut self) -> Result<(), PersistenceError> {
@@ -198,7 +210,7 @@ impl PersistenceHandle {
     }
 
     /// Create a new [`PersistenceHandle`], and spawn the persistence service.
-    pub fn spawn_service<N: ProviderNodeTypes>(
+    pub fn spawn_service<N: PersistenceNodeTypes>(
         provider_factory: ProviderFactory<N>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,

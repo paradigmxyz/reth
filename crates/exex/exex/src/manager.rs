@@ -657,7 +657,7 @@ mod tests {
     use reth_primitives::SealedBlockWithSenders;
     use reth_provider::{
         providers::BlockchainProvider2, test_utils::create_test_provider_factory, BlockReader,
-        BlockWriter, Chain, DatabaseProviderFactory, TransactionVariant,
+        BlockWriter, Chain, DatabaseProviderFactory, StorageLocation, TransactionVariant,
     };
     use reth_testing_utils::generators::{self, random_block, BlockParams};
 
@@ -1238,7 +1238,7 @@ mod tests {
         .seal_with_senders()
         .unwrap();
         let provider_rw = provider_factory.database_provider_rw().unwrap();
-        provider_rw.insert_block(block.clone()).unwrap();
+        provider_rw.insert_block(block.clone(), StorageLocation::Database).unwrap();
         provider_rw.commit().unwrap();
 
         let provider = BlockchainProvider2::new(provider_factory).unwrap();
