@@ -1480,7 +1480,7 @@ enum PropagateTransactionsBuilder<T = TransactionSigned> {
     Full(FullTransactionsBuilder<T>),
 }
 
-impl PropagateTransactionsBuilder {
+impl<T> PropagateTransactionsBuilder<T> {
     /// Create a builder for pooled transactions
     fn pooled(version: EthVersion) -> Self {
         Self::Pooled(PooledTransactionsHashesBuilder::new(version))
@@ -1491,6 +1491,26 @@ impl PropagateTransactionsBuilder {
         Self::Full(FullTransactionsBuilder::new(version))
     }
 
+    /// Returns true if no transactions are recorded.
+    fn is_empty(&self) -> bool {
+        match self {
+            Self::Pooled(builder) => builder.is_empty(),
+            Self::Full(builder) => builder.is_empty(),
+        }
+    }
+
+    /// Consumes the type and returns the built messages that should be sent to the peer.
+    fn build(self) -> PropagateTransactions<T> {
+        match self {
+            Self::Pooled(pooled) => {
+                PropagateTransactions { pooled: Some(pooled.build()), full: None }
+            }
+            Self::Full(full) => full.build(),
+        }
+    }
+}
+
+impl PropagateTransactionsBuilder {
     /// Appends all transactions
     fn extend<'a>(&mut self, txs: impl IntoIterator<Item = &'a PropagateTransaction>) {
         for tx in txs {
@@ -1503,24 +1523,6 @@ impl PropagateTransactionsBuilder {
         match self {
             Self::Pooled(builder) => builder.push(transaction),
             Self::Full(builder) => builder.push(transaction),
-        }
-    }
-
-    /// Returns true if no transactions are recorded.
-    fn is_empty(&self) -> bool {
-        match self {
-            Self::Pooled(builder) => builder.is_empty(),
-            Self::Full(builder) => builder.is_empty(),
-        }
-    }
-
-    /// Consumes the type and returns the built messages that should be sent to the peer.
-    fn build(self) -> PropagateTransactions {
-        match self {
-            Self::Pooled(pooled) => {
-                PropagateTransactions { pooled: Some(pooled.build()), full: None }
-            }
-            Self::Full(full) => full.build(),
         }
     }
 }
@@ -1547,9 +1549,7 @@ struct FullTransactionsBuilder<T = TransactionSigned> {
     pooled: PooledTransactionsHashesBuilder,
 }
 
-// === impl FullTransactionsBuilder ===
-
-impl FullTransactionsBuilder {
+impl<T> FullTransactionsBuilder<T> {
     /// Create a builder for the negotiated version of the peer's session
     fn new(version: EthVersion) -> Self {
         Self {
@@ -1559,6 +1559,20 @@ impl FullTransactionsBuilder {
         }
     }
 
+    /// Returns whether or not any transactions are in the [`FullTransactionsBuilder`].
+    fn is_empty(&self) -> bool {
+        self.transactions.is_empty() && self.pooled.is_empty()
+    }
+
+    /// Returns the messages that should be propagated to the peer.
+    fn build(self) -> PropagateTransactions<T> {
+        let pooled = Some(self.pooled.build()).filter(|pooled| !pooled.is_empty());
+        let full = Some(self.transactions).filter(|full| !full.is_empty());
+        PropagateTransactions { pooled, full }
+    }
+}
+
+impl FullTransactionsBuilder {
     /// Appends all transactions.
     fn extend(&mut self, txs: impl IntoIterator<Item = PropagateTransaction>) {
         for tx in txs {
@@ -1599,18 +1613,6 @@ impl FullTransactionsBuilder {
 
         self.total_size = new_size;
         self.transactions.push(Arc::clone(&transaction.transaction));
-    }
-
-    /// Returns whether or not any transactions are in the [`FullTransactionsBuilder`].
-    fn is_empty(&self) -> bool {
-        self.transactions.is_empty() && self.pooled.is_empty()
-    }
-
-    /// Returns the messages that should be propagated to the peer.
-    fn build(self) -> PropagateTransactions {
-        let pooled = Some(self.pooled.build()).filter(|pooled| !pooled.is_empty());
-        let full = Some(self.transactions).filter(|full| !full.is_empty());
-        PropagateTransactions { pooled, full }
     }
 }
 
