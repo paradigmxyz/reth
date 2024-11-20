@@ -961,7 +961,7 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
     /// For EIP-4844 blob transactions: `max_fee_per_gas * gas_limit + tx_value +
     /// max_blob_fee_per_gas * blob_gas_used`.
-    fn cost(&self) -> U256;
+    fn cost(&self) -> &U256;
 
     /// Amount of gas that should be used in executing this transaction. This is paid up-front.
     fn gas_limit(&self) -> u64;
@@ -1228,8 +1228,8 @@ impl PoolTransaction for EthPooledTransaction {
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
     /// For EIP-4844 blob transactions: `max_fee_per_gas * gas_limit + tx_value +
     /// max_blob_fee_per_gas * blob_gas_used`.
-    fn cost(&self) -> U256 {
-        self.cost
+    fn cost(&self) -> &U256 {
+        &self.cost
     }
 
     /// Amount of gas that should be used in executing this transaction. This is paid up-front.

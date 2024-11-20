@@ -4,15 +4,7 @@ mod client;
 
 pub use client::FetchClient;
 
-use std::{
-    collections::{HashMap, VecDeque},
-    sync::{
-        atomic::{AtomicU64, AtomicUsize, Ordering},
-        Arc,
-    },
-    task::{Context, Poll},
-};
-
+use crate::message::BlockRequest;
 use alloy_primitives::B256;
 use futures::StreamExt;
 use reth_eth_wire::{EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, NetworkPrimitives};
@@ -24,10 +16,16 @@ use reth_network_p2p::{
 };
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
+use std::{
+    collections::{HashMap, VecDeque},
+    sync::{
+        atomic::{AtomicU64, AtomicUsize, Ordering},
+        Arc,
+    },
+    task::{Context, Poll},
+};
 use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-
-use crate::message::BlockRequest;
 
 type InflightHeadersRequest<H> = Request<HeadersRequest, PeerRequestResult<Vec<H>>>;
 type InflightBodiesRequest<B> = Request<Vec<B256>, PeerRequestResult<Vec<B>>>;

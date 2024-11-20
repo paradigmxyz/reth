@@ -27,7 +27,7 @@ use tokio::sync::watch;
 pub fn build_networked_pipeline<N, Client, Executor>(
     config: &StageConfig,
     client: Client,
-    consensus: Arc<dyn Consensus>,
+    consensus: Arc<dyn Consensus<Client::Header, Client::Body>>,
     provider_factory: ProviderFactory<N>,
     task_executor: &TaskExecutor,
     metrics_tx: reth_stages::MetricEventsSender,
@@ -46,7 +46,7 @@ where
 {
     // building network downloaders using the fetch client
     let header_downloader = ReverseHeadersDownloaderBuilder::new(config.headers)
-        .build(client.clone(), Arc::clone(&consensus))
+        .build(client.clone(), consensus.clone().as_header_validator())
         .into_task_with(task_executor);
 
     let body_downloader = BodiesDownloaderBuilder::new(config.bodies)

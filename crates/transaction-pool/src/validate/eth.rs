@@ -384,11 +384,12 @@ where
         let cost = transaction.cost();
 
         // Checks for max cost
-        if cost > account.balance {
+        if cost > &account.balance {
+            let expected = *cost;
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::InsufficientFunds(
-                    GotExpected { got: account.balance, expected: cost }.into(),
+                    GotExpected { got: account.balance, expected }.into(),
                 )
                 .into(),
             )
