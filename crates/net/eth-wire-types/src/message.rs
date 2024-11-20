@@ -207,7 +207,11 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Represents a `GetPooledTransactions` request-response pair.
     GetPooledTransactions(RequestPair<GetPooledTransactions>),
     /// Represents a `PooledTransactions` request-response pair.
-    PooledTransactions(RequestPair<PooledTransactions>),
+    #[cfg_attr(
+        feature = "serde",
+        serde(bound = "N::PooledTransaction: serde::Serialize + serde::de::DeserializeOwned")
+    )]
+    PooledTransactions(RequestPair<PooledTransactions<N::PooledTransaction>>),
     /// Represents a `GetNodeData` request-response pair.
     GetNodeData(RequestPair<GetNodeData>),
     /// Represents a `NodeData` request-response pair.
