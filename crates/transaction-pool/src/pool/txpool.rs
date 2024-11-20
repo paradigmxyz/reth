@@ -657,7 +657,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                     InsertErr::Overdraft { transaction } => Err(PoolError::new(
                         *transaction.hash(),
                         PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::Overdraft {
-                            cost: transaction.cost(),
+                            cost: *transaction.cost(),
                             balance: on_chain_balance,
                         }),
                     )),
@@ -1229,7 +1229,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                     tx.state.insert(TxState::NO_NONCE_GAPS);
                     tx.state.insert(TxState::NO_PARKED_ANCESTORS);
                     tx.cumulative_cost = U256::ZERO;
-                    if tx.transaction.cost() > info.balance {
+                    if tx.transaction.cost() > &info.balance {
                         // sender lacks sufficient funds to pay for this transaction
                         tx.state.remove(TxState::ENOUGH_BALANCE);
                     } else {
@@ -1542,7 +1542,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                     }
                 }
             }
-        } else if new_blob_tx.cost() > on_chain_balance {
+        } else if new_blob_tx.cost() > &on_chain_balance {
             // the transaction would go into overdraft
             return Err(InsertErr::Overdraft { transaction: Arc::new(new_blob_tx) })
         }
