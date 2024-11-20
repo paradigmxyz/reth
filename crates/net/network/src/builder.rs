@@ -1,15 +1,14 @@
 //! Builder support for configuring the entire setup.
 
-use reth_eth_wire::{EthNetworkPrimitives, NetworkPrimitives};
-use reth_network_api::test_utils::PeersHandleProvider;
-use reth_transaction_pool::TransactionPool;
-use tokio::sync::mpsc;
-
 use crate::{
     eth_requests::EthRequestHandler,
     transactions::{TransactionsManager, TransactionsManagerConfig},
     NetworkHandle, NetworkManager,
 };
+use reth_eth_wire::{EthNetworkPrimitives, NetworkPrimitives};
+use reth_network_api::test_utils::PeersHandleProvider;
+use reth_transaction_pool::TransactionPool;
+use tokio::sync::mpsc;
 
 /// We set the max channel capacity of the `EthRequestHandler` to 256
 /// 256 requests with malicious 10MB body requests is 2.6GB which can be absorbed by the node.

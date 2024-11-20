@@ -25,13 +25,18 @@
 //! before it's re-tried. Nonetheless, the capacity of the buffered hashes cache must be large
 //! enough to buffer many hashes during network failure, to allow for recovery.
 
-use std::{
-    collections::HashMap,
-    pin::Pin,
-    task::{ready, Context, Poll},
-    time::Duration,
+use super::{
+    config::TransactionFetcherConfig,
+    constants::{tx_fetcher::*, SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST},
+    MessageFilter, PeerMetadata, PooledTransactions,
+    SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
-
+use crate::{
+    cache::{LruCache, LruMap},
+    duration_metered_exec,
+    metrics::TransactionFetcherMetrics,
+    transactions::{validation, PartiallyFilterMessage},
+};
 use alloy_primitives::TxHash;
 use derive_more::{Constructor, Deref};
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
@@ -47,22 +52,15 @@ use reth_primitives::PooledTransactionsElement;
 use schnellru::ByLength;
 #[cfg(debug_assertions)]
 use smallvec::{smallvec, SmallVec};
+use std::{
+    collections::HashMap,
+    pin::Pin,
+    task::{ready, Context, Poll},
+    time::Duration,
+};
 use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError};
 use tracing::{debug, trace};
 use validation::FilterOutcome;
-
-use super::{
-    config::TransactionFetcherConfig,
-    constants::{tx_fetcher::*, SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST},
-    MessageFilter, PeerMetadata, PooledTransactions,
-    SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
-};
-use crate::{
-    cache::{LruCache, LruMap},
-    duration_metered_exec,
-    metrics::TransactionFetcherMetrics,
-    transactions::{validation, PartiallyFilterMessage},
-};
 
 /// The type responsible for fetching missing transactions from peers.
 ///
