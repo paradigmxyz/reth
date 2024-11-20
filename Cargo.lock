@@ -5286,9 +5286,9 @@ checksum = "b410bbe7e14ab526a0e86877eb47c6996a2bd7746f027ba551028c925390e4e9"
 
 [[package]]
 name = "op-alloy-consensus"
-version = "0.6.5"
+version = "0.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bff54d1d790eca1f3aedbd666162e9c42eceff90b9f9d24b352ed9c2df1e901a"
+checksum = "72da577a88d35b893fae6467112651f26ef023434c196b2a0b3dc75bc853e0e4"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -5299,14 +5299,14 @@ dependencies = [
  "derive_more 1.0.0",
  "serde",
  "serde_with",
- "spin",
+ "thiserror 2.0.3",
 ]
 
 [[package]]
 name = "op-alloy-genesis"
-version = "0.6.5"
+version = "0.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae84fd64fbc53b3e958ea5a96d7f5633e4a111092e41c51672c2d91835c09efb"
+checksum = "818180672dd14ca6642fb57942e1cbd602669f42b6e0222b7ea9bbcae065d67e"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -5314,13 +5314,14 @@ dependencies = [
  "alloy-sol-types",
  "serde",
  "serde_repr",
+ "thiserror 2.0.3",
 ]
 
 [[package]]
 name = "op-alloy-network"
-version = "0.6.5"
+version = "0.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d71e777450ee3e9c5177e00865e9b4496472b623c50f146fc907b667c6b4ab37"
+checksum = "12f82e805bad171ceae2af45efaecf8d0b50622cff3473e3c998ff1dd340de35"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -5333,29 +5334,32 @@ dependencies = [
 
 [[package]]
 name = "op-alloy-protocol"
-version = "0.6.5"
+version = "0.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e854d2d4958d0a213731560172e8455536329ee9574473ff79fa953da91eb6a"
+checksum = "1803a1ac96203b8f713b1fa9b7509c46c645ca7bc22b582761a7495e999d4301"
 dependencies = [
+ "alloc-no-stdlib",
  "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-serde",
  "async-trait",
- "derive_more 1.0.0",
+ "brotli",
+ "miniz_oxide",
  "op-alloy-consensus",
  "op-alloy-genesis",
  "serde",
+ "thiserror 2.0.3",
  "tracing",
  "unsigned-varint",
 ]
 
 [[package]]
 name = "op-alloy-rpc-types"
-version = "0.6.5"
+version = "0.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "981b7f8ab11fe85ba3c1723702f000429b8d0c16b5883c93d577895f262cbac6"
+checksum = "a838c125256e02e2f9da88c51e263b02a06cda7e60382fe2551a3385b516f5bb"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -5372,9 +5376,9 @@ dependencies = [
 
 [[package]]
 name = "op-alloy-rpc-types-engine"
-version = "0.6.5"
+version = "0.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a227b16c9c5df68b112c8db9d268ebf46b3e26c744b4d59d4949575cd603a292"
+checksum = "c227fcc7d81d4023363ba12406e57ebcc1c7cbb1075c38ea471ae32138d4706d"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -5386,6 +5390,7 @@ dependencies = [
  "op-alloy-protocol",
  "serde",
  "snap",
+ "thiserror 2.0.3",
 ]
 
 [[package]]
@@ -10391,9 +10396,6 @@ name = "spin"
 version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
-dependencies = [
- "lock_api",
-]
 
 [[package]]
 name = "spki"
