@@ -135,6 +135,11 @@ impl SparseStateTrie {
         self.state.root()
     }
 
+    /// Calculates the hashes of the nodes below the provided level.
+    pub fn calculate_below_level(&mut self, level: usize) {
+        self.state.calculate_below_level(level);
+    }
+
     /// Update the leaf node of a storage trie at the provided address.
     pub fn update_storage_leaf(
         &mut self,

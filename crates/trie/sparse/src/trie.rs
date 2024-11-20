@@ -74,6 +74,11 @@ impl SparseTrie {
     pub fn root(&mut self) -> Option<B256> {
         Some(self.as_revealed_mut()?.root())
     }
+
+    /// Calculates the hashes of the nodes below the provided level.
+    pub fn calculate_below_level(&mut self, level: usize) {
+        self.as_revealed_mut().unwrap().update_rlp_node_level(level);
+    }
 }
 
 /// The representation of revealed sparse trie.

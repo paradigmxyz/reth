@@ -107,7 +107,7 @@ impl StateRootTaskState {
     }
 }
 
-type SparseStateRootProofResult = (Box<SparseStateTrie>, B256, Duration);
+type SparseStateRootProofResult = (Box<SparseStateTrie>, Duration);
 type SparseStateRootProofReceiver =
     mpsc::Receiver<SparseStateTrieResult<SparseStateRootProofResult>>;
 
@@ -116,7 +116,6 @@ enum SparseStateRootTaskState {
         trie: Box<SparseStateTrie>,
         targets: HashMap<B256, HashSet<B256>>,
         multiproof: MultiProof,
-        state_root: B256,
     },
     Pending {
         targets: HashMap<B256, HashSet<B256>>,
@@ -255,7 +254,6 @@ where
             trie: Box::default(),
             targets: HashMap::default(),
             multiproof: MultiProof::default(),
-            state_root: B256::default(),
         };
         let mut trie_updates = TrieUpdates::default();
 
@@ -284,12 +282,16 @@ where
                     {
                         if let (
                             StateRootTaskState::Idle(_multiproof, state_root),
-                            SparseStateRootTaskState::Idle {
-                                state_root: sparse_state_root, ..
-                            },
+                            SparseStateRootTaskState::Idle { .. },
                         ) = (&task_state, &sparse_task_state)
                         {
-                            assert_eq!(state_root, sparse_state_root);
+                            let sparse_state_root = match sparse_task_state {
+                                SparseStateRootTaskState::Idle { mut trie, .. } => {
+                                    trie.root().unwrap_or(EMPTY_ROOT_HASH)
+                                }
+                                _ => unreachable!(),
+                            };
+                            assert_eq!(*state_root, sparse_state_root);
                             return Ok((*state_root, trie_updates));
                         }
                     }
@@ -379,13 +381,12 @@ where
                 SparseStateRootTaskState::Pending { targets, multiproof, rx } => {
                     match rx.try_recv() {
                         Ok(result) => match result {
-                            Ok((trie, state_root, elapsed)) => {
-                                debug!(target: "engine::root", %state_root, ?elapsed, "Computed intermediate root");
+                            Ok((trie, elapsed)) => {
+                                debug!(target: "engine::root", ?elapsed, "Computed intermediate root");
                                 sparse_task_state = SparseStateRootTaskState::Idle {
                                     trie,
                                     targets: std::mem::take(targets),
                                     multiproof: std::mem::take(multiproof),
-                                    state_root,
                                 };
                             }
                             // TODO(alexey): proper error variant
@@ -574,7 +575,7 @@ fn calculate_state_root_with_sparse(
     multiproof: MultiProof,
     targets: HashMap<B256, HashSet<B256>>,
     state: HashedPostState,
-) -> SparseStateTrieResult<(Box<SparseStateTrie>, B256, Duration)> {
+) -> SparseStateTrieResult<(Box<SparseStateTrie>, Duration)> {
     let started_at = Instant::now();
 
     // Reveal new accounts and storage slots.
@@ -630,10 +631,10 @@ fn calculate_state_root_with_sparse(
 
     // TODO(alexey): calculate using `update_rlp_node_level` and then
     // finalize in the end
-    let root = trie.root().unwrap_or(EMPTY_ROOT_HASH);
+    trie.calculate_below_level(2);
     let elapsed = started_at.elapsed();
 
-    Ok((trie, root, elapsed))
+    Ok((trie, elapsed))
 }
 
 #[cfg(test)]
