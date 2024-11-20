@@ -390,81 +390,20 @@ where
                 }
                 SparseStateRootTaskState::Idle { trie, targets, multiproof, .. } => {
                     debug!(target: "engine::root", accounts_len = self.state.accounts.len(), "Spawning state root calculation from proofs task");
-                    let mut trie = std::mem::take(trie);
+                    let trie = std::mem::take(trie);
                     let targets = std::mem::take(targets);
                     let multiproof = std::mem::take(multiproof);
                     let updated_state = std::mem::take(&mut self.updated_state);
                     let (tx, rx) = mpsc::sync_channel(1);
 
                     rayon::spawn(move || {
-                        let result = || {
-                            let started_at = Instant::now();
-
-                            // Reveal new accounts and storage slots.
-                            for (address, slots) in targets {
-                                let path = Nibbles::unpack(address);
-                                trie.reveal_account(
-                                    address,
-                                    multiproof.account_proof_nodes(&path),
-                                )?;
-
-                                let storage_proofs = multiproof.storage_proof_nodes(address, slots);
-
-                                for (slot, proof) in storage_proofs {
-                                    trie.reveal_storage_slot(address, slot, proof)?;
-                                }
-                            }
-
-                            // Update storage slots with new values and calculate storage roots.
-                            let mut storage_roots =
-                                HashMap::with_capacity(updated_state.storages.len());
-                            for (address, storage) in updated_state.storages {
-                                if storage.wiped {
-                                    trie.wipe_storage(address);
-                                    storage_roots.insert(address, EMPTY_ROOT_HASH);
-                                } else {
-                                    for (slot, value) in storage.storage {
-                                        let slot_path = Nibbles::unpack(slot);
-                                        trie.update_storage_leaf(
-                                            address,
-                                            slot_path,
-                                            alloy_rlp::encode_fixed_size(&value).to_vec(),
-                                        )?;
-                                    }
-
-                                    storage_roots
-                                        .insert(address, trie.storage_root(address).unwrap());
-                                }
-                            }
-
-                            // Update accounts with new values and include updated storage roots
-                            for (address, account) in updated_state.accounts {
-                                let path = Nibbles::unpack(address);
-
-                                if let Some(account) = account {
-                                    let storage_root = storage_roots
-                                        .remove(&address)
-                                        .map(Some)
-                                        .unwrap_or_else(|| trie.storage_root(address))
-                                        .unwrap_or(EMPTY_ROOT_HASH);
-
-                                    let mut encoded = Vec::with_capacity(128);
-                                    TrieAccount::from((account, storage_root))
-                                        .encode(&mut encoded as &mut dyn BufMut);
-                                    trie.update_leaf(path, encoded)?;
-                                } else {
-                                    trie.remove_leaf(&path)?;
-                                }
-                            }
-
-                            // TODO(alexey): calculate using `update_rlp_node_level` and then
-                            // finalize in the end
-                            let root = trie.root().unwrap();
-                            let elapsed = started_at.elapsed();
-
-                            Ok((trie, root, elapsed))
-                        };
-                        let _ = tx.send(result());
+                        let result = calculate_state_root_with_sparse(
+                            trie,
+                            multiproof,
+                            targets,
+                            updated_state,
+                        );
+                        let _ = tx.send(result);
                     });
 
                     sparse_task_state = SparseStateRootTaskState::Pending {
@@ -612,6 +551,73 @@ where
     })?;
 
     Ok((state_root, multiproof, Default::default(), started_at.elapsed()))
+}
+
+fn calculate_state_root_with_sparse(
+    mut trie: Box<SparseStateTrie>,
+    multiproof: MultiProof,
+    targets: HashMap<B256, HashSet<B256>>,
+    state: HashedPostState,
+) -> SparseStateTrieResult<(Box<SparseStateTrie>, B256, Duration)> {
+    let started_at = Instant::now();
+
+    // Reveal new accounts and storage slots.
+    for (address, slots) in targets {
+        let path = Nibbles::unpack(address);
+        trie.reveal_account(address, multiproof.account_proof_nodes(&path))?;
+
+        let storage_proofs = multiproof.storage_proof_nodes(address, slots);
+
+        for (slot, proof) in storage_proofs {
+            trie.reveal_storage_slot(address, slot, proof)?;
+        }
+    }
+
+    // Update storage slots with new values and calculate storage roots.
+    let mut storage_roots = HashMap::with_capacity(state.storages.len());
+    for (address, storage) in state.storages {
+        if storage.wiped {
+            trie.wipe_storage(address);
+            storage_roots.insert(address, EMPTY_ROOT_HASH);
+        } else {
+            for (slot, value) in storage.storage {
+                let slot_path = Nibbles::unpack(slot);
+                trie.update_storage_leaf(
+                    address,
+                    slot_path,
+                    alloy_rlp::encode_fixed_size(&value).to_vec(),
+                )?;
+            }
+
+            storage_roots.insert(address, trie.storage_root(address).unwrap());
+        }
+    }
+
+    // Update accounts with new values and include updated storage roots
+    for (address, account) in state.accounts {
+        let path = Nibbles::unpack(address);
+
+        if let Some(account) = account {
+            let storage_root = storage_roots
+                .remove(&address)
+                .map(Some)
+                .unwrap_or_else(|| trie.storage_root(address))
+                .unwrap_or(EMPTY_ROOT_HASH);
+
+            let mut encoded = Vec::with_capacity(128);
+            TrieAccount::from((account, storage_root)).encode(&mut encoded as &mut dyn BufMut);
+            trie.update_leaf(path, encoded)?;
+        } else {
+            trie.remove_leaf(&path)?;
+        }
+    }
+
+    // TODO(alexey): calculate using `update_rlp_node_level` and then
+    // finalize in the end
+    let root = trie.root().unwrap();
+    let elapsed = started_at.elapsed();
+
+    Ok((trie, root, elapsed))
 }
 
 #[cfg(test)]
