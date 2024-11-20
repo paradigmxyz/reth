@@ -108,7 +108,6 @@ use crate::{
 };
 pub use best::{
     BestPayloadTransactions, BestTransactionFilter, BestTransactionsWithPrioritizedSenders,
-    PayloadTransactionsChain, PayloadTransactionsFixed,
 };
 pub use blob::{blob_tx_priority, fee_delta};
 pub use events::{FullTransactionEvent, TransactionEvent};
@@ -1303,7 +1302,7 @@ mod tests {
 
             // Insert the sidecar into the blob store if the current index is within the blob limit.
             if n < blob_limit.max_txs {
-                blob_store.insert(tx.get_hash(), sidecar.clone()).unwrap();
+                blob_store.insert(*tx.get_hash(), sidecar.clone()).unwrap();
             }
 
             // Add the transaction to the pool with external origin and valid outcome.

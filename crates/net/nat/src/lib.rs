@@ -111,7 +111,7 @@ impl FromStr for NatResolver {
                         "Unknown Nat Resolver: {s}"
                     )))
                 };
-                Self::ExternalIp(ip.parse::<IpAddr>()?)
+                Self::ExternalIp(ip.parse()?)
             }
         };
         Ok(r)

@@ -551,6 +551,11 @@ impl<T: PoolTransaction> AllPoolTransactions<T> {
     pub fn queued_recovered(&self) -> impl Iterator<Item = T::Consensus> + '_ {
         self.queued.iter().map(|tx| tx.transaction.clone().into())
     }
+
+    /// Returns an iterator over all transactions, both pending and queued.
+    pub fn all(&self) -> impl Iterator<Item = T::Consensus> + '_ {
+        self.pending.iter().chain(self.queued.iter()).map(|tx| tx.transaction.clone().into())
+    }
 }
 
 impl<T: PoolTransaction> Default for AllPoolTransactions<T> {
@@ -956,7 +961,7 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
     /// For EIP-4844 blob transactions: `max_fee_per_gas * gas_limit + tx_value +
     /// max_blob_fee_per_gas * blob_gas_used`.
-    fn cost(&self) -> U256;
+    fn cost(&self) -> &U256;
 
     /// Amount of gas that should be used in executing this transaction. This is paid up-front.
     fn gas_limit(&self) -> u64;
@@ -1223,8 +1228,8 @@ impl PoolTransaction for EthPooledTransaction {
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
     /// For EIP-4844 blob transactions: `max_fee_per_gas * gas_limit + tx_value +
     /// max_blob_fee_per_gas * blob_gas_used`.
-    fn cost(&self) -> U256 {
-        self.cost
+    fn cost(&self) -> &U256 {
+        &self.cost
     }
 
     /// Amount of gas that should be used in executing this transaction. This is paid up-front.
@@ -1508,24 +1513,6 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
             }
         }
     }
-}
-
-/// Iterator that returns transactions for the block building process in the order they should be
-/// included in the block.
-///
-/// Can include transactions from the pool and other sources (alternative pools,
-/// sequencer-originated transactions, etc.).
-pub trait PayloadTransactions {
-    /// Returns the next transaction to include in the block.
-    fn next(
-        &mut self,
-        // In the future, `ctx` can include access to state for block building purposes.
-        ctx: (),
-    ) -> Option<TransactionSignedEcRecovered>;
-
-    /// Exclude descendants of the transaction with given sender and nonce from the iterator,
-    /// because this transaction won't be included in the block.
-    fn mark_invalid(&mut self, sender: Address, nonce: u64);
 }
 
 #[cfg(test)]

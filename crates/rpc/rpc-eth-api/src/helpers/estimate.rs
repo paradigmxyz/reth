@@ -6,11 +6,12 @@ use alloy_primitives::U256;
 use alloy_rpc_types_eth::{state::StateOverride, transaction::TransactionRequest, BlockId};
 use futures::Future;
 use reth_chainspec::{EthChainSpec, MIN_TRANSACTION_GAS};
-use reth_primitives::revm_primitives::{
-    BlockEnv, CfgEnvWithHandlerCfg, ExecutionResult, HaltReason, TransactTo,
-};
 use reth_provider::{ChainSpecProvider, StateProvider};
-use reth_revm::{database::StateProviderDatabase, db::CacheDB};
+use reth_revm::{
+    database::StateProviderDatabase,
+    db::CacheDB,
+    primitives::{BlockEnv, CfgEnvWithHandlerCfg, ExecutionResult, HaltReason, TransactTo},
+};
 use reth_rpc_eth_types::{
     revm_utils::{apply_state_overrides, caller_gas_allowance},
     EthApiError, RevertError, RpcInvalidTransactionError,

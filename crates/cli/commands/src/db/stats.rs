@@ -1,4 +1,4 @@
-use crate::db::checksum::ChecksumViewer;
+use crate::{common::CliNodeTypes, db::checksum::ChecksumViewer};
 use clap::Parser;
 use comfy_table::{Cell, Row, Table as ComfyTable};
 use eyre::WrapErr;
@@ -9,9 +9,7 @@ use reth_db::{mdbx, static_file::iter_static_files, DatabaseEnv, TableViewer, Ta
 use reth_db_api::database::Database;
 use reth_db_common::DbTool;
 use reth_fs_util as fs;
-use reth_node_builder::{
-    NodePrimitives, NodeTypesWithDB, NodeTypesWithDBAdapter, NodeTypesWithEngine,
-};
+use reth_node_builder::{NodePrimitives, NodeTypesWithDB, NodeTypesWithDBAdapter};
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::providers::{ProviderNodeTypes, StaticFileProvider};
 use reth_static_file_types::SegmentRangeInclusive;
@@ -40,7 +38,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `db stats` command
-    pub fn execute<N: NodeTypesWithEngine<ChainSpec: EthereumHardforks>>(
+    pub fn execute<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
         self,
         data_dir: ChainPath<DataDirPath>,
         tool: &DbTool<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,

@@ -1,5 +1,6 @@
 use alloy_primitives::B256;
 use futures_util::{Stream, StreamExt};
+use reth_cli_commands::common::CliNodeTypes;
 use reth_config::Config;
 use reth_consensus::Consensus;
 use reth_downloaders::{
@@ -11,11 +12,13 @@ use reth_network_p2p::{
     bodies::downloader::BodyDownloader,
     headers::downloader::{HeaderDownloader, SyncTarget},
 };
-use reth_node_builder::NodeTypesWithDB;
 use reth_node_events::node::NodeEvent;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpExecutorProvider;
-use reth_provider::{BlockNumReader, ChainSpecProvider, HeaderProvider, ProviderFactory};
+use reth_provider::{
+    providers::ProviderNodeTypes, BlockNumReader, ChainSpecProvider, HeaderProvider,
+    ProviderFactory,
+};
 use reth_prune::PruneModes;
 use reth_stages::{sets::DefaultStages, Pipeline, StageSet};
 use reth_stages_types::StageId;
@@ -36,7 +39,7 @@ pub(crate) async fn build_import_pipeline<N, C>(
     disable_exec: bool,
 ) -> eyre::Result<(Pipeline<N>, impl Stream<Item = NodeEvent>)>
 where
-    N: NodeTypesWithDB<ChainSpec = OpChainSpec>,
+    N: CliNodeTypes + ProviderNodeTypes<ChainSpec = OpChainSpec>,
     C: Consensus + 'static,
 {
     if !file_client.has_canonical_blocks() {

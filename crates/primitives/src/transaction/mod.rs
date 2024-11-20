@@ -62,7 +62,7 @@ use op_alloy_consensus::TxDeposit;
 #[cfg(feature = "optimism")]
 pub use tx_type::DEPOSIT_TX_TYPE_ID;
 #[cfg(any(test, feature = "reth-codec"))]
-use tx_type::{
+pub use tx_type::{
     COMPACT_EXTENDED_IDENTIFIER_FLAG, COMPACT_IDENTIFIER_EIP1559, COMPACT_IDENTIFIER_EIP2930,
     COMPACT_IDENTIFIER_LEGACY,
 };
@@ -1274,12 +1274,6 @@ impl TransactionSigned {
         initial_tx
     }
 
-    /// Calculate a heuristic for the in-memory size of the [`TransactionSigned`].
-    #[inline]
-    pub fn size(&self) -> usize {
-        mem::size_of::<TxHash>() + self.transaction.size() + mem::size_of::<Signature>()
-    }
-
     /// Decodes legacy transaction from the data buffer into a tuple.
     ///
     /// This expects `rlp(legacy_tx)`
@@ -1366,13 +1360,9 @@ impl SignedTransaction for TransactionSigned {
         let signature_hash = self.signature_hash();
         recover_signer_unchecked(&self.signature, signature_hash)
     }
+}
 
-    fn from_transaction_and_signature(transaction: Transaction, signature: Signature) -> Self {
-        let mut initial_tx = Self { transaction, hash: Default::default(), signature };
-        initial_tx.hash = initial_tx.recalculate_hash();
-        initial_tx
-    }
-
+impl reth_primitives_traits::FillTxEnv for TransactionSigned {
     fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address) {
         tx_env.caller = sender;
         match self.as_ref() {
@@ -1450,6 +1440,14 @@ impl SignedTransaction for TransactionSigned {
             #[cfg(feature = "optimism")]
             Transaction::Deposit(_) => {}
         }
+    }
+}
+
+impl InMemorySize for TransactionSigned {
+    /// Calculate a heuristic for the in-memory size of the [`TransactionSigned`].
+    #[inline]
+    fn size(&self) -> usize {
+        mem::size_of::<TxHash>() + self.transaction.size() + mem::size_of::<Signature>()
     }
 }
 

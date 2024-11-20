@@ -17,12 +17,12 @@ use alloy_consensus::Header;
 use alloy_primitives::{Address, U256};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
 use reth_optimism_chainspec::{DecodeError, OpChainSpec};
-use reth_primitives::{
-    revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
-    transaction::FillTxEnv,
-    Head, TransactionSigned,
+use reth_primitives::{transaction::FillTxEnv, Head, TransactionSigned};
+use reth_revm::{
+    inspector_handle_register,
+    primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
+    Database, Evm, EvmBuilder, GetInspector,
 };
-use reth_revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
 
 mod config;
 pub use config::{revm_spec, revm_spec_by_timestamp_after_bedrock};
@@ -211,14 +211,13 @@ mod tests {
         AccountRevertInit, BundleStateInit, Chain, ExecutionOutcome, RevertsInit,
     };
     use reth_optimism_chainspec::BASE_MAINNET;
-    use reth_primitives::{
-        revm_primitives::{AccountInfo, BlockEnv, CfgEnv, SpecId},
-        Account, Log, Receipt, Receipts, SealedBlockWithSenders, TxType,
-    };
+    use reth_optimism_primitives::OpPrimitives;
+    use reth_primitives::{Account, Log, Receipt, Receipts, SealedBlockWithSenders, TxType};
 
     use reth_revm::{
         db::{BundleState, CacheDB, EmptyDBTyped},
         inspectors::NoOpInspector,
+        primitives::{AccountInfo, BlockEnv, CfgEnv, SpecId},
         JournaledState,
     };
     use revm_primitives::{CfgEnvWithHandlerCfg, EnvWithHandlerCfg, HandlerCfg};
@@ -604,7 +603,8 @@ mod tests {
 
         // Create a Chain object with a BTreeMap of blocks mapped to their block numbers,
         // including block1_hash and block2_hash, and the execution_outcome
-        let chain = Chain::new([block1, block2], execution_outcome.clone(), None);
+        let chain: Chain<OpPrimitives> =
+            Chain::new([block1, block2], execution_outcome.clone(), None);
 
         // Assert that the proper receipt vector is returned for block1_hash
         assert_eq!(chain.receipts_by_block_hash(block1_hash), Some(vec![&receipt1]));

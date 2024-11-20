@@ -1,5 +1,5 @@
-use super::Header;
 use crate::InMemorySize;
+pub use alloy_consensus::Header;
 use alloy_consensus::Sealed;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{keccak256, BlockHash, Sealable, B256};

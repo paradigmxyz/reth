@@ -89,7 +89,7 @@ impl CursorSubNode {
 
     /// Returns `true` if the current nibble has a root hash.
     pub fn hash_flag(&self) -> bool {
-        self.node.as_ref().map_or(false, |node| match self.nibble {
+        self.node.as_ref().is_some_and(|node| match self.nibble {
             // This guy has it
             -1 => node.root_hash.is_some(),
             // Or get it from the children

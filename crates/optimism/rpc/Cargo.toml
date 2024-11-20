@@ -22,6 +22,7 @@ reth-rpc-server-types.workspace = true
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-transaction-pool.workspace = true
 reth-rpc.workspace = true
+reth-rpc-api.workspace = true
 reth-node-api.workspace = true
 reth-network-api.workspace = true
 reth-node-builder.workspace = true
@@ -31,15 +32,18 @@ reth-chainspec.workspace = true
 reth-optimism-chainspec.workspace = true
 reth-optimism-consensus.workspace = true
 reth-optimism-evm.workspace = true
+reth-optimism-payload-builder.workspace = true
 reth-optimism-forks.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-eth.workspace = true
+alloy-rpc-types-debug.workspace = true
 alloy-consensus.workspace = true
 op-alloy-network.workspace = true
 op-alloy-rpc-types.workspace = true
+op-alloy-rpc-types-engine.workspace = true
 op-alloy-consensus.workspace = true
 revm.workspace = true
 
@@ -49,6 +53,7 @@ tokio.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls-native-roots"] }
 
 # rpc
+jsonrpsee-core.workspace = true
 jsonrpsee-types.workspace = true
 serde_json.workspace = true
 
@@ -66,5 +71,6 @@ optimism = [
 	"reth-primitives/optimism",
 	"reth-provider/optimism",
 	"revm/optimism",
-	"reth-optimism-consensus/optimism"
+	"reth-optimism-consensus/optimism",
+	"reth-optimism-payload-builder/optimism"
 ]

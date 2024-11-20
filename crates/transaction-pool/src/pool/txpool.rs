@@ -318,7 +318,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                 // blob pool that are valid with the lower blob fee
                 if best_transactions_attributes
                     .blob_fee
-                    .map_or(false, |fee| fee < self.all_transactions.pending_fees.blob_fee as u64)
+                    .is_some_and(|fee| fee < self.all_transactions.pending_fees.blob_fee as u64)
                 {
                     let unlocked_by_blob_fee =
                         self.blob_pool.satisfy_attributes(best_transactions_attributes);
@@ -657,7 +657,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                     InsertErr::Overdraft { transaction } => Err(PoolError::new(
                         *transaction.hash(),
                         PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::Overdraft {
-                            cost: transaction.cost(),
+                            cost: *transaction.cost(),
                             balance: on_chain_balance,
                         }),
                     )),
@@ -1229,7 +1229,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                     tx.state.insert(TxState::NO_NONCE_GAPS);
                     tx.state.insert(TxState::NO_PARKED_ANCESTORS);
                     tx.cumulative_cost = U256::ZERO;
-                    if tx.transaction.cost() > info.balance {
+                    if tx.transaction.cost() > &info.balance {
                         // sender lacks sufficient funds to pay for this transaction
                         tx.state.remove(TxState::ENOUGH_BALANCE);
                     } else {
@@ -1328,7 +1328,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 id: *tx.transaction.id(),
                 hash: *tx.transaction.hash(),
                 current: current_pool,
-                destination: Destination::Pool(tx.subpool),
+                destination: tx.subpool.into(),
             })
         }
     }
@@ -1446,7 +1446,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     fn contains_conflicting_transaction(&self, tx: &ValidPoolTransaction<T>) -> bool {
         self.txs_iter(tx.transaction_id.sender)
             .next()
-            .map_or(false, |(_, existing)| tx.tx_type_conflicts_with(&existing.transaction))
+            .is_some_and(|(_, existing)| tx.tx_type_conflicts_with(&existing.transaction))
     }
 
     /// Additional checks for a new transaction.
@@ -1542,7 +1542,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                     }
                 }
             }
-        } else if new_blob_tx.cost() > on_chain_balance {
+        } else if new_blob_tx.cost() > &on_chain_balance {
             // the transaction would go into overdraft
             return Err(InsertErr::Overdraft { transaction: Arc::new(new_blob_tx) })
         }
@@ -1738,7 +1738,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                             id: *id,
                             hash: *tx.transaction.hash(),
                             current: current_pool,
-                            destination: Destination::Pool(tx.subpool),
+                            destination: tx.subpool.into(),
                         })
                     }
                 }
@@ -2486,8 +2486,7 @@ mod tests {
         let tx = MockTransaction::eip1559().inc_price().inc_limit();
         let first = f.validated(tx.clone());
         pool.insert_tx(first, on_chain_balance, on_chain_nonce).unwrap();
-        let tx =
-            MockTransaction::eip4844().set_sender(tx.get_sender()).inc_price_by(100).inc_limit();
+        let tx = MockTransaction::eip4844().set_sender(tx.sender()).inc_price_by(100).inc_limit();
         let blob = f.validated(tx);
         let err = pool.insert_tx(blob, on_chain_balance, on_chain_nonce).unwrap_err();
         assert!(matches!(err, InsertErr::TxTypeConflict { .. }), "{err:?}");
@@ -2502,8 +2501,7 @@ mod tests {
         let tx = MockTransaction::eip4844().inc_price().inc_limit();
         let first = f.validated(tx.clone());
         pool.insert_tx(first, on_chain_balance, on_chain_nonce).unwrap();
-        let tx =
-            MockTransaction::eip1559().set_sender(tx.get_sender()).inc_price_by(100).inc_limit();
+        let tx = MockTransaction::eip1559().set_sender(tx.sender()).inc_price_by(100).inc_limit();
         let tx = f.validated(tx);
         let err = pool.insert_tx(tx, on_chain_balance, on_chain_nonce).unwrap_err();
         assert!(matches!(err, InsertErr::TxTypeConflict { .. }), "{err:?}");
@@ -2622,7 +2620,7 @@ mod tests {
 
         assert_eq!(
             pool.max_account_slots,
-            pool.tx_count(f.ids.sender_id(&tx.get_sender()).unwrap())
+            pool.tx_count(f.ids.sender_id(tx.get_sender()).unwrap())
         );
 
         let err =
@@ -2654,7 +2652,7 @@ mod tests {
 
         assert_eq!(
             pool.max_account_slots,
-            pool.tx_count(f.ids.sender_id(&tx.get_sender()).unwrap())
+            pool.tx_count(f.ids.sender_id(tx.get_sender()).unwrap())
         );
 
         pool.insert_tx(
@@ -2829,7 +2827,7 @@ mod tests {
         let mut changed_senders = HashMap::default();
         changed_senders.insert(
             id.sender,
-            SenderInfo { state_nonce: next.get_nonce(), balance: U256::from(1_000) },
+            SenderInfo { state_nonce: next.nonce(), balance: U256::from(1_000) },
         );
         let outcome = pool.update_accounts(changed_senders);
         assert_eq!(outcome.discarded.len(), 1);
