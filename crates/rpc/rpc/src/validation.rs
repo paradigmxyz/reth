@@ -5,13 +5,13 @@ use alloy_rpc_types_beacon::relay::{
     BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
 };
 use alloy_rpc_types_engine::{
-    BlobsBundleV1, CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar,
+    BlobsBundleV1, CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, PayloadError,
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::{Consensus, PostExecutionInput};
-use reth_errors::{BlockExecutionError, ConsensusError, ProviderError, RethError};
+use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
 use reth_ethereum_consensus::GAS_LIMIT_BOUND_DIVISOR;
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_payload_validator::ExecutionPayloadValidator;
@@ -22,8 +22,7 @@ use reth_provider::{
 };
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
 use reth_rpc_api::BlockSubmissionValidationApiServer;
-use reth_rpc_eth_types::EthApiError;
-use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
+use reth_rpc_server_types::result::internal_rpc_err;
 use reth_tasks::TaskSpawner;
 use reth_trie::HashedPostState;
 use revm_primitives::{Address, B256, U256};
@@ -346,22 +345,18 @@ where
     async fn validate_builder_submission_v3(
         &self,
         request: BuilderBlockValidationRequestV3,
-    ) -> RpcResult<()> {
+    ) -> Result<(), ValidationApiError> {
         let block = self
             .payload_validator
             .ensure_well_formed_payload(
                 ExecutionPayload::V3(request.request.execution_payload),
                 ExecutionPayloadSidecar::v3(CancunPayloadFields {
                     parent_beacon_block_root: request.parent_beacon_block_root,
-                    versioned_hashes: self
-                        .validate_blobs_bundle(request.request.blobs_bundle)
-                        .map_err(|e| RethError::Other(e.into()))
-                        .to_rpc_result()?,
+                    versioned_hashes: self.validate_blobs_bundle(request.request.blobs_bundle)?,
                 }),
-            )
-            .to_rpc_result()?
+            )?
             .try_seal_with_senders()
-            .map_err(|_| EthApiError::InvalidTransactionSignature)?;
+            .map_err(|_| ValidationApiError::InvalidTransactionSignature)?;
 
         self.validate_message_against_block(
             block,
@@ -369,15 +364,13 @@ where
             request.registered_gas_limit,
         )
         .await
-        .map_err(|e| RethError::Other(e.into()))
-        .to_rpc_result()
     }
 
     /// Core logic for validating the builder submission v4
     async fn validate_builder_submission_v4(
         &self,
         request: BuilderBlockValidationRequestV4,
-    ) -> RpcResult<()> {
+    ) -> Result<(), ValidationApiError> {
         let block = self
             .payload_validator
             .ensure_well_formed_payload(
@@ -386,16 +379,13 @@ where
                     CancunPayloadFields {
                         parent_beacon_block_root: request.parent_beacon_block_root,
                         versioned_hashes: self
-                            .validate_blobs_bundle(request.request.blobs_bundle)
-                            .map_err(|e| RethError::Other(e.into()))
-                            .to_rpc_result()?,
+                            .validate_blobs_bundle(request.request.blobs_bundle)?,
                     },
                     request.request.execution_requests.into(),
                 ),
-            )
-            .to_rpc_result()?
+            )?
             .try_seal_with_senders()
-            .map_err(|_| EthApiError::InvalidTransactionSignature)?;
+            .map_err(|_| ValidationApiError::InvalidTransactionSignature)?;
 
         self.validate_message_against_block(
             block,
@@ -403,8 +393,6 @@ where
             request.registered_gas_limit,
         )
         .await
-        .map_err(|e| RethError::Other(e.into()))
-        .to_rpc_result()
     }
 }
 
@@ -444,8 +432,10 @@ where
         let (tx, rx) = oneshot::channel();
 
         self.task_spawner.spawn_blocking(Box::pin(async move {
-            let result = Self::validate_builder_submission_v3(&this, request);
-            let _ = tx.send(result.await.map_err(|e| RethError::Other(e.into())).to_rpc_result());
+            let result = Self::validate_builder_submission_v3(&this, request)
+                .await
+                .map_err(|err| internal_rpc_err(err.to_string()));
+            let _ = tx.send(result);
         }));
 
         rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
@@ -460,8 +450,10 @@ where
         let (tx, rx) = oneshot::channel();
 
         self.task_spawner.spawn_blocking(Box::pin(async move {
-            let result = Self::validate_builder_submission_v4(&this, request);
-            let _ = tx.send(result.await.map_err(|e| RethError::Other(e.into())).to_rpc_result());
+            let result = Self::validate_builder_submission_v4(&this, request)
+                .await
+                .map_err(|err| internal_rpc_err(err.to_string()));
+            let _ = tx.send(result);
         }));
 
         rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
@@ -513,6 +505,9 @@ pub enum ValidationApiError {
     ProposerPayment,
     #[error("invalid blobs bundle")]
     InvalidBlobsBundle,
+    /// When the transaction signature is invalid
+    #[error("invalid transaction signature")]
+    InvalidTransactionSignature,
     #[error("block accesses blacklisted address: {_0}")]
     Blacklist(Address),
     #[error(transparent)]
@@ -523,4 +518,6 @@ pub enum ValidationApiError {
     Provider(#[from] ProviderError),
     #[error(transparent)]
     Execution(#[from] BlockExecutionError),
+    #[error(transparent)]
+    Payload(#[from] PayloadError),
 }
