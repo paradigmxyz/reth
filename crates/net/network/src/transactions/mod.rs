@@ -674,6 +674,123 @@ where
     }
 }
 
+impl<Pool, N> TransactionsManager<Pool, N>
+where
+    Pool: TransactionPool,
+    N: NetworkPrimitives,
+    <<Pool as TransactionPool>::Transaction as PoolTransaction>::Consensus:
+        Into<N::BroadcastedTransaction>,
+{
+
+    /// Propagate the transactions to all connected peers either as full objects or hashes.
+    ///
+    /// The message for new pooled hashes depends on the negotiated version of the stream.
+    /// See [`NewPooledTransactionHashes`]
+    ///
+    /// Note: EIP-4844 are disallowed from being broadcast in full and are only ever sent as hashes, see also <https://eips.ethereum.org/EIPS/eip-4844#networking>.
+    fn propagate_transactions2(
+        &mut self,
+        to_propagate: Vec<PropagateTransaction<N::BroadcastedTransaction>>,
+        propagation_mode: PropagationMode,
+    ) -> PropagatedTransactions {
+        let mut propagated = PropagatedTransactions::default();
+        if self.network.tx_gossip_disabled() {
+            return propagated
+        }
+
+        // send full transactions to a set of the connected peers based on the configured mode
+        let max_num_full = self.config.propagation_mode.full_peer_count(self.peers.len());
+
+        // Note: Assuming ~random~ order due to random state of the peers map hasher
+        for (peer_idx, (peer_id, peer)) in self.peers.iter_mut().enumerate() {
+            // determine whether to send full tx objects or hashes.
+            // let mut builder = if peer_idx > max_num_full {
+            //     PropagateTransactionsBuilder::<N::BroadcastedTransaction>::pooled(peer.version)
+            // } else {
+            //     PropagateTransactionsBuilder::<N::BroadcastedTransaction>::full(peer.version)
+            // };
+        //
+        //     if propagation_mode.is_forced() {
+        //         builder.extend(to_propagate.iter());
+        //     } else {
+        //         // Iterate through the transactions to propagate and fill the hashes and full
+        //         // transaction lists, before deciding whether or not to send full transactions to
+        //         // the peer.
+        //         for tx in &to_propagate {
+        //             // Only proceed if the transaction is not in the peer's list of seen
+        //             // transactions
+        //             if !peer.seen_transactions.contains(&tx.hash()) {
+        //                 builder.push(tx);
+        //             }
+        //         }
+        //     }
+        //
+        //     if builder.is_empty() {
+        //         trace!(target: "net::tx", ?peer_id, "Nothing to propagate to peer; has seen all transactions");
+        //         continue
+        //     }
+        //
+        //     let PropagateTransactions { pooled, full } = builder.build();
+        //
+        //     // send hashes if any
+        //     if let Some(mut new_pooled_hashes) = pooled {
+        //         // enforce tx soft limit per message for the (unlikely) event the number of
+        //         // hashes exceeds it
+        //         new_pooled_hashes
+        //             .truncate(SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE);
+        //
+        //         for hash in new_pooled_hashes.iter_hashes().copied() {
+        //             propagated.0.entry(hash).or_default().push(PropagateKind::Hash(*peer_id));
+        //             // mark transaction as seen by peer
+        //             peer.seen_transactions.insert(hash);
+        //         }
+        //
+        //         trace!(target: "net::tx", ?peer_id, num_txs=?new_pooled_hashes.len(), "Propagating tx hashes to peer");
+        //
+        //         // send hashes of transactions
+        //         self.network.send_transactions_hashes(*peer_id, new_pooled_hashes);
+        //     }
+        //
+        //     // send full transactions, if any
+        //     if let Some(new_full_transactions) = full {
+        //         for tx in &new_full_transactions {
+        //             propagated.0.entry(tx.hash()).or_default().push(PropagateKind::Full(*peer_id));
+        //             // mark transaction as seen by peer
+        //             peer.seen_transactions.insert(tx.hash());
+        //         }
+        //
+        //         trace!(target: "net::tx", ?peer_id, num_txs=?new_full_transactions.len(), "Propagating full transactions to peer");
+        //
+        //         // send full transactions
+        //         self.network.send_transactions(*peer_id, new_full_transactions);
+        //     }
+        }
+        //
+        // // Update propagated transactions metrics
+        // self.metrics.propagated_transactions.increment(propagated.0.len() as u64);
+        //
+        // propagated
+
+        todo!()
+    }
+
+    /// Propagates the given transactions to the peers
+    ///
+    /// This fetches all transaction from the pool, including the 4844 blob transactions but
+    /// __without__ their sidecar, because 4844 transactions are only ever announced as hashes.
+    fn propagate_all2(&mut self, hashes: Vec<TxHash>) {
+        let propagated = self.propagate_transactions2(
+            self.pool.get_all(hashes).into_iter().map(PropagateTransaction::new2).collect(),
+            PropagationMode::Basic,
+        );
+
+        // // notify pool so events get fired
+        // self.pool.on_propagated(propagated);
+        todo!()
+    }
+
+}
+
 impl<Pool> TransactionsManager<Pool>
 where
     Pool: TransactionPool + 'static,
@@ -1452,8 +1569,6 @@ struct PropagateTransaction<T = TransactionSigned> {
     transaction: Arc<T>,
 }
 
-// === impl PropagateTransaction ===
-
 impl PropagateTransaction {
     fn hash(&self) -> TxHash {
         self.transaction.hash()
@@ -1472,6 +1587,19 @@ impl PropagateTransaction {
     }
 }
 
+impl<T> PropagateTransaction<T> {
+    /// Create a new instance from a pooled transaction
+    fn new2<P>(tx: Arc<ValidPoolTransaction<P>>) -> Self
+    where
+        P: PoolTransaction<Consensus : Into<T>>,
+    {
+        let size = tx.encoded_length();
+        let transaction = tx.transaction.clone().into_consensus().into();
+        let transaction = Arc::new(transaction);
+        Self { size, transaction }
+    }
+}
+
 /// Helper type to construct the appropriate message to send to the peer based on whether the peer
 /// should receive them in full or as pooled
 #[derive(Debug, Clone)]
@@ -1480,7 +1608,7 @@ enum PropagateTransactionsBuilder<T = TransactionSigned> {
     Full(FullTransactionsBuilder<T>),
 }
 
-impl PropagateTransactionsBuilder {
+impl<T> PropagateTransactionsBuilder<T> {
     /// Create a builder for pooled transactions
     fn pooled(version: EthVersion) -> Self {
         Self::Pooled(PooledTransactionsHashesBuilder::new(version))
@@ -1490,6 +1618,9 @@ impl PropagateTransactionsBuilder {
     fn full(version: EthVersion) -> Self {
         Self::Full(FullTransactionsBuilder::new(version))
     }
+}
+
+impl PropagateTransactionsBuilder {
 
     /// Appends all transactions
     fn extend<'a>(&mut self, txs: impl IntoIterator<Item = &'a PropagateTransaction>) {
@@ -1547,9 +1678,7 @@ struct FullTransactionsBuilder<T = TransactionSigned> {
     pooled: PooledTransactionsHashesBuilder,
 }
 
-// === impl FullTransactionsBuilder ===
-
-impl FullTransactionsBuilder {
+impl<T> FullTransactionsBuilder<T> {
     /// Create a builder for the negotiated version of the peer's session
     fn new(version: EthVersion) -> Self {
         Self {
@@ -1560,7 +1689,7 @@ impl FullTransactionsBuilder {
     }
 
     /// Appends all transactions.
-    fn extend(&mut self, txs: impl IntoIterator<Item = PropagateTransaction>) {
+    fn extend(&mut self, txs: impl IntoIterator<Item = PropagateTransaction<T>>) {
         for tx in txs {
             self.push(&tx)
         }
@@ -1574,7 +1703,7 @@ impl FullTransactionsBuilder {
     ///
     /// If the transaction is unsuitable for broadcast or would exceed the softlimit, it is appended
     /// to list of pooled transactions, (e.g. 4844 transactions).
-    fn push(&mut self, transaction: &PropagateTransaction) {
+    fn push(&mut self, transaction: &PropagateTransaction<T>) {
         // Do not send full 4844 transaction hashes to peers.
         //
         //  Nodes MUST NOT automatically broadcast blob transactions to their peers.
@@ -1607,7 +1736,7 @@ impl FullTransactionsBuilder {
     }
 
     /// Returns the messages that should be propagated to the peer.
-    fn build(self) -> PropagateTransactions {
+    fn build(self) -> PropagateTransactions<T> {
         let pooled = Some(self.pooled.build()).filter(|pooled| !pooled.is_empty());
         let full = Some(self.transactions).filter(|full| !full.is_empty());
         PropagateTransactions { pooled, full }
