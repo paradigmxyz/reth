@@ -67,25 +67,9 @@ pub trait Transaction:
     fn is_eip7702(&self) -> bool {
         matches!(self.ty(), EIP7702_TX_TYPE_ID)
     }
-
-    /// Returns the [`TxLegacy`] variant if the transaction is a legacy transaction.
-    fn as_legacy(&self) -> Option<&TxLegacy>;
-
-    /// Returns the [`TxEip2930`] variant if the transaction is an EIP-2930 transaction.
-    fn as_eip2930(&self) -> Option<&TxEip2930>;
-
-    /// Returns the [`TxEip1559`] variant if the transaction is an EIP-1559 transaction.
-    fn as_eip1559(&self) -> Option<&TxEip1559>;
-
-    /// Returns the [`TxEip4844`] variant if the transaction is an EIP-4844 transaction.
-    fn as_eip4844(&self) -> Option<&TxEip4844>;
-
-    /// Returns the [`TxEip7702`] variant if the transaction is an EIP-7702 transaction.
-    fn as_eip7702(&self) -> Option<&TxEip7702>;
 }
 
-impl<T> Transaction for T
-where
+impl<T> Transaction for T where
     T: Send
         + Sync
         + Unpin
@@ -98,27 +82,8 @@ where
         + TransactionExt
         + InMemorySize
         + MaybeSerde
-        + MaybeArbitrary,
+        + MaybeArbitrary
 {
-    fn as_legacy(&self) -> Option<&TxLegacy> {
-        (self as &dyn any::Any).downcast_ref::<TxLegacy>().filter(|_| self.is_legacy())
-    }
-
-    fn as_eip2930(&self) -> Option<&TxEip2930> {
-        (self as &dyn any::Any).downcast_ref::<TxEip2930>().filter(|_| self.is_eip2930())
-    }
-
-    fn as_eip1559(&self) -> Option<&TxEip1559> {
-        (self as &dyn any::Any).downcast_ref::<TxEip1559>().filter(|_| self.is_eip1559())
-    }
-
-    fn as_eip4844(&self) -> Option<&TxEip4844> {
-        (self as &dyn any::Any).downcast_ref::<TxEip4844>().filter(|_| self.is_eip4844())
-    }
-
-    fn as_eip7702(&self) -> Option<&TxEip7702> {
-        (self as &dyn any::Any).downcast_ref::<TxEip7702>().filter(|_| self.is_eip7702())
-    }
 }
 
 /// Extension trait of [`alloy_consensus::Transaction`].
