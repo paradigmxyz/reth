@@ -442,11 +442,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::{prelude::SliceRandom, Rng};
     use reth_primitives::{Account as RethAccount, StorageEntry};
     use reth_provider::{
         providers::ConsistentDbView, test_utils::create_test_provider_factory, HashingWriter,
     };
+    use reth_testing_utils::generators::{self, Rng};
     use reth_trie::{test_utils::state_root, TrieInput};
     use revm_primitives::{
         Account as RevmAccount, AccountInfo, AccountStatus, Address, EvmState, EvmStorageSlot,
@@ -467,16 +467,14 @@ mod tests {
     }
 
     fn create_mock_state_updates(num_accounts: usize, updates_per_account: usize) -> Vec<EvmState> {
-        let mut rng = rand::thread_rng();
-        let mut all_addresses: Vec<Address> =
-            (0..num_accounts).map(|_| Address::random()).collect();
+        let mut rng = generators::rng();
+        let all_addresses: Vec<Address> = (0..num_accounts).map(|_| rng.gen()).collect();
         let mut updates = Vec::new();
 
         for _ in 0..updates_per_account {
             let num_accounts_in_update = rng.gen_range(1..=num_accounts);
             let mut state_update = EvmState::default();
 
-            all_addresses.shuffle(&mut rng);
             let selected_addresses = &all_addresses[0..num_accounts_in_update];
 
             for &address in selected_addresses {
