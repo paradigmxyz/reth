@@ -206,8 +206,6 @@ const fn describe_io_stats() {}
 mod tests {
     use super::*;
     use reqwest::Client;
-    use reth_db_api::database_metrics::DatabaseMetrics;
-    use reth_provider::{test_utils::create_test_provider_factory, StaticFileProviderFactory};
     use reth_tasks::TaskManager;
     use socket2::{Domain, Socket, Type};
     use std::net::{SocketAddr, TcpListener};
@@ -237,21 +235,7 @@ mod tests {
         let tasks = TaskManager::current();
         let executor = tasks.executor();
 
-        let factory = create_test_provider_factory();
-        let hooks = Hooks::builder()
-            .with_hook({
-                let db = factory.db_ref().clone();
-                move || db.report_metrics()
-            })
-            .with_hook({
-                let sfp = factory.static_file_provider();
-                move || {
-                    if let Err(error) = sfp.report_metrics() {
-                        tracing::error!(%error, "Failed to report metrics for the static file provider");
-                    }
-                }
-            })
-            .build();
+        let hooks = Hooks::builder().build();
 
         let listen_addr = get_random_available_addr();
         let config =
@@ -266,7 +250,7 @@ mod tests {
 
         // Check the response body
         let body = response.text().await.unwrap();
-        assert!(body.contains("reth_db_table_size"));
-        assert!(body.contains("reth_jemalloc_metadata"));
+        assert!(body.contains("reth_process_cpu_seconds_total"));
+        assert!(body.contains("reth_process_start_time_seconds"));
     }
 }

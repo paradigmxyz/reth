@@ -2,7 +2,7 @@ use metrics_process::Collector;
 use std::{fmt, sync::Arc};
 
 /// The simple alias for function types that are `'static`, `Send`, and `Sync`.
-pub trait Hook: 'static + Fn() + Send + Sync {}
+pub trait Hook: Fn() + Send + Sync + 'static {}
 impl<T: 'static + Fn() + Send + Sync> Hook for T {}
 
 /// A builder-like type to create a new [`Hooks`] instance.
@@ -12,8 +12,17 @@ pub struct HooksBuilder {
 
 impl HooksBuilder {
     /// Registers a [`Hook`].
-    pub fn with_hook(self, hook: impl Hook<Output = ()>) -> Self {
+    pub fn with_hook(self, hook: impl Hook) -> Self {
         self.with_boxed_hook(Box::new(hook))
+    }
+
+    /// Registers a [`Hook`] by calling the provided closure.
+    pub fn install_hook<F, H>(self, f: F) -> Self
+    where
+        F: FnOnce() -> H,
+        H: Hook,
+    {
+        self.with_hook(f())
     }
 
     /// Registers a [`Hook`].
