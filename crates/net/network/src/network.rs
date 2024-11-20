@@ -140,7 +140,7 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
     /// Send message to get the [`TransactionsHandle`].
     ///
     /// Returns `None` if no transaction task is installed.
-    pub async fn transactions_handle(&self) -> Option<TransactionsHandle> {
+    pub async fn transactions_handle(&self) -> Option<TransactionsHandle<N>> {
         let (tx, rx) = oneshot::channel();
         let _ = self.manager().send(NetworkHandleMessage::GetTransactionsHandle(tx));
         rx.await.unwrap()
@@ -504,7 +504,7 @@ pub(crate) enum NetworkHandleMessage<N: NetworkPrimitives = EthNetworkPrimitives
     /// Gets the reputation for a specific peer via a oneshot sender.
     GetReputationById(PeerId, oneshot::Sender<Option<Reputation>>),
     /// Retrieves the `TransactionsHandle` via a oneshot sender.
-    GetTransactionsHandle(oneshot::Sender<Option<TransactionsHandle>>),
+    GetTransactionsHandle(oneshot::Sender<Option<TransactionsHandle<N>>>),
     /// Initiates a graceful shutdown of the network via a oneshot sender.
     Shutdown(oneshot::Sender<()>),
     /// Sets the network state between hibernation and active.

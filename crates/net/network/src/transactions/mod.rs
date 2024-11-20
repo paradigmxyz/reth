@@ -161,9 +161,7 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
         let res = self.get_transaction_hashes(vec![peer]).await?;
         Ok(res.into_values().next().unwrap_or_default())
     }
-}
 
-impl TransactionsHandle {
     /// Requests the transactions directly from the given peer.
     ///
     /// Returns `None` if the peer is not connected.
@@ -173,7 +171,7 @@ impl TransactionsHandle {
         &self,
         peer_id: PeerId,
         hashes: Vec<B256>,
-    ) -> Result<Option<Vec<PooledTransactionsElement>>, RequestError> {
+    ) -> Result<Option<Vec<N::PooledTransaction>>, RequestError> {
         let Some(peer) = self.peer_handle(peer_id).await? else { return Ok(None) };
 
         let (tx, rx) = oneshot::channel();
@@ -1762,7 +1760,7 @@ enum TransactionsCommand<N: NetworkPrimitives = EthNetworkPrimitives> {
 
 /// All events related to transactions emitted by the network.
 #[derive(Debug)]
-pub enum NetworkTransactionEvent {
+pub enum NetworkTransactionEvent<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Represents the event of receiving a list of transactions from a peer.
     ///
     /// This indicates transactions that were broadcasted to us from the peer.
@@ -1786,10 +1784,10 @@ pub enum NetworkTransactionEvent {
         /// The received `GetPooledTransactions` request.
         request: GetPooledTransactions,
         /// The sender for responding to the request with a result of `PooledTransactions`.
-        response: oneshot::Sender<RequestResult<PooledTransactions>>,
+        response: oneshot::Sender<RequestResult<PooledTransactions<N::PooledTransaction>>>,
     },
     /// Represents the event of receiving a `GetTransactionsHandle` request.
-    GetTransactionsHandle(oneshot::Sender<Option<TransactionsHandle>>),
+    GetTransactionsHandle(oneshot::Sender<Option<TransactionsHandle<N>>>),
 }
 
 /// Tracks stats about the [`TransactionsManager`].

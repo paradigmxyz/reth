@@ -90,7 +90,7 @@ pub struct NetworkManager<N: NetworkPrimitives = EthNetworkPrimitives> {
     event_sender: EventSender<NetworkEvent<PeerRequest<N>>>,
     /// Sender half to send events to the
     /// [`TransactionsManager`](crate::transactions::TransactionsManager) task, if configured.
-    to_transactions_manager: Option<UnboundedMeteredSender<NetworkTransactionEvent>>,
+    to_transactions_manager: Option<UnboundedMeteredSender<NetworkTransactionEvent<N>>>,
     /// Sender half to send events to the
     /// [`EthRequestHandler`](crate::eth_requests::EthRequestHandler) task, if configured.
     ///
@@ -120,7 +120,7 @@ pub struct NetworkManager<N: NetworkPrimitives = EthNetworkPrimitives> {
 impl<N: NetworkPrimitives> NetworkManager<N> {
     /// Sets the dedicated channel for events indented for the
     /// [`TransactionsManager`](crate::transactions::TransactionsManager).
-    pub fn set_transactions(&mut self, tx: mpsc::UnboundedSender<NetworkTransactionEvent>) {
+    pub fn set_transactions(&mut self, tx: mpsc::UnboundedSender<NetworkTransactionEvent<N>>) {
         self.to_transactions_manager =
             Some(UnboundedMeteredSender::new(tx, NETWORK_POOL_TRANSACTIONS_SCOPE));
     }
@@ -409,7 +409,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
 
     /// Sends an event to the [`TransactionsManager`](crate::transactions::TransactionsManager) if
     /// configured.
-    fn notify_tx_manager(&self, event: NetworkTransactionEvent) {
+    fn notify_tx_manager(&self, event: NetworkTransactionEvent<N>) {
         if let Some(ref tx) = self.to_transactions_manager {
             let _ = tx.send(event);
         }
