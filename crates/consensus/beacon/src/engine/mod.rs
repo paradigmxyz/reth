@@ -1991,7 +1991,8 @@ mod tests {
     use alloy_rpc_types_engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
     use assert_matches::assert_matches;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
-    use reth_provider::{BlockWriter, ProviderFactory};
+    use reth_node_types::FullNodePrimitives;
+    use reth_provider::{BlockWriter, ProviderFactory, StorageLocation};
     use reth_rpc_types_compat::engine::payload::block_to_payload_v1;
     use reth_stages::{ExecOutput, PipelineError, StageError};
     use reth_stages_api::StageCheckpoint;
@@ -2169,7 +2170,10 @@ mod tests {
         assert_matches!(rx.await, Ok(Ok(())));
     }
 
-    fn insert_blocks<'a, N: ProviderNodeTypes>(
+    fn insert_blocks<
+        'a,
+        N: ProviderNodeTypes<Primitives: FullNodePrimitives<Block = reth_primitives::Block>>,
+    >(
         provider_factory: ProviderFactory<N>,
         mut blocks: impl Iterator<Item = &'a SealedBlock>,
     ) {
@@ -2179,6 +2183,7 @@ mod tests {
                 provider
                     .insert_block(
                         b.clone().try_seal_with_senders().expect("invalid tx signature in block"),
+                        StorageLocation::Database,
                     )
                     .map(drop)
             })

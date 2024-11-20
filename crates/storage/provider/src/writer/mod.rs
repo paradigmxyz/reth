@@ -2,7 +2,7 @@ use crate::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter as SfWriter},
     writer::static_file::StaticFileWriter,
     BlockExecutionWriter, BlockWriter, HistoryWriter, StateChangeWriter, StateWriter,
-    StaticFileProviderFactory, TrieWriter,
+    StaticFileProviderFactory, StorageLocation, TrieWriter,
 };
 use alloy_consensus::Header;
 use alloy_primitives::{BlockNumber, B256, U256};
@@ -15,7 +15,7 @@ use reth_db::{
 };
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{SealedBlock, StaticFileSegment, TransactionSignedNoHash};
+use reth_primitives::{BlockBody, SealedBlock, StaticFileSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     DBProvider, HeaderProvider, ReceiptWriter, StageCheckpointWriter, TransactionsProviderExt,
@@ -148,7 +148,7 @@ impl UnifiedStorageWriter<'_, (), ()> {
 impl<ProviderDB> UnifiedStorageWriter<'_, ProviderDB, &StaticFileProvider<ProviderDB::Primitives>>
 where
     ProviderDB: DBProvider<Tx: DbTx + DbTxMut>
-        + BlockWriter
+        + BlockWriter<Body = BlockBody>
         + TransactionsProviderExt
         + StateChangeWriter
         + TrieWriter
@@ -195,7 +195,7 @@ where
         for block in blocks {
             let sealed_block =
                 block.block().clone().try_with_senders_unchecked(block.senders().clone()).unwrap();
-            self.database().insert_block(sealed_block)?;
+            self.database().insert_block(sealed_block, StorageLocation::Both)?;
             self.save_header_and_transactions(block.block.clone())?;
 
             // Write state and changesets to the database.
@@ -246,25 +246,8 @@ where
                 .save_stage_checkpoint(StageId::Headers, StageCheckpoint::new(block.number))?;
         }
 
-        {
-            let transactions_writer =
-                self.static_file().get_writer(block.number, StaticFileSegment::Transactions)?;
-            let mut storage_writer =
-                UnifiedStorageWriter::from(self.database(), transactions_writer);
-            let no_hash_transactions = block
-                .body
-                .transactions
-                .clone()
-                .into_iter()
-                .map(TransactionSignedNoHash::from)
-                .collect();
-            storage_writer.append_transactions_from_blocks(
-                block.header().number,
-                std::iter::once(&no_hash_transactions),
-            )?;
-            self.database()
-                .save_stage_checkpoint(StageId::Bodies, StageCheckpoint::new(block.number))?;
-        }
+        self.database()
+            .save_stage_checkpoint(StageId::Bodies, StageCheckpoint::new(block.number))?;
 
         Ok(())
     }
@@ -377,56 +360,6 @@ where
         }
 
         Ok(td)
-    }
-
-    /// Appends transactions to static files, using the
-    /// [`BlockBodyIndices`](tables::BlockBodyIndices) table to determine the transaction number
-    /// when appending to static files.
-    ///
-    /// NOTE: The static file writer used to construct this [`UnifiedStorageWriter`] MUST be a
-    /// writer for the Transactions segment.
-    pub fn append_transactions_from_blocks<T>(
-        &mut self,
-        initial_block_number: BlockNumber,
-        transactions: impl Iterator<Item = T>,
-    ) -> ProviderResult<()>
-    where
-        T: Borrow<Vec<TransactionSignedNoHash>>,
-    {
-        self.ensure_static_file_segment(StaticFileSegment::Transactions)?;
-
-        let mut bodies_cursor =
-            self.database().tx_ref().cursor_read::<tables::BlockBodyIndices>()?;
-
-        let mut last_tx_idx = None;
-        for (idx, transactions) in transactions.enumerate() {
-            let block_number = initial_block_number + idx as u64;
-
-            let mut first_tx_index =
-                bodies_cursor.seek_exact(block_number)?.map(|(_, indices)| indices.first_tx_num());
-
-            // If there are no indices, that means there have been no transactions
-            //
-            // So instead of returning an error, use zero
-            if block_number == initial_block_number && first_tx_index.is_none() {
-                first_tx_index = Some(0);
-            }
-
-            let mut tx_index = first_tx_index
-                .or(last_tx_idx)
-                .ok_or(ProviderError::BlockBodyIndicesNotFound(block_number))?;
-
-            for tx in transactions.borrow() {
-                self.static_file_mut().append_transaction(tx_index, tx)?;
-                tx_index += 1;
-            }
-
-            self.static_file_mut().increment_block(block_number)?;
-
-            // update index
-            last_tx_idx = Some(tx_index);
-        }
-        Ok(())
     }
 }
 

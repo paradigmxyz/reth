@@ -17,8 +17,8 @@ use crate::{
     LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError,
     PruneCheckpointReader, PruneCheckpointWriter, RevertsInit, StageCheckpointReader,
     StateChangeWriter, StateProviderBox, StateReader, StateWriter, StaticFileProviderFactory,
-    StatsReader, StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
-    TransactionsProviderExt, TrieWriter, WithdrawalsProvider,
+    StatsReader, StorageLocation, StorageReader, StorageTrieWriter, TransactionVariant,
+    TransactionsProvider, TransactionsProviderExt, TrieWriter, WithdrawalsProvider,
 };
 use alloy_consensus::Header;
 use alloy_eips::{
@@ -37,7 +37,7 @@ use reth_db_api::{
     database::Database,
     models::{
         sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
-        ShardedKey, StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals,
+        ShardedKey, StoredBlockBodyIndices,
     },
     table::Table,
     transaction::{DbTx, DbTxMut},
@@ -52,7 +52,7 @@ use reth_primitives::{
     SealedBlockWithSenders, SealedHeader, StaticFileSegment, StorageEntry, TransactionMeta,
     TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
 };
-use reth_primitives_traits::{BlockBody as _, FullNodePrimitives};
+use reth_primitives_traits::{BlockBody as _, FullNodePrimitives, SignedTransaction};
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{StateProvider, StorageChangeSetReader, TryIntoHistoricalStateProvider};
@@ -73,10 +73,9 @@ use std::{
     fmt::Debug,
     ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::{mpsc, Arc},
-    time::{Duration, Instant},
 };
 use tokio::sync::watch;
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, trace};
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
 pub type DatabaseProviderRO<DB, N> = DatabaseProvider<<DB as Database>::TX, N>;
@@ -292,7 +291,7 @@ impl<Tx: DbTx + DbTxMut + 'static, N: ProviderNodeTypes + 'static> DatabaseProvi
     /// Inserts an historical block. **Used for setting up test environments**
     pub fn insert_historical_block(
         &self,
-        block: SealedBlockWithSenders,
+        block: SealedBlockWithSenders<Header, <Self as BlockWriter>::Body>,
     ) -> ProviderResult<StoredBlockBodyIndices> {
         let ttd = if block.number == 0 {
             block.difficulty
@@ -316,7 +315,7 @@ impl<Tx: DbTx + DbTxMut + 'static, N: ProviderNodeTypes + 'static> DatabaseProvi
 
         writer.append_header(block.header.as_ref(), ttd, &block.hash())?;
 
-        self.insert_block(block)
+        self.insert_block(block, StorageLocation::Database)
     }
 }
 
@@ -3137,7 +3136,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: ProviderNodeTypes + 'static> BlockWriter
     /// [`TransactionHashNumbers`](tables::TransactionHashNumbers).
     fn insert_block(
         &self,
-        block: SealedBlockWithSenders,
+        block: SealedBlockWithSenders<Header, Self::Body>,
+        write_transactions_to: StorageLocation,
     ) -> ProviderResult<StoredBlockBodyIndices> {
         let block_number = block.number;
 
@@ -3166,15 +3166,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: ProviderNodeTypes + 'static> BlockWriter
         self.tx.put::<tables::HeaderTerminalDifficulties>(block_number, ttd.into())?;
         durations_recorder.record_relative(metrics::Action::InsertHeaderTerminalDifficulties);
 
-        // insert body ommers data
-        if !block.body.ommers.is_empty() {
-            self.tx.put::<tables::BlockOmmers>(
-                block_number,
-                StoredBlockOmmers { ommers: block.block.body.ommers },
-            )?;
-            durations_recorder.record_relative(metrics::Action::InsertBlockOmmers);
-        }
-
         let mut next_tx_num = self
             .tx
             .cursor_read::<tables::TransactionBlocks>()?
@@ -3184,84 +3175,28 @@ impl<TX: DbTxMut + DbTx + 'static, N: ProviderNodeTypes + 'static> BlockWriter
         durations_recorder.record_relative(metrics::Action::GetNextTxNum);
         let first_tx_num = next_tx_num;
 
-        let tx_count = block.block.body.transactions.len() as u64;
+        let tx_count = block.block.body.transactions().len() as u64;
 
         // Ensures we have all the senders for the block's transactions.
-        let mut tx_senders_elapsed = Duration::default();
-        let mut transactions_elapsed = Duration::default();
-        let mut tx_hash_numbers_elapsed = Duration::default();
-
         for (transaction, sender) in
-            block.block.body.transactions.into_iter().zip(block.senders.iter())
+            block.block.body.transactions().iter().zip(block.senders.iter())
         {
-            let hash = transaction.hash();
+            let hash = transaction.tx_hash();
 
-            if self
-                .prune_modes
-                .sender_recovery
-                .as_ref()
-                .filter(|prune_mode| prune_mode.is_full())
-                .is_none()
-            {
-                let start = Instant::now();
+            if self.prune_modes.sender_recovery.as_ref().is_none_or(|m| !m.is_full()) {
                 self.tx.put::<tables::TransactionSenders>(next_tx_num, *sender)?;
-                tx_senders_elapsed += start.elapsed();
             }
 
-            let start = Instant::now();
-            self.tx.put::<tables::Transactions>(next_tx_num, transaction.into())?;
-            let elapsed = start.elapsed();
-            if elapsed > Duration::from_secs(1) {
-                warn!(
-                    target: "providers::db",
-                    ?block_number,
-                    tx_num = %next_tx_num,
-                    hash = %hash,
-                    ?elapsed,
-                    "Transaction insertion took too long"
-                );
-            }
-            transactions_elapsed += elapsed;
-
-            if self
-                .prune_modes
-                .transaction_lookup
-                .filter(|prune_mode| prune_mode.is_full())
-                .is_none()
-            {
-                let start = Instant::now();
-                self.tx.put::<tables::TransactionHashNumbers>(hash, next_tx_num)?;
-                tx_hash_numbers_elapsed += start.elapsed();
+            if self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full()) {
+                self.tx.put::<tables::TransactionHashNumbers>(*hash, next_tx_num)?;
             }
             next_tx_num += 1;
         }
-        durations_recorder
-            .record_duration(metrics::Action::InsertTransactionSenders, tx_senders_elapsed);
-        durations_recorder
-            .record_duration(metrics::Action::InsertTransactions, transactions_elapsed);
-        durations_recorder.record_duration(
-            metrics::Action::InsertTransactionHashNumbers,
-            tx_hash_numbers_elapsed,
-        );
 
-        if let Some(withdrawals) = block.block.body.withdrawals {
-            if !withdrawals.is_empty() {
-                self.tx.put::<tables::BlockWithdrawals>(
-                    block_number,
-                    StoredBlockWithdrawals { withdrawals },
-                )?;
-                durations_recorder.record_relative(metrics::Action::InsertBlockWithdrawals);
-            }
-        }
-
-        let block_indices = StoredBlockBodyIndices { first_tx_num, tx_count };
-        self.tx.put::<tables::BlockBodyIndices>(block_number, block_indices)?;
-        durations_recorder.record_relative(metrics::Action::InsertBlockBodyIndices);
-
-        if !block_indices.is_empty() {
-            self.tx.put::<tables::TransactionBlocks>(block_indices.last_tx_num(), block_number)?;
-            durations_recorder.record_relative(metrics::Action::InsertTransactionBlocks);
-        }
+        self.append_block_bodies(
+            vec![(block_number, Some(block.block.body))],
+            write_transactions_to,
+        )?;
 
         debug!(
             target: "providers::db",
@@ -3270,33 +3205,83 @@ impl<TX: DbTxMut + DbTx + 'static, N: ProviderNodeTypes + 'static> BlockWriter
             "Inserted block"
         );
 
-        Ok(block_indices)
+        Ok(StoredBlockBodyIndices { first_tx_num, tx_count })
     }
 
     fn append_block_bodies(
         &self,
         bodies: Vec<(BlockNumber, Option<Self::Body>)>,
+        write_transactions_to: StorageLocation,
     ) -> ProviderResult<()> {
+        let Some(from_block) = bodies.first().map(|(block, _)| *block) else { return Ok(()) };
+
+        // Initialize writer if we will be writing transactions to staticfiles
+        let mut tx_static_writer = write_transactions_to
+            .static_files()
+            .then(|| {
+                self.static_file_provider.get_writer(from_block, StaticFileSegment::Transactions)
+            })
+            .transpose()?;
+
         let mut block_indices_cursor = self.tx.cursor_write::<tables::BlockBodyIndices>()?;
         let mut tx_block_cursor = self.tx.cursor_write::<tables::TransactionBlocks>()?;
+
+        // Initialize cursor if we will be writing transactions to database
+        let mut tx_cursor = write_transactions_to
+            .database()
+            .then(|| {
+                self.tx.cursor_write::<tables::Transactions<
+                    <Self::Body as reth_primitives_traits::BlockBody>::Transaction,
+                >>()
+            })
+            .transpose()?;
 
         // Get id for the next tx_num of zero if there are no transactions.
         let mut next_tx_num = tx_block_cursor.last()?.map(|(id, _)| id + 1).unwrap_or_default();
 
         for (block_number, body) in &bodies {
+            // Increment block on static file header.
+            if let Some(writer) = tx_static_writer.as_mut() {
+                writer.increment_block(*block_number)?;
+            }
+
             let tx_count = body.as_ref().map(|b| b.transactions().len() as u64).unwrap_or_default();
             let block_indices = StoredBlockBodyIndices { first_tx_num: next_tx_num, tx_count };
+
+            let mut durations_recorder = metrics::DurationsRecorder::default();
 
             // insert block meta
             block_indices_cursor.append(*block_number, block_indices)?;
 
-            next_tx_num += tx_count;
+            durations_recorder.record_relative(metrics::Action::InsertBlockBodyIndices);
+
             let Some(body) = body else { continue };
 
             // write transaction block index
             if !body.transactions().is_empty() {
                 tx_block_cursor.append(block_indices.last_tx_num(), *block_number)?;
+                durations_recorder.record_relative(metrics::Action::InsertTransactionBlocks);
             }
+
+            // write transactions
+            for transaction in body.transactions() {
+                if let Some(writer) = tx_static_writer.as_mut() {
+                    writer.append_transaction(next_tx_num, transaction)?;
+                }
+                if let Some(cursor) = tx_cursor.as_mut() {
+                    cursor.append(next_tx_num, transaction.clone())?;
+                }
+
+                // Increment transaction id for each transaction.
+                next_tx_num += 1;
+            }
+
+            debug!(
+                target: "providers::db",
+                ?block_number,
+                actions = ?durations_recorder.actions,
+                "Inserted block body"
+            );
         }
 
         self.storage.writer().write_block_bodies(self, bodies)?;
@@ -3307,7 +3292,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: ProviderNodeTypes + 'static> BlockWriter
     /// TODO(joshie): this fn should be moved to `UnifiedStorageWriter` eventually
     fn append_blocks_with_state(
         &self,
-        blocks: Vec<SealedBlockWithSenders>,
+        blocks: Vec<SealedBlockWithSenders<Header, Self::Body>>,
         execution_outcome: ExecutionOutcome,
         hashed_state: HashedPostStateSorted,
         trie_updates: TrieUpdates,
@@ -3326,7 +3311,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: ProviderNodeTypes + 'static> BlockWriter
 
         // Insert the blocks
         for block in blocks {
-            self.insert_block(block)?;
+            self.insert_block(block, StorageLocation::Database)?;
             durations_recorder.record_relative(metrics::Action::InsertBlock);
         }
 

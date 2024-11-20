@@ -12,7 +12,8 @@ use eyre::{Context, OptionExt};
 use rayon::ThreadPoolBuilder;
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_blockchain_tree::{
-    BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
+    externals::TreeNodeTypes, BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree,
+    TreeExternals,
 };
 use reth_chainspec::{Chain, EthChainSpec, EthereumHardforks};
 use reth_config::{config::EtlConfig, PruneConfig};
@@ -631,7 +632,7 @@ impl<T>
         Attached<WithConfigs<<T::Types as NodeTypes>::ChainSpec>, WithMeteredProviders<T>>,
     >
 where
-    T: FullNodeTypes<Types: ProviderNodeTypes, Provider: WithTree>,
+    T: FullNodeTypes<Types: ProviderNodeTypes + TreeNodeTypes, Provider: WithTree>,
 {
     /// Returns access to the underlying database.
     pub const fn database(&self) -> &<T::Types as NodeTypesWithDB>::DB {

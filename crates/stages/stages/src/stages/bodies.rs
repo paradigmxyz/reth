@@ -19,6 +19,7 @@ use reth_primitives::StaticFileSegment;
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockReader, BlockWriter, DBProvider, ProviderError, StaticFileProviderFactory, StatsReader,
+    StorageLocation,
 };
 use reth_stages_api::{
     EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId,
@@ -122,7 +123,7 @@ where
         let (from_block, to_block) = input.next_block_range().into_inner();
 
         // Get id for the next tx_num of zero if there are no transactions.
-        let mut next_tx_num = provider
+        let next_tx_num = provider
             .tx_ref()
             .cursor_read::<tables::TransactionBlocks>()?
             .last()?
@@ -130,8 +131,6 @@ where
             .unwrap_or_default();
 
         let static_file_provider = provider.static_file_provider();
-        let mut static_file_producer =
-            static_file_provider.get_writer(from_block, StaticFileSegment::Transactions)?;
 
         // Make sure Transactions static file is at the same height. If it's further, this
         // input execution was interrupted previously and we need to unwind the static file.
@@ -145,6 +144,8 @@ where
             // stage run. So, our only solution is to unwind the static files and proceed from the
             // database expected height.
             Ordering::Greater => {
+                let mut static_file_producer =
+                    static_file_provider.get_writer(from_block, StaticFileSegment::Transactions)?;
                 static_file_producer
                     .prune_transactions(next_static_file_tx_num - next_tx_num, from_block - 1)?;
                 // Since this is a database <-> static file inconsistency, we commit the change
@@ -168,40 +169,16 @@ where
 
         let buffer = self.buffer.take().ok_or(StageError::MissingDownloadBuffer)?;
         trace!(target: "sync::stages::bodies", bodies_len = buffer.len(), "Writing blocks");
-        let mut highest_block = from_block;
+        let highest_block = buffer.last().map(|r| r.block_number()).unwrap_or(from_block);
 
-        // Firstly, write transactions to static files
-        for response in &buffer {
-            let block_number = response.block_number();
-
-            // Increment block on static file header.
-            if block_number > 0 {
-                static_file_producer.increment_block(block_number)?;
-            }
-
-            match response {
-                BlockResponse::Full(block) => {
-                    // Write transactions
-                    for transaction in block.body.transactions() {
-                        static_file_producer.append_transaction(next_tx_num, transaction)?;
-
-                        // Increment transaction id for each transaction.
-                        next_tx_num += 1;
-                    }
-                }
-                BlockResponse::Empty(_) => {}
-            };
-
-            highest_block = block_number;
-        }
-
-        // Write bodies to database. This will NOT write transactions to database as we've already
-        // written them directly to static files.
+        // Write bodies to database.
         provider.append_block_bodies(
             buffer
                 .into_iter()
                 .map(|response| (response.block_number(), response.into_body()))
                 .collect(),
+            // We are writing transactions directly to static files.
+            StorageLocation::StaticFiles,
         )?;
 
         // The stage is "done" if:
