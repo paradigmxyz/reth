@@ -159,6 +159,7 @@ pub(crate) struct StateRootTask<Factory> {
     /// Channels to retrieve proof calculation results from.
     pending_proofs: PendingProofs,
     pending_calculation: bool,
+    pending_sparse_calculation: bool,
 }
 
 #[allow(dead_code)]
@@ -175,6 +176,7 @@ where
             updated_state: Default::default(),
             pending_proofs: Default::default(),
             pending_calculation: false,
+            pending_sparse_calculation: false,
         }
     }
 
@@ -276,7 +278,10 @@ where
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
                     // state stream closed, check if we can finish
-                    if self.pending_proofs.is_empty() && !self.pending_calculation {
+                    if self.pending_proofs.is_empty() &&
+                        !self.pending_calculation &&
+                        !self.pending_sparse_calculation
+                    {
                         if let (
                             StateRootTaskState::Idle(_multiproof, state_root),
                             SparseStateRootTaskState::Idle {
@@ -301,7 +306,6 @@ where
             while let Some(proof_rx) = self.pending_proofs.front() {
                 match proof_rx.try_recv() {
                     Ok((targets, state, result)) => {
-                        println!("got a proof: {:?}", targets);
                         self.state.extend(state.clone());
                         self.updated_state.extend(state);
 
@@ -310,10 +314,10 @@ where
                         sparse_task_state.add_proofs(targets, multiproof);
                         self.pending_proofs.pop_front();
                         self.pending_calculation = true;
+                        self.pending_sparse_calculation = true;
                         continue;
                     }
                     Err(mpsc::TryRecvError::Empty) => {
-                        println!("proof is not ready yet");
                         // this proof is not ready yet
                         break;
                     }
@@ -336,7 +340,6 @@ where
                                 trie_updates.extend(new_trie_updates);
                                 new_multiproof.extend(std::mem::take(multiproof));
                                 task_state = StateRootTaskState::Idle(new_multiproof, state_root);
-                                continue;
                             }
                             Err(e) => return Err(ParallelStateRootError::Provider(e)),
                         },
@@ -351,29 +354,30 @@ where
                     }
                 }
                 StateRootTaskState::Idle(multiproof, _) => {
-                    debug!(target: "engine::root", accounts_len = self.state.accounts.len(), "Spawning state root calculation from proofs task");
-                    let view = self.config.consistent_view.clone();
-                    let input_nodes_sorted = self.config.input.nodes.clone().into_sorted();
-                    let input_state_sorted = self.config.input.state.clone().into_sorted();
-                    let multiproof = std::mem::take(multiproof);
-                    let state = self.state.clone();
-                    let (tx, rx) = mpsc::sync_channel(1);
+                    if self.pending_calculation {
+                        debug!(target: "engine::root", accounts_len = self.state.accounts.len(), "Spawning state root calculation from proofs task");
+                        let view = self.config.consistent_view.clone();
+                        let input_nodes_sorted = self.config.input.nodes.clone().into_sorted();
+                        let input_state_sorted = self.config.input.state.clone().into_sorted();
+                        let multiproof = std::mem::take(multiproof);
+                        let state = self.state.clone();
+                        let (tx, rx) = mpsc::sync_channel(1);
 
-                    self.pending_calculation = false;
+                        self.pending_calculation = false;
 
-                    rayon::spawn(move || {
-                        let result = calculate_state_root_from_proofs(
-                            view,
-                            &input_nodes_sorted,
-                            &input_state_sorted,
-                            multiproof,
-                            state,
-                        );
-                        let _ = tx.send(result);
-                    });
+                        rayon::spawn(move || {
+                            let result = calculate_state_root_from_proofs(
+                                view,
+                                &input_nodes_sorted,
+                                &input_state_sorted,
+                                multiproof,
+                                state,
+                            );
+                            let _ = tx.send(result);
+                        });
 
-                    task_state = StateRootTaskState::Pending(Default::default(), rx);
-                    continue;
+                        task_state = StateRootTaskState::Pending(Default::default(), rx);
+                    }
                 }
             }
 
@@ -389,7 +393,6 @@ where
                                     multiproof: std::mem::take(multiproof),
                                     state_root,
                                 };
-                                continue;
                             }
                             // TODO(alexey): proper error variant
                             Err(e) => return Err(ParallelStateRootError::Other(e.to_string())),
@@ -405,29 +408,32 @@ where
                     }
                 }
                 SparseStateRootTaskState::Idle { trie, targets, multiproof, .. } => {
-                    debug!(target: "engine::root", accounts_len = self.state.accounts.len(), "Spawning state root calculation from proofs task");
-                    let trie = std::mem::take(trie);
-                    let targets = std::mem::take(targets);
-                    let multiproof = std::mem::take(multiproof);
-                    let updated_state = std::mem::take(&mut self.updated_state);
-                    let (tx, rx) = mpsc::sync_channel(1);
+                    if self.pending_sparse_calculation {
+                        debug!(target: "engine::root", accounts_len = self.state.accounts.len(), "Spawning state root calculation from proofs task");
+                        let trie = std::mem::take(trie);
+                        let targets = std::mem::take(targets);
+                        let multiproof = std::mem::take(multiproof);
+                        let updated_state = std::mem::take(&mut self.updated_state);
+                        let (tx, rx) = mpsc::sync_channel(1);
 
-                    rayon::spawn(move || {
-                        let result = calculate_state_root_with_sparse(
-                            trie,
-                            multiproof,
-                            targets,
-                            updated_state,
-                        );
-                        let _ = tx.send(result);
-                    });
+                        self.pending_sparse_calculation = false;
 
-                    sparse_task_state = SparseStateRootTaskState::Pending {
-                        targets: HashMap::default(),
-                        multiproof: MultiProof::default(),
-                        rx,
-                    };
-                    continue;
+                        rayon::spawn(move || {
+                            let result = calculate_state_root_with_sparse(
+                                trie,
+                                multiproof,
+                                targets,
+                                updated_state,
+                            );
+                            let _ = tx.send(result);
+                        });
+
+                        sparse_task_state = SparseStateRootTaskState::Pending {
+                            targets: HashMap::default(),
+                            multiproof: MultiProof::default(),
+                            rx,
+                        };
+                    }
                 }
             }
         }
@@ -457,7 +463,6 @@ where
             (*hashed_address, storage.storage.keys().copied().collect())
         }))
         .collect();
-    println!("[IMPL] proof_targets: {:?}", proof_targets);
 
     let account_trie_nodes = proof_targets
         .into_par_iter()
@@ -515,8 +520,6 @@ where
                     .ok_or(TrieWitnessError::MissingTargetNode(key))?;
                 Ok(node)
             })?;
-
-            println!("[IMPL] account: {:?}, storage_root: {:?}", hashed_address, storage_root);
 
             // Gather and record account trie nodes.
             let account = state
@@ -578,6 +581,7 @@ fn calculate_state_root_with_sparse(
     targets: HashMap<B256, HashSet<B256>>,
     state: HashedPostState,
 ) -> SparseStateTrieResult<(Box<SparseStateTrie>, B256, Duration)> {
+    println!("===========");
     let started_at = Instant::now();
 
     // Reveal new accounts and storage slots.
@@ -596,20 +600,22 @@ fn calculate_state_root_with_sparse(
     let mut storage_roots = HashMap::with_capacity(state.storages.len());
     for (address, storage) in state.storages {
         if storage.wiped {
+            println!("[IMPL] wiping storage for {address:?}");
             trie.wipe_storage(address);
             storage_roots.insert(address, EMPTY_ROOT_HASH);
-        } else {
-            for (slot, value) in storage.storage {
-                let slot_path = Nibbles::unpack(slot);
-                trie.update_storage_leaf(
-                    address,
-                    slot_path,
-                    alloy_rlp::encode_fixed_size(&value).to_vec(),
-                )?;
-            }
-
-            storage_roots.insert(address, trie.storage_root(address).unwrap());
         }
+
+        for (slot, value) in storage.storage {
+            println!("[IMPL] account: {address:?}, slot: {slot:?}, value: {value:?}");
+            let slot_path = Nibbles::unpack(slot);
+            trie.update_storage_leaf(
+                address,
+                slot_path,
+                alloy_rlp::encode_fixed_size(&value).to_vec(),
+            )?;
+        }
+
+        storage_roots.insert(address, trie.storage_root(address).unwrap());
     }
 
     // Update accounts with new values and include updated storage roots
@@ -622,6 +628,8 @@ fn calculate_state_root_with_sparse(
                 .map(Some)
                 .unwrap_or_else(|| trie.storage_root(address))
                 .unwrap_or(EMPTY_ROOT_HASH);
+
+            println!("[IMPL] account: {:?}, storage_root: {:?}", address, storage_root);
 
             let mut encoded = Vec::with_capacity(128);
             TrieAccount::from((account, storage_root)).encode(&mut encoded as &mut dyn BufMut);
@@ -636,6 +644,7 @@ fn calculate_state_root_with_sparse(
     let root = trie.root().unwrap_or(EMPTY_ROOT_HASH);
     let elapsed = started_at.elapsed();
 
+    println!("===========");
     Ok((trie, root, elapsed))
 }
 
@@ -720,7 +729,7 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         let stream = StdReceiverStream::new(rx);
 
-        let state_updates = create_mock_state_updates(10, 1);
+        let state_updates = create_mock_state_updates(100, 10);
         let mut hashed_state = HashedPostState::default();
         let mut accumulated_state: HashMap<Address, (RethAccount, HashMap<B256, U256>)> =
             HashMap::default();
@@ -784,8 +793,11 @@ mod tests {
                     .map(|(k, v)| (B256::from(*k), v.present_value))
                     .collect();
 
-                accumulated_state
-                    .insert(*address, (convert_revm_to_reth_account(account), storage));
+                println!("to update: {:?}, storage: {storage:?}", keccak256(address));
+
+                let entry = accumulated_state.entry(*address).or_default();
+                entry.0 = convert_revm_to_reth_account(account);
+                entry.1.extend(storage);
             }
         }
 

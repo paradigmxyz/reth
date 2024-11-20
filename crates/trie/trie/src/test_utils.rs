@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use alloy_primitives::{keccak256, Address, B256, U256};
 use alloy_rlp::encode_fixed_size;
 use reth_primitives::Account;
@@ -12,18 +14,28 @@ where
     I: IntoIterator<Item = (Address, (Account, S))>,
     S: IntoIterator<Item = (B256, U256)>,
 {
+    println!("===========");
+    let mut dict = BTreeMap::new();
     let encoded_accounts = accounts.into_iter().map(|(address, (account, storage))| {
         let storage_root = storage_root(storage);
-        println!("[TEST] account: {:?}, storage_root: {:?}", keccak256(address), storage_root);
+        dict.insert(keccak256(address), storage_root);
         let account = TrieAccount::from((account, storage_root));
         (address, alloy_rlp::encode(account))
     });
-    triehash::sec_trie_root::<KeccakHasher, _, _, _>(encoded_accounts)
+    let root = triehash::sec_trie_root::<KeccakHasher, _, _, _>(encoded_accounts);
+    for (address, storage_root) in dict {
+        println!("[TEST] account: {address:?}, storage_root: {storage_root:?}")
+    }
+    println!("===========");
+    root
 }
 
 /// Compute the storage root for a given account using [`triehash::sec_trie_root`].
 pub fn storage_root<I: IntoIterator<Item = (B256, U256)>>(storage: I) -> B256 {
-    let encoded_storage = storage.into_iter().map(|(k, v)| (k, encode_fixed_size(&v)));
+    let encoded_storage = storage.into_iter().map(|(k, v)| {
+        println!("[TEST] slot: {k:?}, value: {v:?}");
+        (k, encode_fixed_size(&v))
+    });
     triehash::sec_trie_root::<KeccakHasher, _, _, _>(encoded_storage)
 }
 
