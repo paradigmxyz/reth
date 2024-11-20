@@ -685,15 +685,10 @@ impl InMemorySize for BlockBody {
 }
 
 impl reth_primitives_traits::BlockBody for BlockBody {
-    type Header = Header;
     type Transaction = TransactionSigned;
 
     fn transactions(&self) -> &[Self::Transaction] {
         &self.transactions
-    }
-
-    fn ommers(&self) -> &[Self::Header] {
-        &self.ommers
     }
 }
 
