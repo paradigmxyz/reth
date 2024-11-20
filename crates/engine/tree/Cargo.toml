@@ -23,6 +23,7 @@ reth-errors.workspace = true
 reth-evm.workspace = true
 reth-network-p2p.workspace = true
 reth-payload-builder.workspace = true
+reth-payload-builder-primitives.workspace = true
 reth-payload-primitives.workspace = true
 reth-payload-validator.workspace = true
 reth-primitives.workspace = true
@@ -38,13 +39,13 @@ reth-trie-parallel.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
 alloy-rpc-types-engine.workspace = true
+alloy-consensus.workspace = true
 
 revm-primitives.workspace = true
 
 # common
 futures.workspace = true
 tokio = { workspace = true, features = ["macros", "sync"] }
-tokio-stream.workspace = true
 thiserror.workspace = true
 
 # metrics
@@ -79,25 +80,31 @@ reth-chainspec.workspace = true
 alloy-rlp.workspace = true
 
 assert_matches.workspace = true
+criterion.workspace = true
+crossbeam-channel = "0.5.13"
+
+[[bench]]
+name = "channel_perf"
+harness = false
 
 [features]
 test-utils = [
-	"reth-db/test-utils",
-	"reth-chain-state/test-utils",
-	"reth-network-p2p/test-utils",
-	"reth-prune-types",
-	"reth-stages/test-utils",
-	"reth-static-file",
-	"reth-tracing",
-	"reth-blockchain-tree/test-utils",
-	"reth-chainspec/test-utils",
-	"reth-consensus/test-utils",
-	"reth-evm/test-utils",
-	"reth-payload-builder/test-utils",
-	"reth-primitives/test-utils",
-	"reth-revm/test-utils",
-	"reth-stages-api/test-utils",
-	"reth-provider/test-utils",
-	"reth-trie/test-utils",
-	"reth-prune-types?/test-utils"
+    "reth-db/test-utils",
+    "reth-chain-state/test-utils",
+    "reth-network-p2p/test-utils",
+    "reth-prune-types",
+    "reth-stages/test-utils",
+    "reth-static-file",
+    "reth-tracing",
+    "reth-blockchain-tree/test-utils",
+    "reth-chainspec/test-utils",
+    "reth-consensus/test-utils",
+    "reth-evm/test-utils",
+    "reth-payload-builder/test-utils",
+    "reth-primitives/test-utils",
+    "reth-revm/test-utils",
+    "reth-stages-api/test-utils",
+    "reth-provider/test-utils",
+    "reth-trie/test-utils",
+    "reth-prune-types?/test-utils",
 ]

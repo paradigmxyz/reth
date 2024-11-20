@@ -10,12 +10,16 @@ use reth_db::{init_db, open_db_read_only, DatabaseEnv};
 use reth_db_common::init::init_genesis;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_evm::noop::NoopBlockExecutorProvider;
+use reth_node_api::FullNodePrimitives;
 use reth_node_builder::{NodeTypesWithDBAdapter, NodeTypesWithEngine};
 use reth_node_core::{
     args::{DatabaseArgs, DatadirArgs},
     dirs::{ChainPath, DataDirPath},
 };
-use reth_provider::{providers::StaticFileProvider, ProviderFactory, StaticFileProviderFactory};
+use reth_provider::{
+    providers::{NodeTypesForProvider, StaticFileProvider},
+    ProviderFactory, StaticFileProviderFactory,
+};
 use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
@@ -53,7 +57,7 @@ pub struct EnvironmentArgs<C: ChainSpecParser> {
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> EnvironmentArgs<C> {
     /// Initializes environment according to [`AccessRights`] and returns an instance of
     /// [`Environment`].
-    pub fn init<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+    pub fn init<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
         &self,
         access: AccessRights,
     ) -> eyre::Result<Environment<N>> {
@@ -105,13 +109,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Environmen
     /// If it's a read-write environment and an issue is found, it will attempt to heal (including a
     /// pipeline unwind). Otherwise, it will print out an warning, advising the user to restart the
     /// node to heal.
-    fn create_provider_factory<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+    fn create_provider_factory<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
         &self,
         config: &Config,
         db: Arc<DatabaseEnv>,
-        static_file_provider: StaticFileProvider,
+        static_file_provider: StaticFileProvider<N::Primitives>,
     ) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>> {
-        let has_receipt_pruning = config.prune.as_ref().map_or(false, |a| a.has_receipts_pruning());
+        let has_receipt_pruning = config.prune.as_ref().is_some_and(|a| a.has_receipts_pruning());
         let prune_modes =
             config.prune.as_ref().map(|prune| prune.segments.clone()).unwrap_or_default();
         let factory = ProviderFactory::<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>::new(
@@ -187,4 +191,25 @@ impl AccessRights {
     pub const fn is_read_write(&self) -> bool {
         matches!(self, Self::RW)
     }
+}
+
+/// Helper trait with a common set of requirements for the
+/// [`NodeTypes`](reth_node_builder::NodeTypes) in CLI.
+pub trait CliNodeTypes:
+    NodeTypesWithEngine
+    + NodeTypesForProvider<
+        Primitives: FullNodePrimitives<
+            Block: reth_node_api::Block<Body = reth_primitives::BlockBody>,
+        >,
+    >
+{
+}
+impl<N> CliNodeTypes for N where
+    N: NodeTypesWithEngine
+        + NodeTypesForProvider<
+            Primitives: FullNodePrimitives<
+                Block: reth_node_api::Block<Body = reth_primitives::BlockBody>,
+            >,
+        >
+{
 }

@@ -4,6 +4,7 @@ use crate::{
     engine::{DownloadRequest, EngineApiEvent, FromEngine},
     persistence::PersistenceHandle,
 };
+use alloy_consensus::Header;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{
     map::{HashMap, HashSet},
@@ -14,8 +15,7 @@ use alloy_rpc_types_engine::{
     PayloadValidationError,
 };
 use reth_beacon_consensus::{
-    BeaconConsensusEngineEvent, BeaconEngineMessage, ForkchoiceStateTracker, InvalidHeaderCache,
-    OnForkChoiceUpdated, MIN_BLOCKS_FOR_PIPELINE_RUN,
+    BeaconConsensusEngineEvent, InvalidHeaderCache, MIN_BLOCKS_FOR_PIPELINE_RUN,
 };
 use reth_blockchain_tree::{
     error::{InsertBlockErrorKindTwo, InsertBlockErrorTwo, InsertBlockFatalError},
@@ -26,15 +26,17 @@ use reth_chain_state::{
 };
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::{Consensus, PostExecutionInput};
-use reth_engine_primitives::{EngineApiMessageVersion, EngineTypes};
+use reth_engine_primitives::{
+    BeaconEngineMessage, BeaconOnNewPayloadError, EngineApiMessageVersion, EngineTypes,
+    ForkchoiceStateTracker, OnForkChoiceUpdated,
+};
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::execute::BlockExecutorProvider;
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_payload_primitives::{PayloadAttributes, PayloadBuilder, PayloadBuilderAttributes};
+use reth_payload_builder_primitives::PayloadBuilder;
+use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{
-    Block, GotExpected, Header, SealedBlock, SealedBlockWithSenders, SealedHeader,
-};
+use reth_primitives::{Block, GotExpected, SealedBlock, SealedBlockWithSenders, SealedHeader};
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, ExecutionOutcome,
     ProviderError, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
@@ -43,7 +45,8 @@ use reth_provider::{
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
-use reth_trie_parallel::parallel_root::{ParallelStateRoot, ParallelStateRootError};
+use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
+use revm_primitives::ResultAndState;
 use std::{
     cmp::Ordering,
     collections::{btree_map, hash_map, BTreeMap, VecDeque},
@@ -56,9 +59,8 @@ use std::{
     time::Instant,
 };
 use tokio::sync::{
-    mpsc::{UnboundedReceiver, UnboundedSender},
-    oneshot,
-    oneshot::error::TryRecvError,
+    mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    oneshot::{self, error::TryRecvError},
 };
 use tracing::*;
 
@@ -611,7 +613,7 @@ where
             remove_above_state: VecDeque::new(),
         };
 
-        let (tx, outgoing) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, outgoing) = unbounded_channel();
         let state = EngineApiTreeState::new(
             config.block_buffer_limit(),
             config.max_invalid_header_cache_length(),
@@ -1247,11 +1249,11 @@ where
                             }
                             BeaconEngineMessage::NewPayload { payload, sidecar, tx } => {
                                 let output = self.on_new_payload(payload, sidecar);
-                                if let Err(err) = tx.send(output.map(|o| o.outcome).map_err(|e| {
-                                    reth_beacon_consensus::BeaconOnNewPayloadError::Internal(
-                                        Box::new(e),
-                                    )
-                                })) {
+                                if let Err(err) =
+                                    tx.send(output.map(|o| o.outcome).map_err(|e| {
+                                        BeaconOnNewPayloadError::Internal(Box::new(e))
+                                    }))
+                                {
                                     error!(target: "engine::tree", "Failed to send event: {err:?}");
                                     self.metrics
                                         .engine
@@ -2187,9 +2189,18 @@ where
         let block = block.unseal();
 
         let exec_time = Instant::now();
-        let output = self.metrics.executor.execute_metered(executor, (&block, U256::MAX).into())?;
+
+        // TODO: create StateRootTask with the receiving end of a channel and
+        // pass the sending end of the channel to the state hook.
+        let noop_state_hook = |_result_and_state: &ResultAndState| {};
+        let output = self.metrics.executor.execute_metered(
+            executor,
+            (&block, U256::MAX).into(),
+            Box::new(noop_state_hook),
+        )?;
 
         trace!(target: "engine::tree", elapsed=?exec_time.elapsed(), ?block_number, "Executed block");
+
         if let Err(err) = self.consensus.validate_block_post_execution(
             &block,
             PostExecutionInput::new(&output.receipts, &output.requests),
@@ -2209,6 +2220,8 @@ where
         trace!(target: "engine::tree", block=?sealed_block.num_hash(), "Calculating block state root");
         let root_time = Instant::now();
         let mut state_root_result = None;
+
+        // TODO: switch to calculate state root using `StateRootTask`.
 
         // We attempt to compute state root in parallel if we are currently not persisting anything
         // to database. This is safe, because the database state cannot change until we
@@ -2297,6 +2310,9 @@ where
         parent_hash: B256,
         hashed_state: &HashedPostState,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
+        // TODO: when we switch to calculate state root using `StateRootTask` this
+        // method can be still useful to calculate the required `TrieInput` to
+        // create the task.
         let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
         let mut input = TrieInput::default();
 
@@ -2583,13 +2599,14 @@ pub enum AdvancePersistenceError {
 mod tests {
     use super::*;
     use crate::persistence::PersistenceAction;
-    use alloy_primitives::{Bytes, Sealable};
+    use alloy_primitives::Bytes;
     use alloy_rlp::Decodable;
     use alloy_rpc_types_engine::{CancunPayloadFields, ExecutionPayloadSidecar};
     use assert_matches::assert_matches;
-    use reth_beacon_consensus::{EthBeaconConsensus, ForkchoiceStatus};
+    use reth_beacon_consensus::EthBeaconConsensus;
     use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
     use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
+    use reth_engine_primitives::ForkchoiceStatus;
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm::test_utils::MockExecutorProvider;
     use reth_provider::test_utils::MockEthProvider;
@@ -2599,7 +2616,6 @@ mod tests {
         str::FromStr,
         sync::mpsc::{channel, Sender},
     };
-    use tokio::sync::mpsc::unbounded_channel;
 
     /// This is a test channel that allows you to `release` any value that is in the channel.
     ///
@@ -2696,9 +2712,8 @@ mod tests {
 
             let (from_tree_tx, from_tree_rx) = unbounded_channel();
 
-            let sealed = chain_spec.genesis_header().clone().seal_slow();
-            let (header, seal) = sealed.into_parts();
-            let header = SealedHeader::new(header, seal);
+            let header = chain_spec.genesis_header().clone();
+            let header = SealedHeader::seal(header);
             let engine_api_tree_state = EngineApiTreeState::new(10, 10, header.num_hash());
             let canonical_in_memory_state = CanonicalInMemoryState::with_head(header, None, None);
 

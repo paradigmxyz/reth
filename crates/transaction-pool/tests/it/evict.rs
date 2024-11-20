@@ -8,7 +8,8 @@ use reth_transaction_pool::{
     test_utils::{
         MockFeeRange, MockTransactionDistribution, MockTransactionRatio, TestPool, TestPoolBuilder,
     },
-    BlockInfo, PoolConfig, SubPoolLimit, TransactionOrigin, TransactionPool, TransactionPoolExt,
+    BlockInfo, PoolConfig, PoolTransaction, SubPoolLimit, TransactionOrigin, TransactionPool,
+    TransactionPoolExt,
 };
 
 #[tokio::test(flavor = "multi_thread")]
@@ -87,7 +88,7 @@ async fn only_blobs_eviction() {
             let set = set.into_vec();
 
             // ensure that the first nonce is 0
-            assert_eq!(set[0].get_nonce(), 0);
+            assert_eq!(set[0].nonce(), 0);
 
             // and finally insert it into the pool
             let results = pool.add_transactions(TransactionOrigin::External, set).await;
@@ -194,7 +195,7 @@ async fn mixed_eviction() {
             );
 
             let set = set.into_inner().into_vec();
-            assert_eq!(set[0].get_nonce(), 0);
+            assert_eq!(set[0].nonce(), 0);
 
             let results = pool.add_transactions(TransactionOrigin::External, set).await;
             for (i, result) in results.iter().enumerate() {

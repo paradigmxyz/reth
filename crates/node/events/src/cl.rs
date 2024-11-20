@@ -1,7 +1,7 @@
 //! Events related to Consensus Layer health.
 
 use futures::Stream;
-use reth_provider::CanonChainTracker;
+use reth_storage_api::CanonChainTracker;
 use std::{
     fmt,
     pin::Pin,

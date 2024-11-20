@@ -19,8 +19,9 @@ mod op_sepolia;
 
 use alloc::{boxed::Box, vec, vec::Vec};
 use alloy_chains::Chain;
+use alloy_consensus::Header;
 use alloy_genesis::Genesis;
-use alloy_primitives::{Bytes, Parity, Signature, B256, U256};
+use alloy_primitives::{Bytes, B256, U256};
 pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
 use derive_more::{Constructor, Deref, Display, From, Into};
@@ -35,8 +36,7 @@ use reth_chainspec::{
 };
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 use reth_network_peers::NodeRecord;
-use reth_optimism_forks::OptimismHardforks;
-use reth_primitives_traits::Header;
+use reth_optimism_forks::OpHardforks;
 #[cfg(feature = "std")]
 pub(crate) use std::sync::LazyLock;
 
@@ -96,7 +96,7 @@ impl OpChainSpecBuilder {
     }
 
     /// Remove the given fork from the spec.
-    pub fn without_fork(mut self, fork: reth_optimism_forks::OptimismHardfork) -> Self {
+    pub fn without_fork(mut self, fork: reth_optimism_forks::OpHardfork) -> Self {
         self.inner = self.inner.without_fork(fork);
         self
     }
@@ -104,19 +104,17 @@ impl OpChainSpecBuilder {
     /// Enable Bedrock at genesis
     pub fn bedrock_activated(mut self) -> Self {
         self.inner = self.inner.paris_activated();
-        self.inner = self
-            .inner
-            .with_fork(reth_optimism_forks::OptimismHardfork::Bedrock, ForkCondition::Block(0));
+        self.inner =
+            self.inner.with_fork(reth_optimism_forks::OpHardfork::Bedrock, ForkCondition::Block(0));
         self
     }
 
     /// Enable Regolith at genesis
     pub fn regolith_activated(mut self) -> Self {
         self = self.bedrock_activated();
-        self.inner = self.inner.with_fork(
-            reth_optimism_forks::OptimismHardfork::Regolith,
-            ForkCondition::Timestamp(0),
-        );
+        self.inner = self
+            .inner
+            .with_fork(reth_optimism_forks::OpHardfork::Regolith, ForkCondition::Timestamp(0));
         self
     }
 
@@ -127,7 +125,7 @@ impl OpChainSpecBuilder {
         self.inner = self.inner.with_fork(EthereumHardfork::Shanghai, ForkCondition::Timestamp(0));
         self.inner = self
             .inner
-            .with_fork(reth_optimism_forks::OptimismHardfork::Canyon, ForkCondition::Timestamp(0));
+            .with_fork(reth_optimism_forks::OpHardfork::Canyon, ForkCondition::Timestamp(0));
         self
     }
 
@@ -137,7 +135,7 @@ impl OpChainSpecBuilder {
         self.inner = self.inner.with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(0));
         self.inner = self
             .inner
-            .with_fork(reth_optimism_forks::OptimismHardfork::Ecotone, ForkCondition::Timestamp(0));
+            .with_fork(reth_optimism_forks::OpHardfork::Ecotone, ForkCondition::Timestamp(0));
         self
     }
 
@@ -146,7 +144,7 @@ impl OpChainSpecBuilder {
         self = self.ecotone_activated();
         self.inner = self
             .inner
-            .with_fork(reth_optimism_forks::OptimismHardfork::Fjord, ForkCondition::Timestamp(0));
+            .with_fork(reth_optimism_forks::OpHardfork::Fjord, ForkCondition::Timestamp(0));
         self
     }
 
@@ -155,17 +153,16 @@ impl OpChainSpecBuilder {
         self = self.fjord_activated();
         self.inner = self
             .inner
-            .with_fork(reth_optimism_forks::OptimismHardfork::Granite, ForkCondition::Timestamp(0));
+            .with_fork(reth_optimism_forks::OpHardfork::Granite, ForkCondition::Timestamp(0));
         self
     }
 
     /// Enable Holocene at genesis
     pub fn holocene_activated(mut self) -> Self {
         self = self.granite_activated();
-        self.inner = self.inner.with_fork(
-            reth_optimism_forks::OptimismHardfork::Holocene,
-            ForkCondition::Timestamp(0),
-        );
+        self.inner = self
+            .inner
+            .with_fork(reth_optimism_forks::OpHardfork::Holocene, ForkCondition::Timestamp(0));
         self
     }
 
@@ -194,10 +191,9 @@ impl OpChainSpec {
         parent: &Header,
         timestamp: u64,
     ) -> Result<U256, DecodeError> {
-        let is_holocene_activated = self.inner.is_fork_active_at_timestamp(
-            reth_optimism_forks::OptimismHardfork::Holocene,
-            timestamp,
-        );
+        let is_holocene_activated = self
+            .inner
+            .is_fork_active_at_timestamp(reth_optimism_forks::OpHardfork::Holocene, timestamp);
         // If we are in the Holocene, we need to use the base fee params
         // from the parent block's extra data.
         // Else, use the base fee params (default values) from chainspec
@@ -254,12 +250,6 @@ pub fn decode_holocene_1559_params(extra_data: Bytes) -> Result<(u32, u32), Deco
     let elasticity: [u8; 4] =
         extra_data[5..9].try_into().map_err(|_| DecodeError::InvalidElasticity)?;
     Ok((u32::from_be_bytes(denominator), u32::from_be_bytes(elasticity)))
-}
-
-/// Returns the signature for the optimism deposit transactions, which don't include a
-/// signature.
-pub fn optimism_deposit_tx_signature() -> Signature {
-    Signature::new(U256::ZERO, U256::ZERO, Parity::Parity(false))
 }
 
 impl EthChainSpec for OpChainSpec {
@@ -346,11 +336,11 @@ impl EthereumHardforks for OpChainSpec {
     }
 }
 
-impl OptimismHardforks for OpChainSpec {}
+impl OpHardforks for OpChainSpec {}
 
 impl From<Genesis> for OpChainSpec {
     fn from(genesis: Genesis) -> Self {
-        use reth_optimism_forks::OptimismHardfork;
+        use reth_optimism_forks::OpHardfork;
         let optimism_genesis_info = OpGenesisInfo::extract_from(&genesis);
         let genesis_info =
             optimism_genesis_info.optimism_chain_info.genesis_info.unwrap_or_default();
@@ -369,7 +359,7 @@ impl From<Genesis> for OpChainSpec {
             (EthereumHardfork::London.boxed(), genesis.config.london_block),
             (EthereumHardfork::ArrowGlacier.boxed(), genesis.config.arrow_glacier_block),
             (EthereumHardfork::GrayGlacier.boxed(), genesis.config.gray_glacier_block),
-            (OptimismHardfork::Bedrock.boxed(), genesis_info.bedrock_block),
+            (OpHardfork::Bedrock.boxed(), genesis_info.bedrock_block),
         ];
         let mut block_hardforks = hardfork_opts
             .into_iter()
@@ -397,11 +387,12 @@ impl From<Genesis> for OpChainSpec {
             (EthereumHardfork::Shanghai.boxed(), genesis.config.shanghai_time),
             (EthereumHardfork::Cancun.boxed(), genesis.config.cancun_time),
             (EthereumHardfork::Prague.boxed(), genesis.config.prague_time),
-            (OptimismHardfork::Regolith.boxed(), genesis_info.regolith_time),
-            (OptimismHardfork::Canyon.boxed(), genesis_info.canyon_time),
-            (OptimismHardfork::Ecotone.boxed(), genesis_info.ecotone_time),
-            (OptimismHardfork::Fjord.boxed(), genesis_info.fjord_time),
-            (OptimismHardfork::Granite.boxed(), genesis_info.granite_time),
+            (OpHardfork::Regolith.boxed(), genesis_info.regolith_time),
+            (OpHardfork::Canyon.boxed(), genesis_info.canyon_time),
+            (OpHardfork::Ecotone.boxed(), genesis_info.ecotone_time),
+            (OpHardfork::Fjord.boxed(), genesis_info.fjord_time),
+            (OpHardfork::Granite.boxed(), genesis_info.granite_time),
+            (OpHardfork::Holocene.boxed(), genesis_info.holocene_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts
@@ -414,7 +405,7 @@ impl From<Genesis> for OpChainSpec {
         block_hardforks.append(&mut time_hardforks);
 
         // Ordered Hardforks
-        let mainnet_hardforks = OptimismHardfork::op_mainnet();
+        let mainnet_hardforks = OpHardfork::op_mainnet();
         let mainnet_order = mainnet_hardforks.forks_iter();
 
         let mut ordered_hardforks = Vec::with_capacity(block_hardforks.len());
@@ -442,14 +433,14 @@ impl From<Genesis> for OpChainSpec {
 
 #[derive(Default, Debug)]
 struct OpGenesisInfo {
-    optimism_chain_info: op_alloy_rpc_types::genesis::OpChainInfo,
+    optimism_chain_info: op_alloy_rpc_types::OpChainInfo,
     base_fee_params: BaseFeeParamsKind,
 }
 
 impl OpGenesisInfo {
     fn extract_from(genesis: &Genesis) -> Self {
         let mut info = Self {
-            optimism_chain_info: op_alloy_rpc_types::genesis::OpChainInfo::extract_from(
+            optimism_chain_info: op_alloy_rpc_types::OpChainInfo::extract_from(
                 &genesis.config.extra_fields,
             )
             .unwrap_or_default(),
@@ -470,7 +461,7 @@ impl OpGenesisInfo {
                                 BaseFeeParams::new(denominator as u128, elasticity as u128),
                             ),
                             (
-                                reth_optimism_forks::OptimismHardfork::Canyon.boxed(),
+                                reth_optimism_forks::OpHardfork::Canyon.boxed(),
                                 BaseFeeParams::new(canyon_denominator as u128, elasticity as u128),
                             ),
                         ]
@@ -496,7 +487,7 @@ mod tests {
     use alloy_primitives::b256;
     use reth_chainspec::{test_fork_ids, BaseFeeParams, BaseFeeParamsKind};
     use reth_ethereum_forks::{EthereumHardfork, ForkCondition, ForkHash, ForkId, Head};
-    use reth_optimism_forks::{OptimismHardfork, OptimismHardforks};
+    use reth_optimism_forks::{OpHardfork, OpHardforks};
 
     use crate::*;
 
@@ -582,7 +573,11 @@ mod tests {
                 ),
                 (
                     Head { number: 0, timestamp: 1723478400, ..Default::default() },
-                    ForkId { hash: ForkHash([0x75, 0xde, 0xa4, 0x1e]), next: 0 },
+                    ForkId { hash: ForkHash([0x75, 0xde, 0xa4, 0x1e]), next: 1732633200 },
+                ),
+                (
+                    Head { number: 0, timestamp: 1732633200, ..Default::default() },
+                    ForkId { hash: ForkHash([0x4a, 0x1c, 0x79, 0x2e]), next: 0 },
                 ),
             ],
         );
@@ -649,7 +644,11 @@ mod tests {
                 ),
                 (
                     Head { number: 0, timestamp: 1723478400, ..Default::default() },
-                    ForkId { hash: ForkHash([0x5e, 0xdf, 0xa3, 0xb6]), next: 0 },
+                    ForkId { hash: ForkHash([0x5e, 0xdf, 0xa3, 0xb6]), next: 1732633200 },
+                ),
+                (
+                    Head { number: 0, timestamp: 1732633200, ..Default::default() },
+                    ForkId { hash: ForkHash([0x8b, 0x5e, 0x76, 0x29]), next: 0 },
                 ),
             ],
         );
@@ -731,6 +730,7 @@ mod tests {
         "ecotoneTime": 40,
         "fjordTime": 50,
         "graniteTime": 51,
+        "holoceneTime": 52,
         "optimism": {
           "eip1559Elasticity": 60,
           "eip1559Denominator": 70
@@ -752,6 +752,8 @@ mod tests {
         assert_eq!(actual_fjord_timestamp, Some(serde_json::Value::from(50)).as_ref());
         let actual_granite_timestamp = genesis.config.extra_fields.get("graniteTime");
         assert_eq!(actual_granite_timestamp, Some(serde_json::Value::from(51)).as_ref());
+        let actual_holocene_timestamp = genesis.config.extra_fields.get("holoceneTime");
+        assert_eq!(actual_holocene_timestamp, Some(serde_json::Value::from(52)).as_ref());
 
         let optimism_object = genesis.config.extra_fields.get("optimism").unwrap();
         assert_eq!(
@@ -769,19 +771,21 @@ mod tests {
             BaseFeeParamsKind::Constant(BaseFeeParams::new(70, 60))
         );
 
-        assert!(!chain_spec.is_fork_active_at_block(OptimismHardfork::Bedrock, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Regolith, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Ecotone, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Fjord, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Granite, 0));
+        assert!(!chain_spec.is_fork_active_at_block(OpHardfork::Bedrock, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Regolith, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Canyon, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Ecotone, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Fjord, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Granite, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Holocene, 0));
 
-        assert!(chain_spec.is_fork_active_at_block(OptimismHardfork::Bedrock, 10));
-        assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Regolith, 20));
-        assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, 30));
-        assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Ecotone, 40));
-        assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Fjord, 50));
-        assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Granite, 51));
+        assert!(chain_spec.is_fork_active_at_block(OpHardfork::Bedrock, 10));
+        assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Regolith, 20));
+        assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Canyon, 30));
+        assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Ecotone, 40));
+        assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Fjord, 50));
+        assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Granite, 51));
+        assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Holocene, 52));
     }
 
     #[test]
@@ -795,6 +799,7 @@ mod tests {
         "ecotoneTime": 40,
         "fjordTime": 50,
         "graniteTime": 51,
+        "holoceneTime": 52,
         "optimism": {
           "eip1559Elasticity": 60,
           "eip1559Denominator": 70,
@@ -817,6 +822,8 @@ mod tests {
         assert_eq!(actual_fjord_timestamp, Some(serde_json::Value::from(50)).as_ref());
         let actual_granite_timestamp = genesis.config.extra_fields.get("graniteTime");
         assert_eq!(actual_granite_timestamp, Some(serde_json::Value::from(51)).as_ref());
+        let actual_holocene_timestamp = genesis.config.extra_fields.get("holoceneTime");
+        assert_eq!(actual_holocene_timestamp, Some(serde_json::Value::from(52)).as_ref());
 
         let optimism_object = genesis.config.extra_fields.get("optimism").unwrap();
         assert_eq!(
@@ -835,30 +842,32 @@ mod tests {
             BaseFeeParamsKind::Variable(
                 vec![
                     (EthereumHardfork::London.boxed(), BaseFeeParams::new(70, 60)),
-                    (OptimismHardfork::Canyon.boxed(), BaseFeeParams::new(80, 60)),
+                    (OpHardfork::Canyon.boxed(), BaseFeeParams::new(80, 60)),
                 ]
                 .into()
             )
         );
 
-        assert!(!chain_spec.is_fork_active_at_block(OptimismHardfork::Bedrock, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Regolith, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Ecotone, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Fjord, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Granite, 0));
+        assert!(!chain_spec.is_fork_active_at_block(OpHardfork::Bedrock, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Regolith, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Canyon, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Ecotone, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Fjord, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Granite, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Holocene, 0));
 
-        assert!(chain_spec.is_fork_active_at_block(OptimismHardfork::Bedrock, 10));
-        assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Regolith, 20));
-        assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, 30));
-        assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Ecotone, 40));
-        assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Fjord, 50));
-        assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Granite, 51));
+        assert!(chain_spec.is_fork_active_at_block(OpHardfork::Bedrock, 10));
+        assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Regolith, 20));
+        assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Canyon, 30));
+        assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Ecotone, 40));
+        assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Fjord, 50));
+        assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Granite, 51));
+        assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Holocene, 52));
     }
 
     #[test]
     fn parse_genesis_optimism_with_variable_base_fee_params() {
-        use op_alloy_rpc_types::genesis::OpBaseFeeInfo;
+        use op_alloy_rpc_types::OpBaseFeeInfo;
 
         let geth_genesis = r#"
     {
@@ -927,14 +936,14 @@ mod tests {
             })
         );
 
-        assert!(chainspec.is_fork_active_at_block(OptimismHardfork::Bedrock, 0));
+        assert!(chainspec.is_fork_active_at_block(OpHardfork::Bedrock, 0));
 
-        assert!(chainspec.is_fork_active_at_timestamp(OptimismHardfork::Regolith, 20));
+        assert!(chainspec.is_fork_active_at_timestamp(OpHardfork::Regolith, 20));
     }
 
     #[test]
     fn test_fork_order_optimism_mainnet() {
-        use reth_optimism_forks::OptimismHardfork;
+        use reth_optimism_forks::OpHardfork;
 
         let genesis = Genesis {
             config: ChainConfig {
@@ -965,6 +974,7 @@ mod tests {
                     (String::from("ecotoneTime"), 0.into()),
                     (String::from("fjordTime"), 0.into()),
                     (String::from("graniteTime"), 0.into()),
+                    (String::from("holoceneTime"), 0.into()),
                 ]
                 .into_iter()
                 .collect(),
@@ -990,14 +1000,15 @@ mod tests {
             EthereumHardfork::ArrowGlacier.boxed(),
             EthereumHardfork::GrayGlacier.boxed(),
             EthereumHardfork::Paris.boxed(),
-            OptimismHardfork::Bedrock.boxed(),
-            OptimismHardfork::Regolith.boxed(),
+            OpHardfork::Bedrock.boxed(),
+            OpHardfork::Regolith.boxed(),
             EthereumHardfork::Shanghai.boxed(),
-            OptimismHardfork::Canyon.boxed(),
+            OpHardfork::Canyon.boxed(),
             EthereumHardfork::Cancun.boxed(),
-            OptimismHardfork::Ecotone.boxed(),
-            OptimismHardfork::Fjord.boxed(),
-            OptimismHardfork::Granite.boxed(),
+            OpHardfork::Ecotone.boxed(),
+            OpHardfork::Fjord.boxed(),
+            OpHardfork::Granite.boxed(),
+            OpHardfork::Holocene.boxed(),
         ];
 
         assert!(expected_hardforks
@@ -1028,8 +1039,8 @@ mod tests {
     }
 
     fn holocene_chainspec() -> Arc<OpChainSpec> {
-        let mut hardforks = OptimismHardfork::base_sepolia();
-        hardforks.insert(OptimismHardfork::Holocene.boxed(), ForkCondition::Timestamp(1800000000));
+        let mut hardforks = OpHardfork::base_sepolia();
+        hardforks.insert(OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(1800000000));
         Arc::new(OpChainSpec {
             inner: ChainSpec {
                 chain: BASE_SEPOLIA.inner.chain,
@@ -1046,7 +1057,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_base_fee_holocene_nonce_not_set() {
+    fn test_get_base_fee_holocene_extra_data_not_set() {
         let op_chain_spec = holocene_chainspec();
         let parent = Header {
             base_fee_per_gas: Some(1),
@@ -1068,7 +1079,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_base_fee_holocene_nonce_set() {
+    fn test_get_base_fee_holocene_extra_data_set() {
         let op_chain_spec = holocene_chainspec();
         let parent = Header {
             base_fee_per_gas: Some(1),

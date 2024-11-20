@@ -1,7 +1,12 @@
 use metrics_process::Collector;
 use reth_db_api::database_metrics::DatabaseMetrics;
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::providers::StaticFileProvider;
-use std::{fmt, sync::Arc};
+use std::{
+    fmt::{self},
+    sync::Arc,
+};
+
 pub(crate) trait Hook: Fn() + Send + Sync {}
 impl<T: Fn() + Send + Sync> Hook for T {}
 
@@ -22,10 +27,11 @@ pub struct Hooks {
 
 impl Hooks {
     /// Create a new set of hooks
-    pub fn new<Metrics: DatabaseMetrics + 'static + Send + Sync>(
-        db: Metrics,
-        static_file_provider: StaticFileProvider,
-    ) -> Self {
+    pub fn new<Metrics, N>(db: Metrics, static_file_provider: StaticFileProvider<N>) -> Self
+    where
+        Metrics: DatabaseMetrics + 'static + Send + Sync,
+        N: NodePrimitives,
+    {
         let hooks: Vec<Box<dyn Hook<Output = ()>>> = vec![
             Box::new(move || db.report_metrics()),
             Box::new(move || {

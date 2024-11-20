@@ -13,7 +13,7 @@ use reth_trie::{
     TrieInput,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseStateRoot};
-use reth_trie_parallel::parallel_root::ParallelStateRoot;
+use reth_trie_parallel::root::ParallelStateRoot;
 use std::collections::HashMap;
 
 pub fn calculate_state_root(c: &mut Criterion) {

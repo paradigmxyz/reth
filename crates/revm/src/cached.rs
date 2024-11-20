@@ -4,7 +4,7 @@ use alloy_primitives::{
     Address, B256, U256,
 };
 use core::cell::RefCell;
-use reth_primitives::revm_primitives::{
+use revm::primitives::{
     db::{Database, DatabaseRef},
     AccountInfo, Bytecode,
 };

@@ -17,7 +17,6 @@ reth-errors.workspace = true
 reth-fs-util.workspace = true
 reth-rpc-types-compat.workspace = true
 reth-engine-primitives.workspace = true
-reth-beacon-consensus.workspace = true
 reth-payload-validator.workspace = true
 reth-evm.workspace = true
 reth-revm.workspace = true
@@ -51,8 +50,7 @@ tracing.workspace = true
 
 [features]
 optimism = [
-	"reth-beacon-consensus/optimism",
-	"reth-primitives/optimism",
-	"reth-provider/optimism",
-	"revm-primitives/optimism"
+    "reth-primitives/optimism",
+    "reth-provider/optimism",
+    "revm-primitives/optimism",
 ]

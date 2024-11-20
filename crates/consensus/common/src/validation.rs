@@ -1,10 +1,10 @@
 //! Collection of methods for block validation.
 
-use alloy_consensus::constants::MAXIMUM_EXTRA_DATA_SIZE;
+use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, Header};
 use alloy_eips::eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::ConsensusError;
-use reth_primitives::{EthereumHardfork, GotExpected, Header, SealedBlock, SealedHeader};
+use reth_primitives::{BlockBody, EthereumHardfork, GotExpected, SealedBlock, SealedHeader};
 use revm_primitives::calc_excess_blob_gas;
 
 /// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
@@ -70,6 +70,49 @@ pub fn validate_cancun_gas(block: &SealedBlock) -> Result<(), ConsensusError> {
             expected: total_blob_gas,
         }));
     }
+    Ok(())
+}
+
+/// Ensures the block response data matches the header.
+///
+/// This ensures the body response items match the header's hashes:
+///   - ommer hash
+///   - transaction root
+///   - withdrawals root
+pub fn validate_body_against_header(
+    body: &BlockBody,
+    header: &SealedHeader,
+) -> Result<(), ConsensusError> {
+    let ommers_hash = body.calculate_ommers_root();
+    if header.ommers_hash != ommers_hash {
+        return Err(ConsensusError::BodyOmmersHashDiff(
+            GotExpected { got: ommers_hash, expected: header.ommers_hash }.into(),
+        ))
+    }
+
+    let tx_root = body.calculate_tx_root();
+    if header.transactions_root != tx_root {
+        return Err(ConsensusError::BodyTransactionRootDiff(
+            GotExpected { got: tx_root, expected: header.transactions_root }.into(),
+        ))
+    }
+
+    match (header.withdrawals_root, &body.withdrawals) {
+        (Some(header_withdrawals_root), Some(withdrawals)) => {
+            let withdrawals = withdrawals.as_slice();
+            let withdrawals_root = reth_primitives::proofs::calculate_withdrawals_root(withdrawals);
+            if withdrawals_root != header_withdrawals_root {
+                return Err(ConsensusError::BodyWithdrawalsRootDiff(
+                    GotExpected { got: withdrawals_root, expected: header_withdrawals_root }.into(),
+                ))
+            }
+        }
+        (None, None) => {
+            // this is ok because we assume the fork is not active in this case
+        }
+        _ => return Err(ConsensusError::WithdrawalsRootUnexpected),
+    }
+
     Ok(())
 }
 
@@ -275,16 +318,18 @@ pub fn validate_against_parent_4844(
 mod tests {
     use super::*;
     use alloy_consensus::{TxEip4844, EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH};
-    use alloy_eips::{eip4895::Withdrawal, BlockHashOrNumber};
+    use alloy_eips::{
+        eip4895::{Withdrawal, Withdrawals},
+        BlockHashOrNumber,
+    };
     use alloy_primitives::{
-        hex_literal::hex, Address, BlockHash, BlockNumber, Bytes, Parity, Sealable, Signature, U256,
+        hex_literal::hex, Address, BlockHash, BlockNumber, Bytes, PrimitiveSignature as Signature,
+        U256,
     };
     use mockall::mock;
     use rand::Rng;
     use reth_chainspec::ChainSpecBuilder;
-    use reth_primitives::{
-        proofs, Account, BlockBody, Transaction, TransactionSigned, Withdrawals,
-    };
+    use reth_primitives::{proofs, Account, BlockBody, Transaction, TransactionSigned};
     use reth_storage_api::{
         errors::provider::ProviderResult, AccountReader, HeaderProvider, WithdrawalsProvider,
     };
@@ -403,7 +448,7 @@ mod tests {
             blob_versioned_hashes: std::iter::repeat_with(|| rng.gen()).take(num_blobs).collect(),
         });
 
-        let signature = Signature::new(U256::default(), U256::default(), Parity::Parity(true));
+        let signature = Signature::new(U256::default(), U256::default(), true);
 
         TransactionSigned::from_transaction_and_signature(request, signature)
     }
@@ -448,12 +493,9 @@ mod tests {
         let ommers = Vec::new();
         let transactions = Vec::new();
 
-        let sealed = header.seal_slow();
-        let (header, seal) = sealed.into_parts();
-
         (
             SealedBlock {
-                header: SealedHeader::new(header, seal),
+                header: SealedHeader::seal(header),
                 body: BlockBody { transactions, ommers, withdrawals: None },
             },
             parent,
@@ -472,15 +514,13 @@ mod tests {
                     .collect(),
             );
 
-            let sealed = Header {
+            let header = Header {
                 withdrawals_root: Some(proofs::calculate_withdrawals_root(&withdrawals)),
                 ..Default::default()
-            }
-            .seal_slow();
-            let (header, seal) = sealed.into_parts();
+            };
 
             SealedBlock {
-                header: SealedHeader::new(header, seal),
+                header: SealedHeader::seal(header),
                 body: BlockBody { withdrawals: Some(withdrawals), ..Default::default() },
             }
         };
@@ -511,16 +551,14 @@ mod tests {
         // create a tx with 10 blobs
         let transaction = mock_blob_tx(1, 10);
 
-        let sealed = Header {
+        let header = Header {
             base_fee_per_gas: Some(1337),
             withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
             blob_gas_used: Some(1),
             transactions_root: proofs::calculate_transaction_root(&[transaction.clone()]),
             ..Default::default()
-        }
-        .seal_slow();
-        let (header, seal) = sealed.into_parts();
-        let header = SealedHeader::new(header, seal);
+        };
+        let header = SealedHeader::seal(header);
 
         let body = BlockBody {
             transactions: vec![transaction],

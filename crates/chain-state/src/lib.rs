@@ -27,3 +27,6 @@ pub use memory_overlay::{MemoryOverlayStateProvider, MemoryOverlayStateProviderR
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers
 pub mod test_utils;
+
+// todo: remove when generic data prim integration complete
+pub use reth_primitives::EthPrimitives;

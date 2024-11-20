@@ -1,5 +1,3 @@
-#![allow(deprecated)]
-
 use crate::{
     blobstore::BlobStoreError,
     error::{InvalidPoolTransactionError, PoolResult},
@@ -11,14 +9,17 @@ use alloy_consensus::{
     constants::{EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID},
     Transaction as _,
 };
-use alloy_eips::{eip2718::Encodable2718, eip2930::AccessList, eip4844::BlobAndProofV1};
+use alloy_eips::{
+    eip2718::Encodable2718,
+    eip2930::AccessList,
+    eip4844::{BlobAndProofV1, BlobTransactionSidecar, BlobTransactionValidationError},
+};
 use alloy_primitives::{Address, TxHash, TxKind, B256, U256};
 use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 use reth_primitives::{
-    kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, BlobTransactionSidecar,
-    BlobTransactionValidationError, PooledTransactionsElement,
+    kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, PooledTransactionsElement,
     PooledTransactionsElementEcRecovered, SealedBlock, Transaction, TransactionSignedEcRecovered,
 };
 #[cfg(feature = "serde")]
@@ -482,7 +483,7 @@ pub trait TransactionPoolExt: TransactionPool {
     ///
     /// ## Fee changes
     ///
-    /// The [CanonicalStateUpdate] includes the base and blob fee of the pending block, which
+    /// The [`CanonicalStateUpdate`] includes the base and blob fee of the pending block, which
     /// affects the dynamic fee requirement of pending transactions in the pool.
     ///
     /// ## EIP-4844 Blob transactions
@@ -549,6 +550,11 @@ impl<T: PoolTransaction> AllPoolTransactions<T> {
     /// Returns an iterator over all queued [`TransactionSignedEcRecovered`] transactions.
     pub fn queued_recovered(&self) -> impl Iterator<Item = T::Consensus> + '_ {
         self.queued.iter().map(|tx| tx.transaction.clone().into())
+    }
+
+    /// Returns an iterator over all transactions, both pending and queued.
+    pub fn all(&self) -> impl Iterator<Item = T::Consensus> + '_ {
+        self.pending.iter().chain(self.queued.iter()).map(|tx| tx.transaction.clone().into())
     }
 }
 
@@ -668,6 +674,15 @@ impl TransactionOrigin {
     }
 }
 
+/// Represents the kind of update to the canonical state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PoolUpdateKind {
+    /// The update was due to a block commit.
+    Commit,
+    /// The update was due to a reorganization.
+    Reorg,
+}
+
 /// Represents changes after a new canonical block or range of canonical blocks was added to the
 /// chain.
 ///
@@ -692,6 +707,8 @@ pub struct CanonicalStateUpdate<'a> {
     pub changed_accounts: Vec<ChangedAccount>,
     /// All mined transactions in the block range.
     pub mined_transactions: Vec<B256>,
+    /// The kind of update to the canonical state.
+    pub update_kind: PoolUpdateKind,
 }
 
 impl CanonicalStateUpdate<'_> {
@@ -734,6 +751,11 @@ impl fmt::Display for CanonicalStateUpdate<'_> {
             .finish()
     }
 }
+
+/// Alias to restrict the [`BestTransactions`] items to the pool's transaction type.
+pub type BestTransactionsFor<Pool> = Box<
+    dyn BestTransactions<Item = Arc<ValidPoolTransaction<<Pool as TransactionPool>::Transaction>>>,
+>;
 
 /// An `Iterator` that only returns transactions that are ready to be executed.
 ///
@@ -939,7 +961,7 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
     /// For EIP-4844 blob transactions: `max_fee_per_gas * gas_limit + tx_value +
     /// max_blob_fee_per_gas * blob_gas_used`.
-    fn cost(&self) -> U256;
+    fn cost(&self) -> &U256;
 
     /// Amount of gas that should be used in executing this transaction. This is paid up-front.
     fn gas_limit(&self) -> u64;
@@ -1206,8 +1228,8 @@ impl PoolTransaction for EthPooledTransaction {
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
     /// For EIP-4844 blob transactions: `max_fee_per_gas * gas_limit + tx_value +
     /// max_blob_fee_per_gas * blob_gas_used`.
-    fn cost(&self) -> U256 {
-        self.cost
+    fn cost(&self) -> &U256 {
+        &self.cost
     }
 
     /// Amount of gas that should be used in executing this transaction. This is paid up-front.
@@ -1498,7 +1520,7 @@ mod tests {
     use super::*;
     use alloy_consensus::{TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
     use alloy_eips::eip4844::DATA_GAS_PER_BLOB;
-    use alloy_primitives::Signature;
+    use alloy_primitives::PrimitiveSignature as Signature;
     use reth_primitives::TransactionSigned;
 
     #[test]

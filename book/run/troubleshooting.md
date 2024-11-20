@@ -8,7 +8,7 @@ This page tries to answer how to deal with the most popular issues.
 
 If you're:
 1. Running behind the tip
-2. Have slow canonical commit time according to the `Canonical Commit Latency time` chart on [Grafana dashboard](./observability.md#prometheus--grafana) (more than 2-3 seconds)
+2. Have slow canonical commit time according to the `Canonical Commit Latency Time` chart on [Grafana dashboard](./observability.md#prometheus--grafana) (more than 2-3 seconds)
 3. Seeing warnings in your logs such as 
    ```console
    2023-11-08T15:17:24.789731Z  WARN providers::db: Transaction insertion took too long block_number=18528075 tx_num=2150227643 hash=0xb7de1d6620efbdd3aa8547c47a0ff09a7fd3e48ba3fd2c53ce94c6683ed66e7c elapsed=6.793759034s
@@ -48,7 +48,7 @@ equal to the [freshly synced node](../installation/installation.md#hardware-requ
    mv reth_compact.dat $(reth db path)/mdbx.dat
    ```
 7. Start Reth
-8. Confirm that the values on the `Freelist` chart is near zero and the values on the `Canonical Commit Latency time` chart
+8. Confirm that the values on the `Freelist` chart are near zero and the values on the `Canonical Commit Latency Time` chart
 is less than 1 second.
 9. Delete original database
    ```bash

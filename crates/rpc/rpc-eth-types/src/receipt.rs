@@ -2,7 +2,7 @@
 
 use alloy_consensus::{ReceiptEnvelope, Transaction};
 use alloy_primitives::{Address, TxKind};
-use alloy_rpc_types::{Log, ReceiptWithBloom, TransactionReceipt};
+use alloy_rpc_types_eth::{Log, ReceiptWithBloom, TransactionReceipt};
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned, TxType};
 use revm_primitives::calc_blob_gasprice;
 
@@ -59,7 +59,7 @@ pub fn build_receipt<T>(
         })
         .collect();
 
-    let rpc_receipt = alloy_rpc_types::Receipt {
+    let rpc_receipt = alloy_rpc_types_eth::Receipt {
         status: receipt.success.into(),
         cumulative_gas_used: receipt.cumulative_gas_used as u128,
         logs,

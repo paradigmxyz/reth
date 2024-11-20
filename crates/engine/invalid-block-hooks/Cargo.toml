@@ -26,6 +26,7 @@ reth-trie = { workspace = true, features = ["serde"] }
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-rpc-types-debug.workspace = true
+alloy-consensus.workspace = true
 
 # async
 futures.workspace = true

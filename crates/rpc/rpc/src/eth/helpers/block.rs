@@ -1,6 +1,6 @@
 //! Contains RPC handler implementations specific to blocks.
 
-use alloy_rpc_types::{BlockId, TransactionReceipt};
+use alloy_rpc_types_eth::{BlockId, TransactionReceipt};
 use reth_primitives::TransactionMeta;
 use reth_provider::{BlockReaderIdExt, HeaderProvider};
 use reth_rpc_eth_api::{

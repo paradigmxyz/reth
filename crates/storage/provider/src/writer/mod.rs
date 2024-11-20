@@ -1,8 +1,10 @@
 use crate::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter as SfWriter},
     writer::static_file::StaticFileWriter,
-    BlockExecutionWriter, BlockWriter, HistoryWriter, StateChangeWriter, StateWriter, TrieWriter,
+    BlockExecutionWriter, BlockWriter, HistoryWriter, StateChangeWriter, StateWriter,
+    StaticFileProviderFactory, TrieWriter,
 };
+use alloy_consensus::Header;
 use alloy_primitives::{BlockNumber, B256, U256};
 use reth_chain_state::ExecutedBlock;
 use reth_db::{
@@ -13,7 +15,7 @@ use reth_db::{
 };
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{Header, SealedBlock, StaticFileSegment, TransactionSignedNoHash};
+use reth_primitives::{SealedBlock, StaticFileSegment, TransactionSignedNoHash};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     DBProvider, HeaderProvider, ReceiptWriter, StageCheckpointWriter, TransactionsProviderExt,
@@ -114,15 +116,13 @@ impl UnifiedStorageWriter<'_, (), ()> {
     /// start-up.
     ///
     /// NOTE: If unwinding data from storage, use `commit_unwind` instead!
-    pub fn commit<P>(
-        database: impl Into<P> + AsRef<P>,
-        static_file: StaticFileProvider,
-    ) -> ProviderResult<()>
+    pub fn commit<P>(provider: P) -> ProviderResult<()>
     where
-        P: DBProvider<Tx: DbTxMut>,
+        P: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory,
     {
+        let static_file = provider.static_file_provider();
         static_file.commit()?;
-        database.into().into_tx().commit()?;
+        provider.commit()?;
         Ok(())
     }
 
@@ -134,20 +134,18 @@ impl UnifiedStorageWriter<'_, (), ()> {
     /// checkpoints on the next start-up.
     ///
     /// NOTE: Should only be used after unwinding data from storage!
-    pub fn commit_unwind<P>(
-        database: impl Into<P> + AsRef<P>,
-        static_file: StaticFileProvider,
-    ) -> ProviderResult<()>
+    pub fn commit_unwind<P>(provider: P) -> ProviderResult<()>
     where
-        P: DBProvider<Tx: DbTxMut>,
+        P: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory,
     {
-        database.into().into_tx().commit()?;
+        let static_file = provider.static_file_provider();
+        provider.commit()?;
         static_file.commit()?;
         Ok(())
     }
 }
 
-impl<ProviderDB> UnifiedStorageWriter<'_, ProviderDB, &StaticFileProvider>
+impl<ProviderDB> UnifiedStorageWriter<'_, ProviderDB, &StaticFileProvider<ProviderDB::Primitives>>
 where
     ProviderDB: DBProvider<Tx: DbTx + DbTxMut>
         + BlockWriter
@@ -157,7 +155,8 @@ where
         + HistoryWriter
         + StageCheckpointWriter
         + BlockExecutionWriter
-        + AsRef<ProviderDB>,
+        + AsRef<ProviderDB>
+        + StaticFileProviderFactory,
 {
     /// Writes executed blocks and receipts to storage.
     pub fn save_blocks(&self, blocks: &[ExecutedBlock]) -> ProviderResult<()> {
@@ -286,7 +285,8 @@ where
         let tx_range = self
             .database()
             .transaction_range_by_block_range(block_number + 1..=highest_static_file_block)?;
-        let total_txs = tx_range.end().saturating_sub(*tx_range.start());
+        // We are using end + 1 - start here because the returned range is inclusive.
+        let total_txs = (tx_range.end() + 1).saturating_sub(*tx_range.start());
 
         // IMPORTANT: we use `block_number+1` to make sure we remove only what is ABOVE the block
         debug!(target: "provider::storage_writer", ?block_number, "Removing blocks from database above block_number");
@@ -318,9 +318,10 @@ where
     }
 }
 
-impl<ProviderDB> UnifiedStorageWriter<'_, ProviderDB, StaticFileProviderRWRefMut<'_>>
+impl<ProviderDB>
+    UnifiedStorageWriter<'_, ProviderDB, StaticFileProviderRWRefMut<'_, ProviderDB::Primitives>>
 where
-    ProviderDB: DBProvider<Tx: DbTx> + HeaderProvider,
+    ProviderDB: DBProvider<Tx: DbTx> + HeaderProvider + StaticFileProviderFactory,
 {
     /// Ensures that the static file writer is set and of the right [`StaticFileSegment`] variant.
     ///
@@ -429,9 +430,10 @@ where
     }
 }
 
-impl<ProviderDB> UnifiedStorageWriter<'_, ProviderDB, StaticFileProviderRWRefMut<'_>>
+impl<ProviderDB>
+    UnifiedStorageWriter<'_, ProviderDB, StaticFileProviderRWRefMut<'_, ProviderDB::Primitives>>
 where
-    ProviderDB: DBProvider<Tx: DbTxMut + DbTx> + HeaderProvider,
+    ProviderDB: DBProvider<Tx: DbTxMut + DbTx> + HeaderProvider + StaticFileProviderFactory,
 {
     /// Appends receipts block by block.
     ///
@@ -511,9 +513,12 @@ where
 }
 
 impl<ProviderDB> StateWriter
-    for UnifiedStorageWriter<'_, ProviderDB, StaticFileProviderRWRefMut<'_>>
+    for UnifiedStorageWriter<'_, ProviderDB, StaticFileProviderRWRefMut<'_, ProviderDB::Primitives>>
 where
-    ProviderDB: DBProvider<Tx: DbTxMut + DbTx> + StateChangeWriter + HeaderProvider,
+    ProviderDB: DBProvider<Tx: DbTxMut + DbTx>
+        + StateChangeWriter
+        + HeaderProvider
+        + StaticFileProviderFactory,
 {
     /// Write the data and receipts to the database or static files if `static_file_producer` is
     /// `Some`. It should be `None` if there is any kind of pruning/filtering over the receipts.
@@ -523,7 +528,7 @@ where
         is_value_known: OriginalValuesKnown,
     ) -> ProviderResult<()> {
         let (plain_state, reverts) =
-            execution_outcome.bundle.into_plain_state_and_reverts(is_value_known);
+            execution_outcome.bundle.to_plain_state_and_reverts(is_value_known);
 
         self.database().write_state_reverts(reverts, execution_outcome.first_block)?;
 
@@ -664,8 +669,8 @@ mod tests {
         let mut revm_bundle_state = state.take_bundle();
 
         // Write plain state and reverts separately.
-        let reverts = revm_bundle_state.take_all_reverts().into_plain_state_reverts();
-        let plain_state = revm_bundle_state.into_plain_state(OriginalValuesKnown::Yes);
+        let reverts = revm_bundle_state.take_all_reverts().to_plain_state_reverts();
+        let plain_state = revm_bundle_state.to_plain_state(OriginalValuesKnown::Yes);
         assert!(plain_state.storage.is_empty());
         assert!(plain_state.contracts.is_empty());
         provider.write_state_changes(plain_state).expect("Could not write plain state to DB");
@@ -722,8 +727,8 @@ mod tests {
         let mut revm_bundle_state = state.take_bundle();
 
         // Write plain state and reverts separately.
-        let reverts = revm_bundle_state.take_all_reverts().into_plain_state_reverts();
-        let plain_state = revm_bundle_state.into_plain_state(OriginalValuesKnown::Yes);
+        let reverts = revm_bundle_state.take_all_reverts().to_plain_state_reverts();
+        let plain_state = revm_bundle_state.to_plain_state(OriginalValuesKnown::Yes);
         // Account B selfdestructed so flag for it should be present.
         assert_eq!(
             plain_state.storage,
@@ -1129,7 +1134,8 @@ mod tests {
 
         let bundle = state.take_bundle();
 
-        let outcome = ExecutionOutcome::new(bundle, Receipts::default(), 1, Vec::new());
+        let outcome: ExecutionOutcome =
+            ExecutionOutcome::new(bundle, Receipts::default(), 1, Vec::new());
         let mut writer = UnifiedStorageWriter::from_database(&provider);
         writer
             .write_to_storage(outcome, OriginalValuesKnown::Yes)
@@ -1375,7 +1381,7 @@ mod tests {
 
     #[test]
     fn revert_to_indices() {
-        let base = ExecutionOutcome {
+        let base: ExecutionOutcome = ExecutionOutcome {
             bundle: BundleState::default(),
             receipts: vec![vec![Some(Receipt::default()); 2]; 7].into(),
             first_block: 10,
@@ -1441,7 +1447,7 @@ mod tests {
             assert_eq!(
                 StateRoot::overlay_root(
                     tx,
-                    ExecutionOutcome::new(
+                    ExecutionOutcome::<Receipt>::new(
                         state.bundle_state.clone(),
                         Receipts::default(),
                         0,
@@ -1592,7 +1598,7 @@ mod tests {
             .build();
         assert_eq!(previous_state.reverts.len(), 1);
 
-        let mut test = ExecutionOutcome {
+        let mut test: ExecutionOutcome = ExecutionOutcome {
             bundle: present_state,
             receipts: vec![vec![Some(Receipt::default()); 2]; 1].into(),
             first_block: 2,

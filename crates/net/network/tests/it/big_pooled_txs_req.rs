@@ -1,4 +1,4 @@
-use alloy_primitives::{Signature, B256};
+use alloy_primitives::{PrimitiveSignature as Signature, B256};
 use reth_eth_wire::{GetPooledTransactions, PooledTransactions};
 use reth_network::{
     test_utils::{NetworkEventStream, Testnet},
@@ -35,7 +35,7 @@ async fn test_large_tx_req() {
             tx
         })
         .collect();
-    let txs_hashes: Vec<B256> = txs.iter().map(|tx| tx.get_hash()).collect();
+    let txs_hashes: Vec<B256> = txs.iter().map(|tx| *tx.get_hash()).collect();
 
     // setup testnet
     let mut net = Testnet::create_with(2, MockEthProvider::default()).await;

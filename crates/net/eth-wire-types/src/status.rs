@@ -338,7 +338,7 @@ mod tests {
         let total_difficulty = U256::from(rng.gen::<u64>());
 
         // create a genesis that has a random part, so we can check that the hash is preserved
-        let genesis = Genesis { nonce: rng.gen::<u64>(), ..Default::default() };
+        let genesis = Genesis { nonce: rng.gen(), ..Default::default() };
 
         // build head
         let head = Head {

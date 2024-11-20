@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use alloy_primitives::TxHash;
-use alloy_rpc_types::{
+use alloy_rpc_types_eth::{
     pubsub::{
         Params, PubSubSyncStatus, SubscriptionKind, SubscriptionResult as EthSubscriptionResult,
         SyncStatusMetadata,
@@ -27,6 +27,7 @@ use tokio_stream::{
     wrappers::{BroadcastStream, ReceiverStream},
     Stream,
 };
+use tracing::error;
 
 /// `Eth` pubsub RPC implementation.
 ///
@@ -146,11 +147,23 @@ where
                 match params {
                     Params::Bool(true) => {
                         // full transaction objects requested
-                        let stream = pubsub.full_pending_transaction_stream().map(|tx| {
-                            EthSubscriptionResult::FullTransaction(Box::new(from_recovered(
+                        let stream = pubsub.full_pending_transaction_stream().filter_map(|tx| {
+                            let tx_value = match from_recovered(
                                 tx.transaction.to_recovered_transaction(),
                                 &tx_resp_builder,
-                            )))
+                            ) {
+                                Ok(tx) => {
+                                    Some(EthSubscriptionResult::FullTransaction(Box::new(tx)))
+                                }
+                                Err(err) => {
+                                    error!(target = "rpc",
+                                        %err,
+                                        "Failed to fill transaction with block context"
+                                    );
+                                    None
+                                }
+                            };
+                            std::future::ready(tx_value)
                         });
                         return pipe_from_stream(accepted_sink, stream).await
                     }
@@ -329,7 +342,7 @@ where
         self.chain_events.canonical_state_stream().flat_map(|new_chain| {
             let headers = new_chain.committed().headers().collect::<Vec<_>>();
             futures::stream::iter(
-                headers.into_iter().map(reth_rpc_types_compat::block::from_primitive_with_hash),
+                headers.into_iter().map(|h| Header::from_consensus(h.into(), None, None)),
             )
         })
     }

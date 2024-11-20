@@ -1,3 +1,4 @@
+use alloy_consensus::Header;
 use alloy_eips::{merge::EPOCH_SLOTS, BlockNumHash};
 use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_types_engine::{
@@ -10,17 +11,22 @@ use reth_blockchain_tree_api::{
     error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
     BlockStatus, BlockValidationKind, BlockchainTreeEngine, CanonicalOutcome, InsertPayloadOk,
 };
-use reth_engine_primitives::{EngineApiMessageVersion, EngineTypes, PayloadTypes};
+use reth_engine_primitives::{
+    BeaconEngineMessage, BeaconOnNewPayloadError, EngineApiMessageVersion, EngineTypes,
+    ForkchoiceStateHash, ForkchoiceStateTracker, ForkchoiceStatus, OnForkChoiceUpdated,
+    PayloadTypes,
+};
 use reth_errors::{BlockValidationError, ProviderResult, RethError, RethResult};
 use reth_network_p2p::{
     sync::{NetworkSyncUpdater, SyncState},
-    BlockClient,
+    EthBlockClient,
 };
 use reth_node_types::NodeTypesWithEngine;
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_payload_primitives::{PayloadAttributes, PayloadBuilder, PayloadBuilderAttributes};
+use reth_payload_builder_primitives::PayloadBuilder;
+use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{Head, Header, SealedBlock, SealedHeader};
+use reth_primitives::{Head, SealedBlock, SealedHeader};
 use reth_provider::{
     providers::ProviderNodeTypes, BlockIdReader, BlockReader, BlockSource, CanonChainTracker,
     ChainSpecProvider, ProviderError, StageCheckpointReader,
@@ -41,14 +47,8 @@ use tokio::sync::{
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
 
-mod message;
-pub use message::{BeaconEngineMessage, OnForkChoiceUpdated};
-
 mod error;
-pub use error::{
-    BeaconConsensusEngineError, BeaconEngineResult, BeaconForkChoiceUpdateError,
-    BeaconOnNewPayloadError,
-};
+pub use error::{BeaconConsensusEngineError, BeaconEngineResult, BeaconForkChoiceUpdateError};
 
 mod invalid_headers;
 pub use invalid_headers::InvalidHeaderCache;
@@ -58,9 +58,6 @@ pub use event::{BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress};
 
 mod handle;
 pub use handle::BeaconConsensusEngineHandle;
-
-mod forkchoice;
-pub use forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker, ForkchoiceStatus};
 
 mod metrics;
 use metrics::EngineMetrics;
@@ -174,7 +171,7 @@ type PendingForkchoiceUpdate<PayloadAttributes> =
 pub struct BeaconConsensusEngine<N, BT, Client>
 where
     N: EngineNodeTypes,
-    Client: BlockClient,
+    Client: EthBlockClient,
     BT: BlockchainTreeEngine
         + BlockReader
         + BlockIdReader
@@ -237,7 +234,7 @@ where
         + StageCheckpointReader
         + ChainSpecProvider<ChainSpec = N::ChainSpec>
         + 'static,
-    Client: BlockClient + 'static,
+    Client: EthBlockClient + 'static,
 {
     /// Create a new instance of the [`BeaconConsensusEngine`].
     #[allow(clippy::too_many_arguments)]
@@ -1799,7 +1796,7 @@ where
 impl<N, BT, Client> Future for BeaconConsensusEngine<N, BT, Client>
 where
     N: EngineNodeTypes,
-    Client: BlockClient + 'static,
+    Client: EthBlockClient + 'static,
     BT: BlockchainTreeEngine
         + BlockReader
         + BlockIdReader

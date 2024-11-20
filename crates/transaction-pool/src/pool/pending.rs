@@ -8,7 +8,7 @@ use crate::{
 };
 use std::{
     cmp::Ordering,
-    collections::{BTreeMap, BTreeSet},
+    collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap},
     ops::Bound::Unbounded,
     sync::Arc,
 };
@@ -38,14 +38,10 @@ pub struct PendingPool<T: TransactionOrdering> {
     all: BTreeSet<PendingTransaction<T>>,
     /// The highest nonce transactions for each sender - like the `independent` set, but the
     /// highest instead of lowest nonce.
-    ///
-    /// Sorted by their scoring value.
-    highest_nonces: BTreeSet<PendingTransaction<T>>,
+    highest_nonces: HashMap<SenderId, PendingTransaction<T>>,
     /// Independent transactions that can be included directly and don't require other
     /// transactions.
-    ///
-    /// Sorted by their scoring value.
-    independent_transactions: BTreeSet<PendingTransaction<T>>,
+    independent_transactions: HashMap<SenderId, PendingTransaction<T>>,
     /// Keeps track of the size of this pool.
     ///
     /// See also [`PoolTransaction::size`](crate::traits::PoolTransaction::size).
@@ -108,7 +104,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
     pub(crate) fn best(&self) -> BestTransactions<T> {
         BestTransactions {
             all: self.by_id.clone(),
-            independent: self.independent_transactions.clone(),
+            independent: self.independent_transactions.values().cloned().collect(),
             invalid: Default::default(),
             new_transaction_receiver: Some(self.new_transaction_notifier.subscribe()),
             skip_blobs: false,
@@ -255,17 +251,26 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// Updates the independent transaction and highest nonces set, assuming the given transaction
     /// is being _added_ to the pool.
     fn update_independents_and_highest_nonces(&mut self, tx: &PendingTransaction<T>) {
-        let ancestor_id = tx.transaction.id().unchecked_ancestor();
-        if let Some(ancestor) = ancestor_id.and_then(|id| self.by_id.get(&id)) {
-            // the transaction already has an ancestor, so we only need to ensure that the
-            // highest nonces set actually contains the highest nonce for that sender
-            self.highest_nonces.remove(ancestor);
-        } else {
-            // If there's __no__ ancestor in the pool, then this transaction is independent, this is
-            // guaranteed because this pool is gapless.
-            self.independent_transactions.insert(tx.clone());
+        match self.highest_nonces.entry(tx.transaction.sender_id()) {
+            Entry::Occupied(mut entry) => {
+                if entry.get().transaction.nonce() < tx.transaction.nonce() {
+                    *entry.get_mut() = tx.clone();
+                }
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(tx.clone());
+            }
         }
-        self.highest_nonces.insert(tx.clone());
+        match self.independent_transactions.entry(tx.transaction.sender_id()) {
+            Entry::Occupied(mut entry) => {
+                if entry.get().transaction.nonce() > tx.transaction.nonce() {
+                    *entry.get_mut() = tx.clone();
+                }
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(tx.clone());
+            }
+        }
     }
 
     /// Returns the ancestor the given transaction, the transaction with `nonce - 1`.
@@ -320,19 +325,26 @@ impl<T: TransactionOrdering> PendingPool<T> {
         &mut self,
         id: &TransactionId,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
-        // mark the next as independent if it exists
-        if let Some(unlocked) = self.get(&id.descendant()) {
-            self.independent_transactions.insert(unlocked.clone());
+        if let Some(lowest) = self.independent_transactions.get(&id.sender) {
+            if lowest.transaction.nonce() == id.nonce {
+                self.independent_transactions.remove(&id.sender);
+                // mark the next as independent if it exists
+                if let Some(unlocked) = self.get(&id.descendant()) {
+                    self.independent_transactions.insert(id.sender, unlocked.clone());
+                }
+            }
         }
+
         let tx = self.by_id.remove(id)?;
         self.size_of -= tx.transaction.size();
         self.all.remove(&tx);
-        self.independent_transactions.remove(&tx);
 
-        // switch out for the next ancestor if there is one
-        if self.highest_nonces.remove(&tx) {
+        if let Some(highest) = self.highest_nonces.get(&id.sender) {
+            if highest.transaction.nonce() == id.nonce {
+                self.highest_nonces.remove(&id.sender);
+            }
             if let Some(ancestor) = self.ancestor(id) {
-                self.highest_nonces.insert(ancestor.clone());
+                self.highest_nonces.insert(id.sender, ancestor.clone());
             }
         }
         Some(tx.transaction)
@@ -398,8 +410,12 @@ impl<T: TransactionOrdering> PendingPool<T> {
             // we can reuse the temp array
             removed.clear();
 
+            // we prefer removing transactions with lower ordering
+            let mut worst_transactions = self.highest_nonces.values().collect::<Vec<_>>();
+            worst_transactions.sort();
+
             // loop through the highest nonces set, removing transactions until we reach the limit
-            for tx in &self.highest_nonces {
+            for tx in worst_transactions {
                 // return early if the pool is under limits
                 if !limit.is_exceeded(original_length - total_removed, original_size - total_size) ||
                     non_local_senders == 0
@@ -511,6 +527,12 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// Retrieves a transaction with the given ID from the pool, if it exists.
     fn get(&self, id: &TransactionId) -> Option<&PendingTransaction<T>> {
         self.by_id.get(id)
+    }
+
+    /// Returns a reference to the independent transactions in the pool
+    #[cfg(test)]
+    pub(crate) const fn independent(&self) -> &HashMap<SenderId, PendingTransaction<T>> {
+        &self.independent_transactions
     }
 
     /// Asserts that the bijection between `by_id` and `all` is valid.
@@ -668,7 +690,7 @@ mod tests {
 
         // First transaction should be evicted.
         assert_eq!(
-            pool.highest_nonces.iter().next().map(|tx| *tx.transaction.hash()),
+            pool.highest_nonces.values().min().map(|tx| *tx.transaction.hash()),
             Some(*t.hash())
         );
 
@@ -723,7 +745,7 @@ mod tests {
             .collect::<HashSet<_>>();
         let actual_highest_nonces = pool
             .highest_nonces
-            .iter()
+            .values()
             .map(|tx| (tx.transaction.sender(), tx.transaction.nonce()))
             .collect::<HashSet<_>>();
         assert_eq!(expected_highest_nonces, actual_highest_nonces);
@@ -814,5 +836,148 @@ mod tests {
         let pending =
             pending.into_iter().map(|tx| (tx.sender(), tx.nonce())).collect::<HashSet<_>>();
         assert_eq!(pending, expected_pending);
+    }
+
+    // <https://github.com/paradigmxyz/reth/issues/12340>
+    #[test]
+    fn test_eligible_updates_promoted() {
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        let num_senders = 10;
+
+        let first_txs: Vec<_> = (0..num_senders) //
+            .map(|_| MockTransaction::eip1559())
+            .collect();
+        let second_txs: Vec<_> =
+            first_txs.iter().map(|tx| tx.clone().rng_hash().inc_nonce()).collect();
+
+        for tx in first_txs {
+            let valid_tx = f.validated(tx);
+            pool.add_transaction(Arc::new(valid_tx), 0);
+        }
+
+        let mut best = pool.best();
+
+        for _ in 0..num_senders {
+            if let Some(tx) = best.next() {
+                assert_eq!(tx.nonce(), 0);
+            } else {
+                panic!("cannot read one of first_txs");
+            }
+        }
+
+        for tx in second_txs {
+            let valid_tx = f.validated(tx);
+            pool.add_transaction(Arc::new(valid_tx), 0);
+        }
+
+        for _ in 0..num_senders {
+            if let Some(tx) = best.next() {
+                assert_eq!(tx.nonce(), 1);
+            } else {
+                panic!("cannot read one of second_txs");
+            }
+        }
+    }
+
+    #[test]
+    fn test_empty_pool_behavior() {
+        let mut pool = PendingPool::<MockOrdering>::new(MockOrdering::default());
+
+        // Ensure the pool is empty
+        assert!(pool.is_empty());
+        assert_eq!(pool.len(), 0);
+        assert_eq!(pool.size(), 0);
+
+        // Verify that attempting to truncate an empty pool does not panic and returns an empty vec
+        let removed = pool.truncate_pool(SubPoolLimit { max_txs: 10, max_size: 1000 });
+        assert!(removed.is_empty());
+
+        // Verify that retrieving transactions from an empty pool yields nothing
+        let all_txs: Vec<_> = pool.all().collect();
+        assert!(all_txs.is_empty());
+    }
+
+    #[test]
+    fn test_add_remove_transaction() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = PendingPool::new(MockOrdering::default());
+
+        // Add a transaction and check if it's in the pool
+        let tx = f.validated_arc(MockTransaction::eip1559());
+        pool.add_transaction(tx.clone(), 0);
+        assert!(pool.contains(tx.id()));
+        assert_eq!(pool.len(), 1);
+
+        // Remove the transaction and ensure it's no longer in the pool
+        let removed_tx = pool.remove_transaction(tx.id()).unwrap();
+        assert_eq!(removed_tx.id(), tx.id());
+        assert!(!pool.contains(tx.id()));
+        assert_eq!(pool.len(), 0);
+    }
+
+    #[test]
+    fn test_reorder_on_basefee_update() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = PendingPool::new(MockOrdering::default());
+
+        // Add two transactions with different fees
+        let tx1 = f.validated_arc(MockTransaction::eip1559().inc_price());
+        let tx2 = f.validated_arc(MockTransaction::eip1559().inc_price_by(20));
+        pool.add_transaction(tx1.clone(), 0);
+        pool.add_transaction(tx2.clone(), 0);
+
+        // Ensure the transactions are in the correct order
+        let mut best = pool.best();
+        assert_eq!(best.next().unwrap().hash(), tx2.hash());
+        assert_eq!(best.next().unwrap().hash(), tx1.hash());
+
+        // Update the base fee to a value higher than tx1's fee, causing it to be removed
+        let removed = pool.update_base_fee((tx1.max_fee_per_gas() + 1) as u64);
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].hash(), tx1.hash());
+
+        // Verify that only tx2 remains in the pool
+        assert_eq!(pool.len(), 1);
+        assert!(pool.contains(tx2.id()));
+        assert!(!pool.contains(tx1.id()));
+    }
+
+    #[test]
+    #[should_panic(expected = "transaction already included")]
+    fn test_handle_duplicates() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = PendingPool::new(MockOrdering::default());
+
+        // Add the same transaction twice and ensure it only appears once
+        let tx = f.validated_arc(MockTransaction::eip1559());
+        pool.add_transaction(tx.clone(), 0);
+        assert!(pool.contains(tx.id()));
+        assert_eq!(pool.len(), 1);
+
+        // Attempt to add the same transaction again, which should be ignored
+        pool.add_transaction(tx, 0);
+    }
+
+    #[test]
+    fn test_update_blob_fee() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = PendingPool::new(MockOrdering::default());
+
+        // Add transactions with varying blob fees
+        let tx1 = f.validated_arc(MockTransaction::eip4844().set_blob_fee(50).clone());
+        let tx2 = f.validated_arc(MockTransaction::eip4844().set_blob_fee(150).clone());
+        pool.add_transaction(tx1.clone(), 0);
+        pool.add_transaction(tx2.clone(), 0);
+
+        // Update the blob fee to a value that causes tx1 to be removed
+        let removed = pool.update_blob_fee(100);
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].hash(), tx1.hash());
+
+        // Verify that only tx2 remains in the pool
+        assert!(pool.contains(tx2.id()));
+        assert!(!pool.contains(tx1.id()));
     }
 }
