@@ -81,8 +81,13 @@ impl StdReceiverStream {
     }
 }
 
-type PendingProofs =
-    VecDeque<Receiver<(HashMap<B256, HashSet<B256>>, Result<MultiProof, ParallelStateRootError>)>>;
+type PendingProofs = VecDeque<
+    Receiver<(
+        HashMap<B256, HashSet<B256>>,
+        HashedPostState,
+        Result<MultiProof, ParallelStateRootError>,
+    )>,
+>;
 
 type StateRootProofResult = (B256, MultiProof, TrieUpdates, Duration);
 type StateRootProofReceiver = mpsc::Receiver<ProviderResult<StateRootProofResult>>;
@@ -191,7 +196,7 @@ where
         view: ConsistentDbView<Factory>,
         input: Arc<TrieInput>,
         update: EvmState,
-        state: &mut HashedPostState,
+        state: &HashedPostState,
         pending_proofs: &mut PendingProofs,
     ) {
         let mut hashed_state_update = HashedPostState::default();
@@ -234,12 +239,10 @@ where
         let (tx, rx) = mpsc::sync_channel(1);
         rayon::spawn(move || {
             let result = ParallelProof::new(view, input).multiproof(targets.clone());
-            let _ = tx.send((targets.clone(), result));
+            let _ = tx.send((targets.clone(), hashed_state_update, result));
         });
 
         pending_proofs.push_back(rx);
-
-        state.extend(hashed_state_update);
     }
 
     fn run(mut self) -> StateRootResult {
@@ -257,16 +260,13 @@ where
             match self.state_stream.rx.try_recv() {
                 Ok(update) => {
                     debug!(target: "engine::root", len = update.len(), "Received new state update");
-                    let mut state = HashedPostState::default();
                     Self::on_state_update(
                         self.config.consistent_view.clone(),
                         self.config.input.clone(),
                         update,
-                        &mut state,
+                        &self.state,
                         &mut self.pending_proofs,
                     );
-                    self.state.extend(state.clone());
-                    self.updated_state.extend(state);
                     continue;
                 }
                 Err(mpsc::TryRecvError::Empty) => {
@@ -282,6 +282,12 @@ where
                             },
                         ) = (&task_state, &sparse_task_state)
                         {
+                            println!(
+                                "match: {:?}, state_root: {:?}, sparse_state_root: {:?}",
+                                state_root == sparse_state_root,
+                                state_root,
+                                sparse_state_root
+                            );
                             assert_eq!(state_root, sparse_state_root);
                             return Ok((*state_root, trie_updates));
                         }
@@ -292,7 +298,10 @@ where
             // check pending proofs
             while let Some(proof_rx) = self.pending_proofs.front() {
                 match proof_rx.try_recv() {
-                    Ok((targets, result)) => {
+                    Ok((targets, state, result)) => {
+                        self.state.extend(state.clone());
+                        self.updated_state.extend(state);
+
                         let multiproof = result?;
                         task_state.add_proofs(multiproof.clone());
                         sparse_task_state.add_proofs(targets, multiproof);
@@ -628,6 +637,7 @@ mod tests {
     use reth_provider::{
         providers::ConsistentDbView, test_utils::create_test_provider_factory, HashingWriter,
     };
+    use reth_testing_utils::generators;
     use reth_trie::{test_utils::state_root, TrieInput};
     use revm_primitives::{
         Account as RevmAccount, AccountInfo, AccountStatus, Address, EvmState, EvmStorageSlot,
@@ -648,9 +658,9 @@ mod tests {
     }
 
     fn create_mock_state_updates(num_accounts: usize, updates_per_account: usize) -> Vec<EvmState> {
-        let mut rng = rand::thread_rng();
+        let mut rng = generators::rng();
         let mut all_addresses: Vec<Address> =
-            (0..num_accounts).map(|_| Address::random()).collect();
+            (0..num_accounts).map(|_| rng.gen::<Address>()).collect();
         let mut updates = Vec::new();
 
         for _ in 0..updates_per_account {

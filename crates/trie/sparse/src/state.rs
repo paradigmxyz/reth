@@ -142,7 +142,7 @@ impl SparseStateTrie {
         slot: Nibbles,
         value: Vec<u8>,
     ) -> SparseStateTrieResult<()> {
-        self.storages.get_mut(&address).unwrap().update_leaf(slot, value)?;
+        self.storages.entry(address).or_default().update_leaf(slot, value)?;
         Ok(())
     }
 
