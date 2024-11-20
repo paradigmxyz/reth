@@ -42,7 +42,7 @@ impl SparseStateTrie {
         account: B256,
         proof: impl IntoIterator<Item = (Nibbles, Bytes)>,
     ) -> SparseStateTrieResult<()> {
-        if self.revealed.contains_key(&account) {
+        if self.is_account_revealed(&account) {
             return Ok(());
         }
 
@@ -73,7 +73,7 @@ impl SparseStateTrie {
         slot: B256,
         proof: impl IntoIterator<Item = (Nibbles, Bytes)>,
     ) -> SparseStateTrieResult<()> {
-        if self.revealed.get(&account).is_some_and(|v| v.contains(&slot)) {
+        if self.is_storage_slot_revealed(&account, &slot) {
             return Ok(());
         }
 
@@ -124,9 +124,36 @@ impl SparseStateTrie {
         Ok(())
     }
 
+    /// Remove the leaf node.
+    pub fn remove_leaf(&mut self, path: &Nibbles) -> SparseStateTrieResult<()> {
+        self.state.remove_leaf(path)?;
+        Ok(())
+    }
+
     /// Returns sparse trie root if the trie has been revealed.
     pub fn root(&mut self) -> Option<B256> {
         self.state.root()
+    }
+
+    /// Calculates the hashes of the nodes below the provided level.
+    pub fn calculate_below_level(&mut self, level: usize) {
+        self.state.calculate_below_level(level);
+    }
+
+    /// Update the leaf node of a storage trie at the provided address.
+    pub fn update_storage_leaf(
+        &mut self,
+        address: B256,
+        slot: Nibbles,
+        value: Vec<u8>,
+    ) -> SparseStateTrieResult<()> {
+        self.storages.entry(address).or_default().update_leaf(slot, value)?;
+        Ok(())
+    }
+
+    /// Wipe the storage trie at the provided address.
+    pub fn wipe_storage(&mut self, address: B256) {
+        self.storages.remove(&address);
     }
 
     /// Returns storage sparse trie root if the trie has been revealed.
