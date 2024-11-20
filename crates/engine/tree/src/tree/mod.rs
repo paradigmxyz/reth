@@ -2204,8 +2204,7 @@ where
         let input = self
             .compute_trie_input(consistent_view.clone(), block.parent_hash)
             .map_err(|e| InsertBlockErrorKindTwo::Other(Box::new(e)))?;
-        let state_root_config =
-            StateRootConfig { consistent_view: consistent_view.clone(), input: Arc::new(input) };
+        let state_root_config = StateRootConfig { consistent_view, input: Arc::new(input) };
         let receiver_stream = StdReceiverStream::new(state_root_rx);
         let state_root_task = StateRootTask::new(state_root_config, receiver_stream);
         let state_root_handle = state_root_task.spawn();
@@ -2248,6 +2247,7 @@ where
         // per thread and it might end up with a different view of the database.
         let persistence_in_progress = self.persistence_state.in_progress();
         if !persistence_in_progress {
+            let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
             let mut input = self
                 .compute_trie_input(consistent_view.clone(), block.parent_hash)
                 .map_err(|e| InsertBlockErrorKindTwo::Other(Box::new(e)))?;
@@ -2265,8 +2265,13 @@ where
         }
 
         let (state_root, trie_output) = if let Some(result) = state_root_result {
-            if let Ok(state_root_task_result) = state_root_handle.wait_for_result() {
-                debug!(target: "engine::tree", block=?sealed_block.num_hash(), state_root_task_result=?state_root_task_result.0,  regular_state_root_result = ?result.0);
+            match state_root_handle.wait_for_result() {
+                Ok(state_root_task_result) => {
+                    info!(target: "engine::tree", block=?sealed_block.num_hash(), state_root_task_result=?state_root_task_result.0,  regular_state_root_result = ?result.0);
+                }
+                Err(e) => {
+                    info!(target: "engine::tree", error=?e, "on state root task wait_for_result")
+                }
             }
             result
         } else {
