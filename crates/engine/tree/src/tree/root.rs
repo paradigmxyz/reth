@@ -289,12 +289,6 @@ where
                             },
                         ) = (&task_state, &sparse_task_state)
                         {
-                            println!(
-                                "match: {:?}, state_root: {:?}, sparse_state_root: {:?}",
-                                state_root == sparse_state_root,
-                                state_root,
-                                sparse_state_root
-                            );
                             assert_eq!(state_root, sparse_state_root);
                             return Ok((*state_root, trie_updates));
                         }
@@ -581,7 +575,6 @@ fn calculate_state_root_with_sparse(
     targets: HashMap<B256, HashSet<B256>>,
     state: HashedPostState,
 ) -> SparseStateTrieResult<(Box<SparseStateTrie>, B256, Duration)> {
-    println!("===========");
     let started_at = Instant::now();
 
     // Reveal new accounts and storage slots.
@@ -600,13 +593,11 @@ fn calculate_state_root_with_sparse(
     let mut storage_roots = HashMap::with_capacity(state.storages.len());
     for (address, storage) in state.storages {
         if storage.wiped {
-            println!("[IMPL] wiping storage for {address:?}");
             trie.wipe_storage(address);
             storage_roots.insert(address, EMPTY_ROOT_HASH);
         }
 
         for (slot, value) in storage.storage {
-            println!("[IMPL] account: {address:?}, slot: {slot:?}, value: {value:?}");
             let slot_path = Nibbles::unpack(slot);
             trie.update_storage_leaf(
                 address,
@@ -629,8 +620,6 @@ fn calculate_state_root_with_sparse(
                 .unwrap_or_else(|| trie.storage_root(address))
                 .unwrap_or(EMPTY_ROOT_HASH);
 
-            println!("[IMPL] account: {:?}, storage_root: {:?}", address, storage_root);
-
             let mut encoded = Vec::with_capacity(128);
             TrieAccount::from((account, storage_root)).encode(&mut encoded as &mut dyn BufMut);
             trie.update_leaf(path, encoded)?;
@@ -644,7 +633,6 @@ fn calculate_state_root_with_sparse(
     let root = trie.root().unwrap_or(EMPTY_ROOT_HASH);
     let elapsed = started_at.elapsed();
 
-    println!("===========");
     Ok((trie, root, elapsed))
 }
 
@@ -792,8 +780,6 @@ mod tests {
                     .iter()
                     .map(|(k, v)| (B256::from(*k), v.present_value))
                     .collect();
-
-                println!("to update: {:?}, storage: {storage:?}", keccak256(address));
 
                 let entry = accumulated_state.entry(*address).or_default();
                 entry.0 = convert_revm_to_reth_account(account);
