@@ -73,7 +73,6 @@ use std::{
     fmt::Debug,
     ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::{mpsc, Arc},
-    time::{Duration, Instant},
 };
 use tokio::sync::watch;
 use tracing::{debug, error, trace};
@@ -3179,33 +3178,20 @@ impl<TX: DbTxMut + DbTx + 'static, N: ProviderNodeTypes + 'static> BlockWriter
         let tx_count = block.block.body.transactions().len() as u64;
 
         // Ensures we have all the senders for the block's transactions.
-        let mut tx_senders_elapsed = Duration::default();
-        let mut tx_hash_numbers_elapsed = Duration::default();
-
         for (transaction, sender) in
             block.block.body.transactions().iter().zip(block.senders.iter())
         {
             let hash = transaction.tx_hash();
 
             if self.prune_modes.sender_recovery.as_ref().is_none_or(|m| !m.is_full()) {
-                let start = Instant::now();
                 self.tx.put::<tables::TransactionSenders>(next_tx_num, *sender)?;
-                tx_senders_elapsed += start.elapsed();
             }
 
             if self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full()) {
-                let start = Instant::now();
                 self.tx.put::<tables::TransactionHashNumbers>(*hash, next_tx_num)?;
-                tx_hash_numbers_elapsed += start.elapsed();
             }
             next_tx_num += 1;
         }
-        durations_recorder
-            .record_duration(metrics::Action::InsertTransactionSenders, tx_senders_elapsed);
-        durations_recorder.record_duration(
-            metrics::Action::InsertTransactionHashNumbers,
-            tx_hash_numbers_elapsed,
-        );
 
         self.append_block_bodies(
             vec![(block_number, Some(block.block.body))],
