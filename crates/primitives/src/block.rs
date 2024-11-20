@@ -379,7 +379,7 @@ impl SealedBlock {
         let senders = if self.body.transactions.len() == senders.len() {
             senders
         } else {
-            let Some(senders) = self.body.recover_signers() else { return Err(self) };
+            let Some(senders) = self.body.recover_signers_unchecked() else { return Err(self) };
             senders
         };
 
