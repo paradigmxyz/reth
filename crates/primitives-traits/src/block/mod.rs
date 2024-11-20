@@ -8,9 +8,17 @@ use alloc::fmt;
 use crate::{BlockHeader, FullBlockBody, FullBlockHeader, InMemorySize, MaybeSerde};
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
-pub trait FullBlock: Block<Header: FullBlockHeader, Body: FullBlockBody> {}
+pub trait FullBlock:
+    Block<Header: FullBlockHeader, Body: FullBlockBody> + alloy_rlp::Encodable + alloy_rlp::Decodable
+{
+}
 
-impl<T> FullBlock for T where T: Block<Header: FullBlockHeader, Body: FullBlockBody> {}
+impl<T> FullBlock for T where
+    T: Block<Header: FullBlockHeader, Body: FullBlockBody>
+        + alloy_rlp::Encodable
+        + alloy_rlp::Decodable
+{
+}
 
 /// Abstraction of block data type.
 // todo: make sealable super-trait, depends on <https://github.com/paradigmxyz/reth/issues/11449>

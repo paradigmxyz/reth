@@ -82,7 +82,7 @@ parking_lot.workspace = true
 
 # misc
 tracing.workspace = true
-tracing-futures = "0.2"
+tracing-futures.workspace = true
 futures.workspace = true
 rand.workspace = true
 serde.workspace = true

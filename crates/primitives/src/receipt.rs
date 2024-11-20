@@ -72,7 +72,6 @@ impl Receipt {
     }
 }
 
-// todo: replace with alloy receipt
 impl TxReceipt for Receipt {
     fn status_or_post_state(&self) -> Eip658Value {
         self.success.into()
@@ -191,8 +190,6 @@ impl From<Receipt> for ReceiptWithBloom {
 /// [`Receipt`] with calculated bloom filter.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-#[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 pub struct ReceiptWithBloom {
     /// Bloom filter build from logs.
     pub bloom: Bloom,
@@ -396,7 +393,7 @@ impl Decodable for ReceiptWithBloom {
                         Self::decode_receipt(buf, TxType::Eip7702)
                     }
                     #[cfg(feature = "optimism")]
-                    crate::transaction::DEPOSIT_TX_TYPE_ID => {
+                    op_alloy_consensus::DEPOSIT_TX_TYPE_ID => {
                         buf.advance(1);
                         Self::decode_receipt(buf, TxType::Deposit)
                     }
@@ -532,7 +529,7 @@ impl ReceiptWithBloomEncoder<'_> {
             }
             #[cfg(feature = "optimism")]
             TxType::Deposit => {
-                out.put_u8(crate::transaction::DEPOSIT_TX_TYPE_ID);
+                out.put_u8(op_alloy_consensus::DEPOSIT_TX_TYPE_ID);
             }
         }
         out.put_slice(payload.as_ref());
