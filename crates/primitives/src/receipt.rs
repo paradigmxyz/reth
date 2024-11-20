@@ -72,7 +72,6 @@ impl Receipt {
     }
 }
 
-// todo: replace with alloy receipt
 impl TxReceipt for Receipt {
     fn status_or_post_state(&self) -> Eip658Value {
         self.success.into()
@@ -191,8 +190,6 @@ impl From<Receipt> for ReceiptWithBloom {
 /// [`Receipt`] with calculated bloom filter.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-#[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 pub struct ReceiptWithBloom {
     /// Bloom filter build from logs.
     pub bloom: Bloom,
