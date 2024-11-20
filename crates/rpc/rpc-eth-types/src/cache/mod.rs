@@ -472,7 +472,12 @@ where
                             }
                         }
                         CacheAction::CacheNewCanonicalChain { chain_change } => {
-                            for block in chain_change.blocks {
+                            for mut block in chain_change.blocks {
+                                if block.senders.len() != block.body.transactions.len() {
+                                    if let Some(senders) = block.body.recover_signers() {
+                                        block.senders = senders;
+                                    }
+                                }
                                 this.on_new_block(block.hash(), Ok(Some(Arc::new(block))));
                             }
 
