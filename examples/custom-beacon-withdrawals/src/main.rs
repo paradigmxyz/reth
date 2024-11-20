@@ -29,7 +29,7 @@ use reth_evm::execute::{
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_node_ethereum::{node::EthereumAddOns, BasicBlockExecutorProvider, EthereumNode};
-use reth_primitives::{BlockWithSenders, EthPrimitives, Rcpt};
+use reth_primitives::{BlockWithSenders, EthPrimitives, ReceiptTy};
 use std::{fmt::Display, sync::Arc};
 
 pub const SYSTEM_ADDRESS: Address = address!("fffffffffffffffffffffffffffffffffffffffe");
@@ -167,7 +167,7 @@ where
         &mut self,
         _block: &BlockWithSenders,
         _total_difficulty: U256,
-    ) -> Result<ExecuteOutput<Rcpt<EthPrimitives>>, Self::Error> {
+    ) -> Result<ExecuteOutput<ReceiptTy<EthPrimitives>>, Self::Error> {
         Ok(ExecuteOutput { receipts: vec![], gas_used: 0 })
     }
 
@@ -175,7 +175,7 @@ where
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-        _receipts: &[Rcpt<EthPrimitives>],
+        _receipts: &[ReceiptTy<EthPrimitives>],
     ) -> Result<Requests, Self::Error> {
         let env = self.evm_env_for_block(&block.header, total_difficulty);
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);

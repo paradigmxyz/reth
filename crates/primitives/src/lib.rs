@@ -40,7 +40,7 @@ pub use receipt::{
 };
 pub use reth_primitives_traits::{
     logs_bloom, Account, Bytecode, GotExpected, GotExpectedBoxed, HeaderError, Log, LogData,
-    NodePrimitives, Rcpt, SealedHeader, StorageEntry,
+    NodePrimitives, ReceiptTy, SealedHeader, StorageEntry,
 };
 pub use static_file::StaticFileSegment;
 
@@ -80,6 +80,7 @@ pub mod serde_bincode_compat {
 // reth-ethereum-* crates
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EthPrimitives;
+
 impl NodePrimitives for EthPrimitives {
     type Block = crate::Block;
     type BlockHeader = alloy_consensus::Header;

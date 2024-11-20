@@ -14,7 +14,7 @@ use reth_exex::ExExManagerHandle;
 use reth_network_p2p::{
     bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader, EthBlockClient,
 };
-use reth_node_api::NodePrimitives;
+use reth_node_api::FullNodePrimitives;
 use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
 use reth_stages::{prelude::DefaultStages, stages::ExecutionStage, Pipeline, StageSet};
 use reth_static_file::StaticFileProducer;
@@ -27,7 +27,7 @@ use tokio::sync::watch;
 pub fn build_networked_pipeline<N, Client, Executor>(
     config: &StageConfig,
     client: Client,
-    consensus: Arc<dyn Consensus>,
+    consensus: Arc<dyn Consensus<Client::Header, Client::Body>>,
     provider_factory: ProviderFactory<N>,
     task_executor: &TaskExecutor,
     metrics_tx: reth_stages::MetricEventsSender,
@@ -41,10 +41,12 @@ where
     N: ProviderNodeTypes,
     Client: EthBlockClient + 'static,
     Executor: BlockExecutorProvider<Primitives = N::Primitives>,
+    N::Primitives:
+        FullNodePrimitives<Block: reth_node_api::Block<Body = reth_primitives::BlockBody>>,
 {
     // building network downloaders using the fetch client
     let header_downloader = ReverseHeadersDownloaderBuilder::new(config.headers)
-        .build(client.clone(), Arc::clone(&consensus))
+        .build(client.clone(), consensus.clone().as_header_validator())
         .into_task_with(task_executor);
 
     let body_downloader = BodiesDownloaderBuilder::new(config.bodies)
@@ -84,7 +86,7 @@ pub fn build_pipeline<N, H, B, Executor>(
     exex_manager_handle: ExExManagerHandle,
 ) -> eyre::Result<Pipeline<N>>
 where
-    N: ProviderNodeTypes,
+    N: ProviderNodeTypes<BlockBody = reth_primitives::BlockBody>,
     H: HeaderDownloader<Header = <N::Primitives as NodePrimitives>::BlockHeader> + 'static,
     B: BodyDownloader<Body = <N::Primitives as NodePrimitives>::BlockBody> + 'static,
     Executor: BlockExecutorProvider<Primitives = N::Primitives>,

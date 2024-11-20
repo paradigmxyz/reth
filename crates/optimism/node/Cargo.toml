@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 # reth
 reth-chainspec.workspace = true
+reth-db.workspace = true
 reth-engine-local.workspace = true
 reth-primitives.workspace = true
 reth-payload-builder.workspace = true
@@ -118,4 +119,8 @@ test-utils = [
     "reth-trie-db/test-utils",
     "revm/test-utils",
     "reth-optimism-node/test-utils",
+]
+reth-codec = [
+    "reth-primitives/reth-codec",
+    "reth-optimism-primitives/reth-codec",
 ]

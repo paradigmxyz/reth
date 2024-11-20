@@ -59,7 +59,7 @@ pub struct Command<C: ChainSpecParser> {
 }
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
-    fn build_pipeline<N: ProviderNodeTypes<ChainSpec = C::ChainSpec>, Client>(
+    fn build_pipeline<N: ProviderNodeTypes<ChainSpec = C::ChainSpec> + CliNodeTypes, Client>(
         &self,
         config: &Config,
         client: Client,
@@ -73,7 +73,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     {
         // building network downloaders using the fetch client
         let header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
-            .build(client.clone(), Arc::clone(&consensus))
+            .build(client.clone(), consensus.clone().as_header_validator())
             .into_task_with(task_executor);
 
         let body_downloader = BodiesDownloaderBuilder::new(config.stages.bodies)

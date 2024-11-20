@@ -1,3 +1,9 @@
+use std::{
+    collections::BTreeMap,
+    ops::{RangeBounds, RangeInclusive},
+    sync::Arc,
+};
+
 use alloy_consensus::{constants::EMPTY_ROOT_HASH, Header};
 use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
@@ -16,7 +22,7 @@ use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::NodeTypes;
 use reth_primitives::{
-    Account, Block, BlockWithSenders, Bytecode, GotExpected, Receipt, SealedBlock,
+    Account, Block, BlockWithSenders, Bytecode, EthPrimitives, GotExpected, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
     TransactionSignedNoHash,
 };
@@ -31,11 +37,6 @@ use reth_trie::{
 };
 use reth_trie_db::MerklePatriciaTrie;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
-use std::{
-    collections::BTreeMap,
-    ops::{RangeBounds, RangeInclusive},
-    sync::Arc,
-};
 
 use crate::{
     traits::{BlockSource, ReceiptProvider},
@@ -159,9 +160,10 @@ impl MockEthProvider {
 pub struct MockNode;
 
 impl NodeTypes for MockNode {
-    type Primitives = reth_primitives::EthPrimitives;
+    type Primitives = EthPrimitives;
     type ChainSpec = ChainSpec;
     type StateCommitment = MerklePatriciaTrie;
+    type Storage = EthStorage;
 }
 
 impl DatabaseProviderFactory for MockEthProvider {

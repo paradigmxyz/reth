@@ -93,3 +93,4 @@ serde = [
     "roaring/serde",
 	"revm-primitives/serde",
 ]
+reth-codec = []

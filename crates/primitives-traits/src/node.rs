@@ -107,4 +107,4 @@ where
 }
 
 /// Helper adapter type for accessing [`NodePrimitives`] receipt type.
-pub type Rcpt<N> = <N as NodePrimitives>::Receipt;
+pub type ReceiptTy<N> = <N as NodePrimitives>::Receipt;

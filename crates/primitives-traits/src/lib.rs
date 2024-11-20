@@ -60,7 +60,7 @@ pub use tx_type::{FullTxType, TxType};
 pub mod header;
 #[cfg(any(test, feature = "arbitrary", feature = "test-utils"))]
 pub use header::test_utils;
-pub use header::{BlockWithParent, HeaderError, SealedHeader};
+pub use header::{BlockWithParent, Header, HeaderError, SealedHeader};
 
 /// Bincode-compatible serde implementations for common abstracted types in Reth.
 ///
@@ -80,7 +80,7 @@ pub use size::InMemorySize;
 
 /// Node traits
 pub mod node;
-pub use node::{FullNodePrimitives, NodePrimitives, Rcpt};
+pub use node::{FullNodePrimitives, NodePrimitives, ReceiptTy};
 
 /// Helper trait that requires arbitrary implementation if the feature is enabled.
 #[cfg(any(feature = "test-utils", feature = "arbitrary"))]
@@ -106,3 +106,17 @@ pub trait MaybeSerde {}
 impl<T> MaybeSerde for T where T: serde::Serialize + for<'de> serde::Deserialize<'de> {}
 #[cfg(not(feature = "serde"))]
 impl<T> MaybeSerde for T {}
+
+/// Helper trait that requires database encoding implementation since `reth-codec` feature is
+/// enabled.
+#[cfg(feature = "reth-codec")]
+pub trait MaybeCompact: reth_codecs::Compact {}
+/// Noop. Helper trait that would require database encoding implementation if `reth-codec` feature
+/// were enabled.
+#[cfg(not(feature = "reth-codec"))]
+pub trait MaybeCompact {}
+
+#[cfg(feature = "reth-codec")]
+impl<T> MaybeCompact for T where T: reth_codecs::Compact {}
+#[cfg(not(feature = "reth-codec"))]
+impl<T> MaybeCompact for T {}
