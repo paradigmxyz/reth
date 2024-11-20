@@ -6,16 +6,22 @@ use core::hash::Hash;
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
 use alloy_primitives::{keccak256, Address, PrimitiveSignature, TxHash, B256};
 use reth_codecs::Compact;
-use revm_primitives::TxEnv;
 
-use crate::{transaction::TransactionExt, FullTransaction, MaybeArbitrary, Transaction};
+use crate::{FillTxEnv, FullTransaction, InMemorySize, MaybeArbitrary, MaybeSerde, Transaction};
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
-pub trait FullSignedTx: SignedTransaction<Transaction: FullTransaction> + Compact {}
+pub trait FullSignedTx:
+    SignedTransaction<Transaction: FullTransaction> + FillTxEnv + Compact
+{
+}
 
-impl<T> FullSignedTx for T where T: SignedTransaction<Transaction: FullTransaction> + Compact {}
+impl<T> FullSignedTx for T where
+    T: SignedTransaction<Transaction: FullTransaction> + FillTxEnv + Compact
+{
+}
 
 /// A signed transaction.
+#[auto_impl::auto_impl(&, Arc)]
 pub trait SignedTransaction:
     Send
     + Sync
@@ -26,14 +32,14 @@ pub trait SignedTransaction:
     + PartialEq
     + Eq
     + Hash
-    + serde::Serialize
-    + for<'a> serde::Deserialize<'a>
     + alloy_rlp::Encodable
     + alloy_rlp::Decodable
     + Encodable2718
     + Decodable2718
-    + TransactionExt
+    + alloy_consensus::Transaction
+    + MaybeSerde
     + MaybeArbitrary
+    + InMemorySize
 {
     /// Transaction type that is signed.
     type Transaction: Transaction;
@@ -65,6 +71,16 @@ pub trait SignedTransaction:
     /// `reth_primitives::transaction::recover_signer_unchecked`.
     fn recover_signer_unchecked(&self) -> Option<Address>;
 
+    /// Calculate transaction hash, eip2728 transaction does not contain rlp header and start with
+    /// tx type.
+    fn recalculate_hash(&self) -> B256 {
+        keccak256(self.encoded_2718())
+    }
+}
+
+/// Helper trait used in testing.
+#[cfg(feature = "test-utils")]
+pub trait SignedTransactionTesting: SignedTransaction {
     /// Create a new signed transaction from a transaction and its signature.
     ///
     /// This will also calculate the transaction hash using its encoding.
@@ -72,21 +88,4 @@ pub trait SignedTransaction:
         transaction: Self::Transaction,
         signature: PrimitiveSignature,
     ) -> Self;
-
-    /// Calculate transaction hash, eip2728 transaction does not contain rlp header and start with
-    /// tx type.
-    fn recalculate_hash(&self) -> B256 {
-        keccak256(self.encoded_2718())
-    }
-
-    /// Fills [`TxEnv`] with an [`Address`] and transaction.
-    fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address);
-}
-
-impl<T: SignedTransaction> TransactionExt for T {
-    type Type = <T::Transaction as TransactionExt>::Type;
-
-    fn signature_hash(&self) -> B256 {
-        self.transaction().signature_hash()
-    }
 }

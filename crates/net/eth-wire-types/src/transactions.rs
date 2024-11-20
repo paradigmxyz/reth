@@ -96,7 +96,7 @@ mod tests {
     fn encode_get_pooled_transactions() {
         let expected = hex!("f847820457f842a000000000000000000000000000000000000000000000000000000000deadc0dea000000000000000000000000000000000000000000000000000000000feedbeef");
         let mut data = vec![];
-        let request = RequestPair::<GetPooledTransactions> {
+        let request = RequestPair {
             request_id: 1111,
             message: GetPooledTransactions(vec![
                 hex!("00000000000000000000000000000000000000000000000000000000deadc0de").into(),
@@ -114,7 +114,7 @@ mod tests {
         let request = RequestPair::<GetPooledTransactions>::decode(&mut &data[..]).unwrap();
         assert_eq!(
             request,
-            RequestPair::<GetPooledTransactions> {
+            RequestPair {
                 request_id: 1111,
                 message: GetPooledTransactions(vec![
                     hex!("00000000000000000000000000000000000000000000000000000000deadc0de").into(),
@@ -182,7 +182,7 @@ mod tests {
                     .expect("Failed to convert TransactionSigned to PooledTransactionsElement")
             })
             .collect();
-        let request = RequestPair::<PooledTransactions> {
+        let request = RequestPair {
             request_id: 1111,
             message: PooledTransactions(message), /* Assuming PooledTransactions wraps a
                                                    * Vec<PooledTransactionsElement> */
@@ -248,10 +248,7 @@ mod tests {
                     .expect("Failed to convert TransactionSigned to PooledTransactionsElement")
             })
             .collect();
-        let expected = RequestPair::<PooledTransactions> {
-            request_id: 1111,
-            message: PooledTransactions(message),
-        };
+        let expected = RequestPair { request_id: 1111, message: PooledTransactions(message) };
 
         let request = RequestPair::<PooledTransactions>::decode(&mut &data[..]).unwrap();
         assert_eq!(request, expected);
@@ -383,10 +380,8 @@ mod tests {
                     .expect("Failed to convert TransactionSigned to PooledTransactionsElement")
             })
             .collect();
-        let expected_transactions = RequestPair::<PooledTransactions> {
-            request_id: 0,
-            message: PooledTransactions(message),
-        };
+        let expected_transactions =
+            RequestPair { request_id: 0, message: PooledTransactions(message) };
 
         // checking tx by tx for easier debugging if there are any regressions
         for (decoded, expected) in
@@ -522,10 +517,7 @@ mod tests {
                     .expect("Failed to convert TransactionSigned to PooledTransactionsElement")
             })
             .collect();
-        let transactions = RequestPair::<PooledTransactions> {
-            request_id: 0,
-            message: PooledTransactions(message),
-        };
+        let transactions = RequestPair { request_id: 0, message: PooledTransactions(message) };
 
         let mut encoded = vec![];
         transactions.encode(&mut encoded);

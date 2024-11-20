@@ -880,4 +880,104 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_empty_pool_behavior() {
+        let mut pool = PendingPool::<MockOrdering>::new(MockOrdering::default());
+
+        // Ensure the pool is empty
+        assert!(pool.is_empty());
+        assert_eq!(pool.len(), 0);
+        assert_eq!(pool.size(), 0);
+
+        // Verify that attempting to truncate an empty pool does not panic and returns an empty vec
+        let removed = pool.truncate_pool(SubPoolLimit { max_txs: 10, max_size: 1000 });
+        assert!(removed.is_empty());
+
+        // Verify that retrieving transactions from an empty pool yields nothing
+        let all_txs: Vec<_> = pool.all().collect();
+        assert!(all_txs.is_empty());
+    }
+
+    #[test]
+    fn test_add_remove_transaction() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = PendingPool::new(MockOrdering::default());
+
+        // Add a transaction and check if it's in the pool
+        let tx = f.validated_arc(MockTransaction::eip1559());
+        pool.add_transaction(tx.clone(), 0);
+        assert!(pool.contains(tx.id()));
+        assert_eq!(pool.len(), 1);
+
+        // Remove the transaction and ensure it's no longer in the pool
+        let removed_tx = pool.remove_transaction(tx.id()).unwrap();
+        assert_eq!(removed_tx.id(), tx.id());
+        assert!(!pool.contains(tx.id()));
+        assert_eq!(pool.len(), 0);
+    }
+
+    #[test]
+    fn test_reorder_on_basefee_update() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = PendingPool::new(MockOrdering::default());
+
+        // Add two transactions with different fees
+        let tx1 = f.validated_arc(MockTransaction::eip1559().inc_price());
+        let tx2 = f.validated_arc(MockTransaction::eip1559().inc_price_by(20));
+        pool.add_transaction(tx1.clone(), 0);
+        pool.add_transaction(tx2.clone(), 0);
+
+        // Ensure the transactions are in the correct order
+        let mut best = pool.best();
+        assert_eq!(best.next().unwrap().hash(), tx2.hash());
+        assert_eq!(best.next().unwrap().hash(), tx1.hash());
+
+        // Update the base fee to a value higher than tx1's fee, causing it to be removed
+        let removed = pool.update_base_fee((tx1.max_fee_per_gas() + 1) as u64);
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].hash(), tx1.hash());
+
+        // Verify that only tx2 remains in the pool
+        assert_eq!(pool.len(), 1);
+        assert!(pool.contains(tx2.id()));
+        assert!(!pool.contains(tx1.id()));
+    }
+
+    #[test]
+    #[should_panic(expected = "transaction already included")]
+    fn test_handle_duplicates() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = PendingPool::new(MockOrdering::default());
+
+        // Add the same transaction twice and ensure it only appears once
+        let tx = f.validated_arc(MockTransaction::eip1559());
+        pool.add_transaction(tx.clone(), 0);
+        assert!(pool.contains(tx.id()));
+        assert_eq!(pool.len(), 1);
+
+        // Attempt to add the same transaction again, which should be ignored
+        pool.add_transaction(tx, 0);
+    }
+
+    #[test]
+    fn test_update_blob_fee() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = PendingPool::new(MockOrdering::default());
+
+        // Add transactions with varying blob fees
+        let tx1 = f.validated_arc(MockTransaction::eip4844().set_blob_fee(50).clone());
+        let tx2 = f.validated_arc(MockTransaction::eip4844().set_blob_fee(150).clone());
+        pool.add_transaction(tx1.clone(), 0);
+        pool.add_transaction(tx2.clone(), 0);
+
+        // Update the blob fee to a value that causes tx1 to be removed
+        let removed = pool.update_blob_fee(100);
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].hash(), tx1.hash());
+
+        // Verify that only tx2 remains in the pool
+        assert!(pool.contains(tx2.id()));
+        assert!(!pool.contains(tx1.id()));
+    }
 }

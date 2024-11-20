@@ -1,10 +1,19 @@
 //! Block body abstraction.
 
-use crate::InMemorySize;
 use alloc::fmt;
+
 use alloy_consensus::Transaction;
+use reth_codecs::Compact;
+
+use crate::{FullSignedTx, InMemorySize, MaybeSerde};
+
+/// Helper trait that unifies all behaviour required by transaction to support full node operations.
+pub trait FullBlockBody: BlockBody<Transaction: FullSignedTx> + Compact {}
+
+impl<T> FullBlockBody for T where T: BlockBody<Transaction: FullSignedTx> + Compact {}
 
 /// Abstraction for block's body.
+#[auto_impl::auto_impl(&, Arc)]
 pub trait BlockBody:
     Send
     + Sync
@@ -14,12 +23,10 @@ pub trait BlockBody:
     + fmt::Debug
     + PartialEq
     + Eq
-    + serde::Serialize
-    + for<'de> serde::Deserialize<'de>
     + alloy_rlp::Encodable
     + alloy_rlp::Decodable
     + InMemorySize
-    + 'static
+    + MaybeSerde
 {
     /// Ordered list of signed transactions as committed in block.
     // todo: requires trait for signed transaction

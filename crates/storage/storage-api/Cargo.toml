@@ -18,6 +18,7 @@ reth-db-models.workspace = true
 reth-db-api.workspace = true
 reth-execution-types.workspace = true
 reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 reth-storage-errors.workspace = true

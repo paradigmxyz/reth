@@ -22,7 +22,7 @@ use reth_chain_state::{ChainInfoTracker, ForkChoiceNotifications, ForkChoiceSubs
 use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
-use reth_node_types::NodeTypesWithDB;
+use reth_node_types::{FullNodePrimitives, NodeTypes, NodeTypesWithDB};
 use reth_primitives::{
     Account, Block, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
     TransactionMeta, TransactionSigned, TransactionSignedNoHash,
@@ -37,6 +37,7 @@ use std::{
     sync::Arc,
     time::Instant,
 };
+
 use tracing::trace;
 
 mod database;
@@ -67,10 +68,35 @@ pub use blockchain_provider::BlockchainProvider2;
 mod consistent;
 pub use consistent::ConsistentProvider;
 
-/// Helper trait keeping common requirements of providers for [`NodeTypesWithDB`].
-pub trait ProviderNodeTypes: NodeTypesWithDB<ChainSpec: EthereumHardforks> {}
+/// Helper trait to bound [`NodeTypes`] so that combined with database they satisfy
+/// [`ProviderNodeTypes`].
+pub trait NodeTypesForProvider
+where
+    Self: NodeTypes<
+        ChainSpec: EthereumHardforks,
+        Storage: ChainStorage<Self::Primitives>,
+        Primitives: FullNodePrimitives,
+    >,
+{
+}
 
-impl<T> ProviderNodeTypes for T where T: NodeTypesWithDB<ChainSpec: EthereumHardforks> {}
+impl<T> NodeTypesForProvider for T where
+    T: NodeTypes<
+        ChainSpec: EthereumHardforks,
+        Storage: ChainStorage<T::Primitives>,
+        Primitives: FullNodePrimitives,
+    >
+{
+}
+
+/// Helper trait keeping common requirements of providers for [`NodeTypesWithDB`].
+pub trait ProviderNodeTypes
+where
+    Self: NodeTypesForProvider + NodeTypesWithDB,
+{
+}
+
+impl<T> ProviderNodeTypes for T where T: NodeTypesForProvider + NodeTypesWithDB {}
 
 /// The main type for interacting with the blockchain.
 ///

@@ -5,12 +5,12 @@ use std::sync::Arc;
 use node::NodeTestContext;
 use reth::{
     args::{DiscoveryArgs, NetworkArgs, RpcServerArgs},
-    builder::{NodeBuilder, NodeConfig, NodeHandle},
+    builder::{FullNodePrimitives, NodeBuilder, NodeConfig, NodeHandle},
     network::PeersHandleProvider,
     rpc::server_types::RpcModuleSelection,
     tasks::TaskManager,
 };
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_chainspec::EthChainSpec;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_node_builder::{
@@ -18,7 +18,7 @@ use reth_node_builder::{
     FullNodeTypesAdapter, Node, NodeAdapter, NodeComponents, NodeTypesWithDBAdapter,
     NodeTypesWithEngine, PayloadAttributesBuilder, PayloadTypes,
 };
-use reth_provider::providers::{BlockchainProvider, BlockchainProvider2};
+use reth_provider::providers::{BlockchainProvider, BlockchainProvider2, NodeTypesForProvider};
 use tracing::{span, Level};
 use wallet::Wallet;
 
@@ -53,12 +53,14 @@ pub async fn setup<N>(
     attributes_generator: impl Fn(u64) -> <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes + Copy + 'static,
 ) -> eyre::Result<(Vec<NodeHelperType<N, N::AddOns>>, TaskManager, Wallet)>
 where
-    N: Default + Node<TmpNodeAdapter<N>> + NodeTypesWithEngine<ChainSpec: EthereumHardforks>,
+    N: Default + Node<TmpNodeAdapter<N>> + NodeTypesForProvider + NodeTypesWithEngine,
     N::ComponentsBuilder: NodeComponentsBuilder<
         TmpNodeAdapter<N>,
         Components: NodeComponents<TmpNodeAdapter<N>, Network: PeersHandleProvider>,
     >,
     N::AddOns: RethRpcAddOns<Adapter<N>>,
+    N::Primitives:
+        FullNodePrimitives<Block: reth_node_api::Block<Body = reth_primitives::BlockBody>>,
 {
     let tasks = TaskManager::current();
     let exec = tasks.executor();
@@ -120,7 +122,8 @@ pub async fn setup_engine<N>(
 where
     N: Default
         + Node<TmpNodeAdapter<N, BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>>>
-        + NodeTypesWithEngine<ChainSpec: EthereumHardforks>,
+        + NodeTypesWithEngine
+        + NodeTypesForProvider,
     N::ComponentsBuilder: NodeComponentsBuilder<
         TmpNodeAdapter<N, BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>>,
         Components: NodeComponents<
@@ -132,6 +135,8 @@ where
     LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
         <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
     >,
+    N::Primitives:
+        FullNodePrimitives<Block: reth_node_api::Block<Body = reth_primitives::BlockBody>>,
 {
     let tasks = TaskManager::current();
     let exec = tasks.executor();

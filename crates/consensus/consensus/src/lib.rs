@@ -46,7 +46,42 @@ impl<'a> PostExecutionInput<'a> {
 
 /// Consensus is a protocol that chooses canonical chain.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait Consensus<H = Header, B = BlockBody>: Debug + Send + Sync {
+pub trait Consensus<H = Header, B = BlockBody>: HeaderValidator<H> + Debug + Send + Sync {
+    /// Ensures that body field values match the header.
+    fn validate_body_against_header(
+        &self,
+        body: &B,
+        header: &SealedHeader<H>,
+    ) -> Result<(), ConsensusError>;
+
+    /// Validate a block disregarding world state, i.e. things that can be checked before sender
+    /// recovery and execution.
+    ///
+    /// See the Yellow Paper sections 4.3.2 "Holistic Validity", 4.3.4 "Block Header Validity", and
+    /// 11.1 "Ommer Validation".
+    ///
+    /// **This should not be called for the genesis block**.
+    ///
+    /// Note: validating blocks does not include other validations of the Consensus
+    fn validate_block_pre_execution(&self, block: &SealedBlock<H, B>)
+        -> Result<(), ConsensusError>;
+
+    /// Validate a block considering world state, i.e. things that can not be checked before
+    /// execution.
+    ///
+    /// See the Yellow Paper sections 4.3.2 "Holistic Validity".
+    ///
+    /// Note: validating blocks does not include other validations of the Consensus
+    fn validate_block_post_execution(
+        &self,
+        block: &BlockWithSenders,
+        input: PostExecutionInput<'_>,
+    ) -> Result<(), ConsensusError>;
+}
+
+/// HeaderValidator is a protocol that validates headers and their relationships.
+#[auto_impl::auto_impl(&, Arc)]
+pub trait HeaderValidator<H = Header>: Debug + Send + Sync {
     /// Validate if header is correct and follows consensus specification.
     ///
     /// This is called on standalone header to check if all hashes are correct.
@@ -60,7 +95,8 @@ pub trait Consensus<H = Header, B = BlockBody>: Debug + Send + Sync {
     ///
     /// **This should not be called for the genesis block**.
     ///
-    /// Note: Validating header against its parent does not include other Consensus validations.
+    /// Note: Validating header against its parent does not include other HeaderValidator
+    /// validations.
     fn validate_header_against_parent(
         &self,
         header: &SealedHeader<H>,
@@ -99,42 +135,11 @@ pub trait Consensus<H = Header, B = BlockBody>: Debug + Send + Sync {
     ///
     /// Some consensus engines may want to do additional checks here.
     ///
-    /// Note: validating headers with TD does not include other Consensus validation.
+    /// Note: validating headers with TD does not include other HeaderValidator validation.
     fn validate_header_with_total_difficulty(
         &self,
         header: &H,
         total_difficulty: U256,
-    ) -> Result<(), ConsensusError>;
-
-    /// Ensures that body field values match the header.
-    fn validate_body_against_header(
-        &self,
-        body: &B,
-        header: &SealedHeader<H>,
-    ) -> Result<(), ConsensusError>;
-
-    /// Validate a block disregarding world state, i.e. things that can be checked before sender
-    /// recovery and execution.
-    ///
-    /// See the Yellow Paper sections 4.3.2 "Holistic Validity", 4.3.4 "Block Header Validity", and
-    /// 11.1 "Ommer Validation".
-    ///
-    /// **This should not be called for the genesis block**.
-    ///
-    /// Note: validating blocks does not include other validations of the Consensus
-    fn validate_block_pre_execution(&self, block: &SealedBlock<H, B>)
-        -> Result<(), ConsensusError>;
-
-    /// Validate a block considering world state, i.e. things that can not be checked before
-    /// execution.
-    ///
-    /// See the Yellow Paper sections 4.3.2 "Holistic Validity".
-    ///
-    /// Note: validating blocks does not include other validations of the Consensus
-    fn validate_block_post_execution(
-        &self,
-        block: &BlockWithSenders,
-        input: PostExecutionInput<'_>,
     ) -> Result<(), ConsensusError>;
 }
 

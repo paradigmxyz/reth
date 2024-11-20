@@ -14,6 +14,7 @@ use reth_exex::ExExManagerHandle;
 use reth_network_p2p::{
     bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader, EthBlockClient,
 };
+use reth_node_api::FullNodePrimitives;
 use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
 use reth_stages::{prelude::DefaultStages, stages::ExecutionStage, Pipeline, StageSet};
 use reth_static_file::StaticFileProducer;
@@ -40,6 +41,8 @@ where
     N: ProviderNodeTypes,
     Client: EthBlockClient + 'static,
     Executor: BlockExecutorProvider,
+    N::Primitives:
+        FullNodePrimitives<Block: reth_node_api::Block<Body = reth_primitives::BlockBody>>,
 {
     // building network downloaders using the fetch client
     let header_downloader = ReverseHeadersDownloaderBuilder::new(config.headers)
@@ -85,8 +88,12 @@ pub fn build_pipeline<N, H, B, Executor>(
 where
     N: ProviderNodeTypes,
     H: HeaderDownloader<Header = alloy_consensus::Header> + 'static,
-    B: BodyDownloader<Body = reth_primitives::BlockBody> + 'static,
+    B: BodyDownloader<
+            Body = <<N::Primitives as FullNodePrimitives>::Block as reth_node_api::Block>::Body,
+        > + 'static,
     Executor: BlockExecutorProvider,
+    N::Primitives:
+        FullNodePrimitives<Block: reth_node_api::Block<Body = reth_primitives::BlockBody>>,
 {
     let mut builder = Pipeline::<N>::builder();
 

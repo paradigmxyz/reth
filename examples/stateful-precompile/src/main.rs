@@ -9,11 +9,14 @@ use parking_lot::RwLock;
 use reth::{
     api::NextBlockEnvAttributes,
     builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
-    primitives::revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, PrecompileResult, TxEnv},
     revm::{
         handler::register::EvmHandler,
         inspector_handle_register,
         precompile::{Precompile, PrecompileSpecId},
+        primitives::{
+            BlockEnv, CfgEnvWithHandlerCfg, Env, PrecompileResult, SpecId, StatefulPrecompileMut,
+            TxEnv,
+        },
         ContextPrecompile, ContextPrecompiles, Database, Evm, EvmBuilder, GetInspector,
     },
     tasks::TaskManager,
@@ -25,10 +28,7 @@ use reth_node_ethereum::{
     node::EthereumAddOns, BasicBlockExecutorProvider, EthEvmConfig, EthExecutionStrategyFactory,
     EthereumNode,
 };
-use reth_primitives::{
-    revm_primitives::{SpecId, StatefulPrecompileMut},
-    TransactionSigned,
-};
+use reth_primitives::TransactionSigned;
 use reth_tracing::{RethTracer, Tracer};
 use schnellru::{ByLength, LruMap};
 use std::{collections::HashMap, convert::Infallible, sync::Arc};

@@ -5,6 +5,7 @@ use alloy_consensus::constants::{
 use alloy_primitives::{U64, U8};
 use alloy_rlp::{Decodable, Encodable};
 use derive_more::Display;
+use reth_primitives_traits::InMemorySize;
 use serde::{Deserialize, Serialize};
 
 /// Identifier parameter for legacy transaction
@@ -115,6 +116,14 @@ impl reth_primitives_traits::TxType for TxType {
     #[inline]
     fn is_eip7702(&self) -> bool {
         matches!(self, Self::Eip7702)
+    }
+}
+
+impl InMemorySize for TxType {
+    /// Calculates a heuristic for the in-memory size of the [`TxType`].
+    #[inline]
+    fn size(&self) -> usize {
+        core::mem::size_of::<Self>()
     }
 }
 

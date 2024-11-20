@@ -11,7 +11,7 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_payload_builder::OpPayloadBuilder;
 use reth_primitives::SealedHeader;
 use reth_provider::{BlockReaderIdExt, ProviderError, ProviderResult, StateProviderFactory};
-use reth_rpc_api::DebugExecutionWitnessApiServer;
+pub use reth_rpc_api::DebugExecutionWitnessApiServer;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use std::{fmt::Debug, sync::Arc};
 

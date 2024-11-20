@@ -265,8 +265,7 @@ mod tests {
     use alloy_primitives::{hex, map::HashMap, Address, U256};
     use reth_db::test_utils::create_test_rw_db;
     use reth_db_api::database::Database;
-    use reth_primitives::revm_primitives::AccountInfo;
-    use revm::db::BundleState;
+    use revm::{db::BundleState, primitives::AccountInfo};
 
     #[test]
     fn from_bundle_state_with_rayon() {

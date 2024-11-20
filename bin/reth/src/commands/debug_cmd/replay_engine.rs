@@ -8,7 +8,7 @@ use reth_blockchain_tree::{
 };
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
-use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
+use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
 use reth_config::Config;
@@ -18,13 +18,12 @@ use reth_engine_util::engine_store::{EngineMessageStore, StoredEngineApiMessage}
 use reth_fs_util as fs;
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
-use reth_node_api::{
-    EngineApiMessageVersion, NodeTypesWithDB, NodeTypesWithDBAdapter, NodeTypesWithEngine,
-};
+use reth_node_api::{EngineApiMessageVersion, NodeTypesWithDBAdapter};
 use reth_node_ethereum::{EthEngineTypes, EthEvmConfig, EthExecutorProvider};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::{
-    providers::BlockchainProvider, CanonStateSubscriptions, ChainSpecProvider, ProviderFactory,
+    providers::{BlockchainProvider, ProviderNodeTypes},
+    CanonStateSubscriptions, ChainSpecProvider, ProviderFactory,
 };
 use reth_prune::PruneModes;
 use reth_stages::Pipeline;
@@ -56,7 +55,7 @@ pub struct Command<C: ChainSpecParser> {
 }
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
-    async fn build_network<N: NodeTypesWithDB<ChainSpec = C::ChainSpec>>(
+    async fn build_network<N: ProviderNodeTypes<ChainSpec = C::ChainSpec>>(
         &self,
         config: &Config,
         task_executor: TaskExecutor,
@@ -78,9 +77,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     }
 
     /// Execute `debug replay-engine` command
-    pub async fn execute<
-        N: NodeTypesWithEngine<Engine = EthEngineTypes, ChainSpec = C::ChainSpec>,
-    >(
+    pub async fn execute<N: CliNodeTypes<Engine = EthEngineTypes, ChainSpec = C::ChainSpec>>(
         self,
         ctx: CliContext,
     ) -> eyre::Result<()> {
