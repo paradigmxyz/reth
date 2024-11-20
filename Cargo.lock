@@ -8136,7 +8136,6 @@ dependencies = [
  "procfs 0.16.0",
  "reqwest",
  "reth-metrics",
- "reth-provider",
  "reth-tasks",
  "socket2",
  "tikv-jemalloc-ctl",
