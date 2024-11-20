@@ -14,7 +14,7 @@ use reth_eth_wire::{
 };
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::{RequestError, RequestResult};
-use reth_primitives::{PooledTransactionsElement, ReceiptWithBloom};
+use reth_primitives::ReceiptWithBloom;
 use std::{
     sync::Arc,
     task::{ready, Context, Poll},
@@ -89,7 +89,7 @@ pub enum PeerResponse<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Represents a response to a request for pooled transactions.
     PooledTransactions {
         /// The receiver channel for the response to a pooled transactions request.
-        response: oneshot::Receiver<RequestResult<PooledTransactions>>,
+        response: oneshot::Receiver<RequestResult<PooledTransactions<N::PooledTransaction>>>,
     },
     /// Represents a response to a request for `NodeData`.
     NodeData {
@@ -146,7 +146,7 @@ pub enum PeerResponseResult<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Represents a result containing block bodies or an error.
     BlockBodies(RequestResult<Vec<N::BlockBody>>),
     /// Represents a result containing pooled transactions or an error.
-    PooledTransactions(RequestResult<Vec<PooledTransactionsElement>>),
+    PooledTransactions(RequestResult<Vec<N::PooledTransaction>>),
     /// Represents a result containing node data or an error.
     NodeData(RequestResult<Vec<Bytes>>),
     /// Represents a result containing receipts or an error.
