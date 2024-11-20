@@ -1,6 +1,6 @@
 //! `Eth` bundle implementation and helpers.
 
-use alloy_primitives::{Address, Keccak256, U256};
+use alloy_primitives::{Keccak256, U256};
 use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthChainSpec;
@@ -54,14 +54,14 @@ where
         let EthCallBundle {
             txs,
             block_number,
+            coinbase,
             state_block_number,
+            timeout: _,
             timestamp,
             gas_limit,
             difficulty,
             base_fee,
         } = bundle;
-        // TODO: pull from bundle args once we update alloy (or copy/paste struct for now)
-        let coinbase: Option<Address> = None;
         if txs.is_empty() {
             return Err(EthApiError::InvalidParams(
                 EthBundleError::EmptyBundleTransactions.to_string(),
