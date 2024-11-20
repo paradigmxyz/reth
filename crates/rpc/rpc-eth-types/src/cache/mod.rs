@@ -474,7 +474,7 @@ where
                         CacheAction::CacheNewCanonicalChain { chain_change } => {
                             for mut block in chain_change.blocks {
                                 if block.senders.len() != block.body.transactions.len() {
-                                    if let Some(senders) = block.body.recover_signers() {
+                                    if let Some(senders) = block.body.recover_signers_unchecked() {
                                         block.senders = senders;
                                     }
                                 }
