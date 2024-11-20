@@ -2,25 +2,15 @@
 //! `OpTxType` implements `reth_primitives_traits::TxType`.
 //! This type is required because a `Compact` impl is needed on the deposit tx type.
 
-use core::fmt::Debug;
-
-#[cfg(feature = "reth-codec")]
-use alloy_consensus::constants::EIP7702_TX_TYPE_ID;
 use alloy_primitives::{U64, U8};
 use alloy_rlp::{Decodable, Encodable, Error};
 use bytes::BufMut;
+use core::fmt::Debug;
 use derive_more::{
     derive::{From, Into},
     Display,
 };
 use op_alloy_consensus::OpTxType as AlloyOpTxType;
-#[cfg(feature = "reth-codec")]
-use op_alloy_consensus::DEPOSIT_TX_TYPE_ID;
-#[cfg(feature = "reth-codec")]
-use reth_primitives::transaction::{
-    COMPACT_EXTENDED_IDENTIFIER_FLAG, COMPACT_IDENTIFIER_EIP1559, COMPACT_IDENTIFIER_EIP2930,
-    COMPACT_IDENTIFIER_LEGACY,
-};
 use reth_primitives_traits::{InMemorySize, TxType};
 
 /// Wrapper type for [`op_alloy_consensus::OpTxType`] to implement [`TxType`] trait.
@@ -145,16 +135,17 @@ impl reth_codecs::Compact for OpTxType {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
+        use reth_codecs::txtype::*;
         match self.0 {
             AlloyOpTxType::Legacy => COMPACT_IDENTIFIER_LEGACY,
             AlloyOpTxType::Eip2930 => COMPACT_IDENTIFIER_EIP2930,
             AlloyOpTxType::Eip1559 => COMPACT_IDENTIFIER_EIP1559,
             AlloyOpTxType::Eip7702 => {
-                buf.put_u8(EIP7702_TX_TYPE_ID);
+                buf.put_u8(alloy_consensus::constants::EIP7702_TX_TYPE_ID);
                 COMPACT_EXTENDED_IDENTIFIER_FLAG
             }
             AlloyOpTxType::Deposit => {
-                buf.put_u8(DEPOSIT_TX_TYPE_ID);
+                buf.put_u8(op_alloy_consensus::DEPOSIT_TX_TYPE_ID);
                 COMPACT_EXTENDED_IDENTIFIER_FLAG
             }
         }
@@ -164,14 +155,16 @@ impl reth_codecs::Compact for OpTxType {
         use bytes::Buf;
         (
             match identifier {
-                COMPACT_IDENTIFIER_LEGACY => Self(AlloyOpTxType::Legacy),
-                COMPACT_IDENTIFIER_EIP2930 => Self(AlloyOpTxType::Eip2930),
-                COMPACT_IDENTIFIER_EIP1559 => Self(AlloyOpTxType::Eip1559),
-                COMPACT_EXTENDED_IDENTIFIER_FLAG => {
+                reth_codecs::txtype::COMPACT_IDENTIFIER_LEGACY => Self(AlloyOpTxType::Legacy),
+                reth_codecs::txtype::COMPACT_IDENTIFIER_EIP2930 => Self(AlloyOpTxType::Eip2930),
+                reth_codecs::txtype::COMPACT_IDENTIFIER_EIP1559 => Self(AlloyOpTxType::Eip1559),
+                reth_codecs::txtype::COMPACT_EXTENDED_IDENTIFIER_FLAG => {
                     let extended_identifier = buf.get_u8();
                     match extended_identifier {
-                        EIP7702_TX_TYPE_ID => Self(AlloyOpTxType::Eip7702),
-                        DEPOSIT_TX_TYPE_ID => Self(AlloyOpTxType::Deposit),
+                        alloy_consensus::constants::EIP7702_TX_TYPE_ID => {
+                            Self(AlloyOpTxType::Eip7702)
+                        }
+                        op_alloy_consensus::DEPOSIT_TX_TYPE_ID => Self(AlloyOpTxType::Deposit),
                         _ => panic!("Unsupported OpTxType identifier: {extended_identifier}"),
                     }
                 }
@@ -185,8 +178,10 @@ impl reth_codecs::Compact for OpTxType {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::constants::EIP7702_TX_TYPE_ID;
     use bytes::BytesMut;
-    use reth_codecs::Compact;
+    use op_alloy_consensus::DEPOSIT_TX_TYPE_ID;
+    use reth_codecs::{txtype::*, Compact};
     use rstest::rstest;
 
     #[test]
