@@ -393,7 +393,7 @@ impl Decodable for ReceiptWithBloom {
                         Self::decode_receipt(buf, TxType::Eip7702)
                     }
                     #[cfg(feature = "optimism")]
-                    crate::transaction::DEPOSIT_TX_TYPE_ID => {
+                    op_alloy_consensus::DEPOSIT_TX_TYPE_ID => {
                         buf.advance(1);
                         Self::decode_receipt(buf, TxType::Deposit)
                     }
@@ -529,7 +529,7 @@ impl ReceiptWithBloomEncoder<'_> {
             }
             #[cfg(feature = "optimism")]
             TxType::Deposit => {
-                out.put_u8(crate::transaction::DEPOSIT_TX_TYPE_ID);
+                out.put_u8(op_alloy_consensus::DEPOSIT_TX_TYPE_ID);
             }
         }
         out.put_slice(payload.as_ref());
