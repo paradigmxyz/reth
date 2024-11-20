@@ -116,4 +116,5 @@ arbitrary = [
     "reth-stages-types?/arbitrary",
     "reth-trie-common?/arbitrary",
     "alloy-consensus/arbitrary",
+    "alloy-chains/arbitrary",
 ]
