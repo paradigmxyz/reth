@@ -26,11 +26,12 @@ pub struct MultiProof {
 }
 
 impl MultiProof {
-    /// Return the account proof nodes for the given path.
+    /// Return the account proof nodes for the given account path.
     pub fn account_proof_nodes(&self, path: &Nibbles) -> Vec<(Nibbles, Bytes)> {
         self.account_subtree.matching_nodes_sorted(path)
     }
 
+    /// Return the storage proof nodes for the given storage slots of the account path.
     pub fn storage_proof_nodes(
         &self,
         hashed_address: B256,

@@ -246,7 +246,7 @@ where
         let (tx, rx) = mpsc::sync_channel(1);
         rayon::spawn(move || {
             let result = ParallelProof::new(view, input).multiproof(targets.clone());
-            let _ = tx.send((targets.clone(), hashed_state_update, result));
+            let _ = tx.send((targets, hashed_state_update, result));
         });
 
         pending_proofs.push_back(rx);
@@ -644,7 +644,7 @@ fn calculate_state_root_with_sparse(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::{prelude::SliceRandom, Rng};
+    use rand::Rng;
     use reth_primitives::{Account as RethAccount, StorageEntry};
     use reth_provider::{
         providers::ConsistentDbView, test_utils::create_test_provider_factory, HashingWriter,
@@ -671,15 +671,13 @@ mod tests {
 
     fn create_mock_state_updates(num_accounts: usize, updates_per_account: usize) -> Vec<EvmState> {
         let mut rng = generators::rng();
-        let mut all_addresses: Vec<Address> =
-            (0..num_accounts).map(|_| rng.gen::<Address>()).collect();
+        let all_addresses: Vec<Address> = (0..num_accounts).map(|_| rng.gen()).collect();
         let mut updates = Vec::new();
 
         for _ in 0..updates_per_account {
             let num_accounts_in_update = rng.gen_range(1..=num_accounts);
             let mut state_update = EvmState::default();
 
-            all_addresses.shuffle(&mut rng);
             let selected_addresses = &all_addresses[0..num_accounts_in_update];
 
             for &address in selected_addresses {
