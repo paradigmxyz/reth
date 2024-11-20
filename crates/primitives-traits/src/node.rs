@@ -85,8 +85,7 @@ pub trait FullNodePrimitives:
     /// Block header primitive.
     type BlockHeader: FullBlockHeader + 'static;
     /// Block body primitive.
-    type BlockBody: FullBlockBody<Header = Self::BlockHeader, Transaction = Self::SignedTx>
-        + 'static;
+    type BlockBody: FullBlockBody<Transaction = Self::SignedTx> + 'static;
     /// Signed version of the transaction type.
     type SignedTx: FullSignedTx;
     /// Transaction envelope type ID.
