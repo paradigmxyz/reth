@@ -35,13 +35,14 @@ serde = { workspace = true, optional = true }
 derive_more.workspace = true
 
 [dev-dependencies]
-reth-codecs = { workspace = true, features = ["test-utils"] }
+reth-codecs = { workspace = true, features = ["test-utils", "optimism"] }
 rstest.workspace = true
 
 [features]
 default = ["reth-codec"]
 reth-codec = [
     "dep:reth-codecs",
+    "reth-codecs?/optimism",
     "reth-primitives/reth-codec"
 ]
 serde = [
