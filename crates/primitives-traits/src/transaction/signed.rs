@@ -42,7 +42,7 @@ pub trait SignedTransaction:
     + MaybeArbitrary
     + InMemorySize
 {
-    /// Transaction type that is signed.
+    /// Unsigned transaction type.
     type Transaction: Transaction;
 
     /// Returns reference to transaction hash.
