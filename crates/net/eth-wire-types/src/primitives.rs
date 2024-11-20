@@ -70,6 +70,18 @@ pub trait NetworkPrimitives:
         + PartialEq
         + Eq
         + 'static;
+
+    /// The transaction type which peers return in `GetReceipts` messages.
+    type Receipt: Encodable
+        + Decodable
+        + Send
+        + Sync
+        + Unpin
+        + Clone
+        + Debug
+        + PartialEq
+        + Eq
+        + 'static;
 }
 
 /// Primitive types used by Ethereum network.
@@ -83,4 +95,5 @@ impl NetworkPrimitives for EthNetworkPrimitives {
     type Block = reth_primitives::Block;
     type BroadcastedTransaction = reth_primitives::TransactionSigned;
     type PooledTransaction = reth_primitives::PooledTransactionsElement;
+    type Receipt = reth_primitives::Receipt;
 }
