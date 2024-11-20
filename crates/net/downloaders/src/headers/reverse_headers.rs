@@ -9,7 +9,7 @@ use futures::{stream::Stream, FutureExt};
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use rayon::prelude::*;
 use reth_config::config::HeadersConfig;
-use reth_consensus::{Consensus, HeaderValidator};
+use reth_consensus::HeaderValidator;
 use reth_network_p2p::{
     error::{DownloadError, DownloadResult, PeerRequestResult},
     headers::{
@@ -68,7 +68,7 @@ impl<H> From<HeadersResponseError> for ReverseHeadersDownloaderError<H> {
 #[derive(Debug)]
 pub struct ReverseHeadersDownloader<H: HeadersClient> {
     /// Consensus client used to validate headers
-    consensus: Arc<dyn Consensus<H::Header>>,
+    consensus: Arc<dyn HeaderValidator<H::Header>>,
     /// Client used to download headers.
     client: Arc<H>,
     /// The local head of the chain.
@@ -1165,7 +1165,7 @@ impl ReverseHeadersDownloaderBuilder {
     pub fn build<H>(
         self,
         client: H,
-        consensus: Arc<dyn Consensus<H::Header>>,
+        consensus: Arc<dyn HeaderValidator<H::Header>>,
     ) -> ReverseHeadersDownloader<H>
     where
         H: HeadersClient + 'static,

@@ -18,20 +18,19 @@ pub use validation::*;
 pub(crate) use fetcher::{FetchEvent, TransactionFetcher};
 
 use self::constants::{tx_manager::*, DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE};
-use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
-
-use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
-    pin::Pin,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
+use crate::{
+    budget::{
+        DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS,
+        DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS, DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS,
+        DEFAULT_BUDGET_TRY_DRAIN_STREAM,
     },
-    task::{Context, Poll},
-    time::{Duration, Instant},
+    cache::LruCache,
+    duration_metered_exec, metered_poll_nested_stream_with_budget,
+    metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
+    NetworkHandle,
 };
-
 use alloy_primitives::{TxHash, B256};
+use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
     DedupPayload, EthNetworkPrimitives, EthVersion, GetPooledTransactions, HandleMempoolData,
@@ -56,21 +55,19 @@ use reth_transaction_pool::{
     GetPooledTransactionLimit, PoolTransaction, PropagateKind, PropagatedTransactions,
     TransactionPool, ValidPoolTransaction,
 };
+use std::{
+    collections::{hash_map::Entry, HashMap, HashSet},
+    pin::Pin,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    task::{Context, Poll},
+    time::{Duration, Instant},
+};
 use tokio::sync::{mpsc, oneshot, oneshot::error::RecvError};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 use tracing::{debug, trace};
-
-use crate::{
-    budget::{
-        DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS,
-        DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS, DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS,
-        DEFAULT_BUDGET_TRY_DRAIN_STREAM,
-    },
-    cache::LruCache,
-    duration_metered_exec, metered_poll_nested_stream_with_budget,
-    metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
-    NetworkHandle,
-};
 
 /// The future for importing transactions into the pool.
 ///
@@ -85,42 +82,26 @@ pub type PoolImportFuture = Pin<Box<dyn Future<Output = Vec<PoolResult<TxHash>>>
 /// For example [`TransactionsHandle::get_peer_transaction_hashes`] returns the transaction hashes
 /// known by a specific peer.
 #[derive(Debug, Clone)]
-pub struct TransactionsHandle {
+pub struct TransactionsHandle<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Command channel to the [`TransactionsManager`]
-    manager_tx: mpsc::UnboundedSender<TransactionsCommand>,
+    manager_tx: mpsc::UnboundedSender<TransactionsCommand<N>>,
 }
 
 /// Implementation of the `TransactionsHandle` API for use in testnet via type
 /// [`PeerHandle`](crate::test_utils::PeerHandle).
-impl TransactionsHandle {
-    fn send(&self, cmd: TransactionsCommand) {
+impl<N: NetworkPrimitives> TransactionsHandle<N> {
+    fn send(&self, cmd: TransactionsCommand<N>) {
         let _ = self.manager_tx.send(cmd);
     }
 
     /// Fetch the [`PeerRequestSender`] for the given peer.
-    async fn peer_handle(&self, peer_id: PeerId) -> Result<Option<PeerRequestSender>, RecvError> {
+    async fn peer_handle(
+        &self,
+        peer_id: PeerId,
+    ) -> Result<Option<PeerRequestSender<PeerRequest<N>>>, RecvError> {
         let (tx, rx) = oneshot::channel();
         self.send(TransactionsCommand::GetPeerSender { peer_id, peer_request_sender: tx });
         rx.await
-    }
-
-    /// Requests the transactions directly from the given peer.
-    ///
-    /// Returns `None` if the peer is not connected.
-    ///
-    /// **Note**: this returns the response from the peer as received.
-    pub async fn get_pooled_transactions_from(
-        &self,
-        peer_id: PeerId,
-        hashes: Vec<B256>,
-    ) -> Result<Option<Vec<PooledTransactionsElement>>, RequestError> {
-        let Some(peer) = self.peer_handle(peer_id).await? else { return Ok(None) };
-
-        let (tx, rx) = oneshot::channel();
-        let request = PeerRequest::GetPooledTransactions { request: hashes.into(), response: tx };
-        peer.try_send(request).ok();
-
-        rx.await?.map(|res| Some(res.0))
     }
 
     /// Manually propagate the transaction that belongs to the hash.
@@ -182,6 +163,27 @@ impl TransactionsHandle {
     }
 }
 
+impl TransactionsHandle {
+    /// Requests the transactions directly from the given peer.
+    ///
+    /// Returns `None` if the peer is not connected.
+    ///
+    /// **Note**: this returns the response from the peer as received.
+    pub async fn get_pooled_transactions_from(
+        &self,
+        peer_id: PeerId,
+        hashes: Vec<B256>,
+    ) -> Result<Option<Vec<PooledTransactionsElement>>, RequestError> {
+        let Some(peer) = self.peer_handle(peer_id).await? else { return Ok(None) };
+
+        let (tx, rx) = oneshot::channel();
+        let request = PeerRequest::GetPooledTransactions { request: hashes.into(), response: tx };
+        peer.try_send(request).ok();
+
+        rx.await?.map(|res| Some(res.0))
+    }
+}
+
 /// Manages transactions on top of the p2p network.
 ///
 /// This can be spawned to another task and is supposed to be run as background service.
@@ -238,12 +240,12 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     /// Send half for the command channel.
     ///
     /// This is kept so that a new [`TransactionsHandle`] can be created at any time.
-    command_tx: mpsc::UnboundedSender<TransactionsCommand>,
+    command_tx: mpsc::UnboundedSender<TransactionsCommand<N>>,
     /// Incoming commands from [`TransactionsHandle`].
     ///
     /// This will only receive commands if a user manually sends a command to the manager through
     /// the [`TransactionsHandle`] to interact with this type directly.
-    command_rx: UnboundedReceiverStream<TransactionsCommand>,
+    command_rx: UnboundedReceiverStream<TransactionsCommand<N>>,
     /// A stream that yields new __pending__ transactions.
     ///
     /// A transaction is considered __pending__ if it is executable on the current state of the
@@ -315,7 +317,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
 
 impl<Pool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
     /// Returns a new handle that can send commands to this type.
-    pub fn handle(&self) -> TransactionsHandle {
+    pub fn handle(&self) -> TransactionsHandle<N> {
         TransactionsHandle { manager_tx: self.command_tx.clone() }
     }
 
@@ -1483,7 +1485,7 @@ enum PropagateTransactionsBuilder<T = TransactionSigned> {
     Full(FullTransactionsBuilder<T>),
 }
 
-impl PropagateTransactionsBuilder {
+impl<T> PropagateTransactionsBuilder<T> {
     /// Create a builder for pooled transactions
     fn pooled(version: EthVersion) -> Self {
         Self::Pooled(PooledTransactionsHashesBuilder::new(version))
@@ -1494,6 +1496,26 @@ impl PropagateTransactionsBuilder {
         Self::Full(FullTransactionsBuilder::new(version))
     }
 
+    /// Returns true if no transactions are recorded.
+    fn is_empty(&self) -> bool {
+        match self {
+            Self::Pooled(builder) => builder.is_empty(),
+            Self::Full(builder) => builder.is_empty(),
+        }
+    }
+
+    /// Consumes the type and returns the built messages that should be sent to the peer.
+    fn build(self) -> PropagateTransactions<T> {
+        match self {
+            Self::Pooled(pooled) => {
+                PropagateTransactions { pooled: Some(pooled.build()), full: None }
+            }
+            Self::Full(full) => full.build(),
+        }
+    }
+}
+
+impl PropagateTransactionsBuilder {
     /// Appends all transactions
     fn extend<'a>(&mut self, txs: impl IntoIterator<Item = &'a PropagateTransaction>) {
         for tx in txs {
@@ -1506,24 +1528,6 @@ impl PropagateTransactionsBuilder {
         match self {
             Self::Pooled(builder) => builder.push(transaction),
             Self::Full(builder) => builder.push(transaction),
-        }
-    }
-
-    /// Returns true if no transactions are recorded.
-    fn is_empty(&self) -> bool {
-        match self {
-            Self::Pooled(builder) => builder.is_empty(),
-            Self::Full(builder) => builder.is_empty(),
-        }
-    }
-
-    /// Consumes the type and returns the built messages that should be sent to the peer.
-    fn build(self) -> PropagateTransactions {
-        match self {
-            Self::Pooled(pooled) => {
-                PropagateTransactions { pooled: Some(pooled.build()), full: None }
-            }
-            Self::Full(full) => full.build(),
         }
     }
 }
@@ -1550,9 +1554,7 @@ struct FullTransactionsBuilder<T = TransactionSigned> {
     pooled: PooledTransactionsHashesBuilder,
 }
 
-// === impl FullTransactionsBuilder ===
-
-impl FullTransactionsBuilder {
+impl<T> FullTransactionsBuilder<T> {
     /// Create a builder for the negotiated version of the peer's session
     fn new(version: EthVersion) -> Self {
         Self {
@@ -1562,6 +1564,20 @@ impl FullTransactionsBuilder {
         }
     }
 
+    /// Returns whether or not any transactions are in the [`FullTransactionsBuilder`].
+    fn is_empty(&self) -> bool {
+        self.transactions.is_empty() && self.pooled.is_empty()
+    }
+
+    /// Returns the messages that should be propagated to the peer.
+    fn build(self) -> PropagateTransactions<T> {
+        let pooled = Some(self.pooled.build()).filter(|pooled| !pooled.is_empty());
+        let full = Some(self.transactions).filter(|full| !full.is_empty());
+        PropagateTransactions { pooled, full }
+    }
+}
+
+impl FullTransactionsBuilder {
     /// Appends all transactions.
     fn extend(&mut self, txs: impl IntoIterator<Item = PropagateTransaction>) {
         for tx in txs {
@@ -1602,18 +1618,6 @@ impl FullTransactionsBuilder {
 
         self.total_size = new_size;
         self.transactions.push(Arc::clone(&transaction.transaction));
-    }
-
-    /// Returns whether or not any transactions are in the [`FullTransactionsBuilder`].
-    fn is_empty(&self) -> bool {
-        self.transactions.is_empty() && self.pooled.is_empty()
-    }
-
-    /// Returns the messages that should be propagated to the peer.
-    fn build(self) -> PropagateTransactions {
-        let pooled = Some(self.pooled.build()).filter(|pooled| !pooled.is_empty());
-        let full = Some(self.transactions).filter(|full| !full.is_empty());
-        PropagateTransactions { pooled, full }
     }
 }
 
@@ -1733,7 +1737,7 @@ impl PeerMetadata {
 
 /// Commands to send to the [`TransactionsManager`]
 #[derive(Debug)]
-enum TransactionsCommand {
+enum TransactionsCommand<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Propagate a transaction hash to the network.
     PropagateHash(B256),
     /// Propagate transaction hashes to a specific peer.
@@ -1752,7 +1756,7 @@ enum TransactionsCommand {
     /// Requests a clone of the sender sender channel to the peer.
     GetPeerSender {
         peer_id: PeerId,
-        peer_request_sender: oneshot::Sender<Option<PeerRequestSender>>,
+        peer_request_sender: oneshot::Sender<Option<PeerRequestSender<PeerRequest<N>>>>,
     },
 }
 

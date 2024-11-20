@@ -69,7 +69,7 @@ impl Block {
         let senders = if self.body.transactions.len() == senders.len() {
             senders
         } else {
-            let Some(senders) = self.body.recover_signers() else { return Err(self) };
+            let Some(senders) = self.body.recover_signers_unchecked() else { return Err(self) };
             senders
         };
 
@@ -379,7 +379,7 @@ impl SealedBlock {
         let senders = if self.body.transactions.len() == senders.len() {
             senders
         } else {
-            let Some(senders) = self.body.recover_signers() else { return Err(self) };
+            let Some(senders) = self.body.recover_signers_unchecked() else { return Err(self) };
             senders
         };
 
@@ -614,6 +614,15 @@ impl BlockBody {
     /// Recover signer addresses for all transactions in the block body.
     pub fn recover_signers(&self) -> Option<Vec<Address>> {
         TransactionSigned::recover_signers(&self.transactions, self.transactions.len())
+    }
+
+    /// Recover signer addresses for all transactions in the block body _without ensuring that the
+    /// signature has a low `s` value_.
+    ///
+    /// Returns `None`, if some transaction's signature is invalid, see also
+    /// [`TransactionSigned::recover_signer_unchecked`].
+    pub fn recover_signers_unchecked(&self) -> Option<Vec<Address>> {
+        TransactionSigned::recover_signers_unchecked(&self.transactions, self.transactions.len())
     }
 
     /// Returns whether or not the block body contains any blob transactions.

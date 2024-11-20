@@ -57,17 +57,9 @@ pub mod signature;
 pub(crate) mod util;
 mod variant;
 
+use alloc::vec::Vec;
 #[cfg(feature = "optimism")]
 use op_alloy_consensus::TxDeposit;
-#[cfg(feature = "optimism")]
-pub use tx_type::DEPOSIT_TX_TYPE_ID;
-#[cfg(any(test, feature = "reth-codec"))]
-pub use tx_type::{
-    COMPACT_EXTENDED_IDENTIFIER_FLAG, COMPACT_IDENTIFIER_EIP1559, COMPACT_IDENTIFIER_EIP2930,
-    COMPACT_IDENTIFIER_LEGACY,
-};
-
-use alloc::vec::Vec;
 use reth_primitives_traits::{transaction::TransactionExt, SignedTransaction};
 use revm_primitives::{AuthorizationList, TxEnv};
 
@@ -594,19 +586,19 @@ impl reth_codecs::Compact for Transaction {
         use bytes::Buf;
 
         match identifier {
-            COMPACT_IDENTIFIER_LEGACY => {
+            reth_codecs::txtype::COMPACT_IDENTIFIER_LEGACY => {
                 let (tx, buf) = TxLegacy::from_compact(buf, buf.len());
                 (Self::Legacy(tx), buf)
             }
-            COMPACT_IDENTIFIER_EIP2930 => {
+            reth_codecs::txtype::COMPACT_IDENTIFIER_EIP2930 => {
                 let (tx, buf) = TxEip2930::from_compact(buf, buf.len());
                 (Self::Eip2930(tx), buf)
             }
-            COMPACT_IDENTIFIER_EIP1559 => {
+            reth_codecs::txtype::COMPACT_IDENTIFIER_EIP1559 => {
                 let (tx, buf) = TxEip1559::from_compact(buf, buf.len());
                 (Self::Eip1559(tx), buf)
             }
-            COMPACT_EXTENDED_IDENTIFIER_FLAG => {
+            reth_codecs::txtype::COMPACT_EXTENDED_IDENTIFIER_FLAG => {
                 // An identifier of 3 indicates that the transaction type did not fit into
                 // the backwards compatible 2 bit identifier, their transaction types are
                 // larger than 2 bits (eg. 4844 and Deposit Transactions). In this case,
@@ -623,7 +615,7 @@ impl reth_codecs::Compact for Transaction {
                         (Self::Eip7702(tx), buf)
                     }
                     #[cfg(feature = "optimism")]
-                    DEPOSIT_TX_TYPE_ID => {
+                    op_alloy_consensus::DEPOSIT_TX_TYPE_ID => {
                         let (tx, buf) = TxDeposit::from_compact(buf, buf.len());
                         (Self::Deposit(tx), buf)
                     }
