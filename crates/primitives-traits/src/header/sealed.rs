@@ -1,4 +1,4 @@
-use crate::InMemorySize;
+use crate::{InMemorySize, MaybeArbitrary};
 pub use alloy_consensus::Header;
 use alloy_consensus::Sealed;
 use alloy_eips::BlockNumHash;
@@ -156,9 +156,12 @@ impl<H> From<SealedHeader<H>> for Sealed<H> {
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
-impl<'a> arbitrary::Arbitrary<'a> for SealedHeader {
+impl<'a, H> arbitrary::Arbitrary<'a> for SealedHeader<H>
+where
+    H: MaybeArbitrary + Sealable,
+{
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let header = Header::arbitrary(u)?;
+        let header = H::arbitrary(u)?;
 
         Ok(Self::seal(header))
     }

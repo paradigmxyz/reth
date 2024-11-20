@@ -7,7 +7,7 @@ use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
 pub use reth_primitives_traits::test_utils::{generate_valid_header, valid_header_strategy};
-use reth_primitives_traits::{InMemorySize, MaybeArbitrary};
+use reth_primitives_traits::InMemorySize;
 use serde::{Deserialize, Serialize};
 
 /// Ethereum full block.
@@ -427,7 +427,7 @@ impl SealedBlock {
             return Err(GotExpected {
                 got: calculated_root,
                 expected: self.header.transactions_root,
-            });
+            })
         }
 
         Ok(())
@@ -467,7 +467,6 @@ impl<H, B> reth_primitives_traits::Block for SealedBlock<H, B>
 where
     H: reth_primitives_traits::BlockHeader + 'static,
     B: reth_primitives_traits::BlockBody + 'static,
-    SealedHeader<H>: MaybeArbitrary,
     Self: Serialize + for<'a> Deserialize<'a>,
 {
     type Header = H;
@@ -675,12 +674,11 @@ impl InMemorySize for BlockBody {
     /// Calculates a heuristic for the in-memory size of the [`BlockBody`].
     #[inline]
     fn size(&self) -> usize {
-        self.transactions.iter().map(TransactionSigned::size).sum::<usize>()
-            + self.transactions.capacity() * core::mem::size_of::<TransactionSigned>()
-            + self.ommers.iter().map(Header::size).sum::<usize>()
-            + self.ommers.capacity() * core::mem::size_of::<Header>()
-            + self
-                .withdrawals
+        self.transactions.iter().map(TransactionSigned::size).sum::<usize>() +
+            self.transactions.capacity() * core::mem::size_of::<TransactionSigned>() +
+            self.ommers.iter().map(Header::size).sum::<usize>() +
+            self.ommers.capacity() * core::mem::size_of::<Header>() +
+            self.withdrawals
                 .as_ref()
                 .map_or(core::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
     }
