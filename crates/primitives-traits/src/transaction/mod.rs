@@ -3,14 +3,12 @@
 pub mod execute;
 pub mod signed;
 
-use core::{any, fmt, hash::Hash};
+use core::{fmt, hash::Hash};
 
 use alloy_consensus::constants::{
     EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
     LEGACY_TX_TYPE_ID,
 };
-
-use alloy_consensus::{TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
 
 use alloy_primitives::B256;
 use reth_codecs::Compact;
