@@ -579,8 +579,9 @@ mod tests {
                     .map(|(k, v)| (B256::from(*k), v.present_value))
                     .collect();
 
-                accumulated_state
-                    .insert(*address, (convert_revm_to_reth_account(account), storage));
+                let entry = accumulated_state.entry(*address).or_default();
+                entry.0 = convert_revm_to_reth_account(account);
+                entry.1.extend(storage);
             }
         }
 
