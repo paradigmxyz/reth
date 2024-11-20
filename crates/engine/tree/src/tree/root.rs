@@ -157,7 +157,11 @@ pub(crate) struct StateRootTask<Factory> {
     updated_state: HashedPostState,
     /// Channels to retrieve proof calculation results from.
     pending_proofs: PendingProofs,
+    /// Prevents triggering state root calculation and returning the final result
+    /// without all the ongoing proof calculations received.
     pending_calculation: bool,
+    /// Prevents triggering state root calculation and returning the final result
+    /// without all the ongoing proof calculations received.
     pending_sparse_calculation: bool,
 }
 

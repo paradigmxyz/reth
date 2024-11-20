@@ -212,3 +212,18 @@ pub struct NextBlockEnvAttributes {
     /// The randomness value for the next block.
     pub prev_randao: B256,
 }
+
+/// Function hook that allows to modify a transaction environment.
+pub trait TxEnvOverrides {
+    /// Apply the overrides by modifying the given `TxEnv`.
+    fn apply(&mut self, env: &mut TxEnv);
+}
+
+impl<F> TxEnvOverrides for F
+where
+    F: FnMut(&mut TxEnv),
+{
+    fn apply(&mut self, env: &mut TxEnv) {
+        self(env)
+    }
+}
