@@ -55,7 +55,6 @@ tokio-util = { workspace = true, features = ["io", "codec"] }
 rand.workspace = true
 secp256k1 = { workspace = true, features = [
     "global-context",
-    "rand-std",
     "recovery",
 ] }
 

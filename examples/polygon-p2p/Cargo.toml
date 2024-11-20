@@ -10,7 +10,6 @@ license.workspace = true
 [dependencies]
 secp256k1 = { workspace = true, features = [
     "global-context",
-    "rand-std",
     "recovery",
 ] }
 tokio.workspace = true

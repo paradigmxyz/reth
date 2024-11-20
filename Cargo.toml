@@ -560,7 +560,7 @@ tower-http = "0.6"
 
 
 # p2p
-discv5 = "0.8.0"
+discv5 = "0.9.0"
 if-addrs = "0.13"
 
 # rpc
@@ -578,9 +578,9 @@ jsonwebtoken = "9"
 proptest-arbitrary-interop = "0.1.0"
 
 # crypto
-enr = { version = "0.12.1", default-features = false }
+enr = { version = "0.13.0", default-features = false }
 k256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
-secp256k1 = { version = "0.29", default-features = false, features = [
+secp256k1 = { version = "0.30", default-features = false, features = [
     "global-context",
     "recovery",
 ] }

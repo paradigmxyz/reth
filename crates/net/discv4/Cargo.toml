@@ -24,7 +24,6 @@ alloy-rlp = { workspace = true, features = ["derive"] }
 discv5.workspace = true
 secp256k1 = { workspace = true, features = [
     "global-context",
-    "rand-std",
     "recovery",
     "serde",
 ] }
