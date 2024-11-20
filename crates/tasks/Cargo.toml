@@ -15,7 +15,7 @@ workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync", "rt"] }
-tracing-futures = "0.2"
+tracing-futures.workspace = true
 futures-util.workspace = true
 
 # metrics
