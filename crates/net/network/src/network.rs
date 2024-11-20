@@ -1,11 +1,7 @@
-use std::{
-    net::SocketAddr,
-    sync::{
-        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
-        Arc,
-    },
+use crate::{
+    config::NetworkMode, protocol::RlpxSubProtocol, swarm::NetworkConnectionState,
+    transactions::TransactionsHandle, FetchClient,
 };
-
 use alloy_primitives::B256;
 use enr::Enr;
 use parking_lot::Mutex;
@@ -15,6 +11,7 @@ use reth_eth_wire::{
     DisconnectReason, EthNetworkPrimitives, NetworkPrimitives, NewBlock,
     NewPooledTransactionHashes, SharedTransactions,
 };
+use reth_ethereum_forks::Head;
 use reth_network_api::{
     test_utils::{PeersHandle, PeersHandleProvider},
     BlockDownloaderProvider, DiscoveryEvent, NetworkError, NetworkEvent,
@@ -24,19 +21,21 @@ use reth_network_api::{
 use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState, SyncStateProvider};
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::{PeerAddr, PeerKind, Reputation, ReputationChangeKind};
-use reth_primitives::{Head, TransactionSigned};
+use reth_primitives::TransactionSigned;
 use reth_tokio_util::{EventSender, EventStream};
 use secp256k1::SecretKey;
+use std::{
+    net::SocketAddr,
+    sync::{
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+        Arc,
+    },
+};
 use tokio::sync::{
     mpsc::{self, UnboundedSender},
     oneshot,
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
-
-use crate::{
-    config::NetworkMode, protocol::RlpxSubProtocol, swarm::NetworkConnectionState,
-    transactions::TransactionsHandle, FetchClient,
-};
 
 /// A _shareable_ network frontend. Used to interact with the network.
 ///
