@@ -471,10 +471,10 @@ alloy-transport-ipc = { version = "0.6.4", default-features = false }
 alloy-transport-ws = { version = "0.6.4", default-features = false }
 
 # op
-op-alloy-rpc-types = "0.6.5"
-op-alloy-rpc-types-engine = "0.6.5"
-op-alloy-network = "0.6.5"
-op-alloy-consensus = "0.6.5"
+op-alloy-rpc-types = "0.6.7"
+op-alloy-rpc-types-engine = "0.6.7"
+op-alloy-network = "0.6.7"
+op-alloy-consensus = "0.6.7"
 
 # misc
 aquamarine = "0.6"
