@@ -9,6 +9,7 @@ use auto_impl::auto_impl;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::Bytecode;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
+use reth_trie_db::StateCommitment;
 
 /// Type alias of boxed [`StateProvider`].
 pub type StateProviderBox = Box<dyn StateProvider>;
@@ -82,6 +83,12 @@ pub trait StateProvider:
     }
 }
 
+/// Trait implemented for database providers that can provide the [`StateCommitment`] type.
+pub trait StateCommitmentProvider {
+    /// The [`StateCommitment`] type that can be used to perform state commitment operations.
+    type StateCommitment: StateCommitment;
+}
+
 /// Trait implemented for database providers that can be converted into a historical state provider.
 pub trait TryIntoHistoricalStateProvider {
     /// Returns a historical [`StateProvider`] indexed by the given historic block number.
@@ -89,13 +96,6 @@ pub trait TryIntoHistoricalStateProvider {
         self,
         block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox>;
-}
-
-/// Trait implemented for database providers that can be converted into a latest state provider
-/// reference.
-pub trait AsLatestStateProviderRef {
-    /// Returns a [`StateProvider`] for the latest state.
-    fn latest<'a>(&'a self) -> Box<dyn 'a + StateProvider>;
 }
 
 /// Light wrapper that returns `StateProvider` implementations that correspond to the given

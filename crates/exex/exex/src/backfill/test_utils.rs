@@ -13,7 +13,7 @@ use reth_primitives::{
     Block, BlockBody, BlockWithSenders, Receipt, SealedBlockWithSenders, Transaction,
 };
 use reth_provider::{
-    providers::ProviderNodeTypes, AsLatestStateProviderRef, BlockWriter as _, ExecutionOutcome,
+    providers::ProviderNodeTypes, BlockWriter as _, ExecutionOutcome, LatestStateProviderRef,
     ProviderFactory,
 };
 use reth_revm::database::StateProviderDatabase;
@@ -63,7 +63,7 @@ where
 
     // Execute the block to produce a block execution output
     let mut block_execution_output = EthExecutorProvider::ethereum(chain_spec)
-        .executor(StateProviderDatabase::new(provider.latest()))
+        .executor(StateProviderDatabase::new(LatestStateProviderRef::new(&provider)))
         .execute(BlockExecutionInput { block, total_difficulty: U256::ZERO })?;
     block_execution_output.state.reverts.sort();
 
@@ -189,7 +189,7 @@ where
     let provider = provider_factory.provider()?;
 
     let executor = EthExecutorProvider::ethereum(chain_spec)
-        .batch_executor(StateProviderDatabase::new(provider.latest()));
+        .batch_executor(StateProviderDatabase::new(LatestStateProviderRef::new(&provider)));
 
     let mut execution_outcome = executor.execute_and_verify_batch(vec![
         (&block1, U256::ZERO).into(),

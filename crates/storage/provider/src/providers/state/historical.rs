@@ -15,7 +15,9 @@ use reth_db_api::{
     transaction::DbTx,
 };
 use reth_primitives::{Account, Bytecode};
-use reth_storage_api::{BlockNumReader, DBProvider, StateProofProvider, StorageRootProvider};
+use reth_storage_api::{
+    BlockNumReader, DBProvider, StateCommitmentProvider, StateProofProvider, StorageRootProvider,
+};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     proof::{Proof, StorageProof},
@@ -27,7 +29,7 @@ use reth_trie_db::{
     DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot,
     DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness,
 };
-use std::{fmt::Debug, marker::PhantomData};
+use std::fmt::Debug;
 
 /// State provider for a given block number which takes a tx reference.
 ///
@@ -41,15 +43,13 @@ use std::{fmt::Debug, marker::PhantomData};
 /// - [`tables::AccountChangeSets`]
 /// - [`tables::StorageChangeSets`]
 #[derive(Debug)]
-pub struct HistoricalStateProviderRef<'b, Provider, SC> {
+pub struct HistoricalStateProviderRef<'b, Provider> {
     /// Database provider
     provider: &'b Provider,
     /// Block number is main index for the history state of accounts and storages.
     block_number: BlockNumber,
     /// Lowest blocks at which different parts of the state are available.
     lowest_available_blocks: LowestAvailableBlocks,
-    /// Marker to associate the `StateCommitment` type with this provider.
-    _marker: PhantomData<SC>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -60,15 +60,12 @@ pub enum HistoryInfo {
     MaybeInPlainState,
 }
 
-impl<'b, Provider: DBProvider + BlockNumReader, SC> HistoricalStateProviderRef<'b, Provider, SC> {
+impl<'b, Provider: DBProvider + BlockNumReader + StateCommitmentProvider>
+    HistoricalStateProviderRef<'b, Provider>
+{
     /// Create new `StateProvider` for historical block number
     pub fn new(provider: &'b Provider, block_number: BlockNumber) -> Self {
-        Self {
-            provider,
-            block_number,
-            lowest_available_blocks: Default::default(),
-            _marker: PhantomData,
-        }
+        Self { provider, block_number, lowest_available_blocks: Default::default() }
     }
 
     /// Create new `StateProvider` for historical block number and lowest block numbers at which
@@ -78,7 +75,7 @@ impl<'b, Provider: DBProvider + BlockNumReader, SC> HistoricalStateProviderRef<'
         block_number: BlockNumber,
         lowest_available_blocks: LowestAvailableBlocks,
     ) -> Self {
-        Self { provider, block_number, lowest_available_blocks, _marker: PhantomData }
+        Self { provider, block_number, lowest_available_blocks }
     }
 
     /// Lookup an account in the `AccountsHistory` table
@@ -240,14 +237,14 @@ impl<'b, Provider: DBProvider + BlockNumReader, SC> HistoricalStateProviderRef<'
     }
 }
 
-impl<Provider: DBProvider + BlockNumReader, SC> HistoricalStateProviderRef<'_, Provider, SC> {
+impl<Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'_, Provider> {
     fn tx(&self) -> &Provider::Tx {
         self.provider.tx_ref()
     }
 }
 
-impl<Provider: DBProvider + BlockNumReader, SC: Send + Sync> AccountReader
-    for HistoricalStateProviderRef<'_, Provider, SC>
+impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> AccountReader
+    for HistoricalStateProviderRef<'_, Provider>
 {
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
@@ -270,8 +267,8 @@ impl<Provider: DBProvider + BlockNumReader, SC: Send + Sync> AccountReader
     }
 }
 
-impl<Provider: DBProvider + BlockNumReader + BlockHashReader, SC: Send + Sync> BlockHashReader
-    for HistoricalStateProviderRef<'_, Provider, SC>
+impl<Provider: DBProvider + BlockNumReader + BlockHashReader> BlockHashReader
+    for HistoricalStateProviderRef<'_, Provider>
 {
     /// Get block hash by number.
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
@@ -287,8 +284,8 @@ impl<Provider: DBProvider + BlockNumReader + BlockHashReader, SC: Send + Sync> B
     }
 }
 
-impl<Provider: DBProvider + BlockNumReader, SC: Send + Sync> StateRootProvider
-    for HistoricalStateProviderRef<'_, Provider, SC>
+impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StateRootProvider
+    for HistoricalStateProviderRef<'_, Provider>
 {
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         let mut revert_state = self.revert_state()?;
@@ -323,8 +320,8 @@ impl<Provider: DBProvider + BlockNumReader, SC: Send + Sync> StateRootProvider
     }
 }
 
-impl<Provider: DBProvider + BlockNumReader, SC: Send + Sync> StorageRootProvider
-    for HistoricalStateProviderRef<'_, Provider, SC>
+impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StorageRootProvider
+    for HistoricalStateProviderRef<'_, Provider>
 {
     fn storage_root(
         &self,
@@ -350,8 +347,8 @@ impl<Provider: DBProvider + BlockNumReader, SC: Send + Sync> StorageRootProvider
     }
 }
 
-impl<Provider: DBProvider + BlockNumReader, SC: Send + Sync> StateProofProvider
-    for HistoricalStateProviderRef<'_, Provider, SC>
+impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StateProofProvider
+    for HistoricalStateProviderRef<'_, Provider>
 {
     /// Get account and storage proofs.
     fn proof(
@@ -384,8 +381,8 @@ impl<Provider: DBProvider + BlockNumReader, SC: Send + Sync> StateProofProvider
     }
 }
 
-impl<Provider: DBProvider + BlockNumReader + BlockHashReader, SC: Send + Sync> StateProvider
-    for HistoricalStateProviderRef<'_, Provider, SC>
+impl<Provider: DBProvider + BlockNumReader + BlockHashReader + StateCommitmentProvider>
+    StateProvider for HistoricalStateProviderRef<'_, Provider>
 {
     /// Get storage.
     fn storage(
@@ -426,26 +423,21 @@ impl<Provider: DBProvider + BlockNumReader + BlockHashReader, SC: Send + Sync> S
 /// State provider for a given block number.
 /// For more detailed description, see [`HistoricalStateProviderRef`].
 #[derive(Debug)]
-pub struct HistoricalStateProvider<Provider, SC> {
+pub struct HistoricalStateProvider<Provider> {
     /// Database provider.
     provider: Provider,
     /// State at the block number is the main indexer of the state.
     block_number: BlockNumber,
     /// Lowest blocks at which different parts of the state are available.
     lowest_available_blocks: LowestAvailableBlocks,
-    /// Marker to associate the `StateCommitment` type with this provider.
-    _marker: PhantomData<SC>,
 }
 
-impl<Provider: DBProvider + BlockNumReader, SC> HistoricalStateProvider<Provider, SC> {
+impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider>
+    HistoricalStateProvider<Provider>
+{
     /// Create new `StateProvider` for historical block number
     pub fn new(provider: Provider, block_number: BlockNumber) -> Self {
-        Self {
-            provider,
-            block_number,
-            lowest_available_blocks: Default::default(),
-            _marker: PhantomData,
-        }
+        Self { provider, block_number, lowest_available_blocks: Default::default() }
     }
 
     /// Set the lowest block number at which the account history is available.
@@ -468,7 +460,7 @@ impl<Provider: DBProvider + BlockNumReader, SC> HistoricalStateProvider<Provider
 
     /// Returns a new provider that takes the `TX` as reference
     #[inline(always)]
-    const fn as_ref(&self) -> HistoricalStateProviderRef<'_, Provider, SC> {
+    const fn as_ref(&self) -> HistoricalStateProviderRef<'_, Provider> {
         HistoricalStateProviderRef::new_with_lowest_available_blocks(
             &self.provider,
             self.block_number,
@@ -478,7 +470,7 @@ impl<Provider: DBProvider + BlockNumReader, SC> HistoricalStateProvider<Provider
 }
 
 // Delegates all provider impls to [HistoricalStateProviderRef]
-delegate_provider_impls!(HistoricalStateProvider<Provider, SC> where [Provider: DBProvider + BlockNumReader + BlockHashReader, SC: Send + Sync]);
+delegate_provider_impls!(HistoricalStateProvider<Provider> where [Provider: DBProvider + BlockNumReader + BlockHashReader + StateCommitmentProvider]);
 
 /// Lowest blocks at which different parts of the state are available.
 /// They may be [Some] if pruning is enabled.
@@ -522,12 +514,11 @@ mod tests {
         transaction::{DbTx, DbTxMut},
     };
     use reth_primitives::{Account, StorageEntry};
-    use reth_storage_api::{BlockHashReader, BlockNumReader, DBProvider, DatabaseProviderFactory};
+    use reth_storage_api::{
+        BlockHashReader, BlockNumReader, DBProvider, DatabaseProviderFactory,
+        StateCommitmentProvider,
+    };
     use reth_storage_errors::provider::ProviderError;
-    use reth_trie_db::MerklePatriciaTrie;
-
-    type TestHistoricalStateProviderRef<'a, TX> =
-        HistoricalStateProviderRef<'a, TX, MerklePatriciaTrie>;
 
     const ADDRESS: Address = address!("0000000000000000000000000000000000000001");
     const HIGHER_ADDRESS: Address = address!("0000000000000000000000000000000000000005");
@@ -536,10 +527,9 @@ mod tests {
     const fn assert_state_provider<T: StateProvider>() {}
     #[allow(dead_code)]
     const fn assert_historical_state_provider<
-        T: DBProvider + BlockNumReader + BlockHashReader,
-        SC: Send + Sync,
+        T: DBProvider + BlockNumReader + BlockHashReader + StateCommitmentProvider,
     >() {
-        assert_state_provider::<HistoricalStateProvider<T, SC>>();
+        assert_state_provider::<HistoricalStateProvider<T>>();
     }
 
     #[test]
@@ -608,46 +598,43 @@ mod tests {
         let db = factory.provider().unwrap();
 
         // run
-        assert_eq!(TestHistoricalStateProviderRef::new(&db, 1).basic_account(ADDRESS), Ok(None));
+        assert_eq!(HistoricalStateProviderRef::new(&db, 1).basic_account(ADDRESS), Ok(None));
         assert_eq!(
-            TestHistoricalStateProviderRef::new(&db, 2).basic_account(ADDRESS),
+            HistoricalStateProviderRef::new(&db, 2).basic_account(ADDRESS),
             Ok(Some(acc_at3))
         );
         assert_eq!(
-            TestHistoricalStateProviderRef::new(&db, 3).basic_account(ADDRESS),
+            HistoricalStateProviderRef::new(&db, 3).basic_account(ADDRESS),
             Ok(Some(acc_at3))
         );
         assert_eq!(
-            TestHistoricalStateProviderRef::new(&db, 4).basic_account(ADDRESS),
+            HistoricalStateProviderRef::new(&db, 4).basic_account(ADDRESS),
             Ok(Some(acc_at7))
         );
         assert_eq!(
-            TestHistoricalStateProviderRef::new(&db, 7).basic_account(ADDRESS),
+            HistoricalStateProviderRef::new(&db, 7).basic_account(ADDRESS),
             Ok(Some(acc_at7))
         );
         assert_eq!(
-            TestHistoricalStateProviderRef::new(&db, 9).basic_account(ADDRESS),
+            HistoricalStateProviderRef::new(&db, 9).basic_account(ADDRESS),
             Ok(Some(acc_at10))
         );
         assert_eq!(
-            TestHistoricalStateProviderRef::new(&db, 10).basic_account(ADDRESS),
+            HistoricalStateProviderRef::new(&db, 10).basic_account(ADDRESS),
             Ok(Some(acc_at10))
         );
         assert_eq!(
-            TestHistoricalStateProviderRef::new(&db, 11).basic_account(ADDRESS),
+            HistoricalStateProviderRef::new(&db, 11).basic_account(ADDRESS),
             Ok(Some(acc_at15))
         );
         assert_eq!(
-            TestHistoricalStateProviderRef::new(&db, 16).basic_account(ADDRESS),
+            HistoricalStateProviderRef::new(&db, 16).basic_account(ADDRESS),
             Ok(Some(acc_plain))
         );
 
+        assert_eq!(HistoricalStateProviderRef::new(&db, 1).basic_account(HIGHER_ADDRESS), Ok(None));
         assert_eq!(
-            TestHistoricalStateProviderRef::new(&db, 1).basic_account(HIGHER_ADDRESS),
-            Ok(None)
-        );
-        assert_eq!(
-            TestHistoricalStateProviderRef::new(&db, 1000).basic_account(HIGHER_ADDRESS),
+            HistoricalStateProviderRef::new(&db, 1000).basic_account(HIGHER_ADDRESS),
             Ok(Some(higher_acc_plain))
         );
     }
@@ -705,41 +692,41 @@ mod tests {
         let db = factory.provider().unwrap();
 
         // run
-        assert_eq!(TestHistoricalStateProviderRef::new(&db, 0).storage(ADDRESS, STORAGE), Ok(None));
+        assert_eq!(HistoricalStateProviderRef::new(&db, 0).storage(ADDRESS, STORAGE), Ok(None));
         assert_eq!(
-            TestHistoricalStateProviderRef::new(&db, 3).storage(ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 3).storage(ADDRESS, STORAGE),
             Ok(Some(U256::ZERO))
         );
         assert_eq!(
-            TestHistoricalStateProviderRef::new(&db, 4).storage(ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 4).storage(ADDRESS, STORAGE),
             Ok(Some(entry_at7.value))
         );
         assert_eq!(
-            TestHistoricalStateProviderRef::new(&db, 7).storage(ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 7).storage(ADDRESS, STORAGE),
             Ok(Some(entry_at7.value))
         );
         assert_eq!(
-            TestHistoricalStateProviderRef::new(&db, 9).storage(ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 9).storage(ADDRESS, STORAGE),
             Ok(Some(entry_at10.value))
         );
         assert_eq!(
-            TestHistoricalStateProviderRef::new(&db, 10).storage(ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 10).storage(ADDRESS, STORAGE),
             Ok(Some(entry_at10.value))
         );
         assert_eq!(
-            TestHistoricalStateProviderRef::new(&db, 11).storage(ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 11).storage(ADDRESS, STORAGE),
             Ok(Some(entry_at15.value))
         );
         assert_eq!(
-            TestHistoricalStateProviderRef::new(&db, 16).storage(ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 16).storage(ADDRESS, STORAGE),
             Ok(Some(entry_plain.value))
         );
         assert_eq!(
-            TestHistoricalStateProviderRef::new(&db, 1).storage(HIGHER_ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 1).storage(HIGHER_ADDRESS, STORAGE),
             Ok(None)
         );
         assert_eq!(
-            TestHistoricalStateProviderRef::new(&db, 1000).storage(HIGHER_ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 1000).storage(HIGHER_ADDRESS, STORAGE),
             Ok(Some(higher_entry_plain.value))
         );
     }
@@ -751,7 +738,7 @@ mod tests {
 
         // provider block_number < lowest available block number,
         // i.e. state at provider block is pruned
-        let provider = TestHistoricalStateProviderRef::new_with_lowest_available_blocks(
+        let provider = HistoricalStateProviderRef::new_with_lowest_available_blocks(
             &db,
             2,
             LowestAvailableBlocks {
@@ -770,7 +757,7 @@ mod tests {
 
         // provider block_number == lowest available block number,
         // i.e. state at provider block is available
-        let provider = TestHistoricalStateProviderRef::new_with_lowest_available_blocks(
+        let provider = HistoricalStateProviderRef::new_with_lowest_available_blocks(
             &db,
             2,
             LowestAvailableBlocks {
@@ -786,7 +773,7 @@ mod tests {
 
         // provider block_number == lowest available block number,
         // i.e. state at provider block is available
-        let provider = TestHistoricalStateProviderRef::new_with_lowest_available_blocks(
+        let provider = HistoricalStateProviderRef::new_with_lowest_available_blocks(
             &db,
             2,
             LowestAvailableBlocks {
