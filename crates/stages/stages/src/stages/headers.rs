@@ -1,7 +1,7 @@
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
 use futures_util::StreamExt;
 use reth_config::config::EtlConfig;
-use reth_consensus::Consensus;
+use reth_consensus::HeaderValidator;
 use reth_db::{tables, transaction::DbTx, RawKey, RawTable, RawValue};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -48,7 +48,7 @@ pub struct HeaderStage<Provider, Downloader: HeaderDownloader> {
     /// The tip for the stage.
     tip: watch::Receiver<B256>,
     /// Consensus client implementation
-    consensus: Arc<dyn Consensus>,
+    consensus: Arc<dyn HeaderValidator<Downloader::Header>>,
     /// Current sync gap.
     sync_gap: Option<HeaderSyncGap>,
     /// ETL collector with `HeaderHash` -> `BlockNumber`
@@ -63,14 +63,14 @@ pub struct HeaderStage<Provider, Downloader: HeaderDownloader> {
 
 impl<Provider, Downloader> HeaderStage<Provider, Downloader>
 where
-    Downloader: HeaderDownloader,
+    Downloader: HeaderDownloader<Header = alloy_consensus::Header>,
 {
     /// Create a new header stage
     pub fn new(
         database: Provider,
         downloader: Downloader,
         tip: watch::Receiver<B256>,
-        consensus: Arc<dyn Consensus>,
+        consensus: Arc<dyn HeaderValidator<Downloader::Header>>,
         etl_config: EtlConfig,
     ) -> Self {
         Self {

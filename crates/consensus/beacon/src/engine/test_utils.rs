@@ -370,7 +370,7 @@ where
                 .with_tip_sender(tip_tx),
             TestPipelineConfig::Real => {
                 let header_downloader = ReverseHeadersDownloaderBuilder::default()
-                    .build(client.clone(), consensus.clone())
+                    .build(client.clone(), consensus.clone().as_header_validator())
                     .into_task();
 
                 let body_downloader = BodiesDownloaderBuilder::default()
