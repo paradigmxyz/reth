@@ -55,14 +55,14 @@ where
         let EthCallBundle {
             txs,
             block_number,
+            coinbase,
             state_block_number,
+            timeout: _,
             timestamp,
             gas_limit,
             difficulty,
             base_fee,
         } = bundle;
-        // TODO: pull from bundle args once we update alloy (or copy/paste struct for now)
-        let coinbase: Option<Address> = None;
         if txs.is_empty() {
             return Err(EthApiError::InvalidParams(
                 EthBundleError::EmptyBundleTransactions.to_string(),
