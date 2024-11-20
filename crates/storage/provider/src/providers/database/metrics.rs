@@ -57,7 +57,6 @@ pub(crate) enum Action {
     InsertHeaderNumbers,
     InsertHeaderTerminalDifficulties,
     InsertTransactionSenders,
-    InsertTransactions,
     InsertTransactionHashNumbers,
     InsertBlockBodyIndices,
     InsertTransactionBlocks,
@@ -95,8 +94,6 @@ struct DatabaseProviderMetrics {
     insert_header_td: Histogram,
     /// Duration of insert tx senders
     insert_tx_senders: Histogram,
-    /// Duration of insert transactions
-    insert_transactions: Histogram,
     /// Duration of insert transaction hash numbers
     insert_tx_hash_numbers: Histogram,
     /// Duration of insert block body indices
@@ -126,7 +123,6 @@ impl DatabaseProviderMetrics {
             Action::InsertHeaderNumbers => self.insert_header_numbers.record(duration),
             Action::InsertHeaderTerminalDifficulties => self.insert_header_td.record(duration),
             Action::InsertTransactionSenders => self.insert_tx_senders.record(duration),
-            Action::InsertTransactions => self.insert_transactions.record(duration),
             Action::InsertTransactionHashNumbers => self.insert_tx_hash_numbers.record(duration),
             Action::InsertBlockBodyIndices => self.insert_block_body_indices.record(duration),
             Action::InsertTransactionBlocks => self.insert_tx_blocks.record(duration),

@@ -76,7 +76,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::watch;
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, trace};
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
 pub type DatabaseProviderRO<DB, N> = DatabaseProvider<<DB as Database>::TX, N>;
@@ -3277,13 +3277,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: ProviderNodeTypes + 'static> BlockWriter
                 durations_recorder.record_relative(metrics::Action::InsertTransactionBlocks);
             }
 
-            let mut transactions_elapsed = Duration::default();
-
             // write transactions
             for transaction in body.transactions() {
-                let hash = transaction.tx_hash();
-                let start = Instant::now();
-
                 if let Some(writer) = tx_static_writer.as_mut() {
                     writer.append_transaction(next_tx_num, transaction)?;
                 }
@@ -3291,25 +3286,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: ProviderNodeTypes + 'static> BlockWriter
                     cursor.append(next_tx_num, transaction.clone())?;
                 }
 
-                let elapsed = start.elapsed();
-                if elapsed > Duration::from_secs(1) {
-                    warn!(
-                        target: "providers::db",
-                        ?block_number,
-                        tx_num = %next_tx_num,
-                        hash = %hash,
-                        ?elapsed,
-                        "Transaction insertion took too long"
-                    );
-                }
-                transactions_elapsed += elapsed;
-
                 // Increment transaction id for each transaction.
                 next_tx_num += 1;
             }
-
-            durations_recorder
-                .record_duration(metrics::Action::InsertTransactions, transactions_elapsed);
 
             debug!(
                 target: "providers::db",
