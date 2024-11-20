@@ -14,6 +14,7 @@ where
 {
     let encoded_accounts = accounts.into_iter().map(|(address, (account, storage))| {
         let storage_root = storage_root(storage);
+        println!("[TEST] account: {:?}, storage_root: {:?}", keccak256(address), storage_root);
         let account = TrieAccount::from((account, storage_root));
         (address, alloy_rlp::encode(account))
     });

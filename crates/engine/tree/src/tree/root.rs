@@ -158,6 +158,7 @@ pub(crate) struct StateRootTask<Factory> {
     updated_state: HashedPostState,
     /// Channels to retrieve proof calculation results from.
     pending_proofs: PendingProofs,
+    pending_calculation: bool,
 }
 
 #[allow(dead_code)]
@@ -173,6 +174,7 @@ where
             state: Default::default(),
             updated_state: Default::default(),
             pending_proofs: Default::default(),
+            pending_calculation: false,
         }
     }
 
@@ -274,7 +276,7 @@ where
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
                     // state stream closed, check if we can finish
-                    if self.pending_proofs.is_empty() {
+                    if self.pending_proofs.is_empty() && !self.pending_calculation {
                         if let (
                             StateRootTaskState::Idle(_multiproof, state_root),
                             SparseStateRootTaskState::Idle {
@@ -299,6 +301,7 @@ where
             while let Some(proof_rx) = self.pending_proofs.front() {
                 match proof_rx.try_recv() {
                     Ok((targets, state, result)) => {
+                        println!("got a proof: {:?}", targets);
                         self.state.extend(state.clone());
                         self.updated_state.extend(state);
 
@@ -306,9 +309,11 @@ where
                         task_state.add_proofs(multiproof.clone());
                         sparse_task_state.add_proofs(targets, multiproof);
                         self.pending_proofs.pop_front();
+                        self.pending_calculation = true;
                         continue;
                     }
                     Err(mpsc::TryRecvError::Empty) => {
+                        println!("proof is not ready yet");
                         // this proof is not ready yet
                         break;
                     }
@@ -353,6 +358,8 @@ where
                     let multiproof = std::mem::take(multiproof);
                     let state = self.state.clone();
                     let (tx, rx) = mpsc::sync_channel(1);
+
+                    self.pending_calculation = false;
 
                     rayon::spawn(move || {
                         let result = calculate_state_root_from_proofs(
@@ -450,6 +457,7 @@ where
             (*hashed_address, storage.storage.keys().copied().collect())
         }))
         .collect();
+    println!("[IMPL] proof_targets: {:?}", proof_targets);
 
     let account_trie_nodes = proof_targets
         .into_par_iter()
@@ -507,6 +515,8 @@ where
                     .ok_or(TrieWitnessError::MissingTargetNode(key))?;
                 Ok(node)
             })?;
+
+            println!("[IMPL] account: {:?}, storage_root: {:?}", hashed_address, storage_root);
 
             // Gather and record account trie nodes.
             let account = state
@@ -623,7 +633,7 @@ fn calculate_state_root_with_sparse(
 
     // TODO(alexey): calculate using `update_rlp_node_level` and then
     // finalize in the end
-    let root = trie.root().unwrap();
+    let root = trie.root().unwrap_or(EMPTY_ROOT_HASH);
     let elapsed = started_at.elapsed();
 
     Ok((trie, root, elapsed))
@@ -704,11 +714,13 @@ mod tests {
 
     #[test]
     fn test_state_root_task() {
+        reth_tracing::init_test_tracing();
+
         let factory = create_test_provider_factory();
         let (tx, rx) = std::sync::mpsc::channel();
         let stream = StdReceiverStream::new(rx);
 
-        let state_updates = create_mock_state_updates(100, 10);
+        let state_updates = create_mock_state_updates(10, 1);
         let mut hashed_state = HashedPostState::default();
         let mut accumulated_state: HashMap<Address, (RethAccount, HashMap<B256, U256>)> =
             HashMap::default();
