@@ -9,6 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 mod checkpoint;
+mod event;
 mod limiter;
 mod mode;
 mod pruner;
@@ -16,6 +17,7 @@ mod segment;
 mod target;
 
 pub use checkpoint::PruneCheckpoint;
+pub use event::PrunerEvent;
 pub use limiter::PruneLimiter;
 pub use mode::PruneMode;
 pub use pruner::{
