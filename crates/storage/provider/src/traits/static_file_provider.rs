@@ -2,7 +2,7 @@ use reth_node_types::NodePrimitives;
 
 use crate::providers::StaticFileProvider;
 
-/// Static file provider factory.
+/// A factory trait for creating instances of a [`StaticFileProvider`].
 pub trait StaticFileProviderFactory {
     /// The network primitives type [`StaticFileProvider`] is using.
     type Primitives: NodePrimitives;

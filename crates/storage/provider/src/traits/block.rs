@@ -30,7 +30,9 @@ impl StorageLocation {
     }
 }
 
-/// BlockExecution Writer
+/// A trait for managing the execution results of blocks in a blockchain.
+/// Extends the [`BlockWriter`] trait to provide additional functionality for
+/// handling ranges of blocks and their execution results.
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait BlockExecutionWriter: BlockWriter + Send + Sync {
     /// Take range of blocks and its execution result
@@ -53,7 +55,7 @@ pub trait StateReader: Send + Sync {
     fn get_state(&self, block: BlockNumber) -> ProviderResult<Option<ExecutionOutcome>>;
 }
 
-/// Block Writer
+/// A trait that defines methods for writing block data to the database.
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait BlockWriter: Send + Sync {
     /// The body this writer can write.
@@ -84,13 +86,17 @@ pub trait BlockWriter: Send + Sync {
     /// Appends a batch of sealed blocks to the blockchain, including sender information, and
     /// updates the post-state.
     ///
-    /// Inserts the blocks into the database and updates the state with
-    /// provided `BundleState`.
+    /// This method inserts the blocks into the database and updates the state using
+    /// the provided execution outcome, hashed post-state, and trie updates.
     ///
     /// # Parameters
     ///
-    /// - `blocks`: Vector of `SealedBlockWithSenders` instances to append.
-    /// - `state`: Post-state information to update after appending.
+    /// - `blocks`: A vector of `SealedBlockWithSenders` instances representing the blocks to
+    ///   append, including their headers, bodies, and sender information.
+    /// - `execution_outcome`: The result of executing the appended blocks, used to update the
+    ///   execution state.
+    /// - `hashed_state`: The hashed representation of the post-state after applying the blocks.
+    /// - `trie_updates`: State trie updates to be applied to reflect the new post-state.
     ///
     /// # Returns
     ///

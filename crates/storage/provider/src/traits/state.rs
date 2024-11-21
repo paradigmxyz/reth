@@ -19,7 +19,7 @@ pub trait StateWriter {
     ) -> ProviderResult<()>;
 }
 
-/// A trait specifically for writing state changes or reverts
+/// A trait specifically for writing state changes or reverts.
 pub trait StateChangeWriter {
     /// Write state reverts to the database.
     ///
@@ -33,7 +33,7 @@ pub trait StateChangeWriter {
     /// Write state changes to the database.
     fn write_state_changes(&self, changes: StateChangeset) -> ProviderResult<()>;
 
-    /// Writes the hashed state changes to the database
+    /// Writes the hashed state changes to the database.
     fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()>;
 
     /// Remove the block range of state.
