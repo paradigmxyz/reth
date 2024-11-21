@@ -98,7 +98,6 @@ serde = [
 ]
 reth-codec = [
 	"dep:reth-codecs",
-	"dep:serde",
 	"dep:modular-bitfield",
 	"dep:byteorder",
 ]
