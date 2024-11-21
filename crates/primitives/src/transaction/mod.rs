@@ -1131,7 +1131,7 @@ impl TransactionSigned {
 
     /// Transaction hash. Used to identify transaction.
     pub fn hash(&self) -> TxHash {
-        *self.hash.get_or_init(|| self.recalculate_hash())
+        *self.hash_ref()
     }
 
     /// Reference to transaction hash. Used to identify transaction.
