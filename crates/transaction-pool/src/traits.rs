@@ -946,6 +946,11 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
         pooled.into()
     }
 
+    /// Tries to convert the `Consensus` type into the `Pooled` type.
+    fn try_consensus_into_pooled(
+        tx: Self::Consensus,
+    ) -> Result<Self::Pooled, Self::TryFromConsensusError>;
+
     /// Hash of the transaction.
     fn hash(&self) -> &TxHash;
 
@@ -1206,6 +1211,12 @@ impl PoolTransaction for EthPooledTransaction {
     type Consensus = TransactionSignedEcRecovered;
 
     type Pooled = PooledTransactionsElementEcRecovered;
+
+    fn try_consensus_into_pooled(
+        tx: Self::Consensus,
+    ) -> Result<Self::Pooled, Self::TryFromConsensusError> {
+        Self::Pooled::try_from(tx).map_err(|_| TryFromRecoveredTransactionError::BlobSidecarMissing)
+    }
 
     /// Returns hash of the transaction.
     fn hash(&self) -> &TxHash {
