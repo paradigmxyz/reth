@@ -142,10 +142,8 @@ where
             let l1_block_info = self.block_info.l1_block_info.read().clone();
 
             let mut encoded = Vec::with_capacity(valid_tx.transaction().encoded_length());
-            <<Tx as reth_transaction_pool::PoolTransaction>::Consensus as Into<
-                TransactionSigned,
-            >>::into(valid_tx.transaction().clone().into_consensus())
-            .encode_2718(&mut encoded);
+            let tx: TransactionSigned = valid_tx.transaction().clone().into_consensus().into();
+            tx.encode_2718(&mut encoded);
 
             let cost_addition = match l1_block_info.l1_tx_data_fee(
                 &self.chain_spec(),
