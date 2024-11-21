@@ -25,8 +25,7 @@ use reth_network_p2p::{headers::client::HeadersClient, EthBlockClient};
 use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_ethereum::EthExecutorProvider;
 use reth_provider::{
-    providers::ProviderNodeTypes, BlockExecutionWriter, ChainSpecProvider, ProviderFactory,
-    StageCheckpointReader,
+    providers::ProviderNodeTypes, ChainSpecProvider, ProviderFactory, StageCheckpointReader,
 };
 use reth_prune::PruneModes;
 use reth_stages::{
@@ -230,11 +229,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             trace!(target: "reth::cli", from = next_block, to = target_block, tip = ?target_block_hash, ?result, "Pipeline finished");
 
             // Unwind the pipeline without committing.
-            {
-                provider_factory
-                    .provider_rw()?
-                    .take_block_and_execution_range(next_block..=target_block)?;
-            }
+            provider_factory.provider_rw()?.unwind_trie_state_range(next_block..=target_block)?;
 
             // Update latest block
             current_max_block = target_block;

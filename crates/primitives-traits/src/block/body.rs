@@ -29,7 +29,6 @@ pub trait BlockBody:
     + MaybeArbitrary
 {
     /// Ordered list of signed transactions as committed in block.
-    // todo: requires trait for signed transaction
     type Transaction: Transaction;
 
     /// Returns reference to transactions in block.

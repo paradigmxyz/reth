@@ -13,7 +13,7 @@ workspace = true
 
 [dependencies]
 # reth
-reth-codecs.workspace = true
+reth-codecs = { workspace = true, optional = true }
 
 # ethereum
 alloy-consensus.workspace = true
@@ -24,16 +24,16 @@ alloy-rlp.workspace = true
 revm-primitives.workspace = true
 
 # misc
-byteorder = "1"
+byteorder = { workspace = true, optional = true }
+bytes.workspace = true
 derive_more.workspace = true
 roaring = "0.10.2"
 serde_with = { workspace = true, optional = true }
 auto_impl.workspace = true
 
 # required by reth-codecs
-bytes.workspace = true
-modular-bitfield.workspace = true
-serde.workspace = true
+modular-bitfield = { workspace = true, optional = true }
+serde = { workspace = true, optional = true}
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
@@ -50,6 +50,8 @@ proptest.workspace = true
 rand.workspace = true
 serde_json.workspace = true
 test-fuzz.workspace = true
+modular-bitfield.workspace = true
+serde.workspace = true
 
 [features]
 default = ["std"]
@@ -59,11 +61,11 @@ std = [
 	"alloy-genesis/std",
 	"alloy-primitives/std",
 	"revm-primitives/std",
-	"serde/std"
+	"serde?/std"
 ]
 test-utils = [
 	"arbitrary",
-	"reth-codecs/test-utils"
+	"reth-codecs?/test-utils"
 ]
 arbitrary = [
 	"std",
@@ -74,7 +76,7 @@ arbitrary = [
 	"dep:proptest-arbitrary-interop",
 	"alloy-eips/arbitrary",
 	"revm-primitives/arbitrary",
-	"reth-codecs/arbitrary"
+	"reth-codecs?/arbitrary"
 ]
 serde-bincode-compat = [
 	"serde",
@@ -83,13 +85,19 @@ serde-bincode-compat = [
 	"alloy-eips/serde-bincode-compat"
 ]
 serde = [
+	"dep:serde",
 	"alloy-consensus/serde",
     "alloy-eips/serde",
     "alloy-primitives/serde",
     "bytes/serde",
     "rand/serde",
-    "reth-codecs/serde",
+    "reth-codecs?/serde",
     "revm-primitives/serde",
     "roaring/serde",
 	"revm-primitives/serde",
+]
+reth-codec = [
+	"dep:reth-codecs",
+	"dep:modular-bitfield",
+	"dep:byteorder",
 ]
