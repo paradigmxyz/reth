@@ -21,6 +21,8 @@ use once_cell as _;
 use once_cell::sync::Lazy as LazyLock;
 #[cfg(feature = "optimism")]
 use op_alloy_consensus::DepositTransaction;
+#[cfg(feature = "optimism")]
+use op_alloy_consensus::TxDeposit;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use revm_primitives::{AuthorizationList, TxEnv};
