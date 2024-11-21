@@ -2728,7 +2728,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> StateReader for DatabaseProvider<TX, N> {
 impl<TX: DbTxMut + DbTx + 'static, N: ProviderNodeTypes + 'static> BlockExecutionWriter
     for DatabaseProvider<TX, N>
 {
-    fn take_block_and_execution_range_above(
+    fn take_block_and_execution_above(
         &self,
         block: BlockNumber,
         remove_transactions_from: StorageLocation,
@@ -2752,7 +2752,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: ProviderNodeTypes + 'static> BlockExecutio
         Ok(Chain::new(blocks, execution_state, None))
     }
 
-    fn remove_block_and_execution_range_above(
+    fn remove_block_and_execution_above(
         &self,
         block: BlockNumber,
         remove_transactions_from: StorageLocation,

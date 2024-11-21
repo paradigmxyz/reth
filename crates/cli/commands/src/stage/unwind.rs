@@ -90,7 +90,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             let provider = provider_factory.provider_rw()?;
 
             provider
-                .remove_block_and_execution_range_above(target, StorageLocation::Both)
+                .remove_block_and_execution_above(target, StorageLocation::Both)
                 .map_err(|err| eyre::eyre!("Transaction error on unwind: {err}"))?;
 
             // update finalized block if needed
@@ -177,9 +177,7 @@ enum Subcommands {
 }
 
 impl Subcommands {
-    /// Returns the block range to unwind.
-    ///
-    /// This returns an inclusive range: [target..=latest]
+    /// Returns the block to unwind to. The returned block will stay in database.
     fn unwind_target<N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>>(
         &self,
         factory: ProviderFactory<N>,
