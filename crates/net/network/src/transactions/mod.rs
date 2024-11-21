@@ -1617,7 +1617,7 @@ impl<T: SignedTransaction> FullTransactionsBuilder<T> {
         //  via `GetPooledTransactions`.
         //
         // From: <https://eips.ethereum.org/EIPS/eip-4844#networking>
-        if transaction.transaction.transaction().tx_type().is_broadcastable_in_full() {
+        if !transaction.transaction.transaction().tx_type().is_broadcastable_in_full() {
             self.pooled.push(transaction);
             return
         }
