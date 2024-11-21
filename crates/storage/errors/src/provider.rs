@@ -1,6 +1,6 @@
 use crate::{db::DatabaseError, lockfile::StorageLockError, writer::UnifiedStorageWriterError};
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{Address, BlockHash, BlockNumber, TxNumber, B256, U256};
+use alloy_primitives::{Address, BlockHash, BlockNumber, TxNumber, B256};
 use derive_more::Display;
 use reth_primitives::{GotExpected, StaticFileSegment, TxHashOrNumber};
 
@@ -81,15 +81,6 @@ pub enum ProviderError {
     /// Unable to find the safe block.
     #[display("safe block does not exist")]
     SafeBlockNotFound,
-    /// Mismatch of sender and transaction.
-    #[display("mismatch of sender and transaction id {tx_id}")]
-    MismatchOfTransactionAndSenderId {
-        /// The transaction ID.
-        tx_id: TxNumber,
-    },
-    /// Block body wrong transaction count.
-    #[display("stored block indices does not match transaction count")]
-    BlockBodyTransactionCount,
     /// Thrown when the cache service task dropped.
     #[display("cache service task stopped")]
     CacheServiceUnavailable,
@@ -139,9 +130,6 @@ pub enum ProviderError {
     /// Static File Provider was initialized as read-only.
     #[display("cannot get a writer on a read-only environment.")]
     ReadOnlyStaticFileAccess,
-    /// Error encountered when the block number conversion from U256 to u64 causes an overflow.
-    #[display("failed to convert block number U256 to u64: {_0}")]
-    BlockNumberOverflow(U256),
     /// Consistent view error.
     #[display("failed to initialize consistent view: {_0}")]
     ConsistentView(Box<ConsistentViewError>),
