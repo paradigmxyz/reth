@@ -48,9 +48,9 @@ pub enum PeerMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Broadcast new block.
     NewBlock(NewBlockMessage<N::Block>),
     /// Received transactions _from_ the peer
-    ReceivedTransaction(Transactions),
+    ReceivedTransaction(Transactions<N::BroadcastedTransaction>),
     /// Broadcast transactions _from_ local _to_ a peer.
-    SendTransactions(SharedTransactions),
+    SendTransactions(SharedTransactions<N::BroadcastedTransaction>),
     /// Send new pooled transactions
     PooledTransactions(NewPooledTransactionHashes),
     /// All `eth` request variants.
