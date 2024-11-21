@@ -1607,6 +1607,7 @@ impl<T: SignedTransaction> FullTransactionsBuilder<T> {
     ///
     /// If the transaction is unsuitable for broadcast or would exceed the softlimit, it is appended
     /// to list of pooled transactions, (e.g. 4844 transactions).
+    /// See also [`TxType::is_broadcastable_in_full`].
     fn push(&mut self, transaction: &PropagateTransaction<T>) {
         // Do not send full 4844 transaction hashes to peers.
         //
@@ -1616,7 +1617,7 @@ impl<T: SignedTransaction> FullTransactionsBuilder<T> {
         //  via `GetPooledTransactions`.
         //
         // From: <https://eips.ethereum.org/EIPS/eip-4844#networking>
-        if transaction.transaction.transaction().tx_type().is_eip4844() {
+        if !transaction.transaction.transaction().tx_type().is_broadcastable_in_full() {
             self.pooled.push(transaction);
             return
         }
