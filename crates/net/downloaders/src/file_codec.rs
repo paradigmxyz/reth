@@ -18,7 +18,8 @@ use tokio_util::codec::{Decoder, Encoder};
 ///
 /// It's recommended to use [`with_capacity`](tokio_util::codec::FramedRead::with_capacity) to set
 /// the capacity of the framed reader to the size of the file.
-pub(crate) struct BlockFileCodec<B>(std::marker::PhantomData<B>);
+#[derive(Debug)]
+pub struct BlockFileCodec<B>(std::marker::PhantomData<B>);
 
 impl<B> Default for BlockFileCodec<B> {
     fn default() -> Self {

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io, path::Path};
+use std::{collections::HashMap, fmt::Debug, io, path::Path};
 
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
@@ -18,7 +18,7 @@ use reth_primitives_traits::{Block, BlockBody, FullBlock};
 use thiserror::Error;
 use tokio::{fs::File, io::AsyncReadExt};
 use tokio_stream::StreamExt;
-use tokio_util::codec::FramedRead;
+use tokio_util::codec::{Decoder, FramedRead};
 use tracing::{debug, trace, warn};
 
 use super::file_codec::BlockFileCodec;
@@ -41,7 +41,7 @@ pub const DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE: u64 = 1_000_000_000;
 ///
 /// This reads the entire file into memory, so it is not suitable for large files.
 #[derive(Debug)]
-pub struct FileClient<B: Block = reth_primitives::Block> {
+pub struct FileClient<B: Block = reth_primitives::Block, C: Decoder<Item = B> = BlockFileCodec<B>> {
     /// The buffered headers retrieved when fetching new bodies.
     headers: HashMap<BlockNumber, B::Header>,
 
@@ -50,6 +50,8 @@ pub struct FileClient<B: Block = reth_primitives::Block> {
 
     /// The buffered bodies retrieved when fetching new headers.
     bodies: HashMap<BlockHash, B::Body>,
+
+    _codec: std::marker::PhantomData<C>,
 }
 
 /// An error that can occur when constructing and using a [`FileClient`].
@@ -74,7 +76,10 @@ impl From<&'static str> for FileClientError {
     }
 }
 
-impl<B: FullBlock> FileClient<B> {
+impl<B: FullBlock, C> FileClient<B, C>
+where
+    C: Decoder<Item = B, Error = FileClientError> + Default,
+{
     /// Create a new file client from a file path.
     pub async fn new<P: AsRef<Path>>(path: P) -> Result<Self, FileClientError> {
         let file = File::open(path).await?;
@@ -182,7 +187,10 @@ impl<B: FullBlock> FileClient<B> {
     }
 }
 
-impl<B: FullBlock> FromReader for FileClient<B> {
+impl<B: FullBlock, C> FromReader for FileClient<B, C>
+where
+    C: Decoder<Item = B, Error = FileClientError> + Default,
+{
     type Error = FileClientError;
 
     /// Initialize the [`FileClient`] from bytes that have been read from file.
@@ -198,8 +206,7 @@ impl<B: FullBlock> FromReader for FileClient<B> {
         let mut bodies = HashMap::default();
 
         // use with_capacity to make sure the internal buffer contains the entire chunk
-        let mut stream =
-            FramedRead::with_capacity(reader, BlockFileCodec::<B>::default(), num_bytes as usize);
+        let mut stream = FramedRead::with_capacity(reader, C::default(), num_bytes as usize);
 
         trace!(target: "downloaders::file",
             target_num_bytes=num_bytes,
@@ -254,7 +261,12 @@ impl<B: FullBlock> FromReader for FileClient<B> {
             trace!(target: "downloaders::file", blocks = headers.len(), "Initialized file client");
 
             Ok(DecodedFileChunk {
-                file_client: Self { headers, hash_to_number, bodies },
+                file_client: Self {
+                    headers,
+                    hash_to_number,
+                    bodies,
+                    _codec: std::marker::PhantomData,
+                },
                 remaining_bytes,
                 highest_block: None,
             })
@@ -262,7 +274,10 @@ impl<B: FullBlock> FromReader for FileClient<B> {
     }
 }
 
-impl<B: FullBlock> HeadersClient for FileClient<B> {
+impl<B: FullBlock, C> HeadersClient for FileClient<B, C>
+where
+    C: Decoder<Item = B, Error = FileClientError> + Sync + Send + Debug,
+{
     type Header = B::Header;
     type Output = HeadersFut<B::Header>;
 
@@ -313,7 +328,10 @@ impl<B: FullBlock> HeadersClient for FileClient<B> {
     }
 }
 
-impl<B: FullBlock> BodiesClient for FileClient<B> {
+impl<B: FullBlock, C> BodiesClient for FileClient<B, C>
+where
+    C: Decoder<Item = B, Error = FileClientError> + Sync + Send + Debug,
+{
     type Body = B::Body;
     type Output = BodiesFut<B::Body>;
 
@@ -338,7 +356,10 @@ impl<B: FullBlock> BodiesClient for FileClient<B> {
     }
 }
 
-impl<B: FullBlock> DownloadClient for FileClient<B> {
+impl<B: FullBlock, C> DownloadClient for FileClient<B, C>
+where
+    C: Decoder<Item = B, Error = FileClientError> + Sync + Send + Debug,
+{
     fn report_bad_message(&self, _peer_id: PeerId) {
         warn!("Reported a bad message on a file client, the file may be corrupted or invalid");
         // noop

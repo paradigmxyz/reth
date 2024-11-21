@@ -26,6 +26,7 @@ reth-execution-types.workspace = true
 reth-node-core.workspace = true
 reth-optimism-node.workspace = true
 reth-primitives.workspace = true
+reth-codecs.workspace = true
 
 # so jemalloc metrics can be included
 reth-node-metrics.workspace = true
@@ -52,7 +53,11 @@ alloy-consensus = { workspace = true, optional = true }
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 
+revm-primitives.workspace = true
+
 # misc
+bytes.workspace = true
+arbitrary = { workspace = true, features = ["derive"] }
 futures-util.workspace = true
 derive_more = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
@@ -79,8 +84,11 @@ tempfile.workspace = true
 reth-stages = { workspace = true, features = ["test-utils"] }
 reth-db-common.workspace = true
 reth-cli-commands.workspace = true
+reth-codecs = { workspace = true, features = ["test-utils"] }
+arbitrary = { workspace = true, features = ["derive"] }
 
 [features]
+default   = ['optimism']
 optimism = [
     "op-alloy-consensus",
 	"alloy-consensus",

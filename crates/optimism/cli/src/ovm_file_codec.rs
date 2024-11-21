@@ -1,26 +1,34 @@
+#![allow(dead_code, unused)]
+use std::mem;
+
 use alloy_consensus::{
     transaction::{from_eip155_value, RlpEcdsaTx},
     Header, TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
+    eip2930::AccessList,
     eip4895::Withdrawals,
+    eip7702::SignedAuthorization,
 };
 use alloy_primitives::{
     bytes::{Buf, BytesMut},
-    keccak256, PrimitiveSignature as Signature, TxHash, B256, U256,
+    keccak256, Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256,
+    U256,
 };
-use alloy_rlp::{Decodable, Error as RlpError, RlpDecodable};
+use alloy_rlp::{Decodable, Encodable, Error as RlpError, RlpDecodable};
 use derive_more::{AsRef, Deref};
 use op_alloy_consensus::TxDeposit;
+use proptest::prelude::Arbitrary;
 use reth_downloaders::file_client::FileClientError;
-use reth_primitives::transaction::{Transaction, TxType};
+use reth_primitives::transaction::{recover_signer, recover_signer_unchecked, Transaction, TxType};
+use revm_primitives::{AuthorizationList, TxEnv};
 use serde::{Deserialize, Serialize};
 use tokio_util::codec::Decoder;
 
-#[allow(dead_code)]
 /// Specific codec for reading raw block bodies from a file
 /// with optimism-specific signature handling
+#[derive(Debug, Default)]
 pub(crate) struct OvmBlockFileCodec;
 
 impl Decoder for OvmBlockFileCodec {
@@ -44,7 +52,7 @@ impl Decoder for OvmBlockFileCodec {
 /// OVM block, same as EVM block but with different transaction signature handling
 /// Pre-bedrock system transactions on Optimism were sent from the zero address
 /// with an empty signature,
-#[derive(Debug, Clone, PartialEq, Eq, RlpDecodable)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, RlpDecodable, Serialize, Deserialize)]
 pub struct Block {
     /// Block header
     pub header: Header,
@@ -61,8 +69,35 @@ impl Block {
     }
 }
 
+impl reth_node_builder::Block for Block {
+    type Header = Header;
+    type Body = BlockBody;
+
+    fn header(&self) -> &Self::Header {
+        &self.header
+    }
+
+    fn body(&self) -> &Self::Body {
+        &self.body
+    }
+}
+
+impl reth_node_builder::InMemorySize for Block {
+    /// Calculates a heuristic for the in-memory size of the [`Block`].
+    #[inline]
+    fn size(&self) -> usize {
+        self.header.size() + self.body.size()
+    }
+}
+
+impl Encodable for Block {
+    fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
+        todo!()
+    }
+}
+
 /// The body of a block for OVM
-#[derive(Debug, Clone, PartialEq, Eq, Default, RlpDecodable)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, RlpDecodable, Serialize, Deserialize)]
 #[rlp(trailing)]
 pub struct BlockBody {
     /// Transactions in the block
@@ -71,6 +106,34 @@ pub struct BlockBody {
     pub ommers: Vec<Header>,
     /// Withdrawals in the block.
     pub withdrawals: Option<Withdrawals>,
+}
+
+impl reth_node_builder::BlockBody for BlockBody {
+    type Transaction = TransactionSigned;
+
+    fn transactions(&self) -> &[Self::Transaction] {
+        &self.transactions
+    }
+}
+
+impl reth_node_builder::InMemorySize for BlockBody {
+    /// Calculates a heuristic for the in-memory size of the [`BlockBody`].
+    #[inline]
+    fn size(&self) -> usize {
+        self.transactions.iter().map(TransactionSigned::size).sum::<usize>() +
+            self.transactions.capacity() * core::mem::size_of::<TransactionSigned>() +
+            self.ommers.iter().map(Header::size).sum::<usize>() +
+            self.ommers.capacity() * core::mem::size_of::<Header>() +
+            self.withdrawals
+                .as_ref()
+                .map_or(core::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
+    }
+}
+
+impl Encodable for BlockBody {
+    fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
+        todo!()
+    }
 }
 
 /// Signed transaction.
@@ -284,6 +347,231 @@ impl Decodable2718 for TransactionSigned {
 
     fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
         Ok(Self::decode_rlp_legacy_transaction(buf)?)
+    }
+}
+
+impl Encodable for TransactionSigned {
+    /// This encodes the transaction _with_ the signature, and an rlp header.
+    ///
+    /// For legacy transactions, it encodes the transaction data:
+    /// `rlp(tx-data)`
+    ///
+    /// For EIP-2718 typed transactions, it encodes the transaction type followed by the rlp of the
+    /// transaction:
+    /// `rlp(tx-type || rlp(tx-data))`
+    fn encode(&self, out: &mut dyn bytes::BufMut) {
+        self.network_encode(out);
+    }
+
+    fn length(&self) -> usize {
+        let mut payload_length = self.encode_2718_len();
+        if !self.is_legacy() {
+            payload_length += alloy_rlp::Header { list: false, payload_length }.length();
+        }
+
+        payload_length
+    }
+}
+impl alloy_consensus::Transaction for TransactionSigned {
+    fn chain_id(&self) -> Option<ChainId> {
+        self.deref().chain_id()
+    }
+
+    fn nonce(&self) -> u64 {
+        self.deref().nonce()
+    }
+
+    fn gas_limit(&self) -> u64 {
+        self.deref().gas_limit()
+    }
+
+    fn gas_price(&self) -> Option<u128> {
+        self.deref().gas_price()
+    }
+
+    fn max_fee_per_gas(&self) -> u128 {
+        self.deref().max_fee_per_gas()
+    }
+
+    fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        self.deref().max_priority_fee_per_gas()
+    }
+
+    fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        self.deref().max_fee_per_blob_gas()
+    }
+
+    fn priority_fee_or_price(&self) -> u128 {
+        self.deref().priority_fee_or_price()
+    }
+
+    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        self.deref().effective_gas_price(base_fee)
+    }
+
+    fn is_dynamic_fee(&self) -> bool {
+        self.deref().is_dynamic_fee()
+    }
+
+    fn kind(&self) -> TxKind {
+        self.deref().kind()
+    }
+
+    fn value(&self) -> U256 {
+        self.deref().value()
+    }
+
+    fn input(&self) -> &Bytes {
+        self.deref().input()
+    }
+
+    fn ty(&self) -> u8 {
+        self.deref().ty()
+    }
+
+    fn access_list(&self) -> Option<&AccessList> {
+        self.deref().access_list()
+    }
+
+    fn blob_versioned_hashes(&self) -> Option<&[B256]> {
+        alloy_consensus::Transaction::blob_versioned_hashes(self.deref())
+    }
+
+    fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
+        self.deref().authorization_list()
+    }
+}
+
+impl reth_node_builder::SignedTransaction for TransactionSigned {
+    type Transaction = Transaction;
+
+    fn tx_hash(&self) -> &TxHash {
+        &self.hash
+    }
+
+    fn transaction(&self) -> &Self::Transaction {
+        &self.transaction
+    }
+
+    fn signature(&self) -> &Signature {
+        &self.signature
+    }
+
+    fn recover_signer(&self) -> Option<Address> {
+        let signature_hash = self.signature_hash();
+        recover_signer(&self.signature, signature_hash)
+    }
+
+    fn recover_signer_unchecked(&self) -> Option<Address> {
+        let signature_hash = self.signature_hash();
+        recover_signer_unchecked(&self.signature, signature_hash)
+    }
+}
+
+impl reth_node_builder::FillTxEnv for TransactionSigned {
+    fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address) {
+        tx_env.caller = sender;
+        match self.as_ref() {
+            Transaction::Legacy(tx) => {
+                tx_env.gas_limit = tx.gas_limit;
+                tx_env.gas_price = U256::from(tx.gas_price);
+                tx_env.gas_priority_fee = None;
+                tx_env.transact_to = tx.to;
+                tx_env.value = tx.value;
+                tx_env.data = tx.input.clone();
+                tx_env.chain_id = tx.chain_id;
+                tx_env.nonce = Some(tx.nonce);
+                tx_env.access_list.clear();
+                tx_env.blob_hashes.clear();
+                tx_env.max_fee_per_blob_gas.take();
+                tx_env.authorization_list = None;
+            }
+            Transaction::Eip2930(tx) => {
+                tx_env.gas_limit = tx.gas_limit;
+                tx_env.gas_price = U256::from(tx.gas_price);
+                tx_env.gas_priority_fee = None;
+                tx_env.transact_to = tx.to;
+                tx_env.value = tx.value;
+                tx_env.data = tx.input.clone();
+                tx_env.chain_id = Some(tx.chain_id);
+                tx_env.nonce = Some(tx.nonce);
+                tx_env.access_list.clone_from(&tx.access_list.0);
+                tx_env.blob_hashes.clear();
+                tx_env.max_fee_per_blob_gas.take();
+                tx_env.authorization_list = None;
+            }
+            Transaction::Eip1559(tx) => {
+                tx_env.gas_limit = tx.gas_limit;
+                tx_env.gas_price = U256::from(tx.max_fee_per_gas);
+                tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
+                tx_env.transact_to = tx.to;
+                tx_env.value = tx.value;
+                tx_env.data = tx.input.clone();
+                tx_env.chain_id = Some(tx.chain_id);
+                tx_env.nonce = Some(tx.nonce);
+                tx_env.access_list.clone_from(&tx.access_list.0);
+                tx_env.blob_hashes.clear();
+                tx_env.max_fee_per_blob_gas.take();
+                tx_env.authorization_list = None;
+            }
+            Transaction::Eip4844(tx) => {
+                tx_env.gas_limit = tx.gas_limit;
+                tx_env.gas_price = U256::from(tx.max_fee_per_gas);
+                tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
+                tx_env.transact_to = TxKind::Call(tx.to);
+                tx_env.value = tx.value;
+                tx_env.data = tx.input.clone();
+                tx_env.chain_id = Some(tx.chain_id);
+                tx_env.nonce = Some(tx.nonce);
+                tx_env.access_list.clone_from(&tx.access_list.0);
+                tx_env.blob_hashes.clone_from(&tx.blob_versioned_hashes);
+                tx_env.max_fee_per_blob_gas = Some(U256::from(tx.max_fee_per_blob_gas));
+                tx_env.authorization_list = None;
+            }
+            Transaction::Eip7702(tx) => {
+                tx_env.gas_limit = tx.gas_limit;
+                tx_env.gas_price = U256::from(tx.max_fee_per_gas);
+                tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
+                tx_env.transact_to = tx.to.into();
+                tx_env.value = tx.value;
+                tx_env.data = tx.input.clone();
+                tx_env.chain_id = Some(tx.chain_id);
+                tx_env.nonce = Some(tx.nonce);
+                tx_env.access_list.clone_from(&tx.access_list.0);
+                tx_env.blob_hashes.clear();
+                tx_env.max_fee_per_blob_gas.take();
+                tx_env.authorization_list =
+                    Some(AuthorizationList::Signed(tx.authorization_list.clone()));
+            }
+            Transaction::Deposit(_) => {}
+        }
+    }
+}
+
+impl reth_node_builder::InMemorySize for TransactionSigned {
+    /// Calculates a heuristic for the in-memory size of the [`TransactionSigned`].
+    #[inline]
+    fn size(&self) -> usize {
+        mem::size_of::<TxHash>() + self.transaction.size() + mem::size_of::<Signature>()
+    }
+}
+
+impl reth_codecs::Compact for TransactionSigned {
+    fn to_compact<B>(&self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        todo!()
+    }
+
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+        todo!()
+    }
+}
+
+impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        todo!()
     }
 }
 

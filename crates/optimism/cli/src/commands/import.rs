@@ -19,7 +19,10 @@ use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
 use tracing::{debug, error, info};
 
-use crate::commands::build_pipeline::build_import_pipeline;
+use crate::{
+    commands::build_pipeline::build_import_pipeline,
+    ovm_file_codec::{Block, OvmBlockFileCodec},
+};
 
 /// Syncs RLP encoded blocks from a file.
 #[derive(Debug, Parser)]
@@ -65,7 +68,9 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> ImportOpCommand<C> {
         let mut total_decoded_txns = 0;
         let mut total_filtered_out_dup_txns = 0;
 
-        while let Some(mut file_client) = reader.next_chunk::<FileClient>().await? {
+        while let Some(mut file_client) =
+            reader.next_chunk::<FileClient<Block, OvmBlockFileCodec>>().await?
+        {
             // create a new FileClient from chunk read from file
             info!(target: "reth::cli",
                 "Importing chain file chunk"

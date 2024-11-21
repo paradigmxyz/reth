@@ -26,6 +26,8 @@ use reth_static_file::StaticFileProducer;
 use std::sync::Arc;
 use tokio::sync::watch;
 
+use crate::ovm_file_codec::{Block, BlockBody, OvmBlockFileCodec};
+
 /// Builds import pipeline.
 ///
 /// If configured to execute, all stages will run. Otherwise, only stages that don't require state
@@ -34,13 +36,13 @@ pub(crate) async fn build_import_pipeline<N, C>(
     config: &Config,
     provider_factory: ProviderFactory<N>,
     consensus: &Arc<C>,
-    file_client: Arc<FileClient>,
+    file_client: Arc<FileClient<Block, OvmBlockFileCodec>>,
     static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     disable_exec: bool,
 ) -> eyre::Result<(Pipeline<N>, impl Stream<Item = NodeEvent>)>
 where
     N: CliNodeTypes + ProviderNodeTypes<ChainSpec = OpChainSpec>,
-    C: Consensus + 'static,
+    C: Consensus<alloy_consensus::Header, BlockBody> + 'static,
 {
     if !file_client.has_canonical_blocks() {
         eyre::bail!("unable to import non canonical blocks");
