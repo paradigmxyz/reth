@@ -5,7 +5,6 @@ use alloy_consensus::{
     TxEip4844, TxEip7702, TxLegacy,
 };
 use alloy_eips::{
-    eip1898::BlockHashOrNumber,
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
     eip2930::AccessList,
     eip7702::SignedAuthorization,
@@ -60,9 +59,6 @@ use alloc::vec::Vec;
 use op_alloy_consensus::TxDeposit;
 use reth_primitives_traits::{transaction::TransactionExt, SignedTransaction};
 use revm_primitives::{AuthorizationList, TxEnv};
-
-/// Either a transaction hash or number.
-pub type TxHashOrNumber = BlockHashOrNumber;
 
 /// Expected number of transactions where we can expect a speed-up by recovering the senders in
 /// parallel.
