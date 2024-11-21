@@ -781,21 +781,6 @@ mod tests {
 
             let db_senders = provider.senders_by_tx_range(range);
             assert_eq!(db_senders, Ok(vec![]));
-
-            let result = provider.take_block_transaction_range(0..=0);
-            assert_eq!(
-                result,
-                Ok(vec![(
-                    0,
-                    block
-                        .body
-                        .transactions
-                        .iter()
-                        .cloned()
-                        .map(|tx| tx.into_ecrecovered().unwrap())
-                        .collect()
-                )])
-            )
         }
     }
 

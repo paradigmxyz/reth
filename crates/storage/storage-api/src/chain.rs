@@ -5,6 +5,7 @@ use reth_db::{
     models::{StoredBlockOmmers, StoredBlockWithdrawals},
     tables,
     transaction::DbTxMut,
+    DbTxUnwindExt,
 };
 use reth_primitives_traits::{Block, BlockBody, FullNodePrimitives};
 use reth_storage_errors::provider::ProviderResult;
@@ -20,6 +21,13 @@ pub trait BlockBodyWriter<Provider, Body: BlockBody> {
         &self,
         provider: &Provider,
         bodies: Vec<(BlockNumber, Option<Body>)>,
+    ) -> ProviderResult<()>;
+
+    /// Removes all block bodies above the given block number from the database.
+    fn remove_block_bodies_above(
+        &self,
+        provider: &Provider,
+        block: BlockNumber,
     ) -> ProviderResult<()>;
 }
 
@@ -66,6 +74,17 @@ where
                 }
             }
         }
+
+        Ok(())
+    }
+
+    fn remove_block_bodies_above(
+        &self,
+        provider: &Provider,
+        block: BlockNumber,
+    ) -> ProviderResult<()> {
+        provider.tx_ref().unwind_table_by_num::<tables::BlockWithdrawals>(block)?;
+        provider.tx_ref().unwind_table_by_num::<tables::BlockOmmers>(block)?;
 
         Ok(())
     }

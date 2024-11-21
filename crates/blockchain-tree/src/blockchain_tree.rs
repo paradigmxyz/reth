@@ -25,7 +25,7 @@ use reth_provider::{
     BlockExecutionWriter, BlockNumReader, BlockWriter, CanonStateNotification,
     CanonStateNotificationSender, CanonStateNotifications, ChainSpecProvider, ChainSplit,
     ChainSplitTarget, DBProvider, DisplayBlocksChain, HeaderProvider, ProviderError,
-    StaticFileProviderFactory,
+    StaticFileProviderFactory, StorageLocation,
 };
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
@@ -1333,7 +1333,7 @@ where
         info!(target: "blockchain_tree", "REORG: revert canonical from database by unwinding chain blocks {:?}", revert_range);
         // read block and execution result from database. and remove traces of block from tables.
         let blocks_and_execution = provider_rw
-            .take_block_and_execution_range(revert_range)
+            .take_block_and_execution_above(revert_until, StorageLocation::Database)
             .map_err(|e| CanonicalError::CanonicalRevert(e.to_string()))?;
 
         provider_rw.commit()?;
