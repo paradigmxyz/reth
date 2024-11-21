@@ -49,4 +49,14 @@ pub trait TxType:
 
     /// Returns `true` if this is an eip-7702 transaction.
     fn is_eip7702(&self) -> bool;
+
+    /// Returns whether this transaction type can be __broadcasted__ as full transaction over the
+    /// network.
+    ///
+    /// Some transactions are not broadcastable as objects and only allowed to be broadcasted as
+    /// hashes, e.g. because they missing context (e.g. blob sidecar).
+    fn is_broadcastable_in_full(&self) -> bool {
+        // EIP-4844 transactions are not broadcastable in full, only hashes are allowed.
+        !self.is_eip4844()
+    }
 }
