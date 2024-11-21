@@ -638,7 +638,7 @@ tracy-client = "0.17.3"
 #alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", rev = "a971b3a" }
 #alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", rev = "a971b3a" }
 
+#op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", rev = "6a042e7681b1" }
+#op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", rev = "6a042e7681b1" }
 #op-alloy-rpc-types = { git = "https://github.com/alloy-rs/op-alloy", rev = "6a042e7681b1" }
 #op-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/op-alloy", rev = "6a042e7681b1" }
-#op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", rev = "6a042e7681b1" }
-#op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", rev = "6a042e7681b1" }
