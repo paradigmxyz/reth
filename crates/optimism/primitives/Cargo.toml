@@ -18,7 +18,7 @@ reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-codecs = { workspace = true, optional = true }
 
-# ethereum
+# ethereum/
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
@@ -33,6 +33,9 @@ serde = { workspace = true, optional = true }
 
 # misc
 derive_more.workspace = true
+
+# test-utils
+arbitrary = { workspace = true, features = ["derive"], optional = true }
 
 [dev-dependencies]
 reth-codecs = { workspace = true, features = ["test-utils"] }
@@ -53,4 +56,14 @@ serde = [
     "bytes/serde",
     "reth-codecs/serde",
     "op-alloy-consensus/serde",
+]
+arbitrary = [
+    "dep:arbitrary",
+    "reth-primitives-traits/arbitrary",
+    "reth-primitives/arbitrary",
+    "reth-codecs?/arbitrary",
+    "op-alloy-consensus/arbitrary",
+    "alloy-consensus/arbitrary",
+    "alloy-eips/arbitrary",
+    "alloy-primitives/arbitrary",
 ]

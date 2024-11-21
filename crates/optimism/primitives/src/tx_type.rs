@@ -2,56 +2,23 @@
 //! `OpTxType` implements `reth_primitives_traits::TxType`.
 //! This type is required because a `Compact` impl is needed on the deposit tx type.
 
+use core::fmt::Debug;
+
 use alloy_primitives::{U64, U8};
 use alloy_rlp::{Decodable, Encodable, Error};
 use bytes::BufMut;
-use core::fmt::Debug;
 use derive_more::{
     derive::{From, Into},
     Display,
 };
 use op_alloy_consensus::OpTxType as AlloyOpTxType;
-use reth_primitives_traits::{InMemorySize, TxType};
+use reth_primitives_traits::InMemorySize;
 
 /// Wrapper type for [`op_alloy_consensus::OpTxType`] to implement [`TxType`] trait.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Display, Ord, Hash, From, Into)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[into(u8)]
 pub struct OpTxType(AlloyOpTxType);
-
-impl<'a> reth_primitives::arbitrary::Arbitrary<'a> for OpTxType {
-    fn arbitrary(
-        u: &mut reth_primitives::arbitrary::Unstructured<'a>,
-    ) -> reth_primitives::arbitrary::Result<Self> {
-        Ok(AlloyOpTxType::arbitrary(u)?.into())
-    }
-}
-
-impl TxType for OpTxType {
-    #[inline]
-    fn is_legacy(&self) -> bool {
-        matches!(self.0, AlloyOpTxType::Legacy)
-    }
-
-    #[inline]
-    fn is_eip2930(&self) -> bool {
-        matches!(self.0, AlloyOpTxType::Eip2930)
-    }
-
-    #[inline]
-    fn is_eip1559(&self) -> bool {
-        matches!(self.0, AlloyOpTxType::Eip1559)
-    }
-
-    #[inline]
-    fn is_eip4844(&self) -> bool {
-        false
-    }
-
-    #[inline]
-    fn is_eip7702(&self) -> bool {
-        matches!(self.0, AlloyOpTxType::Eip7702)
-    }
-}
 
 impl InMemorySize for OpTxType {
     /// Calculates a heuristic for the in-memory size of the [`OpTxType`].
