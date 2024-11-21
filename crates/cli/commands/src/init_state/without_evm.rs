@@ -3,12 +3,10 @@ use alloy_rlp::Decodable;
 
 use alloy_consensus::Header;
 use reth_node_builder::NodePrimitives;
-use reth_primitives::{
-    BlockBody, SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment,
-};
+use reth_primitives::{SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment};
 use reth_provider::{
     providers::StaticFileProvider, BlockWriter, StageCheckpointWriter, StaticFileProviderFactory,
-    StaticFileWriter,
+    StaticFileWriter, StorageLocation,
 };
 use reth_stages::{StageCheckpoint, StageId};
 
@@ -33,7 +31,9 @@ pub fn setup_without_evm<Provider>(
     total_difficulty: U256,
 ) -> Result<(), eyre::Error>
 where
-    Provider: StaticFileProviderFactory + StageCheckpointWriter + BlockWriter,
+    Provider: StaticFileProviderFactory
+        + StageCheckpointWriter
+        + BlockWriter<Body: reth_node_api::BlockBody>,
 {
     info!(target: "reth::cli", "Setting up dummy EVM chain before importing state.");
 
@@ -64,11 +64,12 @@ fn append_first_block<Provider>(
     total_difficulty: U256,
 ) -> Result<(), eyre::Error>
 where
-    Provider: BlockWriter + StaticFileProviderFactory,
+    Provider: BlockWriter<Body: reth_node_api::BlockBody> + StaticFileProviderFactory,
 {
     provider_rw.insert_block(
-        SealedBlockWithSenders::new(SealedBlock::new(header.clone(), BlockBody::default()), vec![])
+        SealedBlockWithSenders::new(SealedBlock::new(header.clone(), Default::default()), vec![])
             .expect("no senders or txes"),
+        StorageLocation::Database,
     )?;
 
     let sf_provider = provider_rw.static_file_provider();

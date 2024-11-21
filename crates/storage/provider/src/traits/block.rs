@@ -1,3 +1,4 @@
+use alloy_consensus::Header;
 use alloy_primitives::BlockNumber;
 use reth_db_api::models::StoredBlockBodyIndices;
 use reth_execution_types::{Chain, ExecutionOutcome};
@@ -5,6 +6,29 @@ use reth_primitives::SealedBlockWithSenders;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{updates::TrieUpdates, HashedPostStateSorted};
 use std::ops::RangeInclusive;
+
+/// An enum that represents the storage location for a piece of data.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum StorageLocation {
+    /// Write only to static files.
+    StaticFiles,
+    /// Write only to the database.
+    Database,
+    /// Write to both the database and static files.
+    Both,
+}
+
+impl StorageLocation {
+    /// Returns true if the storage location includes static files.
+    pub const fn static_files(&self) -> bool {
+        matches!(self, Self::StaticFiles | Self::Both)
+    }
+
+    /// Returns true if the storage location includes the database.
+    pub const fn database(&self) -> bool {
+        matches!(self, Self::Database | Self::Both)
+    }
+}
 
 /// BlockExecution Writer
 #[auto_impl::auto_impl(&, Arc, Box)]
@@ -40,8 +64,11 @@ pub trait BlockWriter: Send + Sync {
     ///
     /// Return [StoredBlockBodyIndices] that contains indices of the first and last transactions and
     /// transition in the block.
-    fn insert_block(&self, block: SealedBlockWithSenders)
-        -> ProviderResult<StoredBlockBodyIndices>;
+    fn insert_block(
+        &self,
+        block: SealedBlockWithSenders<Header, Self::Body>,
+        write_transactions_to: StorageLocation,
+    ) -> ProviderResult<StoredBlockBodyIndices>;
 
     /// Appends a batch of block bodies extending the canonical chain. This is invoked during
     /// `Bodies` stage and does not write to `TransactionHashNumbers` and `TransactionSenders`
@@ -51,6 +78,7 @@ pub trait BlockWriter: Send + Sync {
     fn append_block_bodies(
         &self,
         bodies: Vec<(BlockNumber, Option<Self::Body>)>,
+        write_transactions_to: StorageLocation,
     ) -> ProviderResult<()>;
 
     /// Appends a batch of sealed blocks to the blockchain, including sender information, and
@@ -69,7 +97,7 @@ pub trait BlockWriter: Send + Sync {
     /// Returns `Ok(())` on success, or an error if any operation fails.
     fn append_blocks_with_state(
         &self,
-        blocks: Vec<SealedBlockWithSenders>,
+        blocks: Vec<SealedBlockWithSenders<Header, Self::Body>>,
         execution_outcome: ExecutionOutcome,
         hashed_state: HashedPostStateSorted,
         trie_updates: TrieUpdates,

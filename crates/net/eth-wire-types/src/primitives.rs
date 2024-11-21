@@ -1,9 +1,8 @@
 //! Abstraction over primitive types in network messages.
 
-use std::fmt::Debug;
-
 use alloy_rlp::{Decodable, Encodable};
 use reth_primitives_traits::{Block, BlockHeader};
+use std::fmt::Debug;
 
 /// Abstraction over primitive types which might appear in network messages. See
 /// [`crate::EthMessage`] for more context.

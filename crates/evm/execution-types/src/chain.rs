@@ -663,7 +663,7 @@ mod tests {
 
     #[test]
     fn chain_append() {
-        let block = SealedBlockWithSenders::default();
+        let block: SealedBlockWithSenders = Default::default();
         let block1_hash = B256::new([0x01; 32]);
         let block2_hash = B256::new([0x02; 32]);
         let block3_hash = B256::new([0x03; 32]);
@@ -727,13 +727,13 @@ mod tests {
             vec![],
         );
 
-        let mut block1 = SealedBlockWithSenders::default();
+        let mut block1: SealedBlockWithSenders = Default::default();
         let block1_hash = B256::new([15; 32]);
         block1.set_block_number(1);
         block1.set_hash(block1_hash);
         block1.senders.push(Address::new([4; 20]));
 
-        let mut block2 = SealedBlockWithSenders::default();
+        let mut block2: SealedBlockWithSenders = Default::default();
         let block2_hash = B256::new([16; 32]);
         block2.set_block_number(2);
         block2.set_hash(block2_hash);
@@ -797,7 +797,7 @@ mod tests {
         use reth_primitives::{Receipt, Receipts, TxType};
 
         // Create a default SealedBlockWithSenders object
-        let block = SealedBlockWithSenders::default();
+        let block: SealedBlockWithSenders = Default::default();
 
         // Define block hashes for block1 and block2
         let block1_hash = B256::new([0x01; 32]);

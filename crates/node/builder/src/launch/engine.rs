@@ -17,7 +17,7 @@ use reth_engine_tree::{
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
 use reth_network::{NetworkSyncUpdater, SyncState};
-use reth_network_api::{BlockDownloaderProvider, NetworkEventListenerProvider};
+use reth_network_api::BlockDownloaderProvider;
 use reth_node_api::{
     BuiltPayload, FullNodePrimitives, FullNodeTypes, NodeTypesWithEngine, PayloadAttributesBuilder,
     PayloadBuilder, PayloadTypes,
@@ -256,7 +256,6 @@ where
         info!(target: "reth::cli", "Consensus engine initialized");
 
         let events = stream_select!(
-            ctx.components().network().event_listener().map(Into::into),
             beacon_engine_handle.event_listener().map(Into::into),
             pipeline_events.map(Into::into),
             if ctx.node_config().debug.tip.is_none() && !ctx.is_dev() {
