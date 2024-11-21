@@ -138,12 +138,12 @@ pub struct PayloadTransactionsCtx<EVM> {
 
 impl<E> PayloadTransactionsCtx<E> {
     /// Creates a new [`Self`] with the provided EVM environment.
-    pub fn new(evm: E) -> Self {
+    pub const fn new(evm: E) -> Self {
         Self { evm, executed_transactions: vec![] }
     }
 
     /// Returns an immutable reference to the EVM environment.
-    pub fn evm(&self) -> &E {
+    pub const fn evm(&self) -> &E {
         &self.evm
     }
 
