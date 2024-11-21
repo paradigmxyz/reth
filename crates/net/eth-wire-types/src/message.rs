@@ -182,7 +182,11 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     )]
     NewBlock(Box<NewBlock<N::Block>>),
     /// Represents a Transactions message broadcast to the network.
-    Transactions(Transactions),
+    #[cfg_attr(
+        feature = "serde",
+        serde(bound = "N::BroadcastedTransaction: serde::Serialize + serde::de::DeserializeOwned")
+    )]
+    Transactions(Transactions<N::BroadcastedTransaction>),
     /// Represents a `NewPooledTransactionHashes` message for eth/66 version.
     NewPooledTransactionHashes66(NewPooledTransactionHashes66),
     /// Represents a `NewPooledTransactionHashes` message for eth/68 version.
@@ -302,7 +306,7 @@ pub enum EthBroadcastMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Represents a new block broadcast message.
     NewBlock(Arc<NewBlock<N::Block>>),
     /// Represents a transactions broadcast message.
-    Transactions(SharedTransactions),
+    Transactions(SharedTransactions<N::BroadcastedTransaction>),
 }
 
 // === impl EthBroadcastMessage ===

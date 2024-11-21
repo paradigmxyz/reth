@@ -1768,7 +1768,7 @@ pub enum NetworkTransactionEvent<N: NetworkPrimitives = EthNetworkPrimitives> {
         /// The ID of the peer from which the transactions were received.
         peer_id: PeerId,
         /// The received transactions.
-        msg: Transactions,
+        msg: Transactions<N::BroadcastedTransaction>,
     },
     /// Represents the event of receiving a list of transaction hashes from a peer.
     IncomingPooledTransactionHashes {
