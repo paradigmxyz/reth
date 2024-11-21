@@ -128,9 +128,9 @@ pub trait LoadPendingBlock:
             // check if the block is still good
             if let Some(pending_block) = lock.as_ref() {
                 // this is guaranteed to be the `latest` header
-                if pending.block_env.number.to::<u64>() == pending_block.block.number
-                    && pending.origin.header().hash() == pending_block.block.parent_hash
-                    && now <= pending_block.expires_at
+                if pending.block_env.number.to::<u64>() == pending_block.block.number &&
+                    pending.origin.header().hash() == pending_block.block.parent_hash &&
+                    now <= pending_block.expires_at
                 {
                     return Ok(Some((pending_block.block.clone(), pending_block.receipts.clone())));
                 }
@@ -199,8 +199,11 @@ pub trait LoadPendingBlock:
     /// block contract call using the parent beacon block root received from the CL.
     fn build_block(
         &self,
-        env: PendingBlockEnv,
+        _env: PendingBlockEnv,
     ) -> Result<(SealedBlockWithSenders, Vec<Receipt>), Self::Error>
     where
-        EthApiError: From<ProviderError>;
+        EthApiError: From<ProviderError>,
+    {
+        Err(Self::Error::from(EthApiError::InvalidParams("not implemented".into())))
+    }
 }
