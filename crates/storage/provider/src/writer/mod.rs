@@ -273,9 +273,7 @@ where
 
         // IMPORTANT: we use `block_number+1` to make sure we remove only what is ABOVE the block
         debug!(target: "provider::storage_writer", ?block_number, "Removing blocks from database above block_number");
-        self.database().remove_block_and_execution_range(
-            block_number + 1..=self.database().last_block_number()?,
-        )?;
+        self.database().remove_block_and_execution_above(block_number, StorageLocation::Both)?;
 
         // IMPORTANT: we use `highest_static_file_block.saturating_sub(block_number)` to make sure
         // we remove only what is ABOVE the block.
@@ -286,10 +284,6 @@ where
         self.static_file()
             .get_writer(block_number, StaticFileSegment::Headers)?
             .prune_headers(highest_static_file_block.saturating_sub(block_number))?;
-
-        self.static_file()
-            .get_writer(block_number, StaticFileSegment::Transactions)?
-            .prune_transactions(total_txs, block_number)?;
 
         if !self.database().prune_modes_ref().has_receipts_pruning() {
             self.static_file()
