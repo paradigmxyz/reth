@@ -101,7 +101,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             provider.commit()?;
         }
 
-        info!(target: "reth::cli", target=target, "Unwound blocks");
+        info!(target: "reth::cli", ?target, "Unwound blocks");
 
         Ok(())
     }
