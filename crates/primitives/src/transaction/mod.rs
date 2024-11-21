@@ -1,5 +1,6 @@
 //! Transaction types.
 
+use alloc::vec::Vec;
 use alloy_consensus::{
     transaction::RlpEcdsaTx, SignableTransaction, Transaction as _, TxEip1559, TxEip2930,
     TxEip4844, TxEip7702, TxLegacy,
@@ -13,28 +14,33 @@ use alloy_primitives::{
     keccak256, Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
 };
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
-use core::mem;
+use core::{
+    hash::{Hash, Hasher},
+    mem,
+};
 use derive_more::{AsRef, Deref};
 use once_cell as _;
 #[cfg(not(feature = "std"))]
-use once_cell::sync::Lazy as LazyLock;
+use once_cell::sync::{Lazy as LazyLock, OnceCell as OnceLock};
 #[cfg(feature = "optimism")]
 use op_alloy_consensus::DepositTransaction;
+#[cfg(feature = "optimism")]
+use op_alloy_consensus::TxDeposit;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
-use reth_primitives_traits::InMemorySize;
+use reth_primitives_traits::{InMemorySize, SignedTransaction};
+use revm_primitives::{AuthorizationList, TxEnv};
 use serde::{Deserialize, Serialize};
 use signature::decode_with_eip155_chain_id;
 #[cfg(feature = "std")]
-use std::sync::LazyLock;
+use std::sync::{LazyLock, OnceLock};
 
+pub use compat::FillTxEnv;
 pub use error::{
     InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
 };
 pub use meta::TransactionMeta;
 pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
 pub use sidecar::BlobTransaction;
-
-pub use compat::FillTxEnv;
 pub use signature::{recover_signer, recover_signer_unchecked};
 pub use tx_type::TxType;
 pub use variant::TransactionSignedVariant;
@@ -53,12 +59,6 @@ pub mod signature;
 
 pub(crate) mod util;
 mod variant;
-
-use alloc::vec::Vec;
-#[cfg(feature = "optimism")]
-use op_alloy_consensus::TxDeposit;
-use reth_primitives_traits::{transaction::TransactionExt, SignedTransaction};
-use revm_primitives::{AuthorizationList, TxEnv};
 
 /// Expected number of transactions where we can expect a speed-up by recovering the senders in
 /// parallel.
@@ -832,22 +832,6 @@ impl alloy_consensus::Transaction for Transaction {
     }
 }
 
-impl TransactionExt for Transaction {
-    type Type = TxType;
-
-    fn signature_hash(&self) -> B256 {
-        match self {
-            Self::Legacy(tx) => tx.signature_hash(),
-            Self::Eip2930(tx) => tx.signature_hash(),
-            Self::Eip1559(tx) => tx.signature_hash(),
-            Self::Eip4844(tx) => tx.signature_hash(),
-            Self::Eip7702(tx) => tx.signature_hash(),
-            #[cfg(feature = "optimism")]
-            _ => todo!("use op type for op"),
-        }
-    }
-}
-
 /// Signed transaction without its Hash. Used type for inserting into the DB.
 ///
 /// This can by converted to [`TransactionSigned`] by calling [`TransactionSignedNoHash::hash`].
@@ -1074,10 +1058,11 @@ impl From<TransactionSigned> for TransactionSignedNoHash {
 
 /// Signed transaction.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, AsRef, Deref, Serialize, Deserialize)]
 pub struct TransactionSigned {
     /// Transaction hash
-    pub hash: TxHash,
+    #[serde(skip)]
+    pub hash: OnceLock<TxHash>,
     /// The transaction signature values
     pub signature: Signature,
     /// Raw transaction info
@@ -1102,6 +1087,21 @@ impl AsRef<Self> for TransactionSigned {
     }
 }
 
+impl Hash for TransactionSigned {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.signature.hash(state);
+        self.transaction.hash(state);
+    }
+}
+
+impl PartialEq for TransactionSigned {
+    fn eq(&self, other: &Self) -> bool {
+        self.signature == other.signature &&
+            self.transaction == other.transaction &&
+            self.hash_ref() == other.hash_ref()
+    }
+}
+
 // === impl TransactionSigned ===
 
 impl TransactionSigned {
@@ -1116,13 +1116,13 @@ impl TransactionSigned {
     }
 
     /// Transaction hash. Used to identify transaction.
-    pub const fn hash(&self) -> TxHash {
-        self.hash
+    pub fn hash(&self) -> TxHash {
+        *self.hash_ref()
     }
 
     /// Reference to transaction hash. Used to identify transaction.
-    pub const fn hash_ref(&self) -> &TxHash {
-        &self.hash
+    pub fn hash_ref(&self) -> &TxHash {
+        self.hash.get_or_init(|| self.recalculate_hash())
     }
 
     /// Recover signer from signature and hash.
@@ -1255,9 +1255,7 @@ impl TransactionSigned {
     ///
     /// This will also calculate the transaction hash using its encoding.
     pub fn from_transaction_and_signature(transaction: Transaction, signature: Signature) -> Self {
-        let mut initial_tx = Self { transaction, hash: Default::default(), signature };
-        initial_tx.hash = initial_tx.recalculate_hash();
-        initial_tx
+        Self { transaction, signature, hash: Default::default() }
     }
 
     /// Decodes legacy transaction from the data buffer into a tuple.
@@ -1317,20 +1315,17 @@ impl TransactionSigned {
     // so decoding methods do not need to manually advance the buffer
     pub fn decode_rlp_legacy_transaction(data: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let (transaction, hash, signature) = Self::decode_rlp_legacy_transaction_tuple(data)?;
-        let signed = Self { transaction: Transaction::Legacy(transaction), hash, signature };
+        let signed =
+            Self { transaction: Transaction::Legacy(transaction), hash: hash.into(), signature };
         Ok(signed)
     }
 }
 
 impl SignedTransaction for TransactionSigned {
-    type Transaction = Transaction;
+    type Type = TxType;
 
     fn tx_hash(&self) -> &TxHash {
-        &self.hash
-    }
-
-    fn transaction(&self) -> &Self::Transaction {
-        &self.transaction
+        self.hash_ref()
     }
 
     fn signature(&self) -> &Signature {
@@ -1604,19 +1599,19 @@ impl Decodable2718 for TransactionSigned {
             TxType::Legacy => Err(Eip2718Error::UnexpectedType(0)),
             TxType::Eip2930 => {
                 let (tx, signature, hash) = TxEip2930::rlp_decode_signed(buf)?.into_parts();
-                Ok(Self { transaction: Transaction::Eip2930(tx), signature, hash })
+                Ok(Self { transaction: Transaction::Eip2930(tx), signature, hash: hash.into() })
             }
             TxType::Eip1559 => {
                 let (tx, signature, hash) = TxEip1559::rlp_decode_signed(buf)?.into_parts();
-                Ok(Self { transaction: Transaction::Eip1559(tx), signature, hash })
+                Ok(Self { transaction: Transaction::Eip1559(tx), signature, hash: hash.into() })
             }
             TxType::Eip7702 => {
                 let (tx, signature, hash) = TxEip7702::rlp_decode_signed(buf)?.into_parts();
-                Ok(Self { transaction: Transaction::Eip7702(tx), signature, hash })
+                Ok(Self { transaction: Transaction::Eip7702(tx), signature, hash: hash.into() })
             }
             TxType::Eip4844 => {
                 let (tx, signature, hash) = TxEip4844::rlp_decode_signed(buf)?.into_parts();
-                Ok(Self { transaction: Transaction::Eip4844(tx), signature, hash })
+                Ok(Self { transaction: Transaction::Eip4844(tx), signature, hash: hash.into() })
             }
             #[cfg(feature = "optimism")]
             TxType::Deposit => Ok(Self::from_transaction_and_signature(
@@ -1657,7 +1652,6 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
 
         #[cfg(feature = "optimism")]
         let signature = if transaction.is_deposit() { TxDeposit::signature() } else { signature };
-
         Ok(Self::from_transaction_and_signature(transaction, signature))
     }
 }
@@ -1896,7 +1890,7 @@ pub mod serde_bincode_compat {
     impl<'a> From<&'a super::TransactionSigned> for TransactionSigned<'a> {
         fn from(value: &'a super::TransactionSigned) -> Self {
             Self {
-                hash: value.hash,
+                hash: value.hash(),
                 signature: value.signature,
                 transaction: Transaction::from(&value.transaction),
             }
@@ -1906,7 +1900,7 @@ pub mod serde_bincode_compat {
     impl<'a> From<TransactionSigned<'a>> for super::TransactionSigned {
         fn from(value: TransactionSigned<'a>) -> Self {
             Self {
-                hash: value.hash,
+                hash: value.hash.into(),
                 signature: value.signature,
                 transaction: value.transaction.into(),
             }
@@ -2199,7 +2193,7 @@ mod tests {
     ) {
         let expected = TransactionSigned::from_transaction_and_signature(transaction, signature);
         if let Some(hash) = hash {
-            assert_eq!(hash, expected.hash);
+            assert_eq!(hash, expected.hash());
         }
         assert_eq!(bytes.len(), expected.length());
 

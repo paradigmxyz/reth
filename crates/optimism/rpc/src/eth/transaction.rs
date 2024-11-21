@@ -84,7 +84,8 @@ where
         tx_info: TransactionInfo,
     ) -> Result<Self::Transaction, Self::Error> {
         let from = tx.signer();
-        let TransactionSigned { transaction, signature, hash } = tx.into_signed();
+        let hash = tx.hash();
+        let TransactionSigned { transaction, signature, .. } = tx.into_signed();
         let mut deposit_receipt_version = None;
         let mut deposit_nonce = None;
 

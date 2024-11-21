@@ -4,16 +4,13 @@ pub mod execute;
 pub mod signed;
 pub mod tx_type;
 
+use crate::{InMemorySize, MaybeArbitrary, MaybeCompact, MaybeSerde};
 use core::{fmt, hash::Hash};
 
-use alloy_primitives::B256;
-
-use crate::{FullTxType, InMemorySize, MaybeArbitrary, MaybeCompact, MaybeSerde, TxType};
-
 /// Helper trait that unifies all behaviour required by transaction to support full node operations.
-pub trait FullTransaction: Transaction<Type: FullTxType> + MaybeCompact {}
+pub trait FullTransaction: Transaction + MaybeCompact {}
 
-impl<T> FullTransaction for T where T: Transaction<Type: FullTxType> + MaybeCompact {}
+impl<T> FullTransaction for T where T: Transaction + MaybeCompact {}
 
 /// Abstraction of a transaction.
 pub trait Transaction:
@@ -26,7 +23,7 @@ pub trait Transaction:
     + Eq
     + PartialEq
     + Hash
-    + TransactionExt
+    + alloy_consensus::Transaction
     + InMemorySize
     + MaybeSerde
     + MaybeArbitrary
@@ -43,25 +40,9 @@ impl<T> Transaction for T where
         + Eq
         + PartialEq
         + Hash
-        + TransactionExt
+        + alloy_consensus::Transaction
         + InMemorySize
         + MaybeSerde
         + MaybeArbitrary
 {
-}
-
-/// Extension trait of [`alloy_consensus::Transaction`].
-#[auto_impl::auto_impl(&, Arc)]
-pub trait TransactionExt: alloy_consensus::Transaction {
-    /// Transaction envelope type ID.
-    type Type: TxType;
-
-    /// Heavy operation that return signature hash over rlp encoded transaction.
-    /// It is only for signature signing or signer recovery.
-    fn signature_hash(&self) -> B256;
-
-    /// Returns the transaction type.
-    fn tx_type(&self) -> Self::Type {
-        Self::Type::try_from(self.ty()).expect("should decode tx type id")
-    }
 }

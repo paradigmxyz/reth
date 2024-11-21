@@ -43,7 +43,7 @@ impl BlobStoreCanonTracker {
                 .body
                 .transactions()
                 .filter(|tx| tx.transaction.is_eip4844())
-                .map(|tx| tx.hash);
+                .map(|tx| tx.hash());
             (*num, iter)
         });
         self.add_blocks(blob_txs);
@@ -128,18 +128,18 @@ mod tests {
                 body: BlockBody {
                     transactions: vec![
                         TransactionSigned {
-                            hash: tx1_hash,
+                            hash: tx1_hash.into(),
                             transaction: Transaction::Eip4844(Default::default()),
                             ..Default::default()
                         },
                         TransactionSigned {
-                            hash: tx2_hash,
+                            hash: tx2_hash.into(),
                             transaction: Transaction::Eip4844(Default::default()),
                             ..Default::default()
                         },
                         // Another transaction that is not EIP-4844
                         TransactionSigned {
-                            hash: B256::random(),
+                            hash: B256::random().into(),
                             transaction: Transaction::Eip7702(Default::default()),
                             ..Default::default()
                         },
@@ -161,12 +161,12 @@ mod tests {
                 body: BlockBody {
                     transactions: vec![
                         TransactionSigned {
-                            hash: tx3_hash,
+                            hash: tx3_hash.into(),
                             transaction: Transaction::Eip1559(Default::default()),
                             ..Default::default()
                         },
                         TransactionSigned {
-                            hash: tx2_hash,
+                            hash: tx2_hash.into(),
                             transaction: Transaction::Eip2930(Default::default()),
                             ..Default::default()
                         },

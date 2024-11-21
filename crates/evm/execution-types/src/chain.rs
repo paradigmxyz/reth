@@ -441,7 +441,7 @@ impl ChainBlocks<'_> {
     /// Returns an iterator over all transaction hashes in the block
     #[inline]
     pub fn transaction_hashes(&self) -> impl Iterator<Item = TxHash> + '_ {
-        self.blocks.values().flat_map(|block| block.transactions().map(|tx| tx.hash))
+        self.blocks.values().flat_map(|block| block.transactions().map(|tx| tx.hash()))
     }
 }
 
