@@ -5,7 +5,7 @@ use crate::{
 };
 use alloy_primitives::Address;
 use core::fmt;
-use reth_payload_util::PayloadTransactions;
+use reth_payload_util::{PayloadTransactions, PayloadTransactionsCtx};
 use reth_primitives::TransactionSignedEcRecovered;
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet, VecDeque},
@@ -230,12 +230,12 @@ where
     }
 }
 
-impl<T, I> PayloadTransactions for BestPayloadTransactions<T, I>
+impl<T, I, E> PayloadTransactions<E> for BestPayloadTransactions<T, I>
 where
     T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
     I: Iterator<Item = Arc<ValidPoolTransaction<T>>>,
 {
-    fn next(&mut self, _ctx: ()) -> Option<TransactionSignedEcRecovered> {
+    fn next(&mut self, _ctx: &PayloadTransactionsCtx<E>) -> Option<TransactionSignedEcRecovered> {
         loop {
             let tx = self.best.next()?;
             if self.invalid.contains(&tx.sender()) {
@@ -890,11 +890,13 @@ mod tests {
             None,
         );
 
-        assert_eq!(block.next(()).unwrap().signer(), address_top_of_block);
-        assert_eq!(block.next(()).unwrap().signer(), address_in_priority_pool);
-        assert_eq!(block.next(()).unwrap().signer(), address_a);
-        assert_eq!(block.next(()).unwrap().signer(), address_b);
-        assert_eq!(block.next(()).unwrap().signer(), address_regular);
+        let noop = PayloadTransactionsCtx::new(());
+
+        assert_eq!(block.next(&noop).unwrap().signer(), address_top_of_block);
+        assert_eq!(block.next(&noop).unwrap().signer(), address_in_priority_pool);
+        assert_eq!(block.next(&noop).unwrap().signer(), address_a);
+        assert_eq!(block.next(&noop).unwrap().signer(), address_b);
+        assert_eq!(block.next(&noop).unwrap().signer(), address_regular);
     }
 
     #[test]

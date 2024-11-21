@@ -17,7 +17,7 @@ use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_forks::OpHardforks;
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
-use reth_payload_util::PayloadTransactions;
+use reth_payload_util::{PayloadTransactions, PayloadTransactionsCtx};
 use reth_primitives::{proofs, Block, BlockBody, Receipt, SealedHeader, TransactionSigned, TxType};
 use reth_provider::{ProviderError, StateProofProvider, StateProviderFactory, StateRootProvider};
 use reth_revm::database::StateProviderDatabase;
@@ -307,7 +307,7 @@ where
         // 4. if mem pool transactions are requested we execute them
         if !ctx.attributes().no_tx_pool {
             let best_txs = best.best_transactions(pool, ctx.best_transaction_attributes());
-            if ctx.execute_best_transactions::<_, Pool>(&mut info, state, best_txs)?.is_some() {
+            if ctx.execute_best_transactions::<_, Pool, _>(&mut info, state, best_txs)?.is_some() {
                 return Ok(BuildOutcomeKind::Cancelled)
             }
 
@@ -479,19 +479,19 @@ where
 pub trait OpPayloadTransactions: Clone + Send + Sync + Unpin + 'static {
     /// Returns an iterator that yields the transaction in the order they should get included in the
     /// new payload.
-    fn best_transactions<Pool: TransactionPool>(
+    fn best_transactions<Pool: TransactionPool, E>(
         &self,
         pool: Pool,
         attr: BestTransactionsAttributes,
-    ) -> impl PayloadTransactions;
+    ) -> impl PayloadTransactions<E>;
 }
 
 impl OpPayloadTransactions for () {
-    fn best_transactions<Pool: TransactionPool>(
+    fn best_transactions<Pool: TransactionPool, E>(
         &self,
         pool: Pool,
         attr: BestTransactionsAttributes,
-    ) -> impl PayloadTransactions {
+    ) -> impl PayloadTransactions<E> {
         BestPayloadTransactions::new(pool.best_transactions_with_attributes(attr))
     }
 }
@@ -822,15 +822,22 @@ where
     /// Executes the given best transactions and updates the execution info.
     ///
     /// Returns `Ok(Some(())` if the job was cancelled.
-    pub fn execute_best_transactions<DB, Pool>(
-        &self,
+    pub fn execute_best_transactions<'a, DB, Pool, P>(
+        &'a self,
         info: &mut ExecutionInfo,
-        db: &mut State<DB>,
-        mut best_txs: impl PayloadTransactions,
+        db: &'a mut State<DB>,
+        mut best_txs: P,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
         DB: Database<Error = ProviderError>,
         Pool: TransactionPool,
+        P: PayloadTransactions<
+            revm::Evm<
+                'a,
+                <EvmConfig as ConfigureEvm>::DefaultExternalContext<'a>,
+                &'a mut State<DB>,
+            >,
+        >,
     {
         let block_gas_limit = self.block_gas_limit();
         let base_fee = self.base_fee();
@@ -840,9 +847,9 @@ where
             self.initialized_block_env.clone(),
             TxEnv::default(),
         );
-        let mut evm = self.evm_config.evm_with_env(&mut *db, env);
+        let mut ctx = PayloadTransactionsCtx::new(self.evm_config.evm_with_env(&mut *db, env));
 
-        while let Some(tx) = best_txs.next(()) {
+        while let Some(tx) = best_txs.next(&mut ctx) {
             // ensure we still have capacity for this transaction
             if info.cumulative_gas_used + tx.gas_limit() > block_gas_limit {
                 // we can't fit this transaction into the block, so we need to mark it as
@@ -864,9 +871,9 @@ where
             }
 
             // Configure the environment for the tx.
-            *evm.tx_mut() = self.evm_config.tx_env(tx.as_signed(), tx.signer());
+            *ctx.evm_mut().tx_mut() = self.evm_config.tx_env(tx.as_signed(), tx.signer());
 
-            let ResultAndState { result, state } = match evm.transact() {
+            let ResultAndState { result, state } = match ctx.evm_mut().transact() {
                 Ok(res) => res,
                 Err(err) => {
                     match err {
@@ -892,7 +899,7 @@ where
             };
 
             // commit changes
-            evm.db_mut().commit(state);
+            ctx.evm_mut().db_mut().commit(state);
 
             let gas_used = result.gas_used();
 
@@ -918,7 +925,8 @@ where
 
             // append sender and transaction to the respective lists
             info.executed_senders.push(tx.signer());
-            info.executed_transactions.push(tx.into_signed());
+            info.executed_transactions.push(tx.as_signed().clone());
+            ctx.add_transaction(tx);
         }
 
         Ok(None)

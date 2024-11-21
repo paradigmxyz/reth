@@ -12,4 +12,4 @@ mod traits;
 mod transaction;
 
 pub use traits::PayloadTransactions;
-pub use transaction::{PayloadTransactionsChain, PayloadTransactionsFixed};
+pub use transaction::{PayloadTransactionsChain, PayloadTransactionsCtx, PayloadTransactionsFixed};

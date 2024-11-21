@@ -26,8 +26,8 @@ impl<T> PayloadTransactionsFixed<T> {
     }
 }
 
-impl PayloadTransactions for PayloadTransactionsFixed<TransactionSignedEcRecovered> {
-    fn next(&mut self, _ctx: ()) -> Option<TransactionSignedEcRecovered> {
+impl<E> PayloadTransactions<E> for PayloadTransactionsFixed<TransactionSignedEcRecovered> {
+    fn next(&mut self, _ctx: &PayloadTransactionsCtx<E>) -> Option<TransactionSignedEcRecovered> {
         (self.index < self.transactions.len()).then(|| {
             let tx = self.transactions[self.index].clone();
             self.index += 1;
@@ -51,7 +51,7 @@ impl PayloadTransactions for PayloadTransactionsFixed<TransactionSignedEcRecover
 /// If the `before` iterator has transactions that are not fitting into the block,
 /// the after iterator will get propagated a `mark_invalid` call for each of them.
 #[derive(Debug)]
-pub struct PayloadTransactionsChain<B: PayloadTransactions, A: PayloadTransactions> {
+pub struct PayloadTransactionsChain<B, A> {
     /// Iterator that will be used first
     before: B,
     /// Allowed gas for the transactions from `before` iterator. If `None`, no gas limit is
@@ -68,7 +68,7 @@ pub struct PayloadTransactionsChain<B: PayloadTransactions, A: PayloadTransactio
     after_gas: u64,
 }
 
-impl<B: PayloadTransactions, A: PayloadTransactions> PayloadTransactionsChain<B, A> {
+impl<B, A> PayloadTransactionsChain<B, A> {
     /// Constructs a new [`PayloadTransactionsChain`].
     pub fn new(
         before: B,
@@ -87,12 +87,12 @@ impl<B: PayloadTransactions, A: PayloadTransactions> PayloadTransactionsChain<B,
     }
 }
 
-impl<B, A> PayloadTransactions for PayloadTransactionsChain<B, A>
+impl<B, A, E> PayloadTransactions<E> for PayloadTransactionsChain<B, A>
 where
-    B: PayloadTransactions,
-    A: PayloadTransactions,
+    B: PayloadTransactions<E>,
+    A: PayloadTransactions<E>,
 {
-    fn next(&mut self, ctx: ()) -> Option<TransactionSignedEcRecovered> {
+    fn next(&mut self, ctx: &PayloadTransactionsCtx<E>) -> Option<TransactionSignedEcRecovered> {
         while let Some(tx) = self.before.next(ctx) {
             if let Some(before_max_gas) = self.before_max_gas {
                 if self.before_gas + tx.transaction.gas_limit() <= before_max_gas {
@@ -124,5 +124,36 @@ where
     fn mark_invalid(&mut self, sender: Address, nonce: u64) {
         self.before.mark_invalid(sender, nonce);
         self.after.mark_invalid(sender, nonce);
+    }
+}
+
+/// Context for managing EVM state and executed transactions during payload transactions building.
+#[derive(Debug)]
+pub struct PayloadTransactionsCtx<EVM> {
+    /// The EVM environment used for transaction execution and state reads.
+    evm: EVM,
+    /// Transactions that have been executed in the EVM environment.
+    executed_transactions: Vec<TransactionSignedEcRecovered>,
+}
+
+impl<E> PayloadTransactionsCtx<E> {
+    /// Creates a new [`Self`] with the provided EVM environment.
+    pub fn new(evm: E) -> Self {
+        Self { evm, executed_transactions: vec![] }
+    }
+
+    /// Returns an immutable reference to the EVM environment.
+    pub fn evm(&self) -> &E {
+        &self.evm
+    }
+
+    /// Returns a mutable reference to the EVM environment.
+    pub fn evm_mut(&mut self) -> &mut E {
+        &mut self.evm
+    }
+
+    /// Add transaction to `executed_transactions` list.
+    pub fn add_transaction(&mut self, tx: TransactionSignedEcRecovered) {
+        self.executed_transactions.push(tx);
     }
 }
