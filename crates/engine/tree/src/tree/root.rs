@@ -335,8 +335,6 @@ where
 {
     let started_at = Instant::now();
 
-    let provider_ro = view.provider_ro()?;
-
     let proof_targets: HashMap<B256, HashSet<B256>> = state
         .accounts
         .keys()
@@ -349,6 +347,7 @@ where
     let account_trie_nodes = proof_targets
         .into_par_iter()
         .map(|(hashed_address, hashed_slots)| {
+            let provider_ro = view.provider_ro().unwrap();
             // Gather and record storage trie nodes for this account.
             let mut storage_trie_nodes = BTreeMap::default();
             let storage = state.storages.get(&hashed_address);
@@ -422,6 +421,8 @@ where
             acc.extend(map.into_iter());
             Ok(acc)
         })?;
+
+    let provider_ro = view.provider_ro()?;
 
     let state_root = next_root_from_proofs(account_trie_nodes, |key: Nibbles| {
         // Right pad the target with 0s.
@@ -601,7 +602,7 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         let stream = StdReceiverStream::new(rx);
 
-        let state_updates = create_mock_state_updates(100, 10);
+        let state_updates = create_mock_state_updates(400, 20);
         let mut hashed_state = HashedPostState::default();
         let mut accumulated_state: HashMap<Address, (RethAccount, HashMap<B256, U256>)> =
             HashMap::default();
