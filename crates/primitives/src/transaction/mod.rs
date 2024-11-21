@@ -16,11 +16,14 @@ use alloy_primitives::{
     keccak256, Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
 };
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
-use core::mem;
+use core::{
+    hash::{Hash, Hasher},
+    mem,
+};
 use derive_more::{AsRef, Deref};
 use once_cell as _;
 #[cfg(not(feature = "std"))]
-use once_cell::sync::Lazy as LazyLock;
+use once_cell::sync::{Lazy as LazyLock, OnceCell as OnceLock};
 #[cfg(feature = "optimism")]
 use op_alloy_consensus::DepositTransaction;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
@@ -1109,8 +1112,8 @@ impl AsRef<Self> for TransactionSigned {
     }
 }
 
-impl std::hash::Hash for TransactionSigned {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+impl Hash for TransactionSigned {
+    fn hash<H: Hasher>(&self, state: &mut H) {
         self.signature.hash(state);
         self.transaction.hash(state);
     }
