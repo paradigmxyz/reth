@@ -1,16 +1,17 @@
 //! Receipt abstraction
 
-use crate::{InMemorySize, MaybeSerde};
+use core::fmt;
+
 use alloc::vec::Vec;
 use alloy_consensus::TxReceipt;
 use alloy_primitives::B256;
-use core::fmt;
-use reth_codecs::Compact;
+
+use crate::{InMemorySize, MaybeCompact, MaybeSerde};
 
 /// Helper trait that unifies all behaviour required by receipt to support full node operations.
-pub trait FullReceipt: Receipt + Compact {}
+pub trait FullReceipt: Receipt + MaybeCompact {}
 
-impl<T> FullReceipt for T where T: ReceiptExt + Compact {}
+impl<T> FullReceipt for T where T: ReceiptExt + MaybeCompact {}
 
 /// Abstraction of a receipt.
 #[auto_impl::auto_impl(&, Arc)]

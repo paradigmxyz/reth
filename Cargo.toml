@@ -528,6 +528,7 @@ tracing = "0.1.0"
 tracing-appender = "0.2"
 url = "2.3"
 zstd = "0.13"
+byteorder = "1"
 
 # metrics
 metrics = "0.24.0"
