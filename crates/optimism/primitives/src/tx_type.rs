@@ -14,7 +14,8 @@ use derive_more::{
 use op_alloy_consensus::OpTxType as AlloyOpTxType;
 use reth_primitives_traits::InMemorySize;
 
-/// Wrapper type for [`op_alloy_consensus::OpTxType`] to implement [`TxType`] trait.
+/// Wrapper type for [`op_alloy_consensus::OpTxType`] to implement
+/// [`TxType`](reth_primitives_traits::TxType) trait.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Display, Ord, Hash, From, Into)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[into(u8)]
