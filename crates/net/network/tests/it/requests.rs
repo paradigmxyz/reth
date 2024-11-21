@@ -33,7 +33,9 @@ pub fn rng_transaction(rng: &mut impl rand::RngCore) -> TransactionSigned {
     });
     let signature = Signature::new(U256::default(), U256::default(), true);
 
-    TransactionSigned::from_transaction_and_signature(request, signature)
+    let tx = TransactionSigned::from_transaction_and_signature(request, signature);
+    tx.hash_ref(); // initializes tx hash
+    tx
 }
 
 #[tokio::test(flavor = "multi_thread")]
