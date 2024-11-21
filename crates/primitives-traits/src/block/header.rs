@@ -3,15 +3,14 @@
 use core::fmt;
 
 use alloy_primitives::Sealable;
-use reth_codecs::Compact;
 
-use crate::{InMemorySize, MaybeSerde};
+use crate::{InMemorySize, MaybeCompact, MaybeSerde};
 
 /// Helper trait that unifies all behaviour required by block header to support full node
 /// operations.
-pub trait FullBlockHeader: BlockHeader + Compact {}
+pub trait FullBlockHeader: BlockHeader + MaybeCompact {}
 
-impl<T> FullBlockHeader for T where T: BlockHeader + Compact {}
+impl<T> FullBlockHeader for T where T: BlockHeader + MaybeCompact {}
 
 /// Abstraction of a block header.
 pub trait BlockHeader:

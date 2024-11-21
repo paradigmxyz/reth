@@ -3,15 +3,14 @@
 use core::fmt;
 
 use alloy_primitives::{U64, U8};
-use reth_codecs::Compact;
 
-use crate::InMemorySize;
+use crate::{InMemorySize, MaybeCompact};
 
 /// Helper trait that unifies all behaviour required by transaction type ID to support full node
 /// operations.
-pub trait FullTxType: TxType + Compact {}
+pub trait FullTxType: TxType + MaybeCompact {}
 
-impl<T> FullTxType for T where T: TxType + Compact {}
+impl<T> FullTxType for T where T: TxType + MaybeCompact {}
 
 /// Trait representing the behavior of a transaction type.
 pub trait TxType:

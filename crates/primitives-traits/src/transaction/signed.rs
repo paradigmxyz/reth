@@ -5,18 +5,19 @@ use core::hash::Hash;
 
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
 use alloy_primitives::{keccak256, Address, PrimitiveSignature, TxHash, B256};
-use reth_codecs::Compact;
 
-use crate::{FillTxEnv, FullTransaction, InMemorySize, MaybeArbitrary, MaybeSerde, Transaction};
+use crate::{
+    FillTxEnv, FullTransaction, InMemorySize, MaybeArbitrary, MaybeCompact, MaybeSerde, Transaction,
+};
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
 pub trait FullSignedTx:
-    SignedTransaction<Transaction: FullTransaction> + FillTxEnv + Compact
+    SignedTransaction<Transaction: FullTransaction> + FillTxEnv + MaybeCompact
 {
 }
 
 impl<T> FullSignedTx for T where
-    T: SignedTransaction<Transaction: FullTransaction> + FillTxEnv + Compact
+    T: SignedTransaction<Transaction: FullTransaction> + FillTxEnv + MaybeCompact
 {
 }
 
@@ -41,7 +42,7 @@ pub trait SignedTransaction:
     + MaybeArbitrary
     + InMemorySize
 {
-    /// Transaction type that is signed.
+    /// Unsigned transaction type.
     type Transaction: Transaction;
 
     /// Returns reference to transaction hash.
