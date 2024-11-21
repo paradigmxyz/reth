@@ -10,6 +10,7 @@ use ffi::{MDBX_txn_flags_t, MDBX_TXN_RDONLY, MDBX_TXN_READWRITE};
 use indexmap::IndexSet;
 use parking_lot::{Mutex, MutexGuard};
 use std::{
+    backtrace::Backtrace,
     ffi::{c_uint, c_void},
     fmt::{self, Debug},
     mem::size_of,
@@ -549,6 +550,19 @@ pub(crate) struct TransactionPtr {
     #[cfg(feature = "read-tx-timeouts")]
     timed_out: Arc<AtomicBool>,
     lock: Arc<Mutex<()>>,
+    lock_backtrace: Arc<Mutex<Option<Backtrace>>>,
+}
+
+struct TransactionPtrLockGuard<'a> {
+    #[allow(dead_code)]
+    lock: MutexGuard<'a, ()>,
+    lock_backtrace: Arc<Mutex<Option<Backtrace>>>,
+}
+
+impl<'a> Drop for TransactionPtrLockGuard<'a> {
+    fn drop(&mut self) {
+        self.lock_backtrace.try_lock().unwrap().take();
+    }
 }
 
 impl TransactionPtr {
@@ -558,6 +572,7 @@ impl TransactionPtr {
             #[cfg(feature = "read-tx-timeouts")]
             timed_out: Arc::new(AtomicBool::new(false)),
             lock: Arc::new(Mutex::new(())),
+            lock_backtrace: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -579,17 +594,22 @@ impl TransactionPtr {
         self.timed_out.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
-    fn lock(&self) -> MutexGuard<'_, ()> {
+    fn lock(&self) -> TransactionPtrLockGuard<'_> {
         if let Some(lock) = self.lock.try_lock() {
-            lock
+            *self.lock_backtrace.try_lock().unwrap() = Some(Backtrace::force_capture());
+            TransactionPtrLockGuard { lock, lock_backtrace: self.lock_backtrace.clone() }
         } else {
             tracing::debug!(
                 target: "libmdbx",
                 txn = %self.txn as usize,
                 backtrace = %std::backtrace::Backtrace::force_capture(),
+                lock_backtrace = ?self.lock_backtrace.try_lock(),
                 "Transaction lock is already acquired, blocking..."
             );
-            self.lock.lock()
+            TransactionPtrLockGuard {
+                lock: self.lock.lock(),
+                lock_backtrace: self.lock_backtrace.clone(),
+            }
         }
     }
 
