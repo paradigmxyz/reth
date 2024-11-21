@@ -69,7 +69,11 @@ impl<D: BodyDownloader> BodyStage<D> {
     }
 
     /// Ensures that static files and database are in sync.
-    fn ensure_consistency<Provider>(&self, provider: &Provider) -> Result<(), StageError>
+    fn ensure_consistency<Provider>(
+        &self,
+        provider: &Provider,
+        unwind_block: Option<u64>,
+    ) -> Result<(), StageError>
     where
         Provider: DBProvider<Tx: DbTxMut> + BlockReader + StaticFileProviderFactory,
     {
@@ -109,11 +113,29 @@ impl<D: BodyDownloader> BodyStage<D> {
             // error will trigger an unwind, that will bring the database to the same height as the
             // static files.
             Ordering::Less => {
-                return Err(missing_static_data_error(
-                    next_static_file_tx_num.saturating_sub(1),
-                    &static_file_provider,
-                    provider,
-                )?)
+                // If we have a scheduled unwind, this might be fine because we will fix the incosistency right away.
+                if let Some(unwind_to) = unwind_block {
+                    let next_tx_num_after_unwind = provider
+                        .tx_ref()
+                        .get::<tables::BlockBodyIndices>(unwind_to)?
+                        .map(|b| b.next_tx_num())
+                        .ok_or(ProviderError::BlockBodyIndicesNotFound(unwind_to))?;
+
+                    // This means we need a deeper unwind.
+                    if next_tx_num_after_unwind > next_static_file_tx_num {
+                        return Err(missing_static_data_error(
+                            next_static_file_tx_num.saturating_sub(1),
+                            &static_file_provider,
+                            provider,
+                        )?)
+                    }
+                } else {
+                    return Err(missing_static_data_error(
+                        next_static_file_tx_num.saturating_sub(1),
+                        &static_file_provider,
+                        provider,
+                    )?)
+                }
             }
             Ordering::Equal => {}
         }
@@ -172,7 +194,7 @@ where
         }
         let (from_block, to_block) = input.next_block_range().into_inner();
 
-        self.ensure_consistency(provider)?;
+        self.ensure_consistency(provider, None)?;
 
         debug!(target: "sync::stages::bodies", stage_progress = from_block, target = to_block, "Commencing sync");
 
@@ -209,10 +231,8 @@ where
     ) -> Result<UnwindOutput, StageError> {
         self.buffer.take();
 
+        self.ensure_consistency(provider, Some(input.unwind_to))?;
         provider.remove_bodies_above(input.unwind_to)?;
-        // At this point static files can't be ahead of database because `remove_bodies_above` will
-        // ensure that. If static files are still behind, this would trigger a deeper unwind.
-        self.ensure_consistency(provider)?;
 
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(input.unwind_to)
@@ -221,6 +241,8 @@ where
     }
 }
 
+/// Called when database is ahead of static files. Attempts to find the first block we are missing
+/// transactions for.
 fn missing_static_data_error<Provider>(
     last_tx_num: TxNumber,
     static_file_provider: &StaticFileProvider<Provider::Primitives>,
