@@ -399,7 +399,7 @@ where
         // grab the blob sidecars from the executed txs
         blob_sidecars = pool
             .get_all_blobs_exact(
-                executed_txs.iter().filter(|tx| tx.is_eip4844()).map(|tx| tx.hash).collect(),
+                executed_txs.iter().filter(|tx| tx.is_eip4844()).map(|tx| tx.hash()).collect(),
             )
             .map_err(PayloadBuilderError::other)?;
 

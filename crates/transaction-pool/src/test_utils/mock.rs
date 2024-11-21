@@ -911,7 +911,7 @@ impl From<PooledTransactionsElementEcRecovered> for MockTransaction {
 impl From<MockTransaction> for TransactionSignedEcRecovered {
     fn from(tx: MockTransaction) -> Self {
         let signed_tx = TransactionSigned {
-            hash: *tx.hash(),
+            hash: (*tx.hash()).into(),
             signature: Signature::test_signature(),
             transaction: tx.clone().into(),
         };

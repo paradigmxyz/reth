@@ -383,7 +383,7 @@ mod tests {
         for block in &blocks[..=max_processed_block] {
             for transaction in &block.body.transactions {
                 if block.number > max_pruned_block {
-                    tx_hash_numbers.push((transaction.hash, tx_hash_number));
+                    tx_hash_numbers.push((transaction.hash(), tx_hash_number));
                 }
                 tx_hash_number += 1;
             }
