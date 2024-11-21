@@ -1,6 +1,6 @@
 //! Receipt abstraction
 
-use crate::{InMemorySize, MaybeSerde, MaybeArbitrary};
+use crate::{InMemorySize, MaybeArbitrary, MaybeSerde};
 use alloc::vec::Vec;
 use alloy_consensus::TxReceipt;
 use alloy_primitives::B256;
