@@ -2982,7 +2982,14 @@ impl<TX: DbTxMut + DbTx + 'static, N: ProviderNodeTypes + 'static> BlockWriter
             .ok_or(ProviderError::BlockBodyIndicesNotFound(block))?;
 
         // Last transaction to be removed
-        let unwind_tx_to = self.tx.entries::<tables::TransactionHashNumbers>()? as u64;
+        let unwind_tx_to = self
+            .tx
+            .cursor_read::<tables::BlockBodyIndices>()?
+            .last()?
+            // shouldn't happen because this was OK above
+            .ok_or(ProviderError::BlockBodyIndicesNotFound(block))?
+            .1
+            .last_tx_num();
 
         if unwind_tx_from < unwind_tx_to {
             for (hash, _) in self.transaction_hashes_by_range(unwind_tx_from..(unwind_tx_to + 1))? {
