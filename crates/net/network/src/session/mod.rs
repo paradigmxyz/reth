@@ -807,7 +807,7 @@ pub(crate) async fn pending_session_with_timeout<F, N: NetworkPrimitives>(
     F: Future<Output = ()>,
 {
     if tokio::time::timeout(timeout, f).await.is_err() {
-        debug!(target: "net::session", ?remote_addr, ?direction, "pending session timed out");
+        trace!(target: "net::session", ?remote_addr, ?direction, "pending session timed out");
         let event = PendingSessionEvent::Disconnected {
             remote_addr,
             session_id,

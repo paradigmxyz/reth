@@ -202,7 +202,7 @@ mod tests {
 
     #[test]
     fn test_commit_notification() {
-        let block = SealedBlockWithSenders::default();
+        let block: SealedBlockWithSenders = Default::default();
         let block1_hash = B256::new([0x01; 32]);
         let block2_hash = B256::new([0x02; 32]);
 
@@ -235,7 +235,7 @@ mod tests {
 
     #[test]
     fn test_reorg_notification() {
-        let block = SealedBlockWithSenders::default();
+        let block: SealedBlockWithSenders = Default::default();
         let block1_hash = B256::new([0x01; 32]);
         let block2_hash = B256::new([0x02; 32]);
         let block3_hash = B256::new([0x03; 32]);
@@ -277,7 +277,7 @@ mod tests {
     #[test]
     fn test_block_receipts_commit() {
         // Create a default block instance for use in block definitions.
-        let block = SealedBlockWithSenders::default();
+        let block: SealedBlockWithSenders = Default::default();
 
         // Define unique hashes for two blocks to differentiate them in the chain.
         let block1_hash = B256::new([0x01; 32]);
@@ -343,7 +343,7 @@ mod tests {
     #[test]
     fn test_block_receipts_reorg() {
         // Define block1 for the old chain segment, which will be reverted.
-        let mut old_block1 = SealedBlockWithSenders::default();
+        let mut old_block1: SealedBlockWithSenders = Default::default();
         old_block1.set_block_number(1);
         old_block1.set_hash(B256::new([0x01; 32]));
         old_block1.block.body.transactions.push(TransactionSigned::default());
@@ -367,7 +367,7 @@ mod tests {
             Arc::new(Chain::new(vec![old_block1.clone()], old_execution_outcome, None));
 
         // Define block2 for the new chain segment, which will be committed.
-        let mut new_block1 = SealedBlockWithSenders::default();
+        let mut new_block1: SealedBlockWithSenders = Default::default();
         new_block1.set_block_number(2);
         new_block1.set_hash(B256::new([0x02; 32]));
         new_block1.block.body.transactions.push(TransactionSigned::default());
