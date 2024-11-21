@@ -5,7 +5,6 @@ use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::SealedBlockWithSenders;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{updates::TrieUpdates, HashedPostStateSorted};
-use std::ops::RangeInclusive;
 
 /// An enum that represents the storage location for a piece of data.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -34,16 +33,10 @@ impl StorageLocation {
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait BlockExecutionWriter: BlockWriter + Send + Sync {
     /// Take range of blocks and its execution result
-    fn take_block_and_execution_range(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Chain>;
+    fn take_block_and_execution_range_above(&self, block: BlockNumber) -> ProviderResult<Chain>;
 
     /// Remove range of blocks and its execution result
-    fn remove_block_and_execution_range(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<()>;
+    fn remove_block_and_execution_range_above(&self, block: BlockNumber) -> ProviderResult<()>;
 }
 
 /// This just receives state, or [`ExecutionOutcome`], from the provider
@@ -80,6 +73,14 @@ pub trait BlockWriter: Send + Sync {
         bodies: Vec<(BlockNumber, Option<Self::Body>)>,
         write_transactions_to: StorageLocation,
     ) -> ProviderResult<()>;
+
+    /// Removes all blocks above the given block number from the database.
+    ///
+    /// Note: This does not remove state or execution data.
+    fn remove_blocks_above(&self, block: BlockNumber) -> ProviderResult<()>;
+
+    /// Removes all block bodies above the given block number from the database.
+    fn remove_bodies_above(&self, block: BlockNumber) -> ProviderResult<()>;
 
     /// Appends a batch of sealed blocks to the blockchain, including sender information, and
     /// updates the post-state.
