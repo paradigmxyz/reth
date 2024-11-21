@@ -1,25 +1,15 @@
 //! API of a signed transaction.
 
+use crate::{FillTxEnv, InMemorySize, MaybeArbitrary, MaybeCompact, MaybeSerde, TxType};
 use alloc::fmt;
-use core::hash::Hash;
-
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
 use alloy_primitives::{keccak256, Address, PrimitiveSignature, TxHash, B256};
-
-use crate::{
-    FillTxEnv, FullTransaction, InMemorySize, MaybeArbitrary, MaybeCompact, MaybeSerde, Transaction,
-};
+use core::hash::Hash;
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
-pub trait FullSignedTx:
-    SignedTransaction<Transaction: FullTransaction> + FillTxEnv + MaybeCompact
-{
-}
+pub trait FullSignedTx: SignedTransaction + FillTxEnv + MaybeCompact {}
 
-impl<T> FullSignedTx for T where
-    T: SignedTransaction<Transaction: FullTransaction> + FillTxEnv + MaybeCompact
-{
-}
+impl<T> FullSignedTx for T where T: SignedTransaction + FillTxEnv + MaybeCompact {}
 
 /// A signed transaction.
 #[auto_impl::auto_impl(&, Arc)]
@@ -42,14 +32,16 @@ pub trait SignedTransaction:
     + MaybeArbitrary
     + InMemorySize
 {
-    /// Unsigned transaction type.
-    type Transaction: Transaction;
+    /// Transaction envelope type ID.
+    type Type: TxType;
+
+    /// Returns the transaction type.
+    fn tx_type(&self) -> Self::Type {
+        Self::Type::try_from(self.ty()).expect("should decode tx type id")
+    }
 
     /// Returns reference to transaction hash.
     fn tx_hash(&self) -> &TxHash;
-
-    /// Returns reference to transaction.
-    fn transaction(&self) -> &Self::Transaction;
 
     /// Returns reference to signature.
     fn signature(&self) -> &PrimitiveSignature;
@@ -77,16 +69,4 @@ pub trait SignedTransaction:
     fn recalculate_hash(&self) -> B256 {
         keccak256(self.encoded_2718())
     }
-}
-
-/// Helper trait used in testing.
-#[cfg(feature = "test-utils")]
-pub trait SignedTransactionTesting: SignedTransaction {
-    /// Create a new signed transaction from a transaction and its signature.
-    ///
-    /// This will also calculate the transaction hash using its encoding.
-    fn from_transaction_and_signature(
-        transaction: Self::Transaction,
-        signature: PrimitiveSignature,
-    ) -> Self;
 }
