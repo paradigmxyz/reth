@@ -608,6 +608,12 @@ impl PoolTransaction for MockTransaction {
         pooled.into()
     }
 
+    fn try_consensus_into_pooled(
+        tx: Self::Consensus,
+    ) -> Result<Self::Pooled, Self::TryFromConsensusError> {
+        Self::Pooled::try_from(tx).map_err(|_| TryFromRecoveredTransactionError::BlobSidecarMissing)
+    }
+
     fn hash(&self) -> &TxHash {
         self.get_hash()
     }
