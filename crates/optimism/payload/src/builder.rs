@@ -849,7 +849,7 @@ where
         );
         let mut ctx = PayloadTransactionsCtx::new(self.evm_config.evm_with_env(&mut *db, env));
 
-        while let Some(tx) = best_txs.next(&mut ctx) {
+        while let Some(tx) = best_txs.next(&ctx) {
             // ensure we still have capacity for this transaction
             if info.cumulative_gas_used + tx.gas_limit() > block_gas_limit {
                 // we can't fit this transaction into the block, so we need to mark it as
