@@ -156,8 +156,9 @@ impl SparseStateTrie {
     }
 
     /// Wipe the storage trie at the provided address.
-    pub fn wipe_storage(&mut self, address: B256) {
-        self.storages.remove(&address);
+    pub fn wipe_storage(&mut self, address: B256) -> SparseStateTrieResult<()> {
+        let Some(trie) = self.storages.get_mut(&address) else { return Ok(()) };
+        trie.wipe().map_err(Into::into)
     }
 
     /// Returns storage sparse trie root if the trie has been revealed.

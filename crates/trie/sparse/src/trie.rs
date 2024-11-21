@@ -70,6 +70,13 @@ impl SparseTrie {
         Ok(())
     }
 
+    /// Wipe the trie, removing all values and nodes, and replacing the root with an empty node.
+    pub fn wipe(&mut self) -> SparseTrieResult<()> {
+        let revealed = self.as_revealed_mut().ok_or(SparseTrieError::Blind)?;
+        revealed.wipe()?;
+        Ok(())
+    }
+
     /// Calculates and returns the trie root if the trie has been revealed.
     pub fn root(&mut self) -> Option<B256> {
         Some(self.as_revealed_mut()?.root())
@@ -563,6 +570,14 @@ impl RevealedSparseTrie {
         }
 
         Ok(nodes)
+    }
+
+    /// Wipe the trie, removing all values and nodes, and replacing the root with an empty node.
+    pub fn wipe(&mut self) -> SparseTrieResult<()> {
+        self.prefix_set.extend_keys(self.nodes.drain().map(|(k, _)| k));
+        self.values.clear();
+        self.nodes.insert(Nibbles::default(), SparseNode::Empty);
+        Ok(())
     }
 
     /// Return the root of the sparse trie.
