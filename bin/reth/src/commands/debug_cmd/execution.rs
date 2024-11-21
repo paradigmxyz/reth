@@ -4,7 +4,7 @@ use crate::{args::NetworkArgs, utils::get_single_header};
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{BlockNumber, B256};
 use clap::Parser;
-use futures::{stream::select as stream_select, StreamExt};
+use futures::StreamExt;
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
@@ -19,7 +19,7 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_exex::ExExManagerHandle;
-use reth_network::{BlockDownloaderProvider, NetworkEventListenerProvider, NetworkHandle};
+use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_network_p2p::{headers::client::HeadersClient, EthBlockClient};
 use reth_node_api::NodeTypesWithDBAdapter;
@@ -207,17 +207,12 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             return Ok(())
         }
 
-        let pipeline_events = pipeline.events();
-        let events = stream_select(
-            network.event_listener().map(Into::into),
-            pipeline_events.map(Into::into),
-        );
         ctx.task_executor.spawn_critical(
             "events task",
             reth_node_events::node::handle_events(
                 Some(Box::new(network)),
                 latest_block_number,
-                events,
+                pipeline.events().map(Into::into),
             ),
         );
 
