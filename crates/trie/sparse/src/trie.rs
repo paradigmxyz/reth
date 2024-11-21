@@ -574,9 +574,12 @@ impl RevealedSparseTrie {
 
     /// Wipe the trie, removing all values and nodes, and replacing the root with an empty node.
     pub fn wipe(&mut self) -> SparseTrieResult<()> {
-        self.prefix_set.extend_keys(self.nodes.drain().map(|(k, _)| k));
-        self.values.clear();
-        self.nodes.insert(Nibbles::default(), SparseNode::Empty);
+        let paths = self.values.drain().map(|(k, _)| k).collect::<Vec<_>>();
+        // TODO: can we optimize the batch deletion here?
+        for path in paths {
+            self.remove_leaf(&path)?;
+        }
+        debug_assert_eq!(self.nodes, HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]));
         Ok(())
     }
 
@@ -1697,5 +1700,45 @@ mod tests {
                 Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3, 0x2])
             ]
         );
+    }
+
+    #[test]
+    fn sparse_trie_wipe() {
+        let mut sparse = RevealedSparseTrie::default();
+
+        let value = alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec();
+
+        // Extension (Key = 5) – Level 0
+        // └── Branch (Mask = 1011) – Level 1
+        //     ├── 0 -> Extension (Key = 23) – Level 2
+        //     │        └── Branch (Mask = 0101) – Level 3
+        //     │              ├── 1 -> Leaf (Key = 1, Path = 50231) – Level 4
+        //     │              └── 3 -> Leaf (Key = 3, Path = 50233) – Level 4
+        //     ├── 2 -> Leaf (Key = 013, Path = 52013) – Level 2
+        //     └── 3 -> Branch (Mask = 0101) – Level 2
+        //                ├── 1 -> Leaf (Key = 3102, Path = 53102) – Level 3
+        //                └── 3 -> Branch (Mask = 1010) – Level 3
+        //                       ├── 0 -> Leaf (Key = 3302, Path = 53302) – Level 4
+        //                       └── 2 -> Leaf (Key = 3320, Path = 53320) – Level 4
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), value.clone())
+            .unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), value.clone())
+            .unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), value.clone())
+            .unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), value.clone())
+            .unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]), value.clone())
+            .unwrap();
+        sparse.update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), value).unwrap();
+
+        sparse.wipe().unwrap();
+
+        assert_eq!(sparse.root(), EMPTY_ROOT_HASH);
     }
 }
