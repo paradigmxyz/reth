@@ -13,7 +13,7 @@ workspace = true
 
 [dependencies]
 # reth
-reth-codecs.workspace = true
+reth-codecs = { workspace = true, optional = true }
 
 # ethereum
 alloy-consensus.workspace = true
@@ -93,4 +93,4 @@ serde = [
     "roaring/serde",
 	"revm-primitives/serde",
 ]
-reth-codec = []
+reth-codec = ["dep:reth-codecs"]
