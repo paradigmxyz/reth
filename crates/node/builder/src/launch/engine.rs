@@ -77,8 +77,7 @@ where
     LocalPayloadAttributesBuilder<Types::ChainSpec>: PayloadAttributesBuilder<
         <<Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
     >,
-    Types::Primitives:
-        FullNodePrimitives<Block: reth_node_api::Block<Body = reth_primitives::BlockBody>>,
+    Types::Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
 
