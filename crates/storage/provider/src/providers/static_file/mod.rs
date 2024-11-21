@@ -68,7 +68,7 @@ mod tests {
     use reth_db_api::transaction::DbTxMut;
     use reth_primitives::{
         static_file::{find_fixed_range, SegmentRangeInclusive, DEFAULT_BLOCKS_PER_STATIC_FILE},
-        Receipt, TransactionSignedNoHash,
+        EthPrimitives, Receipt, TransactionSigned,
     };
     use reth_storage_api::{ReceiptProvider, TransactionsProvider};
     use reth_testing_utils::generators::{self, random_header_range};
@@ -304,20 +304,20 @@ mod tests {
     /// * `10..=19`: no txs/receipts
     /// * `20..=29`: only one tx/receipt
     fn setup_tx_based_scenario(
-        sf_rw: &StaticFileProvider<()>,
+        sf_rw: &StaticFileProvider<EthPrimitives>,
         segment: StaticFileSegment,
         blocks_per_file: u64,
     ) {
         fn setup_block_ranges(
-            writer: &mut StaticFileProviderRWRefMut<'_, ()>,
-            sf_rw: &StaticFileProvider<()>,
+            writer: &mut StaticFileProviderRWRefMut<'_, EthPrimitives>,
+            sf_rw: &StaticFileProvider<EthPrimitives>,
             segment: StaticFileSegment,
             block_range: &Range<u64>,
             mut tx_count: u64,
             next_tx_num: &mut u64,
         ) {
             let mut receipt = Receipt::default();
-            let mut tx = TransactionSignedNoHash::default();
+            let mut tx = TransactionSigned::default();
 
             for block in block_range.clone() {
                 writer.increment_block(block).unwrap();

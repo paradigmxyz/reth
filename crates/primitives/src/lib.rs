@@ -79,7 +79,7 @@ pub mod serde_bincode_compat {
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EthPrimitives;
 
-impl reth_primitives_traits::FullNodePrimitives for EthPrimitives {
+impl reth_primitives_traits::NodePrimitives for EthPrimitives {
     type Block = crate::Block;
     type BlockHeader = alloy_consensus::Header;
     type BlockBody = crate::BlockBody;

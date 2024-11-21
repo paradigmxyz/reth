@@ -1424,7 +1424,7 @@ mod tests {
     }
 
     fn setup_genesis<
-        N: ProviderNodeTypes<Primitives: FullNodePrimitives<Block = reth_primitives::Block>>,
+        N: ProviderNodeTypes<Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>>,
     >(
         factory: &ProviderFactory<N>,
         mut genesis: SealedBlock,

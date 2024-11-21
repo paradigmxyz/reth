@@ -77,33 +77,45 @@ impl NodePrimitives for () {
 }
 
 /// Helper trait that sets trait bounds on [`NodePrimitives`].
-pub trait FullNodePrimitives:
-    Send + Sync + Unpin + Clone + Default + fmt::Debug + PartialEq + Eq + 'static
+pub trait FullNodePrimitives
+where
+    Self: NodePrimitives<
+            Block: FullBlock<Header = Self::BlockHeader, Body = Self::BlockBody>,
+            BlockHeader: FullBlockHeader,
+            BlockBody: FullBlockBody<Transaction = Self::SignedTx>,
+            SignedTx: FullSignedTx,
+            TxType: FullTxType,
+            Receipt: FullReceipt,
+        > + Send
+        + Sync
+        + Unpin
+        + Clone
+        + Default
+        + fmt::Debug
+        + PartialEq
+        + Eq
+        + 'static,
 {
-    /// Block primitive.
-    type Block: FullBlock<Header = Self::BlockHeader, Body = Self::BlockBody>;
-    /// Block header primitive.
-    type BlockHeader: FullBlockHeader + 'static;
-    /// Block body primitive.
-    type BlockBody: FullBlockBody<Transaction = Self::SignedTx> + 'static;
-    /// Signed version of the transaction type.
-    type SignedTx: FullSignedTx;
-    /// Transaction envelope type ID.
-    type TxType: FullTxType;
-    /// A receipt.
-    type Receipt: FullReceipt;
 }
 
-impl<T> NodePrimitives for T
-where
-    T: FullNodePrimitives,
+impl<T> FullNodePrimitives for T where
+    T: NodePrimitives<
+            Block: FullBlock<Header = Self::BlockHeader, Body = Self::BlockBody>,
+            BlockHeader: FullBlockHeader,
+            BlockBody: FullBlockBody<Transaction = Self::SignedTx>,
+            SignedTx: FullSignedTx,
+            TxType: FullTxType,
+            Receipt: FullReceipt,
+        > + Send
+        + Sync
+        + Unpin
+        + Clone
+        + Default
+        + fmt::Debug
+        + PartialEq
+        + Eq
+        + 'static
 {
-    type Block = T::Block;
-    type BlockHeader = T::BlockHeader;
-    type BlockBody = T::BlockBody;
-    type SignedTx = T::SignedTx;
-    type TxType = T::TxType;
-    type Receipt = T::Receipt;
 }
 
 /// Helper adapter type for accessing [`NodePrimitives`] receipt type.

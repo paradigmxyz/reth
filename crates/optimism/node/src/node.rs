@@ -9,7 +9,7 @@ use reth_db::transaction::{DbTx, DbTxMut};
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, PeersInfo};
 use reth_node_api::{
-    AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, PayloadBuilder,
+    AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, NodePrimitives, PayloadBuilder,
 };
 use reth_node_builder::{
     components::{
@@ -49,6 +49,17 @@ use crate::{
     txpool::{OpTransactionPool, OpTransactionValidator},
     OpEngineTypes,
 };
+
+/// Optimism primitive types.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct OpPrimitives;
+
+impl NodePrimitives for OpPrimitives {
+    type Block = Block;
+    type SignedTx = TransactionSigned;
+    type TxType = TxType;
+    type Receipt = Receipt;
+}
 
 /// Storage implementation for Optimism.
 #[derive(Debug, Default, Clone)]
