@@ -65,7 +65,7 @@ std = [
 ]
 test-utils = [
 	"arbitrary",
-	"reth-codecs/test-utils"
+	"reth-codecs?/test-utils"
 ]
 arbitrary = [
 	"std",
@@ -76,7 +76,7 @@ arbitrary = [
 	"dep:proptest-arbitrary-interop",
 	"alloy-eips/arbitrary",
 	"revm-primitives/arbitrary",
-	"reth-codecs/arbitrary"
+	"reth-codecs?/arbitrary"
 ]
 serde-bincode-compat = [
 	"serde",
@@ -91,7 +91,7 @@ serde = [
     "alloy-primitives/serde",
     "bytes/serde",
     "rand/serde",
-    "reth-codecs/serde",
+    "reth-codecs?/serde",
     "revm-primitives/serde",
     "roaring/serde",
 	"revm-primitives/serde",
