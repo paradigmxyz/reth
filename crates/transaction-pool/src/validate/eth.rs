@@ -107,6 +107,19 @@ where
 }
 
 /// A [`TransactionValidator`] implementation that validates ethereum transaction.
+///
+/// It supports all known ethereum transaction types:
+/// - Legacy
+/// - EIP-2718
+/// - EIP-1559
+/// - EIP-4844
+/// - EIP-7702
+///
+/// And enforces additional constraints such as:
+/// - Maximum transaction size
+/// - Maximum gas limit
+///
+/// And adheres to the configured [`LocalTransactionConfig`].
 #[derive(Debug)]
 pub(crate) struct EthTransactionValidatorInner<Client, T> {
     /// Spec of the chain
