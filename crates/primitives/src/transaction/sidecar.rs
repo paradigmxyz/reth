@@ -31,7 +31,8 @@ impl BlobTransaction {
         tx: TransactionSigned,
         sidecar: BlobTransactionSidecar,
     ) -> Result<Self, (TransactionSigned, BlobTransactionSidecar)> {
-        let TransactionSigned { transaction, signature, hash } = tx;
+        let hash = tx.hash();
+        let TransactionSigned { transaction, signature, .. } = tx;
         match transaction {
             Transaction::Eip4844(transaction) => Ok(Self {
                 hash,
@@ -39,7 +40,7 @@ impl BlobTransaction {
                 signature,
             }),
             transaction => {
-                let tx = TransactionSigned { transaction, signature, hash };
+                let tx = TransactionSigned { transaction, signature, hash: hash.into() };
                 Err((tx, sidecar))
             }
         }
@@ -61,7 +62,7 @@ impl BlobTransaction {
     pub fn into_parts(self) -> (TransactionSigned, BlobTransactionSidecar) {
         let transaction = TransactionSigned {
             transaction: Transaction::Eip4844(self.transaction.tx),
-            hash: self.hash,
+            hash: self.hash.into(),
             signature: self.signature,
         };
 

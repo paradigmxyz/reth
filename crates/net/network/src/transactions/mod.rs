@@ -2178,7 +2178,7 @@ mod tests {
         .await;
 
         assert!(!pool.is_empty());
-        assert!(pool.get(&signed_tx.hash).is_some());
+        assert!(pool.get(signed_tx.hash_ref()).is_some());
         handle.terminate().await;
     }
 

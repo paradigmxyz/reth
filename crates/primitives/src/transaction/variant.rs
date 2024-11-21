@@ -36,8 +36,8 @@ impl TransactionSignedVariant {
     pub fn hash(&self) -> B256 {
         match self {
             Self::SignedNoHash(tx) => tx.hash(),
-            Self::Signed(tx) => tx.hash,
-            Self::SignedEcRecovered(tx) => tx.hash,
+            Self::Signed(tx) => tx.hash(),
+            Self::SignedEcRecovered(tx) => tx.hash(),
         }
     }
 

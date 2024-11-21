@@ -69,17 +69,18 @@ impl PooledTransactionsElement {
     /// [`PooledTransactionsElement`]. Since [`BlobTransaction`] is disallowed to be broadcasted on
     /// p2p, return an err if `tx` is [`Transaction::Eip4844`].
     pub fn try_from_broadcast(tx: TransactionSigned) -> Result<Self, TransactionSigned> {
+        let hash = tx.hash();
         match tx {
-            TransactionSigned { transaction: Transaction::Legacy(tx), signature, hash } => {
+            TransactionSigned { transaction: Transaction::Legacy(tx), signature, .. } => {
                 Ok(Self::Legacy { transaction: tx, signature, hash })
             }
-            TransactionSigned { transaction: Transaction::Eip2930(tx), signature, hash } => {
+            TransactionSigned { transaction: Transaction::Eip2930(tx), signature, .. } => {
                 Ok(Self::Eip2930 { transaction: tx, signature, hash })
             }
-            TransactionSigned { transaction: Transaction::Eip1559(tx), signature, hash } => {
+            TransactionSigned { transaction: Transaction::Eip1559(tx), signature, .. } => {
                 Ok(Self::Eip1559 { transaction: tx, signature, hash })
             }
-            TransactionSigned { transaction: Transaction::Eip7702(tx), signature, hash } => {
+            TransactionSigned { transaction: Transaction::Eip7702(tx), signature, .. } => {
                 Ok(Self::Eip7702 { transaction: tx, signature, hash })
             }
             // Not supported because missing blob sidecar
@@ -99,9 +100,10 @@ impl PooledTransactionsElement {
         tx: TransactionSigned,
         sidecar: BlobTransactionSidecar,
     ) -> Result<Self, TransactionSigned> {
+        let hash = tx.hash();
         Ok(match tx {
             // If the transaction is an EIP-4844 transaction...
-            TransactionSigned { transaction: Transaction::Eip4844(tx), signature, hash } => {
+            TransactionSigned { transaction: Transaction::Eip4844(tx), signature, .. } => {
                 // Construct a `PooledTransactionsElement::BlobTransaction` with provided sidecar.
                 Self::BlobTransaction(BlobTransaction {
                     signature,
@@ -187,23 +189,25 @@ impl PooledTransactionsElement {
     /// Returns the inner [`TransactionSigned`].
     pub fn into_transaction(self) -> TransactionSigned {
         match self {
-            Self::Legacy { transaction, signature, hash } => {
-                TransactionSigned { transaction: Transaction::Legacy(transaction), signature, hash }
-            }
+            Self::Legacy { transaction, signature, hash } => TransactionSigned {
+                transaction: Transaction::Legacy(transaction),
+                signature,
+                hash: hash.into(),
+            },
             Self::Eip2930 { transaction, signature, hash } => TransactionSigned {
                 transaction: Transaction::Eip2930(transaction),
                 signature,
-                hash,
+                hash: hash.into(),
             },
             Self::Eip1559 { transaction, signature, hash } => TransactionSigned {
                 transaction: Transaction::Eip1559(transaction),
                 signature,
-                hash,
+                hash: hash.into(),
             },
             Self::Eip7702 { transaction, signature, hash } => TransactionSigned {
                 transaction: Transaction::Eip7702(transaction),
                 signature,
-                hash,
+                hash: hash.into(),
             },
             Self::BlobTransaction(blob_tx) => blob_tx.into_parts().0,
         }
@@ -460,7 +464,7 @@ impl Decodable2718 for PooledTransactionsElement {
             }
             tx_type => {
                 let typed_tx = TransactionSigned::typed_decode(tx_type, buf)?;
-
+                let hash = typed_tx.hash();
                 match typed_tx.transaction {
                     Transaction::Legacy(_) => Err(RlpError::Custom(
                         "legacy transactions should not be a result of typed decoding",
@@ -473,17 +477,17 @@ impl Decodable2718 for PooledTransactionsElement {
                     Transaction::Eip2930(tx) => Ok(Self::Eip2930 {
                         transaction: tx,
                         signature: typed_tx.signature,
-                        hash: typed_tx.hash,
+                        hash
                     }),
                     Transaction::Eip1559(tx) => Ok(Self::Eip1559 {
                         transaction: tx,
                         signature: typed_tx.signature,
-                        hash: typed_tx.hash,
+                        hash
                     }),
                     Transaction::Eip7702(tx) => Ok(Self::Eip7702 {
                         transaction: tx,
                         signature: typed_tx.signature,
-                        hash: typed_tx.hash,
+                        hash
                     }),
                     #[cfg(feature = "optimism")]
                     Transaction::Deposit(_) => Err(RlpError::Custom("Optimism deposit transaction cannot be decoded to PooledTransactionsElement").into())

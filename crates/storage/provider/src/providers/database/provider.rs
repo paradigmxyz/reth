@@ -551,7 +551,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
             .map(|tx| match transaction_kind {
                 TransactionVariant::NoHash => TransactionSigned {
                     // Caller explicitly asked for no hash, so we don't calculate it
-                    hash: B256::ZERO,
+                    hash: Default::default(),
                     signature: tx.signature,
                     transaction: tx.transaction,
                 },
@@ -1500,7 +1500,7 @@ impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> Transaction
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
         if let Some(id) = self.transaction_id(hash)? {
             Ok(self.transaction_by_id_no_hash(id)?.map(|tx| TransactionSigned {
-                hash,
+                hash: hash.into(),
                 signature: tx.signature,
                 transaction: tx.transaction,
             }))
@@ -1518,7 +1518,7 @@ impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> Transaction
         if let Some(transaction_id) = self.transaction_id(tx_hash)? {
             if let Some(tx) = self.transaction_by_id_no_hash(transaction_id)? {
                 let transaction = TransactionSigned {
-                    hash: tx_hash,
+                    hash: tx_hash.into(),
                     signature: tx.signature,
                     transaction: tx.transaction,
                 };
