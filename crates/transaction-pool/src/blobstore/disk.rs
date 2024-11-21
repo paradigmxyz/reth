@@ -75,10 +75,7 @@ impl BlobStore for DiskFileBlobStore {
     }
 
     fn cleanup(&self) -> BlobStoreCleanupStat {
-        let txs_to_delete = {
-            let mut txs_to_delete = self.inner.txs_to_delete.write();
-            std::mem::take(&mut *txs_to_delete)
-        };
+        let txs_to_delete = std::mem::take(&mut *self.inner.txs_to_delete.write());
         let mut stat = BlobStoreCleanupStat::default();
         let mut subsize = 0;
         debug!(target:"txpool::blob", num_blobs=%txs_to_delete.len(), "Removing blobs from disk");
@@ -553,5 +550,137 @@ mod tests {
 
         assert_eq!(store.data_size_hint(), Some(0));
         assert_eq!(store.inner.size_tracker.num_blobs.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn disk_insert_and_retrieve() {
+        let (store, _dir) = tmp_store();
+
+        let (tx, blob) = rng_blobs(1).into_iter().next().unwrap();
+        store.insert(tx, blob.clone()).unwrap();
+
+        assert!(store.is_cached(&tx));
+        let retrieved_blob = store.get(tx).unwrap().map(Arc::unwrap_or_clone).unwrap();
+        assert_eq!(retrieved_blob, blob);
+    }
+
+    #[test]
+    fn disk_delete_blob() {
+        let (store, _dir) = tmp_store();
+
+        let (tx, blob) = rng_blobs(1).into_iter().next().unwrap();
+        store.insert(tx, blob).unwrap();
+        assert!(store.is_cached(&tx));
+
+        store.delete(tx).unwrap();
+        assert!(store.inner.txs_to_delete.read().contains(&tx));
+        store.cleanup();
+
+        let result = store.get(tx).unwrap();
+        assert_eq!(
+            result,
+            Some(Arc::new(BlobTransactionSidecar {
+                blobs: vec![],
+                commitments: vec![],
+                proofs: vec![]
+            }))
+        );
+    }
+
+    #[test]
+    fn disk_insert_all_and_delete_all() {
+        let (store, _dir) = tmp_store();
+
+        let blobs = rng_blobs(5);
+        let txs = blobs.iter().map(|(tx, _)| *tx).collect::<Vec<_>>();
+        store.insert_all(blobs.clone()).unwrap();
+
+        for (tx, _) in &blobs {
+            assert!(store.is_cached(tx));
+        }
+
+        store.delete_all(txs.clone()).unwrap();
+        store.cleanup();
+
+        for tx in txs {
+            let result = store.get(tx).unwrap();
+            assert_eq!(
+                result,
+                Some(Arc::new(BlobTransactionSidecar {
+                    blobs: vec![],
+                    commitments: vec![],
+                    proofs: vec![]
+                }))
+            );
+        }
+    }
+
+    #[test]
+    fn disk_get_all_blobs() {
+        let (store, _dir) = tmp_store();
+
+        let blobs = rng_blobs(3);
+        let txs = blobs.iter().map(|(tx, _)| *tx).collect::<Vec<_>>();
+        store.insert_all(blobs.clone()).unwrap();
+
+        let retrieved_blobs = store.get_all(txs.clone()).unwrap();
+        for (tx, blob) in retrieved_blobs {
+            assert!(blobs.contains(&(tx, Arc::unwrap_or_clone(blob))));
+        }
+
+        store.delete_all(txs).unwrap();
+        store.cleanup();
+    }
+
+    #[test]
+    fn disk_get_exact_blobs_success() {
+        let (store, _dir) = tmp_store();
+
+        let blobs = rng_blobs(3);
+        let txs = blobs.iter().map(|(tx, _)| *tx).collect::<Vec<_>>();
+        store.insert_all(blobs.clone()).unwrap();
+
+        let retrieved_blobs = store.get_exact(txs).unwrap();
+        for (retrieved_blob, (_, original_blob)) in retrieved_blobs.into_iter().zip(blobs) {
+            assert_eq!(Arc::unwrap_or_clone(retrieved_blob), original_blob);
+        }
+    }
+
+    #[test]
+    fn disk_get_exact_blobs_failure() {
+        let (store, _dir) = tmp_store();
+
+        let blobs = rng_blobs(2);
+        let txs = blobs.iter().map(|(tx, _)| *tx).collect::<Vec<_>>();
+        store.insert_all(blobs).unwrap();
+
+        // Try to get a blob that was never inserted
+        let missing_tx = TxHash::random();
+        let result = store.get_exact(vec![txs[0], missing_tx]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn disk_data_size_hint() {
+        let (store, _dir) = tmp_store();
+        assert_eq!(store.data_size_hint(), Some(0));
+
+        let blobs = rng_blobs(2);
+        store.insert_all(blobs).unwrap();
+        assert!(store.data_size_hint().unwrap() > 0);
+    }
+
+    #[test]
+    fn disk_cleanup_stat() {
+        let (store, _dir) = tmp_store();
+
+        let blobs = rng_blobs(3);
+        let txs = blobs.iter().map(|(tx, _)| *tx).collect::<Vec<_>>();
+        store.insert_all(blobs).unwrap();
+
+        store.delete_all(txs).unwrap();
+        let stat = store.cleanup();
+        assert_eq!(stat.delete_succeed, 3);
+        assert_eq!(stat.delete_failed, 0);
     }
 }

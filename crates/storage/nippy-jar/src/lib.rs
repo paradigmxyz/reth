@@ -20,11 +20,6 @@ use std::{
     ops::Range,
     path::{Path, PathBuf},
 };
-
-// Windows specific extension for std::fs
-#[cfg(windows)]
-use std::os::windows::prelude::OpenOptionsExt;
-
 use tracing::*;
 
 /// Compression algorithms supported by `NippyJar`.

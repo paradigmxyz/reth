@@ -2,7 +2,7 @@ use crate::{GotExpected, SealedHeader, TransactionSigned, TransactionSignedEcRec
 use alloc::vec::Vec;
 use alloy_consensus::Header;
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
-use alloy_primitives::{Address, Bytes, B256};
+use alloy_primitives::{Address, Bytes, Sealable, B256};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
@@ -69,7 +69,7 @@ impl Block {
         let senders = if self.body.transactions.len() == senders.len() {
             senders
         } else {
-            let Some(senders) = self.body.recover_signers() else { return Err(self) };
+            let Some(senders) = self.body.recover_signers_unchecked() else { return Err(self) };
             senders
         };
 
@@ -379,7 +379,7 @@ impl SealedBlock {
         let senders = if self.body.transactions.len() == senders.len() {
             senders
         } else {
-            let Some(senders) = self.body.recover_signers() else { return Err(self) };
+            let Some(senders) = self.body.recover_signers_unchecked() else { return Err(self) };
             senders
         };
 
@@ -493,22 +493,30 @@ where
 }
 
 /// Sealed block with senders recovered from transactions.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Deref, DerefMut)]
-pub struct SealedBlockWithSenders {
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Deref, DerefMut)]
+pub struct SealedBlockWithSenders<H = Header, B = BlockBody> {
     /// Sealed block
     #[deref]
     #[deref_mut]
-    pub block: SealedBlock,
+    pub block: SealedBlock<H, B>,
     /// List of senders that match transactions from block.
     pub senders: Vec<Address>,
 }
 
-impl SealedBlockWithSenders {
-    /// New sealed block with sender. Return none if len of tx and senders does not match
-    pub fn new(block: SealedBlock, senders: Vec<Address>) -> Option<Self> {
-        (block.body.transactions.len() == senders.len()).then_some(Self { block, senders })
+impl<H: Default + Sealable, B: Default> Default for SealedBlockWithSenders<H, B> {
+    fn default() -> Self {
+        Self { block: SealedBlock::default(), senders: Default::default() }
     }
+}
 
+impl<H, B: reth_primitives_traits::BlockBody> SealedBlockWithSenders<H, B> {
+    /// New sealed block with sender. Return none if len of tx and senders does not match
+    pub fn new(block: SealedBlock<H, B>, senders: Vec<Address>) -> Option<Self> {
+        (block.body.transactions().len() == senders.len()).then_some(Self { block, senders })
+    }
+}
+
+impl SealedBlockWithSenders {
     /// Split Structure to its components
     #[inline]
     pub fn into_components(self) -> (SealedBlock, Vec<Address>) {
@@ -614,6 +622,15 @@ impl BlockBody {
     /// Recover signer addresses for all transactions in the block body.
     pub fn recover_signers(&self) -> Option<Vec<Address>> {
         TransactionSigned::recover_signers(&self.transactions, self.transactions.len())
+    }
+
+    /// Recover signer addresses for all transactions in the block body _without ensuring that the
+    /// signature has a low `s` value_.
+    ///
+    /// Returns `None`, if some transaction's signature is invalid, see also
+    /// [`TransactionSigned::recover_signer_unchecked`].
+    pub fn recover_signers_unchecked(&self) -> Option<Vec<Address>> {
+        TransactionSigned::recover_signers_unchecked(&self.transactions, self.transactions.len())
     }
 
     /// Returns whether or not the block body contains any blob transactions.

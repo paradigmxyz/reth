@@ -1,13 +1,13 @@
 //! A network implementation for testing purposes.
 
-use std::{
-    fmt,
-    future::Future,
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    pin::Pin,
-    task::{Context, Poll},
+use crate::{
+    builder::ETH_REQUEST_CHANNEL_CAPACITY,
+    error::NetworkError,
+    eth_requests::EthRequestHandler,
+    protocol::IntoRlpxSubProtocol,
+    transactions::{TransactionsHandle, TransactionsManager, TransactionsManagerConfig},
+    NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
 };
-
 use futures::{FutureExt, StreamExt};
 use pin_project::pin_project;
 use reth_chainspec::{Hardforks, MAINNET};
@@ -27,21 +27,19 @@ use reth_transaction_pool::{
     EthTransactionPool, TransactionPool, TransactionValidationTaskExecutor,
 };
 use secp256k1::SecretKey;
+use std::{
+    fmt,
+    future::Future,
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    pin::Pin,
+    task::{Context, Poll},
+};
 use tokio::{
     sync::{
         mpsc::{channel, unbounded_channel},
         oneshot,
     },
     task::JoinHandle,
-};
-
-use crate::{
-    builder::ETH_REQUEST_CHANNEL_CAPACITY,
-    error::NetworkError,
-    eth_requests::EthRequestHandler,
-    protocol::IntoRlpxSubProtocol,
-    transactions::{TransactionsHandle, TransactionsManager, TransactionsManagerConfig},
-    NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
 };
 
 /// A test network consisting of multiple peers.

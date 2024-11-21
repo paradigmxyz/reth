@@ -1,16 +1,13 @@
 //! Peer related implementations
 
-use std::{
-    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
-    fmt::Display,
-    io::{self},
-    net::{IpAddr, SocketAddr},
-    task::{Context, Poll},
-    time::Duration,
+use crate::{
+    error::SessionError,
+    session::{Direction, PendingSessionHandshakeError},
+    swarm::NetworkConnectionState,
 };
-
 use futures::StreamExt;
 use reth_eth_wire::{errors::EthStreamError, DisconnectReason};
+use reth_ethereum_forks::ForkId;
 use reth_net_banlist::BanList;
 use reth_network_api::test_utils::{PeerCommand, PeersHandle};
 use reth_network_peers::{NodeRecord, PeerId};
@@ -22,7 +19,14 @@ use reth_network_types::{
     ConnectionsConfig, Peer, PeerAddr, PeerConnectionState, PeerKind, PeersConfig,
     ReputationChangeKind, ReputationChangeOutcome, ReputationChangeWeights,
 };
-use reth_primitives::ForkId;
+use std::{
+    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
+    fmt::Display,
+    io::{self},
+    net::{IpAddr, SocketAddr},
+    task::{Context, Poll},
+    time::Duration,
+};
 use thiserror::Error;
 use tokio::{
     sync::mpsc,
@@ -30,12 +34,6 @@ use tokio::{
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{trace, warn};
-
-use crate::{
-    error::SessionError,
-    session::{Direction, PendingSessionHandshakeError},
-    swarm::NetworkConnectionState,
-};
 
 /// Maintains the state of _all_ the peers known to the network.
 ///

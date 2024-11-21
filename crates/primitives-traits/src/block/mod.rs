@@ -5,14 +5,20 @@ pub mod header;
 
 use alloc::fmt;
 
-use reth_codecs::Compact;
+use alloy_rlp::{Decodable, Encodable};
 
-use crate::{BlockHeader, FullBlockHeader, InMemorySize, MaybeSerde};
+use crate::{BlockHeader, FullBlockBody, FullBlockHeader, InMemorySize, MaybeSerde};
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
-pub trait FullBlock: Block<Header: Compact> {}
+pub trait FullBlock:
+    Block<Header: FullBlockHeader, Body: FullBlockBody> + Encodable + Decodable
+{
+}
 
-impl<T> FullBlock for T where T: Block<Header: FullBlockHeader> {}
+impl<T> FullBlock for T where
+    T: Block<Header: FullBlockHeader, Body: FullBlockBody> + Encodable + Decodable
+{
+}
 
 /// Abstraction of block data type.
 // todo: make sealable super-trait, depends on <https://github.com/paradigmxyz/reth/issues/11449>

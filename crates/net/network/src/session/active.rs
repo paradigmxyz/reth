@@ -11,6 +11,14 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::{
+    message::{NewBlockMessage, PeerMessage, PeerResponse, PeerResponseResult},
+    session::{
+        conn::EthRlpxConnection,
+        handle::{ActiveSessionMessage, SessionCommand},
+        SessionId,
+    },
+};
 use alloy_primitives::Sealable;
 use futures::{stream::Fuse, SinkExt, StreamExt};
 use metrics::Gauge;
@@ -33,15 +41,6 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
 use tracing::{debug, trace};
-
-use crate::{
-    message::{NewBlockMessage, PeerMessage, PeerResponse, PeerResponseResult},
-    session::{
-        conn::EthRlpxConnection,
-        handle::{ActiveSessionMessage, SessionCommand},
-        SessionId,
-    },
-};
 
 // Constants for timeout updating.
 
