@@ -1914,7 +1914,7 @@ pub mod serde_bincode_compat {
     impl<'a> From<&'a super::TransactionSigned> for TransactionSigned<'a> {
         fn from(value: &'a super::TransactionSigned) -> Self {
             Self {
-                hash: *value.hash_ref(),
+                hash: value.hash(),
                 signature: value.signature,
                 transaction: Transaction::from(&value.transaction),
             }
@@ -2217,7 +2217,7 @@ mod tests {
     ) {
         let expected = TransactionSigned::from_transaction_and_signature(transaction, signature);
         if let Some(hash) = hash {
-            assert_eq!(hash, *expected.hash_ref());
+            assert_eq!(hash, expected.hash());
         }
         assert_eq!(bytes.len(), expected.length());
 
