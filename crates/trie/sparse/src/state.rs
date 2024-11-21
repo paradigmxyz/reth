@@ -118,14 +118,18 @@ impl SparseStateTrie {
         Ok(Some(root_node))
     }
 
-    /// Update the leaf node.
-    pub fn update_leaf(&mut self, path: Nibbles, value: Vec<u8>) -> SparseStateTrieResult<()> {
+    /// Update the account leaf node.
+    pub fn update_account_leaf(
+        &mut self,
+        path: Nibbles,
+        value: Vec<u8>,
+    ) -> SparseStateTrieResult<()> {
         self.state.update_leaf(path, value)?;
         Ok(())
     }
 
-    /// Remove the leaf node.
-    pub fn remove_leaf(&mut self, path: &Nibbles) -> SparseStateTrieResult<()> {
+    /// Remove the account leaf node.
+    pub fn remove_account_leaf(&mut self, path: &Nibbles) -> SparseStateTrieResult<()> {
         self.state.remove_leaf(path)?;
         Ok(())
     }
