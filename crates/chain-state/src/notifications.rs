@@ -196,7 +196,7 @@ impl<T: Clone + Sync + Send + 'static> Stream for ForkChoiceStream<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::B256;
+    use alloy_primitives::{b256, B256};
     use reth_execution_types::ExecutionOutcome;
     use reth_primitives::{Receipt, Receipts, TransactionSigned, TxType};
 
@@ -332,7 +332,11 @@ mod tests {
             block_receipts[0].0,
             BlockReceipts {
                 block: block1.num_hash(),
-                tx_receipts: vec![(B256::default(), receipt1)]
+                tx_receipts: vec![(
+                    // Transaction hash of a Transaction::default()
+                    b256!("20b5378c6fe992c118b557d2f8e8bbe0b7567f6fe5483a8f0f1c51e93a9d91ab"),
+                    receipt1
+                )]
             }
         );
 
