@@ -8328,6 +8328,7 @@ dependencies = [
  "reth-optimism-forks",
  "reth-optimism-node",
  "reth-optimism-payload-builder",
+ "reth-optimism-primitives",
  "reth-optimism-rpc",
  "reth-payload-builder",
  "reth-payload-util",
