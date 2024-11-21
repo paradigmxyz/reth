@@ -39,9 +39,21 @@ reth-codecs = { workspace = true, features = ["test-utils", "optimism"] }
 rstest.workspace = true
 
 [features]
-default = ["reth-codec"]
+default = ["std", "reth-codec"]
+std = [
+    "reth-primitives-traits/std",
+    "reth-primitives/std",
+    "reth-node-types/std",
+    "reth-codecs/std",
+    "alloy-consensus/std",
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "serde/std",
+]
 reth-codec = [
     "dep:reth-codecs",
+    "reth-primitives/reth-codec",
+    "reth-primitives-traits/reth-codec",
     "reth-codecs?/optimism",
     "reth-primitives/reth-codec"
 ]

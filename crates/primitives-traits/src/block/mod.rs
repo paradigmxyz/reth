@@ -5,18 +5,18 @@ pub mod header;
 
 use alloc::fmt;
 
-use alloy_rlp::{Decodable, Encodable};
-
 use crate::{BlockHeader, FullBlockBody, FullBlockHeader, InMemorySize, MaybeSerde};
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
 pub trait FullBlock:
-    Block<Header: FullBlockHeader, Body: FullBlockBody> + Encodable + Decodable
+    Block<Header: FullBlockHeader, Body: FullBlockBody> + alloy_rlp::Encodable + alloy_rlp::Decodable
 {
 }
 
 impl<T> FullBlock for T where
-    T: Block<Header: FullBlockHeader, Body: FullBlockBody> + Encodable + Decodable
+    T: Block<Header: FullBlockHeader, Body: FullBlockBody>
+        + alloy_rlp::Encodable
+        + alloy_rlp::Decodable
 {
 }
 

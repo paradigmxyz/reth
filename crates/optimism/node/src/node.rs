@@ -9,8 +9,7 @@ use reth_db::transaction::{DbTx, DbTxMut};
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, PeersInfo};
 use reth_node_api::{
-    AddOnsContext, EngineValidator, FullNodeComponents, FullNodePrimitives, NodeAddOns,
-    PayloadBuilder,
+    AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, PayloadBuilder,
 };
 use reth_node_builder::{
     components::{
@@ -25,12 +24,13 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_evm::{OpEvmConfig, OpExecutionStrategyFactory};
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
+use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::{
     witness::{DebugExecutionWitnessApiServer, OpDebugWitnessApi},
     OpEthApi,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::{Block, BlockBody, Receipt, TransactionSigned, TxType};
+use reth_primitives::BlockBody;
 use reth_provider::{
     providers::ChainStorage, BlockBodyWriter, CanonStateSubscriptions, DBProvider, EthStorage,
     ProviderResult,
@@ -49,16 +49,6 @@ use crate::{
     txpool::{OpTransactionPool, OpTransactionValidator},
     OpEngineTypes,
 };
-/// Optimism primitive types.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct OpPrimitives;
-
-impl FullNodePrimitives for OpPrimitives {
-    type Block = Block;
-    type SignedTx = TransactionSigned;
-    type TxType = TxType;
-    type Receipt = Receipt;
-}
 
 /// Storage implementation for Optimism.
 #[derive(Debug, Default, Clone)]
@@ -282,6 +272,7 @@ where
         let validator = TransactionValidationTaskExecutor::eth_builder(Arc::new(
             ctx.chain_spec().inner.clone(),
         ))
+        .no_eip4844()
         .with_head_timestamp(ctx.head().timestamp)
         .kzg_settings(ctx.kzg_settings()?)
         .with_additional_tasks(
