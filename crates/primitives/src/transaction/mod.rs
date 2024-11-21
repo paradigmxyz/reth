@@ -1,8 +1,5 @@
 //! Transaction types.
 
-use alloc::vec::Vec;
-#[cfg(any(test, feature = "reth-codec"))]
-use alloy_consensus::constants::{EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID};
 use alloy_consensus::{
     transaction::RlpEcdsaTx, SignableTransaction, Transaction as _, TxEip1559, TxEip2930,
     TxEip4844, TxEip7702, TxLegacy,
@@ -17,30 +14,29 @@ use alloy_primitives::{
     keccak256, Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
 };
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
-pub use compat::FillTxEnv;
 use core::mem;
 use derive_more::{AsRef, Deref};
-pub use error::{
-    InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
-};
-pub use meta::TransactionMeta;
 use once_cell as _;
 #[cfg(not(feature = "std"))]
 use once_cell::sync::Lazy as LazyLock;
 #[cfg(feature = "optimism")]
 use op_alloy_consensus::DepositTransaction;
-#[cfg(feature = "optimism")]
-use op_alloy_consensus::TxDeposit;
-pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use revm_primitives::{AuthorizationList, TxEnv};
 use serde::{Deserialize, Serialize};
-pub use sidecar::BlobTransaction;
 use signature::decode_with_eip155_chain_id;
-pub use signature::{recover_signer, recover_signer_unchecked};
 #[cfg(feature = "std")]
 use std::sync::LazyLock;
+
+pub use compat::FillTxEnv;
+pub use error::{
+    InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
+};
+pub use meta::TransactionMeta;
+pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
+pub use sidecar::BlobTransaction;
+pub use signature::{recover_signer, recover_signer_unchecked};
 pub use tx_type::TxType;
 pub use variant::TransactionSignedVariant;
 
@@ -602,11 +598,11 @@ impl reth_codecs::Compact for Transaction {
                 // reading the full 8 bits (single byte) and match on this transaction type.
                 let identifier = buf.get_u8();
                 match identifier {
-                    EIP4844_TX_TYPE_ID => {
+                    alloy_consensus::constants::EIP4844_TX_TYPE_ID => {
                         let (tx, buf) = TxEip4844::from_compact(buf, buf.len());
                         (Self::Eip4844(tx), buf)
                     }
-                    EIP7702_TX_TYPE_ID => {
+                    alloy_consensus::constants::EIP7702_TX_TYPE_ID => {
                         let (tx, buf) = TxEip7702::from_compact(buf, buf.len());
                         (Self::Eip7702(tx), buf)
                     }
