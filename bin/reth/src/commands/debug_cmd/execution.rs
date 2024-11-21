@@ -25,8 +25,7 @@ use reth_network_p2p::{headers::client::HeadersClient, EthBlockClient};
 use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_ethereum::EthExecutorProvider;
 use reth_provider::{
-    providers::ProviderNodeTypes, BlockExecutionWriter, ChainSpecProvider, ProviderFactory,
-    StageCheckpointReader,
+    providers::ProviderNodeTypes, ChainSpecProvider, ProviderFactory, StageCheckpointReader,
 };
 use reth_prune::PruneModes;
 use reth_stages::{
