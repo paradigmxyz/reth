@@ -16,10 +16,10 @@ pub mod compact_ids {
     /// Identifier for [`LegacyAnalyzed`](revm_primitives::Bytecode::LegacyAnalyzed).
     pub const LEGACY_ANALYZED_BYTECODE_ID: u8 = 2;
 
-    /// Identifier for [`Eof`](revm_primitives::Bytecode::::Eof).
+    /// Identifier for [`Eof`](revm_primitives::Bytecode::Eof).
     pub const EOF_BYTECODE_ID: u8 = 3;
 
-    /// Identifier for [`Eip7702`](revm_primitives::Bytecode::::Eip7702).
+    /// Identifier for [`Eip7702`](revm_primitives::Bytecode::Eip7702).
     pub const EIP7702_BYTECODE_ID: u8 = 4;
 }
 
