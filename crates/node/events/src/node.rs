@@ -307,7 +307,11 @@ impl NodeState {
                 info!(tip_block_number, "Pruner started");
             }
             PrunerEvent::Finished { tip_block_number, elapsed, stats } => {
-                info!(tip_block_number, ?elapsed, ?stats, "Pruner finished");
+                let stats = format!(
+                    "[{}]",
+                    stats.iter().map(|item| item.to_string()).collect::<Vec<_>>().join(", ")
+                );
+                info!(tip_block_number, ?elapsed, %stats, "Pruner finished");
             }
         }
     }
