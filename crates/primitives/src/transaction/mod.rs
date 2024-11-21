@@ -1273,7 +1273,7 @@ impl TransactionSigned {
     /// This will also calculate the transaction hash using its encoding.
     pub fn from_transaction_and_signature(transaction: Transaction, signature: Signature) -> Self {
         let mut initial_tx = Self { transaction, hash: Default::default(), signature };
-        initial_tx.hash = OnceLock::from(initial_tx.recalculate_hash());
+        initial_tx.hash = initial_tx.recalculate_hash().into();
         initial_tx
     }
 
@@ -1811,12 +1811,8 @@ pub mod serde_bincode_compat {
         TxEip4844,
     };
     use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
-    #[cfg(not(feature = "std"))]
-    use once_cell::sync::OnceCell as OnceLock;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
-    #[cfg(feature = "std")]
-    use std::sync::OnceLock;
 
     /// Bincode-compatible [`super::Transaction`] serde implementation.
     ///
@@ -1928,7 +1924,7 @@ pub mod serde_bincode_compat {
     impl<'a> From<TransactionSigned<'a>> for super::TransactionSigned {
         fn from(value: TransactionSigned<'a>) -> Self {
             Self {
-                hash: OnceLock::from(value.hash),
+                hash: value.hash.into(),
                 signature: value.signature,
                 transaction: value.transaction.into(),
             }
