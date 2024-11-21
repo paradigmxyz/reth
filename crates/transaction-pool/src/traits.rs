@@ -20,7 +20,7 @@ use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 use reth_primitives::{
     kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, PooledTransactionsElement,
-    PooledTransactionsElementEcRecovered, SealedBlock, Transaction,
+    PooledTransactionsElementEcRecovered, SealedBlock, Transaction, TransactionSigned,
     TransactionSignedEcRecovered,
 };
 #[cfg(feature = "serde")]
@@ -1070,8 +1070,8 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
 pub trait EthPoolTransaction:
     PoolTransaction<
     Consensus: From<TransactionSignedEcRecovered>
-                   + Into<TransactionSignedEcRecovered>,
-                   // + Into<TransactionSigned>,
+                   + Into<TransactionSignedEcRecovered>
+                   + Into<TransactionSigned>,
     Pooled: From<PooledTransactionsElementEcRecovered> + Into<PooledTransactionsElementEcRecovered>,
 >
 {
