@@ -1272,9 +1272,7 @@ impl TransactionSigned {
     ///
     /// This will also calculate the transaction hash using its encoding.
     pub fn from_transaction_and_signature(transaction: Transaction, signature: Signature) -> Self {
-        let mut initial_tx = Self { transaction, hash: Default::default(), signature };
-        initial_tx.hash = initial_tx.recalculate_hash().into();
-        initial_tx
+        Self { transaction, signature, hash: Default::default() }
     }
 
     /// Decodes legacy transaction from the data buffer into a tuple.
