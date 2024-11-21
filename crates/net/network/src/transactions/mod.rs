@@ -736,7 +736,7 @@ where
             // Iterate through the transactions to propagate and fill the hashes and full
             // transaction
             for tx in to_propagate {
-                if !peer.seen_transactions.contains(&tx.hash()) {
+                if !peer.seen_transactions.contains(tx.tx_hash()) {
                     // Only include if the peer hasn't seen the transaction
                     full_transactions.push(&tx);
                 }
@@ -815,7 +815,7 @@ where
                 hashes.extend(to_propagate)
             } else {
                 for tx in to_propagate {
-                    if !peer.seen_transactions.contains(&tx.hash()) {
+                    if !peer.seen_transactions.contains(tx.tx_hash()) {
                         // Include if the peer hasn't seen it
                         hashes.push(&tx);
                     }
@@ -885,7 +885,7 @@ where
                 for tx in &to_propagate {
                     // Only proceed if the transaction is not in the peer's list of seen
                     // transactions
-                    if !peer.seen_transactions.contains(&tx.hash()) {
+                    if !peer.seen_transactions.contains(tx.tx_hash()) {
                         builder.push(tx);
                     }
                 }
@@ -1486,8 +1486,8 @@ impl<T: SignedTransaction> PropagateTransaction<T> {
         Self { size, transaction }
     }
 
-    fn hash(&self) -> TxHash {
-        *self.transaction.tx_hash()
+    fn tx_hash(&self) -> &TxHash {
+        self.transaction.tx_hash()
     }
 }
 
@@ -1678,9 +1678,9 @@ impl PooledTransactionsHashesBuilder {
 
     fn push<T: SignedTransaction>(&mut self, tx: &PropagateTransaction<T>) {
         match self {
-            Self::Eth66(msg) => msg.0.push(tx.hash()),
+            Self::Eth66(msg) => msg.0.push(*tx.tx_hash()),
             Self::Eth68(msg) => {
-                msg.hashes.push(tx.hash());
+                msg.hashes.push(*tx.tx_hash());
                 msg.sizes.push(tx.size);
                 msg.types.push(tx.transaction.transaction().tx_type().into());
             }
