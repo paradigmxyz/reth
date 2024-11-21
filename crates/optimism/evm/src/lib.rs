@@ -50,7 +50,7 @@ impl OpEvmConfig {
     }
 
     /// Returns the chain spec associated with this configuration.
-    pub fn chain_spec(&self) -> &OpChainSpec {
+    pub const fn chain_spec(&self) -> &Arc<OpChainSpec> {
         &self.chain_spec
     }
 }
