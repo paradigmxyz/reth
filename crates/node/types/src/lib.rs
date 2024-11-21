@@ -232,3 +232,9 @@ where
 {
     type Engine = E;
 }
+
+/// Helper adapter type for accessing [`NodePrimitives::BlockHeader`] on [`NodeTypes`].
+pub type HeaderTy<N> = <<N as NodeTypes>::Primitives as NodePrimitives>::BlockHeader;
+
+/// Helper adapter type for accessing [`NodePrimitives::BlockBody`] on [`NodeTypes`].
+pub type BodyTy<N> = <<N as NodeTypes>::Primitives as NodePrimitives>::BlockBody;
