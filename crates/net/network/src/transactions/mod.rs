@@ -49,7 +49,7 @@ use reth_network_p2p::{
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
 use reth_primitives::{PooledTransactionsElement, TransactionSigned};
-use reth_primitives_traits::{SignedTransaction, TransactionExt, TxType};
+use reth_primitives_traits::{SignedTransaction, TxType};
 use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
     error::{PoolError, PoolResult},
@@ -1617,7 +1617,7 @@ impl<T: SignedTransaction> FullTransactionsBuilder<T> {
         //  via `GetPooledTransactions`.
         //
         // From: <https://eips.ethereum.org/EIPS/eip-4844#networking>
-        if !transaction.transaction.transaction().tx_type().is_broadcastable_in_full() {
+        if !transaction.transaction.tx_type().is_broadcastable_in_full() {
             self.pooled.push(transaction);
             return
         }
@@ -1683,7 +1683,7 @@ impl PooledTransactionsHashesBuilder {
             Self::Eth68(msg) => {
                 msg.hashes.push(*tx.tx_hash());
                 msg.sizes.push(tx.size);
-                msg.types.push(tx.transaction.transaction().tx_type().into());
+                msg.types.push(tx.transaction.tx_type().into());
             }
         }
     }

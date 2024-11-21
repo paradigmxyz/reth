@@ -1,5 +1,6 @@
 //! Transaction types.
 
+use alloc::vec::Vec;
 #[cfg(any(test, feature = "reth-codec"))]
 use alloy_consensus::constants::{EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID};
 use alloy_consensus::{
@@ -16,29 +17,30 @@ use alloy_primitives::{
     keccak256, Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
 };
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
+pub use compat::FillTxEnv;
 use core::mem;
 use derive_more::{AsRef, Deref};
+pub use error::{
+    InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
+};
+pub use meta::TransactionMeta;
 use once_cell as _;
 #[cfg(not(feature = "std"))]
 use once_cell::sync::Lazy as LazyLock;
 #[cfg(feature = "optimism")]
 use op_alloy_consensus::DepositTransaction;
+#[cfg(feature = "optimism")]
+use op_alloy_consensus::TxDeposit;
+pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
-use reth_primitives_traits::InMemorySize;
+use reth_primitives_traits::{InMemorySize, SignedTransaction};
+use revm_primitives::{AuthorizationList, TxEnv};
 use serde::{Deserialize, Serialize};
+pub use sidecar::BlobTransaction;
 use signature::decode_with_eip155_chain_id;
+pub use signature::{recover_signer, recover_signer_unchecked};
 #[cfg(feature = "std")]
 use std::sync::LazyLock;
-
-pub use error::{
-    InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
-};
-pub use meta::TransactionMeta;
-pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
-pub use sidecar::BlobTransaction;
-
-pub use compat::FillTxEnv;
-pub use signature::{recover_signer, recover_signer_unchecked};
 pub use tx_type::TxType;
 pub use variant::TransactionSignedVariant;
 
@@ -56,12 +58,6 @@ pub mod signature;
 
 pub(crate) mod util;
 mod variant;
-
-use alloc::vec::Vec;
-#[cfg(feature = "optimism")]
-use op_alloy_consensus::TxDeposit;
-use reth_primitives_traits::{transaction::TransactionExt, SignedTransaction};
-use revm_primitives::{AuthorizationList, TxEnv};
 
 /// Either a transaction hash or number.
 pub type TxHashOrNumber = BlockHashOrNumber;
@@ -838,22 +834,6 @@ impl alloy_consensus::Transaction for Transaction {
     }
 }
 
-impl TransactionExt for Transaction {
-    type Type = TxType;
-
-    fn signature_hash(&self) -> B256 {
-        match self {
-            Self::Legacy(tx) => tx.signature_hash(),
-            Self::Eip2930(tx) => tx.signature_hash(),
-            Self::Eip1559(tx) => tx.signature_hash(),
-            Self::Eip4844(tx) => tx.signature_hash(),
-            Self::Eip7702(tx) => tx.signature_hash(),
-            #[cfg(feature = "optimism")]
-            _ => todo!("use op type for op"),
-        }
-    }
-}
-
 /// Signed transaction without its Hash. Used type for inserting into the DB.
 ///
 /// This can by converted to [`TransactionSigned`] by calling [`TransactionSignedNoHash::hash`].
@@ -1329,14 +1309,10 @@ impl TransactionSigned {
 }
 
 impl SignedTransaction for TransactionSigned {
-    type Transaction = Transaction;
+    type Type = TxType;
 
     fn tx_hash(&self) -> &TxHash {
         &self.hash
-    }
-
-    fn transaction(&self) -> &Self::Transaction {
-        &self.transaction
     }
 
     fn signature(&self) -> &Signature {

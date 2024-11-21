@@ -29,7 +29,7 @@ pub use transaction::{
     execute::FillTxEnv,
     signed::{FullSignedTx, SignedTransaction},
     tx_type::{FullTxType, TxType},
-    FullTransaction, Transaction, TransactionExt,
+    FullTransaction, Transaction,
 };
 
 mod integer_list;
