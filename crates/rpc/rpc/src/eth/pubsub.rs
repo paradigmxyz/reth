@@ -160,7 +160,7 @@ where
                                         %err,
                                         "Failed to fill transaction with block context"
                                     );
-                                    None
+                                    Err(internal_rpc_err(err.to_string()))
                                 }
                             };
                             std::future::ready(tx_value)
@@ -255,6 +255,10 @@ where
             maybe_item = stream.next() => {
                 let item = match maybe_item {
                     Some(item) => item,
+                    Some(Err(err)) => {
+                        // An error occurred, return it
+                        break Err(err);
+                    },
                     None => {
                         // stream ended
                         break  Ok(())
