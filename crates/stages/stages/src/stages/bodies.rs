@@ -95,8 +95,7 @@ impl<D: BodyDownloader> BodyStage<D> {
             .unwrap_or_default();
 
         match next_static_file_tx_num.cmp(&next_tx_num) {
-            // If static files are ahead, then we didn't reach the database commit in a previous
-            // stage run. So, our only solution is to unwind the static files and proceed from the
+            // If static files are ahead, we are currently unwinding the stage or we didn't reach the database commit in a previous stage run. So, our only solution is to unwind the static files and proceed from the
             // database expected height.
             Ordering::Greater => {
                 let highest_db_block =
