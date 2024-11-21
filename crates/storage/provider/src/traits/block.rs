@@ -32,14 +32,18 @@ impl StorageLocation {
 /// BlockExecution Writer
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait BlockExecutionWriter: BlockWriter + Send + Sync {
-    /// Take range of blocks and its execution result
+    /// Take all of the blocks above the provided number and their execution result
+    ///
+    /// The passed block number will stay in the database.
     fn take_block_and_execution_above(
         &self,
         block: BlockNumber,
         remove_transactions_from: StorageLocation,
     ) -> ProviderResult<Chain>;
 
-    /// Remove range of blocks and its execution result
+    /// Remove all of the blocks above the provided number and their execution result
+    ///
+    /// The passed block number will stay in the database.
     fn remove_block_and_execution_above(
         &self,
         block: BlockNumber,
