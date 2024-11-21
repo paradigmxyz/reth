@@ -1673,8 +1673,9 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
 
         #[cfg(feature = "optimism")]
         let signature = if transaction.is_deposit() { TxDeposit::signature() } else { signature };
-
-        Ok(Self::from_transaction_and_signature(transaction, signature))
+        let tx = Self::from_transaction_and_signature(transaction, signature);
+        tx.hash_ref();
+        Ok(tx)
     }
 }
 
