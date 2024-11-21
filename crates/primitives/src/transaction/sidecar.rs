@@ -31,15 +31,16 @@ impl BlobTransaction {
         tx: TransactionSigned,
         sidecar: BlobTransactionSidecar,
     ) -> Result<Self, (TransactionSigned, BlobTransactionSidecar)> {
-        let TransactionSigned { transaction, signature, hash } = tx;
+        let hash = tx.hash();
+        let TransactionSigned { transaction, signature, .. } = tx;
         match transaction {
             Transaction::Eip4844(transaction) => Ok(Self {
-                hash: *hash.get().unwrap(),
+                hash,
                 transaction: TxEip4844WithSidecar { tx: transaction, sidecar },
                 signature,
             }),
             transaction => {
-                let tx = TransactionSigned { transaction, signature, hash };
+                let tx = TransactionSigned { transaction, signature, hash: hash.into() };
                 Err((tx, sidecar))
             }
         }
