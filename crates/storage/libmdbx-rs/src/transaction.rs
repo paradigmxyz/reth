@@ -596,20 +596,19 @@ impl TransactionPtr {
 
     fn lock(&self) -> TransactionPtrLockGuard<'_> {
         if let Some(lock) = self.lock.try_lock() {
-            *self.lock_backtrace.try_lock().unwrap() = Some(Backtrace::force_capture());
+            *self.lock_backtrace.lock() = Some(Backtrace::force_capture());
             TransactionPtrLockGuard { lock, lock_backtrace: self.lock_backtrace.clone() }
         } else {
             tracing::debug!(
                 target: "libmdbx",
                 txn = %self.txn as usize,
                 backtrace = %std::backtrace::Backtrace::force_capture(),
-                lock_backtrace = ?self.lock_backtrace.try_lock(),
+                lock_backtrace = ?self.lock_backtrace.lock(),
                 "Transaction lock is already acquired, blocking..."
             );
-            TransactionPtrLockGuard {
-                lock: self.lock.lock(),
-                lock_backtrace: self.lock_backtrace.clone(),
-            }
+            let lock = self.lock.lock();
+            *self.lock_backtrace.lock() = Some(Backtrace::force_capture());
+            TransactionPtrLockGuard { lock, lock_backtrace: self.lock_backtrace.clone() }
         }
     }
 
