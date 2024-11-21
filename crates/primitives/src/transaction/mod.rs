@@ -1,5 +1,6 @@
 //! Transaction types.
 
+use alloc::vec::Vec;
 use alloy_consensus::{
     transaction::RlpEcdsaTx, SignableTransaction, Transaction as _, TxEip1559, TxEip2930,
     TxEip4844, TxEip7702, TxLegacy,
@@ -24,21 +25,23 @@ use once_cell as _;
 use once_cell::sync::{Lazy as LazyLock, OnceCell as OnceLock};
 #[cfg(feature = "optimism")]
 use op_alloy_consensus::DepositTransaction;
+#[cfg(feature = "optimism")]
+use op_alloy_consensus::TxDeposit;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
-use reth_primitives_traits::InMemorySize;
+use reth_primitives_traits::{InMemorySize, SignedTransaction};
+use revm_primitives::{AuthorizationList, TxEnv};
 use serde::{Deserialize, Serialize};
 use signature::decode_with_eip155_chain_id;
 #[cfg(feature = "std")]
 use std::sync::{LazyLock, OnceLock};
 
+pub use compat::FillTxEnv;
 pub use error::{
     InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
 };
 pub use meta::TransactionMeta;
 pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
 pub use sidecar::BlobTransaction;
-
-pub use compat::FillTxEnv;
 pub use signature::{recover_signer, recover_signer_unchecked};
 pub use tx_type::TxType;
 pub use variant::TransactionSignedVariant;
@@ -57,12 +60,6 @@ pub mod signature;
 
 pub(crate) mod util;
 mod variant;
-
-use alloc::vec::Vec;
-#[cfg(feature = "optimism")]
-use op_alloy_consensus::TxDeposit;
-use reth_primitives_traits::{transaction::TransactionExt, SignedTransaction};
-use revm_primitives::{AuthorizationList, TxEnv};
 
 /// Either a transaction hash or number.
 pub type TxHashOrNumber = BlockHashOrNumber;
@@ -839,22 +836,6 @@ impl alloy_consensus::Transaction for Transaction {
     }
 }
 
-impl TransactionExt for Transaction {
-    type Type = TxType;
-
-    fn signature_hash(&self) -> B256 {
-        match self {
-            Self::Legacy(tx) => tx.signature_hash(),
-            Self::Eip2930(tx) => tx.signature_hash(),
-            Self::Eip1559(tx) => tx.signature_hash(),
-            Self::Eip4844(tx) => tx.signature_hash(),
-            Self::Eip7702(tx) => tx.signature_hash(),
-            #[cfg(feature = "optimism")]
-            _ => todo!("use op type for op"),
-        }
-    }
-}
-
 /// Signed transaction without its Hash. Used type for inserting into the DB.
 ///
 /// This can by converted to [`TransactionSigned`] by calling [`TransactionSignedNoHash::hash`].
@@ -1345,14 +1326,10 @@ impl TransactionSigned {
 }
 
 impl SignedTransaction for TransactionSigned {
-    type Transaction = Transaction;
+    type Type = TxType;
 
     fn tx_hash(&self) -> &TxHash {
         self.hash_ref()
-    }
-
-    fn transaction(&self) -> &Self::Transaction {
-        &self.transaction
     }
 
     fn signature(&self) -> &Signature {
