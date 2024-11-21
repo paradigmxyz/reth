@@ -172,14 +172,7 @@ impl RevealedSparseTrie {
                 match self.nodes.get(&path) {
                     // Blinded and non-existent nodes can be replaced.
                     Some(SparseNode::Hash(_)) | None => {
-                        self.nodes.insert(
-                            path,
-                            SparseNode::Branch {
-                                state_mask: branch.state_mask,
-                                hash: None,
-                                store_in_db_trie: None,
-                            },
-                        );
+                        self.nodes.insert(path, SparseNode::new_branch(branch.state_mask));
                     }
                     // Branch node already exists, or an extension node was placed where a
                     // branch node was before.
@@ -195,7 +188,7 @@ impl RevealedSparseTrie {
                     let mut child_path = path.clone();
                     child_path.extend_from_slice_unchecked(&ext.key);
                     self.reveal_node_or_hash(child_path, &ext.child)?;
-                    self.nodes.insert(path, SparseNode::Extension { key: ext.key, hash: None });
+                    self.nodes.insert(path, SparseNode::new_ext(ext.key));
                 }
                 // Extension node already exists, or an extension node was placed where a branch
                 // node was before.
