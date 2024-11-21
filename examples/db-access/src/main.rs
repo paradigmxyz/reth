@@ -96,8 +96,9 @@ fn txs_provider_example<T: TransactionsProvider>(provider: T) -> eyre::Result<()
     assert_eq!(tx, tx_by_hash);
 
     // Can query the tx by hash with info about the block it was included in
-    let (tx, meta) =
-        provider.transaction_by_hash_with_meta(tx.hash())?.ok_or(eyre::eyre!("txhash not found"))?;
+    let (tx, meta) = provider
+        .transaction_by_hash_with_meta(tx.hash())?
+        .ok_or(eyre::eyre!("txhash not found"))?;
     assert_eq!(tx.hash(), meta.tx_hash);
 
     // Can reverse lookup the key too
