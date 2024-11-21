@@ -1,5 +1,6 @@
 //! Transaction types.
 
+use alloc::vec::Vec;
 use alloy_consensus::{
     transaction::RlpEcdsaTx, SignableTransaction, Transaction as _, TxEip1559, TxEip2930,
     TxEip4844, TxEip7702, TxLegacy,
