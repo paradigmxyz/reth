@@ -21,7 +21,7 @@ use reth_chainspec::EthChainSpec;
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider};
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
-use reth_network::{BlockDownloaderProvider, NetworkEventListenerProvider};
+use reth_network::BlockDownloaderProvider;
 use reth_node_api::{AddOnsContext, FullNodePrimitives, FullNodeTypes, NodeTypesWithEngine};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
@@ -262,8 +262,6 @@ where
         info!(target: "reth::cli", "Consensus engine initialized");
 
         let events = stream_select!(
-            ctx.components().network().event_listener().map(Into::into),
-            beacon_engine_handle.event_listener().map(Into::into),
             pipeline_events.map(Into::into),
             if ctx.node_config().debug.tip.is_none() && !ctx.is_dev() {
                 Either::Left(

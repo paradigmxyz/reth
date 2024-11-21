@@ -282,6 +282,7 @@ where
         let validator = TransactionValidationTaskExecutor::eth_builder(Arc::new(
             ctx.chain_spec().inner.clone(),
         ))
+        .no_eip4844()
         .with_head_timestamp(ctx.head().timestamp)
         .kzg_settings(ctx.kzg_settings()?)
         .with_additional_tasks(

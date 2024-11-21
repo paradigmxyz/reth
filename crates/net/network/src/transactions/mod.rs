@@ -49,6 +49,7 @@ use reth_network_p2p::{
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
 use reth_primitives::{PooledTransactionsElement, TransactionSigned, TransactionSignedEcRecovered};
+use reth_primitives_traits::{SignedTransaction, TransactionExt, TxType};
 use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
     error::{PoolError, PoolResult},
@@ -1455,13 +1456,7 @@ struct PropagateTransaction<T = TransactionSigned> {
     transaction: Arc<T>,
 }
 
-// === impl PropagateTransaction ===
-
 impl PropagateTransaction {
-    fn hash(&self) -> TxHash {
-        self.transaction.hash()
-    }
-
     /// Create a new instance from a pooled transaction
     fn new<T>(tx: Arc<ValidPoolTransaction<T>>) -> Self
     where
@@ -1475,10 +1470,16 @@ impl PropagateTransaction {
     }
 }
 
+impl<T: SignedTransaction> PropagateTransaction<T> {
+    fn hash(&self) -> TxHash {
+        *self.transaction.tx_hash()
+    }
+}
+
 /// Helper type to construct the appropriate message to send to the peer based on whether the peer
 /// should receive them in full or as pooled
 #[derive(Debug, Clone)]
-enum PropagateTransactionsBuilder<T = TransactionSigned> {
+enum PropagateTransactionsBuilder<T> {
     Pooled(PooledTransactionsHashesBuilder),
     Full(FullTransactionsBuilder<T>),
 }
@@ -1513,16 +1514,16 @@ impl<T> PropagateTransactionsBuilder<T> {
     }
 }
 
-impl PropagateTransactionsBuilder {
+impl<T: SignedTransaction> PropagateTransactionsBuilder<T> {
     /// Appends all transactions
-    fn extend<'a>(&mut self, txs: impl IntoIterator<Item = &'a PropagateTransaction>) {
+    fn extend<'a>(&mut self, txs: impl IntoIterator<Item = &'a PropagateTransaction<T>>) {
         for tx in txs {
             self.push(tx);
         }
     }
 
     /// Appends a transaction to the list.
-    fn push(&mut self, transaction: &PropagateTransaction) {
+    fn push(&mut self, transaction: &PropagateTransaction<T>) {
         match self {
             Self::Pooled(builder) => builder.push(transaction),
             Self::Full(builder) => builder.push(transaction),
@@ -1531,7 +1532,7 @@ impl PropagateTransactionsBuilder {
 }
 
 /// Represents how the transactions should be sent to a peer if any.
-struct PropagateTransactions<T = TransactionSigned> {
+struct PropagateTransactions<T> {
     /// The pooled transaction hashes to send.
     pooled: Option<NewPooledTransactionHashes>,
     /// The transactions to send in full.
@@ -1543,7 +1544,7 @@ struct PropagateTransactions<T = TransactionSigned> {
 /// and enforces other propagation rules for EIP-4844 and tracks those transactions that can't be
 /// broadcasted in full.
 #[derive(Debug, Clone)]
-struct FullTransactionsBuilder<T = TransactionSigned> {
+struct FullTransactionsBuilder<T> {
     /// The soft limit to enforce for a single broadcast message of full transactions.
     total_size: usize,
     /// All transactions to be broadcasted.
@@ -1575,9 +1576,9 @@ impl<T> FullTransactionsBuilder<T> {
     }
 }
 
-impl FullTransactionsBuilder {
+impl<T: SignedTransaction> FullTransactionsBuilder<T> {
     /// Appends all transactions.
-    fn extend(&mut self, txs: impl IntoIterator<Item = PropagateTransaction>) {
+    fn extend(&mut self, txs: impl IntoIterator<Item = PropagateTransaction<T>>) {
         for tx in txs {
             self.push(&tx)
         }
@@ -1591,7 +1592,7 @@ impl FullTransactionsBuilder {
     ///
     /// If the transaction is unsuitable for broadcast or would exceed the softlimit, it is appended
     /// to list of pooled transactions, (e.g. 4844 transactions).
-    fn push(&mut self, transaction: &PropagateTransaction) {
+    fn push(&mut self, transaction: &PropagateTransaction<T>) {
         // Do not send full 4844 transaction hashes to peers.
         //
         //  Nodes MUST NOT automatically broadcast blob transactions to their peers.
@@ -1600,7 +1601,7 @@ impl FullTransactionsBuilder {
         //  via `GetPooledTransactions`.
         //
         // From: <https://eips.ethereum.org/EIPS/eip-4844#networking>
-        if transaction.transaction.is_eip4844() {
+        if transaction.transaction.transaction().tx_type().is_eip4844() {
             self.pooled.push(transaction);
             return
         }
@@ -1651,19 +1652,22 @@ impl PooledTransactionsHashesBuilder {
     }
 
     /// Appends all hashes
-    fn extend(&mut self, txs: impl IntoIterator<Item = PropagateTransaction>) {
+    fn extend<T: SignedTransaction>(
+        &mut self,
+        txs: impl IntoIterator<Item = PropagateTransaction<T>>,
+    ) {
         for tx in txs {
             self.push(&tx);
         }
     }
 
-    fn push(&mut self, tx: &PropagateTransaction) {
+    fn push<T: SignedTransaction>(&mut self, tx: &PropagateTransaction<T>) {
         match self {
             Self::Eth66(msg) => msg.0.push(tx.hash()),
             Self::Eth68(msg) => {
                 msg.hashes.push(tx.hash());
                 msg.sizes.push(tx.size);
-                msg.types.push(tx.transaction.tx_type().into());
+                msg.types.push(tx.transaction.transaction().tx_type().into());
             }
         }
     }
