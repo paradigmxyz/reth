@@ -5,7 +5,7 @@ use alloy_primitives::B256;
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use derive_more::{Constructor, Deref, IntoIterator};
 use reth_codecs_derive::add_arbitrary_tests;
-use reth_primitives::{transaction::TransactionConversionError, PooledTransactionsElement};
+use reth_primitives::PooledTransactionsElement;
 
 /// A list of transaction hashes that the peer would like transaction bodies for.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
@@ -60,9 +60,9 @@ impl<T: Encodable2718> PooledTransactions<T> {
 
 impl<T, U> TryFrom<Vec<U>> for PooledTransactions<T>
 where
-    T: TryFrom<U, Error = TransactionConversionError>,
+    T: TryFrom<U>,
 {
-    type Error = TransactionConversionError;
+    type Error = T::Error;
 
     fn try_from(txs: Vec<U>) -> Result<Self, Self::Error> {
         txs.into_iter().map(T::try_from).collect()
