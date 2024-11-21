@@ -2728,7 +2728,11 @@ impl<TX: DbTx + 'static, N: NodeTypes> StateReader for DatabaseProvider<TX, N> {
 impl<TX: DbTxMut + DbTx + 'static, N: ProviderNodeTypes + 'static> BlockExecutionWriter
     for DatabaseProvider<TX, N>
 {
-    fn take_block_and_execution_range_above(&self, block: BlockNumber) -> ProviderResult<Chain> {
+    fn take_block_and_execution_range_above(
+        &self,
+        block: BlockNumber,
+        remove_transactions_from: StorageLocation,
+    ) -> ProviderResult<Chain> {
         let range = block + 1..=self.last_block_number()?;
 
         self.unwind_trie_state_range(range.clone())?;
@@ -2740,7 +2744,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: ProviderNodeTypes + 'static> BlockExecutio
 
         // remove block bodies it is needed for both get block range and get block execution results
         // that is why it is deleted afterwards.
-        self.remove_blocks_above(block)?;
+        self.remove_blocks_above(block, remove_transactions_from)?;
 
         // Update pipeline progress
         self.update_pipeline_stages(block, true)?;
@@ -2748,7 +2752,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: ProviderNodeTypes + 'static> BlockExecutio
         Ok(Chain::new(blocks, execution_state, None))
     }
 
-    fn remove_block_and_execution_range_above(&self, block: BlockNumber) -> ProviderResult<()> {
+    fn remove_block_and_execution_range_above(
+        &self,
+        block: BlockNumber,
+        remove_transactions_from: StorageLocation,
+    ) -> ProviderResult<()> {
         let range = block + 1..=self.last_block_number()?;
 
         self.unwind_trie_state_range(range.clone())?;
@@ -2758,7 +2766,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: ProviderNodeTypes + 'static> BlockExecutio
 
         // remove block bodies it is needed for both get block range and get block execution results
         // that is why it is deleted afterwards.
-        self.remove_blocks_above(block)?;
+        self.remove_blocks_above(block, remove_transactions_from)?;
 
         // Update pipeline progress
         self.update_pipeline_stages(block, true)?;
@@ -2948,7 +2956,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: ProviderNodeTypes + 'static> BlockWriter
         Ok(())
     }
 
-    fn remove_blocks_above(&self, block: BlockNumber) -> ProviderResult<()> {
+    fn remove_blocks_above(
+        &self,
+        block: BlockNumber,
+        remove_transactions_from: StorageLocation,
+    ) -> ProviderResult<()> {
         let mut canonical_headers_cursor = self.tx.cursor_write::<tables::CanonicalHeaders>()?;
         let mut rev_headers = canonical_headers_cursor.walk_back(None)?;
 
@@ -2980,12 +2992,16 @@ impl<TX: DbTxMut + DbTx + 'static, N: ProviderNodeTypes + 'static> BlockWriter
 
         self.remove::<tables::TransactionSenders>(unwind_tx_from..)?;
 
-        self.remove_bodies_above(block)?;
+        self.remove_bodies_above(block, remove_transactions_from)?;
 
         Ok(())
     }
 
-    fn remove_bodies_above(&self, block: BlockNumber) -> ProviderResult<()> {
+    fn remove_bodies_above(
+        &self,
+        block: BlockNumber,
+        remove_transactions_from: StorageLocation,
+    ) -> ProviderResult<()> {
         self.storage.writer().remove_block_bodies_above(self, block)?;
 
         // First transaction to be removed
@@ -2997,16 +3013,22 @@ impl<TX: DbTxMut + DbTx + 'static, N: ProviderNodeTypes + 'static> BlockWriter
 
         self.remove::<tables::BlockBodyIndices>(block + 1..)?;
         self.remove::<tables::TransactionBlocks>(unwind_tx_from..)?;
-        self.remove::<tables::Transactions>(unwind_tx_from..)?;
 
-        let static_file_tx_num =
-            self.static_file_provider.get_highest_static_file_tx(StaticFileSegment::Transactions);
+        if remove_transactions_from.database() {
+            self.remove::<tables::Transactions>(unwind_tx_from..)?;
+        }
 
-        if let Some(static_tx) = static_file_tx_num {
-            if static_tx >= unwind_tx_from {
-                self.static_file_provider
-                    .latest_writer(StaticFileSegment::Transactions)?
-                    .prune_transactions(static_tx - unwind_tx_from + 1, block)?;
+        if remove_transactions_from.static_files() {
+            let static_file_tx_num = self
+                .static_file_provider
+                .get_highest_static_file_tx(StaticFileSegment::Transactions);
+
+            if let Some(static_tx) = static_file_tx_num {
+                if static_tx >= unwind_tx_from {
+                    self.static_file_provider
+                        .latest_writer(StaticFileSegment::Transactions)?
+                        .prune_transactions(static_tx - unwind_tx_from + 1, block)?;
+                }
             }
         }
 

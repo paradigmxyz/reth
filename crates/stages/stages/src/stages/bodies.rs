@@ -233,7 +233,7 @@ where
         self.buffer.take();
 
         self.ensure_consistency(provider, Some(input.unwind_to))?;
-        provider.remove_bodies_above(input.unwind_to)?;
+        provider.remove_bodies_above(input.unwind_to, StorageLocation::Both)?;
 
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(input.unwind_to)
