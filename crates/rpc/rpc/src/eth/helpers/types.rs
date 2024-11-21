@@ -41,7 +41,8 @@ where
         tx_info: TransactionInfo,
     ) -> Result<Self::Transaction, Self::Error> {
         let from = tx.signer();
-        let TransactionSigned { transaction, signature, hash } = tx.into_signed();
+        let hash = tx.hash();
+        let TransactionSigned { transaction, signature, .. } = tx.into_signed();
 
         let inner: TxEnvelope = match transaction {
             reth_primitives::Transaction::Legacy(tx) => {

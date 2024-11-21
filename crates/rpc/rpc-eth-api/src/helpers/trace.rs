@@ -204,7 +204,7 @@ pub trait Trace: LoadState<Evm: ConfigureEvm<Header = Header>> {
                     cfg.clone(),
                     block_env.clone(),
                     block_txs,
-                    tx.hash,
+                    tx.hash(),
                 )?;
 
                 let env = EnvWithHandlerCfg::new_with_cfg_env(

@@ -43,7 +43,7 @@ impl BlobStoreCanonTracker {
                 .body
                 .transactions()
                 .filter(|tx| tx.transaction.is_eip4844())
-                .map(|tx| tx.hash);
+                .map(|tx| tx.hash());
             (*num, iter)
         });
         self.add_blocks(blob_txs);

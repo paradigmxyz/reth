@@ -1131,12 +1131,12 @@ impl TransactionSigned {
 
     /// Transaction hash. Used to identify transaction.
     pub fn hash(&self) -> TxHash {
-        *self.hash.get().unwrap()
+        *self.hash.get_or_init(|| self.recalculate_hash())
     }
 
     /// Reference to transaction hash. Used to identify transaction.
     pub fn hash_ref(&self) -> &TxHash {
-        self.hash.get().unwrap()
+        self.hash.get_or_init(|| self.recalculate_hash())
     }
 
     /// Recover signer from signature and hash.
