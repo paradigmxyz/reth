@@ -1083,7 +1083,7 @@ impl From<TransactionSigned> for TransactionSignedNoHash {
 
 /// Signed transaction.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
-#[derive(Debug, Clone, PartialEq, Eq, AsRef, Deref, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, AsRef, Deref, Serialize, Deserialize)]
 pub struct TransactionSigned {
     /// Transaction hash
     #[serde(skip)]
@@ -1116,6 +1116,14 @@ impl Hash for TransactionSigned {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.signature.hash(state);
         self.transaction.hash(state);
+    }
+}
+
+impl PartialEq for TransactionSigned {
+    fn eq(&self, other: &Self) -> bool {
+        self.signature == other.signature &&
+            self.transaction == other.transaction &&
+            self.hash_ref() == other.hash_ref()
     }
 }
 
@@ -1673,9 +1681,7 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
 
         #[cfg(feature = "optimism")]
         let signature = if transaction.is_deposit() { TxDeposit::signature() } else { signature };
-        let tx = Self::from_transaction_and_signature(transaction, signature);
-        tx.hash_ref();
-        Ok(tx)
+        Ok(Self::from_transaction_and_signature(transaction, signature))
     }
 }
 

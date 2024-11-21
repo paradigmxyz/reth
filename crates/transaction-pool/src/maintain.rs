@@ -325,7 +325,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                             // been validated previously, we still need the blob in order to
                             // accurately set the transaction's
                             // encoded-length which is propagated over the network.
-                            pool.get_blob(*tx.hash_ref())
+                            pool.get_blob(TransactionSigned::hash(&tx))
                                 .ok()
                                 .flatten()
                                 .map(Arc::unwrap_or_clone)
