@@ -47,6 +47,7 @@ exclude_crates=(
   reth-optimism-node
   reth-optimism-payload-builder
   reth-optimism-rpc
+  reth-optimism-primitives
   reth-rpc
   reth-rpc-api
   reth-rpc-api-testing-util
