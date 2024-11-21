@@ -29,7 +29,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use tracing::debug;
+use tracing::{debug, error};
 
 /// The level below which the sparse trie hashes are calculated in [`update_sparse_trie`].
 const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
@@ -204,7 +204,13 @@ where
         let (tx, rx) = mpsc::sync_channel(1);
         rayon::spawn(move || {
             let result = ParallelProof::new(view, input).multiproof(targets);
-            let _ = tx.send(result);
+            if let Err(ref e) = result {
+                error!(target: "engine::root", error = ?e, "Could not calculate multiproof");
+            }
+
+            if let Err(e) = tx.send(result) {
+                error!(target: "engine::root", error = ?e, "Could not send multiproof result");
+            }
         });
 
         pending_proofs.push_back(rx);
