@@ -113,7 +113,8 @@ impl<D: BodyDownloader> BodyStage<D> {
             // error will trigger an unwind, that will bring the database to the same height as the
             // static files.
             Ordering::Less => {
-                // If we have a scheduled unwind, this might be fine because we will fix the incosistency right away.
+                // If we are already in the process of unwind, this might be fine because we will
+                // fix the inconsistency right away.
                 if let Some(unwind_to) = unwind_block {
                     let next_tx_num_after_unwind = provider
                         .tx_ref()
