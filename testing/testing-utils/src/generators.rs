@@ -149,7 +149,9 @@ pub fn sign_tx_with_key_pair(key_pair: Keypair, tx: Transaction) -> TransactionS
     let signature =
         sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
 
-    TransactionSigned::from_transaction_and_signature(tx, signature)
+    let tx = TransactionSigned::from_transaction_and_signature(tx, signature);
+    tx.hash_ref(); // initializes transaction hash
+    tx
 }
 
 /// Generates a set of [Keypair]s based on the desired count.
