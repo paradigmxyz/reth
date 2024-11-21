@@ -1341,7 +1341,7 @@ impl SignedTransaction for TransactionSigned {
     type Transaction = Transaction;
 
     fn tx_hash(&self) -> &TxHash {
-        self.hash.get().unwrap()
+        self.hash_ref()
     }
 
     fn transaction(&self) -> &Self::Transaction {
@@ -1912,7 +1912,7 @@ pub mod serde_bincode_compat {
     impl<'a> From<&'a super::TransactionSigned> for TransactionSigned<'a> {
         fn from(value: &'a super::TransactionSigned) -> Self {
             Self {
-                hash: *value.hash.get().unwrap(),
+                hash: *value.hash_ref(),
                 signature: value.signature,
                 transaction: Transaction::from(&value.transaction),
             }
@@ -2215,7 +2215,7 @@ mod tests {
     ) {
         let expected = TransactionSigned::from_transaction_and_signature(transaction, signature);
         if let Some(hash) = hash {
-            assert_eq!(hash, *expected.hash.get().unwrap());
+            assert_eq!(hash, *expected.hash_ref());
         }
         assert_eq!(bytes.len(), expected.length());
 
