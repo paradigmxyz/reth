@@ -1811,8 +1811,11 @@ pub mod serde_bincode_compat {
         TxEip4844,
     };
     use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
+    #[cfg(not(feature = "std"))]
+    use once_cell::sync::OnceCell as OnceLock;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
+    #[cfg(feature = "std")]
     use std::sync::OnceLock;
 
     /// Bincode-compatible [`super::Transaction`] serde implementation.
