@@ -1,3 +1,5 @@
+//! Abstraction of transaction envelope type ID.
+
 use core::fmt;
 
 use alloy_primitives::{U64, U8};

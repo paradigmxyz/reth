@@ -401,7 +401,7 @@ mod tests {
     use crate::{
         pool::pending::PendingPool,
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
-        Priority,
+        BestTransactions, Priority,
     };
     use alloy_primitives::U256;
     use reth_payload_util::{PayloadTransactionsChain, PayloadTransactionsFixed};
@@ -895,6 +895,128 @@ mod tests {
         assert_eq!(block.next(()).unwrap().signer(), address_a);
         assert_eq!(block.next(()).unwrap().signer(), address_b);
         assert_eq!(block.next(()).unwrap().signer(), address_regular);
+    }
+
+    #[test]
+    fn test_best_with_fees_iter_no_blob_fee_required() {
+        // Tests transactions without blob fees where base fees are checked.
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        let base_fee: u64 = 10;
+        let base_fee_per_blob_gas: u64 = 0; // No blob fee requirement
+
+        // Insert transactions with max_fee_per_gas above the base fee
+        for nonce in 0..5 {
+            let tx = MockTransaction::eip1559()
+                .rng_hash()
+                .with_nonce(nonce)
+                .with_max_fee(base_fee as u128 + 5);
+            let valid_tx = f.validated(tx);
+            pool.add_transaction(Arc::new(valid_tx), 0);
+        }
+
+        let mut best = pool.best_with_basefee_and_blobfee(base_fee, base_fee_per_blob_gas);
+
+        // All transactions should be returned as no blob fee requirement is imposed
+        for nonce in 0..5 {
+            let tx = best.next().expect("Transaction should be returned");
+            assert_eq!(tx.nonce(), nonce);
+        }
+
+        // Ensure no more transactions are left
+        assert!(best.next().is_none());
+    }
+
+    #[test]
+    fn test_best_with_fees_iter_mix_of_blob_and_non_blob_transactions() {
+        // Tests mixed scenarios with both blob and non-blob transactions.
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        let base_fee: u64 = 10;
+        let base_fee_per_blob_gas: u64 = 15;
+
+        // Add a non-blob transaction that satisfies the base fee
+        let tx_non_blob =
+            MockTransaction::eip1559().rng_hash().with_nonce(0).with_max_fee(base_fee as u128 + 5);
+        pool.add_transaction(Arc::new(f.validated(tx_non_blob.clone())), 0);
+
+        // Add a blob transaction that satisfies both base fee and blob fee
+        let tx_blob = MockTransaction::eip4844()
+            .rng_hash()
+            .with_nonce(1)
+            .with_max_fee(base_fee as u128 + 5)
+            .with_blob_fee(base_fee_per_blob_gas as u128 + 5);
+        pool.add_transaction(Arc::new(f.validated(tx_blob.clone())), 0);
+
+        let mut best = pool.best_with_basefee_and_blobfee(base_fee, base_fee_per_blob_gas);
+
+        // Verify both transactions are returned
+        let tx = best.next().expect("Transaction should be returned");
+        assert_eq!(tx.transaction, tx_non_blob);
+
+        let tx = best.next().expect("Transaction should be returned");
+        assert_eq!(tx.transaction, tx_blob);
+
+        // Ensure no more transactions are left
+        assert!(best.next().is_none());
+    }
+
+    #[test]
+    fn test_best_transactions_with_skipping_blobs() {
+        // Tests the skip_blobs functionality to ensure blob transactions are skipped.
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        // Add a blob transaction
+        let tx_blob = MockTransaction::eip4844().rng_hash().with_nonce(0).with_blob_fee(100);
+        let valid_blob_tx = f.validated(tx_blob);
+        pool.add_transaction(Arc::new(valid_blob_tx), 0);
+
+        // Add a non-blob transaction
+        let tx_non_blob = MockTransaction::eip1559().rng_hash().with_nonce(1).with_max_fee(200);
+        let valid_non_blob_tx = f.validated(tx_non_blob.clone());
+        pool.add_transaction(Arc::new(valid_non_blob_tx), 0);
+
+        let mut best = pool.best();
+        best.skip_blobs();
+
+        // Only the non-blob transaction should be returned
+        let tx = best.next().expect("Transaction should be returned");
+        assert_eq!(tx.transaction, tx_non_blob);
+
+        // Ensure no more transactions are left
+        assert!(best.next().is_none());
+    }
+
+    #[test]
+    fn test_best_transactions_no_updates() {
+        // Tests the no_updates functionality to ensure it properly clears the
+        // new_transaction_receiver.
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        // Add a transaction
+        let tx = MockTransaction::eip1559().rng_hash().with_nonce(0).with_max_fee(100);
+        let valid_tx = f.validated(tx);
+        pool.add_transaction(Arc::new(valid_tx), 0);
+
+        let mut best = pool.best();
+
+        // Use a broadcast channel for transaction updates
+        let (_tx_sender, tx_receiver) =
+            tokio::sync::broadcast::channel::<PendingTransaction<MockOrdering>>(1000);
+        best.new_transaction_receiver = Some(tx_receiver);
+
+        // Ensure receiver is set
+        assert!(best.new_transaction_receiver.is_some());
+
+        // Call no_updates to clear the receiver
+        best.no_updates();
+
+        // Ensure receiver is cleared
+        assert!(best.new_transaction_receiver.is_none());
     }
 
     // TODO: Same nonce test

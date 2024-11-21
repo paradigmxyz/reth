@@ -9,7 +9,7 @@ use reth_beacon_consensus::{BeaconConsensusEngineEvent, ConsensusEngineLiveSyncP
 use reth_engine_primitives::ForkchoiceStatus;
 use reth_network_api::{NetworkEvent, PeersInfo};
 use reth_primitives_traits::{format_gas, format_gas_throughput};
-use reth_prune::PrunerEvent;
+use reth_prune_types::PrunerEvent;
 use reth_stages::{EntitiesCheckpoint, ExecOutput, PipelineEvent, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileProducerEvent;
 use std::{
@@ -307,7 +307,11 @@ impl NodeState {
                 info!(tip_block_number, "Pruner started");
             }
             PrunerEvent::Finished { tip_block_number, elapsed, stats } => {
-                info!(tip_block_number, ?elapsed, ?stats, "Pruner finished");
+                let stats = format!(
+                    "[{}]",
+                    stats.iter().map(|item| item.to_string()).collect::<Vec<_>>().join(", ")
+                );
+                info!(tip_block_number, ?elapsed, %stats, "Pruner finished");
             }
         }
     }
