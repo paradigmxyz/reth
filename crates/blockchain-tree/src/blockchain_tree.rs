@@ -22,10 +22,10 @@ use reth_primitives::{
     SealedHeader, StaticFileSegment,
 };
 use reth_provider::{
-    BlockExecutionWriter, BlockNumReader, BlockWriter, CanonStateNotification,
-    CanonStateNotificationSender, CanonStateNotifications, ChainSpecProvider, ChainSplit,
-    ChainSplitTarget, DBProvider, DisplayBlocksChain, HeaderProvider, ProviderError,
-    StaticFileProviderFactory,
+    writer::UnifiedStorageWriter, BlockExecutionWriter, BlockNumReader, BlockWriter,
+    CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
+    ChainSpecProvider, ChainSplit, ChainSplitTarget, DBProvider, DatabaseProviderFactory,
+    DisplayBlocksChain, HeaderProvider, ProviderError, StaticFileProviderFactory,
 };
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
@@ -1260,7 +1260,7 @@ where
         };
         recorder.record_relative(MakeCanonicalAction::RetrieveStateTrieUpdates);
 
-        let provider_rw = self.externals.provider_factory.provider_rw()?;
+        let provider_rw = self.externals.provider_factory.database_provider_rw()?;
         provider_rw
             .append_blocks_with_state(
                 blocks.into_blocks().collect(),
@@ -1270,7 +1270,7 @@ where
             )
             .map_err(|e| CanonicalError::CanonicalCommit(e.to_string()))?;
 
-        provider_rw.commit()?;
+        UnifiedStorageWriter::commit(provider_rw)?;
         recorder.record_relative(MakeCanonicalAction::CommitCanonicalChainToDatabase);
 
         Ok(())
@@ -1326,7 +1326,7 @@ where
         }
 
         // read data that is needed for new sidechain
-        let provider_rw = self.externals.provider_factory.provider_rw()?;
+        let provider_rw = self.externals.provider_factory.database_provider_rw()?;
 
         let tip = provider_rw.last_block_number()?;
         let revert_range = (revert_until + 1)..=tip;
@@ -1336,7 +1336,7 @@ where
             .take_block_and_execution_range_above(revert_until)
             .map_err(|e| CanonicalError::CanonicalRevert(e.to_string()))?;
 
-        provider_rw.commit()?;
+        UnifiedStorageWriter::commit_unwind(provider_rw)?;
 
         if blocks_and_execution.is_empty() {
             Ok(None)

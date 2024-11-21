@@ -2999,15 +2999,15 @@ impl<TX: DbTxMut + DbTx + 'static, N: ProviderNodeTypes + 'static> BlockWriter
         self.remove::<tables::TransactionBlocks>(unwind_tx_from..)?;
         self.remove::<tables::Transactions>(unwind_tx_from..)?;
 
-        let static_file_tx_num: u64 = self
-            .static_file_provider
-            .get_highest_static_file_tx(StaticFileSegment::Transactions)
-            .unwrap_or_default();
+        let static_file_tx_num =
+            self.static_file_provider.get_highest_static_file_tx(StaticFileSegment::Transactions);
 
-        if unwind_tx_from <= static_file_tx_num {
-            self.static_file_provider
-                .latest_writer(StaticFileSegment::Transactions)?
-                .prune_transactions(static_file_tx_num - unwind_tx_from + 1, block)?;
+        if let Some(static_tx) = static_file_tx_num {
+            if static_tx >= unwind_tx_from {
+                self.static_file_provider
+                    .latest_writer(StaticFileSegment::Transactions)?
+                    .prune_transactions(static_tx - unwind_tx_from + 1, block)?;
+            }
         }
 
         Ok(())
