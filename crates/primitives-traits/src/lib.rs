@@ -28,6 +28,7 @@ pub mod transaction;
 pub use transaction::{
     execute::FillTxEnv,
     signed::{FullSignedTx, SignedTransaction},
+    tx_type::{FullTxType, TxType},
     FullTransaction, Transaction, TransactionExt,
 };
 
@@ -51,10 +52,6 @@ pub use alloy_primitives::{logs_bloom, Log, LogData};
 
 mod storage;
 pub use storage::StorageEntry;
-
-/// Transaction types
-pub mod tx_type;
-pub use tx_type::{FullTxType, TxType};
 
 /// Common header types
 pub mod header;
