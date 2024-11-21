@@ -235,11 +235,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             trace!(target: "reth::cli", from = next_block, to = target_block, tip = ?target_block_hash, ?result, "Pipeline finished");
 
             // Unwind the pipeline without committing.
-            {
-                provider_factory
-                    .provider_rw()?
-                    .take_block_and_execution_range(next_block..=target_block)?;
-            }
+            provider_factory.provider_rw()?.unwind_trie_state_range(next_block..=target_block)?;
 
             // Update latest block
             current_max_block = target_block;
