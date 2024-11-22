@@ -3030,13 +3030,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: ProviderNodeTypes + 'static> BlockWriter
                 .static_file_provider
                 .get_highest_static_file_tx(StaticFileSegment::Transactions);
 
-            if let Some(static_tx) = static_file_tx_num {
-                if static_tx >= unwind_tx_from {
-                    self.static_file_provider
-                        .latest_writer(StaticFileSegment::Transactions)?
-                        .prune_transactions(static_tx - unwind_tx_from + 1, block)?;
-                }
-            }
+            let to_delete = static_file_tx_num
+                .map(|static_tx| (static_tx + 1).saturating_sub(unwind_tx_from))
+                .unwrap_or_default();
+
+            self.static_file_provider
+                .latest_writer(StaticFileSegment::Transactions)?
+                .prune_transactions(to_delete, block)?;
         }
 
         Ok(())
