@@ -339,11 +339,11 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
         self.consistent_provider()?.transaction_by_id(id)
     }
 
-    fn transaction_by_id_no_hash(
+    fn transaction_by_id_unhashed(
         &self,
         id: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
-        self.consistent_provider()?.transaction_by_id_no_hash(id)
+        self.consistent_provider()?.transaction_by_id_unhashed(id)
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
@@ -2588,7 +2588,7 @@ mod tests {
             ),
             (
                 ONE,
-                transaction_by_id_no_hash,
+                transaction_by_id_unhashed,
                 |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     tx_num,
                     Some(Into::<TransactionSignedNoHash>::into(

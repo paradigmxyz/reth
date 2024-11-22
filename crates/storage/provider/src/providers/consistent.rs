@@ -945,13 +945,13 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
         )
     }
 
-    fn transaction_by_id_no_hash(
+    fn transaction_by_id_unhashed(
         &self,
         id: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
         self.get_in_memory_or_storage_by_tx(
             id.into(),
-            |provider| provider.transaction_by_id_no_hash(id),
+            |provider| provider.transaction_by_id_unhashed(id),
             |tx_index, _, block_state| {
                 Ok(block_state
                     .block_ref()

@@ -1482,14 +1482,14 @@ impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> Transaction
         )
     }
 
-    fn transaction_by_id_no_hash(
+    fn transaction_by_id_unhashed(
         &self,
         id: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
         self.static_file_provider.get_with_static_file_or_database(
             StaticFileSegment::Transactions,
             id,
-            |static_file| static_file.transaction_by_id_no_hash(id),
+            |static_file| static_file.transaction_by_id_unhashed(id),
             || Ok(self.tx.get::<tables::Transactions>(id)?),
         )
     }
@@ -1497,7 +1497,7 @@ impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> Transaction
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
         if let Some(id) = self.transaction_id(hash)? {
             Ok(self
-                .transaction_by_id_no_hash(id)?
+                .transaction_by_id_unhashed(id)?
                 .map(|tx| TransactionSigned::new(tx.transaction, tx.signature, hash)))
         } else {
             Ok(None)
@@ -1511,7 +1511,7 @@ impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> Transaction
     ) -> ProviderResult<Option<(TransactionSigned, TransactionMeta)>> {
         let mut transaction_cursor = self.tx.cursor_read::<tables::TransactionBlocks>()?;
         if let Some(transaction_id) = self.transaction_id(tx_hash)? {
-            if let Some(tx) = self.transaction_by_id_no_hash(transaction_id)? {
+            if let Some(tx) = self.transaction_by_id_unhashed(transaction_id)? {
                 let transaction = TransactionSigned::new(tx.transaction, tx.signature, tx_hash);
                 if let Some(block_number) =
                     transaction_cursor.seek(transaction_id).map(|b| b.map(|(_, bn)| bn))?

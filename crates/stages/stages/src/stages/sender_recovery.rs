@@ -667,7 +667,7 @@ mod tests {
                     while let Some((_, body)) = body_cursor.next()? {
                         for tx_id in body.tx_num_range() {
                             let transaction: TransactionSigned = provider
-                                .transaction_by_id_no_hash(tx_id)?
+                                .transaction_by_id_unhashed(tx_id)?
                                 .map(|tx| {
                                     TransactionSigned::new_unhashed(tx.transaction, tx.signature)
                                 })
