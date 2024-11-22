@@ -8,7 +8,7 @@ use futures::Stream;
 use reth_beacon_consensus::{BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress};
 use reth_engine_primitives::ForkchoiceStatus;
 use reth_network_api::PeersInfo;
-use reth_primitives_traits::{format_gas, format_gas_throughput};
+use reth_primitives_traits::format_gas;
 use reth_prune_types::PrunerEvent;
 use reth_stages::{EntitiesCheckpoint, ExecOutput, PipelineEvent, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileProducerEvent;
