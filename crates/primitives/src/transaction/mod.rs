@@ -1724,50 +1724,47 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
 
 /// Signed transaction with recovered signer.
 #[derive(Debug, Clone, PartialEq, Hash, Eq, AsRef, Deref)]
-pub struct TransactionSignedEcRecovered {
+pub struct TransactionSignedEcRecovered<T = TransactionSigned> {
     /// Signer of the transaction
     signer: Address,
     /// Signed transaction
     #[deref]
     #[as_ref]
-    signed_transaction: TransactionSigned,
+    signed_transaction: T,
 }
 
 // === impl TransactionSignedEcRecovered ===
 
-impl TransactionSignedEcRecovered {
+impl<T> TransactionSignedEcRecovered<T> {
     /// Signer of transaction recovered from signature
     pub const fn signer(&self) -> Address {
         self.signer
     }
 
     /// Returns a reference to [`TransactionSigned`]
-    pub const fn as_signed(&self) -> &TransactionSigned {
+    pub const fn as_signed(&self) -> &T {
         &self.signed_transaction
     }
 
     /// Transform back to [`TransactionSigned`]
-    pub fn into_signed(self) -> TransactionSigned {
+    pub fn into_signed(self) -> T {
         self.signed_transaction
     }
 
     /// Dissolve Self to its component
-    pub fn to_components(self) -> (TransactionSigned, Address) {
+    pub fn to_components(self) -> (T, Address) {
         (self.signed_transaction, self.signer)
     }
 
     /// Create [`TransactionSignedEcRecovered`] from [`TransactionSigned`] and [`Address`] of the
     /// signer.
     #[inline]
-    pub const fn from_signed_transaction(
-        signed_transaction: TransactionSigned,
-        signer: Address,
-    ) -> Self {
+    pub const fn from_signed_transaction(signed_transaction: T, signer: Address) -> Self {
         Self { signed_transaction, signer }
     }
 }
 
-impl Encodable for TransactionSignedEcRecovered {
+impl<T: Encodable> Encodable for TransactionSignedEcRecovered<T> {
     /// This encodes the transaction _with_ the signature, and an rlp header.
     ///
     /// Refer to docs for [`TransactionSigned::encode`] for details on the exact format.
@@ -1780,15 +1777,30 @@ impl Encodable for TransactionSignedEcRecovered {
     }
 }
 
-impl Decodable for TransactionSignedEcRecovered {
+impl<T: SignedTransaction> Decodable for TransactionSignedEcRecovered<T> {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let signed_transaction = TransactionSigned::decode(buf)?;
+        let signed_transaction = T::decode(buf)?;
         let signer = signed_transaction
             .recover_signer()
             .ok_or(RlpError::Custom("Unable to recover decoded transaction signer."))?;
         Ok(Self { signer, signed_transaction })
     }
 }
+
+/// And extension trait for [`SignedTransaction`] to convert it into
+/// [`TransactionSignedEcRecovered`].
+pub trait SignedTransactionIntoRecoveredExt: SignedTransaction {
+    /// Consumes the type, recover signer and return [`TransactionSignedEcRecovered`] _without
+    /// ensuring that the signature has a low `s` value_ (EIP-2).
+    ///
+    /// Returns `None` if the transaction's signature is invalid.
+    fn into_ecrecovered_unchecked(self) -> Option<TransactionSignedEcRecovered<Self>> {
+        let signer = self.recover_signer_unchecked()?;
+        Some(TransactionSignedEcRecovered::from_signed_transaction(self, signer))
+    }
+}
+
+impl<T> SignedTransactionIntoRecoveredExt for T where T: SignedTransaction {}
 
 /// Bincode-compatible transaction type serde implementations.
 #[cfg(feature = "serde-bincode-compat")]

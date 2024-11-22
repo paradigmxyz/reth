@@ -8655,6 +8655,7 @@ dependencies = [
 name = "reth-prune"
 version = "1.1.2"
 dependencies = [
+ "alloy-eips",
  "alloy-primitives",
  "assert_matches",
  "itertools 0.13.0",
@@ -8988,6 +8989,7 @@ dependencies = [
  "reth-execution-types",
  "reth-metrics",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-revm",
  "reth-rpc-server-types",
  "reth-rpc-types-compat",
@@ -9062,6 +9064,7 @@ name = "reth-stages"
 version = "1.1.2"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
  "assert_matches",

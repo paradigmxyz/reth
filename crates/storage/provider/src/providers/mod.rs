@@ -76,7 +76,9 @@ where
     Self: NodeTypes<
         ChainSpec: EthereumHardforks,
         Storage: ChainStorage<Self::Primitives>,
-        Primitives: FullNodePrimitives<SignedTx: Value + Into<TransactionSigned>>,
+        Primitives: FullNodePrimitives<
+            SignedTx: Value + From<TransactionSigned> + Into<TransactionSigned>,
+        >,
     >,
 {
 }
@@ -85,7 +87,9 @@ impl<T> NodeTypesForProvider for T where
     T: NodeTypes<
         ChainSpec: EthereumHardforks,
         Storage: ChainStorage<T::Primitives>,
-        Primitives: FullNodePrimitives<SignedTx: Value + Into<TransactionSigned>>,
+        Primitives: FullNodePrimitives<
+            SignedTx: Value + From<TransactionSigned> + Into<TransactionSigned>,
+        >,
     >
 {
 }

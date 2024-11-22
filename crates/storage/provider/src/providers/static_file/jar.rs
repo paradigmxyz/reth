@@ -223,7 +223,7 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
     }
 
     fn transaction_by_id(&self, num: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
-        Ok(self.cursor()?.get_one::<TransactionMask<Self::Transaction>>(num.into())?)
+        self.cursor()?.get_one::<TransactionMask<Self::Transaction>>(num.into())
     }
 
     fn transaction_by_id_unhashed(
@@ -234,7 +234,7 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Transaction>> {
-        Ok(self.cursor()?.get_one::<TransactionMask<Self::Transaction>>((&hash).into())?)
+        self.cursor()?.get_one::<TransactionMask<Self::Transaction>>((&hash).into())
     }
 
     fn transaction_by_hash_with_meta(

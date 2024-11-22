@@ -3,6 +3,7 @@ use crate::{
     segments::{PruneInput, Segment, SegmentOutput},
     PrunerError,
 };
+use alloy_eips::eip2718::Encodable2718;
 use rayon::prelude::*;
 use reth_db::{tables, transaction::DbTxMut};
 use reth_provider::{BlockReader, DBProvider, TransactionsProvider};
@@ -58,7 +59,7 @@ where
         let hashes = provider
             .transactions_by_tx_range(tx_range.clone())?
             .into_par_iter()
-            .map(|transaction| transaction.hash())
+            .map(|transaction| transaction.trie_hash())
             .collect::<Vec<_>>();
 
         // Number of transactions retrieved from the database should match the tx range count

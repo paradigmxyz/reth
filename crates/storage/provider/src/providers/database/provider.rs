@@ -3,7 +3,7 @@ use crate::{
     providers::{
         database::{chain::ChainStorage, metrics},
         static_file::StaticFileWriter,
-        ProviderNodeTypes, StaticFileProvider,
+        NodeTypesForProvider, StaticFileProvider,
     },
     to_range,
     traits::{
@@ -243,7 +243,7 @@ impl<TX, N: NodeTypes> AsRef<Self> for DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: DbTx + DbTxMut + 'static, N: ProviderNodeTypes> DatabaseProvider<TX, N> {
+impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     /// Unwinds trie state for the given range.
     ///
     /// This includes calculating the resulted state root and comparing it with the parent block
@@ -374,7 +374,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
     }
 }
 
-impl<Tx: DbTx + DbTxMut + 'static, N: ProviderNodeTypes + 'static> DatabaseProvider<Tx, N> {
+impl<Tx: DbTx + DbTxMut + 'static, N: NodeTypesForProvider + 'static> DatabaseProvider<Tx, N> {
     // TODO: uncomment below, once `reth debug_cmd` has been feature gated with dev.
     // #[cfg(any(test, feature = "test-utils"))]
     /// Inserts an historical block. **Used for setting up test environments**
@@ -657,7 +657,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: DbTx + 'static, N: ProviderNodeTypes> DatabaseProvider<TX, N> {
+impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     fn transactions_by_tx_range_with_cursor<C>(
         &self,
         range: impl RangeBounds<TxNumber>,
@@ -678,7 +678,7 @@ impl<TX: DbTx + 'static, N: ProviderNodeTypes> DatabaseProvider<TX, N> {
     fn block_with_senders<H, HF, B, BF>(
         &self,
         id: BlockHashOrNumber,
-        transaction_kind: TransactionVariant,
+        _transaction_kind: TransactionVariant,
         header_by_number: HF,
         construct_block: BF,
     ) -> ProviderResult<Option<B>>
@@ -1213,7 +1213,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> BlockNumReader for DatabaseProvider<TX, N
     }
 }
 
-impl<TX: DbTx + 'static, N: ProviderNodeTypes> BlockReader for DatabaseProvider<TX, N> {
+impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvider<TX, N> {
     fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> ProviderResult<Option<Block>> {
         if source.is_canonical() {
             self.block(hash.into())
@@ -1388,7 +1388,9 @@ impl<TX: DbTx + 'static, N: ProviderNodeTypes> BlockReader for DatabaseProvider<
     }
 }
 
-impl<TX: DbTx + 'static, N: ProviderNodeTypes> TransactionsProviderExt for DatabaseProvider<TX, N> {
+impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProviderExt
+    for DatabaseProvider<TX, N>
+{
     /// Recovers transaction hashes by walking through `Transactions` table and
     /// calculating them in a parallel manner. Returned unsorted.
     fn transaction_hashes_by_range(
@@ -1456,7 +1458,7 @@ impl<TX: DbTx + 'static, N: ProviderNodeTypes> TransactionsProviderExt for Datab
 }
 
 // Calculates the hash of the given transaction
-impl<TX: DbTx + 'static, N: ProviderNodeTypes> TransactionsProvider for DatabaseProvider<TX, N> {
+impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for DatabaseProvider<TX, N> {
     type Transaction = TxTy<N>;
 
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
@@ -1600,7 +1602,7 @@ impl<TX: DbTx + 'static, N: ProviderNodeTypes> TransactionsProvider for Database
     }
 }
 
-impl<TX: DbTx + 'static, N: ProviderNodeTypes> ReceiptProvider for DatabaseProvider<TX, N> {
+impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabaseProvider<TX, N> {
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
         self.static_file_provider.get_with_static_file_or_database(
             StaticFileSegment::Receipts,
@@ -2694,7 +2696,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> StateReader for DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: DbTxMut + DbTx + 'static, N: ProviderNodeTypes + 'static> BlockExecutionWriter
+impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockExecutionWriter
     for DatabaseProvider<TX, N>
 {
     fn take_block_and_execution_above(
@@ -2744,7 +2746,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: ProviderNodeTypes + 'static> BlockExecutio
     }
 }
 
-impl<TX: DbTxMut + DbTx + 'static, N: ProviderNodeTypes + 'static> BlockWriter
+impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWriter
     for DatabaseProvider<TX, N>
 {
     type Body = <<N::Primitives as NodePrimitives>::Block as reth_primitives_traits::Block>::Body;

@@ -415,7 +415,7 @@ mod tests {
 
         #[allow(clippy::too_many_arguments)]
         fn prune_and_validate(
-            sf_rw: &StaticFileProvider<()>,
+            sf_rw: &StaticFileProvider<EthPrimitives>,
             static_dir: impl AsRef<Path>,
             segment: StaticFileSegment,
             prune_count: u64,

@@ -2,6 +2,7 @@ use crate::{BlockNumReader, BlockReader};
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Address, BlockNumber, TxHash, TxNumber};
 use reth_primitives::TransactionMeta;
+use reth_primitives_traits::SignedTransaction;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::ops::{Range, RangeBounds, RangeInclusive};
 
@@ -22,7 +23,7 @@ pub enum TransactionVariant {
 #[auto_impl::auto_impl(&, Arc)]
 pub trait TransactionsProvider: BlockNumReader + Send + Sync {
     /// The transaction type this provider reads.
-    type Transaction;
+    type Transaction: Send + Sync + SignedTransaction;
 
     /// Get internal transaction identifier by transaction hash.
     ///
@@ -79,6 +80,9 @@ pub trait TransactionsProvider: BlockNumReader + Send + Sync {
     /// Returns None if the transaction is not found.
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>>;
 }
+
+/// A helper type alias to access [`TransactionsProvider::Transaction`].
+pub type ProviderTx<P> = <P as TransactionsProvider>::Transaction;
 
 ///  Client trait for fetching additional [TransactionSigned] related data.
 #[auto_impl::auto_impl(&, Arc)]

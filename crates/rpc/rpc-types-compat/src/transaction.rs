@@ -8,7 +8,7 @@ use alloy_rpc_types_eth::{
     request::{TransactionInput, TransactionRequest},
     TransactionInfo,
 };
-use reth_primitives::TransactionSignedEcRecovered;
+use reth_primitives::{TransactionSigned, TransactionSignedEcRecovered};
 use serde::{Deserialize, Serialize};
 
 /// Create a new rpc transaction result for a mined transaction, using the given block hash,
@@ -16,8 +16,8 @@ use serde::{Deserialize, Serialize};
 ///
 /// The block hash, number, and tx index fields should be from the original block where the
 /// transaction was mined.
-pub fn from_recovered_with_block_context<T: TransactionCompat>(
-    tx: TransactionSignedEcRecovered,
+pub fn from_recovered_with_block_context<Tx, T: TransactionCompat<Tx>>(
+    tx: TransactionSignedEcRecovered<Tx>,
     tx_info: TransactionInfo,
     resp_builder: &T,
 ) -> Result<T::Transaction, T::Error> {
@@ -26,15 +26,17 @@ pub fn from_recovered_with_block_context<T: TransactionCompat>(
 
 /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
 /// environment related fields to `None`.
-pub fn from_recovered<T: TransactionCompat>(
-    tx: TransactionSignedEcRecovered,
+pub fn from_recovered<Tx, T: TransactionCompat<Tx>>(
+    tx: TransactionSignedEcRecovered<Tx>,
     resp_builder: &T,
 ) -> Result<T::Transaction, T::Error> {
     resp_builder.fill(tx, TransactionInfo::default())
 }
 
 /// Builds RPC transaction w.r.t. network.
-pub trait TransactionCompat: Send + Sync + Unpin + Clone + fmt::Debug {
+pub trait TransactionCompat<T = TransactionSigned>:
+    Send + Sync + Unpin + Clone + fmt::Debug
+{
     /// RPC transaction response type.
     type Transaction: Serialize
         + for<'de> Deserialize<'de>
@@ -51,7 +53,7 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + fmt::Debug {
     /// environment related fields to `None`.
     fn fill(
         &self,
-        tx: TransactionSignedEcRecovered,
+        tx: TransactionSignedEcRecovered<T>,
         tx_inf: TransactionInfo,
     ) -> Result<Self::Transaction, Self::Error>;
 

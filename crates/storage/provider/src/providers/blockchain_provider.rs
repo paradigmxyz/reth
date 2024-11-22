@@ -2246,9 +2246,7 @@ mod tests {
             (transactions_by_tx_range, |block: &SealedBlock, _: &Vec<Vec<Receipt>>| block
                 .body
                 .transactions
-                .iter()
-                .map(|tx| Into::<TransactionSignedNoHash>::into(tx.clone()))
-                .collect::<Vec<_>>()),
+                .clone()),
             (receipts_by_tx_range, |block: &SealedBlock, receipts: &Vec<Vec<Receipt>>| receipts
                 [block.number as usize]
                 .clone())
@@ -2593,9 +2591,7 @@ mod tests {
                 transaction_by_id_unhashed,
                 |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     tx_num,
-                    Some(Into::<TransactionSignedNoHash>::into(
-                        block.body.transactions[test_tx_index].clone()
-                    ))
+                    Some(block.body.transactions[test_tx_index].clone())
                 ),
                 u64::MAX
             ),
