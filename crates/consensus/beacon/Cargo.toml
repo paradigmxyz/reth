@@ -82,6 +82,7 @@ assert_matches.workspace = true
 [features]
 optimism = [
     "reth-blockchain-tree/optimism",
+    "reth-codecs/optimism",
     "reth-chainspec",
     "reth-db-api/optimism",
     "reth-db/optimism",
