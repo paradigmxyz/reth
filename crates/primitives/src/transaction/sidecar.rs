@@ -1,9 +1,9 @@
 #![cfg_attr(docsrs, doc(cfg(feature = "c-kzg")))]
 
 use crate::{Transaction, TransactionSigned};
-use alloy_consensus::{transaction::RlpEcdsaTx, TxEip4844WithSidecar};
+use alloy_consensus::{transaction::RlpEcdsaTx, Signed, TxEip4844WithSidecar};
 use alloy_eips::eip4844::BlobTransactionSidecar;
-use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
+use derive_more::Deref;
 use serde::{Deserialize, Serialize};
 
 /// A response to `GetPooledTransactions` that includes blob data, their commitments, and their
@@ -11,16 +11,8 @@ use serde::{Deserialize, Serialize};
 ///
 /// This is defined in [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#networking) as an element
 /// of a `PooledTransactions` response.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BlobTransaction {
-    /// The transaction hash.
-    pub hash: TxHash,
-    /// The transaction signature.
-    pub signature: Signature,
-    /// The transaction payload with the sidecar.
-    #[serde(flatten)]
-    pub transaction: TxEip4844WithSidecar,
-}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Deref)]
+pub struct BlobTransaction(pub Signed<TxEip4844WithSidecar>);
 
 impl BlobTransaction {
     /// Constructs a new [`BlobTransaction`] from a [`TransactionSigned`] and a
@@ -34,11 +26,11 @@ impl BlobTransaction {
         let hash = tx.hash();
         let TransactionSigned { transaction, signature, .. } = tx;
         match transaction {
-            Transaction::Eip4844(transaction) => Ok(Self {
-                hash,
-                transaction: TxEip4844WithSidecar { tx: transaction, sidecar },
+            Transaction::Eip4844(transaction) => Ok(Self(Signed::new_unchecked(
+                TxEip4844WithSidecar { tx: transaction, sidecar },
                 signature,
-            }),
+                hash,
+            ))),
             transaction => {
                 let tx = TransactionSigned { transaction, signature, hash: hash.into() };
                 Err((tx, sidecar))
@@ -54,19 +46,16 @@ impl BlobTransaction {
         &self,
         proof_settings: &c_kzg::KzgSettings,
     ) -> Result<(), alloy_eips::eip4844::BlobTransactionValidationError> {
-        self.transaction.validate_blob(proof_settings)
+        self.tx().validate_blob(proof_settings)
     }
 
     /// Splits the [`BlobTransaction`] into its [`TransactionSigned`] and [`BlobTransactionSidecar`]
     /// components.
     pub fn into_parts(self) -> (TransactionSigned, BlobTransactionSidecar) {
-        let transaction = TransactionSigned {
-            transaction: Transaction::Eip4844(self.transaction.tx),
-            hash: self.hash.into(),
-            signature: self.signature,
-        };
-
-        (transaction, self.transaction.sidecar)
+        let (transaction, signature, hash) = self.0.into_parts();
+        let (transaction, sidecar) = transaction.into_parts();
+        let transaction = TransactionSigned::new(transaction.into(), signature, hash);
+        (transaction, sidecar)
     }
 
     /// Decodes a [`BlobTransaction`] from RLP. This expects the encoding to be:
@@ -80,8 +69,7 @@ impl BlobTransaction {
     pub(crate) fn decode_inner(data: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let (transaction, signature, hash) =
             TxEip4844WithSidecar::rlp_decode_signed(data)?.into_parts();
-
-        Ok(Self { transaction, hash, signature })
+        Ok(Self(Signed::new_unchecked(transaction, signature, hash)))
     }
 }
 
