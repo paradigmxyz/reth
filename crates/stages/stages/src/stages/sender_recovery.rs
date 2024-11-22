@@ -668,10 +668,8 @@ mod tests {
                         for tx_id in body.tx_num_range() {
                             let transaction: TransactionSigned = provider
                                 .transaction_by_id_no_hash(tx_id)?
-                                .map(|tx| TransactionSigned {
-                                    hash: Default::default(), // we don't require the hash
-                                    signature: tx.signature,
-                                    transaction: tx.transaction,
+                                .map(|tx| {
+                                    TransactionSigned::new_unhashed(tx.transaction, tx.signature)
                                 })
                                 .expect("no transaction entry");
                             let signer =
