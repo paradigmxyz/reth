@@ -3,7 +3,7 @@
 use alloc::vec::Vec;
 use alloy_consensus::{
     transaction::RlpEcdsaTx, SignableTransaction, Signed, Transaction as _, TxEip1559, TxEip2930,
-    TxEip4844, TxEip7702, TxLegacy,
+    TxEip4844, TxEip4844Variant, TxEip7702, TxLegacy, TypedTransaction,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
@@ -833,6 +833,27 @@ impl alloy_consensus::Transaction for Transaction {
     }
 }
 
+impl From<TxEip4844Variant> for Transaction {
+    fn from(value: TxEip4844Variant) -> Self {
+        match value {
+            TxEip4844Variant::TxEip4844(tx) => tx.into(),
+            TxEip4844Variant::TxEip4844WithSidecar(tx) => tx.tx.into(),
+        }
+    }
+}
+
+impl From<TypedTransaction> for Transaction {
+    fn from(value: TypedTransaction) -> Self {
+        match value {
+            TypedTransaction::Legacy(tx) => tx.into(),
+            TypedTransaction::Eip2930(tx) => tx.into(),
+            TypedTransaction::Eip1559(tx) => tx.into(),
+            TypedTransaction::Eip4844(tx) => tx.into(),
+            TypedTransaction::Eip7702(tx) => tx.into(),
+        }
+    }
+}
+
 /// Signed transaction without its Hash. Used type for inserting into the DB.
 ///
 /// This can by converted to [`TransactionSigned`] by calling [`TransactionSignedNoHash::hash`].
@@ -1651,7 +1672,7 @@ macro_rules! impl_from_signed {
     };
 }
 
-impl_from_signed!(TxLegacy, TxEip2930, TxEip1559, TxEip7702, TxEip4844);
+impl_from_signed!(TxLegacy, TxEip2930, TxEip1559, TxEip7702, TxEip4844, TypedTransaction);
 
 impl From<Signed<Transaction>> for TransactionSigned {
     fn from(value: Signed<Transaction>) -> Self {
