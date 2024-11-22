@@ -25,7 +25,7 @@ use reth_db::{models::BlockNumberAddress, transaction::DbTx, Database};
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::ExecutionOutcome;
-use reth_node_types::NodeTypesWithDB;
+use reth_node_types::{NodeTypesWithDB, TxTy};
 use reth_primitives::{
     Account, Block, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
     StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
@@ -331,29 +331,31 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
 }
 
 impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
+    type Transaction = TxTy<N>;
+
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         self.consistent_provider()?.transaction_id(tx_hash)
     }
 
-    fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
+    fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
         self.consistent_provider()?.transaction_by_id(id)
     }
 
     fn transaction_by_id_unhashed(
         &self,
         id: TxNumber,
-    ) -> ProviderResult<Option<TransactionSignedNoHash>> {
+    ) -> ProviderResult<Option<Self::Transaction>> {
         self.consistent_provider()?.transaction_by_id_unhashed(id)
     }
 
-    fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
+    fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Transaction>> {
         self.consistent_provider()?.transaction_by_hash(hash)
     }
 
     fn transaction_by_hash_with_meta(
         &self,
         tx_hash: TxHash,
-    ) -> ProviderResult<Option<(TransactionSigned, TransactionMeta)>> {
+    ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
         self.consistent_provider()?.transaction_by_hash_with_meta(tx_hash)
     }
 
@@ -364,21 +366,21 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
     fn transactions_by_block(
         &self,
         id: BlockHashOrNumber,
-    ) -> ProviderResult<Option<Vec<TransactionSigned>>> {
+    ) -> ProviderResult<Option<Vec<Self::Transaction>>> {
         self.consistent_provider()?.transactions_by_block(id)
     }
 
     fn transactions_by_block_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<Vec<TransactionSigned>>> {
+    ) -> ProviderResult<Vec<Vec<Self::Transaction>>> {
         self.consistent_provider()?.transactions_by_block_range(range)
     }
 
     fn transactions_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<TransactionSignedNoHash>> {
+    ) -> ProviderResult<Vec<Self::Transaction>> {
         self.consistent_provider()?.transactions_by_tx_range(range)
     }
 
@@ -2244,9 +2246,7 @@ mod tests {
             (transactions_by_tx_range, |block: &SealedBlock, _: &Vec<Vec<Receipt>>| block
                 .body
                 .transactions
-                .iter()
-                .map(|tx| Into::<TransactionSignedNoHash>::into(tx.clone()))
-                .collect::<Vec<_>>()),
+                .clone()),
             (receipts_by_tx_range, |block: &SealedBlock, receipts: &Vec<Vec<Receipt>>| receipts
                 [block.number as usize]
                 .clone())
@@ -2591,9 +2591,7 @@ mod tests {
                 transaction_by_id_unhashed,
                 |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     tx_num,
-                    Some(Into::<TransactionSignedNoHash>::into(
-                        block.body.transactions[test_tx_index].clone()
-                    ))
+                    Some(block.body.transactions[test_tx_index].clone())
                 ),
                 u64::MAX
             ),
