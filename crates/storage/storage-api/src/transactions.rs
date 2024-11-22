@@ -1,7 +1,7 @@
 use crate::{BlockNumReader, BlockReader};
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Address, BlockNumber, TxHash, TxNumber};
-use reth_primitives::{TransactionMeta, TransactionSigned, TransactionSignedNoHash};
+use reth_primitives::TransactionMeta;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::ops::{Range, RangeBounds, RangeInclusive};
 
@@ -21,6 +21,9 @@ pub enum TransactionVariant {
 ///  Client trait for fetching [TransactionSigned] related data.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait TransactionsProvider: BlockNumReader + Send + Sync {
+    /// The transaction type this provider reads.
+    type Transaction;
+
     /// Get internal transaction identifier by transaction hash.
     ///
     /// This is the inverse of [TransactionsProvider::transaction_by_id].
@@ -28,23 +31,21 @@ pub trait TransactionsProvider: BlockNumReader + Send + Sync {
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>>;
 
     /// Get transaction by id, computes hash every time so more expensive.
-    fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<TransactionSigned>>;
+    fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<Self::Transaction>>;
 
     /// Get transaction by id without computing the hash.
-    fn transaction_by_id_unhashed(
-        &self,
-        id: TxNumber,
-    ) -> ProviderResult<Option<TransactionSignedNoHash>>;
+    fn transaction_by_id_unhashed(&self, id: TxNumber)
+        -> ProviderResult<Option<Self::Transaction>>;
 
     /// Get transaction by transaction hash.
-    fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>>;
+    fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Transaction>>;
 
     /// Get transaction by transaction hash and additional metadata of the block the transaction was
     /// mined in
     fn transaction_by_hash_with_meta(
         &self,
         hash: TxHash,
-    ) -> ProviderResult<Option<(TransactionSigned, TransactionMeta)>>;
+    ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>>;
 
     /// Get transaction block number
     fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>>;
@@ -53,19 +54,19 @@ pub trait TransactionsProvider: BlockNumReader + Send + Sync {
     fn transactions_by_block(
         &self,
         block: BlockHashOrNumber,
-    ) -> ProviderResult<Option<Vec<TransactionSigned>>>;
+    ) -> ProviderResult<Option<Vec<Self::Transaction>>>;
 
     /// Get transactions by block range.
     fn transactions_by_block_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<Vec<TransactionSigned>>>;
+    ) -> ProviderResult<Vec<Vec<Self::Transaction>>>;
 
     /// Get transactions by tx range.
     fn transactions_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<TransactionSignedNoHash>>;
+    ) -> ProviderResult<Vec<Self::Transaction>>;
 
     /// Get Senders from a tx range.
     fn senders_by_tx_range(

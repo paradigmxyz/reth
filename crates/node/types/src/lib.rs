@@ -238,3 +238,6 @@ pub type HeaderTy<N> = <<N as NodeTypes>::Primitives as NodePrimitives>::BlockHe
 
 /// Helper adapter type for accessing [`NodePrimitives::BlockBody`] on [`NodeTypes`].
 pub type BodyTy<N> = <<N as NodeTypes>::Primitives as NodePrimitives>::BlockBody;
+
+/// Helper adapter type for accessing [`NodePrimitives::SignedTx`] on [`NodeTypes`].
+pub type TxTy<N> = <<N as NodeTypes>::Primitives as NodePrimitives>::SignedTx;

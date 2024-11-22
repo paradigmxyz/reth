@@ -1991,6 +1991,22 @@ pub mod serde_bincode_compat {
     }
 }
 
+/// Recovers a list of signers from a transaction list iterator.
+///
+/// Returns `None`, if some transaction's signature is invalid, see also
+/// [`Self::recover_signer`].
+pub fn recover_signers<'a, I, T>(txes: I, num_txes: usize) -> Option<Vec<Address>>
+where
+    T: SignedTransaction,
+    I: IntoParallelIterator<Item = &'a T> + IntoIterator<Item = &'a T> + Send,
+{
+    if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
+        txes.into_iter().map(|tx| tx.recover_signer()).collect()
+    } else {
+        txes.into_par_iter().map(|tx| tx.recover_signer()).collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{

@@ -10,14 +10,15 @@ use alloy_consensus::Header;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use reth_chainspec::ChainInfo;
-use reth_db::static_file::{
-    BlockHashMask, HeaderMask, HeaderWithHashMask, ReceiptMask, StaticFileCursor, TDWithHashMask,
-    TotalDifficultyMask, TransactionMask,
-};
+use reth_codecs::Compact;
+use reth_db::{static_file::{BlockHashMask, HeaderMask, HeaderWithHashMask, ReceiptMask, StaticFileCursor, TDWithHashMask, TotalDifficultyMask, TransactionMask}, table::Decompress};
+use reth_db_api::models::CompactU256;
 use reth_node_types::NodePrimitives;
 use reth_primitives::{
-    Receipt, SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
+    transaction::recover_signers, Receipt, SealedHeader, TransactionMeta, TransactionSigned,
+    TransactionSignedNoHash,
 };
+use reth_primitives_traits::SignedTransaction;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     fmt::Debug,
@@ -207,40 +208,42 @@ impl<N: NodePrimitives> BlockNumReader for StaticFileJarProvider<'_, N> {
     }
 }
 
-impl<N: NodePrimitives> TransactionsProvider for StaticFileJarProvider<'_, N> {
+impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsProvider for StaticFileJarProvider<'_, N> {
+    type Transaction = N::SignedTx;
+
     fn transaction_id(&self, hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         let mut cursor = self.cursor()?;
 
         Ok(cursor
-            .get_one::<TransactionMask<TransactionSignedNoHash>>((&hash).into())?
+            .get_one::<TransactionMask<Self::Transaction>>((&hash).into())?
             .and_then(|res| (res.hash() == hash).then(|| cursor.number()).flatten()))
     }
 
-    fn transaction_by_id(&self, num: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
+    fn transaction_by_id(&self, num: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
         Ok(self
             .cursor()?
-            .get_one::<TransactionMask<TransactionSignedNoHash>>(num.into())?
+            .get_one::<TransactionMask<Self::Transaction>>(num.into())?
             .map(|tx| tx.with_hash()))
     }
 
     fn transaction_by_id_unhashed(
         &self,
         num: TxNumber,
-    ) -> ProviderResult<Option<TransactionSignedNoHash>> {
-        self.cursor()?.get_one::<TransactionMask<TransactionSignedNoHash>>(num.into())
+    ) -> ProviderResult<Option<Self::Transaction>> {
+        self.cursor()?.get_one::<TransactionMask<Self::Transaction>>(num.into())
     }
 
-    fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
+    fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Transaction>> {
         Ok(self
             .cursor()?
-            .get_one::<TransactionMask<TransactionSignedNoHash>>((&hash).into())?
+            .get_one::<TransactionMask<Self::Transaction>>((&hash).into())?
             .map(|tx| tx.with_hash()))
     }
 
     fn transaction_by_hash_with_meta(
         &self,
         _hash: TxHash,
-    ) -> ProviderResult<Option<(TransactionSigned, TransactionMeta)>> {
+    ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
         // Information required on indexing table [`tables::TransactionBlocks`]
         Err(ProviderError::UnsupportedProvider)
     }
@@ -253,7 +256,7 @@ impl<N: NodePrimitives> TransactionsProvider for StaticFileJarProvider<'_, N> {
     fn transactions_by_block(
         &self,
         _block_id: BlockHashOrNumber,
-    ) -> ProviderResult<Option<Vec<TransactionSigned>>> {
+    ) -> ProviderResult<Option<Vec<Self::Transaction>>> {
         // Related to indexing tables. Live database should get the tx_range and call static file
         // provider with `transactions_by_tx_range` instead.
         Err(ProviderError::UnsupportedProvider)
@@ -262,7 +265,7 @@ impl<N: NodePrimitives> TransactionsProvider for StaticFileJarProvider<'_, N> {
     fn transactions_by_block_range(
         &self,
         _range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<Vec<TransactionSigned>>> {
+    ) -> ProviderResult<Vec<Vec<Self::Transaction>>> {
         // Related to indexing tables. Live database should get the tx_range and call static file
         // provider with `transactions_by_tx_range` instead.
         Err(ProviderError::UnsupportedProvider)
@@ -271,15 +274,13 @@ impl<N: NodePrimitives> TransactionsProvider for StaticFileJarProvider<'_, N> {
     fn transactions_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<reth_primitives::TransactionSignedNoHash>> {
+    ) -> ProviderResult<Vec<Self::Transaction>> {
         let range = to_range(range);
         let mut cursor = self.cursor()?;
         let mut txes = Vec::with_capacity((range.end - range.start) as usize);
 
         for num in range {
-            if let Some(tx) =
-                cursor.get_one::<TransactionMask<TransactionSignedNoHash>>(num.into())?
-            {
+            if let Some(tx) = cursor.get_one::<TransactionMask<Self::Transaction>>(num.into())? {
                 txes.push(tx)
             }
         }
@@ -291,19 +292,18 @@ impl<N: NodePrimitives> TransactionsProvider for StaticFileJarProvider<'_, N> {
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Address>> {
         let txs = self.transactions_by_tx_range(range)?;
-        TransactionSignedNoHash::recover_signers(&txs, txs.len())
-            .ok_or(ProviderError::SenderRecoveryError)
+        recover_signers(&txs, txs.len()).ok_or(ProviderError::SenderRecoveryError)
     }
 
     fn transaction_sender(&self, num: TxNumber) -> ProviderResult<Option<Address>> {
         Ok(self
             .cursor()?
-            .get_one::<TransactionMask<TransactionSignedNoHash>>(num.into())?
+            .get_one::<TransactionMask<Self::Transaction>>(num.into())?
             .and_then(|tx| tx.recover_signer()))
     }
 }
 
-impl<N: NodePrimitives> ReceiptProvider for StaticFileJarProvider<'_, N> {
+impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> ReceiptProvider for StaticFileJarProvider<'_, N> {
     fn receipt(&self, num: TxNumber) -> ProviderResult<Option<Receipt>> {
         self.cursor()?.get_one::<ReceiptMask<Receipt>>(num.into())
     }
