@@ -1,13 +1,9 @@
 use crate::{db::DatabaseError, lockfile::StorageLockError, writer::UnifiedStorageWriterError};
-use alloy_eips::BlockHashOrNumber;
+use alloc::{boxed::Box, string::String};
+use alloy_eips::{BlockHashOrNumber, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxNumber, B256};
 use derive_more::Display;
-use reth_primitives::{GotExpected, StaticFileSegment, TxHashOrNumber};
-
-#[cfg(feature = "std")]
-use std::path::PathBuf;
-
-use alloc::{boxed::Box, string::String};
+use reth_primitives::{GotExpected, StaticFileSegment};
 
 /// Provider result type.
 pub type ProviderResult<Ok> = Result<Ok, ProviderError>;
@@ -66,12 +62,12 @@ pub enum ProviderError {
     /// when required header related data was not found but was required.
     #[display("no header found for {_0:?}")]
     HeaderNotFound(BlockHashOrNumber),
-    /// The specific transaction is missing.
+    /// The specific transaction identified by hash or id is missing.
     #[display("no transaction found for {_0:?}")]
-    TransactionNotFound(TxHashOrNumber),
-    /// The specific receipt is missing
+    TransactionNotFound(HashOrNumber),
+    /// The specific receipt for a transaction identified by hash or id is missing
     #[display("no receipt found for {_0:?}")]
-    ReceiptNotFound(TxHashOrNumber),
+    ReceiptNotFound(HashOrNumber),
     /// Unable to find the best block.
     #[display("best block does not exist")]
     BestBlockNotFound,
@@ -111,7 +107,7 @@ pub enum ProviderError {
     /// Static File is not found at specified path.
     #[cfg(feature = "std")]
     #[display("not able to find {_0} static file at {_1:?}")]
-    MissingStaticFilePath(StaticFileSegment, PathBuf),
+    MissingStaticFilePath(StaticFileSegment, std::path::PathBuf),
     /// Static File is not found for requested block.
     #[display("not able to find {_0} static file for block number {_1}")]
     MissingStaticFileBlock(StaticFileSegment, BlockNumber),
