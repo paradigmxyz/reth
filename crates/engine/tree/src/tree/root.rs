@@ -633,8 +633,6 @@ fn calculate_state_root_with_sparse(
         }
     }
 
-    // TODO(alexey): calculate using `update_rlp_node_level` and then
-    // finalize in the end
     trie.calculate_below_level(2);
     let elapsed = started_at.elapsed();
 
