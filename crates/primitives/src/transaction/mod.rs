@@ -1105,6 +1105,18 @@ impl PartialEq for TransactionSigned {
 // === impl TransactionSigned ===
 
 impl TransactionSigned {
+    /// Creates a new signed transaction from the given parts.
+    pub fn new(transaction: Transaction, signature: Signature, hash: B256) -> Self {
+        Self { hash: hash.into(), signature, transaction }
+    }
+
+    /// Creates a new signed transaction from the given transaction and signature without the hash.
+    ///
+    /// Note: this only calculates the hash on the first [`TransactionSigned::hash`] call.
+    pub fn new_unhashed(transaction: Transaction, signature: Signature) -> Self {
+        Self { hash: Default::default(), signature, transaction }
+    }
+
     /// Transaction signature.
     pub const fn signature(&self) -> &Signature {
         &self.signature
