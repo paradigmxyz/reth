@@ -1995,7 +1995,7 @@ pub mod serde_bincode_compat {
 mod tests {
     use crate::{
         transaction::{TxEip1559, TxKind, TxLegacy},
-        Transaction, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
+        Transaction, TransactionSigned, TransactionSignedEcRecovered,
     };
     use alloy_consensus::Transaction as _;
     use alloy_eips::eip2718::{Decodable2718, Encodable2718};
@@ -2378,17 +2378,17 @@ mod tests {
                 input: Bytes::from(input),
             });
 
-            let tx_signed_no_hash = TransactionSignedNoHash { signature, transaction };
-            test_transaction_signed_to_from_compact(tx_signed_no_hash);
+            let tx = TransactionSigned::new_unhashed(transaction, signature);
+            test_transaction_signed_to_from_compact(tx);
         }
     }
 
-    fn test_transaction_signed_to_from_compact(tx_signed_no_hash: TransactionSignedNoHash) {
+    fn test_transaction_signed_to_from_compact(tx: TransactionSigned) {
         // zstd aware `to_compact`
         let mut buff: Vec<u8> = Vec::new();
-        let written_bytes = tx_signed_no_hash.to_compact(&mut buff);
-        let (decoded, _) = TransactionSignedNoHash::from_compact(&buff, written_bytes);
-        assert_eq!(tx_signed_no_hash, decoded);
+        let written_bytes = tx.to_compact(&mut buff);
+        let (decoded, _) = TransactionSigned::from_compact(&buff, written_bytes);
+        assert_eq!(tx, decoded);
     }
 
     #[test]
