@@ -14,7 +14,6 @@ extern crate alloc;
 
 /// Common constants.
 pub mod constants;
-
 pub use constants::gas_units::{format_gas, format_gas_throughput};
 
 /// Minimal account
@@ -42,7 +41,9 @@ pub use block::{
     Block, FullBlock,
 };
 
+mod encoded;
 mod withdrawal;
+pub use encoded::WithEncoded;
 
 mod error;
 pub use error::{GotExpected, GotExpectedBoxed};
