@@ -73,7 +73,7 @@ impl Block {
             senders
         };
 
-        Ok(BlockWithSenders { block: self, senders })
+        Ok(BlockWithSenders::new_unchecked(self, senders))
     }
 
     /// **Expensive**. Transform into a [`BlockWithSenders`] by recovering senders in the contained
@@ -82,7 +82,7 @@ impl Block {
     /// Returns `None` if a transaction is invalid.
     pub fn with_recovered_senders(self) -> Option<BlockWithSenders> {
         let senders = self.senders()?;
-        Some(BlockWithSenders { block: self, senders })
+        Some(BlockWithSenders::new_unchecked(self, senders))
     }
 }
 
@@ -214,6 +214,11 @@ pub struct BlockWithSenders {
 }
 
 impl BlockWithSenders {
+    /// New block with senders
+    pub const fn new_unchecked(block: Block, senders: Vec<Address>) -> Self {
+        Self { block, senders }
+    }
+
     /// New block with senders. Return none if len of tx and senders does not match
     pub fn new(block: Block, senders: Vec<Address>) -> Option<Self> {
         (block.body.transactions.len() == senders.len()).then_some(Self { block, senders })
@@ -527,7 +532,7 @@ impl SealedBlockWithSenders {
     #[inline]
     pub fn unseal(self) -> BlockWithSenders {
         let Self { block, senders } = self;
-        BlockWithSenders { block: block.unseal(), senders }
+        BlockWithSenders::new_unchecked(block.unseal(), senders)
     }
 
     /// Returns an iterator over all transactions in the block.

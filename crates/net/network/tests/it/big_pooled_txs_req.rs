@@ -26,11 +26,8 @@ async fn test_large_tx_req() {
             // replace rng txhash with real txhash
             let mut tx = MockTransaction::eip1559();
 
-            let ts = TransactionSigned {
-                hash: Default::default(),
-                signature: Signature::test_signature(),
-                transaction: tx.clone().into(),
-            };
+            let ts =
+                TransactionSigned::new_unhashed(tx.clone().into(), Signature::test_signature());
             tx.set_hash(ts.recalculate_hash());
             tx
         })
