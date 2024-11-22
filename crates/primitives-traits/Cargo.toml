@@ -23,6 +23,9 @@ alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 revm-primitives.workspace = true
 
+# op
+op-alloy-consensus = { workspace = true, optional = true }
+
 # misc
 byteorder = { workspace = true, optional = true }
 bytes.workspace = true
@@ -100,4 +103,7 @@ reth-codec = [
 	"dep:reth-codecs",
 	"dep:modular-bitfield",
 	"dep:byteorder",
+]
+op = [
+	"dep:op-alloy-consensus",
 ]

@@ -59,3 +59,27 @@ pub trait TxType:
         !self.is_eip4844()
     }
 }
+
+
+#[cfg(feature = "op")]
+impl TxType for op_alloy_consensus::OpTxType {
+    fn is_legacy(&self) -> bool {
+        todo!()
+    }
+
+    fn is_eip2930(&self) -> bool {
+        todo!()
+    }
+
+    fn is_eip1559(&self) -> bool {
+        todo!()
+    }
+
+    fn is_eip4844(&self) -> bool {
+        todo!()
+    }
+
+    fn is_eip7702(&self) -> bool {
+        todo!()
+    }
+}
