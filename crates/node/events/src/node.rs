@@ -8,7 +8,7 @@ use futures::Stream;
 use reth_beacon_consensus::{BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress};
 use reth_engine_primitives::ForkchoiceStatus;
 use reth_network_api::{NetworkEvent, PeersInfo};
-use reth_primitives_traits::{format_gas, format_gas_throughput};
+use reth_primitives_traits::format_gas;
 use reth_prune::PrunerEvent;
 use reth_stages::{EntitiesCheckpoint, ExecOutput, PipelineEvent, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileProducerEvent;
@@ -252,35 +252,18 @@ impl NodeState {
                     }
                 }
             }
-            BeaconConsensusEngineEvent::CanonicalParentBlockAdded(block, elapsed) => {
+            BeaconConsensusEngineEvent::CanonicalBlockAdded(block, parent) => {
                 info!(
                     number=block.number,
                     hash=?block.hash(),
                     peers=self.num_connected_peers(),
                     txs=block.body.transactions.len(),
                     gas=%format_gas(block.header.gas_used),
-                    gas_throughput=%format_gas_throughput(block.header.gas_used, elapsed),
                     full=%format!("{:.1}%", block.header.gas_used as f64 * 100.0 / block.header.gas_limit as f64),
                     base_fee=%format!("{:.2}gwei", block.header.base_fee_per_gas.unwrap_or(0) as f64 / GWEI_TO_WEI as f64),
                     blobs=block.header.blob_gas_used.unwrap_or(0) / alloy_eips::eip4844::DATA_GAS_PER_BLOB,
                     excess_blobs=block.header.excess_blob_gas.unwrap_or(0) / alloy_eips::eip4844::DATA_GAS_PER_BLOB,
-                    ?elapsed,
-                    "Parent block added to canonical chain"
-                );
-            }
-            BeaconConsensusEngineEvent::CanonicalBlockAdded(block, elapsed) => {
-                info!(
-                    number=block.number,
-                    hash=?block.hash(),
-                    peers=self.num_connected_peers(),
-                    txs=block.body.transactions.len(),
-                    gas=%format_gas(block.header.gas_used),
-                    gas_throughput=%format_gas_throughput(block.header.gas_used, elapsed),
-                    full=%format!("{:.1}%", block.header.gas_used as f64 * 100.0 / block.header.gas_limit as f64),
-                    base_fee=%format!("{:.2}gwei", block.header.base_fee_per_gas.unwrap_or(0) as f64 / GWEI_TO_WEI as f64),
-                    blobs=block.header.blob_gas_used.unwrap_or(0) / alloy_eips::eip4844::DATA_GAS_PER_BLOB,
-                    excess_blobs=block.header.excess_blob_gas.unwrap_or(0) / alloy_eips::eip4844::DATA_GAS_PER_BLOB,
-                    ?elapsed,
+                    ?parent,
                     "Block added to canonical chain"
                 );
             }

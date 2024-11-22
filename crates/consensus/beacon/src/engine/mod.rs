@@ -1248,7 +1248,10 @@ where
                 latest_valid_hash = Some(block_hash);
                 let block = Arc::new(block);
                 let event = if attachment.is_canonical() {
-                    BeaconConsensusEngineEvent::CanonicalBlockAdded(block, elapsed)
+                    BeaconConsensusEngineEvent::CanonicalBlockAdded(
+                        block.clone(),
+                        Some(block.parent_hash),
+                    )
                 } else {
                     BeaconConsensusEngineEvent::ForkBlockAdded(block, elapsed)
                 };

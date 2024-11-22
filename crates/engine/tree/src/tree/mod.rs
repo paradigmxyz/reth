@@ -1207,19 +1207,14 @@ where
                 match request {
                     EngineApiRequest::InsertExecutedBlock(block) => {
                         debug!(target: "engine::tree", block=?block.block().num_hash(), "inserting already executed block");
-
-                        let start = Instant::now();
-
                         self.state.tree_state.insert_executed(block.clone());
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
 
-                        let elapsed = start.elapsed();
-
                         if self.state.tree_state.is_canonical(block.block().parent_hash) {
                             self.emit_event(EngineApiEvent::BeaconConsensus(
-                                BeaconConsensusEngineEvent::CanonicalParentBlockAdded(
+                                BeaconConsensusEngineEvent::CanonicalBlockAdded(
                                     block.block().clone().into(),
-                                    elapsed,
+                                    Some(block.block().parent_hash),
                                 ),
                             ));
                         }
@@ -2303,7 +2298,10 @@ where
         let engine_event = if self.is_fork(block_hash)? {
             BeaconConsensusEngineEvent::ForkBlockAdded(sealed_block, elapsed)
         } else {
-            BeaconConsensusEngineEvent::CanonicalBlockAdded(sealed_block, elapsed)
+            BeaconConsensusEngineEvent::CanonicalBlockAdded(
+                sealed_block.clone(),
+                Some(sealed_block.parent_hash),
+            )
         };
         self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
 

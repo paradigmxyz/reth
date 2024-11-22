@@ -15,10 +15,8 @@ pub enum BeaconConsensusEngineEvent {
     ForkchoiceUpdated(ForkchoiceState, ForkchoiceStatus),
     /// A block was added to the fork chain.
     ForkBlockAdded(Arc<SealedBlock>, Duration),
-    /// A parent block that extends the canonical chain
-    CanonicalParentBlockAdded(Arc<SealedBlock>, Duration),
     /// A block was added to the canonical chain, and the elapsed time validating the block
-    CanonicalBlockAdded(Arc<SealedBlock>, Duration),
+    CanonicalBlockAdded(Arc<SealedBlock>, Option<B256>),
     /// A canonical chain was committed, and the elapsed time committing the data
     CanonicalChainCommitted(Box<SealedHeader>, Duration),
     /// The consensus engine is involved in live sync, and has specific progress
@@ -44,9 +42,6 @@ impl Display for BeaconConsensusEngineEvent {
             }
             Self::ForkBlockAdded(block, duration) => {
                 write!(f, "ForkBlockAdded({:?}, {duration:?})", block.num_hash())
-            }
-            Self::CanonicalParentBlockAdded(block, duration) => {
-                write!(f, "CanonicalParentBlockAdded({:?}, {duration:?})", block.num_hash())
             }
             Self::CanonicalBlockAdded(block, duration) => {
                 write!(f, "CanonicalBlockAdded({:?}, {duration:?})", block.num_hash())
