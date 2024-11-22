@@ -5,8 +5,8 @@ use super::{error::TransactionConversionError, signature::recover_signer, TxEip7
 use crate::{BlobTransaction, Transaction, TransactionSigned, TransactionSignedEcRecovered};
 use alloy_consensus::{
     constants::EIP4844_TX_TYPE_ID,
-    transaction::{RlpEcdsaTx, TxEip1559, TxEip2930, TxEip4844, TxLegacy},
-    SignableTransaction, Signed, Transaction as _, TxEip4844WithSidecar,
+    transaction::{TxEip1559, TxEip2930, TxEip4844, TxLegacy},
+    Signed, Transaction as _, TxEip4844WithSidecar,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Result, Encodable2718},
@@ -78,11 +78,11 @@ impl PooledTransactionsElement {
             // If the transaction is an EIP-4844 transaction...
             TransactionSigned { transaction: Transaction::Eip4844(tx), signature, .. } => {
                 // Construct a `PooledTransactionsElement::BlobTransaction` with provided sidecar.
-                Self::BlobTransaction(BlobTransaction {
+                Self::BlobTransaction(BlobTransaction(Signed::new_unchecked(
+                    TxEip4844WithSidecar { tx, sidecar },
                     signature,
                     hash,
-                    transaction: TxEip4844WithSidecar { tx, sidecar },
-                })
+                )))
             }
             // If the transaction is not EIP-4844, return an error with the original
             // transaction.
@@ -98,7 +98,7 @@ impl PooledTransactionsElement {
             Self::Eip2930(tx) => tx.signature_hash(),
             Self::Eip1559(tx) => tx.signature_hash(),
             Self::Eip7702(tx) => tx.signature_hash(),
-            Self::BlobTransaction(blob_tx) => blob_tx.transaction.signature_hash(),
+            Self::BlobTransaction(tx) => tx.signature_hash(),
         }
     }
 
@@ -109,7 +109,7 @@ impl PooledTransactionsElement {
             Self::Eip2930(tx) => tx.hash(),
             Self::Eip1559(tx) => tx.hash(),
             Self::Eip7702(tx) => tx.hash(),
-            Self::BlobTransaction(tx) => &tx.hash,
+            Self::BlobTransaction(tx) => tx.0.hash(),
         }
     }
 
@@ -120,7 +120,7 @@ impl PooledTransactionsElement {
             Self::Eip2930(tx) => tx.signature(),
             Self::Eip1559(tx) => tx.signature(),
             Self::Eip7702(tx) => tx.signature(),
-            Self::BlobTransaction(blob_tx) => &blob_tx.signature,
+            Self::BlobTransaction(tx) => tx.0.signature(),
         }
     }
 
@@ -131,7 +131,7 @@ impl PooledTransactionsElement {
             Self::Eip2930(tx) => tx.tx().nonce(),
             Self::Eip1559(tx) => tx.tx().nonce(),
             Self::Eip7702(tx) => tx.tx().nonce(),
-            Self::BlobTransaction(blob_tx) => blob_tx.transaction.tx.nonce,
+            Self::BlobTransaction(tx) => tx.tx().nonce(),
         }
     }
 
@@ -203,7 +203,7 @@ impl PooledTransactionsElement {
     /// Returns the [`TxEip4844`] variant if the transaction is an EIP-4844 transaction.
     pub const fn as_eip4844(&self) -> Option<&TxEip4844> {
         match self {
-            Self::BlobTransaction(tx) => Some(&tx.transaction.tx),
+            Self::BlobTransaction(tx) => Some(tx.0.tx().tx()),
             _ => None,
         }
     }
@@ -232,7 +232,7 @@ impl PooledTransactionsElement {
     /// This is also commonly referred to as the "Blob Gas Fee Cap" (`BlobGasFeeCap`).
     pub const fn max_fee_per_blob_gas(&self) -> Option<u128> {
         match self {
-            Self::BlobTransaction(tx) => Some(tx.transaction.tx.max_fee_per_blob_gas),
+            Self::BlobTransaction(tx) => Some(tx.0.tx().tx.max_fee_per_blob_gas),
             _ => None,
         }
     }
@@ -246,7 +246,7 @@ impl PooledTransactionsElement {
             Self::Legacy(_) | Self::Eip2930(_) => None,
             Self::Eip1559(tx) => Some(tx.tx().max_priority_fee_per_gas),
             Self::Eip7702(tx) => Some(tx.tx().max_priority_fee_per_gas),
-            Self::BlobTransaction(tx) => Some(tx.transaction.tx.max_priority_fee_per_gas),
+            Self::BlobTransaction(tx) => Some(tx.0.tx().tx.max_priority_fee_per_gas),
         }
     }
 
@@ -259,7 +259,7 @@ impl PooledTransactionsElement {
             Self::Eip2930(tx) => tx.tx().gas_price,
             Self::Eip1559(tx) => tx.tx().max_fee_per_gas,
             Self::Eip7702(tx) => tx.tx().max_fee_per_gas,
-            Self::BlobTransaction(tx) => tx.transaction.tx.max_fee_per_gas,
+            Self::BlobTransaction(tx) => tx.0.tx().tx.max_fee_per_gas,
         }
     }
 }
@@ -362,9 +362,7 @@ impl Encodable2718 for PooledTransactionsElement {
             Self::Eip2930(tx) => tx.eip2718_encoded_length(),
             Self::Eip1559(tx) => tx.eip2718_encoded_length(),
             Self::Eip7702(tx) => tx.eip2718_encoded_length(),
-            Self::BlobTransaction(BlobTransaction { transaction, signature, .. }) => {
-                transaction.eip2718_encoded_length(signature)
-            }
+            Self::BlobTransaction(tx) => tx.eip2718_encoded_length(),
         }
     }
 
@@ -374,9 +372,7 @@ impl Encodable2718 for PooledTransactionsElement {
             Self::Eip2930(tx) => tx.eip2718_encode(out),
             Self::Eip1559(tx) => tx.eip2718_encode(out),
             Self::Eip7702(tx) => tx.eip2718_encode(out),
-            Self::BlobTransaction(BlobTransaction { transaction, signature, .. }) => {
-                transaction.eip2718_encode(signature, out)
-            }
+            Self::BlobTransaction(tx) => tx.eip2718_encode(out),
         }
     }
 
@@ -457,15 +453,22 @@ impl<'a> arbitrary::Arbitrary<'a> for PooledTransactionsElement {
         // Attempt to create a `TransactionSigned` with arbitrary data.
         let tx_signed = TransactionSigned::arbitrary(u)?;
         // Attempt to create a `PooledTransactionsElement` with arbitrary data, handling the Result.
-        match Self::try_from(tx_signed) {
-            Ok(Self::BlobTransaction(mut tx)) => {
-                // Successfully converted to a BlobTransaction, now generate a sidecar.
-                tx.transaction.sidecar = alloy_eips::eip4844::BlobTransactionSidecar::arbitrary(u)?;
-                Ok(Self::BlobTransaction(tx))
+        match Self::try_from_broadcast(tx_signed) {
+            Ok(tx) => Ok(tx),
+            Err(tx) => {
+                let (tx, sig, hash) = tx.into_parts();
+                match tx {
+                    Transaction::Eip4844(tx) => {
+                        let sidecar = BlobTransactionSidecar::arbitrary(u)?;
+                        Ok(Self::BlobTransaction(BlobTransaction(Signed::new_unchecked(
+                            TxEip4844WithSidecar { tx, sidecar },
+                            sig,
+                            hash,
+                        ))))
+                    }
+                    _ => Err(arbitrary::Error::IncorrectFormat),
+                }
             }
-            Ok(tx) => Ok(tx), // Successfully converted, but not a BlobTransaction.
-            Err(_) => Err(arbitrary::Error::IncorrectFormat), /* Conversion failed, return an
-                                * arbitrary error. */
         }
     }
 }
