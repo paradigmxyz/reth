@@ -889,8 +889,7 @@ mod tests {
                 static_file_provider.latest_writer(StaticFileSegment::Transactions)?;
             transactions_writer.increment_block(block.number)?;
             for tx in block.body.transactions() {
-                let tx: TransactionSignedNoHash = tx.clone().into();
-                transactions_writer.append_transaction(tx_num, &tx)?;
+                transactions_writer.append_transaction(tx_num, tx)?;
                 tx_num += 1;
             }
 

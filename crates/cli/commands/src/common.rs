@@ -197,19 +197,11 @@ impl AccessRights {
 /// [`NodeTypes`](reth_node_builder::NodeTypes) in CLI.
 pub trait CliNodeTypes:
     NodeTypesWithEngine
-    + NodeTypesForProvider<
-        Primitives: FullNodePrimitives<
-            Block: reth_node_api::Block<Body = reth_primitives::BlockBody>,
-        >,
-    >
+    + NodeTypesForProvider<Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>>
 {
 }
 impl<N> CliNodeTypes for N where
     N: NodeTypesWithEngine
-        + NodeTypesForProvider<
-            Primitives: FullNodePrimitives<
-                Block: reth_node_api::Block<Body = reth_primitives::BlockBody>,
-            >,
-        >
+        + NodeTypesForProvider<Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>>
 {
 }
