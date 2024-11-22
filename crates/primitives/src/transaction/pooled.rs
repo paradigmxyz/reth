@@ -6,13 +6,17 @@ use crate::{BlobTransaction, Transaction, TransactionSigned, TransactionSignedEc
 use alloy_consensus::{
     constants::EIP4844_TX_TYPE_ID,
     transaction::{TxEip1559, TxEip2930, TxEip4844, TxLegacy},
-    Signed, Transaction as _, TxEip4844WithSidecar,
+    Signed, TxEip4844WithSidecar,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Result, Encodable2718},
+    eip2930::AccessList,
     eip4844::BlobTransactionSidecar,
+    eip7702::SignedAuthorization,
 };
-use alloy_primitives::{Address, PrimitiveSignature as Signature, TxHash, B256};
+use alloy_primitives::{
+    Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
+};
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
 use bytes::Buf;
 use derive_more::{AsRef, Deref};
@@ -124,17 +128,6 @@ impl PooledTransactionsElement {
         }
     }
 
-    /// Returns the transaction nonce.
-    pub fn nonce(&self) -> u64 {
-        match self {
-            Self::Legacy(tx) => tx.tx().nonce(),
-            Self::Eip2930(tx) => tx.tx().nonce(),
-            Self::Eip1559(tx) => tx.tx().nonce(),
-            Self::Eip7702(tx) => tx.tx().nonce(),
-            Self::BlobTransaction(tx) => tx.tx().nonce(),
-        }
-    }
-
     /// Recover signer from signature and hash.
     ///
     /// Returns `None` if the transaction's signature is invalid, see also [`Self::recover_signer`].
@@ -223,44 +216,6 @@ impl PooledTransactionsElement {
     /// [`DATA_GAS_PER_BLOB`](alloy_eips::eip4844::DATA_GAS_PER_BLOB) a single blob consumes.
     pub fn blob_gas_used(&self) -> Option<u64> {
         self.as_eip4844().map(TxEip4844::blob_gas)
-    }
-
-    /// Max fee per blob gas for eip4844 transaction [`TxEip4844`].
-    ///
-    /// Returns `None` for non-eip4844 transactions.
-    ///
-    /// This is also commonly referred to as the "Blob Gas Fee Cap" (`BlobGasFeeCap`).
-    pub const fn max_fee_per_blob_gas(&self) -> Option<u128> {
-        match self {
-            Self::BlobTransaction(tx) => Some(tx.0.tx().tx.max_fee_per_blob_gas),
-            _ => None,
-        }
-    }
-
-    /// Max priority fee per gas for eip1559 transaction, for legacy and eip2930 transactions this
-    /// is `None`
-    ///
-    /// This is also commonly referred to as the "Gas Tip Cap" (`GasTipCap`).
-    pub const fn max_priority_fee_per_gas(&self) -> Option<u128> {
-        match self {
-            Self::Legacy(_) | Self::Eip2930(_) => None,
-            Self::Eip1559(tx) => Some(tx.tx().max_priority_fee_per_gas),
-            Self::Eip7702(tx) => Some(tx.tx().max_priority_fee_per_gas),
-            Self::BlobTransaction(tx) => Some(tx.0.tx().tx.max_priority_fee_per_gas),
-        }
-    }
-
-    /// Max fee per gas for eip1559 transaction, for legacy transactions this is `gas_price`.
-    ///
-    /// This is also commonly referred to as the "Gas Fee Cap" (`GasFeeCap`).
-    pub const fn max_fee_per_gas(&self) -> u128 {
-        match self {
-            Self::Legacy(tx) => tx.tx().gas_price,
-            Self::Eip2930(tx) => tx.tx().gas_price,
-            Self::Eip1559(tx) => tx.tx().max_fee_per_gas,
-            Self::Eip7702(tx) => tx.tx().max_fee_per_gas,
-            Self::BlobTransaction(tx) => tx.0.tx().tx.max_fee_per_gas,
-        }
     }
 }
 
@@ -429,6 +384,178 @@ impl Decodable2718 for PooledTransactionsElement {
             TransactionSigned::decode_rlp_legacy_transaction_tuple(buf)?;
 
         Ok(Self::Legacy(Signed::new_unchecked(transaction, signature, hash)))
+    }
+}
+
+impl alloy_consensus::Transaction for PooledTransactionsElement {
+    fn chain_id(&self) -> Option<ChainId> {
+        match self {
+            Self::Legacy(tx) => tx.tx().chain_id(),
+            Self::Eip2930(tx) => tx.tx().chain_id(),
+            Self::Eip1559(tx) => tx.tx().chain_id(),
+            Self::Eip7702(tx) => tx.tx().chain_id(),
+            Self::BlobTransaction(tx) => tx.tx().chain_id(),
+        }
+    }
+
+    fn nonce(&self) -> u64 {
+        match self {
+            Self::Legacy(tx) => tx.tx().nonce(),
+            Self::Eip2930(tx) => tx.tx().nonce(),
+            Self::Eip1559(tx) => tx.tx().nonce(),
+            Self::Eip7702(tx) => tx.tx().nonce(),
+            Self::BlobTransaction(tx) => tx.tx().nonce(),
+        }
+    }
+
+    fn gas_limit(&self) -> u64 {
+        match self {
+            Self::Legacy(tx) => tx.tx().gas_limit(),
+            Self::Eip2930(tx) => tx.tx().gas_limit(),
+            Self::Eip1559(tx) => tx.tx().gas_limit(),
+            Self::Eip7702(tx) => tx.tx().gas_limit(),
+            Self::BlobTransaction(tx) => tx.tx().gas_limit(),
+        }
+    }
+
+    fn gas_price(&self) -> Option<u128> {
+        match self {
+            Self::Legacy(tx) => tx.tx().gas_price(),
+            Self::Eip2930(tx) => tx.tx().gas_price(),
+            Self::Eip1559(tx) => tx.tx().gas_price(),
+            Self::Eip7702(tx) => tx.tx().gas_price(),
+            Self::BlobTransaction(tx) => tx.tx().gas_price(),
+        }
+    }
+
+    fn max_fee_per_gas(&self) -> u128 {
+        match self {
+            Self::Legacy(tx) => tx.tx().max_fee_per_gas(),
+            Self::Eip2930(tx) => tx.tx().max_fee_per_gas(),
+            Self::Eip1559(tx) => tx.tx().max_fee_per_gas(),
+            Self::Eip7702(tx) => tx.tx().max_fee_per_gas(),
+            Self::BlobTransaction(tx) => tx.tx().max_fee_per_gas(),
+        }
+    }
+
+    fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        match self {
+            Self::Legacy(tx) => tx.tx().max_priority_fee_per_gas(),
+            Self::Eip2930(tx) => tx.tx().max_priority_fee_per_gas(),
+            Self::Eip1559(tx) => tx.tx().max_priority_fee_per_gas(),
+            Self::Eip7702(tx) => tx.tx().max_priority_fee_per_gas(),
+            Self::BlobTransaction(tx) => tx.tx().max_priority_fee_per_gas(),
+        }
+    }
+
+    fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        match self {
+            Self::Legacy(tx) => tx.tx().max_fee_per_blob_gas(),
+            Self::Eip2930(tx) => tx.tx().max_fee_per_blob_gas(),
+            Self::Eip1559(tx) => tx.tx().max_fee_per_blob_gas(),
+            Self::Eip7702(tx) => tx.tx().max_fee_per_blob_gas(),
+            Self::BlobTransaction(tx) => tx.tx().max_fee_per_blob_gas(),
+        }
+    }
+
+    fn priority_fee_or_price(&self) -> u128 {
+        match self {
+            Self::Legacy(tx) => tx.tx().priority_fee_or_price(),
+            Self::Eip2930(tx) => tx.tx().priority_fee_or_price(),
+            Self::Eip1559(tx) => tx.tx().priority_fee_or_price(),
+            Self::Eip7702(tx) => tx.tx().priority_fee_or_price(),
+            Self::BlobTransaction(tx) => tx.tx().priority_fee_or_price(),
+        }
+    }
+
+    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        match self {
+            Self::Legacy(tx) => tx.tx().effective_gas_price(base_fee),
+            Self::Eip2930(tx) => tx.tx().effective_gas_price(base_fee),
+            Self::Eip1559(tx) => tx.tx().effective_gas_price(base_fee),
+            Self::Eip7702(tx) => tx.tx().effective_gas_price(base_fee),
+            Self::BlobTransaction(tx) => tx.tx().effective_gas_price(base_fee),
+        }
+    }
+
+    fn is_dynamic_fee(&self) -> bool {
+        match self {
+            Self::Legacy(tx) => tx.tx().is_dynamic_fee(),
+            Self::Eip2930(tx) => tx.tx().is_dynamic_fee(),
+            Self::Eip1559(tx) => tx.tx().is_dynamic_fee(),
+            Self::Eip7702(tx) => tx.tx().is_dynamic_fee(),
+            Self::BlobTransaction(tx) => tx.tx().is_dynamic_fee(),
+        }
+    }
+
+    fn kind(&self) -> TxKind {
+        match self {
+            Self::Legacy(tx) => tx.tx().kind(),
+            Self::Eip2930(tx) => tx.tx().kind(),
+            Self::Eip1559(tx) => tx.tx().kind(),
+            Self::Eip7702(tx) => tx.tx().kind(),
+            Self::BlobTransaction(tx) => tx.tx().kind(),
+        }
+    }
+
+    fn value(&self) -> U256 {
+        match self {
+            Self::Legacy(tx) => tx.tx().value(),
+            Self::Eip2930(tx) => tx.tx().value(),
+            Self::Eip1559(tx) => tx.tx().value(),
+            Self::Eip7702(tx) => tx.tx().value(),
+            Self::BlobTransaction(tx) => tx.tx().value(),
+        }
+    }
+
+    fn input(&self) -> &Bytes {
+        match self {
+            Self::Legacy(tx) => tx.tx().input(),
+            Self::Eip2930(tx) => tx.tx().input(),
+            Self::Eip1559(tx) => tx.tx().input(),
+            Self::Eip7702(tx) => tx.tx().input(),
+            Self::BlobTransaction(tx) => tx.tx().input(),
+        }
+    }
+
+    fn ty(&self) -> u8 {
+        match self {
+            Self::Legacy(tx) => tx.tx().ty(),
+            Self::Eip2930(tx) => tx.tx().ty(),
+            Self::Eip1559(tx) => tx.tx().ty(),
+            Self::Eip7702(tx) => tx.tx().ty(),
+            Self::BlobTransaction(tx) => tx.tx().ty(),
+        }
+    }
+
+    fn access_list(&self) -> Option<&AccessList> {
+        match self {
+            Self::Legacy(tx) => tx.tx().access_list(),
+            Self::Eip2930(tx) => tx.tx().access_list(),
+            Self::Eip1559(tx) => tx.tx().access_list(),
+            Self::Eip7702(tx) => tx.tx().access_list(),
+            Self::BlobTransaction(tx) => tx.tx().access_list(),
+        }
+    }
+
+    fn blob_versioned_hashes(&self) -> Option<&[B256]> {
+        match self {
+            Self::Legacy(tx) => tx.tx().blob_versioned_hashes(),
+            Self::Eip2930(tx) => tx.tx().blob_versioned_hashes(),
+            Self::Eip1559(tx) => tx.tx().blob_versioned_hashes(),
+            Self::Eip7702(tx) => tx.tx().blob_versioned_hashes(),
+            Self::BlobTransaction(tx) => tx.tx().blob_versioned_hashes(),
+        }
+    }
+
+    fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
+        match self {
+            Self::Legacy(tx) => tx.tx().authorization_list(),
+            Self::Eip2930(tx) => tx.tx().authorization_list(),
+            Self::Eip1559(tx) => tx.tx().authorization_list(),
+            Self::Eip7702(tx) => tx.tx().authorization_list(),
+            Self::BlobTransaction(tx) => tx.tx().authorization_list(),
+        }
     }
 }
 
