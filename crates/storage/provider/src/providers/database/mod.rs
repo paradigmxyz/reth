@@ -22,7 +22,7 @@ use reth_evm::ConfigureEvmEnv;
 use reth_node_types::{NodeTypesWithDB, TxTy};
 use reth_primitives::{
     Block, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    StaticFileSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
+    StaticFileSegment, TransactionMeta,
 };
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};

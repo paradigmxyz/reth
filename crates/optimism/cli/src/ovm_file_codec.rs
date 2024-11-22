@@ -254,10 +254,6 @@ impl Encodable2718 for TransactionSigned {
     fn encode_2718(&self, out: &mut dyn alloy_rlp::BufMut) {
         self.transaction.eip2718_encode(&self.signature, out)
     }
-
-    fn trie_hash(&self) -> B256 {
-        self.ha()
-    }
 }
 
 impl Decodable2718 for TransactionSigned {

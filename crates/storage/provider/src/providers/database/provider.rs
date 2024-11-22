@@ -717,15 +717,7 @@ impl<TX: DbTx + 'static, N: ProviderNodeTypes> DatabaseProvider<TX, N> {
             (self.transactions_by_tx_range(tx_range.clone())?, self.senders_by_tx_range(tx_range)?)
         };
 
-        let body = transactions
-            .into_iter()
-            .map(|tx| match transaction_kind {
-                TransactionVariant::NoHash => {
-                    TransactionSigned::new_unhashed(tx.transaction, tx.signature)
-                }
-                TransactionVariant::WithHash => tx.with_hash(),
-            })
-            .collect();
+        let body = transactions.into_iter().map(Into::into).collect();
 
         construct_block(header, body, senders, ommers, withdrawals)
     }
@@ -834,7 +826,7 @@ impl<TX: DbTx + 'static, N: ProviderNodeTypes> DatabaseProvider<TX, N> {
             Vec<Address>,
         ) -> ProviderResult<B>,
     {
-        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
+        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions<TxTy<N>>>()?;
         let mut senders_cursor = self.tx.cursor_read::<tables::TransactionSenders>()?;
 
         self.block_range(range, headers_range, |header, tx_range, ommers, withdrawals| {
@@ -1245,7 +1237,7 @@ impl<TX: DbTx + 'static, N: ProviderNodeTypes> BlockReader for DatabaseProvider<
                 // If they exist but are not indexed, we don't have enough
                 // information to return the block anyways, so we return `None`.
                 let transactions = match self.transactions_by_block(number.into())? {
-                    Some(transactions) => transactions,
+                    Some(transactions) => transactions.into_iter().map(Into::into).collect(),
                     None => return Ok(None),
                 };
 
@@ -1476,7 +1468,7 @@ impl<TX: DbTx + 'static, N: ProviderNodeTypes> TransactionsProvider for Database
             StaticFileSegment::Transactions,
             id,
             |static_file| static_file.transaction_by_id(id),
-            || Ok(self.tx.get::<tables::Transactions<Self::Transaction>>(id)?.map(Into::into)),
+            || Ok(self.tx.get::<tables::Transactions<Self::Transaction>>(id)?),
         )
     }
 
@@ -1494,13 +1486,10 @@ impl<TX: DbTx + 'static, N: ProviderNodeTypes> TransactionsProvider for Database
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Transaction>> {
         if let Some(id) = self.transaction_id(hash)? {
-            Ok(self
-                .transaction_by_id_unhashed(id)?
-                .map(|tx| TransactionSigned::new(tx.transaction, tx.signature, hash)))
+            Ok(self.transaction_by_id_unhashed(id)?)
         } else {
             Ok(None)
         }
-        .map(|tx| tx.map(Into::into))
     }
 
     fn transaction_by_hash_with_meta(
@@ -1509,7 +1498,7 @@ impl<TX: DbTx + 'static, N: ProviderNodeTypes> TransactionsProvider for Database
     ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
         let mut transaction_cursor = self.tx.cursor_read::<tables::TransactionBlocks>()?;
         if let Some(transaction_id) = self.transaction_id(tx_hash)? {
-            if let Some(transaction) = self.transaction_by_id_no_hash(transaction_id)? {
+            if let Some(transaction) = self.transaction_by_id_unhashed(transaction_id)? {
                 if let Some(block_number) =
                     transaction_cursor.seek(transaction_id).map(|b| b.map(|(_, bn)| bn))?
                 {
@@ -1559,12 +1548,7 @@ impl<TX: DbTx + 'static, N: ProviderNodeTypes> TransactionsProvider for Database
                 return if tx_range.is_empty() {
                     Ok(Some(Vec::new()))
                 } else {
-                    Ok(Some(
-                        self.transactions_by_tx_range_with_cursor(tx_range, &mut tx_cursor)?
-                            .into_iter()
-                            .map(Into::into)
-                            .collect(),
-                    ))
+                    Ok(Some(self.transactions_by_tx_range_with_cursor(tx_range, &mut tx_cursor)?))
                 }
             }
         }
@@ -1587,7 +1571,6 @@ impl<TX: DbTx + 'static, N: ProviderNodeTypes> TransactionsProvider for Database
                 results.push(
                     self.transactions_by_tx_range_with_cursor(tx_num_range, &mut tx_cursor)?
                         .into_iter()
-                        .map(Into::into)
                         .collect(),
                 );
             }

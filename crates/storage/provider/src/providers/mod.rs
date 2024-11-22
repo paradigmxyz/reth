@@ -26,7 +26,7 @@ use reth_evm::ConfigureEvmEnv;
 use reth_node_types::{FullNodePrimitives, NodeTypes, NodeTypesWithDB, TxTy};
 use reth_primitives::{
     Account, Block, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    TransactionMeta, TransactionSigned, TransactionSignedNoHash,
+    TransactionMeta, TransactionSigned,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -76,7 +76,7 @@ where
     Self: NodeTypes<
         ChainSpec: EthereumHardforks,
         Storage: ChainStorage<Self::Primitives>,
-        Primitives: FullNodePrimitives<SignedTx: Value>,
+        Primitives: FullNodePrimitives<SignedTx: Value + Into<TransactionSigned>>,
     >,
 {
 }

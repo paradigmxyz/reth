@@ -9,19 +9,23 @@ use crate::{
 };
 use alloy_consensus::Header;
 use alloy_eips::{
-    eip2718::Encodable2718, eip4895::{Withdrawal, Withdrawals}, BlockHashOrNumber
+    eip2718::Encodable2718,
+    eip4895::{Withdrawal, Withdrawals},
+    BlockHashOrNumber,
 };
 use alloy_primitives::{keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use dashmap::DashMap;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
 use reth_chainspec::{ChainInfo, ChainSpecProvider};
-use reth_codecs::Compact;
 use reth_db::{
-    lockfile::StorageLock, static_file::{
+    lockfile::StorageLock,
+    static_file::{
         iter_static_files, BlockHashMask, HeaderMask, HeaderWithHashMask, ReceiptMask,
         StaticFileCursor, TDWithHashMask, TransactionMask,
-    }, table::{Decompress, Value}, tables
+    },
+    table::{Decompress, Value},
+    tables,
 };
 use reth_db_api::{
     cursor::DbCursorRO, models::StoredBlockBodyIndices, table::Table, transaction::DbTx,
@@ -32,7 +36,10 @@ use reth_primitives::{
     static_file::{
         find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive,
         DEFAULT_BLOCKS_PER_STATIC_FILE,
-    }, transaction::recover_signers, Block, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash
+    },
+    transaction::recover_signers,
+    Block, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    StaticFileSegment, TransactionMeta, TransactionSignedNoHash,
 };
 use reth_primitives_traits::SignedTransaction;
 use reth_stages_types::{PipelineTarget, StageId};
@@ -1334,7 +1341,9 @@ impl<N: NodePrimitives> BlockHashReader for StaticFileProvider<N> {
     }
 }
 
-impl<N: NodePrimitives> ReceiptProvider for StaticFileProvider<N> {
+impl<N: NodePrimitives<SignedTx: Value + SignedTransaction>> ReceiptProvider
+    for StaticFileProvider<N>
+{
     fn receipt(&self, num: TxNumber) -> ProviderResult<Option<Receipt>> {
         self.get_segment_provider_from_transaction(StaticFileSegment::Receipts, num, None)
             .and_then(|provider| provider.receipt(num))
@@ -1371,7 +1380,9 @@ impl<N: NodePrimitives> ReceiptProvider for StaticFileProvider<N> {
     }
 }
 
-impl<N: NodePrimitives<SignedTx: Value + SignedTransaction>> TransactionsProviderExt for StaticFileProvider<N> {
+impl<N: NodePrimitives<SignedTx: Value + SignedTransaction>> TransactionsProviderExt
+    for StaticFileProvider<N>
+{
     fn transaction_hashes_by_range(
         &self,
         tx_range: Range<TxNumber>,
@@ -1432,7 +1443,9 @@ impl<N: NodePrimitives<SignedTx: Value + SignedTransaction>> TransactionsProvide
     }
 }
 
-impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsProvider for StaticFileProvider<N> {
+impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsProvider
+    for StaticFileProvider<N>
+{
     type Transaction = N::SignedTx;
 
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
@@ -1482,8 +1495,7 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
             Ok(jar_provider
                 .cursor()?
                 .get_one::<TransactionMask<Self::Transaction>>((&hash).into())?
-                .map(|tx| tx.with_hash())
-                .and_then(|tx| (tx.hash_ref() == &hash).then_some(tx)))
+                .and_then(|tx| (tx.trie_hash() == hash).then_some(tx)))
         })
     }
 

@@ -21,7 +21,7 @@ use reth_execution_types::{BundleStateInit, ExecutionOutcome, RevertsInit};
 use reth_node_types::TxTy;
 use reth_primitives::{
     Account, Block, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
+    StorageEntry, TransactionMeta,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
