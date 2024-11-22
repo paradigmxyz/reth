@@ -3,14 +3,15 @@
 
 use super::{error::TransactionConversionError, signature::recover_signer, TxEip7702};
 use crate::{BlobTransaction, Transaction, TransactionSigned, TransactionSignedEcRecovered};
-use alloy_eips::eip4844::BlobTransactionSidecar;
-
 use alloy_consensus::{
     constants::EIP4844_TX_TYPE_ID,
     transaction::{RlpEcdsaTx, TxEip1559, TxEip2930, TxEip4844, TxLegacy},
-    SignableTransaction, TxEip4844WithSidecar,
+    SignableTransaction, Signed, Transaction as _, TxEip4844WithSidecar,
 };
-use alloy_eips::eip2718::{Decodable2718, Eip2718Result, Encodable2718};
+use alloy_eips::{
+    eip2718::{Decodable2718, Eip2718Result, Encodable2718},
+    eip4844::BlobTransactionSidecar,
+};
 use alloy_primitives::{Address, PrimitiveSignature as Signature, TxHash, B256};
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
 use bytes::Buf;
@@ -22,42 +23,14 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests)]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PooledTransactionsElement {
-    /// A legacy transaction
-    Legacy {
-        /// The inner transaction
-        transaction: TxLegacy,
-        /// The signature
-        signature: Signature,
-        /// The hash of the transaction
-        hash: TxHash,
-    },
-    /// An EIP-2930 typed transaction
-    Eip2930 {
-        /// The inner transaction
-        transaction: TxEip2930,
-        /// The signature
-        signature: Signature,
-        /// The hash of the transaction
-        hash: TxHash,
-    },
-    /// An EIP-1559 typed transaction
-    Eip1559 {
-        /// The inner transaction
-        transaction: TxEip1559,
-        /// The signature
-        signature: Signature,
-        /// The hash of the transaction
-        hash: TxHash,
-    },
-    /// An EIP-7702 typed transaction
-    Eip7702 {
-        /// The inner transaction
-        transaction: TxEip7702,
-        /// The signature
-        signature: Signature,
-        /// The hash of the transaction
-        hash: TxHash,
-    },
+    /// An untagged [`TxLegacy`].
+    Legacy(Signed<TxLegacy>),
+    /// A [`TxEip2930`] tagged with type 1.
+    Eip2930(Signed<TxEip2930>),
+    /// A [`TxEip1559`] tagged with type 2.
+    Eip1559(Signed<TxEip1559>),
+    /// A [`TxEip7702`] tagged with type 4.
+    Eip7702(Signed<TxEip7702>),
     /// A blob transaction, which includes the transaction, blob data, commitments, and proofs.
     BlobTransaction(BlobTransaction),
 }
@@ -72,16 +45,16 @@ impl PooledTransactionsElement {
         let hash = tx.hash();
         match tx {
             TransactionSigned { transaction: Transaction::Legacy(tx), signature, .. } => {
-                Ok(Self::Legacy { transaction: tx, signature, hash })
+                Ok(Self::Legacy(Signed::new_unchecked(tx, signature, hash)))
             }
             TransactionSigned { transaction: Transaction::Eip2930(tx), signature, .. } => {
-                Ok(Self::Eip2930 { transaction: tx, signature, hash })
+                Ok(Self::Eip2930(Signed::new_unchecked(tx, signature, hash)))
             }
             TransactionSigned { transaction: Transaction::Eip1559(tx), signature, .. } => {
-                Ok(Self::Eip1559 { transaction: tx, signature, hash })
+                Ok(Self::Eip1559(Signed::new_unchecked(tx, signature, hash)))
             }
             TransactionSigned { transaction: Transaction::Eip7702(tx), signature, .. } => {
-                Ok(Self::Eip7702 { transaction: tx, signature, hash })
+                Ok(Self::Eip7702(Signed::new_unchecked(tx, signature, hash)))
             }
             // Not supported because missing blob sidecar
             tx @ TransactionSigned { transaction: Transaction::Eip4844(_), .. } => Err(tx),
@@ -121,10 +94,10 @@ impl PooledTransactionsElement {
     /// It is only for signature signing or signer recovery.
     pub fn signature_hash(&self) -> B256 {
         match self {
-            Self::Legacy { transaction, .. } => transaction.signature_hash(),
-            Self::Eip2930 { transaction, .. } => transaction.signature_hash(),
-            Self::Eip1559 { transaction, .. } => transaction.signature_hash(),
-            Self::Eip7702 { transaction, .. } => transaction.signature_hash(),
+            Self::Legacy(tx) => tx.signature_hash(),
+            Self::Eip2930(tx) => tx.signature_hash(),
+            Self::Eip1559(tx) => tx.signature_hash(),
+            Self::Eip7702(tx) => tx.signature_hash(),
             Self::BlobTransaction(blob_tx) => blob_tx.transaction.signature_hash(),
         }
     }
@@ -132,10 +105,10 @@ impl PooledTransactionsElement {
     /// Reference to transaction hash. Used to identify transaction.
     pub const fn hash(&self) -> &TxHash {
         match self {
-            Self::Legacy { hash, .. } |
-            Self::Eip2930 { hash, .. } |
-            Self::Eip1559 { hash, .. } |
-            Self::Eip7702 { hash, .. } => hash,
+            Self::Legacy(tx) => tx.hash(),
+            Self::Eip2930(tx) => tx.hash(),
+            Self::Eip1559(tx) => tx.hash(),
+            Self::Eip7702(tx) => tx.hash(),
             Self::BlobTransaction(tx) => &tx.hash,
         }
     }
@@ -143,21 +116,21 @@ impl PooledTransactionsElement {
     /// Returns the signature of the transaction.
     pub const fn signature(&self) -> &Signature {
         match self {
-            Self::Legacy { signature, .. } |
-            Self::Eip2930 { signature, .. } |
-            Self::Eip1559 { signature, .. } |
-            Self::Eip7702 { signature, .. } => signature,
+            Self::Legacy(tx) => tx.signature(),
+            Self::Eip2930(tx) => tx.signature(),
+            Self::Eip1559(tx) => tx.signature(),
+            Self::Eip7702(tx) => tx.signature(),
             Self::BlobTransaction(blob_tx) => &blob_tx.signature,
         }
     }
 
     /// Returns the transaction nonce.
-    pub const fn nonce(&self) -> u64 {
+    pub fn nonce(&self) -> u64 {
         match self {
-            Self::Legacy { transaction, .. } => transaction.nonce,
-            Self::Eip2930 { transaction, .. } => transaction.nonce,
-            Self::Eip1559 { transaction, .. } => transaction.nonce,
-            Self::Eip7702 { transaction, .. } => transaction.nonce,
+            Self::Legacy(tx) => tx.tx().nonce(),
+            Self::Eip2930(tx) => tx.tx().nonce(),
+            Self::Eip1559(tx) => tx.tx().nonce(),
+            Self::Eip7702(tx) => tx.tx().nonce(),
             Self::BlobTransaction(blob_tx) => blob_tx.transaction.tx.nonce,
         }
     }
@@ -189,26 +162,10 @@ impl PooledTransactionsElement {
     /// Returns the inner [`TransactionSigned`].
     pub fn into_transaction(self) -> TransactionSigned {
         match self {
-            Self::Legacy { transaction, signature, hash } => TransactionSigned {
-                transaction: Transaction::Legacy(transaction),
-                signature,
-                hash: hash.into(),
-            },
-            Self::Eip2930 { transaction, signature, hash } => TransactionSigned {
-                transaction: Transaction::Eip2930(transaction),
-                signature,
-                hash: hash.into(),
-            },
-            Self::Eip1559 { transaction, signature, hash } => TransactionSigned {
-                transaction: Transaction::Eip1559(transaction),
-                signature,
-                hash: hash.into(),
-            },
-            Self::Eip7702 { transaction, signature, hash } => TransactionSigned {
-                transaction: Transaction::Eip7702(transaction),
-                signature,
-                hash: hash.into(),
-            },
+            Self::Legacy(tx) => tx.into(),
+            Self::Eip2930(tx) => tx.into(),
+            Self::Eip1559(tx) => tx.into(),
+            Self::Eip7702(tx) => tx.into(),
             Self::BlobTransaction(blob_tx) => blob_tx.into_parts().0,
         }
     }
@@ -222,7 +179,7 @@ impl PooledTransactionsElement {
     /// Returns the [`TxLegacy`] variant if the transaction is a legacy transaction.
     pub const fn as_legacy(&self) -> Option<&TxLegacy> {
         match self {
-            Self::Legacy { transaction, .. } => Some(transaction),
+            Self::Legacy(tx) => Some(tx.tx()),
             _ => None,
         }
     }
@@ -230,7 +187,7 @@ impl PooledTransactionsElement {
     /// Returns the [`TxEip2930`] variant if the transaction is an EIP-2930 transaction.
     pub const fn as_eip2930(&self) -> Option<&TxEip2930> {
         match self {
-            Self::Eip2930 { transaction, .. } => Some(transaction),
+            Self::Eip2930(tx) => Some(tx.tx()),
             _ => None,
         }
     }
@@ -238,7 +195,7 @@ impl PooledTransactionsElement {
     /// Returns the [`TxEip1559`] variant if the transaction is an EIP-1559 transaction.
     pub const fn as_eip1559(&self) -> Option<&TxEip1559> {
         match self {
-            Self::Eip1559 { transaction, .. } => Some(transaction),
+            Self::Eip1559(tx) => Some(tx.tx()),
             _ => None,
         }
     }
@@ -254,7 +211,7 @@ impl PooledTransactionsElement {
     /// Returns the [`TxEip7702`] variant if the transaction is an EIP-7702 transaction.
     pub const fn as_eip7702(&self) -> Option<&TxEip7702> {
         match self {
-            Self::Eip7702 { transaction, .. } => Some(transaction),
+            Self::Eip7702(tx) => Some(tx.tx()),
             _ => None,
         }
     }
@@ -286,9 +243,9 @@ impl PooledTransactionsElement {
     /// This is also commonly referred to as the "Gas Tip Cap" (`GasTipCap`).
     pub const fn max_priority_fee_per_gas(&self) -> Option<u128> {
         match self {
-            Self::Legacy { .. } | Self::Eip2930 { .. } => None,
-            Self::Eip1559 { transaction, .. } => Some(transaction.max_priority_fee_per_gas),
-            Self::Eip7702 { transaction, .. } => Some(transaction.max_priority_fee_per_gas),
+            Self::Legacy(_) | Self::Eip2930(_) => None,
+            Self::Eip1559(tx) => Some(tx.tx().max_priority_fee_per_gas),
+            Self::Eip7702(tx) => Some(tx.tx().max_priority_fee_per_gas),
             Self::BlobTransaction(tx) => Some(tx.transaction.tx.max_priority_fee_per_gas),
         }
     }
@@ -298,10 +255,10 @@ impl PooledTransactionsElement {
     /// This is also commonly referred to as the "Gas Fee Cap" (`GasFeeCap`).
     pub const fn max_fee_per_gas(&self) -> u128 {
         match self {
-            Self::Legacy { transaction, .. } => transaction.gas_price,
-            Self::Eip2930 { transaction, .. } => transaction.gas_price,
-            Self::Eip1559 { transaction, .. } => transaction.max_fee_per_gas,
-            Self::Eip7702 { transaction, .. } => transaction.max_fee_per_gas,
+            Self::Legacy(tx) => tx.tx().gas_price,
+            Self::Eip2930(tx) => tx.tx().gas_price,
+            Self::Eip1559(tx) => tx.tx().max_fee_per_gas,
+            Self::Eip7702(tx) => tx.tx().max_fee_per_gas,
             Self::BlobTransaction(tx) => tx.transaction.tx.max_fee_per_gas,
         }
     }
@@ -391,28 +348,20 @@ impl Decodable for PooledTransactionsElement {
 impl Encodable2718 for PooledTransactionsElement {
     fn type_flag(&self) -> Option<u8> {
         match self {
-            Self::Legacy { .. } => None,
-            Self::Eip2930 { .. } => Some(0x01),
-            Self::Eip1559 { .. } => Some(0x02),
-            Self::BlobTransaction { .. } => Some(0x03),
-            Self::Eip7702 { .. } => Some(0x04),
+            Self::Legacy(_) => None,
+            Self::Eip2930(_) => Some(0x01),
+            Self::Eip1559(_) => Some(0x02),
+            Self::BlobTransaction(_) => Some(0x03),
+            Self::Eip7702(_) => Some(0x04),
         }
     }
 
     fn encode_2718_len(&self) -> usize {
         match self {
-            Self::Legacy { transaction, signature, .. } => {
-                transaction.eip2718_encoded_length(signature)
-            }
-            Self::Eip2930 { transaction, signature, .. } => {
-                transaction.eip2718_encoded_length(signature)
-            }
-            Self::Eip1559 { transaction, signature, .. } => {
-                transaction.eip2718_encoded_length(signature)
-            }
-            Self::Eip7702 { transaction, signature, .. } => {
-                transaction.eip2718_encoded_length(signature)
-            }
+            Self::Legacy(tx) => tx.eip2718_encoded_length(),
+            Self::Eip2930(tx) => tx.eip2718_encoded_length(),
+            Self::Eip1559(tx) => tx.eip2718_encoded_length(),
+            Self::Eip7702(tx) => tx.eip2718_encoded_length(),
             Self::BlobTransaction(BlobTransaction { transaction, signature, .. }) => {
                 transaction.eip2718_encoded_length(signature)
             }
@@ -421,18 +370,10 @@ impl Encodable2718 for PooledTransactionsElement {
 
     fn encode_2718(&self, out: &mut dyn alloy_rlp::BufMut) {
         match self {
-            Self::Legacy { transaction, signature, .. } => {
-                transaction.eip2718_encode(signature, out)
-            }
-            Self::Eip2930 { transaction, signature, .. } => {
-                transaction.eip2718_encode(signature, out)
-            }
-            Self::Eip1559 { transaction, signature, .. } => {
-                transaction.eip2718_encode(signature, out)
-            }
-            Self::Eip7702 { transaction, signature, .. } => {
-                transaction.eip2718_encode(signature, out)
-            }
+            Self::Legacy(tx) => tx.eip2718_encode(out),
+            Self::Eip2930(tx) => tx.eip2718_encode(out),
+            Self::Eip1559(tx) => tx.eip2718_encode(out),
+            Self::Eip7702(tx) => tx.eip2718_encode(out),
             Self::BlobTransaction(BlobTransaction { transaction, signature, .. }) => {
                 transaction.eip2718_encode(signature, out)
             }
@@ -474,21 +415,11 @@ impl Decodable2718 for PooledTransactionsElement {
                     Transaction::Eip4844(_) => Err(RlpError::Custom(
                         "EIP-4844 transactions can only be decoded with transaction type 0x03",
                     ).into()),
-                    Transaction::Eip2930(tx) => Ok(Self::Eip2930 {
-                        transaction: tx,
-                        signature: typed_tx.signature,
-                        hash
-                    }),
-                    Transaction::Eip1559(tx) => Ok(Self::Eip1559 {
-                        transaction: tx,
-                        signature: typed_tx.signature,
-                        hash
-                    }),
-                    Transaction::Eip7702(tx) => Ok(Self::Eip7702 {
-                        transaction: tx,
-                        signature: typed_tx.signature,
-                        hash
-                    }),
+                    Transaction::Eip2930(tx) => Ok(Self::Eip2930 (
+                        Signed::new_unchecked(tx, typed_tx.signature, hash)
+                    )),
+                    Transaction::Eip1559(tx) => Ok(Self::Eip1559( Signed::new_unchecked(tx, typed_tx.signature, hash))),
+                    Transaction::Eip7702(tx) => Ok(Self::Eip7702( Signed::new_unchecked(tx, typed_tx.signature, hash))),
                     #[cfg(feature = "optimism")]
                     Transaction::Deposit(_) => Err(RlpError::Custom("Optimism deposit transaction cannot be decoded to PooledTransactionsElement").into())
                 }
@@ -501,7 +432,7 @@ impl Decodable2718 for PooledTransactionsElement {
         let (transaction, hash, signature) =
             TransactionSigned::decode_rlp_legacy_transaction_tuple(buf)?;
 
-        Ok(Self::Legacy { transaction, signature, hash })
+        Ok(Self::Legacy(Signed::new_unchecked(transaction, signature, hash)))
     }
 }
 
