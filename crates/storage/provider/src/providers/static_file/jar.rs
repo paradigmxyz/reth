@@ -11,7 +11,8 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use reth_chainspec::ChainInfo;
 use reth_db::static_file::{
-    HeaderMask, HeaderWithHashMask, ReceiptMask, StaticFileCursor, TDWithHashMask, TransactionMask,
+    BlockHashMask, HeaderMask, HeaderWithHashMask, ReceiptMask, StaticFileCursor, TDWithHashMask,
+    TotalDifficultyMask, TransactionMask,
 };
 use reth_db_api::models::CompactU256;
 use reth_node_types::NodePrimitives;
@@ -110,7 +111,7 @@ impl<N: NodePrimitives> HeaderProvider for StaticFileJarProvider<'_, N> {
     }
 
     fn header_td_by_number(&self, num: BlockNumber) -> ProviderResult<Option<U256>> {
-        Ok(self.cursor()?.get_one::<HeaderMask<CompactU256>>(num.into())?.map(Into::into))
+        Ok(self.cursor()?.get_one::<TotalDifficultyMask>(num.into())?.map(Into::into))
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
@@ -162,7 +163,7 @@ impl<N: NodePrimitives> HeaderProvider for StaticFileJarProvider<'_, N> {
 
 impl<N: NodePrimitives> BlockHashReader for StaticFileJarProvider<'_, N> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        self.cursor()?.get_one::<HeaderMask<BlockHash>>(number.into())
+        self.cursor()?.get_one::<BlockHashMask>(number.into())
     }
 
     fn canonical_hashes_range(
@@ -174,7 +175,7 @@ impl<N: NodePrimitives> BlockHashReader for StaticFileJarProvider<'_, N> {
         let mut hashes = Vec::with_capacity((end - start) as usize);
 
         for number in start..end {
-            if let Some(hash) = cursor.get_one::<HeaderMask<BlockHash>>(number.into())? {
+            if let Some(hash) = cursor.get_one::<BlockHashMask>(number.into())? {
                 hashes.push(hash)
             }
         }
@@ -202,7 +203,7 @@ impl<N: NodePrimitives> BlockNumReader for StaticFileJarProvider<'_, N> {
         let mut cursor = self.cursor()?;
 
         Ok(cursor
-            .get_one::<HeaderMask<BlockHash>>((&hash).into())?
+            .get_one::<BlockHashMask>((&hash).into())?
             .and_then(|res| (res == hash).then(|| cursor.number()).flatten()))
     }
 }
