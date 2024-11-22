@@ -1650,7 +1650,14 @@ macro_rules! impl_from_signed {
     };
 }
 
-impl_from_signed!(TxLegacy, TxEip2930, TxEip1559, TxEip7702, TxEip4844, Transaction);
+impl_from_signed!(TxLegacy, TxEip2930, TxEip1559, TxEip7702, TxEip4844);
+
+impl From<Signed<Transaction>> for TransactionSigned {
+    fn from(value: Signed<Transaction>) -> Self {
+        let (tx, sig, hash) = value.into_parts();
+        Self::new(tx, sig, hash)
+    }
+}
 
 impl From<TransactionSigned> for Signed<Transaction> {
     fn from(value: TransactionSigned) -> Self {
@@ -1658,7 +1665,6 @@ impl From<TransactionSigned> for Signed<Transaction> {
         Self::new_unchecked(tx, sig, hash)
     }
 }
-
 
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
