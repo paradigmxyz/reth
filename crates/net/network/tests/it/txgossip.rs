@@ -132,10 +132,7 @@ async fn test_sending_invalid_transactions() {
             value: Default::default(),
             input: Default::default(),
         };
-        let tx = TransactionSigned::from_transaction_and_signature(
-            tx.into(),
-            Signature::test_signature(),
-        );
+        let tx = TransactionSigned::new_unhashed(tx.into(), Signature::test_signature());
         peer0.network().send_transactions(*peer1.peer_id(), vec![Arc::new(tx)]);
     }
 

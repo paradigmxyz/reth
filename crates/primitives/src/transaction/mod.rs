@@ -914,7 +914,7 @@ impl TransactionSignedNoHash {
     #[inline]
     pub fn with_hash(self) -> TransactionSigned {
         let Self { signature, transaction } = self;
-        TransactionSigned::from_transaction_and_signature(transaction, signature)
+        TransactionSigned::new_unhashed(transaction, signature)
     }
 
     /// Recovers a list of signers from a transaction list iterator
@@ -1261,13 +1261,6 @@ impl TransactionSigned {
     /// tx type.
     pub fn recalculate_hash(&self) -> B256 {
         keccak256(self.encoded_2718())
-    }
-
-    /// Create a new signed transaction from a transaction and its signature.
-    ///
-    /// This will also calculate the transaction hash using its encoding.
-    pub fn from_transaction_and_signature(transaction: Transaction, signature: Signature) -> Self {
-        Self { transaction, signature, hash: Default::default() }
     }
 
     /// Decodes legacy transaction from the data buffer into a tuple.
@@ -1626,7 +1619,7 @@ impl Decodable2718 for TransactionSigned {
                 Ok(Self { transaction: Transaction::Eip4844(tx), signature, hash: hash.into() })
             }
             #[cfg(feature = "optimism")]
-            TxType::Deposit => Ok(Self::from_transaction_and_signature(
+            TxType::Deposit => Ok(Self::new_unhashed(
                 Transaction::Deposit(TxDeposit::rlp_decode(buf)?),
                 TxDeposit::signature(),
             )),
@@ -1664,7 +1657,7 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
 
         #[cfg(feature = "optimism")]
         let signature = if transaction.is_deposit() { TxDeposit::signature() } else { signature };
-        Ok(Self::from_transaction_and_signature(transaction, signature))
+        Ok(Self::new_unhashed(transaction, signature))
     }
 }
 
@@ -2203,7 +2196,7 @@ mod tests {
         signature: Signature,
         hash: Option<B256>,
     ) {
-        let expected = TransactionSigned::from_transaction_and_signature(transaction, signature);
+        let expected = TransactionSigned::new_unhashed(transaction, signature);
         if let Some(hash) = hash {
             assert_eq!(hash, expected.hash());
         }
@@ -2300,7 +2293,7 @@ mod tests {
                 let signature =
                     crate::sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
 
-                TransactionSigned::from_transaction_and_signature(tx, signature)
+                TransactionSigned::new_unhashed(tx, signature)
             }).collect();
 
             let parallel_senders = TransactionSigned::recover_signers(&txes, txes.len()).unwrap();
