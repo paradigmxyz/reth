@@ -265,7 +265,7 @@ mod tests {
             input: Default::default(),
         });
         let signature = Signature::test_signature();
-        let signed_tx = TransactionSigned::from_transaction_and_signature(deposit_tx, signature);
+        let signed_tx = TransactionSigned::new_unhashed(deposit_tx, signature);
         let signed_recovered =
             TransactionSignedEcRecovered::from_signed_transaction(signed_tx, signer);
         let len = signed_recovered.encode_2718_len();

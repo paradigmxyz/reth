@@ -23,10 +23,6 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests)]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PooledTransactionsElement {
-    // /// A [`TxEip2930`] tagged with type 1.
-    // Eip2930(Signed<TxEip2930>),
-    // /// A [`TxEip1559`] tagged with type 2.
-    // Eip1559(Signed<TxEip1559>),
     /// An untagged [`TxLegacy`].
     Legacy(Signed<TxLegacy>),
     /// A [`TxEip2930`] tagged with type 1.
@@ -129,7 +125,7 @@ impl PooledTransactionsElement {
     }
 
     /// Returns the transaction nonce.
-    pub const fn nonce(&self) -> u64 {
+    pub fn nonce(&self) -> u64 {
         match self {
             Self::Legacy(tx) => tx.tx().nonce(),
             Self::Eip2930(tx) => tx.tx().nonce(),
@@ -167,9 +163,9 @@ impl PooledTransactionsElement {
     pub fn into_transaction(self) -> TransactionSigned {
         match self {
             Self::Legacy(tx) => tx.into(),
-            Self::Eip2930 { transaction, signature, hash } => tx.into(),
-            Self::Eip1559 { transaction, signature, hash } => tx.into(),
-            Self::Eip7702 { transaction, signature, hash } => tx.into(),
+            Self::Eip2930(tx) => tx.into(),
+            Self::Eip1559(tx) => tx.into(),
+            Self::Eip7702(tx) => tx.into(),
             Self::BlobTransaction(blob_tx) => blob_tx.into_parts().0,
         }
     }

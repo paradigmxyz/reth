@@ -102,8 +102,7 @@ impl TestBlockBuilder {
             let signature_hash = tx.signature_hash();
             let signature = self.signer_pk.sign_hash_sync(&signature_hash).unwrap();
 
-            TransactionSigned::from_transaction_and_signature(tx, signature)
-                .with_signer(self.signer)
+            TransactionSigned::new_unhashed(tx, signature).with_signer(self.signer)
         };
 
         let num_txs = rng.gen_range(0..5);
