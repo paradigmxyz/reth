@@ -10,15 +10,32 @@ pub trait InMemorySize {
 
 impl<T: InMemorySize> InMemorySize for alloy_consensus::Signed<T> {
     fn size(&self) -> usize {
-        T::size(self.tx()) + core::mem::size_of::<Signature>() + core::mem::size_of::<TxHash>()
+        T::size(self.tx()) + self.signature().size() + self.hash().size()
     }
 }
+
+/// Implement `InMemorySize` for a type with `size_of`
+macro_rules! impl_in_mem_size_size_of {
+    ($($ty:ty),*) => {
+        $(
+            impl InMemorySize for $ty {
+                #[inline]
+                fn size(&self) -> usize {
+                    core::mem::size_of::<Self>()
+                }
+            }
+        )*
+    };
+}
+
+impl_in_mem_size_size_of!(Signature, TxHash);
 
 /// Implement `InMemorySize` for a type with a native `size` method.
 macro_rules! impl_in_mem_size {
     ($($ty:ty),*) => {
         $(
             impl InMemorySize for $ty {
+                #[inline]
                 fn size(&self) -> usize {
                    Self::size(self)
                 }
