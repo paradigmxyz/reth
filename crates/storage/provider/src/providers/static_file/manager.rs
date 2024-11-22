@@ -19,14 +19,14 @@ use parking_lot::RwLock;
 use reth_chainspec::{ChainInfo, ChainSpecProvider};
 use reth_db::{
     lockfile::StorageLock,
-    static_file::{iter_static_files, HeaderMask, ReceiptMask, StaticFileCursor, TransactionMask},
+    static_file::{
+        iter_static_files, BlockHashMask, HeaderMask, HeaderWithHashMask, ReceiptMask,
+        StaticFileCursor, TDWithHashMask, TransactionMask,
+    },
     tables,
 };
 use reth_db_api::{
-    cursor::DbCursorRO,
-    models::{CompactU256, StoredBlockBodyIndices},
-    table::Table,
-    transaction::DbTx,
+    cursor::DbCursorRO, models::StoredBlockBodyIndices, table::Table, transaction::DbTx,
 };
 use reth_nippy_jar::{NippyJar, NippyJarChecker, CONFIG_FILE_EXTENSION};
 use reth_node_types::NodePrimitives;
@@ -1236,7 +1236,7 @@ impl<N: NodePrimitives> HeaderProvider for StaticFileProvider<N> {
         self.find_static_file(StaticFileSegment::Headers, |jar_provider| {
             Ok(jar_provider
                 .cursor()?
-                .get_two::<HeaderMask<Header, BlockHash>>(block_hash.into())?
+                .get_two::<HeaderWithHashMask<Header>>(block_hash.into())?
                 .and_then(|(header, hash)| {
                     if &hash == block_hash {
                         return Some(header)
@@ -1262,7 +1262,7 @@ impl<N: NodePrimitives> HeaderProvider for StaticFileProvider<N> {
         self.find_static_file(StaticFileSegment::Headers, |jar_provider| {
             Ok(jar_provider
                 .cursor()?
-                .get_two::<HeaderMask<CompactU256, BlockHash>>(block_hash.into())?
+                .get_two::<TDWithHashMask>(block_hash.into())?
                 .and_then(|(td, hash)| (&hash == block_hash).then_some(td.0)))
         })
     }
@@ -1310,7 +1310,7 @@ impl<N: NodePrimitives> HeaderProvider for StaticFileProvider<N> {
             to_range(range),
             |cursor, number| {
                 Ok(cursor
-                    .get_two::<HeaderMask<Header, BlockHash>>(number.into())?
+                    .get_two::<HeaderWithHashMask<Header>>(number.into())?
                     .map(|(header, hash)| SealedHeader::new(header, hash)))
             },
             predicate,
@@ -1331,7 +1331,7 @@ impl<N: NodePrimitives> BlockHashReader for StaticFileProvider<N> {
         self.fetch_range_with_predicate(
             StaticFileSegment::Headers,
             start..end,
-            |cursor, number| cursor.get_one::<HeaderMask<BlockHash>>(number.into()),
+            |cursor, number| cursor.get_one::<BlockHashMask>(number.into()),
             |_| true,
         )
     }
@@ -1463,12 +1463,12 @@ impl<N: NodePrimitives> TransactionsProvider for StaticFileProvider<N> {
             })
     }
 
-    fn transaction_by_id_no_hash(
+    fn transaction_by_id_unhashed(
         &self,
         num: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
         self.get_segment_provider_from_transaction(StaticFileSegment::Transactions, num, None)
-            .and_then(|provider| provider.transaction_by_id_no_hash(num))
+            .and_then(|provider| provider.transaction_by_id_unhashed(num))
             .or_else(|err| {
                 if let ProviderError::MissingStaticFileTx(_, _) = err {
                     Ok(None)
@@ -1541,7 +1541,7 @@ impl<N: NodePrimitives> TransactionsProvider for StaticFileProvider<N> {
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
-        Ok(self.transaction_by_id_no_hash(id)?.and_then(|tx| tx.recover_signer()))
+        Ok(self.transaction_by_id_unhashed(id)?.and_then(|tx| tx.recover_signer()))
     }
 }
 

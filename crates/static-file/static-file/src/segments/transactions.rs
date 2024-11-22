@@ -1,7 +1,9 @@
 use crate::segments::Segment;
 use alloy_primitives::BlockNumber;
-use reth_db::tables;
+use reth_codecs::Compact;
+use reth_db::{table::Value, tables};
 use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::StaticFileWriter, BlockReader, DBProvider, StaticFileProviderFactory,
 };
@@ -13,8 +15,11 @@ use std::ops::RangeInclusive;
 #[derive(Debug, Default)]
 pub struct Transactions;
 
-impl<Provider: StaticFileProviderFactory + DBProvider + BlockReader> Segment<Provider>
-    for Transactions
+impl<Provider> Segment<Provider> for Transactions
+where
+    Provider: StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value + Compact>>
+        + DBProvider
+        + BlockReader,
 {
     fn segment(&self) -> StaticFileSegment {
         StaticFileSegment::Transactions
@@ -38,8 +43,9 @@ impl<Provider: StaticFileProviderFactory + DBProvider + BlockReader> Segment<Pro
                 .block_body_indices(block)?
                 .ok_or(ProviderError::BlockBodyIndicesNotFound(block))?;
 
-            let mut transactions_cursor =
-                provider.tx_ref().cursor_read::<tables::Transactions>()?;
+            let mut transactions_cursor = provider.tx_ref().cursor_read::<tables::Transactions<
+                <<Provider as StaticFileProviderFactory>::Primitives as NodePrimitives>::SignedTx,
+            >>()?;
             let transactions_walker =
                 transactions_cursor.walk_range(block_body_indices.tx_num_range())?;
 

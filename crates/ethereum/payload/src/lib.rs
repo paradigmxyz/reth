@@ -14,7 +14,7 @@ use alloy_eips::{eip4844::MAX_DATA_GAS_PER_BLOCK, eip7685::Requests, merge::BEAC
 use alloy_primitives::U256;
 use reth_basic_payload_builder::{
     commit_withdrawals, is_better_payload, BuildArguments, BuildOutcome, PayloadBuilder,
-    PayloadConfig, WithdrawalsOutcome,
+    PayloadConfig,
 };
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::ChainSpec;
@@ -356,8 +356,8 @@ where
         None
     };
 
-    let WithdrawalsOutcome { withdrawals_root, withdrawals } =
-        commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, attributes.withdrawals)?;
+    let withdrawals_root =
+        commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, &attributes.withdrawals)?;
 
     // merge all transitions into bundle state, this would apply the withdrawal balance changes
     // and 4788 contract call
@@ -399,7 +399,7 @@ where
         // grab the blob sidecars from the executed txs
         blob_sidecars = pool
             .get_all_blobs_exact(
-                executed_txs.iter().filter(|tx| tx.is_eip4844()).map(|tx| tx.hash).collect(),
+                executed_txs.iter().filter(|tx| tx.is_eip4844()).map(|tx| tx.hash()).collect(),
             )
             .map_err(PayloadBuilderError::other)?;
 
@@ -443,11 +443,15 @@ where
     // seal the block
     let block = Block {
         header,
-        body: BlockBody { transactions: executed_txs, ommers: vec![], withdrawals },
+        body: BlockBody {
+            transactions: executed_txs,
+            ommers: vec![],
+            withdrawals: Some(attributes.withdrawals.clone()),
+        },
     };
 
     let sealed_block = Arc::new(block.seal_slow());
-    debug!(target: "payload_builder", ?sealed_block, "sealed built block");
+    debug!(target: "payload_builder", sealed_block_header = ?sealed_block.header, "sealed built block");
 
     // create the executed block data
     let executed = ExecutedBlock {

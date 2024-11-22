@@ -39,6 +39,7 @@ reth-optimism-rpc.workspace = true
 reth-optimism-chainspec.workspace = true
 reth-optimism-consensus.workspace = true
 reth-optimism-forks.workspace = true
+reth-optimism-primitives.workspace = true
 
 # revm with required optimism features
 revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
@@ -118,4 +119,8 @@ test-utils = [
     "reth-trie-db/test-utils",
     "revm/test-utils",
     "reth-optimism-node/test-utils",
+]
+reth-codec = [
+    "reth-primitives/reth-codec",
+    "reth-optimism-primitives/reth-codec",
 ]

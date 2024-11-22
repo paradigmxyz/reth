@@ -27,6 +27,7 @@ reth-payload-builder-primitives.workspace = true
 reth-payload-primitives.workspace = true
 reth-payload-validator.workspace = true
 reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
 reth-revm.workspace = true
@@ -107,4 +108,5 @@ test-utils = [
     "reth-provider/test-utils",
     "reth-trie/test-utils",
     "reth-prune-types?/test-utils",
+    "reth-primitives-traits/test-utils",
 ]

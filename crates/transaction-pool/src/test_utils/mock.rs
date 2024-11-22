@@ -608,6 +608,12 @@ impl PoolTransaction for MockTransaction {
         pooled.into()
     }
 
+    fn try_consensus_into_pooled(
+        tx: Self::Consensus,
+    ) -> Result<Self::Pooled, Self::TryFromConsensusError> {
+        Self::Pooled::try_from(tx).map_err(|_| TryFromRecoveredTransactionError::BlobSidecarMissing)
+    }
+
     fn hash(&self) -> &TxHash {
         self.get_hash()
     }
@@ -904,11 +910,8 @@ impl From<PooledTransactionsElementEcRecovered> for MockTransaction {
 
 impl From<MockTransaction> for TransactionSignedEcRecovered {
     fn from(tx: MockTransaction) -> Self {
-        let signed_tx = TransactionSigned {
-            hash: *tx.hash(),
-            signature: Signature::test_signature(),
-            transaction: tx.clone().into(),
-        };
+        let signed_tx =
+            TransactionSigned::new(tx.clone().into(), Signature::test_signature(), *tx.hash());
 
         Self::from_signed_transaction(signed_tx, tx.sender())
     }

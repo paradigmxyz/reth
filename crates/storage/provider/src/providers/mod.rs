@@ -20,6 +20,7 @@ use reth_blockchain_tree_api::{
 };
 use reth_chain_state::{ChainInfoTracker, ForkChoiceNotifications, ForkChoiceSubscriptions};
 use reth_chainspec::{ChainInfo, EthereumHardforks};
+use reth_db::table::Value;
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_node_types::{FullNodePrimitives, NodeTypes, NodeTypesWithDB};
@@ -75,7 +76,7 @@ where
     Self: NodeTypes<
         ChainSpec: EthereumHardforks,
         Storage: ChainStorage<Self::Primitives>,
-        Primitives: FullNodePrimitives,
+        Primitives: FullNodePrimitives<SignedTx: Value>,
     >,
 {
 }
@@ -84,7 +85,7 @@ impl<T> NodeTypesForProvider for T where
     T: NodeTypes<
         ChainSpec: EthereumHardforks,
         Storage: ChainStorage<T::Primitives>,
-        Primitives: FullNodePrimitives,
+        Primitives: FullNodePrimitives<SignedTx: Value>,
     >
 {
 }
@@ -424,11 +425,11 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider<N> {
         self.database.transaction_by_id(id)
     }
 
-    fn transaction_by_id_no_hash(
+    fn transaction_by_id_unhashed(
         &self,
         id: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
-        self.database.transaction_by_id_no_hash(id)
+        self.database.transaction_by_id_unhashed(id)
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {

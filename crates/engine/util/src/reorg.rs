@@ -339,7 +339,7 @@ where
             // Treat error as fatal
             Err(error) => {
                 return Err(RethError::Execution(BlockExecutionError::Validation(
-                    BlockValidationError::EVM { hash: tx.hash, error: Box::new(error) },
+                    BlockValidationError::EVM { hash: tx.hash(), error: Box::new(error) },
                 )))
             }
         };

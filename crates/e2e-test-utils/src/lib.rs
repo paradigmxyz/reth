@@ -59,8 +59,7 @@ where
         Components: NodeComponents<TmpNodeAdapter<N>, Network: PeersHandleProvider>,
     >,
     N::AddOns: RethRpcAddOns<Adapter<N>>,
-    N::Primitives:
-        FullNodePrimitives<Block: reth_node_api::Block<Body = reth_primitives::BlockBody>>,
+    N::Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>,
 {
     let tasks = TaskManager::current();
     let exec = tasks.executor();
@@ -135,8 +134,7 @@ where
     LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
         <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
     >,
-    N::Primitives:
-        FullNodePrimitives<Block: reth_node_api::Block<Body = reth_primitives::BlockBody>>,
+    N::Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>,
 {
     let tasks = TaskManager::current();
     let exec = tasks.executor();
