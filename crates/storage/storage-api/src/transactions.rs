@@ -19,7 +19,7 @@ pub enum TransactionVariant {
     WithHash,
 }
 
-///  Client trait for fetching [TransactionSigned] related data.
+///  Client trait for fetching transactions related data.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait TransactionsProvider: BlockNumReader + Send + Sync {
     /// The transaction type this provider reads.
@@ -84,7 +84,7 @@ pub trait TransactionsProvider: BlockNumReader + Send + Sync {
 /// A helper type alias to access [`TransactionsProvider::Transaction`].
 pub type ProviderTx<P> = <P as TransactionsProvider>::Transaction;
 
-///  Client trait for fetching additional [TransactionSigned] related data.
+///  Client trait for fetching additional transactions related data.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait TransactionsProviderExt: BlockReader + Send + Sync {
     /// Get transactions range by block range.
