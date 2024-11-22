@@ -9,7 +9,7 @@ use reth_db::transaction::{DbTx, DbTxMut};
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, PeersInfo};
 use reth_node_api::{
-    AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, NodePrimitives, PayloadBuilder,
+    AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, PayloadBuilder,
 };
 use reth_node_builder::{
     components::{
