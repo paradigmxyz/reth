@@ -350,7 +350,7 @@ where
         let block_number = ctx.block_number();
         let execution_outcome = ExecutionOutcome::new(
             state.take_bundle(),
-            vec![info.receipts.clone()].into(),
+            vec![info.receipts].into(),
             block_number,
             Vec::new(),
         );
