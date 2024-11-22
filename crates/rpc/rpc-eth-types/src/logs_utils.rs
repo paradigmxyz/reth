@@ -58,6 +58,7 @@ pub enum ProviderOrBlock<'a, P: BlockReader> {
 
 /// Appends all matching logs of a block's receipts.
 /// If the log matches, look up the corresponding transaction hash.
+#[allow(clippy::too_many_arguments)]
 pub fn append_matching_block_logs<P: BlockReader>(
     all_logs: &mut Vec<Log>,
     provider_or_block: ProviderOrBlock<'_, P>,
@@ -66,7 +67,8 @@ pub fn append_matching_block_logs<P: BlockReader>(
     receipts: &[Receipt],
     removed: bool,
     block_timestamp: u64,
-) -> Result<(), ProviderError> {
+    max_logs_per_response: Option<usize>,
+) -> Result<Option<u64>, ProviderError> {
     // Tracks the index of a log in the entire block.
     let mut log_index: u64 = 0;
 
@@ -129,9 +131,15 @@ pub fn append_matching_block_logs<P: BlockReader>(
                 all_logs.push(log);
             }
             log_index += 1;
+            // Check if we have reached the max logs per response and return the last block if so
+            if let Some(max_logs_per_response) = max_logs_per_response {
+                if log_index >= max_logs_per_response as u64 {
+                    return Ok(Some(block_num_hash.number - 1));
+                }
+            }
         }
     }
-    Ok(())
+    Ok(None)
 }
 
 /// Returns true if the log matches the filter and should be included

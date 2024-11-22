@@ -404,6 +404,7 @@ where
                     &receipts,
                     false,
                     header.timestamp,
+                    None,
                 )?;
 
                 Ok(all_logs)
@@ -501,7 +502,7 @@ where
                     if let Some((receipts, maybe_block)) =
                         self.receipts_and_maybe_block(&num_hash, chain_info.best_number).await?
                     {
-                        append_matching_block_logs(
+                        let max_to_block_reached = append_matching_block_logs(
                             &mut all_logs,
                             maybe_block
                                 .map(|block| ProviderOrBlock::Block(block))
@@ -511,15 +512,20 @@ where
                             &receipts,
                             false,
                             header.timestamp,
+                            Some(self.max_logs_per_response),
                         )?;
 
                         // size check but only if range is multiple blocks, so we always return all
                         // logs of a single block
                         let is_multi_block_range = from_block != to_block;
-                        if is_multi_block_range && all_logs.len() > self.max_logs_per_response {
-                            return Err(EthFilterError::QueryExceedsMaxResults(
-                                self.max_logs_per_response,
-                            ))
+                        if is_multi_block_range {
+                            if let Some(max_to_block) = max_to_block_reached {
+                                return Err(EthFilterError::QueryExceedsMaxResults(
+                                    self.max_logs_per_response,
+                                    from_block,
+                                    max_to_block,
+                                ));
+                            }
                         }
                     }
                 }
@@ -724,8 +730,8 @@ pub enum EthFilterError {
     #[error("query exceeds max block range {0}")]
     QueryExceedsMaxBlocks(u64),
     /// Query result is too large.
-    #[error("query exceeds max results {0}")]
-    QueryExceedsMaxResults(usize),
+    #[error("query exceeds max results {0}, retry with the range {1}-{2}")]
+    QueryExceedsMaxResults(usize, u64, u64),
     /// Error serving request in `eth_` namespace.
     #[error(transparent)]
     EthAPIError(#[from] EthApiError),
@@ -747,7 +753,7 @@ impl From<EthFilterError> for jsonrpsee::types::error::ErrorObject<'static> {
             EthFilterError::EthAPIError(err) => err.into(),
             err @ (EthFilterError::InvalidBlockRangeParams |
             EthFilterError::QueryExceedsMaxBlocks(_) |
-            EthFilterError::QueryExceedsMaxResults(_)) => {
+            EthFilterError::QueryExceedsMaxResults(_, _, _)) => {
                 rpc_error_with_code(jsonrpsee::types::error::INVALID_PARAMS_CODE, err.to_string())
             }
         }
