@@ -10,8 +10,10 @@ use alloy_consensus::Header;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use reth_chainspec::ChainInfo;
-use reth_db::static_file::{HeaderMask, ReceiptMask, StaticFileCursor, TransactionMask};
-use reth_db_api::models::CompactU256;
+use reth_db::static_file::{
+    BlockHashMask, HeaderMask, HeaderWithHashMask, ReceiptMask, StaticFileCursor, TDWithHashMask,
+    TotalDifficultyMask, TransactionMask,
+};
 use reth_node_types::NodePrimitives;
 use reth_primitives::{
     Receipt, SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
@@ -90,7 +92,7 @@ impl<N: NodePrimitives> HeaderProvider for StaticFileJarProvider<'_, N> {
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
         Ok(self
             .cursor()?
-            .get_two::<HeaderMask<Header, BlockHash>>(block_hash.into())?
+            .get_two::<HeaderWithHashMask<Header>>(block_hash.into())?
             .filter(|(_, hash)| hash == block_hash)
             .map(|(header, _)| header))
     }
@@ -102,13 +104,13 @@ impl<N: NodePrimitives> HeaderProvider for StaticFileJarProvider<'_, N> {
     fn header_td(&self, block_hash: &BlockHash) -> ProviderResult<Option<U256>> {
         Ok(self
             .cursor()?
-            .get_two::<HeaderMask<CompactU256, BlockHash>>(block_hash.into())?
+            .get_two::<TDWithHashMask>(block_hash.into())?
             .filter(|(_, hash)| hash == block_hash)
             .map(|(td, _)| td.into()))
     }
 
     fn header_td_by_number(&self, num: BlockNumber) -> ProviderResult<Option<U256>> {
-        Ok(self.cursor()?.get_one::<HeaderMask<CompactU256>>(num.into())?.map(Into::into))
+        Ok(self.cursor()?.get_one::<TotalDifficultyMask>(num.into())?.map(Into::into))
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
@@ -129,7 +131,7 @@ impl<N: NodePrimitives> HeaderProvider for StaticFileJarProvider<'_, N> {
     fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
         Ok(self
             .cursor()?
-            .get_two::<HeaderMask<Header, BlockHash>>(number.into())?
+            .get_two::<HeaderWithHashMask<Header>>(number.into())?
             .map(|(header, hash)| SealedHeader::new(header, hash)))
     }
 
@@ -145,7 +147,7 @@ impl<N: NodePrimitives> HeaderProvider for StaticFileJarProvider<'_, N> {
 
         for number in range {
             if let Some((header, hash)) =
-                cursor.get_two::<HeaderMask<Header, BlockHash>>(number.into())?
+                cursor.get_two::<HeaderWithHashMask<Header>>(number.into())?
             {
                 let sealed = SealedHeader::new(header, hash);
                 if !predicate(&sealed) {
@@ -160,7 +162,7 @@ impl<N: NodePrimitives> HeaderProvider for StaticFileJarProvider<'_, N> {
 
 impl<N: NodePrimitives> BlockHashReader for StaticFileJarProvider<'_, N> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        self.cursor()?.get_one::<HeaderMask<BlockHash>>(number.into())
+        self.cursor()?.get_one::<BlockHashMask>(number.into())
     }
 
     fn canonical_hashes_range(
@@ -172,7 +174,7 @@ impl<N: NodePrimitives> BlockHashReader for StaticFileJarProvider<'_, N> {
         let mut hashes = Vec::with_capacity((end - start) as usize);
 
         for number in start..end {
-            if let Some(hash) = cursor.get_one::<HeaderMask<BlockHash>>(number.into())? {
+            if let Some(hash) = cursor.get_one::<BlockHashMask>(number.into())? {
                 hashes.push(hash)
             }
         }
@@ -200,7 +202,7 @@ impl<N: NodePrimitives> BlockNumReader for StaticFileJarProvider<'_, N> {
         let mut cursor = self.cursor()?;
 
         Ok(cursor
-            .get_one::<HeaderMask<BlockHash>>((&hash).into())?
+            .get_one::<BlockHashMask>((&hash).into())?
             .and_then(|res| (res == hash).then(|| cursor.number()).flatten()))
     }
 }
