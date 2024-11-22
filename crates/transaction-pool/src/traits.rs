@@ -1142,34 +1142,20 @@ impl EthPooledTransaction {
     pub fn new(transaction: TransactionSignedEcRecovered, encoded_length: usize) -> Self {
         let mut blob_sidecar = EthBlobTransactionSidecar::None;
 
-        #[allow(unreachable_patterns)]
-        let gas_cost = match &transaction.transaction {
-            Transaction::Legacy(t) => {
-                U256::from(t.gas_price).saturating_mul(U256::from(t.gas_limit))
-            }
-            Transaction::Eip2930(t) => {
-                U256::from(t.gas_price).saturating_mul(U256::from(t.gas_limit))
-            }
-            Transaction::Eip1559(t) => {
-                U256::from(t.max_fee_per_gas).saturating_mul(U256::from(t.gas_limit))
-            }
-            Transaction::Eip4844(t) => {
-                blob_sidecar = EthBlobTransactionSidecar::Missing;
-                U256::from(t.max_fee_per_gas).saturating_mul(U256::from(t.gas_limit))
-            }
-            Transaction::Eip7702(t) => {
-                U256::from(t.max_fee_per_gas).saturating_mul(U256::from(t.gas_limit))
-            }
-            _ => U256::ZERO,
-        };
-        let mut cost = transaction.value();
-        cost = cost.saturating_add(gas_cost);
+        let gas_cost = U256::from(transaction.transaction.max_fee_per_gas())
+            .saturating_mul(U256::from(transaction.transaction.gas_limit()));
+
+        let mut cost = gas_cost.saturating_add(transaction.value());
 
         if let Some(blob_tx) = transaction.as_eip4844() {
             // Add max blob cost using saturating math to avoid overflow
             cost = cost.saturating_add(U256::from(
                 blob_tx.max_fee_per_blob_gas.saturating_mul(blob_tx.blob_gas() as u128),
             ));
+
+            // because the blob sidecar is not included in this transaction variant, mark it as
+            // missing
+            blob_sidecar = EthBlobTransactionSidecar::Missing;
         }
 
         Self { transaction, cost, encoded_length, blob_sidecar }
