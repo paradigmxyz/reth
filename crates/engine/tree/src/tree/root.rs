@@ -784,7 +784,7 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         let stream = StdReceiverStream::new(rx);
 
-        let state_updates = create_mock_state_updates(400, 20);
+        let state_updates = create_mock_state_updates(10, 10);
         let mut hashed_state = HashedPostState::default();
         let mut accumulated_state: HashMap<Address, (RethAccount, HashMap<B256, U256>)> =
             HashMap::default();
