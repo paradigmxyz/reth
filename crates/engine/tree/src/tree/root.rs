@@ -177,7 +177,7 @@ where
 
                 if destroyed || !account.storage.is_empty() {
                     let storage = account.storage.into_iter().filter_map(|(slot, value)| {
-                        (!destroyed && value.is_changed())
+                        value.is_changed()
                             .then(|| (keccak256(B256::from(slot)), value.present_value))
                     });
                     hashed_state_update
