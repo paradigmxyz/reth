@@ -134,23 +134,13 @@ impl ProofSequencer {
 
     /// Adds a proof and returns all sequential proofs if we have a continuous sequence
     pub(crate) fn add_proof(&mut self, sequence: u64, proof: MultiProof) -> Vec<MultiProof> {
+        self.next_sequence = self.next_sequence.max(sequence + 1);
         self.pending_proofs.insert(sequence, proof);
+        let mut ready_proofs = Vec::with_capacity(self.pending_proofs.len());
 
-        let mut has_next = true;
-        let mut ready_proofs = Vec::new();
-
-        while has_next {
-            has_next = false;
-
-            // find the lowest sequence number in pending proofs
-            if let Some((&lowest_seq, _)) = self.pending_proofs.iter().next() {
-                if lowest_seq <= self.next_sequence {
-                    if let Some(proof) = self.pending_proofs.remove(&lowest_seq) {
-                        has_next = true;
-                        ready_proofs.push(proof);
-                        self.next_sequence = lowest_seq + 1;
-                    }
-                }
+        while let Some((&lowest_seq, _)) = self.pending_proofs.iter().next() {
+            if let Some(proof) = self.pending_proofs.remove(&lowest_seq) {
+                ready_proofs.push(proof);
             }
         }
 
@@ -330,6 +320,11 @@ where
 
     /// Spawns root calculation with the current state and proofs
     fn spawn_root_calculation(&mut self, multiproof: MultiProof) {
+        if self.calculating_root {
+            return;
+        }
+        self.calculating_root = true;
+
         trace!(
             target: "engine::root",
             account_proofs = multiproof.account_subtree.len(),
@@ -341,8 +336,6 @@ where
         let view = self.config.consistent_view.clone();
         let input = self.config.input.clone();
         let state = self.state.clone();
-
-        self.calculating_root = true;
 
         rayon::spawn(move || {
             let result = calculate_state_root_from_proofs(
@@ -422,16 +415,29 @@ where
                             %root,
                             ?elapsed,
                             roots_calculated,
+                            proofs = proofs_processed,
+                            updates = updates_received,
                             "Computed intermediate root"
                         );
                         current_root = root;
                         trie_updates.extend(updates);
                         self.calculating_root = false;
 
+                        let has_new_proofs = !current_multiproof.account_subtree.is_empty() ||
+                            !current_multiproof.storages.is_empty();
+                        let all_proofs_received = proofs_processed >= updates_received;
+                        let no_pending = !self.proof_sequencer.has_pending();
+
+                        trace!(
+                            target: "engine::root",
+                            has_new_proofs,
+                            all_proofs_received,
+                            no_pending,
+                            "State check"
+                        );
+
                         // only spawn new calculation if we have accumulated new proofs
-                        if !current_multiproof.account_subtree.is_empty() ||
-                            !current_multiproof.storages.is_empty()
-                        {
+                        if has_new_proofs {
                             trace!(
                                 target: "engine::root",
                                 account_proofs = current_multiproof.account_subtree.len(),
@@ -439,10 +445,7 @@ where
                                 "Spawning subsequent root calculation"
                             );
                             self.spawn_root_calculation(std::mem::take(&mut current_multiproof));
-                        } else if input_stream_closed &&
-                            proofs_processed >= updates_received &&
-                            !self.proof_sequencer.has_pending()
-                        {
+                        } else if input_stream_closed && all_proofs_received && no_pending {
                             debug!(
                                 target: "engine::root",
                                 total_updates = updates_received,
@@ -865,5 +868,83 @@ mod tests {
             root_from_task, root_from_base,
             "State root mismatch: task={root_from_task:?}, base={root_from_base:?}"
         );
+    }
+
+    #[test]
+    fn test_add_proof_in_sequence() {
+        let mut sequencer = ProofSequencer::new();
+        let proof1 = MultiProof::default();
+        let proof2 = MultiProof::default();
+
+        let ready = sequencer.add_proof(0, proof1);
+        assert_eq!(ready.len(), 1);
+        assert!(!sequencer.has_pending());
+
+        let ready = sequencer.add_proof(1, proof2);
+        assert_eq!(ready.len(), 1);
+        assert!(!sequencer.has_pending());
+    }
+
+    #[test]
+    fn test_add_proof_out_of_order() {
+        let mut sequencer = ProofSequencer::new();
+        let proof1 = MultiProof::default();
+        let proof2 = MultiProof::default();
+        let proof3 = MultiProof::default();
+
+        let ready = sequencer.add_proof(2, proof3);
+        assert_eq!(ready.len(), 0);
+        assert!(sequencer.has_pending());
+
+        let ready = sequencer.add_proof(0, proof1);
+        assert_eq!(ready.len(), 1);
+        assert!(sequencer.has_pending());
+
+        let ready = sequencer.add_proof(1, proof2);
+        assert_eq!(ready.len(), 2);
+        assert!(!sequencer.has_pending());
+    }
+
+    #[test]
+    fn test_add_proof_with_gaps() {
+        let mut sequencer = ProofSequencer::new();
+        let proof1 = MultiProof::default();
+        let proof3 = MultiProof::default();
+
+        let ready = sequencer.add_proof(0, proof1);
+        assert_eq!(ready.len(), 1);
+
+        let ready = sequencer.add_proof(2, proof3);
+        assert_eq!(ready.len(), 0);
+        assert!(sequencer.has_pending());
+    }
+
+    #[test]
+    fn test_add_proof_duplicate_sequence() {
+        let mut sequencer = ProofSequencer::new();
+        let proof1 = MultiProof::default();
+        let proof2 = MultiProof::default();
+
+        let ready = sequencer.add_proof(0, proof1);
+        assert_eq!(ready.len(), 1);
+
+        let ready = sequencer.add_proof(0, proof2);
+        assert_eq!(ready.len(), 1);
+        assert!(!sequencer.has_pending());
+    }
+
+    #[test]
+    fn test_add_proof_batch_processing() {
+        let mut sequencer = ProofSequencer::new();
+        let proofs: Vec<_> = (0..5).map(|_| MultiProof::default()).collect();
+
+        sequencer.add_proof(4, proofs[4].clone());
+        sequencer.add_proof(2, proofs[2].clone());
+        sequencer.add_proof(1, proofs[1].clone());
+        sequencer.add_proof(3, proofs[3].clone());
+
+        let ready = sequencer.add_proof(0, proofs[0].clone());
+        assert_eq!(ready.len(), 5);
+        assert!(!sequencer.has_pending());
     }
 }
