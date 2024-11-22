@@ -1,3 +1,6 @@
+use alloy_consensus::{Header, TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
+use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
+
 /// Trait for calculating a heuristic for the in-memory size of a struct.
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait InMemorySize {
@@ -5,8 +8,42 @@ pub trait InMemorySize {
     fn size(&self) -> usize;
 }
 
-impl InMemorySize for alloy_consensus::Header {
+impl<T: InMemorySize> InMemorySize for alloy_consensus::Signed<T> {
     fn size(&self) -> usize {
-        self.size()
+        T::size(self.tx()) + core::mem::size_of::<Signature>() + core::mem::size_of::<TxHash>()
+    }
+}
+
+/// Implement `InMemorySize` for a type with a native `size` method.
+macro_rules! impl_in_mem_size {
+    ($($ty:ty),*) => {
+        $(
+            impl InMemorySize for $ty {
+                fn size(&self) -> usize {
+                   Self::size(self)
+                }
+            }
+        )*
+    };
+}
+
+impl_in_mem_size!(Header, TxLegacy, TxEip2930, TxEip1559, TxEip7702, TxEip4844);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ensures we don't have any recursion in the `InMemorySize` impls
+    #[test]
+    fn no_in_memory_no_recursion() {
+        fn assert_no_recursion<T: InMemorySize + Default>() {
+            let _ = T::default().size();
+        }
+        assert_no_recursion::<Header>();
+        assert_no_recursion::<TxLegacy>();
+        assert_no_recursion::<TxEip2930>();
+        assert_no_recursion::<TxEip1559>();
+        assert_no_recursion::<TxEip7702>();
+        assert_no_recursion::<TxEip4844>();
     }
 }
