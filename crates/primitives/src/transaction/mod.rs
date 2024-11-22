@@ -1787,8 +1787,7 @@ impl<T: SignedTransaction> Decodable for TransactionSignedEcRecovered<T> {
     }
 }
 
-/// And extension trait for [`SignedTransaction`] to convert it into
-/// [`TransactionSignedEcRecovered`].
+/// Extension trait for [`SignedTransaction`] to convert it into [`TransactionSignedEcRecovered`].
 pub trait SignedTransactionIntoRecoveredExt: SignedTransaction {
     /// Consumes the type, recover signer and return [`TransactionSignedEcRecovered`] _without
     /// ensuring that the signature has a low `s` value_ (EIP-2).
@@ -2009,8 +2008,7 @@ pub mod serde_bincode_compat {
 
 /// Recovers a list of signers from a transaction list iterator.
 ///
-/// Returns `None`, if some transaction's signature is invalid, see also
-/// [`Self::recover_signer`].
+/// Returns `None`, if some transaction's signature is invalid
 pub fn recover_signers<'a, I, T>(txes: I, num_txes: usize) -> Option<Vec<Address>>
 where
     T: SignedTransaction,
