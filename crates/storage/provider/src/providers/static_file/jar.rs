@@ -10,7 +10,9 @@ use alloy_consensus::Header;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use reth_chainspec::ChainInfo;
-use reth_db::static_file::{HeaderMask, ReceiptMask, StaticFileCursor, TransactionMask};
+use reth_db::static_file::{
+    HeaderMask, HeaderWithHashMask, ReceiptMask, StaticFileCursor, TDWithHashMask, TransactionMask,
+};
 use reth_db_api::models::CompactU256;
 use reth_node_types::NodePrimitives;
 use reth_primitives::{
@@ -90,7 +92,7 @@ impl<N: NodePrimitives> HeaderProvider for StaticFileJarProvider<'_, N> {
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
         Ok(self
             .cursor()?
-            .get_two::<HeaderMask<Header, BlockHash>>(block_hash.into())?
+            .get_two::<HeaderWithHashMask<Header>>(block_hash.into())?
             .filter(|(_, hash)| hash == block_hash)
             .map(|(header, _)| header))
     }
@@ -102,7 +104,7 @@ impl<N: NodePrimitives> HeaderProvider for StaticFileJarProvider<'_, N> {
     fn header_td(&self, block_hash: &BlockHash) -> ProviderResult<Option<U256>> {
         Ok(self
             .cursor()?
-            .get_two::<HeaderMask<CompactU256, BlockHash>>(block_hash.into())?
+            .get_two::<TDWithHashMask>(block_hash.into())?
             .filter(|(_, hash)| hash == block_hash)
             .map(|(td, _)| td.into()))
     }
@@ -129,7 +131,7 @@ impl<N: NodePrimitives> HeaderProvider for StaticFileJarProvider<'_, N> {
     fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
         Ok(self
             .cursor()?
-            .get_two::<HeaderMask<Header, BlockHash>>(number.into())?
+            .get_two::<HeaderWithHashMask<Header>>(number.into())?
             .map(|(header, hash)| SealedHeader::new(header, hash)))
     }
 
@@ -145,7 +147,7 @@ impl<N: NodePrimitives> HeaderProvider for StaticFileJarProvider<'_, N> {
 
         for number in range {
             if let Some((header, hash)) =
-                cursor.get_two::<HeaderMask<Header, BlockHash>>(number.into())?
+                cursor.get_two::<HeaderWithHashMask<Header>>(number.into())?
             {
                 let sealed = SealedHeader::new(header, hash);
                 if !predicate(&sealed) {

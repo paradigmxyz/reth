@@ -523,9 +523,9 @@ mod tests {
             },
         };
         use alloy_consensus::Header;
-        use alloy_primitives::{BlockHash, BlockNumber, TxNumber, B256};
+        use alloy_primitives::{BlockNumber, TxNumber, B256};
         use futures_util::Stream;
-        use reth_db::{static_file::HeaderMask, tables};
+        use reth_db::{static_file::HeaderWithHashMask, tables};
         use reth_db_api::{
             cursor::DbCursorRO,
             models::{StoredBlockBodyIndices, StoredBlockOmmers},
@@ -813,7 +813,7 @@ mod tests {
                 for header in static_file_provider.fetch_range_iter(
                     StaticFileSegment::Headers,
                     *range.start()..*range.end() + 1,
-                    |cursor, number| cursor.get_two::<HeaderMask<Header, BlockHash>>(number.into()),
+                    |cursor, number| cursor.get_two::<HeaderWithHashMask<Header>>(number.into()),
                 )? {
                     let (header, hash) = header?;
                     self.headers.push_back(SealedHeader::new(header, hash));
