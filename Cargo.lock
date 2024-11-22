@@ -2957,6 +2957,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-exex"
+version = "0.0.0"
+dependencies = [
+ "eyre",
+ "futures",
+ "reth",
+ "reth-execution-types",
+ "reth-exex",
+ "reth-exex-test-utils",
+ "reth-network",
+ "reth-node-api",
+ "reth-node-ethereum",
+ "reth-provider",
+ "reth-tracing",
+ "tokio",
+]
+
+[[package]]
 name = "example-manual-p2p"
 version = "0.0.0"
 dependencies = [

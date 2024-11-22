@@ -196,7 +196,7 @@ pub struct TestExExHandle {
     /// Node task manager
     pub tasks: TaskManager,
     /// WAL temp directory handle
-    _wal_directory: TempDir,
+    pub wal_directory: TempDir,
 }
 
 impl TestExExHandle {
@@ -347,7 +347,7 @@ pub async fn test_exex_context_with_chain_spec(
             events_rx,
             notifications_tx,
             tasks,
-            _wal_directory: wal_directory,
+            wal_directory,
         },
     ))
 }

@@ -1,0 +1,20 @@
+[package]
+name = "example-exex"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reth-network.workspace = true
+reth-exex.workspace = true
+reth-node-api.workspace = true
+reth-tracing.workspace = true
+reth-node-ethereum.workspace = true
+reth.workspace = true
+reth-execution-types.workspace = true
+reth-exex-test-utils.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
+futures.workspace = true
+tokio.workspace = true
+eyre.workspace = true
