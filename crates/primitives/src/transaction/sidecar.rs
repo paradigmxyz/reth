@@ -32,7 +32,7 @@ impl BlobTransaction {
                 hash,
             ))),
             transaction => {
-                let tx = TransactionSigned { transaction, signature, hash: hash.into() };
+                let tx = TransactionSigned::new(transaction, signature, hash);
                 Err((tx, sidecar))
             }
         }
