@@ -67,3 +67,6 @@ mod hashing;
 pub use hashing::*;
 mod stats;
 pub use stats::*;
+
+mod legacy;
+pub use legacy::*;
