@@ -22,7 +22,7 @@ use reth_trie::{
 use reth_trie_common::proof::ProofRetainer;
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::sync::Arc;
-use tracing::debug;
+use tracing::{debug, error};
 
 #[cfg(feature = "metrics")]
 use crate::metrics::ParallelStateRootMetrics;
@@ -126,7 +126,9 @@ where
                         ))
                     })
                 })();
-                let _ = tx.send(result);
+                if let Err(err) = tx.send(result) {
+                    error!(target: "trie::parallel", ?hashed_address, err_content = ?err.0,  "Failed to send proof result");
+                }
             });
             storage_proofs.insert(hashed_address, rx);
         }

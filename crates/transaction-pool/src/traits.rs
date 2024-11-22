@@ -20,7 +20,8 @@ use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 use reth_primitives::{
     kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, PooledTransactionsElement,
-    PooledTransactionsElementEcRecovered, SealedBlock, Transaction, TransactionSignedEcRecovered,
+    PooledTransactionsElementEcRecovered, SealedBlock, Transaction, TransactionSigned,
+    TransactionSignedEcRecovered,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -946,6 +947,11 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
         pooled.into()
     }
 
+    /// Tries to convert the `Consensus` type into the `Pooled` type.
+    fn try_consensus_into_pooled(
+        tx: Self::Consensus,
+    ) -> Result<Self::Pooled, Self::TryFromConsensusError>;
+
     /// Hash of the transaction.
     fn hash(&self) -> &TxHash;
 
@@ -1063,7 +1069,9 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
 /// Super trait for transactions that can be converted to and from Eth transactions
 pub trait EthPoolTransaction:
     PoolTransaction<
-    Consensus: From<TransactionSignedEcRecovered> + Into<TransactionSignedEcRecovered>,
+    Consensus: From<TransactionSignedEcRecovered>
+                   + Into<TransactionSignedEcRecovered>
+                   + Into<TransactionSigned>,
     Pooled: From<PooledTransactionsElementEcRecovered> + Into<PooledTransactionsElementEcRecovered>,
 >
 {
@@ -1206,6 +1214,12 @@ impl PoolTransaction for EthPooledTransaction {
     type Consensus = TransactionSignedEcRecovered;
 
     type Pooled = PooledTransactionsElementEcRecovered;
+
+    fn try_consensus_into_pooled(
+        tx: Self::Consensus,
+    ) -> Result<Self::Pooled, Self::TryFromConsensusError> {
+        Self::Pooled::try_from(tx).map_err(|_| TryFromRecoveredTransactionError::BlobSidecarMissing)
+    }
 
     /// Returns hash of the transaction.
     fn hash(&self) -> &TxHash {
@@ -1570,7 +1584,7 @@ mod tests {
             ..Default::default()
         });
         let signature = Signature::test_signature();
-        let signed_tx = TransactionSigned::from_transaction_and_signature(tx, signature);
+        let signed_tx = TransactionSigned::new_unhashed(tx, signature);
         let transaction =
             TransactionSignedEcRecovered::from_signed_transaction(signed_tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
@@ -1592,7 +1606,7 @@ mod tests {
             ..Default::default()
         });
         let signature = Signature::test_signature();
-        let signed_tx = TransactionSigned::from_transaction_and_signature(tx, signature);
+        let signed_tx = TransactionSigned::new_unhashed(tx, signature);
         let transaction =
             TransactionSignedEcRecovered::from_signed_transaction(signed_tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
@@ -1614,7 +1628,7 @@ mod tests {
             ..Default::default()
         });
         let signature = Signature::test_signature();
-        let signed_tx = TransactionSigned::from_transaction_and_signature(tx, signature);
+        let signed_tx = TransactionSigned::new_unhashed(tx, signature);
         let transaction =
             TransactionSignedEcRecovered::from_signed_transaction(signed_tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
@@ -1638,7 +1652,7 @@ mod tests {
             ..Default::default()
         });
         let signature = Signature::test_signature();
-        let signed_tx = TransactionSigned::from_transaction_and_signature(tx, signature);
+        let signed_tx = TransactionSigned::new_unhashed(tx, signature);
         let transaction =
             TransactionSignedEcRecovered::from_signed_transaction(signed_tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 300);
@@ -1662,7 +1676,7 @@ mod tests {
             ..Default::default()
         });
         let signature = Signature::test_signature();
-        let signed_tx = TransactionSigned::from_transaction_and_signature(tx, signature);
+        let signed_tx = TransactionSigned::new_unhashed(tx, signature);
         let transaction =
             TransactionSignedEcRecovered::from_signed_transaction(signed_tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);

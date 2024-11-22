@@ -15,7 +15,7 @@ workspace = true
 # reth
 reth-db-api.workspace = true
 reth-primitives = { workspace = true, features = ["reth-codec"] }
-reth-primitives-traits = { workspace = true, features = ["serde"] }
+reth-primitives-traits = { workspace = true, features = ["serde", "reth-codec"] }
 reth-fs-util.workspace = true
 reth-storage-errors.workspace = true
 reth-nippy-jar.workspace = true

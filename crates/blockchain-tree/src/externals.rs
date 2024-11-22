@@ -4,14 +4,24 @@ use alloy_primitives::{BlockHash, BlockNumber};
 use reth_consensus::Consensus;
 use reth_db::{static_file::HeaderMask, tables};
 use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
-use reth_node_types::NodeTypesWithDB;
-use reth_primitives::StaticFileSegment;
+use reth_node_types::{Block, FullNodePrimitives, NodeTypesWithDB};
+use reth_primitives::{BlockBody, StaticFileSegment};
 use reth_provider::{
     providers::ProviderNodeTypes, ChainStateBlockReader, ChainStateBlockWriter, ProviderFactory,
     StaticFileProviderFactory, StatsReader,
 };
 use reth_storage_errors::provider::ProviderResult;
 use std::{collections::BTreeMap, sync::Arc};
+
+/// A helper trait with requirements for [`ProviderNodeTypes`] to be used within [`TreeExternals`].
+pub trait TreeNodeTypes:
+    ProviderNodeTypes<Primitives: FullNodePrimitives<Block: Block<Body = BlockBody>>>
+{
+}
+impl<T> TreeNodeTypes for T where
+    T: ProviderNodeTypes<Primitives: FullNodePrimitives<Block: Block<Body = BlockBody>>>
+{
+}
 
 /// A container for external components.
 ///

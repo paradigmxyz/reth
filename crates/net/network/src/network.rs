@@ -21,7 +21,6 @@ use reth_network_api::{
 use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState, SyncStateProvider};
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::{PeerAddr, PeerKind, Reputation, ReputationChangeKind};
-use reth_primitives::TransactionSigned;
 use reth_tokio_util::{EventSender, EventStream};
 use secp256k1::SecretKey;
 use std::{
@@ -130,7 +129,7 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
     }
 
     /// Send full transactions to the peer
-    pub fn send_transactions(&self, peer_id: PeerId, msg: Vec<Arc<TransactionSigned>>) {
+    pub fn send_transactions(&self, peer_id: PeerId, msg: Vec<Arc<N::BroadcastedTransaction>>) {
         self.send_message(NetworkHandleMessage::SendTransaction {
             peer_id,
             msg: SharedTransactions(msg),
@@ -466,7 +465,7 @@ pub(crate) enum NetworkHandleMessage<N: NetworkPrimitives = EthNetworkPrimitives
         /// The ID of the peer to which the transactions are sent.
         peer_id: PeerId,
         /// The shared transactions to send.
-        msg: SharedTransactions,
+        msg: SharedTransactions<N::BroadcastedTransaction>,
     },
     /// Sends a list of transaction hashes to the given peer.
     SendPooledTransactionHashes {

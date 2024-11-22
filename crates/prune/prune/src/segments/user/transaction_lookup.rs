@@ -142,7 +142,7 @@ mod tests {
         for block in &blocks {
             tx_hash_numbers.reserve_exact(block.body.transactions.len());
             for transaction in &block.body.transactions {
-                tx_hash_numbers.push((transaction.hash, tx_hash_numbers.len() as u64));
+                tx_hash_numbers.push((transaction.hash(), tx_hash_numbers.len() as u64));
             }
         }
         let tx_hash_numbers_len = tx_hash_numbers.len();

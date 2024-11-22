@@ -350,7 +350,7 @@ where
         let block_number = ctx.block_number();
         let execution_outcome = ExecutionOutcome::new(
             state.take_bundle(),
-            vec![info.receipts.clone()].into(),
+            vec![info.receipts].into(),
             block_number,
             Vec::new(),
         );
@@ -424,7 +424,7 @@ where
         };
 
         let sealed_block = Arc::new(block.seal_slow());
-        debug!(target: "payload_builder", ?sealed_block, "sealed built block");
+        debug!(target: "payload_builder", sealed_block_header = ?sealed_block.header, "sealed built block");
 
         // create the executed block data
         let executed = ExecutedBlock {

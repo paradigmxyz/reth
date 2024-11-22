@@ -107,7 +107,7 @@ where
                 let mut transactions = block.transactions_with_sender().enumerate().peekable();
                 let mut inspector = None;
                 while let Some((index, (signer, tx))) = transactions.next() {
-                    let tx_hash = tx.hash;
+                    let tx_hash = tx.hash();
 
                     let env = EnvWithHandlerCfg {
                         env: Env::boxed(
@@ -255,7 +255,7 @@ where
                     cfg.clone(),
                     block_env.clone(),
                     block_txs,
-                    tx.hash,
+                    tx.hash(),
                 )?;
 
                 let env = EnvWithHandlerCfg {
@@ -274,7 +274,7 @@ where
                     Some(TransactionContext {
                         block_hash: Some(block_hash),
                         tx_index: Some(index),
-                        tx_hash: Some(tx.hash),
+                        tx_hash: Some(tx.hash()),
                     }),
                     &mut None,
                 )

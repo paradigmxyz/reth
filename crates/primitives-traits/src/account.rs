@@ -1,32 +1,34 @@
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{keccak256, Bytes, B256, U256};
-use byteorder::{BigEndian, ReadBytesExt};
-use bytes::Buf;
 use derive_more::Deref;
-use reth_codecs::{add_arbitrary_tests, Compact};
-use revm_primitives::{AccountInfo, Bytecode as RevmBytecode, BytecodeDecodeError, JumpTable};
+use revm_primitives::{AccountInfo, Bytecode as RevmBytecode, BytecodeDecodeError};
 
-/// Identifier for [`LegacyRaw`](RevmBytecode::LegacyRaw).
-const LEGACY_RAW_BYTECODE_ID: u8 = 0;
+#[cfg(any(test, feature = "reth-codec"))]
+/// Identifiers used in [`Compact`](reth_codecs::Compact) encoding of [`Bytecode`].
+pub mod compact_ids {
+    /// Identifier for [`LegacyRaw`](revm_primitives::Bytecode::LegacyRaw).
+    pub const LEGACY_RAW_BYTECODE_ID: u8 = 0;
 
-/// Identifier for removed bytecode variant.
-const REMOVED_BYTECODE_ID: u8 = 1;
+    /// Identifier for removed bytecode variant.
+    pub const REMOVED_BYTECODE_ID: u8 = 1;
 
-/// Identifier for [`LegacyAnalyzed`](RevmBytecode::LegacyAnalyzed).
-const LEGACY_ANALYZED_BYTECODE_ID: u8 = 2;
+    /// Identifier for [`LegacyAnalyzed`](revm_primitives::Bytecode::LegacyAnalyzed).
+    pub const LEGACY_ANALYZED_BYTECODE_ID: u8 = 2;
 
-/// Identifier for [`Eof`](RevmBytecode::Eof).
-const EOF_BYTECODE_ID: u8 = 3;
+    /// Identifier for [`Eof`](revm_primitives::Bytecode::Eof).
+    pub const EOF_BYTECODE_ID: u8 = 3;
 
-/// Identifier for [`Eip7702`](RevmBytecode::Eip7702).
-const EIP7702_BYTECODE_ID: u8 = 4;
+    /// Identifier for [`Eip7702`](revm_primitives::Bytecode::Eip7702).
+    pub const EIP7702_BYTECODE_ID: u8 = 4;
+}
 
 /// An Ethereum account.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Compact)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-#[add_arbitrary_tests(compact)]
+#[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 pub struct Account {
     /// Account nonce.
     pub nonce: u64,
@@ -85,11 +87,17 @@ impl Bytecode {
     }
 }
 
-impl Compact for Bytecode {
+#[cfg(any(test, feature = "reth-codec"))]
+impl reth_codecs::Compact for Bytecode {
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
+        use compact_ids::{
+            EIP7702_BYTECODE_ID, EOF_BYTECODE_ID, LEGACY_ANALYZED_BYTECODE_ID,
+            LEGACY_RAW_BYTECODE_ID,
+        };
+
         let bytecode = match &self.0 {
             RevmBytecode::LegacyRaw(bytes) => bytes,
             RevmBytecode::LegacyAnalyzed(analyzed) => analyzed.bytecode(),
@@ -128,7 +136,12 @@ impl Compact for Bytecode {
     // A panic will be triggered if a bytecode variant of 1 or greater than 2 is passed from the
     // database.
     fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
-        let len = buf.read_u32::<BigEndian>().expect("could not read bytecode length");
+        use byteorder::ReadBytesExt;
+        use bytes::Buf;
+
+        use compact_ids::*;
+
+        let len = buf.read_u32::<byteorder::BigEndian>().expect("could not read bytecode length");
         let bytes = Bytes::from(buf.copy_to_bytes(len as usize));
         let variant = buf.read_u8().expect("could not read bytecode variant");
         let decoded = match variant {
@@ -139,8 +152,8 @@ impl Compact for Bytecode {
             LEGACY_ANALYZED_BYTECODE_ID => Self(unsafe {
                 RevmBytecode::new_analyzed(
                     bytes,
-                    buf.read_u64::<BigEndian>().unwrap() as usize,
-                    JumpTable::from_slice(buf),
+                    buf.read_u64::<byteorder::BigEndian>().unwrap() as usize,
+                    revm_primitives::JumpTable::from_slice(buf),
                 )
             }),
             EOF_BYTECODE_ID | EIP7702_BYTECODE_ID => {
@@ -187,9 +200,11 @@ impl From<Account> for AccountInfo {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use alloy_primitives::{hex_literal::hex, B256, U256};
-    use revm_primitives::LegacyAnalyzedBytecode;
+    use reth_codecs::Compact;
+    use revm_primitives::{JumpTable, LegacyAnalyzedBytecode};
+
+    use super::*;
 
     #[test]
     fn test_account() {

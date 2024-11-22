@@ -27,6 +27,7 @@ smallvec = { workspace = true, features = ["const_new"] }
 thiserror.workspace = true
 
 [dev-dependencies]
+reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
 reth-testing-utils.workspace = true
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
@@ -35,6 +36,7 @@ assert_matches.workspace = true
 criterion.workspace = true
 itertools.workspace = true
 pretty_assertions = "1.4"
+proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
 rand.workspace = true
 

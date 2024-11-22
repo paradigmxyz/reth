@@ -61,7 +61,10 @@ impl AccountHashingStage {
     pub fn seed<Tx: DbTx + DbTxMut + 'static, N: reth_provider::providers::ProviderNodeTypes>(
         provider: &reth_provider::DatabaseProvider<Tx, N>,
         opts: SeedOpts,
-    ) -> Result<Vec<(alloy_primitives::Address, reth_primitives::Account)>, StageError> {
+    ) -> Result<Vec<(alloy_primitives::Address, reth_primitives::Account)>, StageError>
+    where
+        N::Primitives: reth_primitives_traits::FullNodePrimitives<Block = reth_primitives::Block>,
+    {
         use alloy_primitives::U256;
         use reth_db_api::models::AccountBeforeTx;
         use reth_provider::{StaticFileProviderFactory, StaticFileWriter};
