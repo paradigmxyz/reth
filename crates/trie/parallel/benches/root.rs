@@ -70,7 +70,7 @@ pub fn calculate_state_root(c: &mut Criterion) {
                     ParallelStateRoot::new(
                         view.clone(),
                         TrieInput::from_state(updated_state.clone()),
-                        overlay_input,
+                        overlay_input.clone(),
                     )
                 },
                 |calculator| async { calculator.incremental_root() },

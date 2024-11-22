@@ -48,6 +48,11 @@ where
         Ok(Self::new(provider, tip))
     }
 
+    /// Returns the tip from the consistent view provider.
+    pub const fn tip(&self) -> Option<B256> {
+        self.tip
+    }
+
     /// Retrieve revert hashed state down to the given block hash.
     pub fn revert_state(&self, block_hash: B256) -> ProviderResult<HashedPostState> {
         let provider = self.provider_ro()?;

@@ -227,7 +227,11 @@ impl AppendableChain {
                     provider.block_execution_data_provider.execution_outcome().clone();
                 execution_outcome.extend(initial_execution_outcome.clone());
                 let input = TrieInput::from_state(execution_outcome.hash_state_slow());
-                let overlay_input = TrieOverlayInput::new(input.clone(), block.header.parent_hash);
+
+                // Either we use the tip, or we use the parent hash if the tip doesn't exist.
+                let tip = consistent_view.tip().unwrap_or_else(|| parent_block.hash());
+                // We use the tip here from the consistent view provider we initialized
+                let overlay_input = TrieOverlayInput::new(input.clone(), tip);
                 ParallelStateRoot::new(consistent_view, input, overlay_input)
                     .incremental_root_with_updates()
                     .map(|(root, updates)| (root, Some(updates)))
