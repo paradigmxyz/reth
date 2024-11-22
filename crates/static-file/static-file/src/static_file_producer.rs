@@ -4,6 +4,9 @@ use crate::{segments, segments::Segment, StaticFileProducerEvent};
 use alloy_primitives::BlockNumber;
 use parking_lot::Mutex;
 use rayon::prelude::*;
+use reth_codecs::Compact;
+use reth_db::table::Value;
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::StaticFileWriter, BlockReader, ChainStateBlockReader, DBProvider,
     DatabaseProviderFactory, StageCheckpointReader, StaticFileProviderFactory,
@@ -86,7 +89,10 @@ impl<Provider> StaticFileProducerInner<Provider>
 where
     Provider: StaticFileProviderFactory
         + DatabaseProviderFactory<
-            Provider: StaticFileProviderFactory + StageCheckpointReader + BlockReader,
+            Provider: StaticFileProviderFactory<
+                Primitives: NodePrimitives<SignedTx: Value + Compact>,
+            > + StageCheckpointReader
+                          + BlockReader,
         >,
 {
     /// Listen for events on the `static_file_producer`.

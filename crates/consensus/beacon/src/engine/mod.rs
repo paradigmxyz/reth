@@ -2172,7 +2172,7 @@ mod tests {
 
     fn insert_blocks<
         'a,
-        N: ProviderNodeTypes<Primitives: FullNodePrimitives<Block = reth_primitives::Block>>,
+        N: ProviderNodeTypes<Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>>,
     >(
         provider_factory: ProviderFactory<N>,
         mut blocks: impl Iterator<Item = &'a SealedBlock>,
