@@ -20,6 +20,7 @@ use alloy_primitives::{
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
 use bytes::Buf;
 use derive_more::{AsRef, Deref};
+use reth_primitives_traits::InMemorySize;
 use serde::{Deserialize, Serialize};
 
 /// A response to `GetPooledTransactions`. This can include either a blob transaction, or a
@@ -555,6 +556,18 @@ impl alloy_consensus::Transaction for PooledTransactionsElement {
             Self::Eip1559(tx) => tx.tx().authorization_list(),
             Self::Eip7702(tx) => tx.tx().authorization_list(),
             Self::BlobTransaction(tx) => tx.tx().authorization_list(),
+        }
+    }
+}
+
+impl InMemorySize for PooledTransactionsElement {
+    fn size(&self) -> usize {
+        match self {
+            Self::Legacy(tx) => tx.size(),
+            Self::Eip2930(tx) => tx.size(),
+            Self::Eip1559(tx) => tx.size(),
+            Self::Eip7702(tx) => tx.size(),
+            Self::BlobTransaction(tx) => tx.size(),
         }
     }
 }
