@@ -1,6 +1,4 @@
-use alloy_consensus::{
-    TxEip1559, TxEip2930, TxEip4844, Header, TxEip7702, TxLegacy,
-};
+use alloy_consensus::{Header, TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
 use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
 
 /// Trait for calculating a heuristic for the in-memory size of a struct.
