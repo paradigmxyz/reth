@@ -2,10 +2,7 @@
 
 use alloy_primitives::{BlockHash, BlockNumber};
 use reth_consensus::Consensus;
-use reth_db::{
-    static_file::{BlockHashMask, HeaderMask},
-    tables,
-};
+use reth_db::{static_file::BlockHashMask, tables};
 use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
 use reth_node_types::{FullNodePrimitives, NodeTypesWithDB};
 use reth_primitives::{BlockBody, StaticFileSegment};
