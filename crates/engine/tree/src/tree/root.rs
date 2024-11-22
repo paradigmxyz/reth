@@ -22,14 +22,15 @@ use reth_trie_parallel::{proof::ParallelProof, root::ParallelStateRootError};
 use reth_trie_sparse::{SparseStateTrie, SparseStateTrieResult};
 use revm_primitives::{keccak256, EvmState, B256};
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::BTreeMap,
     sync::{
-        mpsc::{self, Receiver, RecvError},
+        mpsc::{self, Receiver, RecvError, Sender},
         Arc,
     },
+    thread,
     time::{Duration, Instant},
 };
-use tracing::{debug, error};
+use tracing::{debug, error, trace};
 
 /// The level below which the sparse trie hashes are calculated in [`update_sparse_trie`].
 const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
@@ -84,21 +85,81 @@ impl StdReceiverStream {
     }
 }
 
-type StateRootProofResult = (B256, MultiProof, TrieUpdates, Duration);
-type StateRootProofReceiver = mpsc::Receiver<ProviderResult<StateRootProofResult>>;
-
-enum StateRootTaskState {
-    Idle(MultiProof, B256),
-    Pending(MultiProof, StateRootProofReceiver),
+/// Messages that can be received by the state root task
+#[derive(Debug)]
+pub(crate) enum StateRootMessage {
+    /// New state update from transaction execution
+    StateUpdate(EvmState),
+    /// Input state stream has closed
+    InputStreamClosed,
+    /// Proof calculation completed for a specific state update
+    ProofCalculated {
+        /// The calculated proof
+        proof: MultiProof,
+        /// The index of this proof in the sequence of state updates
+        sequence_number: u64,
+    },
+    /// State root calculation completed
+    RootCalculated {
+        /// The calculated state root
+        root: B256,
+        /// The trie updates produced during calculation
+        updates: TrieUpdates,
+        /// Time taken to calculate the root
+        elapsed: Duration,
+    },
 }
 
-impl StateRootTaskState {
-    fn add_proofs(&mut self, proofs: MultiProof) {
-        match self {
-            Self::Idle(multiproof, _) | Self::Pending(multiproof, _) => {
-                multiproof.extend(proofs);
+/// Handle to track proof calculation ordering
+#[derive(Debug, Default)]
+pub(crate) struct ProofSequencer {
+    /// The next expected proof sequence number
+    next_sequence: u64,
+    /// Buffer for out-of-order proofs
+    pending_proofs: BTreeMap<u64, MultiProof>,
+}
+
+impl ProofSequencer {
+    /// Creates a new proof sequencer
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
+    /// Gets the next sequence number and increments the counter
+    pub(crate) fn next_sequence(&mut self) -> u64 {
+        let seq = self.next_sequence;
+        self.next_sequence += 1;
+        seq
+    }
+
+    /// Adds a proof and returns all sequential proofs if we have a continuous sequence
+    pub(crate) fn add_proof(&mut self, sequence: u64, proof: MultiProof) -> Vec<MultiProof> {
+        self.pending_proofs.insert(sequence, proof);
+
+        let mut has_next = true;
+        let mut ready_proofs = Vec::new();
+
+        while has_next {
+            has_next = false;
+
+            // find the lowest sequence number in pending proofs
+            if let Some((&lowest_seq, _)) = self.pending_proofs.iter().next() {
+                if lowest_seq <= self.next_sequence {
+                    if let Some(proof) = self.pending_proofs.remove(&lowest_seq) {
+                        has_next = true;
+                        ready_proofs.push(proof);
+                        self.next_sequence = lowest_seq + 1;
+                    }
+                }
             }
         }
+
+        ready_proofs
+    }
+
+    /// Returns true if we still have pending proofs
+    pub(crate) fn has_pending(&self) -> bool {
+        !self.pending_proofs.is_empty()
     }
 }
 
@@ -110,19 +171,22 @@ impl StateRootTaskState {
 /// fetches the proofs for relevant accounts from the database and reveal them
 /// to the tree.
 /// Then it updates relevant leaves according to the result of the transaction.
-#[allow(dead_code)]
+#[derive(Debug)]
 pub(crate) struct StateRootTask<Factory> {
-    /// Incoming state updates.
-    state_stream: StdReceiverStream,
-    /// Task configuration.
+    /// Internal channel for receiving all state root related messages
+    rx: Receiver<StateRootMessage>,
+    /// Internal channel for sending messages to the state root task
+    tx: Sender<StateRootMessage>,
+    /// Task configuration
     config: StateRootConfig<Factory>,
-    /// Current state.
+    /// Current state
     state: HashedPostState,
-    /// Channels to retrieve proof calculation results from.
-    pending_proofs: VecDeque<Receiver<Result<MultiProof, ParallelStateRootError>>>,
-    /// Prevents triggering state root calculation and returning the final result
-    /// without all the ongoing proof calculations received.
-    pending_calculation: bool,
+    /// Proof sequencing handler
+    proof_sequencer: ProofSequencer,
+    /// Whether we're currently calculating a root
+    calculating_root: bool,
+    /// Background thread handle for input state stream processing
+    _stream_handler: Option<thread::JoinHandle<()>>,
 }
 
 #[allow(dead_code)]
@@ -130,14 +194,42 @@ impl<Factory> StateRootTask<Factory>
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + Send + Sync + 'static,
 {
-    /// Creates a new `StateRootTask`.
+    /// Creates a new state root task with the unified message channel
     pub(crate) fn new(config: StateRootConfig<Factory>, state_stream: StdReceiverStream) -> Self {
+        let (tx, rx) = mpsc::channel();
+
+        // spawn a background thread to forward state updates from StdReceiverStream
+        // to our internal message channel
+        let stream_tx = tx.clone();
+        let stream_handler = thread::Builder::new()
+            .name("State Stream Handler".to_string())
+            .spawn(move || {
+                loop {
+                    match state_stream.recv() {
+                        Ok(state) => {
+                            if stream_tx.send(StateRootMessage::StateUpdate(state)).is_err() {
+                                break;
+                            }
+                        }
+                        Err(_) => {
+                            // stream closed normally
+                            debug!(target: "engine::root", "State stream closed normally");
+                            let _ = stream_tx.send(StateRootMessage::InputStreamClosed);
+                            break;
+                        }
+                    }
+                }
+            })
+            .expect("failed to spawn stream handler thread");
+
         Self {
             config,
-            state_stream,
+            rx,
+            tx,
             state: Default::default(),
-            pending_proofs: Default::default(),
-            pending_calculation: false,
+            proof_sequencer: ProofSequencer::new(),
+            calculating_root: false,
+            _stream_handler: Some(stream_handler),
         }
     }
 
@@ -162,7 +254,8 @@ where
         input: Arc<TrieInput>,
         update: EvmState,
         state: &mut HashedPostState,
-        pending_proofs: &mut VecDeque<Receiver<Result<MultiProof, ParallelStateRootError>>>,
+        proof_sequence_number: u64,
+        state_root_message_sender: Sender<StateRootMessage>,
     ) {
         let mut hashed_state_update = HashedPostState::default();
         for (address, account) in update {
@@ -202,127 +295,192 @@ where
             }))
             .collect::<HashMap<_, _>>();
 
-        let (tx, rx) = mpsc::sync_channel(1);
         rayon::spawn(move || {
             let result = ParallelProof::new(view, input).multiproof(targets);
-            if let Err(ref e) = result {
-                error!(target: "engine::root", error = ?e, "Could not calculate multiproof");
-            }
-
-            if let Err(e) = tx.send(result) {
-                error!(target: "engine::root", error = ?e, "Could not send multiproof result");
+            match result {
+                Ok(proof) => {
+                    let _ = state_root_message_sender.send(StateRootMessage::ProofCalculated {
+                        proof,
+                        sequence_number: proof_sequence_number,
+                    });
+                }
+                Err(e) => {
+                    error!(target: "engine::root", error = ?e, "Could not calculate multiproof");
+                }
             }
         });
-
-        pending_proofs.push_back(rx);
 
         state.extend(hashed_state_update);
     }
 
+    /// Handler for new proof calculated, aggregates all the existing sequential proofs.
+    fn on_proof(&mut self, proof: MultiProof, sequence_number: u64) -> Option<MultiProof> {
+        let ready_proofs = self.proof_sequencer.add_proof(sequence_number, proof);
+
+        if ready_proofs.is_empty() {
+            None
+        } else {
+            // combine all ready proofs into one
+            ready_proofs.into_iter().reduce(|mut acc, proof| {
+                acc.extend(proof);
+                acc
+            })
+        }
+    }
+
+    /// Spawns root calculation with the current state and proofs
+    fn spawn_root_calculation(&mut self, multiproof: MultiProof) {
+        trace!(
+            target: "engine::root",
+            account_proofs = multiproof.account_subtree.len(),
+            storage_proofs = multiproof.storages.len(),
+            "Spawning root calculation"
+        );
+
+        let tx = self.tx.clone();
+        let view = self.config.consistent_view.clone();
+        let input = self.config.input.clone();
+        let state = self.state.clone();
+
+        self.calculating_root = true;
+
+        rayon::spawn(move || {
+            let result = calculate_state_root_from_proofs(
+                view,
+                &input.nodes.clone().into_sorted(),
+                &input.state.clone().into_sorted(),
+                multiproof,
+                state,
+            );
+            match result {
+                Ok((root, updates, elapsed)) => {
+                    trace!(
+                        target: "engine::root",
+                        %root,
+                        ?elapsed,
+                        "Root calculation completed, sending result"
+                    );
+                    let _ = tx.send(StateRootMessage::RootCalculated { root, updates, elapsed });
+                }
+                Err(e) => {
+                    error!(target: "engine::root", error = ?e, "Could not calculate state root");
+                }
+            }
+        });
+    }
+
     fn run(mut self) -> StateRootResult {
-        let mut task_state = StateRootTaskState::Idle(MultiProof::default(), B256::default());
+        let mut current_multiproof = MultiProof::default();
         let mut trie_updates = TrieUpdates::default();
+        let mut current_root = B256::default();
+        let mut updates_received = 0;
+        let mut proofs_processed = 0;
+        let mut roots_calculated = 0;
+        let mut input_stream_closed = false;
 
         loop {
-            // try to receive state updates without blocking
-            match self.state_stream.rx.try_recv() {
-                Ok(update) => {
-                    debug!(target: "engine::root", len = update.len(), "Received new state update");
-                    Self::on_state_update(
-                        self.config.consistent_view.clone(),
-                        self.config.input.clone(),
-                        update,
-                        &mut self.state,
-                        &mut self.pending_proofs,
-                    );
-                    continue;
-                }
-                Err(mpsc::TryRecvError::Empty) => {
-                    // no new state updates available, continue with other operations
-                }
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    // state stream closed, check if we can finish
-                    if self.pending_proofs.is_empty() && !self.pending_calculation {
-                        if let StateRootTaskState::Idle(_multiproof, state_root) = &task_state {
-                            return Ok((*state_root, trie_updates));
-                        }
+            match self.rx.recv() {
+                Ok(message) => match message {
+                    StateRootMessage::StateUpdate(update) => {
+                        updates_received += 1;
+                        trace!(
+                            target: "engine::root",
+                            len = update.len(),
+                            total_updates = updates_received,
+                            "Received new state update"
+                        );
+                        Self::on_state_update(
+                            self.config.consistent_view.clone(),
+                            self.config.input.clone(),
+                            update,
+                            &mut self.state,
+                            self.proof_sequencer.next_sequence(),
+                            self.tx.clone(),
+                        );
                     }
-                }
-            }
+                    StateRootMessage::ProofCalculated { proof, sequence_number } => {
+                        proofs_processed += 1;
+                        trace!(
+                            target: "engine::root",
+                            sequence = sequence_number,
+                            total_proofs = proofs_processed,
+                            "Processing calculated proof"
+                        );
 
-            // check pending proofs
-            while let Some(proof_rx) = self.pending_proofs.front() {
-                match proof_rx.try_recv() {
-                    Ok(result) => {
-                        let multiproof = result?;
-                        task_state.add_proofs(multiproof);
-                        self.pending_proofs.pop_front();
-                        self.pending_calculation = true;
-                        continue;
-                    }
-                    Err(mpsc::TryRecvError::Empty) => {
-                        // this proof is not ready yet
-                        break;
-                    }
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        // channel was closed without sending a result
-                        return Err(ParallelStateRootError::Other(
-                            "Proof calculation task terminated unexpectedly".into(),
-                        ));
-                    }
-                }
-            }
-
-            // handle task state transitions
-            match &mut task_state {
-                StateRootTaskState::Pending(multiproof, rx) => {
-                    match rx.try_recv() {
-                        Ok(result) => match result {
-                            Ok((state_root, mut new_multiproof, new_trie_updates, elapsed)) => {
-                                debug!(target: "engine::root", %state_root, ?elapsed, "Computed intermediate root");
-                                trie_updates.extend(new_trie_updates);
-                                new_multiproof.extend(std::mem::take(multiproof));
-                                task_state = StateRootTaskState::Idle(new_multiproof, state_root);
-                                continue;
+                        if let Some(combined_proof) = self.on_proof(proof, sequence_number) {
+                            if self.calculating_root {
+                                current_multiproof.extend(combined_proof);
+                            } else {
+                                self.spawn_root_calculation(combined_proof);
                             }
-                            Err(e) => return Err(ParallelStateRootError::Provider(e)),
-                        },
-                        Err(mpsc::TryRecvError::Empty) => {
-                            // root calculation not ready yet
-                        }
-                        Err(mpsc::TryRecvError::Disconnected) => {
-                            return Err(ParallelStateRootError::Other(
-                                "Root calculation task terminated unexpectedly".into(),
-                            ));
                         }
                     }
-                }
-                StateRootTaskState::Idle(multiproof, _) => {
-                    if self.pending_calculation {
-                        debug!(target: "engine::root", accounts_len = self.state.accounts.len(), "Spawning state root calculation from proofs task");
-                        let view = self.config.consistent_view.clone();
-                        let input_nodes_sorted = self.config.input.nodes.clone().into_sorted();
-                        let input_state_sorted = self.config.input.state.clone().into_sorted();
-                        let multiproof = std::mem::take(multiproof);
-                        let state = self.state.clone();
-                        let (tx, rx) = mpsc::sync_channel(1);
+                    StateRootMessage::RootCalculated { root, updates, elapsed } => {
+                        roots_calculated += 1;
+                        trace!(
+                            target: "engine::root",
+                            %root,
+                            ?elapsed,
+                            roots_calculated,
+                            "Computed intermediate root"
+                        );
+                        current_root = root;
+                        trie_updates.extend(updates);
+                        self.calculating_root = false;
 
-                        rayon::spawn(move || {
-                            let result = calculate_state_root_from_proofs(
-                                view,
-                                &input_nodes_sorted,
-                                &input_state_sorted,
-                                multiproof,
-                                state,
+                        // only spawn new calculation if we have accumulated new proofs
+                        if !current_multiproof.account_subtree.is_empty() ||
+                            !current_multiproof.storages.is_empty()
+                        {
+                            trace!(
+                                target: "engine::root",
+                                account_proofs = current_multiproof.account_subtree.len(),
+                                storage_proofs = current_multiproof.storages.len(),
+                                "Spawning subsequent root calculation"
                             );
-                            let _ = tx.send(result);
-                        });
-
-                        self.pending_calculation = false;
-
-                        task_state = StateRootTaskState::Pending(Default::default(), rx);
-                        continue;
+                            self.spawn_root_calculation(std::mem::take(&mut current_multiproof));
+                        } else if input_stream_closed &&
+                            proofs_processed >= updates_received &&
+                            !self.proof_sequencer.has_pending()
+                        {
+                            debug!(
+                                target: "engine::root",
+                                total_updates = updates_received,
+                                total_proofs = proofs_processed,
+                                roots_calculated,
+                                "All proofs processed, ending calculation"
+                            );
+                            return Ok((current_root, trie_updates));
+                        }
                     }
+                    StateRootMessage::InputStreamClosed => {
+                        trace!(
+                            target: "engine::root",
+                            updates = updates_received,
+                            proofs = proofs_processed,
+                            "Input state stream closed"
+                        );
+                        input_stream_closed = true;
+
+                        // check if we can finish immediately
+                        if !self.calculating_root &&
+                            !self.proof_sequencer.has_pending() &&
+                            proofs_processed >= updates_received
+                        {
+                            return Ok((current_root, trie_updates));
+                        }
+                    }
+                },
+                Err(_) => {
+                    // this means our internal message channel is closed, which shouldn't happen
+                    // in normal operation since we hold both ends
+                    error!(
+                        target: "engine::root",
+                        "Internal message channel closed unexpectedly"
+                    );
+                    return Err(ParallelStateRootError::Other(
+                        "Internal message channel closed unexpectedly".into(),
+                    ));
                 }
             }
         }
@@ -336,7 +494,7 @@ pub fn calculate_state_root_from_proofs<Factory>(
     input_state_sorted: &HashedPostStateSorted,
     multiproof: MultiProof,
     state: HashedPostState,
-) -> ProviderResult<(B256, MultiProof, TrieUpdates, Duration)>
+) -> ProviderResult<(B256, TrieUpdates, Duration)>
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone,
 {
@@ -469,7 +627,7 @@ where
         Ok(node)
     })?;
 
-    Ok((state_root, multiproof, Default::default(), started_at.elapsed()))
+    Ok((state_root, Default::default(), started_at.elapsed()))
 }
 
 /// Updates the sparse trie with the given proofs and state, and returns the updated trie and the
@@ -612,6 +770,8 @@ mod tests {
 
     #[test]
     fn test_state_root_task() {
+        reth_tracing::init_test_tracing();
+
         let factory = create_test_provider_factory();
         let (tx, rx) = std::sync::mpsc::channel();
         let stream = StdReceiverStream::new(rx);
