@@ -2,7 +2,7 @@
 
 use alloc::vec::Vec;
 use alloy_consensus::{
-    transaction::RlpEcdsaTx, SignableTransaction, Transaction as _, TxEip1559, TxEip2930,
+    transaction::RlpEcdsaTx, SignableTransaction, Signed, Transaction as _, TxEip1559, TxEip2930,
     TxEip4844, TxEip7702, TxLegacy,
 };
 use alloy_eips::{
@@ -1263,6 +1263,12 @@ impl TransactionSigned {
         keccak256(self.encoded_2718())
     }
 
+    /// Splits the transaction into parts.
+    pub fn into_parts(self) -> (Transaction, Signature, B256) {
+        let hash = self.hash();
+        (self.transaction, self.signature, hash)
+    }
+
     /// Decodes legacy transaction from the data buffer into a tuple.
     ///
     /// This expects `rlp(legacy_tx)`
@@ -1628,6 +1634,35 @@ impl Decodable2718 for TransactionSigned {
 
     fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
         Ok(Self::decode_rlp_legacy_transaction(buf)?)
+    }
+}
+
+macro_rules! impl_from_signed {
+    ($($tx:ident),*) => {
+        $(
+            impl From<Signed<$tx>> for TransactionSigned {
+                fn from(value: Signed<$tx>) -> Self {
+                    let(tx,sig,hash) = value.into_parts();
+                    Self::new(tx.into(), sig, hash)
+                }
+            }
+        )*
+    };
+}
+
+impl_from_signed!(TxLegacy, TxEip2930, TxEip1559, TxEip7702, TxEip4844);
+
+impl From<Signed<Transaction>> for TransactionSigned {
+    fn from(value: Signed<Transaction>) -> Self {
+        let (tx, sig, hash) = value.into_parts();
+        Self::new(tx, sig, hash)
+    }
+}
+
+impl From<TransactionSigned> for Signed<Transaction> {
+    fn from(value: TransactionSigned) -> Self {
+        let (tx, sig, hash) = value.into_parts();
+        Self::new_unchecked(tx, sig, hash)
     }
 }
 
