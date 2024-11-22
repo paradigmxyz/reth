@@ -14,7 +14,6 @@ use reth_db::static_file::{
     BlockHashMask, HeaderMask, HeaderWithHashMask, ReceiptMask, StaticFileCursor, TDWithHashMask,
     TotalDifficultyMask, TransactionMask,
 };
-use reth_db_api::models::CompactU256;
 use reth_node_types::NodePrimitives;
 use reth_primitives::{
     Receipt, SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
