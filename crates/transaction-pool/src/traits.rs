@@ -1245,15 +1245,7 @@ impl PoolTransaction for EthPooledTransaction {
     ///
     /// This is also commonly referred to as the "Gas Fee Cap" (`GasFeeCap`).
     fn max_fee_per_gas(&self) -> u128 {
-        #[allow(unreachable_patterns)]
-        match &self.transaction.transaction {
-            Transaction::Legacy(tx) => tx.gas_price,
-            Transaction::Eip2930(tx) => tx.gas_price,
-            Transaction::Eip1559(tx) => tx.max_fee_per_gas,
-            Transaction::Eip4844(tx) => tx.max_fee_per_gas,
-            Transaction::Eip7702(tx) => tx.max_fee_per_gas,
-            _ => 0,
-        }
+        self.transaction.transaction.max_fee_per_gas()
     }
 
     fn access_list(&self) -> Option<&AccessList> {
@@ -1264,14 +1256,7 @@ impl PoolTransaction for EthPooledTransaction {
     ///
     /// This will return `None` for non-EIP1559 transactions
     fn max_priority_fee_per_gas(&self) -> Option<u128> {
-        #[allow(unreachable_patterns, clippy::match_same_arms)]
-        match &self.transaction.transaction {
-            Transaction::Legacy(_) | Transaction::Eip2930(_) => None,
-            Transaction::Eip1559(tx) => Some(tx.max_priority_fee_per_gas),
-            Transaction::Eip4844(tx) => Some(tx.max_priority_fee_per_gas),
-            Transaction::Eip7702(tx) => Some(tx.max_priority_fee_per_gas),
-            _ => None,
-        }
+        self.transaction.transaction.max_priority_fee_per_gas()
     }
 
     fn max_fee_per_blob_gas(&self) -> Option<u128> {
