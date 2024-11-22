@@ -50,17 +50,6 @@ use crate::{
     OpEngineTypes,
 };
 
-/// Optimism primitive types.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct OpPrimitives;
-
-impl NodePrimitives for OpPrimitives {
-    type Block = Block;
-    type SignedTx = TransactionSigned;
-    type TxType = TxType;
-    type Receipt = Receipt;
-}
-
 /// Storage implementation for Optimism.
 #[derive(Debug, Default, Clone)]
 pub struct OpStorage(EthStorage);
