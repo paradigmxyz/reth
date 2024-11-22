@@ -49,7 +49,7 @@ use reth_network_p2p::{
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
 use reth_primitives::{PooledTransactionsElement, TransactionSigned};
-use reth_primitives_traits::{SignedTransaction, TransactionExt, TxType};
+use reth_primitives_traits::{SignedTransaction, TxType};
 use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
     error::{PoolError, PoolResult},
@@ -736,7 +736,7 @@ where
             // Iterate through the transactions to propagate and fill the hashes and full
             // transaction
             for tx in to_propagate {
-                if !peer.seen_transactions.contains(&tx.hash()) {
+                if !peer.seen_transactions.contains(tx.tx_hash()) {
                     // Only include if the peer hasn't seen the transaction
                     full_transactions.push(&tx);
                 }
@@ -815,7 +815,7 @@ where
                 hashes.extend(to_propagate)
             } else {
                 for tx in to_propagate {
-                    if !peer.seen_transactions.contains(&tx.hash()) {
+                    if !peer.seen_transactions.contains(tx.tx_hash()) {
                         // Include if the peer hasn't seen it
                         hashes.push(&tx);
                     }
@@ -885,7 +885,7 @@ where
                 for tx in &to_propagate {
                     // Only proceed if the transaction is not in the peer's list of seen
                     // transactions
-                    if !peer.seen_transactions.contains(&tx.hash()) {
+                    if !peer.seen_transactions.contains(tx.tx_hash()) {
                         builder.push(tx);
                     }
                 }
@@ -1486,8 +1486,8 @@ impl<T: SignedTransaction> PropagateTransaction<T> {
         Self { size, transaction }
     }
 
-    fn hash(&self) -> TxHash {
-        *self.transaction.tx_hash()
+    fn tx_hash(&self) -> &TxHash {
+        self.transaction.tx_hash()
     }
 }
 
@@ -1607,6 +1607,7 @@ impl<T: SignedTransaction> FullTransactionsBuilder<T> {
     ///
     /// If the transaction is unsuitable for broadcast or would exceed the softlimit, it is appended
     /// to list of pooled transactions, (e.g. 4844 transactions).
+    /// See also [`TxType::is_broadcastable_in_full`].
     fn push(&mut self, transaction: &PropagateTransaction<T>) {
         // Do not send full 4844 transaction hashes to peers.
         //
@@ -1616,7 +1617,7 @@ impl<T: SignedTransaction> FullTransactionsBuilder<T> {
         //  via `GetPooledTransactions`.
         //
         // From: <https://eips.ethereum.org/EIPS/eip-4844#networking>
-        if transaction.transaction.transaction().tx_type().is_eip4844() {
+        if !transaction.transaction.tx_type().is_broadcastable_in_full() {
             self.pooled.push(transaction);
             return
         }
@@ -1678,11 +1679,11 @@ impl PooledTransactionsHashesBuilder {
 
     fn push<T: SignedTransaction>(&mut self, tx: &PropagateTransaction<T>) {
         match self {
-            Self::Eth66(msg) => msg.0.push(tx.hash()),
+            Self::Eth66(msg) => msg.0.push(*tx.tx_hash()),
             Self::Eth68(msg) => {
-                msg.hashes.push(tx.hash());
+                msg.hashes.push(*tx.tx_hash());
                 msg.sizes.push(tx.size);
-                msg.types.push(tx.transaction.transaction().tx_type().into());
+                msg.types.push(tx.transaction.tx_type().into());
             }
         }
     }
@@ -2177,7 +2178,7 @@ mod tests {
         .await;
 
         assert!(!pool.is_empty());
-        assert!(pool.get(&signed_tx.hash).is_some());
+        assert!(pool.get(signed_tx.hash_ref()).is_some());
         handle.terminate().await;
     }
 

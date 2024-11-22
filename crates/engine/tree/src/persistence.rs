@@ -3,7 +3,7 @@ use alloy_eips::BlockNumHash;
 use reth_chain_state::ExecutedBlock;
 use reth_errors::ProviderError;
 use reth_primitives::BlockBody;
-use reth_primitives_traits::{Block, FullNodePrimitives};
+use reth_primitives_traits::FullNodePrimitives;
 use reth_provider::{
     providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockHashReader,
     ChainStateBlockWriter, DatabaseProviderFactory, ProviderFactory, StaticFileProviderFactory,
@@ -21,11 +21,11 @@ use tracing::{debug, error};
 /// A helper trait with requirements for [`ProviderNodeTypes`] to be used within
 /// [`PersistenceService`].
 pub trait PersistenceNodeTypes:
-    ProviderNodeTypes<Primitives: FullNodePrimitives<Block: Block<Body = BlockBody>>>
+    ProviderNodeTypes<Primitives: FullNodePrimitives<BlockBody = BlockBody>>
 {
 }
 impl<T> PersistenceNodeTypes for T where
-    T: ProviderNodeTypes<Primitives: FullNodePrimitives<Block: Block<Body = BlockBody>>>
+    T: ProviderNodeTypes<Primitives: FullNodePrimitives<BlockBody = BlockBody>>
 {
 }
 /// Writes parts of reth's in memory tree state to the database and static files.

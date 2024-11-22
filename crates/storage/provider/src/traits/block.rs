@@ -5,7 +5,6 @@ use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::SealedBlockWithSenders;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{updates::TrieUpdates, HashedPostStateSorted};
-use std::ops::RangeInclusive;
 
 /// An enum that represents the storage location for a piece of data.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -33,16 +32,22 @@ impl StorageLocation {
 /// BlockExecution Writer
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait BlockExecutionWriter: BlockWriter + Send + Sync {
-    /// Take range of blocks and its execution result
-    fn take_block_and_execution_range(
+    /// Take all of the blocks above the provided number and their execution result
+    ///
+    /// The passed block number will stay in the database.
+    fn take_block_and_execution_above(
         &self,
-        range: RangeInclusive<BlockNumber>,
+        block: BlockNumber,
+        remove_transactions_from: StorageLocation,
     ) -> ProviderResult<Chain>;
 
-    /// Remove range of blocks and its execution result
-    fn remove_block_and_execution_range(
+    /// Remove all of the blocks above the provided number and their execution result
+    ///
+    /// The passed block number will stay in the database.
+    fn remove_block_and_execution_above(
         &self,
-        range: RangeInclusive<BlockNumber>,
+        block: BlockNumber,
+        remove_transactions_from: StorageLocation,
     ) -> ProviderResult<()>;
 }
 
@@ -79,6 +84,22 @@ pub trait BlockWriter: Send + Sync {
         &self,
         bodies: Vec<(BlockNumber, Option<Self::Body>)>,
         write_transactions_to: StorageLocation,
+    ) -> ProviderResult<()>;
+
+    /// Removes all blocks above the given block number from the database.
+    ///
+    /// Note: This does not remove state or execution data.
+    fn remove_blocks_above(
+        &self,
+        block: BlockNumber,
+        remove_transactions_from: StorageLocation,
+    ) -> ProviderResult<()>;
+
+    /// Removes all block bodies above the given block number from the database.
+    fn remove_bodies_above(
+        &self,
+        block: BlockNumber,
+        remove_transactions_from: StorageLocation,
     ) -> ProviderResult<()>;
 
     /// Appends a batch of sealed blocks to the blockchain, including sender information, and

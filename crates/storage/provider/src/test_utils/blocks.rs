@@ -89,7 +89,7 @@ pub(crate) static TEST_BLOCK: LazyLock<SealedBlock> = LazyLock::new(|| SealedBlo
     ),
     body: BlockBody {
         transactions: vec![TransactionSigned {
-            hash: hex!("3541dd1d17e76adeb25dcf2b0a9b60a1669219502e58dcf26a2beafbfb550397").into(),
+            hash: b256!("3541dd1d17e76adeb25dcf2b0a9b60a1669219502e58dcf26a2beafbfb550397").into(),
             signature: Signature::new(
                 U256::from_str(
                     "51983300959770368863831494747186777928121405155922056726144551509338672451120",

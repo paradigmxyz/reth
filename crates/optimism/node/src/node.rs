@@ -62,6 +62,14 @@ impl<Provider: DBProvider<Tx: DbTxMut>> BlockBodyWriter<Provider, BlockBody> for
     ) -> ProviderResult<()> {
         self.0.write_block_bodies(provider, bodies)
     }
+
+    fn remove_block_bodies_above(
+        &self,
+        provider: &Provider,
+        block: alloy_primitives::BlockNumber,
+    ) -> ProviderResult<()> {
+        self.0.remove_block_bodies_above(provider, block)
+    }
 }
 
 impl ChainStorage<OpPrimitives> for OpStorage {
