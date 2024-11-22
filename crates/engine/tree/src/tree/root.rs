@@ -134,17 +134,22 @@ impl ProofSequencer {
 
     /// Adds a proof and returns all sequential proofs if we have a continuous sequence
     pub(crate) fn add_proof(&mut self, sequence: u64, proof: MultiProof) -> Vec<MultiProof> {
-        self.next_sequence = self.next_sequence.max(sequence + 1);
-        self.pending_proofs.insert(sequence, proof);
-        let mut ready_proofs = Vec::with_capacity(self.pending_proofs.len());
-
-        while let Some((&lowest_seq, _)) = self.pending_proofs.iter().next() {
-            if let Some(proof) = self.pending_proofs.remove(&lowest_seq) {
-                ready_proofs.push(proof);
-            }
+        if sequence < self.next_sequence {
+            return vec![proof];
         }
 
-        ready_proofs
+        // Insert the new proof into pending proofs
+        self.pending_proofs.insert(sequence, proof);
+
+        let mut consecutive_proofs = Vec::with_capacity(self.pending_proofs.len());
+
+        // Keep taking proofs from pending_proofs as long as they form a consecutive sequence
+        while let Some(proof) = self.pending_proofs.remove(&self.next_sequence) {
+            consecutive_proofs.push(proof);
+            self.next_sequence += 1;
+        }
+
+        consecutive_proofs
     }
 
     /// Returns true if we still have pending proofs
