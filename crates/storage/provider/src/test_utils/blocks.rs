@@ -88,9 +88,14 @@ pub(crate) static TEST_BLOCK: LazyLock<SealedBlock> = LazyLock::new(|| SealedBlo
         hex!("cf7b274520720b50e6a4c3e5c4d553101f44945396827705518ce17cb7219a42").into(),
     ),
     body: BlockBody {
-        transactions: vec![TransactionSigned {
-            hash: b256!("3541dd1d17e76adeb25dcf2b0a9b60a1669219502e58dcf26a2beafbfb550397").into(),
-            signature: Signature::new(
+        transactions: vec![TransactionSigned::new(
+            Transaction::Legacy(TxLegacy {
+                gas_price: 10,
+                gas_limit: 400_000,
+                to: TxKind::Call(hex!("095e7baea6a6c7c4c2dfeb977efac326af552d87").into()),
+                ..Default::default()
+            }),
+            Signature::new(
                 U256::from_str(
                     "51983300959770368863831494747186777928121405155922056726144551509338672451120",
                 )
@@ -101,13 +106,8 @@ pub(crate) static TEST_BLOCK: LazyLock<SealedBlock> = LazyLock::new(|| SealedBlo
                 .unwrap(),
                 false,
             ),
-            transaction: Transaction::Legacy(TxLegacy {
-                gas_price: 10,
-                gas_limit: 400_000,
-                to: TxKind::Call(hex!("095e7baea6a6c7c4c2dfeb977efac326af552d87").into()),
-                ..Default::default()
-            }),
-        }],
+            b256!("3541dd1d17e76adeb25dcf2b0a9b60a1669219502e58dcf26a2beafbfb550397"),
+        )],
         ..Default::default()
     },
 });
