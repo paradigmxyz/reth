@@ -601,19 +601,8 @@ impl RevealedSparseTrie {
 
     /// Wipe the trie, removing all values and nodes, and replacing the root with an empty node.
     pub fn wipe(&mut self) -> SparseTrieResult<()> {
-        let updates = self.updates.as_ref().map(|_| {
-            let mut updates = SparseTrieUpdates::default();
-            for (path, node) in self.nodes.drain() {
-                if matches!(node, SparseNode::Branch { .. }) {
-                    updates.removed_nodes.insert(path);
-                }
-            }
-
-            updates
-        });
         *self = Self::default();
         self.prefix_set = PrefixSetMut::all();
-        self.updates = updates;
         Ok(())
     }
 
@@ -2069,17 +2058,5 @@ mod tests {
         sparse.wipe().unwrap();
 
         assert_eq!(sparse.root(), EMPTY_ROOT_HASH);
-        assert_eq!(
-            sparse.take_updates(),
-            SparseTrieUpdates {
-                removed_nodes: HashSet::from_iter([
-                    Nibbles::from_nibbles([0x5]),
-                    Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3]),
-                    Nibbles::from_nibbles([0x5, 0x3]),
-                    Nibbles::from_nibbles([0x5, 0x3, 0x3])
-                ]),
-                updated_nodes: Default::default()
-            }
-        );
     }
 }
