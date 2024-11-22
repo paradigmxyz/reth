@@ -136,7 +136,7 @@ are only a few cases of changing data.
 | _DELETING_|||
 |Key is absent → Error since no such key      |\ref mdbx_del() or \ref mdbx_replace()|Error \ref MDBX_NOTFOUND|
 |Key exist → Delete by key                    |\ref mdbx_del() with the parameter `data = NULL`|Deletion|
-|Key exist → Delete by key with with data matching check|\ref mdbx_del() with the parameter `data` filled with the value which should be match for deletion|Deletion or \ref MDBX_NOTFOUND if the value does not match|
+|Key exist → Delete by key with data matching check|\ref mdbx_del() with the parameter `data` filled with the value which should be match for deletion|Deletion or \ref MDBX_NOTFOUND if the value does not match|
 |Delete at the current cursor position        |\ref mdbx_cursor_del() with \ref MDBX_CURRENT flag|Deletion|
 |Extract (read & delete) value by the key     |\ref mdbx_replace() with zero flag and parameter `new_data = NULL`|Returning a deleted value|
 
@@ -5264,7 +5264,7 @@ LIBMDBX_API int mdbx_dbi_sequence(MDBX_txn *txn, MDBX_dbi dbi, uint64_t *result,
  * This returns a comparison as if the two data items were keys in the
  * specified database.
  *
- * \warning There ss a Undefined behavior if one of arguments is invalid.
+ * \warning There is a Undefined behavior if one of arguments is invalid.
  *
  * \param [in] txn   A transaction handle returned by \ref mdbx_txn_begin().
  * \param [in] dbi   A database handle returned by \ref mdbx_dbi_open().
