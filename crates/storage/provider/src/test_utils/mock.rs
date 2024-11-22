@@ -263,7 +263,7 @@ impl TransactionsProvider for MockEthProvider {
         Ok(transaction)
     }
 
-    fn transaction_by_id_no_hash(
+    fn transaction_by_id_unhashed(
         &self,
         id: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {

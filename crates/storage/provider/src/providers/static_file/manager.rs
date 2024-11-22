@@ -1463,12 +1463,12 @@ impl<N: NodePrimitives> TransactionsProvider for StaticFileProvider<N> {
             })
     }
 
-    fn transaction_by_id_no_hash(
+    fn transaction_by_id_unhashed(
         &self,
         num: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
         self.get_segment_provider_from_transaction(StaticFileSegment::Transactions, num, None)
-            .and_then(|provider| provider.transaction_by_id_no_hash(num))
+            .and_then(|provider| provider.transaction_by_id_unhashed(num))
             .or_else(|err| {
                 if let ProviderError::MissingStaticFileTx(_, _) = err {
                     Ok(None)
@@ -1541,7 +1541,7 @@ impl<N: NodePrimitives> TransactionsProvider for StaticFileProvider<N> {
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
-        Ok(self.transaction_by_id_no_hash(id)?.and_then(|tx| tx.recover_signer()))
+        Ok(self.transaction_by_id_unhashed(id)?.and_then(|tx| tx.recover_signer()))
     }
 }
 
