@@ -87,7 +87,7 @@ where
             .iter()
             .filter_map(|(tx, _)| {
                 if let PooledTransactionsElement::BlobTransaction(tx) = tx {
-                    Some(tx.transaction.tx.blob_gas())
+                    Some(tx.tx().tx().blob_gas())
                 } else {
                     None
                 }
