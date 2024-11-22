@@ -2,7 +2,7 @@
 //!
 //! Log parsing for building filter.
 
-use alloy_eips::BlockNumHash;
+use alloy_eips::{eip2718::Encodable2718, BlockNumHash};
 use alloy_primitives::TxHash;
 use alloy_rpc_types_eth::{FilteredParams, Log};
 use reth_chainspec::ChainInfo;
@@ -110,7 +110,7 @@ pub fn append_matching_block_logs<P: BlockReader>(
                                     ProviderError::TransactionNotFound(transaction_id.into())
                                 })?;
 
-                            Some(transaction.hash())
+                            Some(transaction.trie_hash())
                         }
                     };
                 }

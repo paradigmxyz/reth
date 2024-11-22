@@ -25,7 +25,6 @@ use reth_node_types::NodeTypes;
 use reth_primitives::{
     Account, Block, BlockWithSenders, Bytecode, EthPrimitives, GotExpected, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
@@ -244,6 +243,8 @@ impl ChainSpecProvider for MockEthProvider {
 }
 
 impl TransactionsProvider for MockEthProvider {
+    type Transaction = TransactionSigned;
+
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         let lock = self.blocks.lock();
         let tx_number = lock
@@ -255,7 +256,7 @@ impl TransactionsProvider for MockEthProvider {
         Ok(tx_number)
     }
 
-    fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
+    fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
         let lock = self.blocks.lock();
         let transaction =
             lock.values().flat_map(|block| &block.body.transactions).nth(id as usize).cloned();
@@ -266,13 +267,10 @@ impl TransactionsProvider for MockEthProvider {
     fn transaction_by_id_unhashed(
         &self,
         id: TxNumber,
-    ) -> ProviderResult<Option<TransactionSignedNoHash>> {
+    ) -> ProviderResult<Option<Self::Transaction>> {
         let lock = self.blocks.lock();
-        let transaction = lock
-            .values()
-            .flat_map(|block| &block.body.transactions)
-            .nth(id as usize)
-            .map(|tx| Into::<TransactionSignedNoHash>::into(tx.clone()));
+        let transaction =
+            lock.values().flat_map(|block| &block.body.transactions).nth(id as usize).cloned();
 
         Ok(transaction)
     }
@@ -286,7 +284,7 @@ impl TransactionsProvider for MockEthProvider {
     fn transaction_by_hash_with_meta(
         &self,
         hash: TxHash,
-    ) -> ProviderResult<Option<(TransactionSigned, TransactionMeta)>> {
+    ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
         let lock = self.blocks.lock();
         for (block_hash, block) in lock.iter() {
             for (index, tx) in block.body.transactions.iter().enumerate() {
@@ -322,14 +320,14 @@ impl TransactionsProvider for MockEthProvider {
     fn transactions_by_block(
         &self,
         id: BlockHashOrNumber,
-    ) -> ProviderResult<Option<Vec<TransactionSigned>>> {
+    ) -> ProviderResult<Option<Vec<Self::Transaction>>> {
         Ok(self.block(id)?.map(|b| b.body.transactions))
     }
 
     fn transactions_by_block_range(
         &self,
         range: impl RangeBounds<alloy_primitives::BlockNumber>,
-    ) -> ProviderResult<Vec<Vec<TransactionSigned>>> {
+    ) -> ProviderResult<Vec<Vec<Self::Transaction>>> {
         // init btreemap so we can return in order
         let mut map = BTreeMap::new();
         for (_, block) in self.blocks.lock().iter() {
@@ -344,14 +342,14 @@ impl TransactionsProvider for MockEthProvider {
     fn transactions_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<reth_primitives::TransactionSignedNoHash>> {
+    ) -> ProviderResult<Vec<Self::Transaction>> {
         let lock = self.blocks.lock();
         let transactions = lock
             .values()
             .flat_map(|block| &block.body.transactions)
             .enumerate()
             .filter(|&(tx_number, _)| range.contains(&(tx_number as TxNumber)))
-            .map(|(_, tx)| tx.clone().into())
+            .map(|(_, tx)| tx.clone())
             .collect();
 
         Ok(transactions)
