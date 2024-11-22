@@ -1133,7 +1133,7 @@ impl EthPooledTransaction {
     /// Caution: In case of blob transactions, this does marks the blob sidecar as
     /// [`EthBlobTransactionSidecar::Missing`]
     pub fn new(transaction: TransactionSignedEcRecovered, encoded_length: usize) -> Self {
-        let blob_sidecar = EthBlobTransactionSidecar::None;
+        let mut blob_sidecar = EthBlobTransactionSidecar::None;
 
         let gas_cost = U256::from(transaction.transaction.max_fee_per_gas())
             .saturating_mul(U256::from(transaction.transaction.gas_limit()));
@@ -1145,6 +1145,10 @@ impl EthPooledTransaction {
             cost = cost.saturating_add(U256::from(
                 blob_tx.max_fee_per_blob_gas.saturating_mul(blob_tx.blob_gas() as u128),
             ));
+
+            // because the blob sidecar is not included in this transaction variant, mark it as
+            // missing
+            blob_sidecar = EthBlobTransactionSidecar::Missing;
         }
 
         Self { transaction, cost, encoded_length, blob_sidecar }
