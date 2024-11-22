@@ -221,7 +221,7 @@ impl<N: NodePrimitives> TransactionsProvider for StaticFileJarProvider<'_, N> {
             .map(|tx| tx.with_hash()))
     }
 
-    fn transaction_by_id_no_hash(
+    fn transaction_by_id_unhashed(
         &self,
         num: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {

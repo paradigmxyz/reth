@@ -433,15 +433,15 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ProviderFactory<N> {
         )
     }
 
-    fn transaction_by_id_no_hash(
+    fn transaction_by_id_unhashed(
         &self,
         id: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
         self.static_file_provider.get_with_static_file_or_database(
             StaticFileSegment::Transactions,
             id,
-            |static_file| static_file.transaction_by_id_no_hash(id),
-            || self.provider()?.transaction_by_id_no_hash(id),
+            |static_file| static_file.transaction_by_id_unhashed(id),
+            || self.provider()?.transaction_by_id_unhashed(id),
         )
     }
 

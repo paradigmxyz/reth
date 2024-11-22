@@ -200,7 +200,7 @@ impl TransactionsProvider for NoopProvider {
         Ok(None)
     }
 
-    fn transaction_by_id_no_hash(
+    fn transaction_by_id_unhashed(
         &self,
         _id: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
