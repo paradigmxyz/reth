@@ -134,7 +134,7 @@ pub fn append_matching_block_logs<P: BlockReader>(
             // Check if we have reached the max logs per response and return the last block if so
             if let Some(max_logs_per_response) = max_logs_per_response {
                 if log_index >= max_logs_per_response as u64 {
-                    return Ok(Some(block_num_hash.number - 1));
+                    return Ok(Some(block_num_hash.number.saturating_sub(1)));
                 }
             }
         }
