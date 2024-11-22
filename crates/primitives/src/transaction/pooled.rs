@@ -5,11 +5,7 @@ use super::{error::TransactionConversionError, signature::recover_signer, TxEip7
 use crate::{BlobTransaction, Transaction, TransactionSigned, TransactionSignedEcRecovered};
 use alloy_eips::eip4844::BlobTransactionSidecar;
 
-use alloy_consensus::{
-    constants::EIP4844_TX_TYPE_ID,
-    transaction::{RlpEcdsaTx, TxEip1559, TxEip2930, TxEip4844, TxLegacy},
-    SignableTransaction, TxEip4844WithSidecar,
-};
+use alloy_consensus::{constants::EIP4844_TX_TYPE_ID, transaction::{RlpEcdsaTx, TxEip1559, TxEip2930, TxEip4844, TxLegacy}, SignableTransaction, Signed, Transaction, TxEip4844WithSidecar};
 use alloy_eips::eip2718::{Decodable2718, Eip2718Result, Encodable2718};
 use alloy_primitives::{Address, PrimitiveSignature as Signature, TxHash, B256};
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
@@ -22,15 +18,15 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests)]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PooledTransactionsElement {
+    // /// An untagged [`TxLegacy`].
+    // Legacy(Signed<TxLegacy>),
+    // /// A [`TxEip2930`] tagged with type 1.
+    // Eip2930(Signed<TxEip2930>),
+    // /// A [`TxEip1559`] tagged with type 2.
+    // Eip1559(Signed<TxEip1559>),
+
     /// A legacy transaction
-    Legacy {
-        /// The inner transaction
-        transaction: TxLegacy,
-        /// The signature
-        signature: Signature,
-        /// The hash of the transaction
-        hash: TxHash,
-    },
+    Legacy(Signed<TxLegacy>),
     /// An EIP-2930 typed transaction
     Eip2930 {
         /// The inner transaction
@@ -72,7 +68,7 @@ impl PooledTransactionsElement {
         let hash = tx.hash();
         match tx {
             TransactionSigned { transaction: Transaction::Legacy(tx), signature, .. } => {
-                Ok(Self::Legacy { transaction: tx, signature, hash })
+                Ok(Self::Legacy(Signed::new_unchecked(tx, signature, hash)))
             }
             TransactionSigned { transaction: Transaction::Eip2930(tx), signature, .. } => {
                 Ok(Self::Eip2930 { transaction: tx, signature, hash })
@@ -121,7 +117,7 @@ impl PooledTransactionsElement {
     /// It is only for signature signing or signer recovery.
     pub fn signature_hash(&self) -> B256 {
         match self {
-            Self::Legacy { transaction, .. } => transaction.signature_hash(),
+            Self::Legacy(tx) => tx.signature_hash(),
             Self::Eip2930 { transaction, .. } => transaction.signature_hash(),
             Self::Eip1559 { transaction, .. } => transaction.signature_hash(),
             Self::Eip7702 { transaction, .. } => transaction.signature_hash(),
@@ -132,7 +128,7 @@ impl PooledTransactionsElement {
     /// Reference to transaction hash. Used to identify transaction.
     pub const fn hash(&self) -> &TxHash {
         match self {
-            Self::Legacy { hash, .. } |
+            Self::Legacy(tx) => tx.hash(),
             Self::Eip2930 { hash, .. } |
             Self::Eip1559 { hash, .. } |
             Self::Eip7702 { hash, .. } => hash,
@@ -143,7 +139,7 @@ impl PooledTransactionsElement {
     /// Returns the signature of the transaction.
     pub const fn signature(&self) -> &Signature {
         match self {
-            Self::Legacy { signature, .. } |
+            Self::Legacy(tx) => tx.signature(),
             Self::Eip2930 { signature, .. } |
             Self::Eip1559 { signature, .. } |
             Self::Eip7702 { signature, .. } => signature,
@@ -154,7 +150,7 @@ impl PooledTransactionsElement {
     /// Returns the transaction nonce.
     pub const fn nonce(&self) -> u64 {
         match self {
-            Self::Legacy { transaction, .. } => transaction.nonce,
+            Self::Legacy(tx) => tx.tx().nonce(),
             Self::Eip2930 { transaction, .. } => transaction.nonce,
             Self::Eip1559 { transaction, .. } => transaction.nonce,
             Self::Eip7702 { transaction, .. } => transaction.nonce,
@@ -189,7 +185,7 @@ impl PooledTransactionsElement {
     /// Returns the inner [`TransactionSigned`].
     pub fn into_transaction(self) -> TransactionSigned {
         match self {
-            Self::Legacy { transaction, signature, hash } => TransactionSigned {
+            Self::Legacy(tx) => TransactionSigned {
                 transaction: Transaction::Legacy(transaction),
                 signature,
                 hash: hash.into(),
