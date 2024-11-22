@@ -921,7 +921,15 @@ impl BestTransactionsAttributes {
     }
 }
 
-/// Trait for transaction types used inside the pool
+/// Trait for transaction types used inside the pool.
+///
+/// This supports two transaction formats
+/// - Consensus format: the form the transaction takes when it is included in a block.
+/// - Pooled format: the form the transaction takes when it is gossiping around the network.
+///
+/// This distinction is necessary for the EIP-4844 blob transactions, which require an additional
+/// sidecar when they are gossiped around the network. It is expected that the `Consensus` format is
+/// a subset of the `Pooled` format.
 pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
     /// Associated error type for the `try_from_consensus` method.
     type TryFromConsensusError;
@@ -1066,7 +1074,11 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
     }
 }
 
-/// Super trait for transactions that can be converted to and from Eth transactions
+/// Super trait for transactions that can be converted to and from Eth transactions intended for the
+/// ethereum style pool.
+///
+/// This extends the [`PoolTransaction`] trait with additional methods that are specific to the
+/// Ethereum pool.
 pub trait EthPoolTransaction:
     PoolTransaction<
     Consensus: From<TransactionSignedEcRecovered>
@@ -1097,9 +1109,9 @@ pub trait EthPoolTransaction:
 /// This type is essentially a wrapper around [`TransactionSignedEcRecovered`] with additional
 /// fields derived from the transaction that are frequently used by the pools for ordering.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EthPooledTransaction {
-    /// `EcRecovered` transaction info
-    pub(crate) transaction: TransactionSignedEcRecovered,
+pub struct EthPooledTransaction<T = TransactionSignedEcRecovered> {
+    /// `EcRecovered` transaction, the consensus format.
+    pub(crate) transaction: T,
 
     /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
@@ -1113,30 +1125,6 @@ pub struct EthPooledTransaction {
 
     /// The blob side car for this transaction
     pub(crate) blob_sidecar: EthBlobTransactionSidecar,
-}
-
-/// Represents the blob sidecar of the [`EthPooledTransaction`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EthBlobTransactionSidecar {
-    /// This transaction does not have a blob sidecar
-    None,
-    /// This transaction has a blob sidecar (EIP-4844) but it is missing
-    ///
-    /// It was either extracted after being inserted into the pool or re-injected after reorg
-    /// without the blob sidecar
-    Missing,
-    /// The eip-4844 transaction was pulled from the network and still has its blob sidecar
-    Present(BlobTransactionSidecar),
-}
-
-impl EthBlobTransactionSidecar {
-    /// Returns the blob sidecar if it is present
-    pub const fn maybe_sidecar(&self) -> Option<&BlobTransactionSidecar> {
-        match self {
-            Self::Present(sidecar) => Some(sidecar),
-            _ => None,
-        }
-    }
 }
 
 impl EthPooledTransaction {
@@ -1400,6 +1388,30 @@ impl TryFrom<TransactionSignedEcRecovered> for EthPooledTransaction {
 impl From<EthPooledTransaction> for TransactionSignedEcRecovered {
     fn from(tx: EthPooledTransaction) -> Self {
         tx.transaction
+    }
+}
+
+/// Represents the blob sidecar of the [`EthPooledTransaction`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EthBlobTransactionSidecar {
+    /// This transaction does not have a blob sidecar
+    None,
+    /// This transaction has a blob sidecar (EIP-4844) but it is missing
+    ///
+    /// It was either extracted after being inserted into the pool or re-injected after reorg
+    /// without the blob sidecar
+    Missing,
+    /// The eip-4844 transaction was pulled from the network and still has its blob sidecar
+    Present(BlobTransactionSidecar),
+}
+
+impl EthBlobTransactionSidecar {
+    /// Returns the blob sidecar if it is present
+    pub const fn maybe_sidecar(&self) -> Option<&BlobTransactionSidecar> {
+        match self {
+            Self::Present(sidecar) => Some(sidecar),
+            _ => None,
+        }
     }
 }
 
