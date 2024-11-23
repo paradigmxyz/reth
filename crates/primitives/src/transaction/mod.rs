@@ -14,10 +14,7 @@ use alloy_primitives::{
     keccak256, Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
 };
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
-use core::{
-    hash::{Hash, Hasher},
-    mem,
-};
+use core::hash::{Hash, Hasher};
 use derive_more::{AsRef, Deref};
 use once_cell as _;
 #[cfg(not(feature = "std"))]
@@ -1461,7 +1458,7 @@ impl InMemorySize for TransactionSigned {
     /// Calculate a heuristic for the in-memory size of the [`TransactionSigned`].
     #[inline]
     fn size(&self) -> usize {
-        mem::size_of::<TxHash>() + self.transaction.size() + mem::size_of::<Signature>()
+        self.hash().size() + self.transaction.size() + self.signature().size()
     }
 }
 
