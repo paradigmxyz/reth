@@ -1,11 +1,11 @@
-use alloy_eips::eip2718::Encodable2718;
-use reth_primitives_traits::{Block, BlockBody, SealedHeader, SignedTransaction};
-use revm_primitives::{Address, B256};
-
 use crate::{
     transaction::{recover_signers, recover_signers_unchecked},
     BlockWithSenders, SealedBlock,
 };
+use alloc::vec::Vec;
+use alloy_eips::eip2718::Encodable2718;
+use reth_primitives_traits::{Block, BlockBody, SealedHeader, SignedTransaction};
+use revm_primitives::{Address, B256};
 
 /// Extension trait for [`reth_primitives_traits::Block`] implementations
 /// allowing for conversions into common block parts containers such as [`SealedBlock`],
