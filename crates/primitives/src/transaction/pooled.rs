@@ -572,6 +572,12 @@ impl InMemorySize for PooledTransactionsElement {
     }
 }
 
+impl From<PooledTransactionsElementEcRecovered> for PooledTransactionsElement {
+    fn from(recovered: PooledTransactionsElementEcRecovered) -> Self {
+        recovered.into_transaction()
+    }
+}
+
 impl TryFrom<TransactionSigned> for PooledTransactionsElement {
     type Error = TransactionConversionError;
 
