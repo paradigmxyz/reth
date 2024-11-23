@@ -12,14 +12,41 @@ use derive_more::{
     Display,
 };
 use op_alloy_consensus::OpTxType as AlloyOpTxType;
-use reth_primitives_traits::InMemorySize;
+use reth_primitives_traits::{InMemorySize, TxType};
 
 /// Wrapper type for [`op_alloy_consensus::OpTxType`] to implement
-/// [`TxType`](reth_primitives_traits::TxType) trait.
+/// [`TxType`] trait.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Display, Ord, Hash, From, Into)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[into(u8)]
 pub struct OpTxType(AlloyOpTxType);
+
+impl TxType for OpTxType {
+    #[inline]
+    fn is_legacy(&self) -> bool {
+        matches!(self.0, AlloyOpTxType::Legacy)
+    }
+
+    #[inline]
+    fn is_eip2930(&self) -> bool {
+        matches!(self.0, AlloyOpTxType::Eip2930)
+    }
+
+    #[inline]
+    fn is_eip1559(&self) -> bool {
+        matches!(self.0, AlloyOpTxType::Eip1559)
+    }
+
+    #[inline]
+    fn is_eip4844(&self) -> bool {
+        false
+    }
+
+    #[inline]
+    fn is_eip7702(&self) -> bool {
+        matches!(self.0, AlloyOpTxType::Eip7702)
+    }
+}
 
 impl InMemorySize for OpTxType {
     /// Calculates a heuristic for the in-memory size of the [`OpTxType`].
