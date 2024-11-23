@@ -166,10 +166,9 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     where
         Self: 'static,
     {
-        let this = self.clone();
+        let provider = self.provider().clone();
         self.spawn_blocking_io(move |_| {
-            let (tx, meta) = match this
-                .provider()
+            let (tx, meta) = match provider
                 .transaction_by_hash_with_meta(hash)
                 .map_err(Self::Error::from_eth_err)?
             {
@@ -177,11 +176,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 None => return Ok(None),
             };
 
-            let receipt =
-                match this.provider().receipt_by_hash(hash).map_err(Self::Error::from_eth_err)? {
-                    Some(recpt) => recpt,
-                    None => return Ok(None),
-                };
+            let receipt = match provider.receipt_by_hash(hash).map_err(Self::Error::from_eth_err)? {
+                Some(recpt) => recpt,
+                None => return Ok(None),
+            };
 
             Ok(Some((tx, meta, receipt)))
         })
@@ -334,7 +332,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         tx: Bytes,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
         async move {
-            let recovered = recover_raw_transaction(tx.clone())?;
+            let recovered = recover_raw_transaction(tx)?;
             let pool_transaction =
                 <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered.into());
 
