@@ -76,8 +76,11 @@ impl PrunerBuilder {
     /// Builds a [Pruner] from the current configuration with the given provider factory.
     pub fn build_with_provider_factory<PF>(self, provider_factory: PF) -> Pruner<PF::ProviderRW, PF>
     where
-        PF: DatabaseProviderFactory<ProviderRW: PruneCheckpointWriter + BlockReader>
-            + StaticFileProviderFactory,
+        PF: DatabaseProviderFactory<
+                ProviderRW: PruneCheckpointWriter + BlockReader + StaticFileProviderFactory,
+            > + StaticFileProviderFactory<
+                Primitives = <PF::ProviderRW as StaticFileProviderFactory>::Primitives,
+            >,
     {
         let segments =
             SegmentSet::from_components(provider_factory.static_file_provider(), self.segments);
@@ -93,10 +96,16 @@ impl PrunerBuilder {
     }
 
     /// Builds a [Pruner] from the current configuration with the given static file provider.
-    pub fn build<Provider>(self, static_file_provider: StaticFileProvider) -> Pruner<Provider, ()>
+    pub fn build<Provider>(
+        self,
+        static_file_provider: StaticFileProvider<Provider::Primitives>,
+    ) -> Pruner<Provider, ()>
     where
-        Provider:
-            DBProvider<Tx: DbTxMut> + BlockReader + PruneCheckpointWriter + TransactionsProvider,
+        Provider: StaticFileProviderFactory
+            + DBProvider<Tx: DbTxMut>
+            + BlockReader
+            + PruneCheckpointWriter
+            + TransactionsProvider,
     {
         let segments = SegmentSet::<Provider>::from_components(static_file_provider, self.segments);
 

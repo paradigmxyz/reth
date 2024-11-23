@@ -6,9 +6,10 @@ use crate::{
     traits::{PoolTransaction, TransactionOrigin},
     PriceBumpConfig,
 };
+use alloy_eips::eip4844::BlobTransactionSidecar;
 use alloy_primitives::{Address, TxHash, B256, U256};
 use futures_util::future::Either;
-use reth_primitives::{BlobTransactionSidecar, SealedBlock, TransactionSignedEcRecovered};
+use reth_primitives::{SealedBlock, TransactionSignedEcRecovered};
 use std::{fmt, future::Future, time::Instant};
 
 mod constants;
@@ -317,7 +318,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     ///
     /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
-    pub fn cost(&self) -> U256 {
+    pub fn cost(&self) -> &U256 {
         self.transaction.cost()
     }
 
@@ -458,9 +459,11 @@ impl<T: PoolTransaction> Clone for ValidPoolTransaction<T> {
 impl<T: PoolTransaction> fmt::Debug for ValidPoolTransaction<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ValidPoolTransaction")
+            .field("id", &self.transaction_id)
+            .field("pragate", &self.propagate)
+            .field("origin", &self.origin)
             .field("hash", self.transaction.hash())
-            .field("provides", &self.transaction_id)
-            .field("raw_tx", &self.transaction)
+            .field("tx", &self.transaction)
             .finish()
     }
 }

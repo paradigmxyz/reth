@@ -1,6 +1,7 @@
-use crate::utils::{advance_chain, setup};
 use alloy_rpc_types_engine::PayloadStatusEnum;
+use futures::StreamExt;
 use reth::blockchain_tree::error::BlockchainTreeError;
+use reth_optimism_node::utils::{advance_chain, setup};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio_stream::StreamExt;
@@ -37,6 +38,8 @@ async fn can_sync() -> eyre::Result<()> {
             true,
         )
         .await?;
+    // We send FCU twice to ensure that pool receives canonical chain update on the second FCU
+    // This is required because notifications are not sent during backfill sync
     second_node
         .engine_api
         .update_optimistic_forkchoice(canonical_chain[tip_index - reorg_depth])

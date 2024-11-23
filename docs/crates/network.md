@@ -991,9 +991,9 @@ fn import_transactions(&mut self, peer_id: PeerId, transactions: Vec<Transaction
             };
 
             // track that the peer knows this transaction
-            peer.transactions.insert(tx.hash);
+            peer.transactions.insert(tx.hash());
 
-            match self.transactions_by_peers.entry(tx.hash) {
+            match self.transactions_by_peers.entry(tx.hash()) {
                 Entry::Occupied(mut entry) => {
                     // transaction was already inserted
                     entry.get_mut().push(peer_id);

@@ -12,6 +12,56 @@ description = "OP primitive types"
 workspace = true
 
 [dependencies]
+# reth
+reth-node-types.workspace = true
 reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
+reth-codecs = { workspace = true, optional = true }
+
+# ethereum
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
+alloy-eips.workspace = true
+alloy-rlp.workspace = true
+
+# op
+op-alloy-consensus.workspace = true
+
+# codec
+bytes.workspace = true
+serde = { workspace = true, optional = true }
+
+# misc
+derive_more.workspace = true
+
+[dev-dependencies]
+reth-codecs = { workspace = true, features = ["test-utils"] }
+rstest.workspace = true
+
+[features]
+default = ["std", "reth-codec"]
+std = [
+    "reth-primitives-traits/std",
+    "reth-primitives/std",
+    "reth-node-types/std",
+    "reth-codecs/std",
+    "alloy-consensus/std",
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "serde/std",
+]
+reth-codec = [
+    "dep:reth-codecs",
+    "reth-primitives/reth-codec",
+    "reth-primitives-traits/reth-codec",
+]
+serde = [
+    "dep:serde",
+    "reth-primitives-traits/serde",
+    "alloy-primitives/serde",
+    "alloy-consensus/serde",
+    "alloy-eips/serde",
+    "bytes/serde",
+    "reth-codecs/serde",
+    "op-alloy-consensus/serde",
+]

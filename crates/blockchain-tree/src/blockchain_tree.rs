@@ -1,6 +1,7 @@
 //! Implementation of [`BlockchainTree`]
 
 use crate::{
+    externals::TreeNodeTypes,
     metrics::{MakeCanonicalAction, MakeCanonicalDurationsRecorder, TreeMetrics},
     state::{SidechainId, TreeState},
     AppendableChain, BlockIndices, BlockchainTreeConfig, ExecutionData, TreeExternals,
@@ -21,10 +22,10 @@ use reth_primitives::{
     SealedHeader, StaticFileSegment,
 };
 use reth_provider::{
-    providers::ProviderNodeTypes, BlockExecutionWriter, BlockNumReader, BlockWriter,
-    CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
-    ChainSpecProvider, ChainSplit, ChainSplitTarget, DisplayBlocksChain, HeaderProvider,
-    ProviderError, StaticFileProviderFactory,
+    BlockExecutionWriter, BlockNumReader, BlockWriter, CanonStateNotification,
+    CanonStateNotificationSender, CanonStateNotifications, ChainSpecProvider, ChainSplit,
+    ChainSplitTarget, DBProvider, DisplayBlocksChain, HeaderProvider, ProviderError,
+    StaticFileProviderFactory, StorageLocation,
 };
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
@@ -93,7 +94,7 @@ impl<N: NodeTypesWithDB, E> BlockchainTree<N, E> {
 
 impl<N, E> BlockchainTree<N, E>
 where
-    N: ProviderNodeTypes,
+    N: TreeNodeTypes,
     E: BlockExecutorProvider,
 {
     /// Builds the blockchain tree for the node.
@@ -1332,7 +1333,7 @@ where
         info!(target: "blockchain_tree", "REORG: revert canonical from database by unwinding chain blocks {:?}", revert_range);
         // read block and execution result from database. and remove traces of block from tables.
         let blocks_and_execution = provider_rw
-            .take_block_and_execution_range(revert_range)
+            .take_block_and_execution_above(revert_until, StorageLocation::Database)
             .map_err(|e| CanonicalError::CanonicalRevert(e.to_string()))?;
 
         provider_rw.commit()?;
@@ -1374,10 +1375,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{TxEip1559, EMPTY_ROOT_HASH};
-    use alloy_eips::eip1559::INITIAL_BASE_FEE;
+    use alloy_consensus::{Header, TxEip1559, EMPTY_ROOT_HASH};
+    use alloy_eips::{eip1559::INITIAL_BASE_FEE, eip4895::Withdrawals};
     use alloy_genesis::{Genesis, GenesisAccount};
-    use alloy_primitives::{keccak256, Address, Sealable, B256};
+    use alloy_primitives::{keccak256, Address, PrimitiveSignature as Signature, B256};
     use assert_matches::assert_matches;
     use linked_hash_set::LinkedHashSet;
     use reth_chainspec::{ChainSpecBuilder, MAINNET, MIN_TRANSACTION_GAS};
@@ -1386,19 +1387,20 @@ mod tests {
     use reth_db_api::transaction::DbTxMut;
     use reth_evm::test_utils::MockExecutorProvider;
     use reth_evm_ethereum::execute::EthExecutorProvider;
+    use reth_node_types::FullNodePrimitives;
     use reth_primitives::{
         proofs::{calculate_receipt_root, calculate_transaction_root},
-        revm_primitives::AccountInfo,
-        Account, BlockBody, Header, Signature, Transaction, TransactionSigned,
-        TransactionSignedEcRecovered, Withdrawals,
+        Account, BlockBody, Transaction, TransactionSigned, TransactionSignedEcRecovered,
     };
     use reth_provider::{
+        providers::ProviderNodeTypes,
         test_utils::{
             blocks::BlockchainTestData, create_test_provider_factory_with_chain_spec,
             MockNodeTypesWithDB,
         },
-        ProviderFactory,
+        ProviderFactory, StorageLocation,
     };
+    use reth_revm::primitives::AccountInfo;
     use reth_stages_api::StageCheckpoint;
     use reth_trie::{root::state_root_unhashed, StateRoot};
     use std::collections::HashMap;
@@ -1421,7 +1423,12 @@ mod tests {
         TreeExternals::new(provider_factory, consensus, executor_factory)
     }
 
-    fn setup_genesis<N: ProviderNodeTypes>(factory: &ProviderFactory<N>, mut genesis: SealedBlock) {
+    fn setup_genesis<
+        N: ProviderNodeTypes<Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>>,
+    >(
+        factory: &ProviderFactory<N>,
+        mut genesis: SealedBlock,
+    ) {
         // insert genesis to db.
 
         genesis.header.set_block_number(10);
@@ -1552,6 +1559,7 @@ mod tests {
                     SealedBlock::new(chain_spec.sealed_genesis_header(), Default::default())
                         .try_seal_with_senders()
                         .unwrap(),
+                    StorageLocation::Database,
                 )
                 .unwrap();
             let account = Account { balance: initial_signer_balance, ..Default::default() };
@@ -1562,7 +1570,7 @@ mod tests {
 
         let single_tx_cost = U256::from(INITIAL_BASE_FEE * MIN_TRANSACTION_GAS);
         let mock_tx = |nonce: u64| -> TransactionSignedEcRecovered {
-            TransactionSigned::from_transaction_and_signature(
+            TransactionSigned::new_unhashed(
                 Transaction::Eip1559(TxEip1559 {
                     chain_id: chain_spec.chain.id(),
                     nonce,
@@ -1599,7 +1607,7 @@ mod tests {
             // receipts root computation is different for OP
             let receipts_root = calculate_receipt_root(&receipts);
 
-            let sealed = Header {
+            let header = Header {
                 number,
                 parent_hash: parent.unwrap_or_default(),
                 gas_used: body.len() as u64 * MIN_TRANSACTION_GAS,
@@ -1621,13 +1629,11 @@ mod tests {
                     ),
                 )])),
                 ..Default::default()
-            }
-            .seal_slow();
-            let (header, seal) = sealed.into_parts();
+            };
 
             SealedBlockWithSenders::new(
                 SealedBlock {
-                    header: SealedHeader::new(header, seal),
+                    header: SealedHeader::seal(header),
                     body: BlockBody {
                         transactions: body.clone().into_iter().map(|tx| tx.into_signed()).collect(),
                         ommers: Vec::new(),

@@ -17,12 +17,14 @@
 
 extern crate alloc;
 
-use crate::builder::RethEvmBuilder;
+use alloy_consensus::BlockHeader as _;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use reth_primitives::TransactionSigned;
 use reth_primitives_traits::BlockHeader;
 use revm::{Database, Evm, GetInspector};
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, SpecId, TxEnv};
+
+use crate::builder::RethEvmBuilder;
 
 pub mod builder;
 pub mod either;
@@ -33,7 +35,6 @@ pub mod noop;
 pub mod provider;
 pub mod state_change;
 pub mod system_calls;
-
 #[cfg(any(test, feature = "test-utils"))]
 /// test helpers for mocking executor
 pub mod test_utils;
@@ -155,7 +156,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
         block_env.coinbase = header.beneficiary();
         block_env.timestamp = U256::from(header.timestamp());
         if after_merge {
-            block_env.prevrandao = Some(header.mix_hash());
+            block_env.prevrandao = header.mix_hash();
             block_env.difficulty = U256::ZERO;
         } else {
             block_env.difficulty = header.difficulty();
@@ -210,4 +211,19 @@ pub struct NextBlockEnvAttributes {
     pub suggested_fee_recipient: Address,
     /// The randomness value for the next block.
     pub prev_randao: B256,
+}
+
+/// Function hook that allows to modify a transaction environment.
+pub trait TxEnvOverrides {
+    /// Apply the overrides by modifying the given `TxEnv`.
+    fn apply(&mut self, env: &mut TxEnv);
+}
+
+impl<F> TxEnvOverrides for F
+where
+    F: FnMut(&mut TxEnv),
+{
+    fn apply(&mut self, env: &mut TxEnv) {
+        self(env)
+    }
 }

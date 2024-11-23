@@ -7,9 +7,10 @@ use crate::{
 use alloy_eips::BlockHashOrNumber;
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
+use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
-use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
+use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
 use reth_config::Config;
@@ -18,12 +19,11 @@ use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
-use reth_node_api::{NodeTypesWithDB, NodeTypesWithEngine};
 use reth_node_ethereum::EthExecutorProvider;
 use reth_provider::{
-    writer::UnifiedStorageWriter, AccountExtReader, ChainSpecProvider, HashingWriter,
-    HeaderProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderFactory,
-    StageCheckpointReader, StateWriter, StaticFileProviderFactory, StorageReader,
+    providers::ProviderNodeTypes, writer::UnifiedStorageWriter, AccountExtReader,
+    ChainSpecProvider, HashingWriter, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
+    ProviderFactory, StageCheckpointReader, StateWriter, StorageReader,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::StageId;
@@ -55,7 +55,7 @@ pub struct Command<C: ChainSpecParser> {
 }
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
-    async fn build_network<N: NodeTypesWithDB<ChainSpec = C::ChainSpec>>(
+    async fn build_network<N: ProviderNodeTypes<ChainSpec = C::ChainSpec>>(
         &self,
         config: &Config,
         task_executor: TaskExecutor,
@@ -77,7 +77,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     }
 
     /// Execute `debug in-memory-merkle` command
-    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
         self,
         ctx: CliContext,
     ) -> eyre::Result<()> {
@@ -124,17 +124,15 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
         let client = fetch_client.clone();
         let chain = provider_factory.chain_spec();
-        let block = (move || get_single_body(client.clone(), Arc::clone(&chain), header.clone()))
+        let consensus = Arc::new(EthBeaconConsensus::new(chain.clone()));
+        let block = (move || get_single_body(client.clone(), header.clone(), consensus.clone()))
             .retry(backoff)
             .notify(
                 |err, _| warn!(target: "reth::cli", "Error requesting body: {err}. Retrying..."),
             )
             .await?;
 
-        let db = StateProviderDatabase::new(LatestStateProviderRef::new(
-            provider.tx_ref(),
-            provider_factory.static_file_provider(),
-        ));
+        let db = StateProviderDatabase::new(LatestStateProviderRef::new(&provider));
 
         let executor = EthExecutorProvider::ethereum(provider_factory.chain_spec()).executor(db);
 

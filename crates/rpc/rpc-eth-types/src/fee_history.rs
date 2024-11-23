@@ -8,7 +8,7 @@ use std::{
 
 use alloy_eips::eip1559::calc_next_block_base_fee;
 use alloy_primitives::B256;
-use alloy_rpc_types::TxGasAndReward;
+use alloy_rpc_types_eth::TxGasAndReward;
 use futures::{
     future::{Fuse, FusedFuture},
     FutureExt, Stream, StreamExt,

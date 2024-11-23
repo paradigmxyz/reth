@@ -1,12 +1,12 @@
 use crate::{ChainSpec, DepositContract};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_chains::Chain;
+use alloy_consensus::Header;
 use alloy_eips::eip1559::BaseFeeParams;
 use alloy_genesis::Genesis;
 use alloy_primitives::B256;
 use core::fmt::{Debug, Display};
 use reth_network_peers::NodeRecord;
-use reth_primitives_traits::Header;
 
 /// Trait representing type configuring a chain spec.
 #[auto_impl::auto_impl(&, Arc)]
@@ -109,6 +109,6 @@ impl EthChainSpec for ChainSpec {
     }
 
     fn is_optimism(&self) -> bool {
-        self.chain.is_optimism()
+        false
     }
 }

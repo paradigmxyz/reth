@@ -1,6 +1,6 @@
 //! Loads and formats OP block RPC response.
 
-use alloy_rpc_types::BlockId;
+use alloy_rpc_types_eth::BlockId;
 use op_alloy_network::Network;
 use op_alloy_rpc_types::OpTransactionReceipt;
 use reth_chainspec::ChainSpecProvider;
@@ -48,7 +48,7 @@ where
                 .enumerate()
                 .map(|(idx, (ref tx, receipt))| -> Result<_, _> {
                     let meta = TransactionMeta {
-                        tx_hash: tx.hash,
+                        tx_hash: tx.hash(),
                         index: idx as u64,
                         block_hash,
                         block_number,

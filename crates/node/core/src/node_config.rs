@@ -8,6 +8,7 @@ use crate::{
     dirs::{ChainPath, DataDirPath},
     utils::get_single_header,
 };
+use alloy_consensus::BlockHeader;
 use eyre::eyre;
 use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
 use reth_config::config::PruneConfig;
@@ -273,7 +274,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     ) -> eyre::Result<Option<BlockNumber>>
     where
         Provider: HeaderProvider,
-        Client: HeadersClient,
+        Client: HeadersClient<Header: reth_primitives_traits::BlockHeader>,
     {
         let max_block = if let Some(block) = self.debug.max_block {
             Some(block)
@@ -332,7 +333,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     ) -> ProviderResult<u64>
     where
         Provider: HeaderProvider,
-        Client: HeadersClient,
+        Client: HeadersClient<Header: reth_primitives_traits::BlockHeader>,
     {
         let header = provider.header_by_hash_or_number(tip.into())?;
 
@@ -342,7 +343,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             return Ok(header.number)
         }
 
-        Ok(self.fetch_tip_from_network(client, tip.into()).await.number)
+        Ok(self.fetch_tip_from_network(client, tip.into()).await.number())
     }
 
     /// Attempt to look up the block with the given number and return the header.
@@ -352,9 +353,9 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         &self,
         client: Client,
         tip: BlockHashOrNumber,
-    ) -> SealedHeader
+    ) -> SealedHeader<Client::Header>
     where
-        Client: HeadersClient,
+        Client: HeadersClient<Header: reth_primitives_traits::BlockHeader>,
     {
         info!(target: "reth::cli", ?tip, "Fetching tip block from the network.");
         let mut fetch_failures = 0;

@@ -2,27 +2,28 @@ use std::sync::Arc;
 
 use reth_chain_state::CanonStateNotification;
 use reth_execution_types::Chain;
+use reth_primitives_traits::NodePrimitives;
 
 /// Notifications sent to an `ExEx`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum ExExNotification {
+pub enum ExExNotification<P: NodePrimitives = reth_chain_state::EthPrimitives> {
     /// Chain got committed without a reorg, and only the new chain is returned.
     ChainCommitted {
         /// The new chain after commit.
-        new: Arc<Chain>,
+        new: Arc<Chain<P>>,
     },
     /// Chain got reorged, and both the old and the new chains are returned.
     ChainReorged {
         /// The old chain before reorg.
-        old: Arc<Chain>,
+        old: Arc<Chain<P>>,
         /// The new chain after reorg.
-        new: Arc<Chain>,
+        new: Arc<Chain<P>>,
     },
     /// Chain got reverted, and only the old chain is returned.
     ChainReverted {
         /// The old chain before reversion.
-        old: Arc<Chain>,
+        old: Arc<Chain<P>>,
     },
 }
 
@@ -60,8 +61,8 @@ impl ExExNotification {
     }
 }
 
-impl From<CanonStateNotification> for ExExNotification {
-    fn from(notification: CanonStateNotification) -> Self {
+impl<P: NodePrimitives> From<CanonStateNotification<P>> for ExExNotification<P> {
+    fn from(notification: CanonStateNotification<P>) -> Self {
         match notification {
             CanonStateNotification::Commit { new } => Self::ChainCommitted { new },
             CanonStateNotification::Reorg { old, new } => Self::ChainReorged { old, new },

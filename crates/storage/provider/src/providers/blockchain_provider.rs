@@ -9,7 +9,11 @@ use crate::{
     StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
-use alloy_eips::{eip4895::Withdrawal, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
+use alloy_consensus::Header;
+use alloy_eips::{
+    eip4895::{Withdrawal, Withdrawals},
+    BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
+};
 use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable, TxHash, TxNumber, B256, U256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chain_state::{
@@ -21,11 +25,10 @@ use reth_db::{models::BlockNumberAddress, transaction::DbTx, Database};
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::ExecutionOutcome;
-use reth_node_types::NodeTypesWithDB;
+use reth_node_types::{NodeTypesWithDB, TxTy};
 use reth_primitives::{
-    Account, Block, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
-    Withdrawals,
+    Account, Block, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -160,7 +163,9 @@ impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider2<N> {
 }
 
 impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider2<N> {
-    fn static_file_provider(&self) -> StaticFileProvider {
+    type Primitives = N::Primitives;
+
+    fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         self.database.static_file_provider()
     }
 }
@@ -326,29 +331,31 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
 }
 
 impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
+    type Transaction = TxTy<N>;
+
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         self.consistent_provider()?.transaction_id(tx_hash)
     }
 
-    fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
+    fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
         self.consistent_provider()?.transaction_by_id(id)
     }
 
-    fn transaction_by_id_no_hash(
+    fn transaction_by_id_unhashed(
         &self,
         id: TxNumber,
-    ) -> ProviderResult<Option<TransactionSignedNoHash>> {
-        self.consistent_provider()?.transaction_by_id_no_hash(id)
+    ) -> ProviderResult<Option<Self::Transaction>> {
+        self.consistent_provider()?.transaction_by_id_unhashed(id)
     }
 
-    fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
+    fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Transaction>> {
         self.consistent_provider()?.transaction_by_hash(hash)
     }
 
     fn transaction_by_hash_with_meta(
         &self,
         tx_hash: TxHash,
-    ) -> ProviderResult<Option<(TransactionSigned, TransactionMeta)>> {
+    ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
         self.consistent_provider()?.transaction_by_hash_with_meta(tx_hash)
     }
 
@@ -359,21 +366,21 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
     fn transactions_by_block(
         &self,
         id: BlockHashOrNumber,
-    ) -> ProviderResult<Option<Vec<TransactionSigned>>> {
+    ) -> ProviderResult<Option<Vec<Self::Transaction>>> {
         self.consistent_provider()?.transactions_by_block(id)
     }
 
     fn transactions_by_block_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<Vec<TransactionSigned>>> {
+    ) -> ProviderResult<Vec<Vec<Self::Transaction>>> {
         self.consistent_provider()?.transactions_by_block_range(range)
     }
 
     fn transactions_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<TransactionSignedNoHash>> {
+    ) -> ProviderResult<Vec<Self::Transaction>> {
         self.consistent_provider()?.transactions_by_tx_range(range)
     }
 
@@ -768,7 +775,7 @@ mod tests {
         BlockWriter, CanonChainTracker, ProviderFactory, StaticFileProviderFactory,
         StaticFileWriter,
     };
-    use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
+    use alloy_eips::{eip4895::Withdrawals, BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
     use alloy_primitives::{BlockNumber, TxNumber, B256};
     use itertools::Itertools;
     use rand::Rng;
@@ -786,9 +793,7 @@ mod tests {
     use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
     use reth_errors::ProviderError;
     use reth_execution_types::{Chain, ExecutionOutcome};
-    use reth_primitives::{
-        Receipt, SealedBlock, StaticFileSegment, TransactionSignedNoHash, Withdrawals,
-    };
+    use reth_primitives::{Receipt, SealedBlock, StaticFileSegment, TransactionSignedNoHash};
     use reth_storage_api::{
         BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
         ChangeSetReader, DatabaseProviderFactory, HeaderProvider, ReceiptProvider,
@@ -886,8 +891,7 @@ mod tests {
                 static_file_provider.latest_writer(StaticFileSegment::Transactions)?;
             transactions_writer.increment_block(block.number)?;
             for tx in block.body.transactions() {
-                let tx: TransactionSignedNoHash = tx.clone().into();
-                transactions_writer.append_transaction(tx_num, &tx)?;
+                transactions_writer.append_transaction(tx_num, tx)?;
                 tx_num += 1;
             }
 
@@ -910,7 +914,7 @@ mod tests {
         )?;
 
         // Commit to both storages: database and static files
-        UnifiedStorageWriter::commit(provider_rw, factory.static_file_provider())?;
+        UnifiedStorageWriter::commit(provider_rw)?;
 
         let provider = BlockchainProvider2::new(factory)?;
 
@@ -998,8 +1002,7 @@ mod tests {
                     UnifiedStorageWriter::from(&provider_rw, &hook_provider.static_file_provider())
                         .save_blocks(&[lowest_memory_block])
                         .unwrap();
-                    UnifiedStorageWriter::commit(provider_rw, hook_provider.static_file_provider())
-                        .unwrap();
+                    UnifiedStorageWriter::commit(provider_rw).unwrap();
 
                     // Remove from memory
                     hook_provider.canonical_in_memory_state.remove_persisted_blocks(num_hash);
@@ -2243,9 +2246,7 @@ mod tests {
             (transactions_by_tx_range, |block: &SealedBlock, _: &Vec<Vec<Receipt>>| block
                 .body
                 .transactions
-                .iter()
-                .map(|tx| Into::<TransactionSignedNoHash>::into(tx.clone()))
-                .collect::<Vec<_>>()),
+                .clone()),
             (receipts_by_tx_range, |block: &SealedBlock, receipts: &Vec<Vec<Receipt>>| receipts
                 [block.number as usize]
                 .clone())
@@ -2587,12 +2588,10 @@ mod tests {
             ),
             (
                 ONE,
-                transaction_by_id_no_hash,
+                transaction_by_id_unhashed,
                 |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     tx_num,
-                    Some(Into::<TransactionSignedNoHash>::into(
-                        block.body.transactions[test_tx_index].clone()
-                    ))
+                    Some(block.body.transactions[test_tx_index].clone())
                 ),
                 u64::MAX
             ),

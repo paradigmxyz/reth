@@ -377,8 +377,9 @@ impl BlockIndices {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::Header;
     use alloy_primitives::B256;
-    use reth_primitives::{Header, SealedBlock, SealedHeader};
+    use reth_primitives::{SealedBlock, SealedHeader};
 
     #[test]
     fn pending_block_num_hash_returns_none_if_no_fork() {

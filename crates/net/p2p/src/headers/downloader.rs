@@ -1,10 +1,14 @@
 use super::error::HeadersDownloaderResult;
 use crate::error::{DownloadError, DownloadResult};
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::B256;
 use futures::Stream;
-use reth_consensus::Consensus;
+use reth_consensus::HeaderValidator;
 use reth_primitives::SealedHeader;
+use reth_primitives_traits::BlockWithParent;
+use std::fmt::Debug;
+
 /// A downloader capable of fetching and yielding block headers.
 ///
 /// A downloader represents a distinct strategy for submitting requests to download block headers,
@@ -13,19 +17,25 @@ use reth_primitives::SealedHeader;
 ///
 /// A [`HeaderDownloader`] is a [Stream] that returns batches of headers.
 pub trait HeaderDownloader:
-    Send + Sync + Stream<Item = HeadersDownloaderResult<Vec<SealedHeader>>> + Unpin
+    Send
+    + Sync
+    + Stream<Item = HeadersDownloaderResult<Vec<SealedHeader<Self::Header>>, Self::Header>>
+    + Unpin
 {
+    /// The header type being downloaded.
+    type Header: Debug + Send + Sync + Unpin + 'static;
+
     /// Updates the gap to sync which ranges from local head to the sync target
     ///
     /// See also [`HeaderDownloader::update_sync_target`] and
     /// [`HeaderDownloader::update_local_head`]
-    fn update_sync_gap(&mut self, head: SealedHeader, target: SyncTarget) {
+    fn update_sync_gap(&mut self, head: SealedHeader<Self::Header>, target: SyncTarget) {
         self.update_local_head(head);
         self.update_sync_target(target);
     }
 
     /// Updates the block number of the local database
-    fn update_local_head(&mut self, head: SealedHeader);
+    fn update_local_head(&mut self, head: SealedHeader<Self::Header>);
 
     /// Updates the target we want to sync to
     fn update_sync_target(&mut self, target: SyncTarget);
@@ -50,7 +60,7 @@ pub enum SyncTarget {
     ///
     /// The benefit of this variant is, that this already provides the block number of the highest
     /// missing block.
-    Gap(SealedHeader),
+    Gap(BlockWithParent),
     /// This represents a tip by block number
     TipNum(u64),
 }
@@ -65,7 +75,7 @@ impl SyncTarget {
     pub fn tip(&self) -> BlockHashOrNumber {
         match self {
             Self::Tip(tip) => (*tip).into(),
-            Self::Gap(gap) => gap.parent_hash.into(),
+            Self::Gap(gap) => gap.parent.into(),
             Self::TipNum(num) => (*num).into(),
         }
     }
@@ -74,23 +84,23 @@ impl SyncTarget {
 /// Validate whether the header is valid in relation to it's parent
 ///
 /// Returns Ok(false) if the
-pub fn validate_header_download(
-    consensus: &dyn Consensus,
-    header: &SealedHeader,
-    parent: &SealedHeader,
+pub fn validate_header_download<H: BlockHeader>(
+    consensus: &dyn HeaderValidator<H>,
+    header: &SealedHeader<H>,
+    parent: &SealedHeader<H>,
 ) -> DownloadResult<()> {
     // validate header against parent
     consensus.validate_header_against_parent(header, parent).map_err(|error| {
         DownloadError::HeaderValidation {
             hash: header.hash(),
-            number: header.number,
+            number: header.number(),
             error: Box::new(error),
         }
     })?;
     // validate header standalone
     consensus.validate_header(header).map_err(|error| DownloadError::HeaderValidation {
         hash: header.hash(),
-        number: header.number,
+        number: header.number(),
         error: Box::new(error),
     })?;
     Ok(())

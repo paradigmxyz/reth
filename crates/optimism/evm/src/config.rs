@@ -1,6 +1,6 @@
 use reth_ethereum_forks::{EthereumHardfork, Head};
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_forks::OptimismHardfork;
+use reth_optimism_forks::OpHardfork;
 
 /// Returns the revm [`SpecId`](revm_primitives::SpecId) at the given timestamp.
 ///
@@ -12,17 +12,17 @@ pub fn revm_spec_by_timestamp_after_bedrock(
     chain_spec: &OpChainSpec,
     timestamp: u64,
 ) -> revm_primitives::SpecId {
-    if chain_spec.fork(OptimismHardfork::Holocene).active_at_timestamp(timestamp) {
+    if chain_spec.fork(OpHardfork::Holocene).active_at_timestamp(timestamp) {
         revm_primitives::HOLOCENE
-    } else if chain_spec.fork(OptimismHardfork::Granite).active_at_timestamp(timestamp) {
+    } else if chain_spec.fork(OpHardfork::Granite).active_at_timestamp(timestamp) {
         revm_primitives::GRANITE
-    } else if chain_spec.fork(OptimismHardfork::Fjord).active_at_timestamp(timestamp) {
+    } else if chain_spec.fork(OpHardfork::Fjord).active_at_timestamp(timestamp) {
         revm_primitives::FJORD
-    } else if chain_spec.fork(OptimismHardfork::Ecotone).active_at_timestamp(timestamp) {
+    } else if chain_spec.fork(OpHardfork::Ecotone).active_at_timestamp(timestamp) {
         revm_primitives::ECOTONE
-    } else if chain_spec.fork(OptimismHardfork::Canyon).active_at_timestamp(timestamp) {
+    } else if chain_spec.fork(OpHardfork::Canyon).active_at_timestamp(timestamp) {
         revm_primitives::CANYON
-    } else if chain_spec.fork(OptimismHardfork::Regolith).active_at_timestamp(timestamp) {
+    } else if chain_spec.fork(OpHardfork::Regolith).active_at_timestamp(timestamp) {
         revm_primitives::REGOLITH
     } else {
         revm_primitives::BEDROCK
@@ -31,19 +31,19 @@ pub fn revm_spec_by_timestamp_after_bedrock(
 
 /// Map the latest active hardfork at the given block to a revm [`SpecId`](revm_primitives::SpecId).
 pub fn revm_spec(chain_spec: &OpChainSpec, block: &Head) -> revm_primitives::SpecId {
-    if chain_spec.fork(OptimismHardfork::Holocene).active_at_head(block) {
+    if chain_spec.fork(OpHardfork::Holocene).active_at_head(block) {
         revm_primitives::HOLOCENE
-    } else if chain_spec.fork(OptimismHardfork::Granite).active_at_head(block) {
+    } else if chain_spec.fork(OpHardfork::Granite).active_at_head(block) {
         revm_primitives::GRANITE
-    } else if chain_spec.fork(OptimismHardfork::Fjord).active_at_head(block) {
+    } else if chain_spec.fork(OpHardfork::Fjord).active_at_head(block) {
         revm_primitives::FJORD
-    } else if chain_spec.fork(OptimismHardfork::Ecotone).active_at_head(block) {
+    } else if chain_spec.fork(OpHardfork::Ecotone).active_at_head(block) {
         revm_primitives::ECOTONE
-    } else if chain_spec.fork(OptimismHardfork::Canyon).active_at_head(block) {
+    } else if chain_spec.fork(OpHardfork::Canyon).active_at_head(block) {
         revm_primitives::CANYON
-    } else if chain_spec.fork(OptimismHardfork::Regolith).active_at_head(block) {
+    } else if chain_spec.fork(OpHardfork::Regolith).active_at_head(block) {
         revm_primitives::REGOLITH
-    } else if chain_spec.fork(OptimismHardfork::Bedrock).active_at_head(block) {
+    } else if chain_spec.fork(OpHardfork::Bedrock).active_at_head(block) {
         revm_primitives::BEDROCK
     } else if chain_spec.fork(EthereumHardfork::Prague).active_at_head(block) {
         revm_primitives::PRAGUE
