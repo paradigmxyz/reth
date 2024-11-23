@@ -304,6 +304,14 @@ where
         self.get_pool_data().all().transactions_iter().filter(|tx| tx.propagate).collect()
     }
 
+    /// Returns only the first `max` transactions in the pool.
+    pub(crate) fn pooled_transactions_max(
+        &self,
+        max: usize,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.get_pool_data().all().transactions_iter().filter(|tx| tx.propagate).take(max).collect()
+    }
+
     /// Returns the [`BlobTransaction`] for the given transaction if the sidecar exists.
     ///
     /// Caution: this assumes the given transaction is eip-4844
