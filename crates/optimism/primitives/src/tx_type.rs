@@ -2,10 +2,11 @@
 //! `OpTxType` implements `reth_primitives_traits::TxType`.
 //! This type is required because a `Compact` impl is needed on the deposit tx type.
 
+use core::fmt::Debug;
+
 use alloy_primitives::{U64, U8};
 use alloy_rlp::{Decodable, Encodable, Error};
 use bytes::BufMut;
-use core::fmt::Debug;
 use derive_more::{
     derive::{From, Into},
     Display,
@@ -13,8 +14,10 @@ use derive_more::{
 use op_alloy_consensus::OpTxType as AlloyOpTxType;
 use reth_primitives_traits::{InMemorySize, TxType};
 
-/// Wrapper type for [`op_alloy_consensus::OpTxType`] to implement [`TxType`] trait.
+/// Wrapper type for [`op_alloy_consensus::OpTxType`] to implement
+/// [`TxType`] trait.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Display, Ord, Hash, From, Into)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[into(u8)]
 pub struct OpTxType(AlloyOpTxType);
 
