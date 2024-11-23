@@ -4,7 +4,7 @@ use core::fmt;
 
 use alloy_primitives::Sealable;
 
-use crate::{InMemorySize, MaybeArbitrary, MaybeCompact, MaybeSerde};
+use crate::{InMemorySize, MaybeCompact, MaybeSerde};
 
 /// Helper trait that unifies all behaviour required by block header to support full node
 /// operations.
@@ -28,7 +28,6 @@ pub trait BlockHeader:
     + Sealable
     + InMemorySize
     + MaybeSerde
-    + MaybeArbitrary
 {
 }
 
@@ -47,6 +46,5 @@ impl<T> BlockHeader for T where
         + Sealable
         + InMemorySize
         + MaybeSerde
-        + MaybeArbitrary
 {
 }
