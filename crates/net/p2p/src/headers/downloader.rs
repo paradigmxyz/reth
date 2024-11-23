@@ -4,8 +4,11 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::B256;
 use futures::Stream;
-use reth_consensus::Consensus;
+use reth_consensus::HeaderValidator;
 use reth_primitives::SealedHeader;
+use reth_primitives_traits::BlockWithParent;
+use std::fmt::Debug;
+
 /// A downloader capable of fetching and yielding block headers.
 ///
 /// A downloader represents a distinct strategy for submitting requests to download block headers,
@@ -20,7 +23,7 @@ pub trait HeaderDownloader:
     + Unpin
 {
     /// The header type being downloaded.
-    type Header: Send + Sync + Unpin + 'static;
+    type Header: Debug + Send + Sync + Unpin + 'static;
 
     /// Updates the gap to sync which ranges from local head to the sync target
     ///
@@ -57,7 +60,7 @@ pub enum SyncTarget {
     ///
     /// The benefit of this variant is, that this already provides the block number of the highest
     /// missing block.
-    Gap(SealedHeader),
+    Gap(BlockWithParent),
     /// This represents a tip by block number
     TipNum(u64),
 }
@@ -72,7 +75,7 @@ impl SyncTarget {
     pub fn tip(&self) -> BlockHashOrNumber {
         match self {
             Self::Tip(tip) => (*tip).into(),
-            Self::Gap(gap) => gap.parent_hash.into(),
+            Self::Gap(gap) => gap.parent.into(),
             Self::TipNum(num) => (*num).into(),
         }
     }
@@ -82,7 +85,7 @@ impl SyncTarget {
 ///
 /// Returns Ok(false) if the
 pub fn validate_header_download<H: BlockHeader>(
-    consensus: &dyn Consensus<H>,
+    consensus: &dyn HeaderValidator<H>,
     header: &SealedHeader<H>,
     parent: &SealedHeader<H>,
 ) -> DownloadResult<()> {

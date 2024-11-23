@@ -552,7 +552,7 @@ mod tests {
                         blocks[..=max_pruned_block as usize]
                             .iter()
                             .map(|block| block.body.transactions.len() as u64)
-                            .sum::<u64>(),
+                            .sum(),
                     ),
                     prune_mode: PruneMode::Full,
                 },
@@ -567,8 +567,8 @@ mod tests {
                 processed: blocks[..=max_processed_block]
                     .iter()
                     .map(|block| block.body.transactions.len() as u64)
-                    .sum::<u64>(),
-                total: blocks.iter().map(|block| block.body.transactions.len() as u64).sum::<u64>()
+                    .sum(),
+                total: blocks.iter().map(|block| block.body.transactions.len() as u64).sum()
             }
         );
     }
@@ -667,11 +667,9 @@ mod tests {
                     while let Some((_, body)) = body_cursor.next()? {
                         for tx_id in body.tx_num_range() {
                             let transaction: TransactionSigned = provider
-                                .transaction_by_id_no_hash(tx_id)?
-                                .map(|tx| TransactionSigned {
-                                    hash: Default::default(), // we don't require the hash
-                                    signature: tx.signature,
-                                    transaction: tx.transaction,
+                                .transaction_by_id_unhashed(tx_id)?
+                                .map(|tx| {
+                                    TransactionSigned::new_unhashed(tx.transaction, tx.signature)
                                 })
                                 .expect("no transaction entry");
                             let signer =

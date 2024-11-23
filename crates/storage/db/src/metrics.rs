@@ -347,7 +347,7 @@ impl OperationMetrics {
 
         // Record duration only for large values to prevent the performance hit of clock syscall
         // on small operations
-        if value_size.map_or(false, |size| size > LARGE_VALUE_THRESHOLD_BYTES) {
+        if value_size.is_some_and(|size| size > LARGE_VALUE_THRESHOLD_BYTES) {
             let start = Instant::now();
             let result = f();
             self.large_value_duration_seconds.record(start.elapsed());

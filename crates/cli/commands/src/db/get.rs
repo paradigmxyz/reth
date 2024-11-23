@@ -2,7 +2,9 @@ use alloy_consensus::Header;
 use alloy_primitives::{hex, BlockHash};
 use clap::Parser;
 use reth_db::{
-    static_file::{ColumnSelectorOne, ColumnSelectorTwo, HeaderMask, ReceiptMask, TransactionMask},
+    static_file::{
+        ColumnSelectorOne, ColumnSelectorTwo, HeaderWithHashMask, ReceiptMask, TransactionMask,
+    },
     tables, RawKey, RawTable, Receipts, TableViewer, Transactions,
 };
 use reth_db_api::table::{Decompress, DupSort, Table};
@@ -61,7 +63,7 @@ impl Command {
             Subcommand::StaticFile { segment, key, raw } => {
                 let (key, mask): (u64, _) = match segment {
                     StaticFileSegment::Headers => {
-                        (table_key::<tables::Headers>(&key)?, <HeaderMask<Header, BlockHash>>::MASK)
+                        (table_key::<tables::Headers>(&key)?, <HeaderWithHashMask<Header>>::MASK)
                     }
                     StaticFileSegment::Transactions => (
                         table_key::<tables::Transactions>(&key)?,
@@ -128,12 +130,12 @@ impl Command {
 
 /// Get an instance of key for given table
 pub(crate) fn table_key<T: Table>(key: &str) -> Result<T::Key, eyre::Error> {
-    serde_json::from_str::<T::Key>(key).map_err(|e| eyre::eyre!(e))
+    serde_json::from_str(key).map_err(|e| eyre::eyre!(e))
 }
 
 /// Get an instance of subkey for given dupsort table
 fn table_subkey<T: DupSort>(subkey: Option<&str>) -> Result<T::SubKey, eyre::Error> {
-    serde_json::from_str::<T::SubKey>(subkey.unwrap_or_default()).map_err(|e| eyre::eyre!(e))
+    serde_json::from_str(subkey.unwrap_or_default()).map_err(|e| eyre::eyre!(e))
 }
 
 struct GetValueViewer<'a, N: NodeTypesWithDB> {

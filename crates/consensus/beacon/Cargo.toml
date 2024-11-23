@@ -14,12 +14,15 @@ workspace = true
 # reth
 reth-ethereum-consensus.workspace = true
 reth-blockchain-tree-api.workspace = true
+reth-codecs.workspace = true
+reth-db-api.workspace = true
 reth-primitives.workspace = true
 reth-stages-api.workspace = true
 reth-errors.workspace = true
 reth-provider.workspace = true
 reth-tasks.workspace = true
 reth-payload-builder.workspace = true
+reth-payload-builder-primitives.workspace = true
 reth-payload-primitives.workspace = true
 reth-payload-validator.workspace = true
 reth-prune.workspace = true
@@ -79,6 +82,7 @@ assert_matches.workspace = true
 [features]
 optimism = [
     "reth-blockchain-tree/optimism",
+    "reth-codecs/optimism",
     "reth-chainspec",
     "reth-db-api/optimism",
     "reth-db/optimism",

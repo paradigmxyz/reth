@@ -1,13 +1,14 @@
 use futures::{Stream, StreamExt};
 use pin_project::pin_project;
-use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage, EngineNodeTypes};
+use reth_beacon_consensus::{BeaconConsensusEngineEvent, EngineNodeTypes};
 use reth_chainspec::EthChainSpec;
 use reth_consensus::Consensus;
+use reth_engine_primitives::BeaconEngineMessage;
 use reth_engine_tree::{
     backfill::PipelineSync,
     download::BasicBlockDownloader,
     engine::{EngineApiKind, EngineApiRequest, EngineApiRequestHandler, EngineHandler},
-    persistence::PersistenceHandle,
+    persistence::{PersistenceHandle, PersistenceNodeTypes},
     tree::{EngineApiTreeHandler, InvalidBlockHook, TreeConfig},
 };
 pub use reth_engine_tree::{
@@ -58,7 +59,7 @@ where
 
 impl<N, Client, E> EngineService<N, Client, E>
 where
-    N: EngineNodeTypes,
+    N: EngineNodeTypes + PersistenceNodeTypes,
     Client: EthBlockClient + 'static,
     E: BlockExecutorProvider + 'static,
 {
@@ -145,6 +146,7 @@ mod tests {
     use super::*;
     use reth_beacon_consensus::EthBeaconConsensus;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
+    use reth_engine_primitives::BeaconEngineMessage;
     use reth_engine_tree::{test_utils::TestPipelineBuilder, tree::NoopInvalidBlockHook};
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm_ethereum::execute::EthExecutorProvider;

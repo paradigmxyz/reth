@@ -1,5 +1,7 @@
 //! Wrapper around `BlockchainTree` that allows for it to be shared.
 
+use crate::externals::TreeNodeTypes;
+
 use super::BlockchainTree;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockHash, BlockNumber};
@@ -13,8 +15,8 @@ use reth_evm::execute::BlockExecutorProvider;
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader};
 use reth_provider::{
-    providers::ProviderNodeTypes, BlockchainTreePendingStateProvider, CanonStateSubscriptions,
-    FullExecutionDataProvider, ProviderError,
+    providers::ProviderNodeTypes, BlockchainTreePendingStateProvider, CanonStateNotifications,
+    CanonStateSubscriptions, FullExecutionDataProvider, ProviderError,
 };
 use reth_storage_errors::provider::ProviderResult;
 use std::{collections::BTreeMap, sync::Arc};
@@ -36,7 +38,7 @@ impl<N: NodeTypesWithDB, E> ShareableBlockchainTree<N, E> {
 
 impl<N, E> BlockchainTreeEngine for ShareableBlockchainTree<N, E>
 where
-    N: ProviderNodeTypes,
+    N: TreeNodeTypes,
     E: BlockExecutorProvider,
 {
     fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError> {
@@ -107,7 +109,7 @@ where
 
 impl<N, E> BlockchainTreeViewer for ShareableBlockchainTree<N, E>
 where
-    N: ProviderNodeTypes,
+    N: TreeNodeTypes,
     E: BlockExecutorProvider,
 {
     fn header_by_hash(&self, hash: BlockHash) -> Option<SealedHeader> {
@@ -170,7 +172,7 @@ where
 
 impl<N, E> BlockchainTreePendingStateProvider for ShareableBlockchainTree<N, E>
 where
-    N: ProviderNodeTypes,
+    N: TreeNodeTypes,
     E: BlockExecutorProvider,
 {
     fn find_pending_state_provider(
@@ -188,7 +190,7 @@ where
     N: ProviderNodeTypes,
     E: Send + Sync,
 {
-    fn subscribe_to_canonical_state(&self) -> reth_provider::CanonStateNotifications {
+    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
         trace!(target: "blockchain_tree", "Registered subscriber for canonical state");
         self.tree.read().subscribe_canon_state()
     }

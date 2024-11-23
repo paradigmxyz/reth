@@ -2,17 +2,23 @@
 
 use std::{sync::Arc, thread::available_parallelism};
 
+use crate::{
+    components::{NodeComponents, NodeComponentsBuilder},
+    hooks::OnComponentInitializedHook,
+    BuilderContext, NodeAdapter,
+};
 use alloy_primitives::{BlockNumber, B256};
 use eyre::{Context, OptionExt};
 use rayon::ThreadPoolBuilder;
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_blockchain_tree::{
-    BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
+    externals::TreeNodeTypes, BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree,
+    TreeExternals,
 };
 use reth_chainspec::{Chain, EthChainSpec, EthereumHardforks};
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_consensus::Consensus;
-use reth_db_api::database::Database;
+use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_db_common::init::{init_genesis, InitDatabaseError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_engine_local::MiningMode;
@@ -21,7 +27,7 @@ use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_fs_util as fs;
 use reth_invalid_block_hooks::InvalidBlockWitnessHook;
 use reth_network_p2p::headers::client::HeadersClient;
-use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithDB};
+use reth_node_api::{FullNodePrimitives, FullNodeTypes, NodeTypes, NodeTypesWithDB};
 use reth_node_core::{
     args::InvalidBlockHookType,
     dirs::{ChainPath, DataDirPath},
@@ -34,15 +40,16 @@ use reth_node_core::{
 use reth_node_metrics::{
     chain::ChainSpecInfo,
     hooks::Hooks,
+    recorder::install_prometheus_recorder,
     server::{MetricServer, MetricServerConfig},
     version::VersionInfo,
 };
 use reth_primitives::Head;
 use reth_provider::{
     providers::{BlockchainProvider, BlockchainProvider2, ProviderNodeTypes, StaticFileProvider},
-    BlockHashReader, CanonStateNotificationSender, ChainSpecProvider, ProviderFactory,
-    ProviderResult, StageCheckpointReader, StateProviderFactory, StaticFileProviderFactory,
-    TreeViewer,
+    BlockHashReader, BlockNumReader, CanonStateNotificationSender, ChainSpecProvider,
+    ProviderError, ProviderFactory, ProviderResult, StageCheckpointReader, StateProviderFactory,
+    StaticFileProviderFactory, TreeViewer,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_api::clients::EthApiClient;
@@ -56,12 +63,6 @@ use reth_transaction_pool::TransactionPool;
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedSender},
     oneshot, watch,
-};
-
-use crate::{
-    components::{NodeComponents, NodeComponentsBuilder},
-    hooks::OnComponentInitializedHook,
-    BuilderContext, NodeAdapter,
 };
 
 /// Allows to set a tree viewer for a configured blockchain provider.
@@ -404,9 +405,11 @@ where
     /// Returns the [`ProviderFactory`] for the attached storage after executing a consistent check
     /// between the database and static files. **It may execute a pipeline unwind if it fails this
     /// check.**
-    pub async fn create_provider_factory<N: NodeTypesWithDB<DB = DB, ChainSpec = ChainSpec>>(
-        &self,
-    ) -> eyre::Result<ProviderFactory<N>> {
+    pub async fn create_provider_factory<N>(&self) -> eyre::Result<ProviderFactory<N>>
+    where
+        N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
+        N::Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>,
+    {
         let factory = ProviderFactory::new(
             self.right().clone(),
             self.chain_spec(),
@@ -416,7 +419,7 @@ where
         .with_static_files_metrics();
 
         let has_receipt_pruning =
-            self.toml_config().prune.as_ref().map_or(false, |a| a.has_receipts_pruning());
+            self.toml_config().prune.as_ref().is_some_and(|a| a.has_receipts_pruning());
 
         // Check for consistency between database and static files. If it fails, it unwinds to
         // the first block that's consistent between database and static files.
@@ -467,9 +470,13 @@ where
     }
 
     /// Creates a new [`ProviderFactory`] and attaches it to the launch context.
-    pub async fn with_provider_factory<N: NodeTypesWithDB<DB = DB, ChainSpec = ChainSpec>>(
+    pub async fn with_provider_factory<N>(
         self,
-    ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<ChainSpec>, ProviderFactory<N>>>> {
+    ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<ChainSpec>, ProviderFactory<N>>>>
+    where
+        N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
+        N::Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>,
+    {
         let factory = self.create_provider_factory().await?;
         let ctx = LaunchContextWith {
             inner: self.inner,
@@ -482,7 +489,7 @@ where
 
 impl<T> LaunchContextWith<Attached<WithConfigs<T::ChainSpec>, ProviderFactory<T>>>
 where
-    T: NodeTypesWithDB<ChainSpec: EthereumHardforks + EthChainSpec>,
+    T: ProviderNodeTypes,
 {
     /// Returns access to the underlying database.
     pub const fn database(&self) -> &T::DB {
@@ -495,7 +502,7 @@ where
     }
 
     /// Returns the static file provider to interact with the static files.
-    pub fn static_file_provider(&self) -> StaticFileProvider {
+    pub fn static_file_provider(&self) -> StaticFileProvider<T::Primitives> {
         self.right().static_file_provider()
     }
 
@@ -509,6 +516,9 @@ where
 
     /// Starts the prometheus endpoint.
     pub async fn start_prometheus_endpoint(&self) -> eyre::Result<()> {
+        // ensure recorder runs upkeep periodically
+        install_prometheus_recorder().spawn_upkeep();
+
         let listen_addr = self.node_config().metrics;
         if let Some(addr) = listen_addr {
             info!(target: "reth::cli", "Starting metrics endpoint at {}", addr);
@@ -524,7 +534,20 @@ where
                 },
                 ChainSpecInfo { name: self.left().config.chain.chain().to_string() },
                 self.task_executor().clone(),
-                Hooks::new(self.database().clone(), self.static_file_provider()),
+                Hooks::builder()
+                    .with_hook({
+                        let db = self.database().clone();
+                        move || db.report_metrics()
+                    })
+                    .with_hook({
+                        let sfp = self.static_file_provider();
+                        move || {
+                            if let Err(error) = sfp.report_metrics() {
+                                error!(%error, "Failed to report metrics for the static file provider");
+                            }
+                        }
+                    })
+                    .build(),
             );
 
             MetricServer::new(config).serve().await?;
@@ -620,7 +643,7 @@ impl<T>
         Attached<WithConfigs<<T::Types as NodeTypes>::ChainSpec>, WithMeteredProviders<T>>,
     >
 where
-    T: FullNodeTypes<Types: ProviderNodeTypes, Provider: WithTree>,
+    T: FullNodeTypes<Types: ProviderNodeTypes + TreeNodeTypes, Provider: WithTree>,
 {
     /// Returns access to the underlying database.
     pub const fn database(&self) -> &<T::Types as NodeTypesWithDB>::DB {
@@ -745,10 +768,7 @@ impl<T, CB>
         Attached<WithConfigs<<T::Types as NodeTypes>::ChainSpec>, WithComponents<T, CB>>,
     >
 where
-    T: FullNodeTypes<
-        Provider: WithTree,
-        Types: NodeTypes<ChainSpec: EthChainSpec + EthereumHardforks>,
-    >,
+    T: FullNodeTypes<Provider: WithTree, Types: ProviderNodeTypes>,
     CB: NodeComponentsBuilder<T>,
 {
     /// Returns the configured `ProviderFactory`.
@@ -766,7 +786,7 @@ where
     }
 
     /// Returns the static file provider to interact with the static files.
-    pub fn static_file_provider(&self) -> StaticFileProvider {
+    pub fn static_file_provider(&self) -> StaticFileProvider<<T::Types as NodeTypes>::Primitives> {
         self.provider_factory().static_file_provider()
     }
 
@@ -814,6 +834,26 @@ where
         self.node_config().debug.terminate || self.node_config().debug.max_block.is_some()
     }
 
+    /// Ensures that the database matches chain-specific requirements.
+    ///
+    /// This checks for OP-Mainnet and ensures we have all the necessary data to progress (past
+    /// bedrock height)
+    fn ensure_chain_specific_db_checks(&self) -> ProviderResult<()> {
+        if self.chain_spec().is_optimism() &&
+            !self.is_dev() &&
+            self.chain_id() == Chain::optimism_mainnet()
+        {
+            let latest = self.blockchain_db().last_block_number()?;
+            // bedrock height
+            if latest < 105235063 {
+                error!("Op-mainnet has been launched without importing the pre-Bedrock state. The chain can't progress without this. See also https://reth.rs/run/sync-op-mainnet.html?minimal-bootstrap-recommended");
+                return Err(ProviderError::BestBlockNotFound)
+            }
+        }
+
+        Ok(())
+    }
+
     /// Check if the pipeline is consistent (all stages have the checkpoint block numbers no less
     /// than the checkpoint of the first stage).
     ///
@@ -857,6 +897,8 @@ where
             }
         }
 
+        self.ensure_chain_specific_db_checks()?;
+
         Ok(None)
     }
 
@@ -888,7 +930,7 @@ impl<T, CB>
 where
     T: FullNodeTypes<
         Provider: WithTree + StateProviderFactory + ChainSpecProvider,
-        Types: NodeTypes<ChainSpec: EthereumHardforks>,
+        Types: ProviderNodeTypes,
     >,
     CB: NodeComponentsBuilder<T>,
 {

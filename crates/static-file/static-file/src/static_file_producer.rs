@@ -4,6 +4,9 @@ use crate::{segments, segments::Segment, StaticFileProducerEvent};
 use alloy_primitives::BlockNumber;
 use parking_lot::Mutex;
 use rayon::prelude::*;
+use reth_codecs::Compact;
+use reth_db::table::Value;
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::StaticFileWriter, BlockReader, ChainStateBlockReader, DBProvider,
     DatabaseProviderFactory, StageCheckpointReader, StaticFileProviderFactory,
@@ -85,7 +88,12 @@ where
 impl<Provider> StaticFileProducerInner<Provider>
 where
     Provider: StaticFileProviderFactory
-        + DatabaseProviderFactory<Provider: StageCheckpointReader + BlockReader>,
+        + DatabaseProviderFactory<
+            Provider: StaticFileProviderFactory<
+                Primitives: NodePrimitives<SignedTx: Value + Compact>,
+            > + StageCheckpointReader
+                          + BlockReader,
+        >,
 {
     /// Listen for events on the `static_file_producer`.
     pub fn events(&self) -> EventStream<StaticFileProducerEvent> {
@@ -136,7 +144,7 @@ where
             // Create a new database transaction on every segment to prevent long-lived read-only
             // transactions
             let provider = self.provider.database_provider_ro()?.disable_long_read_transaction_safety();
-            segment.copy_to_static_files(provider, self.provider.static_file_provider(), block_range.clone())?;
+            segment.copy_to_static_files(provider,  block_range.clone())?;
 
             let elapsed = start.elapsed(); // TODO(alexey): track in metrics
             debug!(target: "static_file", segment = %segment.segment(), ?block_range, ?elapsed, "Finished StaticFileProducer segment");

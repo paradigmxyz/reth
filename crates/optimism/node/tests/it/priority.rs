@@ -25,12 +25,10 @@ use reth_optimism_node::{
     OpEngineTypes, OpNode,
 };
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
+use reth_payload_util::{PayloadTransactions, PayloadTransactionsChain, PayloadTransactionsFixed};
 use reth_primitives::{SealedBlock, Transaction, TransactionSigned, TransactionSignedEcRecovered};
 use reth_provider::providers::BlockchainProvider2;
-use reth_transaction_pool::{
-    pool::{BestPayloadTransactions, PayloadTransactionsChain, PayloadTransactionsFixed},
-    PayloadTransactions,
-};
+use reth_transaction_pool::pool::BestPayloadTransactions;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -65,10 +63,7 @@ impl OpPayloadTransactions for CustomTxPriority {
         };
         let signature = sender.sign_transaction_sync(&mut end_of_block_tx).unwrap();
         let end_of_block_tx = TransactionSignedEcRecovered::from_signed_transaction(
-            TransactionSigned::from_transaction_and_signature(
-                Transaction::Eip1559(end_of_block_tx),
-                signature,
-            ),
+            TransactionSigned::new_unhashed(Transaction::Eip1559(end_of_block_tx), signature),
             sender.address(),
         );
 

@@ -1,5 +1,6 @@
 use alloc::{vec, vec::Vec};
-use core::{cmp::Ordering, ops::Deref};
+use core::cmp::Ordering;
+use reth_primitives_traits::InMemorySize;
 
 use alloy_consensus::{
     constants::{EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID},
@@ -10,11 +11,15 @@ use alloy_primitives::{Bloom, Log, B256};
 use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
 use bytes::{Buf, BufMut};
 use derive_more::{DerefMut, From, IntoIterator};
+use reth_primitives_traits::receipt::ReceiptExt;
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "reth-codec")]
 use crate::compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR};
 use crate::TxType;
+
+/// Retrieves gas spent by transactions as a vector of tuples (transaction index, gas used).
+pub use reth_primitives_traits::receipt::gas_spent_by_transactions;
 
 /// Receipt containing result of transaction execution.
 #[derive(
@@ -67,7 +72,6 @@ impl Receipt {
     }
 }
 
-// todo: replace with alloy receipt
 impl TxReceipt for Receipt {
     fn status_or_post_state(&self) -> Eip658Value {
         self.success.into()
@@ -94,12 +98,30 @@ impl reth_primitives_traits::Receipt for Receipt {
     fn tx_type(&self) -> u8 {
         self.tx_type as u8
     }
+}
 
+impl ReceiptExt for Receipt {
     fn receipts_root(_receipts: &[&Self]) -> B256 {
         #[cfg(feature = "optimism")]
         panic!("This should not be called in optimism mode. Use `optimism_receipts_root_slow` instead.");
         #[cfg(not(feature = "optimism"))]
         crate::proofs::calculate_receipt_root_no_memo(_receipts)
+    }
+}
+
+impl InMemorySize for Receipt {
+    /// Calculates a heuristic for the in-memory size of the [Receipt].
+    #[inline]
+    fn size(&self) -> usize {
+        let total_size = self.tx_type.size() +
+            core::mem::size_of::<bool>() +
+            core::mem::size_of::<u64>() +
+            self.logs.capacity() * core::mem::size_of::<Log>();
+
+        #[cfg(feature = "optimism")]
+        return total_size + 2 * core::mem::size_of::<Option<u64>>();
+        #[cfg(not(feature = "optimism"))]
+        total_size
     }
 }
 
@@ -168,8 +190,6 @@ impl From<Receipt> for ReceiptWithBloom {
 /// [`Receipt`] with calculated bloom filter.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-#[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 pub struct ReceiptWithBloom {
     /// Bloom filter build from logs.
     pub bloom: Bloom,
@@ -197,17 +217,6 @@ impl ReceiptWithBloom {
     const fn as_encoder(&self) -> ReceiptWithBloomEncoder<'_> {
         ReceiptWithBloomEncoder { receipt: &self.receipt, bloom: &self.bloom }
     }
-}
-
-/// Retrieves gas spent by transactions as a vector of tuples (transaction index, gas used).
-pub fn gas_spent_by_transactions<T: Deref<Target = Receipt>>(
-    receipts: impl IntoIterator<Item = T>,
-) -> Vec<(u64, u64)> {
-    receipts
-        .into_iter()
-        .enumerate()
-        .map(|(id, receipt)| (id as u64, receipt.deref().cumulative_gas_used))
-        .collect()
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
@@ -384,7 +393,7 @@ impl Decodable for ReceiptWithBloom {
                         Self::decode_receipt(buf, TxType::Eip7702)
                     }
                     #[cfg(feature = "optimism")]
-                    crate::transaction::DEPOSIT_TX_TYPE_ID => {
+                    op_alloy_consensus::DEPOSIT_TX_TYPE_ID => {
                         buf.advance(1);
                         Self::decode_receipt(buf, TxType::Deposit)
                     }
@@ -520,7 +529,7 @@ impl ReceiptWithBloomEncoder<'_> {
             }
             #[cfg(feature = "optimism")]
             TxType::Deposit => {
-                out.put_u8(crate::transaction::DEPOSIT_TX_TYPE_ID);
+                out.put_u8(op_alloy_consensus::DEPOSIT_TX_TYPE_ID);
             }
         }
         out.put_slice(payload.as_ref());
@@ -553,8 +562,7 @@ impl Encodable for ReceiptWithBloomEncoder<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::revm_primitives::Bytes;
-    use alloy_primitives::{address, b256, bytes, hex_literal::hex};
+    use alloy_primitives::{address, b256, bytes, hex_literal::hex, Bytes};
     use reth_codecs::Compact;
 
     #[test]

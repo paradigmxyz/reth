@@ -4,7 +4,8 @@ use std::{fmt::Display, sync::Arc};
 
 use alloy_consensus::{Header, Transaction, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::merge::BEACON_NONCE;
-use alloy_primitives::{Address, Bytes, U256};
+use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_engine::PayloadId;
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
@@ -14,21 +15,22 @@ use reth_execution_types::ExecutionOutcome;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_forks::OpHardforks;
-use reth_payload_primitives::{PayloadBuilderAttributes, PayloadBuilderError};
-use reth_primitives::{
-    proofs,
-    revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-    Block, BlockBody, Receipt, SealedHeader, TransactionSigned, TxType,
-};
-use reth_provider::{ProviderError, StateProviderFactory, StateRootProvider};
+use reth_payload_builder_primitives::PayloadBuilderError;
+use reth_payload_primitives::PayloadBuilderAttributes;
+use reth_payload_util::PayloadTransactions;
+use reth_primitives::{proofs, Block, BlockBody, Receipt, SealedHeader, TransactionSigned, TxType};
+use reth_provider::{ProviderError, StateProofProvider, StateProviderFactory, StateRootProvider};
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{
-    noop::NoopTransactionPool, BestTransactionsAttributes, PayloadTransactions, TransactionPool,
+    noop::NoopTransactionPool, BestTransactionsAttributes, TransactionPool,
 };
 use reth_trie::HashedPostState;
 use revm::{
     db::{states::bundle_state::BundleRetention, State},
-    primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState, TxEnv},
+    primitives::{
+        BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, InvalidTransaction,
+        ResultAndState, TxEnv,
+    },
     Database, DatabaseCommit,
 };
 use tracing::{debug, trace, warn};
@@ -38,6 +40,8 @@ use crate::{
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
 };
 use op_alloy_consensus::DepositTransaction;
+use op_alloy_rpc_types_engine::OpPayloadAttributes;
+use reth_revm::witness::ExecutionWitnessRecord;
 use reth_transaction_pool::pool::BestPayloadTransactions;
 
 /// Optimism's payload builder
@@ -92,21 +96,6 @@ where
     EvmConfig: ConfigureEvm<Header = Header>,
     Txs: OpPayloadTransactions,
 {
-    /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the targeted payload
-    /// (that has the `parent` as its parent).
-    pub fn cfg_and_block_env(
-        &self,
-        config: &PayloadConfig<OpPayloadBuilderAttributes>,
-        parent: &Header,
-    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), EvmConfig::Error> {
-        let next_attributes = NextBlockEnvAttributes {
-            timestamp: config.attributes.timestamp(),
-            suggested_fee_recipient: config.attributes.suggested_fee_recipient(),
-            prev_randao: config.attributes.prev_randao(),
-        };
-        self.evm_config.next_cfg_and_block_env(parent, next_attributes)
-    }
-
     /// Constructs an Optimism payload from the transactions sent via the
     /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
     /// the payload attributes, the transaction pool will be ignored and the only transactions
@@ -124,7 +113,7 @@ where
         Pool: TransactionPool,
     {
         let (initialized_cfg, initialized_block_env) = self
-            .cfg_and_block_env(&args.config, &args.config.parent_header)
+            .cfg_and_block_env(&args.config.attributes, &args.config.parent_header)
             .map_err(PayloadBuilderError::other)?;
 
         let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
@@ -156,6 +145,65 @@ where
             builder.build(db, ctx)
         }
         .map(|out| out.with_cached_reads(cached_reads))
+    }
+}
+
+impl<EvmConfig, Txs> OpPayloadBuilder<EvmConfig, Txs>
+where
+    EvmConfig: ConfigureEvm<Header = Header>,
+{
+    /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the targeted payload
+    /// (that has the `parent` as its parent).
+    pub fn cfg_and_block_env(
+        &self,
+        attributes: &OpPayloadBuilderAttributes,
+        parent: &Header,
+    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), EvmConfig::Error> {
+        let next_attributes = NextBlockEnvAttributes {
+            timestamp: attributes.timestamp(),
+            suggested_fee_recipient: attributes.suggested_fee_recipient(),
+            prev_randao: attributes.prev_randao(),
+        };
+        self.evm_config.next_cfg_and_block_env(parent, next_attributes)
+    }
+
+    /// Computes the witness for the payload.
+    pub fn payload_witness<Client>(
+        &self,
+        client: &Client,
+        parent: SealedHeader,
+        attributes: OpPayloadAttributes,
+    ) -> Result<ExecutionWitness, PayloadBuilderError>
+    where
+        Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
+    {
+        let attributes = OpPayloadBuilderAttributes::try_new(parent.hash(), attributes, 3)
+            .map_err(PayloadBuilderError::other)?;
+
+        let (initialized_cfg, initialized_block_env) =
+            self.cfg_and_block_env(&attributes, &parent).map_err(PayloadBuilderError::other)?;
+
+        let config = PayloadConfig {
+            parent_header: Arc::new(parent),
+            attributes,
+            extra_data: Default::default(),
+        };
+        let ctx = OpPayloadBuilderCtx {
+            evm_config: self.evm_config.clone(),
+            chain_spec: client.chain_spec(),
+            config,
+            initialized_cfg,
+            initialized_block_env,
+            cancel: Default::default(),
+            best_payload: Default::default(),
+        };
+
+        let state_provider = client.state_by_block_hash(ctx.parent().hash())?;
+        let state = StateProviderDatabase::new(state_provider);
+        let mut state = State::builder().with_database(state).with_bundle_update().build();
+
+        let builder = OpBuilder { pool: NoopTransactionPool::default(), best: () };
+        builder.witness(&mut state, &ctx)
     }
 }
 
@@ -234,36 +282,33 @@ where
     Pool: TransactionPool,
     Txs: OpPayloadTransactions,
 {
-    /// Builds the payload on top of the state.
-    pub fn build<EvmConfig, DB, P>(
+    /// Executes the payload and returns the outcome.
+    pub fn execute<EvmConfig, DB>(
         self,
-        mut db: State<DB>,
-        ctx: OpPayloadBuilderCtx<EvmConfig>,
-    ) -> Result<BuildOutcomeKind<OpBuiltPayload>, PayloadBuilderError>
+        state: &mut State<DB>,
+        ctx: &OpPayloadBuilderCtx<EvmConfig>,
+    ) -> Result<BuildOutcomeKind<ExecutedPayload>, PayloadBuilderError>
     where
         EvmConfig: ConfigureEvm<Header = Header>,
-        DB: Database<Error = ProviderError> + AsRef<P>,
-        P: StateRootProvider,
+        DB: Database<Error = ProviderError>,
     {
         let Self { pool, best } = self;
         debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
 
         // 1. apply eip-4788 pre block contract call
-        ctx.apply_pre_beacon_root_contract_call(&mut db)?;
+        ctx.apply_pre_beacon_root_contract_call(state)?;
 
         // 2. ensure create2deployer is force deployed
-        ctx.ensure_create2_deployer(&mut db)?;
+        ctx.ensure_create2_deployer(state)?;
 
         // 3. execute sequencer transactions
-        let mut info = ctx.execute_sequencer_transactions(&mut db)?;
+        let mut info = ctx.execute_sequencer_transactions(state)?;
 
         // 4. if mem pool transactions are requested we execute them
         if !ctx.attributes().no_tx_pool {
             let best_txs = best.best_transactions(pool, ctx.best_transaction_attributes());
-            if let Some(cancelled) =
-                ctx.execute_best_transactions::<_, Pool>(&mut info, &mut db, best_txs)?
-            {
-                return Ok(cancelled)
+            if ctx.execute_best_transactions::<_, Pool>(&mut info, state, best_txs)?.is_some() {
+                return Ok(BuildOutcomeKind::Cancelled)
             }
 
             // check if the new payload is even more valuable
@@ -273,17 +318,36 @@ where
             }
         }
 
-        let WithdrawalsOutcome { withdrawals_root, withdrawals } =
-            ctx.commit_withdrawals(&mut db)?;
+        let withdrawals_root = ctx.commit_withdrawals(state)?;
 
         // merge all transitions into bundle state, this would apply the withdrawal balance changes
         // and 4788 contract call
-        db.merge_transitions(BundleRetention::Reverts);
+        state.merge_transitions(BundleRetention::Reverts);
+
+        Ok(BuildOutcomeKind::Better { payload: ExecutedPayload { info, withdrawals_root } })
+    }
+
+    /// Builds the payload on top of the state.
+    pub fn build<EvmConfig, DB, P>(
+        self,
+        mut state: State<DB>,
+        ctx: OpPayloadBuilderCtx<EvmConfig>,
+    ) -> Result<BuildOutcomeKind<OpBuiltPayload>, PayloadBuilderError>
+    where
+        EvmConfig: ConfigureEvm<Header = Header>,
+        DB: Database<Error = ProviderError> + AsRef<P>,
+        P: StateRootProvider,
+    {
+        let ExecutedPayload { info, withdrawals_root } = match self.execute(&mut state, &ctx)? {
+            BuildOutcomeKind::Better { payload } | BuildOutcomeKind::Freeze(payload) => payload,
+            BuildOutcomeKind::Cancelled => return Ok(BuildOutcomeKind::Cancelled),
+            BuildOutcomeKind::Aborted { fees } => return Ok(BuildOutcomeKind::Aborted { fees }),
+        };
 
         let block_number = ctx.block_number();
         let execution_outcome = ExecutionOutcome::new(
-            db.take_bundle(),
-            vec![info.receipts.clone()].into(),
+            state.take_bundle(),
+            vec![info.receipts].into(),
             block_number,
             Vec::new(),
         );
@@ -302,7 +366,7 @@ where
         // // calculate the state root
         let hashed_state = HashedPostState::from_bundle_state(&execution_outcome.state().state);
         let (state_root, trie_output) = {
-            db.database.as_ref().state_root_with_updates(hashed_state.clone()).inspect_err(
+            state.database.as_ref().state_root_with_updates(hashed_state.clone()).inspect_err(
                 |err| {
                     warn!(target: "payload_builder",
                     parent_header=%ctx.parent().hash(),
@@ -352,12 +416,12 @@ where
             body: BlockBody {
                 transactions: info.executed_transactions,
                 ommers: vec![],
-                withdrawals,
+                withdrawals: Some(ctx.attributes().payload_attributes.withdrawals.clone()),
             },
         };
 
         let sealed_block = Arc::new(block.seal_slow());
-        debug!(target: "payload_builder", ?sealed_block, "sealed built block");
+        debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), sealed_block_header = ?sealed_block.header, "sealed built block");
 
         // create the executed block data
         let executed = ExecutedBlock {
@@ -388,6 +452,24 @@ where
             Ok(BuildOutcomeKind::Better { payload })
         }
     }
+
+    /// Builds the payload and returns its [`ExecutionWitness`] based on the state after execution.
+    pub fn witness<EvmConfig, DB, P>(
+        self,
+        state: &mut State<DB>,
+        ctx: &OpPayloadBuilderCtx<EvmConfig>,
+    ) -> Result<ExecutionWitness, PayloadBuilderError>
+    where
+        EvmConfig: ConfigureEvm<Header = Header>,
+        DB: Database<Error = ProviderError> + AsRef<P>,
+        P: StateProofProvider,
+    {
+        let _ = self.execute(state, ctx)?;
+        let ExecutionWitnessRecord { hashed_state, codes, keys } =
+            ExecutionWitnessRecord::from_executed_state(state);
+        let state = state.database.as_ref().witness(Default::default(), hashed_state)?;
+        Ok(ExecutionWitness { state: state.into_iter().collect(), codes, keys })
+    }
 }
 
 /// A type that returns a the [`PayloadTransactions`] that should be included in the pool.
@@ -409,6 +491,15 @@ impl OpPayloadTransactions for () {
     ) -> impl PayloadTransactions {
         BestPayloadTransactions::new(pool.best_transactions_with_attributes(attr))
     }
+}
+
+/// Holds the state after execution
+#[derive(Debug)]
+pub struct ExecutedPayload {
+    /// Tracked execution info
+    pub info: ExecutionInfo,
+    /// Withdrawal hash.
+    pub withdrawals_root: Option<B256>,
 }
 
 /// This acts as the container for executed transactions and its byproducts (receipts, gas used)
@@ -558,10 +649,7 @@ impl<EvmConfig> OpPayloadBuilderCtx<EvmConfig> {
     }
 
     /// Commits the withdrawals from the payload attributes to the state.
-    pub fn commit_withdrawals<DB>(
-        &self,
-        db: &mut State<DB>,
-    ) -> Result<WithdrawalsOutcome, ProviderError>
+    pub fn commit_withdrawals<DB>(&self, db: &mut State<DB>) -> Result<Option<B256>, ProviderError>
     where
         DB: Database<Error = ProviderError>,
     {
@@ -569,7 +657,7 @@ impl<EvmConfig> OpPayloadBuilderCtx<EvmConfig> {
             db,
             &self.chain_spec,
             self.attributes().payload_attributes.timestamp,
-            self.attributes().payload_attributes.withdrawals.clone(),
+            &self.attributes().payload_attributes.withdrawals,
         )
     }
 
@@ -725,13 +813,15 @@ where
         Ok(info)
     }
 
-    /// Executes the given best transactions and updates the execution info
+    /// Executes the given best transactions and updates the execution info.
+    ///
+    /// Returns `Ok(Some(())` if the job was cancelled.
     pub fn execute_best_transactions<DB, Pool>(
         &self,
         info: &mut ExecutionInfo,
         db: &mut State<DB>,
         mut best_txs: impl PayloadTransactions,
-    ) -> Result<Option<BuildOutcomeKind<OpBuiltPayload>>, PayloadBuilderError>
+    ) -> Result<Option<()>, PayloadBuilderError>
     where
         DB: Database<Error = ProviderError>,
         Pool: TransactionPool,
@@ -764,7 +854,7 @@ where
 
             // check if the job was cancelled, if so we can exit early
             if self.cancel.is_cancelled() {
-                return Ok(Some(BuildOutcomeKind::Cancelled))
+                return Ok(Some(()))
             }
 
             // Configure the environment for the tx.

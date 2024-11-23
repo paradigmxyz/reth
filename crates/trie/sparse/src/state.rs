@@ -32,7 +32,7 @@ impl SparseStateTrie {
 
     /// Returns `true` if storage slot for account was already revealed.
     pub fn is_storage_slot_revealed(&self, account: &B256, slot: &B256) -> bool {
-        self.revealed.get(account).map_or(false, |slots| slots.contains(slot))
+        self.revealed.get(account).is_some_and(|slots| slots.contains(slot))
     }
 
     /// Reveal unknown trie paths from provided leaf path and its proof for the account.
@@ -42,6 +42,10 @@ impl SparseStateTrie {
         account: B256,
         proof: impl IntoIterator<Item = (Nibbles, Bytes)>,
     ) -> SparseStateTrieResult<()> {
+        if self.revealed.contains_key(&account) {
+            return Ok(());
+        }
+
         let mut proof = proof.into_iter().peekable();
 
         let Some(root_node) = self.validate_proof(&mut proof)? else { return Ok(()) };
@@ -69,6 +73,10 @@ impl SparseStateTrie {
         slot: B256,
         proof: impl IntoIterator<Item = (Nibbles, Bytes)>,
     ) -> SparseStateTrieResult<()> {
+        if self.revealed.get(&account).is_some_and(|v| v.contains(&slot)) {
+            return Ok(());
+        }
+
         let mut proof = proof.into_iter().peekable();
 
         let Some(root_node) = self.validate_proof(&mut proof)? else { return Ok(()) };

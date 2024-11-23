@@ -1,6 +1,7 @@
 //! Builds an RPC receipt response w.r.t. data layout of network.
 
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned};
+use reth_provider::TransactionsProvider;
 use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError, RpcNodeCoreExt, RpcReceipt};
 use reth_rpc_eth_types::{EthApiError, EthReceiptBuilder};
 
@@ -8,7 +9,7 @@ use crate::EthApi;
 
 impl<Provider, Pool, Network, EvmConfig> LoadReceipt for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: RpcNodeCoreExt,
+    Self: RpcNodeCoreExt<Provider: TransactionsProvider<Transaction = TransactionSigned>>,
 {
     async fn build_transaction_receipt(
         &self,

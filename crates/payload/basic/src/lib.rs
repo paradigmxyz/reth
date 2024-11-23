@@ -17,10 +17,10 @@ use futures_util::FutureExt;
 use reth_chainspec::EthereumHardforks;
 use reth_evm::state_change::post_block_withdrawals_balance_increments;
 use reth_payload_builder::{KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJobGenerator};
-use reth_payload_primitives::{
-    BuiltPayload, PayloadBuilderAttributes, PayloadBuilderError, PayloadKind,
-};
-use reth_primitives::{constants::RETH_CLIENT_VERSION, proofs, SealedHeader};
+use reth_payload_builder_primitives::PayloadBuilderError;
+use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadKind};
+use reth_primitives::{proofs, SealedHeader};
+use reth_primitives_traits::constants::RETH_CLIENT_VERSION;
 use reth_provider::{BlockReaderIdExt, CanonStateNotification, StateProviderFactory};
 use reth_revm::cached::CachedReads;
 use reth_tasks::TaskSpawner;
@@ -979,31 +979,6 @@ impl<Payload> Default for MissingPayloadBehaviour<Payload> {
     }
 }
 
-/// Represents the outcome of committing withdrawals to the runtime database and post state.
-/// Pre-shanghai these are `None` values.
-#[derive(Default, Debug)]
-pub struct WithdrawalsOutcome {
-    /// committed withdrawals, if any.
-    pub withdrawals: Option<Withdrawals>,
-    /// withdrawals root if any.
-    pub withdrawals_root: Option<B256>,
-}
-
-impl WithdrawalsOutcome {
-    /// No withdrawals pre shanghai
-    pub const fn pre_shanghai() -> Self {
-        Self { withdrawals: None, withdrawals_root: None }
-    }
-
-    /// No withdrawals
-    pub fn empty() -> Self {
-        Self {
-            withdrawals: Some(Withdrawals::default()),
-            withdrawals_root: Some(EMPTY_WITHDRAWALS),
-        }
-    }
-}
-
 /// Executes the withdrawals and commits them to the _runtime_ Database and `BundleState`.
 ///
 /// Returns the withdrawals root.
@@ -1013,32 +988,26 @@ pub fn commit_withdrawals<DB, ChainSpec>(
     db: &mut State<DB>,
     chain_spec: &ChainSpec,
     timestamp: u64,
-    withdrawals: Withdrawals,
-) -> Result<WithdrawalsOutcome, DB::Error>
+    withdrawals: &Withdrawals,
+) -> Result<Option<B256>, DB::Error>
 where
     DB: Database,
     ChainSpec: EthereumHardforks,
 {
     if !chain_spec.is_shanghai_active_at_timestamp(timestamp) {
-        return Ok(WithdrawalsOutcome::pre_shanghai())
+        return Ok(None)
     }
 
     if withdrawals.is_empty() {
-        return Ok(WithdrawalsOutcome::empty())
+        return Ok(Some(EMPTY_WITHDRAWALS))
     }
 
     let balance_increments =
-        post_block_withdrawals_balance_increments(chain_spec, timestamp, &withdrawals);
+        post_block_withdrawals_balance_increments(chain_spec, timestamp, withdrawals);
 
     db.increment_balances(balance_increments)?;
 
-    let withdrawals_root = proofs::calculate_withdrawals_root(&withdrawals);
-
-    // calculate withdrawals root
-    Ok(WithdrawalsOutcome {
-        withdrawals: Some(withdrawals),
-        withdrawals_root: Some(withdrawals_root),
-    })
+    Ok(Some(proofs::calculate_withdrawals_root(withdrawals)))
 }
 
 /// Checks if the new payload is better than the current best.

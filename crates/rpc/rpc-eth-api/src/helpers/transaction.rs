@@ -9,7 +9,9 @@ use alloy_primitives::{Address, Bytes, TxHash, B256};
 use alloy_rpc_types_eth::{transaction::TransactionRequest, BlockNumberOrTag, TransactionInfo};
 use futures::Future;
 use reth_primitives::{Receipt, SealedBlockWithSenders, TransactionMeta, TransactionSigned};
-use reth_provider::{BlockNumReader, BlockReaderIdExt, ReceiptProvider, TransactionsProvider};
+use reth_provider::{
+    BlockNumReader, BlockReaderIdExt, ProviderTx, ReceiptProvider, TransactionsProvider,
+};
 use reth_rpc_eth_types::{
     utils::{binary_search, recover_raw_transaction},
     EthApiError, SignError, TransactionSource,
@@ -18,13 +20,12 @@ use reth_rpc_types_compat::transaction::{from_recovered, from_recovered_with_blo
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 use std::sync::Arc;
 
-use crate::{
-    FromEthApiError, FullEthApiTypes, IntoEthApiError, RpcNodeCore, RpcNodeCoreExt, RpcReceipt,
-    RpcTransaction,
-};
-
 use super::{
-    Call, EthApiSpec, EthSigner, LoadBlock, LoadPendingBlock, LoadReceipt, LoadState, SpawnBlocking,
+    EthApiSpec, EthSigner, LoadBlock, LoadPendingBlock, LoadReceipt, LoadState, SpawnBlocking,
+};
+use crate::{
+    helpers::estimate::EstimateCall, FromEthApiError, FullEthApiTypes, IntoEthApiError,
+    RpcNodeCore, RpcNodeCoreExt, RpcReceipt, RpcTransaction,
 };
 
 /// Transaction related functions for the [`EthApiServer`](crate::EthApiServer) trait in
@@ -61,10 +62,13 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     /// Checks the pool and state.
     ///
     /// Returns `Ok(None)` if no matching transaction was found.
+    #[expect(clippy::complexity)]
     fn transaction_by_hash(
         &self,
         hash: B256,
-    ) -> impl Future<Output = Result<Option<TransactionSource>, Self::Error>> + Send {
+    ) -> impl Future<
+        Output = Result<Option<TransactionSource<ProviderTx<Self::Provider>>>, Self::Error>,
+    > + Send {
         LoadTransaction::transaction_by_hash(self, hash)
     }
 
@@ -149,19 +153,22 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     }
 
     /// Helper method that loads a transaction and its receipt.
+    #[expect(clippy::complexity)]
     fn load_transaction_and_receipt(
         &self,
         hash: TxHash,
     ) -> impl Future<
-        Output = Result<Option<(TransactionSigned, TransactionMeta, Receipt)>, Self::Error>,
+        Output = Result<
+            Option<(ProviderTx<Self::Provider>, TransactionMeta, Receipt)>,
+            Self::Error,
+        >,
     > + Send
     where
         Self: 'static,
     {
-        let this = self.clone();
+        let provider = self.provider().clone();
         self.spawn_blocking_io(move |_| {
-            let (tx, meta) = match this
-                .provider()
+            let (tx, meta) = match provider
                 .transaction_by_hash_with_meta(hash)
                 .map_err(Self::Error::from_eth_err)?
             {
@@ -169,11 +176,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 None => return Ok(None),
             };
 
-            let receipt =
-                match this.provider().receipt_by_hash(hash).map_err(Self::Error::from_eth_err)? {
-                    Some(recpt) => recpt,
-                    None => return Ok(None),
-                };
+            let receipt = match provider.receipt_by_hash(hash).map_err(Self::Error::from_eth_err)? {
+                Some(recpt) => recpt,
+                None => return Ok(None),
+            };
 
             Ok(Some((tx, meta, receipt)))
         })
@@ -326,7 +332,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         tx: Bytes,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
         async move {
-            let recovered = recover_raw_transaction(tx.clone())?;
+            let recovered = recover_raw_transaction(tx)?;
             let pool_transaction =
                 <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered.into());
 
@@ -348,7 +354,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         mut request: TransactionRequest,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send
     where
-        Self: EthApiSpec + LoadBlock + LoadPendingBlock + Call,
+        Self: EthApiSpec + LoadBlock + LoadPendingBlock + EstimateCall,
     {
         async move {
             let from = match request.from {
@@ -478,10 +484,13 @@ pub trait LoadTransaction:
     /// Checks the pool and state.
     ///
     /// Returns `Ok(None)` if no matching transaction was found.
+    #[expect(clippy::complexity)]
     fn transaction_by_hash(
         &self,
         hash: B256,
-    ) -> impl Future<Output = Result<Option<TransactionSource>, Self::Error>> + Send {
+    ) -> impl Future<
+        Output = Result<Option<TransactionSource<ProviderTx<Self::Provider>>>, Self::Error>,
+    > + Send {
         async move {
             // Try to find the transaction on disk
             let mut resp = self

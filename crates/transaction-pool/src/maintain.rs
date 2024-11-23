@@ -5,7 +5,7 @@ use crate::{
     error::PoolError,
     metrics::MaintainPoolMetrics,
     traits::{CanonicalStateUpdate, TransactionPool, TransactionPoolExt},
-    BlockInfo, PoolTransaction,
+    BlockInfo, PoolTransaction, PoolUpdateKind,
 };
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Address, BlockHash, BlockNumber};
@@ -317,7 +317,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 // find all transactions that were mined in the old chain but not in the new chain
                 let pruned_old_transactions = old_blocks
                     .transactions_ecrecovered()
-                    .filter(|tx| !new_mined_transactions.contains(&tx.hash))
+                    .filter(|tx| !new_mined_transactions.contains(tx.hash_ref()))
                     .filter_map(|tx| {
                         if tx.is_eip4844() {
                             // reorged blobs no longer include the blob, which is necessary for
@@ -325,7 +325,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                             // been validated previously, we still need the blob in order to
                             // accurately set the transaction's
                             // encoded-length which is propagated over the network.
-                            pool.get_blob(tx.hash)
+                            pool.get_blob(TransactionSigned::hash(&tx))
                                 .ok()
                                 .flatten()
                                 .map(Arc::unwrap_or_clone)
@@ -352,6 +352,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                     changed_accounts,
                     // all transactions mined in the new chain need to be removed from the pool
                     mined_transactions: new_blocks.transaction_hashes().collect(),
+                    update_kind: PoolUpdateKind::Reorg,
                 };
                 pool.on_canonical_state_change(update);
 
@@ -434,6 +435,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                     pending_block_blob_fee,
                     changed_accounts,
                     mined_transactions,
+                    update_kind: PoolUpdateKind::Commit,
                 };
                 pool.on_canonical_state_change(update);
 

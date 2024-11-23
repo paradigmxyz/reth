@@ -1,11 +1,11 @@
 use crate::{
     identifier::{SenderId, TransactionId},
     pool::pending::PendingTransaction,
-    PayloadTransactions, PoolTransaction, TransactionOrdering, ValidPoolTransaction,
+    PoolTransaction, TransactionOrdering, ValidPoolTransaction,
 };
-use alloy_consensus::Transaction;
 use alloy_primitives::Address;
 use core::fmt;
+use reth_payload_util::PayloadTransactions;
 use reth_primitives::TransactionSignedEcRecovered;
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet, VecDeque},
@@ -395,139 +395,16 @@ where
     }
 }
 
-/// An implementation of [`crate::traits::PayloadTransactions`] that yields
-/// a pre-defined set of transactions.
-///
-/// This is useful to put a sequencer-specified set of transactions into the block
-/// and compose it with the rest of the transactions.
-#[derive(Debug)]
-pub struct PayloadTransactionsFixed<T> {
-    transactions: Vec<T>,
-    index: usize,
-}
-
-impl<T> PayloadTransactionsFixed<T> {
-    /// Constructs a new [`PayloadTransactionsFixed`].
-    pub fn new(transactions: Vec<T>) -> Self {
-        Self { transactions, index: Default::default() }
-    }
-
-    /// Constructs a new [`PayloadTransactionsFixed`] with a single transaction.
-    pub fn single(transaction: T) -> Self {
-        Self { transactions: vec![transaction], index: Default::default() }
-    }
-}
-
-impl PayloadTransactions for PayloadTransactionsFixed<TransactionSignedEcRecovered> {
-    fn next(&mut self, _ctx: ()) -> Option<TransactionSignedEcRecovered> {
-        (self.index < self.transactions.len()).then(|| {
-            let tx = self.transactions[self.index].clone();
-            self.index += 1;
-            tx
-        })
-    }
-
-    fn mark_invalid(&mut self, _sender: Address, _nonce: u64) {}
-}
-
-/// Wrapper over [`crate::traits::PayloadTransactions`] that combines transactions from multiple
-/// `PayloadTransactions` iterators and keeps track of the gas for both of iterators.
-///
-/// We can't use [`Iterator::chain`], because:
-/// (a) we need to propagate the `mark_invalid` and `no_updates`
-/// (b) we need to keep track of the gas
-///
-/// Notes that [`PayloadTransactionsChain`] fully drains the first iterator
-/// before moving to the second one.
-///
-/// If the `before` iterator has transactions that are not fitting into the block,
-/// the after iterator will get propagated a `mark_invalid` call for each of them.
-#[derive(Debug)]
-pub struct PayloadTransactionsChain<B: PayloadTransactions, A: PayloadTransactions> {
-    /// Iterator that will be used first
-    before: B,
-    /// Allowed gas for the transactions from `before` iterator. If `None`, no gas limit is
-    /// enforced.
-    before_max_gas: Option<u64>,
-    /// Gas used by the transactions from `before` iterator
-    before_gas: u64,
-    /// Iterator that will be used after `before` iterator
-    after: A,
-    /// Allowed gas for the transactions from `after` iterator. If `None`, no gas limit is
-    /// enforced.
-    after_max_gas: Option<u64>,
-    /// Gas used by the transactions from `after` iterator
-    after_gas: u64,
-}
-
-impl<B: PayloadTransactions, A: PayloadTransactions> PayloadTransactionsChain<B, A> {
-    /// Constructs a new [`PayloadTransactionsChain`].
-    pub fn new(
-        before: B,
-        before_max_gas: Option<u64>,
-        after: A,
-        after_max_gas: Option<u64>,
-    ) -> Self {
-        Self {
-            before,
-            before_max_gas,
-            before_gas: Default::default(),
-            after,
-            after_max_gas,
-            after_gas: Default::default(),
-        }
-    }
-}
-
-impl<B, A> PayloadTransactions for PayloadTransactionsChain<B, A>
-where
-    B: PayloadTransactions,
-    A: PayloadTransactions,
-{
-    fn next(&mut self, ctx: ()) -> Option<TransactionSignedEcRecovered> {
-        while let Some(tx) = self.before.next(ctx) {
-            if let Some(before_max_gas) = self.before_max_gas {
-                if self.before_gas + tx.transaction.gas_limit() <= before_max_gas {
-                    self.before_gas += tx.transaction.gas_limit();
-                    return Some(tx);
-                }
-                self.before.mark_invalid(tx.signer(), tx.transaction.nonce());
-                self.after.mark_invalid(tx.signer(), tx.transaction.nonce());
-            } else {
-                return Some(tx);
-            }
-        }
-
-        while let Some(tx) = self.after.next(ctx) {
-            if let Some(after_max_gas) = self.after_max_gas {
-                if self.after_gas + tx.transaction.gas_limit() <= after_max_gas {
-                    self.after_gas += tx.transaction.gas_limit();
-                    return Some(tx);
-                }
-                self.after.mark_invalid(tx.signer(), tx.transaction.nonce());
-            } else {
-                return Some(tx);
-            }
-        }
-
-        None
-    }
-
-    fn mark_invalid(&mut self, sender: Address, nonce: u64) {
-        self.before.mark_invalid(sender, nonce);
-        self.after.mark_invalid(sender, nonce);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
         pool::pending::PendingPool,
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
-        Priority,
+        BestTransactions, Priority,
     };
     use alloy_primitives::U256;
+    use reth_payload_util::{PayloadTransactionsChain, PayloadTransactionsFixed};
 
     #[test]
     fn test_best_iter() {
@@ -1018,6 +895,128 @@ mod tests {
         assert_eq!(block.next(()).unwrap().signer(), address_a);
         assert_eq!(block.next(()).unwrap().signer(), address_b);
         assert_eq!(block.next(()).unwrap().signer(), address_regular);
+    }
+
+    #[test]
+    fn test_best_with_fees_iter_no_blob_fee_required() {
+        // Tests transactions without blob fees where base fees are checked.
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        let base_fee: u64 = 10;
+        let base_fee_per_blob_gas: u64 = 0; // No blob fee requirement
+
+        // Insert transactions with max_fee_per_gas above the base fee
+        for nonce in 0..5 {
+            let tx = MockTransaction::eip1559()
+                .rng_hash()
+                .with_nonce(nonce)
+                .with_max_fee(base_fee as u128 + 5);
+            let valid_tx = f.validated(tx);
+            pool.add_transaction(Arc::new(valid_tx), 0);
+        }
+
+        let mut best = pool.best_with_basefee_and_blobfee(base_fee, base_fee_per_blob_gas);
+
+        // All transactions should be returned as no blob fee requirement is imposed
+        for nonce in 0..5 {
+            let tx = best.next().expect("Transaction should be returned");
+            assert_eq!(tx.nonce(), nonce);
+        }
+
+        // Ensure no more transactions are left
+        assert!(best.next().is_none());
+    }
+
+    #[test]
+    fn test_best_with_fees_iter_mix_of_blob_and_non_blob_transactions() {
+        // Tests mixed scenarios with both blob and non-blob transactions.
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        let base_fee: u64 = 10;
+        let base_fee_per_blob_gas: u64 = 15;
+
+        // Add a non-blob transaction that satisfies the base fee
+        let tx_non_blob =
+            MockTransaction::eip1559().rng_hash().with_nonce(0).with_max_fee(base_fee as u128 + 5);
+        pool.add_transaction(Arc::new(f.validated(tx_non_blob.clone())), 0);
+
+        // Add a blob transaction that satisfies both base fee and blob fee
+        let tx_blob = MockTransaction::eip4844()
+            .rng_hash()
+            .with_nonce(1)
+            .with_max_fee(base_fee as u128 + 5)
+            .with_blob_fee(base_fee_per_blob_gas as u128 + 5);
+        pool.add_transaction(Arc::new(f.validated(tx_blob.clone())), 0);
+
+        let mut best = pool.best_with_basefee_and_blobfee(base_fee, base_fee_per_blob_gas);
+
+        // Verify both transactions are returned
+        let tx = best.next().expect("Transaction should be returned");
+        assert_eq!(tx.transaction, tx_non_blob);
+
+        let tx = best.next().expect("Transaction should be returned");
+        assert_eq!(tx.transaction, tx_blob);
+
+        // Ensure no more transactions are left
+        assert!(best.next().is_none());
+    }
+
+    #[test]
+    fn test_best_transactions_with_skipping_blobs() {
+        // Tests the skip_blobs functionality to ensure blob transactions are skipped.
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        // Add a blob transaction
+        let tx_blob = MockTransaction::eip4844().rng_hash().with_nonce(0).with_blob_fee(100);
+        let valid_blob_tx = f.validated(tx_blob);
+        pool.add_transaction(Arc::new(valid_blob_tx), 0);
+
+        // Add a non-blob transaction
+        let tx_non_blob = MockTransaction::eip1559().rng_hash().with_nonce(1).with_max_fee(200);
+        let valid_non_blob_tx = f.validated(tx_non_blob.clone());
+        pool.add_transaction(Arc::new(valid_non_blob_tx), 0);
+
+        let mut best = pool.best();
+        best.skip_blobs();
+
+        // Only the non-blob transaction should be returned
+        let tx = best.next().expect("Transaction should be returned");
+        assert_eq!(tx.transaction, tx_non_blob);
+
+        // Ensure no more transactions are left
+        assert!(best.next().is_none());
+    }
+
+    #[test]
+    fn test_best_transactions_no_updates() {
+        // Tests the no_updates functionality to ensure it properly clears the
+        // new_transaction_receiver.
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        // Add a transaction
+        let tx = MockTransaction::eip1559().rng_hash().with_nonce(0).with_max_fee(100);
+        let valid_tx = f.validated(tx);
+        pool.add_transaction(Arc::new(valid_tx), 0);
+
+        let mut best = pool.best();
+
+        // Use a broadcast channel for transaction updates
+        let (_tx_sender, tx_receiver) =
+            tokio::sync::broadcast::channel::<PendingTransaction<MockOrdering>>(1000);
+        best.new_transaction_receiver = Some(tx_receiver);
+
+        // Ensure receiver is set
+        assert!(best.new_transaction_receiver.is_some());
+
+        // Call no_updates to clear the receiver
+        best.no_updates();
+
+        // Ensure receiver is cleared
+        assert!(best.new_transaction_receiver.is_none());
     }
 
     // TODO: Same nonce test

@@ -71,7 +71,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - uses: dcarbone/install-jq-action@v2
+      - uses: dcarbone/install-jq-action@v3
       - name: Run Wasm checks
         run: .github/assets/check_wasm.sh
 

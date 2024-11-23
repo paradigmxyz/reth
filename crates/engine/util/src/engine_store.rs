@@ -2,8 +2,7 @@
 
 use alloy_rpc_types_engine::{ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState};
 use futures::{Stream, StreamExt};
-use reth_beacon_consensus::BeaconEngineMessage;
-use reth_engine_primitives::EngineTypes;
+use reth_engine_primitives::{BeaconEngineMessage, EngineTypes};
 use reth_fs_util as fs;
 use serde::{Deserialize, Serialize};
 use std::{

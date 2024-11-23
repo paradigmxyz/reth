@@ -36,7 +36,7 @@ mod tests {
     fn encode_get_node_data() {
         let expected = hex!("f847820457f842a000000000000000000000000000000000000000000000000000000000deadc0dea000000000000000000000000000000000000000000000000000000000feedbeef");
         let mut data = vec![];
-        let request = RequestPair::<GetNodeData> {
+        let request = RequestPair {
             request_id: 1111,
             message: GetNodeData(vec![
                 hex!("00000000000000000000000000000000000000000000000000000000deadc0de").into(),
@@ -54,7 +54,7 @@ mod tests {
         let request = RequestPair::<GetNodeData>::decode(&mut &data[..]).unwrap();
         assert_eq!(
             request,
-            RequestPair::<GetNodeData> {
+            RequestPair {
                 request_id: 1111,
                 message: GetNodeData(vec![
                     hex!("00000000000000000000000000000000000000000000000000000000deadc0de").into(),
@@ -69,7 +69,7 @@ mod tests {
     fn encode_node_data() {
         let expected = hex!("ce820457ca84deadc0de84feedbeef");
         let mut data = vec![];
-        let request = RequestPair::<NodeData> {
+        let request = RequestPair {
             request_id: 1111,
             message: NodeData(vec![
                 hex!("deadc0de").as_slice().into(),
@@ -87,7 +87,7 @@ mod tests {
         let request = RequestPair::<NodeData>::decode(&mut &data[..]).unwrap();
         assert_eq!(
             request,
-            RequestPair::<NodeData> {
+            RequestPair {
                 request_id: 1111,
                 message: NodeData(vec![
                     hex!("deadc0de").as_slice().into(),

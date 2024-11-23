@@ -19,6 +19,7 @@
 //! use alloy_consensus::Header;
 //! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 //! use reth_network_api::{NetworkInfo, Peers};
+//! use reth_primitives::TransactionSigned;
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
 //! use reth_rpc::EthApi;
 //! use reth_rpc_builder::{
@@ -36,7 +37,8 @@
 //!     block_executor: BlockExecutor,
 //!     consensus: Consensus,
 //! ) where
-//!     Provider: FullRpcProvider + AccountReader + ChangeSetReader,
+//!     Provider:
+//!         FullRpcProvider<Transaction = TransactionSigned> + AccountReader + ChangeSetReader,
 //!     Pool: TransactionPool + Unpin + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions + Clone + 'static,
@@ -77,6 +79,7 @@
 //! use reth_engine_primitives::EngineTypes;
 //! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 //! use reth_network_api::{NetworkInfo, Peers};
+//! use reth_primitives::TransactionSigned;
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
 //! use reth_rpc::EthApi;
 //! use reth_rpc_api::EngineApiServer;
@@ -109,7 +112,8 @@
 //!     block_executor: BlockExecutor,
 //!     consensus: Consensus,
 //! ) where
-//!     Provider: FullRpcProvider + AccountReader + ChangeSetReader,
+//!     Provider:
+//!         FullRpcProvider<Transaction = TransactionSigned> + AccountReader + ChangeSetReader,
 //!     Pool: TransactionPool + Unpin + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions + Clone + 'static,
@@ -1252,6 +1256,7 @@ where
             Arc::new(self.consensus.clone()),
             self.block_executor.clone(),
             self.config.flashbots.clone(),
+            Box::new(self.executor.clone()),
         )
     }
 }
@@ -1416,6 +1421,7 @@ where
                             Arc::new(self.consensus.clone()),
                             self.block_executor.clone(),
                             self.config.flashbots.clone(),
+                            Box::new(self.executor.clone()),
                         )
                         .into_rpc()
                         .into(),
@@ -1934,6 +1940,26 @@ impl TransportRpcModuleConfig {
         self.config.as_ref()
     }
 
+    /// Returns true if the given module is configured for any transport.
+    pub fn contains_any(&self, module: &RethRpcModule) -> bool {
+        self.contains_http(module) || self.contains_ws(module) || self.contains_ipc(module)
+    }
+
+    /// Returns true if the given module is configured for the http transport.
+    pub fn contains_http(&self, module: &RethRpcModule) -> bool {
+        self.http.as_ref().is_some_and(|http| http.contains(module))
+    }
+
+    /// Returns true if the given module is configured for the ws transport.
+    pub fn contains_ws(&self, module: &RethRpcModule) -> bool {
+        self.ws.as_ref().is_some_and(|ws| ws.contains(module))
+    }
+
+    /// Returns true if the given module is configured for the ipc transport.
+    pub fn contains_ipc(&self, module: &RethRpcModule) -> bool {
+        self.ipc.as_ref().is_some_and(|ipc| ipc.contains(module))
+    }
+
     /// Ensures that both http and ws are configured and that they are configured to use the same
     /// port.
     fn ensure_ws_http_identical(&self) -> Result<(), WsHttpSamePortError> {
@@ -1977,6 +2003,29 @@ impl TransportRpcModules {
     /// Returns the [`TransportRpcModuleConfig`] used to configure this instance.
     pub const fn module_config(&self) -> &TransportRpcModuleConfig {
         &self.config
+    }
+
+    /// Merge the given [`Methods`] in all configured transport modules if the given
+    /// [`RethRpcModule`] is configured for the transport.
+    ///
+    /// Fails if any of the methods in other is present already.
+    pub fn merge_if_module_configured(
+        &mut self,
+        module: RethRpcModule,
+        other: impl Into<Methods>,
+    ) -> Result<(), RegisterMethodError> {
+        let other = other.into();
+        if self.module_config().contains_http(&module) {
+            self.merge_http(other.clone())?;
+        }
+        if self.module_config().contains_ws(&module) {
+            self.merge_ws(other.clone())?;
+        }
+        if self.module_config().contains_ipc(&module) {
+            self.merge_ipc(other)?;
+        }
+
+        Ok(())
     }
 
     /// Merge the given [Methods] in the configured http methods.

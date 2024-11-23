@@ -11,7 +11,11 @@ use reth_blockchain_tree_api::{
     error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
     BlockStatus, BlockValidationKind, BlockchainTreeEngine, CanonicalOutcome, InsertPayloadOk,
 };
-use reth_engine_primitives::{EngineApiMessageVersion, EngineTypes, PayloadTypes};
+use reth_engine_primitives::{
+    BeaconEngineMessage, BeaconOnNewPayloadError, EngineApiMessageVersion, EngineTypes,
+    ForkchoiceStateHash, ForkchoiceStateTracker, ForkchoiceStatus, OnForkChoiceUpdated,
+    PayloadTypes,
+};
 use reth_errors::{BlockValidationError, ProviderResult, RethError, RethResult};
 use reth_network_p2p::{
     sync::{NetworkSyncUpdater, SyncState},
@@ -19,7 +23,8 @@ use reth_network_p2p::{
 };
 use reth_node_types::NodeTypesWithEngine;
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_payload_primitives::{PayloadAttributes, PayloadBuilder, PayloadBuilderAttributes};
+use reth_payload_builder_primitives::PayloadBuilder;
+use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{Head, SealedBlock, SealedHeader};
 use reth_provider::{
@@ -42,14 +47,8 @@ use tokio::sync::{
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
 
-mod message;
-pub use message::{BeaconEngineMessage, OnForkChoiceUpdated};
-
 mod error;
-pub use error::{
-    BeaconConsensusEngineError, BeaconEngineResult, BeaconForkChoiceUpdateError,
-    BeaconOnNewPayloadError,
-};
+pub use error::{BeaconConsensusEngineError, BeaconEngineResult, BeaconForkChoiceUpdateError};
 
 mod invalid_headers;
 pub use invalid_headers::InvalidHeaderCache;
@@ -59,9 +58,6 @@ pub use event::{BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress};
 
 mod handle;
 pub use handle::BeaconConsensusEngineHandle;
-
-mod forkchoice;
-pub use forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker, ForkchoiceStatus};
 
 mod metrics;
 use metrics::EngineMetrics;
@@ -1995,7 +1991,8 @@ mod tests {
     use alloy_rpc_types_engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
     use assert_matches::assert_matches;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
-    use reth_provider::{BlockWriter, ProviderFactory};
+    use reth_node_types::FullNodePrimitives;
+    use reth_provider::{BlockWriter, ProviderFactory, StorageLocation};
     use reth_rpc_types_compat::engine::payload::block_to_payload_v1;
     use reth_stages::{ExecOutput, PipelineError, StageError};
     use reth_stages_api::StageCheckpoint;
@@ -2173,7 +2170,10 @@ mod tests {
         assert_matches!(rx.await, Ok(Ok(())));
     }
 
-    fn insert_blocks<'a, N: ProviderNodeTypes>(
+    fn insert_blocks<
+        'a,
+        N: ProviderNodeTypes<Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>>,
+    >(
         provider_factory: ProviderFactory<N>,
         mut blocks: impl Iterator<Item = &'a SealedBlock>,
     ) {
@@ -2183,6 +2183,7 @@ mod tests {
                 provider
                     .insert_block(
                         b.clone().try_seal_with_senders().expect("invalid tx signature in block"),
+                        StorageLocation::Database,
                     )
                     .map(drop)
             })

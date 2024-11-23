@@ -1,13 +1,9 @@
 use alloc::vec::Vec;
-use bytes::BufMut;
 use core::fmt;
+
+use bytes::BufMut;
 use derive_more::Deref;
 use roaring::RoaringTreemap;
-use serde::{
-    de::{SeqAccess, Visitor},
-    ser::SerializeSeq,
-    Deserialize, Deserializer, Serialize, Serializer,
-};
 
 /// A data structure that uses Roaring Bitmaps to efficiently store a list of integers.
 ///
@@ -90,11 +86,14 @@ impl IntegerList {
     }
 }
 
-impl Serialize for IntegerList {
+#[cfg(feature = "serde")]
+impl serde::Serialize for IntegerList {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: Serializer,
+        S: serde::Serializer,
     {
+        use serde::ser::SerializeSeq;
+
         let mut seq = serializer.serialize_seq(Some(self.len() as usize))?;
         for e in &self.0 {
             seq.serialize_element(&e)?;
@@ -103,8 +102,11 @@ impl Serialize for IntegerList {
     }
 }
 
+#[cfg(feature = "serde")]
 struct IntegerListVisitor;
-impl<'de> Visitor<'de> for IntegerListVisitor {
+
+#[cfg(feature = "serde")]
+impl<'de> serde::de::Visitor<'de> for IntegerListVisitor {
     type Value = IntegerList;
 
     fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -113,7 +115,7 @@ impl<'de> Visitor<'de> for IntegerListVisitor {
 
     fn visit_seq<E>(self, mut seq: E) -> Result<Self::Value, E::Error>
     where
-        E: SeqAccess<'de>,
+        E: serde::de::SeqAccess<'de>,
     {
         let mut list = IntegerList::empty();
         while let Some(item) = seq.next_element()? {
@@ -123,10 +125,11 @@ impl<'de> Visitor<'de> for IntegerListVisitor {
     }
 }
 
-impl<'de> Deserialize<'de> for IntegerList {
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for IntegerList {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: Deserializer<'de>,
+        D: serde::Deserializer<'de>,
     {
         deserializer.deserialize_byte_buf(IntegerListVisitor)
     }

@@ -1,9 +1,8 @@
 //! Trait abstractions used by the payload crate.
 
 use reth_chain_state::CanonStateNotification;
-use reth_payload_primitives::{
-    BuiltPayload, PayloadBuilderAttributes, PayloadBuilderError, PayloadKind,
-};
+use reth_payload_builder_primitives::PayloadBuilderError;
+use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadKind};
 use std::future::Future;
 
 /// A type that can build a payload.

@@ -693,4 +693,102 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_empty_pool_operations() {
+        let mut pool: BlobTransactions<MockTransaction> = BlobTransactions::default();
+
+        // Ensure pool is empty
+        assert!(pool.is_empty());
+        assert_eq!(pool.len(), 0);
+        assert_eq!(pool.size(), 0);
+
+        // Attempt to remove a non-existent transaction
+        let non_existent_id = TransactionId::new(0.into(), 0);
+        assert!(pool.remove_transaction(&non_existent_id).is_none());
+
+        // Check contains method on empty pool
+        assert!(!pool.contains(&non_existent_id));
+    }
+
+    #[test]
+    fn test_transaction_removal() {
+        let mut factory = MockTransactionFactory::default();
+        let mut pool = BlobTransactions::default();
+
+        // Add a transaction
+        let tx = factory.validated_arc(MockTransaction::eip4844());
+        let tx_id = *tx.id();
+        pool.add_transaction(tx);
+
+        // Remove the transaction
+        let removed = pool.remove_transaction(&tx_id);
+        assert!(removed.is_some());
+        assert_eq!(*removed.unwrap().id(), tx_id);
+        assert!(pool.is_empty());
+    }
+
+    #[test]
+    fn test_satisfy_attributes_empty_pool() {
+        let pool: BlobTransactions<MockTransaction> = BlobTransactions::default();
+        let attributes = BestTransactionsAttributes { blob_fee: Some(100), basefee: 100 };
+        // Satisfy attributes on an empty pool should return an empty vector
+        let satisfied = pool.satisfy_attributes(attributes);
+        assert!(satisfied.is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "transaction is not a blob tx")]
+    fn test_add_non_blob_transaction() {
+        // Ensure that adding a non-blob transaction causes a panic
+        let mut factory = MockTransactionFactory::default();
+        let mut pool = BlobTransactions::default();
+        let tx = factory.validated_arc(MockTransaction::eip1559()); // Not a blob transaction
+        pool.add_transaction(tx);
+    }
+
+    #[test]
+    #[should_panic(expected = "transaction already included")]
+    fn test_add_duplicate_blob_transaction() {
+        // Ensure that adding a duplicate blob transaction causes a panic
+        let mut factory = MockTransactionFactory::default();
+        let mut pool = BlobTransactions::default();
+        let tx = factory.validated_arc(MockTransaction::eip4844());
+        pool.add_transaction(tx.clone()); // First addition
+        pool.add_transaction(tx); // Attempt to add the same transaction again
+    }
+
+    #[test]
+    fn test_remove_transactions_until_limit() {
+        // Test truncating the pool until it satisfies the given size limit
+        let mut factory = MockTransactionFactory::default();
+        let mut pool = BlobTransactions::default();
+        let tx1 = factory.validated_arc(MockTransaction::eip4844().with_size(100));
+        let tx2 = factory.validated_arc(MockTransaction::eip4844().with_size(200));
+        let tx3 = factory.validated_arc(MockTransaction::eip4844().with_size(300));
+
+        // Add transactions to the pool
+        pool.add_transaction(tx1);
+        pool.add_transaction(tx2);
+        pool.add_transaction(tx3);
+
+        // Set a size limit that requires truncation
+        let limit = SubPoolLimit { max_txs: 2, max_size: 300 };
+        let removed = pool.truncate_pool(limit);
+
+        // Check that only one transaction was removed to satisfy the limit
+        assert_eq!(removed.len(), 1);
+        assert_eq!(pool.len(), 2);
+        assert!(pool.size() <= limit.max_size);
+    }
+
+    #[test]
+    fn test_empty_pool_invariants() {
+        // Ensure that the invariants hold for an empty pool
+        let pool: BlobTransactions<MockTransaction> = BlobTransactions::default();
+        pool.assert_invariants();
+        assert!(pool.is_empty());
+        assert_eq!(pool.size(), 0);
+        assert_eq!(pool.len(), 0);
+    }
 }

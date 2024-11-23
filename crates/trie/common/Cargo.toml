@@ -12,7 +12,7 @@ description = "Commonly used types for trie usage in reth."
 workspace = true
 
 [dependencies]
-reth-primitives-traits.workspace = true
+reth-primitives-traits = { workspace = true, features = ["serde"] }
 reth-codecs.workspace = true
 
 alloy-primitives.workspace = true
@@ -34,6 +34,7 @@ plain_hasher = { version = "0.2", optional = true }
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 
 [dev-dependencies]
+alloy-primitives = { workspace = true, features = ["getrandom"] }
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
