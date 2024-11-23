@@ -1,3 +1,5 @@
+pub mod tx_type;
+
 use alloy_primitives::{bytes, Bytes, TxKind, Uint, B256};
 
 use alloy_consensus::{constants::EIP7702_TX_TYPE_ID, SignableTransaction, TxLegacy};

@@ -10,10 +10,9 @@
 
 pub mod bedrock;
 pub mod transaction;
-pub mod tx_type;
 
 pub use transaction::OpTransaction;
-pub use tx_type::OpTxType;
+pub use transaction::tx_type::OpTxType;
 
 use alloy_consensus::Header;
 use reth_node_types::NodePrimitives;
