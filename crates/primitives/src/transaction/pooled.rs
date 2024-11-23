@@ -1,12 +1,17 @@
 //! Defines the types for blob transactions, legacy, and other EIP-2718 transactions included in a
 //! response to `GetPooledTransactions`.
 
-use super::{error::TransactionConversionError, signature::recover_signer, TxEip7702};
-use crate::{BlobTransaction, Transaction, TransactionSigned, TransactionSignedEcRecovered};
+use super::{
+    error::TransactionConversionError, recover_signer_unchecked, signature::recover_signer,
+    TxEip7702,
+};
+use crate::{
+    BlobTransaction, Transaction, TransactionSigned, TransactionSignedEcRecovered, TxType,
+};
 use alloy_consensus::{
     constants::EIP4844_TX_TYPE_ID,
     transaction::{TxEip1559, TxEip2930, TxEip4844, TxLegacy},
-    Signed, TxEip4844WithSidecar,
+    SignableTransaction, Signed, TxEip4844WithSidecar,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Result, Encodable2718},
@@ -19,8 +24,9 @@ use alloy_primitives::{
 };
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
 use bytes::Buf;
+use core::hash::{Hash, Hasher};
 use derive_more::{AsRef, Deref};
-use reth_primitives_traits::InMemorySize;
+use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use serde::{Deserialize, Serialize};
 
 /// A response to `GetPooledTransactions`. This can include either a blob transaction, or a
@@ -217,6 +223,18 @@ impl PooledTransactionsElement {
     /// [`DATA_GAS_PER_BLOB`](alloy_eips::eip4844::DATA_GAS_PER_BLOB) a single blob consumes.
     pub fn blob_gas_used(&self) -> Option<u64> {
         self.as_eip4844().map(TxEip4844::blob_gas)
+    }
+}
+
+impl Default for PooledTransactionsElement {
+    fn default() -> Self {
+        Self::Legacy(TxLegacy::default().into_signed(Signature::test_signature()))
+    }
+}
+
+impl Hash for PooledTransactionsElement {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.trie_hash().hash(state);
     }
 }
 
@@ -557,6 +575,40 @@ impl alloy_consensus::Transaction for PooledTransactionsElement {
             Self::Eip7702(tx) => tx.tx().authorization_list(),
             Self::BlobTransaction(tx) => tx.tx().authorization_list(),
         }
+    }
+}
+
+impl SignedTransaction for PooledTransactionsElement {
+    type Type = TxType;
+
+    fn tx_hash(&self) -> &TxHash {
+        match self {
+            Self::Legacy(tx) => tx.hash(),
+            Self::Eip2930(tx) => tx.hash(),
+            Self::Eip1559(tx) => tx.hash(),
+            Self::Eip7702(tx) => tx.hash(),
+            Self::BlobTransaction(tx) => tx.hash(),
+        }
+    }
+
+    fn signature(&self) -> &Signature {
+        match self {
+            Self::Legacy(tx) => tx.signature(),
+            Self::Eip2930(tx) => tx.signature(),
+            Self::Eip1559(tx) => tx.signature(),
+            Self::Eip7702(tx) => tx.signature(),
+            Self::BlobTransaction(tx) => tx.signature(),
+        }
+    }
+
+    fn recover_signer(&self) -> Option<Address> {
+        let signature_hash = self.signature_hash();
+        recover_signer(self.signature(), signature_hash)
+    }
+
+    fn recover_signer_unchecked(&self) -> Option<Address> {
+        let signature_hash = self.signature_hash();
+        recover_signer_unchecked(self.signature(), signature_hash)
     }
 }
 
