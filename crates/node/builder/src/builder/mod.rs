@@ -34,7 +34,7 @@ use reth_node_core::{
 };
 use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider},
-    ChainSpecProvider, FullProvider,
+    BlockReader, ChainSpecProvider, FullProvider,
 };
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, TransactionPool};
@@ -651,6 +651,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     pub fn start_network<Pool>(&self, builder: NetworkBuilder<(), ()>, pool: Pool) -> NetworkHandle
     where
         Pool: TransactionPool + Unpin + 'static,
+        Node::Provider: BlockReader<Block = reth_primitives::Block>,
     {
         self.start_network_with(builder, pool, Default::default())
     }
@@ -669,6 +670,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     ) -> NetworkHandle
     where
         Pool: TransactionPool + Unpin + 'static,
+        Node::Provider: BlockReader<Block = reth_primitives::Block>,
     {
         let (handle, network, txpool, eth) = builder
             .transactions(pool, tx_config)

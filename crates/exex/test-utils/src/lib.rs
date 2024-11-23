@@ -265,7 +265,7 @@ pub async fn test_exex_context_with_chain_spec(
 
     let (static_dir, _) = create_test_static_files_dir();
     let db = create_test_rw_db();
-    let provider_factory = ProviderFactory::new(
+    let provider_factory = ProviderFactory::<NodeTypesWithDBAdapter<TestNode, _>>::new(
         db,
         chain_spec.clone(),
         StaticFileProvider::read_write(static_dir.into_path()).expect("static file provider"),
@@ -289,7 +289,7 @@ pub async fn test_exex_context_with_chain_spec(
 
     let (_, payload_builder) = NoopPayloadBuilderService::<EthEngineTypes>::new();
 
-    let components = NodeAdapter::<FullNodeTypesAdapter<NodeTypesWithDBAdapter<TestNode, _>, _>, _> {
+    let components = NodeAdapter::<FullNodeTypesAdapter<_, _>, _> {
         components: Components {
             transaction_pool,
             evm_config,

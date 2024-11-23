@@ -74,6 +74,7 @@ impl<T, Provider, Primitives: FullNodePrimitives> ChainStorageReader<Provider, P
     T: BlockBodyReader<Provider, Block = Primitives::Block>
 {
 }
+
 /// Ethereum storage implementation.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct EthStorage;

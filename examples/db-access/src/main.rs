@@ -119,7 +119,10 @@ fn txs_provider_example<T: TransactionsProvider<Transaction = TransactionSigned>
 }
 
 /// The `BlockReader` allows querying the headers-related tables.
-fn block_provider_example<T: BlockReader>(provider: T, number: u64) -> eyre::Result<()> {
+fn block_provider_example<T: BlockReader<Block = reth_primitives::Block>>(
+    provider: T,
+    number: u64,
+) -> eyre::Result<()> {
     // Can query a block by number
     let block = provider.block(number.into())?.ok_or(eyre::eyre!("block num not found"))?;
     assert_eq!(block.number, number);

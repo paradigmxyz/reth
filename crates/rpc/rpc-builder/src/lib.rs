@@ -258,7 +258,7 @@ pub async fn launch<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi, B
     consensus: Arc<dyn Consensus>,
 ) -> Result<RpcServerHandle, RpcError>
 where
-    Provider: FullRpcProvider + AccountReader + ChangeSetReader,
+    Provider: FullRpcProvider<Block = reth_primitives::Block> + AccountReader + ChangeSetReader,
     Pool: TransactionPool + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
@@ -641,6 +641,7 @@ where
         EngineT: EngineTypes,
         EngineApi: EngineApiServer<EngineT>,
         EthApi: FullEthApiServer,
+        Provider: BlockReader<Block = <EthApi::Provider as BlockReader>::Block>,
     {
         let Self {
             provider,
@@ -716,6 +717,7 @@ where
     ) -> RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
     where
         EthApi: EthApiTypes + 'static,
+        Provider: BlockReader<Block = reth_primitives::Block>,
     {
         let Self {
             provider,
@@ -750,6 +752,7 @@ where
     ) -> TransportRpcModules<()>
     where
         EthApi: FullEthApiServer,
+        Provider: BlockReader<Block = <EthApi::Provider as BlockReader>::Block>,
     {
         let mut modules = TransportRpcModules::default();
 
@@ -907,7 +910,12 @@ pub struct RpcRegistryInner<
 impl<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
     RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
 where
-    Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
+    Provider: StateProviderFactory
+        + BlockReader<Block = reth_primitives::Block>
+        + EvmEnvProvider
+        + Clone
+        + Unpin
+        + 'static,
     Pool: Send + Sync + Clone + 'static,
     Network: Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
@@ -1112,6 +1120,7 @@ where
     pub fn register_debug(&mut self) -> &mut Self
     where
         EthApi: EthApiSpec + EthTransactions + TraceExt,
+        Provider: BlockReader<Block = <EthApi::Provider as BlockReader>::Block>,
     {
         let debug_api = self.debug_api();
         self.modules.insert(RethRpcModule::Debug, debug_api.into_rpc().into());
@@ -1126,6 +1135,7 @@ where
     pub fn register_trace(&mut self) -> &mut Self
     where
         EthApi: TraceExt,
+        Provider: BlockReader<Block = <EthApi::Provider as BlockReader>::Block>,
     {
         let trace_api = self.trace_api();
         self.modules.insert(RethRpcModule::Trace, trace_api.into_rpc().into());
@@ -1264,7 +1274,9 @@ where
 impl<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
     RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
 where
-    Provider: FullRpcProvider + AccountReader + ChangeSetReader,
+    Provider: FullRpcProvider<Block = <EthApi::Provider as BlockReader>::Block>
+        + AccountReader
+        + ChangeSetReader,
     Pool: TransactionPool + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
