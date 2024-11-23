@@ -1084,7 +1084,7 @@ pub trait EthPoolTransaction:
     Consensus: From<TransactionSignedEcRecovered>
                    + Into<TransactionSignedEcRecovered>
                    + Into<TransactionSigned>,
-    Pooled: From<PooledTransactionsElementEcRecovered> + Into<PooledTransactionsElementEcRecovered>,
+    Pooled: From<PooledTransactionsElementEcRecovered> + Into<PooledTransactionsElementEcRecovered>  + Into<PooledTransactionsElement>,
 >
 {
     /// Extracts the blob sidecar from the transaction.

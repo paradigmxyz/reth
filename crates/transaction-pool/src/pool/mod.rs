@@ -78,7 +78,8 @@ use crate::{
         PoolTransaction, PropagatedTransactions, TransactionOrigin,
     },
     validate::{TransactionValidationOutcome, ValidPoolTransaction},
-    CanonicalStateUpdate, PoolConfig, TransactionOrdering, TransactionValidator,
+    CanonicalStateUpdate, EthPoolTransaction, PoolConfig, TransactionOrdering,
+    TransactionValidator,
 };
 use alloy_primitives::{Address, TxHash, B256};
 use best::BestTransactions;
@@ -304,6 +305,20 @@ where
         self.get_pool_data().all().transactions_iter().filter(|tx| tx.propagate).collect()
     }
 
+    fn to_pooled_transaction(
+        &self,
+        transaction: Arc<ValidPoolTransaction<T::Transaction>>,
+    ) -> Option<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>
+    where
+        <V as TransactionValidator>::Transaction: EthPoolTransaction,
+    {
+        if transaction.is_eip4844() {
+        } else {
+        }
+
+        todo!()
+    }
+
     /// Returns the [`BlobTransaction`] for the given transaction if the sidecar exists.
     ///
     /// Caution: this assumes the given transaction is eip-4844
@@ -373,18 +388,10 @@ where
         tx_hash: TxHash,
     ) -> Option<PooledTransactionsElement>
     where
-        <V as TransactionValidator>::Transaction:
-            PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
+        <V as TransactionValidator>::Transaction: EthPoolTransaction,
     {
-        self.get(&tx_hash).and_then(|transaction| {
-            let recovered: TransactionSignedEcRecovered =
-                transaction.transaction.clone().into_consensus().into();
-            let tx = recovered.into_signed();
-            if tx.is_eip4844() {
-                self.get_blob_transaction(tx).map(PooledTransactionsElement::BlobTransaction)
-            } else {
-                PooledTransactionsElement::try_from(tx).ok()
-            }
+        self.get(&tx_hash).and_then(|tx| {
+            self.to_pooled_transaction(tx).map(Into::into)
         })
     }
 
