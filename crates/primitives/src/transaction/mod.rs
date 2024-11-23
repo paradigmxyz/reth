@@ -41,7 +41,6 @@ pub use reth_primitives_traits::WithEncoded;
 pub use sidecar::BlobTransaction;
 pub use signature::{recover_signer, recover_signer_unchecked};
 pub use tx_type::TxType;
-pub use variant::TransactionSignedVariant;
 
 pub(crate) mod access_list;
 mod compat;
@@ -56,7 +55,6 @@ mod tx_type;
 pub mod signature;
 
 pub(crate) mod util;
-mod variant;
 
 /// Expected number of transactions where we can expect a speed-up by recovering the senders in
 /// parallel.
