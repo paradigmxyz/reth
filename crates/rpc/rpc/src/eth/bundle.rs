@@ -1,11 +1,12 @@
 //! `Eth` bundle implementation and helpers.
 
+use alloy_consensus::Transaction as _;
 use alloy_primitives::{Keccak256, U256};
 use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
-use reth_primitives::PooledTransactionsElement;
+use reth_primitives::{PooledTransactionsElement, Transaction};
 use reth_provider::{ChainSpecProvider, HeaderProvider};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_eth_api::{
@@ -19,7 +20,7 @@ use revm::{
     primitives::{ResultAndState, TxEnv},
 };
 use revm_primitives::{EnvKzgSettings, EnvWithHandlerCfg, SpecId, MAX_BLOB_GAS_PER_BLOCK};
-use std::sync::Arc;
+use std::{ops::Deref, sync::Arc};
 
 /// `Eth` bundle implementation.
 pub struct EthBundle<Eth> {
@@ -179,8 +180,7 @@ where
                     let tx = tx.into_transaction();
 
                     hasher.update(tx.hash());
-                    let gas_price = tx
-                        .effective_tip_per_gas(basefee)
+                    let gas_price = Transaction::effective_tip_per_gas(tx.deref(), basefee)
                         .ok_or_else(|| RpcInvalidTransactionError::FeeCapTooLow)
                         .map_err(Eth::Error::from_eth_err)?;
                     eth_api.evm_config().fill_tx_env(evm.tx_mut(), &tx, signer);

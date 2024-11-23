@@ -696,6 +696,7 @@ impl TryFrom<TransactionSignedEcRecovered> for PooledTransactionsElementEcRecove
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::Transaction as _;
     use alloy_primitives::{address, hex};
     use assert_matches::assert_matches;
     use bytes::Bytes;
