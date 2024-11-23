@@ -22,11 +22,11 @@ use reth_errors::RethResult;
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
-use reth_node_api::{EngineApiMessageVersion, PayloadBuilderAttributes};
+use reth_node_api::{EngineApiMessageVersion, NodePrimitives, PayloadBuilderAttributes};
 use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider};
 use reth_primitives::{
-    BlobTransaction, PooledTransactionsElement, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    Transaction, TransactionSigned,
+    BlobTransaction, BlockSealExt, PooledTransactionsElement, SealedBlock, SealedBlockWithSenders,
+    SealedHeader, Transaction, TransactionSigned,
 };
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
@@ -258,8 +258,10 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 consensus.validate_block_pre_execution(block)?;
 
                 let senders = block.senders().expect("sender recovery failed");
-                let block_with_senders =
-                    SealedBlockWithSenders::new(block.clone(), senders).unwrap();
+                let block_with_senders = SealedBlockWithSenders::<
+                    <N::Primitives as NodePrimitives>::Block,
+                >::new(block.clone(), senders)
+                .unwrap();
 
                 let db = StateProviderDatabase::new(blockchain_db.latest()?);
                 let executor =

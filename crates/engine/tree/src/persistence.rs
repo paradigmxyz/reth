@@ -21,11 +21,15 @@ use tracing::{debug, error};
 /// A helper trait with requirements for [`ProviderNodeTypes`] to be used within
 /// [`PersistenceService`].
 pub trait PersistenceNodeTypes:
-    ProviderNodeTypes<Primitives: FullNodePrimitives<BlockBody = BlockBody>>
+    ProviderNodeTypes<
+    Primitives: FullNodePrimitives<Block = reth_primitives::Block, BlockBody = BlockBody>,
+>
 {
 }
 impl<T> PersistenceNodeTypes for T where
-    T: ProviderNodeTypes<Primitives: FullNodePrimitives<BlockBody = BlockBody>>
+    T: ProviderNodeTypes<
+        Primitives: FullNodePrimitives<Block = reth_primitives::Block, BlockBody = BlockBody>,
+    >
 {
 }
 /// Writes parts of reth's in memory tree state to the database and static files.
