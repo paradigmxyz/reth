@@ -111,8 +111,7 @@ jemalloc = [
 
 dev = [
     "dep:proptest",
-    "reth-cli-commands/arbitrary",
-	"reth-optimism-primitives/arbitrary"
+    "reth-cli-commands/arbitrary"
 ]
 serde = [
 	"alloy-consensus?/serde",
