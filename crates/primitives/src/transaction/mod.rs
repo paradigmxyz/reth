@@ -1787,6 +1787,78 @@ impl<T: SignedTransaction> Decodable for TransactionSignedEcRecovered<T> {
     }
 }
 
+impl<T: alloy_consensus::Transaction> alloy_consensus::Transaction
+    for TransactionSignedEcRecovered<T>
+{
+    fn chain_id(&self) -> Option<ChainId> {
+        self.signed_transaction.chain_id()
+    }
+
+    fn nonce(&self) -> u64 {
+        self.signed_transaction.nonce()
+    }
+
+    fn gas_limit(&self) -> u64 {
+        self.signed_transaction.gas_limit()
+    }
+
+    fn gas_price(&self) -> Option<u128> {
+        self.signed_transaction.gas_price()
+    }
+
+    fn max_fee_per_gas(&self) -> u128 {
+        self.signed_transaction.max_fee_per_gas()
+    }
+
+    fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        self.signed_transaction.max_priority_fee_per_gas()
+    }
+
+    fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        self.signed_transaction.max_fee_per_blob_gas()
+    }
+
+    fn priority_fee_or_price(&self) -> u128 {
+        self.signed_transaction.priority_fee_or_price()
+    }
+
+    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        self.signed_transaction.effective_gas_price(base_fee)
+    }
+
+    fn is_dynamic_fee(&self) -> bool {
+        self.signed_transaction.is_dynamic_fee()
+    }
+
+    fn kind(&self) -> TxKind {
+        self.signed_transaction.kind()
+    }
+
+    fn value(&self) -> U256 {
+        self.signed_transaction.value()
+    }
+
+    fn input(&self) -> &Bytes {
+        self.signed_transaction.input()
+    }
+
+    fn ty(&self) -> u8 {
+        self.signed_transaction.ty()
+    }
+
+    fn access_list(&self) -> Option<&AccessList> {
+        self.signed_transaction.access_list()
+    }
+
+    fn blob_versioned_hashes(&self) -> Option<&[B256]> {
+        self.signed_transaction.blob_versioned_hashes()
+    }
+
+    fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
+        self.signed_transaction.authorization_list()
+    }
+}
+
 /// Extension trait for [`SignedTransaction`] to convert it into [`TransactionSignedEcRecovered`].
 pub trait SignedTransactionIntoRecoveredExt: SignedTransaction {
     /// Consumes the type, recover signer and return [`TransactionSignedEcRecovered`] _without
