@@ -1,6 +1,6 @@
 //! Block body abstraction.
 
-use alloc::fmt;
+use alloc::{fmt, vec::Vec};
 
 use alloy_consensus::Transaction;
 

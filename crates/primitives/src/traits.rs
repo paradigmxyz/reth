@@ -8,7 +8,7 @@ use crate::{
 };
 
 /// Extension trait for [`reth_primitives_traits::Block`] implementations
-/// allowing for conversions into common block parts cotainers such as [`SealedBlock`],
+/// allowing for conversions into common block parts containers such as [`SealedBlock`],
 /// [`BlockWithSenders`], etc.
 pub trait BlockSealExt: Block {
     /// Calculate the header hash and seal the block so that it can't be changed.
@@ -53,7 +53,7 @@ pub trait BlockSealExt: Block {
     ///
     /// If the number of senders does not match the number of transactions in the block, this falls
     /// back to manually recovery, but _without ensuring that the signature has a low `s` value_.
-    /// See also [`TransactionSigned::recover_signer_unchecked`]
+    /// See also [`recover_signers_unchecked`]
     ///
     /// Returns an error if a signature is invalid.
     #[track_caller]
@@ -111,7 +111,7 @@ pub trait BlockBodyTxExt: BlockBody {
     /// signature has a low `s` value_.
     ///
     /// Returns `None`, if some transaction's signature is invalid, see also
-    /// [`recover_signer_unchecked`].
+    /// [`recover_signers_unchecked`].
     fn recover_signers_unchecked(&self) -> Option<Vec<Address>>
     where
         Self::Transaction: SignedTransaction,
