@@ -1,4 +1,4 @@
-//! Wrapper of [`OpTypesTransaction`], that implements reth database encoding [`Compact`].
+//! Wrapper of [`OpTypedTransaction`], that implements reth database encoding [`Compact`].
 
 pub mod tx_type;
 
