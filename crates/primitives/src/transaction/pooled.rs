@@ -11,7 +11,7 @@ use crate::{
 use alloy_consensus::{
     constants::EIP4844_TX_TYPE_ID,
     transaction::{TxEip1559, TxEip2930, TxEip4844, TxLegacy},
-    SignableTransaction, Signed, TxEip4844WithSidecar,
+    Signed, TxEip4844WithSidecar,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Result, Encodable2718},
@@ -223,12 +223,6 @@ impl PooledTransactionsElement {
     /// [`DATA_GAS_PER_BLOB`](alloy_eips::eip4844::DATA_GAS_PER_BLOB) a single blob consumes.
     pub fn blob_gas_used(&self) -> Option<u64> {
         self.as_eip4844().map(TxEip4844::blob_gas)
-    }
-}
-
-impl Default for PooledTransactionsElement {
-    fn default() -> Self {
-        Self::Legacy(TxLegacy::default().into_signed(Signature::test_signature()))
     }
 }
 
