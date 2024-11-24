@@ -119,6 +119,7 @@ test-utils = [
     "reth-trie-db/test-utils",
     "revm/test-utils",
     "reth-optimism-node/test-utils",
+    "reth-optimism-primitives/arbitrary",
 ]
 reth-codec = [
     "reth-primitives/reth-codec",
