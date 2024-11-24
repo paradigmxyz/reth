@@ -152,7 +152,7 @@ impl<'a> arbitrary::Arbitrary<'a> for Block {
 
 /// Sealed block with senders recovered from transactions.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deref, DerefMut)]
-pub struct BlockWithSenders<B: reth_primitives_traits::Block = Block> {
+pub struct BlockWithSenders<B = Block> {
     /// Block
     #[deref]
     #[deref_mut]
