@@ -7,6 +7,7 @@
 //! cargo run --release -p network-txpool -- node
 //! ```
 
+use alloy_primitives::B256;
 use reth_network::{config::rng_secret_key, NetworkConfig, NetworkManager};
 use reth_provider::test_utils::NoopProvider;
 use reth_transaction_pool::{
@@ -79,6 +80,7 @@ impl TransactionValidator for OkValidator {
         &self,
         _origin: TransactionOrigin,
         transaction: Self::Transaction,
+        _at: B256,
     ) -> TransactionValidationOutcome<Self::Transaction> {
         // Always return valid
         TransactionValidationOutcome::Valid {

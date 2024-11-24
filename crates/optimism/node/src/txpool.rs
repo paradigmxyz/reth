@@ -1,5 +1,6 @@
 //! OP transaction pool types
 use alloy_eips::eip2718::Encodable2718;
+use alloy_primitives::B256;
 use parking_lot::RwLock;
 use reth_chainspec::ChainSpec;
 use reth_optimism_evm::RethL1BlockInfo;
@@ -116,6 +117,7 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
+        at: B256,
     ) -> TransactionValidationOutcome<Tx> {
         if transaction.is_eip4844() {
             return TransactionValidationOutcome::Invalid(
@@ -124,7 +126,7 @@ where
             )
         }
 
-        let outcome = self.inner.validate_one(origin, transaction);
+        let outcome = self.inner.validate_one(origin, transaction, at);
 
         if !self.requires_l1_data_gas_fee() {
             // no need to check L1 gas fee
@@ -188,8 +190,9 @@ where
     pub fn validate_all(
         &self,
         transactions: Vec<(TransactionOrigin, Tx)>,
+        at: B256,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
-        transactions.into_iter().map(|(origin, tx)| self.validate_one(origin, tx)).collect()
+        transactions.into_iter().map(|(origin, tx)| self.validate_one(origin, tx, at)).collect()
     }
 }
 
@@ -204,15 +207,17 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: Self::Transaction,
+        at: B256,
     ) -> TransactionValidationOutcome<Self::Transaction> {
-        self.validate_one(origin, transaction)
+        self.validate_one(origin, transaction, at)
     }
 
     async fn validate_transactions(
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+        at: B256,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        self.validate_all(transactions)
+        self.validate_all(transactions, at)
     }
 
     fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
@@ -270,7 +275,7 @@ mod tests {
             TransactionSignedEcRecovered::from_signed_transaction(signed_tx, signer);
         let len = signed_recovered.encode_2718_len();
         let pooled_tx = EthPooledTransaction::new(signed_recovered, len);
-        let outcome = validator.validate_one(origin, pooled_tx);
+        let outcome = validator.validate_one(origin, pooled_tx, Default::default());
 
         let err = match outcome {
             TransactionValidationOutcome::Invalid(_, err) => err,

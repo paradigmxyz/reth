@@ -354,7 +354,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                     mined_transactions: new_blocks.transaction_hashes().collect(),
                     update_kind: PoolUpdateKind::Reorg,
                 };
-                pool.on_canonical_state_change(update);
+                pool.on_canonical_state_change(update).await;
 
                 // all transactions that were mined in the old chain but not in the new chain need
                 // to be re-injected
@@ -437,7 +437,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                     mined_transactions,
                     update_kind: PoolUpdateKind::Commit,
                 };
-                pool.on_canonical_state_change(update);
+                pool.on_canonical_state_change(update).await;
 
                 // keep track of mined blob transactions
                 blob_store_tracker.add_new_chain_blocks(&blocks);

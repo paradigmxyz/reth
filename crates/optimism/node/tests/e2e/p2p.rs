@@ -4,6 +4,7 @@ use reth::blockchain_tree::error::BlockchainTreeError;
 use reth_optimism_node::utils::{advance_chain, setup};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tokio_stream::StreamExt;
 
 #[tokio::test]
 async fn can_sync() -> eyre::Result<()> {

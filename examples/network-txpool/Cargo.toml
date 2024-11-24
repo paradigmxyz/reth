@@ -6,6 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+alloy-primitives.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 eyre.workspace = true
 tokio.workspace = true
