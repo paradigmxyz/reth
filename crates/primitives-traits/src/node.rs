@@ -42,16 +42,7 @@ pub trait NodePrimitives:
         + MaybeSerde
         + 'static;
     /// Signed version of the transaction type.
-    type SignedTx: Send
-        + Sync
-        + Unpin
-        + Clone
-        + Default
-        + fmt::Debug
-        + PartialEq
-        + Eq
-        + MaybeSerde
-        + 'static;
+    type SignedTx: Send + Sync + Unpin + Clone + fmt::Debug + PartialEq + Eq + MaybeSerde + 'static;
     /// Transaction envelope type ID.
     type TxType: Send + Sync + Unpin + Clone + Default + fmt::Debug + PartialEq + Eq + 'static;
     /// A receipt.

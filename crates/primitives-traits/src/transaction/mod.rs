@@ -18,7 +18,6 @@ pub trait Transaction:
     + Sync
     + Unpin
     + Clone
-    + Default
     + fmt::Debug
     + Eq
     + PartialEq
@@ -35,7 +34,6 @@ impl<T> Transaction for T where
         + Sync
         + Unpin
         + Clone
-        + Default
         + fmt::Debug
         + Eq
         + PartialEq
