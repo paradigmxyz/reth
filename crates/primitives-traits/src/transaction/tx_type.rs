@@ -4,7 +4,7 @@ use core::fmt;
 
 use alloy_primitives::{U64, U8};
 
-use crate::{InMemorySize, MaybeCompact};
+use crate::{InMemorySize, MaybeArbitrary, MaybeCompact};
 
 /// Helper trait that unifies all behaviour required by transaction type ID to support full node
 /// operations.
@@ -33,6 +33,7 @@ pub trait TxType:
     + alloy_rlp::Encodable
     + alloy_rlp::Decodable
     + InMemorySize
+    + MaybeArbitrary
 {
     /// Returns `true` if this is a legacy transaction.
     fn is_legacy(&self) -> bool;
