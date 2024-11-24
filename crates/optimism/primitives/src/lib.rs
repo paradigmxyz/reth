@@ -11,11 +11,9 @@
 #![cfg(feature = "optimism")]
 
 pub mod bedrock;
-pub mod signed_transaction;
 pub mod transaction;
 
-pub use signed_transaction::OpTransactionSigned;
-pub use transaction::{tx_type::OpTxType, OpTransaction};
+pub use transaction::{signed::OpTransactionSigned, tx_type::OpTxType, OpTransaction};
 
 use alloy_consensus::Header;
 use reth_node_types::NodePrimitives;
