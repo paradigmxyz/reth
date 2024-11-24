@@ -202,8 +202,5 @@ pub trait LoadPendingBlock:
         _env: PendingBlockEnv,
     ) -> Result<(SealedBlockWithSenders, Vec<Receipt>), Self::Error>
     where
-        EthApiError: From<ProviderError>,
-    {
-        Err(Self::Error::from(EthApiError::InvalidParams("not implemented".into())))
-    }
+        EthApiError: From<ProviderError>;
 }

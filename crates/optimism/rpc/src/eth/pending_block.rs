@@ -14,11 +14,12 @@ use reth_provider::{
 };
 use reth_rpc_eth_api::{
     helpers::{LoadPendingBlock, SpawnBlocking},
-    FromEthApiError, RpcNodeCore,
+    EthApiTypes, FromEthApiError, RpcNodeCore,
 };
-use reth_rpc_eth_types::{EthApiError, PendingBlock};
+use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv};
 use reth_transaction_pool::TransactionPool;
 use revm::primitives::BlockEnv;
+use std::result::Result;
 
 impl<N> LoadPendingBlock for OpEthApi<N>
 where
@@ -79,5 +80,13 @@ where
                 )
             })
             .expect("Block is present")
+    }
+
+    /// Provides a stub implementation for `build_block`, indicating it's not supported.
+    fn build_block(
+        &self,
+        _env: PendingBlockEnv,
+    ) -> Result<(SealedBlockWithSenders, Vec<Receipt>), <Self as EthApiTypes>::Error> {
+        todo!()
     }
 }

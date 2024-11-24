@@ -7,6 +7,7 @@ use alloy_eips::BlockNumberOrTag;
 use alloy_network::Ethereum;
 use alloy_primitives::U256;
 use derive_more::Deref;
+use reth_ethereum_payload_builder::EthereumPayloadBuilder;
 use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},
@@ -52,6 +53,7 @@ impl<Provider, Pool, Network, EvmConfig> Clone for EthApi<Provider, Pool, Networ
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
     Provider: BlockReaderIdExt,
+    EvmConfig: Clone,
 {
     /// Creates a new, shareable instance using the default tokio task spawner.
     #[allow(clippy::too_many_arguments)]
@@ -151,7 +153,7 @@ where
     type Pool = Pool;
     type Evm = EvmConfig;
     type Network = Network;
-    type PayloadBuilder = ();
+    type PayloadBuilder = EthereumPayloadBuilder<EvmConfig>;
 
     fn pool(&self) -> &Self::Pool {
         self.inner.pool()
@@ -166,7 +168,7 @@ where
     }
 
     fn payload_builder(&self) -> &Self::PayloadBuilder {
-        &()
+        &self.inner.payload_builder
     }
 
     fn provider(&self) -> &Self::Provider {
@@ -250,11 +252,15 @@ pub struct EthApiInner<Provider, Pool, Network, EvmConfig> {
 
     /// Guard for getproof calls
     blocking_task_guard: BlockingTaskGuard,
+
+    /// Payload builder
+    payload_builder: EthereumPayloadBuilder<EvmConfig>,
 }
 
 impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, EvmConfig>
 where
     Provider: BlockReaderIdExt,
+    EvmConfig: Clone,
 {
     /// Creates a new, shareable instance using the default tokio task spawner.
     #[allow(clippy::too_many_arguments)]
@@ -284,6 +290,8 @@ where
                 .unwrap_or_default(),
         );
 
+        let payload_builder = EthereumPayloadBuilder::new(evm_config.clone());
+
         Self {
             provider,
             pool,
@@ -301,6 +309,7 @@ where
             fee_history_cache,
             evm_config,
             blocking_task_guard: BlockingTaskGuard::new(proof_permits),
+            payload_builder,
         }
     }
 }
@@ -400,6 +409,12 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
     #[inline]
     pub const fn blocking_task_guard(&self) -> &BlockingTaskGuard {
         &self.blocking_task_guard
+    }
+
+    /// Returns a handle to the payload builder.
+    #[inline]
+    pub const fn payload_builder(&self) -> &EthereumPayloadBuilder<EvmConfig> {
+        &self.payload_builder
     }
 }
 

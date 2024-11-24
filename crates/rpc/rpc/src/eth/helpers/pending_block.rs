@@ -36,8 +36,10 @@ where
                           + StateProviderFactory,
             Pool: TransactionPool,
             Evm: ConfigureEvm<Header = Header>,
+            PayloadBuilder = EthereumPayloadBuilder<EvmConfig>,
         >,
     ChainSpec: EthChainSpec + EthereumHardforks,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     #[inline]
     fn pending_block(&self) -> &tokio::sync::Mutex<Option<PendingBlock>> {
@@ -94,9 +96,7 @@ where
             None,                 // Optional best payload
         );
 
-        // Instantiate the payload builder locally
-        let evm_config = self.evm_config().clone();
-        let payload_builder = EthereumPayloadBuilder::new(evm_config);
+        let payload_builder = self.payload_builder().clone();
 
         // Build the payload
         match payload_builder.try_build(args).unwrap() {
