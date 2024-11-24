@@ -56,7 +56,7 @@ use std::{
         mpsc::{Receiver, RecvError, RecvTimeoutError, Sender},
         Arc,
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
@@ -1210,11 +1210,13 @@ where
                         self.state.tree_state.insert_executed(block.clone());
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
 
-                        if self.state.tree_state.is_canonical(block.block().parent_hash) {
+                        let block_ref = block.block();
+                        if self.state.tree_state.is_canonical(block_ref.parent_hash) {
                             self.emit_event(EngineApiEvent::BeaconConsensus(
                                 BeaconConsensusEngineEvent::CanonicalBlockAdded(
-                                    block.block().clone().into(),
-                                    Some(block.block().parent_hash),
+                                    block_ref.clone().into(),
+                                    Duration::ZERO,
+                                    Some(block_ref.parent_hash),
                                 ),
                             ));
                         }
@@ -2300,6 +2302,7 @@ where
         } else {
             BeaconConsensusEngineEvent::CanonicalBlockAdded(
                 sealed_block.clone(),
+                elapsed,
                 Some(sealed_block.parent_hash),
             )
         };
@@ -2943,7 +2946,7 @@ mod tests {
             let event = self.from_tree_rx.recv().await.unwrap();
             match event {
                 EngineApiEvent::BeaconConsensus(
-                    BeaconConsensusEngineEvent::CanonicalBlockAdded(block, _),
+                    BeaconConsensusEngineEvent::CanonicalBlockAdded(block, _, _),
                 ) => {
                     assert!(block.hash() == expected_hash);
                 }

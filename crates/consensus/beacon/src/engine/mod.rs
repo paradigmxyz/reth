@@ -1250,6 +1250,7 @@ where
                 let event = if attachment.is_canonical() {
                     BeaconConsensusEngineEvent::CanonicalBlockAdded(
                         block.clone(),
+                        elapsed,
                         Some(block.parent_hash),
                     )
                 } else {
