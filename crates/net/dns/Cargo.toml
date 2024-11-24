@@ -19,7 +19,7 @@ reth-tokio-util = { workspace = true, features = ["time"] }
 
 # ethereum
 alloy-primitives.workspace = true
-secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery", "serde"] }
+secp256k1 = { workspace = true, features = ["global-context", "recovery", "serde"] }
 enr.workspace = true
 
 # async/futures

@@ -122,7 +122,7 @@ impl Message {
         // Serialize the signature and append it to the signature bytes
         let (rec, sig) = signature.serialize_compact();
         sig_bytes.extend_from_slice(&sig);
-        sig_bytes.put_u8(rec.to_i32() as u8);
+        sig_bytes.put_u8(i32::from(rec) as u8);
         sig_bytes.unsplit(payload);
 
         // Calculate the hash of the signature bytes and append it to the datagram
@@ -156,7 +156,7 @@ impl Message {
         }
 
         let signature = &packet[32..96];
-        let recovery_id = RecoveryId::from_i32(packet[96] as i32)?;
+        let recovery_id = RecoveryId::try_from(packet[96] as i32)?;
         let recoverable_sig = RecoverableSignature::from_compact(signature, recovery_id)?;
 
         // recover the public key

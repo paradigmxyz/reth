@@ -63,7 +63,6 @@ tracing.workspace = true
 # crypto
 secp256k1 = { workspace = true, features = [
     "global-context",
-    "rand-std",
     "recovery",
 ] }
 

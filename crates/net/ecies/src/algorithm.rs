@@ -421,7 +421,7 @@ impl ECIES {
 
         let mut sig_bytes = [0u8; 65];
         sig_bytes[..64].copy_from_slice(&sig);
-        sig_bytes[64] = rec_id.to_i32() as u8;
+        sig_bytes[64] = i32::from(rec_id) as u8;
 
         let id = pk2id(&self.public_key);
 
@@ -479,7 +479,7 @@ impl ECIES {
         let sigdata = data.get_next::<[u8; 65]>()?.ok_or(ECIESErrorImpl::InvalidAuthData)?;
         let signature = RecoverableSignature::from_compact(
             &sigdata[..64],
-            RecoveryId::from_i32(sigdata[64] as i32)?,
+            RecoveryId::try_from(sigdata[64] as i32)?,
         )?;
         let remote_id = data.get_next()?.ok_or(ECIESErrorImpl::InvalidAuthData)?;
         self.remote_id = Some(remote_id);
