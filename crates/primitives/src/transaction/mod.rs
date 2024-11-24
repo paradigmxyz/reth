@@ -56,6 +56,12 @@ pub mod signature;
 
 pub(crate) mod util;
 
+#[cfg(any(test, feature = "reth-codec"))]
+pub use tx_type::{
+    COMPACT_EXTENDED_IDENTIFIER_FLAG, COMPACT_IDENTIFIER_EIP1559, COMPACT_IDENTIFIER_EIP2930,
+    COMPACT_IDENTIFIER_LEGACY,
+};
+
 /// Expected number of transactions where we can expect a speed-up by recovering the senders in
 /// parallel.
 pub static PARALLEL_SENDER_RECOVERY_THRESHOLD: LazyLock<usize> =

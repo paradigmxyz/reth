@@ -10,7 +10,7 @@ use reth_network_p2p::{
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
     EthBlockClient,
 };
-use reth_primitives::SealedBlock;
+use reth_primitives::{EthPrimitives, NodePrimitives, SealedBlock};
 use reth_provider::providers::ProviderNodeTypes;
 use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult};
 use reth_tasks::TaskSpawner;
@@ -361,9 +361,9 @@ impl Ord for OrderedSealedBlock {
 
 /// The event type emitted by the [`EngineSyncController`].
 #[derive(Debug)]
-pub(crate) enum EngineSyncEvent {
+pub(crate) enum EngineSyncEvent<N: NodePrimitives = EthPrimitives> {
     /// A full block has been downloaded from the network.
-    FetchedFullBlock(SealedBlock),
+    FetchedFullBlock(SealedBlock<N::BlockHeader, N::BlockBody>),
     /// Pipeline started syncing
     ///
     /// This is none if the pipeline is triggered without a specific target.

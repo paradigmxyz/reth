@@ -8400,6 +8400,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
+ "arbitrary",
  "bytes",
  "derive_more 1.0.0",
  "op-alloy-consensus",
