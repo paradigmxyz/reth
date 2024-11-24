@@ -579,6 +579,7 @@ impl alloy_consensus::Transaction for PooledTransactionsElement {
 }
 
 impl SignedTransaction for PooledTransactionsElement {
+    type Transaction = Transaction;
     type Type = TxType;
 
     fn tx_hash(&self) -> &TxHash {
