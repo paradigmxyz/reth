@@ -46,11 +46,11 @@ use reth_db_api::{
 use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_network_p2p::headers::downloader::SyncTarget;
-use reth_node_types::{NodeTypes, TxTy};
+use reth_node_types::{BlockTy, NodeTypes, TxTy};
 use reth_primitives::{
-    Account, Block, BlockBody, BlockSealExt, BlockWithSenders, Bytecode, GotExpected,
-    NodePrimitives, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment,
-    StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
+    Account, Block, BlockBody, BlockSealExt, BlockWithSenders, Bytecode, GotExpected, Receipt,
+    SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, StorageEntry,
+    TransactionMeta, TransactionSigned, TransactionSignedNoHash,
 };
 use reth_primitives_traits::{BlockBody as _, SignedTransaction};
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
@@ -2751,7 +2751,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockExecu
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWriter
     for DatabaseProvider<TX, N>
 {
-    type Block = <N::Primitives as NodePrimitives>::Block;
+    type Block = BlockTy<N>;
 
     /// Inserts the block into the database, always modifying the following tables:
     /// * [`CanonicalHeaders`](tables::CanonicalHeaders)
