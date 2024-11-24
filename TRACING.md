@@ -392,6 +392,49 @@ Targets:
     [***TxPoolApi::txpool_inspect*** fn emits ***trace*** event](crates/rpc/rpc/src/txpool.rs#L95)
     [***TxPoolApi::txpool_content_from*** fn emits ***trace*** event](crates/rpc/rpc/src/txpool.rs#L135)
     [***TxPoolApi::txpool_content*** fn emits ***trace*** event](crates/rpc/rpc/src/txpool.rs#L149)
+
+41. **reth-rpc-builder**
+    [***TxPoolApi::txpool_content*** fn emits ***trace*** event](crates/rpc/rpc/src/txpool.rs#L149)
+    [***RpcServerArgs::rpc_server_config*** fn emits ***warn*** event](crates/rpc/rpc-builder/src/config.rs#L176)
+    [***RpcServerArgs::auth_jwt_secret*** fn emits ***debug*** event](crates/rpc/rpc-builder/src/config.rs#L220)
+
+42. **reth-rpc-engine-api**
+    [***EngineApi::get_payload_v1*** fn emits ***warn*** event](crates/rpc/rpc-engine-api/src/engine_api.rs#L359)
+    [***EngineApi::get_payload_v2*** fn emits ***warn*** event](crates/rpc/rpc-engine-api/src/engine_api.rs#L383)
+    [***EngineApi::get_payload_v3*** fn emits ***warn*** event](crates/rpc/rpc-engine-api/src/engine_api.rs#L418)
+    [***EngineApi::get_payload_v4*** fn emits ***warn*** event](crates/rpc/rpc-engine-api/src/engine_api.rs#L418)
+    [***EngineApi::new_payload_v1*** fn emits ***trace*** event](crates/rpc/rpc-engine-api/src/engine_api.rs#L747)
+    [***EngineApi::new_payload_v2*** fn emits ***trace*** event](crates/rpc/rpc-engine-api/src/engine_api.rs#L754)
+    [***EngineApi::new_payload_v3*** fn emits ***trace*** event](crates/rpc/rpc-engine-api/src/engine_api.rs#L761)
+    [***EngineApi::new_payload_v4*** fn emits ***trace*** event](crates/rpc/rpc-engine-api/src/engine_api.rs#L773)
+    [***EngineApi::fork_choice_updated_v1*** fn emits ***trace*** event](crates/rpc/rpc-engine-api/src/engine_api.rs#L795)
+    [***EngineApi::fork_choice_updated_v2*** fn emits ***trace*** event](crates/rpc/rpc-engine-api/src/engine_api.rs#L810)
+    [***EngineApi::fork_choice_updated_v3*** fn emits ***trace*** event](crates/rpc/rpc-engine-api/src/engine_api.rs#L826)
+    [***EngineApi::get_payload_v1*** fn emits ***trace*** event](crates/rpc/rpc-engine-api/src/engine_api.rs#L850)
+    [***EngineApi::get_payload_v2*** fn emits ***trace*** event](crates/rpc/rpc-engine-api/src/engine_api.rs#L870)
+    [***EngineApi::get_payload_v3*** fn emits ***trace*** event](crates/rpc/rpc-engine-api/src/engine_api.rs#L890)
+    [***EngineApi::get_payload_v4*** fn emits ***trace*** event](crates/rpc/rpc-engine-api/src/engine_api.rs#L910)
+    [***EngineApi::get_payload_bodies_by_hash_v1*** fn emits ***trace*** event](crates/rpc/rpc-engine-api/src/engine_api.rs#L923)
+    [***EngineApi::get_payload_bodies_by_range_v1*** fn emits ***trace*** event](crates/rpc/rpc-engine-api/src/engine_api.rs#L950)
+    [***EngineApi::exchange_transition_configuration*** fn emits ***trace*** event](crates/rpc/rpc-engine-api/src/engine_api.rs#L964)
+    [***EngineApi::get_client_version_v1*** fn emits ***trace*** event](crates/rpc/rpc-engine-api/src/engine_api.rs#L978)
+    [***EngineApi::get_blobs_v1*** fn emits ***trace*** event](crates/rpc/rpc-engine-api/src/engine_api.rs#L994)
+
+43. **reth-rpc-eth-types**
+    [***RpcInvalidTransactionError::from*** fn emits ***error*** event](crates/rpc/rpc-eth-types/src/error/mod.rs#L494)
+    [***fee_history_cache_new_blocks_task*** fn emits ***trace*** event](crates/rpc/rpc-eth-types/src/fee_history.rs#L208)
+    [***GasPriceOracle::new*** fn emits ***warn*** event](crates/rpc/rpc-eth-types/src/gas_oracle.rs#L90)
+    [***JwtAuthValidator::validate*** fn emits ***error*** events](crates/rpc/rpc-layer/src/jwt_validator.rs#L24)
+
+44. **reth-stages-api**
+    [***MetricsListener::handle_event*** fn emits ***trace*** event](crates/stages/api/src/metrics/listener.rs#L48)
+    [***Pipeline::set_tip*** fn emits ***warn*** event](crates/stages/api/src/pipeline/mod.rs#L101)
+    [***Pipeline::run_as_fut*** fn emits ***trace*** event](crates/stages/api/src/pipeline/mod.rs#L133)
+    [***Pipeline::run*** fn emits ***trace*** event](crates/stages/api/src/pipeline/mod.rs#L164)
+    [***Pipeline::run_loop*** fn emits ***trace*** events](crates/stages/api/src/pipeline/mod.rs#L205)
+    [***Pipeline::unwind*** fn emits ***info, debug*** events](crates/stages/api/src/pipeline/mod.rs#L278)
+    [***Pipeline::execute_stage_to_completion*** fn emits ***info, debug*** events](crates/stages/api/src/pipeline/mod.rs#L382)
+    [***on_stage_error*** fn emits ***warn, error*** events](crates/stages/api/src/pipeline/mod.rs#L382)
     
 
     
