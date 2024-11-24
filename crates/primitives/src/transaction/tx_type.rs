@@ -26,10 +26,6 @@ pub const COMPACT_IDENTIFIER_EIP1559: usize = 2;
 #[cfg(any(test, feature = "reth-codec"))]
 pub const COMPACT_EXTENDED_IDENTIFIER_FLAG: usize = 3;
 
-/// Identifier for [`TxDeposit`](op_alloy_consensus::TxDeposit) transaction.
-#[cfg(feature = "optimism")]
-pub const DEPOSIT_TX_TYPE_ID: u8 = 126;
-
 /// Transaction Type
 ///
 /// Currently being used as 2-bit type when encoding it to `reth_codecs::Compact` on

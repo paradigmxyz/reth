@@ -9,7 +9,6 @@ use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
     eip2930::AccessList,
     eip7702::SignedAuthorization,
-    BlockHashOrNumber,
 };
 use alloy_primitives::{
     keccak256, Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
@@ -57,16 +56,11 @@ pub mod signature;
 
 pub(crate) mod util;
 
-#[cfg(feature = "optimism")]
-pub use tx_type::DEPOSIT_TX_TYPE_ID;
 #[cfg(any(test, feature = "reth-codec"))]
 pub use tx_type::{
     COMPACT_EXTENDED_IDENTIFIER_FLAG, COMPACT_IDENTIFIER_EIP1559, COMPACT_IDENTIFIER_EIP2930,
     COMPACT_IDENTIFIER_LEGACY,
 };
-
-/// Either a transaction hash or number.
-pub type TxHashOrNumber = BlockHashOrNumber;
 
 /// Expected number of transactions where we can expect a speed-up by recovering the senders in
 /// parallel.
