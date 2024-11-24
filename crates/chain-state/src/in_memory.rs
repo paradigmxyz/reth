@@ -158,6 +158,11 @@ impl<N: NodePrimitives> CanonicalInMemoryStateInner<N> {
     }
 }
 
+type PendingBlockAndReceipts<N> = (
+    SealedBlock<<N as NodePrimitives>::BlockHeader, <N as NodePrimitives>::BlockBody>,
+    Vec<<N as NodePrimitives>::Receipt>,
+);
+
 /// This type is responsible for providing the blocks, receipts, and state for
 /// all canonical blocks not on disk yet and keeps track of the block range that
 /// is in memory.
@@ -487,9 +492,7 @@ where
 
     /// Returns a tuple with the `SealedBlock` corresponding to the pending
     /// state and a vector of its `Receipt`s.
-    pub fn pending_block_and_receipts(
-        &self,
-    ) -> Option<(SealedBlock<N::BlockHeader, N::BlockBody>, Vec<N::Receipt>)> {
+    pub fn pending_block_and_receipts(&self) -> Option<PendingBlockAndReceipts<N>> {
         self.pending_state().map(|block_state| {
             (block_state.block_ref().block().clone(), block_state.executed_block_receipts())
         })
