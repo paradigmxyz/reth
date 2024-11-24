@@ -1,7 +1,8 @@
 use core::fmt;
 
 use crate::{
-    FullBlock, FullBlockBody, FullBlockHeader, FullReceipt, FullSignedTx, FullTxType, MaybeSerde,
+    Block, BlockBody, BlockHeader, FullBlock, FullBlockBody, FullBlockHeader, FullReceipt,
+    FullSignedTx, FullTxType, MaybeSerde, SignedTransaction,
 };
 
 /// Configures all the primitive types of the node.
@@ -77,46 +78,74 @@ impl NodePrimitives for () {
 }
 
 /// Helper trait that sets trait bounds on [`NodePrimitives`].
-pub trait FullNodePrimitives
-where
-    Self: NodePrimitives<
-            Block: FullBlock<Header = Self::BlockHeader, Body = Self::BlockBody>,
-            BlockHeader: FullBlockHeader,
-            BlockBody: FullBlockBody<Transaction = Self::SignedTx>,
-            SignedTx: FullSignedTx,
-            TxType: FullTxType,
-            Receipt: FullReceipt,
-        > + Send
-        + Sync
-        + Unpin
-        + Clone
-        + Default
-        + fmt::Debug
-        + PartialEq
-        + Eq
-        + 'static,
+pub trait FullNodePrimitives:
+    NodePrimitives<
+    Block: FullBlock<Header = Self::BlockHeader, Body = Self::BlockBody> + 'static,
+    BlockHeader: FullBlockHeader + 'static,
+    BlockBody: FullBlockBody<Transaction = Self::SignedTx> + 'static,
+    SignedTx: FullSignedTx + 'static,
+    TxType: FullTxType + 'static,
+    Receipt: FullReceipt + 'static,
+>
 {
 }
 
 impl<T> FullNodePrimitives for T where
     T: NodePrimitives<
-            Block: FullBlock<Header = Self::BlockHeader, Body = Self::BlockBody>,
-            BlockHeader: FullBlockHeader,
-            BlockBody: FullBlockBody<Transaction = Self::SignedTx>,
-            SignedTx: FullSignedTx,
-            TxType: FullTxType,
-            Receipt: FullReceipt,
-        > + Send
-        + Sync
-        + Unpin
-        + Clone
-        + Default
-        + fmt::Debug
-        + PartialEq
-        + Eq
-        + 'static
+        Block: FullBlock<Header = Self::BlockHeader, Body = Self::BlockBody> + 'static,
+        BlockHeader: FullBlockHeader + 'static,
+        BlockBody: FullBlockBody<Transaction = Self::SignedTx> + 'static,
+        SignedTx: FullSignedTx + 'static,
+        TxType: FullTxType + 'static,
+        Receipt: FullReceipt + 'static,
+    >
 {
 }
 
 /// Helper adapter type for accessing [`NodePrimitives`] receipt type.
 pub type ReceiptTy<N> = <N as NodePrimitives>::Receipt;
+
+/// Helper trait that links [`NodePrimitives::Block`] to [`NodePrimitives::BlockHeader`],
+/// [`NodePrimitives::BlockBody`] and [`NodePrimitives::SignedTx`].
+pub trait BlockPrimitives:
+    NodePrimitives<
+    Block: Block<Header = Self::BlockHeader, Body = Self::BlockBody>,
+    BlockHeader: BlockHeader,
+    BlockBody: BlockBody<Transaction = Self::SignedTx>,
+    SignedTx: SignedTransaction,
+>
+{
+}
+
+impl<T> BlockPrimitives for T where
+    T: NodePrimitives<
+        Block: Block<Header = T::BlockHeader, Body = T::BlockBody>,
+        BlockHeader: BlockHeader,
+        BlockBody: BlockBody<Transaction = T::SignedTx>,
+        SignedTx: SignedTransaction,
+    >
+{
+}
+
+/// Helper trait like [`BlockPrimitives`], but with encoding trait bounds on
+/// [`NodePrimitives::Block`], [`NodePrimitives::BlockHeader`], [`NodePrimitives::BlockBody`] and
+/// [`NodePrimitives::SignedTx`].
+pub trait FullBlockPrimitives:
+    NodePrimitives<
+    Block: FullBlock<Header = Self::BlockHeader, Body = Self::BlockBody>,
+    BlockHeader: FullBlockHeader,
+    BlockBody: FullBlockBody<Transaction = Self::SignedTx>,
+    SignedTx: FullSignedTx,
+>
+{
+}
+
+impl<T> FullBlockPrimitives for T where
+    T: NodePrimitives<
+        Block: FullBlock<Header = T::BlockHeader, Body = T::BlockBody>,
+        BlockHeader: FullBlockHeader,
+        BlockBody: FullBlockBody<Transaction = T::SignedTx>,
+        SignedTx: FullSignedTx,
+    >
+{
+}

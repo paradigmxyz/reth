@@ -1,15 +1,26 @@
 //! API of a signed transaction.
 
-use crate::{FillTxEnv, InMemorySize, MaybeArbitrary, MaybeCompact, MaybeSerde, TxType};
 use alloc::fmt;
-use alloy_eips::eip2718::{Decodable2718, Encodable2718};
-use alloy_primitives::{keccak256, Address, PrimitiveSignature, TxHash, B256};
 use core::hash::Hash;
 
-/// Helper trait that unifies all behaviour required by block to support full node operations.
-pub trait FullSignedTx: SignedTransaction + FillTxEnv + MaybeCompact {}
+use alloy_eips::eip2718::{Decodable2718, Encodable2718};
+use alloy_primitives::{keccak256, Address, PrimitiveSignature, TxHash, B256};
 
-impl<T> FullSignedTx for T where T: SignedTransaction + FillTxEnv + MaybeCompact {}
+use crate::{
+    FillTxEnv, FullTransaction, FullTxType, InMemorySize, MaybeArbitrary, MaybeCompact, MaybeSerde,
+    Transaction, TxType,
+};
+
+/// Helper trait that unifies all behaviour required by block to support full node operations.
+pub trait FullSignedTx:
+    SignedTransaction<Transaction: FullTransaction, Type: FullTxType> + FillTxEnv + MaybeCompact
+{
+}
+
+impl<T> FullSignedTx for T where
+    T: SignedTransaction<Transaction: FullTransaction, Type: FullTxType> + FillTxEnv + MaybeCompact
+{
+}
 
 /// A signed transaction.
 #[auto_impl::auto_impl(&, Arc)]
@@ -32,6 +43,9 @@ pub trait SignedTransaction:
     + MaybeArbitrary
     + InMemorySize
 {
+    /// Unsigned transaction type.
+    type Transaction: Transaction;
+
     /// Transaction envelope type ID.
     type Type: TxType;
 

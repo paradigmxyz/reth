@@ -7,7 +7,7 @@ use reth_db::{
     transaction::DbTxMut,
     DbTxUnwindExt,
 };
-use reth_primitives_traits::{Block, BlockBody, FullNodePrimitives};
+use reth_primitives_traits::{BlockBody, BlockPrimitives};
 use reth_storage_errors::provider::ProviderResult;
 
 /// Trait that implements how block bodies are written to the storage.
@@ -32,12 +32,12 @@ pub trait BlockBodyWriter<Provider, Body: BlockBody> {
 }
 
 /// Trait that implements how chain-specific types are written to the storage.
-pub trait ChainStorageWriter<Provider, Primitives: FullNodePrimitives>:
-    BlockBodyWriter<Provider, <Primitives::Block as Block>::Body>
+pub trait ChainStorageWriter<Provider, Primitives: BlockPrimitives>:
+    BlockBodyWriter<Provider, Primitives::BlockBody>
 {
 }
-impl<T, Provider, Primitives: FullNodePrimitives> ChainStorageWriter<Provider, Primitives> for T where
-    T: BlockBodyWriter<Provider, <Primitives::Block as Block>::Body>
+impl<T, Provider, Primitives: BlockPrimitives> ChainStorageWriter<Provider, Primitives> for T where
+    T: BlockBodyWriter<Provider, Primitives::BlockBody>
 {
 }
 

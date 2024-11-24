@@ -2,9 +2,7 @@
 
 use alloc::fmt;
 
-use alloy_consensus::Transaction;
-
-use crate::{FullSignedTx, InMemorySize, MaybeArbitrary, MaybeSerde};
+use crate::{FullSignedTx, InMemorySize, MaybeArbitrary, MaybeSerde, SignedTransaction};
 
 /// Helper trait that unifies all behaviour required by transaction to support full node operations.
 pub trait FullBlockBody: BlockBody<Transaction: FullSignedTx> {}
@@ -28,8 +26,8 @@ pub trait BlockBody:
     + MaybeSerde
     + MaybeArbitrary
 {
-    /// Ordered list of signed transactions as committed in block.
-    type Transaction: Transaction;
+    /// Signed transaction.
+    type Transaction: SignedTransaction;
 
     /// Returns reference to transactions in block.
     fn transactions(&self) -> &[Self::Transaction];

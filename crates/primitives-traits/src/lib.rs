@@ -78,7 +78,9 @@ pub use size::InMemorySize;
 
 /// Node traits
 pub mod node;
-pub use node::{FullNodePrimitives, NodePrimitives, ReceiptTy};
+pub use node::{
+    BlockPrimitives, FullBlockPrimitives, FullNodePrimitives, NodePrimitives, ReceiptTy,
+};
 
 /// Helper trait that requires arbitrary implementation if the feature is enabled.
 #[cfg(any(feature = "test-utils", feature = "arbitrary"))]

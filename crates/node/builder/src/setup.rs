@@ -87,9 +87,7 @@ pub fn build_pipeline<N, H, B, Executor>(
 where
     N: ProviderNodeTypes,
     H: HeaderDownloader<Header = alloy_consensus::Header> + 'static,
-    B: BodyDownloader<
-            Body = <<N::Primitives as NodePrimitives>::Block as reth_node_api::Block>::Body,
-        > + 'static,
+    B: BodyDownloader<Body = <N::Primitives as NodePrimitives>::BlockBody> + 'static,
     Executor: BlockExecutorProvider,
     N::Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>,
 {

@@ -32,6 +32,7 @@ reth-engine-primitives.workspace = true
 reth-network-p2p.workspace = true
 reth-node-types.workspace = true
 reth-chainspec = { workspace = true, optional = true }
+reth-primitives-traits.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true

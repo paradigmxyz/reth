@@ -27,6 +27,7 @@ use reth_payload_builder_primitives::PayloadBuilder;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{Head, SealedBlock, SealedHeader};
+use reth_primitives_traits::BlockPrimitives;
 use reth_provider::{
     providers::ProviderNodeTypes, BlockIdReader, BlockReader, BlockSource, CanonChainTracker,
     ChainSpecProvider, ProviderError, StageCheckpointReader,
@@ -226,7 +227,7 @@ where
 
 impl<N, BT, Client> BeaconConsensusEngine<N, BT, Client>
 where
-    N: EngineNodeTypes,
+    N: EngineNodeTypes<Primitives: BlockPrimitives>,
     BT: BlockchainTreeEngine
         + BlockReader
         + BlockIdReader
@@ -1795,7 +1796,7 @@ where
 /// receiver and forwarding them to the blockchain tree.
 impl<N, BT, Client> Future for BeaconConsensusEngine<N, BT, Client>
 where
-    N: EngineNodeTypes,
+    N: EngineNodeTypes<Primitives: BlockPrimitives>,
     Client: EthBlockClient + 'static,
     BT: BlockchainTreeEngine
         + BlockReader

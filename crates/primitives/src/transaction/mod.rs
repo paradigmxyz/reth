@@ -1265,6 +1265,7 @@ impl TransactionSigned {
 
 impl SignedTransaction for TransactionSigned {
     type Type = TxType;
+    type Transaction = Transaction;
 
     fn tx_hash(&self) -> &TxHash {
         self.hash_ref()

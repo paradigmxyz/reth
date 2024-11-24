@@ -1,11 +1,11 @@
 use crate::{providers::NodeTypes, DatabaseProvider};
 use reth_db::transaction::{DbTx, DbTxMut};
-use reth_node_types::FullNodePrimitives;
 use reth_primitives::EthPrimitives;
+use reth_primitives_traits::BlockPrimitives;
 use reth_storage_api::{ChainStorageWriter, EthStorage};
 
 /// Trait that provides access to implementations of [`ChainStorage`]
-pub trait ChainStorage<Primitives: FullNodePrimitives>: Send + Sync {
+pub trait ChainStorage<Primitives: BlockPrimitives>: Send + Sync {
     /// Provides access to the chain writer.
     fn writer<TX, Types>(&self) -> impl ChainStorageWriter<DatabaseProvider<TX, Types>, Primitives>
     where
