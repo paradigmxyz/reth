@@ -44,7 +44,8 @@ criterion_main!(benches);
 mod implementations {
     use super::*;
     use alloy_rlp::Encodable;
-    use reth_trie_common::{root::adjust_index_for_rlp, HashBuilder, Nibbles};
+    use alloy_trie::root::adjust_index_for_rlp;
+    use reth_trie_common::{HashBuilder, Nibbles};
 
     pub fn trie_hash_ordered_trie_root(receipts: &[ReceiptWithBloom]) -> B256 {
         triehash::ordered_trie_root::<KeccakHasher, _>(receipts.iter().map(|receipt| {
