@@ -11,7 +11,7 @@ use once_cell as _;
 use once_cell::sync::Lazy as LazyLock;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
-use crate::{FullSignedTx, InMemorySize, MaybeSerde, SignedTransaction};
+use crate::{FullSignedTx, InMemorySize, MaybeArbitrary, MaybeSerde, SignedTransaction};
 
 /// Expected number of transactions where we can expect a speed-up by recovering the senders in
 /// parallel.
@@ -42,6 +42,7 @@ pub trait BlockBody:
     + alloy_rlp::Decodable
     + InMemorySize
     + MaybeSerde
+    + MaybeArbitrary
 {
     /// Ordered list of signed transactions as committed in block.
     type Transaction: SignedTransaction;
