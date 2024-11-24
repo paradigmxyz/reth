@@ -1,9 +1,8 @@
 //! Abstraction over primitive types in network messages.
 
-use std::fmt::Debug;
-
 use alloy_rlp::{Decodable, Encodable};
 use reth_primitives_traits::{Block, BlockHeader};
+use std::fmt::Debug;
 
 /// Abstraction over primitive types which might appear in network messages. See
 /// [`crate::EthMessage`] for more context.
@@ -70,6 +69,18 @@ pub trait NetworkPrimitives:
         + PartialEq
         + Eq
         + 'static;
+
+    /// The transaction type which peers return in `GetReceipts` messages.
+    type Receipt: Encodable
+        + Decodable
+        + Send
+        + Sync
+        + Unpin
+        + Clone
+        + Debug
+        + PartialEq
+        + Eq
+        + 'static;
 }
 
 /// Primitive types used by Ethereum network.
@@ -83,4 +94,5 @@ impl NetworkPrimitives for EthNetworkPrimitives {
     type Block = reth_primitives::Block;
     type BroadcastedTransaction = reth_primitives::TransactionSigned;
     type PooledTransaction = reth_primitives::PooledTransactionsElement;
+    type Receipt = reth_primitives::Receipt;
 }

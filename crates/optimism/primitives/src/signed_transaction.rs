@@ -1,5 +1,7 @@
 //! A signed Optimism transaction.
 
+use core::mem;
+
 use alloy_consensus::{
     transaction::RlpEcdsaTx, SignableTransaction, TxEip1559, TxEip2930, TxEip7702,
 };
@@ -12,7 +14,7 @@ use reth_primitives::{
     transaction::{recover_signer, recover_signer_unchecked},
     TransactionSigned,
 };
-use reth_primitives_traits::{InMemorySize, SignedTransaction};
+use reth_primitives_traits::{FillTxEnv, InMemorySize, SignedTransaction};
 use revm_primitives::{AuthorizationList, TxEnv};
 use serde::{Deserialize, Serialize};
 
@@ -31,14 +33,10 @@ pub struct OpTransactionSigned {
 }
 
 impl SignedTransaction for OpTransactionSigned {
-    type Transaction = OpTypedTransaction;
+    type Type = OpTxType;
 
     fn tx_hash(&self) -> &TxHash {
         &self.hash
-    }
-
-    fn transaction(&self) -> &Self::Transaction {
-        &self.transaction
     }
 
     fn signature(&self) -> &Signature {
@@ -72,7 +70,9 @@ impl SignedTransaction for OpTransactionSigned {
     fn recalculate_hash(&self) -> B256 {
         keccak256(self.encoded_2718())
     }
+}
 
+impl FillTxEnv for OpTransactionSigned {
     fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address) {
         let envelope = self.encoded_2718();
 

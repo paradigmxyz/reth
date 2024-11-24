@@ -8,6 +8,7 @@ use reth_network_p2p::{
 };
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
+    fmt::Debug,
     future::Future,
     ops::RangeInclusive,
     pin::Pin,
@@ -47,10 +48,10 @@ impl<B: Send + Sync + Unpin + 'static> TaskDownloader<B> {
     /// use reth_network_p2p::bodies::client::BodiesClient;
     /// use reth_primitives_traits::InMemorySize;
     /// use reth_storage_api::HeaderProvider;
-    /// use std::sync::Arc;
+    /// use std::{fmt::Debug, sync::Arc};
     ///
     /// fn t<
-    ///     B: BodiesClient<Body: InMemorySize> + 'static,
+    ///     B: BodiesClient<Body: Debug + InMemorySize> + 'static,
     ///     Provider: HeaderProvider + Unpin + 'static,
     /// >(
     ///     client: Arc<B>,
@@ -90,7 +91,7 @@ impl<B: Send + Sync + Unpin + 'static> TaskDownloader<B> {
     }
 }
 
-impl<B: Send + Sync + Unpin + 'static> BodyDownloader for TaskDownloader<B> {
+impl<B: Debug + Send + Sync + Unpin + 'static> BodyDownloader for TaskDownloader<B> {
     type Body = B;
 
     fn set_download_range(&mut self, range: RangeInclusive<BlockNumber>) -> DownloadResult<()> {

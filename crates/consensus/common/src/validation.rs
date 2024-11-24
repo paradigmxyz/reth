@@ -450,7 +450,7 @@ mod tests {
 
         let signature = Signature::new(U256::default(), U256::default(), true);
 
-        TransactionSigned::from_transaction_and_signature(request, signature)
+        TransactionSigned::new_unhashed(request, signature)
     }
 
     /// got test block

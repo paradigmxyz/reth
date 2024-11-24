@@ -199,7 +199,7 @@ impl TransactionBuilder {
     /// Signs the provided transaction using the specified signer and returns a signed transaction.
     fn signed(transaction: Transaction, signer: B256) -> TransactionSigned {
         let signature = sign_message(signer, transaction.signature_hash()).unwrap();
-        TransactionSigned::from_transaction_and_signature(transaction, signature)
+        TransactionSigned::new_unhashed(transaction, signature)
     }
 
     /// Sets the signer for the transaction builder.

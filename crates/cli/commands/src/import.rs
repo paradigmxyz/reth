@@ -167,7 +167,7 @@ pub fn build_import_pipeline<N, C, E>(
     executor: E,
 ) -> eyre::Result<(Pipeline<N>, impl Stream<Item = NodeEvent>)>
 where
-    N: ProviderNodeTypes,
+    N: ProviderNodeTypes + CliNodeTypes,
     C: Consensus + 'static,
     E: BlockExecutorProvider,
 {

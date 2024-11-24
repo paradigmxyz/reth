@@ -147,7 +147,7 @@ impl Stream for TestDownload {
 
             let empty: SealedHeader = SealedHeader::default();
             if let Err(error) =
-                Consensus::<_>::validate_header_against_parent(&this.consensus, &empty, &empty)
+                <dyn Consensus<_>>::validate_header_against_parent(&this.consensus, &empty, &empty)
             {
                 this.done = true;
                 return Poll::Ready(Some(Err(DownloadError::HeaderValidation {
