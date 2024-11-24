@@ -1,6 +1,6 @@
 //! Block body abstraction.
 
-use alloc::fmt;
+use alloc::{fmt, vec::Vec};
 #[cfg(feature = "std")]
 use std::sync::LazyLock;
 
