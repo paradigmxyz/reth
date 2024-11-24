@@ -1,3 +1,4 @@
+use crate::transaction::PayloadTransactionsCtx;
 use alloy_primitives::Address;
 use reth_primitives::TransactionSignedEcRecovered;
 
@@ -6,13 +7,9 @@ use reth_primitives::TransactionSignedEcRecovered;
 ///
 /// Can include transactions from the pool and other sources (alternative pools,
 /// sequencer-originated transactions, etc.).
-pub trait PayloadTransactions {
+pub trait PayloadTransactions<EVM> {
     /// Returns the next transaction to include in the block.
-    fn next(
-        &mut self,
-        // In the future, `ctx` can include access to state for block building purposes.
-        ctx: (),
-    ) -> Option<TransactionSignedEcRecovered>;
+    fn next(&mut self, ctx: &PayloadTransactionsCtx<EVM>) -> Option<TransactionSignedEcRecovered>;
 
     /// Exclude descendants of the transaction with given sender and nonce from the iterator,
     /// because this transaction won't be included in the block.

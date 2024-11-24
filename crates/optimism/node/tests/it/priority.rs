@@ -38,11 +38,11 @@ struct CustomTxPriority {
 }
 
 impl OpPayloadTransactions for CustomTxPriority {
-    fn best_transactions<Pool>(
+    fn best_transactions<Pool, E>(
         &self,
         pool: Pool,
         attr: reth_transaction_pool::BestTransactionsAttributes,
-    ) -> impl PayloadTransactions
+    ) -> impl PayloadTransactions<E>
     where
         Pool: reth_transaction_pool::TransactionPool,
     {
