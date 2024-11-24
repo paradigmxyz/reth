@@ -10,7 +10,7 @@ use revm_primitives::{Address, B256};
 /// Extension trait for [`reth_primitives_traits::Block`] implementations
 /// allowing for conversions into common block parts containers such as [`SealedBlock`],
 /// [`BlockWithSenders`], etc.
-pub trait BlockSealExt: Block {
+pub trait BlockExt: Block {
     /// Calculate the header hash and seal the block so that it can't be changed.
     fn seal_slow(self) -> SealedBlock<Self::Header, Self::Body> {
         let (header, body) = self.split();
@@ -87,7 +87,7 @@ pub trait BlockSealExt: Block {
     }
 }
 
-impl<T: Block> BlockSealExt for T {}
+impl<T: Block> BlockExt for T {}
 
 /// Extension trait for [`BlockBody`] adding helper methods operating with transactions.
 pub trait BlockBodyTxExt: BlockBody {

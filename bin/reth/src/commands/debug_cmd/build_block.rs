@@ -25,7 +25,7 @@ use reth_fs_util as fs;
 use reth_node_api::{BlockTy, EngineApiMessageVersion, PayloadBuilderAttributes};
 use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider};
 use reth_primitives::{
-    BlobTransaction, BlockSealExt, PooledTransactionsElement, SealedBlock, SealedBlockWithSenders,
+    BlobTransaction, BlockExt, PooledTransactionsElement, SealedBlock, SealedBlockWithSenders,
     SealedHeader, Transaction, TransactionSigned,
 };
 use reth_provider::{

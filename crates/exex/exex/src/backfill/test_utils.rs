@@ -11,7 +11,7 @@ use reth_evm::execute::{
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_node_api::FullNodePrimitives;
 use reth_primitives::{
-    Block, BlockBody, BlockSealExt, BlockWithSenders, Receipt, SealedBlockWithSenders, Transaction,
+    Block, BlockBody, BlockExt, BlockWithSenders, Receipt, SealedBlockWithSenders, Transaction,
 };
 use reth_provider::{
     providers::ProviderNodeTypes, BlockWriter as _, ExecutionOutcome, LatestStateProviderRef,

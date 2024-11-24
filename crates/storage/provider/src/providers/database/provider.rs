@@ -48,7 +48,7 @@ use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_network_p2p::headers::downloader::SyncTarget;
 use reth_node_types::{BlockTy, NodeTypes, TxTy};
 use reth_primitives::{
-    Account, Block, BlockBody, BlockSealExt, BlockWithSenders, Bytecode, GotExpected, Receipt,
+    Account, Block, BlockBody, BlockExt, BlockWithSenders, Bytecode, GotExpected, Receipt,
     SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, StorageEntry,
     TransactionMeta, TransactionSigned, TransactionSignedNoHash,
 };

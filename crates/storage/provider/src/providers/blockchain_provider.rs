@@ -794,7 +794,7 @@ mod tests {
     use reth_errors::ProviderError;
     use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_primitives::{
-        BlockSealExt, Receipt, SealedBlock, StaticFileSegment, TransactionSignedNoHash,
+        BlockExt, Receipt, SealedBlock, StaticFileSegment, TransactionSignedNoHash,
     };
     use reth_storage_api::{
         BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,

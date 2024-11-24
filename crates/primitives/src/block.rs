@@ -1,6 +1,6 @@
 use crate::{
-    traits::BlockSealExt, transaction::SignedTransactionIntoRecoveredExt, BlockBodyTxExt,
-    GotExpected, SealedHeader, TransactionSigned, TransactionSignedEcRecovered,
+    traits::BlockExt, transaction::SignedTransactionIntoRecoveredExt, BlockBodyTxExt, GotExpected,
+    SealedHeader, TransactionSigned, TransactionSignedEcRecovered,
 };
 use alloc::vec::Vec;
 use alloy_consensus::Header;
