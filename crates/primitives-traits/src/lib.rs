@@ -12,6 +12,11 @@
 #[macro_use]
 extern crate alloc;
 
+/// Helper traits for calling block header and body methods directly on block type.
+pub mod block_prelude {
+    pub use crate::{block::body::Body as _, Block};
+}
+
 /// Common constants.
 pub mod constants;
 pub use constants::gas_units::{format_gas, format_gas_throughput};
@@ -36,7 +41,7 @@ pub use integer_list::{IntegerList, IntegerListError};
 
 pub mod block;
 pub use block::{
-    body::{BlockBody, FullBlockBody},
+    body::{BlockBody, FullBlockBody, PARALLEL_SENDER_RECOVERY_THRESHOLD},
     header::{BlockHeader, FullBlockHeader},
     Block, FullBlock,
 };

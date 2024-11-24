@@ -6,7 +6,7 @@ homepage.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "Common types in reth."
+description = "Reth abstraction of EVM data primitives."
 
 [lints]
 workspace = true
@@ -23,19 +23,25 @@ alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 revm-primitives.workspace = true
 
-# misc
+# async
+once_cell.workspace = true
+
+# io
+rayon.workspace = true
+
+# codec
 byteorder = { workspace = true, optional = true }
 bytes.workspace = true
-derive_more.workspace = true
 roaring = "0.10.2"
 serde_with = { workspace = true, optional = true }
-auto_impl.workspace = true
-
-# required by reth-codecs
 modular-bitfield = { workspace = true, optional = true }
 serde = { workspace = true, optional = true}
 
-# arbitrary utils
+# misc
+derive_more.workspace = true
+auto_impl.workspace = true
+
+# test-utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
 proptest-arbitrary-interop = { workspace = true, optional = true }
@@ -61,7 +67,8 @@ std = [
 	"alloy-genesis/std",
 	"alloy-primitives/std",
 	"revm-primitives/std",
-	"serde?/std"
+	"serde?/std",
+	"once_cell/std",
 ]
 test-utils = [
 	"arbitrary",

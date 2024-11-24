@@ -77,24 +77,23 @@ impl NodePrimitives for () {
 }
 
 /// Helper trait that sets trait bounds on [`NodePrimitives`].
-pub trait FullNodePrimitives
-where
-    Self: NodePrimitives<
-            Block: FullBlock<Header = Self::BlockHeader, Body = Self::BlockBody>,
-            BlockHeader: FullBlockHeader,
-            BlockBody: FullBlockBody<Transaction = Self::SignedTx>,
-            SignedTx: FullSignedTx,
-            TxType: FullTxType,
-            Receipt: FullReceipt,
-        > + Send
-        + Sync
-        + Unpin
-        + Clone
-        + Default
-        + fmt::Debug
-        + PartialEq
-        + Eq
-        + 'static,
+pub trait FullNodePrimitives:
+    NodePrimitives<
+        Block: FullBlock<Header = Self::BlockHeader, Body = Self::BlockBody>,
+        BlockHeader: FullBlockHeader,
+        BlockBody: FullBlockBody<Transaction = Self::SignedTx>,
+        SignedTx: FullSignedTx,
+        TxType: FullTxType,
+        Receipt: FullReceipt,
+    > + Send
+    + Sync
+    + Unpin
+    + Clone
+    + Default
+    + fmt::Debug
+    + PartialEq
+    + Eq
+    + 'static
 {
 }
 
