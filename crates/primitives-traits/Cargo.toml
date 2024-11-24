@@ -67,7 +67,8 @@ std = [
 	"alloy-genesis/std",
 	"alloy-primitives/std",
 	"revm-primitives/std",
-	"serde?/std"
+	"serde?/std",
+	"once_cell/std",
 ]
 test-utils = [
 	"arbitrary",
