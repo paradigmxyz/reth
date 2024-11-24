@@ -3,13 +3,13 @@
 use std::{fmt::Display, sync::Arc};
 
 use alloy_consensus::{Header, Transaction, EMPTY_OMMER_ROOT_HASH};
-use alloy_eips::merge::BEACON_NONCE;
+use alloy_eips::{eip4895::Withdrawals, merge::BEACON_NONCE};
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_engine::PayloadId;
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
-use reth_chainspec::ChainSpecProvider;
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_evm::{system_calls::SystemCaller, ConfigureEvm, NextBlockEnvAttributes};
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_chainspec::OpChainSpec;
@@ -416,7 +416,7 @@ where
             body: BlockBody {
                 transactions: info.executed_transactions,
                 ommers: vec![],
-                withdrawals: Some(ctx.attributes().payload_attributes.withdrawals.clone()),
+                withdrawals: ctx.withdrawals().cloned(),
             },
         };
 
@@ -558,6 +558,13 @@ impl<EvmConfig> OpPayloadBuilderCtx<EvmConfig> {
     /// Returns the builder attributes.
     pub const fn attributes(&self) -> &OpPayloadBuilderAttributes {
         &self.config.attributes
+    }
+
+    /// Returns the withdrawals if shanghai is active.
+    pub fn withdrawals(&self) -> Option<&Withdrawals> {
+        self.chain_spec
+            .is_shanghai_active_at_timestamp(self.attributes().timestamp())
+            .then(|| &self.attributes().payload_attributes.withdrawals)
     }
 
     /// Returns the block gas limit to target.
