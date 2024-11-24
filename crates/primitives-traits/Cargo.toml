@@ -23,6 +23,12 @@ alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 revm-primitives.workspace = true
 
+# async
+once_cell.workspace = true
+
+# io
+rayon.workspace = true
+
 # misc
 byteorder = { workspace = true, optional = true }
 bytes.workspace = true
