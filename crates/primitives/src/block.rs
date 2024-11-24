@@ -699,9 +699,34 @@ impl InMemorySize for BlockBody {
 
 impl reth_primitives_traits::BlockBody for BlockBody {
     type Transaction = TransactionSigned;
+    type Withdrawals = Withdrawals;
 
-    fn transactions(&self) -> &[Self::Transaction] {
+    fn transactions(&self) -> &Vec<Self::Transaction> {
         &self.transactions
+    }
+
+    fn withdrawals(&self) -> Option<&Self::Withdrawals> {
+        self.withdrawals.as_ref()
+    }
+
+    fn calculate_tx_root(&self) -> B256 {
+        self.calculate_tx_root()
+    }
+
+    fn calculate_ommers_root(&self) -> B256 {
+        self.calculate_ommers_root()
+    }
+
+    fn calculate_withdrawals_root(&self) -> Option<B256> {
+        self.calculate_withdrawals_root()
+    }
+
+    fn blob_versioned_hashes(&self) -> Vec<&B256> {
+        self.blob_versioned_hashes()
+    }
+
+    fn blob_versioned_hashes_copied(&self) -> Vec<B256> {
+        self.blob_versioned_hashes().into_iter().copied().collect()
     }
 }
 

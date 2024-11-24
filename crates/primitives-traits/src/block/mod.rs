@@ -3,10 +3,11 @@
 pub mod body;
 pub mod header;
 
-use alloc::fmt;
+use core::fmt;
 
 use crate::{
-    BlockHeader, FullBlockBody, FullBlockHeader, InMemorySize, MaybeArbitrary, MaybeSerde,
+    BlockBody, BlockHeader, FullBlockBody, FullBlockHeader, InMemorySize, MaybeArbitrary,
+    MaybeSerde,
 };
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
@@ -44,7 +45,7 @@ pub trait Block:
     type Header: BlockHeader + 'static;
 
     /// The block's body contains the transactions in the block.
-    type Body: Send + Sync + Unpin + 'static;
+    type Body: BlockBody + 'static;
 
     /// Returns reference to block header.
     fn header(&self) -> &Self::Header;
