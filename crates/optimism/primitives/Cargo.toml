@@ -40,7 +40,6 @@ arbitrary = { workspace = true, features = ["derive"], optional = true }
 [dev-dependencies]
 reth-codecs = { workspace = true, features = ["test-utils"] }
 rstest.workspace = true
-test-fuzz.workspace = true
 arbitrary.workspace = true
 
 [features]

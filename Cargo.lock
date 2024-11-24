@@ -8400,7 +8400,6 @@ dependencies = [
  "reth-primitives-traits",
  "rstest",
  "serde",
- "test-fuzz",
 ]
 
 [[package]]
