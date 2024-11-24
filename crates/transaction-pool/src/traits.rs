@@ -932,7 +932,7 @@ impl BestTransactionsAttributes {
 /// a subset of the `Pooled` format.
 pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
     /// Associated error type for the `try_from_consensus` method.
-    type TryFromConsensusError;
+    type TryFromConsensusError: fmt::Display;
 
     /// Associated type representing the raw consensus variant of the transaction.
     type Consensus: From<Self> + TryInto<Self, Error = Self::TryFromConsensusError>;
@@ -953,6 +953,11 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
     /// Define a method to convert from the `Pooled` type to `Self`
     fn from_pooled(pooled: Self::Pooled) -> Self {
         pooled.into()
+    }
+
+    /// Tries to convert the `Consensus` type into the `Pooled` type.
+    fn try_into_pooled(self) -> Result<Self::Pooled, Self::TryFromConsensusError> {
+        Self::try_consensus_into_pooled(self.into_consensus())
     }
 
     /// Tries to convert the `Consensus` type into the `Pooled` type.
@@ -1084,7 +1089,9 @@ pub trait EthPoolTransaction:
     Consensus: From<TransactionSignedEcRecovered>
                    + Into<TransactionSignedEcRecovered>
                    + Into<TransactionSigned>,
-    Pooled: From<PooledTransactionsElementEcRecovered> + Into<PooledTransactionsElementEcRecovered>,
+    Pooled: From<PooledTransactionsElementEcRecovered>
+                + Into<PooledTransactionsElementEcRecovered>
+                + Into<PooledTransactionsElement>,
 >
 {
     /// Extracts the blob sidecar from the transaction.

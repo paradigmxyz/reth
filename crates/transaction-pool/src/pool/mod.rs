@@ -78,7 +78,8 @@ use crate::{
         PoolTransaction, PropagatedTransactions, TransactionOrigin,
     },
     validate::{TransactionValidationOutcome, ValidPoolTransaction},
-    CanonicalStateUpdate, PoolConfig, TransactionOrdering, TransactionValidator,
+    CanonicalStateUpdate, EthPoolTransaction, PoolConfig, TransactionOrdering,
+    TransactionValidator,
 };
 use alloy_primitives::{Address, TxHash, B256};
 use best::BestTransactions;
@@ -87,9 +88,7 @@ use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 
 use alloy_eips::eip4844::BlobTransactionSidecar;
-use reth_primitives::{
-    BlobTransaction, PooledTransactionsElement, TransactionSigned, TransactionSignedEcRecovered,
-};
+use reth_primitives::PooledTransactionsElement;
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -312,18 +311,33 @@ where
         self.get_pool_data().all().transactions_iter().filter(|tx| tx.propagate).take(max).collect()
     }
 
-    /// Returns the [`BlobTransaction`] for the given transaction if the sidecar exists.
+    /// Converts the internally tracked transaction to the pooled format.
     ///
-    /// Caution: this assumes the given transaction is eip-4844
-    fn get_blob_transaction(&self, transaction: TransactionSigned) -> Option<BlobTransaction> {
-        if let Ok(Some(sidecar)) = self.blob_store.get(transaction.hash()) {
-            if let Ok(blob) =
-                BlobTransaction::try_from_signed(transaction, Arc::unwrap_or_clone(sidecar))
-            {
-                return Some(blob)
-            }
+    /// If the transaction is an EIP-4844 transaction, the blob sidecar is fetched from the blob
+    /// store and attached to the transaction.
+    fn to_pooled_transaction(
+        &self,
+        transaction: Arc<ValidPoolTransaction<T::Transaction>>,
+    ) -> Option<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>
+    where
+        <V as TransactionValidator>::Transaction: EthPoolTransaction,
+    {
+        if transaction.is_eip4844() {
+            let sidecar = self.blob_store.get(*transaction.hash()).ok()??;
+            transaction.transaction.clone().try_into_pooled_eip4844(sidecar)
+        } else {
+            transaction
+                .transaction
+                .clone()
+                .try_into_pooled()
+                .inspect_err(|err| {
+                    debug!(
+                        target: "txpool", %err,
+                        "failed to convert transaction to pooled element; skipping",
+                    );
+                })
+                .ok()
         }
-        None
     }
 
     /// Returns converted [`PooledTransactionsElement`] for the given transaction hashes.
@@ -333,39 +347,19 @@ where
         limit: GetPooledTransactionLimit,
     ) -> Vec<PooledTransactionsElement>
     where
-        <V as TransactionValidator>::Transaction:
-            PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
+        <V as TransactionValidator>::Transaction: EthPoolTransaction,
     {
         let transactions = self.get_all(tx_hashes);
         let mut elements = Vec::with_capacity(transactions.len());
         let mut size = 0;
         for transaction in transactions {
             let encoded_len = transaction.encoded_length();
-            let recovered: TransactionSignedEcRecovered =
-                transaction.transaction.clone().into_consensus().into();
-            let tx = recovered.into_signed();
-            let pooled = if tx.is_eip4844() {
-                // for EIP-4844 transactions, we need to fetch the blob sidecar from the blob store
-                if let Some(blob) = self.get_blob_transaction(tx) {
-                    PooledTransactionsElement::BlobTransaction(blob)
-                } else {
-                    continue
-                }
-            } else {
-                match PooledTransactionsElement::try_from(tx) {
-                    Ok(element) => element,
-                    Err(err) => {
-                        debug!(
-                            target: "txpool", %err,
-                            "failed to convert transaction to pooled element; skipping",
-                        );
-                        continue
-                    }
-                }
+            let Some(pooled) = self.to_pooled_transaction(transaction) else {
+                continue;
             };
 
             size += encoded_len;
-            elements.push(pooled);
+            elements.push(pooled.into());
 
             if limit.exceeds(size) {
                 break
@@ -381,19 +375,9 @@ where
         tx_hash: TxHash,
     ) -> Option<PooledTransactionsElement>
     where
-        <V as TransactionValidator>::Transaction:
-            PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
+        <V as TransactionValidator>::Transaction: EthPoolTransaction,
     {
-        self.get(&tx_hash).and_then(|transaction| {
-            let recovered: TransactionSignedEcRecovered =
-                transaction.transaction.clone().into_consensus().into();
-            let tx = recovered.into_signed();
-            if tx.is_eip4844() {
-                self.get_blob_transaction(tx).map(PooledTransactionsElement::BlobTransaction)
-            } else {
-                PooledTransactionsElement::try_from(tx).ok()
-            }
-        })
+        self.get(&tx_hash).and_then(|tx| self.to_pooled_transaction(tx).map(Into::into))
     }
 
     /// Updates the entire pool after a new block was executed.

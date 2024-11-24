@@ -5,7 +5,9 @@ pub mod header;
 
 use alloc::fmt;
 
-use crate::{BlockHeader, FullBlockBody, FullBlockHeader, InMemorySize, MaybeSerde};
+use crate::{
+    BlockHeader, FullBlockBody, FullBlockHeader, InMemorySize, MaybeArbitrary, MaybeSerde,
+};
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
 pub trait FullBlock:
@@ -26,7 +28,17 @@ impl<T> FullBlock for T where
 // senders
 #[auto_impl::auto_impl(&, Arc)]
 pub trait Block:
-    Send + Sync + Unpin + Clone + Default + fmt::Debug + PartialEq + Eq + InMemorySize + MaybeSerde
+    Send
+    + Sync
+    + Unpin
+    + Clone
+    + Default
+    + fmt::Debug
+    + PartialEq
+    + Eq
+    + InMemorySize
+    + MaybeSerde
+    + MaybeArbitrary
 {
     /// Header part of the block.
     type Header: BlockHeader + 'static;
