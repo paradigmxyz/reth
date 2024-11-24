@@ -25,6 +25,3 @@ pub use full::{FullProvider, FullRpcProvider};
 
 mod tree_viewer;
 pub use tree_viewer::TreeViewer;
-
-mod finalized_block;
-pub use finalized_block::{ChainStateBlockReader, ChainStateBlockWriter};

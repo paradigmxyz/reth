@@ -362,7 +362,7 @@ pub enum RpcInvalidTransactionError {
     SenderNoEOA,
     /// Gas limit was exceeded during execution.
     /// Contains the gas limit.
-    #[error("out of gas: gas required exceeds allowance: {0}")]
+    #[error("out of gas: gas required exceeds: {0}")]
     BasicOutOfGas(u64),
     /// Gas limit was exceeded during memory expansion.
     /// Contains the gas limit.

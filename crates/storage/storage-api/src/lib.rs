@@ -22,6 +22,9 @@ pub use block_id::*;
 mod block_hash;
 pub use block_hash::*;
 
+mod chain;
+pub use chain::*;
+
 mod header;
 pub use header::*;
 
@@ -64,3 +67,6 @@ mod hashing;
 pub use hashing::*;
 mod stats;
 pub use stats::*;
+
+mod legacy;
+pub use legacy::*;

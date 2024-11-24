@@ -109,6 +109,7 @@ impl EthSigner for DevSigner {
 
 #[cfg(test)]
 mod tests {
+    use alloy_consensus::Transaction;
     use alloy_primitives::{Bytes, U256};
     use alloy_rpc_types_eth::TransactionInput;
     use revm_primitives::TxKind;

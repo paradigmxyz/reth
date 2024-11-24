@@ -11,7 +11,7 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_forks::OpHardforks;
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned, TxType};
-use reth_provider::ChainSpecProvider;
+use reth_provider::{ChainSpecProvider, TransactionsProvider};
 use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError, RpcReceipt};
 use reth_rpc_eth_types::{receipt::build_receipt, EthApiError};
 
@@ -21,6 +21,7 @@ impl<N> LoadReceipt for OpEthApi<N>
 where
     Self: Send + Sync,
     N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>,
+    Self::Provider: TransactionsProvider<Transaction = TransactionSigned>,
 {
     async fn build_transaction_receipt(
         &self,
@@ -54,10 +55,10 @@ where
 
 /// L1 fee and data gas for a non-deposit transaction, or deposit nonce and receipt version for a
 /// deposit transaction.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct OpReceiptFieldsBuilder {
     /// Block timestamp.
-    pub l1_block_timestamp: u64,
+    pub block_timestamp: u64,
     /// The L1 fee for transaction.
     pub l1_fee: Option<u128>,
     /// L1 gas used by transaction.
@@ -84,8 +85,19 @@ pub struct OpReceiptFieldsBuilder {
 
 impl OpReceiptFieldsBuilder {
     /// Returns a new builder.
-    pub fn new(block_timestamp: u64) -> Self {
-        Self { l1_block_timestamp: block_timestamp, ..Default::default() }
+    pub const fn new(block_timestamp: u64) -> Self {
+        Self {
+            block_timestamp,
+            l1_fee: None,
+            l1_data_gas: None,
+            l1_fee_scalar: None,
+            l1_base_fee: None,
+            deposit_nonce: None,
+            deposit_receipt_version: None,
+            l1_base_fee_scalar: None,
+            l1_blob_base_fee: None,
+            l1_blob_base_fee_scalar: None,
+        }
     }
 
     /// Applies [`L1BlockInfo`](revm::L1BlockInfo).
@@ -96,7 +108,7 @@ impl OpReceiptFieldsBuilder {
         l1_block_info: revm::L1BlockInfo,
     ) -> Result<Self, OpEthApiError> {
         let raw_tx = tx.encoded_2718();
-        let timestamp = self.l1_block_timestamp;
+        let timestamp = self.block_timestamp;
 
         self.l1_fee = Some(
             l1_block_info
@@ -140,7 +152,7 @@ impl OpReceiptFieldsBuilder {
     /// Builds the [`OpTransactionReceiptFields`] object.
     pub const fn build(self) -> OpTransactionReceiptFields {
         let Self {
-            l1_block_timestamp: _, // used to compute other fields
+            block_timestamp: _, // used to compute other fields
             l1_fee,
             l1_data_gas: l1_gas_used,
             l1_fee_scalar,
@@ -187,6 +199,7 @@ impl OpReceiptBuilder {
         all_receipts: &[Receipt],
         l1_block_info: revm::L1BlockInfo,
     ) -> Result<Self, OpEthApiError> {
+        let timestamp = meta.timestamp;
         let core_receipt =
             build_receipt(transaction, meta, receipt, all_receipts, |receipt_with_bloom| {
                 match receipt.tx_type {
@@ -211,7 +224,7 @@ impl OpReceiptBuilder {
                 }
             })?;
 
-        let op_receipt_fields = OpReceiptFieldsBuilder::default()
+        let op_receipt_fields = OpReceiptFieldsBuilder::new(timestamp)
             .l1_block_info(chain_spec, transaction, l1_block_info)?
             .deposit_nonce(receipt.deposit_nonce)
             .deposit_version(receipt.deposit_receipt_version)
