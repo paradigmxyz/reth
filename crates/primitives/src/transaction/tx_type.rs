@@ -278,7 +278,7 @@ impl Decodable for TxType {
 mod tests {
     use super::*;
     use alloy_primitives::hex;
-    use reth_codecs::{txtype::*, Compact};
+    use reth_codecs::Compact;
     use reth_primitives_traits::TxType as _;
     use rstest::rstest;
 

@@ -9,6 +9,7 @@ use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
     eip2930::AccessList,
     eip7702::SignedAuthorization,
+    BlockHashOrNumber,
 };
 use alloy_primitives::{
     keccak256, Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
@@ -59,18 +60,12 @@ pub(crate) mod util;
 mod variant;
 
 #[cfg(feature = "optimism")]
-use op_alloy_consensus::TxDeposit;
-#[cfg(feature = "optimism")]
 pub use tx_type::DEPOSIT_TX_TYPE_ID;
 #[cfg(any(test, feature = "reth-codec"))]
 pub use tx_type::{
     COMPACT_EXTENDED_IDENTIFIER_FLAG, COMPACT_IDENTIFIER_EIP1559, COMPACT_IDENTIFIER_EIP2930,
     COMPACT_IDENTIFIER_LEGACY,
 };
-
-use alloc::vec::Vec;
-use reth_primitives_traits::{transaction::TransactionExt, SignedTransaction};
-use revm_primitives::{AuthorizationList, TxEnv};
 
 /// Either a transaction hash or number.
 pub type TxHashOrNumber = BlockHashOrNumber;

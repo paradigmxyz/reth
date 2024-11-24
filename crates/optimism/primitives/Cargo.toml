@@ -34,6 +34,9 @@ serde = { workspace = true, optional = true }
 # misc
 derive_more.workspace = true
 
+# test
+arbitrary = { workspace = true, optional = true }
+
 [dev-dependencies]
 reth-codecs = { workspace = true, features = ["test-utils"] }
 rstest.workspace = true
@@ -66,4 +69,7 @@ serde = [
     "reth-codecs?/serde",
     "op-alloy-consensus/serde",
 ]
-arbitrary = ["reth-primitives-traits/arbitrary"]
+arbitrary = [
+    "dep:arbitrary",
+    "reth-primitives-traits/arbitrary"
+]

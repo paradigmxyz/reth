@@ -11,8 +11,7 @@
 pub mod bedrock;
 pub mod transaction;
 
-pub use transaction::OpTransaction;
-pub use transaction::tx_type::OpTxType;
+pub use transaction::{tx_type::OpTxType, OpTransaction};
 
 use alloy_consensus::Header;
 use reth_node_types::NodePrimitives;

@@ -1,23 +1,23 @@
+//! Wrapper of [`OpTypesTransaction`], that implements reth database encoding [`Compact`].
+
 pub mod tx_type;
 
 use alloy_primitives::{bytes, Bytes, TxKind, Uint, B256};
 
-use alloy_consensus::{constants::EIP7702_TX_TYPE_ID, SignableTransaction, TxLegacy};
-use op_tx_type::OpTxType;
-use reth_primitives::revm_primitives::{AccessList, SignedAuthorization};
-use reth_primitives_traits::{InMemorySize, TransactionExt};
-
+use alloy_consensus::{constants::EIP7702_TX_TYPE_ID, TxLegacy};
+use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization};
+use derive_more::{Deref, From};
 use op_alloy_consensus::{OpTypedTransaction, DEPOSIT_TX_TYPE_ID};
 use reth_codecs::Compact;
-
 use reth_primitives::transaction::{
     COMPACT_EXTENDED_IDENTIFIER_FLAG, COMPACT_IDENTIFIER_EIP1559, COMPACT_IDENTIFIER_EIP2930,
     COMPACT_IDENTIFIER_LEGACY,
 };
+use reth_primitives_traits::InMemorySize;
 
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, PartialEq, Eq, derive_more::Deref, Hash, derive_more::From)]
+#[derive(Debug, Clone, PartialEq, Eq, Deref, Hash, From)]
 /// Optimistic transaction.
 pub struct OpTransaction(OpTypedTransaction);
 
@@ -157,20 +157,6 @@ impl alloy_consensus::Transaction for OpTransaction {
 
     fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
         self.0.effective_tip_per_gas(base_fee)
-    }
-}
-
-impl TransactionExt for OpTransaction {
-    type Type = OpTxType;
-
-    fn signature_hash(&self) -> B256 {
-        match &self.0 {
-            OpTypedTransaction::Legacy(tx) => tx.signature_hash(),
-            OpTypedTransaction::Eip2930(tx) => tx.signature_hash(),
-            OpTypedTransaction::Eip1559(tx) => tx.signature_hash(),
-            OpTypedTransaction::Eip7702(tx) => tx.signature_hash(),
-            OpTypedTransaction::Deposit(tx) => tx.tx_hash(),
-        }
     }
 }
 
