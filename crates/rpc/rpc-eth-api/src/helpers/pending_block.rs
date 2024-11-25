@@ -115,7 +115,7 @@ pub trait LoadPendingBlock:
                         .receipts_by_block(block.hash().into())
                         .map_err(Self::Error::from_eth_err)?
                     {
-                        return Ok(Some((block, receipts)));
+                        return Ok(Some((block, receipts)))
                     }
                 }
             }
@@ -147,7 +147,7 @@ pub trait LoadPendingBlock:
                 Ok(block) => block,
                 Err(err) => {
                     debug!(target: "rpc", "Failed to build pending block: {:?}", err);
-                    return Ok(None);
+                    return Ok(None)
                 }
             };
 
