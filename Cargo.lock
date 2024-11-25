@@ -9454,6 +9454,7 @@ version = "1.1.2"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
+ "arbitrary",
  "assert_matches",
  "criterion",
  "itertools 0.13.0",
