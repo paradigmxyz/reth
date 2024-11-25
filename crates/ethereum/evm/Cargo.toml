@@ -39,6 +39,8 @@ secp256k1.workspace = true
 serde_json.workspace = true
 alloy-genesis.workspace = true
 
+reth-scroll-primitives.workspace = true
+
 [features]
 default = ["std"]
 std = [
@@ -52,3 +54,4 @@ std = [
 	"revm-primitives/std",
 	"secp256k1/std"
 ]
+scroll = []

@@ -10,6 +10,9 @@
 #![allow(clippy::useless_let_if_seq)]
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
+// Don't use the crate if `scroll` feature is used.
+#![cfg_attr(feature = "scroll", allow(unused_crate_dependencies))]
+#![cfg(not(feature = "scroll"))]
 
 pub mod builder;
 pub use builder::OpPayloadBuilder;

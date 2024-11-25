@@ -1,0 +1,42 @@
+[package]
+name = "reth-scroll-revm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# revm
+revm.workspace = true
+
+# scroll
+reth-scroll-primitives.workspace = true
+
+# misc
+serde = { workspace = true, optional = true }
+
+[features]
+default = ["std"]
+arbitrary = [
+	"revm/arbitrary",
+	"reth-scroll-primitives/arbitrary"
+]
+asm-keccak = ["revm/asm-keccak"]
+c-kzg = ["revm/c-kzg"]
+optimism = ["revm/optimism"]
+serde = [
+	"revm/serde",
+	"serde/std"
+]
+scroll = []
+test-utils = ["revm/test-utils"]
+std = [
+	"revm/std",
+	"serde/std"
+]

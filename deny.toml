@@ -67,6 +67,11 @@ exceptions = [
     { allow = ["MPL-2.0"], name = "webpki-roots" },
 ]
 
+# Skip the poseidon-bn254 and bn254 crates for license verification. We should at some point publish a license for them.
+[licenses.private]
+ignore = true
+ignore-sources = ["https://github.com/scroll-tech/poseidon-bn254", "https://github.com/scroll-tech/bn254"]
+
 [[licenses.clarify]]
 name = "ring"
 expression = "LicenseRef-ring"
@@ -93,4 +98,7 @@ allow-git = [
     "https://github.com/foundry-rs/block-explorers",
     "https://github.com/bluealloy/revm",
     "https://github.com/paradigmxyz/revm-inspectors",
+    "https://github.com/scroll-tech/bn254",
+    "https://github.com/scroll-tech/sp1-intrinsics",
+    "https://github.com/scroll-tech/poseidon-bn254"
 ]

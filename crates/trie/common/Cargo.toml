@@ -22,6 +22,8 @@ alloy-consensus.workspace = true
 alloy-genesis.workspace = true
 revm-primitives.workspace = true
 
+reth-scroll-primitives = { workspace = true, optional = true }
+
 bytes.workspace = true
 derive_more.workspace = true
 serde.workspace = true
@@ -40,6 +42,8 @@ proptest-arbitrary-interop.workspace = true
 hash-db = "=0.15.2"
 plain_hasher = "0.2"
 
+reth-scroll-primitives.workspace = true
+
 [features]
 test-utils = [
 	"dep:plain_hasher",
@@ -56,5 +60,7 @@ arbitrary = [
 	"alloy-primitives/arbitrary",
 	"nybbles/arbitrary",
 	"revm-primitives/arbitrary",
-	"reth-codecs/arbitrary"
+	"reth-codecs/arbitrary",
+	"reth-scroll-primitives?/arbitrary"
 ]
+scroll = ["reth-scroll-primitives"]

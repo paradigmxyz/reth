@@ -83,7 +83,13 @@ impl ExtendedAccount {
     /// Create new instance of extended account
     pub fn new(nonce: u64, balance: U256) -> Self {
         Self {
-            account: Account { nonce, balance, bytecode_hash: None },
+            account: Account {
+                nonce,
+                balance,
+                bytecode_hash: None,
+                #[cfg(feature = "scroll")]
+                account_extension: Some(reth_scroll_primitives::AccountExtension::empty()),
+            },
             bytecode: None,
             storage: Default::default(),
         }
@@ -91,6 +97,11 @@ impl ExtendedAccount {
 
     /// Set bytecode and bytecode hash on the extended account
     pub fn with_bytecode(mut self, bytecode: Bytes) -> Self {
+        #[cfg(feature = "scroll")]
+        {
+            self.account.account_extension =
+                Some(reth_scroll_primitives::AccountExtension::from_bytecode(&bytecode));
+        }
         let hash = keccak256(&bytecode);
         self.account.bytecode_hash = Some(hash);
         self.bytecode = Some(Bytecode::new_raw(bytecode));

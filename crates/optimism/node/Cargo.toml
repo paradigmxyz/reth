@@ -117,3 +117,4 @@ test-utils = [
     "revm/test-utils",
     "reth-optimism-node/test-utils",
 ]
+scroll = []

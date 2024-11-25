@@ -1,0 +1,47 @@
+[package]
+name = "reth-scroll-primitives"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# alloy
+alloy-primitives.workspace = true
+
+# reth
+reth-codecs.workspace = true
+
+# scroll
+poseidon-bn254 = { workspace = true, features = ["bn254"] }
+
+# misc
+arbitrary = { workspace = true, features = ["derive"], optional = true }
+
+# required by reth-codecs
+bytes.workspace = true
+modular-bitfield.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+alloy-primitives = { workspace = true, features = ["arbitrary"] }
+arbitrary = { workspace = true, features = ["derive"] }
+test-fuzz.workspace = true
+
+[features]
+default = ["std"]
+std = [
+	"serde/std",
+	"alloy-primitives/std"
+]
+arbitrary = [
+	"dep:arbitrary",
+	"alloy-primitives/arbitrary",
+	"reth-codecs/arbitrary"
+]

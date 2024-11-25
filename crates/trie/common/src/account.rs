@@ -135,7 +135,11 @@ mod tests {
                 Account {
                     nonce: 10,
                     balance: U256::from(1000),
-                    bytecode_hash: Some(keccak256([0x60, 0x61]))
+                    bytecode_hash: Some(keccak256([0x60, 0x61])),
+                    #[cfg(feature = "scroll")]
+                    account_extension: Some(
+                        reth_scroll_primitives::AccountExtension::from_bytecode(&[0x60, 0x61])
+                    )
                 },
                 expected_storage_root
             )),

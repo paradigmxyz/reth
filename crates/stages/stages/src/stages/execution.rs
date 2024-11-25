@@ -880,13 +880,26 @@ mod tests {
         db_tx
             .put::<tables::PlainAccountState>(
                 acc1,
-                Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) },
+                Account {
+                    nonce: 0,
+                    balance: U256::ZERO,
+                    bytecode_hash: Some(code_hash),
+                    // TODO (scroll): use `from_bytecode`
+                    #[cfg(feature = "scroll")]
+                    account_extension: Some(reth_scroll_primitives::AccountExtension::empty()),
+                },
             )
             .unwrap();
         db_tx
             .put::<tables::PlainAccountState>(
                 acc2,
-                Account { nonce: 0, balance, bytecode_hash: None },
+                Account {
+                    nonce: 0,
+                    balance,
+                    bytecode_hash: None,
+                    #[cfg(feature = "scroll")]
+                    account_extension: Some(reth_scroll_primitives::AccountExtension::empty()),
+                },
             )
             .unwrap();
         db_tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.to_vec().into())).unwrap();
@@ -936,19 +949,29 @@ mod tests {
 
             // check post state
             let account1 = address!("1000000000000000000000000000000000000000");
-            let account1_info =
-                Account { balance: U256::ZERO, nonce: 0x00, bytecode_hash: Some(code_hash) };
+            let account1_info = Account {
+                balance: U256::ZERO,
+                nonce: 0x00,
+                bytecode_hash: Some(code_hash),
+                // TODO (scroll): use `from_bytecode`.
+                #[cfg(feature = "scroll")]
+                account_extension: Some(reth_scroll_primitives::AccountExtension::empty()),
+            };
             let account2 = address!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba");
             let account2_info = Account {
                 balance: U256::from(0x1bc16d674ece94bau128),
                 nonce: 0x00,
                 bytecode_hash: None,
+                #[cfg(feature = "scroll")]
+                account_extension: Some(reth_scroll_primitives::AccountExtension::empty()),
             };
             let account3 = address!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b");
             let account3_info = Account {
                 balance: U256::from(0x3635c9adc5de996b46u128),
                 nonce: 0x01,
                 bytecode_hash: None,
+                #[cfg(feature = "scroll")]
+                account_extension: Some(reth_scroll_primitives::AccountExtension::empty()),
             };
 
             // assert accounts
@@ -1024,9 +1047,22 @@ mod tests {
 
         let db_tx = provider.tx_ref();
         let acc1 = address!("1000000000000000000000000000000000000000");
-        let acc1_info = Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) };
+        let acc1_info = Account {
+            nonce: 0,
+            balance: U256::ZERO,
+            bytecode_hash: Some(code_hash),
+            // TODO (scroll): use `from_bytecode`.
+            #[cfg(feature = "scroll")]
+            account_extension: Some(reth_scroll_primitives::AccountExtension::empty()),
+        };
         let acc2 = address!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b");
-        let acc2_info = Account { nonce: 0, balance, bytecode_hash: None };
+        let acc2_info = Account {
+            nonce: 0,
+            balance,
+            bytecode_hash: None,
+            #[cfg(feature = "scroll")]
+            account_extension: Some(reth_scroll_primitives::AccountExtension::empty()),
+        };
 
         db_tx.put::<tables::PlainAccountState>(acc1, acc1_info).unwrap();
         db_tx.put::<tables::PlainAccountState>(acc2, acc2_info).unwrap();
@@ -1143,9 +1179,21 @@ mod tests {
         let code_hash = keccak256(code);
 
         // pre state
-        let caller_info = Account { nonce: 0, balance, bytecode_hash: None };
-        let destroyed_info =
-            Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) };
+        let caller_info = Account {
+            nonce: 0,
+            balance,
+            bytecode_hash: None,
+            #[cfg(feature = "scroll")]
+            account_extension: Some(reth_scroll_primitives::AccountExtension::empty()),
+        };
+        let destroyed_info = Account {
+            nonce: 0,
+            balance: U256::ZERO,
+            bytecode_hash: Some(code_hash),
+            // TODO (scroll): use `from_bytecode`.
+            #[cfg(feature = "scroll")]
+            account_extension: Some(reth_scroll_primitives::AccountExtension::empty()),
+        };
 
         // set account
         let provider = test_db.factory.provider_rw().unwrap();
@@ -1204,7 +1252,9 @@ mod tests {
                     Account {
                         nonce: 0,
                         balance: U256::from(0x1bc16d674eca30a0u64),
-                        bytecode_hash: None
+                        bytecode_hash: None,
+                        #[cfg(feature = "scroll")]
+                        account_extension: Some(reth_scroll_primitives::AccountExtension::empty()),
                     }
                 ),
                 (
@@ -1212,7 +1262,9 @@ mod tests {
                     Account {
                         nonce: 1,
                         balance: U256::from(0xde0b6b3a761cf60u64),
-                        bytecode_hash: None
+                        bytecode_hash: None,
+                        #[cfg(feature = "scroll")]
+                        account_extension: Some(reth_scroll_primitives::AccountExtension::empty()),
                     }
                 )
             ]

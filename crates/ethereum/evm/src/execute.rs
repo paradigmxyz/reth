@@ -325,6 +325,10 @@ mod tests {
             balance: U256::ZERO,
             bytecode_hash: Some(keccak256(BEACON_ROOTS_CODE.clone())),
             nonce: 1,
+            #[cfg(feature = "scroll")]
+            account_extension: Some(reth_scroll_primitives::AccountExtension::from_bytecode(
+                &BEACON_ROOTS_CODE,
+            )),
         };
 
         db.insert_account(
@@ -344,6 +348,10 @@ mod tests {
             nonce: 1,
             balance: U256::ZERO,
             bytecode_hash: Some(keccak256(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone())),
+            #[cfg(feature = "scroll")]
+            account_extension: Some(reth_scroll_primitives::AccountExtension::from_bytecode(
+                &WITHDRAWAL_REQUEST_PREDEPLOY_CODE,
+            )),
         };
 
         db.insert_account(
@@ -707,6 +715,10 @@ mod tests {
             balance: U256::ZERO,
             bytecode_hash: Some(keccak256(HISTORY_STORAGE_CODE.clone())),
             nonce: 1,
+            #[cfg(feature = "scroll")]
+            account_extension: Some(reth_scroll_primitives::AccountExtension::from_bytecode(
+                &HISTORY_STORAGE_CODE,
+            )),
         };
 
         db.insert_account(
@@ -1059,7 +1071,13 @@ mod tests {
 
         db.insert_account(
             sender_address,
-            Account { nonce: 1, balance: U256::from(ETH_TO_WEI), bytecode_hash: None },
+            Account {
+                nonce: 1,
+                balance: U256::from(ETH_TO_WEI),
+                bytecode_hash: None,
+                #[cfg(feature = "scroll")]
+                account_extension: Some(reth_scroll_primitives::AccountExtension::empty()),
+            },
             None,
             HashMap::default(),
         );
@@ -1141,7 +1159,13 @@ mod tests {
         // Insert the sender account into the state with a nonce of 1 and a balance of 1 ETH in Wei
         db.insert_account(
             sender_address,
-            Account { nonce: 1, balance: U256::from(ETH_TO_WEI), bytecode_hash: None },
+            Account {
+                nonce: 1,
+                balance: U256::from(ETH_TO_WEI),
+                bytecode_hash: None,
+                #[cfg(feature = "scroll")]
+                account_extension: Some(reth_scroll_primitives::AccountExtension::empty()),
+            },
             None,
             HashMap::default(),
         );

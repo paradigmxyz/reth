@@ -16,7 +16,6 @@ workspace = true
 reth-primitives-traits.workspace = true
 reth-ethereum-forks.workspace = true
 reth-static-file-types.workspace = true
-revm-primitives = { workspace = true, features = ["serde"] }
 reth-codecs = { workspace = true, optional = true }
 
 # ethereum
@@ -28,6 +27,9 @@ alloy-rpc-types = { workspace = true, optional = true }
 alloy-serde = { workspace = true, optional = true }
 alloy-eips = { workspace = true, features = ["serde"] }
 alloy-trie = { workspace = true, features = ["serde"] }
+
+# scroll
+revm-primitives = { package = "reth-scroll-revm", path = "../scroll/revm", features = ["serde"] }
 
 # optimism
 op-alloy-rpc-types = { workspace = true, optional = true }
@@ -67,7 +69,7 @@ reth-codecs = { workspace = true, features = ["test-utils"] }
 reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
 reth-testing-utils.workspace = true
 reth-trie-common.workspace = true
-revm-primitives = { workspace = true, features = ["arbitrary"] }
+revm-primitives = { package = "reth-scroll-revm", path = "../scroll/revm", features = ["arbitrary"] }
 
 alloy-eips = { workspace = true, features = ["arbitrary"] }
 alloy-genesis.workspace = true
@@ -143,7 +145,7 @@ alloy-compat = [
 	"dep:alloy-rpc-types",
 	"dep:alloy-serde",
 	"dep:op-alloy-rpc-types",
-    "dep:alloy-network",
+	"dep:alloy-network",
 ]
 test-utils = [
 	"reth-primitives-traits/test-utils",
@@ -151,6 +153,7 @@ test-utils = [
 	"reth-codecs?/test-utils",
 	"reth-trie-common/test-utils",
 	"arbitrary",
+	"revm-primitives/test-utils"
 ]
 serde-bincode-compat = [
 	"alloy-consensus/serde-bincode-compat",

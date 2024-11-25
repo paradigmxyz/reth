@@ -162,6 +162,10 @@ impl State {
                 balance: account.balance,
                 nonce: account.nonce.to::<u64>(),
                 bytecode_hash: code_hash,
+                #[cfg(feature = "scroll")]
+                account_extension: Some(reth_scroll_primitives::AccountExtension::from_bytecode(
+                    &account.code,
+                )),
             };
             tx.put::<tables::PlainAccountState>(address, reth_account)?;
             tx.put::<tables::HashedAccounts>(hashed_address, reth_account)?;

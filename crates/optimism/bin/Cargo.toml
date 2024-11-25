@@ -46,6 +46,7 @@ optimism = [
 	"reth-optimism-rpc/optimism",
 	"reth-provider/optimism"
 ]
+scroll = []
 
 dev = [
 	"reth-optimism-cli/dev"

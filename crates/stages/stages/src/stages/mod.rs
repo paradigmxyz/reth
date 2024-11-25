@@ -117,7 +117,14 @@ mod tests {
             .tx_ref()
             .put::<tables::PlainAccountState>(
                 address!("1000000000000000000000000000000000000000"),
-                Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) },
+                Account {
+                    nonce: 0,
+                    balance: U256::ZERO,
+                    bytecode_hash: Some(code_hash),
+                    // TODO (scroll): use `from_bytecode`.
+                    #[cfg(feature = "scroll")]
+                    account_extension: Some(reth_scroll_primitives::AccountExtension::empty()),
+                },
             )
             .unwrap();
         provider_rw
@@ -128,6 +135,8 @@ mod tests {
                     nonce: 0,
                     balance: U256::from(0x3635c9adc5dea00000u128),
                     bytecode_hash: None,
+                    #[cfg(feature = "scroll")]
+                    account_extension: Some(reth_scroll_primitives::AccountExtension::empty()),
                 },
             )
             .unwrap();

@@ -39,6 +39,9 @@ reth-trie-db = { workspace = true, features = ["metrics"] }
 
 reth-testing-utils = { workspace = true, optional = true }
 
+# scroll
+reth-scroll-primitives = { workspace = true, optional = true }
+
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 
@@ -73,6 +76,8 @@ reth-testing-utils.workspace = true
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-network-peers.workspace = true
+
+reth-scroll-primitives.workspace = true
 
 alloy-rlp.workspace = true
 itertools.workspace = true
@@ -114,6 +119,7 @@ test-utils = [
     "reth-trie/test-utils",
     "reth-prune-types/test-utils",
 ]
+scroll = ["reth-scroll-primitives"]
 
 [[bench]]
 name = "criterion"

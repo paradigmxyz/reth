@@ -105,6 +105,8 @@ impl AccountHashingStage {
                     nonce: nonce - 1,
                     balance: balance - U256::from(1),
                     bytecode_hash: None,
+                    #[cfg(feature = "scroll")]
+                    account_extension: Some(reth_scroll_primitives::AccountExtension::empty()),
                 };
                 let acc_before_tx = AccountBeforeTx { address: *addr, info: Some(prev_acc) };
                 acc_changeset_cursor.append(t, acc_before_tx)?;
@@ -399,6 +401,10 @@ mod tests {
                             nonce: nonce - 1,
                             balance: balance - U256::from(1),
                             bytecode_hash: None,
+                            #[cfg(feature = "scroll")]
+                            account_extension: Some(
+                                reth_scroll_primitives::AccountExtension::empty(),
+                            ),
                         };
                         let hashed_addr = keccak256(address);
                         if let Some((_, acc)) = hashed_acc_cursor.seek_exact(hashed_addr)? {

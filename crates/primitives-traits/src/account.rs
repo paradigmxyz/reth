@@ -34,6 +34,15 @@ pub struct Account {
     pub balance: U256,
     /// Hash of the account's bytecode.
     pub bytecode_hash: Option<B256>,
+    /// The extension for a Scroll account. This `Option` should always be `Some` and is used
+    /// in order to maintain backward compatibility in case additional fields are added on the
+    /// `Account` due to the way storage compaction is performed.
+    /// Adding the `code_size` and the `poseidon_code_hash` fields on the `Account` without the
+    /// extension caused the used bits of the bitflag struct to reach 16 bits, meaning no
+    /// additional bitflag was available. See [reth codecs](reth_codecs::test_utils) for more
+    /// details.
+    #[cfg(feature = "scroll")]
+    pub account_extension: Option<reth_scroll_primitives::AccountExtension>,
 }
 
 impl Account {
@@ -158,6 +167,10 @@ impl From<&GenesisAccount> for Account {
             nonce: value.nonce.unwrap_or_default(),
             balance: value.balance,
             bytecode_hash: value.code.as_ref().map(keccak256),
+            #[cfg(feature = "scroll")]
+            account_extension: Some(reth_scroll_primitives::AccountExtension::from_bytecode(
+                value.code.as_ref().unwrap_or_default(),
+            )),
         }
     }
 }
@@ -169,6 +182,8 @@ impl From<AccountInfo> for Account {
             balance: revm_acc.balance,
             nonce: revm_acc.nonce,
             bytecode_hash: (code_hash != KECCAK_EMPTY).then_some(code_hash),
+            #[cfg(feature = "scroll")]
+            account_extension: Some((revm_acc.code_size, revm_acc.poseidon_code_hash).into()),
         }
     }
 }
@@ -180,6 +195,39 @@ impl From<Account> for AccountInfo {
             nonce: reth_acc.nonce,
             code_hash: reth_acc.bytecode_hash.unwrap_or(KECCAK_EMPTY),
             code: None,
+            #[cfg(feature = "scroll")]
+            code_size: reth_acc.account_extension.unwrap_or_default().code_size,
+            #[cfg(feature = "scroll")]
+            poseidon_code_hash: reth_acc
+                .account_extension
+                .unwrap_or_default()
+                .poseidon_code_hash
+                .unwrap_or(reth_scroll_primitives::POSEIDON_EMPTY),
+        }
+    }
+}
+
+#[cfg(feature = "scroll")]
+impl From<Account> for revm_primitives::shared::AccountInfo {
+    fn from(reth_acc: Account) -> Self {
+        Self {
+            balance: reth_acc.balance,
+            nonce: reth_acc.nonce,
+            code_hash: reth_acc.bytecode_hash.unwrap_or(KECCAK_EMPTY),
+            code: None,
+        }
+    }
+}
+
+// TODO (scroll): remove at last Scroll `Account` related PR.
+#[cfg(feature = "scroll")]
+impl From<revm_primitives::shared::AccountInfo> for Account {
+    fn from(revm_acc: revm_primitives::shared::AccountInfo) -> Self {
+        Self {
+            balance: revm_acc.balance,
+            nonce: revm_acc.nonce,
+            bytecode_hash: (revm_acc.code_hash != KECCAK_EMPTY).then_some(revm_acc.code_hash),
+            account_extension: None,
         }
     }
 }
@@ -208,7 +256,13 @@ mod tests {
 
     #[test]
     fn test_empty_account() {
-        let mut acc = Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None };
+        let mut acc = Account {
+            nonce: 0,
+            balance: U256::ZERO,
+            bytecode_hash: None,
+            #[cfg(feature = "scroll")]
+            account_extension: Some(Default::default()),
+        };
         // Nonce 0, balance 0, and bytecode hash set to None is considered empty.
         assert!(acc.is_empty());
 
@@ -260,12 +314,23 @@ mod tests {
     #[test]
     fn test_account_has_bytecode() {
         // Account with no bytecode (None)
-        let acc_no_bytecode = Account { nonce: 1, balance: U256::from(1000), bytecode_hash: None };
+        let acc_no_bytecode = Account {
+            nonce: 1,
+            balance: U256::from(1000),
+            bytecode_hash: None,
+            #[cfg(feature = "scroll")]
+            account_extension: Some(Default::default()),
+        };
         assert!(!acc_no_bytecode.has_bytecode(), "Account should not have bytecode");
 
         // Account with bytecode hash set to KECCAK_EMPTY (should have bytecode)
-        let acc_empty_bytecode =
-            Account { nonce: 1, balance: U256::from(1000), bytecode_hash: Some(KECCAK_EMPTY) };
+        let acc_empty_bytecode = Account {
+            nonce: 1,
+            balance: U256::from(1000),
+            bytecode_hash: Some(KECCAK_EMPTY),
+            #[cfg(feature = "scroll")]
+            account_extension: Some(Default::default()),
+        };
         assert!(acc_empty_bytecode.has_bytecode(), "Account should have bytecode");
 
         // Account with a non-empty bytecode hash
@@ -273,6 +338,10 @@ mod tests {
             nonce: 1,
             balance: U256::from(1000),
             bytecode_hash: Some(B256::from_slice(&[0x11u8; 32])),
+            #[cfg(feature = "scroll")]
+            account_extension: Some(reth_scroll_primitives::AccountExtension::from_bytecode(
+                &[0x11u8; 32],
+            )),
         };
         assert!(acc_with_bytecode.has_bytecode(), "Account should have bytecode");
     }
@@ -280,12 +349,23 @@ mod tests {
     #[test]
     fn test_account_get_bytecode_hash() {
         // Account with no bytecode (should return KECCAK_EMPTY)
-        let acc_no_bytecode = Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None };
+        let acc_no_bytecode = Account {
+            nonce: 0,
+            balance: U256::ZERO,
+            bytecode_hash: None,
+            #[cfg(feature = "scroll")]
+            account_extension: Some(Default::default()),
+        };
         assert_eq!(acc_no_bytecode.get_bytecode_hash(), KECCAK_EMPTY, "Should return KECCAK_EMPTY");
 
         // Account with bytecode hash set to KECCAK_EMPTY
-        let acc_empty_bytecode =
-            Account { nonce: 1, balance: U256::from(1000), bytecode_hash: Some(KECCAK_EMPTY) };
+        let acc_empty_bytecode = Account {
+            nonce: 1,
+            balance: U256::from(1000),
+            bytecode_hash: Some(KECCAK_EMPTY),
+            #[cfg(feature = "scroll")]
+            account_extension: Some(Default::default()),
+        };
         assert_eq!(
             acc_empty_bytecode.get_bytecode_hash(),
             KECCAK_EMPTY,
@@ -294,8 +374,15 @@ mod tests {
 
         // Account with a valid bytecode hash
         let bytecode_hash = B256::from_slice(&[0x11u8; 32]);
-        let acc_with_bytecode =
-            Account { nonce: 1, balance: U256::from(1000), bytecode_hash: Some(bytecode_hash) };
+        let acc_with_bytecode = Account {
+            nonce: 1,
+            balance: U256::from(1000),
+            bytecode_hash: Some(bytecode_hash),
+            #[cfg(feature = "scroll")]
+            account_extension: Some(reth_scroll_primitives::AccountExtension::from_bytecode(
+                &[0x11u8; 32],
+            )),
+        };
         assert_eq!(
             acc_with_bytecode.get_bytecode_hash(),
             bytecode_hash,

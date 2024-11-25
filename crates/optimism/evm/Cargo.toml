@@ -69,3 +69,4 @@ optimism = [
 	"revm/optimism",
 	"revm-primitives/optimism"
 ]
+scroll = []

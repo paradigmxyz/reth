@@ -121,3 +121,4 @@ serde = [
 	"reth-execution-types/serde",
 	"reth-provider/serde"
 ]
+scroll = []

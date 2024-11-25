@@ -1,0 +1,36 @@
+[package]
+name = "reth-scroll-storage"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# alloy
+alloy-primitives.workspace = true
+
+# reth
+reth-revm.workspace = true
+reth-storage-errors.workspace = true
+
+# scroll
+reth-scroll-primitives.workspace = true
+reth-scroll-revm.workspace = true
+
+[dev-dependencies]
+eyre.workspace = true
+reth-codecs = { workspace = true, features = ["test-utils"] }
+reth-primitives-traits.workspace = true
+reth-revm = { workspace = true, features = ["test-utils"] }
+
+[features]
+scroll = [
+	"reth-primitives-traits/scroll",
+	"reth-scroll-revm/scroll",
+]

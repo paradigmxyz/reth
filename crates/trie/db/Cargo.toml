@@ -55,6 +55,8 @@ reth-trie = { workspace = true, features = ["test-utils"] }
 
 alloy-consensus.workspace = true
 
+reth-scroll-primitives.workspace = true
+
 # trie
 triehash = "0.8"
 
@@ -86,3 +88,4 @@ test-utils = [
 	"reth-trie/test-utils",
 	"revm/test-utils"
 ]
+scroll = []
