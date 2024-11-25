@@ -6,17 +6,22 @@ use alloy_primitives::{
     Bytes, B256,
 };
 use alloy_rlp::Decodable;
-use reth_trie::{Nibbles, TrieNode};
+use reth_trie::{
+    updates::{StorageTrieUpdates, TrieUpdates},
+    Nibbles, TrieNode,
+};
 
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
 #[derive(Default, Debug)]
 pub struct SparseStateTrie {
     /// Sparse account trie.
-    pub(crate) state: SparseTrie,
+    state: SparseTrie,
     /// Sparse storage tries.
-    pub(crate) storages: HashMap<B256, SparseTrie>,
+    storages: HashMap<B256, SparseTrie>,
     /// Collection of revealed account and storage keys.
-    pub(crate) revealed: HashMap<B256, HashSet<B256>>,
+    revealed: HashMap<B256, HashSet<B256>>,
+    /// Collection of addresses that had their storage tries wiped.
+    wiped_storages: HashSet<B256>,
 }
 
 impl SparseStateTrie {
@@ -42,7 +47,7 @@ impl SparseStateTrie {
         account: B256,
         proof: impl IntoIterator<Item = (Nibbles, Bytes)>,
     ) -> SparseStateTrieResult<()> {
-        if self.revealed.contains_key(&account) {
+        if self.is_account_revealed(&account) {
             return Ok(());
         }
 
@@ -73,7 +78,7 @@ impl SparseStateTrie {
         slot: B256,
         proof: impl IntoIterator<Item = (Nibbles, Bytes)>,
     ) -> SparseStateTrieResult<()> {
-        if self.revealed.get(&account).is_some_and(|v| v.contains(&slot)) {
+        if self.is_storage_slot_revealed(&account, &slot) {
             return Ok(());
         }
 
@@ -118,9 +123,19 @@ impl SparseStateTrie {
         Ok(Some(root_node))
     }
 
-    /// Update the leaf node.
-    pub fn update_leaf(&mut self, path: Nibbles, value: Vec<u8>) -> SparseStateTrieResult<()> {
+    /// Update the account leaf node.
+    pub fn update_account_leaf(
+        &mut self,
+        path: Nibbles,
+        value: Vec<u8>,
+    ) -> SparseStateTrieResult<()> {
         self.state.update_leaf(path, value)?;
+        Ok(())
+    }
+
+    /// Remove the account leaf node.
+    pub fn remove_account_leaf(&mut self, path: &Nibbles) -> SparseStateTrieResult<()> {
+        self.state.remove_leaf(path)?;
         Ok(())
     }
 
@@ -129,9 +144,59 @@ impl SparseStateTrie {
         self.state.root()
     }
 
+    /// Calculates the hashes of the nodes below the provided level.
+    pub fn calculate_below_level(&mut self, level: usize) {
+        self.state.calculate_below_level(level);
+    }
+
+    /// Update the leaf node of a storage trie at the provided address.
+    pub fn update_storage_leaf(
+        &mut self,
+        address: B256,
+        slot: Nibbles,
+        value: Vec<u8>,
+    ) -> SparseStateTrieResult<()> {
+        self.storages.entry(address).or_default().update_leaf(slot, value)?;
+        Ok(())
+    }
+
+    /// Wipe the storage trie at the provided address.
+    pub fn wipe_storage(&mut self, address: B256) -> SparseStateTrieResult<()> {
+        let Some(trie) = self.storages.get_mut(&address) else { return Ok(()) };
+        self.wiped_storages.insert(address);
+        trie.wipe().map_err(Into::into)
+    }
+
     /// Returns storage sparse trie root if the trie has been revealed.
     pub fn storage_root(&mut self, account: B256) -> Option<B256> {
         self.storages.get_mut(&account).and_then(|trie| trie.root())
+    }
+
+    /// Returns [`TrieUpdates`] by taking the updates from the revealed sparse tries.
+    ///
+    /// Returns `None` if the accounts trie is not revealed.
+    pub fn take_trie_updates(&mut self) -> Option<TrieUpdates> {
+        self.state.as_revealed_mut().map(|state| {
+            let updates = state.take_updates();
+            TrieUpdates {
+                account_nodes: HashMap::from_iter(updates.updated_nodes),
+                removed_nodes: HashSet::from_iter(updates.removed_nodes),
+                storage_tries: self
+                    .storages
+                    .iter_mut()
+                    .map(|(address, trie)| {
+                        let trie = trie.as_revealed_mut().unwrap();
+                        let updates = trie.take_updates();
+                        let updates = StorageTrieUpdates {
+                            is_deleted: self.wiped_storages.contains(address),
+                            storage_nodes: HashMap::from_iter(updates.updated_nodes),
+                            removed_nodes: HashSet::from_iter(updates.removed_nodes),
+                        };
+                        (*address, updates)
+                    })
+                    .collect(),
+            }
+        })
     }
 }
 
