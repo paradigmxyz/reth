@@ -142,6 +142,7 @@ where
     }
 }
 
+#[allow(dead_code)]
 fn calculate_state_root_with_sparse(
     mut trie: Box<SparseStateTrie>,
     multiproof: MultiProof,
@@ -166,7 +167,7 @@ fn calculate_state_root_with_sparse(
     let mut storage_roots = FbHashMap::default();
     for (address, storage) in state.storages {
         if storage.wiped {
-            trie.wipe_storage(address);
+            trie.wipe_storage(address)?;
             storage_roots.insert(address, EMPTY_ROOT_HASH);
         }
 
