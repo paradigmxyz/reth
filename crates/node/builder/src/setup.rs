@@ -14,7 +14,7 @@ use reth_exex::ExExManagerHandle;
 use reth_network_p2p::{
     bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader, EthBlockClient,
 };
-use reth_node_api::FullNodePrimitives;
+use reth_node_api::{FullNodePrimitives, NodePrimitives};
 use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
 use reth_stages::{prelude::DefaultStages, stages::ExecutionStage, Pipeline, StageSet};
 use reth_static_file::StaticFileProducer;
@@ -27,7 +27,7 @@ use tokio::sync::watch;
 pub fn build_networked_pipeline<N, Client, Executor>(
     config: &StageConfig,
     client: Client,
-    consensus: Arc<dyn Consensus>,
+    consensus: Arc<dyn Consensus<Client::Header, Client::Body>>,
     provider_factory: ProviderFactory<N>,
     task_executor: &TaskExecutor,
     metrics_tx: reth_stages::MetricEventsSender,
@@ -41,12 +41,11 @@ where
     N: ProviderNodeTypes,
     Client: EthBlockClient + 'static,
     Executor: BlockExecutorProvider,
-    N::Primitives:
-        FullNodePrimitives<Block: reth_node_api::Block<Body = reth_primitives::BlockBody>>,
+    N::Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>,
 {
     // building network downloaders using the fetch client
     let header_downloader = ReverseHeadersDownloaderBuilder::new(config.headers)
-        .build(client.clone(), Arc::clone(&consensus))
+        .build(client.clone(), consensus.clone().as_header_validator())
         .into_task_with(task_executor);
 
     let body_downloader = BodiesDownloaderBuilder::new(config.bodies)
@@ -89,11 +88,10 @@ where
     N: ProviderNodeTypes,
     H: HeaderDownloader<Header = alloy_consensus::Header> + 'static,
     B: BodyDownloader<
-            Body = <<N::Primitives as FullNodePrimitives>::Block as reth_node_api::Block>::Body,
+            Body = <<N::Primitives as NodePrimitives>::Block as reth_node_api::Block>::Body,
         > + 'static,
     Executor: BlockExecutorProvider,
-    N::Primitives:
-        FullNodePrimitives<Block: reth_node_api::Block<Body = reth_primitives::BlockBody>>,
+    N::Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>,
 {
     let mut builder = Pipeline::<N>::builder();
 

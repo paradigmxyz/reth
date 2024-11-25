@@ -24,6 +24,9 @@ reth-config.workspace = true
 reth-prune-types.workspace = true
 reth-static-file-types.workspace = true
 
+# ethereum
+alloy-eips.workspace = true
+
 # metrics
 reth-metrics.workspace = true
 metrics.workspace = true

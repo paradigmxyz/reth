@@ -471,10 +471,10 @@ alloy-transport-ipc = { version = "0.6.4", default-features = false }
 alloy-transport-ws = { version = "0.6.4", default-features = false }
 
 # op
-op-alloy-rpc-types = "0.6.5"
-op-alloy-rpc-types-engine = "0.6.5"
-op-alloy-network = "0.6.5"
-op-alloy-consensus = "0.6.5"
+op-alloy-rpc-types = "0.6.7"
+op-alloy-rpc-types-engine = "0.6.7"
+op-alloy-network = "0.6.7"
+op-alloy-consensus = "0.6.7"
 
 # misc
 aquamarine = "0.6"
@@ -528,6 +528,7 @@ tracing = "0.1.0"
 tracing-appender = "0.2"
 url = "2.3"
 zstd = "0.13"
+byteorder = "1"
 
 # metrics
 metrics = "0.24.0"
@@ -555,6 +556,7 @@ hyper = "1.3"
 hyper-util = "0.1.5"
 pin-project = "1.0.12"
 reqwest = { version = "0.12", default-features = false }
+tracing-futures = "0.2"
 tower = "0.4"
 tower-http = "0.6"
 
@@ -637,7 +639,7 @@ tracy-client = "0.17.3"
 #alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", rev = "a971b3a" }
 #alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", rev = "a971b3a" }
 
+#op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", rev = "6a042e7681b1" }
+#op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", rev = "6a042e7681b1" }
 #op-alloy-rpc-types = { git = "https://github.com/alloy-rs/op-alloy", rev = "6a042e7681b1" }
 #op-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/op-alloy", rev = "6a042e7681b1" }
-#op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", rev = "6a042e7681b1" }
-#op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", rev = "6a042e7681b1" }

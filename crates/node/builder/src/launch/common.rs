@@ -12,12 +12,13 @@ use eyre::{Context, OptionExt};
 use rayon::ThreadPoolBuilder;
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_blockchain_tree::{
-    BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
+    externals::TreeNodeTypes, BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree,
+    TreeExternals,
 };
 use reth_chainspec::{Chain, EthChainSpec, EthereumHardforks};
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_consensus::Consensus;
-use reth_db_api::database::Database;
+use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_db_common::init::{init_genesis, InitDatabaseError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_engine_local::MiningMode;
@@ -407,8 +408,7 @@ where
     pub async fn create_provider_factory<N>(&self) -> eyre::Result<ProviderFactory<N>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
-        N::Primitives:
-            FullNodePrimitives<Block: reth_node_api::Block<Body = reth_primitives::BlockBody>>,
+        N::Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>,
     {
         let factory = ProviderFactory::new(
             self.right().clone(),
@@ -475,8 +475,7 @@ where
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<ChainSpec>, ProviderFactory<N>>>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
-        N::Primitives:
-            FullNodePrimitives<Block: reth_node_api::Block<Body = reth_primitives::BlockBody>>,
+        N::Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>,
     {
         let factory = self.create_provider_factory().await?;
         let ctx = LaunchContextWith {
@@ -535,7 +534,20 @@ where
                 },
                 ChainSpecInfo { name: self.left().config.chain.chain().to_string() },
                 self.task_executor().clone(),
-                Hooks::new(self.database().clone(), self.static_file_provider()),
+                Hooks::builder()
+                    .with_hook({
+                        let db = self.database().clone();
+                        move || db.report_metrics()
+                    })
+                    .with_hook({
+                        let sfp = self.static_file_provider();
+                        move || {
+                            if let Err(error) = sfp.report_metrics() {
+                                error!(%error, "Failed to report metrics for the static file provider");
+                            }
+                        }
+                    })
+                    .build(),
             );
 
             MetricServer::new(config).serve().await?;
@@ -631,7 +643,7 @@ impl<T>
         Attached<WithConfigs<<T::Types as NodeTypes>::ChainSpec>, WithMeteredProviders<T>>,
     >
 where
-    T: FullNodeTypes<Types: ProviderNodeTypes, Provider: WithTree>,
+    T: FullNodeTypes<Types: ProviderNodeTypes + TreeNodeTypes, Provider: WithTree>,
 {
     /// Returns access to the underlying database.
     pub const fn database(&self) -> &<T::Types as NodeTypesWithDB>::DB {
