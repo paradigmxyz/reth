@@ -42,7 +42,8 @@ use reth::{
         PayloadBuilderConfig,
     },
     network::NetworkHandle,
-    providers::{CanonStateSubscriptions, StateProviderFactory},
+    primitives::EthPrimitives,
+    providers::{CanonStateSubscriptions, EthStorage, StateProviderFactory},
     rpc::eth::EthApi,
     tasks::TaskManager,
     transaction_pool::TransactionPool,
@@ -227,9 +228,10 @@ struct MyCustomNode;
 
 /// Configure the node types
 impl NodeTypes for MyCustomNode {
-    type Primitives = ();
+    type Primitives = EthPrimitives;
     type ChainSpec = ChainSpec;
     type StateCommitment = MerklePatriciaTrie;
+    type Storage = EthStorage;
 }
 
 /// Configure the node types with the custom engine types
@@ -254,7 +256,14 @@ pub type MyNodeAddOns<N> = RpcAddOns<
 /// This provides a preset configuration for the node
 impl<N> Node<N> for MyCustomNode
 where
-    N: FullNodeTypes<Types: NodeTypesWithEngine<Engine = CustomEngineTypes, ChainSpec = ChainSpec>>,
+    N: FullNodeTypes<
+        Types: NodeTypesWithEngine<
+            Engine = CustomEngineTypes,
+            ChainSpec = ChainSpec,
+            Primitives = EthPrimitives,
+            Storage = EthStorage,
+        >,
+    >,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,

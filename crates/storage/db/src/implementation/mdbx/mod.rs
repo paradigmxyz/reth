@@ -66,7 +66,7 @@ impl DatabaseEnvKind {
 }
 
 /// Arguments for database initialization.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct DatabaseArguments {
     /// Client version that accesses the database.
     client_version: ClientVersion,
@@ -97,6 +97,12 @@ pub struct DatabaseArguments {
     ///
     /// This flag affects only at environment opening but can't be changed after.
     exclusive: Option<bool>,
+}
+
+impl Default for DatabaseArguments {
+    fn default() -> Self {
+        Self::new(ClientVersion::default())
+    }
 }
 
 impl DatabaseArguments {

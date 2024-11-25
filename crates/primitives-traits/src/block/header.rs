@@ -1,15 +1,16 @@
 //! Block header data primitive.
 
-use crate::InMemorySize;
-use alloy_primitives::Sealable;
 use core::fmt;
-use reth_codecs::Compact;
+
+use alloy_primitives::Sealable;
+
+use crate::{InMemorySize, MaybeArbitrary, MaybeCompact, MaybeSerde};
 
 /// Helper trait that unifies all behaviour required by block header to support full node
 /// operations.
-pub trait FullBlockHeader: BlockHeader + Compact {}
+pub trait FullBlockHeader: BlockHeader + MaybeCompact {}
 
-impl<T> FullBlockHeader for T where T: BlockHeader + Compact {}
+impl<T> FullBlockHeader for T where T: BlockHeader + MaybeCompact {}
 
 /// Abstraction of a block header.
 pub trait BlockHeader:
@@ -26,6 +27,8 @@ pub trait BlockHeader:
     + alloy_consensus::BlockHeader
     + Sealable
     + InMemorySize
+    + MaybeSerde
+    + MaybeArbitrary
 {
 }
 
@@ -38,12 +41,12 @@ impl<T> BlockHeader for T where
         + fmt::Debug
         + PartialEq
         + Eq
-        + serde::Serialize
-        + for<'de> serde::Deserialize<'de>
         + alloy_rlp::Encodable
         + alloy_rlp::Decodable
         + alloy_consensus::BlockHeader
         + Sealable
         + InMemorySize
+        + MaybeSerde
+        + MaybeArbitrary
 {
 }

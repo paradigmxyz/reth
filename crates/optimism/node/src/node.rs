@@ -5,10 +5,11 @@ use std::sync::Arc;
 use alloy_consensus::Header;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_chainspec::{EthChainSpec, Hardforks};
+use reth_db::transaction::{DbTx, DbTxMut};
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, PeersInfo};
 use reth_node_api::{
-    AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, NodePrimitives, PayloadBuilder,
+    AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, PayloadBuilder,
 };
 use reth_node_builder::{
     components::{
@@ -23,10 +24,18 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_evm::{OpEvmConfig, OpExecutionStrategyFactory};
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
-use reth_optimism_rpc::OpEthApi;
+use reth_optimism_primitives::OpPrimitives;
+use reth_optimism_rpc::{
+    witness::{DebugExecutionWitnessApiServer, OpDebugWitnessApi},
+    OpEthApi,
+};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::{Block, Receipt, TransactionSigned, TxType};
-use reth_provider::CanonStateSubscriptions;
+use reth_primitives::BlockBody;
+use reth_provider::{
+    providers::ChainStorage, BlockBodyWriter, CanonStateSubscriptions, DBProvider, EthStorage,
+    ProviderResult,
+};
+use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, CoinbaseTipOrdering, TransactionPool,
@@ -41,17 +50,39 @@ use crate::{
     OpEngineTypes,
 };
 
-/// Optimism primitive types.
+/// Storage implementation for Optimism.
 #[derive(Debug, Default, Clone)]
-pub struct OpPrimitives;
+pub struct OpStorage(EthStorage);
 
-impl NodePrimitives for OpPrimitives {
-    type Block = Block;
-    type SignedTx = TransactionSigned;
-    type TxType = TxType;
-    type Receipt = Receipt;
+impl<Provider: DBProvider<Tx: DbTxMut>> BlockBodyWriter<Provider, BlockBody> for OpStorage {
+    fn write_block_bodies(
+        &self,
+        provider: &Provider,
+        bodies: Vec<(u64, Option<BlockBody>)>,
+    ) -> ProviderResult<()> {
+        self.0.write_block_bodies(provider, bodies)
+    }
+
+    fn remove_block_bodies_above(
+        &self,
+        provider: &Provider,
+        block: alloy_primitives::BlockNumber,
+    ) -> ProviderResult<()> {
+        self.0.remove_block_bodies_above(provider, block)
+    }
 }
 
+impl ChainStorage<OpPrimitives> for OpStorage {
+    fn writer<TX, Types>(
+        &self,
+    ) -> impl reth_provider::ChainStorageWriter<reth_provider::DatabaseProvider<TX, Types>, OpPrimitives>
+    where
+        TX: DbTxMut + DbTx + 'static,
+        Types: NodeTypes<Primitives = OpPrimitives>,
+    {
+        self
+    }
+}
 /// Type configuration for a regular Optimism node.
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
@@ -98,7 +129,14 @@ impl OpNode {
 
 impl<N> Node<N> for OpNode
 where
-    N: FullNodeTypes<Types: NodeTypesWithEngine<Engine = OpEngineTypes, ChainSpec = OpChainSpec>>,
+    N: FullNodeTypes<
+        Types: NodeTypesWithEngine<
+            Engine = OpEngineTypes,
+            ChainSpec = OpChainSpec,
+            Primitives = OpPrimitives,
+            Storage = OpStorage,
+        >,
+    >,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
@@ -126,6 +164,7 @@ impl NodeTypes for OpNode {
     type Primitives = OpPrimitives;
     type ChainSpec = OpChainSpec;
     type StateCommitment = MerklePatriciaTrie;
+    type Storage = OpStorage;
 }
 
 impl NodeTypesWithEngine for OpNode {
@@ -152,7 +191,7 @@ impl<N: FullNodeComponents> OpAddOns<N> {
 impl<N> NodeAddOns<N> for OpAddOns<N>
 where
     N: FullNodeComponents<
-        Types: NodeTypes<ChainSpec = OpChainSpec>,
+        Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives, Storage = OpStorage>,
         PayloadBuilder: PayloadBuilder<PayloadType = <N::Types as NodeTypesWithEngine>::Engine>,
     >,
     OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
@@ -163,14 +202,24 @@ where
         self,
         ctx: reth_node_api::AddOnsContext<'_, N>,
     ) -> eyre::Result<Self::Handle> {
-        self.0.launch_add_ons(ctx).await
+        // install additional OP specific rpc methods
+        let debug_ext =
+            OpDebugWitnessApi::new(ctx.node.provider().clone(), ctx.node.evm_config().clone());
+
+        self.0
+            .launch_add_ons_with(ctx, move |modules| {
+                debug!(target: "reth::cli", "Installing debug payload witness rpc endpoint");
+                modules.merge_if_module_configured(RethRpcModule::Debug, debug_ext.into_rpc())?;
+                Ok(())
+            })
+            .await
     }
 }
 
 impl<N> RethRpcAddOns<N> for OpAddOns<N>
 where
     N: FullNodeComponents<
-        Types: NodeTypes<ChainSpec = OpChainSpec>,
+        Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives, Storage = OpStorage>,
         PayloadBuilder: PayloadBuilder<PayloadType = <N::Types as NodeTypesWithEngine>::Engine>,
     >,
     OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
@@ -231,6 +280,7 @@ where
         let validator = TransactionValidationTaskExecutor::eth_builder(Arc::new(
             ctx.chain_spec().inner.clone(),
         ))
+        .no_eip4844()
         .with_head_timestamp(ctx.head().timestamp)
         .kzg_settings(ctx.kzg_settings()?)
         .with_additional_tasks(

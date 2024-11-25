@@ -65,4 +65,5 @@ serde = [
     "alloy-primitives/serde",
     "bytes/serde",
     "rand/serde",
+    "reth-primitives-traits/serde",
 ]

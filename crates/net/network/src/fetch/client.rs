@@ -1,10 +1,6 @@
 //! A client implementation that can interact with the network and download data.
 
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
-};
-
+use crate::{fetch::DownloadRequest, flattened_response::FlattenedResponse};
 use alloy_primitives::B256;
 use futures::{future, future::Either};
 use reth_eth_wire::{EthNetworkPrimitives, NetworkPrimitives};
@@ -18,9 +14,11 @@ use reth_network_p2p::{
 };
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
-
-use crate::{fetch::DownloadRequest, flattened_response::FlattenedResponse};
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Front-end API for fetching data from the network.

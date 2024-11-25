@@ -5,6 +5,7 @@ use alloy_consensus::constants::{
 use alloy_primitives::{U64, U8};
 use alloy_rlp::{Decodable, Encodable};
 use derive_more::Display;
+use reth_primitives_traits::InMemorySize;
 use serde::{Deserialize, Serialize};
 
 /// Identifier parameter for legacy transaction
@@ -24,10 +25,6 @@ pub const COMPACT_IDENTIFIER_EIP1559: usize = 2;
 /// read from the buffer as a single byte.
 #[cfg(any(test, feature = "reth-codec"))]
 pub const COMPACT_EXTENDED_IDENTIFIER_FLAG: usize = 3;
-
-/// Identifier for [`TxDeposit`](op_alloy_consensus::TxDeposit) transaction.
-#[cfg(feature = "optimism")]
-pub const DEPOSIT_TX_TYPE_ID: u8 = 126;
 
 /// Transaction Type
 ///
@@ -118,6 +115,14 @@ impl reth_primitives_traits::TxType for TxType {
     }
 }
 
+impl InMemorySize for TxType {
+    /// Calculates a heuristic for the in-memory size of the [`TxType`].
+    #[inline]
+    fn size(&self) -> usize {
+        core::mem::size_of::<Self>()
+    }
+}
+
 impl From<TxType> for u8 {
     fn from(value: TxType) -> Self {
         match value {
@@ -127,7 +132,7 @@ impl From<TxType> for u8 {
             TxType::Eip4844 => EIP4844_TX_TYPE_ID,
             TxType::Eip7702 => EIP7702_TX_TYPE_ID,
             #[cfg(feature = "optimism")]
-            TxType::Deposit => DEPOSIT_TX_TYPE_ID,
+            TxType::Deposit => op_alloy_consensus::DEPOSIT_TX_TYPE_ID,
         }
     }
 }
@@ -186,6 +191,8 @@ impl reth_codecs::Compact for TxType {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
+        use reth_codecs::txtype::*;
+
         match self {
             Self::Legacy => COMPACT_IDENTIFIER_LEGACY,
             Self::Eip2930 => COMPACT_IDENTIFIER_EIP2930,
@@ -200,7 +207,7 @@ impl reth_codecs::Compact for TxType {
             }
             #[cfg(feature = "optimism")]
             Self::Deposit => {
-                buf.put_u8(DEPOSIT_TX_TYPE_ID);
+                buf.put_u8(op_alloy_consensus::DEPOSIT_TX_TYPE_ID);
                 COMPACT_EXTENDED_IDENTIFIER_FLAG
             }
         }
@@ -213,16 +220,16 @@ impl reth_codecs::Compact for TxType {
         use bytes::Buf;
         (
             match identifier {
-                COMPACT_IDENTIFIER_LEGACY => Self::Legacy,
-                COMPACT_IDENTIFIER_EIP2930 => Self::Eip2930,
-                COMPACT_IDENTIFIER_EIP1559 => Self::Eip1559,
-                COMPACT_EXTENDED_IDENTIFIER_FLAG => {
+                reth_codecs::txtype::COMPACT_IDENTIFIER_LEGACY => Self::Legacy,
+                reth_codecs::txtype::COMPACT_IDENTIFIER_EIP2930 => Self::Eip2930,
+                reth_codecs::txtype::COMPACT_IDENTIFIER_EIP1559 => Self::Eip1559,
+                reth_codecs::txtype::COMPACT_EXTENDED_IDENTIFIER_FLAG => {
                     let extended_identifier = buf.get_u8();
                     match extended_identifier {
                         EIP4844_TX_TYPE_ID => Self::Eip4844,
                         EIP7702_TX_TYPE_ID => Self::Eip7702,
                         #[cfg(feature = "optimism")]
-                        DEPOSIT_TX_TYPE_ID => Self::Deposit,
+                        op_alloy_consensus::DEPOSIT_TX_TYPE_ID => Self::Deposit,
                         _ => panic!("Unsupported TxType identifier: {extended_identifier}"),
                     }
                 }
@@ -265,11 +272,18 @@ impl Decodable for TxType {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use alloy_primitives::hex;
     use reth_codecs::Compact;
+    use reth_primitives_traits::TxType as _;
     use rstest::rstest;
 
-    use super::*;
+    #[test]
+    fn is_broadcastable() {
+        assert!(TxType::Legacy.is_broadcastable_in_full());
+        assert!(TxType::Eip1559.is_broadcastable_in_full());
+        assert!(!TxType::Eip4844.is_broadcastable_in_full());
+    }
 
     #[rstest]
     #[case(U64::from(LEGACY_TX_TYPE_ID), Ok(TxType::Legacy))]
@@ -277,7 +291,10 @@ mod tests {
     #[case(U64::from(EIP1559_TX_TYPE_ID), Ok(TxType::Eip1559))]
     #[case(U64::from(EIP4844_TX_TYPE_ID), Ok(TxType::Eip4844))]
     #[case(U64::from(EIP7702_TX_TYPE_ID), Ok(TxType::Eip7702))]
-    #[cfg_attr(feature = "optimism", case(U64::from(DEPOSIT_TX_TYPE_ID), Ok(TxType::Deposit)))]
+    #[cfg_attr(
+        feature = "optimism",
+        case(U64::from(op_alloy_consensus::DEPOSIT_TX_TYPE_ID), Ok(TxType::Deposit))
+    )]
     #[case(U64::MAX, Err("invalid tx type"))]
     fn test_u64_to_tx_type(#[case] input: U64, #[case] expected: Result<TxType, &'static str>) {
         let tx_type_result = TxType::try_from(input);
@@ -290,7 +307,7 @@ mod tests {
     #[case(TxType::Eip1559, COMPACT_IDENTIFIER_EIP1559, vec![])]
     #[case(TxType::Eip4844, COMPACT_EXTENDED_IDENTIFIER_FLAG, vec![EIP4844_TX_TYPE_ID])]
     #[case(TxType::Eip7702, COMPACT_EXTENDED_IDENTIFIER_FLAG, vec![EIP7702_TX_TYPE_ID])]
-    #[cfg_attr(feature = "optimism", case(TxType::Deposit, COMPACT_EXTENDED_IDENTIFIER_FLAG, vec![DEPOSIT_TX_TYPE_ID]))]
+    #[cfg_attr(feature = "optimism", case(TxType::Deposit, COMPACT_EXTENDED_IDENTIFIER_FLAG, vec![op_alloy_consensus::DEPOSIT_TX_TYPE_ID]))]
     fn test_txtype_to_compact(
         #[case] tx_type: TxType,
         #[case] expected_identifier: usize,
@@ -309,7 +326,7 @@ mod tests {
     #[case(TxType::Eip1559, COMPACT_IDENTIFIER_EIP1559, vec![])]
     #[case(TxType::Eip4844, COMPACT_EXTENDED_IDENTIFIER_FLAG, vec![EIP4844_TX_TYPE_ID])]
     #[case(TxType::Eip7702, COMPACT_EXTENDED_IDENTIFIER_FLAG, vec![EIP7702_TX_TYPE_ID])]
-    #[cfg_attr(feature = "optimism", case(TxType::Deposit, COMPACT_EXTENDED_IDENTIFIER_FLAG, vec![DEPOSIT_TX_TYPE_ID]))]
+    #[cfg_attr(feature = "optimism", case(TxType::Deposit, COMPACT_EXTENDED_IDENTIFIER_FLAG, vec![op_alloy_consensus::DEPOSIT_TX_TYPE_ID]))]
     fn test_txtype_from_compact(
         #[case] expected_type: TxType,
         #[case] identifier: usize,
@@ -328,7 +345,7 @@ mod tests {
     #[case(&[EIP4844_TX_TYPE_ID], Ok(TxType::Eip4844))]
     #[case(&[EIP7702_TX_TYPE_ID], Ok(TxType::Eip7702))]
     #[case(&[u8::MAX], Err(alloy_rlp::Error::InputTooShort))]
-    #[cfg_attr(feature = "optimism", case(&[DEPOSIT_TX_TYPE_ID], Ok(TxType::Deposit)))]
+    #[cfg_attr(feature = "optimism", case(&[op_alloy_consensus::DEPOSIT_TX_TYPE_ID], Ok(TxType::Deposit)))]
     fn decode_tx_type(#[case] input: &[u8], #[case] expected: Result<TxType, alloy_rlp::Error>) {
         let tx_type_result = TxType::decode(&mut &input[..]);
         assert_eq!(tx_type_result, expected)

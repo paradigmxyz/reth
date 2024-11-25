@@ -47,6 +47,7 @@ exclude_crates=(
   reth-optimism-node
   reth-optimism-payload-builder
   reth-optimism-rpc
+  reth-optimism-primitives
   reth-rpc
   reth-rpc-api
   reth-rpc-api-testing-util
@@ -68,6 +69,7 @@ exclude_crates=(
   reth-static-file # tokio
   reth-transaction-pool # c-kzg
   reth-trie-parallel # tokio
+  reth-testing-utils
 )
 
 # Array to hold the results

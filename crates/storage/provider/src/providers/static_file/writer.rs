@@ -558,7 +558,10 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// empty blocks and this function wouldn't be called.
     ///
     /// Returns the current [`TxNumber`] as seen in the static file.
-    pub fn append_transaction(&mut self, tx_num: TxNumber, tx: impl Compact) -> ProviderResult<()> {
+    pub fn append_transaction(&mut self, tx_num: TxNumber, tx: &N::SignedTx) -> ProviderResult<()>
+    where
+        N::SignedTx: Compact,
+    {
         let start = Instant::now();
         self.ensure_no_queued_prune()?;
 
