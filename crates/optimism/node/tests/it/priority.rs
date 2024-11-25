@@ -63,10 +63,7 @@ impl OpPayloadTransactions for CustomTxPriority {
         };
         let signature = sender.sign_transaction_sync(&mut end_of_block_tx).unwrap();
         let end_of_block_tx = TransactionSignedEcRecovered::from_signed_transaction(
-            TransactionSigned::from_transaction_and_signature(
-                Transaction::Eip1559(end_of_block_tx),
-                signature,
-            ),
+            TransactionSigned::new_unhashed(Transaction::Eip1559(end_of_block_tx), signature),
             sender.address(),
         );
 

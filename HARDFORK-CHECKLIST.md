@@ -17,5 +17,5 @@
 ### Updates to the engine API
 
 - Add new endpoints to the `EngineApi` trait and implement endpoints.
-- Update the `ExceuctionPayload` + `ExecutionPayloadSidecar` to `Block` conversion if there are any additional parameters.
+- Update the `ExecutionPayload` + `ExecutionPayloadSidecar` to `Block` conversion if there are any additional parameters.
 - Update version specific validation checks in the `EngineValidator` trait.

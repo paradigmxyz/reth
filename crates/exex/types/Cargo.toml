@@ -15,6 +15,7 @@ workspace = true
 # reth
 reth-chain-state.workspace = true
 reth-execution-types.workspace = true
+reth-primitives-traits.workspace = true
 
 # reth
 alloy-primitives.workspace = true
@@ -38,11 +39,13 @@ serde = [
 	"reth-execution-types/serde",
 	"alloy-eips/serde",
 	"alloy-primitives/serde",
-	"rand/serde"
+	"rand/serde",
+	"reth-primitives-traits/serde",
 ]
 serde-bincode-compat = [
 	"reth-execution-types/serde-bincode-compat",
 	"serde_with",
 	"reth-primitives/serde-bincode-compat",
-	"alloy-eips/serde-bincode-compat"
+	"alloy-eips/serde-bincode-compat",
+	"reth-primitives-traits/serde-bincode-compat",
 ]

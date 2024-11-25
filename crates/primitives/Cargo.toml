@@ -13,7 +13,7 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives-traits.workspace = true
+reth-primitives-traits = { workspace = true, features = ["serde"] }
 reth-ethereum-forks.workspace = true
 reth-static-file-types.workspace = true
 reth-codecs = { workspace = true, optional = true }
@@ -64,11 +64,11 @@ arbitrary = { workspace = true, features = ["derive"], optional = true }
 
 [dev-dependencies]
 # eth
-reth-chainspec.workspace = true
+reth-chainspec = { workspace = true, features = ["arbitrary"] }
 reth-codecs = { workspace = true, features = ["test-utils"] }
 reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
 reth-testing-utils.workspace = true
-reth-trie-common.workspace = true
+reth-trie-common = { workspace = true, features = ["arbitrary"] }
 revm-primitives = { package = "reth-scroll-revm", path = "../scroll/revm", features = ["arbitrary"] }
 
 alloy-eips = { workspace = true, features = ["arbitrary"] }
@@ -107,7 +107,12 @@ std = [
 	"serde/std",
 	"alloy-trie/std"
 ]
-reth-codec = ["dep:reth-codecs", "dep:zstd", "dep:modular-bitfield", "std"]
+reth-codec = [
+	"dep:reth-codecs",
+	"dep:zstd",
+	"dep:modular-bitfield", "std",
+	"reth-primitives-traits/reth-codec",
+]
 asm-keccak = ["alloy-primitives/asm-keccak", "revm-primitives/asm-keccak"]
 arbitrary = [
 	"dep:arbitrary",

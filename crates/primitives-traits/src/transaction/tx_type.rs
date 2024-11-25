@@ -1,13 +1,16 @@
+//! Abstraction of transaction envelope type ID.
+
 use core::fmt;
 
 use alloy_primitives::{U64, U8};
-use reth_codecs::Compact;
+
+use crate::{InMemorySize, MaybeArbitrary, MaybeCompact};
 
 /// Helper trait that unifies all behaviour required by transaction type ID to support full node
 /// operations.
-pub trait FullTxType: TxType + Compact {}
+pub trait FullTxType: TxType + MaybeCompact {}
 
-impl<T> FullTxType for T where T: TxType + Compact {}
+impl<T> FullTxType for T where T: TxType + MaybeCompact {}
 
 /// Trait representing the behavior of a transaction type.
 pub trait TxType:
@@ -29,6 +32,8 @@ pub trait TxType:
     + TryFrom<U64>
     + alloy_rlp::Encodable
     + alloy_rlp::Decodable
+    + InMemorySize
+    + MaybeArbitrary
 {
     /// Returns `true` if this is a legacy transaction.
     fn is_legacy(&self) -> bool;
@@ -44,4 +49,14 @@ pub trait TxType:
 
     /// Returns `true` if this is an eip-7702 transaction.
     fn is_eip7702(&self) -> bool;
+
+    /// Returns whether this transaction type can be __broadcasted__ as full transaction over the
+    /// network.
+    ///
+    /// Some transactions are not broadcastable as objects and only allowed to be broadcasted as
+    /// hashes, e.g. because they missing context (e.g. blob sidecar).
+    fn is_broadcastable_in_full(&self) -> bool {
+        // EIP-4844 transactions are not broadcastable in full, only hashes are allowed.
+        !self.is_eip4844()
+    }
 }

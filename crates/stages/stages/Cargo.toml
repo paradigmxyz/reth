@@ -42,6 +42,7 @@ reth-testing-utils = { workspace = true, optional = true }
 # scroll
 reth-scroll-primitives = { workspace = true, optional = true }
 
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 

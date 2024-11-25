@@ -1,4 +1,5 @@
 use crate::BeaconSidecarConfig;
+use alloy_consensus::Transaction as _;
 use alloy_primitives::B256;
 use alloy_rpc_types_beacon::sidecar::{BeaconBlobBundle, SidecarIterator};
 use eyre::Result;
