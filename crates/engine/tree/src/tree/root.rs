@@ -97,10 +97,8 @@ pub(crate) enum InternalMessage {
     },
     /// State root calculation completed
     RootCalculated {
-        /// The calculated state root
-        root: B256,
-        /// The trie updates produced during calculation
-        updates: TrieUpdates,
+        /// The updated sparse trie
+        trie: Box<SparseStateTrie>,
         /// Time taken to calculate the root
         elapsed: Duration,
     },
@@ -183,7 +181,7 @@ pub(crate) struct StateRootTask<Factory> {
     /// Proof sequencing handler
     proof_sequencer: ProofSequencer,
     /// Whether we're currently calculating a root
-    calculating_root: bool,
+    sparse_trie: Option<Box<SparseStateTrie>>,
     /// Incoming state updates.
     state_stream: StdReceiverStream,
 }
@@ -203,7 +201,7 @@ where
             tx,
             state: Default::default(),
             proof_sequencer: ProofSequencer::new(),
-            calculating_root: false,
+            sparse_trie: Some(Box::new(SparseStateTrie::default().with_updates(true))),
             state_stream,
         }
     }
@@ -315,10 +313,9 @@ where
 
     /// Spawns root calculation with the current state and proofs
     fn spawn_root_calculation(&mut self, multiproof: MultiProof) {
-        if self.calculating_root {
+        let Some(trie) = self.sparse_trie.take() else {
             return;
-        }
-        self.calculating_root = true;
+        };
 
         trace!(
             target: "engine::root",
@@ -327,28 +324,27 @@ where
             "Spawning root calculation"
         );
 
-        let tx = self.tx.clone();
-        let view = self.config.consistent_view.clone();
-        let input = self.config.input.clone();
-        let state = self.state.clone();
+        let state = std::mem::take(&mut self.state);
+        let targets: FbHashMap<32, FbHashSet<32>> = state
+            .accounts
+            .keys()
+            .map(|hashed_address| (*hashed_address, HashSet::default()))
+            .chain(state.storages.iter().map(|(hashed_address, storage)| {
+                (*hashed_address, storage.storage.keys().copied().collect())
+            }))
+            .collect();
 
+        let tx = self.tx.clone();
         rayon::spawn(move || {
-            let result = calculate_state_root_from_proofs(
-                view,
-                &input.nodes.clone().into_sorted(),
-                &input.state.clone().into_sorted(),
-                multiproof,
-                state,
-            );
+            let result = update_sparse_trie(trie, multiproof, targets, state);
             match result {
-                Ok((root, updates, elapsed)) => {
+                Ok((trie, elapsed)) => {
                     trace!(
                         target: "engine::root",
-                        %root,
                         ?elapsed,
                         "Root calculation completed, sending result"
                     );
-                    let _ = tx.send(InternalMessage::RootCalculated { root, updates, elapsed });
+                    let _ = tx.send(InternalMessage::RootCalculated { trie, elapsed });
                 }
                 Err(e) => {
                     error!(target: "engine::root", error = ?e, "Could not calculate state root");
@@ -363,8 +359,6 @@ where
         message: InternalMessage,
         stats: &mut TaskStats,
         current_multiproof: &mut MultiProof,
-        trie_updates: &mut TrieUpdates,
-        current_root: &mut B256,
     ) -> Option<StateRootResult> {
         match message {
             InternalMessage::ProofCalculated { proof, sequence_number } => {
@@ -377,7 +371,7 @@ where
                 );
 
                 if let Some(combined_proof) = self.on_proof(proof, sequence_number) {
-                    if self.calculating_root {
+                    if self.sparse_trie.is_none() {
                         current_multiproof.extend(combined_proof);
                     } else {
                         self.spawn_root_calculation(combined_proof);
@@ -385,20 +379,19 @@ where
                 }
                 None
             }
-            InternalMessage::RootCalculated { root, updates, elapsed } => {
+            InternalMessage::RootCalculated { trie, elapsed } => {
                 stats.roots_calculated += 1;
                 trace!(
                     target: "engine::root",
-                    %root,
                     ?elapsed,
                     roots_calculated = stats.roots_calculated,
                     proofs = stats.proofs_processed,
                     updates = stats.updates_received,
                     "Computed intermediate root"
                 );
-                *current_root = root;
-                trie_updates.extend(updates);
-                self.calculating_root = false;
+                // *current_root = root;
+                // trie_updates.extend(updates);
+                self.sparse_trie = Some(trie);
 
                 let has_new_proofs = !current_multiproof.account_subtree.is_empty() ||
                     !current_multiproof.storages.is_empty();
@@ -414,7 +407,7 @@ where
                     );
                     self.spawn_root_calculation(std::mem::take(current_multiproof));
                     None
-                } else if all_proofs_received && no_pending {
+                } else if all_proofs_received && no_pending && self.sparse_trie.is_some() {
                     debug!(
                         target: "engine::root",
                         total_updates = stats.updates_received,
@@ -422,7 +415,10 @@ where
                         roots_calculated = stats.roots_calculated,
                         "All proofs processed, ending calculation"
                     );
-                    Some(Ok((*current_root, trie_updates.clone())))
+                    let mut trie = self.sparse_trie.take().unwrap();
+                    let root = trie.root().unwrap();
+                    let trie_updates = trie.take_trie_updates().unwrap();
+                    Some(Ok((root, trie_updates)))
                 } else {
                     None
                 }
@@ -439,8 +435,6 @@ where
     fn run(mut self) -> StateRootResult {
         let mut stats = TaskStats::default();
         let mut current_multiproof = MultiProof::default();
-        let mut trie_updates = TrieUpdates::default();
-        let mut current_root = B256::default();
 
         loop {
             match self.state_stream.rx.try_recv() {
@@ -469,8 +463,6 @@ where
                                 message,
                                 &mut stats,
                                 &mut current_multiproof,
-                                &mut trie_updates,
-                                &mut current_root,
                             ) {
                                 return result;
                             }
@@ -487,11 +479,14 @@ where
                     );
 
                     // Check if we can finish immediately
-                    if !self.calculating_root &&
-                        !self.proof_sequencer.has_pending() &&
-                        stats.proofs_processed >= stats.updates_received
-                    {
-                        return Ok((current_root, trie_updates));
+                    if let Some(mut trie) = self.sparse_trie.take() {
+                        if !self.proof_sequencer.has_pending() &&
+                            stats.proofs_processed >= stats.updates_received
+                        {
+                            let root = trie.root().unwrap();
+                            let trie_updates = trie.take_trie_updates().unwrap();
+                            return Ok((root, trie_updates));
+                        }
                     }
 
                     // Otherwise, continue processing remaining proofs
@@ -501,8 +496,6 @@ where
                                 message,
                                 &mut stats,
                                 &mut current_multiproof,
-                                &mut trie_updates,
-                                &mut current_root,
                             ) {
                                 return result;
                             }
@@ -660,7 +653,6 @@ where
 
 /// Updates the sparse trie with the given proofs and state, and returns the updated trie and the
 /// time it took.
-#[allow(dead_code)]
 fn update_sparse_trie(
     mut trie: Box<SparseStateTrie>,
     multiproof: MultiProof,
