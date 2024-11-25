@@ -1,6 +1,6 @@
 use super::{
-    AccountReader, BlockHashReader, BlockIdReader, StateProofProvider, StateRootProvider,
-    StorageRootProvider,
+    AccountReader, BlockHashReader, BlockIdReader, HashedStorageProvider, StateProofProvider,
+    StateRootProvider, StorageRootProvider,
 };
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::{BlockId, BlockNumberOrTag};
@@ -24,6 +24,7 @@ pub trait StateProvider:
     + StorageRootProvider
     + StateProofProvider
     + HashedPostStateProvider
+    + HashedStorageProvider
     + Send
     + Sync
 {

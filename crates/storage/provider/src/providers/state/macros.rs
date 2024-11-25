@@ -59,6 +59,9 @@ macro_rules! delegate_provider_impls {
             HashedPostStateProvider $(where [$($generics)*])? {
                 fn hashed_post_state(&self, bundle_state: &revm::db::BundleState) -> reth_trie::HashedPostState;
             }
+            HashedStorageProvider $(where [$($generics)*])? {
+                fn hashed_storage(&self, bundle_state: &revm::db::BundleAccount) -> reth_trie::HashedStorage;
+            }
         );
     }
 }
