@@ -19,6 +19,9 @@ use std::{
 };
 use tracing::debug;
 
+/// The level below which the sparse trie hashes are calculated in [`update_sparse_trie`].
+const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
+
 /// Result of the state root calculation
 pub(crate) type StateRootResult = Result<(B256, TrieUpdates), ParallelStateRootError>;
 
@@ -204,7 +207,7 @@ fn update_sparse_trie(
         }
     }
 
-    trie.calculate_below_level(2);
+    trie.calculate_below_level(SPARSE_TRIE_INCREMENTAL_LEVEL);
     let elapsed = started_at.elapsed();
 
     Ok((trie, elapsed))
