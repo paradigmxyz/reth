@@ -79,7 +79,7 @@ pub trait BlockReader:
 
     /// Returns the pending block if available
     ///
-    /// Note: This returns a [`SealedBlock`] because it's expected that this is sealed by the
+    /// Note: This returns a [`SealedBlockFor`] because it's expected that this is sealed by the
     /// provider and the caller does not know the hash.
     fn pending_block(&self) -> ProviderResult<Option<SealedBlockFor<Self::Block>>>;
 
