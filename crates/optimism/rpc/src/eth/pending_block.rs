@@ -87,6 +87,6 @@ where
         &self,
         _env: PendingBlockEnv,
     ) -> Result<(SealedBlockWithSenders, Vec<Receipt>), <Self as EthApiTypes>::Error> {
-        Err(EthApiError::Unsupported("build_block is not supported for Optimism".into()).into())
+        Err(EthApiError::Unsupported("build_block is not supported for Optimism").into())
     }
 }
