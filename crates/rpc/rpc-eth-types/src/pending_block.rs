@@ -4,10 +4,12 @@
 
 use std::time::Instant;
 
+use alloy_consensus::BlockHeader;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::B256;
 use derive_more::Constructor;
 use reth_primitives::{Receipt, SealedBlockWithSenders, SealedHeader};
+use reth_primitives_traits::Block;
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 
 /// Configured [`BlockEnv`] and [`CfgEnvWithHandlerCfg`] for a pending block.
@@ -23,26 +25,26 @@ pub struct PendingBlockEnv {
 
 /// The origin for a configured [`PendingBlockEnv`]
 #[derive(Clone, Debug)]
-pub enum PendingBlockEnvOrigin {
+pub enum PendingBlockEnvOrigin<B: Block = reth_primitives::Block> {
     /// The pending block as received from the CL.
-    ActualPending(SealedBlockWithSenders),
+    ActualPending(SealedBlockWithSenders<B>),
     /// The _modified_ header of the latest block.
     ///
     /// This derives the pending state based on the latest header by modifying:
     ///  - the timestamp
     ///  - the block number
     ///  - fees
-    DerivedFromLatest(SealedHeader),
+    DerivedFromLatest(SealedHeader<B::Header>),
 }
 
-impl PendingBlockEnvOrigin {
+impl<B: Block> PendingBlockEnvOrigin<B> {
     /// Returns true if the origin is the actual pending block as received from the CL.
     pub const fn is_actual_pending(&self) -> bool {
         matches!(self, Self::ActualPending(_))
     }
 
     /// Consumes the type and returns the actual pending block.
-    pub fn into_actual_pending(self) -> Option<SealedBlockWithSenders> {
+    pub fn into_actual_pending(self) -> Option<SealedBlockWithSenders<B>> {
         match self {
             Self::ActualPending(block) => Some(block),
             _ => None,
@@ -67,13 +69,13 @@ impl PendingBlockEnvOrigin {
     /// header.
     pub fn build_target_hash(&self) -> B256 {
         match self {
-            Self::ActualPending(block) => block.parent_hash,
+            Self::ActualPending(block) => block.header().parent_hash(),
             Self::DerivedFromLatest(header) => header.hash(),
         }
     }
 
     /// Returns the header this pending block is based on.
-    pub fn header(&self) -> &SealedHeader {
+    pub fn header(&self) -> &SealedHeader<B::Header> {
         match self {
             Self::ActualPending(block) => &block.header,
             Self::DerivedFromLatest(header) => header,

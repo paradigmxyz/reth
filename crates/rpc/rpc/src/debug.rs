@@ -793,7 +793,7 @@ where
 #[async_trait]
 impl<Provider, Eth, BlockExecutor> DebugApiServer for DebugApi<Provider, Eth, BlockExecutor>
 where
-    Provider: BlockReaderIdExt
+    Provider: BlockReaderIdExt<Block: Encodable>
         + HeaderProvider
         + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + StateProviderFactory

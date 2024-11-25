@@ -35,7 +35,9 @@ pub use reth_static_file_types as static_file;
 pub mod transaction;
 #[cfg(any(test, feature = "arbitrary"))]
 pub use block::{generate_valid_header, valid_header_strategy};
-pub use block::{Block, BlockBody, BlockWithSenders, SealedBlock, SealedBlockWithSenders};
+pub use block::{
+    Block, BlockBody, BlockWithSenders, SealedBlock, SealedBlockFor, SealedBlockWithSenders,
+};
 #[cfg(feature = "reth-codec")]
 pub use compression::*;
 pub use receipt::{

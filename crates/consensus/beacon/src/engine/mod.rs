@@ -1,4 +1,4 @@
-use alloy_consensus::Header;
+use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::{merge::EPOCH_SLOTS, BlockNumHash};
 use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_types_engine::{
@@ -21,7 +21,7 @@ use reth_network_p2p::{
     sync::{NetworkSyncUpdater, SyncState},
     EthBlockClient,
 };
-use reth_node_types::NodeTypesWithEngine;
+use reth_node_types::{Block, BlockTy, NodeTypesWithEngine};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
@@ -228,7 +228,7 @@ impl<N, BT, Client> BeaconConsensusEngine<N, BT, Client>
 where
     N: EngineNodeTypes,
     BT: BlockchainTreeEngine
-        + BlockReader
+        + BlockReader<Block = BlockTy<N>>
         + BlockIdReader
         + CanonChainTracker
         + StageCheckpointReader
@@ -946,7 +946,7 @@ where
                 .blockchain
                 .find_block_by_hash(safe_block_hash, BlockSource::Any)?
                 .ok_or(ProviderError::UnknownBlockHash(safe_block_hash))?;
-            self.blockchain.set_safe(SealedHeader::new(safe.header, safe_block_hash));
+            self.blockchain.set_safe(SealedHeader::new(safe.split().0, safe_block_hash));
         }
         Ok(())
     }
@@ -966,9 +966,9 @@ where
                 .blockchain
                 .find_block_by_hash(finalized_block_hash, BlockSource::Any)?
                 .ok_or(ProviderError::UnknownBlockHash(finalized_block_hash))?;
-            self.blockchain.finalize_block(finalized.number)?;
+            self.blockchain.finalize_block(finalized.header().number())?;
             self.blockchain
-                .set_finalized(SealedHeader::new(finalized.header, finalized_block_hash));
+                .set_finalized(SealedHeader::new(finalized.split().0, finalized_block_hash));
         }
         Ok(())
     }
@@ -1798,7 +1798,7 @@ where
     N: EngineNodeTypes,
     Client: EthBlockClient + 'static,
     BT: BlockchainTreeEngine
-        + BlockReader
+        + BlockReader<Block = BlockTy<N>>
         + BlockIdReader
         + CanonChainTracker
         + StageCheckpointReader
