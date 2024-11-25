@@ -1,5 +1,25 @@
 //! Keeps track of the state of the network.
 
+use crate::{
+    cache::LruCache,
+    discovery::Discovery,
+    fetch::{BlockResponseOutcome, FetchAction, StateFetcher},
+    message::{BlockRequest, NewBlockMessage, PeerResponse, PeerResponseResult},
+    peers::{PeerAction, PeersManager},
+    FetchClient,
+};
+use alloy_consensus::BlockHeader;
+use alloy_primitives::B256;
+use rand::seq::SliceRandom;
+use reth_eth_wire::{
+    BlockHashNumber, Capabilities, DisconnectReason, EthNetworkPrimitives, NetworkPrimitives,
+    NewBlockHashes, Status,
+};
+use reth_ethereum_forks::ForkId;
+use reth_network_api::{DiscoveredEvent, DiscoveryEvent, PeerRequest, PeerRequestSender};
+use reth_network_peers::PeerId;
+use reth_network_types::{PeerAddr, PeerKind};
+use reth_primitives_traits::Block;
 use std::{
     collections::{HashMap, VecDeque},
     fmt,
@@ -11,30 +31,8 @@ use std::{
     },
     task::{Context, Poll},
 };
-
-use alloy_consensus::BlockHeader;
-use alloy_primitives::B256;
-use rand::seq::SliceRandom;
-use reth_eth_wire::{
-    BlockHashNumber, Capabilities, DisconnectReason, EthNetworkPrimitives, NetworkPrimitives,
-    NewBlockHashes, Status,
-};
-use reth_network_api::{DiscoveredEvent, DiscoveryEvent, PeerRequest, PeerRequestSender};
-use reth_network_peers::PeerId;
-use reth_network_types::{PeerAddr, PeerKind};
-use reth_primitives::ForkId;
-use reth_primitives_traits::Block;
 use tokio::sync::oneshot;
 use tracing::{debug, trace};
-
-use crate::{
-    cache::LruCache,
-    discovery::Discovery,
-    fetch::{BlockResponseOutcome, FetchAction, StateFetcher},
-    message::{BlockRequest, NewBlockMessage, PeerResponse, PeerResponseResult},
-    peers::{PeerAction, PeersManager},
-    FetchClient,
-};
 
 /// Cache limit of blocks to keep track of for a single peer.
 const PEER_BLOCK_CACHE_LIMIT: u32 = 512;

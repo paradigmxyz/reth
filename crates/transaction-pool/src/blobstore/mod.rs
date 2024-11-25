@@ -152,7 +152,7 @@ impl PartialEq for BlobStoreSize {
 }
 
 /// Statistics for the cleanup operation.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BlobStoreCleanupStat {
     /// the number of successfully deleted blobs
     pub delete_succeed: usize,

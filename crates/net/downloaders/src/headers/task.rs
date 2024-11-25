@@ -8,6 +8,7 @@ use reth_network_p2p::headers::{
 use reth_primitives::SealedHeader;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
+    fmt::Debug,
     future::Future,
     pin::Pin,
     task::{ready, Context, Poll},
@@ -44,10 +45,10 @@ impl<H: Send + Sync + Unpin + 'static> TaskDownloader<H> {
     /// # use std::sync::Arc;
     /// # use reth_downloaders::headers::reverse_headers::ReverseHeadersDownloader;
     /// # use reth_downloaders::headers::task::TaskDownloader;
-    /// # use reth_consensus::Consensus;
+    /// # use reth_consensus::HeaderValidator;
     /// # use reth_network_p2p::headers::client::HeadersClient;
     /// # use reth_primitives_traits::BlockHeader;
-    /// # fn t<H: HeadersClient<Header: BlockHeader> + 'static>(consensus:Arc<dyn Consensus<H::Header>>, client: Arc<H>) {
+    /// # fn t<H: HeadersClient<Header: BlockHeader> + 'static>(consensus:Arc<dyn HeaderValidator<H::Header>>, client: Arc<H>) {
     ///    let downloader = ReverseHeadersDownloader::<H>::builder().build(
     ///        client,
     ///        consensus
@@ -82,7 +83,7 @@ impl<H: Send + Sync + Unpin + 'static> TaskDownloader<H> {
     }
 }
 
-impl<H: Send + Sync + Unpin + 'static> HeaderDownloader for TaskDownloader<H> {
+impl<H: Debug + Send + Sync + Unpin + 'static> HeaderDownloader for TaskDownloader<H> {
     type Header = H;
 
     fn update_sync_gap(&mut self, head: SealedHeader<H>, target: SyncTarget) {

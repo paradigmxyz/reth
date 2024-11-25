@@ -26,3 +26,9 @@ pub(crate) enum Destination {
     /// Move transaction to pool
     Pool(SubPool),
 }
+
+impl From<SubPool> for Destination {
+    fn from(sub_pool: SubPool) -> Self {
+        Self::Pool(sub_pool)
+    }
+}

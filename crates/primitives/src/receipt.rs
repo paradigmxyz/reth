@@ -1,5 +1,6 @@
 use alloc::{vec, vec::Vec};
 use core::cmp::Ordering;
+use reth_primitives_traits::InMemorySize;
 
 use alloy_consensus::{
     constants::{EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID},
@@ -71,7 +72,6 @@ impl Receipt {
     }
 }
 
-// todo: replace with alloy receipt
 impl TxReceipt for Receipt {
     fn status_or_post_state(&self) -> Eip658Value {
         self.success.into()
@@ -106,6 +106,22 @@ impl ReceiptExt for Receipt {
         panic!("This should not be called in optimism mode. Use `optimism_receipts_root_slow` instead.");
         #[cfg(not(feature = "optimism"))]
         crate::proofs::calculate_receipt_root_no_memo(_receipts)
+    }
+}
+
+impl InMemorySize for Receipt {
+    /// Calculates a heuristic for the in-memory size of the [Receipt].
+    #[inline]
+    fn size(&self) -> usize {
+        let total_size = self.tx_type.size() +
+            core::mem::size_of::<bool>() +
+            core::mem::size_of::<u64>() +
+            self.logs.capacity() * core::mem::size_of::<Log>();
+
+        #[cfg(feature = "optimism")]
+        return total_size + 2 * core::mem::size_of::<Option<u64>>();
+        #[cfg(not(feature = "optimism"))]
+        total_size
     }
 }
 
@@ -174,8 +190,6 @@ impl From<Receipt> for ReceiptWithBloom {
 /// [`Receipt`] with calculated bloom filter.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-#[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 pub struct ReceiptWithBloom {
     /// Bloom filter build from logs.
     pub bloom: Bloom,
@@ -379,7 +393,7 @@ impl Decodable for ReceiptWithBloom {
                         Self::decode_receipt(buf, TxType::Eip7702)
                     }
                     #[cfg(feature = "optimism")]
-                    crate::transaction::DEPOSIT_TX_TYPE_ID => {
+                    op_alloy_consensus::DEPOSIT_TX_TYPE_ID => {
                         buf.advance(1);
                         Self::decode_receipt(buf, TxType::Deposit)
                     }
@@ -515,7 +529,7 @@ impl ReceiptWithBloomEncoder<'_> {
             }
             #[cfg(feature = "optimism")]
             TxType::Deposit => {
-                out.put_u8(crate::transaction::DEPOSIT_TX_TYPE_ID);
+                out.put_u8(op_alloy_consensus::DEPOSIT_TX_TYPE_ID);
             }
         }
         out.put_slice(payload.as_ref());
