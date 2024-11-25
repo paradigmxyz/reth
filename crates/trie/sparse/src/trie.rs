@@ -1024,8 +1024,8 @@ impl RlpNodeBuffers {
 /// The aggregation of sparse trie updates.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SparseTrieUpdates {
-    updated_nodes: HashMap<Nibbles, BranchNodeCompact>,
-    removed_nodes: HashSet<Nibbles>,
+    pub(crate) updated_nodes: HashMap<Nibbles, BranchNodeCompact>,
+    pub(crate) removed_nodes: HashSet<Nibbles>,
 }
 
 #[cfg(test)]

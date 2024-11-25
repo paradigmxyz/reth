@@ -7,10 +7,10 @@ use std::collections::{HashMap, HashSet};
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TrieUpdates {
     #[cfg_attr(feature = "serde", serde(with = "serde_nibbles_map"))]
-    pub(crate) account_nodes: HashMap<Nibbles, BranchNodeCompact>,
+    pub account_nodes: HashMap<Nibbles, BranchNodeCompact>,
     #[cfg_attr(feature = "serde", serde(with = "serde_nibbles_set"))]
-    pub(crate) removed_nodes: HashSet<Nibbles>,
-    pub(crate) storage_tries: HashMap<B256, StorageTrieUpdates>,
+    pub removed_nodes: HashSet<Nibbles>,
+    pub storage_tries: HashMap<B256, StorageTrieUpdates>,
 }
 
 impl TrieUpdates {
@@ -113,13 +113,13 @@ impl TrieUpdates {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StorageTrieUpdates {
     /// Flag indicating whether the trie was deleted.
-    pub(crate) is_deleted: bool,
+    pub is_deleted: bool,
     /// Collection of updated storage trie nodes.
     #[cfg_attr(feature = "serde", serde(with = "serde_nibbles_map"))]
-    pub(crate) storage_nodes: HashMap<Nibbles, BranchNodeCompact>,
+    pub storage_nodes: HashMap<Nibbles, BranchNodeCompact>,
     /// Collection of removed storage trie nodes.
     #[cfg_attr(feature = "serde", serde(with = "serde_nibbles_set"))]
-    pub(crate) removed_nodes: HashSet<Nibbles>,
+    pub removed_nodes: HashSet<Nibbles>,
 }
 
 #[cfg(feature = "test-utils")]

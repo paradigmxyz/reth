@@ -6,17 +6,22 @@ use alloy_primitives::{
     Bytes, B256,
 };
 use alloy_rlp::Decodable;
-use reth_trie::{Nibbles, TrieNode};
+use reth_trie::{
+    updates::{StorageTrieUpdates, TrieUpdates},
+    Nibbles, TrieNode,
+};
 
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
 #[derive(Default, Debug)]
 pub struct SparseStateTrie {
     /// Sparse account trie.
-    pub(crate) state: SparseTrie,
+    state: SparseTrie,
     /// Sparse storage tries.
-    pub(crate) storages: HashMap<B256, SparseTrie>,
+    storages: HashMap<B256, SparseTrie>,
     /// Collection of revealed account and storage keys.
-    pub(crate) revealed: HashMap<B256, HashSet<B256>>,
+    revealed: HashMap<B256, HashSet<B256>>,
+    /// Collection of addresses that had their storage tries wiped.
+    wiped_storages: HashSet<B256>,
 }
 
 impl SparseStateTrie {
@@ -158,12 +163,40 @@ impl SparseStateTrie {
     /// Wipe the storage trie at the provided address.
     pub fn wipe_storage(&mut self, address: B256) -> SparseStateTrieResult<()> {
         let Some(trie) = self.storages.get_mut(&address) else { return Ok(()) };
+        self.wiped_storages.insert(address);
         trie.wipe().map_err(Into::into)
     }
 
     /// Returns storage sparse trie root if the trie has been revealed.
     pub fn storage_root(&mut self, account: B256) -> Option<B256> {
         self.storages.get_mut(&account).and_then(|trie| trie.root())
+    }
+
+    /// Returns [`TrieUpdates`] by taking the updates from the revealed sparse tries.
+    ///
+    /// Returns `None` if the accounts trie is not revealed.
+    pub fn take_trie_updates(&mut self) -> Option<TrieUpdates> {
+        self.state.as_revealed_mut().map(|state| {
+            let updates = state.take_updates();
+            TrieUpdates {
+                account_nodes: HashMap::from_iter(updates.updated_nodes),
+                removed_nodes: HashSet::from_iter(updates.removed_nodes),
+                storage_tries: self
+                    .storages
+                    .iter_mut()
+                    .map(|(address, trie)| {
+                        let trie = trie.as_revealed_mut().unwrap();
+                        let updates = trie.take_updates();
+                        let updates = StorageTrieUpdates {
+                            is_deleted: self.wiped_storages.contains(address),
+                            storage_nodes: HashMap::from_iter(updates.updated_nodes),
+                            removed_nodes: HashSet::from_iter(updates.removed_nodes),
+                        };
+                        (*address, updates)
+                    })
+                    .collect(),
+            }
+        })
     }
 }
 
