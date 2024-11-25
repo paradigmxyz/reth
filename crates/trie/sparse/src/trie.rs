@@ -804,8 +804,7 @@ impl RevealedSparseTrie {
                                 }
 
                                 // Set the hash mask. If a child node has a hash value AND is a
-                                // branch node, set the hash mask
-                                // and save the hash.
+                                // branch node, set the hash mask and save the hash.
                                 let hash = child.as_hash().filter(|_| node_type.is_branch());
                                 hash_mask_values.push(hash.is_some());
                                 if let Some(hash) = hash {
