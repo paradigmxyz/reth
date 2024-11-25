@@ -30,16 +30,19 @@ impl<Provider, Pool, Network, EvmConfig> LoadPendingBlock
 where
     Self: SpawnBlocking
         + RpcNodeCore<
-            Provider: BlockReaderIdExt
-                          + EvmEnvProvider
-                          + ChainSpecProvider<ChainSpec = ChainSpec>
-                          + StateProviderFactory,
-            Pool: TransactionPool,
-            Evm: ConfigureEvm<Header = Header>,
+            Provider = Provider,
+            Pool = Pool,
+            Evm = EvmConfig,
+            Network = Network,
             PayloadBuilder = EthereumPayloadBuilder<EvmConfig>,
         >,
-    ChainSpec: EthChainSpec + EthereumHardforks,
+    Provider: BlockReaderIdExt
+        + EvmEnvProvider
+        + ChainSpecProvider<ChainSpec = ChainSpec>
+        + StateProviderFactory,
+    Pool: TransactionPool,
     EvmConfig: ConfigureEvm<Header = Header>,
+    ChainSpec: EthChainSpec + EthereumHardforks,
 {
     #[inline]
     fn pending_block(&self) -> &tokio::sync::Mutex<Option<PendingBlock>> {
@@ -88,7 +91,7 @@ where
 
         // Build arguments
         let args = BuildArguments::new(
-            self.provider().clone(),
+            self.provider(),
             self.pool().clone(),
             CachedReads::default(),
             payload_config,
