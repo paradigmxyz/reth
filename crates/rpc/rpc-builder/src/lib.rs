@@ -42,7 +42,8 @@
 //!         + ChangeSetReader,
 //!     Pool: TransactionPool + Unpin + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
-//!     Events: CanonStateSubscriptions<Primitives = reth_primitives::EthPrimitives> + Clone + 'static,
+//!     Events:
+//!         CanonStateSubscriptions<Primitives = reth_primitives::EthPrimitives> + Clone + 'static,
 //!     EvmConfig: ConfigureEvm<Header = Header>,
 //!     BlockExecutor: BlockExecutorProvider,
 //!     Consensus: reth_consensus::Consensus + Clone + 'static,
@@ -118,7 +119,8 @@
 //!         + ChangeSetReader,
 //!     Pool: TransactionPool + Unpin + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
-//!     Events: CanonStateSubscriptions<Primitives = reth_primitives::EthPrimitives> + Clone + 'static,
+//!     Events:
+//!         CanonStateSubscriptions<Primitives = reth_primitives::EthPrimitives> + Clone + 'static,
 //!     EngineApi: EngineApiServer<EngineT>,
 //!     EngineT: EngineTypes,
 //!     EvmConfig: ConfigureEvm<Header = Header>,
