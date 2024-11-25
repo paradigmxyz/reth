@@ -165,22 +165,25 @@ impl State {
             };
             tx.put::<tables::PlainAccountState>(address, reth_account)?;
             tx.put::<tables::HashedAccounts>(hashed_address, reth_account)?;
+
             if let Some(code_hash) = code_hash {
                 tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(account.code.clone()))?;
             }
-            account.storage.iter().filter(|(_, v)| !v.is_zero()).try_for_each(|(k, v)| {
-                let storage_key = B256::from_slice(&k.to_be_bytes::<32>());
-                tx.put::<tables::PlainStorageState>(
-                    address,
-                    StorageEntry { key: storage_key, value: *v },
-                )?;
-                tx.put::<tables::HashedStorages>(
-                    hashed_address,
-                    StorageEntry { key: keccak256(storage_key), value: *v },
-                )
-            })?;
-        }
 
+            for (k, v) in &account.storage {
+                if !v.is_zero() {
+                    let storage_key = B256::from_slice(&k.to_be_bytes::<32>());
+                    tx.put::<tables::PlainStorageState>(
+                        address,
+                        StorageEntry { key: storage_key, value: *v },
+                    )?;
+                    tx.put::<tables::HashedStorages>(
+                        hashed_address,
+                        StorageEntry { key: keccak256(storage_key), value: *v },
+                    )?;
+                }
+            }
+        }
         Ok(())
     }
 }
@@ -414,7 +417,7 @@ mod tests {
     fn header_deserialize() {
         let test = r#"{
             "baseFeePerGas" : "0x0a",
-            "bloom" : "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+            "bloom" : "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
             "coinbase" : "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "difficulty" : "0x020000",
             "extraData" : "0x00",
