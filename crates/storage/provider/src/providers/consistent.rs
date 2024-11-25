@@ -49,6 +49,7 @@ use tracing::trace;
 /// CAUTION: Avoid holding this provider for too long or the inner database transaction will
 /// time-out.
 #[derive(Debug)]
+#[doc(hidden)] // triggers ICE for `cargo docs`
 pub struct ConsistentProvider<N: ProviderNodeTypes> {
     /// Storage provider.
     storage_provider: <ProviderFactory<N> as DatabaseProviderFactory>::Provider,
