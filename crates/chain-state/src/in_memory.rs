@@ -134,7 +134,7 @@ impl<N: NodePrimitives> InMemoryState<N> {
 pub(crate) struct CanonicalInMemoryStateInner<N: NodePrimitives> {
     /// Tracks certain chain information, such as the canonical head, safe head, and finalized
     /// head.
-    pub(crate) chain_info_tracker: ChainInfoTracker,
+    pub(crate) chain_info_tracker: ChainInfoTracker<N>,
     /// Tracks blocks at the tip of the chain that have not been persisted to disk yet.
     pub(crate) in_memory_state: InMemoryState<N>,
     /// A broadcast stream that emits events when the canonical chain is updated.
@@ -158,6 +158,11 @@ impl<N: NodePrimitives> CanonicalInMemoryStateInner<N> {
     }
 }
 
+type PendingBlockAndReceipts<N> = (
+    SealedBlock<reth_primitives_traits::HeaderTy<N>, reth_primitives_traits::BodyTy<N>>,
+    Vec<reth_primitives_traits::ReceiptTy<N>>,
+);
+
 /// This type is responsible for providing the blocks, receipts, and state for
 /// all canonical blocks not on disk yet and keeps track of the block range that
 /// is in memory.
@@ -166,15 +171,21 @@ pub struct CanonicalInMemoryState<N: NodePrimitives = reth_primitives::EthPrimit
     pub(crate) inner: Arc<CanonicalInMemoryStateInner<N>>,
 }
 
-impl<N: NodePrimitives> CanonicalInMemoryState<N> {
+impl<N> CanonicalInMemoryState<N>
+where
+    N: NodePrimitives<
+        BlockHeader = alloy_consensus::Header,
+        BlockBody = reth_primitives::BlockBody,
+    >,
+{
     /// Create a new in-memory state with the given blocks, numbers, pending state, and optional
     /// finalized header.
     pub fn new(
         blocks: HashMap<B256, Arc<BlockState<N>>>,
         numbers: BTreeMap<u64, B256>,
         pending: Option<BlockState<N>>,
-        finalized: Option<SealedHeader>,
-        safe: Option<SealedHeader>,
+        finalized: Option<SealedHeader<N::BlockHeader>>,
+        safe: Option<SealedHeader<N::BlockHeader>>,
     ) -> Self {
         let in_memory_state = InMemoryState::new(blocks, numbers, pending);
         let header = in_memory_state
@@ -201,9 +212,9 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     /// Create a new in memory state with the given local head and finalized header
     /// if it exists.
     pub fn with_head(
-        head: SealedHeader,
-        finalized: Option<SealedHeader>,
-        safe: Option<SealedHeader>,
+        head: SealedHeader<N::BlockHeader>,
+        finalized: Option<SealedHeader<N::BlockHeader>>,
+        safe: Option<SealedHeader<N::BlockHeader>>,
     ) -> Self {
         let chain_info_tracker = ChainInfoTracker::new(head, finalized, safe);
         let in_memory_state = InMemoryState::default();
@@ -224,7 +235,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     }
 
     /// Returns the header corresponding to the given hash.
-    pub fn header_by_hash(&self, hash: B256) -> Option<SealedHeader> {
+    pub fn header_by_hash(&self, hash: B256) -> Option<SealedHeader<N::BlockHeader>> {
         self.state_by_hash(hash).map(|block| block.block_ref().block.header.clone())
     }
 
@@ -427,37 +438,37 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     }
 
     /// Canonical head setter.
-    pub fn set_canonical_head(&self, header: SealedHeader) {
+    pub fn set_canonical_head(&self, header: SealedHeader<N::BlockHeader>) {
         self.inner.chain_info_tracker.set_canonical_head(header);
     }
 
     /// Safe head setter.
-    pub fn set_safe(&self, header: SealedHeader) {
+    pub fn set_safe(&self, header: SealedHeader<N::BlockHeader>) {
         self.inner.chain_info_tracker.set_safe(header);
     }
 
     /// Finalized head setter.
-    pub fn set_finalized(&self, header: SealedHeader) {
+    pub fn set_finalized(&self, header: SealedHeader<N::BlockHeader>) {
         self.inner.chain_info_tracker.set_finalized(header);
     }
 
     /// Canonical head getter.
-    pub fn get_canonical_head(&self) -> SealedHeader {
+    pub fn get_canonical_head(&self) -> SealedHeader<N::BlockHeader> {
         self.inner.chain_info_tracker.get_canonical_head()
     }
 
     /// Finalized header getter.
-    pub fn get_finalized_header(&self) -> Option<SealedHeader> {
+    pub fn get_finalized_header(&self) -> Option<SealedHeader<N::BlockHeader>> {
         self.inner.chain_info_tracker.get_finalized_header()
     }
 
     /// Safe header getter.
-    pub fn get_safe_header(&self) -> Option<SealedHeader> {
+    pub fn get_safe_header(&self) -> Option<SealedHeader<N::BlockHeader>> {
         self.inner.chain_info_tracker.get_safe_header()
     }
 
     /// Returns the `SealedHeader` corresponding to the pending state.
-    pub fn pending_sealed_header(&self) -> Option<SealedHeader> {
+    pub fn pending_sealed_header(&self) -> Option<SealedHeader<N::BlockHeader>> {
         self.pending_state().map(|h| h.block_ref().block().header.clone())
     }
 
@@ -467,7 +478,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     }
 
     /// Returns the `SealedBlock` corresponding to the pending state.
-    pub fn pending_block(&self) -> Option<SealedBlock> {
+    pub fn pending_block(&self) -> Option<SealedBlock<N::BlockHeader, N::BlockBody>> {
         self.pending_state().map(|block_state| block_state.block_ref().block().clone())
     }
 
@@ -479,7 +490,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 
     /// Returns a tuple with the `SealedBlock` corresponding to the pending
     /// state and a vector of its `Receipt`s.
-    pub fn pending_block_and_receipts(&self) -> Option<(SealedBlock, Vec<N::Receipt>)> {
+    pub fn pending_block_and_receipts(&self) -> Option<PendingBlockAndReceipts<N>> {
         self.pending_state().map(|block_state| {
             (block_state.block_ref().block().clone(), block_state.executed_block_receipts())
         })
@@ -491,12 +502,14 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     }
 
     /// Subscribe to new safe block events.
-    pub fn subscribe_safe_block(&self) -> watch::Receiver<Option<SealedHeader>> {
+    pub fn subscribe_safe_block(&self) -> watch::Receiver<Option<SealedHeader<N::BlockHeader>>> {
         self.inner.chain_info_tracker.subscribe_safe_block()
     }
 
     /// Subscribe to new finalized block events.
-    pub fn subscribe_finalized_block(&self) -> watch::Receiver<Option<SealedHeader>> {
+    pub fn subscribe_finalized_block(
+        &self,
+    ) -> watch::Receiver<Option<SealedHeader<N::BlockHeader>>> {
         self.inner.chain_info_tracker.subscribe_finalized_block()
     }
 

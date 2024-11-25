@@ -18,6 +18,7 @@ reth-errors.workspace = true
 reth-execution-types.workspace = true
 reth-metrics.workspace = true
 reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 reth-storage-api.workspace = true
 reth-trie.workspace = true
 
@@ -56,12 +57,13 @@ revm.workspace = true
 
 [features]
 test-utils = [
-    "alloy-signer",
-    "alloy-signer-local",
-    "rand",
-    "revm",
-    "reth-chainspec/test-utils",
-    "reth-primitives/test-utils",
-    "reth-trie/test-utils",
-    "revm?/test-utils",
+	"alloy-signer",
+	"alloy-signer-local",
+	"rand",
+	"revm",
+	"reth-chainspec/test-utils",
+	"reth-primitives/test-utils",
+	"reth-trie/test-utils",
+	"revm?/test-utils",
+	"reth-primitives-traits/test-utils"
 ]
