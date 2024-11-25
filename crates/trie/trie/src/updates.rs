@@ -6,10 +6,13 @@ use std::collections::{HashMap, HashSet};
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TrieUpdates {
+    /// Collection of updated intermediate account nodes indexed by full path.
     #[cfg_attr(feature = "serde", serde(with = "serde_nibbles_map"))]
     pub account_nodes: HashMap<Nibbles, BranchNodeCompact>,
+    /// Collection of removed intermediate account nodes indexed by full path.
     #[cfg_attr(feature = "serde", serde(with = "serde_nibbles_set"))]
     pub removed_nodes: HashSet<Nibbles>,
+    /// Collection of updated storage tries indexed by the hashed address.
     pub storage_tries: HashMap<B256, StorageTrieUpdates>,
 }
 
