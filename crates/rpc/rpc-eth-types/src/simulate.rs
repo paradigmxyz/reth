@@ -1,6 +1,6 @@
 //! Utilities for serving `eth_simulateV1`
 
-use alloy_consensus::{Transaction as _, TxEip4844Variant, TxType, TypedTransaction};
+use alloy_consensus::{Transaction as _, TxType};
 use alloy_primitives::PrimitiveSignature as Signature;
 use alloy_rpc_types_eth::{
     simulate::{SimCallResult, SimulateError, SimulatedBlock},
@@ -10,7 +10,7 @@ use alloy_rpc_types_eth::{
 use jsonrpsee_types::ErrorObject;
 use reth_primitives::{
     proofs::{calculate_receipt_root, calculate_transaction_root},
-    BlockBody, BlockWithSenders, Receipt, Transaction, TransactionSigned, TransactionSignedNoHash,
+    BlockBody, BlockWithSenders, Receipt, TransactionSigned,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_server_types::result::rpc_err;
@@ -135,34 +135,7 @@ where
 
         // Create an empty signature for the transaction.
         let signature = Signature::new(Default::default(), Default::default(), false);
-
-        let tx = match tx {
-            TypedTransaction::Legacy(tx) => {
-                TransactionSignedNoHash { transaction: Transaction::Legacy(tx), signature }
-                    .with_hash()
-            }
-            TypedTransaction::Eip2930(tx) => {
-                TransactionSignedNoHash { transaction: Transaction::Eip2930(tx), signature }
-                    .with_hash()
-            }
-            TypedTransaction::Eip1559(tx) => {
-                TransactionSignedNoHash { transaction: Transaction::Eip1559(tx), signature }
-                    .with_hash()
-            }
-            TypedTransaction::Eip4844(tx) => {
-                let tx = match tx {
-                    TxEip4844Variant::TxEip4844(tx) => tx,
-                    TxEip4844Variant::TxEip4844WithSidecar(tx) => tx.tx,
-                };
-                TransactionSignedNoHash { transaction: Transaction::Eip4844(tx), signature }
-                    .with_hash()
-            }
-            TypedTransaction::Eip7702(tx) => {
-                TransactionSignedNoHash { transaction: Transaction::Eip7702(tx), signature }
-                    .with_hash()
-            }
-        };
-
+        let tx = TransactionSigned::new_unhashed(tx.into(), signature);
         transactions.push(tx);
     }
 

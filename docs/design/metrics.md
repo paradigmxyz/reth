@@ -42,7 +42,7 @@ There will only ever exist one description per metric `KeyName`; it is not possi
 The `metrics` crate provides three macros per metric variant: `register_<metric>!`, `<metric>!`, and `describe_<metric>!`. Prefer to use these where possible, since they generate the code necessary to register and update metrics under various conditions.
 
 - The `register_<metric>!` macro simply creates the metric and returns a handle to it (e.g. a `Counter`). These metric structs are thread-safe and cheap to clone.
-- The `<metric>!` macro registers the metric if it does not exist, and updates it's value.
+- The `<metric>!` macro registers the metric if it does not exist, and updates its value.
 - The `describe_<metric>!` macro adds an end-user description for the metric.
 
 How the metrics are exposed to the end-user is determined by the CLI.

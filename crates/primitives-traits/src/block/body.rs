@@ -3,14 +3,13 @@
 use alloc::fmt;
 
 use alloy_consensus::Transaction;
-use reth_codecs::Compact;
 
-use crate::{FullSignedTx, InMemorySize, MaybeSerde};
+use crate::{FullSignedTx, InMemorySize, MaybeArbitrary, MaybeSerde};
 
 /// Helper trait that unifies all behaviour required by transaction to support full node operations.
-pub trait FullBlockBody: BlockBody<Transaction: FullSignedTx> + Compact {}
+pub trait FullBlockBody: BlockBody<Transaction: FullSignedTx> {}
 
-impl<T> FullBlockBody for T where T: BlockBody<Transaction: FullSignedTx> + Compact {}
+impl<T> FullBlockBody for T where T: BlockBody<Transaction: FullSignedTx> {}
 
 /// Abstraction for block's body.
 #[auto_impl::auto_impl(&, Arc)]
@@ -27,9 +26,9 @@ pub trait BlockBody:
     + alloy_rlp::Decodable
     + InMemorySize
     + MaybeSerde
+    + MaybeArbitrary
 {
     /// Ordered list of signed transactions as committed in block.
-    // todo: requires trait for signed transaction
     type Transaction: Transaction;
 
     /// Returns reference to transactions in block.

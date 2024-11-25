@@ -48,7 +48,7 @@ pub use transaction::{
     util::secp256k1::{public_key_to_address, recover_signer_unchecked, sign_message},
     BlobTransaction, InvalidTransactionError, PooledTransactionsElement,
     PooledTransactionsElementEcRecovered, Transaction, TransactionMeta, TransactionSigned,
-    TransactionSignedEcRecovered, TransactionSignedNoHash, TxHashOrNumber, TxType,
+    TransactionSignedEcRecovered, TransactionSignedNoHash, TxType,
 };
 
 // Re-exports
@@ -79,17 +79,10 @@ pub mod serde_bincode_compat {
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EthPrimitives;
 
-#[cfg(feature = "reth-codec")]
-impl reth_primitives_traits::FullNodePrimitives for EthPrimitives {
+impl reth_primitives_traits::NodePrimitives for EthPrimitives {
     type Block = crate::Block;
-    type SignedTx = crate::TransactionSigned;
-    type TxType = crate::TxType;
-    type Receipt = crate::Receipt;
-}
-
-#[cfg(not(feature = "reth-codec"))]
-impl NodePrimitives for EthPrimitives {
-    type Block = crate::Block;
+    type BlockHeader = alloy_consensus::Header;
+    type BlockBody = crate::BlockBody;
     type SignedTx = crate::TransactionSigned;
     type TxType = crate::TxType;
     type Receipt = crate::Receipt;

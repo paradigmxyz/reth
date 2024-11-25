@@ -1,17 +1,19 @@
-use crate::InMemorySize;
 pub use alloy_consensus::Header;
+
+use core::mem;
+
 use alloy_consensus::Sealed;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{keccak256, BlockHash, Sealable, B256};
 use alloy_rlp::{Decodable, Encodable};
 use bytes::BufMut;
-use core::mem;
 use derive_more::{AsRef, Deref};
-use reth_codecs::add_arbitrary_tests;
-use serde::{Deserialize, Serialize};
+
+use crate::InMemorySize;
 
 /// A helper struct to store the block number/hash and its parent hash.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BlockWithParent {
     /// Parent hash.
     pub parent: B256,
@@ -21,8 +23,9 @@ pub struct BlockWithParent {
 
 /// A [`Header`] that is sealed at a precalculated hash, use [`SealedHeader::unseal()`] if you want
 /// to modify header.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Serialize, Deserialize)]
-#[add_arbitrary_tests(rlp)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
 pub struct SealedHeader<H = Header> {
     /// Locked Header hash.
     hash: BlockHash,
@@ -156,9 +159,12 @@ impl<H> From<SealedHeader<H>> for Sealed<H> {
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
-impl<'a> arbitrary::Arbitrary<'a> for SealedHeader {
+impl<'a, H> arbitrary::Arbitrary<'a> for SealedHeader<H>
+where
+    H: for<'b> arbitrary::Arbitrary<'b> + Sealable,
+{
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let header = Header::arbitrary(u)?;
+        let header = H::arbitrary(u)?;
 
         Ok(Self::seal(header))
     }

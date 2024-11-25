@@ -201,7 +201,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     let encoded_length = pooled.encode_2718_len();
 
                     // insert the blob into the store
-                    blob_store.insert(transaction.hash, sidecar)?;
+                    blob_store.insert(transaction.hash(), sidecar)?;
 
                     encoded_length
                 }

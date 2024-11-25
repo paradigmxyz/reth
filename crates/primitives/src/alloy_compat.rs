@@ -156,7 +156,7 @@ impl TryFrom<AnyRpcTransaction> for TransactionSigned {
             _ => return Err(ConversionError::Custom("unknown transaction type".to_string())),
         };
 
-        Ok(Self { transaction, signature, hash })
+        Ok(Self { transaction, signature, hash: hash.into() })
     }
 }
 

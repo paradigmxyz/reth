@@ -15,39 +15,6 @@
 //! (IP+port) of our node is published via discovery, remote peers can initiate inbound connections
 //! to the local node. Once a (tcp) connection is established, both peers start to authenticate a [RLPx session](https://github.com/ethereum/devp2p/blob/master/rlpx.md) via a handshake. If the handshake was successful, both peers announce their capabilities and are now ready to exchange sub-protocol messages via the `RLPx` session.
 
-use std::{
-    net::SocketAddr,
-    path::Path,
-    pin::Pin,
-    sync::{
-        atomic::{AtomicU64, AtomicUsize, Ordering},
-        Arc,
-    },
-    task::{Context, Poll},
-    time::{Duration, Instant},
-};
-
-use futures::{Future, StreamExt};
-use parking_lot::Mutex;
-use reth_eth_wire::{
-    capability::CapabilityMessage, Capabilities, DisconnectReason, EthNetworkPrimitives,
-    NetworkPrimitives,
-};
-use reth_fs_util::{self as fs, FsPathError};
-use reth_metrics::common::mpsc::UnboundedMeteredSender;
-use reth_network_api::{
-    test_utils::PeersHandle, EthProtocolInfo, NetworkEvent, NetworkStatus, PeerInfo, PeerRequest,
-};
-use reth_network_peers::{NodeRecord, PeerId};
-use reth_network_types::ReputationChangeKind;
-use reth_storage_api::BlockNumReader;
-use reth_tasks::shutdown::GracefulShutdown;
-use reth_tokio_util::EventSender;
-use secp256k1::SecretKey;
-use tokio::sync::mpsc::{self, error::TrySendError};
-use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, error, trace, warn};
-
 use crate::{
     budget::{DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL, DEFAULT_BUDGET_TRY_DRAIN_SWARM},
     config::NetworkConfig,
@@ -68,6 +35,37 @@ use crate::{
     transactions::NetworkTransactionEvent,
     FetchClient, NetworkBuilder,
 };
+use futures::{Future, StreamExt};
+use parking_lot::Mutex;
+use reth_eth_wire::{
+    capability::CapabilityMessage, Capabilities, DisconnectReason, EthNetworkPrimitives,
+    NetworkPrimitives,
+};
+use reth_fs_util::{self as fs, FsPathError};
+use reth_metrics::common::mpsc::UnboundedMeteredSender;
+use reth_network_api::{
+    test_utils::PeersHandle, EthProtocolInfo, NetworkEvent, NetworkStatus, PeerInfo, PeerRequest,
+};
+use reth_network_peers::{NodeRecord, PeerId};
+use reth_network_types::ReputationChangeKind;
+use reth_storage_api::BlockNumReader;
+use reth_tasks::shutdown::GracefulShutdown;
+use reth_tokio_util::EventSender;
+use secp256k1::SecretKey;
+use std::{
+    net::SocketAddr,
+    path::Path,
+    pin::Pin,
+    sync::{
+        atomic::{AtomicU64, AtomicUsize, Ordering},
+        Arc,
+    },
+    task::{Context, Poll},
+    time::{Duration, Instant},
+};
+use tokio::sync::mpsc::{self, error::TrySendError};
+use tokio_stream::wrappers::UnboundedReceiverStream;
+use tracing::{debug, error, trace, warn};
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Manages the _entire_ state of the network.
@@ -92,7 +90,7 @@ pub struct NetworkManager<N: NetworkPrimitives = EthNetworkPrimitives> {
     event_sender: EventSender<NetworkEvent<PeerRequest<N>>>,
     /// Sender half to send events to the
     /// [`TransactionsManager`](crate::transactions::TransactionsManager) task, if configured.
-    to_transactions_manager: Option<UnboundedMeteredSender<NetworkTransactionEvent>>,
+    to_transactions_manager: Option<UnboundedMeteredSender<NetworkTransactionEvent<N>>>,
     /// Sender half to send events to the
     /// [`EthRequestHandler`](crate::eth_requests::EthRequestHandler) task, if configured.
     ///
@@ -122,7 +120,7 @@ pub struct NetworkManager<N: NetworkPrimitives = EthNetworkPrimitives> {
 impl<N: NetworkPrimitives> NetworkManager<N> {
     /// Sets the dedicated channel for events indented for the
     /// [`TransactionsManager`](crate::transactions::TransactionsManager).
-    pub fn set_transactions(&mut self, tx: mpsc::UnboundedSender<NetworkTransactionEvent>) {
+    pub fn set_transactions(&mut self, tx: mpsc::UnboundedSender<NetworkTransactionEvent<N>>) {
         self.to_transactions_manager =
             Some(UnboundedMeteredSender::new(tx, NETWORK_POOL_TRANSACTIONS_SCOPE));
     }
@@ -411,7 +409,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
 
     /// Sends an event to the [`TransactionsManager`](crate::transactions::TransactionsManager) if
     /// configured.
-    fn notify_tx_manager(&self, event: NetworkTransactionEvent) {
+    fn notify_tx_manager(&self, event: NetworkTransactionEvent<N>) {
         if let Some(ref tx) = self.to_transactions_manager {
             let _ = tx.send(event);
         }

@@ -105,7 +105,12 @@ std = [
 	"serde/std",
 	"alloy-trie/std"
 ]
-reth-codec = ["dep:reth-codecs", "dep:zstd", "dep:modular-bitfield", "std"]
+reth-codec = [
+	"dep:reth-codecs",
+	"dep:zstd",
+	"dep:modular-bitfield", "std",
+	"reth-primitives-traits/reth-codec",
+]
 asm-keccak = ["alloy-primitives/asm-keccak", "revm-primitives/asm-keccak"]
 arbitrary = [
 	"dep:arbitrary",

@@ -19,10 +19,10 @@ use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
 use reth_evm::ConfigureEvmEnv;
-use reth_node_types::NodeTypesWithDB;
+use reth_node_types::{NodeTypesWithDB, TxTy};
 use reth_primitives::{
     Block, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    StaticFileSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
+    StaticFileSegment, TransactionMeta,
 };
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -425,11 +425,13 @@ impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
 }
 
 impl<N: ProviderNodeTypes> TransactionsProvider for ProviderFactory<N> {
+    type Transaction = TxTy<N>;
+
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         self.provider()?.transaction_id(tx_hash)
     }
 
-    fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
+    fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
         self.static_file_provider.get_with_static_file_or_database(
             StaticFileSegment::Transactions,
             id,
@@ -438,26 +440,26 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ProviderFactory<N> {
         )
     }
 
-    fn transaction_by_id_no_hash(
+    fn transaction_by_id_unhashed(
         &self,
         id: TxNumber,
-    ) -> ProviderResult<Option<TransactionSignedNoHash>> {
+    ) -> ProviderResult<Option<Self::Transaction>> {
         self.static_file_provider.get_with_static_file_or_database(
             StaticFileSegment::Transactions,
             id,
-            |static_file| static_file.transaction_by_id_no_hash(id),
-            || self.provider()?.transaction_by_id_no_hash(id),
+            |static_file| static_file.transaction_by_id_unhashed(id),
+            || self.provider()?.transaction_by_id_unhashed(id),
         )
     }
 
-    fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
+    fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Transaction>> {
         self.provider()?.transaction_by_hash(hash)
     }
 
     fn transaction_by_hash_with_meta(
         &self,
         tx_hash: TxHash,
-    ) -> ProviderResult<Option<(TransactionSigned, TransactionMeta)>> {
+    ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
         self.provider()?.transaction_by_hash_with_meta(tx_hash)
     }
 
@@ -468,21 +470,21 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ProviderFactory<N> {
     fn transactions_by_block(
         &self,
         id: BlockHashOrNumber,
-    ) -> ProviderResult<Option<Vec<TransactionSigned>>> {
+    ) -> ProviderResult<Option<Vec<Self::Transaction>>> {
         self.provider()?.transactions_by_block(id)
     }
 
     fn transactions_by_block_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<Vec<TransactionSigned>>> {
+    ) -> ProviderResult<Vec<Vec<Self::Transaction>>> {
         self.provider()?.transactions_by_block_range(range)
     }
 
     fn transactions_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<TransactionSignedNoHash>> {
+    ) -> ProviderResult<Vec<Self::Transaction>> {
         self.provider()?.transactions_by_tx_range(range)
     }
 
@@ -657,7 +659,7 @@ mod tests {
         providers::{StaticFileProvider, StaticFileWriter},
         test_utils::{blocks::TEST_BLOCK, create_test_provider_factory, MockNodeTypesWithDB},
         BlockHashReader, BlockNumReader, BlockWriter, DBProvider, HeaderSyncGapProvider,
-        TransactionsProvider,
+        StorageLocation, TransactionsProvider,
     };
     use alloy_primitives::{TxNumber, B256, U256};
     use assert_matches::assert_matches;
@@ -728,14 +730,20 @@ mod tests {
         {
             let provider = factory.provider_rw().unwrap();
             assert_matches!(
-                provider.insert_block(block.clone().try_seal_with_senders().unwrap()),
+                provider.insert_block(
+                    block.clone().try_seal_with_senders().unwrap(),
+                    StorageLocation::Database
+                ),
                 Ok(_)
             );
             assert_matches!(
                 provider.transaction_sender(0), Ok(Some(sender))
                 if sender == block.body.transactions[0].recover_signer().unwrap()
             );
-            assert_matches!(provider.transaction_id(block.body.transactions[0].hash), Ok(Some(0)));
+            assert_matches!(
+                provider.transaction_id(block.body.transactions[0].hash()),
+                Ok(Some(0))
+            );
         }
 
         {
@@ -746,11 +754,14 @@ mod tests {
             };
             let provider = factory.with_prune_modes(prune_modes).provider_rw().unwrap();
             assert_matches!(
-                provider.insert_block(block.clone().try_seal_with_senders().unwrap(),),
+                provider.insert_block(
+                    block.clone().try_seal_with_senders().unwrap(),
+                    StorageLocation::Database
+                ),
                 Ok(_)
             );
             assert_matches!(provider.transaction_sender(0), Ok(None));
-            assert_matches!(provider.transaction_id(block.body.transactions[0].hash), Ok(None));
+            assert_matches!(provider.transaction_id(block.body.transactions[0].hash()), Ok(None));
         }
     }
 
@@ -767,7 +778,10 @@ mod tests {
             let provider = factory.provider_rw().unwrap();
 
             assert_matches!(
-                provider.insert_block(block.clone().try_seal_with_senders().unwrap()),
+                provider.insert_block(
+                    block.clone().try_seal_with_senders().unwrap(),
+                    StorageLocation::Database
+                ),
                 Ok(_)
             );
 
@@ -785,21 +799,6 @@ mod tests {
 
             let db_senders = provider.senders_by_tx_range(range);
             assert_eq!(db_senders, Ok(vec![]));
-
-            let result = provider.take_block_transaction_range(0..=0);
-            assert_eq!(
-                result,
-                Ok(vec![(
-                    0,
-                    block
-                        .body
-                        .transactions
-                        .iter()
-                        .cloned()
-                        .map(|tx| tx.into_ecrecovered().unwrap())
-                        .collect()
-                )])
-            )
         }
     }
 

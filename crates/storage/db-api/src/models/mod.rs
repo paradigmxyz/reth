@@ -8,7 +8,9 @@ use alloy_consensus::Header;
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{Address, Bytes, Log, B256, U256};
 use reth_codecs::{add_arbitrary_tests, Compact};
-use reth_primitives::{Account, Bytecode, Receipt, StorageEntry, TransactionSignedNoHash, TxType};
+use reth_primitives::{
+    Account, Bytecode, Receipt, StorageEntry, TransactionSigned, TransactionSignedNoHash, TxType,
+};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
 use reth_trie_common::{StoredNibbles, StoredNibblesSubKey, *};
@@ -225,6 +227,7 @@ impl_compression_for_compact!(
     Bytecode,
     AccountBeforeTx,
     TransactionSignedNoHash,
+    TransactionSigned,
     CompactU256,
     StageCheckpoint,
     PruneCheckpoint,
@@ -312,7 +315,7 @@ mod tests {
     fn test_ensure_backwards_compatibility() {
         use super::*;
         use reth_codecs::{test_utils::UnusedBits, validate_bitflag_backwards_compat};
-        use reth_primitives::{Account, Receipt, ReceiptWithBloom};
+        use reth_primitives::{Account, Receipt};
         use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
         use reth_stages_types::{
             AccountHashingCheckpoint, CheckpointBlockRange, EntitiesCheckpoint,
@@ -333,7 +336,6 @@ mod tests {
         assert_eq!(PruneMode::bitflag_encoded_bytes(), 1);
         assert_eq!(PruneSegment::bitflag_encoded_bytes(), 1);
         assert_eq!(Receipt::bitflag_encoded_bytes(), 1);
-        assert_eq!(ReceiptWithBloom::bitflag_encoded_bytes(), 0);
         assert_eq!(StageCheckpoint::bitflag_encoded_bytes(), 1);
         assert_eq!(StageUnitCheckpoint::bitflag_encoded_bytes(), 1);
         assert_eq!(StoredBlockBodyIndices::bitflag_encoded_bytes(), 1);
@@ -355,7 +357,6 @@ mod tests {
         validate_bitflag_backwards_compat!(PruneMode, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(PruneSegment, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(Receipt, UnusedBits::Zero);
-        validate_bitflag_backwards_compat!(ReceiptWithBloom, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(StageCheckpoint, UnusedBits::NotZero);
         validate_bitflag_backwards_compat!(StageUnitCheckpoint, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(StoredBlockBodyIndices, UnusedBits::Zero);
