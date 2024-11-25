@@ -101,8 +101,11 @@ impl<T> FullNodePrimitives for T where
 {
 }
 
-/// Helper adapter type for accessing [`NodePrimitives`] receipt type.
-pub type ReceiptTy<N> = <N as NodePrimitives>::Receipt;
+/// Helper adapter type for accessing [`NodePrimitives`] block header types.
+pub type HeaderTy<N> = <N as NodePrimitives>::BlockHeader;
 
-/// Helper adapter type for accessing [`NodePrimitives`] body type.
+/// Helper adapter type for accessing [`NodePrimitives`] block body types.
 pub type BodyTy<N> = <N as NodePrimitives>::BlockBody;
+
+/// Helper adapter type for accessing [`NodePrimitives`] receipt types.
+pub type ReceiptTy<N> = <N as NodePrimitives>::Receipt;

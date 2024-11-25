@@ -133,6 +133,8 @@ pub enum ProviderError {
     StorageLockError(StorageLockError),
     /// Storage writer error.
     UnifiedStorageWriterError(UnifiedStorageWriterError),
+    /// Received invalid output from configured storage implementation.
+    InvalidStorageOutput,
 }
 
 impl From<DatabaseError> for ProviderError {

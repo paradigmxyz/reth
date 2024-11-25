@@ -1992,6 +1992,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_node_types::FullNodePrimitives;
+    use reth_primitives::BlockExt;
     use reth_provider::{BlockWriter, ProviderFactory, StorageLocation};
     use reth_rpc_types_compat::engine::payload::block_to_payload_v1;
     use reth_stages::{ExecOutput, PipelineError, StageError};

@@ -22,19 +22,22 @@ use std::{fmt::Display, sync::Arc};
 
 /// A [`BlockExecutorProvider`] that returns mocked execution results.
 #[derive(Clone, Debug, Default)]
-pub struct MockExecutorProvider<T = reth_primitives::Receipt> {
-    exec_results: Arc<Mutex<Vec<ExecutionOutcome<T>>>>,
+pub struct MockExecutorProvider<N: NodePrimitives> {
+    exec_results: Arc<Mutex<Vec<ExecutionOutcome<N::Receipt>>>>,
 }
 
-impl<T> MockExecutorProvider<T> {
+impl<N: NodePrimitives> MockExecutorProvider<N> {
     /// Extend the mocked execution results
-    pub fn extend(&self, results: impl IntoIterator<Item = impl Into<ExecutionOutcome<T>>>) {
+    pub fn extend(
+        &self,
+        results: impl IntoIterator<Item = impl Into<ExecutionOutcome<N::Receipt>>>,
+    ) {
         self.exec_results.lock().extend(results.into_iter().map(Into::into));
     }
 }
 
-impl BlockExecutorProvider for MockExecutorProvider {
-    type Primitives = reth_primitives::EthPrimitives;
+impl<N: NodePrimitives> BlockExecutorProvider for MockExecutorProvider<N> {
+    type Primitives = N;
 
     type Executor<DB: Database<Error: Into<ProviderError> + Display>> = Self;
 
@@ -55,7 +58,7 @@ impl BlockExecutorProvider for MockExecutorProvider {
     }
 }
 
-impl<DB, N> Executor<DB, N> for MockExecutorProvider<N::Receipt>
+impl<DB, N> Executor<DB, N> for MockExecutorProvider<N>
 where
     N: NodePrimitives,
 {
@@ -100,7 +103,7 @@ where
     }
 }
 
-impl<DB, N> BatchExecutor<DB, N> for MockExecutorProvider<N::Receipt>
+impl<DB, N> BatchExecutor<DB, N> for MockExecutorProvider<N>
 where
     N: NodePrimitives,
 {

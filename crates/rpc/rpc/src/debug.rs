@@ -18,7 +18,7 @@ use reth_evm::{
     execute::{BlockExecutorProvider, Executor},
     ConfigureEvmEnv,
 };
-use reth_primitives::{Block, SealedBlockWithSenders};
+use reth_primitives::{Block, BlockExt, SealedBlockWithSenders};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProofProvider, StateProviderFactory,
     TransactionVariant,
@@ -80,7 +80,7 @@ where
         + StateProviderFactory
         + 'static,
     Eth: EthApiTypes + TraceExt + 'static,
-    BlockExecutor: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
+    BlockExecutor: BlockExecutorProvider,
 {
     /// Acquires a permit to execute a tracing call.
     async fn acquire_trace_permit(&self) -> Result<OwnedSemaphorePermit, AcquireError> {
@@ -799,7 +799,7 @@ where
         + StateProviderFactory
         + 'static,
     Eth: EthApiSpec + EthTransactions + TraceExt + 'static,
-    BlockExecutor: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
+    BlockExecutor: BlockExecutorProvider,
 {
     /// Handler for `debug_getRawHeader`
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {

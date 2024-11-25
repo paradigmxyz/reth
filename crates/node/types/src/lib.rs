@@ -41,7 +41,7 @@ pub trait NodeTypes: Send + Sync + Unpin + 'static {
 }
 
 /// The type that configures an Ethereum-like node with an engine for consensus.
-pub trait NodeTypesWithEngine: NodeTypes<Primitives = EthPrimitives> {
+pub trait NodeTypesWithEngine: NodeTypes {
     /// The node's engine types, defining the interaction with the consensus engine.
     type Engine: EngineTypes;
 }
@@ -50,7 +50,7 @@ pub trait NodeTypesWithEngine: NodeTypes<Primitives = EthPrimitives> {
 /// node.
 ///
 /// Its types are configured by node internally and are not intended to be user configurable.
-pub trait NodeTypesWithDB: NodeTypes<Primitives = EthPrimitives> {
+pub trait NodeTypesWithDB: NodeTypes {
     /// Underlying database type used by the node to store and retrieve data.
     type DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static;
 }
@@ -102,7 +102,7 @@ where
 
 impl<Types, DB> NodeTypesWithDB for NodeTypesWithDBAdapter<Types, DB>
 where
-    Types: NodeTypes<Primitives = EthPrimitives>,
+    Types: NodeTypes,
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
 {
     type DB = DB;
@@ -218,7 +218,7 @@ where
     SC: StateCommitment,
     S: Default + Send + Sync + Unpin + Debug + 'static,
 {
-    type Primitives = EthPrimitives;
+    type Primitives = P;
     type ChainSpec = C;
     type StateCommitment = SC;
     type Storage = S;
@@ -237,6 +237,9 @@ where
 
 /// Helper adapter type for accessing data primitives aggregator type on [`NodeTypes`].
 pub type Prims<N> = <N as NodeTypes>::Primitives;
+
+/// Helper adapter type for accessing [`NodePrimitives::Block`] on [`NodeTypes`].
+pub type BlockTy<N> = <<N as NodeTypes>::Primitives as NodePrimitives>::Block;
 
 /// Helper adapter type for accessing [`NodePrimitives::BlockHeader`] on [`NodeTypes`].
 pub type HeaderTy<N> = <<N as NodeTypes>::Primitives as NodePrimitives>::BlockHeader;

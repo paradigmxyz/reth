@@ -1392,7 +1392,8 @@ mod tests {
     use reth_node_types::FullNodePrimitives;
     use reth_primitives::{
         proofs::{calculate_receipt_root, calculate_transaction_root},
-        Account, BlockBody, Transaction, TransactionSigned, TransactionSignedEcRecovered,
+        Account, BlockBody, EthPrimitives, Transaction, TransactionSigned,
+        TransactionSignedEcRecovered,
     };
     use reth_provider::{
         providers::ProviderNodeTypes,
@@ -1409,7 +1410,7 @@ mod tests {
 
     fn setup_externals(
         exec_res: Vec<ExecutionOutcome>,
-    ) -> TreeExternals<MockNodeTypesWithDB, MockExecutorProvider> {
+    ) -> TreeExternals<MockNodeTypesWithDB, MockExecutorProvider<EthPrimitives>> {
         let chain_spec = Arc::new(
             ChainSpecBuilder::default()
                 .chain(MAINNET.chain)
@@ -1594,7 +1595,9 @@ mod tests {
                           body: Vec<TransactionSignedEcRecovered>,
                           num_of_signer_txs: u64|
          -> SealedBlockWithSenders {
-            let transactions_root = calculate_transaction_root(&body);
+            let signed_body =
+                body.clone().into_iter().map(|tx| tx.into_signed()).collect::<Vec<_>>();
+            let transactions_root = calculate_transaction_root(&signed_body);
             let receipts = body
                 .iter()
                 .enumerate()
@@ -1640,7 +1643,7 @@ mod tests {
                 SealedBlock {
                     header: SealedHeader::seal(header),
                     body: BlockBody {
-                        transactions: body.clone().into_iter().map(|tx| tx.into_signed()).collect(),
+                        transactions: signed_body,
                         ommers: Vec::new(),
                         withdrawals: Some(Withdrawals::default()),
                     },

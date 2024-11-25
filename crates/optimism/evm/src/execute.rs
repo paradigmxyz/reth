@@ -1,10 +1,10 @@
 //! Optimism block execution strategy.
 
-use crate::{l1::ensure_create2_deployer, OpBlockExecutionError, OpEvmConfig};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use core::fmt::Display;
+
 use alloy_consensus::{Header, Transaction as _};
 use alloy_eips::eip7685::Requests;
-use core::fmt::Display;
 use op_alloy_consensus::DepositTransaction;
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
@@ -20,12 +20,15 @@ use reth_evm::{
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::validate_block_post_execution;
 use reth_optimism_forks::OpHardfork;
+use reth_optimism_primitives::OpPrimitives;
 use reth_primitives::{BlockWithSenders, Receipt, TxType};
 use reth_revm::{Database, State};
 use revm_primitives::{
     db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState, U256,
 };
 use tracing::trace;
+
+use crate::{l1::ensure_create2_deployer, OpBlockExecutionError, OpEvmConfig};
 
 /// Factory for [`OpExecutionStrategy`].
 #[derive(Debug, Clone)]
@@ -56,7 +59,7 @@ where
     EvmConfig:
         Clone + Unpin + Sync + Send + 'static + ConfigureEvm<Header = alloy_consensus::Header>,
 {
-    type Primitives = reth_primitives::EthPrimitives;
+    type Primitives = OpPrimitives;
 
     type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
         OpExecutionStrategy<DB, EvmConfig>;
@@ -123,7 +126,7 @@ where
     DB: Database<Error: Into<ProviderError> + Display>,
     EvmConfig: ConfigureEvm<Header = alloy_consensus::Header>,
 {
-    type Primitives = reth_primitives::EthPrimitives;
+    type Primitives = OpPrimitives;
     type Error = BlockExecutionError;
 
     fn init(&mut self, tx_env_overrides: Box<dyn TxEnvOverrides>) {

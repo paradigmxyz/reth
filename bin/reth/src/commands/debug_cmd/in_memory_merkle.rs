@@ -20,6 +20,7 @@ use reth_execution_types::ExecutionOutcome;
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_node_ethereum::EthExecutorProvider;
+use reth_primitives::BlockExt;
 use reth_provider::{
     providers::ProviderNodeTypes, writer::UnifiedStorageWriter, AccountExtReader,
     ChainSpecProvider, HashingWriter, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,

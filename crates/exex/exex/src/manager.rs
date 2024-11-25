@@ -8,6 +8,7 @@ use metrics::Gauge;
 use reth_chain_state::ForkChoiceStream;
 use reth_chainspec::Head;
 use reth_metrics::{metrics::Counter, Metrics};
+use reth_node_api::{NodePrimitives, NodeTypes};
 use reth_primitives::SealedHeader;
 use reth_provider::HeaderProvider;
 use reth_tracing::tracing::{debug, warn};
@@ -208,7 +209,7 @@ pub struct ExExManagerMetrics {
 /// - Error handling
 /// - Monitoring
 #[derive(Debug)]
-pub struct ExExManager<P> {
+pub struct ExExManager<P: NodeTypes> {
     /// Provider for querying headers.
     provider: P,
 
@@ -246,12 +247,12 @@ pub struct ExExManager<P> {
     finalized_header_stream: ForkChoiceStream<SealedHeader>,
 
     /// A handle to the `ExEx` manager.
-    handle: ExExManagerHandle,
+    handle: ExExManagerHandle<P::Primitives>,
     /// Metrics for the `ExEx` manager.
     metrics: ExExManagerMetrics,
 }
 
-impl<P> ExExManager<P> {
+impl<P: NodeTypes> ExExManager<P> {
     /// Create a new [`ExExManager`].
     ///
     /// You must provide an [`ExExHandle`] for each `ExEx` and the maximum capacity of the
@@ -314,7 +315,7 @@ impl<P> ExExManager<P> {
     }
 
     /// Returns the handle to the manager.
-    pub fn handle(&self) -> ExExManagerHandle {
+    pub fn handle(&self) -> ExExManagerHandle<P::Primitives> {
         self.handle.clone()
     }
 
@@ -524,9 +525,9 @@ where
 
 /// A handle to communicate with the [`ExExManager`].
 #[derive(Debug)]
-pub struct ExExManagerHandle {
+pub struct ExExManagerHandle<N: NodePrimitives> {
     /// Channel to send notifications to the `ExEx` manager.
-    exex_tx: UnboundedSender<(ExExNotificationSource, ExExNotification)>,
+    exex_tx: UnboundedSender<(ExExNotificationSource, ExExNotification<N>)>,
     /// The number of `ExEx`'s running on the node.
     num_exexs: usize,
     /// A watch channel denoting whether the manager is ready for new notifications or not.
@@ -544,7 +545,7 @@ pub struct ExExManagerHandle {
     finished_height: watch::Receiver<FinishedExExHeight>,
 }
 
-impl ExExManagerHandle {
+impl<N: NodePrimitives> ExExManagerHandle<N> {
     /// Creates an empty manager handle.
     ///
     /// Use this if there is no manager present.
@@ -571,8 +572,8 @@ impl ExExManagerHandle {
     pub fn send(
         &self,
         source: ExExNotificationSource,
-        notification: ExExNotification,
-    ) -> Result<(), SendError<(ExExNotificationSource, ExExNotification)>> {
+        notification: ExExNotification<N>,
+    ) -> Result<(), SendError<(ExExNotificationSource, ExExNotification<N>)>> {
         self.exex_tx.send((source, notification))
     }
 
@@ -583,8 +584,8 @@ impl ExExManagerHandle {
     pub async fn send_async(
         &mut self,
         source: ExExNotificationSource,
-        notification: ExExNotification,
-    ) -> Result<(), SendError<(ExExNotificationSource, ExExNotification)>> {
+        notification: ExExNotification<N>,
+    ) -> Result<(), SendError<(ExExNotificationSource, ExExNotification<N>)>> {
         self.ready().await;
         self.exex_tx.send((source, notification))
     }
@@ -1235,7 +1236,7 @@ mod tests {
             genesis_block.number + 1,
             BlockParams { parent: Some(genesis_hash), ..Default::default() },
         )
-        .seal_with_senders()
+        .seal_with_senders::<reth_primitives::Block>()
         .unwrap();
         let provider_rw = provider_factory.database_provider_rw().unwrap();
         provider_rw.insert_block(block.clone(), StorageLocation::Database).unwrap();

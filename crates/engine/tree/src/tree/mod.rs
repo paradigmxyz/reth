@@ -36,7 +36,9 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{Block, GotExpected, SealedBlock, SealedBlockWithSenders, SealedHeader};
+use reth_primitives::{
+    Block, GotExpected, NodePrimitives, SealedBlock, SealedBlockWithSenders, SealedHeader,
+};
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, ExecutionOutcome,
     ProviderError, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
@@ -538,7 +540,7 @@ impl<P, E, T, Spec> EngineApiTreeHandler<P, E, T, Spec>
 where
     P: DatabaseProviderFactory + BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     <P as DatabaseProviderFactory>::Provider: BlockReader,
-    E: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
+    E: BlockExecutorProvider<Primitives: NodePrimitives<Receipt = reth_primitives::Receipt>>,
     T: EngineTypes,
     Spec: Send + Sync + EthereumHardforks + 'static,
 {
@@ -2609,6 +2611,7 @@ mod tests {
     use reth_engine_primitives::ForkchoiceStatus;
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm::test_utils::MockExecutorProvider;
+    use reth_primitives::BlockExt;
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::{block_to_payload_v1, payload::block_to_payload_v3};
     use reth_trie::updates::TrieUpdates;

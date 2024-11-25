@@ -42,7 +42,8 @@ use reth_config::config::StageConfig;
 use reth_consensus::Consensus;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network_p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader};
-use reth_provider::HeaderSyncGapProvider;
+use reth_node_types::NodeTypes;
+use reth_provider::{providers::ProviderNodeTypes, HeaderSyncGapProvider};
 use reth_prune_types::PruneModes;
 use reth_stages_api::Stage;
 use tokio::sync::watch;
@@ -113,7 +114,7 @@ where
         prune_modes: PruneModes,
     ) -> Self
     where
-        E: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
+        E: BlockExecutorProvider,
     {
         Self {
             online: OnlineStages::new(
@@ -133,7 +134,7 @@ where
 
 impl<P, H, B, E> DefaultStages<P, H, B, E>
 where
-    E: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
+    E: BlockExecutorProvider,
     H: HeaderDownloader,
     B: BodyDownloader,
 {
@@ -159,7 +160,7 @@ where
     P: HeaderSyncGapProvider + 'static,
     H: HeaderDownloader + 'static,
     B: BodyDownloader + 'static,
-    E: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
+    E: BlockExecutorProvider,
     OnlineStages<P, H, B>: StageSet<Provider>,
     OfflineStages<E>: StageSet<Provider>,
 {
@@ -312,7 +313,7 @@ impl<EF> OfflineStages<EF> {
 
 impl<E, Provider> StageSet<Provider> for OfflineStages<E>
 where
-    E: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
+    E: BlockExecutorProvider,
     ExecutionStages<E>: StageSet<Provider>,
     PruneSenderRecoveryStage: Stage<Provider>,
     HashingStages: StageSet<Provider>,
@@ -369,9 +370,10 @@ impl<E> ExecutionStages<E> {
 
 impl<E, Provider> StageSet<Provider> for ExecutionStages<E>
 where
-    E: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
+    Provider: NodeTypes,
+    E: BlockExecutorProvider,
     SenderRecoveryStage: Stage<Provider>,
-    ExecutionStage<E>: Stage<Provider>,
+    ExecutionStage<Provider::Primitives, E>: Stage<Provider>,
 {
     fn builder(self) -> StageSetBuilder<Provider> {
         StageSetBuilder::default()

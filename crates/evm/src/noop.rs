@@ -1,6 +1,6 @@
 //! A no operation block executor implementation.
 
-use core::fmt::Display;
+use core::{fmt::Display, marker::PhantomData};
 
 use alloy_primitives::BlockNumber;
 use reth_execution_errors::BlockExecutionError;
@@ -22,10 +22,10 @@ const UNAVAILABLE_FOR_NOOP: &str = "execution unavailable for noop";
 /// A [`BlockExecutorProvider`] implementation that does nothing.
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
-pub struct NoopBlockExecutorProvider;
+pub struct NoopBlockExecutorProvider<N>(PhantomData<N>);
 
-impl BlockExecutorProvider for NoopBlockExecutorProvider {
-    type Primitives = reth_primitives::EthPrimitives;
+impl<N: NodePrimitives> BlockExecutorProvider for NoopBlockExecutorProvider<N> {
+    type Primitives = N;
 
     type Executor<DB: Database<Error: Into<ProviderError> + Display>> = Self;
 
@@ -35,18 +35,18 @@ impl BlockExecutorProvider for NoopBlockExecutorProvider {
     where
         DB: Database<Error: Into<ProviderError> + Display>,
     {
-        Self
+        Self(PhantomData)
     }
 
     fn batch_executor<DB>(&self, _: DB) -> Self::BatchExecutor<DB>
     where
         DB: Database<Error: Into<ProviderError> + Display>,
     {
-        Self
+        Self(PhantomData)
     }
 }
 
-impl<DB, N> Executor<DB, N> for NoopBlockExecutorProvider
+impl<DB, N> Executor<DB, N> for NoopBlockExecutorProvider<N>
 where
     N: NodePrimitives,
 {
@@ -81,7 +81,7 @@ where
     }
 }
 
-impl<DB, N> BatchExecutor<DB, N> for NoopBlockExecutorProvider
+impl<DB, N> BatchExecutor<DB, N> for NoopBlockExecutorProvider<N>
 where
     N: NodePrimitives,
 {

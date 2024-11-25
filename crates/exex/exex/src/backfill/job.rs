@@ -8,7 +8,8 @@ use alloy_primitives::BlockNumber;
 use reth_evm::execute::{
     BatchExecutor, BlockExecutionError, BlockExecutionOutput, BlockExecutorProvider, Executor,
 };
-use reth_primitives::{Block, BlockWithSenders, Receipt};
+use reth_node_api::NodePrimitives;
+use reth_primitives::{Block, BlockExt, BlockWithSenders, Receipt};
 use reth_primitives_traits::format_gas_throughput;
 use reth_provider::{
     BlockReader, Chain, HeaderProvider, ProviderError, StateProviderFactory, TransactionVariant,
@@ -36,7 +37,7 @@ pub struct BackfillJob<E, P> {
 
 impl<E, P> Iterator for BackfillJob<E, P>
 where
-    E: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
+    E: BlockExecutorProvider<Primitives: NodePrimitives<Receipt = reth_primitives::Receipt>>,
     P: HeaderProvider + BlockReader + StateProviderFactory,
 {
     type Item = BackfillJobResult<Chain>;
@@ -52,7 +53,7 @@ where
 
 impl<E, P> BackfillJob<E, P>
 where
-    E: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
+    E: BlockExecutorProvider<Primitives: NodePrimitives<Receipt = reth_primitives::Receipt>>,
     P: BlockReader + HeaderProvider + StateProviderFactory,
 {
     /// Converts the backfill job into a single block backfill job.
@@ -164,7 +165,7 @@ pub struct SingleBlockBackfillJob<E, P> {
 
 impl<E, P> Iterator for SingleBlockBackfillJob<E, P>
 where
-    E: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
+    E: BlockExecutorProvider<Primitives: NodePrimitives<Receipt = reth_primitives::Receipt>>,
     P: HeaderProvider + BlockReader + StateProviderFactory,
 {
     type Item = BackfillJobResult<(BlockWithSenders, BlockExecutionOutput<Receipt>)>;
@@ -176,7 +177,7 @@ where
 
 impl<E, P> SingleBlockBackfillJob<E, P>
 where
-    E: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
+    E: BlockExecutorProvider<Primitives: NodePrimitives<Receipt = reth_primitives::Receipt>>,
     P: HeaderProvider + BlockReader + StateProviderFactory,
 {
     /// Converts the single block backfill job into a stream.

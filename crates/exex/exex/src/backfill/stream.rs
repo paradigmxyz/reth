@@ -11,6 +11,7 @@ use futures::{
     StreamExt,
 };
 use reth_evm::execute::{BlockExecutionError, BlockExecutionOutput, BlockExecutorProvider};
+use reth_node_api::NodePrimitives;
 use reth_primitives::{BlockWithSenders, Receipt};
 use reth_provider::{BlockReader, Chain, HeaderProvider, StateProviderFactory};
 use reth_prune_types::PruneModes;
@@ -102,7 +103,10 @@ where
 
 impl<E, P> Stream for StreamBackfillJob<E, P, SingleBlockStreamItem>
 where
-    E: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives> + Clone + Send + 'static,
+    E: BlockExecutorProvider<Primitives: NodePrimitives<Receipt = reth_primitives::Receipt>>
+        + Clone
+        + Send
+        + 'static,
     P: HeaderProvider + BlockReader + StateProviderFactory + Clone + Send + Unpin + 'static,
 {
     type Item = BackfillJobResult<SingleBlockStreamItem>;
@@ -135,7 +139,10 @@ where
 
 impl<E, P> Stream for StreamBackfillJob<E, P, BatchBlockStreamItem>
 where
-    E: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives> + Clone + Send + 'static,
+    E: BlockExecutorProvider<Primitives: NodePrimitives<Receipt = reth_primitives::Receipt>>
+        + Clone
+        + Send
+        + 'static,
     P: HeaderProvider + BlockReader + StateProviderFactory + Clone + Send + Unpin + 'static,
 {
     type Item = BackfillJobResult<BatchBlockStreamItem>;

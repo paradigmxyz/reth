@@ -4,7 +4,7 @@
 use std::fmt::Debug;
 
 use reth_chainspec::{EthChainSpec, Head};
-use reth_node_api::{EthPrimitives, FullNodeComponents, NodeTypes};
+use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_node_core::node_config::NodeConfig;
 use tokio::sync::mpsc;
 
@@ -50,7 +50,7 @@ impl Debug for ExExContextDyn {
 
 impl<Node> From<ExExContext<Node>> for ExExContextDyn
 where
-    Node: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>,
+    Node: FullNodeComponents<Types: NodeTypes>,
     Node::Provider: Debug,
     Node::Executor: Debug,
 {

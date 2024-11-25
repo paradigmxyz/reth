@@ -66,7 +66,7 @@ use tracing::*;
 ///   values to [`tables::PlainStorageState`]
 // false positive, we cannot derive it if !DB: Debug.
 #[allow(missing_debug_implementations)]
-pub struct ExecutionStage<E> {
+pub struct ExecutionStage<E: BlockExecutorProvider> {
     /// The stage's internal block executor
     executor_provider: E,
     /// The commit thresholds of the execution stage.
@@ -81,13 +81,13 @@ pub struct ExecutionStage<E> {
     /// Input for the post execute commit hook.
     /// Set after every [`ExecutionStage::execute`] and cleared after
     /// [`ExecutionStage::post_execute_commit`].
-    post_execute_commit_input: Option<Chain>,
+    post_execute_commit_input: Option<Chain<E::Primitives>>,
     /// Input for the post unwind commit hook.
     /// Set after every [`ExecutionStage::unwind`] and cleared after
     /// [`ExecutionStage::post_unwind_commit`].
-    post_unwind_commit_input: Option<Chain>,
+    post_unwind_commit_input: Option<Chain<E::Primitives>>,
     /// Handle to communicate with `ExEx` manager.
-    exex_manager_handle: ExExManagerHandle,
+    exex_manager_handle: ExExManagerHandle<E::Primitives>,
     /// Executor metrics.
     metrics: ExecutorMetrics,
 }
@@ -99,7 +99,7 @@ impl<E> ExecutionStage<E> {
         thresholds: ExecutionStageThresholds,
         external_clean_threshold: u64,
         prune_modes: PruneModes,
-        exex_manager_handle: ExExManagerHandle,
+        exex_manager_handle: ExExManagerHandle<E::Primitives>,
     ) -> Self {
         Self {
             external_clean_threshold,
@@ -172,11 +172,11 @@ impl<E> ExecutionStage<E> {
     }
 }
 
-impl<E, Provider> Stage<Provider> for ExecutionStage<E>
+impl<E, Provider> Stage<Provider> for ExecutionStage<Provider::Primitives, E>
 where
     Provider: DBProvider
         + BlockReader
-        + StaticFileProviderFactory<Primitives = reth_primitives::EthPrimitives>
+        + StaticFileProviderFactory<Primitives: NodePrimitives<Receipt = reth_primitives::Receipt>>
         + StatsReader
         + StateChangeWriter
         + BlockHashReader,
@@ -394,7 +394,7 @@ where
         // which means the manager has died, which then in turn means the node is shutting down.
         let _ = self.exex_manager_handle.send(
             ExExNotificationSource::Pipeline,
-            ExExNotification::ChainCommitted { new: Arc::new(chain) },
+            ExExNotification::<Provider::Primitives>::ChainCommitted { new: Arc::new(chain) },
         );
 
         Ok(())

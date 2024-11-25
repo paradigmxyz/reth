@@ -6617,6 +6617,7 @@ dependencies = [
  "reth-execution-types",
  "reth-metrics",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-storage-api",
  "reth-testing-utils",
  "reth-trie",
@@ -9112,6 +9113,7 @@ dependencies = [
  "reth-exex",
  "reth-network-p2p",
  "reth-network-peers",
+ "reth-node-types",
  "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",
@@ -9460,6 +9462,7 @@ version = "1.1.2"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
+ "arbitrary",
  "assert_matches",
  "criterion",
  "itertools 0.13.0",

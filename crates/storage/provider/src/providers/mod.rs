@@ -20,7 +20,6 @@ use reth_blockchain_tree_api::{
 };
 use reth_chain_state::{ChainInfoTracker, ForkChoiceNotifications, ForkChoiceSubscriptions};
 use reth_chainspec::{ChainInfo, EthereumHardforks};
-use reth_db::table::Value;
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_node_types::{FullNodePrimitives, NodeTypes, NodeTypesWithDB, TxTy};
@@ -77,8 +76,10 @@ where
         ChainSpec: EthereumHardforks,
         Storage: ChainStorage<Self::Primitives>,
         Primitives: FullNodePrimitives<
-            SignedTx: Value + From<TransactionSigned> + Into<TransactionSigned>,
             Receipt = reth_primitives::Receipt,
+            SignedTx = TransactionSigned,
+            BlockHeader = alloy_consensus::Header,
+            BlockBody = reth_primitives::BlockBody,
         >,
     >,
 {
@@ -89,8 +90,10 @@ impl<T> NodeTypesForProvider for T where
         ChainSpec: EthereumHardforks,
         Storage: ChainStorage<T::Primitives>,
         Primitives: FullNodePrimitives<
-            SignedTx: Value + From<TransactionSigned> + Into<TransactionSigned>,
             Receipt = reth_primitives::Receipt,
+            SignedTx = TransactionSigned,
+            BlockHeader = alloy_consensus::Header,
+            BlockBody = reth_primitives::BlockBody,
         >,
     >
 {
@@ -117,7 +120,7 @@ pub struct BlockchainProvider<N: NodeTypesWithDB> {
     /// The blockchain tree instance.
     tree: Arc<dyn TreeViewer>,
     /// Tracks the chain info wrt forkchoice updates
-    chain_info: ChainInfoTracker,
+    chain_info: ChainInfoTracker<N::Primitives>,
 }
 
 impl<N: ProviderNodeTypes> Clone for BlockchainProvider<N> {

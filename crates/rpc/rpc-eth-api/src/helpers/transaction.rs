@@ -315,7 +315,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     {
         async move {
             if let Some(block) = self.block_with_senders(block_id).await? {
-                if let Some(tx) = block.transactions().nth(index) {
+                if let Some(tx) = block.transactions().get(index) {
                     return Ok(Some(tx.encoded_2718().into()))
                 }
             }

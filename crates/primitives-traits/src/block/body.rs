@@ -1,6 +1,6 @@
 //! Block body abstraction.
 
-use alloc::fmt;
+use alloc::{fmt, vec::Vec};
 
 use crate::{FullSignedTx, InMemorySize, MaybeArbitrary, MaybeSerde, SignedTransaction};
 
@@ -10,7 +10,6 @@ pub trait FullBlockBody: BlockBody<Transaction: FullSignedTx> {}
 impl<T> FullBlockBody for T where T: BlockBody<Transaction: FullSignedTx> {}
 
 /// Abstraction for block's body.
-#[auto_impl::auto_impl(&, Arc)]
 pub trait BlockBody:
     Send
     + Sync
@@ -31,4 +30,7 @@ pub trait BlockBody:
 
     /// Returns reference to transactions in block.
     fn transactions(&self) -> &[Self::Transaction];
+
+    /// Consume the block body and return a [`Vec`] of transactions.
+    fn into_transactions(self) -> Vec<Self::Transaction>;
 }

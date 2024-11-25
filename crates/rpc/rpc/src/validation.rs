@@ -15,7 +15,9 @@ use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
 use reth_ethereum_consensus::GAS_LIMIT_BOUND_DIVISOR;
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{Block, GotExpected, Receipt, SealedBlockWithSenders, SealedHeader};
+use reth_primitives::{
+    Block, GotExpected, NodePrimitives, Receipt, SealedBlockWithSenders, SealedHeader,
+};
 use reth_provider::{
     AccountReader, BlockExecutionInput, BlockExecutionOutput, BlockReaderIdExt, HeaderProvider,
     StateProviderFactory, WithdrawalsProvider,
@@ -95,7 +97,7 @@ where
         + AccountReader
         + WithdrawalsProvider
         + 'static,
-    E: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
+    E: BlockExecutorProvider<Primitives: NodePrimitives<Receipt = reth_primitives::Receipt>>,
 {
     /// Validates the given block and a [`BidTrace`] against it.
     pub async fn validate_message_against_block(
@@ -407,7 +409,7 @@ where
         + WithdrawalsProvider
         + Clone
         + 'static,
-    E: BlockExecutorProvider<Primitives = reth_primitives::EthPrimitives>,
+    E: BlockExecutorProvider<Primitives: NodePrimitives<Receipt = reth_primitives::Receipt>>,
 {
     async fn validate_builder_submission_v1(
         &self,
