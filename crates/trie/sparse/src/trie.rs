@@ -53,9 +53,13 @@ impl SparseTrie {
     /// # Returns
     ///
     /// Mutable reference to [`RevealedSparseTrie`].
-    pub fn reveal_root(&mut self, root: TrieNode) -> SparseTrieResult<&mut RevealedSparseTrie> {
+    pub fn reveal_root(
+        &mut self,
+        root: TrieNode,
+        retain_updates: bool,
+    ) -> SparseTrieResult<&mut RevealedSparseTrie> {
         if self.is_blind() {
-            *self = Self::Revealed(Box::new(RevealedSparseTrie::from_root(root)?))
+            *self = Self::Revealed(Box::new(RevealedSparseTrie::from_root(root, retain_updates)?))
         }
         Ok(self.as_revealed_mut().unwrap())
     }
@@ -77,7 +81,7 @@ impl SparseTrie {
     /// Wipe the trie, removing all values and nodes, and replacing the root with an empty node.
     pub fn wipe(&mut self) -> SparseTrieResult<()> {
         let revealed = self.as_revealed_mut().ok_or(SparseTrieError::Blind)?;
-        revealed.wipe()?;
+        revealed.wipe();
         Ok(())
     }
 
@@ -139,19 +143,20 @@ impl Default for RevealedSparseTrie {
 
 impl RevealedSparseTrie {
     /// Create new revealed sparse trie from the given root node.
-    pub fn from_root(node: TrieNode) -> SparseTrieResult<Self> {
+    pub fn from_root(node: TrieNode, retain_updates: bool) -> SparseTrieResult<Self> {
         let mut this = Self {
             nodes: HashMap::default(),
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
             rlp_buf: Vec::new(),
             updates: None,
-        };
+        }
+        .with_updates(retain_updates);
         this.reveal_node(Nibbles::default(), node)?;
         Ok(this)
     }
 
-    /// Makes the sparse trie to store updated branch nodes.
+    /// Set the retention of branch node updates and deletions.
     pub fn with_updates(mut self, retain_updates: bool) -> Self {
         if retain_updates {
             self.updates = Some(SparseTrieUpdates::default());
@@ -600,10 +605,9 @@ impl RevealedSparseTrie {
     }
 
     /// Wipe the trie, removing all values and nodes, and replacing the root with an empty node.
-    pub fn wipe(&mut self) -> SparseTrieResult<()> {
+    pub fn wipe(&mut self) {
         *self = Self::default();
         self.prefix_set = PrefixSetMut::all();
-        Ok(())
     }
 
     /// Return the root of the sparse trie.
@@ -799,8 +803,7 @@ impl RevealedSparseTrie {
                                 }
 
                                 // Set the hash mask. If a child node has a hash value AND is a
-                                // branch node, set the hash mask
-                                // and save the hash.
+                                // branch node, set the hash mask and save the hash.
                                 let hash = child.as_hash().filter(|_| node_type.is_branch());
                                 hash_mask_values.push(hash.is_some());
                                 if let Some(hash) = hash {
@@ -1586,7 +1589,7 @@ mod tests {
             TrieMask::new(0b11),
         ));
 
-        let mut sparse = RevealedSparseTrie::from_root(branch.clone()).unwrap();
+        let mut sparse = RevealedSparseTrie::from_root(branch.clone(), false).unwrap();
 
         // Reveal a branch node and one of its children
         //
@@ -1748,6 +1751,7 @@ mod tests {
                 .take_proof_nodes();
         let mut sparse = RevealedSparseTrie::from_root(
             TrieNode::decode(&mut &proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
+            false,
         )
         .unwrap();
 
@@ -1822,6 +1826,7 @@ mod tests {
         .take_proof_nodes();
         let mut sparse = RevealedSparseTrie::from_root(
             TrieNode::decode(&mut &proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
+            false,
         )
         .unwrap();
 
@@ -1892,6 +1897,7 @@ mod tests {
                 .take_proof_nodes();
         let mut sparse = RevealedSparseTrie::from_root(
             TrieNode::decode(&mut &proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
+            false,
         )
         .unwrap();
 
@@ -2055,7 +2061,7 @@ mod tests {
             .unwrap();
         sparse.update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), value).unwrap();
 
-        sparse.wipe().unwrap();
+        sparse.wipe();
 
         assert_eq!(sparse.root(), EMPTY_ROOT_HASH);
     }
