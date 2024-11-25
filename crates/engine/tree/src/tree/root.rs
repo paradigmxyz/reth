@@ -1,14 +1,26 @@
 //! State root task related functionality.
 
+use alloy_primitives::map::FbHashMap;
+use alloy_rlp::{BufMut, Encodable};
 use reth_provider::providers::ConsistentDbView;
-use reth_trie::{updates::TrieUpdates, TrieInput};
+use reth_trie::{
+    updates::TrieUpdates, HashedPostState, MultiProof, Nibbles, TrieAccount, TrieInput,
+    EMPTY_ROOT_HASH,
+};
 use reth_trie_parallel::root::ParallelStateRootError;
-use revm_primitives::{EvmState, B256};
-use std::sync::{
-    mpsc::{self, Receiver, RecvError},
-    Arc,
+use reth_trie_sparse::{SparseStateTrie, SparseStateTrieResult};
+use revm_primitives::{map::FbHashSet, EvmState, B256};
+use std::{
+    sync::{
+        mpsc::{self, Receiver, RecvError},
+        Arc,
+    },
+    time::{Duration, Instant},
 };
 use tracing::debug;
+
+/// The level below which the sparse trie hashes are calculated in [`update_sparse_trie`].
+const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
 
 /// Result of the state root calculation
 pub(crate) type StateRootResult = Result<(B256, TrieUpdates), ParallelStateRootError>;
@@ -131,6 +143,74 @@ where
         //    * return final state root result
         Ok((B256::default(), TrieUpdates::default()))
     }
+}
+
+/// Updates the sparse trie with the given proofs and state, and returns the updated trie and the
+/// time it took.
+#[allow(dead_code)]
+fn update_sparse_trie(
+    mut trie: Box<SparseStateTrie>,
+    multiproof: MultiProof,
+    targets: FbHashMap<32, FbHashSet<32>>,
+    state: HashedPostState,
+) -> SparseStateTrieResult<(Box<SparseStateTrie>, Duration)> {
+    let started_at = Instant::now();
+
+    // Reveal new accounts and storage slots.
+    for (address, slots) in targets {
+        let path = Nibbles::unpack(address);
+        trie.reveal_account(address, multiproof.account_proof_nodes(&path))?;
+
+        let storage_proofs = multiproof.storage_proof_nodes(address, slots);
+
+        for (slot, proof) in storage_proofs {
+            trie.reveal_storage_slot(address, slot, proof)?;
+        }
+    }
+
+    // Update storage slots with new values and calculate storage roots.
+    let mut storage_roots = FbHashMap::default();
+    for (address, storage) in state.storages {
+        if storage.wiped {
+            trie.wipe_storage(address)?;
+            storage_roots.insert(address, EMPTY_ROOT_HASH);
+        }
+
+        for (slot, value) in storage.storage {
+            let slot_path = Nibbles::unpack(slot);
+            trie.update_storage_leaf(
+                address,
+                slot_path,
+                alloy_rlp::encode_fixed_size(&value).to_vec(),
+            )?;
+        }
+
+        storage_roots.insert(address, trie.storage_root(address).unwrap());
+    }
+
+    // Update accounts with new values and include updated storage roots
+    for (address, account) in state.accounts {
+        let path = Nibbles::unpack(address);
+
+        if let Some(account) = account {
+            let storage_root = storage_roots
+                .remove(&address)
+                .map(Some)
+                .unwrap_or_else(|| trie.storage_root(address))
+                .unwrap_or(EMPTY_ROOT_HASH);
+
+            let mut encoded = Vec::with_capacity(128);
+            TrieAccount::from((account, storage_root)).encode(&mut encoded as &mut dyn BufMut);
+            trie.update_account_leaf(path, encoded)?;
+        } else {
+            trie.remove_account_leaf(&path)?;
+        }
+    }
+
+    trie.calculate_below_level(SPARSE_TRIE_INCREMENTAL_LEVEL);
+    let elapsed = started_at.elapsed();
+
+    Ok((trie, elapsed))
 }
 
 #[cfg(test)]

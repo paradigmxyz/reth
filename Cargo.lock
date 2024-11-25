@@ -7281,6 +7281,7 @@ dependencies = [
  "reth-tracing",
  "reth-trie",
  "reth-trie-parallel",
+ "reth-trie-sparse",
  "revm-primitives",
  "thiserror 1.0.69",
  "tokio",
