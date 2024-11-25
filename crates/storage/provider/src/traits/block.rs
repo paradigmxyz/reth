@@ -69,7 +69,7 @@ pub trait BlockWriter: Send + Sync {
     /// Return [StoredBlockBodyIndices] that contains indices of the first and last transactions and
     /// transition in the block.
     ///
-    /// Accepts [`StorageLocation`] value which specifies where should transactions and headers be
+    /// Accepts [`StorageLocation`] value which specifies where transactions and headers should be
     /// written.
     fn insert_block(
         &self,
