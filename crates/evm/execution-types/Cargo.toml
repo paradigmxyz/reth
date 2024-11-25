@@ -58,4 +58,5 @@ std = [
 	"revm/std",
 	"serde?/std",
 	"reth-primitives-traits/std",
+    "alloy-consensus/std",
 ]
