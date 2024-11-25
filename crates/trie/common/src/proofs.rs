@@ -26,6 +26,31 @@ pub struct MultiProof {
 }
 
 impl MultiProof {
+    /// Return the account proof nodes for the given account path.
+    pub fn account_proof_nodes(&self, path: &Nibbles) -> Vec<(Nibbles, Bytes)> {
+        self.account_subtree.matching_nodes_sorted(path)
+    }
+
+    /// Return the storage proof nodes for the given storage slots of the account path.
+    pub fn storage_proof_nodes(
+        &self,
+        hashed_address: B256,
+        slots: impl IntoIterator<Item = B256>,
+    ) -> Vec<(B256, Vec<(Nibbles, Bytes)>)> {
+        self.storages
+            .get(&hashed_address)
+            .map(|storage_mp| {
+                slots
+                    .into_iter()
+                    .map(|slot| {
+                        let nibbles = Nibbles::unpack(slot);
+                        (slot, storage_mp.subtree.matching_nodes_sorted(&nibbles))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// Construct the account proof from the multiproof.
     pub fn account_proof(
         &self,
@@ -37,10 +62,9 @@ impl MultiProof {
 
         // Retrieve the account proof.
         let proof = self
-            .account_subtree
-            .matching_nodes_iter(&nibbles)
-            .sorted_by(|a, b| a.0.cmp(b.0))
-            .map(|(_, node)| node.clone())
+            .account_proof_nodes(&nibbles)
+            .into_iter()
+            .map(|(_, node)| node)
             .collect::<Vec<_>>();
 
         // Inspect the last node in the proof. If it's a leaf node with matching suffix,
