@@ -17,6 +17,7 @@
 //!
 //! ```
 //! use alloy_consensus::Header;
+//! use reth_chainspec::{ChainSpec, ChainSpecProvider};
 //! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 //! use reth_network_api::{NetworkInfo, Peers};
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
@@ -36,7 +37,10 @@
 //!     block_executor: BlockExecutor,
 //!     consensus: Consensus,
 //! ) where
-//!     Provider: FullRpcProvider + AccountReader + ChangeSetReader,
+//!     Provider: FullRpcProvider
+//!         + AccountReader
+//!         + ChangeSetReader
+//!         + ChainSpecProvider<ChainSpec = ChainSpec>,
 //!     Pool: TransactionPool + Unpin + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions + Clone + 'static,
@@ -74,6 +78,7 @@
 //!
 //! ```
 //! use alloy_consensus::Header;
+//! use reth_chainspec::{ChainSpec, ChainSpecProvider};
 //! use reth_engine_primitives::EngineTypes;
 //! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 //! use reth_network_api::{NetworkInfo, Peers};
@@ -109,7 +114,10 @@
 //!     block_executor: BlockExecutor,
 //!     consensus: Consensus,
 //! ) where
-//!     Provider: FullRpcProvider + AccountReader + ChangeSetReader,
+//!     Provider: FullRpcProvider
+//!         + AccountReader
+//!         + ChangeSetReader
+//!         + ChainSpecProvider<ChainSpec = ChainSpec>,
 //!     Pool: TransactionPool + Unpin + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions + Clone + 'static,
@@ -2029,7 +2037,7 @@ impl TransportRpcModules {
     /// Returns [Ok(false)] if no http transport is configured.
     pub fn merge_http(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
         if let Some(ref mut http) = self.http {
-            return http.merge(other.into()).map(|_| true)
+            return http.merge(other.into()).map(|_| true);
         }
         Ok(false)
     }
@@ -2041,7 +2049,7 @@ impl TransportRpcModules {
     /// Returns [Ok(false)] if no ws transport is configured.
     pub fn merge_ws(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
         if let Some(ref mut ws) = self.ws {
-            return ws.merge(other.into()).map(|_| true)
+            return ws.merge(other.into()).map(|_| true);
         }
         Ok(false)
     }
@@ -2053,7 +2061,7 @@ impl TransportRpcModules {
     /// Returns [Ok(false)] if no ipc transport is configured.
     pub fn merge_ipc(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
         if let Some(ref mut ipc) = self.ipc {
-            return ipc.merge(other.into()).map(|_| true)
+            return ipc.merge(other.into()).map(|_| true);
         }
         Ok(false)
     }
