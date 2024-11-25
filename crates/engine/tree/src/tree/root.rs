@@ -263,6 +263,7 @@ where
             .collect::<HashMap<_, _>>();
 
         rayon::spawn(move || {
+            debug!(target: "engine::root", ?targets, "Spawning proof task");
             let provider = match view.provider_ro() {
                 Ok(provider) => provider,
                 Err(error) => {
@@ -606,16 +607,19 @@ fn update_sparse_trie(
     targets: FbHashMap<32, FbHashSet<32>>,
     state: HashedPostState,
 ) -> SparseStateTrieResult<(Box<SparseStateTrie>, Duration)> {
+    debug!(target: "engine::root::sparse", "Updating sparse trie");
     let started_at = Instant::now();
 
     // Reveal new accounts and storage slots.
     for (address, slots) in targets {
+        debug!(target: "engine::root::sparse", ?address, "Revealing account");
         let path = Nibbles::unpack(address);
         trie.reveal_account(address, multiproof.account_proof_nodes(&path))?;
 
         let storage_proofs = multiproof.storage_proof_nodes(address, slots);
 
         for (slot, proof) in storage_proofs {
+            debug!(target: "engine::root::sparse", ?address, ?slot, "Revealing storage slot");
             trie.reveal_storage_slot(address, slot, proof)?;
         }
     }
@@ -624,11 +628,13 @@ fn update_sparse_trie(
     let mut storage_roots = FbHashMap::default();
     for (address, storage) in state.storages {
         if storage.wiped {
+            debug!(target: "engine::root::sparse", ?address, "Wiping storage");
             trie.wipe_storage(address)?;
             storage_roots.insert(address, EMPTY_ROOT_HASH);
         }
 
         for (slot, value) in storage.storage {
+            debug!(target: "engine::root::sparse", ?address, ?slot, "Updating storage slot");
             let slot_path = Nibbles::unpack(slot);
             trie.update_storage_leaf(
                 address,
@@ -651,16 +657,20 @@ fn update_sparse_trie(
                 .unwrap_or_else(|| trie.storage_root(address))
                 .unwrap_or(EMPTY_ROOT_HASH);
 
+            debug!(target: "engine::root::sparse", ?address, "Updating account");
             let mut encoded = Vec::with_capacity(128);
             TrieAccount::from((account, storage_root)).encode(&mut encoded as &mut dyn BufMut);
             trie.update_account_leaf(path, encoded)?;
         } else {
+            debug!(target: "engine::root::sparse", ?address, "Removing account");
             trie.remove_account_leaf(&path)?;
         }
     }
 
     trie.calculate_below_level(SPARSE_TRIE_INCREMENTAL_LEVEL);
     let elapsed = started_at.elapsed();
+
+    debug!(target: "engine::root::sparse", "Sparse trie updated");
 
     Ok((trie, elapsed))
 }
