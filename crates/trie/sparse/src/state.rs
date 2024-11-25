@@ -219,7 +219,6 @@ mod tests {
     use alloy_rlp::EMPTY_STRING_CODE;
     use arbitrary::Arbitrary;
     use assert_matches::assert_matches;
-    use itertools::Itertools;
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use reth_primitives_traits::Account;
     use reth_trie::{
@@ -314,18 +313,8 @@ mod tests {
 
         let storage_root = storage_hash_builder.root();
         let proof_nodes = storage_hash_builder.take_proof_nodes();
-        let storage_proof_1 = proof_nodes
-            .iter()
-            .filter(|(path, _)| path.is_empty() || slot_path_1.common_prefix_length(path) > 0)
-            .map(|(path, proof)| (path.clone(), proof.clone()))
-            .sorted_by_key(|(path, _)| path.clone())
-            .collect::<Vec<_>>();
-        let storage_proof_2 = proof_nodes
-            .iter()
-            .filter(|(path, _)| path.is_empty() || slot_path_2.common_prefix_length(path) > 0)
-            .map(|(path, proof)| (path.clone(), proof.clone()))
-            .sorted_by_key(|(path, _)| path.clone())
-            .collect::<Vec<_>>();
+        let storage_proof_1 = proof_nodes.matching_nodes_sorted(&slot_path_1);
+        let storage_proof_2 = proof_nodes.matching_nodes_sorted(&slot_path_2);
 
         let address_1 = b256!("1000000000000000000000000000000000000000000000000000000000000000");
         let address_path_1 = Nibbles::unpack(address_1);
@@ -346,18 +335,8 @@ mod tests {
 
         let root = hash_builder.root();
         let proof_nodes = hash_builder.take_proof_nodes();
-        let proof_1 = proof_nodes
-            .iter()
-            .filter(|(path, _)| path.is_empty() || address_path_1.common_prefix_length(path) > 0)
-            .map(|(path, proof)| (path.clone(), proof.clone()))
-            .sorted_by_key(|(path, _)| path.clone())
-            .collect::<Vec<_>>();
-        let proof_2 = proof_nodes
-            .iter()
-            .filter(|(path, _)| path.is_empty() || address_path_2.common_prefix_length(path) > 0)
-            .map(|(path, proof)| (path.clone(), proof.clone()))
-            .sorted_by_key(|(path, _)| path.clone())
-            .collect::<Vec<_>>();
+        let proof_1 = proof_nodes.matching_nodes_sorted(&address_path_1);
+        let proof_2 = proof_nodes.matching_nodes_sorted(&address_path_2);
 
         let mut sparse = SparseStateTrie::default().with_updates(true);
         sparse.reveal_account(address_1, proof_1).unwrap();
