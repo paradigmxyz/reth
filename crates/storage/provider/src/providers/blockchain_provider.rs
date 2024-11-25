@@ -27,14 +27,14 @@ use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::{BlockTy, NodeTypesWithDB, TxTy};
 use reth_primitives::{
-    Account, Block, BlockWithSenders, NodePrimitives, Receipt, SealedBlock, SealedBlockFor,
-    SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash,
+    Account, Block, BlockWithSenders, EthPrimitives, NodePrimitives, Receipt, SealedBlock,
+    SealedBlockFor, SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta,
+    TransactionSigned, TransactionSignedNoHash,
 };
 use reth_primitives_traits::BlockBody as _;
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::{DBProvider, StorageChangeSetReader};
+use reth_storage_api::{DBProvider, NodePrimitivesProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
@@ -150,6 +150,10 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
     }
 }
 
+impl<N: NodeTypesWithDB> NodePrimitivesProvider for BlockchainProvider2<N> {
+    type Primitives = N::Primitives;
+}
+
 impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider2<N> {
     type DB = N::DB;
     type Provider = <ProviderFactory<N> as DatabaseProviderFactory>::Provider;
@@ -165,8 +169,6 @@ impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider2<N> {
 }
 
 impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider2<N> {
-    type Primitives = N::Primitives;
-
     fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         self.database.static_file_provider()
     }
@@ -711,8 +713,10 @@ where
     }
 }
 
-impl<N: NodeTypesWithDB> CanonStateSubscriptions for BlockchainProvider2<N> {
-    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
+impl<N: NodeTypesWithDB<Primitives = EthPrimitives>> CanonStateSubscriptions
+    for BlockchainProvider2<N>
+{
+    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<Self::Primitives> {
         self.canonical_in_memory_state.subscribe_canon_state()
     }
 }

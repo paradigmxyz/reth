@@ -56,7 +56,8 @@ use reth_primitives_traits::{Block as _, BlockBody as _, SignedTransaction};
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    BlockBodyReader, StateProvider, StorageChangeSetReader, TryIntoHistoricalStateProvider,
+    BlockBodyReader, NodePrimitivesProvider, StateProvider, StorageChangeSetReader,
+    TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
@@ -207,9 +208,11 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX, N: NodeTypes> StaticFileProviderFactory for DatabaseProvider<TX, N> {
+impl<TX, N: NodeTypes> NodePrimitivesProvider for DatabaseProvider<TX, N> {
     type Primitives = N::Primitives;
+}
 
+impl<TX, N: NodeTypes> StaticFileProviderFactory for DatabaseProvider<TX, N> {
     /// Returns a static file provider
     fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         self.static_file_provider.clone()
@@ -2678,7 +2681,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockExecu
         &self,
         block: BlockNumber,
         remove_transactions_from: StorageLocation,
-    ) -> ProviderResult<Chain> {
+    ) -> ProviderResult<Chain<Self::Primitives>> {
         let range = block + 1..=self.last_block_number()?;
 
         self.unwind_trie_state_range(range.clone())?;

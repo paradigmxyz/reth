@@ -1,7 +1,9 @@
 use alloy_primitives::BlockNumber;
 use reth_db_api::models::StoredBlockBodyIndices;
 use reth_execution_types::{Chain, ExecutionOutcome};
+use reth_node_types::NodePrimitives;
 use reth_primitives::SealedBlockWithSenders;
+use reth_storage_api::NodePrimitivesProvider;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{updates::TrieUpdates, HashedPostStateSorted};
 
@@ -28,9 +30,10 @@ impl StorageLocation {
     }
 }
 
-/// BlockExecution Writer
-#[auto_impl::auto_impl(&, Arc, Box)]
-pub trait BlockExecutionWriter: BlockWriter + Send + Sync {
+/// `BlockExecution` Writer
+pub trait BlockExecutionWriter:
+    NodePrimitivesProvider<Primitives: NodePrimitives<Block = Self::Block>> + BlockWriter + Send + Sync
+{
     /// Take all of the blocks above the provided number and their execution result
     ///
     /// The passed block number will stay in the database.
@@ -38,7 +41,7 @@ pub trait BlockExecutionWriter: BlockWriter + Send + Sync {
         &self,
         block: BlockNumber,
         remove_transactions_from: StorageLocation,
-    ) -> ProviderResult<Chain>;
+    ) -> ProviderResult<Chain<Self::Primitives>>;
 
     /// Remove all of the blocks above the provided number and their execution result
     ///
@@ -48,6 +51,24 @@ pub trait BlockExecutionWriter: BlockWriter + Send + Sync {
         block: BlockNumber,
         remove_transactions_from: StorageLocation,
     ) -> ProviderResult<()>;
+}
+
+impl<T: BlockExecutionWriter> BlockExecutionWriter for &T {
+    fn take_block_and_execution_above(
+        &self,
+        block: BlockNumber,
+        remove_transactions_from: StorageLocation,
+    ) -> ProviderResult<Chain<Self::Primitives>> {
+        (*self).take_block_and_execution_above(block, remove_transactions_from)
+    }
+
+    fn remove_block_and_execution_above(
+        &self,
+        block: BlockNumber,
+        remove_transactions_from: StorageLocation,
+    ) -> ProviderResult<()> {
+        (*self).remove_block_and_execution_above(block, remove_transactions_from)
+    }
 }
 
 /// This just receives state, or [`ExecutionOutcome`], from the provider

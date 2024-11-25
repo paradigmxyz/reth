@@ -14,9 +14,11 @@ use reth_chainspec::{ChainSpec, EthereumHardfork, MIN_TRANSACTION_GAS};
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{
     proofs::{calculate_receipt_root, calculate_transaction_root, calculate_withdrawals_root},
-    BlockBody, NodePrimitives, Receipt, Receipts, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, Transaction, TransactionSigned, TransactionSignedEcRecovered,
+    BlockBody, EthPrimitives, NodePrimitives, Receipt, Receipts, SealedBlock,
+    SealedBlockWithSenders, SealedHeader, Transaction, TransactionSigned,
+    TransactionSignedEcRecovered,
 };
+use reth_storage_api::NodePrimitivesProvider;
 use reth_trie::{root::state_root_unhashed, updates::TrieUpdates, HashedPostState};
 use revm::{db::BundleState, primitives::AccountInfo};
 use std::{
@@ -312,6 +314,10 @@ impl TestCanonStateSubscriptions {
         let event = CanonStateNotification::Reorg { old, new };
         self.canon_notif_tx.lock().as_mut().unwrap().retain(|tx| tx.send(event.clone()).is_ok())
     }
+}
+
+impl NodePrimitivesProvider for TestCanonStateSubscriptions {
+    type Primitives = EthPrimitives;
 }
 
 impl CanonStateSubscriptions for TestCanonStateSubscriptions {
