@@ -637,7 +637,7 @@ fn update_sparse_trie(
             )?;
         }
 
-        storage_roots.insert(address, trie.storage_root(address).unwrap());
+        storage_roots.insert(address, trie.storage_root(address).unwrap_or(EMPTY_ROOT_HASH));
     }
 
     // Update accounts with new values and include updated storage roots
