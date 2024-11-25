@@ -39,8 +39,8 @@ use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{Block, GotExpected, SealedBlock, SealedBlockWithSenders, SealedHeader};
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, ExecutionOutcome,
-    HashedPostStateProvider, ProviderError, StateProviderBox, StateProviderFactory, StateReader,
-    StateRootProvider, TransactionVariant,
+    HashedPostStateProvider, ProviderError, StateCommitmentProvider, StateProviderBox,
+    StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
@@ -540,6 +540,7 @@ where
         + BlockReader
         + StateProviderFactory
         + StateReader
+        + StateCommitmentProvider
         + HashedPostStateProvider
         + Clone
         + 'static,

@@ -32,7 +32,7 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::{DBProvider, StorageChangeSetReader};
+use reth_storage_api::{DBProvider, StateCommitmentProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::HashedPostState;
 use reth_trie_db::StateCommitment;
@@ -165,6 +165,10 @@ impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider2<N> {
     fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
         self.database.database_provider_rw()
     }
+}
+
+impl<N: ProviderNodeTypes> StateCommitmentProvider for BlockchainProvider2<N> {
+    type StateCommitment = N::StateCommitment;
 }
 
 impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider2<N> {

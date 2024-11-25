@@ -26,7 +26,7 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::TryIntoHistoricalStateProvider;
+use reth_storage_api::{StateCommitmentProvider, TryIntoHistoricalStateProvider};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::HashedPostState;
 use reth_trie_db::StateCommitment;
@@ -219,6 +219,10 @@ impl<N: ProviderNodeTypes> DatabaseProviderFactory for ProviderFactory<N> {
     fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
         self.provider_rw().map(|provider| provider.0)
     }
+}
+
+impl<N: NodeTypesWithDB> StateCommitmentProvider for ProviderFactory<N> {
+    type StateCommitment = N::StateCommitment;
 }
 
 impl<N: NodeTypesWithDB> StaticFileProviderFactory for ProviderFactory<N> {

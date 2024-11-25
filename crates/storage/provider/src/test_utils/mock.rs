@@ -28,8 +28,8 @@ use reth_primitives::{
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    DatabaseProviderFactory, HashedPostStateProvider, StageCheckpointReader, StateProofProvider,
-    StorageRootProvider,
+    DatabaseProviderFactory, HashedPostStateProvider, StageCheckpointReader,
+    StateCommitmentProvider, StateProofProvider, StorageRootProvider,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
@@ -162,6 +162,10 @@ impl NodeTypes for MockNode {
     type ChainSpec = ChainSpec;
     type StateCommitment = MerklePatriciaTrie;
     type Storage = EthStorage;
+}
+
+impl StateCommitmentProvider for MockEthProvider {
+    type StateCommitment = <MockNode as NodeTypes>::StateCommitment;
 }
 
 impl DatabaseProviderFactory for MockEthProvider {

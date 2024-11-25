@@ -135,7 +135,9 @@ impl<'b, Provider: DBProvider + BlockNumReader + StateCommitmentProvider>
             );
         }
 
-        Ok(HashedPostState::from_reverts(self.tx(), self.block_number)?)
+        Ok(HashedPostState::from_reverts::<
+            <Provider::StateCommitment as StateCommitment>::KeyHasher,
+        >(self.tx(), self.block_number)?)
     }
 
     /// Retrieve revert hashed storage for this history provider and target address.
