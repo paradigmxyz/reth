@@ -95,6 +95,7 @@ pub(crate) enum StateRootMessage {
     ProofCalculated {
         /// The calculated proof
         proof: MultiProof,
+        state_update: HashedPostState,
         /// The index of this proof in the sequence of state updates
         sequence_number: u64,
     },
@@ -277,6 +278,7 @@ where
                 Ok(proof) => {
                     let _ = state_root_message_sender.send(StateRootMessage::ProofCalculated {
                         proof,
+                        state_update: hashed_state_update,
                         sequence_number: proof_sequence_number,
                     });
                 }
@@ -285,8 +287,6 @@ where
                 }
             }
         });
-
-        state.extend(hashed_state_update);
     }
 
     /// Handler for new proof calculated, aggregates all the existing sequential proofs.
@@ -372,7 +372,7 @@ where
                             self.tx.clone(),
                         );
                     }
-                    StateRootMessage::ProofCalculated { proof, sequence_number } => {
+                    StateRootMessage::ProofCalculated { proof, state_update, sequence_number } => {
                         proofs_processed += 1;
                         trace!(
                             target: "engine::root",
@@ -380,6 +380,7 @@ where
                             total_proofs = proofs_processed,
                             "Processing calculated proof"
                         );
+                        self.state.extend(state_update);
 
                         if let Some(combined_proof) = self.on_proof(proof, sequence_number) {
                             if self.sparse_trie.is_none() {
