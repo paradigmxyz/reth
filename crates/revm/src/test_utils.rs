@@ -7,11 +7,11 @@ use alloy_primitives::{
 use reth_primitives::{Account, Bytecode};
 use reth_storage_api::{
     AccountReader, BlockHashReader, HashedPostStateProvider, HashedStorageProvider,
-    StateProofProvider, StateProvider, StateRootProvider, StorageRootProvider,
+    KeyHasherProvider, StateProofProvider, StateProvider, StateRootProvider, StorageRootProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, KeccakKeyHasher,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, KeccakKeyHasher, KeyHasher,
     MultiProof, StorageProof, TrieInput,
 };
 
@@ -150,6 +150,12 @@ impl HashedPostStateProvider for StateProviderTest {
 impl HashedStorageProvider for StateProviderTest {
     fn hashed_storage(&self, account: &revm::db::BundleAccount) -> HashedStorage {
         HashedStorage::from_bundle_account::<KeccakKeyHasher>(account)
+    }
+}
+
+impl KeyHasherProvider for StateProviderTest {
+    fn hash_key(&self, bytes: &[u8]) -> B256 {
+        KeccakKeyHasher::hash_key(bytes)
     }
 }
 

@@ -62,6 +62,9 @@ macro_rules! delegate_provider_impls {
             HashedStorageProvider $(where [$($generics)*])? {
                 fn hashed_storage(&self, bundle_state: &revm::db::BundleAccount) -> reth_trie::HashedStorage;
             }
+            KeyHasherProvider $(where [$($generics)*])? {
+                fn hash_key(&self, bytes: &[u8]) -> alloy_primitives::B256;
+            }
         );
     }
 }

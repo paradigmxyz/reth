@@ -15,10 +15,10 @@ use reth_primitives::{
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_server_types::result::rpc_err;
 use reth_rpc_types_compat::{block::from_block, TransactionCompat};
-use reth_storage_api::StateRootProvider;
+use reth_storage_api::{KeyHasherProvider, StateRootProvider};
 use reth_trie::{HashedPostState, HashedStorage};
 use revm::{db::CacheDB, Database};
-use revm_primitives::{keccak256, Address, BlockEnv, Bytes, ExecutionResult, TxKind, B256, U256};
+use revm_primitives::{Address, BlockEnv, Bytes, ExecutionResult, TxKind, B256, U256};
 
 use crate::{
     cache::db::StateProviderTraitObjWrapper,
@@ -231,7 +231,7 @@ pub fn build_block<T: TransactionCompat<Error: FromEthApiError>>(
 
     let mut hashed_state = HashedPostState::default();
     for (address, account) in &db.accounts {
-        let hashed_address = keccak256(address);
+        let hashed_address = db.db.hash_key(address.as_ref());
         hashed_state.accounts.insert(hashed_address, Some(account.info.clone().into()));
 
         let storage = hashed_state
@@ -241,7 +241,7 @@ pub fn build_block<T: TransactionCompat<Error: FromEthApiError>>(
 
         for (slot, value) in &account.storage {
             let slot = B256::from(*slot);
-            let hashed_slot = keccak256(slot);
+            let hashed_slot = db.db.hash_key(slot.as_ref());
             storage.storage.insert(hashed_slot, *value);
         }
     }

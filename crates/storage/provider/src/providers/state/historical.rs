@@ -16,15 +16,16 @@ use reth_db_api::{
 };
 use reth_primitives::{Account, Bytecode};
 use reth_storage_api::{
-    BlockNumReader, DBProvider, HashedStorageProvider, StateCommitmentProvider, StateProofProvider,
-    StorageRootProvider,
+    BlockNumReader, DBProvider, HashedStorageProvider, KeyHasherProvider, StateCommitmentProvider,
+    StateProofProvider, StorageRootProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     proof::{Proof, StorageProof},
     updates::TrieUpdates,
     witness::TrieWitness,
-    AccountProof, HashedPostState, HashedStorage, MultiProof, StateRoot, StorageRoot, TrieInput,
+    AccountProof, HashedPostState, HashedStorage, KeyHasher, MultiProof, StateRoot, StorageRoot,
+    TrieInput,
 };
 use reth_trie_db::{
     DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot,
@@ -394,13 +395,21 @@ impl<Provider: StateCommitmentProvider> HashedPostStateProvider
     }
 }
 
-impl<Provider: StateCommitmentProvider + Send + Sync> HashedStorageProvider
+impl<Provider: StateCommitmentProvider> HashedStorageProvider
     for HistoricalStateProviderRef<'_, Provider>
 {
     fn hashed_storage(&self, account: &revm::db::BundleAccount) -> HashedStorage {
         HashedStorage::from_bundle_account::<
             <Provider::StateCommitment as StateCommitment>::KeyHasher,
         >(account)
+    }
+}
+
+impl<Provider: StateCommitmentProvider> KeyHasherProvider
+    for HistoricalStateProviderRef<'_, Provider>
+{
+    fn hash_key(&self, bytes: &[u8]) -> B256 {
+        <<Provider::StateCommitment as StateCommitment>::KeyHasher as KeyHasher>::hash_key(bytes)
     }
 }
 

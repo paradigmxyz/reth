@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
 
 use alloy_consensus::Header;
-use alloy_primitives::{keccak256, B256, U256};
+use alloy_primitives::{B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use eyre::OptionExt;
 use pretty_assertions::Comparison;
@@ -68,10 +68,9 @@ where
         // TODO(alexey): unify with `DebugApi::debug_execution_witness`
 
         // Setup database.
+        let provider = self.provider.state_by_block_hash(parent_header.hash())?;
         let mut db = StateBuilder::new()
-            .with_database(StateProviderDatabase::new(
-                self.provider.state_by_block_hash(parent_header.hash())?,
-            ))
+            .with_database(StateProviderDatabase::new(&provider))
             .with_bundle_update()
             .build();
 
@@ -132,7 +131,7 @@ where
         // referenced accounts + storage slots.
         let mut hashed_state = db.database.hashed_post_state(&bundle_state);
         for (address, account) in db.cache.accounts {
-            let hashed_address = keccak256(address);
+            let hashed_address = provider.hash_key(address.as_ref());
             hashed_state
                 .accounts
                 .insert(hashed_address, account.account.as_ref().map(|a| a.info.clone().into()));
@@ -147,7 +146,7 @@ where
 
                 for (slot, value) in account.storage {
                     let slot = B256::from(slot);
-                    let hashed_slot = keccak256(slot);
+                    let hashed_slot = provider.hash_key(slot.as_ref());
                     storage.storage.insert(hashed_slot, value);
 
                     state_preimages.insert(hashed_slot, alloy_rlp::encode(slot).into());

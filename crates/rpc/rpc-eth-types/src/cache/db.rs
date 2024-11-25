@@ -8,7 +8,9 @@ use alloy_primitives::{
 };
 use reth_errors::ProviderResult;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB, DatabaseRef};
-use reth_storage_api::{HashedPostStateProvider, HashedStorageProvider, StateProvider};
+use reth_storage_api::{
+    HashedPostStateProvider, HashedStorageProvider, KeyHasherProvider, StateProvider,
+};
 use reth_trie::HashedStorage;
 use revm::Database;
 
@@ -142,6 +144,12 @@ impl HashedPostStateProvider for StateProviderTraitObjWrapper<'_> {
 impl HashedStorageProvider for StateProviderTraitObjWrapper<'_> {
     fn hashed_storage(&self, account: &revm::db::BundleAccount) -> HashedStorage {
         self.0.hashed_storage(account)
+    }
+}
+
+impl KeyHasherProvider for StateProviderTraitObjWrapper<'_> {
+    fn hash_key(&self, bytes: &[u8]) -> B256 {
+        self.0.hash_key(bytes)
     }
 }
 
