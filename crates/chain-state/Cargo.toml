@@ -52,7 +52,6 @@ alloy-signer.workspace = true
 alloy-signer-local.workspace = true
 alloy-consensus.workspace = true
 rand.workspace = true
-revm.workspace = true
 
 [features]
 test-utils = [
@@ -62,4 +61,5 @@ test-utils = [
     "reth-chainspec/test-utils",
     "reth-primitives/test-utils",
     "reth-trie/test-utils",
+    "revm/test-utils",
 ]
