@@ -15,6 +15,7 @@ reth-consensus.workspace = true
 reth-execution-errors.workspace = true
 reth-primitives.workspace = true
 reth-storage-errors.workspace = true
+reth-network.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
