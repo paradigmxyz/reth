@@ -1207,19 +1207,16 @@ where
                 match request {
                     EngineApiRequest::InsertExecutedBlock(block) => {
                         debug!(target: "engine::tree", block=?block.block().num_hash(), "inserting already executed block");
-                        self.state.tree_state.insert_executed(block.clone());
+                        let sealed_block = block.block.clone();
+                        self.state.tree_state.insert_executed(block);
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
 
-                        let block_ref = block.block();
-                        if self.state.tree_state.is_canonical(block_ref.parent_hash) {
-                            self.emit_event(EngineApiEvent::BeaconConsensus(
-                                BeaconConsensusEngineEvent::CanonicalBlockAdded(
-                                    block_ref.clone().into(),
-                                    Duration::ZERO,
-                                    Some(block_ref.parent_hash),
-                                ),
-                            ));
-                        }
+                        self.emit_event(EngineApiEvent::BeaconConsensus(
+                            BeaconConsensusEngineEvent::CanonicalBlockAdded(
+                                sealed_block,
+                                Some(Duration::ZERO),
+                            ),
+                        ));
                     }
                     EngineApiRequest::Beacon(request) => {
                         match request {
@@ -2300,11 +2297,7 @@ where
         let engine_event = if self.is_fork(block_hash)? {
             BeaconConsensusEngineEvent::ForkBlockAdded(sealed_block, elapsed)
         } else {
-            BeaconConsensusEngineEvent::CanonicalBlockAdded(
-                sealed_block.clone(),
-                elapsed,
-                Some(sealed_block.parent_hash),
-            )
+            BeaconConsensusEngineEvent::CanonicalBlockAdded(sealed_block, Some(elapsed))
         };
         self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
 
@@ -2946,7 +2939,7 @@ mod tests {
             let event = self.from_tree_rx.recv().await.unwrap();
             match event {
                 EngineApiEvent::BeaconConsensus(
-                    BeaconConsensusEngineEvent::CanonicalBlockAdded(block, _, _),
+                    BeaconConsensusEngineEvent::CanonicalBlockAdded(block, _),
                 ) => {
                     assert!(block.hash() == expected_hash);
                 }
