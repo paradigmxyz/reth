@@ -250,6 +250,7 @@ impl Encodable2718 for TransactionSigned {
             Transaction::Deposit(deposit_tx) => deposit_tx.eip2718_encoded_length(),
         }
     }
+
     fn encode_2718(&self, out: &mut dyn alloy_rlp::BufMut) {
         self.transaction.eip2718_encode(&self.signature, out)
     }

@@ -131,4 +131,5 @@ test-utils = [
     "revm/test-utils",
     "reth-prune-types/test-utils",
     "reth-stages-types/test-utils",
+    "reth-optimism-primitives?/arbitrary",
 ]

@@ -82,6 +82,7 @@ pub enum BlobStoreUpdates {
 #[cfg(test)]
 mod tests {
     use alloy_consensus::Header;
+    use alloy_primitives::PrimitiveSignature as Signature;
     use reth_execution_types::Chain;
     use reth_primitives::{
         BlockBody, SealedBlock, SealedBlockWithSenders, SealedHeader, Transaction,
@@ -127,22 +128,22 @@ mod tests {
                 ),
                 body: BlockBody {
                     transactions: vec![
-                        TransactionSigned {
-                            hash: tx1_hash.into(),
-                            transaction: Transaction::Eip4844(Default::default()),
-                            ..Default::default()
-                        },
-                        TransactionSigned {
-                            hash: tx2_hash.into(),
-                            transaction: Transaction::Eip4844(Default::default()),
-                            ..Default::default()
-                        },
+                        TransactionSigned::new(
+                            Transaction::Eip4844(Default::default()),
+                            Signature::test_signature(),
+                            tx1_hash,
+                        ),
+                        TransactionSigned::new(
+                            Transaction::Eip4844(Default::default()),
+                            Signature::test_signature(),
+                            tx2_hash,
+                        ),
                         // Another transaction that is not EIP-4844
-                        TransactionSigned {
-                            hash: B256::random().into(),
-                            transaction: Transaction::Eip7702(Default::default()),
-                            ..Default::default()
-                        },
+                        TransactionSigned::new(
+                            Transaction::Eip7702(Default::default()),
+                            Signature::test_signature(),
+                            B256::random(),
+                        ),
                     ],
                     ..Default::default()
                 },
@@ -160,16 +161,16 @@ mod tests {
                 ),
                 body: BlockBody {
                     transactions: vec![
-                        TransactionSigned {
-                            hash: tx3_hash.into(),
-                            transaction: Transaction::Eip1559(Default::default()),
-                            ..Default::default()
-                        },
-                        TransactionSigned {
-                            hash: tx2_hash.into(),
-                            transaction: Transaction::Eip2930(Default::default()),
-                            ..Default::default()
-                        },
+                        TransactionSigned::new(
+                            Transaction::Eip1559(Default::default()),
+                            Signature::test_signature(),
+                            tx3_hash,
+                        ),
+                        TransactionSigned::new(
+                            Transaction::Eip2930(Default::default()),
+                            Signature::test_signature(),
+                            tx2_hash,
+                        ),
                     ],
                     ..Default::default()
                 },

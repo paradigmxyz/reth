@@ -3,13 +3,13 @@
 use std::{fmt::Display, sync::Arc};
 
 use alloy_consensus::{Header, Transaction, EMPTY_OMMER_ROOT_HASH};
-use alloy_eips::merge::BEACON_NONCE;
-use alloy_primitives::{Address, Bytes, U256};
+use alloy_eips::{eip4895::Withdrawals, merge::BEACON_NONCE};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_engine::PayloadId;
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
-use reth_chainspec::ChainSpecProvider;
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_evm::{system_calls::SystemCaller, ConfigureEvm, NextBlockEnvAttributes};
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_chainspec::OpChainSpec;
@@ -318,13 +318,13 @@ where
             }
         }
 
-        let withdrawals_outcome = ctx.commit_withdrawals(state)?;
+        let withdrawals_root = ctx.commit_withdrawals(state)?;
 
         // merge all transitions into bundle state, this would apply the withdrawal balance changes
         // and 4788 contract call
         state.merge_transitions(BundleRetention::Reverts);
 
-        Ok(BuildOutcomeKind::Better { payload: ExecutedPayload { info, withdrawals_outcome } })
+        Ok(BuildOutcomeKind::Better { payload: ExecutedPayload { info, withdrawals_root } })
     }
 
     /// Builds the payload on top of the state.
@@ -338,10 +338,7 @@ where
         DB: Database<Error = ProviderError> + AsRef<P>,
         P: StateRootProvider,
     {
-        let ExecutedPayload {
-            info,
-            withdrawals_outcome: WithdrawalsOutcome { withdrawals, withdrawals_root },
-        } = match self.execute(&mut state, &ctx)? {
+        let ExecutedPayload { info, withdrawals_root } = match self.execute(&mut state, &ctx)? {
             BuildOutcomeKind::Better { payload } | BuildOutcomeKind::Freeze(payload) => payload,
             BuildOutcomeKind::Cancelled => return Ok(BuildOutcomeKind::Cancelled),
             BuildOutcomeKind::Aborted { fees } => return Ok(BuildOutcomeKind::Aborted { fees }),
@@ -419,12 +416,12 @@ where
             body: BlockBody {
                 transactions: info.executed_transactions,
                 ommers: vec![],
-                withdrawals,
+                withdrawals: ctx.withdrawals().cloned(),
             },
         };
 
         let sealed_block = Arc::new(block.seal_slow());
-        debug!(target: "payload_builder", sealed_block_header = ?sealed_block.header, "sealed built block");
+        debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), sealed_block_header = ?sealed_block.header, "sealed built block");
 
         // create the executed block data
         let executed = ExecutedBlock {
@@ -501,8 +498,8 @@ impl OpPayloadTransactions for () {
 pub struct ExecutedPayload {
     /// Tracked execution info
     pub info: ExecutionInfo,
-    /// Outcome after committing withdrawals.
-    pub withdrawals_outcome: WithdrawalsOutcome,
+    /// Withdrawal hash.
+    pub withdrawals_root: Option<B256>,
 }
 
 /// This acts as the container for executed transactions and its byproducts (receipts, gas used)
@@ -561,6 +558,13 @@ impl<EvmConfig> OpPayloadBuilderCtx<EvmConfig> {
     /// Returns the builder attributes.
     pub const fn attributes(&self) -> &OpPayloadBuilderAttributes {
         &self.config.attributes
+    }
+
+    /// Returns the withdrawals if shanghai is active.
+    pub fn withdrawals(&self) -> Option<&Withdrawals> {
+        self.chain_spec
+            .is_shanghai_active_at_timestamp(self.attributes().timestamp())
+            .then(|| &self.attributes().payload_attributes.withdrawals)
     }
 
     /// Returns the block gas limit to target.
@@ -652,10 +656,7 @@ impl<EvmConfig> OpPayloadBuilderCtx<EvmConfig> {
     }
 
     /// Commits the withdrawals from the payload attributes to the state.
-    pub fn commit_withdrawals<DB>(
-        &self,
-        db: &mut State<DB>,
-    ) -> Result<WithdrawalsOutcome, ProviderError>
+    pub fn commit_withdrawals<DB>(&self, db: &mut State<DB>) -> Result<Option<B256>, ProviderError>
     where
         DB: Database<Error = ProviderError>,
     {
@@ -663,7 +664,7 @@ impl<EvmConfig> OpPayloadBuilderCtx<EvmConfig> {
             db,
             &self.chain_spec,
             self.attributes().payload_attributes.timestamp,
-            self.attributes().payload_attributes.withdrawals.clone(),
+            &self.attributes().payload_attributes.withdrawals,
         )
     }
 

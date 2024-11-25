@@ -409,7 +409,7 @@ where
         &self,
         max: usize,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
-        self.pooled_transactions().into_iter().take(max).collect()
+        self.pool.pooled_transactions_max(max)
     }
 
     fn get_pooled_transaction_elements(

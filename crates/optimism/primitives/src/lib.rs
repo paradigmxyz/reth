@@ -9,19 +9,19 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 pub mod bedrock;
-pub mod tx_type;
+pub mod transaction;
 
-pub use tx_type::OpTxType;
+pub use transaction::{tx_type::OpTxType, OpTransaction};
 
 use alloy_consensus::Header;
-use reth_node_types::FullNodePrimitives;
+use reth_node_types::NodePrimitives;
 use reth_primitives::{Block, BlockBody, Receipt, TransactionSigned};
 
 /// Optimism primitive types.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct OpPrimitives;
 
-impl FullNodePrimitives for OpPrimitives {
+impl NodePrimitives for OpPrimitives {
     type Block = Block;
     type BlockHeader = Header;
     type BlockBody = BlockBody;

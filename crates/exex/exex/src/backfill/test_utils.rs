@@ -58,7 +58,7 @@ pub(crate) fn execute_block_and_commit_to_database<N>(
     block: &BlockWithSenders,
 ) -> eyre::Result<BlockExecutionOutput<Receipt>>
 where
-    N: ProviderNodeTypes<Primitives: FullNodePrimitives<Block = reth_primitives::Block>>,
+    N: ProviderNodeTypes<Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>>,
 {
     let provider = provider_factory.provider()?;
 
@@ -162,7 +162,7 @@ pub(crate) fn blocks_and_execution_outputs<N>(
     key_pair: Keypair,
 ) -> eyre::Result<Vec<(SealedBlockWithSenders, BlockExecutionOutput<Receipt>)>>
 where
-    N: ProviderNodeTypes<Primitives: FullNodePrimitives<Block = reth_primitives::Block>>,
+    N: ProviderNodeTypes<Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>>,
 {
     let (block1, block2) = blocks(chain_spec.clone(), key_pair)?;
 
@@ -184,7 +184,7 @@ pub(crate) fn blocks_and_execution_outcome<N>(
 ) -> eyre::Result<(Vec<SealedBlockWithSenders>, ExecutionOutcome)>
 where
     N: ProviderNodeTypes,
-    N::Primitives: FullNodePrimitives<Block = reth_primitives::Block>,
+    N::Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>,
 {
     let (block1, block2) = blocks(chain_spec.clone(), key_pair)?;
 
