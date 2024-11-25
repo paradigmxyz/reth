@@ -271,10 +271,14 @@ where
             .collect::<HashMap<_, _>>();
 
         rayon::spawn(move || {
-            let Ok(provider) = view.provider_ro() else {
-                error!(target: "engine::root", "Could not get provider");
-                return;
+            let provider = match view.provider_ro() {
+                Ok(provider) => provider,
+                Err(error) => {
+                    error!(target: "engine::root", ?error, "Could not get provider");
+                    return;
+                }
             };
+
             let result =
                 Proof::overlay_multiproof(provider.tx_ref(), input.as_ref().clone(), targets);
             match result {
@@ -458,7 +462,7 @@ where
                 }
                 Err(mpsc::TryRecvError::Empty) => {
                     // No state updates available, try to process internal messages
-                    match self.rx.try_recv() {
+                    match self.rx.recv() {
                         Ok(message) => {
                             if let Some(result) = self.handle_internal_message(
                                 message,
@@ -470,10 +474,7 @@ where
                                 return result;
                             }
                         }
-                        Err(mpsc::TryRecvError::Empty) => continue,
-                        Err(mpsc::TryRecvError::Disconnected) => {
-                            return Self::handle_internal_error()
-                        }
+                        Err(_) => return Self::handle_internal_error(),
                     }
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
