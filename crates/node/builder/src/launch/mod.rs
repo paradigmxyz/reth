@@ -16,13 +16,15 @@ use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
     BeaconConsensusEngine,
 };
-use reth_blockchain_tree::{noop::NoopBlockchainTree, BlockchainTreeConfig};
+use reth_blockchain_tree::{
+    externals::TreeNodeTypes, noop::NoopBlockchainTree, BlockchainTreeConfig,
+};
 use reth_chainspec::EthChainSpec;
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider};
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
 use reth_network::BlockDownloaderProvider;
-use reth_node_api::{AddOnsContext, FullNodePrimitives, FullNodeTypes, NodeTypesWithEngine};
+use reth_node_api::{AddOnsContext, FullNodeTypes, NodeTypesWithEngine};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
@@ -98,11 +100,10 @@ impl DefaultNodeLauncher {
 
 impl<Types, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for DefaultNodeLauncher
 where
-    Types: ProviderNodeTypes + NodeTypesWithEngine,
+    Types: ProviderNodeTypes + NodeTypesWithEngine + TreeNodeTypes,
     T: FullNodeTypes<Provider = BlockchainProvider<Types>, Types = Types>,
     CB: NodeComponentsBuilder<T>,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>,
-    Types::Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
 

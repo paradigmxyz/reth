@@ -78,6 +78,7 @@ where
         Storage: ChainStorage<Self::Primitives>,
         Primitives: FullNodePrimitives<
             SignedTx: Value + From<TransactionSigned> + Into<TransactionSigned>,
+            BlockHeader = alloy_consensus::Header,
         >,
     >,
 {
@@ -89,6 +90,7 @@ impl<T> NodeTypesForProvider for T where
         Storage: ChainStorage<T::Primitives>,
         Primitives: FullNodePrimitives<
             SignedTx: Value + From<TransactionSigned> + Into<TransactionSigned>,
+            BlockHeader = alloy_consensus::Header,
         >,
     >
 {
