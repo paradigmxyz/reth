@@ -11,6 +11,8 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{transport::Server, Request, Response, Status};
+use reth::providers::BlockReader;
+use reth::primitives::Block;
 
 struct ExExService {
     notifications: Arc<broadcast::Sender<ExExNotification>>,
@@ -44,7 +46,7 @@ impl RemoteExEx for ExExService {
     }
 }
 
-async fn remote_exex<Node: FullNodeComponents>(
+async fn remote_exex<Node: FullNodeComponents<Provider: BlockReader<Block = Block>>>(
     mut ctx: ExExContext<Node>,
     notifications: Arc<broadcast::Sender<ExExNotification>>,
 ) -> eyre::Result<()> {
