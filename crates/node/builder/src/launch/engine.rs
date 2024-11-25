@@ -12,6 +12,7 @@ use reth_engine_local::{LocalEngineService, LocalPayloadAttributesBuilder};
 use reth_engine_service::service::{ChainEvent, EngineService};
 use reth_engine_tree::{
     engine::{EngineApiRequest, EngineRequestHandler},
+    persistence::PersistenceNodeTypes,
     tree::TreeConfig,
 };
 use reth_engine_util::EngineMessageStreamExt;
@@ -19,8 +20,8 @@ use reth_exex::ExExManagerHandle;
 use reth_network::{NetworkSyncUpdater, SyncState};
 use reth_network_api::BlockDownloaderProvider;
 use reth_node_api::{
-    BuiltPayload, FullNodePrimitives, FullNodeTypes, NodeTypesWithEngine, PayloadAttributesBuilder,
-    PayloadBuilder, PayloadTypes,
+    BuiltPayload, FullNodeTypes, NodeTypesWithEngine, PayloadAttributesBuilder, PayloadBuilder,
+    PayloadTypes,
 };
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
@@ -70,14 +71,13 @@ impl EngineNodeLauncher {
 
 impl<Types, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
 where
-    Types: ProviderNodeTypes + NodeTypesWithEngine,
+    Types: ProviderNodeTypes + NodeTypesWithEngine + PersistenceNodeTypes,
     T: FullNodeTypes<Types = Types, Provider = BlockchainProvider2<Types>>,
     CB: NodeComponentsBuilder<T>,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>,
     LocalPayloadAttributesBuilder<Types::ChainSpec>: PayloadAttributesBuilder<
         <<Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
     >,
-    Types::Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
 

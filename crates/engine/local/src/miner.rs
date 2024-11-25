@@ -210,12 +210,13 @@ where
 
         let block = payload.block();
 
-        let cancun_fields =
-            self.provider.chain_spec().is_cancun_active_at_timestamp(block.timestamp).then(|| {
-                CancunPayloadFields {
-                    parent_beacon_block_root: block.parent_beacon_block_root.unwrap(),
-                    versioned_hashes: block.blob_versioned_hashes().into_iter().copied().collect(),
-                }
+        let cancun_fields = self
+            .provider
+            .chain_spec()
+            .is_cancun_active_at_timestamp(block.timestamp)
+            .then(|| CancunPayloadFields {
+                parent_beacon_block_root: block.parent_beacon_block_root.unwrap(),
+                versioned_hashes: block.body.blob_versioned_hashes().into_iter().copied().collect(),
             });
 
         let (tx, rx) = oneshot::channel();

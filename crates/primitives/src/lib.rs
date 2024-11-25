@@ -21,6 +21,9 @@
 
 extern crate alloc;
 
+mod traits;
+pub use traits::*;
+
 #[cfg(feature = "alloy-compat")]
 mod alloy_compat;
 mod block;

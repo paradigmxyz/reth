@@ -9,7 +9,7 @@ use reth::{
 use reth_basic_payload_builder::{BasicPayloadJobGeneratorConfig, PayloadBuilder, PayloadConfig};
 use reth_node_api::PayloadBuilderAttributes;
 use reth_payload_builder::{PayloadBuilderError, PayloadJobGenerator};
-use reth_primitives::SealedHeader;
+use reth_primitives::{BlockExt, SealedHeader};
 use std::sync::Arc;
 
 /// The generator type that creates new jobs that builds empty blocks.

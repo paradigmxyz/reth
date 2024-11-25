@@ -63,7 +63,7 @@ where
 
     let head = notifications.next().await.unwrap();
 
-    let tx = head.tip().transactions().next().unwrap();
+    let tx = &head.tip().transactions()[0];
     assert_eq!(tx.hash(), hash);
     println!("mined transaction: {hash}");
 }
