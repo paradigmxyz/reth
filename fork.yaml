@@ -14,5 +14,29 @@ def:
   description: |
     This is an overview of the changes in [`scroll-reth`](https://github.com/scroll-tech/reth),
     a fork of [`reth`](https://github.com/paradigmxyz/reth).
-  globs:
-    - "*"
+  sub:
+    - title: "crates/scroll"
+      globs:
+        - "crates/scroll/**/*"
+    - title: "crates/ethereum"
+      globs:
+        - "crates/ethereum/**/*"
+    - title: "crates/optimism"
+      globs:
+        - "crates/optimism/**/*"
+    - title: "crates/primitives"
+      globs:
+        - "crates/primitives*/**/*"
+    - title: "crates/stages"
+      globs:
+        - "crates/stages/**/*"
+    - title: "crates/storage"
+      globs:
+        - "crates/storage/**/*"
+    - title: "crates/trie"
+      globs:
+        - "crates/trie/**/*"
+
+ignore:
+  - "fork.yaml"
+  - ".github/**"
