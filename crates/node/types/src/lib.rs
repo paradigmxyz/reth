@@ -233,6 +233,9 @@ where
     type Engine = E;
 }
 
+/// Helper adapter type for accessing [`NodePrimitives::Block`] on [`NodeTypes`].
+pub type BlockTy<N> = <<N as NodeTypes>::Primitives as NodePrimitives>::Block;
+
 /// Helper adapter type for accessing [`NodePrimitives::BlockHeader`] on [`NodeTypes`].
 pub type HeaderTy<N> = <<N as NodeTypes>::Primitives as NodePrimitives>::BlockHeader;
 

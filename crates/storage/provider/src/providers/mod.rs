@@ -78,6 +78,7 @@ where
         Storage: ChainStorage<Self::Primitives>,
         Primitives: FullNodePrimitives<
             SignedTx: Value + From<TransactionSigned> + Into<TransactionSigned>,
+            BlockHeader = alloy_consensus::Header,
         >,
     >,
 {
@@ -89,6 +90,7 @@ impl<T> NodeTypesForProvider for T where
         Storage: ChainStorage<T::Primitives>,
         Primitives: FullNodePrimitives<
             SignedTx: Value + From<TransactionSigned> + Into<TransactionSigned>,
+            BlockHeader = alloy_consensus::Header,
         >,
     >
 {
@@ -115,7 +117,7 @@ pub struct BlockchainProvider<N: NodeTypesWithDB> {
     /// The blockchain tree instance.
     tree: Arc<dyn TreeViewer>,
     /// Tracks the chain info wrt forkchoice updates
-    chain_info: ChainInfoTracker,
+    chain_info: ChainInfoTracker<reth_primitives::EthPrimitives>,
 }
 
 impl<N: ProviderNodeTypes> Clone for BlockchainProvider<N> {

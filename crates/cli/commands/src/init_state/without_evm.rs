@@ -33,7 +33,7 @@ pub fn setup_without_evm<Provider>(
 where
     Provider: StaticFileProviderFactory
         + StageCheckpointWriter
-        + BlockWriter<Body: reth_node_api::BlockBody>,
+        + BlockWriter<Block: reth_node_api::Block<Header = reth_primitives::Header>>,
 {
     info!(target: "reth::cli", "Setting up dummy EVM chain before importing state.");
 
@@ -64,7 +64,8 @@ fn append_first_block<Provider>(
     total_difficulty: U256,
 ) -> Result<(), eyre::Error>
 where
-    Provider: BlockWriter<Body: reth_node_api::BlockBody> + StaticFileProviderFactory,
+    Provider: BlockWriter<Block: reth_node_api::Block<Header = reth_primitives::Header>>
+        + StaticFileProviderFactory,
 {
     provider_rw.insert_block(
         SealedBlockWithSenders::new(SealedBlock::new(header.clone(), Default::default()), vec![])

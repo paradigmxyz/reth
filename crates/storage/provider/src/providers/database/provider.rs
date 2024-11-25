@@ -46,9 +46,9 @@ use reth_db_api::{
 use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_network_p2p::headers::downloader::SyncTarget;
-use reth_node_types::{NodeTypes, TxTy};
+use reth_node_types::{BlockTy, NodeTypes, TxTy};
 use reth_primitives::{
-    Account, Block, BlockBody, BlockWithSenders, Bytecode, GotExpected, NodePrimitives, Receipt,
+    Account, Block, BlockBody, BlockExt, BlockWithSenders, Bytecode, GotExpected, Receipt,
     SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, StorageEntry,
     TransactionMeta, TransactionSigned, TransactionSignedNoHash,
 };
@@ -380,7 +380,7 @@ impl<Tx: DbTx + DbTxMut + 'static, N: NodeTypesForProvider + 'static> DatabasePr
     /// Inserts an historical block. **Used for setting up test environments**
     pub fn insert_historical_block(
         &self,
-        block: SealedBlockWithSenders<Header, <Self as BlockWriter>::Body>,
+        block: SealedBlockWithSenders<<Self as BlockWriter>::Block>,
     ) -> ProviderResult<StoredBlockBodyIndices> {
         let ttd = if block.number == 0 {
             block.difficulty
@@ -2751,7 +2751,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockExecu
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWriter
     for DatabaseProvider<TX, N>
 {
-    type Body = <<N::Primitives as NodePrimitives>::Block as reth_primitives_traits::Block>::Body;
+    type Block = BlockTy<N>;
 
     /// Inserts the block into the database, always modifying the following tables:
     /// * [`CanonicalHeaders`](tables::CanonicalHeaders)
@@ -2775,7 +2775,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     /// [`TransactionHashNumbers`](tables::TransactionHashNumbers).
     fn insert_block(
         &self,
-        block: SealedBlockWithSenders<Header, Self::Body>,
+        block: SealedBlockWithSenders<Self::Block>,
         write_transactions_to: StorageLocation,
     ) -> ProviderResult<StoredBlockBodyIndices> {
         let block_number = block.number;
@@ -2849,7 +2849,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
 
     fn append_block_bodies(
         &self,
-        bodies: Vec<(BlockNumber, Option<Self::Body>)>,
+        bodies: Vec<(BlockNumber, Option<<Self::Block as reth_primitives_traits::Block>::Body>)>,
         write_transactions_to: StorageLocation,
     ) -> ProviderResult<()> {
         let Some(from_block) = bodies.first().map(|(block, _)| *block) else { return Ok(()) };
@@ -2868,11 +2868,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         // Initialize cursor if we will be writing transactions to database
         let mut tx_cursor = write_transactions_to
             .database()
-            .then(|| {
-                self.tx.cursor_write::<tables::Transactions<
-                    <Self::Body as reth_primitives_traits::BlockBody>::Transaction,
-                >>()
-            })
+            .then(|| self.tx.cursor_write::<tables::Transactions<TxTy<N>>>())
             .transpose()?;
 
         // Get id for the next tx_num of zero if there are no transactions.
@@ -3017,7 +3013,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     /// TODO(joshie): this fn should be moved to `UnifiedStorageWriter` eventually
     fn append_blocks_with_state(
         &self,
-        blocks: Vec<SealedBlockWithSenders<Header, Self::Body>>,
+        blocks: Vec<SealedBlockWithSenders<Self::Block>>,
         execution_outcome: ExecutionOutcome,
         hashed_state: HashedPostStateSorted,
         trie_updates: TrieUpdates,
