@@ -68,7 +68,7 @@ unclear.
 
 The most important pieces of information we need in a bug report are:
 
-- The Reth version you are on (and that it is up to date)
+- The Reth version you are on (and that it is up-to-date)
 - The platform you are on (Windows, macOS, an M1 Mac or Linux)
 - Code snippets if this is happening in relation to testing or building code
 - Concrete steps to reproduce the bug
@@ -125,7 +125,7 @@ future.
 Types of tests include:
 
 - **Unit tests**: Functions which have very specific tasks should be unit tested.
-- **Integration tests**: For general purpose, far reaching functionality,
+- **Integration tests**: For general purpose, far-reaching functionality,
   integration tests should be added. The best way to add a new integration test is to look at existing ones and follow
   the style.
 
