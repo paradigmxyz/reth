@@ -63,6 +63,7 @@ test-utils = [
     "revm",
     "reth-chainspec/test-utils",
     "reth-primitives/test-utils",
+    "reth-primitives-traits/test-utils",
     "reth-trie/test-utils",
     "revm?/test-utils",
 ]
