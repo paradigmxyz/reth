@@ -27,7 +27,7 @@ use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_primitives::{
     proofs::{self},
-    Block, BlockBody, EthereumHardforks, Receipt,
+    Block, BlockBody, BlockExt, EthereumHardforks, Receipt,
 };
 use reth_provider::{ChainSpecProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;

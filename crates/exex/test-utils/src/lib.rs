@@ -45,7 +45,7 @@ use reth_node_ethereum::{
     EthEngineTypes, EthEvmConfig,
 };
 use reth_payload_builder::noop::NoopPayloadBuilderService;
-use reth_primitives::{EthPrimitives, Head, SealedBlockWithSenders};
+use reth_primitives::{BlockExt, EthPrimitives, Head, SealedBlockWithSenders};
 use reth_provider::{
     providers::{BlockchainProvider, StaticFileProvider},
     BlockReader, EthStorage, ProviderFactory,
@@ -306,7 +306,7 @@ pub async fn test_exex_context_with_chain_spec(
         .block_by_hash(genesis_hash)?
         .ok_or_else(|| eyre::eyre!("genesis block not found"))?
         .seal_slow()
-        .seal_with_senders()
+        .seal_with_senders::<reth_primitives::Block>()
         .ok_or_else(|| eyre::eyre!("failed to recover senders"))?;
 
     let head = Head {

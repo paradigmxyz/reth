@@ -15,7 +15,7 @@ use reth_db::{
 };
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{BlockBody, SealedBlock, StaticFileSegment};
+use reth_primitives::{SealedBlock, StaticFileSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     DBProvider, HeaderProvider, ReceiptWriter, StageCheckpointWriter, TransactionsProviderExt,
@@ -148,7 +148,7 @@ impl UnifiedStorageWriter<'_, (), ()> {
 impl<ProviderDB> UnifiedStorageWriter<'_, ProviderDB, &StaticFileProvider<ProviderDB::Primitives>>
 where
     ProviderDB: DBProvider<Tx: DbTx + DbTxMut>
-        + BlockWriter<Body = BlockBody>
+        + BlockWriter<Block = reth_primitives::Block>
         + TransactionsProviderExt
         + StateChangeWriter
         + TrieWriter
