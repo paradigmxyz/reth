@@ -1000,7 +1000,7 @@ pub struct WithMeteredProvider<N: NodeTypesWithDB> {
     metrics_sender: UnboundedSender<MetricEvent>,
 }
 
-/// Helper container to bundle the [`ProviderFactory`], [`BlockchainProvider`]
+/// Helper container to bundle the [`ProviderFactory`], [`FullNodeTypes::Provider`]
 /// and a metrics sender.
 #[allow(missing_debug_implementations)]
 pub struct WithMeteredProviders<T>
