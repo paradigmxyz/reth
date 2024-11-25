@@ -90,9 +90,9 @@ generate_tests!(#[rlp, 25] NewBlock<reth_primitives::Block>, EthNewBlockTests);
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp, 10)]
-pub struct Transactions(
+pub struct Transactions<T = TransactionSigned>(
     /// New transactions for the peer to include in its mempool.
-    pub Vec<TransactionSigned>,
+    pub Vec<T>,
 );
 
 impl Transactions {
@@ -102,14 +102,14 @@ impl Transactions {
     }
 }
 
-impl From<Vec<TransactionSigned>> for Transactions {
-    fn from(txs: Vec<TransactionSigned>) -> Self {
+impl<T> From<Vec<T>> for Transactions<T> {
+    fn from(txs: Vec<T>) -> Self {
         Self(txs)
     }
 }
 
-impl From<Transactions> for Vec<TransactionSigned> {
-    fn from(txs: Transactions) -> Self {
+impl<T> From<Transactions<T>> for Vec<T> {
+    fn from(txs: Transactions<T>) -> Self {
         txs.0
     }
 }
@@ -121,9 +121,9 @@ impl From<Transactions> for Vec<TransactionSigned> {
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp, 20)]
-pub struct SharedTransactions(
+pub struct SharedTransactions<T = TransactionSigned>(
     /// New transactions for the peer to include in its mempool.
-    pub Vec<Arc<TransactionSigned>>,
+    pub Vec<Arc<T>>,
 );
 
 /// A wrapper type for all different new pooled transaction types

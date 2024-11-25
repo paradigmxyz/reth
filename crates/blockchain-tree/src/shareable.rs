@@ -1,5 +1,7 @@
 //! Wrapper around `BlockchainTree` that allows for it to be shared.
 
+use crate::externals::TreeNodeTypes;
+
 use super::BlockchainTree;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockHash, BlockNumber};
@@ -36,7 +38,7 @@ impl<N: NodeTypesWithDB, E> ShareableBlockchainTree<N, E> {
 
 impl<N, E> BlockchainTreeEngine for ShareableBlockchainTree<N, E>
 where
-    N: ProviderNodeTypes,
+    N: TreeNodeTypes,
     E: BlockExecutorProvider<Primitives = N::Primitives>,
 {
     fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError> {
@@ -107,7 +109,7 @@ where
 
 impl<N, E> BlockchainTreeViewer for ShareableBlockchainTree<N, E>
 where
-    N: ProviderNodeTypes,
+    N: TreeNodeTypes,
     E: BlockExecutorProvider<Primitives = N::Primitives>,
 {
     fn header_by_hash(&self, hash: BlockHash) -> Option<SealedHeader> {
@@ -170,7 +172,7 @@ where
 
 impl<N, E> BlockchainTreePendingStateProvider for ShareableBlockchainTree<N, E>
 where
-    N: ProviderNodeTypes,
+    N: TreeNodeTypes,
     E: BlockExecutorProvider<Primitives = N::Primitives>,
 {
     fn find_pending_state_provider(

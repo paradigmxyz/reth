@@ -14,7 +14,6 @@ extern crate alloc;
 
 /// Common constants.
 pub mod constants;
-
 pub use constants::gas_units::{format_gas, format_gas_throughput};
 
 /// Minimal account
@@ -28,7 +27,8 @@ pub mod transaction;
 pub use transaction::{
     execute::FillTxEnv,
     signed::{FullSignedTx, SignedTransaction},
-    FullTransaction, Transaction, TransactionExt,
+    tx_type::{FullTxType, TxType},
+    FullTransaction, Transaction,
 };
 
 mod integer_list;
@@ -41,7 +41,9 @@ pub use block::{
     Block, FullBlock,
 };
 
+mod encoded;
 mod withdrawal;
+pub use encoded::WithEncoded;
 
 mod error;
 pub use error::{GotExpected, GotExpectedBoxed};
@@ -51,10 +53,6 @@ pub use alloy_primitives::{logs_bloom, Log, LogData};
 
 mod storage;
 pub use storage::StorageEntry;
-
-/// Transaction types
-pub mod tx_type;
-pub use tx_type::{FullTxType, TxType};
 
 /// Common header types
 pub mod header;

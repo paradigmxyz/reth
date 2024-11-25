@@ -41,7 +41,7 @@ pub trait NodePrimitives:
         + Eq
         + MaybeSerde
         + 'static;
-    /// Signed version of the transaction type.
+    /// Signed version of the transaction type, as found in a block.
     type SignedTx: Send
         + Sync
         + Unpin
@@ -78,33 +78,31 @@ impl NodePrimitives for () {
 
 /// Helper trait that sets trait bounds on [`NodePrimitives`].
 pub trait FullNodePrimitives:
-    Send + Sync + Unpin + Clone + Default + fmt::Debug + PartialEq + Eq + 'static
+    NodePrimitives<
+    Block: FullBlock<Header = Self::BlockHeader, Body = Self::BlockBody>,
+    BlockHeader: FullBlockHeader,
+    BlockBody: FullBlockBody<Transaction = Self::SignedTx>,
+    SignedTx: FullSignedTx,
+    TxType: FullTxType,
+    Receipt: FullReceipt,
+>
 {
-    /// Block primitive.
-    type Block: FullBlock<Header = Self::BlockHeader, Body = Self::BlockBody> + 'static;
-    /// Block header primitive.
-    type BlockHeader: FullBlockHeader + 'static;
-    /// Block body primitive.
-    type BlockBody: FullBlockBody<Transaction = Self::SignedTx> + 'static;
-    /// Signed version of the transaction type.
-    type SignedTx: FullSignedTx + 'static;
-    /// Transaction envelope type ID.
-    type TxType: FullTxType + 'static;
-    /// A receipt.
-    type Receipt: FullReceipt + 'static;
 }
 
-impl<T> NodePrimitives for T
-where
-    T: FullNodePrimitives,
+impl<T> FullNodePrimitives for T where
+    T: NodePrimitives<
+        Block: FullBlock<Header = Self::BlockHeader, Body = Self::BlockBody>,
+        BlockHeader: FullBlockHeader,
+        BlockBody: FullBlockBody<Transaction = Self::SignedTx>,
+        SignedTx: FullSignedTx,
+        TxType: FullTxType,
+        Receipt: FullReceipt,
+    >
 {
-    type Block = T::Block;
-    type BlockHeader = T::BlockHeader;
-    type BlockBody = T::BlockBody;
-    type SignedTx = T::SignedTx;
-    type TxType = T::TxType;
-    type Receipt = T::Receipt;
 }
 
 /// Helper adapter type for accessing [`NodePrimitives`] receipt type.
 pub type ReceiptTy<N> = <N as NodePrimitives>::Receipt;
+
+/// Helper adapter type for accessing [`NodePrimitives`] body type.
+pub type BodyTy<N> = <N as NodePrimitives>::BlockBody;

@@ -19,6 +19,7 @@
 //! use alloy_consensus::Header;
 //! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 //! use reth_network_api::{NetworkInfo, Peers};
+//! use reth_primitives::TransactionSigned;
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
 //! use reth_rpc::EthApi;
 //! use reth_rpc_builder::{
@@ -36,7 +37,8 @@
 //!     block_executor: BlockExecutor,
 //!     consensus: Consensus,
 //! ) where
-//!     Provider: FullRpcProvider + AccountReader + ChangeSetReader,
+//!     Provider:
+//!         FullRpcProvider<Transaction = TransactionSigned> + AccountReader + ChangeSetReader,
 //!     Pool: TransactionPool + Unpin + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions + Clone + 'static,
@@ -77,6 +79,7 @@
 //! use reth_engine_primitives::EngineTypes;
 //! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 //! use reth_network_api::{NetworkInfo, Peers};
+//! use reth_primitives::TransactionSigned;
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
 //! use reth_rpc::EthApi;
 //! use reth_rpc_api::EngineApiServer;
@@ -109,7 +112,8 @@
 //!     block_executor: BlockExecutor,
 //!     consensus: Consensus,
 //! ) where
-//!     Provider: FullRpcProvider + AccountReader + ChangeSetReader,
+//!     Provider:
+//!         FullRpcProvider<Transaction = TransactionSigned> + AccountReader + ChangeSetReader,
 //!     Pool: TransactionPool + Unpin + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions + Clone + 'static,

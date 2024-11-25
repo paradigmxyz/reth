@@ -21,7 +21,6 @@ use reth_network_api::{
 use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState, SyncStateProvider};
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::{PeerAddr, PeerKind, Reputation, ReputationChangeKind};
-use reth_primitives::TransactionSigned;
 use reth_tokio_util::{EventSender, EventStream};
 use secp256k1::SecretKey;
 use std::{
@@ -130,7 +129,7 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
     }
 
     /// Send full transactions to the peer
-    pub fn send_transactions(&self, peer_id: PeerId, msg: Vec<Arc<TransactionSigned>>) {
+    pub fn send_transactions(&self, peer_id: PeerId, msg: Vec<Arc<N::BroadcastedTransaction>>) {
         self.send_message(NetworkHandleMessage::SendTransaction {
             peer_id,
             msg: SharedTransactions(msg),
@@ -140,7 +139,7 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
     /// Send message to get the [`TransactionsHandle`].
     ///
     /// Returns `None` if no transaction task is installed.
-    pub async fn transactions_handle(&self) -> Option<TransactionsHandle> {
+    pub async fn transactions_handle(&self) -> Option<TransactionsHandle<N>> {
         let (tx, rx) = oneshot::channel();
         let _ = self.manager().send(NetworkHandleMessage::GetTransactionsHandle(tx));
         rx.await.unwrap()
@@ -466,7 +465,7 @@ pub(crate) enum NetworkHandleMessage<N: NetworkPrimitives = EthNetworkPrimitives
         /// The ID of the peer to which the transactions are sent.
         peer_id: PeerId,
         /// The shared transactions to send.
-        msg: SharedTransactions,
+        msg: SharedTransactions<N::BroadcastedTransaction>,
     },
     /// Sends a list of transaction hashes to the given peer.
     SendPooledTransactionHashes {
@@ -504,7 +503,7 @@ pub(crate) enum NetworkHandleMessage<N: NetworkPrimitives = EthNetworkPrimitives
     /// Gets the reputation for a specific peer via a oneshot sender.
     GetReputationById(PeerId, oneshot::Sender<Option<Reputation>>),
     /// Retrieves the `TransactionsHandle` via a oneshot sender.
-    GetTransactionsHandle(oneshot::Sender<Option<TransactionsHandle>>),
+    GetTransactionsHandle(oneshot::Sender<Option<TransactionsHandle<N>>>),
     /// Initiates a graceful shutdown of the network via a oneshot sender.
     Shutdown(oneshot::Sender<()>),
     /// Sets the network state between hibernation and active.

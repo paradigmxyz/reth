@@ -24,13 +24,12 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_evm::{OpEvmConfig, OpExecutionStrategyFactory};
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
-use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::{
     witness::{DebugExecutionWitnessApiServer, OpDebugWitnessApi},
     OpEthApi,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::BlockBody;
+use reth_primitives::{BlockBody, EthPrimitives};
 use reth_provider::{
     providers::ChainStorage, BlockBodyWriter, CanonStateSubscriptions, DBProvider, EthStorage,
     ProviderResult,
@@ -62,15 +61,23 @@ impl<Provider: DBProvider<Tx: DbTxMut>> BlockBodyWriter<Provider, BlockBody> for
     ) -> ProviderResult<()> {
         self.0.write_block_bodies(provider, bodies)
     }
+
+    fn remove_block_bodies_above(
+        &self,
+        provider: &Provider,
+        block: alloy_primitives::BlockNumber,
+    ) -> ProviderResult<()> {
+        self.0.remove_block_bodies_above(provider, block)
+    }
 }
 
-impl ChainStorage<OpPrimitives> for OpStorage {
+impl ChainStorage<EthPrimitives> for OpStorage {
     fn writer<TX, Types>(
         &self,
-    ) -> impl reth_provider::ChainStorageWriter<reth_provider::DatabaseProvider<TX, Types>, OpPrimitives>
+    ) -> impl reth_provider::ChainStorageWriter<reth_provider::DatabaseProvider<TX, Types>, EthPrimitives>
     where
         TX: DbTxMut + DbTx + 'static,
-        Types: NodeTypes<Primitives = OpPrimitives>,
+        Types: NodeTypes<Primitives = EthPrimitives>,
     {
         self
     }
@@ -125,7 +132,7 @@ where
         Types: NodeTypesWithEngine<
             Engine = OpEngineTypes,
             ChainSpec = OpChainSpec,
-            Primitives = OpPrimitives,
+            Primitives = EthPrimitives,
             Storage = OpStorage,
         >,
     >,
@@ -153,7 +160,7 @@ where
 }
 
 impl NodeTypes for OpNode {
-    type Primitives = OpPrimitives;
+    type Primitives = EthPrimitives;
     type ChainSpec = OpChainSpec;
     type StateCommitment = MerklePatriciaTrie;
     type Storage = OpStorage;
@@ -183,7 +190,7 @@ impl<N: FullNodeComponents> OpAddOns<N> {
 impl<N> NodeAddOns<N> for OpAddOns<N>
 where
     N: FullNodeComponents<
-        Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives, Storage = OpStorage>,
+        Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = EthPrimitives, Storage = OpStorage>,
         PayloadBuilder: PayloadBuilder<PayloadType = <N::Types as NodeTypesWithEngine>::Engine>,
     >,
     OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
@@ -211,7 +218,7 @@ where
 impl<N> RethRpcAddOns<N> for OpAddOns<N>
 where
     N: FullNodeComponents<
-        Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives, Storage = OpStorage>,
+        Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = EthPrimitives, Storage = OpStorage>,
         PayloadBuilder: PayloadBuilder<PayloadType = <N::Types as NodeTypesWithEngine>::Engine>,
     >,
     OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
@@ -272,6 +279,7 @@ where
         let validator = TransactionValidationTaskExecutor::eth_builder(Arc::new(
             ctx.chain_spec().inner.clone(),
         ))
+        .no_eip4844()
         .with_head_timestamp(ctx.head().timestamp)
         .kzg_settings(ctx.kzg_settings()?)
         .with_additional_tasks(

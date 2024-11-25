@@ -403,7 +403,7 @@ mod tests {
     use reth_primitives::Block;
     use reth_provider::{
         providers::BlockchainProvider2, test_utils::create_test_provider_factory, BlockWriter,
-        Chain, DatabaseProviderFactory,
+        Chain, DatabaseProviderFactory, StorageLocation,
     };
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use tokio::sync::mpsc;
@@ -431,6 +431,7 @@ mod tests {
         let provider_rw = provider_factory.provider_rw()?;
         provider_rw.insert_block(
             node_head_block.clone().seal_with_senders().ok_or_eyre("failed to recover senders")?,
+            StorageLocation::Database,
         )?;
         provider_rw.commit()?;
 
@@ -574,7 +575,7 @@ mod tests {
             ..Default::default()
         };
         let provider_rw = provider.database_provider_rw()?;
-        provider_rw.insert_block(node_head_block)?;
+        provider_rw.insert_block(node_head_block, StorageLocation::Database)?;
         provider_rw.commit()?;
         let node_head_notification = ExExNotification::ChainCommitted {
             new: Arc::new(

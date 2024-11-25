@@ -623,7 +623,7 @@ mod tests {
     }
 
     #[derive(Clone)]
-    struct TestExecutorStrategyFactory<N: NodePrimitives> {
+    struct TestExecutorStrategyFactory<N: NodePrimitives = reth_primitives::EthPrimitives> {
         execute_transactions_result: ExecuteOutput<N::Receipt>,
         apply_post_execution_changes_result: Requests,
         finish_result: BundleState,
@@ -759,7 +759,7 @@ mod tests {
 
     #[test]
     fn test_tx_env_overrider() {
-        let strategy_factory = TestExecutorStrategyFactory {
+        let strategy_factory: TestExecutorStrategyFactory = TestExecutorStrategyFactory {
             execute_transactions_result: ExecuteOutput {
                 receipts: vec![reth_primitives::Receipt::default()],
                 gas_used: 10,

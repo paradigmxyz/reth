@@ -237,3 +237,12 @@ where
 
 /// Helper adapter type for accessing data primitives aggregator type on [`NodeTypes`].
 pub type Prims<N> = <N as NodeTypes>::Primitives;
+
+/// Helper adapter type for accessing [`NodePrimitives::BlockHeader`] on [`NodeTypes`].
+pub type HeaderTy<N> = <<N as NodeTypes>::Primitives as NodePrimitives>::BlockHeader;
+
+/// Helper adapter type for accessing [`NodePrimitives::BlockBody`] on [`NodeTypes`].
+pub type BodyTy<N> = <<N as NodeTypes>::Primitives as NodePrimitives>::BlockBody;
+
+/// Helper adapter type for accessing [`NodePrimitives::SignedTx`] on [`NodeTypes`].
+pub type TxTy<N> = <<N as NodeTypes>::Primitives as NodePrimitives>::SignedTx;

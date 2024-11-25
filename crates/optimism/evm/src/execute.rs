@@ -382,7 +382,7 @@ mod tests {
 
         let chain_spec = Arc::new(OpChainSpecBuilder::base_mainnet().regolith_activated().build());
 
-        let tx = TransactionSigned::from_transaction_and_signature(
+        let tx = TransactionSigned::new_unhashed(
             Transaction::Eip1559(TxEip1559 {
                 chain_id: chain_spec.chain.id(),
                 nonce: 0,
@@ -393,7 +393,7 @@ mod tests {
             Signature::test_signature(),
         );
 
-        let tx_deposit = TransactionSigned::from_transaction_and_signature(
+        let tx_deposit = TransactionSigned::new_unhashed(
             Transaction::Deposit(op_alloy_consensus::TxDeposit {
                 from: addr,
                 to: addr.into(),
@@ -466,7 +466,7 @@ mod tests {
 
         let chain_spec = Arc::new(OpChainSpecBuilder::base_mainnet().canyon_activated().build());
 
-        let tx = TransactionSigned::from_transaction_and_signature(
+        let tx = TransactionSigned::new_unhashed(
             Transaction::Eip1559(TxEip1559 {
                 chain_id: chain_spec.chain.id(),
                 nonce: 0,
@@ -477,7 +477,7 @@ mod tests {
             Signature::test_signature(),
         );
 
-        let tx_deposit = TransactionSigned::from_transaction_and_signature(
+        let tx_deposit = TransactionSigned::new_unhashed(
             Transaction::Deposit(op_alloy_consensus::TxDeposit {
                 from: addr,
                 to: addr.into(),

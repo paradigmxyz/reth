@@ -149,7 +149,7 @@ pub fn sign_tx_with_key_pair(key_pair: Keypair, tx: Transaction) -> TransactionS
     let signature =
         sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
 
-    TransactionSigned::from_transaction_and_signature(tx, signature)
+    TransactionSigned::new_unhashed(tx, signature)
 }
 
 /// Generates a set of [Keypair]s based on the desired count.
@@ -479,7 +479,7 @@ mod tests {
                 sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), signature_hash)
                     .unwrap();
 
-            let signed = TransactionSigned::from_transaction_and_signature(tx.clone(), signature);
+            let signed = TransactionSigned::new_unhashed(tx.clone(), signature);
             let recovered = signed.recover_signer().unwrap();
 
             let expected = public_key_to_address(key_pair.public_key());
