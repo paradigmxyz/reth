@@ -457,7 +457,7 @@ where
                 }
                 Err(mpsc::TryRecvError::Empty) => {
                     // No state updates available, try to process internal messages
-                    match self.rx.recv() {
+                    match self.rx.try_recv() {
                         Ok(message) => {
                             if let Some(result) = self.handle_internal_message(
                                 message,
@@ -467,7 +467,10 @@ where
                                 return result;
                             }
                         }
-                        Err(_) => return Self::handle_internal_error(),
+                        Err(mpsc::TryRecvError::Empty) => (),
+                        Err(mpsc::TryRecvError::Disconnected) => {
+                            return Self::handle_internal_error()
+                        }
                     }
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
