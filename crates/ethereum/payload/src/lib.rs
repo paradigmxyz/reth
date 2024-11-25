@@ -27,7 +27,7 @@ use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_primitives::{
     proofs::{self},
-    Block, BlockBody, EthereumHardforks, Receipt,
+    Block, BlockBody, BlockExt, EthereumHardforks, Receipt,
 };
 use reth_provider::{ChainSpecProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
@@ -440,14 +440,14 @@ where
         requests_hash,
     };
 
+    let withdrawals = chain_spec
+        .is_shanghai_active_at_timestamp(attributes.timestamp)
+        .then(|| attributes.withdrawals.clone());
+
     // seal the block
     let block = Block {
         header,
-        body: BlockBody {
-            transactions: executed_txs,
-            ommers: vec![],
-            withdrawals: Some(attributes.withdrawals.clone()),
-        },
+        body: BlockBody { transactions: executed_txs, ommers: vec![], withdrawals },
     };
 
     let sealed_block = Arc::new(block.seal_slow());

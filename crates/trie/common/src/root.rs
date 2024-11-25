@@ -7,17 +7,6 @@ use alloy_trie::HashBuilder;
 use itertools::Itertools;
 use nybbles::Nibbles;
 
-/// Adjust the index of an item for rlp encoding.
-pub const fn adjust_index_for_rlp(i: usize, len: usize) -> usize {
-    if i > 0x7f {
-        i
-    } else if i == 0x7f || i + 1 == len {
-        0
-    } else {
-        i + 1
-    }
-}
-
 /// Hashes and sorts account keys, then proceeds to calculating the root hash of the state
 /// represented as MPT.
 /// See [`state_root_unsorted`] for more info.

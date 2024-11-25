@@ -4,7 +4,7 @@ use reth_chainspec::ChainSpecBuilder;
 use reth_db::{open_db_read_only, DatabaseEnv};
 use reth_node_ethereum::EthereumNode;
 use reth_node_types::NodeTypesWithDBAdapter;
-use reth_primitives::{SealedHeader, TransactionSigned};
+use reth_primitives::{BlockExt, SealedHeader, TransactionSigned};
 use reth_provider::{
     providers::StaticFileProvider, AccountReader, BlockReader, BlockSource, HeaderProvider,
     ProviderFactory, ReceiptProvider, StateProvider, TransactionsProvider,
@@ -119,7 +119,10 @@ fn txs_provider_example<T: TransactionsProvider<Transaction = TransactionSigned>
 }
 
 /// The `BlockReader` allows querying the headers-related tables.
-fn block_provider_example<T: BlockReader>(provider: T, number: u64) -> eyre::Result<()> {
+fn block_provider_example<T: BlockReader<Block = reth_primitives::Block>>(
+    provider: T,
+    number: u64,
+) -> eyre::Result<()> {
     // Can query a block by number
     let block = provider.block(number.into())?.ok_or(eyre::eyre!("block num not found"))?;
     assert_eq!(block.number, number);

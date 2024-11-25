@@ -1,5 +1,5 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD;
-use alloy_consensus::Header;
+use alloy_consensus::{BlockHeader, Header};
 use alloy_primitives::BlockNumber;
 use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
@@ -12,7 +12,7 @@ use reth_evm::{
 use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives::{SealedHeader, StaticFileSegment};
-use reth_primitives_traits::{format_gas_throughput, NodePrimitives};
+use reth_primitives_traits::{format_gas_throughput, Block, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
     writer::UnifiedStorageWriter,
@@ -176,7 +176,7 @@ impl<E, Provider> Stage<Provider> for ExecutionStage<E>
 where
     E: BlockExecutorProvider,
     Provider: DBProvider
-        + BlockReader
+        + BlockReader<Block = reth_primitives::Block>
         + StaticFileProviderFactory
         + StatsReader
         + StateChangeWriter
@@ -270,17 +270,17 @@ where
 
             fetch_block_duration += fetch_block_start.elapsed();
 
-            cumulative_gas += block.gas_used;
+            cumulative_gas += block.header().gas_used();
 
             // Configure the executor to use the current state.
-            trace!(target: "sync::stages::execution", number = block_number, txs = block.body.transactions.len(), "Executing block");
+            trace!(target: "sync::stages::execution", number = block_number, txs = block.body().transactions().len(), "Executing block");
 
             // Execute the block
             let execute_start = Instant::now();
 
             self.metrics.metered_one((&block, td).into(), |input| {
                 executor.execute_and_verify_one(input).map_err(|error| StageError::Block {
-                    block: Box::new(SealedHeader::seal(block.header.clone())),
+                    block: Box::new(SealedHeader::seal(block.header().clone())),
                     error: BlockErrorKind::Execution(error),
                 })
             })?;
@@ -304,7 +304,7 @@ where
             }
 
             stage_progress = block_number;
-            stage_checkpoint.progress.processed += block.gas_used;
+            stage_checkpoint.progress.processed += block.gas_used();
 
             // If we have ExExes we need to save the block in memory for later
             if self.exex_manager_handle.has_exexs() {
@@ -343,7 +343,7 @@ where
         // the `has_exexs` check here as well
         if !blocks.is_empty() {
             let blocks = blocks.into_iter().map(|block| {
-                let hash = block.header.hash_slow();
+                let hash = block.header().hash_slow();
                 block.seal(hash)
             });
 

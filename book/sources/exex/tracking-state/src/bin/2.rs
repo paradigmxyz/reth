@@ -6,7 +6,7 @@ use std::{
 
 use alloy_primitives::BlockNumber;
 use futures_util::{FutureExt, TryStreamExt};
-use reth::api::FullNodeComponents;
+use reth::{api::FullNodeComponents, primitives::Block, providers::BlockReader};
 use reth_exex::{ExExContext, ExExEvent};
 use reth_node_ethereum::EthereumNode;
 use reth_tracing::tracing::info;
@@ -25,7 +25,7 @@ impl<Node: FullNodeComponents> MyExEx<Node> {
     }
 }
 
-impl<Node: FullNodeComponents> Future for MyExEx<Node> {
+impl<Node: FullNodeComponents<Provider: BlockReader<Block = Block>>> Future for MyExEx<Node> {
     type Output = eyre::Result<()>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {

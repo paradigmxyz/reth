@@ -1,11 +1,12 @@
 use crate::{segments::SegmentSet, Pruner};
+use alloy_eips::eip2718::Encodable2718;
 use reth_chainspec::MAINNET;
 use reth_config::PruneConfig;
 use reth_db::transaction::DbTxMut;
 use reth_exex_types::FinishedExExHeight;
 use reth_provider::{
     providers::StaticFileProvider, BlockReader, DBProvider, DatabaseProviderFactory,
-    PruneCheckpointWriter, StaticFileProviderFactory, TransactionsProvider,
+    PruneCheckpointWriter, StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
 use std::time::Duration;
@@ -77,7 +78,9 @@ impl PrunerBuilder {
     pub fn build_with_provider_factory<PF>(self, provider_factory: PF) -> Pruner<PF::ProviderRW, PF>
     where
         PF: DatabaseProviderFactory<
-                ProviderRW: PruneCheckpointWriter + BlockReader + StaticFileProviderFactory,
+                ProviderRW: PruneCheckpointWriter
+                                + BlockReader<Transaction: Encodable2718>
+                                + StaticFileProviderFactory,
             > + StaticFileProviderFactory<
                 Primitives = <PF::ProviderRW as StaticFileProviderFactory>::Primitives,
             >,
@@ -103,9 +106,8 @@ impl PrunerBuilder {
     where
         Provider: StaticFileProviderFactory
             + DBProvider<Tx: DbTxMut>
-            + BlockReader
-            + PruneCheckpointWriter
-            + TransactionsProvider,
+            + BlockReader<Transaction: Encodable2718>
+            + PruneCheckpointWriter,
     {
         let segments = SegmentSet::<Provider>::from_components(static_file_provider, self.segments);
 

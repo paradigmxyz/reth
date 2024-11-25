@@ -5,6 +5,7 @@ use std::sync::Arc;
 use node::NodeTestContext;
 use reth::{
     args::{DiscoveryArgs, NetworkArgs, RpcServerArgs},
+    blockchain_tree::externals::NodeTypesForTree,
     builder::{FullNodePrimitives, NodeBuilder, NodeConfig, NodeHandle},
     network::PeersHandleProvider,
     rpc::server_types::RpcModuleSelection,
@@ -53,13 +54,12 @@ pub async fn setup<N>(
     attributes_generator: impl Fn(u64) -> <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes + Copy + 'static,
 ) -> eyre::Result<(Vec<NodeHelperType<N, N::AddOns>>, TaskManager, Wallet)>
 where
-    N: Default + Node<TmpNodeAdapter<N>> + NodeTypesForProvider + NodeTypesWithEngine,
+    N: Default + Node<TmpNodeAdapter<N>> + NodeTypesForTree + NodeTypesWithEngine,
     N::ComponentsBuilder: NodeComponentsBuilder<
         TmpNodeAdapter<N>,
         Components: NodeComponents<TmpNodeAdapter<N>, Network: PeersHandleProvider>,
     >,
     N::AddOns: RethRpcAddOns<Adapter<N>>,
-    N::Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>,
 {
     let tasks = TaskManager::current();
     let exec = tasks.executor();
@@ -134,7 +134,8 @@ where
     LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
         <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
     >,
-    N::Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>,
+    N::Primitives:
+        FullNodePrimitives<Block = reth_primitives::Block, BlockBody = reth_primitives::BlockBody>,
 {
     let tasks = TaskManager::current();
     let exec = tasks.executor();
