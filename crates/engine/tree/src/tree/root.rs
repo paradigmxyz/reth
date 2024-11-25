@@ -17,8 +17,8 @@ use reth_trie::{
     HashedPostState, HashedPostStateSorted, HashedStorage, MultiProof, Nibbles, TrieAccount,
     TrieInput, EMPTY_ROOT_HASH,
 };
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use reth_trie_parallel::{proof::ParallelProof, root::ParallelStateRootError};
+use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseProof, DatabaseTrieCursorFactory};
+use reth_trie_parallel::root::ParallelStateRootError;
 use reth_trie_sparse::{SparseStateTrie, SparseStateTrieResult};
 use revm_primitives::{keccak256, EvmState, B256};
 use std::{
@@ -271,7 +271,12 @@ where
             .collect::<HashMap<_, _>>();
 
         rayon::spawn(move || {
-            let result = ParallelProof::new(view, input).multiproof(targets);
+            let Ok(provider) = view.provider_ro() else {
+                error!(target: "engine::root", "Could not get provider");
+                return;
+            };
+            let result =
+                Proof::overlay_multiproof(provider.tx_ref(), input.as_ref().clone(), targets);
             match result {
                 Ok(proof) => {
                     let _ = state_root_message_sender.send(InternalMessage::ProofCalculated {
@@ -453,7 +458,7 @@ where
                 }
                 Err(mpsc::TryRecvError::Empty) => {
                     // No state updates available, try to process internal messages
-                    match self.rx.recv() {
+                    match self.rx.try_recv() {
                         Ok(message) => {
                             if let Some(result) = self.handle_internal_message(
                                 message,
@@ -465,7 +470,10 @@ where
                                 return result;
                             }
                         }
-                        Err(_) => return Self::handle_internal_error(),
+                        Err(mpsc::TryRecvError::Empty) => continue,
+                        Err(mpsc::TryRecvError::Disconnected) => {
+                            return Self::handle_internal_error()
+                        }
                     }
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
