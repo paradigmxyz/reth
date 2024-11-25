@@ -15,6 +15,7 @@ use reth_primitives::{
     BlockWithSenders, NodePrimitives, Receipts, SealedBlock, SealedBlockWithSenders, SealedHeader,
     TransactionMeta, TransactionSigned,
 };
+use reth_primitives_traits::BlockBody as _;
 use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
@@ -534,8 +535,13 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     /// Returns a `TransactionSigned` for the given `TxHash` if found.
     pub fn transaction_by_hash(&self, hash: TxHash) -> Option<TransactionSigned> {
         for block_state in self.canonical_chain() {
-            if let Some(tx) =
-                block_state.block_ref().block().body.transactions().find(|tx| tx.hash() == hash)
+            if let Some(tx) = block_state
+                .block_ref()
+                .block()
+                .body
+                .transactions()
+                .iter()
+                .find(|tx| tx.hash() == hash)
             {
                 return Some(tx.clone())
             }
@@ -555,6 +561,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
                 .block()
                 .body
                 .transactions()
+                .iter()
                 .enumerate()
                 .find(|(_, tx)| tx.hash() == tx_hash)
             {
@@ -735,6 +742,7 @@ impl<N: NodePrimitives> BlockState<N> {
                 .block()
                 .body
                 .transactions()
+                .iter()
                 .find(|tx| tx.hash() == hash)
                 .cloned()
         })
@@ -751,6 +759,7 @@ impl<N: NodePrimitives> BlockState<N> {
                 .block()
                 .body
                 .transactions()
+                .iter()
                 .enumerate()
                 .find(|(_, tx)| tx.hash() == tx_hash)
                 .map(|(index, tx)| {

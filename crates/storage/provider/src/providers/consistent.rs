@@ -977,7 +977,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Transaction>> {
         if let Some(tx) = self.head_block.as_ref().and_then(|b| b.transaction_on_chain(hash)) {
-            return Ok(Some(tx.into()))
+            return Ok(Some(tx))
         }
 
         self.storage_provider.transaction_by_hash(hash)
@@ -990,7 +990,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
         if let Some((tx, meta)) =
             self.head_block.as_ref().and_then(|b| b.transaction_meta_on_chain(tx_hash))
         {
-            return Ok(Some((tx.into(), meta)))
+            return Ok(Some((tx, meta)))
         }
 
         self.storage_provider.transaction_by_hash_with_meta(tx_hash)
@@ -1011,18 +1011,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block(
             id,
             |provider| provider.transactions_by_block(id),
-            |block_state| {
-                Ok(Some(
-                    block_state
-                        .block_ref()
-                        .block()
-                        .body
-                        .transactions
-                        .iter()
-                        .map(|tx| tx.clone().into())
-                        .collect(),
-                ))
-            },
+            |block_state| Ok(Some(block_state.block_ref().block().body.transactions.clone())),
         )
     }
 
@@ -1033,18 +1022,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
             |db_provider, range, _| db_provider.transactions_by_block_range(range),
-            |block_state, _| {
-                Some(
-                    block_state
-                        .block_ref()
-                        .block()
-                        .body
-                        .transactions
-                        .iter()
-                        .map(|tx| tx.clone().into())
-                        .collect(),
-                )
-            },
+            |block_state, _| Some(block_state.block_ref().block().body.transactions.clone()),
             |_| true,
         )
     }

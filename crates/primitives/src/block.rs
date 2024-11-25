@@ -661,12 +661,6 @@ impl BlockBody {
     pub fn blob_versioned_hashes(&self) -> Vec<&B256> {
         self.blob_versioned_hashes_iter().collect()
     }
-
-    /// Returns an iterator over all transactions.
-    #[inline]
-    pub fn transactions(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
-        self.transactions.iter()
-    }
 }
 
 impl InMemorySize for BlockBody {
