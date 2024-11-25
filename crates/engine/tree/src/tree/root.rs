@@ -166,19 +166,17 @@ fn calculate_state_root_with_sparse(
     let mut storage_roots = FbHashMap::default();
     for (address, storage) in state.storages {
         if storage.wiped {
-            // TODO(alexey): wipe storage
-            // trie.wipe_storage(address);
+            trie.wipe_storage(address);
             storage_roots.insert(address, EMPTY_ROOT_HASH);
         }
 
         for (slot, value) in storage.storage {
             let slot_path = Nibbles::unpack(slot);
-            // TODO(alexey): update storage leaf
-            // trie.update_storage_leaf(
-            //     address,
-            //     slot_path,
-            //     alloy_rlp::encode_fixed_size(&value).to_vec(),
-            // )?;
+            trie.update_storage_leaf(
+                address,
+                slot_path,
+                alloy_rlp::encode_fixed_size(&value).to_vec(),
+            )?;
         }
 
         storage_roots.insert(address, trie.storage_root(address).unwrap());
@@ -197,15 +195,13 @@ fn calculate_state_root_with_sparse(
 
             let mut encoded = Vec::with_capacity(128);
             TrieAccount::from((account, storage_root)).encode(&mut encoded as &mut dyn BufMut);
-            trie.update_leaf(path, encoded)?;
+            trie.update_account_leaf(path, encoded)?;
         } else {
-            // TODO(alexey): remove account leaf
-            // trie.remove_account_leaf(&path)?;
+            trie.remove_account_leaf(&path)?;
         }
     }
 
-    // TODO(alexey): calculate below level
-    // trie.calculate_below_level(2);
+    trie.calculate_below_level(2);
     let elapsed = started_at.elapsed();
 
     Ok((trie, elapsed))
