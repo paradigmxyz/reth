@@ -78,16 +78,18 @@ where
                 .then(Default::default),
         };
 
+        let builder_attributes = EthPayloadBuilderAttributes::try_new(
+            origin.header().hash(),
+            payload_attributes,
+            EngineApiMessageVersion::default() as u8,
+        )
+        .expect("failed to create builder attributes");
+
         // Create the payload config
         let payload_config = PayloadConfig::new(
             Arc::new(origin.header().clone()),
             Bytes::default(),
-            EthPayloadBuilderAttributes::try_new(
-                origin.header().hash(),
-                payload_attributes,
-                EngineApiMessageVersion::default() as u8, // Engine API message version
-            )
-            .unwrap(), // Unwrap the Result to get EthPayloadBuilderAttributes
+            builder_attributes,
         );
 
         // Build arguments
