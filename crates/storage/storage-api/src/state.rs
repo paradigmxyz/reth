@@ -86,14 +86,14 @@ pub trait StateProvider:
 }
 
 /// Trait implemented for database providers that can provide the [`StateCommitment`] type.
-pub trait StateCommitmentProvider {
+pub trait StateCommitmentProvider: Send + Sync {
     /// The [`StateCommitment`] type that can be used to perform state commitment operations.
     type StateCommitment: StateCommitment;
 }
 
 /// Trait that provides the hashed state from various sources.
 #[auto_impl(&, Arc, Box)]
-pub trait HashedPostStateProvider {
+pub trait HashedPostStateProvider: Send + Sync {
     /// Returns the `HashedPostState` of the provided [`BundleState`].
     fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState;
 }
