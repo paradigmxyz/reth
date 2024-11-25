@@ -142,8 +142,10 @@ where
     }
 }
 
+/// Updates the sparse trie with the given proofs and state, and returns the updated trie and the
+/// time it took.
 #[allow(dead_code)]
-fn calculate_state_root_with_sparse(
+fn update_sparse_trie(
     mut trie: Box<SparseStateTrie>,
     multiproof: MultiProof,
     targets: FbHashMap<32, FbHashSet<32>>,
