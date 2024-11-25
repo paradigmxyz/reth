@@ -11,8 +11,7 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    proofs::calculate_transaction_root, Block, BlockBody, BlockExt, Receipt,
-    SealedBlockWithSenders, SealedHeader, TransactionSignedEcRecovered,
+    Receipt, SealedBlockWithSenders, SealedHeader, TransactionSignedEcRecovered,
 };
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderError,
