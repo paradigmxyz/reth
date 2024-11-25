@@ -32,6 +32,7 @@ reth-testing-utils.workspace = true
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 
+arbitrary.workspace = true
 assert_matches.workspace = true
 criterion.workspace = true
 itertools.workspace = true

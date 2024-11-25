@@ -172,7 +172,7 @@ mod tests {
 
         // [ Headers Creation and Commit ]
         {
-            let sf_rw = StaticFileProvider::<()>::read_write(&static_dir)
+            let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir)
                 .expect("Failed to create static file provider")
                 .with_custom_blocks_per_file(blocks_per_file);
 
@@ -191,8 +191,8 @@ mod tests {
 
         // Helper function to prune headers and validate truncation results
         fn prune_and_validate(
-            writer: &mut StaticFileProviderRWRefMut<'_, ()>,
-            sf_rw: &StaticFileProvider<()>,
+            writer: &mut StaticFileProviderRWRefMut<'_, EthPrimitives>,
+            sf_rw: &StaticFileProvider<EthPrimitives>,
             static_dir: impl AsRef<Path>,
             prune_count: u64,
             expected_tip: Option<u64>,
