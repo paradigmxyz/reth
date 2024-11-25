@@ -21,12 +21,13 @@ use reth_blockchain_tree_api::{
 };
 use reth_chain_state::{ChainInfoTracker, ForkChoiceNotifications, ForkChoiceSubscriptions};
 use reth_chainspec::{ChainInfo, EthereumHardforks};
+use reth_db::table::Value;
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_node_types::{BlockTy, FullNodePrimitives, NodeTypes, NodeTypesWithDB, TxTy};
 use reth_primitives::{
-    Account, BlockWithSenders, Receipt, SealedBlock, SealedBlockFor, SealedBlockWithSenders,
-    SealedHeader, TransactionMeta, TransactionSigned,
+    Account, BlockWithSenders, EthPrimitives, Receipt, SealedBlock, SealedBlockFor,
+    SealedBlockWithSenders, SealedHeader, TransactionMeta,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -77,10 +78,8 @@ where
         ChainSpec: EthereumHardforks,
         Storage: ChainStorage<Self::Primitives>,
         Primitives: FullNodePrimitives<
-            SignedTx = TransactionSigned,
+            SignedTx: Value,
             BlockHeader = alloy_consensus::Header,
-            BlockBody = reth_primitives::BlockBody,
-            Block = reth_primitives::Block,
             Receipt = reth_primitives::Receipt,
         >,
     >,
@@ -92,10 +91,8 @@ impl<T> NodeTypesForProvider for T where
         ChainSpec: EthereumHardforks,
         Storage: ChainStorage<T::Primitives>,
         Primitives: FullNodePrimitives<
-            SignedTx = TransactionSigned,
+            SignedTx: Value,
             BlockHeader = alloy_consensus::Header,
-            BlockBody = reth_primitives::BlockBody,
-            Block = reth_primitives::Block,
             Receipt = reth_primitives::Receipt,
         >,
     >
@@ -108,8 +105,17 @@ where
     Self: NodeTypesForProvider + NodeTypesWithDB,
 {
 }
-
 impl<T> ProviderNodeTypes for T where T: NodeTypesForProvider + NodeTypesWithDB {}
+
+/// A helper trait with requirements for [`NodeTypesForProvider`] to be used within legacy
+/// blockchain tree.
+pub trait NodeTypesForTree: NodeTypesForProvider<Primitives = EthPrimitives> {}
+impl<T> NodeTypesForTree for T where T: NodeTypesForProvider<Primitives = EthPrimitives> {}
+
+/// Helper trait with requirements for [`ProviderNodeTypes`] to be used within legacy blockchain
+/// tree.
+pub trait TreeNodeTypes: ProviderNodeTypes + NodeTypesForTree {}
+impl<T> TreeNodeTypes for T where T: ProviderNodeTypes + NodeTypesForTree {}
 
 /// The main type for interacting with the blockchain.
 ///
@@ -342,7 +348,7 @@ impl<N: ProviderNodeTypes> BlockIdReader for BlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider<N> {
+impl<N: TreeNodeTypes> BlockReader for BlockchainProvider<N> {
     type Block = BlockTy<N>;
 
     fn find_block_by_hash(

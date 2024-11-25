@@ -5,23 +5,15 @@ use reth_consensus::Consensus;
 use reth_db::{static_file::BlockHashMask, tables};
 use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
 use reth_node_types::NodeTypesWithDB;
-use reth_primitives::{EthPrimitives, StaticFileSegment};
+use reth_primitives::StaticFileSegment;
 use reth_provider::{
-    providers::{NodeTypesForProvider, ProviderNodeTypes},
-    ChainStateBlockReader, ChainStateBlockWriter, ProviderFactory, StaticFileProviderFactory,
-    StatsReader,
+    providers::ProviderNodeTypes, ChainStateBlockReader, ChainStateBlockWriter, ProviderFactory,
+    StaticFileProviderFactory, StatsReader,
 };
 use reth_storage_errors::provider::ProviderResult;
 use std::{collections::BTreeMap, sync::Arc};
 
-/// A helper trait with requirements for [`ProviderNodeTypes`] to be used within [`TreeExternals`].
-pub trait NodeTypesForTree: NodeTypesForProvider<Primitives = EthPrimitives> {}
-
-impl<T> NodeTypesForTree for T where T: NodeTypesForProvider<Primitives = EthPrimitives> {}
-
-/// A helper trait with requirements for [`ProviderNodeTypes`] to be used within [`TreeExternals`].
-pub trait TreeNodeTypes: ProviderNodeTypes + NodeTypesForTree {}
-impl<T> TreeNodeTypes for T where T: ProviderNodeTypes + NodeTypesForTree {}
+pub use reth_provider::providers::{NodeTypesForTree, TreeNodeTypes};
 
 /// A container for external components.
 ///

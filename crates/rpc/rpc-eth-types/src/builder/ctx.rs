@@ -42,8 +42,12 @@ where
     where
         Provider: ChainSpecProvider + 'static,
         Tasks: TaskSpawner,
-        Events:
-            CanonStateSubscriptions<Primitives: NodePrimitives<Receipt = reth_primitives::Receipt>>,
+        Events: CanonStateSubscriptions<
+            Primitives: NodePrimitives<
+                Block = reth_primitives::Block,
+                Receipt = reth_primitives::Receipt,
+            >,
+        >,
     {
         let fee_history_cache =
             FeeHistoryCache::new(self.cache.clone(), self.config.fee_history_cache);

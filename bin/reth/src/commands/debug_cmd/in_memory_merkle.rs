@@ -19,6 +19,7 @@ use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
+use reth_node_api::{BlockTy, NodePrimitives};
 use reth_node_ethereum::EthExecutorProvider;
 use reth_primitives::BlockExt;
 use reth_provider::{
@@ -56,7 +57,12 @@ pub struct Command<C: ChainSpecParser> {
 }
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
-    async fn build_network<N: ProviderNodeTypes<ChainSpec = C::ChainSpec>>(
+    async fn build_network<
+        N: ProviderNodeTypes<
+            ChainSpec = C::ChainSpec,
+            Primitives: NodePrimitives<Block = reth_primitives::Block>,
+        >,
+    >(
         &self,
         config: &Config,
         task_executor: TaskExecutor,
@@ -143,7 +149,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             (
                 &block
                     .clone()
-                    .unseal()
+                    .unseal::<BlockTy<N>>()
                     .with_recovered_senders()
                     .ok_or(BlockValidationError::SenderRecoveryError)?,
                 merkle_block_td + block.difficulty,

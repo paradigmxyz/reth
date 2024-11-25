@@ -9,6 +9,7 @@ use reth_db_api::{database::Database, table::TableImporter};
 use reth_db_common::DbTool;
 use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
+use reth_node_api::NodePrimitives;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::{
     providers::{ProviderNodeTypes, StaticFileProvider},
@@ -24,7 +25,12 @@ use reth_stages::{
 };
 use tracing::info;
 
-pub(crate) async fn dump_merkle_stage<N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>>(
+pub(crate) async fn dump_merkle_stage<
+    N: ProviderNodeTypes<
+        DB = Arc<DatabaseEnv>,
+        Primitives: NodePrimitives<Block = reth_primitives::Block>,
+    >,
+>(
     db_tool: &DbTool<N>,
     from: BlockNumber,
     to: BlockNumber,
@@ -67,7 +73,9 @@ pub(crate) async fn dump_merkle_stage<N: ProviderNodeTypes<DB = Arc<DatabaseEnv>
 }
 
 /// Dry-run an unwind to FROM block and copy the necessary table data to the new database.
-fn unwind_and_copy<N: ProviderNodeTypes>(
+fn unwind_and_copy<
+    N: ProviderNodeTypes<Primitives: NodePrimitives<Block = reth_primitives::Block>>,
+>(
     db_tool: &DbTool<N>,
     range: (u64, u64),
     tip_block_number: u64,
