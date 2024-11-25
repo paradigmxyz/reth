@@ -53,9 +53,13 @@ impl SparseTrie {
     /// # Returns
     ///
     /// Mutable reference to [`RevealedSparseTrie`].
-    pub fn reveal_root(&mut self, root: TrieNode) -> SparseTrieResult<&mut RevealedSparseTrie> {
+    pub fn reveal_root(
+        &mut self,
+        root: TrieNode,
+        retain_updates: bool,
+    ) -> SparseTrieResult<&mut RevealedSparseTrie> {
         if self.is_blind() {
-            *self = Self::Revealed(Box::new(RevealedSparseTrie::from_root(root)?))
+            *self = Self::Revealed(Box::new(RevealedSparseTrie::from_root(root, retain_updates)?))
         }
         Ok(self.as_revealed_mut().unwrap())
     }
@@ -139,19 +143,20 @@ impl Default for RevealedSparseTrie {
 
 impl RevealedSparseTrie {
     /// Create new revealed sparse trie from the given root node.
-    pub fn from_root(node: TrieNode) -> SparseTrieResult<Self> {
+    pub fn from_root(node: TrieNode, retain_updates: bool) -> SparseTrieResult<Self> {
         let mut this = Self {
             nodes: HashMap::default(),
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
             rlp_buf: Vec::new(),
             updates: None,
-        };
+        }
+        .with_updates(retain_updates);
         this.reveal_node(Nibbles::default(), node)?;
         Ok(this)
     }
 
-    /// Makes the sparse trie to store updated branch nodes.
+    /// Set the retention of branch node updates and deletions.
     pub fn with_updates(mut self, retain_updates: bool) -> Self {
         if retain_updates {
             self.updates = Some(SparseTrieUpdates::default());
@@ -1586,7 +1591,7 @@ mod tests {
             TrieMask::new(0b11),
         ));
 
-        let mut sparse = RevealedSparseTrie::from_root(branch.clone()).unwrap();
+        let mut sparse = RevealedSparseTrie::from_root(branch.clone(), false).unwrap();
 
         // Reveal a branch node and one of its children
         //
@@ -1748,6 +1753,7 @@ mod tests {
                 .take_proof_nodes();
         let mut sparse = RevealedSparseTrie::from_root(
             TrieNode::decode(&mut &proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
+            false,
         )
         .unwrap();
 
@@ -1822,6 +1828,7 @@ mod tests {
         .take_proof_nodes();
         let mut sparse = RevealedSparseTrie::from_root(
             TrieNode::decode(&mut &proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
+            false,
         )
         .unwrap();
 
@@ -1892,6 +1899,7 @@ mod tests {
                 .take_proof_nodes();
         let mut sparse = RevealedSparseTrie::from_root(
             TrieNode::decode(&mut &proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
+            false,
         )
         .unwrap();
 

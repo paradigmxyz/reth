@@ -14,6 +14,7 @@ use reth_trie::{
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
 #[derive(Default, Debug)]
 pub struct SparseStateTrie {
+    retain_updates: bool,
     /// Sparse account trie.
     state: SparseTrie,
     /// Sparse storage tries.
@@ -28,6 +29,12 @@ impl SparseStateTrie {
     /// Create state trie from state trie.
     pub fn from_state(state: SparseTrie) -> Self {
         Self { state, ..Default::default() }
+    }
+
+    /// Set the retention of branch node updates and deletions.
+    pub const fn with_updates(mut self, retain_updates: bool) -> Self {
+        self.retain_updates = retain_updates;
+        self
     }
 
     /// Returns `true` if account was already revealed.
@@ -56,7 +63,7 @@ impl SparseStateTrie {
         let Some(root_node) = self.validate_proof(&mut proof)? else { return Ok(()) };
 
         // Reveal root node if it wasn't already.
-        let trie = self.state.reveal_root(root_node)?;
+        let trie = self.state.reveal_root(root_node, self.retain_updates)?;
 
         // Reveal the remaining proof nodes.
         for (path, bytes) in proof {
@@ -87,7 +94,11 @@ impl SparseStateTrie {
         let Some(root_node) = self.validate_proof(&mut proof)? else { return Ok(()) };
 
         // Reveal root node if it wasn't already.
-        let trie = self.storages.entry(account).or_default().reveal_root(root_node)?;
+        let trie = self
+            .storages
+            .entry(account)
+            .or_default()
+            .reveal_root(root_node, self.retain_updates)?;
 
         // Reveal the remaining proof nodes.
         for (path, bytes) in proof {
