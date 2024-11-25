@@ -5,7 +5,7 @@ use std::{
 
 use futures_util::TryStreamExt;
 use reth_codecs::Compact;
-use reth_primitives_traits::BlockBody;
+use reth_primitives_traits::{Block, BlockBody};
 use tracing::*;
 
 use alloy_primitives::TxNumber;
@@ -151,7 +151,7 @@ where
         + StaticFileProviderFactory
         + StatsReader
         + BlockReader
-        + BlockWriter<Body = D::Body>,
+        + BlockWriter<Block: Block<Body = D::Body>>,
     D: BodyDownloader<Body: BlockBody<Transaction: Compact>>,
 {
     /// Return the id of the stage

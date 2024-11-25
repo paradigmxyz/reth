@@ -793,7 +793,9 @@ mod tests {
     use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
     use reth_errors::ProviderError;
     use reth_execution_types::{Chain, ExecutionOutcome};
-    use reth_primitives::{Receipt, SealedBlock, StaticFileSegment, TransactionSignedNoHash};
+    use reth_primitives::{
+        BlockExt, Receipt, SealedBlock, StaticFileSegment, TransactionSignedNoHash,
+    };
     use reth_storage_api::{
         BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
         ChangeSetReader, DatabaseProviderFactory, HeaderProvider, ReceiptProvider,

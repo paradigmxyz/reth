@@ -1712,6 +1712,11 @@ pub trait SignedTransactionIntoRecoveredExt: SignedTransaction {
         let signer = self.recover_signer_unchecked()?;
         Some(TransactionSignedEcRecovered::from_signed_transaction(self, signer))
     }
+
+    /// Returns the [`TransactionSignedEcRecovered`] transaction with the given sender.
+    fn with_signer(self, signer: Address) -> TransactionSignedEcRecovered<Self> {
+        TransactionSignedEcRecovered::from_signed_transaction(self, signer)
+    }
 }
 
 impl<T> SignedTransactionIntoRecoveredExt for T where T: SignedTransaction {}
@@ -1933,6 +1938,22 @@ where
         txes.into_iter().map(|tx| tx.recover_signer()).collect()
     } else {
         txes.into_par_iter().map(|tx| tx.recover_signer()).collect()
+    }
+}
+
+/// Recovers a list of signers from a transaction list iterator _without ensuring that the
+/// signature has a low `s` value_.
+///
+/// Returns `None`, if some transaction's signature is invalid.
+pub fn recover_signers_unchecked<'a, I, T>(txes: I, num_txes: usize) -> Option<Vec<Address>>
+where
+    T: SignedTransaction,
+    I: IntoParallelIterator<Item = &'a T> + IntoIterator<Item = &'a T> + Send,
+{
+    if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
+        txes.into_iter().map(|tx| tx.recover_signer_unchecked()).collect()
+    } else {
+        txes.into_par_iter().map(|tx| tx.recover_signer_unchecked()).collect()
     }
 }
 

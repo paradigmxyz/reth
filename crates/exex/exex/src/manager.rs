@@ -1235,7 +1235,7 @@ mod tests {
             genesis_block.number + 1,
             BlockParams { parent: Some(genesis_hash), ..Default::default() },
         )
-        .seal_with_senders()
+        .seal_with_senders::<reth_primitives::Block>()
         .unwrap();
         let provider_rw = provider_factory.database_provider_rw().unwrap();
         provider_rw.insert_block(block.clone(), StorageLocation::Database).unwrap();

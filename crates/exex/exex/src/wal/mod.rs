@@ -268,21 +268,25 @@ mod tests {
         // Create 4 canonical blocks and one reorged block with number 2
         let blocks = random_block_range(&mut rng, 0..=3, BlockRangeParams::default())
             .into_iter()
-            .map(|block| block.seal_with_senders().ok_or_eyre("failed to recover senders"))
+            .map(|block| {
+                block
+                    .seal_with_senders::<reth_primitives::Block>()
+                    .ok_or_eyre("failed to recover senders")
+            })
             .collect::<eyre::Result<Vec<_>>>()?;
         let block_1_reorged = random_block(
             &mut rng,
             1,
             BlockParams { parent: Some(blocks[0].hash()), ..Default::default() },
         )
-        .seal_with_senders()
+        .seal_with_senders::<reth_primitives::Block>()
         .ok_or_eyre("failed to recover senders")?;
         let block_2_reorged = random_block(
             &mut rng,
             2,
             BlockParams { parent: Some(blocks[1].hash()), ..Default::default() },
         )
-        .seal_with_senders()
+        .seal_with_senders::<reth_primitives::Block>()
         .ok_or_eyre("failed to recover senders")?;
 
         // Create notifications for the above blocks.
