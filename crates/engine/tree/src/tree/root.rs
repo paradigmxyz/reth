@@ -17,8 +17,8 @@ use reth_trie::{
     HashedPostState, HashedPostStateSorted, HashedStorage, MultiProof, Nibbles, TrieAccount,
     TrieInput, EMPTY_ROOT_HASH,
 };
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use reth_trie_parallel::{proof::ParallelProof, root::ParallelStateRootError};
+use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseProof, DatabaseTrieCursorFactory};
+use reth_trie_parallel::root::ParallelStateRootError;
 use reth_trie_sparse::{SparseStateTrie, SparseStateTrieResult};
 use revm_primitives::{keccak256, EvmState, B256};
 use std::{
@@ -271,7 +271,17 @@ where
             .collect::<HashMap<_, _>>();
 
         rayon::spawn(move || {
-            let result = ParallelProof::new(view, input).multiproof(targets);
+            let provider = match view.provider_ro() {
+                Ok(provider) => provider,
+                Err(error) => {
+                    error!(target: "engine::root", ?error, "Could not get provider");
+                    return;
+                }
+            };
+
+            // TODO: replace with parallel proof
+            let result =
+                Proof::overlay_multiproof(provider.tx_ref(), input.as_ref().clone(), targets);
             match result {
                 Ok(proof) => {
                     let _ = state_root_message_sender.send(InternalMessage::ProofCalculated {
