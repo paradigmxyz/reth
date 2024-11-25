@@ -109,7 +109,7 @@ impl<S, Engine, Provider, Evm, Spec> Stream for EngineReorg<S, Engine, Provider,
 where
     S: Stream<Item = BeaconEngineMessage<Engine>>,
     Engine: EngineTypes,
-    Provider: BlockReader + StateProviderFactory,
+    Provider: BlockReader<Block = reth_primitives::Block> + StateProviderFactory,
     Evm: ConfigureEvm<Header = Header>,
     Spec: EthereumHardforks,
 {
@@ -256,7 +256,7 @@ fn create_reorg_head<Provider, Evm, Spec>(
     next_sidecar: ExecutionPayloadSidecar,
 ) -> RethResult<(ExecutionPayload, ExecutionPayloadSidecar)>
 where
-    Provider: BlockReader + StateProviderFactory,
+    Provider: BlockReader<Block = reth_primitives::Block> + StateProviderFactory,
     Evm: ConfigureEvm<Header = Header>,
     Spec: EthereumHardforks,
 {

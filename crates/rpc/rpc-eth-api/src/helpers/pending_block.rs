@@ -45,7 +45,7 @@ use tracing::debug;
 pub trait LoadPendingBlock:
     EthApiTypes
     + RpcNodeCore<
-        Provider: BlockReaderIdExt
+        Provider: BlockReaderIdExt<Block = reth_primitives::Block>
                       + EvmEnvProvider
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                       + StateProviderFactory,
@@ -114,9 +114,15 @@ pub trait LoadPendingBlock:
     }
 
     /// Returns the locally built pending block
+    #[expect(clippy::type_complexity)]
     fn local_pending_block(
         &self,
-    ) -> impl Future<Output = Result<Option<(SealedBlockWithSenders, Vec<Receipt>)>, Self::Error>> + Send
+    ) -> impl Future<
+        Output = Result<
+            Option<(SealedBlockWithSenders<<Self::Provider as BlockReader>::Block>, Vec<Receipt>)>,
+            Self::Error,
+        >,
+    > + Send
     where
         Self: SpawnBlocking,
     {

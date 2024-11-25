@@ -27,7 +27,12 @@ pub struct EthHandlers<Provider, Pool, Network, Events, EthApi: EthApiTypes> {
 
 impl<Provider, Pool, Network, Events, EthApi> EthHandlers<Provider, Pool, Network, Events, EthApi>
 where
-    Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
+    Provider: StateProviderFactory
+        + BlockReader<Block = reth_primitives::Block>
+        + EvmEnvProvider
+        + Clone
+        + Unpin
+        + 'static,
     Pool: Send + Sync + Clone + 'static,
     Network: Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,

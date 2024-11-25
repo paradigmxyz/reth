@@ -489,6 +489,11 @@ where
     }
 }
 
+/// A helepr trait to construct [`SealedBlock`] from a [`reth_primitives_traits::Block`].
+pub type SealedBlockFor<B> = SealedBlock<
+    <B as reth_primitives_traits::Block>::Header,
+    <B as reth_primitives_traits::Block>::Body,
+>;
 /// Sealed block with senders recovered from transactions.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Deref, DerefMut)]
 pub struct SealedBlockWithSenders<B: reth_primitives_traits::Block = Block> {

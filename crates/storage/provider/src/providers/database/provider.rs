@@ -46,13 +46,13 @@ use reth_db_api::{
 use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_network_p2p::headers::downloader::SyncTarget;
-use reth_node_types::{BlockTy, NodeTypes, TxTy};
+use reth_node_types::{BlockTy, BodyTy, NodeTypes, TxTy};
 use reth_primitives::{
-    Account, Block, BlockBody, BlockExt, BlockWithSenders, Bytecode, GotExpected, Receipt,
-    SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, StorageEntry,
+    Account, Block, BlockExt, BlockWithSenders, Bytecode, GotExpected, Receipt, SealedBlock,
+    SealedBlockFor, SealedBlockWithSenders, SealedHeader, StaticFileSegment, StorageEntry,
     TransactionMeta, TransactionSignedNoHash,
 };
-use reth_primitives_traits::{BlockBody as _, SignedTransaction};
+use reth_primitives_traits::{Block as _, BlockBody as _, SignedTransaction};
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
@@ -457,7 +457,7 @@ where
     Ok(Vec::new())
 }
 
-impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
+impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     /// Creates a provider with an inner read-only transaction.
     pub const fn new(
         tx: TX,
@@ -519,7 +519,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         N::ChainSpec: EthereumHardforks,
         H: AsRef<Header>,
         HF: FnOnce(BlockNumber) -> ProviderResult<Option<H>>,
-        BF: FnOnce(H, BlockBody, Vec<Address>) -> ProviderResult<Option<B>>,
+        BF: FnOnce(H, BodyTy<N>, Vec<Address>) -> ProviderResult<Option<B>>,
     {
         let Some(block_number) = self.convert_hash_or_number(id)? else { return Ok(None) };
         let Some(header) = header_by_number(block_number)? else { return Ok(None) };
@@ -569,7 +569,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         N::ChainSpec: EthereumHardforks,
         H: AsRef<Header>,
         HF: FnOnce(RangeInclusive<BlockNumber>) -> ProviderResult<Vec<H>>,
-        F: FnMut(H, BlockBody, Range<TxNumber>) -> ProviderResult<R>,
+        F: FnMut(H, BodyTy<N>, Range<TxNumber>) -> ProviderResult<R>,
     {
         if range.is_empty() {
             return Ok(Vec::new())
@@ -637,7 +637,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         N::ChainSpec: EthereumHardforks,
         H: AsRef<Header>,
         HF: Fn(RangeInclusive<BlockNumber>) -> ProviderResult<Vec<H>>,
-        BF: Fn(H, BlockBody, Vec<Address>) -> ProviderResult<B>,
+        BF: Fn(H, BodyTy<N>, Vec<Address>) -> ProviderResult<B>,
     {
         let mut senders_cursor = self.tx.cursor_read::<tables::TransactionSenders>()?;
 
@@ -651,7 +651,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
                         .walk_range(tx_range.clone())?
                         .collect::<Result<HashMap<_, _>, _>>()?;
 
-                let mut senders = Vec::with_capacity(body.transactions.len());
+                let mut senders = Vec::with_capacity(body.transactions().len());
                 for (tx_num, tx) in tx_range.zip(body.transactions()) {
                     match known_senders.get(&tx_num) {
                         None => {
@@ -1190,7 +1190,13 @@ impl<TX: DbTx + 'static, N: NodeTypes> BlockNumReader for DatabaseProvider<TX, N
 }
 
 impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvider<TX, N> {
-    fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> ProviderResult<Option<Block>> {
+    type Block = BlockTy<N>;
+
+    fn find_block_by_hash(
+        &self,
+        hash: B256,
+        source: BlockSource,
+    ) -> ProviderResult<Option<Self::Block>> {
         if source.is_canonical() {
             self.block(hash.into())
         } else {
@@ -1203,7 +1209,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
     /// If the header for this block is not found, this returns `None`.
     /// If the header is found, but the transactions either do not exist, or are not indexed, this
     /// will return None.
-    fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Block>> {
+    fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
         if let Some(number) = self.convert_hash_or_number(id)? {
             if let Some(header) = self.header_by_number(number)? {
                 // If the body indices are not found, this means that the transactions either do not
@@ -1228,15 +1234,19 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
         Ok(None)
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlock>> {
+    fn pending_block(&self) -> ProviderResult<Option<SealedBlockFor<Self::Block>>> {
         Ok(None)
     }
 
-    fn pending_block_with_senders(&self) -> ProviderResult<Option<SealedBlockWithSenders>> {
+    fn pending_block_with_senders(
+        &self,
+    ) -> ProviderResult<Option<SealedBlockWithSenders<Self::Block>>> {
         Ok(None)
     }
 
-    fn pending_block_and_receipts(&self) -> ProviderResult<Option<(SealedBlock, Vec<Receipt>)>> {
+    fn pending_block_and_receipts(
+        &self,
+    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Receipt>)>> {
         Ok(None)
     }
 
@@ -1275,13 +1285,13 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<BlockWithSenders>> {
+    ) -> ProviderResult<Option<BlockWithSenders<Self::Block>>> {
         self.block_with_senders(
             id,
             transaction_kind,
             |block_number| self.header_by_number(block_number),
             |header, body, senders| {
-                Block { header, body }
+                Self::Block::new(header, body)
                     // Note: we're using unchecked here because we know the block contains valid txs
                     // wrt to its height and can ignore the s value check so pre
                     // EIP-2 txs are allowed
@@ -1296,7 +1306,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<SealedBlockWithSenders>> {
+    ) -> ProviderResult<Option<SealedBlockWithSenders<Self::Block>>> {
         self.block_with_senders(
             id,
             transaction_kind,
@@ -1313,23 +1323,23 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
         )
     }
 
-    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
+    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Self::Block>> {
         self.block_range(
             range,
             |range| self.headers_range(range),
-            |header, body, _| Ok(Block { header, body }),
+            |header, body, _| Ok(Self::Block::new(header, body)),
         )
     }
 
     fn block_with_senders_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<BlockWithSenders>> {
+    ) -> ProviderResult<Vec<BlockWithSenders<Self::Block>>> {
         self.block_with_senders_range(
             range,
             |range| self.headers_range(range),
             |header, body, senders| {
-                Block { header, body }
+                Self::Block::new(header, body)
                     .try_with_senders_unchecked(senders)
                     .map_err(|_| ProviderError::SenderRecoveryError)
             },
@@ -1339,7 +1349,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
     fn sealed_block_with_senders_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
+    ) -> ProviderResult<Vec<SealedBlockWithSenders<Self::Block>>> {
         self.block_with_senders_range(
             range,
             |range| self.sealed_headers_range(range),
@@ -2812,7 +2822,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
 
     fn append_block_bodies(
         &self,
-        bodies: Vec<(BlockNumber, Option<<Self::Block as reth_primitives_traits::Block>::Body>)>,
+        bodies: Vec<(BlockNumber, Option<BodyTy<N>>)>,
         write_transactions_to: StorageLocation,
     ) -> ProviderResult<()> {
         let Some(from_block) = bodies.first().map(|(block, _)| *block) else { return Ok(()) };

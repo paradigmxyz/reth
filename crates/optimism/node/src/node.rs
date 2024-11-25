@@ -135,7 +135,11 @@ impl OpNode {
     >
     where
         Node: FullNodeTypes<
-            Types: NodeTypesWithEngine<Engine = OpEngineTypes, ChainSpec = OpChainSpec>,
+            Types: NodeTypesWithEngine<
+                Engine = OpEngineTypes,
+                ChainSpec = OpChainSpec,
+                Primitives = OpPrimitives,
+            >,
         >,
     {
         let RollupArgs { disable_txpool_gossip, compute_pending_block, discovery_v4, .. } = args;
@@ -293,7 +297,7 @@ pub struct OpPoolBuilder {
 
 impl<Node> PoolBuilder<Node> for OpPoolBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
 {
     type Pool = OpTransactionPool<Node::Provider, DiskFileBlobStore>;
 
@@ -522,7 +526,7 @@ impl OpNetworkBuilder {
 
 impl<Node, Pool> NetworkBuilder<Node, Pool> for OpNetworkBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
     Pool: TransactionPool + Unpin + 'static,
 {
     async fn build_network(

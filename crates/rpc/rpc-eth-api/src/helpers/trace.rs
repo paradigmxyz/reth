@@ -10,6 +10,7 @@ use futures::Future;
 use reth_chainspec::ChainSpecProvider;
 use reth_evm::{system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::SealedBlockWithSenders;
+use reth_provider::BlockReader;
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDb, StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
@@ -24,7 +25,7 @@ use revm_primitives::{
 use super::{Call, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction};
 
 /// Executes CPU heavy tasks.
-pub trait Trace: LoadState<Evm: ConfigureEvm<Header = Header>> {
+pub trait Trace: LoadState<Provider: BlockReader, Evm: ConfigureEvm<Header = Header>> {
     /// Executes the [`EnvWithHandlerCfg`] against the given [Database] without committing state
     /// changes.
     fn inspect<DB, I>(
@@ -230,7 +231,7 @@ pub trait Trace: LoadState<Evm: ConfigureEvm<Header = Header>> {
     fn trace_block_until<F, R>(
         &self,
         block_id: BlockId,
-        block: Option<Arc<SealedBlockWithSenders>>,
+        block: Option<Arc<SealedBlockWithSenders<<Self::Provider as BlockReader>::Block>>>,
         highest_index: Option<u64>,
         config: TracingInspectorConfig,
         f: F,

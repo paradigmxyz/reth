@@ -470,6 +470,8 @@ impl BlockIdReader for MockEthProvider {
 }
 
 impl BlockReader for MockEthProvider {
+    type Block = Block;
+
     fn find_block_by_hash(
         &self,
         hash: B256,

@@ -92,6 +92,8 @@ impl BlockNumReader for NoopProvider {
 }
 
 impl BlockReader for NoopProvider {
+    type Block = Block;
+
     fn find_block_by_hash(
         &self,
         hash: B256,

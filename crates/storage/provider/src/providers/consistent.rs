@@ -18,11 +18,12 @@ use reth_db::models::BlockNumberAddress;
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::{BundleStateInit, ExecutionOutcome, RevertsInit};
-use reth_node_types::TxTy;
+use reth_node_types::{BlockTy, TxTy};
 use reth_primitives::{
-    Account, Block, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    Account, BlockWithSenders, Receipt, SealedBlockFor, SealedBlockWithSenders, SealedHeader,
     StorageEntry, TransactionMeta,
 };
+use reth_primitives_traits::{Block, BlockBody};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{DatabaseProviderFactory, StateProvider, StorageChangeSetReader};
@@ -778,7 +779,13 @@ impl<N: ProviderNodeTypes> BlockIdReader for ConsistentProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
-    fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> ProviderResult<Option<Block>> {
+    type Block = BlockTy<N>;
+
+    fn find_block_by_hash(
+        &self,
+        hash: B256,
+        source: BlockSource,
+    ) -> ProviderResult<Option<Self::Block>> {
         match source {
             BlockSource::Any | BlockSource::Canonical => {
                 // Note: it's fine to return the unsealed block because the caller already has
@@ -795,7 +802,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         }
     }
 
-    fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Block>> {
+    fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
         self.get_in_memory_or_storage_by_block(
             id,
             |db_provider| db_provider.block(id),
@@ -803,15 +810,19 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         )
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlock>> {
+    fn pending_block(&self) -> ProviderResult<Option<SealedBlockFor<Self::Block>>> {
         Ok(self.canonical_in_memory_state.pending_block())
     }
 
-    fn pending_block_with_senders(&self) -> ProviderResult<Option<SealedBlockWithSenders>> {
+    fn pending_block_with_senders(
+        &self,
+    ) -> ProviderResult<Option<SealedBlockWithSenders<Self::Block>>> {
         Ok(self.canonical_in_memory_state.pending_block_with_senders())
     }
 
-    fn pending_block_and_receipts(&self) -> ProviderResult<Option<(SealedBlock, Vec<Receipt>)>> {
+    fn pending_block_and_receipts(
+        &self,
+    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Receipt>)>> {
         Ok(self.canonical_in_memory_state.pending_block_and_receipts())
     }
 
@@ -873,7 +884,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<BlockWithSenders>> {
+    ) -> ProviderResult<Option<BlockWithSenders<Self::Block>>> {
         self.get_in_memory_or_storage_by_block(
             id,
             |db_provider| db_provider.block_with_senders(id, transaction_kind),
@@ -885,7 +896,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<SealedBlockWithSenders>> {
+    ) -> ProviderResult<Option<SealedBlockWithSenders<Self::Block>>> {
         self.get_in_memory_or_storage_by_block(
             id,
             |db_provider| db_provider.sealed_block_with_senders(id, transaction_kind),
@@ -893,7 +904,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         )
     }
 
-    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
+    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Self::Block>> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
             |db_provider, range, _| db_provider.block_range(range),
@@ -905,7 +916,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
     fn block_with_senders_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<BlockWithSenders>> {
+    ) -> ProviderResult<Vec<BlockWithSenders<Self::Block>>> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
             |db_provider, range, _| db_provider.block_with_senders_range(range),
@@ -917,7 +928,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
     fn sealed_block_with_senders_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
+    ) -> ProviderResult<Vec<SealedBlockWithSenders<Self::Block>>> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
             |db_provider, range, _| db_provider.sealed_block_with_senders_range(range),
@@ -1011,7 +1022,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block(
             id,
             |provider| provider.transactions_by_block(id),
-            |block_state| Ok(Some(block_state.block_ref().block().body.transactions.clone())),
+            |block_state| Ok(Some(block_state.block_ref().block().body().transactions().to_vec())),
         )
     }
 
@@ -1022,7 +1033,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
             |db_provider, range, _| db_provider.transactions_by_block_range(range),
-            |block_state, _| Some(block_state.block_ref().block().body.transactions.clone()),
+            |block_state, _| Some(block_state.block_ref().block().body().transactions().to_vec()),
             |_| true,
         )
     }
@@ -1289,7 +1300,7 @@ impl<N: ProviderNodeTypes> ChainSpecProvider for ConsistentProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> BlockReaderIdExt for ConsistentProvider<N> {
-    fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Block>> {
+    fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Block>> {
         match id {
             BlockId::Number(num) => self.block_by_number_or_tag(num),
             BlockId::Hash(hash) => {

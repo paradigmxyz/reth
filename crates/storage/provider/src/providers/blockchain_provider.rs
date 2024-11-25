@@ -25,10 +25,11 @@ use reth_db::{models::BlockNumberAddress, transaction::DbTx, Database};
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::ExecutionOutcome;
-use reth_node_types::{NodeTypesWithDB, TxTy};
+use reth_node_types::{BlockTy, NodeTypesWithDB, TxTy};
 use reth_primitives::{
-    Account, Block, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
+    Account, Block, BlockWithSenders, NodePrimitives, Receipt, SealedBlock, SealedBlockFor,
+    SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta, TransactionSigned,
+    TransactionSignedNoHash,
 };
 use reth_primitives_traits::BlockBody as _;
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
@@ -259,23 +260,33 @@ impl<N: ProviderNodeTypes> BlockIdReader for BlockchainProvider2<N> {
 }
 
 impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
-    fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> ProviderResult<Option<Block>> {
+    type Block = BlockTy<N>;
+
+    fn find_block_by_hash(
+        &self,
+        hash: B256,
+        source: BlockSource,
+    ) -> ProviderResult<Option<Self::Block>> {
         self.consistent_provider()?.find_block_by_hash(hash, source)
     }
 
-    fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Block>> {
+    fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
         self.consistent_provider()?.block(id)
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlock>> {
+    fn pending_block(&self) -> ProviderResult<Option<SealedBlockFor<Self::Block>>> {
         Ok(self.canonical_in_memory_state.pending_block())
     }
 
-    fn pending_block_with_senders(&self) -> ProviderResult<Option<SealedBlockWithSenders>> {
+    fn pending_block_with_senders(
+        &self,
+    ) -> ProviderResult<Option<SealedBlockWithSenders<Self::Block>>> {
         Ok(self.canonical_in_memory_state.pending_block_with_senders())
     }
 
-    fn pending_block_and_receipts(&self) -> ProviderResult<Option<(SealedBlock, Vec<Receipt>)>> {
+    fn pending_block_and_receipts(
+        &self,
+    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Receipt>)>> {
         Ok(self.canonical_in_memory_state.pending_block_and_receipts())
     }
 
@@ -300,7 +311,7 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<BlockWithSenders>> {
+    ) -> ProviderResult<Option<BlockWithSenders<Self::Block>>> {
         self.consistent_provider()?.block_with_senders(id, transaction_kind)
     }
 
@@ -308,25 +319,25 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<SealedBlockWithSenders>> {
+    ) -> ProviderResult<Option<SealedBlockWithSenders<Self::Block>>> {
         self.consistent_provider()?.sealed_block_with_senders(id, transaction_kind)
     }
 
-    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
+    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Self::Block>> {
         self.consistent_provider()?.block_range(range)
     }
 
     fn block_with_senders_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<BlockWithSenders>> {
+    ) -> ProviderResult<Vec<BlockWithSenders<Self::Block>>> {
         self.consistent_provider()?.block_with_senders_range(range)
     }
 
     fn sealed_block_with_senders_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
+    ) -> ProviderResult<Vec<SealedBlockWithSenders<Self::Block>>> {
         self.consistent_provider()?.sealed_block_with_senders_range(range)
     }
 }
@@ -670,9 +681,9 @@ where
 
 impl<N: ProviderNodeTypes> BlockReaderIdExt for BlockchainProvider2<N>
 where
-    Self: BlockReader + ReceiptProviderIdExt,
+    Self: ReceiptProviderIdExt,
 {
-    fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Block>> {
+    fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Block>> {
         self.consistent_provider()?.block_by_id(id)
     }
 

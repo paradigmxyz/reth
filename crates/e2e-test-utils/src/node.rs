@@ -1,5 +1,6 @@
 use std::{marker::PhantomData, pin::Pin};
 
+use alloy_consensus::{BlockHeader, Sealable};
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use eyre::Ok;
@@ -15,6 +16,7 @@ use reth::{
     },
 };
 use reth_chainspec::EthereumHardforks;
+use reth_node_api::{Block, FullBlock, NodePrimitives};
 use reth_node_builder::{rpc::RethRpcAddOns, NodeTypes, NodeTypesWithEngine};
 use reth_stages_types::StageId;
 use tokio_stream::StreamExt;
@@ -51,7 +53,11 @@ impl<Node, Engine, AddOns> NodeTestContext<Node, AddOns>
 where
     Engine: EngineTypes,
     Node: FullNodeComponents,
-    Node::Types: NodeTypesWithEngine<ChainSpec: EthereumHardforks, Engine = Engine>,
+    Node::Types: NodeTypesWithEngine<
+        ChainSpec: EthereumHardforks,
+        Engine = Engine,
+        Primitives: NodePrimitives<Block: FullBlock>,
+    >,
     Node::Network: PeersHandleProvider,
     AddOns: RethRpcAddOns<Node>,
 {
@@ -178,7 +184,7 @@ where
 
             if check {
                 if let Some(latest_block) = self.inner.provider.block_by_number(number)? {
-                    assert_eq!(latest_block.hash_slow(), expected_block_hash);
+                    assert_eq!(latest_block.header().hash_slow(), expected_block_hash);
                     break
                 }
                 assert!(
@@ -225,10 +231,10 @@ where
             if let Some(latest_block) =
                 self.inner.provider.block_by_number_or_tag(BlockNumberOrTag::Latest)?
             {
-                if latest_block.number == block_number {
+                if latest_block.header().number() == block_number {
                     // make sure the block hash we submitted via FCU engine api is the new latest
                     // block using an RPC call
-                    assert_eq!(latest_block.hash_slow(), block_hash);
+                    assert_eq!(latest_block.header().hash_slow(), block_hash);
                     break
                 }
             }
