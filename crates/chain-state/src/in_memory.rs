@@ -483,9 +483,7 @@ where
     }
 
     /// Returns the `SealedBlockWithSenders` corresponding to the pending state.
-    pub fn pending_block_with_senders(
-        &self,
-    ) -> Option<SealedBlockWithSenders<N::BlockHeader, N::BlockBody>> {
+    pub fn pending_block_with_senders(&self) -> Option<SealedBlockWithSenders> {
         self.pending_state()
             .and_then(|block_state| block_state.block_ref().block().clone().seal_with_senders())
     }
