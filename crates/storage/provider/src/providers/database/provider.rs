@@ -50,12 +50,14 @@ use reth_node_types::{BlockTy, NodeTypes, TxTy};
 use reth_primitives::{
     Account, Block, BlockBody, BlockExt, BlockWithSenders, Bytecode, GotExpected, Receipt,
     SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, StorageEntry,
-    TransactionMeta, TransactionSigned, TransactionSignedNoHash,
+    TransactionMeta, TransactionSignedNoHash,
 };
 use reth_primitives_traits::{BlockBody as _, SignedTransaction};
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::{StateProvider, StorageChangeSetReader, TryIntoHistoricalStateProvider};
+use reth_storage_api::{
+    BlockBodyReader, StateProvider, StorageChangeSetReader, TryIntoHistoricalStateProvider,
+};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
@@ -517,20 +519,10 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         N::ChainSpec: EthereumHardforks,
         H: AsRef<Header>,
         HF: FnOnce(BlockNumber) -> ProviderResult<Option<H>>,
-        BF: FnOnce(
-            H,
-            Vec<TransactionSigned>,
-            Vec<Address>,
-            Vec<Header>,
-            Option<Withdrawals>,
-        ) -> ProviderResult<Option<B>>,
+        BF: FnOnce(H, BlockBody, Vec<Address>) -> ProviderResult<Option<B>>,
     {
         let Some(block_number) = self.convert_hash_or_number(id)? else { return Ok(None) };
         let Some(header) = header_by_number(block_number)? else { return Ok(None) };
-
-        let ommers = self.ommers(block_number.into())?.unwrap_or_default();
-        let withdrawals =
-            self.withdrawals_by_block(block_number.into(), header.as_ref().timestamp)?;
 
         // Get the block body
         //
@@ -548,9 +540,14 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             (self.transactions_by_tx_range(tx_range.clone())?, self.senders_by_tx_range(tx_range)?)
         };
 
-        let body = transactions.into_iter().map(Into::into).collect();
+        let body = self
+            .storage
+            .reader()
+            .read_block_bodies(self, vec![(header.as_ref(), transactions)])?
+            .pop()
+            .ok_or(ProviderError::InvalidStorageOutput)?;
 
-        construct_block(header, body, senders, ommers, withdrawals)
+        construct_block(header, body, senders)
     }
 
     /// Returns a range of blocks from the database.
@@ -572,7 +569,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         N::ChainSpec: EthereumHardforks,
         H: AsRef<Header>,
         HF: FnOnce(RangeInclusive<BlockNumber>) -> ProviderResult<Vec<H>>,
-        F: FnMut(H, Range<TxNumber>, Vec<Header>, Option<Withdrawals>) -> ProviderResult<R>,
+        F: FnMut(H, BlockBody, Range<TxNumber>) -> ProviderResult<R>,
     {
         if range.is_empty() {
             return Ok(Vec::new())
@@ -582,48 +579,39 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         let mut blocks = Vec::with_capacity(len);
 
         let headers = headers_range(range)?;
-        let mut ommers_cursor = self.tx.cursor_read::<tables::BlockOmmers>()?;
-        let mut withdrawals_cursor = self.tx.cursor_read::<tables::BlockWithdrawals>()?;
+        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions<TxTy<N>>>()?;
         let mut block_body_cursor = self.tx.cursor_read::<tables::BlockBodyIndices>()?;
 
+        let mut present_headers = Vec::new();
         for header in headers {
-            let header_ref = header.as_ref();
             // If the body indices are not found, this means that the transactions either do
             // not exist in the database yet, or they do exit but are
             // not indexed. If they exist but are not indexed, we don't
             // have enough information to return the block anyways, so
             // we skip the block.
             if let Some((_, block_body_indices)) =
-                block_body_cursor.seek_exact(header_ref.number)?
+                block_body_cursor.seek_exact(header.as_ref().number)?
             {
                 let tx_range = block_body_indices.tx_num_range();
-
-                // If we are past shanghai, then all blocks should have a withdrawal list,
-                // even if empty
-                let withdrawals =
-                    if self.chain_spec.is_shanghai_active_at_timestamp(header_ref.timestamp) {
-                        withdrawals_cursor
-                            .seek_exact(header_ref.number)?
-                            .map(|(_, w)| w.withdrawals)
-                            .unwrap_or_default()
-                            .into()
-                    } else {
-                        None
-                    };
-                let ommers =
-                    if self.chain_spec.final_paris_total_difficulty(header_ref.number).is_some() {
-                        Vec::new()
-                    } else {
-                        ommers_cursor
-                            .seek_exact(header_ref.number)?
-                            .map(|(_, o)| o.ommers)
-                            .unwrap_or_default()
-                    };
-
-                if let Ok(b) = assemble_block(header, tx_range, ommers, withdrawals) {
-                    blocks.push(b);
-                }
+                present_headers.push((header, tx_range));
             }
+        }
+
+        let mut inputs = Vec::new();
+        for (header, tx_range) in &present_headers {
+            let transactions = if tx_range.is_empty() {
+                Vec::new()
+            } else {
+                self.transactions_by_tx_range_with_cursor(tx_range.clone(), &mut tx_cursor)?
+            };
+
+            inputs.push((header.as_ref(), transactions));
+        }
+
+        let bodies = self.storage.reader().read_block_bodies(self, inputs)?;
+
+        for ((header, tx_range), body) in present_headers.into_iter().zip(bodies) {
+            blocks.push(assemble_block(header, body, tx_range)?);
         }
 
         Ok(blocks)
@@ -649,34 +637,22 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         N::ChainSpec: EthereumHardforks,
         H: AsRef<Header>,
         HF: Fn(RangeInclusive<BlockNumber>) -> ProviderResult<Vec<H>>,
-        BF: Fn(
-            H,
-            Vec<TransactionSigned>,
-            Vec<Header>,
-            Option<Withdrawals>,
-            Vec<Address>,
-        ) -> ProviderResult<B>,
+        BF: Fn(H, BlockBody, Vec<Address>) -> ProviderResult<B>,
     {
-        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions<TxTy<N>>>()?;
         let mut senders_cursor = self.tx.cursor_read::<tables::TransactionSenders>()?;
 
-        self.block_range(range, headers_range, |header, tx_range, ommers, withdrawals| {
-            let (body, senders) = if tx_range.is_empty() {
-                (Vec::new(), Vec::new())
+        self.block_range(range, headers_range, |header, body, tx_range| {
+            let senders = if tx_range.is_empty() {
+                Vec::new()
             } else {
-                let body = self
-                    .transactions_by_tx_range_with_cursor(tx_range.clone(), &mut tx_cursor)?
-                    .into_iter()
-                    .map(Into::into)
-                    .collect::<Vec<TransactionSigned>>();
                 // fetch senders from the senders table
                 let known_senders =
                     senders_cursor
                         .walk_range(tx_range.clone())?
                         .collect::<Result<HashMap<_, _>, _>>()?;
 
-                let mut senders = Vec::with_capacity(body.len());
-                for (tx_num, tx) in tx_range.zip(body.iter()) {
+                let mut senders = Vec::with_capacity(body.transactions.len());
+                for (tx_num, tx) in tx_range.zip(body.transactions()) {
                     match known_senders.get(&tx_num) {
                         None => {
                             // recover the sender from the transaction if not found
@@ -689,10 +665,10 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
                     }
                 }
 
-                (body, senders)
+                senders
             };
 
-            assemble_block(header, body, ommers, withdrawals, senders)
+            assemble_block(header, body, senders)
         })
     }
 
@@ -1230,21 +1206,22 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Block>> {
         if let Some(number) = self.convert_hash_or_number(id)? {
             if let Some(header) = self.header_by_number(number)? {
-                let withdrawals = self.withdrawals_by_block(number.into(), header.timestamp)?;
-                let ommers = self.ommers(number.into())?.unwrap_or_default();
                 // If the body indices are not found, this means that the transactions either do not
                 // exist in the database yet, or they do exit but are not indexed.
                 // If they exist but are not indexed, we don't have enough
                 // information to return the block anyways, so we return `None`.
-                let transactions = match self.transactions_by_block(number.into())? {
-                    Some(transactions) => transactions.into_iter().map(Into::into).collect(),
-                    None => return Ok(None),
+                let Some(transactions) = self.transactions_by_block(number.into())? else {
+                    return Ok(None)
                 };
 
-                return Ok(Some(Block {
-                    header,
-                    body: BlockBody { transactions, ommers, withdrawals },
-                }))
+                let body = self
+                    .storage
+                    .reader()
+                    .read_block_bodies(self, vec![(&header, transactions)])?
+                    .pop()
+                    .ok_or(ProviderError::InvalidStorageOutput)?;
+
+                return Ok(Some(Block { header, body }))
             }
         }
 
@@ -1303,8 +1280,8 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
             id,
             transaction_kind,
             |block_number| self.header_by_number(block_number),
-            |header, transactions, senders, ommers, withdrawals| {
-                Block { header, body: BlockBody { transactions, ommers, withdrawals } }
+            |header, body, senders| {
+                Block { header, body }
                     // Note: we're using unchecked here because we know the block contains valid txs
                     // wrt to its height and can ignore the s value check so pre
                     // EIP-2 txs are allowed
@@ -1324,8 +1301,8 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
             id,
             transaction_kind,
             |block_number| self.sealed_header(block_number),
-            |header, transactions, senders, ommers, withdrawals| {
-                SealedBlock { header, body: BlockBody { transactions, ommers, withdrawals } }
+            |header, body, senders| {
+                SealedBlock { header, body }
                     // Note: we're using unchecked here because we know the block contains valid txs
                     // wrt to its height and can ignore the s value check so pre
                     // EIP-2 txs are allowed
@@ -1337,21 +1314,10 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
-        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions<TxTy<N>>>()?;
         self.block_range(
             range,
             |range| self.headers_range(range),
-            |header, tx_range, ommers, withdrawals| {
-                let transactions = if tx_range.is_empty() {
-                    Vec::new()
-                } else {
-                    self.transactions_by_tx_range_with_cursor(tx_range, &mut tx_cursor)?
-                        .into_iter()
-                        .map(Into::into)
-                        .collect()
-                };
-                Ok(Block { header, body: BlockBody { transactions, ommers, withdrawals } })
-            },
+            |header, body, _| Ok(Block { header, body }),
         )
     }
 
@@ -1362,8 +1328,8 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
         self.block_with_senders_range(
             range,
             |range| self.headers_range(range),
-            |header, transactions, ommers, withdrawals, senders| {
-                Block { header, body: BlockBody { transactions, ommers, withdrawals } }
+            |header, body, senders| {
+                Block { header, body }
                     .try_with_senders_unchecked(senders)
                     .map_err(|_| ProviderError::SenderRecoveryError)
             },
@@ -1377,12 +1343,9 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
         self.block_with_senders_range(
             range,
             |range| self.sealed_headers_range(range),
-            |header, transactions, ommers, withdrawals, senders| {
-                SealedBlockWithSenders::new(
-                    SealedBlock { header, body: BlockBody { transactions, ommers, withdrawals } },
-                    senders,
-                )
-                .ok_or(ProviderError::SenderRecoveryError)
+            |header, body, senders| {
+                SealedBlockWithSenders::new(SealedBlock { header, body }, senders)
+                    .ok_or(ProviderError::SenderRecoveryError)
             },
         )
     }

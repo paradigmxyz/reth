@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use alloy_consensus::Header;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
-use reth_chainspec::{EthChainSpec, Hardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_db::transaction::{DbTx, DbTxMut};
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, PeersInfo};
@@ -32,8 +32,8 @@ use reth_optimism_rpc::{
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::BlockBody;
 use reth_provider::{
-    providers::ChainStorage, BlockBodyWriter, CanonStateSubscriptions, DBProvider, EthStorage,
-    ProviderResult,
+    providers::ChainStorage, BlockBodyReader, BlockBodyWriter, CanonStateSubscriptions,
+    ChainSpecProvider, DBProvider, EthStorage, ProviderResult, ReadBodyInput,
 };
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
@@ -72,7 +72,31 @@ impl<Provider: DBProvider<Tx: DbTxMut>> BlockBodyWriter<Provider, BlockBody> for
     }
 }
 
+impl<Provider: DBProvider + ChainSpecProvider<ChainSpec: EthereumHardforks>>
+    BlockBodyReader<Provider> for OpStorage
+{
+    type Block = reth_primitives::Block;
+
+    fn read_block_bodies(
+        &self,
+        provider: &Provider,
+        inputs: Vec<ReadBodyInput<'_, Self::Block>>,
+    ) -> ProviderResult<Vec<BlockBody>> {
+        self.0.read_block_bodies(provider, inputs)
+    }
+}
+
 impl ChainStorage<OpPrimitives> for OpStorage {
+    fn reader<TX, Types>(
+        &self,
+    ) -> impl reth_provider::ChainStorageReader<reth_provider::DatabaseProvider<TX, Types>, OpPrimitives>
+    where
+        TX: DbTx + 'static,
+        Types: reth_provider::providers::NodeTypesForProvider<Primitives = OpPrimitives>,
+    {
+        self
+    }
+
     fn writer<TX, Types>(
         &self,
     ) -> impl reth_provider::ChainStorageWriter<reth_provider::DatabaseProvider<TX, Types>, OpPrimitives>
@@ -83,6 +107,7 @@ impl ChainStorage<OpPrimitives> for OpStorage {
         self
     }
 }
+
 /// Type configuration for a regular Optimism node.
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
