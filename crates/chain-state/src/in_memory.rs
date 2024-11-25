@@ -159,8 +159,8 @@ impl<N: NodePrimitives> CanonicalInMemoryStateInner<N> {
 }
 
 type PendingBlockAndReceipts<N> = (
-    SealedBlock<<N as NodePrimitives>::BlockHeader, <N as NodePrimitives>::BlockBody>,
-    Vec<<N as NodePrimitives>::Receipt>,
+    SealedBlock<reth_primitives_traits::HeaderTy<N>, reth_primitives_traits::BodyTy<N>>,
+    Vec<reth_primitives_traits::ReceiptTy<N>>,
 );
 
 /// This type is responsible for providing the blocks, receipts, and state for
