@@ -117,7 +117,7 @@ pub struct BlockchainProvider<N: NodeTypesWithDB> {
     /// The blockchain tree instance.
     tree: Arc<dyn TreeViewer>,
     /// Tracks the chain info wrt forkchoice updates
-    chain_info: ChainInfoTracker,
+    chain_info: ChainInfoTracker<reth_primitives::EthPrimitives>,
 }
 
 impl<N: ProviderNodeTypes> Clone for BlockchainProvider<N> {
