@@ -33,7 +33,6 @@ reth-prune.workspace = true
 reth-revm.workspace = true
 reth-stages-api.workspace = true
 reth-tasks.workspace = true
-reth-trie-common.workspace = true
 reth-trie-parallel.workspace = true
 reth-trie-sparse.workspace = true
 reth-trie.workspace = true
@@ -94,23 +93,23 @@ harness = false
 
 [features]
 test-utils = [
-    "reth-db/test-utils",
+    "reth-blockchain-tree/test-utils",
     "reth-chain-state/test-utils",
+    "reth-chainspec/test-utils",
+    "reth-consensus/test-utils",
+    "reth-db/test-utils",
+    "reth-evm/test-utils",
     "reth-network-p2p/test-utils",
+    "reth-payload-builder/test-utils",
+    "reth-primitives-traits/test-utils",
+    "reth-primitives/test-utils",
+    "reth-provider/test-utils",
     "reth-prune-types",
+    "reth-prune-types?/test-utils",
+    "reth-revm/test-utils",
+    "reth-stages-api/test-utils",
     "reth-stages/test-utils",
     "reth-static-file",
     "reth-tracing",
-    "reth-blockchain-tree/test-utils",
-    "reth-chainspec/test-utils",
-    "reth-consensus/test-utils",
-    "reth-evm/test-utils",
-    "reth-payload-builder/test-utils",
-    "reth-primitives/test-utils",
-    "reth-revm/test-utils",
-    "reth-stages-api/test-utils",
-    "reth-provider/test-utils",
     "reth-trie/test-utils",
-    "reth-prune-types?/test-utils",
-    "reth-primitives-traits/test-utils",
 ]
