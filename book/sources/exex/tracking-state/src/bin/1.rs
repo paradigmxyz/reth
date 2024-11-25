@@ -5,12 +5,10 @@ use std::{
 };
 
 use futures_util::{FutureExt, TryStreamExt};
-use reth::api::FullNodeComponents;
+use reth::{api::FullNodeComponents, primitives::Block, providers::BlockReader};
 use reth_exex::{ExExContext, ExExEvent, ExExNotification};
 use reth_node_ethereum::EthereumNode;
 use reth_tracing::tracing::info;
-use reth::providers::BlockReader;
-use reth::primitives::Block;
 
 struct MyExEx<Node: FullNodeComponents> {
     ctx: ExExContext<Node>,

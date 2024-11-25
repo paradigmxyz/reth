@@ -3,6 +3,7 @@ use remote_exex::proto::{
     self,
     remote_ex_ex_server::{RemoteExEx, RemoteExExServer},
 };
+use reth::{primitives::Block, providers::BlockReader};
 use reth_exex::{ExExContext, ExExEvent, ExExNotification};
 use reth_node_api::FullNodeComponents;
 use reth_node_ethereum::EthereumNode;
@@ -11,8 +12,6 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{transport::Server, Request, Response, Status};
-use reth::providers::BlockReader;
-use reth::primitives::Block;
 
 struct ExExService {
     notifications: Arc<broadcast::Sender<ExExNotification>>,
