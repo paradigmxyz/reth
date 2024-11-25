@@ -41,7 +41,6 @@ reth-basic-payload-builder.workspace = true
 reth-ethereum-payload-builder.workspace = true
 reth-node-api.workspace = true
 
-
 # ethereum
 alloy-consensus.workspace = true
 alloy-signer.workspace = true

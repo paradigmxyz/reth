@@ -10,6 +10,7 @@ use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
 use reth_ethereum_payload_builder::EthereumPayloadBuilder;
 use reth_evm::ConfigureEvm;
 use reth_node_api::{BuiltPayload, EngineApiMessageVersion, PayloadBuilderAttributes};
+use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_primitives::{Receipt, SealedBlockWithSenders};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderError, StateProviderFactory,
@@ -81,7 +82,7 @@ where
         let payload_config = PayloadConfig::new(
             Arc::new(origin.header().clone()),
             Bytes::default(),
-            reth_payload_builder::EthPayloadBuilderAttributes::try_new(
+            EthPayloadBuilderAttributes::try_new(
                 origin.header().hash(),
                 payload_attributes,
                 EngineApiMessageVersion::default() as u8, // Engine API message version
