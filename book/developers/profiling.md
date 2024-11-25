@@ -25,7 +25,7 @@ In this tutorial, we will be reviewing:
 
 [Jemalloc](https://jemalloc.net/) is a general-purpose allocator that is used [across the industry in production](https://engineering.fb.com/2011/01/03/core-data/scalable-memory-allocation-using-jemalloc/), well known for its performance benefits, predictability, and profiling capabilities.
 We've seen significant performance benefits in reth when using jemalloc, but will be primarily focusing on its profiling capabilities.
-Jemalloc also provides tools for analyzing and visualizing its the allocation profiles it generates, notably `jeprof`.
+Jemalloc also provides tools for analyzing and visualizing its allocation profiles it generates, notably `jeprof`.
 
 
 #### Enabling jemalloc in reth

@@ -628,7 +628,7 @@ pub trait Call: LoadState<Evm: ConfigureEvm<Header = Header>> + SpawnBlocking {
                     cfg.clone(),
                     block_env.clone(),
                     block_txs,
-                    tx.hash,
+                    tx.hash(),
                 )?;
 
                 let env = EnvWithHandlerCfg::new_with_cfg_env(

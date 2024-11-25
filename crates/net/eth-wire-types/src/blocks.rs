@@ -342,7 +342,7 @@ mod tests {
             message: BlockBodies(vec![
                 BlockBody {
                     transactions: vec![
-                        TransactionSigned::from_transaction_and_signature(Transaction::Legacy(TxLegacy {
+                        TransactionSigned::new_unhashed(Transaction::Legacy(TxLegacy {
                             chain_id: Some(1),
                             nonce: 0x8u64,
                             gas_price: 0x4a817c808,
@@ -356,7 +356,7 @@ mod tests {
                                 false,
                             ),
                         ),
-                        TransactionSigned::from_transaction_and_signature(Transaction::Legacy(TxLegacy {
+                        TransactionSigned::new_unhashed(Transaction::Legacy(TxLegacy {
                             chain_id: Some(1),
                             nonce: 0x9u64,
                             gas_price: 0x4a817c809,
@@ -413,7 +413,7 @@ mod tests {
             message: BlockBodies(vec![
                 BlockBody {
                     transactions: vec![
-                        TransactionSigned::from_transaction_and_signature(Transaction::Legacy(
+                        TransactionSigned::new_unhashed(Transaction::Legacy(
                             TxLegacy {
                                 chain_id: Some(1),
                                 nonce: 0x8u64,
@@ -423,13 +423,13 @@ mod tests {
                                 value: U256::from(0x200u64),
                                 input: Default::default(),
                             }),
-                            Signature::new(
+                                                        Signature::new(
                                 U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12").unwrap(),
                                 U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10").unwrap(),
                                 false,
                             ),
                         ),
-                        TransactionSigned::from_transaction_and_signature(
+                        TransactionSigned::new_unhashed(
                             Transaction::Legacy(TxLegacy {
                                 chain_id: Some(1),
                                 nonce: 0x9u64,

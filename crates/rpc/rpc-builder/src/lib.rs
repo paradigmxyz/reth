@@ -20,6 +20,7 @@
 //! use reth_chainspec::{ChainSpec, ChainSpecProvider};
 //! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 //! use reth_network_api::{NetworkInfo, Peers};
+//! use reth_primitives::TransactionSigned;
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
 //! use reth_rpc::EthApi;
 //! use reth_rpc_builder::{
@@ -37,7 +38,7 @@
 //!     block_executor: BlockExecutor,
 //!     consensus: Consensus,
 //! ) where
-//!     Provider: FullRpcProvider
+//!     Provider: FullRpcProvider<Transaction = TransactionSigned>
 //!         + AccountReader
 //!         + ChangeSetReader
 //!         + ChainSpecProvider<ChainSpec = ChainSpec>,
@@ -82,6 +83,7 @@
 //! use reth_engine_primitives::EngineTypes;
 //! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 //! use reth_network_api::{NetworkInfo, Peers};
+//! use reth_primitives::TransactionSigned;
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
 //! use reth_rpc::EthApi;
 //! use reth_rpc_api::EngineApiServer;
@@ -114,7 +116,7 @@
 //!     block_executor: BlockExecutor,
 //!     consensus: Consensus,
 //! ) where
-//!     Provider: FullRpcProvider
+//!     Provider: FullRpcProvider<Transaction = TransactionSigned>
 //!         + AccountReader
 //!         + ChangeSetReader
 //!         + ChainSpecProvider<ChainSpec = ChainSpec>,
@@ -1260,6 +1262,7 @@ where
             Arc::new(self.consensus.clone()),
             self.block_executor.clone(),
             self.config.flashbots.clone(),
+            Box::new(self.executor.clone()),
         )
     }
 }
@@ -1424,6 +1427,7 @@ where
                             Arc::new(self.consensus.clone()),
                             self.block_executor.clone(),
                             self.config.flashbots.clone(),
+                            Box::new(self.executor.clone()),
                         )
                         .into_rpc()
                         .into(),

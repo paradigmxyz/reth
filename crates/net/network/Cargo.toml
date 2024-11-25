@@ -23,6 +23,7 @@ reth-network-p2p.workspace = true
 reth-discv4.workspace = true
 reth-discv5.workspace = true
 reth-dns-discovery.workspace = true
+reth-ethereum-forks.workspace = true
 reth-eth-wire.workspace = true
 reth-eth-wire-types.workspace = true
 reth-ecies.workspace = true
@@ -121,6 +122,7 @@ serde = [
 	"rand/serde",
 	"smallvec/serde",
 	"url/serde",
+	"reth-primitives-traits/serde",
 ]
 test-utils = [
 	"dep:reth-provider",

@@ -20,6 +20,7 @@ use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
     cmp::Ordering,
     collections::BinaryHeap,
+    fmt::Debug,
     mem,
     ops::RangeInclusive,
     pin::Pin,
@@ -298,7 +299,7 @@ where
 
 impl<B, Provider> BodyDownloader for BodiesDownloader<B, Provider>
 where
-    B: BodiesClient<Body: InMemorySize> + 'static,
+    B: BodiesClient<Body: Debug + InMemorySize> + 'static,
     Provider: HeaderProvider + Unpin + 'static,
 {
     type Body = B::Body;

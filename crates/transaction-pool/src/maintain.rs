@@ -317,7 +317,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 // find all transactions that were mined in the old chain but not in the new chain
                 let pruned_old_transactions = old_blocks
                     .transactions_ecrecovered()
-                    .filter(|tx| !new_mined_transactions.contains(&tx.hash))
+                    .filter(|tx| !new_mined_transactions.contains(tx.hash_ref()))
                     .filter_map(|tx| {
                         if tx.is_eip4844() {
                             // reorged blobs no longer include the blob, which is necessary for
@@ -325,7 +325,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                             // been validated previously, we still need the blob in order to
                             // accurately set the transaction's
                             // encoded-length which is propagated over the network.
-                            pool.get_blob(tx.hash)
+                            pool.get_blob(TransactionSigned::hash(&tx))
                                 .ok()
                                 .flatten()
                                 .map(Arc::unwrap_or_clone)

@@ -27,7 +27,7 @@ use reth_engine_tree::{
         EngineApiKind, EngineApiRequest, EngineApiRequestHandler, EngineRequestHandler, FromEngine,
         RequestHandlerEvent,
     },
-    persistence::PersistenceHandle,
+    persistence::{PersistenceHandle, PersistenceNodeTypes},
     tree::{EngineApiTreeHandler, InvalidBlockHook, TreeConfig},
 };
 use reth_evm::execute::BlockExecutorProvider;
@@ -59,7 +59,7 @@ where
 
 impl<N> LocalEngineService<N>
 where
-    N: EngineNodeTypes,
+    N: EngineNodeTypes + PersistenceNodeTypes,
 {
     /// Constructor for [`LocalEngineService`].
     #[allow(clippy::too_many_arguments)]
