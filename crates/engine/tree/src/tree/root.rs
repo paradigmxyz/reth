@@ -85,9 +85,9 @@ impl StdReceiverStream {
     }
 }
 
-/// Messages that can be received by the state root task
+/// Messages used internally by the state root task
 #[derive(Debug)]
-pub(crate) enum StateRootMessage {
+pub(crate) enum InternalMessage {
     /// Proof calculation completed for a specific state update
     ProofCalculated {
         /// The calculated proof
@@ -173,9 +173,9 @@ struct TaskStats {
 #[derive(Debug)]
 pub(crate) struct StateRootTask<Factory> {
     /// Internal channel for receiving all state root related messages
-    rx: Receiver<StateRootMessage>,
+    rx: Receiver<InternalMessage>,
     /// Internal channel for sending messages to the state root task
-    tx: Sender<StateRootMessage>,
+    tx: Sender<InternalMessage>,
     /// Task configuration
     config: StateRootConfig<Factory>,
     /// Current state
@@ -230,7 +230,7 @@ where
         update: EvmState,
         state: &mut HashedPostState,
         proof_sequence_number: u64,
-        state_root_message_sender: Sender<StateRootMessage>,
+        state_root_message_sender: Sender<InternalMessage>,
     ) {
         let mut hashed_state_update = HashedPostState::default();
         for (address, account) in update {
@@ -274,7 +274,7 @@ where
             let result = ParallelProof::new(view, input).multiproof(targets);
             match result {
                 Ok(proof) => {
-                    let _ = state_root_message_sender.send(StateRootMessage::ProofCalculated {
+                    let _ = state_root_message_sender.send(InternalMessage::ProofCalculated {
                         proof,
                         sequence_number: proof_sequence_number,
                     });
@@ -338,7 +338,7 @@ where
                         ?elapsed,
                         "Root calculation completed, sending result"
                     );
-                    let _ = tx.send(StateRootMessage::RootCalculated { root, updates, elapsed });
+                    let _ = tx.send(InternalMessage::RootCalculated { root, updates, elapsed });
                 }
                 Err(e) => {
                     error!(target: "engine::root", error = ?e, "Could not calculate state root");
@@ -350,14 +350,14 @@ where
     /// Handles internal messages (proofs and root calculations) and tracks state
     fn handle_internal_message(
         &mut self,
-        message: StateRootMessage,
+        message: InternalMessage,
         stats: &mut TaskStats,
         current_multiproof: &mut MultiProof,
         trie_updates: &mut TrieUpdates,
         current_root: &mut B256,
     ) -> Option<StateRootResult> {
         match message {
-            StateRootMessage::ProofCalculated { proof, sequence_number } => {
+            InternalMessage::ProofCalculated { proof, sequence_number } => {
                 stats.proofs_processed += 1;
                 trace!(
                     target: "engine::root",
@@ -375,7 +375,7 @@ where
                 }
                 None
             }
-            StateRootMessage::RootCalculated { root, updates, elapsed } => {
+            InternalMessage::RootCalculated { root, updates, elapsed } => {
                 stats.roots_calculated += 1;
                 trace!(
                     target: "engine::root",
