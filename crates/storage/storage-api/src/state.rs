@@ -9,7 +9,9 @@ use auto_impl::auto_impl;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::Bytecode;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
+use reth_trie::HashedPostState;
 use reth_trie_db::StateCommitment;
+use revm::db::states::BundleState;
 
 /// Type alias of boxed [`StateProvider`].
 pub type StateProviderBox = Box<dyn StateProvider>;
@@ -22,6 +24,7 @@ pub trait StateProvider:
     + StateRootProvider
     + StorageRootProvider
     + StateProofProvider
+    + HashedPostStateProvider
     + Send
     + Sync
 {
@@ -87,6 +90,13 @@ pub trait StateProvider:
 pub trait StateCommitmentProvider {
     /// The [`StateCommitment`] type that can be used to perform state commitment operations.
     type StateCommitment: StateCommitment;
+}
+
+/// Trait that provides the hashed state from various sources.
+#[auto_impl(&, Arc, Box)]
+pub trait HashedPostStateProvider {
+    /// Returns the `HashedPostState` of the provided [`BundleState`].
+    fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState;
 }
 
 /// Trait implemented for database providers that can be converted into a historical state provider.

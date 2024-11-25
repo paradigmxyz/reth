@@ -24,7 +24,6 @@ use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
 use reth_rpc_api::BlockSubmissionValidationApiServer;
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
-use reth_trie::HashedPostState;
 use revm_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, sync::Arc};
@@ -178,7 +177,7 @@ where
         self.ensure_payment(&block, &output, &message)?;
 
         let state_root =
-            state_provider.state_root(HashedPostState::from_bundle_state(&output.state.state))?;
+            state_provider.state_root(state_provider.hashed_post_state(&output.state))?;
 
         if state_root != block.state_root {
             return Err(ConsensusError::BodyStateRootDiff(

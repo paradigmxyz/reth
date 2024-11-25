@@ -22,8 +22,9 @@ use reth_network_api::NetworkInfo;
 use reth_node_ethereum::EthExecutorProvider;
 use reth_provider::{
     providers::ProviderNodeTypes, writer::UnifiedStorageWriter, AccountExtReader,
-    ChainSpecProvider, HashingWriter, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
-    ProviderFactory, StageCheckpointReader, StateWriter, StorageReader,
+    ChainSpecProvider, HashedPostStateProvider, HashingWriter, HeaderProvider,
+    LatestStateProviderRef, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
+    StateWriter, StorageReader,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::StageId;
@@ -132,7 +133,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             )
             .await?;
 
-        let db = StateProviderDatabase::new(LatestStateProviderRef::new(&provider));
+        let state_provider = LatestStateProviderRef::new(&provider);
+        let db = StateProviderDatabase::new(&state_provider);
 
         let executor = EthExecutorProvider::ethereum(provider_factory.chain_spec()).executor(db);
 
@@ -154,7 +156,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         // Unpacked `BundleState::state_root_slow` function
         let (in_memory_state_root, in_memory_updates) = StateRoot::overlay_root_with_updates(
             provider.tx_ref(),
-            execution_outcome.hash_state_slow(),
+            state_provider.hashed_post_state(execution_outcome.state()),
         )?;
 
         if in_memory_state_root == block.state_root {

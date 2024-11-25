@@ -39,8 +39,8 @@ use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{Block, GotExpected, SealedBlock, SealedBlockWithSenders, SealedHeader};
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, ExecutionOutcome,
-    ProviderError, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
-    TransactionVariant,
+    HashedPostStateProvider, ProviderError, StateProviderBox, StateProviderFactory, StateReader,
+    StateRootProvider, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
@@ -536,7 +536,13 @@ impl<P: Debug, E: Debug, T: EngineTypes + Debug, Spec: Debug> std::fmt::Debug
 
 impl<P, E, T, Spec> EngineApiTreeHandler<P, E, T, Spec>
 where
-    P: DatabaseProviderFactory + BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+    P: DatabaseProviderFactory
+        + BlockReader
+        + StateProviderFactory
+        + StateReader
+        + HashedPostStateProvider
+        + Clone
+        + 'static,
     <P as DatabaseProviderFactory>::Provider: BlockReader,
     E: BlockExecutorProvider,
     T: EngineTypes,
@@ -1541,7 +1547,7 @@ where
             .provider
             .get_state(block.number)?
             .ok_or_else(|| ProviderError::StateForNumberNotFound(block.number))?;
-        let hashed_state = execution_output.hash_state_slow();
+        let hashed_state = self.provider.hashed_post_state(execution_output.state());
 
         Ok(Some(ExecutedBlock {
             block: Arc::new(block),
@@ -2215,7 +2221,7 @@ where
             return Err(err.into())
         }
 
-        let hashed_state = HashedPostState::from_bundle_state(&output.state.state);
+        let hashed_state = self.provider.hashed_post_state(&output.state);
 
         trace!(target: "engine::tree", block=?sealed_block.num_hash(), "Calculating block state root");
         let root_time = Instant::now();

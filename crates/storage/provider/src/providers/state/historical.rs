@@ -1,6 +1,6 @@
 use crate::{
     providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
-    ProviderError, StateProvider, StateRootProvider,
+    HashedPostStateProvider, ProviderError, StateProvider, StateRootProvider,
 };
 use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::{
@@ -27,7 +27,7 @@ use reth_trie::{
 };
 use reth_trie_db::{
     DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot,
-    DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness,
+    DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness, StateCommitment,
 };
 use std::fmt::Debug;
 
@@ -381,6 +381,16 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StateProof
     }
 }
 
+impl<Provider: StateCommitmentProvider> HashedPostStateProvider
+    for HistoricalStateProviderRef<'_, Provider>
+{
+    fn hashed_post_state(&self, bundle_state: &revm::db::BundleState) -> HashedPostState {
+        HashedPostState::from_bundle_state::<
+            <Provider::StateCommitment as StateCommitment>::KeyHasher,
+        >(bundle_state.state())
+    }
+}
+
 impl<Provider: DBProvider + BlockNumReader + BlockHashReader + StateCommitmentProvider>
     StateProvider for HistoricalStateProviderRef<'_, Provider>
 {
@@ -418,6 +428,12 @@ impl<Provider: DBProvider + BlockNumReader + BlockHashReader + StateCommitmentPr
     fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
         self.tx().get::<tables::Bytecodes>(code_hash).map_err(Into::into)
     }
+}
+
+impl<Provider: StateCommitmentProvider> StateCommitmentProvider
+    for HistoricalStateProviderRef<'_, Provider>
+{
+    type StateCommitment = Provider::StateCommitment;
 }
 
 /// State provider for a given block number.
@@ -467,6 +483,12 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider>
             self.lowest_available_blocks,
         )
     }
+}
+
+impl<Provider: StateCommitmentProvider> StateCommitmentProvider
+    for HistoricalStateProvider<Provider>
+{
+    type StateCommitment = Provider::StateCommitment;
 }
 
 // Delegates all provider impls to [HistoricalStateProviderRef]

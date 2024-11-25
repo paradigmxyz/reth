@@ -10,7 +10,8 @@ use reth_execution_errors::StateRootError;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
-    updates::TrieUpdates, HashedPostState, HashedStorage, StateRoot, StateRootProgress, TrieInput,
+    updates::TrieUpdates, HashedPostState, HashedStorage, KeccakKeyHasher, StateRoot,
+    StateRootProgress, TrieInput,
 };
 use std::{collections::HashMap, ops::RangeInclusive};
 use tracing::debug;
@@ -136,7 +137,7 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
         tx: &'a TX,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<Self, StateRootError> {
-        let loaded_prefix_sets = PrefixSetLoader::new(tx).load(range)?;
+        let loaded_prefix_sets = PrefixSetLoader::<_, KeccakKeyHasher>::new(tx).load(range)?;
         Ok(Self::from_tx(tx).with_prefix_sets(loaded_prefix_sets))
     }
 
@@ -265,6 +266,7 @@ mod tests {
     use alloy_primitives::{hex, map::HashMap, Address, U256};
     use reth_db::test_utils::create_test_rw_db;
     use reth_db_api::database::Database;
+    use reth_trie::KeccakKeyHasher;
     use revm::{db::BundleState, primitives::AccountInfo};
 
     #[test]
@@ -285,7 +287,7 @@ mod tests {
             .build();
         assert_eq!(bundle_state.reverts.len(), 1);
 
-        let post_state = HashedPostState::from_bundle_state(&bundle_state.state);
+        let post_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(&bundle_state.state);
         assert_eq!(post_state.accounts.len(), 2);
         assert_eq!(post_state.storages.len(), 2);
 

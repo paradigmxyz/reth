@@ -29,7 +29,8 @@ use reth_primitives::{
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    DatabaseProviderFactory, StageCheckpointReader, StateProofProvider, StorageRootProvider,
+    DatabaseProviderFactory, HashedPostStateProvider, StageCheckpointReader, StateProofProvider,
+    StorageRootProvider,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
@@ -665,6 +666,12 @@ impl StateProofProvider for MockEthProvider {
         _target: HashedPostState,
     ) -> ProviderResult<HashMap<B256, Bytes>> {
         Ok(HashMap::default())
+    }
+}
+
+impl HashedPostStateProvider for MockEthProvider {
+    fn hashed_post_state(&self, _state: &revm::db::BundleState) -> HashedPostState {
+        HashedPostState::default()
     }
 }
 
