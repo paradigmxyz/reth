@@ -47,7 +47,7 @@ use reth_stages_api::ControlFlow;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::ResultAndState;
-use root::{StateRootConfig, StateRootTask, StdReceiverStream};
+use root::{StateRootConfig, StateRootMessage, StateRootTask};
 use std::{
     cmp::Ordering,
     collections::{btree_map, hash_map, BTreeMap, VecDeque},
@@ -2205,11 +2205,12 @@ where
             .compute_trie_input(consistent_view.clone(), block.parent_hash)
             .map_err(|e| InsertBlockErrorKindTwo::Other(Box::new(e)))?;
         let state_root_config = StateRootConfig { consistent_view, input: Arc::new(input) };
-        let receiver_stream = StdReceiverStream::new(state_root_rx);
-        let state_root_task = StateRootTask::new(state_root_config, receiver_stream);
+        let state_root_task =
+            StateRootTask::new(state_root_config, state_root_tx.clone(), state_root_rx);
         let state_root_handle = state_root_task.spawn();
         let state_hook = move |result_and_state: &ResultAndState| {
-            let _ = state_root_tx.send(result_and_state.state.clone());
+            let _ =
+                state_root_tx.send(StateRootMessage::StateUpdate(result_and_state.state.clone()));
         };
 
         let output = self.metrics.executor.execute_metered(
