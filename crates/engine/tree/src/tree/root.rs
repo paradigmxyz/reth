@@ -69,7 +69,6 @@ pub(crate) struct StateRootConfig<Factory> {
 
 /// Wrapper for std channel receiver to maintain compatibility with `UnboundedReceiverStream`
 #[derive(Debug)]
-#[allow(dead_code)]
 pub(crate) struct StdReceiverStream {
     rx: Receiver<EvmState>,
 }
