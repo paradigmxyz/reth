@@ -8,6 +8,7 @@ mod call;
 mod pending_block;
 
 pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
+use reth_optimism_primitives::OpPrimitives;
 
 use std::{fmt, sync::Arc};
 
@@ -71,7 +72,11 @@ pub struct OpEthApi<N: RpcNodeCore> {
 impl<N> OpEthApi<N>
 where
     N: RpcNodeCore<
-        Provider: BlockReaderIdExt + ChainSpecProvider + CanonStateSubscriptions + Clone + 'static,
+        Provider: BlockReaderIdExt
+                      + ChainSpecProvider
+                      + CanonStateSubscriptions<Primitives = OpPrimitives>
+                      + Clone
+                      + 'static,
     >,
 {
     /// Creates a new instance for given context.

@@ -3,9 +3,10 @@ use crate::{
     BlockSource, BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
     CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
     DatabaseProviderFactory, EvmEnvProvider, FullExecutionDataProvider, HeaderProvider,
-    ProviderError, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
-    StageCheckpointReader, StateProviderBox, StateProviderFactory, StaticFileProviderFactory,
-    TransactionVariant, TransactionsProvider, TreeViewer, WithdrawalsProvider,
+    NodePrimitivesProvider, ProviderError, PruneCheckpointReader, ReceiptProvider,
+    ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox, StateProviderFactory,
+    StaticFileProviderFactory, TransactionVariant, TransactionsProvider, TreeViewer,
+    WithdrawalsProvider,
 };
 use alloy_consensus::Header;
 use alloy_eips::{
@@ -80,6 +81,7 @@ where
             BlockHeader = alloy_consensus::Header,
             BlockBody = reth_primitives::BlockBody,
             Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
         >,
     >,
 {
@@ -94,6 +96,7 @@ impl<T> NodeTypesForProvider for T where
             BlockHeader = alloy_consensus::Header,
             BlockBody = reth_primitives::BlockBody,
             Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
         >,
     >
 {
@@ -118,7 +121,7 @@ pub struct BlockchainProvider<N: NodeTypesWithDB> {
     /// Provider type used to access the database.
     database: ProviderFactory<N>,
     /// The blockchain tree instance.
-    tree: Arc<dyn TreeViewer>,
+    tree: Arc<dyn TreeViewer<Primitives = N::Primitives>>,
     /// Tracks the chain info wrt forkchoice updates
     chain_info: ChainInfoTracker<reth_primitives::EthPrimitives>,
 }
@@ -136,7 +139,7 @@ impl<N: ProviderNodeTypes> Clone for BlockchainProvider<N> {
 impl<N: NodeTypesWithDB> BlockchainProvider<N> {
     /// Sets the treeviewer for the provider.
     #[doc(hidden)]
-    pub fn with_tree(mut self, tree: Arc<dyn TreeViewer>) -> Self {
+    pub fn with_tree(mut self, tree: Arc<dyn TreeViewer<Primitives = N::Primitives>>) -> Self {
         self.tree = tree;
         self
     }
@@ -148,7 +151,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     /// if it exists.
     pub fn with_blocks(
         database: ProviderFactory<N>,
-        tree: Arc<dyn TreeViewer>,
+        tree: Arc<dyn TreeViewer<Primitives = N::Primitives>>,
         latest: SealedHeader,
         finalized: Option<SealedHeader>,
         safe: Option<SealedHeader>,
@@ -158,7 +161,10 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
 
     /// Create a new provider using only the database and the tree, fetching the latest header from
     /// the database to initialize the provider.
-    pub fn new(database: ProviderFactory<N>, tree: Arc<dyn TreeViewer>) -> ProviderResult<Self> {
+    pub fn new(
+        database: ProviderFactory<N>,
+        tree: Arc<dyn TreeViewer<Primitives = N::Primitives>>,
+    ) -> ProviderResult<Self> {
         let provider = database.provider()?;
         let best = provider.chain_info()?;
         let latest_header = provider
@@ -225,6 +231,10 @@ where
     }
 }
 
+impl<N: ProviderNodeTypes> NodePrimitivesProvider for BlockchainProvider<N> {
+    type Primitives = N::Primitives;
+}
+
 impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider<N> {
     type DB = N::DB;
     type Provider = <ProviderFactory<N> as DatabaseProviderFactory>::Provider;
@@ -240,8 +250,6 @@ impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider<N> {
-    type Primitives = N::Primitives;
-
     fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         self.database.static_file_provider()
     }
@@ -944,7 +952,7 @@ impl<N: ProviderNodeTypes> BlockchainTreePendingStateProvider for BlockchainProv
 }
 
 impl<N: ProviderNodeTypes> CanonStateSubscriptions for BlockchainProvider<N> {
-    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
+    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<Self::Primitives> {
         self.tree.subscribe_to_canonical_state()
     }
 }
