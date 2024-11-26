@@ -173,7 +173,6 @@ impl RevealedSparseTrie {
 
     /// Reveal the trie node only if it was not known already.
     pub fn reveal_node(&mut self, path: Nibbles, node: TrieNode) -> SparseTrieResult<()> {
-        // TODO: revise all inserts to not overwrite existing entries
         match node {
             TrieNode::EmptyRoot => {
                 debug_assert!(path.is_empty());
