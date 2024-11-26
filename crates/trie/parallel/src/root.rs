@@ -14,10 +14,11 @@ use reth_trie::{
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdates,
     walker::TrieWalker,
-    HashBuilder, Nibbles, StorageRoot, TrieAccount, TrieInput, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    HashBuilder, Nibbles, StorageRoot, TrieAccount, TrieInput, TrieOverlayInput,
+    TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 use thiserror::Error;
 use tracing::*;
 
@@ -38,6 +39,8 @@ pub struct ParallelStateRoot<Factory> {
     view: ConsistentDbView<Factory>,
     /// Trie input.
     input: TrieInput,
+    /// Trie overlay input.
+    overlay_input: TrieOverlayInput,
     /// Parallel state root metrics.
     #[cfg(feature = "metrics")]
     metrics: ParallelStateRootMetrics,
@@ -45,10 +48,15 @@ pub struct ParallelStateRoot<Factory> {
 
 impl<Factory> ParallelStateRoot<Factory> {
     /// Create new parallel state root calculator.
-    pub fn new(view: ConsistentDbView<Factory>, input: TrieInput) -> Self {
+    pub fn new(
+        view: ConsistentDbView<Factory>,
+        input: TrieInput,
+        overlay_input: TrieOverlayInput,
+    ) -> Self {
         Self {
             view,
             input,
+            overlay_input,
             #[cfg(feature = "metrics")]
             metrics: ParallelStateRootMetrics::default(),
         }
@@ -76,8 +84,6 @@ where
         retain_updates: bool,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
         let mut tracker = ParallelTrieTracker::default();
-        let trie_nodes_sorted = Arc::new(self.input.nodes.into_sorted());
-        let hashed_state_sorted = Arc::new(self.input.state.into_sorted());
         let prefix_sets = self.input.prefix_sets.freeze();
         let storage_root_targets = StorageRootTargets::new(
             prefix_sets.account_prefix_set.iter().map(|nibbles| B256::from_slice(&nibbles.pack())),
@@ -91,9 +97,21 @@ where
         for (hashed_address, prefix_set) in
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
         {
+            // When we create the provider, we currently collect the in-memory nodes into TrieInput,
+            // and have a reference "anchor" block (known as `historical` in the current impl).
+            //
+            // We also create `revert_state` going back to this anchor. This uses
+            // `DatabaseHashedPostState::from_reverts`, which walks the `anchor..` changesets. We
+            // are guaranteed that the anchor is less than or equal to the db transaction's current
+            // database tip.
+            //
+            // These can then be combined into the overlay, to easily create a consistent view of
+            // the trie at a specific block.
+            //
+            // This means we need something that holds `(anchor, block, trie-updates)` when
+            // initialized, and opens a db tx to construct the above.
             let view = self.view.clone();
-            let hashed_state_sorted = hashed_state_sorted.clone();
-            let trie_nodes_sorted = trie_nodes_sorted.clone();
+            let mut overlay_input = self.overlay_input.clone();
             #[cfg(feature = "metrics")]
             let metrics = self.metrics.storage_trie.clone();
 
@@ -101,7 +119,13 @@ where
 
             rayon::spawn_fifo(move || {
                 let result = (|| -> Result<_, ParallelStateRootError> {
-                    let provider_ro = view.provider_ro()?;
+                    let (provider_ro, reverts) =
+                        view.revert_state_provider(overlay_input.anchor())?;
+                    overlay_input.prepend(reverts);
+                    let input = overlay_input.into_inner();
+                    let trie_nodes_sorted = input.nodes.into_sorted();
+                    let hashed_state_sorted = input.state.into_sorted();
+
                     let trie_cursor_factory = InMemoryTrieCursorFactory::new(
                         DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
                         &trie_nodes_sorted,
@@ -128,7 +152,13 @@ where
         trace!(target: "trie::parallel_state_root", "calculating state root");
         let mut trie_updates = TrieUpdates::default();
 
-        let provider_ro = self.view.provider_ro()?;
+        let mut overlay_input = self.overlay_input;
+        let (provider_ro, reverts) = self.view.revert_state_provider(overlay_input.anchor())?;
+        overlay_input.prepend(reverts);
+        let input = overlay_input.into_inner();
+        let trie_nodes_sorted = input.nodes.into_sorted();
+        let hashed_state_sorted = input.state.into_sorted();
+        let prefix_sets = input.prefix_sets.freeze();
         let trie_cursor_factory = InMemoryTrieCursorFactory::new(
             DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
             &trie_nodes_sorted,
@@ -247,12 +277,16 @@ mod tests {
     use alloy_primitives::{keccak256, Address, U256};
     use rand::Rng;
     use reth_primitives::{Account, StorageEntry};
-    use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
+    use reth_provider::{
+        test_utils::create_test_provider_factory, BlockHashReader, BlockNumReader, HashingWriter,
+    };
     use reth_trie::{test_utils, HashedPostState, HashedStorage};
 
     #[tokio::test]
     async fn random_parallel_root() {
         let factory = create_test_provider_factory();
+        let tip_num = factory.best_block_number().unwrap();
+        let tip_hash = factory.block_hash(tip_num).unwrap().unwrap();
         let consistent_view = ConsistentDbView::new(factory.clone(), None);
 
         let mut rng = rand::thread_rng();
@@ -295,8 +329,9 @@ mod tests {
             provider_rw.commit().unwrap();
         }
 
+        let overlay_input = TrieOverlayInput::new(Default::default(), tip_hash);
         assert_eq!(
-            ParallelStateRoot::new(consistent_view.clone(), Default::default())
+            ParallelStateRoot::new(consistent_view.clone(), Default::default(), overlay_input)
                 .incremental_root()
                 .unwrap(),
             test_utils::state_root(state.clone())
@@ -327,8 +362,10 @@ mod tests {
             }
         }
 
+        let input = TrieInput::from_state(hashed_state);
+        let overlay_input = TrieOverlayInput::new(input.clone(), tip_hash);
         assert_eq!(
-            ParallelStateRoot::new(consistent_view, TrieInput::from_state(hashed_state))
+            ParallelStateRoot::new(consistent_view, input, overlay_input)
                 .incremental_root()
                 .unwrap(),
             test_utils::state_root(state)
