@@ -681,9 +681,13 @@ where
 impl<Pool, N> TransactionsManager<Pool, N>
 where
     Pool: TransactionPool,
-    N: NetworkPrimitives<BroadcastedTransaction: SignedTransaction>,
+    N: NetworkPrimitives<
+        BroadcastedTransaction: SignedTransaction,
+        PooledTransaction: SignedTransaction,
+    >,
     <<Pool as TransactionPool>::Transaction as PoolTransaction>::Consensus:
         Into<N::BroadcastedTransaction>,
+    <<Pool as TransactionPool>::Transaction as PoolTransaction>::Pooled: Into<N::PooledTransaction>,
 {
     /// Invoked when transactions in the local mempool are considered __pending__.
     ///
@@ -955,28 +959,20 @@ where
         // notify pool so events get fired
         self.pool.on_propagated(propagated);
     }
-}
 
-impl<Pool> TransactionsManager<Pool>
-where
-    Pool: TransactionPool + 'static,
-    <<Pool as TransactionPool>::Transaction as PoolTransaction>::Consensus: Into<TransactionSigned>,
-    <<Pool as TransactionPool>::Transaction as PoolTransaction>::Pooled:
-        Into<PooledTransactionsElement>,
-{
     /// Request handler for an incoming request for transactions
     fn on_get_pooled_transactions(
         &mut self,
         peer_id: PeerId,
         request: GetPooledTransactions,
-        response: oneshot::Sender<RequestResult<PooledTransactions>>,
+        response: oneshot::Sender<RequestResult<PooledTransactions<N::PooledTransaction>>>,
     ) {
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             if self.network.tx_gossip_disabled() {
                 let _ = response.send(Ok(PooledTransactions::default()));
                 return
             }
-            let transactions = self.pool.get_pooled_transactions_as::<PooledTransactionsElement>(
+            let transactions = self.pool.get_pooled_transactions_as::<N::PooledTransaction>(
                 request.0,
                 GetPooledTransactionLimit::ResponseSizeSoftLimit(
                     self.transaction_fetcher.info.soft_limit_byte_size_pooled_transactions_response,
@@ -987,13 +983,21 @@ where
 
             // we sent a response at which point we assume that the peer is aware of the
             // transactions
-            peer.seen_transactions.extend(transactions.iter().map(|tx| *tx.hash()));
+            peer.seen_transactions.extend(transactions.iter().map(|tx| *tx.tx_hash()));
 
             let resp = PooledTransactions(transactions);
             let _ = response.send(Ok(resp));
         }
     }
+}
 
+impl<Pool> TransactionsManager<Pool>
+where
+    Pool: TransactionPool + 'static,
+    <<Pool as TransactionPool>::Transaction as PoolTransaction>::Consensus: Into<TransactionSigned>,
+    <<Pool as TransactionPool>::Transaction as PoolTransaction>::Pooled:
+        Into<PooledTransactionsElement>,
+{
     /// Handles dedicated transaction events related to the `eth` protocol.
     fn on_network_tx_event(&mut self, event: NetworkTransactionEvent) {
         match event {
