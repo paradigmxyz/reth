@@ -7112,6 +7112,7 @@ dependencies = [
  "reth-network-peers",
  "reth-node-api",
  "reth-node-builder",
+ "reth-optimism-primitives",
  "reth-payload-builder",
  "reth-payload-builder-primitives",
  "reth-payload-primitives",
