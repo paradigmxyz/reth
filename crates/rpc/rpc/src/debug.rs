@@ -19,6 +19,7 @@ use reth_evm::{
     ConfigureEvmEnv,
 };
 use reth_primitives::{Block, BlockExt, SealedBlockWithSenders};
+use reth_primitives_traits::SignedTransaction;
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProofProvider, StateProviderFactory,
     TransactionVariant,
