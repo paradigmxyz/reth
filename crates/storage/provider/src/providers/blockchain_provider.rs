@@ -1009,7 +1009,7 @@ mod tests {
                     // Push to disk
                     let provider_rw = hook_provider.database_provider_rw().unwrap();
                     UnifiedStorageWriter::from(&provider_rw, &hook_provider.static_file_provider())
-                        .save_blocks(&[lowest_memory_block])
+                        .save_blocks(vec![lowest_memory_block])
                         .unwrap();
                     UnifiedStorageWriter::commit(provider_rw).unwrap();
 

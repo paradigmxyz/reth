@@ -147,7 +147,7 @@ impl<N: PersistenceNodeTypes> PersistenceService<N> {
             let provider_rw = self.provider.database_provider_rw()?;
             let static_file_provider = self.provider.static_file_provider();
 
-            UnifiedStorageWriter::from(&provider_rw, &static_file_provider).save_blocks(&blocks)?;
+            UnifiedStorageWriter::from(&provider_rw, &static_file_provider).save_blocks(blocks)?;
             UnifiedStorageWriter::commit(provider_rw)?;
         }
         self.metrics.save_blocks_duration_seconds.record(start_time.elapsed());

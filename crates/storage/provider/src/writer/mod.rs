@@ -10,6 +10,7 @@ use reth_primitives::StaticFileSegment;
 use reth_storage_api::{DBProvider, StageCheckpointWriter, TransactionsProviderExt};
 use reth_storage_errors::writer::UnifiedStorageWriterError;
 use revm::db::OriginalValuesKnown;
+use std::sync::Arc;
 use tracing::debug;
 
 /// [`UnifiedStorageWriter`] is responsible for managing the writing to storage with both database
@@ -130,7 +131,7 @@ where
         + StaticFileProviderFactory,
 {
     /// Writes executed blocks and receipts to storage.
-    pub fn save_blocks(&self, blocks: &[ExecutedBlock]) -> ProviderResult<()> {
+    pub fn save_blocks(&self, blocks: Vec<ExecutedBlock>) -> ProviderResult<()> {
         if blocks.is_empty() {
             debug!(target: "provider::storage_writer", "Attempted to write empty block range");
             return Ok(())
@@ -138,13 +139,13 @@ where
 
         // NOTE: checked non-empty above
         let first_block = blocks.first().unwrap().block();
-        let last_block = blocks.last().unwrap().block().clone();
+        let last_block = blocks.last().unwrap().block();
         let first_number = first_block.number;
         let last_block_number = last_block.number;
 
         debug!(target: "provider::storage_writer", block_count = %blocks.len(), "Writing blocks and execution data to storage");
 
-        // TODO: remove all the clones and do performant / batched writes for each type of object
+        // TODO: Do performant / batched writes for each type of object
         // instead of a loop over all blocks,
         // meaning:
         //  * blocks
@@ -153,27 +154,24 @@ where
         //  * trie updates (cannot naively extend, need helper)
         //  * indices (already done basically)
         // Insert the blocks
-        for block in blocks {
-            let sealed_block =
-                block.block().clone().try_with_senders_unchecked(block.senders().clone()).unwrap();
+        for ExecutedBlock { block, senders, execution_output, hashed_state, trie } in blocks {
+            let sealed_block = Arc::unwrap_or_clone(block)
+                .try_with_senders_unchecked(Arc::unwrap_or_clone(senders))
+                .unwrap();
             self.database().insert_block(sealed_block, StorageLocation::Both)?;
 
             // Write state and changesets to the database.
             // Must be written after blocks because of the receipt lookup.
-            let execution_outcome = block.execution_outcome().clone();
             self.database().write_to_storage(
-                execution_outcome,
+                Arc::unwrap_or_clone(execution_output),
                 OriginalValuesKnown::No,
                 StorageLocation::StaticFiles,
             )?;
 
             // insert hashes and intermediate merkle nodes
-            {
-                let trie_updates = block.trie_updates().clone();
-                let hashed_state = block.hashed_state();
-                self.database().write_hashed_state(&hashed_state.clone().into_sorted())?;
-                self.database().write_trie_updates(&trie_updates)?;
-            }
+            self.database()
+                .write_hashed_state(&Arc::unwrap_or_clone(hashed_state).into_sorted())?;
+            self.database().write_trie_updates(&trie)?;
         }
 
         // update history indices
