@@ -212,7 +212,7 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     /// From which we get all new incoming transaction related messages.
     network_events: EventStream<NetworkEvent<PeerRequest<N>>>,
     /// Transaction fetcher to handle inflight and missing transaction requests.
-    transaction_fetcher: TransactionFetcher,
+    transaction_fetcher: TransactionFetcher<N>,
     /// All currently pending transactions grouped by peers.
     ///
     /// This way we can track incoming transactions and prevent multiple pool imports for the same
@@ -235,7 +235,7 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     /// Bad imports.
     bad_imports: LruCache<TxHash>,
     /// All the connected peers.
-    peers: HashMap<PeerId, PeerMetadata>,
+    peers: HashMap<PeerId, PeerMetadata<N>>,
     /// Send half for the command channel.
     ///
     /// This is kept so that a new [`TransactionsHandle`] can be created at any time.
@@ -1731,23 +1731,23 @@ impl TransactionSource {
 
 /// Tracks a single peer in the context of [`TransactionsManager`].
 #[derive(Debug)]
-pub struct PeerMetadata {
+pub struct PeerMetadata<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Optimistically keeps track of transactions that we know the peer has seen. Optimistic, in
     /// the sense that transactions are preemptively marked as seen by peer when they are sent to
     /// the peer.
     seen_transactions: LruCache<TxHash>,
     /// A communication channel directly to the peer's session task.
-    request_tx: PeerRequestSender,
+    request_tx: PeerRequestSender<PeerRequest<N>>,
     /// negotiated version of the session.
     version: EthVersion,
     /// The peer's client version.
     client_version: Arc<str>,
 }
 
-impl PeerMetadata {
+impl<N: NetworkPrimitives> PeerMetadata<N> {
     /// Returns a new instance of [`PeerMetadata`].
     fn new(
-        request_tx: PeerRequestSender,
+        request_tx: PeerRequestSender<PeerRequest<N>>,
         version: EthVersion,
         client_version: Arc<str>,
         max_transactions_seen_by_peer: u32,
