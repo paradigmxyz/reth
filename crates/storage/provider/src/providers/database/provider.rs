@@ -341,6 +341,34 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
         Ok(())
     }
+
+    /// Removes receipts from all transactions starting with provided number (inclusive).
+    fn remove_receipts_from(
+        &self,
+        from_tx: TxNumber,
+        last_block: BlockNumber,
+        remove_from: StorageLocation,
+    ) -> ProviderResult<()> {
+        if remove_from.database() {
+            // iterate over block body and remove receipts
+            self.remove::<tables::Receipts>(from_tx..)?;
+        }
+
+        if remove_from.static_files() && !self.prune_modes.has_receipts_pruning() {
+            let static_file_receipt_num =
+                self.static_file_provider.get_highest_static_file_tx(StaticFileSegment::Receipts);
+
+            let to_delete = static_file_receipt_num
+                .map(|static_num| (static_num + 1).saturating_sub(from_tx))
+                .unwrap_or_default();
+
+            self.static_file_provider
+                .latest_writer(StaticFileSegment::Receipts)?
+                .prune_receipts(to_delete, last_block)?;
+        }
+
+        Ok(())
+    }
 }
 
 impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for DatabaseProvider<TX, N> {
@@ -826,34 +854,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
                 )?;
             }
         }
-        Ok(())
-    }
-
-    /// Removes receipts from all transactions starting with provided number (inclusive).
-    fn remove_receipts_from(
-        &self,
-        from_tx: TxNumber,
-        last_block: BlockNumber,
-        remove_from: StorageLocation,
-    ) -> ProviderResult<()> {
-        if remove_from.database() {
-            // iterate over block body and remove receipts
-            self.remove::<tables::Receipts>(from_tx..)?;
-        }
-
-        if remove_from.static_files() && !self.prune_modes.has_receipts_pruning() {
-            let static_file_receipt_num =
-                self.static_file_provider.get_highest_static_file_tx(StaticFileSegment::Receipts);
-
-            let to_delete = static_file_receipt_num
-                .map(|static_num| (static_num + 1).saturating_sub(from_tx))
-                .unwrap_or_default();
-
-            self.static_file_provider
-                .latest_writer(StaticFileSegment::Receipts)?
-                .prune_receipts(to_delete, last_block)?;
-        }
-
         Ok(())
     }
 }
