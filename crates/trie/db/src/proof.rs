@@ -141,7 +141,7 @@ impl<'a, TX: DbTx> DatabaseStorageProof<'a, TX>
         storage: HashedStorage,
     ) -> Result<StorageMultiProof, StateProofError> {
         let hashed_address = keccak256(address);
-        let targets = slots.into_iter().map(keccak256).collect();
+        let targets = slots.iter().map(keccak256).collect();
         let prefix_set = storage.construct_prefix_set();
         let state_sorted = HashedPostStateSorted::new(
             Default::default(),
