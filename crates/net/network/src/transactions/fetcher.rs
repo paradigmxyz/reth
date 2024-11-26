@@ -68,7 +68,7 @@ use validation::FilterOutcome;
 /// new requests on announced hashes.
 #[derive(Debug)]
 #[pin_project]
-pub struct TransactionFetcher {
+pub struct TransactionFetcher<T = PooledTransactionsElement> {
     /// All peers with to which a [`GetPooledTransactions`] request is inflight.
     pub active_peers: LruMap<PeerId, u8, ByLength>,
     /// All currently active [`GetPooledTransactions`] requests.
@@ -77,7 +77,7 @@ pub struct TransactionFetcher {
     /// It's disjoint from the set of hashes which are awaiting an idle fallback peer in order to
     /// be fetched.
     #[pin]
-    pub inflight_requests: FuturesUnordered<GetPooledTxRequestFut>,
+    pub inflight_requests: FuturesUnordered<GetPooledTxRequestFut<T>>,
     /// Hashes that are awaiting an idle fallback peer so they can be fetched.
     ///
     /// This is a subset of all hashes in the fetcher, and is disjoint from the set of hashes for
@@ -93,9 +93,7 @@ pub struct TransactionFetcher {
     metrics: TransactionFetcherMetrics,
 }
 
-// === impl TransactionFetcher ===
-
-impl TransactionFetcher {
+impl<T> TransactionFetcher<T> {
     /// Removes the peer from the active set.
     pub(crate) fn remove_peer(&mut self, peer_id: &PeerId) {
         self.active_peers.remove(peer_id);
@@ -896,6 +894,10 @@ impl TransactionFetcher {
             approx_capacity_get_pooled_transactions_req_eth66()
         }
     }
+}
+
+impl TransactionFetcher {
+
 
     /// Processes a resolved [`GetPooledTransactions`] request. Queues the outcome as a
     /// [`FetchEvent`], which will then be streamed by
@@ -1044,7 +1046,7 @@ impl Stream for TransactionFetcher {
     }
 }
 
-impl Default for TransactionFetcher {
+impl<T> Default for TransactionFetcher<T> {
     fn default() -> Self {
         Self {
             active_peers: LruMap::new(DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS),
@@ -1091,13 +1093,13 @@ impl TxFetchMetadata {
 
 /// Represents possible events from fetching transactions.
 #[derive(Debug)]
-pub enum FetchEvent {
+pub enum FetchEvent<T = PooledTransactionsElement> {
     /// Triggered when transactions are successfully fetched.
     TransactionsFetched {
         /// The ID of the peer from which transactions were fetched.
         peer_id: PeerId,
         /// The transactions that were fetched, if available.
-        transactions: PooledTransactions,
+        transactions: PooledTransactions<T>,
     },
     /// Triggered when there is an error in fetching transactions.
     FetchError {
@@ -1115,22 +1117,22 @@ pub enum FetchEvent {
 
 /// An inflight request for [`PooledTransactions`] from a peer.
 #[derive(Debug)]
-pub struct GetPooledTxRequest {
+pub struct GetPooledTxRequest<T = PooledTransactionsElement> {
     peer_id: PeerId,
     /// Transaction hashes that were requested, for cleanup purposes
     requested_hashes: RequestTxHashes,
-    response: oneshot::Receiver<RequestResult<PooledTransactions>>,
+    response: oneshot::Receiver<RequestResult<PooledTransactions<T>>>,
 }
 
 /// Upon reception of a response, a [`GetPooledTxRequest`] is deconstructed to form a
 /// [`GetPooledTxResponse`].
 #[derive(Debug)]
-pub struct GetPooledTxResponse {
+pub struct GetPooledTxResponse<T = PooledTransactionsElement> {
     peer_id: PeerId,
     /// Transaction hashes that were requested, for cleanup purposes, since peer may only return a
     /// subset of requested hashes.
     requested_hashes: RequestTxHashes,
-    result: Result<RequestResult<PooledTransactions>, RecvError>,
+    result: Result<RequestResult<PooledTransactions<T>>, RecvError>,
 }
 
 /// Stores the response receiver made by sending a [`GetPooledTransactions`] request to a peer's
@@ -1138,24 +1140,24 @@ pub struct GetPooledTxResponse {
 #[must_use = "futures do nothing unless polled"]
 #[pin_project::pin_project]
 #[derive(Debug)]
-pub struct GetPooledTxRequestFut {
+pub struct GetPooledTxRequestFut<T = PooledTransactionsElement> {
     #[pin]
-    inner: Option<GetPooledTxRequest>,
+    inner: Option<GetPooledTxRequest<T>>,
 }
 
-impl GetPooledTxRequestFut {
+impl<T> GetPooledTxRequestFut<T> {
     #[inline]
     const fn new(
         peer_id: PeerId,
         requested_hashes: RequestTxHashes,
-        response: oneshot::Receiver<RequestResult<PooledTransactions>>,
+        response: oneshot::Receiver<RequestResult<PooledTransactions<T>>>,
     ) -> Self {
         Self { inner: Some(GetPooledTxRequest { peer_id, requested_hashes, response }) }
     }
 }
 
-impl Future for GetPooledTxRequestFut {
-    type Output = GetPooledTxResponse;
+impl<T> Future for GetPooledTxRequestFut<T> {
+    type Output = GetPooledTxResponse<T>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut req = self.as_mut().project().inner.take().expect("polled after completion");
