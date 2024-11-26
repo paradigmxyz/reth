@@ -56,7 +56,7 @@ use std::{
         mpsc::{Receiver, RecvError, RecvTimeoutError, Sender},
         Arc,
     },
-    time::{Duration, Instant},
+    time::Instant,
 };
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
@@ -1207,6 +1207,7 @@ where
                 match request {
                     EngineApiRequest::InsertExecutedBlock(block) => {
                         debug!(target: "engine::tree", block=?block.block().num_hash(), "inserting already executed block");
+                        let now = Instant::now();
                         let sealed_block = block.block.clone();
                         self.state.tree_state.insert_executed(block);
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
@@ -1214,7 +1215,7 @@ where
                         self.emit_event(EngineApiEvent::BeaconConsensus(
                             BeaconConsensusEngineEvent::CanonicalBlockAdded(
                                 sealed_block,
-                                Some(Duration::ZERO),
+                                now.elapsed(),
                             ),
                         ));
                     }
@@ -2297,7 +2298,7 @@ where
         let engine_event = if self.is_fork(block_hash)? {
             BeaconConsensusEngineEvent::ForkBlockAdded(sealed_block, elapsed)
         } else {
-            BeaconConsensusEngineEvent::CanonicalBlockAdded(sealed_block, Some(elapsed))
+            BeaconConsensusEngineEvent::CanonicalBlockAdded(sealed_block, elapsed)
         };
         self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
 
@@ -2941,7 +2942,7 @@ mod tests {
                 EngineApiEvent::BeaconConsensus(
                     BeaconConsensusEngineEvent::CanonicalBlockAdded(block, _),
                 ) => {
-                    assert!(block.hash() == expected_hash);
+                    assert_eq!(block.hash(), expected_hash);
                 }
                 _ => panic!("Unexpected event: {:#?}", event),
             }

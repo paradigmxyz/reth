@@ -253,7 +253,7 @@ impl NodeState {
                     peers=self.num_connected_peers(),
                     txs=block.body.transactions.len(),
                     gas=%format_gas(block.header.gas_used),
-                    gas_throughput=%format_gas_throughput(block.header.gas_used, elapsed.unwrap()),
+                    gas_throughput=%format_gas_throughput(block.header.gas_used, elapsed),
                     full=%format!("{:.1}%", block.header.gas_used as f64 * 100.0 / block.header.gas_limit as f64),
                     base_fee=%format!("{:.2}gwei", block.header.base_fee_per_gas.unwrap_or(0) as f64 / GWEI_TO_WEI as f64),
                     blobs=block.header.blob_gas_used.unwrap_or(0) / alloy_eips::eip4844::DATA_GAS_PER_BLOB,
