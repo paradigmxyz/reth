@@ -13,8 +13,8 @@ use crate::{
     validate::ValidTransaction,
     AllPoolTransactions, AllTransactionsEvents, BestTransactions, BlockInfo, EthPoolTransaction,
     EthPooledTransaction, NewTransactionEvent, PoolResult, PoolSize, PoolTransaction,
-    PooledTransactionsElement, PropagatedTransactions, TransactionEvents, TransactionOrigin,
-    TransactionPool, TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
+    PropagatedTransactions, TransactionEvents, TransactionOrigin, TransactionPool,
+    TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
 };
 use alloy_eips::{
     eip1559::ETHEREUM_BLOCK_GAS_LIMIT,
@@ -135,7 +135,18 @@ impl TransactionPool for NoopTransactionPool {
         &self,
         _tx_hashes: Vec<TxHash>,
         _limit: GetPooledTransactionLimit,
-    ) -> Vec<PooledTransactionsElement> {
+    ) -> Vec<<Self::Transaction as PoolTransaction>::Pooled> {
+        vec![]
+    }
+
+    fn get_pooled_transactions_as<T>(
+        &self,
+        _tx_hashes: Vec<TxHash>,
+        _limit: GetPooledTransactionLimit,
+    ) -> Vec<T>
+    where
+        <Self::Transaction as PoolTransaction>::Pooled: Into<T>,
+    {
         vec![]
     }
 
