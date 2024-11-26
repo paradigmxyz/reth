@@ -12,21 +12,24 @@ description = "Commonly used types for trie usage in reth."
 workspace = true
 
 [dependencies]
-reth-primitives-traits = { workspace = true, features = ["serde"] }
-reth-codecs.workspace = true
-
+# alloy
 alloy-primitives.workspace = true
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
-alloy-trie = { workspace = true, features = ["serde"] }
+alloy-trie.workspace = true
 alloy-consensus.workspace = true
 alloy-genesis.workspace = true
+
+reth-primitives-traits.workspace = true
+reth-codecs.workspace = true
 revm-primitives.workspace = true
 
 bytes.workspace = true
 derive_more.workspace = true
-serde.workspace = true
 itertools.workspace = true
-nybbles = { workspace = true, features = ["serde", "rlp"] }
+nybbles = { workspace = true, features = ["rlp"] }
+
+# `serde` feature
+serde = { workspace = true, optional = true }
 
 # `test-utils` feature
 hash-db = { version = "=0.15.2", optional = true }
@@ -45,6 +48,17 @@ proptest-arbitrary-interop.workspace = true
 criterion.workspace = true
 
 [features]
+serde = [
+    "dep:serde",
+    "bytes/serde",
+    "nybbles/serde",
+    "alloy-primitives/serde",
+    "alloy-consensus/serde",
+    "alloy-trie/serde",
+    "revm-primitives/serde",
+    "reth-primitives-traits/serde",
+    "reth-codecs/serde"
+]
 test-utils = [
     "dep:plain_hasher",
     "dep:hash-db",

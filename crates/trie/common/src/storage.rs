@@ -1,9 +1,9 @@
 use super::{BranchNodeCompact, StoredNibblesSubKey};
 use reth_codecs::Compact;
-use serde::{Deserialize, Serialize};
 
 /// Account storage trie node.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StorageTrieEntry {
     /// The nibbles of the intermediate node
     pub nibbles: StoredNibblesSubKey,

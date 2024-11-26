@@ -21,8 +21,8 @@ reth-storage-errors.workspace = true
 reth-nippy-jar.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
+reth-trie-common = { workspace = true, features = ["serde"] }
 reth-tracing.workspace = true
-reth-trie-common.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
