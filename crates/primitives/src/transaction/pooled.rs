@@ -739,6 +739,24 @@ impl TryFrom<TransactionSignedEcRecovered> for PooledTransactionsElementEcRecove
     }
 }
 
+impl Encodable2718 for PooledTransactionsElementEcRecovered {
+    fn type_flag(&self) -> Option<u8> {
+        self.transaction.type_flag()
+    }
+
+    fn encode_2718_len(&self) -> usize {
+        self.transaction.encode_2718_len()
+    }
+
+    fn encode_2718(&self, out: &mut dyn alloy_rlp::BufMut) {
+        self.transaction.encode_2718(out)
+    }
+
+    fn trie_hash(&self) -> B256 {
+        self.transaction.trie_hash()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
