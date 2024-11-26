@@ -26,7 +26,7 @@ where
     Node: FullNodeComponents<
         Types: NodeTypes<
             ChainSpec: EthereumHardforks,
-            Primitives: NodePrimitives<Block: Encodable>,
+            Primitives: NodePrimitives<Block: Encodable, Receipt = reth_primitives::Receipt>,
         >,
     >,
     EthApi: EthApiSpec + EthTransactions + TraceExt,

@@ -106,7 +106,7 @@ impl EthStateCache {
     ) -> Self
     where
         Provider: StateProviderFactory
-            + BlockReader<Block = reth_primitives::Block>
+            + BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
             + EvmEnvProvider
             + Clone
             + Unpin
@@ -128,7 +128,7 @@ impl EthStateCache {
     ) -> Self
     where
         Provider: StateProviderFactory
-            + BlockReader<Block = reth_primitives::Block>
+            + BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
             + EvmEnvProvider
             + Clone
             + Unpin
@@ -348,7 +348,7 @@ where
 impl<Provider, Tasks, EvmConfig> Future for EthStateCacheService<Provider, Tasks, EvmConfig>
 where
     Provider: StateProviderFactory
-        + BlockReader<Block = reth_primitives::Block>
+        + BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
         + EvmEnvProvider
         + Clone
         + Unpin

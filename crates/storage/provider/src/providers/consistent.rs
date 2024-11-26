@@ -19,7 +19,7 @@ use reth_db::models::BlockNumberAddress;
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::{BundleStateInit, ExecutionOutcome, RevertsInit};
-use reth_node_types::{BlockTy, TxTy};
+use reth_node_types::{BlockTy, ReceiptTy, TxTy};
 use reth_primitives::{
     Account, BlockWithSenders, Receipt, SealedBlockFor, SealedBlockWithSenders, SealedHeader,
     StorageEntry, TransactionMeta,
@@ -1078,7 +1078,9 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> ReceiptProvider for ConsistentProvider<N> {
-    fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
+    type Receipt = ReceiptTy<N>;
+
+    fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
         self.get_in_memory_or_storage_by_tx(
             id.into(),
             |provider| provider.receipt(id),
@@ -1088,7 +1090,7 @@ impl<N: ProviderNodeTypes> ReceiptProvider for ConsistentProvider<N> {
         )
     }
 
-    fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
+    fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Receipt>> {
         for block_state in self.head_block.iter().flat_map(|b| b.chain()) {
             let executed_block = block_state.block_ref();
             let block = executed_block.block();
@@ -1112,7 +1114,10 @@ impl<N: ProviderNodeTypes> ReceiptProvider for ConsistentProvider<N> {
         self.storage_provider.receipt_by_hash(hash)
     }
 
-    fn receipts_by_block(&self, block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>> {
+    fn receipts_by_block(
+        &self,
+        block: BlockHashOrNumber,
+    ) -> ProviderResult<Option<Vec<Self::Receipt>>> {
         self.get_in_memory_or_storage_by_block(
             block,
             |db_provider| db_provider.receipts_by_block(block),
@@ -1123,7 +1128,7 @@ impl<N: ProviderNodeTypes> ReceiptProvider for ConsistentProvider<N> {
     fn receipts_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<Receipt>> {
+    ) -> ProviderResult<Vec<Self::Receipt>> {
         self.get_in_memory_or_storage_by_tx_range(
             range,
             |db_provider, db_range| db_provider.receipts_by_tx_range(db_range),
@@ -1135,7 +1140,7 @@ impl<N: ProviderNodeTypes> ReceiptProvider for ConsistentProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> ReceiptProviderIdExt for ConsistentProvider<N> {
-    fn receipts_by_block_id(&self, block: BlockId) -> ProviderResult<Option<Vec<Receipt>>> {
+    fn receipts_by_block_id(&self, block: BlockId) -> ProviderResult<Option<Vec<Self::Receipt>>> {
         match block {
             BlockId::Hash(rpc_block_hash) => {
                 let mut receipts = self.receipts_by_block(rpc_block_hash.block_hash.into())?;
