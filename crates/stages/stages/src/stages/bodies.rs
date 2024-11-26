@@ -13,9 +13,8 @@ use reth_db_api::{cursor::DbCursorRO, transaction::DbTxMut};
 use reth_network_p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
 use reth_primitives::StaticFileSegment;
 use reth_provider::{
-    providers::{StaticFileWriter},
-    BlockReader, BlockWriter, DBProvider, ProviderError, StaticFileProviderFactory, StatsReader,
-    StorageLocation,
+    providers::StaticFileWriter, BlockReader, BlockWriter, DBProvider, ProviderError,
+    StaticFileProviderFactory, StatsReader, StorageLocation,
 };
 use reth_stages_api::{
     EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId,
@@ -129,7 +128,7 @@ impl<D: BodyDownloader> BodyStage<D> {
                             next_static_file_tx_num.saturating_sub(1),
                             &static_file_provider,
                             provider,
-                            StaticFileSegment::Transactions
+                            StaticFileSegment::Transactions,
                         )?)
                     }
                 } else {

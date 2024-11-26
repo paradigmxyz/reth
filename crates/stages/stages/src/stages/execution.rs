@@ -14,7 +14,10 @@ use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives::{SealedHeader, StaticFileSegment};
 use reth_primitives_traits::{format_gas_throughput, Block, BlockBody, NodePrimitives};
 use reth_provider::{
-    providers::{StaticFileProvider, StaticFileWriter}, BlockHashReader, BlockReader, DBProvider, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateChangeWriter, StateCommitmentProvider, StateWriter, StaticFileProviderFactory, StatsReader, StorageLocation, TransactionVariant
+    providers::{StaticFileProvider, StaticFileWriter},
+    BlockHashReader, BlockReader, DBProvider, HeaderProvider, LatestStateProviderRef,
+    OriginalValuesKnown, ProviderError, StateChangeWriter, StateCommitmentProvider, StateWriter,
+    StaticFileProviderFactory, StatsReader, StorageLocation, TransactionVariant,
 };
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
