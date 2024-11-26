@@ -4,7 +4,7 @@ use alloy_primitives::{TxHash, TxNumber};
 use reth_storage_errors::provider::ProviderResult;
 use std::ops::RangeBounds;
 
-/// Client trait for fetching [Receipt] data .
+/// Client trait for fetching receipt data.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait ReceiptProvider: Send + Sync {
     /// The receipt type.

@@ -37,8 +37,11 @@
 //!     block_executor: BlockExecutor,
 //!     consensus: Consensus,
 //! ) where
-//!     Provider: FullRpcProvider<Transaction = TransactionSigned, Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
-//!         + AccountReader
+//!     Provider: FullRpcProvider<
+//!             Transaction = TransactionSigned,
+//!             Block = reth_primitives::Block,
+//!             Receipt = reth_primitives::Receipt,
+//!         > + AccountReader
 //!         + ChangeSetReader,
 //!     Pool: TransactionPool + Unpin + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
@@ -114,8 +117,11 @@
 //!     block_executor: BlockExecutor,
 //!     consensus: Consensus,
 //! ) where
-//!     Provider: FullRpcProvider<Transaction = TransactionSigned, Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
-//!         + AccountReader
+//!     Provider: FullRpcProvider<
+//!             Transaction = TransactionSigned,
+//!             Block = reth_primitives::Block,
+//!             Receipt = reth_primitives::Receipt,
+//!         > + AccountReader
 //!         + ChangeSetReader,
 //!     Pool: TransactionPool + Unpin + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
