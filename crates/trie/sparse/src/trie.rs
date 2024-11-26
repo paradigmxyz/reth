@@ -530,6 +530,7 @@ impl RevealedSparseTrie {
         let mut current = Nibbles::default(); // Start traversal from the root
         let mut nodes = Vec::new(); // Collect traversed nodes
 
+        debug!(target: "trie::sparse", ?path, nodes = ?self.nodes, "Taking nodes for path");
         while let Some(node) = self.nodes.remove(&current) {
             match &node {
                 SparseNode::Empty => return Err(SparseTrieError::Blind),
