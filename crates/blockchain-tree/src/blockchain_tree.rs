@@ -25,12 +25,11 @@ use reth_provider::{
     BlockExecutionWriter, BlockNumReader, BlockWriter, CanonStateNotification,
     CanonStateNotificationSender, CanonStateNotifications, ChainSpecProvider, ChainSplit,
     ChainSplitTarget, DBProvider, DisplayBlocksChain, HashedPostStateProvider, HeaderProvider,
-    ProviderError, StaticFileProviderFactory, StorageLocation,
+    LatestStateProviderRef, ProviderError, StateRootProvider, StaticFileProviderFactory,
+    StorageLocation,
 };
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
-use reth_trie::{hashed_cursor::HashedPostStateCursorFactory, StateRoot};
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseStateRoot};
 use std::{
     collections::{btree_map::Entry, BTreeMap, HashSet},
     sync::Arc,
@@ -1216,8 +1215,6 @@ where
     ) -> Result<(), CanonicalError> {
         let (blocks, state, chain_trie_updates) = chain.into_inner();
         let hashed_state = self.externals.provider_factory.hashed_post_state(state.state());
-        let prefix_sets = hashed_state.construct_prefix_sets().freeze();
-        let hashed_state_sorted = hashed_state.into_sorted();
 
         // Compute state root or retrieve cached trie updates before opening write transaction.
         let block_hash_numbers =
@@ -1237,14 +1234,8 @@ where
                     // State root calculation can take a while, and we're sure no write transaction
                     // will be open in parallel. See https://github.com/paradigmxyz/reth/issues/6168.
                     .disable_long_read_transaction_safety();
-                let (state_root, trie_updates) = StateRoot::from_tx(provider.tx_ref())
-                    .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
-                        DatabaseHashedCursorFactory::new(provider.tx_ref()),
-                        &hashed_state_sorted,
-                    ))
-                    .with_prefix_sets(prefix_sets)
-                    .root_with_updates()
-                    .map_err(Into::<BlockValidationError>::into)?;
+                let (state_root, trie_updates) = LatestStateProviderRef::new(&provider)
+                    .state_root_from_state_with_updates(hashed_state.clone())?;
                 let tip = blocks.tip();
                 if state_root != tip.state_root {
                     return Err(ProviderError::StateRootMismatch(Box::new(RootMismatch {
@@ -1265,7 +1256,7 @@ where
             .append_blocks_with_state(
                 blocks.into_blocks().collect(),
                 state,
-                hashed_state_sorted,
+                hashed_state.into_sorted(),
                 trie_updates,
             )
             .map_err(|e| CanonicalError::CanonicalCommit(e.to_string()))?;
@@ -1403,6 +1394,7 @@ mod tests {
     use reth_revm::primitives::AccountInfo;
     use reth_stages_api::StageCheckpoint;
     use reth_trie::{root::state_root_unhashed, StateRoot};
+    use reth_trie_db::DatabaseStateRoot;
     use std::collections::HashMap;
 
     fn setup_externals(

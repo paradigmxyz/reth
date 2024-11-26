@@ -246,7 +246,7 @@ pub fn build_block<T: TransactionCompat<Error: FromEthApiError>>(
         }
     }
 
-    let state_root = db.db.state_root(hashed_state).map_err(T::Error::from_eth_err)?;
+    let state_root = db.db.state_root_from_state(hashed_state).map_err(T::Error::from_eth_err)?;
 
     let header = alloy_consensus::Header {
         beneficiary: block_env.coinbase,
