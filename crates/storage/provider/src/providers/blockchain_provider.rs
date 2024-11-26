@@ -904,13 +904,18 @@ mod tests {
             .unwrap_or_default();
 
         // Insert blocks into the database
-        for block in &database_blocks {
+        for (block, receipts) in database_blocks.iter().zip(&receipts) {
             // TODO: this should be moved inside `insert_historical_block`: <https://github.com/paradigmxyz/reth/issues/11524>
             let mut transactions_writer =
                 static_file_provider.latest_writer(StaticFileSegment::Transactions)?;
+            let mut receipts_writer =
+                static_file_provider.latest_writer(StaticFileSegment::Receipts)?;
             transactions_writer.increment_block(block.number)?;
-            for tx in block.body.transactions() {
+            receipts_writer.increment_block(block.number)?;
+
+            for (tx, receipt) in block.body.transactions().iter().zip(receipts) {
                 transactions_writer.append_transaction(tx_num, tx)?;
+                receipts_writer.append_receipt(tx_num, receipt)?;
                 tx_num += 1;
             }
 
@@ -918,19 +923,6 @@ mod tests {
                 block.clone().seal_with_senders().expect("failed to seal block with senders"),
             )?;
         }
-
-        // Insert receipts into the static files
-        UnifiedStorageWriter::new(
-            &provider_rw,
-            Some(factory.static_file_provider().latest_writer(StaticFileSegment::Receipts)?),
-        )
-        .append_receipts_from_blocks(
-            // The initial block number is required
-            database_blocks.first().map(|b| b.number).unwrap_or_default(),
-            receipts[..database_blocks.len()]
-                .iter()
-                .map(|vec| vec.clone().into_iter().map(Some).collect::<Vec<_>>()),
-        )?;
 
         // Commit to both storages: database and static files
         UnifiedStorageWriter::commit(provider_rw)?;
