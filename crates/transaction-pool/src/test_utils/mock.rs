@@ -770,6 +770,14 @@ impl EthPoolTransaction for MockTransaction {
         }
     }
 
+    fn try_into_pooled_eip4844(self, sidecar: Arc<BlobTransactionSidecar>) -> Option<Self::Pooled> {
+        Self::Pooled::try_from_blob_transaction(
+            self.into_consensus(),
+            Arc::unwrap_or_clone(sidecar),
+        )
+        .ok()
+    }
+
     fn validate_blob(
         &self,
         _blob: &BlobTransactionSidecar,
@@ -910,11 +918,8 @@ impl From<PooledTransactionsElementEcRecovered> for MockTransaction {
 
 impl From<MockTransaction> for TransactionSignedEcRecovered {
     fn from(tx: MockTransaction) -> Self {
-        let signed_tx = TransactionSigned {
-            hash: (*tx.hash()).into(),
-            signature: Signature::test_signature(),
-            transaction: tx.clone().into(),
-        };
+        let signed_tx =
+            TransactionSigned::new(tx.clone().into(), Signature::test_signature(), *tx.hash());
 
         Self::from_signed_transaction(signed_tx, tx.sender())
     }

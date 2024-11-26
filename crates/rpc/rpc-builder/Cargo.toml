@@ -19,6 +19,7 @@ reth-consensus.workspace = true
 reth-network-api.workspace = true
 reth-node-core.workspace = true
 reth-provider.workspace = true
+reth-primitives.workspace = true
 reth-rpc.workspace = true
 reth-rpc-api.workspace = true
 reth-rpc-eth-api.workspace = true

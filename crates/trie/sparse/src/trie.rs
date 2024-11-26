@@ -53,9 +53,13 @@ impl SparseTrie {
     /// # Returns
     ///
     /// Mutable reference to [`RevealedSparseTrie`].
-    pub fn reveal_root(&mut self, root: TrieNode) -> SparseTrieResult<&mut RevealedSparseTrie> {
+    pub fn reveal_root(
+        &mut self,
+        root: TrieNode,
+        retain_updates: bool,
+    ) -> SparseTrieResult<&mut RevealedSparseTrie> {
         if self.is_blind() {
-            *self = Self::Revealed(Box::new(RevealedSparseTrie::from_root(root)?))
+            *self = Self::Revealed(Box::new(RevealedSparseTrie::from_root(root, retain_updates)?))
         }
         Ok(self.as_revealed_mut().unwrap())
     }
@@ -67,9 +71,28 @@ impl SparseTrie {
         Ok(())
     }
 
+    /// Remove the leaf node.
+    pub fn remove_leaf(&mut self, path: &Nibbles) -> SparseTrieResult<()> {
+        let revealed = self.as_revealed_mut().ok_or(SparseTrieError::Blind)?;
+        revealed.remove_leaf(path)?;
+        Ok(())
+    }
+
+    /// Wipe the trie, removing all values and nodes, and replacing the root with an empty node.
+    pub fn wipe(&mut self) -> SparseTrieResult<()> {
+        let revealed = self.as_revealed_mut().ok_or(SparseTrieError::Blind)?;
+        revealed.wipe();
+        Ok(())
+    }
+
     /// Calculates and returns the trie root if the trie has been revealed.
     pub fn root(&mut self) -> Option<B256> {
         Some(self.as_revealed_mut()?.root())
+    }
+
+    /// Calculates the hashes of the nodes below the provided level.
+    pub fn calculate_below_level(&mut self, level: usize) {
+        self.as_revealed_mut().unwrap().update_rlp_node_level(level);
     }
 }
 
@@ -120,19 +143,20 @@ impl Default for RevealedSparseTrie {
 
 impl RevealedSparseTrie {
     /// Create new revealed sparse trie from the given root node.
-    pub fn from_root(node: TrieNode) -> SparseTrieResult<Self> {
+    pub fn from_root(node: TrieNode, retain_updates: bool) -> SparseTrieResult<Self> {
         let mut this = Self {
             nodes: HashMap::default(),
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
             rlp_buf: Vec::new(),
             updates: None,
-        };
+        }
+        .with_updates(retain_updates);
         this.reveal_node(Nibbles::default(), node)?;
         Ok(this)
     }
 
-    /// Makes the sparse trie to store updated branch nodes.
+    /// Set the retention of branch node updates and deletions.
     pub fn with_updates(mut self, retain_updates: bool) -> Self {
         if retain_updates {
             self.updates = Some(SparseTrieUpdates::default());
@@ -580,6 +604,12 @@ impl RevealedSparseTrie {
         Ok(nodes)
     }
 
+    /// Wipe the trie, removing all values and nodes, and replacing the root with an empty node.
+    pub fn wipe(&mut self) {
+        *self = Self::default();
+        self.prefix_set = PrefixSetMut::all();
+    }
+
     /// Return the root of the sparse trie.
     /// Updates all remaining dirty nodes before calculating the root.
     pub fn root(&mut self) -> B256 {
@@ -773,8 +803,7 @@ impl RevealedSparseTrie {
                                 }
 
                                 // Set the hash mask. If a child node has a hash value AND is a
-                                // branch node, set the hash mask
-                                // and save the hash.
+                                // branch node, set the hash mask and save the hash.
                                 let hash = child.as_hash().filter(|_| node_type.is_branch());
                                 hash_mask_values.push(hash.is_some());
                                 if let Some(hash) = hash {
@@ -998,8 +1027,8 @@ impl RlpNodeBuffers {
 /// The aggregation of sparse trie updates.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SparseTrieUpdates {
-    updated_nodes: HashMap<Nibbles, BranchNodeCompact>,
-    removed_nodes: HashSet<Nibbles>,
+    pub(crate) updated_nodes: HashMap<Nibbles, BranchNodeCompact>,
+    pub(crate) removed_nodes: HashSet<Nibbles>,
 }
 
 #[cfg(test)]
@@ -1560,7 +1589,7 @@ mod tests {
             TrieMask::new(0b11),
         ));
 
-        let mut sparse = RevealedSparseTrie::from_root(branch.clone()).unwrap();
+        let mut sparse = RevealedSparseTrie::from_root(branch.clone(), false).unwrap();
 
         // Reveal a branch node and one of its children
         //
@@ -1722,6 +1751,7 @@ mod tests {
                 .take_proof_nodes();
         let mut sparse = RevealedSparseTrie::from_root(
             TrieNode::decode(&mut &proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
+            false,
         )
         .unwrap();
 
@@ -1796,6 +1826,7 @@ mod tests {
         .take_proof_nodes();
         let mut sparse = RevealedSparseTrie::from_root(
             TrieNode::decode(&mut &proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
+            false,
         )
         .unwrap();
 
@@ -1866,6 +1897,7 @@ mod tests {
                 .take_proof_nodes();
         let mut sparse = RevealedSparseTrie::from_root(
             TrieNode::decode(&mut &proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
+            false,
         )
         .unwrap();
 
@@ -1992,5 +2024,45 @@ mod tests {
 
         assert_eq!(sparse_root, hash_builder.root());
         assert_eq!(sparse_updates.updated_nodes, hash_builder.updated_branch_nodes.take().unwrap());
+    }
+
+    #[test]
+    fn sparse_trie_wipe() {
+        let mut sparse = RevealedSparseTrie::default().with_updates(true);
+
+        let value = alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec();
+
+        // Extension (Key = 5) – Level 0
+        // └── Branch (Mask = 1011) – Level 1
+        //     ├── 0 -> Extension (Key = 23) – Level 2
+        //     │        └── Branch (Mask = 0101) – Level 3
+        //     │              ├── 1 -> Leaf (Key = 1, Path = 50231) – Level 4
+        //     │              └── 3 -> Leaf (Key = 3, Path = 50233) – Level 4
+        //     ├── 2 -> Leaf (Key = 013, Path = 52013) – Level 2
+        //     └── 3 -> Branch (Mask = 0101) – Level 2
+        //                ├── 1 -> Leaf (Key = 3102, Path = 53102) – Level 3
+        //                └── 3 -> Branch (Mask = 1010) – Level 3
+        //                       ├── 0 -> Leaf (Key = 3302, Path = 53302) – Level 4
+        //                       └── 2 -> Leaf (Key = 3320, Path = 53320) – Level 4
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), value.clone())
+            .unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), value.clone())
+            .unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), value.clone())
+            .unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), value.clone())
+            .unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]), value.clone())
+            .unwrap();
+        sparse.update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), value).unwrap();
+
+        sparse.wipe();
+
+        assert_eq!(sparse.root(), EMPTY_ROOT_HASH);
     }
 }

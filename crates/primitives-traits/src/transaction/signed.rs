@@ -18,7 +18,6 @@ pub trait SignedTransaction:
     + Sync
     + Unpin
     + Clone
-    + Default
     + fmt::Debug
     + PartialEq
     + Eq

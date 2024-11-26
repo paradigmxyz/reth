@@ -18,6 +18,7 @@ use alloy_rpc_types_eth::{
 use futures::Future;
 use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
+use reth_node_api::BlockBody;
 use reth_primitives::TransactionSigned;
 use reth_provider::{BlockIdReader, ChainSpecProvider, HeaderProvider};
 use reth_revm::{
@@ -278,14 +279,15 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock {
             // we're essentially replaying the transactions in the block here, hence we need the
             // state that points to the beginning of the block, which is the state at
             // the parent block
-            let mut at = block.parent_hash;
+            let mut at = block.parent_hash();
             let mut replay_block_txs = true;
 
-            let num_txs = transaction_index.index().unwrap_or(block.body.transactions.len());
+            let num_txs =
+                transaction_index.index().unwrap_or_else(|| block.body.transactions().len());
             // but if all transactions are to be replayed, we can use the state at the block itself,
             // however only if we're not targeting the pending block, because for pending we can't
             // rely on the block's state being available
-            if !is_block_target_pending && num_txs == block.body.transactions.len() {
+            if !is_block_target_pending && num_txs == block.body.transactions().len() {
                 at = block.hash();
                 replay_block_txs = false;
             }

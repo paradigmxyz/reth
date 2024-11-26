@@ -14,7 +14,7 @@ use alloy_eips::{eip4844::MAX_DATA_GAS_PER_BLOCK, eip7685::Requests, merge::BEAC
 use alloy_primitives::U256;
 use reth_basic_payload_builder::{
     commit_withdrawals, is_better_payload, BuildArguments, BuildOutcome, PayloadBuilder,
-    PayloadConfig, WithdrawalsOutcome,
+    PayloadConfig,
 };
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::ChainSpec;
@@ -27,7 +27,7 @@ use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_primitives::{
     proofs::{self},
-    Block, BlockBody, EthereumHardforks, Receipt,
+    Block, BlockBody, BlockExt, EthereumHardforks, Receipt,
 };
 use reth_provider::{ChainSpecProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
@@ -356,8 +356,8 @@ where
         None
     };
 
-    let WithdrawalsOutcome { withdrawals_root, withdrawals } =
-        commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, attributes.withdrawals)?;
+    let withdrawals_root =
+        commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, &attributes.withdrawals)?;
 
     // merge all transitions into bundle state, this would apply the withdrawal balance changes
     // and 4788 contract call
@@ -440,6 +440,10 @@ where
         requests_hash,
     };
 
+    let withdrawals = chain_spec
+        .is_shanghai_active_at_timestamp(attributes.timestamp)
+        .then(|| attributes.withdrawals.clone());
+
     // seal the block
     let block = Block {
         header,
@@ -447,7 +451,7 @@ where
     };
 
     let sealed_block = Arc::new(block.seal_slow());
-    debug!(target: "payload_builder", sealed_block_header = ?sealed_block.header, "sealed built block");
+    debug!(target: "payload_builder", id=%attributes.id, sealed_block_header = ?sealed_block.header, "sealed built block");
 
     // create the executed block data
     let executed = ExecutedBlock {

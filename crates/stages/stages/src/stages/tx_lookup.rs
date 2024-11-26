@@ -1,12 +1,15 @@
+use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{TxHash, TxNumber};
 use num_traits::Zero;
 use reth_config::config::{EtlConfig, TransactionLookupConfig};
-use reth_db::{tables, RawKey, RawValue};
+use reth_db::{table::Value, tables, RawKey, RawValue};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     transaction::{DbTx, DbTxMut},
 };
 use reth_etl::Collector;
+use reth_primitives::NodePrimitives;
+use reth_primitives_traits::SignedTransaction;
 use reth_provider::{
     BlockReader, DBProvider, PruneCheckpointReader, PruneCheckpointWriter,
     StaticFileProviderFactory, StatsReader, TransactionsProvider, TransactionsProviderExt,
@@ -60,7 +63,7 @@ where
         + BlockReader
         + PruneCheckpointReader
         + StatsReader
-        + StaticFileProviderFactory
+        + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value + SignedTransaction>>
         + TransactionsProviderExt,
 {
     /// Return the id of the stage
@@ -206,7 +209,7 @@ where
             for tx_id in body.tx_num_range() {
                 // First delete the transaction and hash to id mapping
                 if let Some(transaction) = static_file_provider.transaction_by_id(tx_id)? {
-                    if tx_hash_number_cursor.seek_exact(transaction.hash())?.is_some() {
+                    if tx_hash_number_cursor.seek_exact(transaction.trie_hash())?.is_some() {
                         tx_hash_number_cursor.delete_current()?;
                     }
                 }

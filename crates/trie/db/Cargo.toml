@@ -18,7 +18,6 @@ reth-execution-errors.workspace = true
 reth-db.workspace = true
 reth-db-api.workspace = true
 reth-storage-errors.workspace = true
-reth-trie-common.workspace = true
 reth-trie.workspace = true
 
 revm.workspace = true
@@ -70,6 +69,7 @@ serde = [
 	"dep:serde",
 	"reth-provider/serde",
 	"reth-trie/serde",
+	"reth-trie-common/serde",
 	"alloy-consensus/serde",
 	"alloy-primitives/serde",
 	"revm/serde",

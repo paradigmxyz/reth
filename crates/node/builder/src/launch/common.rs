@@ -11,10 +11,6 @@ use alloy_primitives::{BlockNumber, B256};
 use eyre::{Context, OptionExt};
 use rayon::ThreadPoolBuilder;
 use reth_beacon_consensus::EthBeaconConsensus;
-use reth_blockchain_tree::{
-    externals::TreeNodeTypes, BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree,
-    TreeExternals,
-};
 use reth_chainspec::{Chain, EthChainSpec, EthereumHardforks};
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_consensus::Consensus;
@@ -46,10 +42,9 @@ use reth_node_metrics::{
 };
 use reth_primitives::Head;
 use reth_provider::{
-    providers::{BlockchainProvider, BlockchainProvider2, ProviderNodeTypes, StaticFileProvider},
-    BlockHashReader, BlockNumReader, CanonStateNotificationSender, ChainSpecProvider,
-    ProviderError, ProviderFactory, ProviderResult, StageCheckpointReader, StateProviderFactory,
-    StaticFileProviderFactory, TreeViewer,
+    providers::{ProviderNodeTypes, StaticFileProvider},
+    BlockHashReader, BlockNumReader, ChainSpecProvider, ProviderError, ProviderFactory,
+    ProviderResult, StageCheckpointReader, StateProviderFactory, StaticFileProviderFactory,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_api::clients::EthApiClient;
@@ -64,27 +59,6 @@ use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedSender},
     oneshot, watch,
 };
-
-/// Allows to set a tree viewer for a configured blockchain provider.
-// TODO: remove this helper trait once the engine revamp is done, the new
-// blockchain provider won't require a TreeViewer.
-// https://github.com/paradigmxyz/reth/issues/8742
-pub trait WithTree {
-    /// Setter for tree viewer.
-    fn set_tree(self, tree: Arc<dyn TreeViewer>) -> Self;
-}
-
-impl<N: NodeTypesWithDB> WithTree for BlockchainProvider<N> {
-    fn set_tree(self, tree: Arc<dyn TreeViewer>) -> Self {
-        self.with_tree(tree)
-    }
-}
-
-impl<N: NodeTypesWithDB> WithTree for BlockchainProvider2<N> {
-    fn set_tree(self, _tree: Arc<dyn TreeViewer>) -> Self {
-        self
-    }
-}
 
 /// Reusable setup for launching a node.
 ///
@@ -610,8 +584,6 @@ where
     pub fn with_blockchain_db<T, F>(
         self,
         create_blockchain_provider: F,
-        tree_config: BlockchainTreeConfig,
-        canon_state_notification_sender: CanonStateNotificationSender,
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<N::ChainSpec>, WithMeteredProviders<T>>>>
     where
         T: FullNodeTypes<Types = N>,
@@ -625,8 +597,6 @@ where
                 metrics_sender: self.sync_metrics_tx(),
             },
             blockchain_db,
-            tree_config,
-            canon_state_notification_sender,
         };
 
         let ctx = LaunchContextWith {
@@ -643,7 +613,7 @@ impl<T>
         Attached<WithConfigs<<T::Types as NodeTypes>::ChainSpec>, WithMeteredProviders<T>>,
     >
 where
-    T: FullNodeTypes<Types: ProviderNodeTypes + TreeNodeTypes, Provider: WithTree>,
+    T: FullNodeTypes<Types: ProviderNodeTypes>,
 {
     /// Returns access to the underlying database.
     pub const fn database(&self) -> &<T::Types as NodeTypesWithDB>::DB {
@@ -674,16 +644,6 @@ where
         &self.right().blockchain_db
     }
 
-    /// Returns a reference to the `BlockchainTreeConfig`.
-    pub const fn tree_config(&self) -> &BlockchainTreeConfig {
-        &self.right().tree_config
-    }
-
-    /// Returns the `CanonStateNotificationSender`.
-    pub fn canon_state_notification_sender(&self) -> CanonStateNotificationSender {
-        self.right().canon_state_notification_sender.clone()
-    }
-
     /// Creates a `NodeAdapter` and attaches it to the launch context.
     pub async fn with_components<CB>(
         self,
@@ -712,31 +672,13 @@ where
         debug!(target: "reth::cli", "creating components");
         let components = components_builder.build_components(&builder_ctx).await?;
 
-        let consensus: Arc<dyn Consensus> = Arc::new(components.consensus().clone());
-
-        let tree_externals = TreeExternals::new(
-            self.provider_factory().clone().with_prune_modes(self.prune_modes()),
-            consensus.clone(),
-            components.block_executor().clone(),
-        );
-        let tree = BlockchainTree::new(tree_externals, *self.tree_config())?
-            .with_sync_metrics_tx(self.sync_metrics_tx())
-            // Note: This is required because we need to ensure that both the components and the
-            // tree are using the same channel for canon state notifications. This will be removed
-            // once the Blockchain provider no longer depends on an instance of the tree
-            .with_canon_state_notification_sender(self.canon_state_notification_sender());
-
-        let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
-
-        // Replace the tree component with the actual tree
-        let blockchain_db = self.blockchain_db().clone().set_tree(blockchain_tree);
-
-        debug!(target: "reth::cli", "configured blockchain tree");
+        let blockchain_db = self.blockchain_db().clone();
+        let consensus = Arc::new(components.consensus().clone());
 
         let node_adapter = NodeAdapter {
             components,
             task_executor: self.task_executor().clone(),
-            provider: blockchain_db.clone(),
+            provider: blockchain_db,
         };
 
         debug!(target: "reth::cli", "calling on_component_initialized hook");
@@ -747,8 +689,6 @@ where
                 provider_factory: self.provider_factory().clone(),
                 metrics_sender: self.sync_metrics_tx(),
             },
-            blockchain_db,
-            tree_config: self.right().tree_config,
             node_adapter,
             head,
             consensus,
@@ -768,7 +708,7 @@ impl<T, CB>
         Attached<WithConfigs<<T::Types as NodeTypes>::ChainSpec>, WithComponents<T, CB>>,
     >
 where
-    T: FullNodeTypes<Provider: WithTree, Types: ProviderNodeTypes>,
+    T: FullNodeTypes<Types: ProviderNodeTypes>,
     CB: NodeComponentsBuilder<T>,
 {
     /// Returns the configured `ProviderFactory`.
@@ -805,9 +745,14 @@ where
         &self.right().node_adapter
     }
 
+    /// Returns mutable reference to the configured `NodeAdapter`.
+    pub fn node_adapter_mut(&mut self) -> &mut NodeAdapter<T, CB::Components> {
+        &mut self.right_mut().node_adapter
+    }
+
     /// Returns a reference to the blockchain provider.
     pub const fn blockchain_db(&self) -> &T::Provider {
-        &self.right().blockchain_db
+        &self.node_adapter().provider
     }
 
     /// Returns the initial backfill to sync to at launch.
@@ -912,11 +857,6 @@ where
         self.right().db_provider_container.metrics_sender.clone()
     }
 
-    /// Returns a reference to the `BlockchainTreeConfig`.
-    pub const fn tree_config(&self) -> &BlockchainTreeConfig {
-        &self.right().tree_config
-    }
-
     /// Returns the node adapter components.
     pub const fn components(&self) -> &CB::Components {
         &self.node_adapter().components
@@ -928,10 +868,7 @@ impl<T, CB>
         Attached<WithConfigs<<T::Types as NodeTypes>::ChainSpec>, WithComponents<T, CB>>,
     >
 where
-    T: FullNodeTypes<
-        Provider: WithTree + StateProviderFactory + ChainSpecProvider,
-        Types: ProviderNodeTypes,
-    >,
+    T: FullNodeTypes<Provider: StateProviderFactory + ChainSpecProvider, Types: ProviderNodeTypes>,
     CB: NodeComponentsBuilder<T>,
 {
     /// Returns the [`InvalidBlockHook`] to use for the node.
@@ -1063,7 +1000,7 @@ pub struct WithMeteredProvider<N: NodeTypesWithDB> {
     metrics_sender: UnboundedSender<MetricEvent>,
 }
 
-/// Helper container to bundle the [`ProviderFactory`], [`BlockchainProvider`]
+/// Helper container to bundle the [`ProviderFactory`], [`FullNodeTypes::Provider`]
 /// and a metrics sender.
 #[allow(missing_debug_implementations)]
 pub struct WithMeteredProviders<T>
@@ -1072,8 +1009,6 @@ where
 {
     db_provider_container: WithMeteredProvider<T::Types>,
     blockchain_db: T::Provider,
-    canon_state_notification_sender: CanonStateNotificationSender,
-    tree_config: BlockchainTreeConfig,
 }
 
 /// Helper container to bundle the metered providers container and [`NodeAdapter`].
@@ -1084,8 +1019,6 @@ where
     CB: NodeComponentsBuilder<T>,
 {
     db_provider_container: WithMeteredProvider<T::Types>,
-    tree_config: BlockchainTreeConfig,
-    blockchain_db: T::Provider,
     node_adapter: NodeAdapter<T, CB::Components>,
     head: Head,
     consensus: Arc<dyn Consensus>,

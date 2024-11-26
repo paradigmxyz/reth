@@ -3,6 +3,7 @@ use remote_exex::proto::{
     self,
     remote_ex_ex_server::{RemoteExEx, RemoteExExServer},
 };
+use reth::{primitives::Block, providers::BlockReader};
 use reth_exex::{ExExContext, ExExEvent, ExExNotification};
 use reth_node_api::FullNodeComponents;
 use reth_node_ethereum::EthereumNode;
@@ -46,7 +47,7 @@ impl RemoteExEx for ExExService {
 
 // ANCHOR: snippet
 #[allow(dead_code)]
-async fn remote_exex<Node: FullNodeComponents>(
+async fn remote_exex<Node: FullNodeComponents<Provider: BlockReader<Block = Block>>>(
     mut ctx: ExExContext<Node>,
     notifications: Arc<broadcast::Sender<ExExNotification>>,
 ) -> eyre::Result<()> {

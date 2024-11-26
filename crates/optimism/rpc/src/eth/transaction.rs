@@ -58,6 +58,7 @@ impl<N> LoadTransaction for OpEthApi<N>
 where
     Self: SpawnBlocking + FullEthApiTypes,
     N: RpcNodeCore<Provider: TransactionsProvider, Pool: TransactionPool>,
+    Self::Pool: TransactionPool,
 {
 }
 

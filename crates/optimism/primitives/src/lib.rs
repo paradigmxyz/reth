@@ -9,9 +9,9 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 pub mod bedrock;
-pub mod tx_type;
+pub mod transaction;
 
-pub use tx_type::OpTxType;
+pub use transaction::{tx_type::OpTxType, OpTransaction};
 
 use alloy_consensus::Header;
 use reth_node_types::NodePrimitives;
