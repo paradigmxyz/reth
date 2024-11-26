@@ -1,13 +1,12 @@
-use std::fmt::Debug;
-
+use crate::{ExExContextDyn, ExExEvent, ExExNotifications, ExExNotificationsStream};
 use reth_exex_types::ExExHead;
-use reth_node_api::{FullNodeComponents, NodeTypes, NodeTypesWithEngine};
+use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_node_core::node_config::NodeConfig;
 use reth_primitives::Head;
+use reth_provider::BlockReader;
 use reth_tasks::TaskExecutor;
+use std::fmt::Debug;
 use tokio::sync::mpsc::UnboundedSender;
-
-use crate::{ExExContextDyn, ExExEvent, ExExNotifications, ExExNotificationsStream};
 
 /// Captures the context that an `ExEx` has access to.
 pub struct ExExContext<Node: FullNodeComponents> {
@@ -58,7 +57,7 @@ where
 impl<Node> ExExContext<Node>
 where
     Node: FullNodeComponents,
-    Node::Provider: Debug,
+    Node::Provider: Debug + BlockReader<Block = reth_primitives::Block>,
     Node::Executor: Debug,
 {
     /// Returns dynamic version of the context
@@ -97,10 +96,7 @@ where
     }
 
     /// Returns the handle to the payload builder service.
-    pub fn payload_builder(
-        &self,
-    ) -> &reth_payload_builder::PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>
-    {
+    pub fn payload_builder(&self) -> &Node::PayloadBuilder {
         self.components.payload_builder()
     }
 
@@ -111,13 +107,19 @@ where
 
     /// Sets notifications stream to [`crate::ExExNotificationsWithoutHead`], a stream of
     /// notifications without a head.
-    pub fn set_notifications_without_head(&mut self) {
+    pub fn set_notifications_without_head(&mut self)
+    where
+        Node::Provider: BlockReader<Block = reth_primitives::Block>,
+    {
         self.notifications.set_without_head();
     }
 
     /// Sets notifications stream to [`crate::ExExNotificationsWithHead`], a stream of notifications
     /// with the provided head.
-    pub fn set_notifications_with_head(&mut self, head: ExExHead) {
+    pub fn set_notifications_with_head(&mut self, head: ExExHead)
+    where
+        Node::Provider: BlockReader<Block = reth_primitives::Block>,
+    {
         self.notifications.set_with_head(head);
     }
 }
@@ -126,6 +128,7 @@ where
 mod tests {
     use reth_exex_types::ExExHead;
     use reth_node_api::FullNodeComponents;
+    use reth_provider::BlockReader;
 
     use crate::ExExContext;
 
@@ -137,7 +140,10 @@ mod tests {
             ctx: ExExContext<Node>,
         }
 
-        impl<Node: FullNodeComponents> ExEx<Node> {
+        impl<Node: FullNodeComponents> ExEx<Node>
+        where
+            Node::Provider: BlockReader<Block = reth_primitives::Block>,
+        {
             async fn _test_bounds(mut self) -> eyre::Result<()> {
                 self.ctx.pool();
                 self.ctx.block_executor();

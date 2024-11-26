@@ -3,10 +3,11 @@
 
 use std::sync::Arc;
 
-use alloy_network::AnyNetwork;
+use alloy_eips::BlockNumberOrTag;
+use alloy_network::Ethereum;
 use alloy_primitives::U256;
 use derive_more::Deref;
-use reth_primitives::BlockNumberOrTag;
+use reth_primitives::NodePrimitives;
 use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},
@@ -102,7 +103,8 @@ where
     ) -> Self
     where
         Tasks: TaskSpawner + Clone + 'static,
-        Events: CanonStateSubscriptions,
+        Events:
+            CanonStateSubscriptions<Primitives: NodePrimitives<Receipt = reth_primitives::Receipt>>,
     {
         let blocking_task_pool =
             BlockingTaskPool::build().expect("failed to build blocking task pool");
@@ -132,8 +134,7 @@ where
     Self: Send + Sync,
 {
     type Error = EthApiError;
-    // todo: replace with alloy_network::Ethereum
-    type NetworkTypes = AnyNetwork;
+    type NetworkTypes = Ethereum;
     type TransactionCompat = EthTxBuilder;
 
     fn tx_resp_builder(&self) -> &Self::TransactionCompat {
@@ -152,6 +153,7 @@ where
     type Pool = Pool;
     type Evm = EvmConfig;
     type Network = Network;
+    type PayloadBuilder = ();
 
     fn pool(&self) -> &Self::Pool {
         self.inner.pool()
@@ -163,6 +165,10 @@ where
 
     fn network(&self) -> &Self::Network {
         self.inner.network()
+    }
+
+    fn payload_builder(&self) -> &Self::PayloadBuilder {
+        &()
     }
 
     fn provider(&self) -> &Self::Provider {
@@ -401,13 +407,15 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
 
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::{B256, U64};
+    use alloy_consensus::Header;
+    use alloy_eips::BlockNumberOrTag;
+    use alloy_primitives::{PrimitiveSignature as Signature, B256, U64};
     use alloy_rpc_types::FeeHistory;
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use reth_chainspec::{BaseFeeParams, ChainSpec, EthChainSpec};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
-    use reth_primitives::{Block, BlockBody, BlockNumberOrTag, Header, TransactionSigned};
+    use reth_primitives::{Block, BlockBody, TransactionSigned};
     use reth_provider::{
         test_utils::{MockEthProvider, NoopProvider},
         BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory,
@@ -426,7 +434,7 @@ mod tests {
     use crate::EthApi;
 
     fn build_test_eth_api<
-        P: BlockReaderIdExt
+        P: BlockReaderIdExt<Block = reth_primitives::Block>
             + BlockReader
             + ChainSpecProvider<ChainSpec = ChainSpec>
             + EvmEnvProvider
@@ -498,23 +506,21 @@ mod tests {
                 let random_fee: u128 = rng.gen();
 
                 if let Some(base_fee_per_gas) = header.base_fee_per_gas {
-                    let transaction = TransactionSigned {
-                        transaction: reth_primitives::Transaction::Eip1559(
-                            alloy_consensus::TxEip1559 {
-                                max_priority_fee_per_gas: random_fee,
-                                max_fee_per_gas: random_fee + base_fee_per_gas as u128,
-                                ..Default::default()
-                            },
-                        ),
-                        ..Default::default()
-                    };
+                    let transaction = TransactionSigned::new_unhashed(
+                        reth_primitives::Transaction::Eip1559(alloy_consensus::TxEip1559 {
+                            max_priority_fee_per_gas: random_fee,
+                            max_fee_per_gas: random_fee + base_fee_per_gas as u128,
+                            ..Default::default()
+                        }),
+                        Signature::test_signature(),
+                    );
 
                     transactions.push(transaction);
                 } else {
-                    let transaction = TransactionSigned {
-                        transaction: reth_primitives::Transaction::Legacy(Default::default()),
-                        ..Default::default()
-                    };
+                    let transaction = TransactionSigned::new_unhashed(
+                        reth_primitives::Transaction::Legacy(Default::default()),
+                        Signature::test_signature(),
+                    );
 
                     transactions.push(transaction);
                 }

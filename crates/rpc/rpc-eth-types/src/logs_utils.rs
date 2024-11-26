@@ -2,11 +2,13 @@
 //!
 //! Log parsing for building filter.
 
+use alloy_eips::{eip2718::Encodable2718, BlockNumHash};
 use alloy_primitives::TxHash;
-use alloy_rpc_types::{FilteredParams, Log};
+use alloy_rpc_types_eth::{FilteredParams, Log};
 use reth_chainspec::ChainInfo;
 use reth_errors::ProviderError;
-use reth_primitives::{BlockNumHash, Receipt, SealedBlockWithSenders};
+use reth_primitives::{Receipt, SealedBlockWithSenders};
+use reth_primitives_traits::SignedTransaction;
 use reth_storage_api::BlockReader;
 use std::sync::Arc;
 
@@ -57,7 +59,7 @@ pub enum ProviderOrBlock<'a, P: BlockReader> {
 
 /// Appends all matching logs of a block's receipts.
 /// If the log matches, look up the corresponding transaction hash.
-pub fn append_matching_block_logs<P: BlockReader>(
+pub fn append_matching_block_logs<P: BlockReader<Transaction: SignedTransaction>>(
     all_logs: &mut Vec<Log>,
     provider_or_block: ProviderOrBlock<'_, P>,
     filter: &FilteredParams,
@@ -109,7 +111,7 @@ pub fn append_matching_block_logs<P: BlockReader>(
                                     ProviderError::TransactionNotFound(transaction_id.into())
                                 })?;
 
-                            Some(transaction.hash())
+                            Some(transaction.trie_hash())
                         }
                     };
                 }
@@ -178,7 +180,7 @@ pub fn get_filter_block_range(
 
 #[cfg(test)]
 mod tests {
-    use alloy_rpc_types::Filter;
+    use alloy_rpc_types_eth::Filter;
 
     use super::*;
 
@@ -241,8 +243,8 @@ mod tests {
         let start_block = info.best_number;
 
         let (from_block_number, to_block_number) = get_filter_block_range(
-            from_block.and_then(alloy_rpc_types::BlockNumberOrTag::as_number),
-            to_block.and_then(alloy_rpc_types::BlockNumberOrTag::as_number),
+            from_block.and_then(alloy_rpc_types_eth::BlockNumberOrTag::as_number),
+            to_block.and_then(alloy_rpc_types_eth::BlockNumberOrTag::as_number),
             start_block,
             info,
         );

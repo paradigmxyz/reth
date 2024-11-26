@@ -1,15 +1,16 @@
 use crate::{
     wal::Wal, ExExEvent, ExExNotification, ExExNotifications, FinishedExExHeight, WalHandle,
 };
+use alloy_eips::BlockNumHash;
 use futures::StreamExt;
 use itertools::Itertools;
 use metrics::Gauge;
 use reth_chain_state::ForkChoiceStream;
 use reth_chainspec::Head;
 use reth_metrics::{metrics::Counter, Metrics};
-use reth_primitives::{BlockNumHash, SealedHeader};
+use reth_primitives::SealedHeader;
 use reth_provider::HeaderProvider;
-use reth_tracing::tracing::debug;
+use reth_tracing::tracing::{debug, warn};
 use std::{
     collections::VecDeque,
     fmt::Debug,
@@ -33,6 +34,12 @@ use tokio_util::sync::{PollSendError, PollSender, ReusableBoxFuture};
 /// 1024 notifications in the buffer is 3.5 hours of mainnet blocks,
 /// or 17 minutes of 1-second blocks.
 pub const DEFAULT_EXEX_MANAGER_CAPACITY: usize = 1024;
+
+/// The maximum number of blocks allowed in the WAL before emitting a warning.
+///
+/// This constant defines the threshold for the Write-Ahead Log (WAL) size. If the number of blocks
+/// in the WAL exceeds this limit, a warning is logged to indicate potential issues.
+pub const WAL_BLOCKS_WARNING: usize = 128;
 
 /// The source of the notification.
 ///
@@ -376,6 +383,13 @@ where
                 .unwrap();
 
             self.wal.finalize(lowest_finished_height)?;
+            if self.wal.num_blocks() > WAL_BLOCKS_WARNING {
+                warn!(
+                    target: "exex::manager",
+                    blocks = ?self.wal.num_blocks(),
+                    "WAL contains too many blocks and is not getting cleared. That will lead to increased disk space usage. Check that you emit the FinishedHeight event from your ExExes."
+                );
+            }
         } else {
             let unfinalized_exexes = exex_finished_heights
                 .into_iter()
@@ -643,7 +657,7 @@ mod tests {
     use reth_primitives::SealedBlockWithSenders;
     use reth_provider::{
         providers::BlockchainProvider2, test_utils::create_test_provider_factory, BlockReader,
-        BlockWriter, Chain, DatabaseProviderFactory, TransactionVariant,
+        BlockWriter, Chain, DatabaseProviderFactory, StorageLocation, TransactionVariant,
     };
     use reth_testing_utils::generators::{self, random_block, BlockParams};
 
@@ -722,7 +736,7 @@ mod tests {
             ExExManager::new((), vec![exex_handle], 10, wal, empty_finalized_header_stream());
 
         // Define the notification for testing
-        let mut block1 = SealedBlockWithSenders::default();
+        let mut block1: SealedBlockWithSenders = Default::default();
         block1.block.header.set_hash(B256::new([0x01; 32]));
         block1.block.header.set_block_number(10);
 
@@ -740,7 +754,7 @@ mod tests {
         assert_eq!(exex_manager.next_id, 1);
 
         // Push another notification
-        let mut block2 = SealedBlockWithSenders::default();
+        let mut block2: SealedBlockWithSenders = Default::default();
         block2.block.header.set_hash(B256::new([0x02; 32]));
         block2.block.header.set_block_number(20);
 
@@ -778,7 +792,7 @@ mod tests {
         );
 
         // Push some notifications to fill part of the buffer
-        let mut block1 = SealedBlockWithSenders::default();
+        let mut block1: SealedBlockWithSenders = Default::default();
         block1.block.header.set_hash(B256::new([0x01; 32]));
         block1.block.header.set_block_number(10);
 
@@ -1037,11 +1051,11 @@ mod tests {
         assert_eq!(exex_handle.next_notification_id, 0);
 
         // Setup two blocks for the chain commit notification
-        let mut block1 = SealedBlockWithSenders::default();
+        let mut block1: SealedBlockWithSenders = Default::default();
         block1.block.header.set_hash(B256::new([0x01; 32]));
         block1.block.header.set_block_number(10);
 
-        let mut block2 = SealedBlockWithSenders::default();
+        let mut block2: SealedBlockWithSenders = Default::default();
         block2.block.header.set_hash(B256::new([0x02; 32]));
         block2.block.header.set_block_number(11);
 
@@ -1090,7 +1104,7 @@ mod tests {
         // Set finished_height to a value higher than the block tip
         exex_handle.finished_height = Some(BlockNumHash::new(15, B256::random()));
 
-        let mut block1 = SealedBlockWithSenders::default();
+        let mut block1: SealedBlockWithSenders = Default::default();
         block1.block.header.set_hash(B256::new([0x01; 32]));
         block1.block.header.set_block_number(10);
 
@@ -1221,10 +1235,10 @@ mod tests {
             genesis_block.number + 1,
             BlockParams { parent: Some(genesis_hash), ..Default::default() },
         )
-        .seal_with_senders()
+        .seal_with_senders::<reth_primitives::Block>()
         .unwrap();
         let provider_rw = provider_factory.database_provider_rw().unwrap();
-        provider_rw.insert_block(block.clone()).unwrap();
+        provider_rw.insert_block(block.clone(), StorageLocation::Database).unwrap();
         provider_rw.commit().unwrap();
 
         let provider = BlockchainProvider2::new(provider_factory).unwrap();

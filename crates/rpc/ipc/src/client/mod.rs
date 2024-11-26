@@ -136,10 +136,9 @@ pub enum IpcError {
 
 #[cfg(test)]
 mod tests {
-    use interprocess::local_socket::ListenerOptions;
-
     use super::*;
     use crate::server::dummy_name;
+    use interprocess::local_socket::ListenerOptions;
 
     #[tokio::test]
     async fn test_connect() {

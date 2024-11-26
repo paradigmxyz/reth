@@ -1,6 +1,6 @@
-use alloy_primitives::{BlockNumber, TxNumber};
-
 use crate::{PruneCheckpoint, PruneLimiter, PruneMode, PruneSegment};
+use alloy_primitives::{BlockNumber, TxNumber};
+use derive_more::Display;
 
 /// Pruner run output.
 #[derive(Debug)]
@@ -15,6 +15,18 @@ impl From<PruneProgress> for PrunerOutput {
     fn from(progress: PruneProgress) -> Self {
         Self { progress, segments: Vec::new() }
     }
+}
+
+/// Represents information of a pruner run for a segment.
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
+#[display("(table={segment}, pruned={pruned}, status={progress})")]
+pub struct PrunedSegmentInfo {
+    /// The pruned segment
+    pub segment: PruneSegment,
+    /// Number of pruned entries
+    pub pruned: usize,
+    /// Prune progress
+    pub progress: PruneProgress,
 }
 
 /// Segment pruning output.
@@ -67,16 +79,18 @@ impl SegmentOutputCheckpoint {
 }
 
 /// Progress of pruning.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Display)]
 pub enum PruneProgress {
     /// There is more data to prune.
+    #[display("HasMoreData({_0})")]
     HasMoreData(PruneInterruptReason),
     /// Pruning has been finished.
+    #[display("Finished")]
     Finished,
 }
 
 /// Reason for interrupting a prune run.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Display)]
 pub enum PruneInterruptReason {
     /// Prune run timed out.
     Timeout,

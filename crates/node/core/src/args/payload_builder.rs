@@ -86,7 +86,7 @@ impl TypedValueParser for ExtradataValueParser {
     ) -> Result<Self::Value, clap::Error> {
         let val =
             value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
-        if val.as_bytes().len() > MAXIMUM_EXTRA_DATA_SIZE {
+        if val.len() > MAXIMUM_EXTRA_DATA_SIZE {
             return Err(clap::Error::raw(
                 clap::error::ErrorKind::InvalidValue,
                 format!(

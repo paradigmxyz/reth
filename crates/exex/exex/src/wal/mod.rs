@@ -66,6 +66,11 @@ impl Wal {
     ) -> eyre::Result<Box<dyn Iterator<Item = eyre::Result<ExExNotification>> + '_>> {
         self.inner.iter_notifications()
     }
+
+    /// Returns the number of blocks in the WAL.
+    pub fn num_blocks(&self) -> usize {
+        self.inner.block_cache().num_blocks()
+    }
 }
 
 /// Inner type for the WAL.
@@ -231,13 +236,13 @@ mod tests {
     use crate::wal::{cache::CachedBlock, Wal};
 
     fn read_notifications(wal: &Wal) -> eyre::Result<Vec<ExExNotification>> {
-        let Some(files_range) = wal.inner.storage.files_range()? else { return Ok(Vec::new()) };
-
-        wal.inner
-            .storage
-            .iter_notifications(files_range)
-            .map(|entry| Ok(entry?.2))
-            .collect::<eyre::Result<_>>()
+        wal.inner.storage.files_range()?.map_or(Ok(Vec::new()), |range| {
+            wal.inner
+                .storage
+                .iter_notifications(range)
+                .map(|entry| entry.map(|(_, _, n)| n))
+                .collect()
+        })
     }
 
     fn sort_committed_blocks(
@@ -263,21 +268,25 @@ mod tests {
         // Create 4 canonical blocks and one reorged block with number 2
         let blocks = random_block_range(&mut rng, 0..=3, BlockRangeParams::default())
             .into_iter()
-            .map(|block| block.seal_with_senders().ok_or_eyre("failed to recover senders"))
+            .map(|block| {
+                block
+                    .seal_with_senders::<reth_primitives::Block>()
+                    .ok_or_eyre("failed to recover senders")
+            })
             .collect::<eyre::Result<Vec<_>>>()?;
         let block_1_reorged = random_block(
             &mut rng,
             1,
             BlockParams { parent: Some(blocks[0].hash()), ..Default::default() },
         )
-        .seal_with_senders()
+        .seal_with_senders::<reth_primitives::Block>()
         .ok_or_eyre("failed to recover senders")?;
         let block_2_reorged = random_block(
             &mut rng,
             2,
             BlockParams { parent: Some(blocks[1].hash()), ..Default::default() },
         )
-        .seal_with_senders()
+        .seal_with_senders::<reth_primitives::Block>()
         .ok_or_eyre("failed to recover senders")?;
 
         // Create notifications for the above blocks.

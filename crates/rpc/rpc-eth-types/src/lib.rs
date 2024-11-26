@@ -37,5 +37,5 @@ pub use gas_oracle::{
 };
 pub use id_provider::EthSubscriptionIdProvider;
 pub use pending_block::{PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
-pub use receipt::ReceiptBuilder;
+pub use receipt::EthReceiptBuilder;
 pub use transaction::TransactionSource;

@@ -1,7 +1,7 @@
 //! Loads chain metadata.
 
 use alloy_primitives::{Address, U256, U64};
-use alloy_rpc_types::{Stage, SyncInfo, SyncStatus};
+use alloy_rpc_types_eth::{Stage, SyncInfo, SyncStatus};
 use futures::Future;
 use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_errors::{RethError, RethResult};

@@ -3,7 +3,7 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-use alloy_eips::eip7685::Requests;
+use alloy_eips::{eip4895::Withdrawal, eip7685::Requests};
 use alloy_sol_macro::sol;
 use alloy_sol_types::SolCall;
 #[cfg(feature = "optimism")]
@@ -15,7 +15,10 @@ use reth::{
     providers::ProviderError,
     revm::{
         interpreter::Host,
-        primitives::{Env, TransactTo, TxEnv},
+        primitives::{
+            address, Address, BlockEnv, Bytes, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg,
+            TransactTo, TxEnv, U256,
+        },
         Database, DatabaseCommit, Evm, State,
     },
 };
@@ -26,12 +29,7 @@ use reth_evm::execute::{
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_node_ethereum::{node::EthereumAddOns, BasicBlockExecutorProvider, EthereumNode};
-use reth_primitives::{
-    revm_primitives::{
-        address, Address, BlockEnv, Bytes, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, U256,
-    },
-    BlockWithSenders, Receipt, Withdrawal,
-};
+use reth_primitives::{BlockWithSenders, Receipt};
 use std::{fmt::Display, sync::Arc};
 
 pub const SYSTEM_ADDRESS: Address = address!("fffffffffffffffffffffffffffffffffffffffe");

@@ -1,5 +1,5 @@
-use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobTransactionSidecar};
-use alloy_eips::eip4844::BlobAndProofV1;
+use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError};
+use alloy_eips::eip4844::{BlobAndProofV1, BlobTransactionSidecar};
 use alloy_primitives::B256;
 use std::sync::Arc;
 

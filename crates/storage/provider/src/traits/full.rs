@@ -7,19 +7,19 @@ use crate::{
 };
 use reth_chain_state::{CanonStateSubscriptions, ForkChoiceSubscriptions};
 use reth_chainspec::EthereumHardforks;
-use reth_node_types::NodeTypesWithDB;
+use reth_node_types::{BlockTy, NodeTypesWithDB, TxTy};
 
 /// Helper trait to unify all provider traits for simplicity.
 pub trait FullProvider<N: NodeTypesWithDB>:
     DatabaseProviderFactory<DB = N::DB>
-    + StaticFileProviderFactory
-    + BlockReaderIdExt
+    + StaticFileProviderFactory<Primitives = N::Primitives>
+    + BlockReaderIdExt<Transaction = TxTy<N>, Block = BlockTy<N>>
     + AccountReader
     + StateProviderFactory
     + EvmEnvProvider
     + ChainSpecProvider<ChainSpec = N::ChainSpec>
     + ChangeSetReader
-    + CanonStateSubscriptions
+    + CanonStateSubscriptions<Primitives = N::Primitives>
     + ForkChoiceSubscriptions
     + StageCheckpointReader
     + Clone
@@ -30,14 +30,14 @@ pub trait FullProvider<N: NodeTypesWithDB>:
 
 impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
     T: DatabaseProviderFactory<DB = N::DB>
-        + StaticFileProviderFactory
-        + BlockReaderIdExt
+        + StaticFileProviderFactory<Primitives = N::Primitives>
+        + BlockReaderIdExt<Transaction = TxTy<N>, Block = BlockTy<N>>
         + AccountReader
         + StateProviderFactory
         + EvmEnvProvider
         + ChainSpecProvider<ChainSpec = N::ChainSpec>
         + ChangeSetReader
-        + CanonStateSubscriptions
+        + CanonStateSubscriptions<Primitives = N::Primitives>
         + ForkChoiceSubscriptions
         + StageCheckpointReader
         + Clone

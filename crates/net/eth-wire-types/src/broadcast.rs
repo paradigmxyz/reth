@@ -1,15 +1,14 @@
 //! Types for broadcasting new data.
 
-use crate::{EthMessage, EthVersion};
+use crate::{EthMessage, EthVersion, NetworkPrimitives};
+use alloy_primitives::{Bytes, TxHash, B256, U128};
 use alloy_rlp::{
     Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
 };
-
-use alloy_primitives::{Bytes, TxHash, B256, U128};
 use derive_more::{Constructor, Deref, DerefMut, From, IntoIterator};
-use reth_codecs_derive::add_arbitrary_tests;
-use reth_primitives::{Block, PooledTransactionsElement, TransactionSigned};
-
+use reth_codecs_derive::{add_arbitrary_tests, generate_tests};
+use reth_primitives::TransactionSigned;
+use reth_primitives_traits::SignedTransaction;
 use std::{
     collections::{HashMap, HashSet},
     mem,
@@ -75,13 +74,14 @@ impl From<NewBlockHashes> for Vec<BlockHashNumber> {
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-#[add_arbitrary_tests(rlp, 25)]
-pub struct NewBlock {
+pub struct NewBlock<B = reth_primitives::Block> {
     /// A new block.
-    pub block: Block,
+    pub block: B,
     /// The current total difficulty.
     pub td: U128,
 }
+
+generate_tests!(#[rlp, 25] NewBlock<reth_primitives::Block>, EthNewBlockTests);
 
 /// This informs peers of transactions that have appeared on the network and are not yet included
 /// in a block.
@@ -89,9 +89,9 @@ pub struct NewBlock {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp, 10)]
-pub struct Transactions(
+pub struct Transactions<T = TransactionSigned>(
     /// New transactions for the peer to include in its mempool.
-    pub Vec<TransactionSigned>,
+    pub Vec<T>,
 );
 
 impl Transactions {
@@ -101,14 +101,14 @@ impl Transactions {
     }
 }
 
-impl From<Vec<TransactionSigned>> for Transactions {
-    fn from(txs: Vec<TransactionSigned>) -> Self {
+impl<T> From<Vec<T>> for Transactions<T> {
+    fn from(txs: Vec<T>) -> Self {
         Self(txs)
     }
 }
 
-impl From<Transactions> for Vec<TransactionSigned> {
-    fn from(txs: Transactions) -> Self {
+impl<T> From<Transactions<T>> for Vec<T> {
+    fn from(txs: Transactions<T>) -> Self {
         txs.0
     }
 }
@@ -120,9 +120,9 @@ impl From<Transactions> for Vec<TransactionSigned> {
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp, 20)]
-pub struct SharedTransactions(
+pub struct SharedTransactions<T = TransactionSigned>(
     /// New transactions for the peer to include in its mempool.
-    pub Vec<Arc<TransactionSigned>>,
+    pub Vec<Arc<T>>,
 );
 
 /// A wrapper type for all different new pooled transaction types
@@ -269,7 +269,7 @@ impl NewPooledTransactionHashes {
     }
 }
 
-impl From<NewPooledTransactionHashes> for EthMessage {
+impl<N: NetworkPrimitives> From<NewPooledTransactionHashes> for EthMessage<N> {
     fn from(value: NewPooledTransactionHashes) -> Self {
         match value {
             NewPooledTransactionHashes::Eth66(msg) => Self::NewPooledTransactionHashes66(msg),
@@ -554,7 +554,7 @@ pub trait HandleVersionedMempoolData {
     fn msg_version(&self) -> EthVersion;
 }
 
-impl HandleMempoolData for Vec<PooledTransactionsElement> {
+impl<T: SignedTransaction> HandleMempoolData for Vec<T> {
     fn is_empty(&self) -> bool {
         self.is_empty()
     }
@@ -564,7 +564,7 @@ impl HandleMempoolData for Vec<PooledTransactionsElement> {
     }
 
     fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) {
-        self.retain(|tx| f(tx.hash()))
+        self.retain(|tx| f(tx.tx_hash()))
     }
 }
 
@@ -732,7 +732,7 @@ impl RequestTxHashes {
 
 impl FromIterator<(TxHash, Eth68TxMetadata)> for RequestTxHashes {
     fn from_iter<I: IntoIterator<Item = (TxHash, Eth68TxMetadata)>>(iter: I) -> Self {
-        Self::new(iter.into_iter().map(|(hash, _)| hash).collect::<HashSet<_>>())
+        Self::new(iter.into_iter().map(|(hash, _)| hash).collect())
     }
 }
 

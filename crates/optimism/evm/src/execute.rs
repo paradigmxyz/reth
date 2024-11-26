@@ -1,8 +1,8 @@
 //! Optimism block execution strategy.
 
-use crate::{l1::ensure_create2_deployer, OptimismBlockExecutionError, OptimismEvmConfig};
+use crate::{l1::ensure_create2_deployer, OpBlockExecutionError, OpEvmConfig};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
-use alloy_consensus::Transaction as _;
+use alloy_consensus::{Header, Transaction as _};
 use alloy_eips::eip7685::Requests;
 use core::fmt::Display;
 use op_alloy_consensus::DepositTransaction;
@@ -15,12 +15,12 @@ use reth_evm::{
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, SystemCaller},
-    ConfigureEvm,
+    ConfigureEvm, TxEnvOverrides,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::validate_block_post_execution;
-use reth_optimism_forks::OptimismHardfork;
-use reth_primitives::{BlockWithSenders, Header, Receipt, TxType};
+use reth_optimism_forks::OpHardfork;
+use reth_primitives::{BlockWithSenders, Receipt, TxType};
 use reth_revm::{Database, State};
 use revm_primitives::{
     db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState, U256,
@@ -29,7 +29,7 @@ use tracing::trace;
 
 /// Factory for [`OpExecutionStrategy`].
 #[derive(Debug, Clone)]
-pub struct OpExecutionStrategyFactory<EvmConfig = OptimismEvmConfig> {
+pub struct OpExecutionStrategyFactory<EvmConfig = OpEvmConfig> {
     /// The chainspec
     chain_spec: Arc<OpChainSpec>,
     /// How to create an EVM.
@@ -39,7 +39,7 @@ pub struct OpExecutionStrategyFactory<EvmConfig = OptimismEvmConfig> {
 impl OpExecutionStrategyFactory {
     /// Creates a new default optimism executor strategy factory.
     pub fn optimism(chain_spec: Arc<OpChainSpec>) -> Self {
-        Self::new(chain_spec.clone(), OptimismEvmConfig::new(chain_spec))
+        Self::new(chain_spec.clone(), OpEvmConfig::new(chain_spec))
     }
 }
 
@@ -78,6 +78,8 @@ where
     chain_spec: Arc<OpChainSpec>,
     /// How to create an EVM.
     evm_config: EvmConfig,
+    /// Optional overrides for the transactions environment.
+    tx_env_overrides: Option<Box<dyn TxEnvOverrides>>,
     /// Current state for block execution.
     state: State<DB>,
     /// Utility to call system smart contracts.
@@ -91,7 +93,7 @@ where
     /// Creates a new [`OpExecutionStrategy`]
     pub fn new(state: State<DB>, chain_spec: Arc<OpChainSpec>, evm_config: EvmConfig) -> Self {
         let system_caller = SystemCaller::new(evm_config.clone(), chain_spec.clone());
-        Self { state, chain_spec, evm_config, system_caller }
+        Self { state, chain_spec, evm_config, system_caller, tx_env_overrides: None }
     }
 }
 
@@ -119,6 +121,10 @@ where
 {
     type Error = BlockExecutionError;
 
+    fn init(&mut self, tx_env_overrides: Box<dyn TxEnvOverrides>) {
+        self.tx_env_overrides = Some(tx_env_overrides);
+    }
+
     fn apply_pre_execution_changes(
         &mut self,
         block: &BlockWithSenders,
@@ -144,7 +150,7 @@ where
         // so we can safely assume that this will always be triggered upon the transition and that
         // the above check for empty blocks will never be hit on OP chains.
         ensure_create2_deployer(self.chain_spec.clone(), block.timestamp, evm.db_mut())
-            .map_err(|_| OptimismBlockExecutionError::ForceCreate2DeployerFail)?;
+            .map_err(|_| OpBlockExecutionError::ForceCreate2DeployerFail)?;
 
         Ok(())
     }
@@ -158,7 +164,7 @@ where
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
 
         let is_regolith =
-            self.chain_spec.fork(OptimismHardfork::Regolith).active_at_timestamp(block.timestamp);
+            self.chain_spec.fork(OpHardfork::Regolith).active_at_timestamp(block.timestamp);
 
         let mut cumulative_gas_used = 0;
         let mut receipts = Vec::with_capacity(block.body.transactions.len());
@@ -178,7 +184,7 @@ where
 
             // An optimism block should never contain blob transactions.
             if matches!(transaction.tx_type(), TxType::Eip4844) {
-                return Err(OptimismBlockExecutionError::BlobTransactionRejected.into())
+                return Err(OpBlockExecutionError::BlobTransactionRejected.into())
             }
 
             // Cache the depositor account prior to the state transition for the deposit nonce.
@@ -193,9 +199,13 @@ where
                         .map(|acc| acc.account_info().unwrap_or_default())
                 })
                 .transpose()
-                .map_err(|_| OptimismBlockExecutionError::AccountLoadFailed(*sender))?;
+                .map_err(|_| OpBlockExecutionError::AccountLoadFailed(*sender))?;
 
             self.evm_config.fill_tx_env(evm.tx_mut(), transaction, *sender);
+
+            if let Some(tx_env_overrides) = &mut self.tx_env_overrides {
+                tx_env_overrides.apply(evm.tx_mut());
+            }
 
             // Execute transaction.
             let result_and_state = evm.transact().map_err(move |err| {
@@ -233,7 +243,7 @@ where
                 // this is only set for post-Canyon deposit transactions.
                 deposit_receipt_version: (transaction.is_deposit() &&
                     self.chain_spec
-                        .is_fork_active_at_timestamp(OptimismHardfork::Canyon, block.timestamp))
+                        .is_fork_active_at_timestamp(OpHardfork::Canyon, block.timestamp))
                 .then_some(1),
             });
         }
@@ -297,12 +307,14 @@ mod tests {
     use super::*;
     use crate::OpChainSpec;
     use alloy_consensus::TxEip1559;
-    use alloy_primitives::{b256, Address, StorageKey, StorageValue};
+    use alloy_primitives::{
+        b256, Address, PrimitiveSignature as Signature, StorageKey, StorageValue,
+    };
     use op_alloy_consensus::TxDeposit;
     use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_evm::execute::{BasicBlockExecutorProvider, BatchExecutor, BlockExecutorProvider};
     use reth_optimism_chainspec::OpChainSpecBuilder;
-    use reth_primitives::{Account, Block, BlockBody, Signature, Transaction, TransactionSigned};
+    use reth_primitives::{Account, Block, BlockBody, Transaction, TransactionSigned};
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, L1_BLOCK_CONTRACT,
     };
@@ -339,7 +351,7 @@ mod tests {
         chain_spec: Arc<OpChainSpec>,
     ) -> BasicBlockExecutorProvider<OpExecutionStrategyFactory> {
         let strategy_factory =
-            OpExecutionStrategyFactory::new(chain_spec.clone(), OptimismEvmConfig::new(chain_spec));
+            OpExecutionStrategyFactory::new(chain_spec.clone(), OpEvmConfig::new(chain_spec));
 
         BasicBlockExecutorProvider::new(strategy_factory)
     }
@@ -365,7 +377,7 @@ mod tests {
 
         let chain_spec = Arc::new(OpChainSpecBuilder::base_mainnet().regolith_activated().build());
 
-        let tx = TransactionSigned::from_transaction_and_signature(
+        let tx = TransactionSigned::new_unhashed(
             Transaction::Eip1559(TxEip1559 {
                 chain_id: chain_spec.chain.id(),
                 nonce: 0,
@@ -376,7 +388,7 @@ mod tests {
             Signature::test_signature(),
         );
 
-        let tx_deposit = TransactionSigned::from_transaction_and_signature(
+        let tx_deposit = TransactionSigned::new_unhashed(
             Transaction::Deposit(op_alloy_consensus::TxDeposit {
                 from: addr,
                 to: addr.into(),
@@ -449,7 +461,7 @@ mod tests {
 
         let chain_spec = Arc::new(OpChainSpecBuilder::base_mainnet().canyon_activated().build());
 
-        let tx = TransactionSigned::from_transaction_and_signature(
+        let tx = TransactionSigned::new_unhashed(
             Transaction::Eip1559(TxEip1559 {
                 chain_id: chain_spec.chain.id(),
                 nonce: 0,
@@ -460,7 +472,7 @@ mod tests {
             Signature::test_signature(),
         );
 
-        let tx_deposit = TransactionSigned::from_transaction_and_signature(
+        let tx_deposit = TransactionSigned::new_unhashed(
             Transaction::Deposit(op_alloy_consensus::TxDeposit {
                 from: addr,
                 to: addr.into(),

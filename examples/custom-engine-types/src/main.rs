@@ -22,6 +22,7 @@ use std::{convert::Infallible, sync::Arc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use alloy_eips::eip4895::Withdrawals;
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, B256};
 use alloy_rpc_types::{
@@ -41,7 +42,8 @@ use reth::{
         PayloadBuilderConfig,
     },
     network::NetworkHandle,
-    providers::{CanonStateSubscriptions, StateProviderFactory},
+    primitives::EthPrimitives,
+    providers::{CanonStateSubscriptions, EthStorage, StateProviderFactory},
     rpc::eth::EthApi,
     tasks::TaskManager,
     transaction_pool::TransactionPool,
@@ -68,7 +70,6 @@ use reth_payload_builder::{
     EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderError, PayloadBuilderHandle,
     PayloadBuilderService,
 };
-use reth_primitives::Withdrawals;
 use reth_tracing::{RethTracer, Tracer};
 use reth_trie_db::MerklePatriciaTrie;
 
@@ -227,9 +228,10 @@ struct MyCustomNode;
 
 /// Configure the node types
 impl NodeTypes for MyCustomNode {
-    type Primitives = ();
+    type Primitives = EthPrimitives;
     type ChainSpec = ChainSpec;
     type StateCommitment = MerklePatriciaTrie;
+    type Storage = EthStorage;
 }
 
 /// Configure the node types with the custom engine types
@@ -254,7 +256,14 @@ pub type MyNodeAddOns<N> = RpcAddOns<
 /// This provides a preset configuration for the node
 impl<N> Node<N> for MyCustomNode
 where
-    N: FullNodeTypes<Types: NodeTypesWithEngine<Engine = CustomEngineTypes, ChainSpec = ChainSpec>>,
+    N: FullNodeTypes<
+        Types: NodeTypesWithEngine<
+            Engine = CustomEngineTypes,
+            ChainSpec = ChainSpec,
+            Primitives = EthPrimitives,
+            Storage = EthStorage,
+        >,
+    >,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
@@ -291,7 +300,11 @@ pub struct CustomPayloadServiceBuilder;
 impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for CustomPayloadServiceBuilder
 where
     Node: FullNodeTypes<
-        Types: NodeTypesWithEngine<Engine = CustomEngineTypes, ChainSpec = ChainSpec>,
+        Types: NodeTypesWithEngine<
+            Engine = CustomEngineTypes,
+            ChainSpec = ChainSpec,
+            Primitives = EthPrimitives,
+        >,
     >,
     Pool: TransactionPool + Unpin + 'static,
 {

@@ -140,6 +140,15 @@ impl RpcModuleSelection {
             (None, None) => true,
         }
     }
+
+    /// Returns true if the selection contains the given module.
+    pub fn contains(&self, module: &RethRpcModule) -> bool {
+        match self {
+            Self::All => true,
+            Self::Standard => Self::STANDARD_MODULES.contains(module),
+            Self::Selection(s) => s.contains(module),
+        }
+    }
 }
 
 impl From<&HashSet<RethRpcModule>> for RpcModuleSelection {

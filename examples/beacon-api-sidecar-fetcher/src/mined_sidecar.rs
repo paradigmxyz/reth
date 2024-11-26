@@ -1,4 +1,5 @@
 use crate::BeaconSidecarConfig;
+use alloy_consensus::Transaction as _;
 use alloy_primitives::B256;
 use alloy_rpc_types_beacon::sidecar::{BeaconBlobBundle, SidecarIterator};
 use eyre::Result;
@@ -97,6 +98,7 @@ where
     fn process_block(&mut self, block: &SealedBlockWithSenders) {
         let txs: Vec<_> = block
             .transactions()
+            .iter()
             .filter(|tx| tx.is_eip4844())
             .map(|tx| (tx.clone(), tx.blob_versioned_hashes().unwrap().len()))
             .collect();
@@ -190,6 +192,7 @@ where
                             for (_, block) in old.blocks().iter() {
                                 let txs: Vec<BlobTransactionEvent> = block
                                     .transactions()
+                                    .iter()
                                     .filter(|tx: &&reth::primitives::TransactionSigned| {
                                         tx.is_eip4844()
                                     })

@@ -4,13 +4,11 @@ use alloy_primitives::{TxHash, B256};
 use alloy_rpc_types_engine::{CancunPayloadFields, ExecutionPayloadSidecar, ForkchoiceState};
 use eyre::OptionExt;
 use futures_util::{stream::Fuse, StreamExt};
-use reth_beacon_consensus::BeaconEngineMessage;
 use reth_chainspec::EthereumHardforks;
-use reth_engine_primitives::{EngineApiMessageVersion, EngineTypes};
+use reth_engine_primitives::{BeaconEngineMessage, EngineApiMessageVersion, EngineTypes};
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_payload_primitives::{
-    BuiltPayload, PayloadAttributesBuilder, PayloadBuilder, PayloadKind, PayloadTypes,
-};
+use reth_payload_builder_primitives::PayloadBuilder;
+use reth_payload_primitives::{BuiltPayload, PayloadAttributesBuilder, PayloadKind, PayloadTypes};
 use reth_provider::{BlockReader, ChainSpecProvider};
 use reth_rpc_types_compat::engine::payload::block_to_payload;
 use reth_transaction_pool::TransactionPool;
@@ -212,12 +210,13 @@ where
 
         let block = payload.block();
 
-        let cancun_fields =
-            self.provider.chain_spec().is_cancun_active_at_timestamp(block.timestamp).then(|| {
-                CancunPayloadFields {
-                    parent_beacon_block_root: block.parent_beacon_block_root.unwrap(),
-                    versioned_hashes: block.blob_versioned_hashes().into_iter().copied().collect(),
-                }
+        let cancun_fields = self
+            .provider
+            .chain_spec()
+            .is_cancun_active_at_timestamp(block.timestamp)
+            .then(|| CancunPayloadFields {
+                parent_beacon_block_root: block.parent_beacon_block_root.unwrap(),
+                versioned_hashes: block.body.blob_versioned_hashes().into_iter().copied().collect(),
             });
 
         let (tx, rx) = oneshot::channel();

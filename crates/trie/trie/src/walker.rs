@@ -58,8 +58,13 @@ impl<C> TrieWalker<C> {
 
     /// Split the walker into stack and trie updates.
     pub fn split(mut self) -> (Vec<CursorSubNode>, HashSet<Nibbles>) {
-        let keys = self.removed_keys.take();
-        (self.stack, keys.unwrap_or_default())
+        let keys = self.take_removed_keys();
+        (self.stack, keys)
+    }
+
+    /// Take removed keys from the walker.
+    pub fn take_removed_keys(&mut self) -> HashSet<Nibbles> {
+        self.removed_keys.take().unwrap_or_default()
     }
 
     /// Prints the current stack of trie nodes.
@@ -88,7 +93,7 @@ impl<C> TrieWalker<C> {
 
     /// Indicates whether the children of the current node are present in the trie.
     pub fn children_are_in_trie(&self) -> bool {
-        self.stack.last().map_or(false, |n| n.tree_flag())
+        self.stack.last().is_some_and(|n| n.tree_flag())
     }
 
     /// Returns the next unprocessed key in the trie.
@@ -112,7 +117,7 @@ impl<C> TrieWalker<C> {
         self.can_skip_current_node = self
             .stack
             .last()
-            .map_or(false, |node| !self.changes.contains(node.full_key()) && node.hash_flag());
+            .is_some_and(|node| !self.changes.contains(node.full_key()) && node.hash_flag());
     }
 }
 

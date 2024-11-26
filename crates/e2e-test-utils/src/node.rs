@@ -1,7 +1,8 @@
 use std::{marker::PhantomData, pin::Pin};
 
+use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
-use alloy_rpc_types::BlockNumberOrTag;
+use alloy_rpc_types_eth::BlockNumberOrTag;
 use eyre::Ok;
 use futures_util::Future;
 use reth::{
@@ -15,7 +16,9 @@ use reth::{
     },
 };
 use reth_chainspec::EthereumHardforks;
+use reth_node_api::Block;
 use reth_node_builder::{rpc::RethRpcAddOns, NodeTypes, NodeTypesWithEngine};
+use reth_primitives::EthPrimitives;
 use reth_stages_types::StageId;
 use tokio_stream::StreamExt;
 use url::Url;
@@ -51,7 +54,11 @@ impl<Node, Engine, AddOns> NodeTestContext<Node, AddOns>
 where
     Engine: EngineTypes,
     Node: FullNodeComponents,
-    Node::Types: NodeTypesWithEngine<ChainSpec: EthereumHardforks, Engine = Engine>,
+    Node::Types: NodeTypesWithEngine<
+        ChainSpec: EthereumHardforks,
+        Engine = Engine,
+        Primitives = EthPrimitives,
+    >,
     Node::Network: PeersHandleProvider,
     AddOns: RethRpcAddOns<Node>,
 {
@@ -178,7 +185,7 @@ where
 
             if check {
                 if let Some(latest_block) = self.inner.provider.block_by_number(number)? {
-                    assert_eq!(latest_block.hash_slow(), expected_block_hash);
+                    assert_eq!(latest_block.header().hash_slow(), expected_block_hash);
                     break
                 }
                 assert!(
@@ -216,7 +223,7 @@ where
         // get head block from notifications stream and verify the tx has been pushed to the
         // pool is actually present in the canonical block
         let head = self.engine_api.canonical_stream.next().await.unwrap();
-        let tx = head.tip().transactions().next();
+        let tx = head.tip().transactions().first();
         assert_eq!(tx.unwrap().hash().as_slice(), tip_tx_hash.as_slice());
 
         loop {
@@ -225,10 +232,10 @@ where
             if let Some(latest_block) =
                 self.inner.provider.block_by_number_or_tag(BlockNumberOrTag::Latest)?
             {
-                if latest_block.number == block_number {
+                if latest_block.header().number() == block_number {
                     // make sure the block hash we submitted via FCU engine api is the new latest
                     // block using an RPC call
-                    assert_eq!(latest_block.hash_slow(), block_hash);
+                    assert_eq!(latest_block.header().hash_slow(), block_hash);
                     break
                 }
             }

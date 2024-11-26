@@ -2,6 +2,8 @@ use crate::metrics::PersistenceMetrics;
 use alloy_eips::BlockNumHash;
 use reth_chain_state::ExecutedBlock;
 use reth_errors::ProviderError;
+use reth_primitives::BlockBody;
+use reth_primitives_traits::FullNodePrimitives;
 use reth_provider::{
     providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockHashReader,
     ChainStateBlockWriter, DatabaseProviderFactory, ProviderFactory, StaticFileProviderFactory,
@@ -16,6 +18,20 @@ use thiserror::Error;
 use tokio::sync::oneshot;
 use tracing::{debug, error};
 
+/// A helper trait with requirements for [`ProviderNodeTypes`] to be used within
+/// [`PersistenceService`].
+pub trait PersistenceNodeTypes:
+    ProviderNodeTypes<
+    Primitives: FullNodePrimitives<Block = reth_primitives::Block, BlockBody = BlockBody>,
+>
+{
+}
+impl<T> PersistenceNodeTypes for T where
+    T: ProviderNodeTypes<
+        Primitives: FullNodePrimitives<Block = reth_primitives::Block, BlockBody = BlockBody>,
+    >
+{
+}
 /// Writes parts of reth's in memory tree state to the database and static files.
 ///
 /// This is meant to be a spawned service that listens for various incoming persistence operations,
@@ -60,7 +76,7 @@ impl<N: ProviderNodeTypes> PersistenceService<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> PersistenceService<N> {
+impl<N: PersistenceNodeTypes> PersistenceService<N> {
     /// This is the main loop, that will listen to database events and perform the requested
     /// database actions
     pub fn run(mut self) -> Result<(), PersistenceError> {
@@ -120,7 +136,7 @@ impl<N: ProviderNodeTypes> PersistenceService<N> {
 
         let new_tip_hash = provider_rw.block_hash(new_tip_num)?;
         UnifiedStorageWriter::from(&provider_rw, &sf_provider).remove_blocks_above(new_tip_num)?;
-        UnifiedStorageWriter::commit_unwind(provider_rw, sf_provider)?;
+        UnifiedStorageWriter::commit_unwind(provider_rw)?;
 
         debug!(target: "engine::persistence", ?new_tip_num, ?new_tip_hash, "Removed blocks from disk");
         self.metrics.remove_blocks_above_duration_seconds.record(start_time.elapsed());
@@ -142,7 +158,7 @@ impl<N: ProviderNodeTypes> PersistenceService<N> {
             let static_file_provider = self.provider.static_file_provider();
 
             UnifiedStorageWriter::from(&provider_rw, &static_file_provider).save_blocks(&blocks)?;
-            UnifiedStorageWriter::commit(provider_rw, static_file_provider)?;
+            UnifiedStorageWriter::commit(provider_rw)?;
         }
         self.metrics.save_blocks_duration_seconds.record(start_time.elapsed());
         Ok(last_block_hash_num)
@@ -198,7 +214,7 @@ impl PersistenceHandle {
     }
 
     /// Create a new [`PersistenceHandle`], and spawn the persistence service.
-    pub fn spawn_service<N: ProviderNodeTypes>(
+    pub fn spawn_service<N: PersistenceNodeTypes>(
         provider_factory: ProviderFactory<N>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,

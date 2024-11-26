@@ -16,6 +16,10 @@ pub use reth_engine_primitives::*;
 pub use reth_payload_primitives as payload;
 pub use reth_payload_primitives::*;
 
+/// Traits and helper types used to abstract over payload builder types.
+pub use reth_payload_builder_primitives as payload_builder;
+pub use reth_payload_builder_primitives::*;
+
 /// Traits and helper types used to abstract over EVM methods and types.
 pub use reth_evm::{ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
 

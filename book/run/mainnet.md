@@ -84,3 +84,13 @@ In the meantime, consider setting up [observability](./observability.md) to moni
 ## Running without a Consensus Layer
 
 We provide a method for running Reth without a Consensus Layer via the `--debug.tip <HASH>` parameter. If you provide that to your node, it will simulate sending an `engine_forkchoiceUpdated` message _once_ and will trigger syncing to the provided block hash. This is useful for testing and debugging purposes, but in order to have a node that can keep up with the tip you'll need to run a CL alongside it. At the moment we have no plans of including a Consensus Layer implementation in Reth, and we are open to including light clients other methods of syncing like importing Lighthouse as a library.
+
+## Running with Etherscan as Block Source
+
+You can use `--debug.etherscan` to run Reth with a fake consensus client that advances the chain using recent blocks on Etherscan. This requires an Etherscan API key (set via `ETHERSCAN_API_KEY` environment variable). Optionally, specify a custom API URL with `--debug.etherscan <URL>`.
+
+Example:
+```bash
+export ETHERSCAN_API_KEY=your_api_key_here
+reth node --debug.etherscan
+```

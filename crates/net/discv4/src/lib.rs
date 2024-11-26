@@ -794,7 +794,7 @@ impl Discv4Service {
     }
 
     /// Sends a new `FindNode` packet to the node with `target` as the lookup target but checks
-    /// whether we should should send a new ping first to renew the endpoint proof by checking the
+    /// whether we should send a new ping first to renew the endpoint proof by checking the
     /// previously failed findNode requests. It could be that the node is no longer reachable or
     /// lost our entry.
     fn find_node_checked(&mut self, node: &NodeRecord, ctx: LookupContext) {
