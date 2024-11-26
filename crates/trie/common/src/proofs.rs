@@ -171,8 +171,8 @@ impl StorageMultiProof {
 
 /// The merkle proof with the relevant account info.
 #[derive(Clone, PartialEq, Eq, Debug)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "serde"), serde(rename_all = "camelCase"))]
 pub struct AccountProof {
     /// The address associated with the account.
     pub address: Address,
@@ -228,7 +228,7 @@ impl AccountProof {
 
 /// The merkle proof of the storage entry.
 #[derive(Clone, PartialEq, Eq, Default, Debug)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
 pub struct StorageProof {
     /// The raw storage key.
     pub key: B256,
