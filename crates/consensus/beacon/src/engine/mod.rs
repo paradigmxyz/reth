@@ -1,4 +1,4 @@
-use alloy_consensus::Header;
+use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::{merge::EPOCH_SLOTS, BlockNumHash};
 use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_types_engine::{
@@ -21,7 +21,7 @@ use reth_network_p2p::{
     sync::{NetworkSyncUpdater, SyncState},
     EthBlockClient,
 };
-use reth_node_types::NodeTypesWithEngine;
+use reth_node_types::{Block, BlockTy, NodeTypesWithEngine};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
@@ -228,7 +228,7 @@ impl<N, BT, Client> BeaconConsensusEngine<N, BT, Client>
 where
     N: EngineNodeTypes,
     BT: BlockchainTreeEngine
-        + BlockReader
+        + BlockReader<Block = BlockTy<N>>
         + BlockIdReader
         + CanonChainTracker
         + StageCheckpointReader
@@ -946,7 +946,7 @@ where
                 .blockchain
                 .find_block_by_hash(safe_block_hash, BlockSource::Any)?
                 .ok_or(ProviderError::UnknownBlockHash(safe_block_hash))?;
-            self.blockchain.set_safe(SealedHeader::new(safe.header, safe_block_hash));
+            self.blockchain.set_safe(SealedHeader::new(safe.split().0, safe_block_hash));
         }
         Ok(())
     }
@@ -966,9 +966,9 @@ where
                 .blockchain
                 .find_block_by_hash(finalized_block_hash, BlockSource::Any)?
                 .ok_or(ProviderError::UnknownBlockHash(finalized_block_hash))?;
-            self.blockchain.finalize_block(finalized.number)?;
+            self.blockchain.finalize_block(finalized.header().number())?;
             self.blockchain
-                .set_finalized(SealedHeader::new(finalized.header, finalized_block_hash));
+                .set_finalized(SealedHeader::new(finalized.split().0, finalized_block_hash));
         }
         Ok(())
     }
@@ -1798,7 +1798,7 @@ where
     N: EngineNodeTypes,
     Client: EthBlockClient + 'static,
     BT: BlockchainTreeEngine
-        + BlockReader
+        + BlockReader<Block = BlockTy<N>>
         + BlockIdReader
         + CanonChainTracker
         + StageCheckpointReader
@@ -1991,7 +1991,9 @@ mod tests {
     use alloy_rpc_types_engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
     use assert_matches::assert_matches;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
-    use reth_provider::{BlockWriter, ProviderFactory};
+    use reth_node_types::FullNodePrimitives;
+    use reth_primitives::BlockExt;
+    use reth_provider::{BlockWriter, ProviderFactory, StorageLocation};
     use reth_rpc_types_compat::engine::payload::block_to_payload_v1;
     use reth_stages::{ExecOutput, PipelineError, StageError};
     use reth_stages_api::StageCheckpoint;
@@ -2169,7 +2171,10 @@ mod tests {
         assert_matches!(rx.await, Ok(Ok(())));
     }
 
-    fn insert_blocks<'a, N: ProviderNodeTypes>(
+    fn insert_blocks<
+        'a,
+        N: ProviderNodeTypes<Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>>,
+    >(
         provider_factory: ProviderFactory<N>,
         mut blocks: impl Iterator<Item = &'a SealedBlock>,
     ) {
@@ -2179,6 +2184,7 @@ mod tests {
                 provider
                     .insert_block(
                         b.clone().try_seal_with_senders().expect("invalid tx signature in block"),
+                        StorageLocation::Database,
                     )
                     .map(drop)
             })

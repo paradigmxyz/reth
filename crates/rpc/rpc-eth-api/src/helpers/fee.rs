@@ -1,5 +1,6 @@
 //! Loads fee history from database. Helper trait for `eth_` fee and transaction RPC methods.
 
+use alloy_consensus::BlockHeader;
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::{BlockNumberOrTag, FeeHistory};
 use futures::Future;
@@ -287,7 +288,7 @@ pub trait LoadFee: LoadBlock {
                         .block_with_senders(BlockNumberOrTag::Pending.into())
                         .await?
                         .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Pending.into()))?
-                        .base_fee_per_gas
+                        .base_fee_per_gas()
                         .ok_or(EthApiError::InvalidTransaction(
                             RpcInvalidTransactionError::TxTypeNotSupported,
                         ))?;
@@ -324,7 +325,7 @@ pub trait LoadFee: LoadBlock {
         let suggested_tip = self.suggested_priority_fee();
         async move {
             let (header, suggested_tip) = futures::try_join!(header, suggested_tip)?;
-            let base_fee = header.and_then(|h| h.base_fee_per_gas).unwrap_or_default();
+            let base_fee = header.and_then(|h| h.base_fee_per_gas()).unwrap_or_default();
             Ok(suggested_tip + U256::from(base_fee))
         }
     }

@@ -21,6 +21,9 @@
 
 extern crate alloc;
 
+mod traits;
+pub use traits::*;
+
 #[cfg(feature = "alloy-compat")]
 mod alloy_compat;
 mod block;
@@ -32,7 +35,9 @@ pub use reth_static_file_types as static_file;
 pub mod transaction;
 #[cfg(any(test, feature = "arbitrary"))]
 pub use block::{generate_valid_header, valid_header_strategy};
-pub use block::{Block, BlockBody, BlockWithSenders, SealedBlock, SealedBlockWithSenders};
+pub use block::{
+    Block, BlockBody, BlockWithSenders, SealedBlock, SealedBlockFor, SealedBlockWithSenders,
+};
 #[cfg(feature = "reth-codec")]
 pub use compression::*;
 pub use receipt::{
@@ -48,7 +53,7 @@ pub use transaction::{
     util::secp256k1::{public_key_to_address, recover_signer_unchecked, sign_message},
     BlobTransaction, InvalidTransactionError, PooledTransactionsElement,
     PooledTransactionsElementEcRecovered, Transaction, TransactionMeta, TransactionSigned,
-    TransactionSignedEcRecovered, TransactionSignedNoHash, TxHashOrNumber, TxType,
+    TransactionSignedEcRecovered, TransactionSignedNoHash, TxType,
 };
 
 // Re-exports
@@ -79,17 +84,10 @@ pub mod serde_bincode_compat {
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EthPrimitives;
 
-#[cfg(feature = "reth-codec")]
-impl reth_primitives_traits::FullNodePrimitives for EthPrimitives {
+impl reth_primitives_traits::NodePrimitives for EthPrimitives {
     type Block = crate::Block;
-    type SignedTx = crate::TransactionSigned;
-    type TxType = crate::TxType;
-    type Receipt = crate::Receipt;
-}
-
-#[cfg(not(feature = "reth-codec"))]
-impl NodePrimitives for EthPrimitives {
-    type Block = crate::Block;
+    type BlockHeader = alloy_consensus::Header;
+    type BlockBody = crate::BlockBody;
     type SignedTx = crate::TransactionSigned;
     type TxType = crate::TxType;
     type Receipt = crate::Receipt;

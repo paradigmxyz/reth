@@ -16,7 +16,7 @@ use futures::{
 use metrics::atomics::AtomicU64;
 use reth_chain_state::CanonStateNotification;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
-use reth_primitives::{Receipt, SealedBlock, TransactionSigned};
+use reth_primitives::{NodePrimitives, Receipt, SealedBlock, TransactionSigned};
 use reth_storage_api::BlockReaderIdExt;
 use revm_primitives::{calc_blob_gasprice, calc_excess_blob_gas};
 use serde::{Deserialize, Serialize};
@@ -205,13 +205,14 @@ struct FeeHistoryCacheInner {
 
 /// Awaits for new chain events and directly inserts them into the cache so they're available
 /// immediately before they need to be fetched from disk.
-pub async fn fee_history_cache_new_blocks_task<St, Provider>(
+pub async fn fee_history_cache_new_blocks_task<St, Provider, N>(
     fee_history_cache: FeeHistoryCache,
     mut events: St,
     provider: Provider,
 ) where
-    St: Stream<Item = CanonStateNotification> + Unpin + 'static,
+    St: Stream<Item = CanonStateNotification<N>> + Unpin + 'static,
     Provider: BlockReaderIdExt + ChainSpecProvider + 'static,
+    N: NodePrimitives<Receipt = reth_primitives::Receipt>,
 {
     // We're listening for new blocks emitted when the node is in live sync.
     // If the node transitions to stage sync, we need to fetch the missing blocks

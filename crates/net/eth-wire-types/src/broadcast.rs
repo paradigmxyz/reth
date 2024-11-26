@@ -1,15 +1,14 @@
 //! Types for broadcasting new data.
 
 use crate::{EthMessage, EthVersion, NetworkPrimitives};
+use alloy_primitives::{Bytes, TxHash, B256, U128};
 use alloy_rlp::{
     Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
 };
-
-use alloy_primitives::{Bytes, TxHash, B256, U128};
 use derive_more::{Constructor, Deref, DerefMut, From, IntoIterator};
 use reth_codecs_derive::{add_arbitrary_tests, generate_tests};
-use reth_primitives::{PooledTransactionsElement, TransactionSigned};
-
+use reth_primitives::TransactionSigned;
+use reth_primitives_traits::SignedTransaction;
 use std::{
     collections::{HashMap, HashSet},
     mem,
@@ -90,9 +89,9 @@ generate_tests!(#[rlp, 25] NewBlock<reth_primitives::Block>, EthNewBlockTests);
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp, 10)]
-pub struct Transactions(
+pub struct Transactions<T = TransactionSigned>(
     /// New transactions for the peer to include in its mempool.
-    pub Vec<TransactionSigned>,
+    pub Vec<T>,
 );
 
 impl Transactions {
@@ -102,14 +101,14 @@ impl Transactions {
     }
 }
 
-impl From<Vec<TransactionSigned>> for Transactions {
-    fn from(txs: Vec<TransactionSigned>) -> Self {
+impl<T> From<Vec<T>> for Transactions<T> {
+    fn from(txs: Vec<T>) -> Self {
         Self(txs)
     }
 }
 
-impl From<Transactions> for Vec<TransactionSigned> {
-    fn from(txs: Transactions) -> Self {
+impl<T> From<Transactions<T>> for Vec<T> {
+    fn from(txs: Transactions<T>) -> Self {
         txs.0
     }
 }
@@ -121,9 +120,9 @@ impl From<Transactions> for Vec<TransactionSigned> {
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp, 20)]
-pub struct SharedTransactions(
+pub struct SharedTransactions<T = TransactionSigned>(
     /// New transactions for the peer to include in its mempool.
-    pub Vec<Arc<TransactionSigned>>,
+    pub Vec<Arc<T>>,
 );
 
 /// A wrapper type for all different new pooled transaction types
@@ -555,7 +554,7 @@ pub trait HandleVersionedMempoolData {
     fn msg_version(&self) -> EthVersion;
 }
 
-impl HandleMempoolData for Vec<PooledTransactionsElement> {
+impl<T: SignedTransaction> HandleMempoolData for Vec<T> {
     fn is_empty(&self) -> bool {
         self.is_empty()
     }
@@ -565,7 +564,7 @@ impl HandleMempoolData for Vec<PooledTransactionsElement> {
     }
 
     fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) {
-        self.retain(|tx| f(tx.hash()))
+        self.retain(|tx| f(tx.tx_hash()))
     }
 }
 

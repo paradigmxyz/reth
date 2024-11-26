@@ -30,16 +30,16 @@ pub mod test_utils;
 
 /// Post execution input passed to [`Consensus::validate_block_post_execution`].
 #[derive(Debug)]
-pub struct PostExecutionInput<'a> {
+pub struct PostExecutionInput<'a, R = Receipt> {
     /// Receipts of the block.
-    pub receipts: &'a [Receipt],
+    pub receipts: &'a [R],
     /// EIP-7685 requests of the block.
     pub requests: &'a Requests,
 }
 
-impl<'a> PostExecutionInput<'a> {
+impl<'a, R> PostExecutionInput<'a, R> {
     /// Creates a new instance of `PostExecutionInput`.
-    pub const fn new(receipts: &'a [Receipt], requests: &'a Requests) -> Self {
+    pub const fn new(receipts: &'a [R], requests: &'a Requests) -> Self {
         Self { receipts, requests }
     }
 }

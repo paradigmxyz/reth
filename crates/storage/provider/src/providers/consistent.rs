@@ -18,13 +18,17 @@ use reth_db::models::BlockNumberAddress;
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::{BundleStateInit, ExecutionOutcome, RevertsInit};
+use reth_node_types::{BlockTy, TxTy};
 use reth_primitives::{
-    Account, Block, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
+    Account, BlockWithSenders, Receipt, SealedBlockFor, SealedBlockWithSenders, SealedHeader,
+    StorageEntry, TransactionMeta,
 };
+use reth_primitives_traits::{Block, BlockBody};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::{DatabaseProviderFactory, StateProvider, StorageChangeSetReader};
+use reth_storage_api::{
+    DatabaseProviderFactory, NodePrimitivesProvider, StateProvider, StorageChangeSetReader,
+};
 use reth_storage_errors::provider::ProviderResult;
 use revm::{
     db::states::PlainStorageRevert,
@@ -611,9 +615,11 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> StaticFileProviderFactory for ConsistentProvider<N> {
+impl<N: ProviderNodeTypes> NodePrimitivesProvider for ConsistentProvider<N> {
     type Primitives = N::Primitives;
+}
 
+impl<N: ProviderNodeTypes> StaticFileProviderFactory for ConsistentProvider<N> {
     fn static_file_provider(&self) -> StaticFileProvider<N::Primitives> {
         self.storage_provider.static_file_provider()
     }
@@ -777,7 +783,13 @@ impl<N: ProviderNodeTypes> BlockIdReader for ConsistentProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
-    fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> ProviderResult<Option<Block>> {
+    type Block = BlockTy<N>;
+
+    fn find_block_by_hash(
+        &self,
+        hash: B256,
+        source: BlockSource,
+    ) -> ProviderResult<Option<Self::Block>> {
         match source {
             BlockSource::Any | BlockSource::Canonical => {
                 // Note: it's fine to return the unsealed block because the caller already has
@@ -794,7 +806,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         }
     }
 
-    fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Block>> {
+    fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
         self.get_in_memory_or_storage_by_block(
             id,
             |db_provider| db_provider.block(id),
@@ -802,15 +814,19 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         )
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlock>> {
+    fn pending_block(&self) -> ProviderResult<Option<SealedBlockFor<Self::Block>>> {
         Ok(self.canonical_in_memory_state.pending_block())
     }
 
-    fn pending_block_with_senders(&self) -> ProviderResult<Option<SealedBlockWithSenders>> {
+    fn pending_block_with_senders(
+        &self,
+    ) -> ProviderResult<Option<SealedBlockWithSenders<Self::Block>>> {
         Ok(self.canonical_in_memory_state.pending_block_with_senders())
     }
 
-    fn pending_block_and_receipts(&self) -> ProviderResult<Option<(SealedBlock, Vec<Receipt>)>> {
+    fn pending_block_and_receipts(
+        &self,
+    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Receipt>)>> {
         Ok(self.canonical_in_memory_state.pending_block_and_receipts())
     }
 
@@ -872,7 +888,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<BlockWithSenders>> {
+    ) -> ProviderResult<Option<BlockWithSenders<Self::Block>>> {
         self.get_in_memory_or_storage_by_block(
             id,
             |db_provider| db_provider.block_with_senders(id, transaction_kind),
@@ -884,7 +900,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<SealedBlockWithSenders>> {
+    ) -> ProviderResult<Option<SealedBlockWithSenders<Self::Block>>> {
         self.get_in_memory_or_storage_by_block(
             id,
             |db_provider| db_provider.sealed_block_with_senders(id, transaction_kind),
@@ -892,7 +908,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         )
     }
 
-    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
+    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Self::Block>> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
             |db_provider, range, _| db_provider.block_range(range),
@@ -904,7 +920,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
     fn block_with_senders_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<BlockWithSenders>> {
+    ) -> ProviderResult<Vec<BlockWithSenders<Self::Block>>> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
             |db_provider, range, _| db_provider.block_with_senders_range(range),
@@ -916,7 +932,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
     fn sealed_block_with_senders_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
+    ) -> ProviderResult<Vec<SealedBlockWithSenders<Self::Block>>> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
             |db_provider, range, _| db_provider.sealed_block_with_senders_range(range),
@@ -927,6 +943,8 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
+    type Transaction = TxTy<N>;
+
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         self.get_in_memory_or_storage_by_tx(
             tx_hash.into(),
@@ -935,23 +953,10 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
         )
     }
 
-    fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
+    fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
         self.get_in_memory_or_storage_by_tx(
             id.into(),
             |provider| provider.transaction_by_id(id),
-            |tx_index, _, block_state| {
-                Ok(block_state.block_ref().block().body.transactions.get(tx_index).cloned())
-            },
-        )
-    }
-
-    fn transaction_by_id_no_hash(
-        &self,
-        id: TxNumber,
-    ) -> ProviderResult<Option<TransactionSignedNoHash>> {
-        self.get_in_memory_or_storage_by_tx(
-            id.into(),
-            |provider| provider.transaction_by_id_no_hash(id),
             |tx_index, _, block_state| {
                 Ok(block_state
                     .block_ref()
@@ -965,7 +970,27 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
         )
     }
 
-    fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
+    fn transaction_by_id_unhashed(
+        &self,
+        id: TxNumber,
+    ) -> ProviderResult<Option<Self::Transaction>> {
+        self.get_in_memory_or_storage_by_tx(
+            id.into(),
+            |provider| provider.transaction_by_id_unhashed(id),
+            |tx_index, _, block_state| {
+                Ok(block_state
+                    .block_ref()
+                    .block()
+                    .body
+                    .transactions
+                    .get(tx_index)
+                    .cloned()
+                    .map(Into::into))
+            },
+        )
+    }
+
+    fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Transaction>> {
         if let Some(tx) = self.head_block.as_ref().and_then(|b| b.transaction_on_chain(hash)) {
             return Ok(Some(tx))
         }
@@ -976,7 +1001,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
     fn transaction_by_hash_with_meta(
         &self,
         tx_hash: TxHash,
-    ) -> ProviderResult<Option<(TransactionSigned, TransactionMeta)>> {
+    ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
         if let Some((tx, meta)) =
             self.head_block.as_ref().and_then(|b| b.transaction_meta_on_chain(tx_hash))
         {
@@ -997,22 +1022,22 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
     fn transactions_by_block(
         &self,
         id: BlockHashOrNumber,
-    ) -> ProviderResult<Option<Vec<TransactionSigned>>> {
+    ) -> ProviderResult<Option<Vec<Self::Transaction>>> {
         self.get_in_memory_or_storage_by_block(
             id,
             |provider| provider.transactions_by_block(id),
-            |block_state| Ok(Some(block_state.block_ref().block().body.transactions.clone())),
+            |block_state| Ok(Some(block_state.block_ref().block().body().transactions().to_vec())),
         )
     }
 
     fn transactions_by_block_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<Vec<TransactionSigned>>> {
+    ) -> ProviderResult<Vec<Vec<Self::Transaction>>> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
             |db_provider, range, _| db_provider.transactions_by_block_range(range),
-            |block_state, _| Some(block_state.block_ref().block().body.transactions.clone()),
+            |block_state, _| Some(block_state.block_ref().block().body().transactions().to_vec()),
             |_| true,
         )
     }
@@ -1020,7 +1045,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
     fn transactions_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<TransactionSignedNoHash>> {
+    ) -> ProviderResult<Vec<Self::Transaction>> {
         self.get_in_memory_or_storage_by_tx_range(
             range,
             |db_provider, db_range| db_provider.transactions_by_tx_range(db_range),
@@ -1279,7 +1304,7 @@ impl<N: ProviderNodeTypes> ChainSpecProvider for ConsistentProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> BlockReaderIdExt for ConsistentProvider<N> {
-    fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Block>> {
+    fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Block>> {
         match id {
             BlockId::Number(num) => self.block_by_number_or_tag(num),
             BlockId::Hash(hash) => {

@@ -10,6 +10,7 @@ use crate::{
     DefaultNodeLauncher, LaunchNode, Node, NodeHandle,
 };
 use futures::Future;
+use reth_blockchain_tree::externals::NodeTypesForTree;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli_util::get_secret_key;
 use reth_db_api::{
@@ -33,7 +34,7 @@ use reth_node_core::{
 };
 use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider},
-    ChainSpecProvider, FullProvider,
+    BlockReader, ChainSpecProvider, FullProvider,
 };
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, TransactionPool};
@@ -358,15 +359,14 @@ where
         >,
     >
     where
-        N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec> + NodeTypesForProvider,
+        N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec> + NodeTypesForTree,
         N::AddOns: RethRpcAddOns<
             NodeAdapter<
                 RethFullAdapter<DB, N>,
                 <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
             >,
         >,
-        N::Primitives:
-            FullNodePrimitives<Block: reth_node_api::Block<Body = reth_primitives::BlockBody>>,
+        N::Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>,
     {
         self.node(node).launch().await
     }
@@ -554,11 +554,9 @@ where
 impl<T, DB, CB, AO> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>>
 where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
-    T: NodeTypesWithEngine + NodeTypesForProvider,
+    T: NodeTypesWithEngine + NodeTypesForTree,
     CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
     AO: RethRpcAddOns<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
-    T::Primitives:
-        FullNodePrimitives<Block: reth_node_api::Block<Body = reth_primitives::BlockBody>>,
 {
     /// Launches the node with the [`DefaultNodeLauncher`] that sets up engine API consensus and rpc
     pub async fn launch(
@@ -653,6 +651,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     pub fn start_network<Pool>(&self, builder: NetworkBuilder<(), ()>, pool: Pool) -> NetworkHandle
     where
         Pool: TransactionPool + Unpin + 'static,
+        Node::Provider: BlockReader<Block = reth_primitives::Block>,
     {
         self.start_network_with(builder, pool, Default::default())
     }
@@ -671,6 +670,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     ) -> NetworkHandle
     where
         Pool: TransactionPool + Unpin + 'static,
+        Node::Provider: BlockReader<Block = reth_primitives::Block>,
     {
         let (handle, network, txpool, eth) = builder
             .transactions(pool, tx_config)

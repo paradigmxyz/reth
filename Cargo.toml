@@ -419,6 +419,7 @@ reth-trie = { path = "crates/trie/trie" }
 reth-trie-common = { path = "crates/trie/common" }
 reth-trie-db = { path = "crates/trie/db" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
+reth-trie-sparse = { path = "crates/trie/sparse" }
 
 # revm
 revm = { version = "18.0.0", features = ["std"], default-features = false }
@@ -528,6 +529,7 @@ tracing = "0.1.0"
 tracing-appender = "0.2"
 url = "2.3"
 zstd = "0.13"
+byteorder = "1"
 
 # metrics
 metrics = "0.24.0"
@@ -638,7 +640,7 @@ tracy-client = "0.17.3"
 #alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", rev = "a971b3a" }
 #alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", rev = "a971b3a" }
 
+#op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", rev = "6a042e7681b1" }
+#op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", rev = "6a042e7681b1" }
 #op-alloy-rpc-types = { git = "https://github.com/alloy-rs/op-alloy", rev = "6a042e7681b1" }
 #op-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/op-alloy", rev = "6a042e7681b1" }
-#op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", rev = "6a042e7681b1" }
-#op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", rev = "6a042e7681b1" }

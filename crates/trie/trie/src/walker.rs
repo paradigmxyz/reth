@@ -58,8 +58,13 @@ impl<C> TrieWalker<C> {
 
     /// Split the walker into stack and trie updates.
     pub fn split(mut self) -> (Vec<CursorSubNode>, HashSet<Nibbles>) {
-        let keys = self.removed_keys.take();
-        (self.stack, keys.unwrap_or_default())
+        let keys = self.take_removed_keys();
+        (self.stack, keys)
+    }
+
+    /// Take removed keys from the walker.
+    pub fn take_removed_keys(&mut self) -> HashSet<Nibbles> {
+        self.removed_keys.take().unwrap_or_default()
     }
 
     /// Prints the current stack of trie nodes.

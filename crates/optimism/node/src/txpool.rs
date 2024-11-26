@@ -3,7 +3,9 @@ use alloy_eips::eip2718::Encodable2718;
 use parking_lot::RwLock;
 use reth_chainspec::ChainSpec;
 use reth_optimism_evm::RethL1BlockInfo;
-use reth_primitives::{Block, GotExpected, InvalidTransactionError, SealedBlock};
+use reth_primitives::{
+    Block, GotExpected, InvalidTransactionError, SealedBlock, TransactionSigned,
+};
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use reth_revm::L1BlockInfo;
 use reth_transaction_pool::{
@@ -67,7 +69,7 @@ impl<Client, Tx> OpTransactionValidator<Client, Tx> {
 
 impl<Client, Tx> OpTransactionValidator<Client, Tx>
 where
-    Client: StateProviderFactory + BlockReaderIdExt,
+    Client: StateProviderFactory + BlockReaderIdExt<Block = reth_primitives::Block>,
     Tx: EthPoolTransaction,
 {
     /// Create a new [`OpTransactionValidator`].
@@ -140,7 +142,8 @@ where
             let l1_block_info = self.block_info.l1_block_info.read().clone();
 
             let mut encoded = Vec::with_capacity(valid_tx.transaction().encoded_length());
-            valid_tx.transaction().clone().into_consensus().into().encode_2718(&mut encoded);
+            let tx: TransactionSigned = valid_tx.transaction().clone().into_consensus().into();
+            tx.encode_2718(&mut encoded);
 
             let cost_addition = match l1_block_info.l1_tx_data_fee(
                 &self.chain_spec(),
@@ -192,7 +195,7 @@ where
 
 impl<Client, Tx> TransactionValidator for OpTransactionValidator<Client, Tx>
 where
-    Client: StateProviderFactory + BlockReaderIdExt,
+    Client: StateProviderFactory + BlockReaderIdExt<Block = reth_primitives::Block>,
     Tx: EthPoolTransaction,
 {
     type Transaction = Tx;
@@ -262,7 +265,7 @@ mod tests {
             input: Default::default(),
         });
         let signature = Signature::test_signature();
-        let signed_tx = TransactionSigned::from_transaction_and_signature(deposit_tx, signature);
+        let signed_tx = TransactionSigned::new_unhashed(deposit_tx, signature);
         let signed_recovered =
             TransactionSignedEcRecovered::from_signed_transaction(signed_tx, signer);
         let len = signed_recovered.encode_2718_len();

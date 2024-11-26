@@ -2,21 +2,32 @@
 
 use std::sync::Arc;
 
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
 use alloy_rpc_types_eth::{Block, Header, Index};
 use futures::Future;
-use reth_primitives::{Receipt, SealedBlock, SealedBlockWithSenders};
+use reth_node_api::BlockBody;
+use reth_primitives::{Receipt, SealedBlockFor, SealedBlockWithSenders};
 use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider};
 use reth_rpc_types_compat::block::from_block;
 
-use crate::{node::RpcNodeCoreExt, FromEthApiError, FullEthApiTypes, RpcBlock, RpcReceipt};
+use crate::{
+    node::RpcNodeCoreExt, EthApiTypes, FromEthApiError, FullEthApiTypes, RpcBlock, RpcNodeCore,
+    RpcReceipt,
+};
 
 use super::{LoadPendingBlock, LoadReceipt, SpawnBlocking};
 
 /// Result type of the fetched block receipts.
 pub type BlockReceiptsResult<N, E> = Result<Option<Vec<RpcReceipt<N>>>, E>;
 /// Result type of the fetched block and its receipts.
-pub type BlockAndReceiptsResult<E> = Result<Option<(SealedBlock, Arc<Vec<Receipt>>)>, E>;
+pub type BlockAndReceiptsResult<Eth> = Result<
+    Option<(
+        SealedBlockFor<<<Eth as RpcNodeCore>::Provider as BlockReader>::Block>,
+        Arc<Vec<Receipt>>,
+    )>,
+    <Eth as EthApiTypes>::Error,
+>;
 
 /// Block related functions for the [`EthApiServer`](crate::EthApiServer) trait in the
 /// `eth_` namespace.
@@ -49,7 +60,7 @@ pub trait EthBlocks: LoadBlock {
             let block_hash = block.hash();
             let mut total_difficulty = self
                 .provider()
-                .header_td_by_number(block.number)
+                .header_td_by_number(block.number())
                 .map_err(Self::Error::from_eth_err)?;
             if total_difficulty.is_none() {
                 // if we failed to find td after we successfully loaded the block, try again using
@@ -83,7 +94,7 @@ pub trait EthBlocks: LoadBlock {
                     .provider()
                     .pending_block()
                     .map_err(Self::Error::from_eth_err)?
-                    .map(|block| block.body.transactions.len()))
+                    .map(|block| block.body.transactions().len()))
             }
 
             let block_hash = match self
@@ -120,7 +131,7 @@ pub trait EthBlocks: LoadBlock {
     fn load_block_and_receipts(
         &self,
         block_id: BlockId,
-    ) -> impl Future<Output = BlockAndReceiptsResult<Self::Error>> + Send
+    ) -> impl Future<Output = BlockAndReceiptsResult<Self>> + Send
     where
         Self: LoadReceipt,
     {
@@ -198,10 +209,16 @@ pub trait EthBlocks: LoadBlock {
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` blocks RPC methods.
 pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
     /// Returns the block object for the given block id.
+    #[expect(clippy::type_complexity)]
     fn block_with_senders(
         &self,
         block_id: BlockId,
-    ) -> impl Future<Output = Result<Option<Arc<SealedBlockWithSenders>>, Self::Error>> + Send {
+    ) -> impl Future<
+        Output = Result<
+            Option<Arc<SealedBlockWithSenders<<Self::Provider as BlockReader>::Block>>>,
+            Self::Error,
+        >,
+    > + Send {
         async move {
             if block_id.is_pending() {
                 // Pending block can be fetched directly without need for caching

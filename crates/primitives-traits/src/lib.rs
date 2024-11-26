@@ -14,7 +14,6 @@ extern crate alloc;
 
 /// Common constants.
 pub mod constants;
-
 pub use constants::gas_units::{format_gas, format_gas_throughput};
 
 /// Minimal account
@@ -28,7 +27,8 @@ pub mod transaction;
 pub use transaction::{
     execute::FillTxEnv,
     signed::{FullSignedTx, SignedTransaction},
-    FullTransaction, Transaction, TransactionExt,
+    tx_type::{FullTxType, TxType},
+    FullTransaction, Transaction,
 };
 
 mod integer_list;
@@ -41,7 +41,9 @@ pub use block::{
     Block, FullBlock,
 };
 
+mod encoded;
 mod withdrawal;
+pub use encoded::WithEncoded;
 
 mod error;
 pub use error::{GotExpected, GotExpectedBoxed};
@@ -51,10 +53,6 @@ pub use alloy_primitives::{logs_bloom, Log, LogData};
 
 mod storage;
 pub use storage::StorageEntry;
-
-/// Transaction types
-pub mod tx_type;
-pub use tx_type::{FullTxType, TxType};
 
 /// Common header types
 pub mod header;
@@ -80,7 +78,7 @@ pub use size::InMemorySize;
 
 /// Node traits
 pub mod node;
-pub use node::{FullNodePrimitives, NodePrimitives, ReceiptTy};
+pub use node::{BodyTy, FullNodePrimitives, HeaderTy, NodePrimitives, ReceiptTy};
 
 /// Helper trait that requires arbitrary implementation if the feature is enabled.
 #[cfg(any(feature = "test-utils", feature = "arbitrary"))]
@@ -106,3 +104,17 @@ pub trait MaybeSerde {}
 impl<T> MaybeSerde for T where T: serde::Serialize + for<'de> serde::Deserialize<'de> {}
 #[cfg(not(feature = "serde"))]
 impl<T> MaybeSerde for T {}
+
+/// Helper trait that requires database encoding implementation since `reth-codec` feature is
+/// enabled.
+#[cfg(feature = "reth-codec")]
+pub trait MaybeCompact: reth_codecs::Compact {}
+/// Noop. Helper trait that would require database encoding implementation if `reth-codec` feature
+/// were enabled.
+#[cfg(not(feature = "reth-codec"))]
+pub trait MaybeCompact {}
+
+#[cfg(feature = "reth-codec")]
+impl<T> MaybeCompact for T where T: reth_codecs::Compact {}
+#[cfg(not(feature = "reth-codec"))]
+impl<T> MaybeCompact for T {}

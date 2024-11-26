@@ -4,7 +4,7 @@ use reth_chainspec::ChainSpecBuilder;
 use reth_db::{open_db_read_only, DatabaseEnv};
 use reth_node_ethereum::EthereumNode;
 use reth_node_types::NodeTypesWithDBAdapter;
-use reth_primitives::SealedHeader;
+use reth_primitives::{BlockExt, SealedHeader, TransactionSigned};
 use reth_provider::{
     providers::StaticFileProvider, AccountReader, BlockReader, BlockSource, HeaderProvider,
     ProviderFactory, ReceiptProvider, StateProvider, TransactionsProvider,
@@ -83,7 +83,9 @@ fn header_provider_example<T: HeaderProvider>(provider: T, number: u64) -> eyre:
 }
 
 /// The `TransactionsProvider` allows querying transaction-related information
-fn txs_provider_example<T: TransactionsProvider>(provider: T) -> eyre::Result<()> {
+fn txs_provider_example<T: TransactionsProvider<Transaction = TransactionSigned>>(
+    provider: T,
+) -> eyre::Result<()> {
     // Try the 5th tx
     let txid = 5;
 
@@ -92,16 +94,17 @@ fn txs_provider_example<T: TransactionsProvider>(provider: T) -> eyre::Result<()
 
     // Can query the tx by hash
     let tx_by_hash =
-        provider.transaction_by_hash(tx.hash)?.ok_or(eyre::eyre!("txhash not found"))?;
+        provider.transaction_by_hash(tx.hash())?.ok_or(eyre::eyre!("txhash not found"))?;
     assert_eq!(tx, tx_by_hash);
 
     // Can query the tx by hash with info about the block it was included in
-    let (tx, meta) =
-        provider.transaction_by_hash_with_meta(tx.hash)?.ok_or(eyre::eyre!("txhash not found"))?;
-    assert_eq!(tx.hash, meta.tx_hash);
+    let (tx, meta) = provider
+        .transaction_by_hash_with_meta(tx.hash())?
+        .ok_or(eyre::eyre!("txhash not found"))?;
+    assert_eq!(tx.hash(), meta.tx_hash);
 
     // Can reverse lookup the key too
-    let id = provider.transaction_id(tx.hash)?.ok_or(eyre::eyre!("txhash not found"))?;
+    let id = provider.transaction_id(tx.hash())?.ok_or(eyre::eyre!("txhash not found"))?;
     assert_eq!(id, txid);
 
     // Can find the block of a transaction given its key
@@ -116,7 +119,10 @@ fn txs_provider_example<T: TransactionsProvider>(provider: T) -> eyre::Result<()
 }
 
 /// The `BlockReader` allows querying the headers-related tables.
-fn block_provider_example<T: BlockReader>(provider: T, number: u64) -> eyre::Result<()> {
+fn block_provider_example<T: BlockReader<Block = reth_primitives::Block>>(
+    provider: T,
+    number: u64,
+) -> eyre::Result<()> {
     // Can query a block by number
     let block = provider.block(number.into())?.ok_or(eyre::eyre!("block num not found"))?;
     assert_eq!(block.number, number);
@@ -159,7 +165,9 @@ fn block_provider_example<T: BlockReader>(provider: T, number: u64) -> eyre::Res
 }
 
 /// The `ReceiptProvider` allows querying the receipts tables.
-fn receipts_provider_example<T: ReceiptProvider + TransactionsProvider + HeaderProvider>(
+fn receipts_provider_example<
+    T: ReceiptProvider + TransactionsProvider<Transaction = TransactionSigned> + HeaderProvider,
+>(
     provider: T,
 ) -> eyre::Result<()> {
     let txid = 5;
@@ -171,7 +179,7 @@ fn receipts_provider_example<T: ReceiptProvider + TransactionsProvider + HeaderP
     // Can query receipt by txhash too
     let tx = provider.transaction_by_id(txid)?.unwrap();
     let receipt_by_hash =
-        provider.receipt_by_hash(tx.hash)?.ok_or(eyre::eyre!("tx receipt by hash not found"))?;
+        provider.receipt_by_hash(tx.hash())?.ok_or(eyre::eyre!("tx receipt by hash not found"))?;
     assert_eq!(receipt, receipt_by_hash);
 
     // Can query all the receipts in a block

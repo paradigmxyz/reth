@@ -18,7 +18,7 @@ use reth_evm::{
     execute::{BlockExecutorProvider, Executor},
     ConfigureEvmEnv,
 };
-use reth_primitives::{Block, SealedBlockWithSenders};
+use reth_primitives::{Block, BlockExt, SealedBlockWithSenders};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProofProvider, StateProviderFactory,
     TransactionVariant,
@@ -107,7 +107,7 @@ where
                 let mut transactions = block.transactions_with_sender().enumerate().peekable();
                 let mut inspector = None;
                 while let Some((index, (signer, tx))) = transactions.next() {
-                    let tx_hash = tx.hash;
+                    let tx_hash = tx.hash();
 
                     let env = EnvWithHandlerCfg {
                         env: Env::boxed(
@@ -255,7 +255,7 @@ where
                     cfg.clone(),
                     block_env.clone(),
                     block_txs,
-                    tx.hash,
+                    tx.hash(),
                 )?;
 
                 let env = EnvWithHandlerCfg {
@@ -274,7 +274,7 @@ where
                     Some(TransactionContext {
                         block_hash: Some(block_hash),
                         tx_index: Some(index),
-                        tx_hash: Some(tx.hash),
+                        tx_hash: Some(tx.hash()),
                     }),
                     &mut None,
                 )
@@ -793,7 +793,7 @@ where
 #[async_trait]
 impl<Provider, Eth, BlockExecutor> DebugApiServer for DebugApi<Provider, Eth, BlockExecutor>
 where
-    Provider: BlockReaderIdExt
+    Provider: BlockReaderIdExt<Block: Encodable>
         + HeaderProvider
         + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + StateProviderFactory
