@@ -543,12 +543,11 @@ pub mod serde_bincode_compat {
 
     #[cfg(test)]
     mod tests {
-        use crate::updates::StorageTrieUpdates;
-
-        use super::super::{serde_bincode_compat, TrieUpdates};
-
+        use crate::{
+            serde_bincode_compat, updates::StorageTrieUpdates, BranchNodeCompact, Nibbles,
+            TrieUpdates,
+        };
         use alloy_primitives::B256;
-        use reth_trie_common::{BranchNodeCompact, Nibbles};
         use serde::{Deserialize, Serialize};
         use serde_with::serde_as;
 
