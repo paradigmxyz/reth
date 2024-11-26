@@ -142,7 +142,7 @@ impl TransactionPool for NoopTransactionPool {
     fn get_pooled_transaction_element(
         &self,
         _tx_hash: TxHash,
-    ) -> Option<PooledTransactionsElement> {
+    ) -> Option<<Self::Transaction as PoolTransaction>::Pooled> {
         None
     }
 
