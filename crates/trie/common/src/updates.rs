@@ -403,7 +403,7 @@ fn exclude_empty_from_pair<V>(
 }
 
 /// Bincode-compatible trie updates type serde implementations.
-#[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
+#[cfg(feature = "serde-bincode-compat")]
 pub mod serde_bincode_compat {
     use crate::{BranchNodeCompact, Nibbles};
     use alloy_primitives::B256;
