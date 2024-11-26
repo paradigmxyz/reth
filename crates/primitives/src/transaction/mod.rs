@@ -1035,7 +1035,7 @@ impl PartialEq for TransactionSigned {
     fn eq(&self, other: &Self) -> bool {
         self.signature == other.signature &&
             self.transaction == other.transaction &&
-            self.hash_ref() == other.hash_ref()
+            self.tx_hash() == other.tx_hash()
     }
 }
 
@@ -1054,11 +1054,6 @@ impl TransactionSigned {
         Self { hash: Default::default(), signature, transaction }
     }
 
-    /// Transaction signature.
-    pub const fn signature(&self) -> &Signature {
-        &self.signature
-    }
-
     /// Transaction
     pub const fn transaction(&self) -> &Transaction {
         &self.transaction
@@ -1066,12 +1061,7 @@ impl TransactionSigned {
 
     /// Transaction hash. Used to identify transaction.
     pub fn hash(&self) -> TxHash {
-        *self.hash_ref()
-    }
-
-    /// Reference to transaction hash. Used to identify transaction.
-    pub fn hash_ref(&self) -> &TxHash {
-        self.hash.get_or_init(|| self.recalculate_hash())
+        *self.tx_hash()
     }
 
     /// Recovers a list of signers from a transaction list iterator.
@@ -1237,7 +1227,7 @@ impl SignedTransaction for TransactionSigned {
     type Type = TxType;
 
     fn tx_hash(&self) -> &TxHash {
-        self.hash_ref()
+        self.hash.get_or_init(|| self.recalculate_hash())
     }
 
     fn signature(&self) -> &Signature {

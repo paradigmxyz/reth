@@ -23,6 +23,7 @@ use reth_primitives::{
     PooledTransactionsElementEcRecovered, SealedBlock, Transaction, TransactionSigned,
     TransactionSignedEcRecovered,
 };
+use reth_primitives_traits::SignedTransaction;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{
@@ -1244,7 +1245,7 @@ impl PoolTransaction for EthPooledTransaction {
 
     /// Returns hash of the transaction.
     fn hash(&self) -> &TxHash {
-        self.transaction.hash_ref()
+        self.transaction.tx_hash()
     }
 
     /// Returns the Sender of the transaction.
