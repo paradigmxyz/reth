@@ -6,7 +6,7 @@ use alloy_primitives::{
     Bytes, B256,
 };
 use alloy_rlp::Decodable;
-use reth_trie::{
+use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
     Nibbles, TrieNode,
 };

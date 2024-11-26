@@ -6,13 +6,10 @@ use alloy_primitives::{
 };
 use alloy_rlp::Decodable;
 use reth_tracing::tracing::debug;
-use reth_trie::{
-    prefix_set::{PrefixSet, PrefixSetMut},
-    BranchNodeCompact, RlpNode,
-};
 use reth_trie_common::{
-    BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, TrieMask, TrieNode, CHILD_INDEX_RANGE,
-    EMPTY_ROOT_HASH,
+    prefix_set::{PrefixSet, PrefixSetMut},
+    BranchNodeCompact, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, RlpNode, TrieMask,
+    TrieNode, CHILD_INDEX_RANGE, EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
 use std::{borrow::Cow, fmt};
