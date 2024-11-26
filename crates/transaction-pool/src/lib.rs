@@ -441,6 +441,13 @@ where
         self.pool.pending_transactions()
     }
 
+    fn pending_transactions_max(
+        &self,
+        max: usize,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.pending_transactions_max(max)
+    }
+
     fn queued_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.pool.queued_transactions()
     }

@@ -270,6 +270,15 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Consumer: RPC
     fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
+    /// Returns first `max` transactions that can be included in the next block.
+    /// See <https://github.com/paradigmxyz/reth/issues/12767#issuecomment-2493223579>
+    ///
+    /// Consumer: Block production
+    fn pending_transactions_max(
+        &self,
+        max: usize,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
     /// Returns all transactions that can be included in _future_ blocks.
     ///
     /// This and [Self::pending_transactions] are mutually exclusive.
