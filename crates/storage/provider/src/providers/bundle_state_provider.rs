@@ -9,7 +9,8 @@ use reth_primitives::{Account, Bytecode};
 use reth_storage_api::{StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
+    StorageMultiProof, TrieInput,
 };
 
 /// A state provider that resolves to data from either a wrapped [`crate::ExecutionOutcome`]
@@ -137,6 +138,17 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StorageRootProvider
         let mut storage = self.get_hashed_storage(address);
         storage.extend(&hashed_storage);
         self.state_provider.storage_proof(address, slot, storage)
+    }
+
+    fn storage_multiproof(
+        &self,
+        address: Address,
+        slots: &[B256],
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<StorageMultiProof> {
+        let mut storage = self.get_hashed_storage(address);
+        storage.extend(&hashed_storage);
+        self.state_provider.storage_multiproof(address, slots, storage)
     }
 }
 
