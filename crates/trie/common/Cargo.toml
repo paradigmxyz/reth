@@ -31,6 +31,8 @@ nybbles = { workspace = true, features = ["rlp"] }
 # `serde` feature
 serde = { workspace = true, optional = true }
 
+serde_with = { workspace = true, optional = true }
+
 # `test-utils` feature
 hash-db = { version = "=0.15.2", optional = true }
 plain_hasher = { version = "0.2", optional = true }
@@ -65,7 +67,8 @@ serde = [
 ]
 serde-bincode-compat = [
 	"reth-primitives-traits/serde-bincode-compat",
-	"alloy-consensus/serde-bincode-compat"
+	"alloy-consensus/serde-bincode-compat",
+    "dep:serde_with"
 ]
 test-utils = [
     "dep:plain_hasher",
