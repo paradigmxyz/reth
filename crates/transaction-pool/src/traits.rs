@@ -241,7 +241,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// If the transaction is a blob transaction, the sidecar will be included.
     ///
     /// It is expected that this variant represents the valid p2p format for full transactions.
-    /// E.g. for EIP-4844 transactions this is the concensus transaction format with the blob
+    /// E.g. for EIP-4844 transactions this is the consensus transaction format with the blob
     /// sidecar.
     ///
     /// Consumer: P2P
@@ -251,11 +251,9 @@ pub trait TransactionPool: Send + Sync + Clone {
     ) -> Option<<Self::Transaction as PoolTransaction>::Pooled>;
 
     /// Returns the pooled transaction variant for the given transaction hash as the requested type.
-    fn get_pooled_transaction_as<T>(
-        &self,
-        tx_hash: TxHash,
-    ) -> Option<T>
-    where <Self::Transaction as PoolTransaction>::Pooled :Into<T>
+    fn get_pooled_transaction_as<T>(&self, tx_hash: TxHash) -> Option<T>
+    where
+        <Self::Transaction as PoolTransaction>::Pooled: Into<T>,
     {
         self.get_pooled_transaction_element(tx_hash).map(Into::into)
     }
