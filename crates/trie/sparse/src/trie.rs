@@ -176,6 +176,7 @@ impl RevealedSparseTrie {
 
     /// Reveal the trie node only if it was not known already.
     pub fn reveal_node(&mut self, path: Nibbles, node: TrieNode) -> SparseTrieResult<()> {
+        debug!(target: "trie::sparse", ?path, ?node, "Revealing node");
         // TODO: revise all inserts to not overwrite existing entries
         match node {
             TrieNode::EmptyRoot => {
@@ -244,6 +245,8 @@ impl RevealedSparseTrie {
     }
 
     fn reveal_node_or_hash(&mut self, path: Nibbles, child: &[u8]) -> SparseTrieResult<()> {
+        debug!(target: "trie::sparse", ?path, child = ?hex::encode(child), "Revealing node or hash");
+
         if child.len() == B256::len_bytes() + 1 {
             let hash = B256::from_slice(&child[1..]);
             match self.nodes.get(&path) {
