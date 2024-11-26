@@ -10,9 +10,8 @@ use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
     proof::{Proof, StorageProof},
     trie_cursor::InMemoryTrieCursorFactory,
-    HashedPostStateSorted, HashedStorage, MultiProof, TrieInput,
+    AccountProof, HashedPostStateSorted, HashedStorage, MultiProof, TrieInput,
 };
-use reth_trie_common::AccountProof;
 
 /// Extends [`Proof`] with operations specific for working with a database transaction.
 pub trait DatabaseProof<'a, TX> {
@@ -96,7 +95,7 @@ pub trait DatabaseStorageProof<'a, TX> {
         address: Address,
         slot: B256,
         storage: HashedStorage,
-    ) -> Result<reth_trie_common::StorageProof, StateProofError>;
+    ) -> Result<reth_trie::StorageProof, StateProofError>;
 }
 
 impl<'a, TX: DbTx> DatabaseStorageProof<'a, TX>
@@ -111,7 +110,7 @@ impl<'a, TX: DbTx> DatabaseStorageProof<'a, TX>
         address: Address,
         slot: B256,
         storage: HashedStorage,
-    ) -> Result<reth_trie_common::StorageProof, StateProofError> {
+    ) -> Result<reth_trie::StorageProof, StateProofError> {
         let hashed_address = keccak256(address);
         let prefix_set = storage.construct_prefix_set();
         let state_sorted = HashedPostStateSorted::new(

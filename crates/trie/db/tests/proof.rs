@@ -6,8 +6,7 @@ use alloy_rlp::EMPTY_STRING_CODE;
 use reth_chainspec::{Chain, ChainSpec, HOLESKY, MAINNET};
 use reth_primitives::Account;
 use reth_provider::test_utils::{create_test_provider_factory, insert_genesis};
-use reth_trie::{proof::Proof, Nibbles};
-use reth_trie_common::{AccountProof, StorageProof};
+use reth_trie::{proof::Proof, AccountProof, Nibbles, StorageProof};
 use reth_trie_db::DatabaseProof;
 use std::{
     str::FromStr,

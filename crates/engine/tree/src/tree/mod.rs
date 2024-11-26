@@ -1212,8 +1212,17 @@ where
                 match request {
                     EngineApiRequest::InsertExecutedBlock(block) => {
                         debug!(target: "engine::tree", block=?block.block().num_hash(), "inserting already executed block");
+                        let now = Instant::now();
+                        let sealed_block = block.block.clone();
                         self.state.tree_state.insert_executed(block);
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
+
+                        self.emit_event(EngineApiEvent::BeaconConsensus(
+                            BeaconConsensusEngineEvent::CanonicalBlockAdded(
+                                sealed_block,
+                                now.elapsed(),
+                            ),
+                        ));
                     }
                     EngineApiRequest::Beacon(request) => {
                         match request {
@@ -2939,7 +2948,7 @@ mod tests {
                 EngineApiEvent::BeaconConsensus(
                     BeaconConsensusEngineEvent::CanonicalBlockAdded(block, _),
                 ) => {
-                    assert!(block.hash() == expected_hash);
+                    assert_eq!(block.hash(), expected_hash);
                 }
                 _ => panic!("Unexpected event: {:#?}", event),
             }

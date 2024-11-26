@@ -3,11 +3,11 @@ use alloy_trie::{hash_builder::HashBuilderValue, nodes::RlpNode, HashBuilder};
 use bytes::Buf;
 use nybbles::Nibbles;
 use reth_codecs::Compact;
-use serde::{Deserialize, Serialize};
 
 /// The hash builder state for storing in the database.
 /// Check the `reth-trie` crate for more info on hash builder.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
     feature = "arbitrary",
     derive(arbitrary::Arbitrary),

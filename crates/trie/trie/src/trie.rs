@@ -258,11 +258,8 @@ where
 
         let root = hash_builder.root();
 
-        trie_updates.finalize(
-            account_node_iter.walker,
-            hash_builder,
-            self.prefix_sets.destroyed_accounts,
-        );
+        let removed_keys = account_node_iter.walker.take_removed_keys();
+        trie_updates.finalize(hash_builder, removed_keys, self.prefix_sets.destroyed_accounts);
 
         let stats = tracker.finish();
 
@@ -434,7 +431,8 @@ where
         let root = hash_builder.root();
 
         let mut trie_updates = StorageTrieUpdates::default();
-        trie_updates.finalize(storage_node_iter.walker, hash_builder);
+        let removed_keys = storage_node_iter.walker.take_removed_keys();
+        trie_updates.finalize(hash_builder, removed_keys);
 
         let stats = tracker.finish();
 

@@ -522,16 +522,14 @@ pub enum ChainSplit<N: NodePrimitives = reth_primitives::EthPrimitives> {
 /// Bincode-compatible [`Chain`] serde implementation.
 #[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
 pub(super) mod serde_bincode_compat {
-    use std::collections::BTreeMap;
-
+    use crate::ExecutionOutcome;
     use alloc::borrow::Cow;
     use alloy_primitives::BlockNumber;
     use reth_primitives::serde_bincode_compat::SealedBlockWithSenders;
-    use reth_trie::serde_bincode_compat::updates::TrieUpdates;
+    use reth_trie_common::serde_bincode_compat::updates::TrieUpdates;
     use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
-
-    use crate::ExecutionOutcome;
+    use std::collections::BTreeMap;
 
     /// Bincode-compatible [`super::Chain`] serde implementation.
     ///
