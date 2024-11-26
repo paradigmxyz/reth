@@ -15,9 +15,10 @@ use crate::{
     HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter,
     LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError,
     PruneCheckpointReader, PruneCheckpointWriter, RevertsInit, StageCheckpointReader,
-    StateChangeWriter, StateProviderBox, StateReader, StateWriter, StaticFileProviderFactory,
-    StatsReader, StorageLocation, StorageReader, StorageTrieWriter, TransactionVariant,
-    TransactionsProvider, TransactionsProviderExt, TrieWriter, WithdrawalsProvider,
+    StateChangeWriter, StateCommitmentProvider, StateProviderBox, StateReader, StateWriter,
+    StaticFileProviderFactory, StatsReader, StorageLocation, StorageReader, StorageTrieWriter,
+    TransactionVariant, TransactionsProvider, TransactionsProviderExt, TrieWriter,
+    WithdrawalsProvider,
 };
 use alloy_consensus::Header;
 use alloy_eips::{
@@ -157,10 +158,10 @@ impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
 }
 
 impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
-    /// State provider for latest block
-    pub fn latest<'a>(&'a self) -> ProviderResult<Box<dyn StateProvider + 'a>> {
+    /// State provider for latest state
+    pub fn latest<'a>(&'a self) -> Box<dyn StateProvider + 'a> {
         trace!(target: "providers::db", "Returning latest state provider");
-        Ok(Box::new(LatestStateProviderRef::new(self)))
+        Box::new(LatestStateProviderRef::new(self))
     }
 
     /// Storage provider for state at that given block hash
@@ -376,6 +377,10 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
 
         Ok(Box::new(state_provider))
     }
+}
+
+impl<TX: DbTx + 'static, N: NodeTypes> StateCommitmentProvider for DatabaseProvider<TX, N> {
+    type StateCommitment = N::StateCommitment;
 }
 
 impl<Tx: DbTx + DbTxMut + 'static, N: NodeTypesForProvider + 'static> DatabaseProvider<Tx, N> {

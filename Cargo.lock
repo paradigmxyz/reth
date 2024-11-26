@@ -9230,6 +9230,7 @@ dependencies = [
  "reth-stages-types",
  "reth-storage-errors",
  "reth-trie",
+ "reth-trie-db",
 ]
 
 [[package]]

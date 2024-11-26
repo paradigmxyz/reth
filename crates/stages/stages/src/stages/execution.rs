@@ -16,8 +16,8 @@ use reth_primitives_traits::{format_gas_throughput, Block, BlockBody, NodePrimit
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
     BlockHashReader, BlockReader, DBProvider, HeaderProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderError, StateChangeWriter, StateWriter, StaticFileProviderFactory,
-    StatsReader, StorageLocation, TransactionVariant,
+    OriginalValuesKnown, ProviderError, StateChangeWriter, StateCommitmentProvider, StateWriter,
+    StaticFileProviderFactory, StatsReader, StorageLocation, TransactionVariant,
 };
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
@@ -180,7 +180,8 @@ where
         + StatsReader
         + StateChangeWriter
         + BlockHashReader
-        + StateWriter,
+        + StateWriter
+        + StateCommitmentProvider,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {

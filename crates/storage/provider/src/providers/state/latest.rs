@@ -9,7 +9,9 @@ use alloy_primitives::{
 use reth_db::tables;
 use reth_db_api::{cursor::DbDupCursorRO, transaction::DbTx};
 use reth_primitives::{Account, Bytecode};
-use reth_storage_api::{DBProvider, StateProofProvider, StorageRootProvider};
+use reth_storage_api::{
+    DBProvider, StateCommitmentProvider, StateProofProvider, StorageRootProvider,
+};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
     proof::{Proof, StorageProof},
@@ -62,7 +64,9 @@ impl<Provider: BlockHashReader> BlockHashReader for LatestStateProviderRef<'_, P
     }
 }
 
-impl<Provider: DBProvider> StateRootProvider for LatestStateProviderRef<'_, Provider> {
+impl<Provider: DBProvider + StateCommitmentProvider> StateRootProvider
+    for LatestStateProviderRef<'_, Provider>
+{
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         StateRoot::overlay_root(self.tx(), hashed_state)
             .map_err(|err| ProviderError::Database(err.into()))
@@ -90,7 +94,9 @@ impl<Provider: DBProvider> StateRootProvider for LatestStateProviderRef<'_, Prov
     }
 }
 
-impl<Provider: DBProvider> StorageRootProvider for LatestStateProviderRef<'_, Provider> {
+impl<Provider: DBProvider + StateCommitmentProvider> StorageRootProvider
+    for LatestStateProviderRef<'_, Provider>
+{
     fn storage_root(
         &self,
         address: Address,
@@ -121,7 +127,9 @@ impl<Provider: DBProvider> StorageRootProvider for LatestStateProviderRef<'_, Pr
     }
 }
 
-impl<Provider: DBProvider> StateProofProvider for LatestStateProviderRef<'_, Provider> {
+impl<Provider: DBProvider + StateCommitmentProvider> StateProofProvider
+    for LatestStateProviderRef<'_, Provider>
+{
     fn proof(
         &self,
         input: TrieInput,
@@ -149,7 +157,7 @@ impl<Provider: DBProvider> StateProofProvider for LatestStateProviderRef<'_, Pro
     }
 }
 
-impl<Provider: DBProvider + BlockHashReader> StateProvider
+impl<Provider: DBProvider + BlockHashReader + StateCommitmentProvider> StateProvider
     for LatestStateProviderRef<'_, Provider>
 {
     /// Get storage.
@@ -191,7 +199,7 @@ impl<Provider: DBProvider> LatestStateProvider<Provider> {
 }
 
 // Delegates all provider impls to [LatestStateProviderRef]
-delegate_provider_impls!(LatestStateProvider<Provider> where [Provider: DBProvider + BlockHashReader]);
+delegate_provider_impls!(LatestStateProvider<Provider> where [Provider: DBProvider + BlockHashReader + StateCommitmentProvider]);
 
 #[cfg(test)]
 mod tests {
@@ -199,7 +207,9 @@ mod tests {
 
     const fn assert_state_provider<T: StateProvider>() {}
     #[allow(dead_code)]
-    const fn assert_latest_state_provider<T: DBProvider + BlockHashReader>() {
+    const fn assert_latest_state_provider<
+        T: DBProvider + BlockHashReader + StateCommitmentProvider,
+    >() {
         assert_state_provider::<LatestStateProvider<T>>();
     }
 }
