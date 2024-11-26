@@ -171,6 +171,7 @@ mod tests {
     };
     use alloy_primitives::B256;
     use reth_primitives::SealedBlock;
+    use reth_primitives_traits::SignedTransaction;
     use reth_provider::{
         providers::StaticFileWriter, TransactionsProvider, TransactionsProviderExt,
     };

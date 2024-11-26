@@ -26,6 +26,7 @@ use reth_primitives::{
     Account, Block, BlockWithSenders, Bytecode, EthPrimitives, GotExpected, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
 };
+use reth_primitives_traits::SignedTransaction;
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     DatabaseProviderFactory, StageCheckpointReader, StateProofProvider, StorageRootProvider,
