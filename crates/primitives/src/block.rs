@@ -458,7 +458,7 @@ where
 impl<H, B> reth_primitives_traits::Block for SealedBlock<H, B>
 where
     H: reth_primitives_traits::BlockHeader + 'static,
-    B: reth_primitives_traits::BlockBody<Header = H> + 'static,
+    B: reth_primitives_traits::BlockBody<OmmerHeader = H> + 'static,
     Self: Serialize + for<'a> Deserialize<'a>,
 {
     type Header = H;
@@ -687,7 +687,7 @@ impl InMemorySize for BlockBody {
 
 impl reth_primitives_traits::BlockBody for BlockBody {
     type Transaction = TransactionSigned;
-    type Header = Header;
+    type OmmerHeader = Header;
 
     fn transactions(&self) -> &[Self::Transaction] {
         &self.transactions
@@ -701,7 +701,7 @@ impl reth_primitives_traits::BlockBody for BlockBody {
         self.withdrawals.as_ref()
     }
 
-    fn ommers(&self) -> Option<&[Self::Header]> {
+    fn ommers(&self) -> Option<&[Self::OmmerHeader]> {
         Some(&self.ommers)
     }
 }

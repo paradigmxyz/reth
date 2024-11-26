@@ -32,7 +32,7 @@ pub trait BlockBody:
     type Transaction: Transaction;
 
     /// Ommer header type.
-    type Header;
+    type OmmerHeader;
 
     /// Returns reference to transactions in block.
     fn transactions(&self) -> &[Self::Transaction];
@@ -44,5 +44,5 @@ pub trait BlockBody:
     fn withdrawals(&self) -> Option<&Withdrawals>;
 
     /// Returns block ommers if any.
-    fn ommers(&self) -> Option<&[Self::Header]>;
+    fn ommers(&self) -> Option<&[Self::OmmerHeader]>;
 }
