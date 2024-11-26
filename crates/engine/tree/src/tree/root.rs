@@ -220,7 +220,7 @@ where
         view: ConsistentDbView<Factory>,
         input: Arc<TrieInput>,
         update: EvmState,
-        state: &mut HashedPostState,
+        state: &HashedPostState,
         proof_sequence_number: u64,
         state_root_message_sender: Sender<StateRootMessage>,
     ) {
@@ -368,7 +368,7 @@ where
                             self.config.consistent_view.clone(),
                             self.config.input.clone(),
                             update,
-                            &mut self.state,
+                            &self.state,
                             self.proof_sequencer.next_sequence(),
                             self.tx.clone(),
                         );
