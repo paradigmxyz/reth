@@ -544,8 +544,9 @@ pub mod serde_bincode_compat {
     #[cfg(test)]
     mod tests {
         use crate::{
-            serde_bincode_compat, updates::StorageTrieUpdates, BranchNodeCompact, Nibbles,
-            TrieUpdates,
+            serde_bincode_compat,
+            updates::{StorageTrieUpdates, TrieUpdates},
+            BranchNodeCompact, Nibbles,
         };
         use alloy_primitives::B256;
         use serde::{Deserialize, Serialize};
@@ -589,7 +590,7 @@ pub mod serde_bincode_compat {
             #[serde_as]
             #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
             struct Data {
-                #[serde_as(as = "serde_bincode_compat::StorageTrieUpdates")]
+                #[serde_as(as = "serde_bincode_compat::updates::StorageTrieUpdates")]
                 trie_updates: StorageTrieUpdates,
             }
 
