@@ -383,6 +383,8 @@ where
                         );
                         self.state.extend(state_update);
 
+                        debug!(target: "engine::root", ?proof, "Proof calculated");
+
                         if let Some(combined_proof) = self.on_proof(proof, sequence_number) {
                             if self.sparse_trie.is_none() {
                                 current_multiproof.extend(combined_proof);
