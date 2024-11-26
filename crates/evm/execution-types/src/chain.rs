@@ -520,7 +520,7 @@ pub enum ChainSplit<N: NodePrimitives = reth_primitives::EthPrimitives> {
 }
 
 /// Bincode-compatible [`Chain`] serde implementation.
-#[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
+#[cfg(feature = "serde-bincode-compat")]
 pub(super) mod serde_bincode_compat {
     use crate::ExecutionOutcome;
     use alloc::borrow::Cow;
