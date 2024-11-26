@@ -115,7 +115,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             Ok(self.block_state_provider_ref(state)?.boxed())
         } else {
             trace!(target: "providers::blockchain", "Using database state for latest state provider");
-            self.storage_provider.latest()
+            Ok(self.storage_provider.latest())
         }
     }
 
