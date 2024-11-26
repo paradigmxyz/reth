@@ -4,26 +4,22 @@ use crate::{
     BlockExecutionWriter, BlockWriter, HistoryWriter, StateChangeWriter, StateWriter,
     StaticFileProviderFactory, StorageLocation, TrieWriter,
 };
-use alloy_consensus::Header;
-use alloy_primitives::{BlockNumber, B256, U256};
+use alloy_primitives::BlockNumber;
 use reth_chain_state::ExecutedBlock;
 use reth_db::{
     cursor::DbCursorRO,
-    models::CompactU256,
     tables,
     transaction::{DbTx, DbTxMut},
 };
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{SealedBlock, StaticFileSegment};
-use reth_stages_types::{StageCheckpoint, StageId};
+use reth_primitives::StaticFileSegment;
 use reth_storage_api::{
     DBProvider, HeaderProvider, ReceiptWriter, StageCheckpointWriter, TransactionsProviderExt,
 };
 use reth_storage_errors::writer::UnifiedStorageWriterError;
 use revm::db::OriginalValuesKnown;
-use std::{borrow::Borrow, sync::Arc};
-use tracing::{debug, instrument};
+use tracing::debug;
 
 mod database;
 mod static_file;
@@ -196,7 +192,6 @@ where
             let sealed_block =
                 block.block().clone().try_with_senders_unchecked(block.senders().clone()).unwrap();
             self.database().insert_block(sealed_block, StorageLocation::Both)?;
-            self.save_header_and_transactions(block.block.clone())?;
 
             // Write state and changesets to the database.
             // Must be written after blocks because of the receipt lookup.
@@ -219,35 +214,6 @@ where
         self.database().update_pipeline_stages(last_block_number, false)?;
 
         debug!(target: "provider::storage_writer", range = ?first_number..=last_block_number, "Appended block data");
-
-        Ok(())
-    }
-
-    /// Writes the header & transactions to static files, and updates their respective checkpoints
-    /// on database.
-    #[instrument(level = "trace", skip_all, fields(block = ?block.num_hash()) target = "storage")]
-    fn save_header_and_transactions(&self, block: Arc<SealedBlock>) -> ProviderResult<()> {
-        debug!(target: "provider::storage_writer", "Writing headers and transactions.");
-
-        {
-            let header_writer =
-                self.static_file().get_writer(block.number, StaticFileSegment::Headers)?;
-            let mut storage_writer = UnifiedStorageWriter::from(self.database(), header_writer);
-            let td = storage_writer.append_headers_from_blocks(
-                block.header().number,
-                std::iter::once(&(block.header(), block.hash())),
-            )?;
-
-            debug!(target: "provider::storage_writer", block_num=block.number, "Updating transaction metadata after writing");
-            self.database()
-                .tx_ref()
-                .put::<tables::HeaderTerminalDifficulties>(block.number, CompactU256(td))?;
-            self.database()
-                .save_stage_checkpoint(StageId::Headers, StageCheckpoint::new(block.number))?;
-        }
-
-        self.database()
-            .save_stage_checkpoint(StageId::Bodies, StageCheckpoint::new(block.number))?;
 
         Ok(())
     }
@@ -322,38 +288,6 @@ where
             }
             None => Err(UnifiedStorageWriterError::MissingStaticFileWriter),
         }
-    }
-
-    /// Appends headers to static files, using the
-    /// [`HeaderTerminalDifficulties`](tables::HeaderTerminalDifficulties) table to determine the
-    /// total difficulty of the parent block during header insertion.
-    ///
-    /// NOTE: The static file writer used to construct this [`UnifiedStorageWriter`] MUST be a
-    /// writer for the Headers segment.
-    pub fn append_headers_from_blocks<H, I>(
-        &mut self,
-        initial_block_number: BlockNumber,
-        headers: impl Iterator<Item = I>,
-    ) -> ProviderResult<U256>
-    where
-        I: Borrow<(H, B256)>,
-        H: Borrow<Header>,
-    {
-        self.ensure_static_file_segment(StaticFileSegment::Headers)?;
-
-        let mut td = self
-            .database()
-            .header_td_by_number(initial_block_number)?
-            .ok_or(ProviderError::TotalDifficultyNotFound(initial_block_number))?;
-
-        for pair in headers {
-            let (header, hash) = pair.borrow();
-            let header = header.borrow();
-            td += header.difficulty;
-            self.static_file_mut().append_header(header, td, hash)?;
-        }
-
-        Ok(td)
     }
 }
 
