@@ -43,7 +43,7 @@ pub fn from_block_with_tx_hashes<T>(
     block_hash: Option<B256>,
 ) -> Block<T> {
     let block_hash = block_hash.unwrap_or_else(|| block.header.hash_slow());
-    let transactions = block.body.transactions().map(|tx| tx.hash()).collect();
+    let transactions = block.body.transactions.iter().map(|tx| tx.hash()).collect();
 
     from_block_with_transactions(
         block.length(),

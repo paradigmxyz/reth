@@ -15,6 +15,7 @@ use jsonrpsee::{
     server::SubscriptionMessage, types::ErrorObject, PendingSubscriptionSink, SubscriptionSink,
 };
 use reth_network_api::NetworkInfo;
+use reth_primitives::NodePrimitives;
 use reth_provider::{BlockReader, CanonStateSubscriptions, EvmEnvProvider};
 use reth_rpc_eth_api::{pubsub::EthPubSubApiServer, TransactionCompat};
 use reth_rpc_eth_types::logs_utils;
@@ -84,7 +85,9 @@ impl<Provider, Pool, Events, Network, Eth> EthPubSubApiServer<Eth::Transaction>
 where
     Provider: BlockReader + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + 'static,
-    Events: CanonStateSubscriptions + Clone + 'static,
+    Events: CanonStateSubscriptions<Primitives: NodePrimitives<Receipt = reth_primitives::Receipt>>
+        + Clone
+        + 'static,
     Network: NetworkInfo + Clone + 'static,
     Eth: TransactionCompat + 'static,
 {
@@ -117,7 +120,9 @@ async fn handle_accepted<Provider, Pool, Events, Network, Eth>(
 where
     Provider: BlockReader + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + 'static,
-    Events: CanonStateSubscriptions + Clone + 'static,
+    Events: CanonStateSubscriptions<Primitives: NodePrimitives<Receipt = reth_primitives::Receipt>>
+        + Clone
+        + 'static,
     Network: NetworkInfo + Clone + 'static,
     Eth: TransactionCompat,
 {
@@ -333,7 +338,8 @@ where
 impl<Provider, Pool, Events, Network> EthPubSubInner<Provider, Pool, Events, Network>
 where
     Provider: BlockReader + EvmEnvProvider + 'static,
-    Events: CanonStateSubscriptions + 'static,
+    Events: CanonStateSubscriptions<Primitives: NodePrimitives<Receipt = reth_primitives::Receipt>>
+        + 'static,
     Network: NetworkInfo + 'static,
     Pool: 'static,
 {

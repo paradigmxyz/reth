@@ -105,7 +105,12 @@ impl EthStateCache {
         evm_config: EvmConfig,
     ) -> Self
     where
-        Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
+        Provider: StateProviderFactory
+            + BlockReader<Block = reth_primitives::Block>
+            + EvmEnvProvider
+            + Clone
+            + Unpin
+            + 'static,
         EvmConfig: ConfigureEvm<Header = Header>,
     {
         Self::spawn_with(provider, config, TokioTaskExecutor::default(), evm_config)
@@ -122,7 +127,12 @@ impl EthStateCache {
         evm_config: EvmConfig,
     ) -> Self
     where
-        Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
+        Provider: StateProviderFactory
+            + BlockReader<Block = reth_primitives::Block>
+            + EvmEnvProvider
+            + Clone
+            + Unpin
+            + 'static,
         Tasks: TaskSpawner + Clone + 'static,
         EvmConfig: ConfigureEvm<Header = Header>,
     {
@@ -337,7 +347,12 @@ where
 
 impl<Provider, Tasks, EvmConfig> Future for EthStateCacheService<Provider, Tasks, EvmConfig>
 where
-    Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
+    Provider: StateProviderFactory
+        + BlockReader<Block = reth_primitives::Block>
+        + EvmEnvProvider
+        + Clone
+        + Unpin
+        + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     EvmConfig: ConfigureEvm<Header = Header>,
 {

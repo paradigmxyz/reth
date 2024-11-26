@@ -90,7 +90,12 @@ impl<P, E> ExExNotifications<P, E> {
 
 impl<P, E> ExExNotificationsStream for ExExNotifications<P, E>
 where
-    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
+    P: BlockReader<Block = reth_primitives::Block>
+        + HeaderProvider
+        + StateProviderFactory
+        + Clone
+        + Unpin
+        + 'static,
     E: BlockExecutorProvider + Clone + Unpin + 'static,
 {
     fn set_without_head(&mut self) {
@@ -139,7 +144,12 @@ where
 
 impl<P, E> Stream for ExExNotifications<P, E>
 where
-    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
+    P: BlockReader<Block = reth_primitives::Block>
+        + HeaderProvider
+        + StateProviderFactory
+        + Clone
+        + Unpin
+        + 'static,
     E: BlockExecutorProvider + Clone + Unpin + 'static,
 {
     type Item = eyre::Result<ExExNotification>;
@@ -262,7 +272,12 @@ impl<P, E> ExExNotificationsWithHead<P, E> {
 
 impl<P, E> ExExNotificationsWithHead<P, E>
 where
-    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
+    P: BlockReader<Block = reth_primitives::Block>
+        + HeaderProvider
+        + StateProviderFactory
+        + Clone
+        + Unpin
+        + 'static,
     E: BlockExecutorProvider + Clone + Unpin + 'static,
 {
     /// Checks if the ExEx head is on the canonical chain.
@@ -339,7 +354,12 @@ where
 
 impl<P, E> Stream for ExExNotificationsWithHead<P, E>
 where
-    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
+    P: BlockReader<Block = reth_primitives::Block>
+        + HeaderProvider
+        + StateProviderFactory
+        + Clone
+        + Unpin
+        + 'static,
     E: BlockExecutorProvider + Clone + Unpin + 'static,
 {
     type Item = eyre::Result<ExExNotification>;
@@ -400,7 +420,7 @@ mod tests {
     use futures::StreamExt;
     use reth_db_common::init::init_genesis;
     use reth_evm_ethereum::execute::EthExecutorProvider;
-    use reth_primitives::Block;
+    use reth_primitives::{Block, BlockExt};
     use reth_provider::{
         providers::BlockchainProvider2, test_utils::create_test_provider_factory, BlockWriter,
         Chain, DatabaseProviderFactory, StorageLocation,
@@ -567,7 +587,7 @@ mod tests {
             genesis_block.number + 1,
             BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
         )
-        .seal_with_senders()
+        .seal_with_senders::<reth_primitives::Block>()
         .ok_or_eyre("failed to recover senders")?;
         let node_head = Head {
             number: node_head_block.number,

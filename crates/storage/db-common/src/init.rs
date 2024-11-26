@@ -14,7 +14,7 @@ use reth_provider::{
     BlockHashReader, BlockNumReader, BundleStateInit, ChainSpecProvider, DBProvider,
     DatabaseProviderFactory, ExecutionOutcome, HashingWriter, HeaderProvider, HistoryWriter,
     OriginalValuesKnown, ProviderError, RevertsInit, StageCheckpointWriter, StateChangeWriter,
-    StateWriter, StaticFileProviderFactory, TrieWriter,
+    StateWriter, StaticFileProviderFactory, StorageLocation, TrieWriter,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
@@ -76,6 +76,7 @@ where
         + HeaderProvider
         + HashingWriter
         + StateChangeWriter
+        + StateWriter
         + AsRef<PF::ProviderRW>,
 {
     let chain = factory.chain_spec();
@@ -147,6 +148,7 @@ where
         + DBProvider<Tx: DbTxMut>
         + StateChangeWriter
         + HeaderProvider
+        + StateWriter
         + AsRef<Provider>,
 {
     insert_state(provider, alloc, 0)
@@ -163,6 +165,7 @@ where
         + DBProvider<Tx: DbTxMut>
         + StateChangeWriter
         + HeaderProvider
+        + StateWriter
         + AsRef<Provider>,
 {
     let capacity = alloc.size_hint().1.unwrap_or(0);
@@ -230,8 +233,11 @@ where
         Vec::new(),
     );
 
-    let mut storage_writer = UnifiedStorageWriter::from_database(&provider);
-    storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::Yes)?;
+    provider.write_to_storage(
+        execution_outcome,
+        OriginalValuesKnown::Yes,
+        StorageLocation::Database,
+    )?;
 
     trace!(target: "reth::cli", "Inserted state");
 
@@ -351,6 +357,7 @@ where
         + HashingWriter
         + StateChangeWriter
         + TrieWriter
+        + StateWriter
         + AsRef<Provider>,
 {
     let block = provider_rw.last_block_number()?;
@@ -470,6 +477,7 @@ where
         + HeaderProvider
         + HashingWriter
         + HistoryWriter
+        + StateWriter
         + StateChangeWriter
         + AsRef<Provider>,
 {

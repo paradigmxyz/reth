@@ -53,7 +53,7 @@ impl EthereumNode {
         EthereumConsensusBuilder,
     >
     where
-        Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
+        Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
         <Node::Types as NodeTypesWithEngine>::Engine: PayloadTypes<
             BuiltPayload = EthBuiltPayload,
             PayloadAttributes = EthPayloadAttributes,
@@ -164,7 +164,7 @@ pub struct EthereumPoolBuilder {
 
 impl<Types, Node> PoolBuilder<Node> for EthereumPoolBuilder
 where
-    Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
+    Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
 {
     type Pool = EthTransactionPool<Node::Provider, DiskFileBlobStore>;
@@ -240,7 +240,7 @@ impl EthereumPayloadBuilder {
         pool: Pool,
     ) -> eyre::Result<PayloadBuilderHandle<Types::Engine>>
     where
-        Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
+        Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
         Node: FullNodeTypes<Types = Types>,
         Evm: ConfigureEvm<Header = Header>,
         Pool: TransactionPool + Unpin + 'static,
@@ -278,7 +278,7 @@ impl EthereumPayloadBuilder {
 
 impl<Types, Node, Pool> PayloadServiceBuilder<Node, Pool> for EthereumPayloadBuilder
 where
-    Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
+    Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
     Pool: TransactionPool + Unpin + 'static,
     Types::Engine: PayloadTypes<
@@ -304,7 +304,7 @@ pub struct EthereumNetworkBuilder {
 
 impl<Node, Pool> NetworkBuilder<Node, Pool> for EthereumNetworkBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
     Pool: TransactionPool + Unpin + 'static,
 {
     async fn build_network(

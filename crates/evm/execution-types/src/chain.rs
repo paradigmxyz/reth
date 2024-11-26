@@ -11,7 +11,7 @@ use reth_primitives::{
     TransactionSignedEcRecovered,
 };
 use reth_primitives_traits::NodePrimitives;
-use reth_trie::updates::TrieUpdates;
+use reth_trie_common::updates::TrieUpdates;
 use revm::db::BundleState;
 
 /// A chain of blocks and their final state.
@@ -236,7 +236,7 @@ impl<N: NodePrimitives> Chain<N> {
             self.blocks().iter().zip(self.execution_outcome.receipts().iter())
         {
             let mut tx_receipts = Vec::with_capacity(receipts.len());
-            for (tx, receipt) in block.body.transactions().zip(receipts.iter()) {
+            for (tx, receipt) in block.body.transactions.iter().zip(receipts.iter()) {
                 tx_receipts.push((
                     tx.hash(),
                     receipt.as_ref().expect("receipts have not been pruned").clone(),
@@ -417,7 +417,7 @@ impl ChainBlocks<'_> {
     /// Returns an iterator over all transactions in the chain.
     #[inline]
     pub fn transactions(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
-        self.blocks.values().flat_map(|block| block.body.transactions())
+        self.blocks.values().flat_map(|block| block.body.transactions.iter())
     }
 
     /// Returns an iterator over all transactions and their senders.
@@ -441,7 +441,7 @@ impl ChainBlocks<'_> {
     /// Returns an iterator over all transaction hashes in the block
     #[inline]
     pub fn transaction_hashes(&self) -> impl Iterator<Item = TxHash> + '_ {
-        self.blocks.values().flat_map(|block| block.transactions().map(|tx| tx.hash()))
+        self.blocks.values().flat_map(|block| block.transactions().iter().map(|tx| tx.hash()))
     }
 }
 
@@ -513,16 +513,14 @@ pub enum ChainSplit<N: NodePrimitives = reth_primitives::EthPrimitives> {
 /// Bincode-compatible [`Chain`] serde implementation.
 #[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
 pub(super) mod serde_bincode_compat {
-    use std::collections::BTreeMap;
-
+    use crate::ExecutionOutcome;
     use alloc::borrow::Cow;
     use alloy_primitives::BlockNumber;
     use reth_primitives::serde_bincode_compat::SealedBlockWithSenders;
-    use reth_trie::serde_bincode_compat::updates::TrieUpdates;
+    use reth_trie_common::serde_bincode_compat::updates::TrieUpdates;
     use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
-
-    use crate::ExecutionOutcome;
+    use std::collections::BTreeMap;
 
     /// Bincode-compatible [`super::Chain`] serde implementation.
     ///

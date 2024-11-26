@@ -11,7 +11,8 @@ use reth_storage_api::{
     StorageRootProvider,
 };
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
+    StorageMultiProof, TrieInput,
 };
 use std::sync::OnceLock;
 
@@ -166,6 +167,20 @@ macro_rules! impl_state_provider {
                     state.storages.get(&keccak256(address)).cloned().unwrap_or_default();
                 hashed_storage.extend(&storage);
                 self.historical.storage_proof(address, slot, hashed_storage)
+            }
+
+             // TODO: Currently this does not reuse available in-memory trie nodes.
+             fn storage_multiproof(
+                &self,
+                address: Address,
+                slots: &[B256],
+                storage: HashedStorage,
+            ) -> ProviderResult<StorageMultiProof> {
+                let state = &self.trie_state().state;
+                let mut hashed_storage =
+                    state.storages.get(&keccak256(address)).cloned().unwrap_or_default();
+                hashed_storage.extend(&storage);
+                self.historical.storage_multiproof(address, slots, hashed_storage)
             }
         }
 

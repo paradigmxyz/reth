@@ -17,9 +17,9 @@ use reth_provider::{
 use reth_trie::{
     prefix_set::PrefixSetMut,
     test_utils::{state_root, state_root_prehashed, storage_root, storage_root_prehashed},
+    triehash::KeccakHasher,
     BranchNodeCompact, StateRoot, StorageRoot, TrieMask,
 };
-use reth_trie_common::triehash::KeccakHasher;
 use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot};
 use std::{
     collections::{BTreeMap, HashMap},

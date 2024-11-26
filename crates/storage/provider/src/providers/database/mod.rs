@@ -19,14 +19,14 @@ use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
 use reth_evm::ConfigureEvmEnv;
-use reth_node_types::{NodeTypesWithDB, TxTy};
+use reth_node_types::{BlockTy, NodeTypesWithDB, TxTy};
 use reth_primitives::{
-    Block, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    BlockWithSenders, Receipt, SealedBlockFor, SealedBlockWithSenders, SealedHeader,
     StaticFileSegment, TransactionMeta,
 };
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::TryIntoHistoricalStateProvider;
+use reth_storage_api::{NodePrimitivesProvider, TryIntoHistoricalStateProvider};
 use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
@@ -202,6 +202,10 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     }
 }
 
+impl<N: NodeTypesWithDB> NodePrimitivesProvider for ProviderFactory<N> {
+    type Primitives = N::Primitives;
+}
+
 impl<N: ProviderNodeTypes> DatabaseProviderFactory for ProviderFactory<N> {
     type DB = N::DB;
     type Provider = DatabaseProvider<<N::DB as Database>::TX, N>;
@@ -217,8 +221,6 @@ impl<N: ProviderNodeTypes> DatabaseProviderFactory for ProviderFactory<N> {
 }
 
 impl<N: NodeTypesWithDB> StaticFileProviderFactory for ProviderFactory<N> {
-    type Primitives = N::Primitives;
-
     /// Returns static file provider
     fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         self.static_file_provider.clone()
@@ -353,23 +355,33 @@ impl<N: ProviderNodeTypes> BlockNumReader for ProviderFactory<N> {
 }
 
 impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
-    fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> ProviderResult<Option<Block>> {
+    type Block = BlockTy<N>;
+
+    fn find_block_by_hash(
+        &self,
+        hash: B256,
+        source: BlockSource,
+    ) -> ProviderResult<Option<Self::Block>> {
         self.provider()?.find_block_by_hash(hash, source)
     }
 
-    fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Block>> {
+    fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
         self.provider()?.block(id)
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlock>> {
+    fn pending_block(&self) -> ProviderResult<Option<SealedBlockFor<Self::Block>>> {
         self.provider()?.pending_block()
     }
 
-    fn pending_block_with_senders(&self) -> ProviderResult<Option<SealedBlockWithSenders>> {
+    fn pending_block_with_senders(
+        &self,
+    ) -> ProviderResult<Option<SealedBlockWithSenders<Self::Block>>> {
         self.provider()?.pending_block_with_senders()
     }
 
-    fn pending_block_and_receipts(&self) -> ProviderResult<Option<(SealedBlock, Vec<Receipt>)>> {
+    fn pending_block_and_receipts(
+        &self,
+    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Receipt>)>> {
         self.provider()?.pending_block_and_receipts()
     }
 
@@ -388,7 +400,7 @@ impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<BlockWithSenders>> {
+    ) -> ProviderResult<Option<BlockWithSenders<Self::Block>>> {
         self.provider()?.block_with_senders(id, transaction_kind)
     }
 
@@ -396,25 +408,25 @@ impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<SealedBlockWithSenders>> {
+    ) -> ProviderResult<Option<SealedBlockWithSenders<Self::Block>>> {
         self.provider()?.sealed_block_with_senders(id, transaction_kind)
     }
 
-    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
+    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Self::Block>> {
         self.provider()?.block_range(range)
     }
 
     fn block_with_senders_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<BlockWithSenders>> {
+    ) -> ProviderResult<Vec<BlockWithSenders<Self::Block>>> {
         self.provider()?.block_with_senders_range(range)
     }
 
     fn sealed_block_with_senders_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
+    ) -> ProviderResult<Vec<SealedBlockWithSenders<Self::Block>>> {
         self.provider()?.sealed_block_with_senders_range(range)
     }
 }
@@ -658,6 +670,7 @@ mod tests {
         test_utils::{create_test_static_files_dir, ERROR_TEMPDIR},
     };
     use reth_primitives::StaticFileSegment;
+    use reth_primitives_traits::SignedTransaction;
     use reth_prune_types::{PruneMode, PruneModes};
     use reth_storage_errors::provider::ProviderError;
     use reth_testing_utils::generators::{self, random_block, random_header, BlockParams};
