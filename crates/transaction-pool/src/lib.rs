@@ -156,7 +156,6 @@ use alloy_primitives::{Address, TxHash, B256, U256};
 use aquamarine as _;
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
-use reth_primitives::PooledTransactionsElement;
 use reth_storage_api::StateProviderFactory;
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::mpsc::Receiver;
@@ -416,8 +415,19 @@ where
         &self,
         tx_hashes: Vec<TxHash>,
         limit: GetPooledTransactionLimit,
-    ) -> Vec<PooledTransactionsElement> {
+    ) -> Vec<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled> {
         self.pool.get_pooled_transaction_elements(tx_hashes, limit)
+    }
+
+    fn get_pooled_transactions_as<P>(
+        &self,
+        tx_hashes: Vec<TxHash>,
+        limit: GetPooledTransactionLimit,
+    ) -> Vec<P>
+    where
+        <Self::Transaction as PoolTransaction>::Pooled: Into<P>,
+    {
+        self.pool.get_pooled_transactions_as(tx_hashes, limit)
     }
 
     fn get_pooled_transaction_element(

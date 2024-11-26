@@ -961,6 +961,8 @@ impl<Pool> TransactionsManager<Pool>
 where
     Pool: TransactionPool + 'static,
     <<Pool as TransactionPool>::Transaction as PoolTransaction>::Consensus: Into<TransactionSigned>,
+    <<Pool as TransactionPool>::Transaction as PoolTransaction>::Pooled:
+        Into<PooledTransactionsElement>,
 {
     /// Request handler for an incoming request for transactions
     fn on_get_pooled_transactions(
@@ -974,14 +976,14 @@ where
                 let _ = response.send(Ok(PooledTransactions::default()));
                 return
             }
-            let transactions = self.pool.get_pooled_transaction_elements(
+            let transactions = self.pool.get_pooled_transactions_as::<PooledTransactionsElement>(
                 request.0,
                 GetPooledTransactionLimit::ResponseSizeSoftLimit(
                     self.transaction_fetcher.info.soft_limit_byte_size_pooled_transactions_response,
                 ),
             );
 
-            trace!(target: "net::tx::propagation", sent_txs=?transactions.iter().map(|tx| *tx.hash()), "Sending requested transactions to peer");
+            trace!(target: "net::tx::propagation", sent_txs=?transactions.iter().map(|tx| tx.tx_hash()), "Sending requested transactions to peer");
 
             // we sent a response at which point we assume that the peer is aware of the
             // transactions
@@ -1291,6 +1293,8 @@ impl<Pool> Future for TransactionsManager<Pool>
 where
     Pool: TransactionPool + Unpin + 'static,
     <<Pool as TransactionPool>::Transaction as PoolTransaction>::Consensus: Into<TransactionSigned>,
+    <<Pool as TransactionPool>::Transaction as PoolTransaction>::Pooled:
+        Into<PooledTransactionsElement>,
 {
     type Output = ();
 

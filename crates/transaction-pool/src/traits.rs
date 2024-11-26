@@ -231,7 +231,16 @@ pub trait TransactionPool: Send + Sync + Clone {
         &self,
         tx_hashes: Vec<TxHash>,
         limit: GetPooledTransactionLimit,
-    ) -> Vec<PooledTransactionsElement>;
+    ) -> Vec<<Self::Transaction as PoolTransaction>::Pooled>;
+
+    /// Returns the pooled transaction variant for the given transaction hash as the requested type.
+    fn get_pooled_transactions_as<T>(
+        &self,
+        tx_hashes: Vec<TxHash>,
+        limit: GetPooledTransactionLimit,
+    ) -> Vec<T>
+    where
+        <Self::Transaction as PoolTransaction>::Pooled: Into<T>;
 
     /// Returns the pooled transaction variant for the given transaction hash.
     ///
