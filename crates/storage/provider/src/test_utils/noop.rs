@@ -372,6 +372,15 @@ impl StorageRootProvider for NoopProvider {
     ) -> ProviderResult<reth_trie::StorageProof> {
         Ok(reth_trie::StorageProof::new(slot))
     }
+
+    fn storage_multiproof(
+        &self,
+        _address: Address,
+        _slots: &[B256],
+        _hashed_storage: HashedStorage,
+    ) -> ProviderResult<reth_trie::StorageMultiProof> {
+        Ok(reth_trie::StorageMultiProof::empty())
+    }
 }
 
 impl StateProofProvider for NoopProvider {

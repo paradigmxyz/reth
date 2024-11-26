@@ -944,7 +944,9 @@ mod tests {
         AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
         StorageRootProvider,
     };
-    use reth_trie::{AccountProof, HashedStorage, MultiProof, StorageProof, TrieInput};
+    use reth_trie::{
+        AccountProof, HashedStorage, MultiProof, StorageMultiProof, StorageProof, TrieInput,
+    };
 
     fn create_mock_state(
         test_block_builder: &mut TestBlockBuilder<EthPrimitives>,
@@ -1053,6 +1055,15 @@ mod tests {
             _hashed_storage: HashedStorage,
         ) -> ProviderResult<StorageProof> {
             Ok(StorageProof::new(slot))
+        }
+
+        fn storage_multiproof(
+            &self,
+            _address: Address,
+            _slots: &[B256],
+            _hashed_storage: HashedStorage,
+        ) -> ProviderResult<StorageMultiProof> {
+            Ok(StorageMultiProof::empty())
         }
     }
 
