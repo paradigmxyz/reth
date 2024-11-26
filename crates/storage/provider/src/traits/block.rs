@@ -37,19 +37,25 @@ pub trait BlockExecutionWriter:
     /// Take all of the blocks above the provided number and their execution result
     ///
     /// The passed block number will stay in the database.
+    ///
+    /// Accepts [`StorageLocation`] specifying from where should transactions and receipts be
+    /// removed.
     fn take_block_and_execution_above(
         &self,
         block: BlockNumber,
-        remove_transactions_from: StorageLocation,
+        remove_from: StorageLocation,
     ) -> ProviderResult<Chain<Self::Primitives>>;
 
     /// Remove all of the blocks above the provided number and their execution result
     ///
     /// The passed block number will stay in the database.
+    ///
+    /// Accepts [`StorageLocation`] specifying from where should transactions and receipts be
+    /// removed.
     fn remove_block_and_execution_above(
         &self,
         block: BlockNumber,
-        remove_transactions_from: StorageLocation,
+        remove_from: StorageLocation,
     ) -> ProviderResult<()>;
 }
 
@@ -57,17 +63,17 @@ impl<T: BlockExecutionWriter> BlockExecutionWriter for &T {
     fn take_block_and_execution_above(
         &self,
         block: BlockNumber,
-        remove_transactions_from: StorageLocation,
+        remove_from: StorageLocation,
     ) -> ProviderResult<Chain<Self::Primitives>> {
-        (*self).take_block_and_execution_above(block, remove_transactions_from)
+        (*self).take_block_and_execution_above(block, remove_from)
     }
 
     fn remove_block_and_execution_above(
         &self,
         block: BlockNumber,
-        remove_transactions_from: StorageLocation,
+        remove_from: StorageLocation,
     ) -> ProviderResult<()> {
-        (*self).remove_block_and_execution_above(block, remove_transactions_from)
+        (*self).remove_block_and_execution_above(block, remove_from)
     }
 }
 

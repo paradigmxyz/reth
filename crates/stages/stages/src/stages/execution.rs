@@ -411,7 +411,8 @@ where
         // Unwind account and storage changesets, as well as receipts.
         //
         // This also updates `PlainStorageState` and `PlainAccountState`.
-        let bundle_state_with_receipts = provider.take_state_above(unwind_to)?;
+        let bundle_state_with_receipts =
+            provider.take_state_above(unwind_to, StorageLocation::Both)?;
 
         // Prepare the input for post unwind commit hook, where an `ExExNotification` will be sent.
         if self.exex_manager_handle.has_exexs() {
@@ -434,7 +435,8 @@ where
 
         let static_file_provider = provider.static_file_provider();
 
-        // Unwind all receipts for transactions in the block range
+        // Reeipts are already pruned by `take_state` call, but we still run
+        // `prepare_static_file_producer` for consistency checks
         if self.prune_modes.receipts.is_none() && self.prune_modes.receipts_log_filter.is_empty() {
             // We only use static files for Receipts, if there is no receipt pruning of any kind.
 
