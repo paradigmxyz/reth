@@ -14,7 +14,7 @@ workspace = true
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-execution-errors.workspace = true
-reth-trie-common.workspace = true
+reth-trie-common = { workspace = true, optional = true }
 reth-trie.workspace = true
 
 revm.workspace = true
@@ -43,14 +43,15 @@ serde = [
 	"alloy-eips/serde",
 	"alloy-primitives/serde",
 	"reth-primitives-traits/serde",
-  "alloy-consensus/serde",
-	"reth-trie-common/serde",
+	"alloy-consensus/serde",
 	"reth-trie/serde",
+	"reth-trie-common?/serde"
 ]
 serde-bincode-compat = [
+	"serde",
+	"reth-trie-common/serde-bincode-compat",
 	"reth-primitives/serde-bincode-compat",
 	"reth-primitives-traits/serde-bincode-compat",
-	"reth-trie-common/serde-bincode-compat",
 	"serde_with",
 	"alloy-eips/serde-bincode-compat",
     "alloy-consensus/serde-bincode-compat",
