@@ -271,9 +271,9 @@ pub trait TransactionPool: Send + Sync + Clone {
     fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
     /// Returns first `max` transactions that can be included in the next block.
+    /// See <https://github.com/paradigmxyz/reth/issues/12767#issuecomment-2493223579>
     ///
     /// Consumer: Block production
-    /// See https://github.com/paradigmxyz/reth/issues/12767#issuecomment-2493223579
     fn pending_transactions_max(
         &self,
         max: usize,
