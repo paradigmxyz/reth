@@ -26,7 +26,7 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::TryIntoHistoricalStateProvider;
+use reth_storage_api::{NodePrimitivesProvider, TryIntoHistoricalStateProvider};
 use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
@@ -202,6 +202,10 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     }
 }
 
+impl<N: NodeTypesWithDB> NodePrimitivesProvider for ProviderFactory<N> {
+    type Primitives = N::Primitives;
+}
+
 impl<N: ProviderNodeTypes> DatabaseProviderFactory for ProviderFactory<N> {
     type DB = N::DB;
     type Provider = DatabaseProvider<<N::DB as Database>::TX, N>;
@@ -217,8 +221,6 @@ impl<N: ProviderNodeTypes> DatabaseProviderFactory for ProviderFactory<N> {
 }
 
 impl<N: NodeTypesWithDB> StaticFileProviderFactory for ProviderFactory<N> {
-    type Primitives = N::Primitives;
-
     /// Returns static file provider
     fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         self.static_file_provider.clone()

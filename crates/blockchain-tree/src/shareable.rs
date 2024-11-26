@@ -16,7 +16,7 @@ use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader};
 use reth_provider::{
     providers::ProviderNodeTypes, BlockchainTreePendingStateProvider, CanonStateNotifications,
-    CanonStateSubscriptions, FullExecutionDataProvider, ProviderError,
+    CanonStateSubscriptions, FullExecutionDataProvider, NodePrimitivesProvider, ProviderError,
 };
 use reth_storage_errors::provider::ProviderResult;
 use std::{collections::BTreeMap, sync::Arc};
@@ -185,9 +185,17 @@ where
     }
 }
 
-impl<N, E> CanonStateSubscriptions for ShareableBlockchainTree<N, E>
+impl<N, E> NodePrimitivesProvider for ShareableBlockchainTree<N, E>
 where
     N: ProviderNodeTypes,
+    E: Send + Sync,
+{
+    type Primitives = N::Primitives;
+}
+
+impl<N, E> CanonStateSubscriptions for ShareableBlockchainTree<N, E>
+where
+    N: TreeNodeTypes,
     E: Send + Sync,
 {
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {

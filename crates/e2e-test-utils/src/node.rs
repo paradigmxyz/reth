@@ -1,6 +1,6 @@
 use std::{marker::PhantomData, pin::Pin};
 
-use alloy_consensus::{BlockHeader, Sealable};
+use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use eyre::Ok;
@@ -16,8 +16,9 @@ use reth::{
     },
 };
 use reth_chainspec::EthereumHardforks;
-use reth_node_api::{Block, FullBlock, NodePrimitives};
+use reth_node_api::Block;
 use reth_node_builder::{rpc::RethRpcAddOns, NodeTypes, NodeTypesWithEngine};
+use reth_primitives::EthPrimitives;
 use reth_stages_types::StageId;
 use tokio_stream::StreamExt;
 use url::Url;
@@ -56,7 +57,7 @@ where
     Node::Types: NodeTypesWithEngine<
         ChainSpec: EthereumHardforks,
         Engine = Engine,
-        Primitives: NodePrimitives<Block: FullBlock>,
+        Primitives = EthPrimitives,
     >,
     Node::Network: PeersHandleProvider,
     AddOns: RethRpcAddOns<Node>,

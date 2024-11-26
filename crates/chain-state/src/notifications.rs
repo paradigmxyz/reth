@@ -1,9 +1,9 @@
 //! Canonical chain state notification trait and types.
 
-use auto_impl::auto_impl;
 use derive_more::{Deref, DerefMut};
 use reth_execution_types::{BlockReceipts, Chain};
 use reth_primitives::{NodePrimitives, SealedBlockWithSenders, SealedHeader};
+use reth_storage_api::NodePrimitivesProvider;
 use std::{
     pin::Pin,
     sync::Arc,
@@ -25,18 +25,27 @@ pub type CanonStateNotificationSender<N = reth_primitives::EthPrimitives> =
     broadcast::Sender<CanonStateNotification<N>>;
 
 /// A type that allows to register chain related event subscriptions.
-#[auto_impl(&, Arc)]
-pub trait CanonStateSubscriptions: Send + Sync {
+pub trait CanonStateSubscriptions: NodePrimitivesProvider + Send + Sync {
     /// Get notified when a new canonical chain was imported.
     ///
     /// A canonical chain be one or more blocks, a reorg or a revert.
-    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications;
+    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<Self::Primitives>;
 
     /// Convenience method to get a stream of [`CanonStateNotification`].
-    fn canonical_state_stream(&self) -> CanonStateNotificationStream {
+    fn canonical_state_stream(&self) -> CanonStateNotificationStream<Self::Primitives> {
         CanonStateNotificationStream {
             st: BroadcastStream::new(self.subscribe_to_canonical_state()),
         }
+    }
+}
+
+impl<T: CanonStateSubscriptions> CanonStateSubscriptions for &T {
+    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<Self::Primitives> {
+        (*self).subscribe_to_canonical_state()
+    }
+
+    fn canonical_state_stream(&self) -> CanonStateNotificationStream<Self::Primitives> {
+        (*self).canonical_state_stream()
     }
 }
 

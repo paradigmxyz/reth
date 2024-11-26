@@ -2,6 +2,7 @@
 
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::ChainSpecProvider;
+use reth_primitives::NodePrimitives;
 use reth_storage_api::BlockReaderIdExt;
 use reth_tasks::TaskSpawner;
 
@@ -41,7 +42,8 @@ where
     where
         Provider: ChainSpecProvider + 'static,
         Tasks: TaskSpawner,
-        Events: CanonStateSubscriptions,
+        Events:
+            CanonStateSubscriptions<Primitives: NodePrimitives<Receipt = reth_primitives::Receipt>>,
     {
         let fee_history_cache =
             FeeHistoryCache::new(self.cache.clone(), self.config.fee_history_cache);

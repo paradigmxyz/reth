@@ -26,7 +26,9 @@ use reth_primitives::{
 use reth_primitives_traits::{Block, BlockBody};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::{DatabaseProviderFactory, StateProvider, StorageChangeSetReader};
+use reth_storage_api::{
+    DatabaseProviderFactory, NodePrimitivesProvider, StateProvider, StorageChangeSetReader,
+};
 use reth_storage_errors::provider::ProviderResult;
 use revm::{
     db::states::PlainStorageRevert,
@@ -613,9 +615,11 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> StaticFileProviderFactory for ConsistentProvider<N> {
+impl<N: ProviderNodeTypes> NodePrimitivesProvider for ConsistentProvider<N> {
     type Primitives = N::Primitives;
+}
 
+impl<N: ProviderNodeTypes> StaticFileProviderFactory for ConsistentProvider<N> {
     fn static_file_provider(&self) -> StaticFileProvider<N::Primitives> {
         self.storage_provider.static_file_provider()
     }
