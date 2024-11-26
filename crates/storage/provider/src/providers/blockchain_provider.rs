@@ -775,12 +775,6 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider2<N> {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        ops::{Range, RangeBounds},
-        sync::Arc,
-        time::Instant,
-    };
-
     use crate::{
         providers::BlockchainProvider2,
         test_utils::{
@@ -812,7 +806,7 @@ mod tests {
     use reth_primitives::{
         BlockExt, Receipt, SealedBlock, StaticFileSegment, TransactionSignedNoHash,
     };
-    use reth_primitives_traits::BlockBody as _;
+    use reth_primitives_traits::{BlockBody as _, SignedTransaction};
     use reth_storage_api::{
         BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
         ChangeSetReader, DatabaseProviderFactory, HeaderProvider, ReceiptProvider,
@@ -824,7 +818,11 @@ mod tests {
         random_receipt, BlockParams, BlockRangeParams,
     };
     use revm::db::BundleState;
-    use std::ops::Bound;
+    use std::{
+        ops::{Bound, Range, RangeBounds},
+        sync::Arc,
+        time::Instant,
+    };
 
     const TEST_BLOCKS_COUNT: usize = 5;
 

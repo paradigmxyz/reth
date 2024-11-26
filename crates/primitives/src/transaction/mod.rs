@@ -1074,42 +1074,6 @@ impl TransactionSigned {
         self.hash.get_or_init(|| self.recalculate_hash())
     }
 
-    /// Recover signer from signature and hash.
-    ///
-    /// Returns `None` if the transaction's signature is invalid following [EIP-2](https://eips.ethereum.org/EIPS/eip-2), see also [`recover_signer`].
-    ///
-    /// Note:
-    ///
-    /// This can fail for some early ethereum mainnet transactions pre EIP-2, use
-    /// [`Self::recover_signer_unchecked`] if you want to recover the signer without ensuring that
-    /// the signature has a low `s` value.
-    pub fn recover_signer(&self) -> Option<Address> {
-        // Optimism's Deposit transaction does not have a signature. Directly return the
-        // `from` address.
-        #[cfg(feature = "optimism")]
-        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from)
-        }
-        let signature_hash = self.signature_hash();
-        recover_signer(&self.signature, signature_hash)
-    }
-
-    /// Recover signer from signature and hash _without ensuring that the signature has a low `s`
-    /// value_.
-    ///
-    /// Returns `None` if the transaction's signature is invalid, see also
-    /// [`recover_signer_unchecked`].
-    pub fn recover_signer_unchecked(&self) -> Option<Address> {
-        // Optimism's Deposit transaction does not have a signature. Directly return the
-        // `from` address.
-        #[cfg(feature = "optimism")]
-        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from)
-        }
-        let signature_hash = self.signature_hash();
-        recover_signer_unchecked(&self.signature, signature_hash)
-    }
-
     /// Recovers a list of signers from a transaction list iterator.
     ///
     /// Returns `None`, if some transaction's signature is invalid, see also
@@ -1281,11 +1245,23 @@ impl SignedTransaction for TransactionSigned {
     }
 
     fn recover_signer(&self) -> Option<Address> {
+        // Optimism's Deposit transaction does not have a signature. Directly return the
+        // `from` address.
+        #[cfg(feature = "optimism")]
+        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
+            return Some(from)
+        }
         let signature_hash = self.signature_hash();
         recover_signer(&self.signature, signature_hash)
     }
 
     fn recover_signer_unchecked(&self) -> Option<Address> {
+        // Optimism's Deposit transaction does not have a signature. Directly return the
+        // `from` address.
+        #[cfg(feature = "optimism")]
+        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
+            return Some(from)
+        }
         let signature_hash = self.signature_hash();
         recover_signer_unchecked(&self.signature, signature_hash)
     }
@@ -1971,6 +1947,7 @@ mod tests {
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
     use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_codecs::Compact;
+    use reth_primitives_traits::SignedTransaction;
     use std::str::FromStr;
 
     #[test]
