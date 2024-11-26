@@ -678,6 +678,14 @@ where
         self.get_pool_data().best_transactions_with_attributes(best_transactions_attributes)
     }
 
+    /// Returns only the first `max` transactions in the pending pool.
+    pub(crate) fn pending_transactions_max(
+        &self,
+        max: usize,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.get_pool_data().pending_transactions_iter().take(max).collect()
+    }
+
     /// Returns all transactions from the pending sub-pool
     pub(crate) fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         self.get_pool_data().pending_transactions()
