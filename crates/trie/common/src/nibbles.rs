@@ -120,3 +120,97 @@ impl Compact for StoredNibblesSubKey {
         (Self(Nibbles::from_nibbles_unchecked(&buf[..len])), &buf[65..])
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::BytesMut;
+
+    #[test]
+    fn test_stored_nibbles_from_nibbles() {
+        let nibbles = Nibbles::from_nibbles_unchecked(vec![0x12, 0x34, 0x56]);
+        let stored = StoredNibbles::from(nibbles.clone());
+        assert_eq!(stored.0, nibbles);
+    }
+
+    #[test]
+    fn test_stored_nibbles_from_vec() {
+        let bytes = vec![0x12, 0x34, 0x56];
+        let stored = StoredNibbles::from(bytes.clone());
+        assert_eq!(stored.0.as_slice(), bytes.as_slice());
+    }
+
+    #[test]
+    fn test_stored_nibbles_equality() {
+        let bytes = vec![0x12, 0x34];
+        let stored = StoredNibbles::from(bytes.clone());
+        assert_eq!(stored, *bytes.as_slice());
+    }
+
+    #[test]
+    fn test_stored_nibbles_partial_cmp() {
+        let stored = StoredNibbles::from(vec![0x12, 0x34]);
+        let other = vec![0x12, 0x35];
+        assert!(stored < *other.as_slice());
+    }
+
+    #[test]
+    fn test_stored_nibbles_to_compact() {
+        let stored = StoredNibbles::from(vec![0x12, 0x34]);
+        let mut buf = BytesMut::with_capacity(10);
+        let len = stored.to_compact(&mut buf);
+        assert_eq!(len, 2);
+        assert_eq!(buf, &vec![0x12, 0x34][..]);
+    }
+
+    #[test]
+    fn test_stored_nibbles_from_compact() {
+        let buf = vec![0x12, 0x34, 0x56];
+        let (stored, remaining) = StoredNibbles::from_compact(&buf, 2);
+        assert_eq!(stored.0.as_slice(), &[0x12, 0x34]);
+        assert_eq!(remaining, &[0x56]);
+    }
+
+    #[test]
+    fn test_stored_nibbles_subkey_from_nibbles() {
+        let nibbles = Nibbles::from_nibbles_unchecked(vec![0x12, 0x34]);
+        let subkey = StoredNibblesSubKey::from(nibbles.clone());
+        assert_eq!(subkey.0, nibbles);
+    }
+
+    #[test]
+    fn test_stored_nibbles_subkey_to_compact() {
+        let subkey = StoredNibblesSubKey::from(vec![0x12, 0x34]);
+        let mut buf = BytesMut::with_capacity(65);
+        let len = subkey.to_compact(&mut buf);
+        assert_eq!(len, 65);
+        assert_eq!(buf[..2], [0x12, 0x34]);
+        assert_eq!(buf[64], 2); // Length byte
+    }
+
+    #[test]
+    fn test_stored_nibbles_subkey_from_compact() {
+        let mut buf = vec![0x12, 0x34];
+        buf.resize(65, 0);
+        buf[64] = 2;
+        let (subkey, remaining) = StoredNibblesSubKey::from_compact(&buf, 65);
+        assert_eq!(subkey.0.as_slice(), &[0x12, 0x34]);
+        assert_eq!(remaining, &[] as &[u8]);
+    }
+
+    #[test]
+    fn test_serialization_stored_nibbles() {
+        let stored = StoredNibbles::from(vec![0x12, 0x34]);
+        let serialized = serde_json::to_string(&stored).unwrap();
+        let deserialized: StoredNibbles = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(stored, deserialized);
+    }
+
+    #[test]
+    fn test_serialization_stored_nibbles_subkey() {
+        let subkey = StoredNibblesSubKey::from(vec![0x12, 0x34]);
+        let serialized = serde_json::to_string(&subkey).unwrap();
+        let deserialized: StoredNibblesSubKey = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(subkey, deserialized);
+    }
+}
