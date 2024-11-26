@@ -49,7 +49,7 @@ thiserror.workspace = true
 tempfile = { workspace = true, optional = true }
 derive_more.workspace = true
 rustc-hash = { workspace = true, optional = true }
-sysinfo = { version = "0.31", default-features = false, features = ["system"] }
+sysinfo = { version = "0.32", default-features = false, features = ["system"] }
 parking_lot = { workspace = true, optional = true }
 
 # arbitrary utils
