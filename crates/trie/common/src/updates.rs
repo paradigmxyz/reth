@@ -557,7 +557,7 @@ pub mod serde_bincode_compat {
             #[serde_as]
             #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
             struct Data {
-                #[serde_as(as = "serde_bincode_compat::TrieUpdates")]
+                #[serde_as(as = "serde_bincode_compat::updates::TrieUpdates")]
                 trie_updates: TrieUpdates,
             }
 
