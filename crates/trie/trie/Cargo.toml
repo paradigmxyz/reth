@@ -86,10 +86,6 @@ test-utils = [
 ]
 
 [[bench]]
-name = "prefix_set"
-harness = false
-
-[[bench]]
 name = "hash_post_state"
 harness = false
 

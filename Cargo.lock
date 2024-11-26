@@ -9381,6 +9381,7 @@ dependencies = [
  "alloy-trie",
  "arbitrary",
  "bytes",
+ "criterion",
  "derive_more 1.0.0",
  "hash-db",
  "itertools 0.13.0",
