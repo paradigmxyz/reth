@@ -68,10 +68,13 @@ pub trait BlockWriter: Send + Sync {
     ///
     /// Return [StoredBlockBodyIndices] that contains indices of the first and last transactions and
     /// transition in the block.
+    ///
+    /// Accepts [`StorageLocation`] value which specifies where transactions and headers should be
+    /// written.
     fn insert_block(
         &self,
         block: SealedBlockWithSenders<Self::Block>,
-        write_transactions_to: StorageLocation,
+        write_to: StorageLocation,
     ) -> ProviderResult<StoredBlockBodyIndices>;
 
     /// Appends a batch of block bodies extending the canonical chain. This is invoked during
