@@ -113,6 +113,7 @@ pub(crate) enum StateRootMessage {
 pub(crate) struct ProofSequencer {
     /// The next expected proof sequence number
     next_sequence: u64,
+    internal_sequence: u64,
     /// Buffer for out-of-order proofs
     pending_proofs: BTreeMap<u64, MultiProof>,
 }
@@ -132,19 +133,15 @@ impl ProofSequencer {
 
     /// Adds a proof and returns all sequential proofs if we have a continuous sequence
     pub(crate) fn add_proof(&mut self, sequence: u64, proof: MultiProof) -> Vec<MultiProof> {
-        if sequence < self.next_sequence {
-            return vec![proof];
-        }
-
         // Insert the new proof into pending proofs
         self.pending_proofs.insert(sequence, proof);
 
         let mut consecutive_proofs = Vec::with_capacity(self.pending_proofs.len());
 
         // Keep taking proofs from pending_proofs as long as they form a consecutive sequence
-        while let Some(proof) = self.pending_proofs.remove(&self.next_sequence) {
+        while let Some(proof) = self.pending_proofs.remove(&self.internal_sequence) {
             consecutive_proofs.push(proof);
-            self.next_sequence += 1;
+            self.internal_sequence += 1;
         }
 
         consecutive_proofs
@@ -892,20 +889,6 @@ mod tests {
         let ready = sequencer.add_proof(2, proof3);
         assert_eq!(ready.len(), 0);
         assert!(sequencer.has_pending());
-    }
-
-    #[test]
-    fn test_add_proof_duplicate_sequence() {
-        let mut sequencer = ProofSequencer::new();
-        let proof1 = MultiProof::default();
-        let proof2 = MultiProof::default();
-
-        let ready = sequencer.add_proof(0, proof1);
-        assert_eq!(ready.len(), 1);
-
-        let ready = sequencer.add_proof(0, proof2);
-        assert_eq!(ready.len(), 1);
-        assert!(!sequencer.has_pending());
     }
 
     #[test]
