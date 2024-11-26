@@ -1952,7 +1952,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateChangeWriter
     ///     2. Take the new value from the local state
     ///     3. Set the local state to the value in the changeset
     fn remove_state_above(&self, block: BlockNumber) -> ProviderResult<()> {
-        let range = block..=self.last_block_number()?;
+        let range = block + 1..=self.last_block_number()?;
 
         if range.is_empty() {
             return Ok(());
@@ -2045,8 +2045,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateChangeWriter
     ///     1. Take the old value from the changeset
     ///     2. Take the new value from the local state
     ///     3. Set the local state to the value in the changeset
-    fn take_state_above(&self, above: BlockNumber) -> ProviderResult<ExecutionOutcome> {
-        let range = above..=self.last_block_number()?;
+    fn take_state_above(&self, block: BlockNumber) -> ProviderResult<ExecutionOutcome> {
+        let range = block + 1..=self.last_block_number()?;
 
         if range.is_empty() {
             return Ok(ExecutionOutcome::default())
