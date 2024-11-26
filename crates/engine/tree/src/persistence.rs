@@ -2,8 +2,7 @@ use crate::metrics::PersistenceMetrics;
 use alloy_eips::BlockNumHash;
 use reth_chain_state::ExecutedBlock;
 use reth_errors::ProviderError;
-use reth_primitives::BlockBody;
-use reth_primitives_traits::FullNodePrimitives;
+use reth_primitives::EthPrimitives;
 use reth_provider::{
     providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockHashReader,
     ChainStateBlockWriter, DatabaseProviderFactory, ProviderFactory, StaticFileProviderFactory,
@@ -20,18 +19,9 @@ use tracing::{debug, error};
 
 /// A helper trait with requirements for [`ProviderNodeTypes`] to be used within
 /// [`PersistenceService`].
-pub trait PersistenceNodeTypes:
-    ProviderNodeTypes<
-    Primitives: FullNodePrimitives<Block = reth_primitives::Block, BlockBody = BlockBody>,
->
-{
-}
-impl<T> PersistenceNodeTypes for T where
-    T: ProviderNodeTypes<
-        Primitives: FullNodePrimitives<Block = reth_primitives::Block, BlockBody = BlockBody>,
-    >
-{
-}
+pub trait PersistenceNodeTypes: ProviderNodeTypes<Primitives = EthPrimitives> {}
+impl<T> PersistenceNodeTypes for T where T: ProviderNodeTypes<Primitives = EthPrimitives> {}
+
 /// Writes parts of reth's in memory tree state to the database and static files.
 ///
 /// This is meant to be a spawned service that listens for various incoming persistence operations,

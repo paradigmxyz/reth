@@ -14,7 +14,7 @@ pub trait NodePrimitives:
     /// Block header primitive.
     type BlockHeader: BlockHeader;
     /// Block body primitive.
-    type BlockBody: BlockBody<Transaction = Self::SignedTx>;
+    type BlockBody: BlockBody<Transaction = Self::SignedTx, OmmerHeader = Self::BlockHeader>;
     /// Signed version of the transaction type.
     type SignedTx: Send + Sync + Unpin + Clone + fmt::Debug + PartialEq + Eq + MaybeSerde + 'static;
     /// Transaction envelope type ID.

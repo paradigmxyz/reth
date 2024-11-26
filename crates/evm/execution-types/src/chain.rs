@@ -2,16 +2,17 @@
 
 use crate::ExecutionOutcome;
 use alloc::{borrow::Cow, collections::BTreeMap};
-use alloy_eips::{eip1898::ForkBlock, BlockNumHash};
+use alloy_consensus::BlockHeader;
+use alloy_eips::{eip1898::ForkBlock, eip2718::Encodable2718, BlockNumHash};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash};
 use core::{fmt, ops::RangeInclusive};
 use reth_execution_errors::{BlockExecutionError, InternalBlockExecutionError};
 use reth_primitives::{
-    SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionSigned,
-    TransactionSignedEcRecovered,
+    transaction::SignedTransactionIntoRecoveredExt, SealedBlockFor, SealedBlockWithSenders,
+    SealedHeader, TransactionSignedEcRecovered,
 };
-use reth_primitives_traits::NodePrimitives;
-use reth_trie_common::updates::TrieUpdates;
+use reth_primitives_traits::{Block, BlockBody, NodePrimitives, SignedTransaction};
+use reth_trie::updates::TrieUpdates;
 use revm::db::BundleState;
 
 /// A chain of blocks and their final state.
@@ -28,7 +29,7 @@ use revm::db::BundleState;
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Chain<N: NodePrimitives = reth_primitives::EthPrimitives> {
     /// All blocks in this chain.
-    blocks: BTreeMap<BlockNumber, SealedBlockWithSenders>,
+    blocks: BTreeMap<BlockNumber, SealedBlockWithSenders<N::Block>>,
     /// The outcome of block execution for this chain.
     ///
     /// This field contains the state of all accounts after the execution of all blocks in this
@@ -49,11 +50,11 @@ impl<N: NodePrimitives> Chain<N> {
     ///
     /// A chain of blocks should not be empty.
     pub fn new(
-        blocks: impl IntoIterator<Item = SealedBlockWithSenders>,
+        blocks: impl IntoIterator<Item = SealedBlockWithSenders<N::Block>>,
         execution_outcome: ExecutionOutcome<N::Receipt>,
         trie_updates: Option<TrieUpdates>,
     ) -> Self {
-        let blocks = blocks.into_iter().map(|b| (b.number, b)).collect::<BTreeMap<_, _>>();
+        let blocks = blocks.into_iter().map(|b| (b.number(), b)).collect::<BTreeMap<_, _>>();
         debug_assert!(!blocks.is_empty(), "Chain should have at least one block");
 
         Self { blocks, execution_outcome, trie_updates }
@@ -61,7 +62,7 @@ impl<N: NodePrimitives> Chain<N> {
 
     /// Create new Chain from a single block and its state.
     pub fn from_block(
-        block: SealedBlockWithSenders,
+        block: SealedBlockWithSenders<N::Block>,
         execution_outcome: ExecutionOutcome<N::Receipt>,
         trie_updates: Option<TrieUpdates>,
     ) -> Self {
@@ -69,17 +70,17 @@ impl<N: NodePrimitives> Chain<N> {
     }
 
     /// Get the blocks in this chain.
-    pub const fn blocks(&self) -> &BTreeMap<BlockNumber, SealedBlockWithSenders> {
+    pub const fn blocks(&self) -> &BTreeMap<BlockNumber, SealedBlockWithSenders<N::Block>> {
         &self.blocks
     }
 
     /// Consumes the type and only returns the blocks in this chain.
-    pub fn into_blocks(self) -> BTreeMap<BlockNumber, SealedBlockWithSenders> {
+    pub fn into_blocks(self) -> BTreeMap<BlockNumber, SealedBlockWithSenders<N::Block>> {
         self.blocks
     }
 
     /// Returns an iterator over all headers in the block with increasing block numbers.
-    pub fn headers(&self) -> impl Iterator<Item = SealedHeader> + '_ {
+    pub fn headers(&self) -> impl Iterator<Item = SealedHeader<N::BlockHeader>> + '_ {
         self.blocks.values().map(|block| block.header.clone())
     }
 
@@ -120,12 +121,15 @@ impl<N: NodePrimitives> Chain<N> {
     }
 
     /// Returns the block with matching hash.
-    pub fn block(&self, block_hash: BlockHash) -> Option<&SealedBlock> {
+    pub fn block(&self, block_hash: BlockHash) -> Option<&SealedBlockFor<N::Block>> {
         self.block_with_senders(block_hash).map(|block| &block.block)
     }
 
     /// Returns the block with matching hash.
-    pub fn block_with_senders(&self, block_hash: BlockHash) -> Option<&SealedBlockWithSenders> {
+    pub fn block_with_senders(
+        &self,
+        block_hash: BlockHash,
+    ) -> Option<&SealedBlockWithSenders<N::Block>> {
         self.blocks.iter().find_map(|(_num, block)| (block.hash() == block_hash).then_some(block))
     }
 
@@ -134,7 +138,7 @@ impl<N: NodePrimitives> Chain<N> {
         &self,
         block_number: BlockNumber,
     ) -> Option<ExecutionOutcome<N::Receipt>> {
-        if self.tip().number == block_number {
+        if self.tip().number() == block_number {
             return Some(self.execution_outcome.clone())
         }
 
@@ -152,14 +156,14 @@ impl<N: NodePrimitives> Chain<N> {
     /// 3. The optional trie updates.
     pub fn into_inner(
         self,
-    ) -> (ChainBlocks<'static>, ExecutionOutcome<N::Receipt>, Option<TrieUpdates>) {
+    ) -> (ChainBlocks<'static, N::Block>, ExecutionOutcome<N::Receipt>, Option<TrieUpdates>) {
         (ChainBlocks { blocks: Cow::Owned(self.blocks) }, self.execution_outcome, self.trie_updates)
     }
 
     /// Destructure the chain into its inner components:
     /// 1. A reference to the blocks contained in the chain.
     /// 2. A reference to the execution outcome representing the final state.
-    pub const fn inner(&self) -> (ChainBlocks<'_>, &ExecutionOutcome<N::Receipt>) {
+    pub const fn inner(&self) -> (ChainBlocks<'_, N::Block>, &ExecutionOutcome<N::Receipt>) {
         (ChainBlocks { blocks: Cow::Borrowed(&self.blocks) }, &self.execution_outcome)
     }
 
@@ -169,14 +173,15 @@ impl<N: NodePrimitives> Chain<N> {
     }
 
     /// Returns an iterator over all blocks in the chain with increasing block number.
-    pub fn blocks_iter(&self) -> impl Iterator<Item = &SealedBlockWithSenders> + '_ {
+    pub fn blocks_iter(&self) -> impl Iterator<Item = &SealedBlockWithSenders<N::Block>> + '_ {
         self.blocks().iter().map(|block| block.1)
     }
 
     /// Returns an iterator over all blocks and their receipts in the chain.
     pub fn blocks_and_receipts(
         &self,
-    ) -> impl Iterator<Item = (&SealedBlockWithSenders, &Vec<Option<N::Receipt>>)> + '_ {
+    ) -> impl Iterator<Item = (&SealedBlockWithSenders<N::Block>, &Vec<Option<N::Receipt>>)> + '_
+    {
         self.blocks_iter().zip(self.block_receipts_iter())
     }
 
@@ -184,7 +189,7 @@ impl<N: NodePrimitives> Chain<N> {
     #[track_caller]
     pub fn fork_block(&self) -> ForkBlock {
         let first = self.first();
-        ForkBlock { number: first.number.saturating_sub(1), hash: first.parent_hash }
+        ForkBlock { number: first.number().saturating_sub(1), hash: first.parent_hash() }
     }
 
     /// Get the first block in this chain.
@@ -193,7 +198,7 @@ impl<N: NodePrimitives> Chain<N> {
     ///
     /// If chain doesn't have any blocks.
     #[track_caller]
-    pub fn first(&self) -> &SealedBlockWithSenders {
+    pub fn first(&self) -> &SealedBlockWithSenders<N::Block> {
         self.blocks.first_key_value().expect("Chain should have at least one block").1
     }
 
@@ -203,7 +208,7 @@ impl<N: NodePrimitives> Chain<N> {
     ///
     /// If chain doesn't have any blocks.
     #[track_caller]
-    pub fn tip(&self) -> &SealedBlockWithSenders {
+    pub fn tip(&self) -> &SealedBlockWithSenders<N::Block> {
         self.blocks.last_key_value().expect("Chain should have at least one block").1
     }
 
@@ -218,7 +223,7 @@ impl<N: NodePrimitives> Chain<N> {
     ///
     /// If chain doesn't have any blocks.
     pub fn range(&self) -> RangeInclusive<BlockNumber> {
-        self.first().number..=self.tip().number
+        self.first().number()..=self.tip().number()
     }
 
     /// Get all receipts for the given block.
@@ -230,15 +235,18 @@ impl<N: NodePrimitives> Chain<N> {
     /// Get all receipts with attachment.
     ///
     /// Attachment includes block number, block hash, transaction hash and transaction index.
-    pub fn receipts_with_attachment(&self) -> Vec<BlockReceipts<N::Receipt>> {
+    pub fn receipts_with_attachment(&self) -> Vec<BlockReceipts<N::Receipt>>
+    where
+        N::SignedTx: Encodable2718,
+    {
         let mut receipt_attach = Vec::with_capacity(self.blocks().len());
         for ((block_num, block), receipts) in
             self.blocks().iter().zip(self.execution_outcome.receipts().iter())
         {
             let mut tx_receipts = Vec::with_capacity(receipts.len());
-            for (tx, receipt) in block.body.transactions.iter().zip(receipts.iter()) {
+            for (tx, receipt) in block.body.transactions().iter().zip(receipts.iter()) {
                 tx_receipts.push((
-                    tx.hash(),
+                    tx.trie_hash(),
                     receipt.as_ref().expect("receipts have not been pruned").clone(),
                 ));
             }
@@ -252,10 +260,10 @@ impl<N: NodePrimitives> Chain<N> {
     /// This method assumes that blocks attachment to the chain has already been validated.
     pub fn append_block(
         &mut self,
-        block: SealedBlockWithSenders,
+        block: SealedBlockWithSenders<N::Block>,
         execution_outcome: ExecutionOutcome<N::Receipt>,
     ) {
-        self.blocks.insert(block.number, block);
+        self.blocks.insert(block.number(), block);
         self.execution_outcome.extend(execution_outcome);
         self.trie_updates.take(); // reset
     }
@@ -375,22 +383,22 @@ impl fmt::Display for DisplayBlocksChain<'_> {
 
 /// All blocks in the chain
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ChainBlocks<'a> {
-    blocks: Cow<'a, BTreeMap<BlockNumber, SealedBlockWithSenders>>,
+pub struct ChainBlocks<'a, B: Block> {
+    blocks: Cow<'a, BTreeMap<BlockNumber, SealedBlockWithSenders<B>>>,
 }
 
-impl ChainBlocks<'_> {
+impl<B: Block<Body: BlockBody<Transaction: SignedTransaction>>> ChainBlocks<'_, B> {
     /// Creates a consuming iterator over all blocks in the chain with increasing block number.
     ///
     /// Note: this always yields at least one block.
     #[inline]
-    pub fn into_blocks(self) -> impl Iterator<Item = SealedBlockWithSenders> {
+    pub fn into_blocks(self) -> impl Iterator<Item = SealedBlockWithSenders<B>> {
         self.blocks.into_owned().into_values()
     }
 
     /// Creates an iterator over all blocks in the chain with increasing block number.
     #[inline]
-    pub fn iter(&self) -> impl Iterator<Item = (&BlockNumber, &SealedBlockWithSenders)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&BlockNumber, &SealedBlockWithSenders<B>)> {
         self.blocks.iter()
     }
 
@@ -400,7 +408,7 @@ impl ChainBlocks<'_> {
     ///
     /// Chains always have at least one block.
     #[inline]
-    pub fn tip(&self) -> &SealedBlockWithSenders {
+    pub fn tip(&self) -> &SealedBlockWithSenders<B> {
         self.blocks.last_key_value().expect("Chain should have at least one block").1
     }
 
@@ -410,21 +418,21 @@ impl ChainBlocks<'_> {
     ///
     /// Chains always have at least one block.
     #[inline]
-    pub fn first(&self) -> &SealedBlockWithSenders {
+    pub fn first(&self) -> &SealedBlockWithSenders<B> {
         self.blocks.first_key_value().expect("Chain should have at least one block").1
     }
 
     /// Returns an iterator over all transactions in the chain.
     #[inline]
-    pub fn transactions(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
-        self.blocks.values().flat_map(|block| block.body.transactions.iter())
+    pub fn transactions(&self) -> impl Iterator<Item = &<B::Body as BlockBody>::Transaction> + '_ {
+        self.blocks.values().flat_map(|block| block.body.transactions().iter())
     }
 
     /// Returns an iterator over all transactions and their senders.
     #[inline]
     pub fn transactions_with_sender(
         &self,
-    ) -> impl Iterator<Item = (&Address, &TransactionSigned)> + '_ {
+    ) -> impl Iterator<Item = (&Address, &<B::Body as BlockBody>::Transaction)> + '_ {
         self.blocks.values().flat_map(|block| block.transactions_with_sender())
     }
 
@@ -434,20 +442,21 @@ impl ChainBlocks<'_> {
     #[inline]
     pub fn transactions_ecrecovered(
         &self,
-    ) -> impl Iterator<Item = TransactionSignedEcRecovered> + '_ {
+    ) -> impl Iterator<Item = TransactionSignedEcRecovered<<B::Body as BlockBody>::Transaction>> + '_
+    {
         self.transactions_with_sender().map(|(signer, tx)| tx.clone().with_signer(*signer))
     }
 
     /// Returns an iterator over all transaction hashes in the block
     #[inline]
     pub fn transaction_hashes(&self) -> impl Iterator<Item = TxHash> + '_ {
-        self.blocks.values().flat_map(|block| block.transactions().iter().map(|tx| tx.hash()))
+        self.blocks.values().flat_map(|block| block.transactions().iter().map(|tx| tx.trie_hash()))
     }
 }
 
-impl IntoIterator for ChainBlocks<'_> {
-    type Item = (BlockNumber, SealedBlockWithSenders);
-    type IntoIter = std::collections::btree_map::IntoIter<BlockNumber, SealedBlockWithSenders>;
+impl<B: Block> IntoIterator for ChainBlocks<'_, B> {
+    type Item = (BlockNumber, SealedBlockWithSenders<B>);
+    type IntoIter = std::collections::btree_map::IntoIter<BlockNumber, SealedBlockWithSenders<B>>;
 
     fn into_iter(self) -> Self::IntoIter {
         #[allow(clippy::unnecessary_to_owned)]

@@ -4,18 +4,18 @@ use crate::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
     ChainInfoTracker, MemoryOverlayStateProvider,
 };
-use alloy_consensus::Header;
-use alloy_eips::{BlockHashOrNumber, BlockNumHash};
+use alloy_consensus::BlockHeader;
+use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber, BlockNumHash};
 use alloy_primitives::{map::HashMap, Address, TxHash, B256};
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives::{
-    BlockWithSenders, NodePrimitives, Receipts, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    TransactionMeta, TransactionSigned,
+    BlockWithSenders, HeaderExt, NodePrimitives, Receipts, SealedBlock, SealedBlockFor,
+    SealedBlockWithSenders, SealedHeader, TransactionMeta,
 };
-use reth_primitives_traits::BlockBody as _;
+use reth_primitives_traits::{Block, BlockBody as _, SignedTransaction};
 use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
@@ -159,10 +159,8 @@ impl<N: NodePrimitives> CanonicalInMemoryStateInner<N> {
     }
 }
 
-type PendingBlockAndReceipts<N> = (
-    SealedBlock<reth_primitives_traits::HeaderTy<N>, reth_primitives_traits::BodyTy<N>>,
-    Vec<reth_primitives_traits::ReceiptTy<N>>,
-);
+type PendingBlockAndReceipts<N> =
+    (SealedBlockFor<<N as NodePrimitives>::Block>, Vec<reth_primitives_traits::ReceiptTy<N>>);
 
 /// This type is responsible for providing the blocks, receipts, and state for
 /// all canonical blocks not on disk yet and keeps track of the block range that
@@ -172,13 +170,7 @@ pub struct CanonicalInMemoryState<N: NodePrimitives = reth_primitives::EthPrimit
     pub(crate) inner: Arc<CanonicalInMemoryStateInner<N>>,
 }
 
-impl<N> CanonicalInMemoryState<N>
-where
-    N: NodePrimitives<
-        BlockHeader = alloy_consensus::Header,
-        BlockBody = reth_primitives::BlockBody,
-    >,
-{
+impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     /// Create a new in-memory state with the given blocks, numbers, pending state, and optional
     /// finalized header.
     pub fn new(
@@ -250,7 +242,7 @@ where
     /// Note: This assumes that the parent block of the pending block is canonical.
     pub fn set_pending_block(&self, pending: ExecutedBlock<N>) {
         // fetch the state of the pending block's parent block
-        let parent = self.state_by_hash(pending.block().parent_hash);
+        let parent = self.state_by_hash(pending.block().parent_hash());
         let pending = BlockState::with_parent(pending, parent);
         self.inner.in_memory_state.pending.send_modify(|p| {
             p.replace(pending);
@@ -274,14 +266,14 @@ where
             // we first remove the blocks from the reorged chain
             for block in reorged {
                 let hash = block.block().hash();
-                let number = block.block().number;
+                let number = block.block().number();
                 blocks.remove(&hash);
                 numbers.remove(&number);
             }
 
             // insert the new blocks
             for block in new_blocks {
-                let parent = blocks.get(&block.block().parent_hash).cloned();
+                let parent = blocks.get(&block.block().parent_hash()).cloned();
                 let block_state = BlockState::with_parent(block, parent);
                 let hash = block_state.hash();
                 let number = block_state.number();
@@ -341,16 +333,16 @@ where
             // height)
             let mut old_blocks = blocks
                 .drain()
-                .filter(|(_, b)| b.block_ref().block().number > persisted_height)
+                .filter(|(_, b)| b.block_ref().block().number() > persisted_height)
                 .map(|(_, b)| b.block.clone())
                 .collect::<Vec<_>>();
 
             // sort the blocks by number so we can insert them back in natural order (low -> high)
-            old_blocks.sort_unstable_by_key(|block| block.block().number);
+            old_blocks.sort_unstable_by_key(|block| block.block().number());
 
             // re-insert the blocks in natural order and connect them to their parent blocks
             for block in old_blocks {
-                let parent = blocks.get(&block.block().parent_hash).cloned();
+                let parent = blocks.get(&block.block().parent_hash()).cloned();
                 let block_state = BlockState::with_parent(block, parent);
                 let hash = block_state.hash();
                 let number = block_state.number();
@@ -363,7 +355,7 @@ where
             // also shift the pending state if it exists
             self.inner.in_memory_state.pending.send_modify(|p| {
                 if let Some(p) = p.as_mut() {
-                    p.parent = blocks.get(&p.block_ref().block.parent_hash).cloned();
+                    p.parent = blocks.get(&p.block_ref().block.parent_hash()).cloned();
                 }
             });
         }
@@ -474,7 +466,7 @@ where
     }
 
     /// Returns the `Header` corresponding to the pending state.
-    pub fn pending_header(&self) -> Option<Header> {
+    pub fn pending_header(&self) -> Option<N::BlockHeader> {
         self.pending_sealed_header().map(|sealed_header| sealed_header.unseal())
     }
 
@@ -484,7 +476,10 @@ where
     }
 
     /// Returns the `SealedBlockWithSenders` corresponding to the pending state.
-    pub fn pending_block_with_senders(&self) -> Option<SealedBlockWithSenders> {
+    pub fn pending_block_with_senders(&self) -> Option<SealedBlockWithSenders<N::Block>>
+    where
+        N::SignedTx: SignedTransaction,
+    {
         self.pending_state()
             .and_then(|block_state| block_state.block_ref().block().clone().seal_with_senders())
     }
@@ -546,7 +541,10 @@ where
     }
 
     /// Returns a `TransactionSigned` for the given `TxHash` if found.
-    pub fn transaction_by_hash(&self, hash: TxHash) -> Option<TransactionSigned> {
+    pub fn transaction_by_hash(&self, hash: TxHash) -> Option<N::SignedTx>
+    where
+        N::SignedTx: Encodable2718,
+    {
         for block_state in self.canonical_chain() {
             if let Some(tx) = block_state
                 .block_ref()
@@ -554,7 +552,7 @@ where
                 .body
                 .transactions()
                 .iter()
-                .find(|tx| tx.hash() == hash)
+                .find(|tx| tx.trie_hash() == hash)
             {
                 return Some(tx.clone())
             }
@@ -567,7 +565,10 @@ where
     pub fn transaction_by_hash_with_meta(
         &self,
         tx_hash: TxHash,
-    ) -> Option<(TransactionSigned, TransactionMeta)> {
+    ) -> Option<(N::SignedTx, TransactionMeta)>
+    where
+        N::SignedTx: Encodable2718,
+    {
         for block_state in self.canonical_chain() {
             if let Some((index, tx)) = block_state
                 .block_ref()
@@ -576,16 +577,16 @@ where
                 .transactions()
                 .iter()
                 .enumerate()
-                .find(|(_, tx)| tx.hash() == tx_hash)
+                .find(|(_, tx)| tx.trie_hash() == tx_hash)
             {
                 let meta = TransactionMeta {
                     tx_hash,
                     index: index as u64,
                     block_hash: block_state.hash(),
-                    block_number: block_state.block_ref().block.number,
-                    base_fee: block_state.block_ref().block.header.base_fee_per_gas,
-                    timestamp: block_state.block_ref().block.timestamp,
-                    excess_blob_gas: block_state.block_ref().block.excess_blob_gas,
+                    block_number: block_state.block_ref().block.number(),
+                    base_fee: block_state.block_ref().block.header.base_fee_per_gas(),
+                    timestamp: block_state.block_ref().block.timestamp(),
+                    excess_blob_gas: block_state.block_ref().block.excess_blob_gas(),
                 };
                 return Some((tx.clone(), meta))
             }
@@ -636,14 +637,15 @@ impl<N: NodePrimitives> BlockState<N> {
     }
 
     /// Returns the block with senders for the state.
-    pub fn block_with_senders(&self) -> BlockWithSenders {
+    pub fn block_with_senders(&self) -> BlockWithSenders<N::Block> {
         let block = self.block.block().clone();
         let senders = self.block.senders().clone();
-        BlockWithSenders::new_unchecked(block.unseal(), senders)
+        let (header, body) = block.split();
+        BlockWithSenders::new_unchecked(N::Block::new(header.unseal(), body), senders)
     }
 
     /// Returns the sealed block with senders for the state.
-    pub fn sealed_block_with_senders(&self) -> SealedBlockWithSenders {
+    pub fn sealed_block_with_senders(&self) -> SealedBlockWithSenders<N::Block> {
         let block = self.block.block().clone();
         let senders = self.block.senders().clone();
         SealedBlockWithSenders { block, senders }
@@ -656,13 +658,13 @@ impl<N: NodePrimitives> BlockState<N> {
 
     /// Returns the block number of executed block that determines the state.
     pub fn number(&self) -> u64 {
-        self.block.block().number
+        self.block.block().number()
     }
 
     /// Returns the state root after applying the executed block that determines
     /// the state.
     pub fn state_root(&self) -> B256 {
-        self.block.block().header.state_root
+        self.block.block().header.state_root()
     }
 
     /// Returns the `Receipts` of executed block that determines the state.
@@ -748,7 +750,10 @@ impl<N: NodePrimitives> BlockState<N> {
     }
 
     /// Tries to find a transaction by [`TxHash`] in the chain ending at this block.
-    pub fn transaction_on_chain(&self, hash: TxHash) -> Option<TransactionSigned> {
+    pub fn transaction_on_chain(&self, hash: TxHash) -> Option<N::SignedTx>
+    where
+        N::SignedTx: Encodable2718,
+    {
         self.chain().find_map(|block_state| {
             block_state
                 .block_ref()
@@ -756,7 +761,7 @@ impl<N: NodePrimitives> BlockState<N> {
                 .body
                 .transactions()
                 .iter()
-                .find(|tx| tx.hash() == hash)
+                .find(|tx| tx.trie_hash() == hash)
                 .cloned()
         })
     }
@@ -765,7 +770,10 @@ impl<N: NodePrimitives> BlockState<N> {
     pub fn transaction_meta_on_chain(
         &self,
         tx_hash: TxHash,
-    ) -> Option<(TransactionSigned, TransactionMeta)> {
+    ) -> Option<(N::SignedTx, TransactionMeta)>
+    where
+        N::SignedTx: Encodable2718,
+    {
         self.chain().find_map(|block_state| {
             block_state
                 .block_ref()
@@ -774,16 +782,16 @@ impl<N: NodePrimitives> BlockState<N> {
                 .transactions()
                 .iter()
                 .enumerate()
-                .find(|(_, tx)| tx.hash() == tx_hash)
+                .find(|(_, tx)| tx.trie_hash() == tx_hash)
                 .map(|(index, tx)| {
                     let meta = TransactionMeta {
                         tx_hash,
                         index: index as u64,
                         block_hash: block_state.hash(),
-                        block_number: block_state.block_ref().block.number,
-                        base_fee: block_state.block_ref().block.header.base_fee_per_gas,
-                        timestamp: block_state.block_ref().block.timestamp,
-                        excess_blob_gas: block_state.block_ref().block.excess_blob_gas,
+                        block_number: block_state.block_ref().block.number(),
+                        base_fee: block_state.block_ref().block.header.base_fee_per_gas(),
+                        timestamp: block_state.block_ref().block.timestamp(),
+                        excess_blob_gas: block_state.block_ref().block.excess_blob_gas(),
                     };
                     (tx.clone(), meta)
                 })
@@ -795,7 +803,7 @@ impl<N: NodePrimitives> BlockState<N> {
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct ExecutedBlock<N: NodePrimitives = reth_primitives::EthPrimitives> {
     /// Sealed block the rest of fields refer to.
-    pub block: Arc<SealedBlock>,
+    pub block: Arc<SealedBlockFor<N::Block>>,
     /// Block's senders.
     pub senders: Arc<Vec<Address>>,
     /// Block's execution outcome.
@@ -809,7 +817,7 @@ pub struct ExecutedBlock<N: NodePrimitives = reth_primitives::EthPrimitives> {
 impl<N: NodePrimitives> ExecutedBlock<N> {
     /// [`ExecutedBlock`] constructor.
     pub const fn new(
-        block: Arc<SealedBlock>,
+        block: Arc<SealedBlockFor<N::Block>>,
         senders: Arc<Vec<Address>>,
         execution_output: Arc<ExecutionOutcome<N::Receipt>>,
         hashed_state: Arc<HashedPostState>,
@@ -819,7 +827,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     }
 
     /// Returns a reference to the executed block.
-    pub fn block(&self) -> &SealedBlock {
+    pub fn block(&self) -> &SealedBlockFor<N::Block> {
         &self.block
     }
 
@@ -831,7 +839,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     /// Returns a [`SealedBlockWithSenders`]
     ///
     /// Note: this clones the block and senders.
-    pub fn sealed_block_with_senders(&self) -> SealedBlockWithSenders {
+    pub fn sealed_block_with_senders(&self) -> SealedBlockWithSenders<N::Block> {
         SealedBlockWithSenders { block: (*self.block).clone(), senders: (*self.senders).clone() }
     }
 
@@ -869,7 +877,7 @@ pub enum NewCanonicalChain<N: NodePrimitives = reth_primitives::EthPrimitives> {
     },
 }
 
-impl<N: NodePrimitives> NewCanonicalChain<N> {
+impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
     /// Returns the length of the new chain.
     pub fn new_block_count(&self) -> usize {
         match self {
@@ -922,7 +930,7 @@ impl<N: NodePrimitives> NewCanonicalChain<N> {
     ///
     /// Returns the new tip for [`Self::Reorg`] and [`Self::Commit`] variants which commit at least
     /// 1 new block.
-    pub fn tip(&self) -> &SealedBlock {
+    pub fn tip(&self) -> &SealedBlockFor<N::Block> {
         match self {
             Self::Commit { new } | Self::Reorg { new, .. } => {
                 new.last().expect("non empty blocks").block()

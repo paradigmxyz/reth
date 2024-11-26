@@ -57,7 +57,7 @@ pub struct BlockchainProvider2<N: NodeTypesWithDB> {
     pub(crate) database: ProviderFactory<N>,
     /// Tracks the chain info wrt forkchoice updates and in memory canonical
     /// state.
-    pub(crate) canonical_in_memory_state: CanonicalInMemoryState,
+    pub(crate) canonical_in_memory_state: CanonicalInMemoryState<N::Primitives>,
 }
 
 impl<N: NodeTypesWithDB> Clone for BlockchainProvider2<N> {
@@ -117,7 +117,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
     }
 
     /// Gets a clone of `canonical_in_memory_state`.
-    pub fn canonical_in_memory_state(&self) -> CanonicalInMemoryState {
+    pub fn canonical_in_memory_state(&self) -> CanonicalInMemoryState<N::Primitives> {
         self.canonical_in_memory_state.clone()
     }
 
@@ -132,8 +132,8 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
     /// This uses a given [`BlockState`] to initialize a state provider for that block.
     fn block_state_provider(
         &self,
-        state: &BlockState,
-    ) -> ProviderResult<MemoryOverlayStateProvider> {
+        state: &BlockState<N::Primitives>,
+    ) -> ProviderResult<MemoryOverlayStateProvider<N::Primitives>> {
         let anchor_hash = state.anchor().hash;
         let latest_historical = self.database.history_by_block_hash(anchor_hash)?;
         Ok(state.state_provider(latest_historical))
@@ -647,7 +647,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider2<N> {
     }
 }
 
-impl<N: NodeTypesWithDB> CanonChainTracker for BlockchainProvider2<N>
+impl<N: ProviderNodeTypes> CanonChainTracker for BlockchainProvider2<N>
 where
     Self: BlockReader,
 {
@@ -721,7 +721,7 @@ impl<N: NodeTypesWithDB<Primitives = EthPrimitives>> CanonStateSubscriptions
     }
 }
 
-impl<N: NodeTypesWithDB> ForkChoiceSubscriptions for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes> ForkChoiceSubscriptions for BlockchainProvider2<N> {
     fn subscribe_safe_block(&self) -> ForkChoiceNotifications {
         let receiver = self.canonical_in_memory_state.subscribe_safe_block();
         ForkChoiceNotifications(receiver)
@@ -2347,7 +2347,7 @@ mod tests {
             (block_range, |block: &SealedBlock| block.clone().unseal()),
             (block_with_senders_range, |block: &SealedBlock| block
                 .clone()
-                .unseal()
+                .unseal::<reth_primitives::Block>()
                 .with_senders_unchecked(vec![])),
             (sealed_block_with_senders_range, |block: &SealedBlock| block
                 .clone()
@@ -2542,7 +2542,7 @@ mod tests {
                 block_with_senders,
                 |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     (BlockHashOrNumber::Number(block.number), TransactionVariant::WithHash),
-                    block.clone().unseal().with_recovered_senders()
+                    block.clone().unseal::<reth_primitives::Block>().with_recovered_senders()
                 ),
                 (BlockHashOrNumber::Number(u64::MAX), TransactionVariant::WithHash)
             ),
@@ -2551,7 +2551,7 @@ mod tests {
                 block_with_senders,
                 |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     (BlockHashOrNumber::Hash(block.hash()), TransactionVariant::WithHash),
-                    block.clone().unseal().with_recovered_senders()
+                    block.clone().unseal::<reth_primitives::Block>().with_recovered_senders()
                 ),
                 (BlockHashOrNumber::Hash(B256::random()), TransactionVariant::WithHash)
             ),
@@ -2561,7 +2561,12 @@ mod tests {
                 |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     (BlockHashOrNumber::Number(block.number), TransactionVariant::WithHash),
                     Some(
-                        block.clone().unseal().with_recovered_senders().unwrap().seal(block.hash())
+                        block
+                            .clone()
+                            .unseal::<reth_primitives::Block>()
+                            .with_recovered_senders()
+                            .unwrap()
+                            .seal(block.hash())
                     )
                 ),
                 (BlockHashOrNumber::Number(u64::MAX), TransactionVariant::WithHash)
@@ -2572,7 +2577,12 @@ mod tests {
                 |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     (BlockHashOrNumber::Hash(block.hash()), TransactionVariant::WithHash),
                     Some(
-                        block.clone().unseal().with_recovered_senders().unwrap().seal(block.hash())
+                        block
+                            .clone()
+                            .unseal::<reth_primitives::Block>()
+                            .with_recovered_senders()
+                            .unwrap()
+                            .seal(block.hash())
                     )
                 ),
                 (BlockHashOrNumber::Hash(B256::random()), TransactionVariant::WithHash)
