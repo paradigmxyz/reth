@@ -12,9 +12,10 @@ workspace = true
 
 [dependencies]
 reth-primitives.workspace = true
-reth-execution-errors.workspace = true
-reth-trie.workspace = true
 reth-primitives-traits.workspace = true
+reth-execution-errors.workspace = true
+reth-trie-common.workspace = true
+reth-trie.workspace = true
 
 revm.workspace = true
 
@@ -36,17 +37,18 @@ default = ["std"]
 optimism = ["reth-primitives/optimism", "revm/optimism"]
 serde = [
 	"dep:serde",
-	"reth-trie/serde",
+	"rand/serde",
 	"revm/serde",
 	"alloy-eips/serde",
 	"alloy-primitives/serde",
-	"rand/serde",
 	"reth-primitives-traits/serde",
+	"reth-trie-common/serde",
+	"reth-trie/serde",
 ]
 serde-bincode-compat = [
 	"reth-primitives/serde-bincode-compat",
 	"reth-primitives-traits/serde-bincode-compat",
-	"reth-trie/serde-bincode-compat",
+	"reth-trie-common/serde-bincode-compat",
 	"serde_with",
 	"alloy-eips/serde-bincode-compat",
 ]

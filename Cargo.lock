@@ -7573,6 +7573,7 @@ dependencies = [
  "reth-primitives",
  "reth-primitives-traits",
  "reth-trie",
+ "reth-trie-common",
  "revm",
  "serde",
  "serde_with",
@@ -9349,7 +9350,6 @@ dependencies = [
  "alloy-rlp",
  "alloy-trie",
  "auto_impl",
- "bincode",
  "criterion",
  "itertools 0.13.0",
  "metrics",
@@ -9363,9 +9363,7 @@ dependencies = [
  "reth-storage-errors",
  "reth-trie-common",
  "revm",
- "serde",
  "serde_json",
- "serde_with",
  "tracing",
  "triehash",
 ]
@@ -9380,6 +9378,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-trie",
  "arbitrary",
+ "bincode",
  "bytes",
  "criterion",
  "derive_more 1.0.0",
@@ -9394,6 +9393,7 @@ dependencies = [
  "revm-primitives",
  "serde",
  "serde_json",
+ "serde_with",
 ]
 
 [[package]]

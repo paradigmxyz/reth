@@ -42,12 +42,6 @@ metrics = { workspace = true, optional = true }
 # `test-utils` feature
 triehash = { version = "0.8", optional = true }
 
-# `serde` feature
-serde = { workspace = true, optional = true }
-
-# `serde-bincode-compat` feature
-serde_with = { workspace = true, optional = true }
-
 [dev-dependencies]
 # reth
 reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
@@ -61,28 +55,21 @@ proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 serde_json.workspace = true
 criterion.workspace = true
-bincode.workspace = true
 
 [features]
 metrics = ["reth-metrics", "dep:metrics"]
 serde = [
-	"dep:serde",
-	"alloy-consensus/serde",
 	"alloy-primitives/serde",
-	"revm/serde",
+	"alloy-consensus/serde",
 	"alloy-trie/serde",
+	"revm/serde",
 	"reth-trie-common/serde"
-]
-serde-bincode-compat = [
-	"serde_with",
-	"reth-primitives/serde-bincode-compat",
-	"alloy-consensus/serde-bincode-compat"
 ]
 test-utils = [
 	"triehash",
-	"reth-trie-common/test-utils",
-	"reth-primitives/test-utils",
 	"revm/test-utils",
+	"reth-primitives/test-utils",
+	"reth-trie-common/test-utils",
 	"reth-stages-types/test-utils"
 ]
 
