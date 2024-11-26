@@ -947,7 +947,7 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
     type Consensus: From<Self> + TryInto<Self, Error = Self::TryFromConsensusError>;
 
     /// Associated type representing the recovered pooled variant of the transaction.
-    type Pooled: Into<Self>;
+    type Pooled: Encodable2718 + Into<Self>;
 
     /// Define a method to convert from the `Consensus` type to `Self`
     fn try_from_consensus(tx: Self::Consensus) -> Result<Self, Self::TryFromConsensusError> {
