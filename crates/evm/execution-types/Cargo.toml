@@ -43,6 +43,7 @@ serde = [
 	"alloy-primitives/serde",
 	"reth-primitives-traits/serde",
 	"reth-trie-common/serde",
+	"reth-trie/serde",
 ]
 serde-bincode-compat = [
 	"reth-primitives/serde-bincode-compat",
