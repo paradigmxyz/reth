@@ -17,10 +17,6 @@
 mod constants;
 pub use constants::*;
 
-/// The implementation of a container for storing intermediate changes to a trie.
-/// The container indicates when the trie has been modified.
-pub mod prefix_set;
-
 /// The implementation of forward-only in-memory cursor.
 pub mod forward_cursor;
 

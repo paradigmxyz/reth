@@ -26,6 +26,10 @@ pub use storage::StorageTrieEntry;
 mod subnode;
 pub use subnode::StoredSubNode;
 
+/// The implementation of a container for storing intermediate changes to a trie.
+/// The container indicates when the trie has been modified.
+pub mod prefix_set;
+
 mod proofs;
 #[cfg(any(test, feature = "test-utils"))]
 pub use proofs::triehash;
@@ -33,4 +37,5 @@ pub use proofs::*;
 
 pub mod root;
 
+/// Re-export
 pub use alloy_trie::{nodes::*, proof, BranchNodeCompact, HashBuilder, TrieMask, EMPTY_ROOT_HASH};
