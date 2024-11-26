@@ -233,15 +233,30 @@ pub trait TransactionPool: Send + Sync + Clone {
         limit: GetPooledTransactionLimit,
     ) -> Vec<PooledTransactionsElement>;
 
-    /// Returns converted [PooledTransactionsElement] for the given transaction hash.
+    /// Returns the pooled transaction variant for the given transaction hash.
     ///
     /// This adheres to the expected behavior of
     /// [`GetPooledTransactions`](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getpooledtransactions-0x09):
     ///
     /// If the transaction is a blob transaction, the sidecar will be included.
     ///
+    /// It is expected that this variant represents the valid p2p format for full transactions.
+    /// E.g. for EIP-4844 transactions this is the consensus transaction format with the blob
+    /// sidecar.
+    ///
     /// Consumer: P2P
-    fn get_pooled_transaction_element(&self, tx_hash: TxHash) -> Option<PooledTransactionsElement>;
+    fn get_pooled_transaction_element(
+        &self,
+        tx_hash: TxHash,
+    ) -> Option<<Self::Transaction as PoolTransaction>::Pooled>;
+
+    /// Returns the pooled transaction variant for the given transaction hash as the requested type.
+    fn get_pooled_transaction_as<T>(&self, tx_hash: TxHash) -> Option<T>
+    where
+        <Self::Transaction as PoolTransaction>::Pooled: Into<T>,
+    {
+        self.get_pooled_transaction_element(tx_hash).map(Into::into)
+    }
 
     /// Returns an iterator that yields transactions that are ready for block production.
     ///

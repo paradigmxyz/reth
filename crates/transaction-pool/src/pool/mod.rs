@@ -373,11 +373,11 @@ where
     pub(crate) fn get_pooled_transaction_element(
         &self,
         tx_hash: TxHash,
-    ) -> Option<PooledTransactionsElement>
+    ) -> Option<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>
     where
         <V as TransactionValidator>::Transaction: EthPoolTransaction,
     {
-        self.get(&tx_hash).and_then(|tx| self.to_pooled_transaction(tx).map(Into::into))
+        self.get(&tx_hash).and_then(|tx| self.to_pooled_transaction(tx))
     }
 
     /// Updates the entire pool after a new block was executed.
