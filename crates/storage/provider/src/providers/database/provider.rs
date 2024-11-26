@@ -206,6 +206,12 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 
         Ok(Box::new(state_provider))
     }
+
+    #[cfg(feature = "test-utils")]
+    /// Sets the prune modes for provider.
+    pub fn set_prune_modes(&mut self, prune_modes: PruneModes) {
+        self.prune_modes = prune_modes;
+    }
 }
 
 impl<TX, N: NodeTypes> NodePrimitivesProvider for DatabaseProvider<TX, N> {

@@ -818,7 +818,7 @@ mod tests {
 
     #[tokio::test]
     async fn sanity_execution_of_block() {
-        let mut factory = create_test_provider_factory();
+        let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
         let input = ExecInput { target: Some(1), checkpoint: None };
         let mut genesis_rlp = hex!("f901faf901f5a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa045571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32eda056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808502540be400808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
@@ -876,6 +876,8 @@ mod tests {
 
         // Tests node with database and node with static files
         for mut mode in modes {
+            let mut provider = factory.database_provider_rw().unwrap();
+
             if let Some(mode) = &mut mode {
                 // Simulating a full node where we write receipts to database
                 mode.receipts_log_filter = random_filter.clone();
@@ -883,9 +885,7 @@ mod tests {
 
             let mut execution_stage = stage();
             execution_stage.prune_modes = mode.clone().unwrap_or_default();
-            factory = factory.with_prune_modes(mode.clone().unwrap_or_default());
-
-            let provider = factory.database_provider_rw().unwrap();
+            provider.set_prune_modes(mode.clone().unwrap_or_default());
 
             let output = execution_stage.execute(&provider, input).unwrap();
             provider.commit().unwrap();
@@ -950,9 +950,10 @@ mod tests {
                 "Post changed of a account"
             );
 
-            let provider = factory.database_provider_rw().unwrap();
+            let mut provider = factory.database_provider_rw().unwrap();
             let mut stage = stage();
-            stage.prune_modes = mode.unwrap_or_default();
+            stage.prune_modes = mode.clone().unwrap_or_default();
+            provider.set_prune_modes(mode.unwrap_or_default());
 
             let _result = stage
                 .unwind(
@@ -966,7 +967,7 @@ mod tests {
 
     #[tokio::test]
     async fn sanity_execute_unwind() {
-        let mut factory = create_test_provider_factory();
+        let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
         let input = ExecInput { target: Some(1), checkpoint: None };
         let mut genesis_rlp = hex!("f901faf901f5a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa045571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32eda056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808502540be400808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
@@ -1009,7 +1010,7 @@ mod tests {
         provider.commit().unwrap();
 
         // execute
-        let mut provider;
+        let mut provider = factory.database_provider_rw().unwrap();
 
         // If there is a pruning configuration, then it's forced to use the database.
         // This way we test both cases.
@@ -1027,9 +1028,7 @@ mod tests {
             // Test Execution
             let mut execution_stage = stage();
             execution_stage.prune_modes = mode.clone().unwrap_or_default();
-            factory = factory.with_prune_modes(mode.clone().unwrap_or_default());
-
-            provider = factory.database_provider_rw().unwrap();
+            provider.set_prune_modes(mode.clone().unwrap_or_default());
 
             let result = execution_stage.execute(&provider, input).unwrap();
             provider.commit().unwrap();
@@ -1037,7 +1036,8 @@ mod tests {
             // Test Unwind
             provider = factory.database_provider_rw().unwrap();
             let mut stage = stage();
-            stage.prune_modes = mode.unwrap_or_default();
+            stage.prune_modes = mode.clone().unwrap_or_default();
+            provider.set_prune_modes(mode.clone().unwrap_or_default());
 
             let result = stage
                 .unwind(
@@ -1082,8 +1082,6 @@ mod tests {
             );
 
             assert_eq!(provider.receipt(0), Ok(None), "First receipt should be unwound");
-
-            provider.commit().unwrap();
         }
     }
 
