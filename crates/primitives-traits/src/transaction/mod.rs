@@ -12,11 +12,6 @@ use alloy_consensus::constants::{
     LEGACY_TX_TYPE_ID,
 };
 
-use alloy_primitives::B256;
-use reth_codecs::Compact;
-
-use crate::{FullTxType, InMemorySize, MaybeArbitrary, MaybeSerde, TxType};
-
 /// Helper trait that unifies all behaviour required by transaction to support full node operations.
 pub trait FullTransaction: Transaction + MaybeCompact {}
 
@@ -40,31 +35,31 @@ pub trait Transaction:
     /// Returns true if the transaction is a legacy transaction.
     #[inline]
     fn is_legacy(&self) -> bool {
-        matches!(self.ty(), LEGACY_TX_TYPE_ID)
+        self.ty() == LEGACY_TX_TYPE_ID
     }
 
     /// Returns true if the transaction is an EIP-2930 transaction.
     #[inline]
     fn is_eip2930(&self) -> bool {
-        matches!(self.ty(), EIP2930_TX_TYPE_ID)
+        self.ty() == EIP2930_TX_TYPE_ID
     }
 
     /// Returns true if the transaction is an EIP-1559 transaction.
     #[inline]
     fn is_eip1559(&self) -> bool {
-        matches!(self.ty(), EIP1559_TX_TYPE_ID)
+        self.ty() == EIP1559_TX_TYPE_ID
     }
 
     /// Returns true if the transaction is an EIP-4844 transaction.
     #[inline]
     fn is_eip4844(&self) -> bool {
-        matches!(self.ty(), EIP4844_TX_TYPE_ID)
+        self.ty() == EIP4844_TX_TYPE_ID
     }
 
     /// Returns true if the transaction is an EIP-7702 transaction.
     #[inline]
     fn is_eip7702(&self) -> bool {
-        matches!(self.ty(), EIP7702_TX_TYPE_ID)
+        self.ty() == EIP7702_TX_TYPE_ID
     }
 }
 
