@@ -1,4 +1,5 @@
 use super::ExecutedBlock;
+use alloy_consensus::BlockHeader;
 use alloy_primitives::{
     keccak256,
     map::{HashMap, HashSet},
@@ -75,7 +76,7 @@ macro_rules! impl_state_provider {
         impl $($tokens)* BlockHashReader for $type {
             fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>> {
                 for block in &self.in_memory {
-                    if block.block.number == number {
+                    if block.block.number() == number {
                         return Ok(Some(block.block.hash()))
                     }
                 }
@@ -92,9 +93,9 @@ macro_rules! impl_state_provider {
                 let mut earliest_block_number = None;
                 let mut in_memory_hashes = Vec::new();
                 for block in &self.in_memory {
-                    if range.contains(&block.block.number) {
+                    if range.contains(&block.block.number()) {
                         in_memory_hashes.insert(0, block.block.hash());
-                        earliest_block_number = Some(block.block.number);
+                        earliest_block_number = Some(block.block.number());
                     }
                 }
 

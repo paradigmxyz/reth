@@ -17,7 +17,7 @@ use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_network_p2p::full_block::FullBlockClient;
-use reth_node_api::BlockTy;
+use reth_node_api::{BlockTy, NodePrimitives};
 use reth_node_ethereum::EthExecutorProvider;
 use reth_provider::{
     providers::ProviderNodeTypes, BlockNumReader, BlockWriter, ChainSpecProvider,
@@ -56,7 +56,12 @@ pub struct Command<C: ChainSpecParser> {
 }
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
-    async fn build_network<N: ProviderNodeTypes<ChainSpec = C::ChainSpec>>(
+    async fn build_network<
+        N: ProviderNodeTypes<
+            ChainSpec = C::ChainSpec,
+            Primitives: NodePrimitives<Block = reth_primitives::Block>,
+        >,
+    >(
         &self,
         config: &Config,
         task_executor: TaskExecutor,

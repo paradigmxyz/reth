@@ -103,8 +103,12 @@ where
     ) -> Self
     where
         Tasks: TaskSpawner + Clone + 'static,
-        Events:
-            CanonStateSubscriptions<Primitives: NodePrimitives<Receipt = reth_primitives::Receipt>>,
+        Events: CanonStateSubscriptions<
+            Primitives: NodePrimitives<
+                Block = reth_primitives::Block,
+                Receipt = reth_primitives::Receipt,
+            >,
+        >,
     {
         let blocking_task_pool =
             BlockingTaskPool::build().expect("failed to build blocking task pool");

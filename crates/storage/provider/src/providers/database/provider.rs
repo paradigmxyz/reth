@@ -47,7 +47,7 @@ use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_network_p2p::headers::downloader::SyncTarget;
 use reth_node_types::{BlockTy, BodyTy, NodeTypes, TxTy};
 use reth_primitives::{
-    Account, Block, BlockExt, BlockWithSenders, Bytecode, GotExpected, Receipt, SealedBlock,
+    Account, BlockExt, BlockWithSenders, Bytecode, GotExpected, Receipt, SealedBlock,
     SealedBlockFor, SealedBlockWithSenders, SealedHeader, StaticFileSegment, StorageEntry,
     TransactionMeta, TransactionSignedNoHash,
 };
@@ -1229,7 +1229,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
                     .pop()
                     .ok_or(ProviderError::InvalidStorageOutput)?;
 
-                return Ok(Some(Block { header, body }))
+                return Ok(Some(Self::Block::new(header, body)))
             }
         }
 

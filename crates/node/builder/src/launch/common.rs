@@ -382,7 +382,10 @@ where
     pub async fn create_provider_factory<N>(&self) -> eyre::Result<ProviderFactory<N>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
-        N::Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>,
+        N::Primitives: FullNodePrimitives<
+            Block = reth_primitives::Block,
+            BlockBody = reth_primitives::BlockBody,
+        >,
     {
         let factory = ProviderFactory::new(
             self.right().clone(),
@@ -449,7 +452,10 @@ where
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<ChainSpec>, ProviderFactory<N>>>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
-        N::Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>,
+        N::Primitives: FullNodePrimitives<
+            Block = reth_primitives::Block,
+            BlockBody = reth_primitives::BlockBody,
+        >,
     {
         let factory = self.create_provider_factory().await?;
         let ctx = LaunchContextWith {
