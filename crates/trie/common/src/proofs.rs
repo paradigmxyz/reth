@@ -11,7 +11,6 @@ use alloy_trie::{
 };
 use itertools::Itertools;
 use reth_primitives_traits::Account;
-use serde::{Deserialize, Serialize};
 use std::collections::{hash_map, HashMap};
 
 /// The state multiproof of target accounts and multiproofs of their storage tries.
@@ -171,8 +170,9 @@ impl StorageMultiProof {
 }
 
 /// The merkle proof with the relevant account info.
-#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
 pub struct AccountProof {
     /// The address associated with the account.
     pub address: Address,
@@ -227,7 +227,8 @@ impl AccountProof {
 }
 
 /// The merkle proof of the storage entry.
-#[derive(Clone, PartialEq, Eq, Default, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Default, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StorageProof {
     /// The raw storage key.
     pub key: B256,

@@ -1,24 +1,12 @@
 use bytes::Buf;
 use derive_more::Deref;
 use reth_codecs::Compact;
-use serde::{Deserialize, Serialize};
 
 pub use nybbles::Nibbles;
 
 /// The representation of nibbles of the merkle trie stored in the database.
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    derive_more::Index,
-)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, derive_more::Index)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "test-utils", derive(arbitrary::Arbitrary))]
 pub struct StoredNibbles(pub Nibbles);
 
@@ -74,7 +62,8 @@ impl Compact for StoredNibbles {
 }
 
 /// The representation of nibbles of the merkle trie stored in the database.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord, Hash, Deref)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deref)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "test-utils", derive(arbitrary::Arbitrary))]
 pub struct StoredNibblesSubKey(pub Nibbles);
 
