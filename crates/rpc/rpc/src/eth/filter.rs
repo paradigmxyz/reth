@@ -520,11 +520,11 @@ where
                         let is_multi_block_range = from_block != to_block;
                         if is_multi_block_range {
                             if let Some(max_to_block) = max_to_block_reached {
-                                return Err(EthFilterError::QueryExceedsMaxResults(
-                                    self.max_logs_per_response,
+                                return Err(EthFilterError::QueryExceedsMaxResults {
+                                    max_logs: self.max_logs_per_response,
                                     from_block,
-                                    max_to_block,
-                                ));
+                                    to_block: max_to_block,
+                                });
                             }
                         }
                     }
@@ -730,8 +730,15 @@ pub enum EthFilterError {
     #[error("query exceeds max block range {0}")]
     QueryExceedsMaxBlocks(u64),
     /// Query result is too large.
-    #[error("query exceeds max results {0}, retry with the range {1}-{2}")]
-    QueryExceedsMaxResults(usize, u64, u64),
+    #[error("query exceeds max results {max_logs}, retry with the range {from_block}-{to_block}")]
+    QueryExceedsMaxResults {
+        /// Maximum number of logs allowed per response
+        max_logs: usize,
+        /// Start block of the suggested retry range
+        from_block: u64,
+        /// End block of the suggested retry range (last successfully processed block)
+        to_block: u64,
+    },
     /// Error serving request in `eth_` namespace.
     #[error(transparent)]
     EthAPIError(#[from] EthApiError),
@@ -753,7 +760,7 @@ impl From<EthFilterError> for jsonrpsee::types::error::ErrorObject<'static> {
             EthFilterError::EthAPIError(err) => err.into(),
             err @ (EthFilterError::InvalidBlockRangeParams |
             EthFilterError::QueryExceedsMaxBlocks(_) |
-            EthFilterError::QueryExceedsMaxResults(_, _, _)) => {
+            EthFilterError::QueryExceedsMaxResults { .. }) => {
                 rpc_error_with_code(jsonrpsee::types::error::INVALID_PARAMS_CODE, err.to_string())
             }
         }
