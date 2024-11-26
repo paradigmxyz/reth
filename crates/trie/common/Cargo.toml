@@ -31,6 +31,9 @@ nybbles = { workspace = true, features = ["rlp"] }
 # `serde` feature
 serde = { workspace = true, optional = true }
 
+# `serde-bincode-compat` feature
+serde_with = { workspace = true, optional = true }
+
 # `test-utils` feature
 hash-db = { version = "=0.15.2", optional = true }
 plain_hasher = { version = "0.2", optional = true }
@@ -46,6 +49,7 @@ arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 criterion.workspace = true
+bincode.workspace = true
 
 [features]
 serde = [
@@ -58,6 +62,11 @@ serde = [
     "revm-primitives/serde",
     "reth-primitives-traits/serde",
     "reth-codecs/serde"
+]
+serde-bincode-compat = [
+	"serde_with",
+	"reth-primitives-traits/serde-bincode-compat",
+	"alloy-consensus/serde-bincode-compat"
 ]
 test-utils = [
     "dep:plain_hasher",
