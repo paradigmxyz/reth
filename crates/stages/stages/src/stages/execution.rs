@@ -209,16 +209,18 @@ where
         let static_file_provider = provider.static_file_provider();
 
         // We only use static files for Receipts, if there is no receipt pruning of any kind.
-        if self.prune_modes.receipts.is_none() && self.prune_modes.receipts_log_filter.is_empty() {
+        let write_receipts_to = if self.prune_modes.receipts.is_none() &&
+            self.prune_modes.receipts_log_filter.is_empty()
+        {
             debug!(target: "sync::stages::execution", start = start_block, "Preparing static file producer");
             let mut producer =
                 prepare_static_file_producer(provider, &static_file_provider, start_block)?;
             // Since there might be a database <-> static file inconsistency (read
             // `prepare_static_file_producer` for context), we commit the change straight away.
             producer.commit()?;
-            Some(producer)
+            StorageLocation::StaticFiles
         } else {
-            None
+            StorageLocation::Database
         };
 
         let db = StateProviderDatabase(LatestStateProviderRef::new(provider));
@@ -358,7 +360,7 @@ where
         let time = Instant::now();
 
         // write output
-        provider.write_to_storage(state, OriginalValuesKnown::Yes, StorageLocation::StaticFiles)?;
+        provider.write_to_storage(state, OriginalValuesKnown::Yes, write_receipts_to)?;
 
         let db_write_duration = time.elapsed();
         debug!(
