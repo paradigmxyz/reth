@@ -15,10 +15,9 @@ use reth_primitives::{SealedHeader, StaticFileSegment};
 use reth_primitives_traits::{format_gas_throughput, Block, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
-    writer::UnifiedStorageWriter,
     BlockHashReader, BlockReader, DBProvider, HeaderProvider, LatestStateProviderRef,
     OriginalValuesKnown, ProviderError, StateChangeWriter, StateWriter, StaticFileProviderFactory,
-    StatsReader, TransactionVariant,
+    StatsReader, StorageLocation, TransactionVariant,
 };
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
@@ -180,9 +179,8 @@ where
         + StaticFileProviderFactory
         + StatsReader
         + StateChangeWriter
-        + BlockHashReader,
-    for<'a> UnifiedStorageWriter<'a, Provider, StaticFileProviderRWRefMut<'a, Provider::Primitives>>:
-        StateWriter,
+        + BlockHashReader
+        + StateWriter,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -211,7 +209,7 @@ where
         let static_file_provider = provider.static_file_provider();
 
         // We only use static files for Receipts, if there is no receipt pruning of any kind.
-        let static_file_producer = if self.prune_modes.receipts.is_none() &&
+        let write_receipts_to = if self.prune_modes.receipts.is_none() &&
             self.prune_modes.receipts_log_filter.is_empty()
         {
             debug!(target: "sync::stages::execution", start = start_block, "Preparing static file producer");
@@ -220,9 +218,9 @@ where
             // Since there might be a database <-> static file inconsistency (read
             // `prepare_static_file_producer` for context), we commit the change straight away.
             producer.commit()?;
-            Some(producer)
+            StorageLocation::StaticFiles
         } else {
-            None
+            StorageLocation::Database
         };
 
         let db = StateProviderDatabase(LatestStateProviderRef::new(provider));
@@ -362,8 +360,7 @@ where
         let time = Instant::now();
 
         // write output
-        let mut writer = UnifiedStorageWriter::new(provider, static_file_producer);
-        writer.write_to_storage(state, OriginalValuesKnown::Yes)?;
+        provider.write_to_storage(state, OriginalValuesKnown::Yes, write_receipts_to)?;
 
         let db_write_duration = time.elapsed();
         debug!(

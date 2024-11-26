@@ -20,9 +20,9 @@ use reth_network_p2p::full_block::FullBlockClient;
 use reth_node_api::BlockTy;
 use reth_node_ethereum::EthExecutorProvider;
 use reth_provider::{
-    providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockNumReader, BlockWriter,
-    ChainSpecProvider, DatabaseProviderFactory, HeaderProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderError, ProviderFactory, StateWriter, StorageLocation,
+    providers::ProviderNodeTypes, BlockNumReader, BlockWriter, ChainSpecProvider,
+    DatabaseProviderFactory, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
+    ProviderError, ProviderFactory, StateWriter, StorageLocation,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::{
@@ -158,8 +158,11 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             executor.execute_and_verify_one((&sealed_block.clone().unseal(), td).into())?;
             let execution_outcome = executor.finalize();
 
-            let mut storage_writer = UnifiedStorageWriter::from_database(&provider_rw);
-            storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::Yes)?;
+            provider_rw.write_to_storage(
+                execution_outcome,
+                OriginalValuesKnown::Yes,
+                StorageLocation::Database,
+            )?;
 
             let checkpoint = Some(StageCheckpoint::new(
                 block_number

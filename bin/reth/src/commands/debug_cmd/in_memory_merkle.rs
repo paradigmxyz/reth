@@ -22,9 +22,9 @@ use reth_network_api::NetworkInfo;
 use reth_node_ethereum::EthExecutorProvider;
 use reth_primitives::BlockExt;
 use reth_provider::{
-    providers::ProviderNodeTypes, writer::UnifiedStorageWriter, AccountExtReader,
-    ChainSpecProvider, HashingWriter, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
-    ProviderFactory, StageCheckpointReader, StateWriter, StorageReader,
+    providers::ProviderNodeTypes, AccountExtReader, ChainSpecProvider, DatabaseProviderFactory,
+    HashingWriter, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderFactory,
+    StageCheckpointReader, StateWriter, StorageLocation, StorageReader,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::StageId;
@@ -163,7 +163,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             return Ok(())
         }
 
-        let provider_rw = provider_factory.provider_rw()?;
+        let provider_rw = provider_factory.database_provider_rw()?;
 
         // Insert block, state and hashes
         provider_rw.insert_historical_block(
@@ -172,8 +172,11 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 .try_seal_with_senders()
                 .map_err(|_| BlockValidationError::SenderRecoveryError)?,
         )?;
-        let mut storage_writer = UnifiedStorageWriter::from_database(&provider_rw.0);
-        storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::No)?;
+        provider_rw.write_to_storage(
+            execution_outcome,
+            OriginalValuesKnown::No,
+            StorageLocation::Database,
+        )?;
         let storage_lists = provider_rw.changed_storages_with_range(block.number..=block.number)?;
         let storages = provider_rw.plain_state_storages(storage_lists)?;
         provider_rw.insert_storage_for_hashing(storages)?;
