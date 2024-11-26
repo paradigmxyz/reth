@@ -677,7 +677,7 @@ pub struct PooledTransactionsElementEcRecovered<T = PooledTransactionsElement> {
 }
 
 impl<T> PooledTransactionsElementEcRecovered<T> {
-    /// Create an instance from the given transactiona and the [`Address`] of the signer.
+    /// Create an instance from the given transaction and the [`Address`] of the signer.
     pub const fn from_signed_transaction(transaction: T, signer: Address) -> Self {
         Self { transaction, signer }
     }
