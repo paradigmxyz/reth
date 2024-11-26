@@ -6,7 +6,7 @@ pub use nybbles::Nibbles;
 
 /// The representation of nibbles of the merkle trie stored in the database.
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, derive_more::Index)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "test-utils", derive(arbitrary::Arbitrary))]
 pub struct StoredNibbles(pub Nibbles);
 
@@ -63,7 +63,7 @@ impl Compact for StoredNibbles {
 
 /// The representation of nibbles of the merkle trie stored in the database.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deref)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "test-utils", derive(arbitrary::Arbitrary))]
 pub struct StoredNibblesSubKey(pub Nibbles);
 

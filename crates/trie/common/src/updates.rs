@@ -4,13 +4,13 @@ use std::collections::{HashMap, HashSet};
 
 /// The aggregation of trie updates.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
 pub struct TrieUpdates {
     /// Collection of updated intermediate account nodes indexed by full path.
-    #[cfg_attr(feature = "serde", serde(with = "serde_nibbles_map"))]
+    #[cfg_attr(any(test, feature = "serde"), serde(with = "serde_nibbles_map"))]
     pub account_nodes: HashMap<Nibbles, BranchNodeCompact>,
     /// Collection of removed intermediate account nodes indexed by full path.
-    #[cfg_attr(feature = "serde", serde(with = "serde_nibbles_set"))]
+    #[cfg_attr(any(test, feature = "serde"), serde(with = "serde_nibbles_set"))]
     pub removed_nodes: HashSet<Nibbles>,
     /// Collection of updated storage tries indexed by the hashed address.
     pub storage_tries: HashMap<B256, StorageTrieUpdates>,
@@ -112,15 +112,15 @@ impl TrieUpdates {
 
 /// Trie updates for storage trie of a single account.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
 pub struct StorageTrieUpdates {
     /// Flag indicating whether the trie was deleted.
     pub is_deleted: bool,
     /// Collection of updated storage trie nodes.
-    #[cfg_attr(feature = "serde", serde(with = "serde_nibbles_map"))]
+    #[cfg_attr(any(test, feature = "serde"), serde(with = "serde_nibbles_map"))]
     pub storage_nodes: HashMap<Nibbles, BranchNodeCompact>,
     /// Collection of removed storage trie nodes.
-    #[cfg_attr(feature = "serde", serde(with = "serde_nibbles_set"))]
+    #[cfg_attr(any(test, feature = "serde"), serde(with = "serde_nibbles_set"))]
     pub removed_nodes: HashSet<Nibbles>,
 }
 
@@ -225,7 +225,7 @@ impl StorageTrieUpdates {
 /// hex-encoded packed representation.
 ///
 /// This also sorts the set before serializing.
-#[cfg(feature = "serde")]
+#[cfg(any(test, feature = "serde"))]
 mod serde_nibbles_set {
     use crate::Nibbles;
     use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
@@ -261,7 +261,7 @@ mod serde_nibbles_set {
 /// hex-encoded packed representation.
 ///
 /// This also sorts the map's keys before encoding and serializing.
-#[cfg(feature = "serde")]
+#[cfg(any(test, feature = "serde"))]
 mod serde_nibbles_map {
     use crate::Nibbles;
     use alloy_primitives::hex;
@@ -403,7 +403,7 @@ fn exclude_empty_from_pair<V>(
 }
 
 /// Bincode-compatible trie updates type serde implementations.
-#[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
+#[cfg(feature = "serde-bincode-compat")]
 pub mod serde_bincode_compat {
     use crate::{BranchNodeCompact, Nibbles};
     use alloy_primitives::B256;

@@ -7,7 +7,7 @@ use reth_codecs::Compact;
 /// The hash builder state for storing in the database.
 /// Check the `reth-trie` crate for more info on hash builder.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
     feature = "arbitrary",
     derive(arbitrary::Arbitrary),
