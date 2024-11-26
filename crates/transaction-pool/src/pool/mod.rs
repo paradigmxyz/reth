@@ -381,7 +381,7 @@ where
         elements
     }
 
-    /// Returns converted [`PooledTransactionsElement`] for the given transaction hash.
+    /// Returns converted pooled transaction for the given transaction hash.
     pub(crate) fn get_pooled_transaction_element(
         &self,
         tx_hash: TxHash,
