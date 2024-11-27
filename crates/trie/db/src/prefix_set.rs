@@ -8,8 +8,10 @@ use reth_db_api::{
     DatabaseError,
 };
 use reth_primitives::StorageEntry;
-use reth_trie::prefix_set::{PrefixSetMut, TriePrefixSets};
-use reth_trie_common::Nibbles;
+use reth_trie::{
+    prefix_set::{PrefixSetMut, TriePrefixSets},
+    Nibbles,
+};
 use std::{
     collections::{HashMap, HashSet},
     ops::RangeInclusive,

@@ -110,6 +110,7 @@ impl ProcessUID {
         let pid2 = sysinfo::Pid::from(pid);
         system.refresh_processes_specifics(
             sysinfo::ProcessesToUpdate::Some(&[pid2]),
+            true,
             ProcessRefreshKind::new(),
         );
         system.process(pid2).map(|process| Self { pid, start_time: process.start_time() })

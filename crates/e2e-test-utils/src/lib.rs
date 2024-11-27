@@ -6,8 +6,9 @@ use node::NodeTestContext;
 use reth::{
     args::{DiscoveryArgs, NetworkArgs, RpcServerArgs},
     blockchain_tree::externals::NodeTypesForTree,
-    builder::{FullNodePrimitives, NodeBuilder, NodeConfig, NodeHandle},
+    builder::{NodeBuilder, NodeConfig, NodeHandle},
     network::PeersHandleProvider,
+    primitives::EthPrimitives,
     rpc::server_types::RpcModuleSelection,
     tasks::TaskManager,
 };
@@ -121,7 +122,7 @@ pub async fn setup_engine<N>(
 where
     N: Default
         + Node<TmpNodeAdapter<N, BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>>>
-        + NodeTypesWithEngine
+        + NodeTypesWithEngine<Primitives = EthPrimitives>
         + NodeTypesForProvider,
     N::ComponentsBuilder: NodeComponentsBuilder<
         TmpNodeAdapter<N, BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>>,
@@ -134,8 +135,6 @@ where
     LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
         <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
     >,
-    N::Primitives:
-        FullNodePrimitives<Block = reth_primitives::Block, BlockBody = reth_primitives::BlockBody>,
 {
     let tasks = TaskManager::current();
     let exec = tasks.executor();

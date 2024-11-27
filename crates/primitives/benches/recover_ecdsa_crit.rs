@@ -4,6 +4,7 @@ use alloy_rlp::Decodable;
 use criterion::{criterion_group, criterion_main, Criterion};
 use pprof::criterion::{Output, PProfProfiler};
 use reth_primitives::TransactionSigned;
+use reth_primitives_traits::SignedTransaction;
 
 /// Benchmarks the recovery of the public key from the ECDSA message using criterion.
 pub fn criterion_benchmark(c: &mut Criterion) {

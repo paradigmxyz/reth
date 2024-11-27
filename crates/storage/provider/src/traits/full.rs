@@ -19,7 +19,7 @@ pub trait FullProvider<N: NodeTypesWithDB>:
     + EvmEnvProvider
     + ChainSpecProvider<ChainSpec = N::ChainSpec>
     + ChangeSetReader
-    + CanonStateSubscriptions
+    + CanonStateSubscriptions<Primitives = N::Primitives>
     + ForkChoiceSubscriptions
     + StageCheckpointReader
     + Clone
@@ -37,7 +37,7 @@ impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
         + EvmEnvProvider
         + ChainSpecProvider<ChainSpec = N::ChainSpec>
         + ChangeSetReader
-        + CanonStateSubscriptions
+        + CanonStateSubscriptions<Primitives = N::Primitives>
         + ForkChoiceSubscriptions
         + StageCheckpointReader
         + Clone

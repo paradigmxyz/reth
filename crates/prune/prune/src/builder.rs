@@ -6,7 +6,7 @@ use reth_db::transaction::DbTxMut;
 use reth_exex_types::FinishedExExHeight;
 use reth_provider::{
     providers::StaticFileProvider, BlockReader, DBProvider, DatabaseProviderFactory,
-    PruneCheckpointWriter, StaticFileProviderFactory,
+    NodePrimitivesProvider, PruneCheckpointWriter, StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
 use std::time::Duration;
@@ -82,7 +82,7 @@ impl PrunerBuilder {
                                 + BlockReader<Transaction: Encodable2718>
                                 + StaticFileProviderFactory,
             > + StaticFileProviderFactory<
-                Primitives = <PF::ProviderRW as StaticFileProviderFactory>::Primitives,
+                Primitives = <PF::ProviderRW as NodePrimitivesProvider>::Primitives,
             >,
     {
         let segments =

@@ -6,6 +6,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(not(feature = "std"), no_std)]
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
@@ -15,19 +16,20 @@ pub mod transaction;
 
 pub use transaction::{signed::OpTransactionSigned, tx_type::OpTxType, OpTransaction};
 
-use alloy_consensus::Header;
-use reth_node_types::NodePrimitives;
-use reth_primitives::{Block, BlockBody, Receipt, TransactionSigned};
-
 /// Optimism primitive types.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct OpPrimitives;
+pub type OpPrimitives = reth_primitives::EthPrimitives;
 
-impl NodePrimitives for OpPrimitives {
-    type Block = Block;
-    type BlockHeader = Header;
-    type BlockBody = BlockBody;
-    type SignedTx = TransactionSigned;
-    type TxType = OpTxType;
-    type Receipt = Receipt;
-}
+// TODO: once we are ready for separating primitive types, introduce a separate `NodePrimitives`
+// implementation used exclusively by legacy engine.
+//
+// #[derive(Debug, Default, Clone, PartialEq, Eq)]
+// pub struct OpPrimitives;
+//
+// impl NodePrimitives for OpPrimitives {
+//     type Block = Block;
+//     type BlockHeader = Header;
+//     type BlockBody = BlockBody;
+//     type SignedTx = TransactionSigned;
+//     type TxType = OpTxType;
+//     type Receipt = Receipt;
+// }

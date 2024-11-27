@@ -6,13 +6,10 @@ use alloy_primitives::{
 };
 use alloy_rlp::Decodable;
 use reth_tracing::tracing::debug;
-use reth_trie::{
-    prefix_set::{PrefixSet, PrefixSetMut},
-    BranchNodeCompact, RlpNode,
-};
 use reth_trie_common::{
-    BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, TrieMask, TrieNode, CHILD_INDEX_RANGE,
-    EMPTY_ROOT_HASH,
+    prefix_set::{PrefixSet, PrefixSetMut},
+    BranchNodeCompact, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, RlpNode, TrieMask,
+    TrieNode, CHILD_INDEX_RANGE, EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
 use std::{borrow::Cow, fmt};
@@ -176,7 +173,6 @@ impl RevealedSparseTrie {
 
     /// Reveal the trie node only if it was not known already.
     pub fn reveal_node(&mut self, path: Nibbles, node: TrieNode) -> SparseTrieResult<()> {
-        // TODO: revise all inserts to not overwrite existing entries
         match node {
             TrieNode::EmptyRoot => {
                 debug_assert!(path.is_empty());

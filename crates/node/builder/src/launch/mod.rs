@@ -17,7 +17,8 @@ use reth_beacon_consensus::{
     BeaconConsensusEngine,
 };
 use reth_blockchain_tree::{
-    externals::TreeNodeTypes, noop::NoopBlockchainTree, BlockchainTreeConfig,
+    externals::TreeNodeTypes, noop::NoopBlockchainTree, BlockchainTree, BlockchainTreeConfig,
+    ShareableBlockchainTree, TreeExternals,
 };
 use reth_chainspec::EthChainSpec;
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider};
@@ -134,7 +135,7 @@ where
         ));
 
         // setup the launch context
-        let ctx = ctx
+        let mut ctx = ctx
             .with_configured_globals()
             // load the toml config
             .with_loaded_toml_config(config)?
@@ -162,8 +163,28 @@ where
             // later the components.
             .with_blockchain_db::<T, _>(move |provider_factory| {
                 Ok(BlockchainProvider::new(provider_factory, tree)?)
-            }, tree_config, canon_state_notification_sender)?
+            })?
             .with_components(components_builder, on_component_initialized).await?;
+
+        let consensus = Arc::new(ctx.components().consensus().clone());
+
+        let tree_externals = TreeExternals::new(
+            ctx.provider_factory().clone(),
+            consensus.clone(),
+            ctx.components().block_executor().clone(),
+        );
+        let tree = BlockchainTree::new(tree_externals, tree_config)?
+            .with_sync_metrics_tx(ctx.sync_metrics_tx())
+            // Note: This is required because we need to ensure that both the components and the
+            // tree are using the same channel for canon state notifications. This will be removed
+            // once the Blockchain provider no longer depends on an instance of the tree
+            .with_canon_state_notification_sender(canon_state_notification_sender);
+
+        let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
+
+        ctx.node_adapter_mut().provider = ctx.blockchain_db().clone().with_tree(blockchain_tree);
+
+        debug!(target: "reth::cli", "configured blockchain tree");
 
         // spawn exexs
         let exex_manager_handle = ExExLauncher::new(

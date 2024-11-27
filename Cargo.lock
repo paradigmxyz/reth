@@ -4590,9 +4590,9 @@ dependencies = [
 
 [[package]]
 name = "libc"
-version = "0.2.164"
+version = "0.2.166"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "433bfe06b8c75da9b2e3fbea6e5329ff87748f0b144ef75306e674c3f6f7c13f"
+checksum = "c2ccc108bbc0b1331bd061864e7cd823c0cab660bbe6970e66e2c0614decde36"
 
 [[package]]
 name = "libloading"
@@ -6489,6 +6489,7 @@ dependencies = [
  "reth-payload-primitives",
  "reth-payload-validator",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-prune",
  "reth-prune-types",
@@ -6603,7 +6604,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-signer",
  "alloy-signer-local",
- "auto_impl",
  "derive_more 1.0.0",
  "metrics",
  "parking_lot",
@@ -7112,6 +7112,7 @@ dependencies = [
  "reth-network-peers",
  "reth-node-api",
  "reth-node-builder",
+ "reth-optimism-primitives",
  "reth-payload-builder",
  "reth-payload-builder-primitives",
  "reth-payload-primitives",
@@ -7269,7 +7270,6 @@ dependencies = [
  "reth-payload-primitives",
  "reth-payload-validator",
  "reth-primitives",
- "reth-primitives-traits",
  "reth-provider",
  "reth-prune",
  "reth-prune-types",
@@ -7564,6 +7564,7 @@ dependencies = [
 name = "reth-execution-types"
 version = "1.1.2"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "arbitrary",
@@ -7573,6 +7574,7 @@ dependencies = [
  "reth-primitives",
  "reth-primitives-traits",
  "reth-trie",
+ "reth-trie-common",
  "revm",
  "serde",
  "serde_with",
@@ -7696,6 +7698,7 @@ dependencies = [
  "reth-engine-primitives",
  "reth-evm",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-revm",
  "reth-rpc-api",
@@ -8412,7 +8415,6 @@ dependencies = [
  "proptest-arbitrary-interop",
  "rand 0.8.5",
  "reth-codecs",
- "reth-node-types",
  "reth-primitives",
  "reth-primitives-traits",
  "revm-primitives",
@@ -8450,6 +8452,7 @@ dependencies = [
  "reth-optimism-evm",
  "reth-optimism-forks",
  "reth-optimism-payload-builder",
+ "reth-optimism-primitives",
  "reth-primitives",
  "reth-provider",
  "reth-rpc",
@@ -8790,6 +8793,7 @@ dependencies = [
  "reth-network-types",
  "reth-payload-validator",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-revm",
  "reth-rpc-api",
@@ -9233,6 +9237,7 @@ dependencies = [
  "reth-stages-types",
  "reth-storage-errors",
  "reth-trie",
+ "reth-trie-db",
 ]
 
 [[package]]
@@ -9274,6 +9279,7 @@ dependencies = [
  "alloy-primitives",
  "rand 0.8.5",
  "reth-primitives",
+ "reth-primitives-traits",
  "secp256k1",
 ]
 
@@ -9356,7 +9362,6 @@ dependencies = [
  "alloy-rlp",
  "alloy-trie",
  "auto_impl",
- "bincode",
  "criterion",
  "itertools 0.13.0",
  "metrics",
@@ -9370,9 +9375,7 @@ dependencies = [
  "reth-storage-errors",
  "reth-trie-common",
  "revm",
- "serde",
  "serde_json",
- "serde_with",
  "tracing",
  "triehash",
 ]
@@ -9387,7 +9390,9 @@ dependencies = [
  "alloy-rlp",
  "alloy-trie",
  "arbitrary",
+ "bincode",
  "bytes",
+ "criterion",
  "derive_more 1.0.0",
  "hash-db",
  "itertools 0.13.0",
@@ -9399,6 +9404,8 @@ dependencies = [
  "reth-primitives-traits",
  "revm-primitives",
  "serde",
+ "serde_json",
+ "serde_with",
 ]
 
 [[package]]
@@ -10607,9 +10614,9 @@ dependencies = [
 
 [[package]]
 name = "sysinfo"
-version = "0.31.4"
+version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "355dbe4f8799b304b05e1b0f05fc59b2a18d36645cf169607da45bde2f69a1be"
+checksum = "4c33cd241af0f2e9e3b5c32163b873b29956890b5342e6745b917ce9d490f4af"
 dependencies = [
  "core-foundation-sys",
  "libc",

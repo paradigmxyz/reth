@@ -13,7 +13,6 @@ workspace = true
 
 [dependencies]
 # reth
-reth-node-types.workspace = true
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-codecs = { workspace = true, optional = true, features = ["optimism"] }
@@ -54,13 +53,13 @@ default = ["std", "reth-codec"]
 std = [
     "reth-primitives/std",
     "reth-primitives-traits/std",
+    "reth-codecs/std",
     "alloy-consensus/std",
     "alloy-eips/std",
     "alloy-primitives/std",
     "revm-primitives/std",
     "serde/std",
     "secp256k1/std",
-    "reth-node-types/std",
     "reth-codecs/std",
 ]
 optimism = [

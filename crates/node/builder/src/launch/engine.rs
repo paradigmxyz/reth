@@ -5,7 +5,6 @@ use reth_beacon_consensus::{
     hooks::{EngineHooks, StaticFileHook},
     BeaconConsensusEngineHandle,
 };
-use reth_blockchain_tree::BlockchainTreeConfig;
 use reth_chainspec::EthChainSpec;
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider};
 use reth_engine_local::{LocalEngineService, LocalPayloadAttributesBuilder};
@@ -29,7 +28,7 @@ use reth_node_core::{
     primitives::Head,
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
-use reth_primitives::EthereumHardforks;
+use reth_primitives::{EthPrimitives, EthereumHardforks};
 use reth_provider::providers::{BlockchainProvider2, ProviderNodeTypes};
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
@@ -71,7 +70,8 @@ impl EngineNodeLauncher {
 
 impl<Types, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
 where
-    Types: ProviderNodeTypes + NodeTypesWithEngine + PersistenceNodeTypes,
+    Types:
+        ProviderNodeTypes<Primitives = EthPrimitives> + NodeTypesWithEngine + PersistenceNodeTypes,
     T: FullNodeTypes<Types = Types, Provider = BlockchainProvider2<Types>>,
     CB: NodeComponentsBuilder<T>,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>,
@@ -93,15 +93,6 @@ where
             config,
         } = target;
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
-
-        // TODO: move tree_config and canon_state_notification_sender
-        // initialization to with_blockchain_db once the engine revamp is done
-        // https://github.com/paradigmxyz/reth/issues/8742
-        let tree_config = BlockchainTreeConfig::default();
-
-        // NOTE: This is a temporary workaround to provide the canon state notification sender to the components builder because there's a cyclic dependency between the blockchain provider and the tree component. This will be removed once the Blockchain provider no longer depends on an instance of the tree: <https://github.com/paradigmxyz/reth/issues/7154>
-        let (canon_state_notification_sender, _receiver) =
-            tokio::sync::broadcast::channel(tree_config.max_reorg_depth() as usize * 2);
 
         // setup the launch context
         let ctx = ctx
@@ -132,7 +123,7 @@ where
             // later the components.
             .with_blockchain_db::<T, _>(move |provider_factory| {
                 Ok(BlockchainProvider2::new(provider_factory)?)
-            }, tree_config, canon_state_notification_sender)?
+            })?
             .with_components(components_builder, on_component_initialized).await?;
 
         // spawn exexs

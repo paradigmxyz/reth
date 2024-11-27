@@ -1,5 +1,3 @@
-use std::{collections::HashMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
-
 use alloy_consensus::Header;
 use alloy_primitives::{keccak256, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
@@ -11,6 +9,7 @@ use reth_evm::{
     state_change::post_block_balance_increments, system_calls::SystemCaller, ConfigureEvm,
 };
 use reth_primitives::{Receipt, SealedBlockWithSenders, SealedHeader};
+use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
@@ -22,6 +21,7 @@ use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
 use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage};
 use serde::Serialize;
+use std::{collections::HashMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
 
 /// Generates a witness for the given block and saves it to a file.
 #[derive(Debug)]
