@@ -8,7 +8,8 @@ use itertools::Itertools;
 use reth_db::DatabaseError;
 use reth_execution_errors::StorageRootError;
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, ProviderError,
+    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
+    HashedStateReader, ProviderError,
 };
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
@@ -53,7 +54,11 @@ impl<Factory> ParallelProof<Factory> {
 
 impl<Factory> ParallelProof<Factory>
 where
-    Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + Send + Sync + 'static,
+    Factory: DatabaseProviderFactory<Provider: BlockReader + HashedStateReader>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
 {
     /// Generate a state multiproof according to specified targets.
     pub fn multiproof(

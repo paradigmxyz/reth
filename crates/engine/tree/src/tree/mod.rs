@@ -41,8 +41,8 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, ExecutionOutcome,
-    ProviderError, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
-    TransactionVariant,
+    HashedStateReader, ProviderError, StateProviderBox, StateProviderFactory, StateReader,
+    StateRootProvider, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
@@ -549,7 +549,7 @@ where
         + StateReader<Receipt = reth_primitives::Receipt>
         + Clone
         + 'static,
-    <P as DatabaseProviderFactory>::Provider: BlockReader,
+    <P as DatabaseProviderFactory>::Provider: BlockReader + HashedStateReader,
     E: BlockExecutorProvider,
     T: EngineTypes,
     Spec: Send + Sync + EthereumHardforks + 'static,

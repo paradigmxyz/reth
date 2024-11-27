@@ -1,6 +1,6 @@
 use crate::{
     providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
-    ProviderError, StateProvider, StateRootProvider,
+    HashedStateReader, ProviderError, StateProvider, StateRootProvider,
 };
 use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::{
@@ -27,8 +27,8 @@ use reth_trie::{
     StorageRoot, TrieInput,
 };
 use reth_trie_db::{
-    DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot,
-    DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness,
+    DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot, DatabaseStorageProof,
+    DatabaseStorageRoot, DatabaseTrieWitness,
 };
 use std::fmt::Debug;
 
@@ -111,32 +111,6 @@ impl<'b, Provider: DBProvider + BlockNumReader + StateCommitmentProvider>
             |key| key.address == address && key.sharded_key.key == storage_key,
             self.lowest_available_blocks.storage_history_block_number,
         )
-    }
-
-    /// Checks and returns `true` if distance to historical block exceeds the provided limit.
-    fn check_distance_against_limit(&self, limit: u64) -> ProviderResult<bool> {
-        let tip = self.provider.last_block_number()?;
-
-        Ok(tip.saturating_sub(self.block_number) > limit)
-    }
-
-    /// Retrieve revert hashed state for this history provider.
-    fn revert_state(&self) -> ProviderResult<HashedPostState> {
-        if !self.lowest_available_blocks.is_account_history_available(self.block_number) ||
-            !self.lowest_available_blocks.is_storage_history_available(self.block_number)
-        {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number))
-        }
-
-        if self.check_distance_against_limit(EPOCH_SLOTS)? {
-            tracing::warn!(
-                target: "provider::historical_sp",
-                target = self.block_number,
-                "Attempt to calculate state root for an old block might result in OOM"
-            );
-        }
-
-        Ok(HashedPostState::from_reverts(self.tx(), self.block_number)?)
     }
 
     /// Retrieve revert hashed storage for this history provider and target address.
@@ -238,9 +212,41 @@ impl<'b, Provider: DBProvider + BlockNumReader + StateCommitmentProvider>
     }
 }
 
-impl<Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'_, Provider> {
+impl<Provider: DBProvider + BlockNumReader + HashedStateReader>
+    HistoricalStateProviderRef<'_, Provider>
+{
+    /// Retrieve revert hashed state for this history provider.
+    fn revert_state(&self) -> ProviderResult<HashedPostState> {
+        if !self.lowest_available_blocks.is_account_history_available(self.block_number) ||
+            !self.lowest_available_blocks.is_storage_history_available(self.block_number)
+        {
+            return Err(ProviderError::StateAtBlockPruned(self.block_number))
+        }
+
+        if self.check_distance_against_limit(EPOCH_SLOTS)? {
+            tracing::warn!(
+                target: "provider::historical_sp",
+                target = self.block_number,
+                "Attempt to calculate state root for an old block might result in OOM"
+            );
+        }
+
+        self.provider.get_hashed_reverts(self.block_number)
+    }
+}
+
+impl<Provider: DBProvider> HistoricalStateProviderRef<'_, Provider> {
     fn tx(&self) -> &Provider::Tx {
         self.provider.tx_ref()
+    }
+}
+
+impl<Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'_, Provider> {
+    /// Checks and returns `true` if distance to historical block exceeds the provided limit.
+    fn check_distance_against_limit(&self, limit: u64) -> ProviderResult<bool> {
+        let tip = self.provider.last_block_number()?;
+
+        Ok(tip.saturating_sub(self.block_number) > limit)
     }
 }
 
@@ -285,8 +291,8 @@ impl<Provider: DBProvider + BlockNumReader + BlockHashReader> BlockHashReader
     }
 }
 
-impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StateRootProvider
-    for HistoricalStateProviderRef<'_, Provider>
+impl<Provider: DBProvider + BlockNumReader + HashedStateReader + StateCommitmentProvider>
+    StateRootProvider for HistoricalStateProviderRef<'_, Provider>
 {
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         let mut revert_state = self.revert_state()?;
@@ -360,8 +366,8 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StorageRoo
     }
 }
 
-impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StateProofProvider
-    for HistoricalStateProviderRef<'_, Provider>
+impl<Provider: DBProvider + BlockNumReader + HashedStateReader + StateCommitmentProvider>
+    StateProofProvider for HistoricalStateProviderRef<'_, Provider>
 {
     /// Get account and storage proofs.
     fn proof(
@@ -394,8 +400,9 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StateProof
     }
 }
 
-impl<Provider: DBProvider + BlockNumReader + BlockHashReader + StateCommitmentProvider>
-    StateProvider for HistoricalStateProviderRef<'_, Provider>
+impl<
+        Provider: DBProvider + BlockNumReader + HashedStateReader + BlockHashReader + StateCommitmentProvider,
+    > StateProvider for HistoricalStateProviderRef<'_, Provider>
 {
     /// Get storage.
     fn storage(
@@ -483,7 +490,7 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider>
 }
 
 // Delegates all provider impls to [HistoricalStateProviderRef]
-delegate_provider_impls!(HistoricalStateProvider<Provider> where [Provider: DBProvider + BlockNumReader + BlockHashReader + StateCommitmentProvider]);
+delegate_provider_impls!(HistoricalStateProvider<Provider> where [Provider: DBProvider + BlockNumReader + BlockHashReader + HashedStateReader + StateCommitmentProvider]);
 
 /// Lowest blocks at which different parts of the state are available.
 /// They may be [Some] if pruning is enabled.
@@ -518,7 +525,8 @@ mod tests {
     use crate::{
         providers::state::historical::{HistoryInfo, LowestAvailableBlocks},
         test_utils::create_test_provider_factory,
-        AccountReader, HistoricalStateProvider, HistoricalStateProviderRef, StateProvider,
+        AccountReader, HashedStateReader, HistoricalStateProvider, HistoricalStateProviderRef,
+        StateProvider,
     };
     use alloy_primitives::{address, b256, Address, B256, U256};
     use reth_db::{tables, BlockNumberList};
@@ -540,7 +548,7 @@ mod tests {
     const fn assert_state_provider<T: StateProvider>() {}
     #[allow(dead_code)]
     const fn assert_historical_state_provider<
-        T: DBProvider + BlockNumReader + BlockHashReader + StateCommitmentProvider,
+        T: DBProvider + BlockNumReader + BlockHashReader + HashedStateReader + StateCommitmentProvider,
     >() {
         assert_state_provider::<HistoricalStateProvider<T>>();
     }

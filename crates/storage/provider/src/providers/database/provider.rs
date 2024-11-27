@@ -11,7 +11,7 @@ use crate::{
     },
     AccountReader, BlockBodyWriter, BlockExecutionWriter, BlockHashReader, BlockNumReader,
     BlockReader, BlockWriter, BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter,
-    DBProvider, EvmEnvProvider, HashingWriter, HeaderProvider, HeaderSyncGap,
+    DBProvider, EvmEnvProvider, HashedStateReader, HashingWriter, HeaderProvider, HeaderSyncGap,
     HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter,
     LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError,
     PruneCheckpointReader, PruneCheckpointWriter, RevertsInit, StageCheckpointReader,
@@ -62,7 +62,7 @@ use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
     updates::{StorageTrieUpdates, TrieUpdates},
-    HashedPostStateSorted, Nibbles, StateRoot, StoredNibbles,
+    HashedPostState, HashedPostStateSorted, HashedStorage, Nibbles, StateRoot, StoredNibbles,
 };
 use reth_trie_db::{DatabaseStateRoot, DatabaseStorageTrieCursor};
 use revm::{
@@ -919,6 +919,50 @@ impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> 
             .walk_range(storage_range)?
             .map(|result| -> ProviderResult<_> { Ok(result?) })
             .collect()
+    }
+}
+
+impl<TX: DbTx, N: NodeTypes> HashedStateReader for DatabaseProvider<TX, N> {
+    fn get_hashed_reverts(&self, from: BlockNumber) -> ProviderResult<HashedPostState> {
+        // Iterate over account changesets and record value before first occurring account change.
+        let mut accounts = HashMap::new();
+        let mut account_changesets_cursor = self.tx.cursor_read::<tables::AccountChangeSets>()?;
+        for entry in account_changesets_cursor.walk_range(from..)? {
+            let (_, AccountBeforeTx { address, info }) = entry?;
+            accounts.entry(address).or_insert(info);
+        }
+
+        // Iterate over storage changesets and record value before first occurring storage change.
+        let mut storages = HashMap::<Address, HashMap<B256, U256>>::default();
+        let mut storage_changesets_cursor = self.tx.cursor_read::<tables::StorageChangeSets>()?;
+        for entry in
+            storage_changesets_cursor.walk_range(BlockNumberAddress((from, Address::ZERO))..)?
+        {
+            let (BlockNumberAddress((_, address)), storage) = entry?;
+            let account_storage = storages.entry(address).or_default();
+            account_storage.entry(storage.key).or_insert(storage.value);
+        }
+
+        let hashed_accounts =
+            accounts.into_iter().map(|(address, info)| (keccak256(address), info)).collect();
+
+        let hashed_storages = storages
+            .into_iter()
+            .map(|(address, storage)| {
+                (
+                    keccak256(address),
+                    HashedStorage::from_iter(
+                        // The `wiped` flag indicates only whether previous storage entries
+                        // should be looked up in db or not. For reverts it's a noop since all
+                        // wiped changes had been written as storage reverts.
+                        false,
+                        storage.into_iter().map(|(slot, value)| (keccak256(slot), value)),
+                    ),
+                )
+            })
+            .collect();
+
+        Ok(HashedPostState { accounts: hashed_accounts, storages: hashed_storages })
     }
 }
 
