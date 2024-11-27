@@ -1422,7 +1422,7 @@ impl<N: FullNodePrimitives<SignedTx: Value, Receipt: Value>> TransactionsProvide
                     chunk_range,
                     |cursor, number| {
                         Ok(cursor
-                            .get_one::<TransactionMask<TransactionSignedNoHash>>(number.into())?
+                            .get_one::<TransactionMask<Self::Transaction>>(number.into())?
                             .map(|transaction| {
                                 rlp_buf.clear();
                                 let _ = channel_tx
@@ -1708,11 +1708,14 @@ impl<N: NodePrimitives> StatsReader for StaticFileProvider<N> {
 
 /// Calculates the tx hash for the given transaction and its id.
 #[inline]
-fn calculate_hash(
-    entry: (TxNumber, TransactionSignedNoHash),
+fn calculate_hash<T>(
+    entry: (TxNumber, T),
     rlp_buf: &mut Vec<u8>,
-) -> Result<(B256, TxNumber), Box<ProviderError>> {
+) -> Result<(B256, TxNumber), Box<ProviderError>>
+where
+    T: Encodable2718,
+{
     let (tx_id, tx) = entry;
-    tx.transaction.eip2718_encode(&tx.signature, rlp_buf);
+    tx.encode_2718(rlp_buf);
     Ok((keccak256(rlp_buf), tx_id))
 }
