@@ -20,7 +20,7 @@ pub struct OpTxType(AlloyOpTxType);
 
 impl OpTxType {
     #[inline]
-    fn is_deposit(&self) -> bool {
+    pub fn is_deposit(&self) -> bool {
         matches!(self.0, AlloyOpTxType::Deposit)
     }
 }
