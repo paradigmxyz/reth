@@ -95,6 +95,8 @@ pub trait StateReader: Send + Sync {
 pub trait BlockWriter: Send + Sync {
     /// The body this writer can write.
     type Block: reth_primitives_traits::Block;
+    /// The receipt type for [`ExecutionOutcome`].
+    type Receipt: Send + Sync;
 
     /// Insert full block and make it canonical. Parent tx num and transition id is taken from
     /// parent block in database.
@@ -154,7 +156,7 @@ pub trait BlockWriter: Send + Sync {
     fn append_blocks_with_state(
         &self,
         blocks: Vec<SealedBlockWithSenders<Self::Block>>,
-        execution_outcome: ExecutionOutcome,
+        execution_outcome: ExecutionOutcome<Self::Receipt>,
         hashed_state: HashedPostStateSorted,
         trie_updates: TrieUpdates,
     ) -> ProviderResult<()>;

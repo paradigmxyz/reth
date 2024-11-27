@@ -15,10 +15,9 @@ use crate::{
     HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter,
     LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError,
     PruneCheckpointReader, PruneCheckpointWriter, RevertsInit, StageCheckpointReader,
-    StateChangeWriter, StateCommitmentProvider, StateProviderBox, StateWriter,
-    StaticFileProviderFactory, StatsReader, StorageLocation, StorageReader, StorageTrieWriter,
-    TransactionVariant, TransactionsProvider, TransactionsProviderExt, TrieWriter,
-    WithdrawalsProvider,
+    StateCommitmentProvider, StateProviderBox, StateWriter, StaticFileProviderFactory, StatsReader,
+    StorageLocation, StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
+    TransactionsProviderExt, TrieWriter, WithdrawalsProvider,
 };
 use alloy_consensus::Header;
 use alloy_eips::{
@@ -351,7 +350,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     ) -> ProviderResult<()> {
         if remove_from.database() {
             // iterate over block body and remove receipts
-            self.remove::<tables::Receipts>(from_tx..)?;
+            self.remove::<tables::Receipts<ReceiptTy<N>>>(from_tx..)?;
         }
 
         if remove_from.static_files() && !self.prune_modes.has_receipts_pruning() {
@@ -1536,7 +1535,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
             StaticFileSegment::Receipts,
             id,
             |static_file| static_file.receipt(id),
-            || Ok(self.tx.get::<tables::Receipts>(id)?),
+            || Ok(self.tx.get::<tables::Receipts<Self::Receipt>>(id)?),
         )
     }
 
@@ -1573,7 +1572,10 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
             StaticFileSegment::Receipts,
             to_range(range),
             |static_file, range, _| static_file.receipts_by_tx_range(range),
-            |range, _| self.cursor_read_collect::<tables::Receipts>(range).map_err(Into::into),
+            |range, _| {
+                self.cursor_read_collect::<tables::Receipts<Self::Receipt>>(range)
+                    .map_err(Into::into)
+            },
             |_| true,
         )
     }
@@ -1798,9 +1800,77 @@ impl<TX: DbTx + 'static, N: NodeTypes> StorageReader for DatabaseProvider<TX, N>
     }
 }
 
-impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateChangeWriter
+impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     for DatabaseProvider<TX, N>
 {
+    type Receipt = ReceiptTy<N>;
+
+    fn write_state(
+        &self,
+        execution_outcome: ExecutionOutcome<Self::Receipt>,
+        is_value_known: OriginalValuesKnown,
+        write_receipts_to: StorageLocation,
+    ) -> ProviderResult<()> {
+        let (plain_state, reverts) =
+            execution_outcome.bundle.to_plain_state_and_reverts(is_value_known);
+
+        self.write_state_reverts(reverts, execution_outcome.first_block)?;
+        self.write_state_changes(plain_state)?;
+
+        let mut bodies_cursor = self.tx.cursor_read::<tables::BlockBodyIndices>()?;
+
+        let has_receipts_pruning = self.prune_modes.has_receipts_pruning() ||
+            execution_outcome.receipts.iter().flatten().any(|receipt| receipt.is_none());
+
+        // Prepare receipts cursor if we are going to write receipts to the database
+        //
+        // We are writing to database if requested or if there's any kind of receipt pruning
+        // configured
+        let mut receipts_cursor = (write_receipts_to.database() || has_receipts_pruning)
+            .then(|| self.tx.cursor_write::<tables::Receipts<Self::Receipt>>())
+            .transpose()?;
+
+        // Prepare receipts static writer if we are going to write receipts to static files
+        //
+        // We are writing to static files if requested and if there's no receipt pruning configured
+        let mut receipts_static_writer = (write_receipts_to.static_files() &&
+            !has_receipts_pruning)
+            .then(|| {
+                self.static_file_provider
+                    .get_writer(execution_outcome.first_block, StaticFileSegment::Receipts)
+            })
+            .transpose()?;
+
+        for (idx, receipts) in execution_outcome.receipts.into_iter().enumerate() {
+            let block_number = execution_outcome.first_block + idx as u64;
+
+            // Increment block number for receipts static file writer
+            if let Some(writer) = receipts_static_writer.as_mut() {
+                writer.increment_block(block_number)?;
+            }
+
+            let first_tx_index = bodies_cursor
+                .seek_exact(block_number)?
+                .map(|(_, indices)| indices.first_tx_num())
+                .ok_or(ProviderError::BlockBodyIndicesNotFound(block_number))?;
+
+            for (idx, receipt) in receipts.into_iter().enumerate() {
+                let receipt_idx = first_tx_index + idx as u64;
+                if let Some(receipt) = receipt {
+                    if let Some(writer) = &mut receipts_static_writer {
+                        writer.append_receipt(receipt_idx, &receipt)?;
+                    }
+
+                    if let Some(cursor) = &mut receipts_cursor {
+                        cursor.append(receipt_idx, receipt)?;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     fn write_state_reverts(
         &self,
         reverts: PlainStateReverts,
@@ -2089,7 +2159,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateChangeWriter
         &self,
         block: BlockNumber,
         remove_receipts_from: StorageLocation,
-    ) -> ProviderResult<ExecutionOutcome> {
+    ) -> ProviderResult<ExecutionOutcome<Self::Receipt>> {
         let range = block + 1..=self.last_block_number()?;
 
         if range.is_empty() {
@@ -2172,7 +2242,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateChangeWriter
                 },
                 |range, _| {
                     self.tx
-                        .cursor_read::<tables::Receipts>()?
+                        .cursor_read::<tables::Receipts<Self::Receipt>>()?
                         .walk_range(range)?
                         .map(|r| r.map_err(Into::into))
                         .collect()
@@ -2709,6 +2779,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     for DatabaseProvider<TX, N>
 {
     type Block = BlockTy<N>;
+    type Receipt = ReceiptTy<N>;
 
     /// Inserts the block into the database, always modifying the following tables:
     /// * [`CanonicalHeaders`](tables::CanonicalHeaders)
@@ -2976,7 +3047,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     fn append_blocks_with_state(
         &self,
         blocks: Vec<SealedBlockWithSenders<Self::Block>>,
-        execution_outcome: ExecutionOutcome,
+        execution_outcome: ExecutionOutcome<Self::Receipt>,
         hashed_state: HashedPostStateSorted,
         trie_updates: TrieUpdates,
     ) -> ProviderResult<()> {
@@ -2998,11 +3069,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             durations_recorder.record_relative(metrics::Action::InsertBlock);
         }
 
-        self.write_to_storage(
-            execution_outcome,
-            OriginalValuesKnown::No,
-            StorageLocation::Database,
-        )?;
+        self.write_state(execution_outcome, OriginalValuesKnown::No, StorageLocation::Database)?;
         durations_recorder.record_relative(metrics::Action::InsertState);
 
         // insert hashes and intermediate merkle nodes
@@ -3050,7 +3117,7 @@ impl<TX: DbTxMut, N: NodeTypes> PruneCheckpointWriter for DatabaseProvider<TX, N
     }
 }
 
-impl<TX: DbTx + 'static, N: NodeTypes> StatsReader for DatabaseProvider<TX, N> {
+impl<TX: DbTx + 'static, N: NodeTypesForProvider> StatsReader for DatabaseProvider<TX, N> {
     fn count_entries<T: Table>(&self) -> ProviderResult<usize> {
         let db_entries = self.tx.entries::<T>()?;
         let static_file_entries = match self.static_file_provider.count_entries::<T>() {
@@ -3120,75 +3187,5 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
 
     fn prune_modes_ref(&self) -> &PruneModes {
         self.prune_modes_ref()
-    }
-}
-
-impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> StateWriter
-    for DatabaseProvider<TX, N>
-{
-    fn write_to_storage(
-        &self,
-        execution_outcome: ExecutionOutcome,
-        is_value_known: OriginalValuesKnown,
-        write_receipts_to: StorageLocation,
-    ) -> ProviderResult<()> {
-        let (plain_state, reverts) =
-            execution_outcome.bundle.to_plain_state_and_reverts(is_value_known);
-
-        self.write_state_reverts(reverts, execution_outcome.first_block)?;
-        self.write_state_changes(plain_state)?;
-
-        let mut bodies_cursor = self.tx.cursor_read::<tables::BlockBodyIndices>()?;
-
-        let has_receipts_pruning = self.prune_modes.has_receipts_pruning() ||
-            execution_outcome.receipts.iter().flatten().any(|receipt| receipt.is_none());
-
-        // Prepare receipts cursor if we are going to write receipts to the database
-        //
-        // We are writing to database if requested or if there's any kind of receipt pruning
-        // configured
-        let mut receipts_cursor = (write_receipts_to.database() || has_receipts_pruning)
-            .then(|| self.tx.cursor_write::<tables::Receipts>())
-            .transpose()?;
-
-        // Prepare receipts static writer if we are going to write receipts to static files
-        //
-        // We are writing to static files if requested and if there's no receipt pruning configured
-        let mut receipts_static_writer = (write_receipts_to.static_files() &&
-            !has_receipts_pruning)
-            .then(|| {
-                self.static_file_provider
-                    .get_writer(execution_outcome.first_block, StaticFileSegment::Receipts)
-            })
-            .transpose()?;
-
-        for (idx, receipts) in execution_outcome.receipts.into_iter().enumerate() {
-            let block_number = execution_outcome.first_block + idx as u64;
-
-            // Increment block number for receipts static file writer
-            if let Some(writer) = receipts_static_writer.as_mut() {
-                writer.increment_block(block_number)?;
-            }
-
-            let first_tx_index = bodies_cursor
-                .seek_exact(block_number)?
-                .map(|(_, indices)| indices.first_tx_num())
-                .ok_or(ProviderError::BlockBodyIndicesNotFound(block_number))?;
-
-            for (idx, receipt) in receipts.into_iter().enumerate() {
-                let receipt_idx = first_tx_index + idx as u64;
-                if let Some(receipt) = receipt {
-                    if let Some(writer) = &mut receipts_static_writer {
-                        writer.append_receipt(receipt_idx, &receipt)?;
-                    }
-
-                    if let Some(cursor) = &mut receipts_cursor {
-                        cursor.append(receipt_idx, receipt)?;
-                    }
-                }
-            }
-        }
-
-        Ok(())
     }
 }

@@ -145,7 +145,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
     pub fn get_state(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Option<ExecutionOutcome>> {
+    ) -> ProviderResult<Option<ExecutionOutcome<ReceiptTy<N>>>> {
         self.consistent_provider()?.get_state(range)
     }
 }
