@@ -268,7 +268,7 @@ mod tests {
         ];
         assert_matches!(
             sparse.validate_proof(&mut proof.into_iter().peekable()),
-            Err(SparseStateTrieError::InvalidRootNodePath { .. })
+            Err(SparseStateTrieError::UnexpectedNode { .. })
         );
     }
 
