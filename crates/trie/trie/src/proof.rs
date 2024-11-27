@@ -16,6 +16,7 @@ use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
     proof::ProofRetainer, AccountProof, MultiProof, StorageMultiProof, TrieAccount,
 };
+use tracing::debug;
 
 /// A struct for generating merkle proofs.
 ///
@@ -106,12 +107,14 @@ where
         let mut storages = HashMap::default();
         let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
         let mut account_node_iter = TrieNodeIter::new(walker, hashed_account_cursor);
+        debug!(target: "engine::root", accounts = ?targets.keys(), "Iterating over account nodes");
         while let Some(account_node) = account_node_iter.try_next()? {
             match account_node {
                 TrieElement::Branch(node) => {
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
                 TrieElement::Leaf(hashed_address, account) => {
+                    debug!(target: "trie", ?hashed_address, ?account, "Adding account to proof");
                     let storage_prefix_set = self
                         .prefix_sets
                         .storage_prefix_sets
@@ -136,6 +139,7 @@ where
                 }
             }
         }
+        debug!(target: "engine::root", targets = ?targets.keys(), "Finished iterating over account nodes");
         let _ = hash_builder.root();
         Ok(MultiProof { account_subtree: hash_builder.take_proof_nodes(), storages })
     }
