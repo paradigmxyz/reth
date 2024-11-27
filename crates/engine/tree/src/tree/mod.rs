@@ -36,7 +36,9 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{Block, GotExpected, SealedBlock, SealedBlockWithSenders, SealedHeader};
+use reth_primitives::{
+    Block, GotExpected, NodePrimitives, SealedBlock, SealedBlockWithSenders, SealedHeader,
+};
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, ExecutionOutcome,
     ProviderError, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
@@ -51,6 +53,7 @@ use std::{
     cmp::Ordering,
     collections::{btree_map, hash_map, BTreeMap, VecDeque},
     fmt::Debug,
+    marker::PhantomData,
     ops::Bound,
     sync::{
         mpsc::{Receiver, RecvError, RecvTimeoutError, Sender},
@@ -469,7 +472,7 @@ pub enum TreeAction {
 ///
 /// This type is responsible for processing engine API requests, maintaining the canonical state and
 /// emitting events.
-pub struct EngineApiTreeHandler<P, E, T: EngineTypes, Spec> {
+pub struct EngineApiTreeHandler<N, P, E, T: EngineTypes, Spec> {
     provider: P,
     executor_provider: E,
     consensus: Arc<dyn Consensus>,
@@ -509,10 +512,12 @@ pub struct EngineApiTreeHandler<P, E, T: EngineTypes, Spec> {
     invalid_block_hook: Box<dyn InvalidBlockHook>,
     /// The engine API variant of this handler
     engine_kind: EngineApiKind,
+    /// Captures the types the engine operates on
+    _primtives: PhantomData<N>,
 }
 
-impl<P: Debug, E: Debug, T: EngineTypes + Debug, Spec: Debug> std::fmt::Debug
-    for EngineApiTreeHandler<P, E, T, Spec>
+impl<N, P: Debug, E: Debug, T: EngineTypes + Debug, Spec: Debug> std::fmt::Debug
+    for EngineApiTreeHandler<N, P, E, T, Spec>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineApiTreeHandler")
@@ -535,8 +540,9 @@ impl<P: Debug, E: Debug, T: EngineTypes + Debug, Spec: Debug> std::fmt::Debug
     }
 }
 
-impl<P, E, T, Spec> EngineApiTreeHandler<P, E, T, Spec>
+impl<N, P, E, T, Spec> EngineApiTreeHandler<N, P, E, T, Spec>
 where
+    N: NodePrimitives,
     P: DatabaseProviderFactory
         + BlockReader<Block = reth_primitives::Block>
         + StateProviderFactory
@@ -584,6 +590,7 @@ where
             incoming_tx,
             invalid_block_hook: Box::new(NoopInvalidBlockHook),
             engine_kind,
+            _primtives: Default::default(),
         }
     }
 
@@ -2624,7 +2631,7 @@ mod tests {
     use reth_engine_primitives::ForkchoiceStatus;
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm::test_utils::MockExecutorProvider;
-    use reth_primitives::BlockExt;
+    use reth_primitives::{BlockExt, EthPrimitives};
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::{block_to_payload_v1, payload::block_to_payload_v3};
     use reth_trie::updates::TrieUpdates;
@@ -2689,8 +2696,13 @@ mod tests {
     }
 
     struct TestHarness {
-        tree:
-            EngineApiTreeHandler<MockEthProvider, MockExecutorProvider, EthEngineTypes, ChainSpec>,
+        tree: EngineApiTreeHandler<
+            EthPrimitives,
+            MockEthProvider,
+            MockExecutorProvider,
+            EthEngineTypes,
+            ChainSpec,
+        >,
         to_tree_tx: Sender<FromEngine<EngineApiRequest<EthEngineTypes>>>,
         from_tree_rx: UnboundedReceiver<EngineApiEvent>,
         blocks: Vec<ExecutedBlock>,
