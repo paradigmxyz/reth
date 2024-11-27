@@ -1,7 +1,7 @@
 use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use alloy_primitives::{
     keccak256,
-    map::{HashMap, HashSet},
+    map::{FbHashMap, FbHashSet, HashMap, HashSet},
     Address, B256,
 };
 use reth_db_api::transaction::DbTx;
@@ -66,7 +66,7 @@ impl<'a, TX: DbTx> DatabaseProof<'a, TX>
     fn overlay_multiproof(
         tx: &'a TX,
         input: TrieInput,
-        targets: HashMap<B256, HashSet<B256>>,
+        targets: FbHashMap<B256, FbHashSet<B256>>,
     ) -> Result<MultiProof, StateProofError> {
         let nodes_sorted = input.nodes.into_sorted();
         let state_sorted = input.state.into_sorted();

@@ -262,18 +262,10 @@ where
             }
         }
 
-        // Dispatch proof gathering for this state update
-        let targets = hashed_state_update
-            .accounts
-            .keys()
-            .filter(|hashed_address| !fetched_proof_targets.contains(*hashed_address))
-            .map(|hashed_address| (*hashed_address, HashSet::default()))
-            .chain(hashed_state_update.storages.iter().map(|(hashed_address, storage)| {
-                (*hashed_address, storage.storage.keys().copied().collect())
-            }))
-            .collect::<HashMap<_, _>>();
+        let proof_targets = get_proof_targets(hashed_state_update.clone());
 
-        let proof_targets = targets.clone();
+        // Dispatch proof gathering for this state update
+        let targets = proof_targets.clone();
         rayon::spawn(move || {
             let provider = match view.provider_ro() {
                 Ok(provider) => provider,
@@ -284,8 +276,11 @@ where
             };
 
             // TODO: replace with parallel proof
-            let result =
-                Proof::overlay_multiproof(provider.tx_ref(), input.as_ref().clone(), proof_targets);
+            let result = Proof::overlay_multiproof(
+                provider.tx_ref(),
+                input.as_ref().clone(),
+                targets.clone(),
+            );
             match result {
                 Ok(proof) => {
                     let _ = state_root_message_sender.send(StateRootMessage::ProofCalculated {
@@ -300,7 +295,7 @@ where
             }
         });
 
-        targets
+        proof_targets
     }
 
     /// Handler for new proof calculated, aggregates all the existing sequential proofs.
@@ -324,8 +319,8 @@ where
         }
     }
 
-    /// Spawns root calculation with the current state and proofs
-    fn spawn_root_calculation(&mut self, multiproof: MultiProof, state: HashedPostState) {
+    /// Spawns root calculation with the current state and proofs.
+    fn spawn_root_calculation(&mut self, state: HashedPostState, multiproof: MultiProof) {
         let Some(trie) = self.sparse_trie.take() else { return };
 
         trace!(
@@ -335,14 +330,7 @@ where
             "Spawning root calculation"
         );
 
-        let targets: FbHashMap<32, FbHashSet<32>> = state
-            .accounts
-            .keys()
-            .map(|hashed_address| (*hashed_address, HashSet::default()))
-            .chain(state.storages.iter().map(|(hashed_address, storage)| {
-                (*hashed_address, storage.storage.keys().copied().collect())
-            }))
-            .collect();
+        let targets = get_proof_targets(state);
 
         let tx = self.tx.clone();
         rayon::spawn(move || {
@@ -408,7 +396,7 @@ where
                                 current_multiproof.extend(combined_proof);
                                 current_state_update.extend(combined_state_update);
                             } else {
-                                self.spawn_root_calculation(combined_proof, combined_state_update);
+                                self.spawn_root_calculation(combined_state_update, combined_proof);
                             }
                         }
                     }
@@ -478,6 +466,17 @@ where
             }
         }
     }
+}
+
+fn get_proof_targets(state_update: HashedPostState) -> FbHashMap<B256, FbHashSet<B256>> {
+    state_update
+        .accounts
+        .keys()
+        .map(|hashed_address| (*hashed_address, Default::default()))
+        .chain(state_update.storages.iter().map(|(hashed_address, storage)| {
+            (*hashed_address, storage.storage.keys().copied().collect())
+        }))
+        .collect()
 }
 
 /// Updates the sparse trie with the given proofs and state, and returns the updated trie and the
