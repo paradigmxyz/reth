@@ -48,9 +48,9 @@ use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_network_p2p::headers::downloader::SyncTarget;
 use reth_node_types::{BlockTy, BodyTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives::{
-    Account, BlockExt, BlockWithSenders, Bytecode, GotExpected, Receipt, SealedBlock,
-    SealedBlockFor, SealedBlockWithSenders, SealedHeader, StaticFileSegment, StorageEntry,
-    TransactionMeta, TransactionSignedNoHash,
+    Account, BlockExt, BlockWithSenders, Bytecode, GotExpected, SealedBlock, SealedBlockFor,
+    SealedBlockWithSenders, SealedHeader, StaticFileSegment, StorageEntry, TransactionMeta,
+    TransactionSignedNoHash,
 };
 use reth_primitives_traits::{Block as _, BlockBody as _, SignedTransaction};
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
@@ -1199,7 +1199,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Receipt>)>> {
+    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Self::Receipt>)>> {
         Ok(None)
     }
 

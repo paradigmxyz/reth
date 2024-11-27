@@ -21,8 +21,8 @@ use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::{BundleStateInit, ExecutionOutcome, RevertsInit};
 use reth_node_types::{BlockTy, ReceiptTy, TxTy};
 use reth_primitives::{
-    Account, BlockWithSenders, Receipt, SealedBlockFor, SealedBlockWithSenders, SealedHeader,
-    StorageEntry, TransactionMeta,
+    Account, BlockWithSenders, SealedBlockFor, SealedBlockWithSenders, SealedHeader, StorageEntry,
+    TransactionMeta,
 };
 use reth_primitives_traits::{Block, BlockBody};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
@@ -151,7 +151,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     pub fn get_state(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Option<ExecutionOutcome>> {
+    ) -> ProviderResult<Option<ExecutionOutcome<ReceiptTy<N>>>> {
         if range.is_empty() {
             return Ok(None)
         }
@@ -828,7 +828,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Receipt>)>> {
+    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Self::Receipt>)>> {
         Ok(self.canonical_in_memory_state.pending_block_and_receipts())
     }
 
@@ -1501,6 +1501,8 @@ impl<N: ProviderNodeTypes> AccountReader for ConsistentProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> StateReader for ConsistentProvider<N> {
+    type Receipt = ReceiptTy<N>;
+
     /// Re-constructs the [`ExecutionOutcome`] from in-memory and database state, if necessary.
     ///
     /// If data for the block does not exist, this will return [`None`].

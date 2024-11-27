@@ -288,7 +288,7 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Receipt>)>> {
+    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Self::Receipt>)>> {
         Ok(self.canonical_in_memory_state.pending_block_and_receipts())
     }
 
@@ -764,6 +764,8 @@ impl<N: ProviderNodeTypes> AccountReader for BlockchainProvider2<N> {
 }
 
 impl<N: ProviderNodeTypes> StateReader for BlockchainProvider2<N> {
+    type Receipt = ReceiptTy<N>;
+
     /// Re-constructs the [`ExecutionOutcome`] from in-memory and database state, if necessary.
     ///
     /// If data for the block does not exist, this will return [`None`].
@@ -773,7 +775,10 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider2<N> {
     /// inconsistent. Currently this can safely be called within the blockchain tree thread,
     /// because the tree thread is responsible for modifying the [`CanonicalInMemoryState`] in the
     /// first place.
-    fn get_state(&self, block: BlockNumber) -> ProviderResult<Option<ExecutionOutcome>> {
+    fn get_state(
+        &self,
+        block: BlockNumber,
+    ) -> ProviderResult<Option<ExecutionOutcome<Self::Receipt>>> {
         StateReader::get_state(&self.consistent_provider()?, block)
     }
 }

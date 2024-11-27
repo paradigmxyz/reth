@@ -21,8 +21,8 @@ use reth_errors::{RethError, RethResult};
 use reth_evm::ConfigureEvmEnv;
 use reth_node_types::{BlockTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives::{
-    BlockWithSenders, Receipt, SealedBlockFor, SealedBlockWithSenders, SealedHeader,
-    StaticFileSegment, TransactionMeta,
+    BlockWithSenders, SealedBlockFor, SealedBlockWithSenders, SealedHeader, StaticFileSegment,
+    TransactionMeta,
 };
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -381,7 +381,7 @@ impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Receipt>)>> {
+    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Self::Receipt>)>> {
         self.provider()?.pending_block_and_receipts()
     }
 

@@ -38,8 +38,8 @@ use reth_primitives::{
         DEFAULT_BLOCKS_PER_STATIC_FILE,
     },
     transaction::recover_signers,
-    BlockWithSenders, Receipt, SealedBlockFor, SealedBlockWithSenders, SealedHeader,
-    StaticFileSegment, TransactionMeta, TransactionSignedNoHash,
+    BlockWithSenders, SealedBlockFor, SealedBlockWithSenders, SealedHeader, StaticFileSegment,
+    TransactionMeta, TransactionSignedNoHash,
 };
 use reth_primitives_traits::SignedTransaction;
 use reth_stages_types::{PipelineTarget, StageId};
@@ -1613,7 +1613,7 @@ impl<N: FullNodePrimitives<SignedTx: Value, Receipt: Value>> BlockReader for Sta
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Receipt>)>> {
+    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Self::Receipt>)>> {
         // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
