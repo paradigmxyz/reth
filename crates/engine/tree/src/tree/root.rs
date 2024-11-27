@@ -251,10 +251,12 @@ where
                 debug!(target: "engine::root", ?address, ?hashed_address, "Adding account to state update");
 
                 let destroyed = account.is_selfdestructed();
-                hashed_state_update.accounts.insert(
-                    hashed_address,
-                    if destroyed || account.is_empty() { None } else { Some(account.info.into()) },
-                );
+                if destroyed || !account.is_empty() {
+                    hashed_state_update.accounts.insert(
+                        hashed_address,
+                        if destroyed { None } else { Some(account.info.into()) },
+                    );
+                }
 
                 if destroyed || !account.storage.is_empty() {
                     let storage = account.storage.into_iter().filter_map(|(slot, value)| {
