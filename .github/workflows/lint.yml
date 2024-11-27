@@ -82,14 +82,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          target: riscv32im-unknown-none-elf
+          target: riscv32imac-unknown-none-elf
       - uses: taiki-e/install-action@cargo-hack
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
       - uses: dcarbone/install-jq-action@v3
       - name: Run RISC-V checks
-        run: .github/assets/check_rv32im.sh
+        run: .github/assets/check_rv32imac.sh
 
   crate-checks:
     runs-on: ubuntu-latest

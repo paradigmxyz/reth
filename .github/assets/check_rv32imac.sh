@@ -156,7 +156,7 @@ for crate in "${crates[@]}"; do
     continue
   fi
 
-  cmd="cargo +stable build -p $crate --target riscv32im-unknown-none-elf --no-default-features"
+  cmd="cargo +stable build -p $crate --target riscv32imac-unknown-none-elf --no-default-features"
 
   if [ -n "$CI" ]; then
     echo "::group::$cmd"
