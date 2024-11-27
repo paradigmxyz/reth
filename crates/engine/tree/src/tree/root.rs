@@ -666,8 +666,10 @@ fn update_sparse_trie(
         trie.reveal_account(address, proof)?;
         let account = account.unwrap();
 
-        if account.storage_root != EMPTY_ROOT_HASH {
-            trie.reveal_storage_root(address, account.storage_root)?;
+        if account.storage_root == EMPTY_ROOT_HASH {
+            trie.reveal_storage_root(address, TrieNode::EmptyRoot)?;
+        } else {
+            trie.reveal_storage_root_hash(address, account.storage_root)?;
         }
 
         let storage_proofs = multiproof.storage_proof_nodes(address, slots);

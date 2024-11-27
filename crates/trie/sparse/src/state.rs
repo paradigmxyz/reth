@@ -80,6 +80,16 @@ impl SparseStateTrie {
     pub fn reveal_storage_root(
         &mut self,
         account: B256,
+        root_node: TrieNode,
+    ) -> SparseStateTrieResult<()> {
+        self.storages.entry(account).or_default().reveal_root(root_node, self.retain_updates)?;
+
+        Ok(())
+    }
+
+    pub fn reveal_storage_root_hash(
+        &mut self,
+        account: B256,
         root_hash: B256,
     ) -> SparseStateTrieResult<()> {
         self.storages
