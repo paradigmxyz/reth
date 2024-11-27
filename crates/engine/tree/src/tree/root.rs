@@ -139,7 +139,7 @@ impl ProofSequencer {
         proof: MultiProof,
         state_update: HashedPostState,
     ) -> Vec<(MultiProof, HashedPostState)> {
-        debug!(target: "engine::tree", ?sequence, "Adding proof");
+        debug!(target: "engine::root", ?sequence, "Adding proof");
         if sequence >= self.next_to_deliver {
             self.pending_proofs.insert(sequence, (proof, state_update));
         }
@@ -154,7 +154,7 @@ impl ProofSequencer {
 
         // keep collecting proofs as long as we have consecutive sequence numbers
         while let Some((proof, state_update)) = self.pending_proofs.remove(&current_sequence) {
-            debug!(target: "engine::tree", ?current_sequence, "Collected proof for returning");
+            debug!(target: "engine::root", ?current_sequence, "Collected proof for returning");
             consecutive_proofs.push((proof, state_update));
             current_sequence += 1;
 
@@ -248,6 +248,7 @@ where
         for (address, account) in update {
             if account.is_touched() {
                 let hashed_address = keccak256(address);
+                debug!(target: "engine::root", ?address, ?hashed_address, "Adding account to state update");
 
                 let destroyed = account.is_selfdestructed();
                 hashed_state_update.accounts.insert(
