@@ -282,7 +282,7 @@ where
                 provider.tx_ref(),
                 // TODO(alexey): this clone can be expensive, we should avoid it
                 input.as_ref().clone(),
-                targets.clone(),
+                targets,
             );
             match result {
                 Ok(proof) => {
