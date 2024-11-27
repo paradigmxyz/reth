@@ -133,6 +133,7 @@ impl ProofSequencer {
     /// Adds a proof and returns all sequential proofs if we have a continuous sequence
     pub(crate) fn add_proof(&mut self, sequence: u64, proof: MultiProof) -> Vec<MultiProof> {
         if sequence < self.next_sequence {
+            debug!(target: "engine::tree", next_sequence = ?self.next_sequence, ?sequence, "Returning an out-of-order proof");
             return vec![proof];
         }
 
@@ -143,6 +144,7 @@ impl ProofSequencer {
 
         // Keep taking proofs from pending_proofs as long as they form a consecutive sequence
         while let Some(proof) = self.pending_proofs.remove(&self.next_sequence) {
+            debug!(target: "engine::tree", sequence = ?self.next_sequence, "Returning a consecutive proof");
             consecutive_proofs.push(proof);
             self.next_sequence += 1;
         }
