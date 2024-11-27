@@ -215,7 +215,7 @@ impl SparseStateTrie {
         address: B256,
         slot: &Nibbles,
     ) -> SparseStateTrieResult<()> {
-        self.storages.entry(address).or_default().remove_leaf(&slot)?;
+        self.storages.entry(address).or_default().remove_leaf(slot)?;
         Ok(())
     }
 
