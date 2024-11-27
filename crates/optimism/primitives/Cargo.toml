@@ -29,18 +29,16 @@ secp256k1.workspace = true
 op-alloy-consensus.workspace = true
 
 # codec
-modular-bitfield = { workspace = true, optional = true }
-zstd = { workspace = true, optional = true }
 bytes.workspace = true
 serde = { workspace = true, optional = true }
 
 # misc
-derive_more = { workspace = true, features = ["deref", "from", "constructor"] }
-proptest = { workspace = true, optional = true }
+derive_more = { workspace = true, features = ["deref", "from", "into", "constructor"] }
 rand = { workspace = true, optional = true }
 
 # test
 arbitrary = { workspace = true, features = ["derive"], optional = true }
+proptest = { workspace = true, optional = true }
 
 [dev-dependencies]
 proptest-arbitrary-interop.workspace = true
@@ -69,8 +67,6 @@ optimism = [
 ]
 reth-codec = [
     "dep:reth-codecs",
-    "dep:zstd",
-    "dep:modular-bitfield",
     "std",
     "rand",
     "dep:proptest",

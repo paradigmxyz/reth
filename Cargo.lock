@@ -8409,7 +8409,6 @@ dependencies = [
  "arbitrary",
  "bytes",
  "derive_more 1.0.0",
- "modular-bitfield",
  "op-alloy-consensus",
  "proptest",
  "proptest-arbitrary-interop",
@@ -8421,7 +8420,6 @@ dependencies = [
  "rstest",
  "secp256k1",
  "serde",
- "zstd",
 ]
 
 [[package]]

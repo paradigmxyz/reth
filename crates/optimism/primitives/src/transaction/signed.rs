@@ -5,11 +5,19 @@ use core::mem;
 use alloy_consensus::{
     transaction::RlpEcdsaTx, SignableTransaction, TxEip1559, TxEip2930, TxEip7702,
 };
-use alloy_eips::eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718};
-use alloy_primitives::{keccak256, Address, PrimitiveSignature as Signature, TxHash, B256, U256};
+use alloy_eips::{
+    eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
+    eip2930::AccessList,
+    eip7702::SignedAuthorization,
+};
+use alloy_primitives::{
+    keccak256, Address, Bytes, PrimitiveSignature as Signature, TxHash, TxKind, Uint, B256, U256,
+};
 use alloy_rlp::Header;
 use derive_more::{AsRef, Constructor, Deref};
-use op_alloy_consensus::{OpTxType, OpTypedTransaction, TxDeposit};
+use op_alloy_consensus::{OpTypedTransaction, TxDeposit};
+#[cfg(any(test, feature = "reth-codec"))]
+use proptest as _;
 use reth_primitives::{
     transaction::{recover_signer, recover_signer_unchecked},
     TransactionSigned,
@@ -17,6 +25,8 @@ use reth_primitives::{
 use reth_primitives_traits::{FillTxEnv, InMemorySize, SignedTransaction};
 use revm_primitives::{AuthorizationList, TxEnv};
 use serde::{Deserialize, Serialize};
+
+use crate::{OpTransaction, OpTxType};
 
 /// Signed transaction.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
@@ -29,7 +39,16 @@ pub struct OpTransactionSigned {
     /// Raw transaction info
     #[deref]
     #[as_ref]
-    pub transaction: OpTypedTransaction, /* todo: replace with https://github.com/paradigmxyz/reth/issues/12473 */
+    pub transaction: OpTransaction, /* todo: replace with https://github.com/paradigmxyz/reth/issues/12473 */
+}
+
+impl OpTransactionSigned {
+    /// Creates a new signed transaction from the given transaction and signature without the hash.
+    ///
+    /// Note: this only calculates the hash on the first [`TransactionSigned::hash`] call.
+    pub fn new_unhashed(transaction: OpTransaction, signature: Signature) -> Self {
+        Self { hash: Default::default(), signature, transaction }
+    }
 }
 
 impl SignedTransaction for OpTransactionSigned {
@@ -46,7 +65,7 @@ impl SignedTransaction for OpTransactionSigned {
     fn recover_signer(&self) -> Option<Address> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
-        if let OpTypedTransaction::Deposit(TxDeposit { from, .. }) = self.transaction {
+        if let OpTypedTransaction::Deposit(TxDeposit { from, .. }) = *self.transaction {
             return Some(from)
         }
 
@@ -58,7 +77,7 @@ impl SignedTransaction for OpTransactionSigned {
     fn recover_signer_unchecked(&self) -> Option<Address> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
-        if let OpTypedTransaction::Deposit(TxDeposit { from, .. }) = self.transaction {
+        if let OpTypedTransaction::Deposit(TxDeposit { from, .. }) = *self.transaction {
             return Some(from)
         }
 
@@ -77,7 +96,7 @@ impl FillTxEnv for OpTransactionSigned {
         let envelope = self.encoded_2718();
 
         tx_env.caller = sender;
-        match self.as_ref() {
+        match self.transaction.deref() {
             OpTypedTransaction::Legacy(tx) => {
                 tx_env.gas_limit = tx.gas_limit;
                 tx_env.gas_price = U256::from(tx.gas_price);
@@ -198,14 +217,14 @@ impl alloy_rlp::Decodable for OpTransactionSigned {
 
 impl Encodable2718 for OpTransactionSigned {
     fn type_flag(&self) -> Option<u8> {
-        match self.transaction.tx_type() {
-            OpTxType::Legacy => None,
-            tx_type => Some(tx_type as u8),
+        match self.tx_type().deref() {
+            op_alloy_consensus::OpTxType::Legacy => None,
+            tx_type => Some(*tx_type as u8),
         }
     }
 
     fn encode_2718_len(&self) -> usize {
-        match &self.transaction {
+        match self.transaction.deref() {
             OpTypedTransaction::Legacy(legacy_tx) => {
                 legacy_tx.eip2718_encoded_length(&self.signature)
             }
@@ -225,7 +244,7 @@ impl Encodable2718 for OpTransactionSigned {
     fn encode_2718(&self, out: &mut dyn alloy_rlp::BufMut) {
         let Self { transaction, signature, .. } = self;
 
-        match transaction {
+        match transaction.deref() {
             OpTypedTransaction::Legacy(legacy_tx) => {
                 // do nothing w/ with_header
                 legacy_tx.eip2718_encode(signature, out)
@@ -245,21 +264,33 @@ impl Encodable2718 for OpTransactionSigned {
 impl Decodable2718 for OpTransactionSigned {
     fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
         match ty.try_into().map_err(|_| Eip2718Error::UnexpectedType(ty))? {
-            OpTxType::Legacy => Err(Eip2718Error::UnexpectedType(0)),
-            OpTxType::Eip2930 => {
+            op_alloy_consensus::OpTxType::Legacy => Err(Eip2718Error::UnexpectedType(0)),
+            op_alloy_consensus::OpTxType::Eip2930 => {
                 let (tx, signature, hash) = TxEip2930::rlp_decode_signed(buf)?.into_parts();
-                Ok(Self { transaction: OpTypedTransaction::Eip2930(tx), signature, hash })
+                Ok(Self {
+                    transaction: OpTransaction::new(OpTypedTransaction::Eip2930(tx)),
+                    signature,
+                    hash,
+                })
             }
-            OpTxType::Eip1559 => {
+            op_alloy_consensus::OpTxType::Eip1559 => {
                 let (tx, signature, hash) = TxEip1559::rlp_decode_signed(buf)?.into_parts();
-                Ok(Self { transaction: OpTypedTransaction::Eip1559(tx), signature, hash })
+                Ok(Self {
+                    transaction: OpTransaction::new(OpTypedTransaction::Eip1559(tx)),
+                    signature,
+                    hash,
+                })
             }
-            OpTxType::Eip7702 => {
+            op_alloy_consensus::OpTxType::Eip7702 => {
                 let (tx, signature, hash) = TxEip7702::rlp_decode_signed(buf)?.into_parts();
-                Ok(Self { transaction: OpTypedTransaction::Eip7702(tx), signature, hash })
+                Ok(Self {
+                    transaction: OpTransaction::new(OpTypedTransaction::Eip7702(tx)),
+                    signature,
+                    hash,
+                })
             }
-            OpTxType::Deposit => Ok(Self::from_transaction_and_signature(
-                OpTypedTransaction::Deposit(TxDeposit::rlp_decode(buf)?),
+            op_alloy_consensus::OpTxType::Deposit => Ok(Self::new_unhashed(
+                OpTransaction::new(OpTypedTransaction::Deposit(TxDeposit::rlp_decode(buf)?)),
                 TxDeposit::signature(),
             )),
         }
@@ -268,7 +299,81 @@ impl Decodable2718 for OpTransactionSigned {
     fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
         let (transaction, hash, signature) =
             TransactionSigned::decode_rlp_legacy_transaction_tuple(buf)?;
-        Ok(Self::new(hash, signature, OpTypedTransaction::Legacy(transaction)))
+        Ok(Self::new(hash, signature, OpTransaction::new(OpTypedTransaction::Legacy(transaction))))
+    }
+}
+
+impl alloy_consensus::Transaction for OpTransactionSigned {
+    fn chain_id(&self) -> Option<u64> {
+        self.deref().chain_id()
+    }
+
+    fn nonce(&self) -> u64 {
+        self.deref().nonce()
+    }
+
+    fn gas_limit(&self) -> u64 {
+        self.deref().gas_limit()
+    }
+
+    fn gas_price(&self) -> Option<u128> {
+        self.deref().gas_price()
+    }
+
+    fn max_fee_per_gas(&self) -> u128 {
+        self.deref().max_fee_per_gas()
+    }
+
+    fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        self.deref().max_priority_fee_per_gas()
+    }
+
+    fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        self.deref().max_fee_per_blob_gas()
+    }
+
+    fn priority_fee_or_price(&self) -> u128 {
+        self.deref().priority_fee_or_price()
+    }
+
+    fn kind(&self) -> TxKind {
+        self.deref().kind()
+    }
+
+    fn value(&self) -> Uint<256, 4> {
+        self.deref().value()
+    }
+
+    fn input(&self) -> &Bytes {
+        self.deref().input()
+    }
+
+    fn ty(&self) -> u8 {
+        self.deref().ty()
+    }
+
+    fn access_list(&self) -> Option<&AccessList> {
+        self.deref().access_list()
+    }
+
+    fn blob_versioned_hashes(&self) -> Option<&[B256]> {
+        self.deref().blob_versioned_hashes()
+    }
+
+    fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
+        self.deref().authorization_list()
+    }
+
+    fn is_dynamic_fee(&self) -> bool {
+        self.deref().is_dynamic_fee()
+    }
+
+    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        self.deref().effective_gas_price(base_fee)
+    }
+
+    fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
+        self.deref().effective_tip_per_gas(base_fee)
     }
 }
 
@@ -277,7 +382,7 @@ impl Default for OpTransactionSigned {
         Self {
             hash: Default::default(),
             signature: Signature::test_signature(),
-            transaction: OpTypedTransaction::Legacy(Default::default()),
+            transaction: OpTransaction::new(OpTypedTransaction::Legacy(Default::default())),
         }
     }
 }
@@ -307,7 +412,7 @@ impl<'a> arbitrary::Arbitrary<'a> for OpTransactionSigned {
 
         let signature = if is_deposit(&transaction) { TxDeposit::signature() } else { signature };
 
-        Ok(Self::from_transaction_and_signature(transaction, signature))
+        Ok(Self::new_unhashed(OpTransaction::new(transaction), signature))
     }
 }
 

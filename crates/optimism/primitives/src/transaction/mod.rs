@@ -7,7 +7,7 @@ use alloy_primitives::{bytes, Bytes, TxKind, Uint, B256};
 
 use alloy_consensus::{constants::EIP7702_TX_TYPE_ID, TxLegacy};
 use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization};
-use derive_more::{Deref, From};
+use derive_more::{Constructor, Deref, From};
 use op_alloy_consensus::{OpTypedTransaction, DEPOSIT_TX_TYPE_ID};
 use reth_codecs::Compact;
 use reth_primitives::transaction::{
@@ -17,7 +17,7 @@ use reth_primitives::transaction::{
 use reth_primitives_traits::InMemorySize;
 
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize, Constructor))]
 #[derive(Debug, Clone, PartialEq, Eq, Deref, Hash, From)]
 /// Optimistic transaction.
 pub struct OpTransaction(OpTypedTransaction);
