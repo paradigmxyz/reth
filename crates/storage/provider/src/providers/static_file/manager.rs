@@ -1422,7 +1422,7 @@ impl<N: FullNodePrimitives<SignedTx: Value, Receipt: Value>> TransactionsProvide
                     chunk_range,
                     |cursor, number| {
                         Ok(cursor
-                            .get_one::<TransactionMask<TransactionSignedNoHash>>(number.into())?
+                            .get_one::<TransactionMask<Self::Transaction>>(number.into())?
                             .map(|transaction| {
                                 rlp_buf.clear();
                                 let _ = channel_tx
