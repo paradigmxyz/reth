@@ -21,12 +21,14 @@ use reth_payload_util::PayloadTransactions;
 use reth_primitives::{
     proofs, Block, BlockBody, BlockExt, Receipt, SealedHeader, TransactionSigned, TxType,
 };
-use reth_provider::{ProviderError, StateProofProvider, StateProviderFactory, StateRootProvider};
+use reth_provider::{
+    HashedPostStateProvider, ProviderError, StateProofProvider, StateProviderFactory,
+    StateRootProvider,
+};
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{
     noop::NoopTransactionPool, BestTransactionsAttributes, TransactionPool,
 };
-use reth_trie::HashedPostState;
 use revm::{
     db::{states::bundle_state::BundleRetention, State},
     primitives::{
@@ -338,7 +340,7 @@ where
     where
         EvmConfig: ConfigureEvm<Header = Header>,
         DB: Database<Error = ProviderError> + AsRef<P>,
-        P: StateRootProvider,
+        P: StateRootProvider + HashedPostStateProvider,
     {
         let ExecutedPayload { info, withdrawals_root } = match self.execute(&mut state, &ctx)? {
             BuildOutcomeKind::Better { payload } | BuildOutcomeKind::Freeze(payload) => payload,
@@ -366,9 +368,10 @@ where
             execution_outcome.block_logs_bloom(block_number).expect("Number is in range");
 
         // // calculate the state root
-        let hashed_state = HashedPostState::from_bundle_state(&execution_outcome.state().state);
+        let state_provider = state.database.as_ref();
+        let hashed_state = state_provider.hashed_post_state(execution_outcome.state());
         let (state_root, trie_output) = {
-            state.database.as_ref().state_root_with_updates(hashed_state.clone()).inspect_err(
+            state_provider.state_root_from_state_with_updates(hashed_state.clone()).inspect_err(
                 |err| {
                     warn!(target: "payload_builder",
                     parent_header=%ctx.parent().hash(),

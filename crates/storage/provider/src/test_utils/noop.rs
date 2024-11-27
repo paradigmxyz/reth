@@ -27,7 +27,10 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::{NodePrimitivesProvider, StateProofProvider, StorageRootProvider};
+use reth_storage_api::{
+    HashedPostStateProvider, HashedStorageProvider, KeyHasherProvider, NodePrimitivesProvider,
+    StateProofProvider, StorageRootProvider,
+};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
@@ -332,7 +335,7 @@ impl ChangeSetReader for NoopProvider {
 }
 
 impl StateRootProvider for NoopProvider {
-    fn state_root(&self, _state: HashedPostState) -> ProviderResult<B256> {
+    fn state_root_from_state(&self, _state: HashedPostState) -> ProviderResult<B256> {
         Ok(B256::default())
     }
 
@@ -340,7 +343,7 @@ impl StateRootProvider for NoopProvider {
         Ok(B256::default())
     }
 
-    fn state_root_with_updates(
+    fn state_root_from_state_with_updates(
         &self,
         _state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
@@ -407,6 +410,24 @@ impl StateProofProvider for NoopProvider {
         _target: HashedPostState,
     ) -> ProviderResult<HashMap<B256, Bytes>> {
         Ok(HashMap::default())
+    }
+}
+
+impl HashedPostStateProvider for NoopProvider {
+    fn hashed_post_state(&self, _bundle_state: &revm::db::BundleState) -> HashedPostState {
+        HashedPostState::default()
+    }
+}
+
+impl HashedStorageProvider for NoopProvider {
+    fn hashed_storage(&self, _account: &revm::db::BundleAccount) -> HashedStorage {
+        HashedStorage::default()
+    }
+}
+
+impl KeyHasherProvider for NoopProvider {
+    fn hash_key(&self, _bytes: &[u8]) -> B256 {
+        B256::default()
     }
 }
 

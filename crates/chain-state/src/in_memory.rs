@@ -949,12 +949,15 @@ mod tests {
     use reth_errors::ProviderResult;
     use reth_primitives::{Account, Bytecode, EthPrimitives, Receipt};
     use reth_storage_api::{
-        AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
+        AccountReader, BlockHashReader, HashedPostStateProvider, HashedStorageProvider,
+        KeyHasherProvider, StateProofProvider, StateProvider, StateRootProvider,
         StorageRootProvider,
     };
     use reth_trie::{
-        AccountProof, HashedStorage, MultiProof, StorageMultiProof, StorageProof, TrieInput,
+        AccountProof, HashedStorage, KeccakKeyHasher, KeyHasher, MultiProof, StorageMultiProof,
+        StorageProof, TrieInput,
     };
+    use revm::db::BundleAccount;
 
     fn create_mock_state(
         test_block_builder: &mut TestBlockBuilder<EthPrimitives>,
@@ -1024,7 +1027,7 @@ mod tests {
     }
 
     impl StateRootProvider for MockStateProvider {
-        fn state_root(&self, _hashed_state: HashedPostState) -> ProviderResult<B256> {
+        fn state_root_from_state(&self, _hashed_state: HashedPostState) -> ProviderResult<B256> {
             Ok(B256::random())
         }
 
@@ -1032,7 +1035,7 @@ mod tests {
             Ok(B256::random())
         }
 
-        fn state_root_with_updates(
+        fn state_root_from_state_with_updates(
             &self,
             _hashed_state: HashedPostState,
         ) -> ProviderResult<(B256, TrieUpdates)> {
@@ -1044,6 +1047,24 @@ mod tests {
             _input: TrieInput,
         ) -> ProviderResult<(B256, TrieUpdates)> {
             Ok((B256::random(), TrieUpdates::default()))
+        }
+    }
+
+    impl HashedPostStateProvider for MockStateProvider {
+        fn hashed_post_state(&self, _bundle_state: &revm::db::BundleState) -> HashedPostState {
+            HashedPostState::default()
+        }
+    }
+
+    impl HashedStorageProvider for MockStateProvider {
+        fn hashed_storage(&self, _account: &BundleAccount) -> HashedStorage {
+            HashedStorage::default()
+        }
+    }
+
+    impl KeyHasherProvider for MockStateProvider {
+        fn hash_key(&self, bytes: &[u8]) -> B256 {
+            KeccakKeyHasher::hash_key(bytes)
         }
     }
 

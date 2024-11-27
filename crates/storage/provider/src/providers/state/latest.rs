@@ -1,6 +1,6 @@
 use crate::{
     providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
-    StateProvider, StateRootProvider,
+    HashedPostStateProvider, StateProvider, StateRootProvider,
 };
 use alloy_primitives::{
     map::{HashMap, HashSet},
@@ -10,19 +10,20 @@ use reth_db::tables;
 use reth_db_api::{cursor::DbDupCursorRO, transaction::DbTx};
 use reth_primitives::{Account, Bytecode};
 use reth_storage_api::{
-    DBProvider, StateCommitmentProvider, StateProofProvider, StorageRootProvider,
+    DBProvider, HashedStorageProvider, KeyHasherProvider, StateCommitmentProvider,
+    StateProofProvider, StateRootProviderExt, StorageRootProvider,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
     proof::{Proof, StorageProof},
     updates::TrieUpdates,
     witness::TrieWitness,
-    AccountProof, HashedPostState, HashedStorage, MultiProof, StateRoot, StorageMultiProof,
+    AccountProof, HashedPostState, HashedStorage, KeyHasher, MultiProof, StorageMultiProof,
     StorageRoot, TrieInput,
 };
 use reth_trie_db::{
     DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,
-    DatabaseTrieWitness,
+    DatabaseTrieWitness, StateCommitment,
 };
 
 /// State provider over latest state that takes tx reference.
@@ -67,30 +68,86 @@ impl<Provider: BlockHashReader> BlockHashReader for LatestStateProviderRef<'_, P
 impl<Provider: DBProvider + StateCommitmentProvider> StateRootProvider
     for LatestStateProviderRef<'_, Provider>
 {
-    fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
-        StateRoot::overlay_root(self.tx(), hashed_state)
-            .map_err(|err| ProviderError::Database(err.into()))
+    fn state_root_from_state(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
+        <Provider::StateCommitment as StateCommitment>::StateRoot::overlay_root(
+            self.tx(),
+            hashed_state,
+        )
+        .map_err(|err| ProviderError::Database(err.into()))
     }
 
     fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256> {
-        StateRoot::overlay_root_from_nodes(self.tx(), input)
-            .map_err(|err| ProviderError::Database(err.into()))
+        <Provider::StateCommitment as StateCommitment>::StateRoot::overlay_root_from_nodes(
+            self.tx(),
+            input,
+        )
+        .map_err(|err| ProviderError::Database(err.into()))
     }
 
-    fn state_root_with_updates(
+    fn state_root_from_state_with_updates(
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        StateRoot::overlay_root_with_updates(self.tx(), hashed_state)
-            .map_err(|err| ProviderError::Database(err.into()))
+        <Provider::StateCommitment as StateCommitment>::StateRoot::overlay_root_with_updates(
+            self.tx(),
+            hashed_state,
+        )
+        .map_err(|err| ProviderError::Database(err.into()))
     }
 
     fn state_root_from_nodes_with_updates(
         &self,
         input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        StateRoot::overlay_root_from_nodes_with_updates(self.tx(), input)
+        <Provider::StateCommitment as StateCommitment>::StateRoot::overlay_root_from_nodes_with_updates(self.tx(), input)
             .map_err(|err| ProviderError::Database(err.into()))
+    }
+}
+
+impl<Provider: DBProvider + StateCommitmentProvider> StateRootProviderExt
+    for LatestStateProviderRef<'_, Provider>
+{
+    fn state_root(&self) -> ProviderResult<B256> {
+        <Provider::StateCommitment as StateCommitment>::StateRoot::root(self.tx())
+            .map_err(|err| ProviderError::Database(err.into()))
+    }
+
+    fn state_root_with_updates(&self) -> ProviderResult<(B256, TrieUpdates)> {
+        <Provider::StateCommitment as StateCommitment>::StateRoot::root_with_updates(self.tx())
+            .map_err(|err| ProviderError::Database(err.into()))
+    }
+
+    fn incremental_state_root_with_updates(
+        &self,
+        range: std::ops::RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        <Provider::StateCommitment as StateCommitment>::StateRoot::incremental_root_with_updates(
+            self.tx(),
+            range,
+        )
+        .map_err(|err| ProviderError::Database(err.into()))
+    }
+
+    fn state_root_from_prefix_sets_with_updates(
+        &self,
+        prefix_set: reth_trie::prefix_set::TriePrefixSets,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        <Provider::StateCommitment as StateCommitment>::StateRoot::root_from_prefix_sets_with_updates(
+            self.tx(),
+            prefix_set,
+        )
+        .map_err(|err| ProviderError::Database(err.into()))
+    }
+
+    fn state_root_with_progress(
+        &self,
+        state: Option<reth_trie::IntermediateStateRootState>,
+    ) -> ProviderResult<reth_trie::StateRootProgress> {
+        <Provider::StateCommitment as StateCommitment>::StateRoot::root_with_progress(
+            self.tx(),
+            state,
+        )
+        .map_err(|err| ProviderError::Database(err.into()))
     }
 }
 
@@ -157,6 +214,32 @@ impl<Provider: DBProvider + StateCommitmentProvider> StateProofProvider
     }
 }
 
+impl<Provider: DBProvider + StateCommitmentProvider> HashedPostStateProvider
+    for LatestStateProviderRef<'_, Provider>
+{
+    fn hashed_post_state(&self, bundle_state: &revm::db::BundleState) -> HashedPostState {
+        HashedPostState::from_bundle_state::<
+            <Provider::StateCommitment as StateCommitment>::KeyHasher,
+        >(bundle_state.state())
+    }
+}
+
+impl<Provider: StateCommitmentProvider + Send + Sync> HashedStorageProvider
+    for LatestStateProviderRef<'_, Provider>
+{
+    fn hashed_storage<'a>(&self, account: &revm::db::BundleAccount) -> HashedStorage {
+        HashedStorage::from_bundle_account::<
+            <Provider::StateCommitment as StateCommitment>::KeyHasher,
+        >(account)
+    }
+}
+
+impl<Provider: StateCommitmentProvider> KeyHasherProvider for LatestStateProviderRef<'_, Provider> {
+    fn hash_key(&self, bytes: &[u8]) -> B256 {
+        <<Provider::StateCommitment as StateCommitment>::KeyHasher as KeyHasher>::hash_key(bytes)
+    }
+}
+
 impl<Provider: DBProvider + BlockHashReader + StateCommitmentProvider> StateProvider
     for LatestStateProviderRef<'_, Provider>
 {
@@ -181,11 +264,17 @@ impl<Provider: DBProvider + BlockHashReader + StateCommitmentProvider> StateProv
     }
 }
 
+impl<Provider: StateCommitmentProvider> StateCommitmentProvider
+    for LatestStateProviderRef<'_, Provider>
+{
+    type StateCommitment = Provider::StateCommitment;
+}
+
 /// State provider for the latest state.
 #[derive(Debug)]
 pub struct LatestStateProvider<Provider>(Provider);
 
-impl<Provider: DBProvider> LatestStateProvider<Provider> {
+impl<Provider: DBProvider + StateCommitmentProvider> LatestStateProvider<Provider> {
     /// Create new state provider
     pub const fn new(db: Provider) -> Self {
         Self(db)
@@ -196,6 +285,10 @@ impl<Provider: DBProvider> LatestStateProvider<Provider> {
     const fn as_ref(&self) -> LatestStateProviderRef<'_, Provider> {
         LatestStateProviderRef::new(&self.0)
     }
+}
+
+impl<Provider: StateCommitmentProvider> StateCommitmentProvider for LatestStateProvider<Provider> {
+    type StateCommitment = Provider::StateCommitment;
 }
 
 // Delegates all provider impls to [LatestStateProviderRef]

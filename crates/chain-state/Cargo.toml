@@ -26,6 +26,7 @@ reth-trie.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
+revm.workspace = true
 
 # async
 tokio = { workspace = true, default-features = false, features = ["sync", "macros"] }
@@ -44,7 +45,6 @@ pin-project.workspace = true
 alloy-signer = { workspace = true, optional = true }
 alloy-signer-local = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
-revm = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-testing-utils.workspace = true
@@ -52,17 +52,15 @@ alloy-signer.workspace = true
 alloy-signer-local.workspace = true
 alloy-consensus.workspace = true
 rand.workspace = true
-revm.workspace = true
 
 [features]
 test-utils = [
     "alloy-signer",
     "alloy-signer-local",
     "rand",
-    "revm",
     "reth-chainspec/test-utils",
     "reth-primitives/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-trie/test-utils",
-    "revm?/test-utils",
+    "revm/test-utils",
 ]

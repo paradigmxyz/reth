@@ -33,7 +33,6 @@ use reth_revm::{
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
-use reth_trie::HashedPostState;
 use revm::{db::states::bundle_state::BundleRetention, DatabaseCommit, State};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
@@ -395,7 +394,7 @@ pub trait LoadPendingBlock:
             block_number,
             Vec::new(),
         );
-        let hashed_state = HashedPostState::from_bundle_state(&execution_outcome.state().state);
+        let hashed_state = db.database.hashed_post_state(execution_outcome.state());
 
         let receipts_root = self.receipts_root(&block_env, &execution_outcome, block_number);
 
@@ -403,7 +402,8 @@ pub trait LoadPendingBlock:
             execution_outcome.block_logs_bloom(block_number).expect("Block is present");
 
         // calculate the state root
-        let state_root = db.database.state_root(hashed_state).map_err(Self::Error::from_eth_err)?;
+        let state_root =
+            db.database.state_root_from_state(hashed_state).map_err(Self::Error::from_eth_err)?;
 
         // create the block header
         let transactions_root = calculate_transaction_root(&executed_txs);

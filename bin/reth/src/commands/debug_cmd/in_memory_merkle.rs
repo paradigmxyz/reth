@@ -24,14 +24,13 @@ use reth_node_ethereum::EthExecutorProvider;
 use reth_primitives::BlockExt;
 use reth_provider::{
     providers::ProviderNodeTypes, AccountExtReader, ChainSpecProvider, DatabaseProviderFactory,
-    HashingWriter, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderFactory,
-    StageCheckpointReader, StateWriter, StorageLocation, StorageReader,
+    HashedPostStateProvider, HashingWriter, HeaderProvider, LatestStateProviderRef,
+    OriginalValuesKnown, ProviderFactory, StageCheckpointReader, StateRootProvider,
+    StateRootProviderExt, StateWriter, StorageLocation, StorageReader,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::StageId;
 use reth_tasks::TaskExecutor;
-use reth_trie::StateRoot;
-use reth_trie_db::DatabaseStateRoot;
 use std::{path::PathBuf, sync::Arc};
 use tracing::*;
 
@@ -139,7 +138,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             )
             .await?;
 
-        let db = StateProviderDatabase::new(LatestStateProviderRef::new(&provider));
+        let state_provider = LatestStateProviderRef::new(&provider);
+        let db = StateProviderDatabase::new(&state_provider);
 
         let executor = EthExecutorProvider::ethereum(provider_factory.chain_spec()).executor(db);
 
@@ -159,10 +159,10 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let execution_outcome = ExecutionOutcome::from((block_execution_output, block.number));
 
         // Unpacked `BundleState::state_root_slow` function
-        let (in_memory_state_root, in_memory_updates) = StateRoot::overlay_root_with_updates(
-            provider.tx_ref(),
-            execution_outcome.hash_state_slow(),
-        )?;
+        let (in_memory_state_root, in_memory_updates) = state_provider
+            .state_root_from_state_with_updates(
+                state_provider.hashed_post_state(execution_outcome.state()),
+            )?;
 
         if in_memory_state_root == block.state_root {
             info!(target: "reth::cli", state_root = ?in_memory_state_root, "Computed in-memory state root matches");
@@ -190,10 +190,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let accounts = provider_rw.basic_accounts(account_lists)?;
         provider_rw.insert_account_for_hashing(accounts)?;
 
-        let (state_root, incremental_trie_updates) = StateRoot::incremental_root_with_updates(
-            provider_rw.tx_ref(),
-            block.number..=block.number,
-        )?;
+        let (state_root, incremental_trie_updates) =
+            state_provider.incremental_state_root_with_updates(block.number..=block.number)?;
         if state_root != block.state_root {
             eyre::bail!(
                 "Computed incremental state root mismatch. Expected: {:?}. Got: {:?}",

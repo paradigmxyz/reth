@@ -26,7 +26,6 @@ use reth_revm::{
     DatabaseCommit,
 };
 use reth_rpc_types_compat::engine::payload::block_to_payload;
-use reth_trie::HashedPostState;
 use revm_primitives::{
     calc_excess_blob_gas, BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg,
 };
@@ -383,7 +382,7 @@ where
         reorg_target.number,
         Default::default(),
     );
-    let hashed_state = HashedPostState::from_bundle_state(&outcome.state().state);
+    let hashed_state = state_provider.hashed_post_state(outcome.state());
 
     let (blob_gas_used, excess_blob_gas) =
         if chain_spec.is_cancun_active_at_timestamp(reorg_target.timestamp) {
@@ -423,7 +422,7 @@ where
             gas_used: cumulative_gas_used,
             blob_gas_used: blob_gas_used.map(Into::into),
             excess_blob_gas: excess_blob_gas.map(Into::into),
-            state_root: state_provider.state_root(hashed_state)?,
+            state_root: state_provider.state_root_from_state(hashed_state)?,
         },
         body: BlockBody {
             transactions,
