@@ -379,6 +379,8 @@ impl TransactionsProvider for MockEthProvider {
 }
 
 impl ReceiptProvider for MockEthProvider {
+    type Receipt = Receipt;
+
     fn receipt(&self, _id: TxNumber) -> ProviderResult<Option<Receipt>> {
         Ok(None)
     }
@@ -828,6 +830,8 @@ impl ChangeSetReader for MockEthProvider {
 }
 
 impl StateReader for MockEthProvider {
+    type Receipt = Receipt;
+
     fn get_state(&self, _block: BlockNumber) -> ProviderResult<Option<ExecutionOutcome>> {
         Ok(None)
     }

@@ -37,8 +37,11 @@
 //!     block_executor: BlockExecutor,
 //!     consensus: Consensus,
 //! ) where
-//!     Provider: FullRpcProvider<Transaction = TransactionSigned, Block = reth_primitives::Block>
-//!         + AccountReader
+//!     Provider: FullRpcProvider<
+//!             Transaction = TransactionSigned,
+//!             Block = reth_primitives::Block,
+//!             Receipt = reth_primitives::Receipt,
+//!         > + AccountReader
 //!         + ChangeSetReader,
 //!     Pool: TransactionPool + Unpin + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
@@ -114,8 +117,11 @@
 //!     block_executor: BlockExecutor,
 //!     consensus: Consensus,
 //! ) where
-//!     Provider: FullRpcProvider<Transaction = TransactionSigned, Block = reth_primitives::Block>
-//!         + AccountReader
+//!     Provider: FullRpcProvider<
+//!             Transaction = TransactionSigned,
+//!             Block = reth_primitives::Block,
+//!             Receipt = reth_primitives::Receipt,
+//!         > + AccountReader
 //!         + ChangeSetReader,
 //!     Pool: TransactionPool + Unpin + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
@@ -195,7 +201,7 @@ use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_primitives::EthPrimitives;
 use reth_provider::{
     AccountReader, BlockReader, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
-    EvmEnvProvider, FullRpcProvider, StateProviderFactory,
+    EvmEnvProvider, FullRpcProvider, ReceiptProvider, StateProviderFactory,
 };
 use reth_rpc::{
     AdminApi, DebugApi, EngineEthApi, EthBundle, NetApi, OtterscanApi, RPCApi, RethApi, TraceApi,
@@ -263,7 +269,9 @@ pub async fn launch<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi, B
     consensus: Arc<dyn Consensus>,
 ) -> Result<RpcServerHandle, RpcError>
 where
-    Provider: FullRpcProvider<Block = reth_primitives::Block> + AccountReader + ChangeSetReader,
+    Provider: FullRpcProvider<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
+        + AccountReader
+        + ChangeSetReader,
     Pool: TransactionPool + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
@@ -646,7 +654,10 @@ where
         EngineT: EngineTypes,
         EngineApi: EngineApiServer<EngineT>,
         EthApi: FullEthApiServer,
-        Provider: BlockReader<Block = <EthApi::Provider as BlockReader>::Block>,
+        Provider: BlockReader<
+            Block = <EthApi::Provider as BlockReader>::Block,
+            Receipt = <EthApi::Provider as ReceiptProvider>::Receipt,
+        >,
     {
         let Self {
             provider,
@@ -722,7 +733,7 @@ where
     ) -> RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
     where
         EthApi: EthApiTypes + 'static,
-        Provider: BlockReader<Block = reth_primitives::Block>,
+        Provider: BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>,
     {
         let Self {
             provider,
@@ -757,7 +768,10 @@ where
     ) -> TransportRpcModules<()>
     where
         EthApi: FullEthApiServer,
-        Provider: BlockReader<Block = <EthApi::Provider as BlockReader>::Block>,
+        Provider: BlockReader<
+            Block = <EthApi::Provider as BlockReader>::Block,
+            Receipt = <EthApi::Provider as ReceiptProvider>::Receipt,
+        >,
     {
         let mut modules = TransportRpcModules::default();
 
@@ -916,7 +930,7 @@ impl<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
     RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
 where
     Provider: StateProviderFactory
-        + BlockReader<Block = reth_primitives::Block>
+        + BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
         + EvmEnvProvider
         + Clone
         + Unpin
@@ -1125,7 +1139,10 @@ where
     pub fn register_debug(&mut self) -> &mut Self
     where
         EthApi: EthApiSpec + EthTransactions + TraceExt,
-        Provider: BlockReader<Block = <EthApi::Provider as BlockReader>::Block>,
+        Provider: BlockReader<
+            Block = <EthApi::Provider as BlockReader>::Block,
+            Receipt = reth_primitives::Receipt,
+        >,
     {
         let debug_api = self.debug_api();
         self.modules.insert(RethRpcModule::Debug, debug_api.into_rpc().into());
@@ -1279,8 +1296,10 @@ where
 impl<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
     RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
 where
-    Provider: FullRpcProvider<Block = <EthApi::Provider as BlockReader>::Block>
-        + AccountReader
+    Provider: FullRpcProvider<
+            Block = <EthApi::Provider as BlockReader>::Block,
+            Receipt = <EthApi::Provider as ReceiptProvider>::Receipt,
+        > + AccountReader
         + ChangeSetReader,
     Pool: TransactionPool + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,

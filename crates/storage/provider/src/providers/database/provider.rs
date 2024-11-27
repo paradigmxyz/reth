@@ -46,11 +46,11 @@ use reth_db_api::{
 use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_network_p2p::headers::downloader::SyncTarget;
-use reth_node_types::{BlockTy, BodyTy, NodeTypes, TxTy};
+use reth_node_types::{BlockTy, BodyTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives::{
-    Account, BlockExt, BlockWithSenders, Bytecode, GotExpected, Receipt, SealedBlock,
-    SealedBlockFor, SealedBlockWithSenders, SealedHeader, StaticFileSegment, StorageEntry,
-    TransactionMeta, TransactionSignedNoHash,
+    Account, BlockExt, BlockWithSenders, Bytecode, GotExpected, SealedBlock, SealedBlockFor,
+    SealedBlockWithSenders, SealedHeader, StaticFileSegment, StorageEntry, TransactionMeta,
+    TransactionSignedNoHash,
 };
 use reth_primitives_traits::{Block as _, BlockBody as _, SignedTransaction};
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
@@ -1199,7 +1199,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Receipt>)>> {
+    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Self::Receipt>)>> {
         Ok(None)
     }
 
@@ -1529,7 +1529,9 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
 }
 
 impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabaseProvider<TX, N> {
-    fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
+    type Receipt = ReceiptTy<N>;
+
+    fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
         self.static_file_provider.get_with_static_file_or_database(
             StaticFileSegment::Receipts,
             id,
@@ -1538,7 +1540,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
         )
     }
 
-    fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
+    fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Receipt>> {
         if let Some(id) = self.transaction_id(hash)? {
             self.receipt(id)
         } else {
@@ -1546,7 +1548,10 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
         }
     }
 
-    fn receipts_by_block(&self, block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>> {
+    fn receipts_by_block(
+        &self,
+        block: BlockHashOrNumber,
+    ) -> ProviderResult<Option<Vec<Self::Receipt>>> {
         if let Some(number) = self.convert_hash_or_number(block)? {
             if let Some(body) = self.block_body_indices(number)? {
                 let tx_range = body.tx_num_range();
@@ -1563,7 +1568,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
     fn receipts_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<Receipt>> {
+    ) -> ProviderResult<Vec<Self::Receipt>> {
         self.static_file_provider.get_range_with_static_file_or_database(
             StaticFileSegment::Receipts,
             to_range(range),

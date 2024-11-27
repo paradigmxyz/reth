@@ -19,10 +19,10 @@ use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
 use reth_evm::ConfigureEvmEnv;
-use reth_node_types::{BlockTy, NodeTypesWithDB, TxTy};
+use reth_node_types::{BlockTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives::{
-    BlockWithSenders, Receipt, SealedBlockFor, SealedBlockWithSenders, SealedHeader,
-    StaticFileSegment, TransactionMeta,
+    BlockWithSenders, SealedBlockFor, SealedBlockWithSenders, SealedHeader, StaticFileSegment,
+    TransactionMeta,
 };
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -381,7 +381,7 @@ impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Receipt>)>> {
+    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Self::Receipt>)>> {
         self.provider()?.pending_block_and_receipts()
     }
 
@@ -508,7 +508,8 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ProviderFactory<N> {
 }
 
 impl<N: ProviderNodeTypes> ReceiptProvider for ProviderFactory<N> {
-    fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
+    type Receipt = ReceiptTy<N>;
+    fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
         self.static_file_provider.get_with_static_file_or_database(
             StaticFileSegment::Receipts,
             id,
@@ -517,18 +518,21 @@ impl<N: ProviderNodeTypes> ReceiptProvider for ProviderFactory<N> {
         )
     }
 
-    fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
+    fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Receipt>> {
         self.provider()?.receipt_by_hash(hash)
     }
 
-    fn receipts_by_block(&self, block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>> {
+    fn receipts_by_block(
+        &self,
+        block: BlockHashOrNumber,
+    ) -> ProviderResult<Option<Vec<Self::Receipt>>> {
         self.provider()?.receipts_by_block(block)
     }
 
     fn receipts_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<Receipt>> {
+    ) -> ProviderResult<Vec<Self::Receipt>> {
         self.static_file_provider.get_range_with_static_file_or_database(
             StaticFileSegment::Receipts,
             to_range(range),

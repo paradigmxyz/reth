@@ -38,8 +38,8 @@ use reth_primitives::{
         DEFAULT_BLOCKS_PER_STATIC_FILE,
     },
     transaction::recover_signers,
-    BlockWithSenders, Receipt, SealedBlockFor, SealedBlockWithSenders, SealedHeader,
-    StaticFileSegment, TransactionMeta, TransactionSignedNoHash,
+    BlockWithSenders, SealedBlockFor, SealedBlockWithSenders, SealedHeader, StaticFileSegment,
+    TransactionMeta, TransactionSignedNoHash,
 };
 use reth_primitives_traits::SignedTransaction;
 use reth_stages_types::{PipelineTarget, StageId};
@@ -1341,10 +1341,12 @@ impl<N: NodePrimitives> BlockHashReader for StaticFileProvider<N> {
     }
 }
 
-impl<N: NodePrimitives<SignedTx: Value + SignedTransaction>> ReceiptProvider
+impl<N: NodePrimitives<SignedTx: Value + SignedTransaction, Receipt: Value>> ReceiptProvider
     for StaticFileProvider<N>
 {
-    fn receipt(&self, num: TxNumber) -> ProviderResult<Option<Receipt>> {
+    type Receipt = N::Receipt;
+
+    fn receipt(&self, num: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
         self.get_segment_provider_from_transaction(StaticFileSegment::Receipts, num, None)
             .and_then(|provider| provider.receipt(num))
             .or_else(|err| {
@@ -1356,31 +1358,36 @@ impl<N: NodePrimitives<SignedTx: Value + SignedTransaction>> ReceiptProvider
             })
     }
 
-    fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
+    fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Receipt>> {
         if let Some(num) = self.transaction_id(hash)? {
             return self.receipt(num)
         }
         Ok(None)
     }
 
-    fn receipts_by_block(&self, _block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>> {
+    fn receipts_by_block(
+        &self,
+        _block: BlockHashOrNumber,
+    ) -> ProviderResult<Option<Vec<Self::Receipt>>> {
         unreachable!()
     }
 
     fn receipts_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<Receipt>> {
+    ) -> ProviderResult<Vec<Self::Receipt>> {
         self.fetch_range_with_predicate(
             StaticFileSegment::Receipts,
             to_range(range),
-            |cursor, number| cursor.get_one::<ReceiptMask<Receipt>>(number.into()),
+            |cursor, number| cursor.get_one::<ReceiptMask<Self::Receipt>>(number.into()),
             |_| true,
         )
     }
 }
 
-impl<N: FullNodePrimitives<SignedTx: Value>> TransactionsProviderExt for StaticFileProvider<N> {
+impl<N: FullNodePrimitives<SignedTx: Value, Receipt: Value>> TransactionsProviderExt
+    for StaticFileProvider<N>
+{
     fn transaction_hashes_by_range(
         &self,
         tx_range: Range<TxNumber>,
@@ -1575,7 +1582,7 @@ impl<N: NodePrimitives> BlockNumReader for StaticFileProvider<N> {
     }
 }
 
-impl<N: FullNodePrimitives<SignedTx: Value>> BlockReader for StaticFileProvider<N> {
+impl<N: FullNodePrimitives<SignedTx: Value, Receipt: Value>> BlockReader for StaticFileProvider<N> {
     type Block = N::Block;
 
     fn find_block_by_hash(
@@ -1606,7 +1613,7 @@ impl<N: FullNodePrimitives<SignedTx: Value>> BlockReader for StaticFileProvider<
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Receipt>)>> {
+    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Self::Receipt>)>> {
         // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
