@@ -179,7 +179,7 @@ macro_rules! impl_state_provider {
             ) -> ProviderResult<StorageMultiProof> {
                 let state = &self.trie_state().state;
                 let mut hashed_storage =
-                    state.storages.get(&keccak256(address)).cloned().unwrap_or_default();
+                    state.storages.get(&self.hash_key(address.as_ref())).cloned().unwrap_or_default();
                 hashed_storage.extend(&storage);
                 self.historical.storage_multiproof(address, slots, hashed_storage)
             }
