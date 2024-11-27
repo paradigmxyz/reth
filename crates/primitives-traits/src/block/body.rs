@@ -2,10 +2,9 @@
 
 use alloc::{fmt, vec::Vec};
 
-use alloy_consensus::Transaction;
 use alloy_eips::eip4895::Withdrawals;
 
-use crate::{FullSignedTx, InMemorySize, MaybeArbitrary, MaybeSerde};
+use crate::{FullSignedTx, InMemorySize, MaybeArbitrary, MaybeSerde, SignedTransaction};
 
 /// Helper trait that unifies all behaviour required by transaction to support full node operations.
 pub trait FullBlockBody: BlockBody<Transaction: FullSignedTx> {}
@@ -29,7 +28,7 @@ pub trait BlockBody:
     + MaybeArbitrary
 {
     /// Ordered list of signed transactions as committed in block.
-    type Transaction: Transaction;
+    type Transaction: SignedTransaction;
 
     /// Ommer header type.
     type OmmerHeader;
