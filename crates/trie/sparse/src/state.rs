@@ -8,7 +8,7 @@ use alloy_primitives::{
 use alloy_rlp::Decodable;
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
-    Nibbles, TrieNode,
+    MultiProof, Nibbles, TrieNode,
 };
 
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
@@ -60,7 +60,7 @@ impl SparseStateTrie {
 
         let mut proof = proof.into_iter().peekable();
 
-        let Some(root_node) = self.validate_proof(&mut proof)? else { return Ok(()) };
+        let Some(root_node) = self.validate_root_node(&mut proof)? else { return Ok(()) };
 
         // Reveal root node if it wasn't already.
         let trie = self.state.reveal_root(root_node, self.retain_updates)?;
@@ -91,7 +91,7 @@ impl SparseStateTrie {
 
         let mut proof = proof.into_iter().peekable();
 
-        let Some(root_node) = self.validate_proof(&mut proof)? else { return Ok(()) };
+        let Some(root_node) = self.validate_root_node(&mut proof)? else { return Ok(()) };
 
         // Reveal root node if it wasn't already.
         let trie = self
@@ -112,8 +112,56 @@ impl SparseStateTrie {
         Ok(())
     }
 
+    /// Reveal unknown trie paths from multiproof and the list of included accounts and slots.
+    /// NOTE: This method does not extensively validate the proof.
+    pub fn reveal_multiproof(
+        &mut self,
+        targets: HashMap<B256, HashSet<B256>>,
+        multiproof: MultiProof,
+    ) -> SparseStateTrieResult<()> {
+        let account_subtree = multiproof.account_subtree.into_nodes_sorted();
+        let mut account_nodes = account_subtree.into_iter().peekable();
+
+        if let Some(root_node) = self.validate_root_node(&mut account_nodes)? {
+            // Reveal root node if it wasn't already.
+            let trie = self.state.reveal_root(root_node, self.retain_updates)?;
+
+            // Reveal the remaining proof nodes.
+            for (path, bytes) in account_nodes {
+                let node = TrieNode::decode(&mut &bytes[..])?;
+                trie.reveal_node(path, node)?;
+            }
+        }
+
+        for (account, storage_subtree) in multiproof.storages {
+            let storage_subtree = storage_subtree.subtree.into_nodes_sorted();
+            let mut storage_nodes = storage_subtree.into_iter().peekable();
+
+            if let Some(root_node) = self.validate_root_node(&mut storage_nodes)? {
+                // Reveal root node if it wasn't already.
+                let trie = self
+                    .storages
+                    .entry(account)
+                    .or_default()
+                    .reveal_root(root_node, self.retain_updates)?;
+
+                // Reveal the remaining proof nodes.
+                for (path, bytes) in storage_nodes {
+                    let node = TrieNode::decode(&mut &bytes[..])?;
+                    trie.reveal_node(path, node)?;
+                }
+            }
+        }
+
+        for (account, slots) in targets {
+            self.revealed.entry(account).or_default().extend(slots);
+        }
+
+        Ok(())
+    }
+
     /// Validates the root node of the proof and returns it if it exists and is valid.
-    fn validate_proof<I: Iterator<Item = (Nibbles, Bytes)>>(
+    fn validate_root_node<I: Iterator<Item = (Nibbles, Bytes)>>(
         &self,
         proof: &mut Peekable<I>,
     ) -> SparseStateTrieResult<Option<TrieNode>> {
@@ -232,7 +280,7 @@ mod tests {
         let sparse = SparseStateTrie::default();
         let proof = [(Nibbles::from_nibbles([0x1]), Bytes::from([EMPTY_STRING_CODE]))];
         assert_matches!(
-            sparse.validate_proof(&mut proof.into_iter().peekable()),
+            sparse.validate_root_node(&mut proof.into_iter().peekable()),
             Err(SparseStateTrieError::InvalidRootNode { .. })
         );
     }
@@ -245,7 +293,7 @@ mod tests {
             (Nibbles::from_nibbles([0x1]), Bytes::new()),
         ];
         assert_matches!(
-            sparse.validate_proof(&mut proof.into_iter().peekable()),
+            sparse.validate_root_node(&mut proof.into_iter().peekable()),
             Err(SparseStateTrieError::InvalidRootNode { .. })
         );
     }
