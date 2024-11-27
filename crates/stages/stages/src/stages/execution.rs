@@ -14,7 +14,7 @@ use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives::{SealedHeader, StaticFileSegment};
 use reth_primitives_traits::{format_gas_throughput, Block, BlockBody, NodePrimitives};
 use reth_provider::{
-    providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
+    providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, BlockReader, DBProvider, HeaderProvider, LatestStateProviderRef,
     OriginalValuesKnown, ProviderError, StateChangeWriter, StateCommitmentProvider, StateWriter,
     StaticFileProviderFactory, StatsReader, StorageLocation, TransactionVariant,
@@ -34,6 +34,8 @@ use std::{
     time::{Duration, Instant},
 };
 use tracing::*;
+
+use super::missing_static_data_error;
 
 /// The execution stage executes all transactions and
 /// update history indexes.
@@ -169,6 +171,88 @@ impl<E> ExecutionStage<E> {
         }
         Ok(prune_modes)
     }
+
+    /// Performs consistency check on static files.
+    ///
+    /// This function compares the highest receipt number recorded in the database with that in the
+    /// static file to detect any discrepancies due to unexpected shutdowns or database rollbacks.
+    /// **If the height in the static file is higher**, it rolls back (unwinds) the static file.
+    /// **Conversely, if the height in the database is lower**, it triggers a rollback in the
+    /// database (by returning [`StageError`]) until the heights in both the database and static
+    /// file match.
+    fn ensure_consistency<Provider>(
+        &self,
+        provider: &Provider,
+        checkpoint: u64,
+        unwind_to: Option<u64>,
+    ) -> Result<(), StageError>
+    where
+        Provider: StaticFileProviderFactory + DBProvider + BlockReader + HeaderProvider,
+    {
+        // If thre's any receipts pruning configured, receipts are written directly to database and
+        // inconsistencies are expected.
+        if self.prune_modes.has_receipts_pruning() {
+            return Ok(())
+        }
+
+        // Get next expected receipt number
+        let tx = provider.tx_ref();
+        let next_receipt_num = tx
+            .cursor_read::<tables::BlockBodyIndices>()?
+            .seek_exact(checkpoint)?
+            .map(|(_, value)| value.next_tx_num())
+            .unwrap_or(0);
+
+        let static_file_provider = provider.static_file_provider();
+
+        // Get next expected receipt number in static files
+        let next_static_file_receipt_num = static_file_provider
+            .get_highest_static_file_tx(StaticFileSegment::Receipts)
+            .map(|num| num + 1)
+            .unwrap_or(0);
+
+        // Check if we had any unexpected shutdown after committing to static files, but
+        // NOT committing to database.
+        match next_static_file_receipt_num.cmp(&next_receipt_num) {
+            // It can be equal when it's a chain of empty blocks, but we still need to update the
+            // last block in the range.
+            Ordering::Greater | Ordering::Equal => {
+                let mut static_file_producer =
+                    static_file_provider.latest_writer(StaticFileSegment::Receipts)?;
+                static_file_producer
+                    .prune_receipts(next_static_file_receipt_num - next_receipt_num, checkpoint)?;
+                // Since this is a database <-> static file inconsistency, we commit the change
+                // straight away.
+                static_file_producer.commit()?;
+            }
+            Ordering::Less => {
+                // If we are already in the process of unwind, this might be fine because we will
+                // fix the inconsistency right away.
+                if let Some(unwind_to) = unwind_to {
+                    let next_receipt_num_after_unwind = provider
+                        .tx_ref()
+                        .get::<tables::BlockBodyIndices>(unwind_to)?
+                        .map(|b| b.next_tx_num())
+                        .ok_or(ProviderError::BlockBodyIndicesNotFound(unwind_to))?;
+
+                    if next_receipt_num_after_unwind > next_static_file_receipt_num {
+                        // This means we need a deeper unwind.
+                    } else {
+                        return Ok(())
+                    }
+                }
+
+                return Err(missing_static_data_error(
+                    next_static_file_receipt_num.saturating_sub(1),
+                    &static_file_provider,
+                    provider,
+                    StaticFileSegment::Receipts,
+                )?)
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl<E, Provider> Stage<Provider> for ExecutionStage<E>
@@ -209,20 +293,7 @@ where
         let prune_modes = self.adjust_prune_modes(provider, start_block, max_block)?;
         let static_file_provider = provider.static_file_provider();
 
-        // We only use static files for Receipts, if there is no receipt pruning of any kind.
-        let write_receipts_to = if self.prune_modes.receipts.is_none() &&
-            self.prune_modes.receipts_log_filter.is_empty()
-        {
-            debug!(target: "sync::stages::execution", start = start_block, "Preparing static file producer");
-            let mut producer =
-                prepare_static_file_producer(provider, &static_file_provider, start_block)?;
-            // Since there might be a database <-> static file inconsistency (read
-            // `prepare_static_file_producer` for context), we commit the change straight away.
-            producer.commit()?;
-            StorageLocation::StaticFiles
-        } else {
-            StorageLocation::Database
-        };
+        self.ensure_consistency(provider, input.checkpoint().block_number, None)?;
 
         let db = StateProviderDatabase(LatestStateProviderRef::new(provider));
         let mut executor = self.executor_provider.batch_executor(db);
@@ -361,7 +432,7 @@ where
         let time = Instant::now();
 
         // write output
-        provider.write_to_storage(state, OriginalValuesKnown::Yes, write_receipts_to)?;
+        provider.write_to_storage(state, OriginalValuesKnown::Yes, StorageLocation::StaticFiles)?;
 
         let db_write_duration = time.elapsed();
         debug!(
@@ -408,10 +479,13 @@ where
             })
         }
 
+        self.ensure_consistency(provider, input.checkpoint.block_number, Some(unwind_to))?;
+
         // Unwind account and storage changesets, as well as receipts.
         //
         // This also updates `PlainStorageState` and `PlainAccountState`.
-        let bundle_state_with_receipts = provider.take_state_above(unwind_to)?;
+        let bundle_state_with_receipts =
+            provider.take_state_above(unwind_to, StorageLocation::Both)?;
 
         // Prepare the input for post unwind commit hook, where an `ExExNotification` will be sent.
         if self.exex_manager_handle.has_exexs() {
@@ -430,25 +504,6 @@ where
             if let Some(previous_input) = previous_input {
                 tracing::debug!(target: "sync::stages::execution", ?previous_input, "Previous post unwind commit input wasn't processed");
             }
-        }
-
-        let static_file_provider = provider.static_file_provider();
-
-        // Unwind all receipts for transactions in the block range
-        if self.prune_modes.receipts.is_none() && self.prune_modes.receipts_log_filter.is_empty() {
-            // We only use static files for Receipts, if there is no receipt pruning of any kind.
-
-            // prepare_static_file_producer does a consistency check that will unwind static files
-            // if the expected highest receipt in the files is higher than the database.
-            // Which is essentially what happens here when we unwind this stage.
-            let _static_file_producer =
-                prepare_static_file_producer(provider, &static_file_provider, *range.start())?;
-        } else {
-            // If there is any kind of receipt pruning/filtering we use the database, since static
-            // files do not support filters.
-            //
-            // If we hit this case, the receipts have already been unwound by the call to
-            // `take_state`.
         }
 
         // Update the checkpoint.
@@ -574,85 +629,6 @@ fn calculate_gas_used_from_headers<N: NodePrimitives>(
     debug!(target: "sync::stages::execution", ?range, ?duration, "Finished calculating gas used from headers");
 
     Ok(gas_total)
-}
-
-/// Returns a `StaticFileProviderRWRefMut` static file producer after performing a consistency
-/// check.
-///
-/// This function compares the highest receipt number recorded in the database with that in the
-/// static file to detect any discrepancies due to unexpected shutdowns or database rollbacks. **If
-/// the height in the static file is higher**, it rolls back (unwinds) the static file.
-/// **Conversely, if the height in the database is lower**, it triggers a rollback in the database
-/// (by returning [`StageError`]) until the heights in both the database and static file match.
-fn prepare_static_file_producer<'a, 'b, Provider>(
-    provider: &'b Provider,
-    static_file_provider: &'a StaticFileProvider<Provider::Primitives>,
-    start_block: u64,
-) -> Result<StaticFileProviderRWRefMut<'a, Provider::Primitives>, StageError>
-where
-    Provider: StaticFileProviderFactory + DBProvider + BlockReader + HeaderProvider,
-    'b: 'a,
-{
-    // Get next expected receipt number
-    let tx = provider.tx_ref();
-    let next_receipt_num = tx
-        .cursor_read::<tables::BlockBodyIndices>()?
-        .seek_exact(start_block)?
-        .map(|(_, value)| value.first_tx_num)
-        .unwrap_or(0);
-
-    // Get next expected receipt number in static files
-    let next_static_file_receipt_num = static_file_provider
-        .get_highest_static_file_tx(StaticFileSegment::Receipts)
-        .map(|num| num + 1)
-        .unwrap_or(0);
-
-    let mut static_file_producer =
-        static_file_provider.get_writer(start_block, StaticFileSegment::Receipts)?;
-
-    // Check if we had any unexpected shutdown after committing to static files, but
-    // NOT committing to database.
-    match next_static_file_receipt_num.cmp(&next_receipt_num) {
-        // It can be equal when it's a chain of empty blocks, but we still need to update the last
-        // block in the range.
-        Ordering::Greater | Ordering::Equal => static_file_producer.prune_receipts(
-            next_static_file_receipt_num - next_receipt_num,
-            start_block.saturating_sub(1),
-        )?,
-        Ordering::Less => {
-            let mut last_block = static_file_provider
-                .get_highest_static_file_block(StaticFileSegment::Receipts)
-                .unwrap_or(0);
-
-            let last_receipt_num = static_file_provider
-                .get_highest_static_file_tx(StaticFileSegment::Receipts)
-                .unwrap_or(0);
-
-            // To be extra safe, we make sure that the last receipt num matches the last block from
-            // its indices. If not, get it.
-            loop {
-                if let Some(indices) = provider.block_body_indices(last_block)? {
-                    if indices.last_tx_num() <= last_receipt_num {
-                        break
-                    }
-                }
-                if last_block == 0 {
-                    break
-                }
-                last_block -= 1;
-            }
-
-            let missing_block =
-                Box::new(provider.sealed_header(last_block + 1)?.unwrap_or_default());
-
-            return Err(StageError::MissingStaticFileData {
-                block: missing_block,
-                segment: StaticFileSegment::Receipts,
-            })
-        }
-    }
-
-    Ok(static_file_producer)
 }
 
 #[cfg(test)]
@@ -900,7 +876,7 @@ mod tests {
 
         // Tests node with database and node with static files
         for mut mode in modes {
-            let provider = factory.database_provider_rw().unwrap();
+            let mut provider = factory.database_provider_rw().unwrap();
 
             if let Some(mode) = &mut mode {
                 // Simulating a full node where we write receipts to database
@@ -909,6 +885,7 @@ mod tests {
 
             let mut execution_stage = stage();
             execution_stage.prune_modes = mode.clone().unwrap_or_default();
+            provider.set_prune_modes(mode.clone().unwrap_or_default());
 
             let output = execution_stage.execute(&provider, input).unwrap();
             provider.commit().unwrap();
@@ -973,9 +950,10 @@ mod tests {
                 "Post changed of a account"
             );
 
-            let provider = factory.database_provider_rw().unwrap();
+            let mut provider = factory.database_provider_rw().unwrap();
             let mut stage = stage();
-            stage.prune_modes = mode.unwrap_or_default();
+            stage.prune_modes = mode.clone().unwrap_or_default();
+            provider.set_prune_modes(mode.unwrap_or_default());
 
             let _result = stage
                 .unwind(
@@ -1050,6 +1028,7 @@ mod tests {
             // Test Execution
             let mut execution_stage = stage();
             execution_stage.prune_modes = mode.clone().unwrap_or_default();
+            provider.set_prune_modes(mode.clone().unwrap_or_default());
 
             let result = execution_stage.execute(&provider, input).unwrap();
             provider.commit().unwrap();
@@ -1057,7 +1036,8 @@ mod tests {
             // Test Unwind
             provider = factory.database_provider_rw().unwrap();
             let mut stage = stage();
-            stage.prune_modes = mode.unwrap_or_default();
+            stage.prune_modes = mode.clone().unwrap_or_default();
+            provider.set_prune_modes(mode.clone().unwrap_or_default());
 
             let result = stage
                 .unwind(

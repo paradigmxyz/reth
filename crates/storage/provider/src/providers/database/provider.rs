@@ -206,6 +206,12 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 
         Ok(Box::new(state_provider))
     }
+
+    #[cfg(feature = "test-utils")]
+    /// Sets the prune modes for provider.
+    pub fn set_prune_modes(&mut self, prune_modes: PruneModes) {
+        self.prune_modes = prune_modes;
+    }
 }
 
 impl<TX, N: NodeTypes> NodePrimitivesProvider for DatabaseProvider<TX, N> {
@@ -332,6 +338,34 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             })))
         }
         self.write_trie_updates(&trie_updates)?;
+
+        Ok(())
+    }
+
+    /// Removes receipts from all transactions starting with provided number (inclusive).
+    fn remove_receipts_from(
+        &self,
+        from_tx: TxNumber,
+        last_block: BlockNumber,
+        remove_from: StorageLocation,
+    ) -> ProviderResult<()> {
+        if remove_from.database() {
+            // iterate over block body and remove receipts
+            self.remove::<tables::Receipts>(from_tx..)?;
+        }
+
+        if remove_from.static_files() && !self.prune_modes.has_receipts_pruning() {
+            let static_file_receipt_num =
+                self.static_file_provider.get_highest_static_file_tx(StaticFileSegment::Receipts);
+
+            let to_delete = static_file_receipt_num
+                .map(|static_num| (static_num + 1).saturating_sub(from_tx))
+                .unwrap_or_default();
+
+            self.static_file_provider
+                .latest_writer(StaticFileSegment::Receipts)?
+                .prune_receipts(to_delete, last_block)?;
+        }
 
         Ok(())
     }
@@ -1951,7 +1985,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateChangeWriter
     ///     1. Take the old value from the changeset
     ///     2. Take the new value from the local state
     ///     3. Set the local state to the value in the changeset
-    fn remove_state_above(&self, block: BlockNumber) -> ProviderResult<()> {
+    fn remove_state_above(
+        &self,
+        block: BlockNumber,
+        remove_receipts_from: StorageLocation,
+    ) -> ProviderResult<()> {
         let range = block + 1..=self.last_block_number()?;
 
         if range.is_empty() {
@@ -1964,8 +2002,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateChangeWriter
         // get transaction receipts
         let from_transaction_num =
             block_bodies.first().expect("already checked if there are blocks").1.first_tx_num();
-        let to_transaction_num =
-            block_bodies.last().expect("already checked if there are blocks").1.last_tx_num();
 
         let storage_range = BlockNumberAddress::range(range.clone());
 
@@ -2018,8 +2054,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateChangeWriter
             }
         }
 
-        // iterate over block body and remove receipts
-        self.remove::<tables::Receipts>(from_transaction_num..=to_transaction_num)?;
+        self.remove_receipts_from(from_transaction_num, block, remove_receipts_from)?;
 
         Ok(())
     }
@@ -2045,7 +2080,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateChangeWriter
     ///     1. Take the old value from the changeset
     ///     2. Take the new value from the local state
     ///     3. Set the local state to the value in the changeset
-    fn take_state_above(&self, block: BlockNumber) -> ProviderResult<ExecutionOutcome> {
+    fn take_state_above(
+        &self,
+        block: BlockNumber,
+        remove_receipts_from: StorageLocation,
+    ) -> ProviderResult<ExecutionOutcome> {
         let range = block + 1..=self.last_block_number()?;
 
         if range.is_empty() {
@@ -2115,21 +2154,44 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateChangeWriter
             }
         }
 
-        // iterate over block body and create ExecutionResult
-        let mut receipt_iter =
-            self.take::<tables::Receipts>(from_transaction_num..=to_transaction_num)?.into_iter();
+        // Collect receipts into tuples (tx_num, receipt) to correctly handle pruned receipts
+        let mut receipts_iter = self
+            .static_file_provider
+            .get_range_with_static_file_or_database(
+                StaticFileSegment::Receipts,
+                from_transaction_num..to_transaction_num + 1,
+                |static_file, range, _| {
+                    static_file
+                        .receipts_by_tx_range(range.clone())
+                        .map(|r| range.into_iter().zip(r).collect())
+                },
+                |range, _| {
+                    self.tx
+                        .cursor_read::<tables::Receipts>()?
+                        .walk_range(range)?
+                        .map(|r| r.map_err(Into::into))
+                        .collect()
+                },
+                |_| true,
+            )?
+            .into_iter()
+            .peekable();
 
         let mut receipts = Vec::with_capacity(block_bodies.len());
         // loop break if we are at the end of the blocks.
         for (_, block_body) in block_bodies {
             let mut block_receipts = Vec::with_capacity(block_body.tx_count as usize);
-            for _ in block_body.tx_num_range() {
-                if let Some((_, receipt)) = receipt_iter.next() {
-                    block_receipts.push(Some(receipt));
+            for num in block_body.tx_num_range() {
+                if receipts_iter.peek().is_some_and(|(n, _)| *n == num) {
+                    block_receipts.push(receipts_iter.next().map(|(_, r)| r));
+                } else {
+                    block_receipts.push(None);
                 }
             }
             receipts.push(block_receipts);
         }
+
+        self.remove_receipts_from(from_transaction_num, block, remove_receipts_from)?;
 
         Ok(ExecutionOutcome::new_init(
             state,
@@ -2594,20 +2656,20 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockExecu
     fn take_block_and_execution_above(
         &self,
         block: BlockNumber,
-        remove_transactions_from: StorageLocation,
+        remove_from: StorageLocation,
     ) -> ProviderResult<Chain<Self::Primitives>> {
         let range = block + 1..=self.last_block_number()?;
 
         self.unwind_trie_state_range(range.clone())?;
 
         // get execution res
-        let execution_state = self.take_state_above(block)?;
+        let execution_state = self.take_state_above(block, remove_from)?;
 
         let blocks = self.sealed_block_with_senders_range(range)?;
 
         // remove block bodies it is needed for both get block range and get block execution results
         // that is why it is deleted afterwards.
-        self.remove_blocks_above(block, remove_transactions_from)?;
+        self.remove_blocks_above(block, remove_from)?;
 
         // Update pipeline progress
         self.update_pipeline_stages(block, true)?;
@@ -2618,18 +2680,18 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockExecu
     fn remove_block_and_execution_above(
         &self,
         block: BlockNumber,
-        remove_transactions_from: StorageLocation,
+        remove_from: StorageLocation,
     ) -> ProviderResult<()> {
         let range = block + 1..=self.last_block_number()?;
 
         self.unwind_trie_state_range(range)?;
 
         // remove execution res
-        self.remove_state_above(block)?;
+        self.remove_state_above(block, remove_from)?;
 
         // remove block bodies it is needed for both get block range and get block execution results
         // that is why it is deleted afterwards.
-        self.remove_blocks_above(block, remove_transactions_from)?;
+        self.remove_blocks_above(block, remove_from)?;
 
         // Update pipeline progress
         self.update_pipeline_stages(block, true)?;
