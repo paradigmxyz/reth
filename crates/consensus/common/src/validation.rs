@@ -1,6 +1,6 @@
 //! Collection of methods for block validation.
 
-use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, Header};
+use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, BlockHeader, Header};
 use alloy_eips::eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::ConsensusError;
@@ -23,12 +23,12 @@ pub const fn validate_header_gas(header: &Header) -> Result<(), ConsensusError> 
 
 /// Ensure the EIP-1559 base fee is set if the London hardfork is active.
 #[inline]
-pub fn validate_header_base_fee<ChainSpec: EthereumHardforks>(
-    header: &Header,
+pub fn validate_header_base_fee<H: BlockHeader, ChainSpec: EthereumHardforks>(
+    header: &H,
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError> {
-    if chain_spec.is_fork_active_at_block(EthereumHardfork::London, header.number) &&
-        header.base_fee_per_gas.is_none()
+    if chain_spec.is_fork_active_at_block(EthereumHardfork::London, header.number()) &&
+        header.base_fee_per_gas().is_none()
     {
         return Err(ConsensusError::BaseFeeMissing)
     }
