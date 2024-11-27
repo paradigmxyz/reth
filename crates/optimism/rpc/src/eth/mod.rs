@@ -8,6 +8,7 @@ mod call;
 mod pending_block;
 
 pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
+use reth_optimism_primitives::OpPrimitives;
 
 use std::{fmt, sync::Arc};
 
@@ -20,8 +21,8 @@ use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_node_builder::EthApiBuilderCtx;
 use reth_provider::{
-    BlockNumReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, EvmEnvProvider,
-    StageCheckpointReader, StateProviderFactory,
+    BlockNumReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
+    EvmEnvProvider, StageCheckpointReader, StateProviderFactory,
 };
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
@@ -71,7 +72,11 @@ pub struct OpEthApi<N: RpcNodeCore> {
 impl<N> OpEthApi<N>
 where
     N: RpcNodeCore<
-        Provider: BlockReaderIdExt + ChainSpecProvider + CanonStateSubscriptions + Clone + 'static,
+        Provider: BlockReaderIdExt
+                      + ChainSpecProvider
+                      + CanonStateSubscriptions<Primitives = OpPrimitives>
+                      + Clone
+                      + 'static,
     >,
 {
     /// Creates a new instance for given context.
@@ -249,7 +254,7 @@ where
 
 impl<N> Trace for OpEthApi<N>
 where
-    Self: LoadState<Evm: ConfigureEvm<Header = Header>>,
+    Self: RpcNodeCore<Provider: BlockReader> + LoadState<Evm: ConfigureEvm<Header = Header>>,
     N: RpcNodeCore,
 {
 }

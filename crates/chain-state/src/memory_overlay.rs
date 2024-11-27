@@ -1,4 +1,5 @@
 use super::ExecutedBlock;
+use alloy_consensus::BlockHeader;
 use alloy_primitives::{
     map::{HashMap, HashSet},
     Address, BlockNumber, Bytes, StorageKey, StorageValue, B256,
@@ -10,7 +11,8 @@ use reth_storage_api::{
     KeyHasherProvider, StateProofProvider, StateProvider, StateRootProvider, StorageRootProvider,
 };
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
+    StorageMultiProof, TrieInput,
 };
 use revm::db::{BundleAccount, BundleState};
 use std::sync::OnceLock;
@@ -74,7 +76,7 @@ macro_rules! impl_state_provider {
         impl $($tokens)* BlockHashReader for $type {
             fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>> {
                 for block in &self.in_memory {
-                    if block.block.number == number {
+                    if block.block.number() == number {
                         return Ok(Some(block.block.hash()))
                     }
                 }
@@ -91,9 +93,9 @@ macro_rules! impl_state_provider {
                 let mut earliest_block_number = None;
                 let mut in_memory_hashes = Vec::new();
                 for block in &self.in_memory {
-                    if range.contains(&block.block.number) {
+                    if range.contains(&block.block.number()) {
                         in_memory_hashes.insert(0, block.block.hash());
-                        earliest_block_number = Some(block.block.number);
+                        earliest_block_number = Some(block.block.number());
                     }
                 }
 
@@ -166,6 +168,20 @@ macro_rules! impl_state_provider {
                     state.storages.get(&self.hash_key(address.as_ref())).cloned().unwrap_or_default();
                 hashed_storage.extend(&storage);
                 self.historical.storage_proof(address, slot, hashed_storage)
+            }
+
+             // TODO: Currently this does not reuse available in-memory trie nodes.
+             fn storage_multiproof(
+                &self,
+                address: Address,
+                slots: &[B256],
+                storage: HashedStorage,
+            ) -> ProviderResult<StorageMultiProof> {
+                let state = &self.trie_state().state;
+                let mut hashed_storage =
+                    state.storages.get(&keccak256(address)).cloned().unwrap_or_default();
+                hashed_storage.extend(&storage);
+                self.historical.storage_multiproof(address, slots, hashed_storage)
             }
         }
 

@@ -19,7 +19,7 @@ use reth_primitives::Receipts;
 use reth_provider::{
     providers::ProviderNodeTypes, writer::UnifiedStorageWriter, DatabaseProviderFactory,
     OriginalValuesKnown, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
-    StateWriter, StaticFileProviderFactory, StaticFileWriter, StatsReader,
+    StateWriter, StaticFileProviderFactory, StatsReader, StorageLocation,
 };
 use reth_stages::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
@@ -219,11 +219,11 @@ where
             ExecutionOutcome::new(Default::default(), receipts, first_block, Default::default());
 
         // finally, write the receipts
-        let mut storage_writer = UnifiedStorageWriter::from(
-            &provider,
-            static_file_provider.latest_writer(StaticFileSegment::Receipts)?,
-        );
-        storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::Yes)?;
+        provider.write_to_storage(
+            execution_outcome,
+            OriginalValuesKnown::Yes,
+            StorageLocation::StaticFiles,
+        )?;
     }
 
     // Only commit if we have imported as many receipts as the number of transactions.

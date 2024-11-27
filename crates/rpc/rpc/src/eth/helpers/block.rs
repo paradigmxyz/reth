@@ -32,7 +32,6 @@ where
             let block_hash = block.hash();
             let excess_blob_gas = block.excess_blob_gas;
             let timestamp = block.timestamp;
-            let block = block.unseal();
 
             return block
                 .body

@@ -24,8 +24,8 @@ use reth_trie::{
     proof::{Proof, StorageProof},
     updates::TrieUpdates,
     witness::TrieWitness,
-    AccountProof, HashedPostState, HashedStorage, KeyHasher, MultiProof, StateRoot, StorageRoot,
-    TrieInput,
+    AccountProof, HashedPostState, HashedStorage, KeyHasher, MultiProof, StateRoot,
+    StorageMultiProof, StorageRoot, TrieInput,
 };
 use reth_trie_db::{
     DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot,
@@ -347,6 +347,18 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StorageRoo
         let mut revert_storage = self.revert_storage(address)?;
         revert_storage.extend(&hashed_storage);
         StorageProof::overlay_storage_proof(self.tx(), address, slot, revert_storage)
+            .map_err(Into::<ProviderError>::into)
+    }
+
+    fn storage_multiproof(
+        &self,
+        address: Address,
+        slots: &[B256],
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<StorageMultiProof> {
+        let mut revert_storage = self.revert_storage(address)?;
+        revert_storage.extend(&hashed_storage);
+        StorageProof::overlay_storage_multiproof(self.tx(), address, slots, revert_storage)
             .map_err(Into::<ProviderError>::into)
     }
 }

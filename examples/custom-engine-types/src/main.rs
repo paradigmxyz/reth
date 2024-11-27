@@ -300,7 +300,11 @@ pub struct CustomPayloadServiceBuilder;
 impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for CustomPayloadServiceBuilder
 where
     Node: FullNodeTypes<
-        Types: NodeTypesWithEngine<Engine = CustomEngineTypes, ChainSpec = ChainSpec>,
+        Types: NodeTypesWithEngine<
+            Engine = CustomEngineTypes,
+            ChainSpec = ChainSpec,
+            Primitives = EthPrimitives,
+        >,
     >,
     Pool: TransactionPool + Unpin + 'static,
 {
