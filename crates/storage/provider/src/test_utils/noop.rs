@@ -22,13 +22,14 @@ use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_errors::ProviderError;
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{
-    Account, Block, BlockWithSenders, Bytecode, Receipt, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, TransactionMeta, TransactionSigned,
+    Account, Block, BlockWithSenders, Bytecode, EthPrimitives, Receipt, SealedBlock,
+    SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    HashedPostStateProvider, HashedStorageProvider, StateProofProvider, StorageRootProvider,
+    HashedPostStateProvider, HashedStorageProvider, NodePrimitivesProvider, StateProofProvider,
+    StorageRootProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
@@ -94,6 +95,8 @@ impl BlockNumReader for NoopProvider {
 }
 
 impl BlockReader for NoopProvider {
+    type Block = Block;
+
     fn find_block_by_hash(
         &self,
         hash: B256,
@@ -372,6 +375,15 @@ impl StorageRootProvider for NoopProvider {
     ) -> ProviderResult<reth_trie::StorageProof> {
         Ok(reth_trie::StorageProof::new(slot))
     }
+
+    fn storage_multiproof(
+        &self,
+        _address: Address,
+        _slots: &[B256],
+        _hashed_storage: HashedStorage,
+    ) -> ProviderResult<reth_trie::StorageMultiProof> {
+        Ok(reth_trie::StorageMultiProof::empty())
+    }
 }
 
 impl StateProofProvider for NoopProvider {
@@ -571,9 +583,11 @@ impl PruneCheckpointReader for NoopProvider {
     }
 }
 
-impl StaticFileProviderFactory for NoopProvider {
-    type Primitives = ();
+impl NodePrimitivesProvider for NoopProvider {
+    type Primitives = EthPrimitives;
+}
 
+impl StaticFileProviderFactory for NoopProvider {
     fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         StaticFileProvider::read_only(PathBuf::default(), false).unwrap()
     }

@@ -453,6 +453,7 @@ mod tests {
     use alloy_eips::eip2930::AccessList;
     use alloy_primitives::{hex, PrimitiveSignature as Signature};
     use reth_primitives::public_key_to_address;
+    use reth_primitives_traits::SignedTransaction;
     use std::str::FromStr;
 
     #[test]

@@ -28,6 +28,9 @@ reth-stages-types.workspace = true
 reth-network-peers.workspace = true
 reth-engine-local.workspace = true
 
+# currently need to enable this for workspace level
+reth-optimism-primitives  = { workspace = true, features = ["arbitrary"] }
+
 # rpc
 jsonrpsee.workspace = true
 url.workspace = true
@@ -35,6 +38,7 @@ url.workspace = true
 # ethereum
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
+alloy-rlp.workspace = true
 op-alloy-rpc-types-engine.workspace = true
 
 futures-util.workspace = true

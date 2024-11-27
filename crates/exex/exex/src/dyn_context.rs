@@ -6,6 +6,7 @@ use std::fmt::Debug;
 use reth_chainspec::{EthChainSpec, Head};
 use reth_node_api::FullNodeComponents;
 use reth_node_core::node_config::NodeConfig;
+use reth_provider::BlockReader;
 use tokio::sync::mpsc;
 
 use crate::{ExExContext, ExExEvent, ExExNotificationsStream};
@@ -51,7 +52,7 @@ impl Debug for ExExContextDyn {
 impl<Node> From<ExExContext<Node>> for ExExContextDyn
 where
     Node: FullNodeComponents,
-    Node::Provider: Debug,
+    Node::Provider: Debug + BlockReader<Block = reth_primitives::Block>,
     Node::Executor: Debug,
 {
     fn from(ctx: ExExContext<Node>) -> Self {

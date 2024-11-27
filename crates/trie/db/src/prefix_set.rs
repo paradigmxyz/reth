@@ -10,9 +10,8 @@ use reth_db_api::{
 use reth_primitives::StorageEntry;
 use reth_trie::{
     prefix_set::{PrefixSetMut, TriePrefixSets},
-    KeyHasher,
+    KeyHasher, Nibbles,
 };
-use reth_trie_common::Nibbles;
 use std::{
     collections::{HashMap, HashSet},
     marker::PhantomData,
