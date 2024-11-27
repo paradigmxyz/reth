@@ -28,7 +28,10 @@ pub(crate) async fn dump_execution_stage<N, E>(
 where
     N: ProviderNodeTypes<
         DB = Arc<DatabaseEnv>,
-        Primitives: NodePrimitives<Block = reth_primitives::Block>,
+        Primitives: NodePrimitives<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+        >,
     >,
     E: BlockExecutorProvider,
 {
@@ -136,7 +139,12 @@ fn import_tables_with_range<N: NodeTypesWithDB>(
 /// `PlainAccountState` safely. There might be some state dependency from an address
 /// which hasn't been changed in the given range.
 fn unwind_and_copy<
-    N: ProviderNodeTypes<Primitives: NodePrimitives<Block = reth_primitives::Block>>,
+    N: ProviderNodeTypes<
+        Primitives: NodePrimitives<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+        >,
+    >,
 >(
     db_tool: &DbTool<N>,
     from: u64,
@@ -174,7 +182,12 @@ fn dry_run<N, E>(
     executor: E,
 ) -> eyre::Result<()>
 where
-    N: ProviderNodeTypes<Primitives: NodePrimitives<Block = reth_primitives::Block>>,
+    N: ProviderNodeTypes<
+        Primitives: NodePrimitives<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+        >,
+    >,
     E: BlockExecutorProvider,
 {
     info!(target: "reth::cli", "Executing stage. [dry-run]");

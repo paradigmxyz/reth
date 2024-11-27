@@ -2779,6 +2779,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     for DatabaseProvider<TX, N>
 {
     type Block = BlockTy<N>;
+    type Receipt = ReceiptTy<N>;
 
     /// Inserts the block into the database, always modifying the following tables:
     /// * [`CanonicalHeaders`](tables::CanonicalHeaders)
@@ -3046,7 +3047,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     fn append_blocks_with_state(
         &self,
         blocks: Vec<SealedBlockWithSenders<Self::Block>>,
-        execution_outcome: ExecutionOutcome,
+        execution_outcome: ExecutionOutcome<Self::Receipt>,
         hashed_state: HashedPostStateSorted,
         trie_updates: TrieUpdates,
     ) -> ProviderResult<()> {
@@ -3116,7 +3117,7 @@ impl<TX: DbTxMut, N: NodeTypes> PruneCheckpointWriter for DatabaseProvider<TX, N
     }
 }
 
-impl<TX: DbTx + 'static, N: NodeTypes> StatsReader for DatabaseProvider<TX, N> {
+impl<TX: DbTx + 'static, N: NodeTypesForProvider> StatsReader for DatabaseProvider<TX, N> {
     fn count_entries<T: Table>(&self) -> ProviderResult<usize> {
         let db_entries = self.tx.entries::<T>()?;
         let static_file_entries = match self.static_file_provider.count_entries::<T>() {
