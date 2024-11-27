@@ -40,9 +40,17 @@ pub trait StateChangeWriter {
 
     /// Remove the block range of state above the given block. The state of the passed block is not
     /// removed.
-    fn remove_state_above(&self, block: BlockNumber) -> ProviderResult<()>;
+    fn remove_state_above(
+        &self,
+        block: BlockNumber,
+        remove_receipts_from: StorageLocation,
+    ) -> ProviderResult<()>;
 
     /// Take the block range of state, recreating the [`ExecutionOutcome`]. The state of the passed
     /// block is not removed.
-    fn take_state_above(&self, block: BlockNumber) -> ProviderResult<ExecutionOutcome>;
+    fn take_state_above(
+        &self,
+        block: BlockNumber,
+        remove_receipts_from: StorageLocation,
+    ) -> ProviderResult<ExecutionOutcome>;
 }

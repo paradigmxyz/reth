@@ -189,24 +189,15 @@ where
     /// database and static files. This is exclusive, i.e., it only removes blocks above
     /// `block_number`, and does not remove `block_number`.
     pub fn remove_blocks_above(&self, block_number: u64) -> ProviderResult<()> {
+        // IMPORTANT: we use `block_number+1` to make sure we remove only what is ABOVE the block
+        debug!(target: "provider::storage_writer", ?block_number, "Removing blocks from database above block_number");
+        self.database().remove_block_and_execution_above(block_number, StorageLocation::Both)?;
+
         // Get highest static file block for the total block range
         let highest_static_file_block = self
             .static_file()
             .get_highest_static_file_block(StaticFileSegment::Headers)
             .expect("todo: error handling, headers should exist");
-
-        // Get the total txs for the block range, so we have the correct number of columns for
-        // receipts and transactions
-        // IMPORTANT: we use `block_number+1` to make sure we remove only what is ABOVE the block
-        let tx_range = self
-            .database()
-            .transaction_range_by_block_range(block_number + 1..=highest_static_file_block)?;
-        // We are using end + 1 - start here because the returned range is inclusive.
-        let total_txs = (tx_range.end() + 1).saturating_sub(*tx_range.start());
-
-        // IMPORTANT: we use `block_number+1` to make sure we remove only what is ABOVE the block
-        debug!(target: "provider::storage_writer", ?block_number, "Removing blocks from database above block_number");
-        self.database().remove_block_and_execution_above(block_number, StorageLocation::Both)?;
 
         // IMPORTANT: we use `highest_static_file_block.saturating_sub(block_number)` to make sure
         // we remove only what is ABOVE the block.
@@ -217,12 +208,6 @@ where
         self.static_file()
             .get_writer(block_number, StaticFileSegment::Headers)?
             .prune_headers(highest_static_file_block.saturating_sub(block_number))?;
-
-        if !self.database().prune_modes_ref().has_receipts_pruning() {
-            self.static_file()
-                .get_writer(block_number, StaticFileSegment::Receipts)?
-                .prune_receipts(total_txs, block_number)?;
-        }
 
         Ok(())
     }
