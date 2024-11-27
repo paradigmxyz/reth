@@ -1,6 +1,4 @@
-use std::iter::Peekable;
-
-use crate::{SparseStateTrieError, SparseStateTrieResult, SparseTrie};
+use crate::{RevealedSparseTrie, SparseStateTrieError, SparseStateTrieResult, SparseTrie};
 use alloy_primitives::{
     map::{HashMap, HashSet},
     Bytes, B256,
@@ -10,6 +8,7 @@ use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
     MultiProof, Nibbles, TrieNode,
 };
+use std::iter::Peekable;
 
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
 #[derive(Default, Debug)]
@@ -45,6 +44,11 @@ impl SparseStateTrie {
     /// Returns `true` if storage slot for account was already revealed.
     pub fn is_storage_slot_revealed(&self, account: &B256, slot: &B256) -> bool {
         self.revealed.get(account).is_some_and(|slots| slots.contains(slot))
+    }
+
+    /// Returned mutable reference to storage sparse trie if it was revealed.
+    pub fn storage_trie_mut(&mut self, account: &B256) -> Option<&mut RevealedSparseTrie> {
+        self.storages.get_mut(account).and_then(|e| e.as_revealed_mut())
     }
 
     /// Reveal unknown trie paths from provided leaf path and its proof for the account.
