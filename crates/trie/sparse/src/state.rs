@@ -1,6 +1,6 @@
 use std::iter::Peekable;
 
-use crate::{SparseStateTrieError, SparseStateTrieResult, SparseTrie};
+use crate::{RevealedSparseTrie, SparseStateTrieError, SparseStateTrieResult, SparseTrie};
 use alloy_primitives::{
     map::{HashMap, HashSet},
     Bytes, B256,
@@ -66,10 +66,7 @@ impl SparseStateTrie {
         let trie = self.state.reveal_root(root_node, self.retain_updates)?;
 
         // Reveal the remaining proof nodes.
-        for (path, bytes) in proof {
-            let node = TrieNode::decode(&mut &bytes[..])?;
-            trie.reveal_node(path, node)?;
-        }
+        Self::reveal_proof(trie, proof)?;
 
         // Mark leaf path as revealed.
         self.revealed.entry(account).or_default();
@@ -101,10 +98,7 @@ impl SparseStateTrie {
             .reveal_root(root_node, self.retain_updates)?;
 
         // Reveal the remaining proof nodes.
-        for (path, bytes) in proof {
-            let node = TrieNode::decode(&mut &bytes[..])?;
-            trie.reveal_node(path, node)?;
-        }
+        Self::reveal_proof(trie, proof)?;
 
         // Mark leaf path as revealed.
         self.revealed.entry(account).or_default().insert(slot);
@@ -117,21 +111,49 @@ impl SparseStateTrie {
         &self,
         proof: &mut Peekable<I>,
     ) -> SparseStateTrieResult<Option<TrieNode>> {
-        let mut proof = proof.into_iter().peekable();
-
         // Validate root node.
         let Some((path, node)) = proof.next() else { return Ok(None) };
+
+        // Decode root node.
+        let root_node = TrieNode::decode(&mut &node[..])?;
+
+        // Root node path should be empty.
         if !path.is_empty() {
-            return Err(SparseStateTrieError::InvalidRootNode { path, node })
+            return Err(SparseStateTrieError::InvalidRootNodePath {
+                path,
+                node: Box::new(root_node),
+            })
         }
 
-        // Decode root node and perform sanity check.
-        let root_node = TrieNode::decode(&mut &node[..])?;
-        if matches!(root_node, TrieNode::EmptyRoot) && proof.peek().is_some() {
-            return Err(SparseStateTrieError::InvalidRootNode { path, node })
+        // No other nodes should be present if the root node is empty.
+        if (matches!(root_node, TrieNode::EmptyRoot) && proof.peek().is_some()) {
+            return Err(SparseStateTrieError::UnexpectedNode { path, node: Box::new(root_node) })
         }
 
         Ok(Some(root_node))
+    }
+
+    /// Reveals the proof nodes in the provided trie.
+    fn reveal_proof<I: Iterator<Item = (Nibbles, Bytes)>>(
+        trie: &mut RevealedSparseTrie,
+        mut proof: Peekable<I>,
+    ) -> SparseStateTrieResult<()> {
+        // Reveal the remaining proof nodes.
+        while let Some((path, bytes)) = proof.next() {
+            let node = TrieNode::decode(&mut &bytes[..])?;
+
+            // Check that the last node of the proof is a leaf node.
+            if proof.peek().is_none() && !matches!(node, TrieNode::Leaf(_)) {
+                return Err(SparseStateTrieError::ProofWithoutLeafNode {
+                    path,
+                    node: Box::new(node),
+                })
+            }
+
+            trie.reveal_node(path, node)?;
+        }
+
+        Ok(())
     }
 
     /// Update the account leaf node.
@@ -233,7 +255,7 @@ mod tests {
         let proof = [(Nibbles::from_nibbles([0x1]), Bytes::from([EMPTY_STRING_CODE]))];
         assert_matches!(
             sparse.validate_proof(&mut proof.into_iter().peekable()),
-            Err(SparseStateTrieError::InvalidRootNode { .. })
+            Err(SparseStateTrieError::InvalidRootNodePath { .. })
         );
     }
 
@@ -246,7 +268,7 @@ mod tests {
         ];
         assert_matches!(
             sparse.validate_proof(&mut proof.into_iter().peekable()),
-            Err(SparseStateTrieError::InvalidRootNode { .. })
+            Err(SparseStateTrieError::InvalidRootNodePath { .. })
         );
     }
 

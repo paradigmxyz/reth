@@ -1,6 +1,7 @@
 //! Errors for sparse trie.
 
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::B256;
+use alloy_trie::nodes::TrieNode;
 use reth_trie_common::Nibbles;
 use thiserror::Error;
 
@@ -12,13 +13,29 @@ pub type SparseStateTrieResult<Ok> = Result<Ok, SparseStateTrieError>;
 /// Error encountered in [`crate::SparseStateTrie`].
 #[derive(Error, Debug)]
 pub enum SparseStateTrieError {
-    /// Encountered invalid root node.
+    /// Encountered invalid root node path.
     #[error("invalid root node at {path:?}: {node:?}")]
-    InvalidRootNode {
+    InvalidRootNodePath {
         /// Path to first proof node.
         path: Nibbles,
-        /// Encoded first proof node.
-        node: Bytes,
+        /// Decoded first proof node.
+        node: Box<TrieNode>,
+    },
+    /// Encountered unexpected node at path.
+    #[error("encountered unexpected node at path {path:?} when revealing: {node:?}")]
+    UnexpectedNode {
+        /// Path to the node.
+        path: Nibbles,
+        /// Node that was at the path when revealing.
+        node: Box<TrieNode>,
+    },
+    /// Encountered proof without leaf node.
+    #[error("proof without leaf node at {path:?}: {node:?}")]
+    ProofWithoutLeafNode {
+        /// Path to the leaf node.
+        path: Nibbles,
+        /// Decoded leaf node.
+        node: Box<TrieNode>,
     },
     /// Sparse trie error.
     #[error(transparent)]
