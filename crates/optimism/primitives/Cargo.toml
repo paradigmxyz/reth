@@ -13,10 +13,9 @@ workspace = true
 
 [dependencies]
 # reth
-reth-node-types.workspace = true
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
-reth-codecs = { workspace = true, optional = true }
+reth-codecs = { workspace = true, optional = true, features = ["optimism"] }
 
 # ethereum
 alloy-primitives.workspace = true
@@ -34,7 +33,7 @@ serde = { workspace = true, optional = true }
 # misc
 derive_more.workspace = true
 
-# test-utils
+# test
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 
 [dev-dependencies]
@@ -47,7 +46,6 @@ default = ["std", "reth-codec"]
 std = [
     "reth-primitives-traits/std",
     "reth-primitives/std",
-    "reth-node-types/std",
     "reth-codecs/std",
     "alloy-consensus/std",
     "alloy-eips/std",
@@ -66,7 +64,7 @@ serde = [
     "alloy-consensus/serde",
     "alloy-eips/serde",
     "bytes/serde",
-    "reth-codecs/serde",
+    "reth-codecs?/serde",
     "op-alloy-consensus/serde",
 ]
 arbitrary = [

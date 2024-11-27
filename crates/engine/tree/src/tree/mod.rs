@@ -4,7 +4,7 @@ use crate::{
     engine::{DownloadRequest, EngineApiEvent, FromEngine},
     persistence::PersistenceHandle,
 };
-use alloy_consensus::Header;
+use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{
     map::{HashMap, HashSet},
@@ -536,7 +536,12 @@ impl<P: Debug, E: Debug, T: EngineTypes + Debug, Spec: Debug> std::fmt::Debug
 
 impl<P, E, T, Spec> EngineApiTreeHandler<P, E, T, Spec>
 where
-    P: DatabaseProviderFactory + BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+    P: DatabaseProviderFactory
+        + BlockReader<Block = reth_primitives::Block>
+        + StateProviderFactory
+        + StateReader
+        + Clone
+        + 'static,
     <P as DatabaseProviderFactory>::Provider: BlockReader,
     E: BlockExecutorProvider,
     T: EngineTypes,
@@ -1207,8 +1212,17 @@ where
                 match request {
                     EngineApiRequest::InsertExecutedBlock(block) => {
                         debug!(target: "engine::tree", block=?block.block().num_hash(), "inserting already executed block");
+                        let now = Instant::now();
+                        let sealed_block = block.block.clone();
                         self.state.tree_state.insert_executed(block);
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
+
+                        self.emit_event(EngineApiEvent::BeaconConsensus(
+                            BeaconConsensusEngineEvent::CanonicalBlockAdded(
+                                sealed_block,
+                                now.elapsed(),
+                            ),
+                        ));
                     }
                     EngineApiRequest::Beacon(request) => {
                         match request {
@@ -1539,8 +1553,8 @@ where
             .ok_or_else(|| ProviderError::HeaderNotFound(hash.into()))?;
         let execution_output = self
             .provider
-            .get_state(block.number)?
-            .ok_or_else(|| ProviderError::StateForNumberNotFound(block.number))?;
+            .get_state(block.number())?
+            .ok_or_else(|| ProviderError::StateForNumberNotFound(block.number()))?;
         let hashed_state = execution_output.hash_state_slow();
 
         Ok(Some(ExecutedBlock {
@@ -2267,7 +2281,7 @@ where
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
         debug!(target: "engine::tree", ?root_elapsed, block=?sealed_block.num_hash(), "Calculated state root");
 
-        let executed = ExecutedBlock {
+        let executed: ExecutedBlock = ExecutedBlock {
             block: sealed_block.clone(),
             senders: Arc::new(block.senders),
             execution_output: Arc::new(ExecutionOutcome::from((output, block_number))),
@@ -2609,6 +2623,7 @@ mod tests {
     use reth_engine_primitives::ForkchoiceStatus;
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm::test_utils::MockExecutorProvider;
+    use reth_primitives::BlockExt;
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::{block_to_payload_v1, payload::block_to_payload_v3};
     use reth_trie::updates::TrieUpdates;
@@ -2933,7 +2948,7 @@ mod tests {
                 EngineApiEvent::BeaconConsensus(
                     BeaconConsensusEngineEvent::CanonicalBlockAdded(block, _),
                 ) => {
-                    assert!(block.hash() == expected_hash);
+                    assert_eq!(block.hash(), expected_hash);
                 }
                 _ => panic!("Unexpected event: {:#?}", event),
             }

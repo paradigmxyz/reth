@@ -98,21 +98,21 @@ optimism = [
     "revm/optimism",
 ]
 serde = [
-    "reth-execution-types/serde",
-    "reth-trie-db/serde",
-    "reth-trie/serde",
-    "alloy-consensus/serde",
-    "alloy-eips/serde",
-    "alloy-primitives/serde",
-    "alloy-rpc-types-engine/serde",
     "dashmap/serde",
     "notify/serde",
     "parking_lot/serde",
     "rand/serde",
+    "alloy-primitives/serde",
+    "alloy-consensus/serde",
+    "alloy-eips/serde",
+    "alloy-rpc-types-engine/serde",
     "revm/serde",
     "reth-codecs/serde",
     "reth-optimism-primitives?/serde",
     "reth-primitives-traits/serde",
+    "reth-execution-types/serde",
+    "reth-trie-db/serde",
+    "reth-trie/serde",
 ]
 test-utils = [
     "reth-db/test-utils",

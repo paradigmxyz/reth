@@ -9,7 +9,7 @@ use alloy_primitives::U256;
 use reth_chain_state::{CanonStateNotification, ExecutedBlock};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{PayloadKind, PayloadTypes};
-use reth_primitives::Block;
+use reth_primitives::{Block, BlockExt};
 use std::{
     future::Future,
     pin::Pin,

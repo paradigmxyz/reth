@@ -21,6 +21,7 @@ use reth_primitives::{
     PooledTransactionsElementEcRecovered, SealedHeader, TransactionSigned,
     TransactionSignedEcRecovered,
 };
+use reth_primitives_traits::SignedTransaction;
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{
@@ -317,7 +318,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 // find all transactions that were mined in the old chain but not in the new chain
                 let pruned_old_transactions = old_blocks
                     .transactions_ecrecovered()
-                    .filter(|tx| !new_mined_transactions.contains(tx.hash_ref()))
+                    .filter(|tx| !new_mined_transactions.contains(tx.tx_hash()))
                     .filter_map(|tx| {
                         if tx.is_eip4844() {
                             // reorged blobs no longer include the blob, which is necessary for

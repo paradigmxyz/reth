@@ -1,5 +1,5 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD;
-use alloy_consensus::Header;
+use alloy_consensus::{BlockHeader, Header};
 use alloy_primitives::BlockNumber;
 use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
@@ -12,13 +12,12 @@ use reth_evm::{
 use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives::{SealedHeader, StaticFileSegment};
-use reth_primitives_traits::{format_gas_throughput, NodePrimitives};
+use reth_primitives_traits::{format_gas_throughput, Block, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
-    writer::UnifiedStorageWriter,
     BlockHashReader, BlockReader, DBProvider, HeaderProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderError, StateChangeWriter, StateWriter, StaticFileProviderFactory,
-    StatsReader, TransactionVariant,
+    OriginalValuesKnown, ProviderError, StateChangeWriter, StateCommitmentProvider, StateWriter,
+    StaticFileProviderFactory, StatsReader, StorageLocation, TransactionVariant,
 };
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
@@ -176,13 +175,13 @@ impl<E, Provider> Stage<Provider> for ExecutionStage<E>
 where
     E: BlockExecutorProvider,
     Provider: DBProvider
-        + BlockReader
+        + BlockReader<Block = reth_primitives::Block>
         + StaticFileProviderFactory
         + StatsReader
         + StateChangeWriter
-        + BlockHashReader,
-    for<'a> UnifiedStorageWriter<'a, Provider, StaticFileProviderRWRefMut<'a, Provider::Primitives>>:
-        StateWriter,
+        + BlockHashReader
+        + StateWriter
+        + StateCommitmentProvider,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -211,7 +210,7 @@ where
         let static_file_provider = provider.static_file_provider();
 
         // We only use static files for Receipts, if there is no receipt pruning of any kind.
-        let static_file_producer = if self.prune_modes.receipts.is_none() &&
+        let write_receipts_to = if self.prune_modes.receipts.is_none() &&
             self.prune_modes.receipts_log_filter.is_empty()
         {
             debug!(target: "sync::stages::execution", start = start_block, "Preparing static file producer");
@@ -220,9 +219,9 @@ where
             // Since there might be a database <-> static file inconsistency (read
             // `prepare_static_file_producer` for context), we commit the change straight away.
             producer.commit()?;
-            Some(producer)
+            StorageLocation::StaticFiles
         } else {
-            None
+            StorageLocation::Database
         };
 
         let db = StateProviderDatabase(LatestStateProviderRef::new(provider));
@@ -270,17 +269,17 @@ where
 
             fetch_block_duration += fetch_block_start.elapsed();
 
-            cumulative_gas += block.gas_used;
+            cumulative_gas += block.header().gas_used();
 
             // Configure the executor to use the current state.
-            trace!(target: "sync::stages::execution", number = block_number, txs = block.body.transactions.len(), "Executing block");
+            trace!(target: "sync::stages::execution", number = block_number, txs = block.body().transactions().len(), "Executing block");
 
             // Execute the block
             let execute_start = Instant::now();
 
             self.metrics.metered_one((&block, td).into(), |input| {
                 executor.execute_and_verify_one(input).map_err(|error| StageError::Block {
-                    block: Box::new(SealedHeader::seal(block.header.clone())),
+                    block: Box::new(SealedHeader::seal(block.header().clone())),
                     error: BlockErrorKind::Execution(error),
                 })
             })?;
@@ -304,7 +303,7 @@ where
             }
 
             stage_progress = block_number;
-            stage_checkpoint.progress.processed += block.gas_used;
+            stage_checkpoint.progress.processed += block.gas_used();
 
             // If we have ExExes we need to save the block in memory for later
             if self.exex_manager_handle.has_exexs() {
@@ -343,7 +342,7 @@ where
         // the `has_exexs` check here as well
         if !blocks.is_empty() {
             let blocks = blocks.into_iter().map(|block| {
-                let hash = block.header.hash_slow();
+                let hash = block.header().hash_slow();
                 block.seal(hash)
             });
 
@@ -362,8 +361,7 @@ where
         let time = Instant::now();
 
         // write output
-        let mut writer = UnifiedStorageWriter::new(provider, static_file_producer);
-        writer.write_to_storage(state, OriginalValuesKnown::Yes)?;
+        provider.write_to_storage(state, OriginalValuesKnown::Yes, write_receipts_to)?;
 
         let db_write_duration = time.elapsed();
         debug!(
@@ -413,7 +411,7 @@ where
         // Unwind account and storage changesets, as well as receipts.
         //
         // This also updates `PlainStorageState` and `PlainAccountState`.
-        let bundle_state_with_receipts = provider.take_state(range.clone())?;
+        let bundle_state_with_receipts = provider.take_state_above(unwind_to)?;
 
         // Prepare the input for post unwind commit hook, where an `ExExNotification` will be sent.
         if self.exex_manager_handle.has_exexs() {

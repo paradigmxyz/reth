@@ -18,7 +18,7 @@ use reth_engine_util::engine_store::{EngineMessageStore, StoredEngineApiMessage}
 use reth_fs_util as fs;
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
-use reth_node_api::{EngineApiMessageVersion, NodeTypesWithDBAdapter};
+use reth_node_api::{EngineApiMessageVersion, NodePrimitives, NodeTypesWithDBAdapter};
 use reth_node_ethereum::{EthEngineTypes, EthEvmConfig, EthExecutorProvider};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::{
@@ -55,7 +55,12 @@ pub struct Command<C: ChainSpecParser> {
 }
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
-    async fn build_network<N: ProviderNodeTypes<ChainSpec = C::ChainSpec>>(
+    async fn build_network<
+        N: ProviderNodeTypes<
+            ChainSpec = C::ChainSpec,
+            Primitives: NodePrimitives<Block = reth_primitives::Block>,
+        >,
+    >(
         &self,
         config: &Config,
         task_executor: TaskExecutor,
