@@ -178,7 +178,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 .try_seal_with_senders()
                 .map_err(|_| BlockValidationError::SenderRecoveryError)?,
         )?;
-        provider_rw.write_to_storage(
+        provider_rw.write_state(
             execution_outcome,
             OriginalValuesKnown::No,
             StorageLocation::Database,

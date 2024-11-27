@@ -219,7 +219,7 @@ where
             ExecutionOutcome::new(Default::default(), receipts, first_block, Default::default());
 
         // finally, write the receipts
-        provider.write_to_storage(
+        provider.write_state(
             execution_outcome,
             OriginalValuesKnown::Yes,
             StorageLocation::StaticFiles,
