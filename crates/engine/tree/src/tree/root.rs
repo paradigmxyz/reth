@@ -134,6 +134,7 @@ impl ProofSequencer {
 
     /// Adds a proof and returns all sequential proofs if we have a continuous sequence
     pub(crate) fn add_proof(&mut self, sequence: u64, proof: MultiProof) -> Vec<MultiProof> {
+        debug!(target: "engine::tree", ?sequence, "Adding proof");
         if sequence >= self.next_to_deliver {
             self.pending_proofs.insert(sequence, proof);
         }
@@ -148,6 +149,7 @@ impl ProofSequencer {
 
         // keep collecting proofs as long as we have consecutive sequence numbers
         while let Some(proof) = self.pending_proofs.remove(&current_sequence) {
+            debug!(target: "engine::tree", ?current_sequence, "Collected proof for returning");
             consecutive_proofs.push(proof);
             current_sequence += 1;
 
