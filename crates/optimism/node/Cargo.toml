@@ -18,6 +18,7 @@ reth-engine-local.workspace = true
 reth-primitives.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-util.workspace = true
+reth-payload-validator.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-consensus.workspace = true
 reth-node-api.workspace = true

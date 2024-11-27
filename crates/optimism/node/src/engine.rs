@@ -5,7 +5,6 @@ use alloy_rpc_types_engine::{
 use op_alloy_rpc_types_engine::{
     OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4, OpPayloadAttributes,
 };
-use reth::payload::ExecutionPayloadValidator;
 use reth_chainspec::ChainSpec;
 use reth_node_api::{
     payload::{
@@ -18,6 +17,7 @@ use reth_node_api::{
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
 use reth_optimism_payload_builder::{OpBuiltPayload, OpPayloadBuilderAttributes};
+use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{Block, SealedBlockFor};
 use std::sync::Arc;
 

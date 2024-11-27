@@ -8351,6 +8351,7 @@ dependencies = [
  "reth-optimism-rpc",
  "reth-payload-builder",
  "reth-payload-util",
+ "reth-payload-validator",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
