@@ -22,7 +22,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderError,
-    ReceiptProvider, StateProviderFactory,
+    ProviderReceipt, ReceiptProvider, StateProviderFactory,
 };
 use reth_revm::{
     database::StateProviderDatabase,
@@ -45,8 +45,10 @@ use tracing::debug;
 pub trait LoadPendingBlock:
     EthApiTypes
     + RpcNodeCore<
-        Provider: BlockReaderIdExt<Block = reth_primitives::Block>
-                      + EvmEnvProvider
+        Provider: BlockReaderIdExt<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+        > + EvmEnvProvider
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                       + StateProviderFactory,
         Pool: TransactionPool,
@@ -119,7 +121,10 @@ pub trait LoadPendingBlock:
         &self,
     ) -> impl Future<
         Output = Result<
-            Option<(SealedBlockWithSenders<<Self::Provider as BlockReader>::Block>, Vec<Receipt>)>,
+            Option<(
+                SealedBlockWithSenders<<Self::Provider as BlockReader>::Block>,
+                Vec<ProviderReceipt<Self::Provider>>,
+            )>,
             Self::Error,
         >,
     > + Send

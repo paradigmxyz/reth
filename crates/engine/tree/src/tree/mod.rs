@@ -539,7 +539,7 @@ where
     P: DatabaseProviderFactory
         + BlockReader<Block = reth_primitives::Block>
         + StateProviderFactory
-        + StateReader
+        + StateReader<Receipt = reth_primitives::Receipt>
         + Clone
         + 'static,
     <P as DatabaseProviderFactory>::Provider: BlockReader,

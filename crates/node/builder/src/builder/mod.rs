@@ -651,7 +651,8 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     pub fn start_network<Pool>(&self, builder: NetworkBuilder<(), ()>, pool: Pool) -> NetworkHandle
     where
         Pool: TransactionPool + Unpin + 'static,
-        Node::Provider: BlockReader<Block = reth_primitives::Block>,
+        Node::Provider:
+            BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>,
     {
         self.start_network_with(builder, pool, Default::default())
     }
@@ -670,7 +671,8 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     ) -> NetworkHandle
     where
         Pool: TransactionPool + Unpin + 'static,
-        Node::Provider: BlockReader<Block = reth_primitives::Block>,
+        Node::Provider:
+            BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>,
     {
         let (handle, network, txpool, eth) = builder
             .transactions(pool, tx_config)

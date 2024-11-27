@@ -18,7 +18,7 @@ use reth_db::{
     table::Decompress,
 };
 use reth_node_types::NodePrimitives;
-use reth_primitives::{transaction::recover_signers, Receipt, SealedHeader, TransactionMeta};
+use reth_primitives::{transaction::recover_signers, SealedHeader, TransactionMeta};
 use reth_primitives_traits::SignedTransaction;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
@@ -300,14 +300,16 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
     }
 }
 
-impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> ReceiptProvider
-    for StaticFileJarProvider<'_, N>
+impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction, Receipt: Decompress>>
+    ReceiptProvider for StaticFileJarProvider<'_, N>
 {
-    fn receipt(&self, num: TxNumber) -> ProviderResult<Option<Receipt>> {
-        self.cursor()?.get_one::<ReceiptMask<Receipt>>(num.into())
+    type Receipt = N::Receipt;
+
+    fn receipt(&self, num: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
+        self.cursor()?.get_one::<ReceiptMask<Self::Receipt>>(num.into())
     }
 
-    fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
+    fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Receipt>> {
         if let Some(tx_static_file) = &self.auxiliary_jar {
             if let Some(num) = tx_static_file.transaction_id(hash)? {
                 return self.receipt(num)
@@ -316,7 +318,10 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> ReceiptProvide
         Ok(None)
     }
 
-    fn receipts_by_block(&self, _block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>> {
+    fn receipts_by_block(
+        &self,
+        _block: BlockHashOrNumber,
+    ) -> ProviderResult<Option<Vec<Self::Receipt>>> {
         // Related to indexing tables. StaticFile should get the tx_range and call static file
         // provider with `receipt()` instead for each
         Err(ProviderError::UnsupportedProvider)
@@ -325,13 +330,13 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> ReceiptProvide
     fn receipts_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<Receipt>> {
+    ) -> ProviderResult<Vec<Self::Receipt>> {
         let range = to_range(range);
         let mut cursor = self.cursor()?;
         let mut receipts = Vec::with_capacity((range.end - range.start) as usize);
 
         for num in range {
-            if let Some(tx) = cursor.get_one::<ReceiptMask<Receipt>>(num.into())? {
+            if let Some(tx) = cursor.get_one::<ReceiptMask<Self::Receipt>>(num.into())? {
                 receipts.push(tx)
             }
         }
