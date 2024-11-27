@@ -213,14 +213,13 @@ mod tests {
     use reth_optimism_chainspec::BASE_MAINNET;
     use reth_optimism_primitives::OpPrimitives;
     use reth_primitives::{Account, Log, Receipt, Receipts, SealedBlockWithSenders, TxType};
-
     use reth_revm::{
         db::{BundleState, CacheDB, EmptyDBTyped},
         inspectors::NoOpInspector,
         primitives::{AccountInfo, BlockEnv, CfgEnv, SpecId},
         JournaledState,
     };
-    use revm_primitives::{CfgEnvWithHandlerCfg, EnvWithHandlerCfg, HandlerCfg};
+    use revm_primitives::{EnvWithHandlerCfg, HandlerCfg};
     use std::{
         collections::{HashMap, HashSet},
         sync::Arc,
@@ -232,12 +231,6 @@ mod tests {
 
     #[test]
     fn test_fill_cfg_and_block_env() {
-        // Create a new configuration environment
-        let mut cfg_env = CfgEnvWithHandlerCfg::new_with_spec_id(CfgEnv::default(), SpecId::LATEST);
-
-        // Create a default block environment
-        let mut block_env = BlockEnv::default();
-
         // Create a default header
         let header = Header::default();
 
@@ -254,10 +247,10 @@ mod tests {
         // Define the total difficulty as zero (default)
         let total_difficulty = U256::ZERO;
 
-        // Use the `OpEvmConfig` to fill the `cfg_env` and `block_env` based on the ChainSpec,
+        // Use the `OpEvmConfig` to create the `cfg_env` and `block_env` based on the ChainSpec,
         // Header, and total difficulty
-        OpEvmConfig::new(Arc::new(OpChainSpec { inner: chain_spec.clone() }))
-            .fill_cfg_and_block_env(&mut cfg_env, &mut block_env, &header, total_difficulty);
+        let (cfg_env, _) = OpEvmConfig::new(Arc::new(OpChainSpec { inner: chain_spec.clone() }))
+            .cfg_and_block_env(&header, total_difficulty);
 
         // Assert that the chain ID in the `cfg_env` is correctly set to the chain ID of the
         // ChainSpec
