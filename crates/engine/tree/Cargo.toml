@@ -122,6 +122,5 @@ test-utils = [
     "reth-tracing",
     "reth-trie/test-utils",
     "reth-prune-types?/test-utils",
-    "reth-primitives-traits/test-utils",
     "reth-trie-db/test-utils",
 ]

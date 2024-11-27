@@ -111,8 +111,10 @@ pub(crate) enum StateRootMessage {
 /// Handle to track proof calculation ordering
 #[derive(Debug, Default)]
 pub(crate) struct ProofSequencer {
-    /// The next expected proof sequence number
+    /// The next proof sequence number to be produced.
     next_sequence: u64,
+    /// The next sequence number expected to be delivered.
+    next_to_deliver: u64,
     /// Buffer for out-of-order proofs
     pending_proofs: BTreeMap<u64, MultiProof>,
 }
@@ -132,21 +134,31 @@ impl ProofSequencer {
 
     /// Adds a proof and returns all sequential proofs if we have a continuous sequence
     pub(crate) fn add_proof(&mut self, sequence: u64, proof: MultiProof) -> Vec<MultiProof> {
-        if sequence < self.next_sequence {
-            debug!(target: "engine::tree", next_sequence = ?self.next_sequence, ?sequence, "Returning an out-of-order proof");
-            return vec![proof];
+        if sequence >= self.next_to_deliver {
+            self.pending_proofs.insert(sequence, proof);
         }
 
-        // Insert the new proof into pending proofs
-        self.pending_proofs.insert(sequence, proof);
+        // return early if we don't have the next expected proof
+        if !self.pending_proofs.contains_key(&self.next_to_deliver) {
+            return Vec::new()
+        }
 
         let mut consecutive_proofs = Vec::with_capacity(self.pending_proofs.len());
+        let mut current_sequence = self.next_to_deliver;
 
-        // Keep taking proofs from pending_proofs as long as they form a consecutive sequence
-        while let Some(proof) = self.pending_proofs.remove(&self.next_sequence) {
-            debug!(target: "engine::tree", sequence = ?self.next_sequence, "Returning a consecutive proof");
+        // keep collecting proofs as long as we have consecutive sequence numbers
+        while let Some(proof) = self.pending_proofs.remove(&current_sequence) {
             consecutive_proofs.push(proof);
-            self.next_sequence += 1;
+            current_sequence += 1;
+
+            // if we don't have the next number, stop collecting
+            if !self.pending_proofs.contains_key(&current_sequence) {
+                break;
+            }
+        }
+
+        if !consecutive_proofs.is_empty() {
+            self.next_to_deliver += consecutive_proofs.len() as u64;
         }
 
         consecutive_proofs
@@ -852,6 +864,7 @@ mod tests {
         let mut sequencer = ProofSequencer::new();
         let proof1 = MultiProof::default();
         let proof2 = MultiProof::default();
+        sequencer.next_sequence = 2;
 
         let ready = sequencer.add_proof(0, proof1);
         assert_eq!(ready.len(), 1);
@@ -868,6 +881,7 @@ mod tests {
         let proof1 = MultiProof::default();
         let proof2 = MultiProof::default();
         let proof3 = MultiProof::default();
+        sequencer.next_sequence = 3;
 
         let ready = sequencer.add_proof(2, proof3);
         assert_eq!(ready.len(), 0);
@@ -887,6 +901,7 @@ mod tests {
         let mut sequencer = ProofSequencer::new();
         let proof1 = MultiProof::default();
         let proof3 = MultiProof::default();
+        sequencer.next_sequence = 3;
 
         let ready = sequencer.add_proof(0, proof1);
         assert_eq!(ready.len(), 1);
@@ -906,7 +921,7 @@ mod tests {
         assert_eq!(ready.len(), 1);
 
         let ready = sequencer.add_proof(0, proof2);
-        assert_eq!(ready.len(), 1);
+        assert_eq!(ready.len(), 0);
         assert!(!sequencer.has_pending());
     }
 
@@ -914,6 +929,7 @@ mod tests {
     fn test_add_proof_batch_processing() {
         let mut sequencer = ProofSequencer::new();
         let proofs: Vec<_> = (0..5).map(|_| MultiProof::default()).collect();
+        sequencer.next_sequence = 5;
 
         sequencer.add_proof(4, proofs[4].clone());
         sequencer.add_proof(2, proofs[2].clone());
