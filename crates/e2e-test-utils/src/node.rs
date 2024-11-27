@@ -8,6 +8,7 @@ use alloy_rpc_types_engine::PayloadStatusEnum;
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use eyre::Ok;
 use futures_util::Future;
+use alloy_eips::BlockId;
 use reth_chainspec::EthereumHardforks;
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_api::{Block, EngineTypes, FullNodeComponents};
@@ -134,8 +135,8 @@ where
         Ok((self.payload.expect_built_payload().await?, eth_attr))
     }
 
-    /// Advances the node forward one block
-    pub async fn advance_block(
+    /// Triggers payload building job and submits it to the engine.
+    pub async fn build_and_submit_payload(
         &mut self,
     ) -> eyre::Result<(Engine::BuiltPayload, Engine::PayloadBuilderAttributes)>
     where
@@ -146,13 +147,27 @@ where
     {
         let (payload, eth_attr) = self.new_payload().await?;
 
-        let block_hash = self
-            .engine_api
+        self.engine_api
             .submit_payload(payload.clone(), eth_attr.clone(), PayloadStatusEnum::Valid)
             .await?;
 
+        Ok((payload, eth_attr))
+    }
+
+    /// Advances the node forward one block
+    pub async fn advance_block(
+        &mut self,
+    ) -> eyre::Result<(Engine::BuiltPayload, Engine::PayloadBuilderAttributes)>
+    where
+        <Engine as EngineTypes>::ExecutionPayloadEnvelopeV3:
+            From<Engine::BuiltPayload> + PayloadEnvelopeExt,
+        <Engine as EngineTypes>::ExecutionPayloadEnvelopeV4:
+            From<Engine::BuiltPayload> + PayloadEnvelopeExt,
+    {
+        let (payload, eth_attr) = self.build_and_submit_payload().await?;
+
         // trigger forkchoice update via engine api to commit the block to the blockchain
-        self.engine_api.update_forkchoice(block_hash, block_hash).await?;
+        self.engine_api.update_forkchoice(payload.block().hash(), payload.block().hash()).await?;
 
         Ok((payload, eth_attr))
     }
@@ -235,6 +250,28 @@ where
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Sends FCU and waits for the node to sync to the given block.
+    pub async fn sync_to(&self, block: BlockHash) -> eyre::Result<()> {
+        self.engine_api.update_forkchoice(block, block).await?;
+
+        let start = std::time::Instant::now();
+
+        while !self
+            .inner
+            .provider
+            .sealed_header_by_id(BlockId::Number(BlockNumberOrTag::Latest))?
+            .map_or(false, |h| {
+                h.hash() == block
+            })
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+            assert!(start.elapsed() <= std::time::Duration::from_secs(10), "timed out");
+        }
+
         Ok(())
     }
 
