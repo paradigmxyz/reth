@@ -29,7 +29,8 @@ use reth_primitives::{
 use reth_primitives_traits::SignedTransaction;
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    DatabaseProviderFactory, StageCheckpointReader, StateProofProvider, StorageRootProvider,
+    DatabaseProviderFactory, HashedPostStateProvider, HashedStorageProvider, KeyHasherProvider,
+    StageCheckpointReader, StateCommitmentProvider, StateProofProvider, StorageRootProvider,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
@@ -162,6 +163,10 @@ impl NodeTypes for MockNode {
     type ChainSpec = ChainSpec;
     type StateCommitment = MerklePatriciaTrie;
     type Storage = EthStorage;
+}
+
+impl StateCommitmentProvider for MockEthProvider {
+    type StateCommitment = <MockNode as NodeTypes>::StateCommitment;
 }
 
 impl DatabaseProviderFactory for MockEthProvider {
@@ -675,6 +680,24 @@ impl StateProofProvider for MockEthProvider {
         _target: HashedPostState,
     ) -> ProviderResult<HashMap<B256, Bytes>> {
         Ok(HashMap::default())
+    }
+}
+
+impl HashedPostStateProvider for MockEthProvider {
+    fn hashed_post_state(&self, _state: &revm::db::BundleState) -> HashedPostState {
+        HashedPostState::default()
+    }
+}
+
+impl HashedStorageProvider for MockEthProvider {
+    fn hashed_storage(&self, _account: &revm::db::BundleAccount) -> HashedStorage {
+        HashedStorage::default()
+    }
+}
+
+impl KeyHasherProvider for MockEthProvider {
+    fn hash_key(&self, _bytes: &[u8]) -> B256 {
+        B256::default()
     }
 }
 

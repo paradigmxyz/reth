@@ -26,7 +26,6 @@ reth-payload-builder-primitives.workspace = true
 reth-payload-util.workspace = true
 reth-payload-primitives = { workspace = true, features = ["op"] }
 reth-basic-payload-builder.workspace = true
-reth-trie.workspace = true
 reth-chain-state.workspace = true
 
 # op-reth

@@ -27,7 +27,10 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::{NodePrimitivesProvider, StateProofProvider, StorageRootProvider};
+use reth_storage_api::{
+    HashedPostStateProvider, HashedStorageProvider, KeyHasherProvider, NodePrimitivesProvider,
+    StateProofProvider, StorageRootProvider,
+};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
@@ -407,6 +410,24 @@ impl StateProofProvider for NoopProvider {
         _target: HashedPostState,
     ) -> ProviderResult<HashMap<B256, Bytes>> {
         Ok(HashMap::default())
+    }
+}
+
+impl HashedPostStateProvider for NoopProvider {
+    fn hashed_post_state(&self, _bundle_state: &revm::db::BundleState) -> HashedPostState {
+        HashedPostState::default()
+    }
+}
+
+impl HashedStorageProvider for NoopProvider {
+    fn hashed_storage(&self, _account: &revm::db::BundleAccount) -> HashedStorage {
+        HashedStorage::default()
+    }
+}
+
+impl KeyHasherProvider for NoopProvider {
+    fn hash_key(&self, _bytes: &[u8]) -> B256 {
+        B256::default()
     }
 }
 

@@ -34,7 +34,6 @@ reth-evm.workspace = true
 reth-rpc-eth-types.workspace = true
 reth-rpc-server-types.workspace = true
 reth-network-types.workspace = true
-reth-trie.workspace = true
 reth-consensus.workspace = true
 reth-payload-validator.workspace = true
 
