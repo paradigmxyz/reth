@@ -37,7 +37,7 @@ impl<N: NodePrimitives> BeaconConsensusEngineEvent<N> {
 
 impl<N> Display for BeaconConsensusEngineEvent<N>
 where
-    N: NodePrimitives,
+    N: NodePrimitives<BlockHeader: BlockHeader>,
     N::BlockHeader: BlockHeader,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
