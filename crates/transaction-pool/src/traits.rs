@@ -19,9 +19,9 @@ use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 use reth_primitives::{
-    kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, InvalidTransactionError,
-    PooledTransactionsElement, PooledTransactionsElementEcRecovered, SealedBlock, Transaction,
-    TransactionSigned, TransactionSignedEcRecovered,
+    kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, PooledTransactionsElement,
+    PooledTransactionsElementEcRecovered, SealedBlock, Transaction, TransactionSigned,
+    TransactionSignedEcRecovered,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -753,33 +753,6 @@ impl fmt::Display for CanonicalStateUpdate<'_> {
     }
 }
 
-/// Helper error type representing different reasons why a transaction might fail during
-/// processing in the transaction pool.
-#[derive(Debug, derive_more::Display, derive_more::Error)]
-pub enum InvalidKind {
-    /// The type of gas limit that was exceeded (block or blob)
-    #[display("{kind} exceeds limit: required {required}, limit {limit}")]
-    ExceedsGasLimit {
-        /// Type of gas limit exceeded
-        kind: GasLimitKind,
-        /// The amount of gas required by the transaction
-        required: u64,
-        /// The maximum gas limit allowed
-        limit: u64,
-    },
-    /// Represents consensus-level validation errors that can occur when validating a transaction.
-    InvalidTransaction(InvalidTransactionError),
-}
-
-/// Specifies which type of gas limit was exceeded
-#[derive(Debug, Clone, Copy, derive_more::Display)]
-pub enum GasLimitKind {
-    /// Block gas limit exceeded
-    Block,
-    /// Blob gas limit exceeded
-    Blob,
-}
-
 /// Alias to restrict the [`BestTransactions`] items to the pool's transaction type.
 pub type BestTransactionsFor<Pool> = Box<
     dyn BestTransactions<Item = Arc<ValidPoolTransaction<<Pool as TransactionPool>::Transaction>>>,
@@ -799,7 +772,7 @@ pub trait BestTransactions: Iterator + Send {
     /// Implementers must ensure all subsequent transaction _don't_ depend on this transaction.
     /// In other words, this must remove the given transaction _and_ drain all transaction that
     /// depend on it.
-    fn mark_invalid(&mut self, transaction: &Self::Item, kind: InvalidKind);
+    fn mark_invalid(&mut self, transaction: &Self::Item, kind: InvalidPoolTransactionError);
 
     /// An iterator may be able to receive additional pending transactions that weren't present it
     /// the pool when it was created.
@@ -861,7 +834,7 @@ impl<T> BestTransactions for Box<T>
 where
     T: BestTransactions + ?Sized,
 {
-    fn mark_invalid(&mut self, transaction: &Self::Item, kind: InvalidKind) {
+    fn mark_invalid(&mut self, transaction: &Self::Item, kind: InvalidPoolTransactionError) {
         (**self).mark_invalid(transaction, kind)
     }
 
@@ -880,7 +853,7 @@ where
 
 /// A no-op implementation that yields no transactions.
 impl<T> BestTransactions for std::iter::Empty<T> {
-    fn mark_invalid(&mut self, _tx: &T, _kind: InvalidKind) {}
+    fn mark_invalid(&mut self, _tx: &T, _kind: InvalidPoolTransactionError) {}
 
     fn no_updates(&mut self) {}
 

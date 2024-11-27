@@ -9303,7 +9303,6 @@ dependencies = [
  "auto_impl",
  "bitflags 2.6.0",
  "criterion",
- "derive_more 1.0.0",
  "futures-util",
  "metrics",
  "parking_lot",

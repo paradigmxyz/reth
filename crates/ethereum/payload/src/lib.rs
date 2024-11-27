@@ -32,8 +32,8 @@ use reth_primitives::{
 use reth_provider::{ChainSpecProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{
-    noop::NoopTransactionPool, BestTransactions, BestTransactionsAttributes, GasLimitKind,
-    InvalidKind, TransactionPool, ValidPoolTransaction,
+    error::InvalidPoolTransactionError, noop::NoopTransactionPool, BestTransactions,
+    BestTransactionsAttributes, TransactionPool, ValidPoolTransaction,
 };
 use reth_trie::HashedPostState;
 use revm::{
@@ -230,11 +230,7 @@ where
             // continue
             best_txs.mark_invalid(
                 &pool_tx,
-                InvalidKind::ExceedsGasLimit {
-                    kind: GasLimitKind::Block,
-                    required: pool_tx.gas_limit(),
-                    limit: block_gas_limit,
-                },
+                InvalidPoolTransactionError::ExceedsGasLimit(pool_tx.gas_limit(), block_gas_limit),
             );
             continue
         }
@@ -259,11 +255,10 @@ where
                 trace!(target: "payload_builder", tx=?tx.hash, ?sum_blob_gas_used, ?tx_blob_gas, "skipping blob transaction because it would exceed the max data gas per block");
                 best_txs.mark_invalid(
                     &pool_tx,
-                    InvalidKind::ExceedsGasLimit {
-                        kind: GasLimitKind::Blob,
-                        required: tx_blob_gas,
-                        limit: MAX_DATA_GAS_PER_BLOCK,
-                    },
+                    InvalidPoolTransactionError::ExceedsGasLimit(
+                        tx_blob_gas,
+                        MAX_DATA_GAS_PER_BLOCK,
+                    ),
                 );
                 continue
             }
@@ -286,7 +281,7 @@ where
                             trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
                             best_txs.mark_invalid(
                                 &pool_tx,
-                                InvalidKind::InvalidTransaction(
+                                InvalidPoolTransactionError::Consensus(
                                     InvalidTransactionError::TxTypeNotSupported,
                                 ),
                             );

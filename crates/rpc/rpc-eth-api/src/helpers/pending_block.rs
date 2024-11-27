@@ -33,7 +33,7 @@ use reth_revm::{
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
 use reth_transaction_pool::{
-    BestTransactionsAttributes, GasLimitKind, InvalidKind, TransactionPool,
+    error::InvalidPoolTransactionError, BestTransactionsAttributes, TransactionPool,
 };
 use reth_trie::HashedPostState;
 use revm::{db::states::bundle_state::BundleRetention, DatabaseCommit, State};
@@ -285,11 +285,10 @@ pub trait LoadPendingBlock:
                 // continue
                 best_txs.mark_invalid(
                     &pool_tx,
-                    InvalidKind::ExceedsGasLimit {
-                        kind: GasLimitKind::Block,
-                        required: pool_tx.gas_limit(),
-                        limit: block_gas_limit,
-                    },
+                    InvalidPoolTransactionError::ExceedsGasLimit(
+                        pool_tx.gas_limit(),
+                        block_gas_limit,
+                    ),
                 );
                 continue
             }
@@ -300,7 +299,9 @@ pub trait LoadPendingBlock:
                 // before we can continue
                 best_txs.mark_invalid(
                     &pool_tx,
-                    InvalidKind::InvalidTransaction(InvalidTransactionError::TxTypeNotSupported),
+                    InvalidPoolTransactionError::Consensus(
+                        InvalidTransactionError::TxTypeNotSupported,
+                    ),
                 );
                 continue
             }
@@ -319,11 +320,10 @@ pub trait LoadPendingBlock:
                     // for regular transactions above.
                     best_txs.mark_invalid(
                         &pool_tx,
-                        InvalidKind::ExceedsGasLimit {
-                            kind: GasLimitKind::Blob,
-                            required: tx_blob_gas,
-                            limit: MAX_DATA_GAS_PER_BLOCK,
-                        },
+                        InvalidPoolTransactionError::ExceedsGasLimit(
+                            tx_blob_gas,
+                            MAX_DATA_GAS_PER_BLOCK,
+                        ),
                     );
                     continue
                 }
@@ -350,7 +350,7 @@ pub trait LoadPendingBlock:
                                 // descendants
                                 best_txs.mark_invalid(
                                     &pool_tx,
-                                    InvalidKind::InvalidTransaction(
+                                    InvalidPoolTransactionError::Consensus(
                                         InvalidTransactionError::TxTypeNotSupported,
                                     ),
                                 );
