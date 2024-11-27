@@ -9,20 +9,20 @@ use revm::db::{
 
 use super::StorageLocation;
 
-/// A helper trait for [`ExecutionOutcome`] to write state and receipts to storage.
+/// A trait specifically for writing state changes or reverts
 pub trait StateWriter {
-    /// Write the data and receipts to the database or static files if `static_file_producer` is
+    /// Receipt type included into [`ExecutionOutcome`].
+    type Receipt;
+
+    /// Write the state and receipts to the database or static files if `static_file_producer` is
     /// `Some`. It should be `None` if there is any kind of pruning/filtering over the receipts.
-    fn write_to_storage(
+    fn write_state(
         &self,
-        execution_outcome: ExecutionOutcome,
+        execution_outcome: ExecutionOutcome<Self::Receipt>,
         is_value_known: OriginalValuesKnown,
         write_receipts_to: StorageLocation,
     ) -> ProviderResult<()>;
-}
 
-/// A trait specifically for writing state changes or reverts
-pub trait StateChangeWriter {
     /// Write state reverts to the database.
     ///
     /// NOTE: Reverts will delete all wiped storage from plain state.
@@ -52,5 +52,5 @@ pub trait StateChangeWriter {
         &self,
         block: BlockNumber,
         remove_receipts_from: StorageLocation,
-    ) -> ProviderResult<ExecutionOutcome>;
+    ) -> ProviderResult<ExecutionOutcome<Self::Receipt>>;
 }

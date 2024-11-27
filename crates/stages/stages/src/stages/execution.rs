@@ -16,7 +16,7 @@ use reth_primitives_traits::{format_gas_throughput, Block, BlockBody, NodePrimit
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, BlockReader, DBProvider, HeaderProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderError, StateChangeWriter, StateCommitmentProvider, StateWriter,
+    OriginalValuesKnown, ProviderError, StateCommitmentProvider, StateWriter,
     StaticFileProviderFactory, StatsReader, StorageLocation, TransactionVariant,
 };
 use reth_prune_types::PruneModes;
@@ -262,9 +262,8 @@ where
         + BlockReader<Block = reth_primitives::Block>
         + StaticFileProviderFactory
         + StatsReader
-        + StateChangeWriter
         + BlockHashReader
-        + StateWriter
+        + StateWriter<Receipt = reth_primitives::Receipt>
         + StateCommitmentProvider,
 {
     /// Return the id of the stage
@@ -432,7 +431,7 @@ where
         let time = Instant::now();
 
         // write output
-        provider.write_to_storage(state, OriginalValuesKnown::Yes, StorageLocation::StaticFiles)?;
+        provider.write_state(state, OriginalValuesKnown::Yes, StorageLocation::StaticFiles)?;
 
         let db_write_duration = time.elapsed();
         debug!(

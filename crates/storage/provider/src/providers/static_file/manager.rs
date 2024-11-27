@@ -38,8 +38,8 @@ use reth_primitives::{
         DEFAULT_BLOCKS_PER_STATIC_FILE,
     },
     transaction::recover_signers,
-    BlockWithSenders, SealedBlockFor, SealedBlockWithSenders, SealedHeader, StaticFileSegment,
-    TransactionMeta, TransactionSignedNoHash,
+    BlockWithSenders, Receipt, SealedBlockFor, SealedBlockWithSenders, SealedHeader,
+    StaticFileSegment, TransactionMeta, TransactionSignedNoHash,
 };
 use reth_primitives_traits::SignedTransaction;
 use reth_stages_types::{PipelineTarget, StageId};
@@ -1692,7 +1692,7 @@ impl<N: NodePrimitives> StatsReader for StaticFileProvider<N> {
                 .map(|block| block + 1)
                 .unwrap_or_default()
                 as usize),
-            tables::Receipts::NAME => Ok(self
+            tables::Receipts::<Receipt>::NAME => Ok(self
                 .get_highest_static_file_tx(StaticFileSegment::Receipts)
                 .map(|receipts| receipts + 1)
                 .unwrap_or_default() as usize),

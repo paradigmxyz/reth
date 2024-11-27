@@ -385,6 +385,7 @@ where
         N::Primitives: FullNodePrimitives<
             Block = reth_primitives::Block,
             BlockBody = reth_primitives::BlockBody,
+            Receipt = reth_primitives::Receipt,
         >,
     {
         let factory = ProviderFactory::new(
@@ -455,6 +456,7 @@ where
         N::Primitives: FullNodePrimitives<
             Block = reth_primitives::Block,
             BlockBody = reth_primitives::BlockBody,
+            Receipt = reth_primitives::Receipt,
         >,
     {
         let factory = self.create_provider_factory().await?;

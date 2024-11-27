@@ -79,8 +79,8 @@ where
         Storage: ChainStorage<Self::Primitives>,
         Primitives: FullNodePrimitives<
             SignedTx: Value,
+            Receipt: Value,
             BlockHeader = alloy_consensus::Header,
-            Receipt = reth_primitives::Receipt,
         >,
     >,
 {
@@ -92,8 +92,8 @@ impl<T> NodeTypesForProvider for T where
         Storage: ChainStorage<T::Primitives>,
         Primitives: FullNodePrimitives<
             SignedTx: Value,
+            Receipt: Value,
             BlockHeader = alloy_consensus::Header,
-            Receipt = reth_primitives::Receipt,
         >,
     >
 {
@@ -541,7 +541,7 @@ impl<N: ProviderNodeTypes> ReceiptProvider for BlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> ReceiptProviderIdExt for BlockchainProvider<N> {
+impl<N: TreeNodeTypes> ReceiptProviderIdExt for BlockchainProvider<N> {
     fn receipts_by_block_id(&self, block: BlockId) -> ProviderResult<Option<Vec<Receipt>>> {
         match block {
             BlockId::Hash(rpc_block_hash) => {

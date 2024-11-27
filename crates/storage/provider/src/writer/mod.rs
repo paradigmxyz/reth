@@ -1,12 +1,14 @@
 use crate::{
     providers::{StaticFileProvider, StaticFileWriter as SfWriter},
-    BlockExecutionWriter, BlockWriter, HistoryWriter, StateChangeWriter, StateWriter,
-    StaticFileProviderFactory, StorageLocation, TrieWriter,
+    BlockExecutionWriter, BlockWriter, HistoryWriter, StateWriter, StaticFileProviderFactory,
+    StorageLocation, TrieWriter,
 };
+use alloy_consensus::BlockHeader;
 use reth_chain_state::ExecutedBlock;
 use reth_db::transaction::{DbTx, DbTxMut};
 use reth_errors::ProviderResult;
-use reth_primitives::StaticFileSegment;
+use reth_primitives::{NodePrimitives, StaticFileSegment};
+use reth_primitives_traits::SignedTransaction;
 use reth_storage_api::{DBProvider, StageCheckpointWriter, TransactionsProviderExt};
 use reth_storage_errors::writer::UnifiedStorageWriterError;
 use revm::db::OriginalValuesKnown;
@@ -119,9 +121,8 @@ impl UnifiedStorageWriter<'_, (), ()> {
 impl<ProviderDB> UnifiedStorageWriter<'_, ProviderDB, &StaticFileProvider<ProviderDB::Primitives>>
 where
     ProviderDB: DBProvider<Tx: DbTx + DbTxMut>
-        + BlockWriter<Block = reth_primitives::Block>
+        + BlockWriter
         + TransactionsProviderExt
-        + StateChangeWriter
         + TrieWriter
         + StateWriter
         + HistoryWriter
@@ -131,7 +132,11 @@ where
         + StaticFileProviderFactory,
 {
     /// Writes executed blocks and receipts to storage.
-    pub fn save_blocks(&self, blocks: Vec<ExecutedBlock>) -> ProviderResult<()> {
+    pub fn save_blocks<N>(&self, blocks: Vec<ExecutedBlock<N>>) -> ProviderResult<()>
+    where
+        N: NodePrimitives<SignedTx: SignedTransaction>,
+        ProviderDB: BlockWriter<Block = N::Block> + StateWriter<Receipt = N::Receipt>,
+    {
         if blocks.is_empty() {
             debug!(target: "provider::storage_writer", "Attempted to write empty block range");
             return Ok(())
@@ -139,9 +144,10 @@ where
 
         // NOTE: checked non-empty above
         let first_block = blocks.first().unwrap().block();
+
         let last_block = blocks.last().unwrap().block();
-        let first_number = first_block.number;
-        let last_block_number = last_block.number;
+        let first_number = first_block.number();
+        let last_block_number = last_block.number();
 
         debug!(target: "provider::storage_writer", block_count = %blocks.len(), "Writing blocks and execution data to storage");
 
@@ -162,7 +168,7 @@ where
 
             // Write state and changesets to the database.
             // Must be written after blocks because of the receipt lookup.
-            self.database().write_to_storage(
+            self.database().write_state(
                 Arc::unwrap_or_clone(execution_output),
                 OriginalValuesKnown::No,
                 StorageLocation::StaticFiles,
@@ -490,7 +496,7 @@ mod tests {
         let outcome =
             ExecutionOutcome::new(state.take_bundle(), Receipts::default(), 1, Vec::new());
         provider
-            .write_to_storage(outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
+            .write_state(outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
             .expect("Could not write bundle state to DB");
 
         // Check plain storage state
@@ -590,7 +596,7 @@ mod tests {
         let outcome =
             ExecutionOutcome::new(state.take_bundle(), Receipts::default(), 2, Vec::new());
         provider
-            .write_to_storage(outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
+            .write_state(outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
             .expect("Could not write bundle state to DB");
 
         assert_eq!(
@@ -657,7 +663,7 @@ mod tests {
         let outcome =
             ExecutionOutcome::new(init_state.take_bundle(), Receipts::default(), 0, Vec::new());
         provider
-            .write_to_storage(outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
+            .write_state(outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
             .expect("Could not write bundle state to DB");
 
         let mut state = State::builder().with_bundle_update().build();
@@ -805,7 +811,7 @@ mod tests {
         let outcome: ExecutionOutcome =
             ExecutionOutcome::new(bundle, Receipts::default(), 1, Vec::new());
         provider
-            .write_to_storage(outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
+            .write_state(outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
             .expect("Could not write bundle state to DB");
 
         let mut storage_changeset_cursor = provider
@@ -970,7 +976,7 @@ mod tests {
         let outcome =
             ExecutionOutcome::new(init_state.take_bundle(), Receipts::default(), 0, Vec::new());
         provider
-            .write_to_storage(outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
+            .write_state(outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
             .expect("Could not write bundle state to DB");
 
         let mut state = State::builder().with_bundle_update().build();
@@ -1017,7 +1023,7 @@ mod tests {
         let outcome =
             ExecutionOutcome::new(state.take_bundle(), Receipts::default(), 1, Vec::new());
         provider
-            .write_to_storage(outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
+            .write_state(outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
             .expect("Could not write bundle state to DB");
 
         let mut storage_changeset_cursor = provider

@@ -58,7 +58,10 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     async fn build_network<
         N: ProviderNodeTypes<
             ChainSpec = C::ChainSpec,
-            Primitives: NodePrimitives<Block = reth_primitives::Block>,
+            Primitives: NodePrimitives<
+                Block = reth_primitives::Block,
+                Receipt = reth_primitives::Receipt,
+            >,
         >,
     >(
         &self,
