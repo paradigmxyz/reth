@@ -155,7 +155,9 @@ impl<N: NodePrimitives> CanonStateNotification<N> {
 
 /// Wrapper around a broadcast receiver that receives fork choice notifications.
 #[derive(Debug, Deref, DerefMut)]
-pub struct ForkChoiceNotifications(pub watch::Receiver<Option<SealedHeader>>);
+pub struct ForkChoiceNotifications<T = alloy_consensus::Header>(
+    pub watch::Receiver<Option<SealedHeader<T>>>,
+);
 
 /// A trait that allows to register to fork choice related events
 /// and get notified when a new fork choice is available.
