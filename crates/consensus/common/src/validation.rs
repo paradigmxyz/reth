@@ -1,6 +1,6 @@
 //! Collection of methods for block validation.
 
-use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, Header};
+use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, BlockHeader, Header};
 use alloy_eips::eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::ConsensusError;
@@ -41,15 +41,16 @@ pub fn validate_header_base_fee<ChainSpec: EthereumHardforks>(
 ///
 /// [EIP-4895]: https://eips.ethereum.org/EIPS/eip-4895
 #[inline]
-pub fn validate_shanghai_withdrawals(block: &SealedBlock) -> Result<(), ConsensusError> {
-    let withdrawals =
-        block.body.withdrawals.as_ref().ok_or(ConsensusError::BodyWithdrawalsMissing)?;
+pub fn validate_shanghai_withdrawals<H: BlockHeader, B: reth_primitives_traits::BlockBody>(
+    block: &SealedBlock<H, B>,
+) -> Result<(), ConsensusError> {
+    let withdrawals = block.body.withdrawals().ok_or(ConsensusError::BodyWithdrawalsMissing)?;
     let withdrawals_root = reth_primitives::proofs::calculate_withdrawals_root(withdrawals);
     let header_withdrawals_root =
-        block.withdrawals_root.as_ref().ok_or(ConsensusError::WithdrawalsRootMissing)?;
+        block.withdrawals_root().ok_or(ConsensusError::WithdrawalsRootMissing)?;
     if withdrawals_root != *header_withdrawals_root {
         return Err(ConsensusError::BodyWithdrawalsRootDiff(
-            GotExpected { got: withdrawals_root, expected: *header_withdrawals_root }.into(),
+            GotExpected { got: withdrawals_root, expected: header_withdrawals_root }.into(),
         ));
     }
     Ok(())
