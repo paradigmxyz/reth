@@ -198,16 +198,6 @@ impl SparseStateTrie {
         Ok(())
     }
 
-    /// Returns sparse trie root if the trie has been revealed.
-    pub fn root(&mut self) -> Option<B256> {
-        self.state.root()
-    }
-
-    /// Calculates the hashes of the nodes below the provided level.
-    pub fn calculate_below_level(&mut self, level: usize) {
-        self.state.calculate_below_level(level);
-    }
-
     /// Update the leaf node of a storage trie at the provided address.
     pub fn update_storage_leaf(
         &mut self,
@@ -219,6 +209,16 @@ impl SparseStateTrie {
         Ok(())
     }
 
+    /// Update the leaf node of a storage trie at the provided address.
+    pub fn remove_storage_leaf(
+        &mut self,
+        address: B256,
+        slot: &Nibbles,
+    ) -> SparseStateTrieResult<()> {
+        self.storages.entry(address).or_default().remove_leaf(slot)?;
+        Ok(())
+    }
+
     /// Wipe the storage trie at the provided address.
     pub fn wipe_storage(&mut self, address: B256) -> SparseStateTrieResult<()> {
         let Some(trie) = self.storages.get_mut(&address) else { return Ok(()) };
@@ -226,9 +226,19 @@ impl SparseStateTrie {
         trie.wipe().map_err(Into::into)
     }
 
+    /// Calculates the hashes of the nodes below the provided level.
+    pub fn calculate_below_level(&mut self, level: usize) {
+        self.state.calculate_below_level(level);
+    }
+
     /// Returns storage sparse trie root if the trie has been revealed.
     pub fn storage_root(&mut self, account: B256) -> Option<B256> {
         self.storages.get_mut(&account).and_then(|trie| trie.root())
+    }
+
+    /// Returns sparse trie root if the trie has been revealed.
+    pub fn root(&mut self) -> Option<B256> {
+        self.state.root()
     }
 
     /// Returns [`TrieUpdates`] by taking the updates from the revealed sparse tries.
