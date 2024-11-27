@@ -17,14 +17,13 @@
 
 extern crate alloc;
 
+use crate::builder::RethEvmBuilder;
 use alloy_consensus::BlockHeader as _;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use reth_primitives::TransactionSigned;
 use reth_primitives_traits::BlockHeader;
 use revm::{Database, Evm, GetInspector};
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, SpecId, TxEnv};
-
-use crate::builder::RethEvmBuilder;
 
 pub mod builder;
 pub mod either;
@@ -139,9 +138,16 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
         data: Bytes,
     );
 
+    /// Returns a [`CfgEnvWithHandlerCfg`] for the given header.
+    fn cfg_env(&self, header: &Self::Header, total_difficulty: U256) -> CfgEnvWithHandlerCfg {
+        let mut cfg = CfgEnvWithHandlerCfg::new(Default::default(), Default::default());
+        self.fill_cfg_env(&mut cfg, header, total_difficulty);
+        cfg
+    }
+
     /// Fill [`CfgEnvWithHandlerCfg`] fields according to the chain spec and given header.
     ///
-    /// This must set the corresponding spec id in the handler cfg, based on timestamp or total
+    /// This __must__ set the corresponding spec id in the handler cfg, based on timestamp or total
     /// difficulty
     fn fill_cfg_env(
         &self,
@@ -169,6 +175,18 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
         if let Some(excess_blob_gas) = header.excess_blob_gas() {
             block_env.set_blob_excess_gas_and_price(excess_blob_gas);
         }
+    }
+
+    /// Creates a new [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the given header.
+    fn cfg_and_block_env(
+        &self,
+        header: &Self::Header,
+        total_difficulty: U256,
+    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+        let mut cfg = CfgEnvWithHandlerCfg::new(Default::default(), Default::default());
+        let mut block_env = BlockEnv::default();
+        self.fill_cfg_and_block_env(&mut cfg, &mut block_env, header, total_difficulty);
+        (cfg, block_env)
     }
 
     /// Convenience function to call both [`fill_cfg_env`](ConfigureEvmEnv::fill_cfg_env) and
