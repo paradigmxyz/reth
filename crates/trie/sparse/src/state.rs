@@ -1,5 +1,3 @@
-use std::iter::Peekable;
-
 use crate::{SparseStateTrieError, SparseStateTrieResult, SparseTrie};
 use alloy_primitives::{
     map::{HashMap, HashSet},
@@ -60,7 +58,10 @@ impl SparseStateTrie {
 
         let mut proof = proof.into_iter().peekable();
 
-        let Some(root_node) = self.validate_proof(&mut proof)? else { return Ok(()) };
+        let maybe_root_node = proof.next();
+        let Some(root_node) = self.validate_proof(maybe_root_node, proof.peek().is_some())? else {
+            return Ok(())
+        };
 
         // Reveal root node if it wasn't already.
         let trie = self.state.reveal_root(root_node, self.retain_updates)?;
@@ -91,7 +92,10 @@ impl SparseStateTrie {
 
         let mut proof = proof.into_iter().peekable();
 
-        let Some(root_node) = self.validate_proof(&mut proof)? else { return Ok(()) };
+        let maybe_root_node = proof.next();
+        let Some(root_node) = self.validate_proof(maybe_root_node, proof.peek().is_some())? else {
+            return Ok(())
+        };
 
         // Reveal root node if it wasn't already.
         let trie = self
@@ -113,21 +117,20 @@ impl SparseStateTrie {
     }
 
     /// Validates the root node of the proof and returns it if it exists and is valid.
-    fn validate_proof<I: Iterator<Item = (Nibbles, Bytes)>>(
+    fn validate_proof(
         &self,
-        proof: &mut Peekable<I>,
+        maybe_root_node: Option<(Nibbles, Bytes)>,
+        has_more_nodes: bool,
     ) -> SparseStateTrieResult<Option<TrieNode>> {
-        let mut proof = proof.into_iter().peekable();
-
         // Validate root node.
-        let Some((path, node)) = proof.next() else { return Ok(None) };
+        let Some((path, node)) = maybe_root_node else { return Ok(None) };
         if !path.is_empty() {
             return Err(SparseStateTrieError::InvalidRootNode { path, node })
         }
 
         // Decode root node and perform sanity check.
         let root_node = TrieNode::decode(&mut &node[..])?;
-        if matches!(root_node, TrieNode::EmptyRoot) && proof.peek().is_some() {
+        if matches!(root_node, TrieNode::EmptyRoot) && has_more_nodes {
             return Err(SparseStateTrieError::InvalidRootNode { path, node })
         }
 
