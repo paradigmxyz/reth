@@ -19,8 +19,9 @@ use reth_primitives_traits::{InMemorySize, TxType};
 pub struct OpTxType(AlloyOpTxType);
 
 impl OpTxType {
+    /// Returns `true` if this is a [`OpTxType::Deposit`](op_alloy_consensus::OpTxType::Deposit).
     #[inline]
-    pub fn is_deposit(&self) -> bool {
+    pub const fn is_deposit(&self) -> bool {
         matches!(self.0, AlloyOpTxType::Deposit)
     }
 }
