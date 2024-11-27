@@ -90,8 +90,6 @@ impl SignedTransaction for OpTransactionSigned {
     }
 }
 
-#[cfg(feature = "optimism")] // feature needed due to feature mess up from anti-pattern of this crate being imported into a
-                             // non-op-reth crate: reth-provider
 impl reth_primitives_traits::FillTxEnv for OpTransactionSigned {
     fn fill_tx_env(&self, tx_env: &mut revm_primitives::TxEnv, sender: Address) {
         use alloy_primitives::U256;
@@ -416,7 +414,11 @@ impl<'a> arbitrary::Arbitrary<'a> for OpTransactionSigned {
 
         let signature = if is_deposit(&transaction) { TxDeposit::signature() } else { signature };
 
-        Ok(Self::new_unhashed(OpTransaction::new(transaction), signature))
+        let mut signed_tx = Self::new_unhashed(OpTransaction::new(transaction), signature);
+        let hash = signed_tx.recalculate_hash();
+        signed_tx.hash = hash;
+
+        Ok(signed_tx)
     }
 }
 
