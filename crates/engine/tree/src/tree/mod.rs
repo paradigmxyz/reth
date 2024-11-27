@@ -2318,6 +2318,13 @@ where
         let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
         let persistence_not_in_progress = !self.persistence_state.in_progress();
 
+        // We only run the parallel state root if we are currently persisting blocks that are all
+        // ancestors of the one we are executing. If we're committing ancestor blocks, then: any
+        // trie updates being committed are a subset of the in-memory trie updates collected before
+        // fetching reverts. So any diff in reverts (pre vs post commit) is already covered by the
+        // in-memory trie updates we collect in `compute_state_root_parallel`.
+        //
+        // See https://github.com/paradigmxyz/reth/issues/12688 for more details
         let is_descendant_block = self.persistence_state.current_action().map_or(true, |action| {
             match action {
                 CurrentPersistenceAction::SavingBlocks { blocks } => {
