@@ -26,6 +26,7 @@ use reth_primitives::{
     Account, Block, BlockWithSenders, Bytecode, EthPrimitives, GotExpected, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
 };
+use reth_primitives_traits::SignedTransaction;
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     DatabaseProviderFactory, HashedPostStateProvider, StageCheckpointReader,
@@ -33,8 +34,8 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, StorageProof,
-    TrieInput,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
+    StorageMultiProof, StorageProof, TrieInput,
 };
 use reth_trie_db::MerklePatriciaTrie;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
@@ -475,6 +476,8 @@ impl BlockIdReader for MockEthProvider {
 }
 
 impl BlockReader for MockEthProvider {
+    type Block = Block;
+
     fn find_block_by_hash(
         &self,
         hash: B256,
@@ -641,6 +644,15 @@ impl StorageRootProvider for MockEthProvider {
         _hashed_storage: HashedStorage,
     ) -> ProviderResult<reth_trie::StorageProof> {
         Ok(StorageProof::new(slot))
+    }
+
+    fn storage_multiproof(
+        &self,
+        _address: Address,
+        _slots: &[B256],
+        _hashed_storage: HashedStorage,
+    ) -> ProviderResult<StorageMultiProof> {
+        Ok(StorageMultiProof::empty())
     }
 }
 

@@ -1,6 +1,7 @@
 use alloy_consensus::TxEnvelope;
 use alloy_network::eip2718::Decodable2718;
 use alloy_primitives::{Bytes, B256};
+use alloy_rlp::Encodable;
 use reth::{
     builder::{rpc::RpcRegistry, FullNodeComponents},
     rpc::api::{
@@ -12,6 +13,7 @@ use reth::{
     },
 };
 use reth_chainspec::EthereumHardforks;
+use reth_node_api::NodePrimitives;
 use reth_node_builder::NodeTypes;
 
 #[allow(missing_debug_implementations)]
@@ -21,7 +23,12 @@ pub struct RpcTestContext<Node: FullNodeComponents, EthApi: EthApiTypes> {
 
 impl<Node, EthApi> RpcTestContext<Node, EthApi>
 where
-    Node: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
+    Node: FullNodeComponents<
+        Types: NodeTypes<
+            ChainSpec: EthereumHardforks,
+            Primitives: NodePrimitives<Block: Encodable>,
+        >,
+    >,
     EthApi: EthApiSpec + EthTransactions + TraceExt,
 {
     /// Injects a raw transaction into the node tx pool via RPC server

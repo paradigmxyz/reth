@@ -31,14 +31,14 @@ use reth_db_api::{
     cursor::DbCursorRO, models::StoredBlockBodyIndices, table::Table, transaction::DbTx,
 };
 use reth_nippy_jar::{NippyJar, NippyJarChecker, CONFIG_FILE_EXTENSION};
-use reth_node_types::NodePrimitives;
+use reth_node_types::{FullNodePrimitives, NodePrimitives};
 use reth_primitives::{
     static_file::{
         find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive,
         DEFAULT_BLOCKS_PER_STATIC_FILE,
     },
     transaction::recover_signers,
-    Block, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    BlockWithSenders, Receipt, SealedBlockFor, SealedBlockWithSenders, SealedHeader,
     StaticFileSegment, TransactionMeta, TransactionSignedNoHash,
 };
 use reth_primitives_traits::SignedTransaction;
@@ -1380,9 +1380,7 @@ impl<N: NodePrimitives<SignedTx: Value + SignedTransaction>> ReceiptProvider
     }
 }
 
-impl<N: NodePrimitives<SignedTx: Value + SignedTransaction>> TransactionsProviderExt
-    for StaticFileProvider<N>
-{
+impl<N: FullNodePrimitives<SignedTx: Value>> TransactionsProviderExt for StaticFileProvider<N> {
     fn transaction_hashes_by_range(
         &self,
         tx_range: Range<TxNumber>,
@@ -1577,32 +1575,38 @@ impl<N: NodePrimitives> BlockNumReader for StaticFileProvider<N> {
     }
 }
 
-impl<N: NodePrimitives<SignedTx: Value + SignedTransaction>> BlockReader for StaticFileProvider<N> {
+impl<N: FullNodePrimitives<SignedTx: Value>> BlockReader for StaticFileProvider<N> {
+    type Block = N::Block;
+
     fn find_block_by_hash(
         &self,
         _hash: B256,
         _source: BlockSource,
-    ) -> ProviderResult<Option<Block>> {
+    ) -> ProviderResult<Option<Self::Block>> {
         // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
 
-    fn block(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Block>> {
+    fn block(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
         // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlock>> {
+    fn pending_block(&self) -> ProviderResult<Option<SealedBlockFor<Self::Block>>> {
         // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
 
-    fn pending_block_with_senders(&self) -> ProviderResult<Option<SealedBlockWithSenders>> {
+    fn pending_block_with_senders(
+        &self,
+    ) -> ProviderResult<Option<SealedBlockWithSenders<Self::Block>>> {
         // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
 
-    fn pending_block_and_receipts(&self) -> ProviderResult<Option<(SealedBlock, Vec<Receipt>)>> {
+    fn pending_block_and_receipts(
+        &self,
+    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Receipt>)>> {
         // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
@@ -1621,7 +1625,7 @@ impl<N: NodePrimitives<SignedTx: Value + SignedTransaction>> BlockReader for Sta
         &self,
         _id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<BlockWithSenders>> {
+    ) -> ProviderResult<Option<BlockWithSenders<Self::Block>>> {
         // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
@@ -1630,12 +1634,12 @@ impl<N: NodePrimitives<SignedTx: Value + SignedTransaction>> BlockReader for Sta
         &self,
         _id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<SealedBlockWithSenders>> {
+    ) -> ProviderResult<Option<SealedBlockWithSenders<Self::Block>>> {
         // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
 
-    fn block_range(&self, _range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
+    fn block_range(&self, _range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Self::Block>> {
         // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
@@ -1643,14 +1647,14 @@ impl<N: NodePrimitives<SignedTx: Value + SignedTransaction>> BlockReader for Sta
     fn block_with_senders_range(
         &self,
         _range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<BlockWithSenders>> {
+    ) -> ProviderResult<Vec<BlockWithSenders<Self::Block>>> {
         Err(ProviderError::UnsupportedProvider)
     }
 
     fn sealed_block_with_senders_range(
         &self,
         _range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
+    ) -> ProviderResult<Vec<SealedBlockWithSenders<Self::Block>>> {
         Err(ProviderError::UnsupportedProvider)
     }
 }

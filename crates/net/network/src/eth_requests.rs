@@ -15,7 +15,7 @@ use reth_eth_wire::{
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::error::RequestResult;
 use reth_network_peers::PeerId;
-use reth_primitives::BlockBody;
+use reth_primitives_traits::Block;
 use reth_storage_api::{BlockReader, HeaderProvider, ReceiptProvider};
 use std::{
     future::Future,
@@ -157,7 +157,9 @@ where
         &self,
         _peer_id: PeerId,
         request: GetBlockBodies,
-        response: oneshot::Sender<RequestResult<BlockBodies<BlockBody>>>,
+        response: oneshot::Sender<
+            RequestResult<BlockBodies<<C::Block as reth_primitives_traits::Block>::Body>>,
+        >,
     ) {
         self.metrics.eth_bodies_requests_received_total.increment(1);
         let mut bodies = Vec::new();
@@ -166,8 +168,7 @@ where
 
         for hash in request.0 {
             if let Some(block) = self.client.block_by_hash(hash).unwrap_or_default() {
-                let body: BlockBody = block.into();
-
+                let (_, body) = block.split();
                 total_bytes += body.length();
                 bodies.push(body);
 
@@ -223,7 +224,7 @@ where
 /// This should be spawned or used as part of `tokio::select!`.
 impl<C> Future for EthRequestHandler<C>
 where
-    C: BlockReader + HeaderProvider + Unpin,
+    C: BlockReader<Block = reth_primitives::Block> + HeaderProvider + Unpin,
 {
     type Output = ();
 

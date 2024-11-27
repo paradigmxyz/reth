@@ -7,18 +7,20 @@ use alloy_primitives::{B256, U256};
 use alloy_rpc_types_eth::BlockId;
 use derive_more::{Deref, DerefMut, From, Into};
 use itertools::Itertools;
-use reth_rpc_server_types::constants;
+use reth_primitives_traits::SignedTransaction;
+use reth_rpc_server_types::{
+    constants,
+    constants::gas_oracle::{
+        DEFAULT_GAS_PRICE_BLOCKS, DEFAULT_GAS_PRICE_PERCENTILE, DEFAULT_IGNORE_GAS_PRICE,
+        DEFAULT_MAX_GAS_PRICE, MAX_HEADER_HISTORY, SAMPLE_NUMBER,
+    },
+};
 use reth_storage_api::BlockReaderIdExt;
 use schnellru::{ByLength, LruMap};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Formatter};
 use tokio::sync::Mutex;
 use tracing::warn;
-
-use reth_rpc_server_types::constants::gas_oracle::{
-    DEFAULT_GAS_PRICE_BLOCKS, DEFAULT_GAS_PRICE_PERCENTILE, DEFAULT_IGNORE_GAS_PRICE,
-    DEFAULT_MAX_GAS_PRICE, MAX_HEADER_HISTORY, SAMPLE_NUMBER,
-};
 
 use super::{EthApiError, EthResult, EthStateCache, RpcInvalidTransactionError};
 
