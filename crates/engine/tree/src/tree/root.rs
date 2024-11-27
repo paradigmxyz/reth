@@ -1,7 +1,7 @@
 //! State root task related functionality.
 
 use alloy_primitives::map::{DefaultHashBuilder, FbHashMap, FbHashSet, HashMap, HashSet};
-use alloy_rlp::{BufMut, Encodable};
+use alloy_rlp::{BufMut, Decodable, Encodable};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reth_errors::ProviderResult;
 use reth_execution_errors::TrieWitnessError;
@@ -14,8 +14,8 @@ use reth_trie::{
     trie_cursor::InMemoryTrieCursorFactory,
     updates::{TrieUpdates, TrieUpdatesSorted},
     witness::{next_root_from_proofs, target_nodes},
-    HashedPostState, HashedPostStateSorted, HashedStorage, MultiProof, Nibbles, TrieAccount,
-    TrieInput, EMPTY_ROOT_HASH,
+    HashedPostState, HashedPostStateSorted, HashedStorage, LeafNode, MultiProof, Nibbles,
+    TrieAccount, TrieInput, TrieNode, EMPTY_ROOT_HASH,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseProof, DatabaseTrieCursorFactory};
 use reth_trie_parallel::root::ParallelStateRootError;
@@ -652,7 +652,23 @@ fn update_sparse_trie(
     for (address, slots) in targets {
         debug!(target: "engine::root::sparse", ?address, "Revealing account");
         let path = Nibbles::unpack(address);
-        trie.reveal_account(address, multiproof.account_proof_nodes(&path))?;
+        let proof = multiproof.account_proof_nodes(&path);
+        let account = proof
+            .last()
+            .map(|(_, node)| TrieNode::decode(&mut &node[..]))
+            .transpose()?
+            .and_then(|node| match node {
+                TrieNode::Leaf(LeafNode { value, .. }) => Some(value),
+                _ => None,
+            })
+            .map(|value| TrieAccount::decode(&mut &value[..]))
+            .transpose()?;
+        trie.reveal_account(address, proof)?;
+        let account = account.unwrap();
+
+        if account.storage_root != EMPTY_ROOT_HASH {
+            trie.reveal_storage_root(address, account.storage_root)?;
+        }
 
         let storage_proofs = multiproof.storage_proof_nodes(address, slots);
 

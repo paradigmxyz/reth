@@ -77,6 +77,19 @@ impl SparseStateTrie {
         Ok(())
     }
 
+    pub fn reveal_storage_root(
+        &mut self,
+        account: B256,
+        root_hash: B256,
+    ) -> SparseStateTrieResult<()> {
+        self.storages
+            .entry(account)
+            .or_default()
+            .reveal_root_hash(root_hash, self.retain_updates)?;
+
+        Ok(())
+    }
+
     /// Reveal unknown trie paths from provided leaf path and its proof for the storage slot.
     /// NOTE: This method does not extensively validate the proof.
     pub fn reveal_storage_slot(

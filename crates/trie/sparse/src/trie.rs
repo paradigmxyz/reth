@@ -15,7 +15,7 @@ use reth_trie_common::{
     EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
-use std::{borrow::Cow, fmt};
+use std::{borrow::Cow, collections::hash_map::Entry, fmt};
 
 /// Inner representation of the sparse trie.
 /// Sparse trie is blind by default until nodes are revealed.
@@ -62,6 +62,20 @@ impl SparseTrie {
             *self = Self::Revealed(Box::new(RevealedSparseTrie::from_root(root, retain_updates)?))
         }
         Ok(self.as_revealed_mut().unwrap())
+    }
+
+    pub fn reveal_root_hash(
+        &mut self,
+        root_hash: B256,
+        retain_updates: bool,
+    ) -> SparseTrieResult<()> {
+        if self.is_blind() {
+            *self = Self::Revealed(Box::new(RevealedSparseTrie::from_root_hash(
+                root_hash,
+                retain_updates,
+            )?))
+        }
+        Ok(())
     }
 
     /// Update the leaf node.
@@ -156,6 +170,20 @@ impl RevealedSparseTrie {
         Ok(this)
     }
 
+    /// Create new revealed sparse trie from the given root node.
+    pub fn from_root_hash(hash: B256, retain_updates: bool) -> SparseTrieResult<Self> {
+        let mut this = Self {
+            nodes: HashMap::default(),
+            values: HashMap::default(),
+            prefix_set: PrefixSetMut::default(),
+            rlp_buf: Vec::new(),
+            updates: None,
+        }
+        .with_updates(retain_updates);
+        this.reveal_root_hash(hash)?;
+        Ok(this)
+    }
+
     /// Set the retention of branch node updates and deletions.
     pub fn with_updates(mut self, retain_updates: bool) -> Self {
         if retain_updates {
@@ -241,6 +269,28 @@ impl RevealedSparseTrie {
             },
         }
 
+        Ok(())
+    }
+
+    pub fn reveal_root_hash(&mut self, hash: B256) -> SparseTrieResult<()> {
+        debug!(target: "trie::sparse", "Revealing root hash");
+        let entry = self.nodes.entry(Nibbles::default());
+        match entry {
+            Entry::Occupied(mut entry) => match entry.get_mut() {
+                SparseNode::Empty => {
+                    entry.insert(SparseNode::Hash(hash));
+                }
+                _ => {
+                    return Err(SparseTrieError::Reveal {
+                        path: Nibbles::default(),
+                        node: Box::new(SparseNode::Hash(hash)),
+                    })
+                }
+            },
+            Entry::Vacant(entry) => {
+                entry.insert(SparseNode::Hash(hash));
+            }
+        }
         Ok(())
     }
 
