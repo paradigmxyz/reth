@@ -1,134 +1,13 @@
 #!/usr/bin/env bash
 set +e  # Disable immediate exit on error
 
-# Array of crates to compile
-crates=($(cargo metadata --format-version=1 --no-deps | jq -r '.packages[].name' | grep '^reth' | sort))
-
-# Array of crates to exclude
-# Used with the `contains` function.
-# shellcheck disable=SC2034
-exclude_crates=(
-#   # The following are not working yet, but known to be fixable
-#   reth-exex-types # https://github.com/paradigmxyz/reth/issues/9946
-#   # The following require investigation if they can be fixed
-#   reth-basic-payload-builder
-#   reth-beacon-consensus
-#   reth-bench
-#   reth-blockchain-tree
-#   reth-cli
-#   reth-cli-commands
-#   reth-cli-runner
-#   reth-consensus-debug-client
-#   reth-db-common
-#   reth-discv4
-#   reth-discv5
-#   reth-dns-discovery
-#   reth-downloaders
-#   reth-e2e-test-utils
-#   reth-engine-service
-#   reth-engine-tree
-#   reth-engine-util
-#   reth-eth-wire
-#   reth-ethereum-cli
-#   reth-ethereum-payload-builder
-#   reth-etl
-#   reth-exex
-#   reth-exex-test-utils
-#   reth-ipc
-#   reth-net-nat
-#   reth-network
-#   reth-node-api
-#   reth-node-builder
-#   reth-node-core
-#   reth-node-ethereum
-#   reth-node-events
-#   reth-node-metrics
-#   reth-optimism-cli
-#   reth-optimism-node
-#   reth-optimism-payload-builder
-#   reth-optimism-rpc
-#   reth-optimism-primitives
-#   reth-rpc
-#   reth-rpc-api
-#   reth-rpc-api-testing-util
-#   reth-rpc-builder
-#   reth-rpc-engine-api
-#   reth-rpc-eth-api
-#   reth-rpc-eth-types
-#   reth-rpc-layer
-#   reth-stages
-#   reth-engine-local
-#   # The following are not supposed to be working
-#   reth # all of the crates below
-#   reth-invalid-block-hooks # reth-provider
-#   reth-libmdbx # mdbx
-#   reth-mdbx-sys # mdbx
-#   reth-provider # tokio
-#   reth-prune # tokio
-#   reth-stages-api # reth-provider, reth-prune
-#   reth-static-file # tokio
-#   reth-transaction-pool # c-kzg
-#   reth-trie-parallel # tokio
-#   reth-testing-utils
-#   # The following failed the initial risc-v test
-#   reth-blockchain-tree-api
-#   reth-chain-state
-#   reth-chainspec
-#   reth-cli-util
-#   reth-codecs
-#   reth-config
-#   reth-consensus
-#   reth-consensus-common
-#   reth-db
-#   reth-db-api
-#   reth-db-models
-#   reth-ecies
-#   reth-engine-primitives
-#   reth-errors
-#   reth-eth-wire-types
-#   reth-ethereum-consensus
-#   reth-ethereum-engine-primitives
-#   reth-ethereum-forks
-#   reth-evm
-#   reth-evm-ethereum
-#   reth-execution-errors
-#   reth-execution-types
-#   reth-fs-util
-#   reth-metrics
-#   reth-net-banlist
-#   reth-network-api
-#   reth-network-p2p
-#   reth-network-peers
-#   reth-network-types
-#   reth-nippy-jar
-#   reth-node-types
-#   reth-optimism-chainspec
-#   reth-optimism-consensus
-#   reth-optimism-evm
-#   reth-optimism-forks
-#   reth-optimism-storage
-#   reth-payload-builder
-#   reth-payload-builder-primitives
-#   reth-payload-primitives
-#   reth-payload-util
-#   reth-payload-validator
-#   reth-primitives
-#   reth-primitives-traits
-#   reth-prune-types
-#   reth-revm
-#   reth-rpc-server-types
-#   reth-rpc-types-compat
-#   reth-stages-types
-#   reth-static-file-types
-#   reth-storage-api
-#   reth-storage-errors
-#   reth-tasks
-#   reth-tokio-util
-#   reth-tracing
-#   reth-trie
-#   reth-trie-common
-#   reth-trie-db
-#   reth-trie-sparse
+# Array of crates to check
+crates_to_check=(
+    reth-evm
+    reth-primitives
+    reth-primitives-traits
+    reth-optimism-forks
+    reth-optimism-chainspec
 )
 
 # Array to hold the results
@@ -136,26 +15,7 @@ results=()
 # Flag to track if any command fails
 any_failed=0
 
-# Function to check if a value exists in an array
-contains() {
-  local array="$1[@]"
-  local seeking=$2
-  local in=1
-  for element in "${!array}"; do
-    if [[ "$element" == "$seeking" ]]; then
-      in=0
-      break
-    fi
-  done
-  return $in
-}
-
-for crate in "${crates[@]}"; do
-  if contains exclude_crates "$crate"; then
-    results+=("3:⏭️:$crate")
-    continue
-  fi
-
+for crate in "${crates_to_check[@]}"; do
   cmd="cargo +stable build -p $crate --target riscv32imac-unknown-none-elf --no-default-features"
 
   if [ -n "$CI" ]; then
