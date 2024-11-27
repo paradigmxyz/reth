@@ -44,25 +44,56 @@ pub trait StateRootProvider: Send + Sync {
 
 /// A trait that is used to compute the state root of the latest state stored in the database.
 pub trait StateRootProviderExt: Send + Sync {
-    /// Returns the state root of the current state.
+    /// Returns the state root of the current state stored in the database using the existing
+    /// trie nodes.
     fn state_root(&self) -> ProviderResult<B256>;
 
-    /// Returns the state root of the current state and trie updates.
+    /// Calculates the state root of the current state stored in the database using the existing
+    /// trie nodes if they exist. If there are no trie nodes in the database then it will compute
+    /// them and return them in the [`TrieUpdates`] field of the result tuple.
+    ///
+    /// # Returns
+    ///
+    /// A [`ProviderResult`] containing a tuple of the state root ([`B256`]) and the trie updates
+    /// ([`TrieUpdates`]) that were computed during the state root calculation.
     fn state_root_with_updates(&self) -> ProviderResult<(B256, TrieUpdates)>;
 
-    /// Returns the state root with trie updates associated with the given block range.
+    /// For the provided block number range, identifies all the state (accounts and storage slots)
+    /// that has changed. It then calculates the state root by updating the trie paths associated
+    /// with the changed state.
+    ///
+    /// # Returns
+    ///
+    /// A [`ProviderResult`] containing a tuple of the state root ([`B256`]) and the trie updates
+    /// ([`TrieUpdates`]) that were computed during the state root calculation.
     fn incremental_state_root_with_updates(
         &self,
         range: std::ops::RangeInclusive<BlockNumber>,
     ) -> ProviderResult<(B256, TrieUpdates)>;
 
-    /// Returns the state root progress.
+    /// Calculates the state root of the current state stored in the database. If the size of trie
+    /// updates ([`TrieUpdates`]) exceeds a specified threshold, it will return
+    /// [`StateRootProgress::Progress`] which contains the intermediate state of the state root
+    /// computation. This method will then be invoked iteratively until the state root
+    /// calculation is complete indicated by the return of [`StateRootProgress::Complete`].
+    ///
+    /// # Returns
+    ///
+    /// A [`ProviderResult`] containing [`StateRootProgress`] indicating the status of the state
+    /// root calculation after this invocation.
     fn state_root_with_progress(
         &self,
         state: Option<IntermediateStateRootState>,
     ) -> ProviderResult<StateRootProgress>;
 
-    /// Returns the state root of the current state with the provided prefix sets updated.
+    /// Calculates the state root of the current state stored in the database by updating the paths
+    /// in the state and storage tries that are specified in the provided [`TriePrefixSets`]
+    /// argument.
+    ///
+    /// # Returns
+    ///
+    /// A [`ProviderResult`] containing a tuple of the state root ([`B256`]) and the trie updates
+    /// ([`TrieUpdates`]) that were computed during the state root calculation.
     fn state_root_from_prefix_sets_with_updates(
         &self,
         prefix_set: TriePrefixSets,
