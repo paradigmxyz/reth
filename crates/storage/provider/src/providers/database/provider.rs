@@ -21,6 +21,7 @@ use crate::{
 };
 use alloy_consensus::Header;
 use alloy_eips::{
+    eip2718::Encodable2718,
     eip4895::{Withdrawal, Withdrawals},
     BlockHashOrNumber,
 };
@@ -49,7 +50,6 @@ use reth_node_types::{BlockTy, BodyTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives::{
     Account, BlockExt, BlockWithSenders, Bytecode, GotExpected, SealedBlock, SealedBlockFor,
     SealedBlockWithSenders, SealedHeader, StaticFileSegment, StorageEntry, TransactionMeta,
-    TransactionSignedNoHash,
 };
 use reth_primitives_traits::{Block as _, BlockBody as _, SignedTransaction};
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
@@ -1327,7 +1327,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProviderExt
             tx_range,
             |static_file, range, _| static_file.transaction_hashes_by_range(range),
             |tx_range, _| {
-                let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
+                let mut tx_cursor = self.tx.cursor_read::<tables::Transactions<TxTy<N>>>()?;
                 let tx_range_size = tx_range.clone().count();
                 let tx_walker = tx_cursor.walk_range(tx_range)?;
 
@@ -1336,12 +1336,15 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProviderExt
                 let mut transaction_count = 0;
 
                 #[inline]
-                fn calculate_hash(
-                    entry: Result<(TxNumber, TransactionSignedNoHash), DatabaseError>,
+                fn calculate_hash<T>(
+                    entry: Result<(TxNumber, T), DatabaseError>,
                     rlp_buf: &mut Vec<u8>,
-                ) -> Result<(B256, TxNumber), Box<ProviderError>> {
+                ) -> Result<(B256, TxNumber), Box<ProviderError>>
+                where
+                    T: Encodable2718,
+                {
                     let (tx_id, tx) = entry.map_err(|e| Box::new(e.into()))?;
-                    tx.transaction.eip2718_encode(&tx.signature, rlp_buf);
+                    tx.encode_2718(rlp_buf);
                     Ok((keccak256(rlp_buf), tx_id))
                 }
 
@@ -2904,7 +2907,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             .then(|| self.tx.cursor_write::<tables::Transactions<TxTy<N>>>())
             .transpose()?;
 
-        // Get id for the next tx_num of zero if there are no transactions.
+        // Get id for the next tx_num or zero if there are no transactions.
         let mut next_tx_num = tx_block_cursor.last()?.map(|(id, _)| id + 1).unwrap_or_default();
 
         for (block_number, body) in &bodies {
@@ -2992,7 +2995,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             .1
             .last_tx_num();
 
-        if unwind_tx_from < unwind_tx_to {
+        if unwind_tx_from <= unwind_tx_to {
             for (hash, _) in self.transaction_hashes_by_range(unwind_tx_from..(unwind_tx_to + 1))? {
                 self.tx.delete::<tables::TransactionHashNumbers>(hash, None)?;
             }
@@ -3023,7 +3026,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         self.remove::<tables::TransactionBlocks>(unwind_tx_from..)?;
 
         if remove_transactions_from.database() {
-            self.remove::<tables::Transactions>(unwind_tx_from..)?;
+            self.remove::<tables::Transactions<TxTy<N>>>(unwind_tx_from..)?;
         }
 
         if remove_transactions_from.static_files() {
