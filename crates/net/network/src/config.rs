@@ -147,7 +147,7 @@ where
 
 impl<C> NetworkConfig<C>
 where
-    C: BlockReader + HeaderProvider + Clone + Unpin + 'static,
+    C: BlockReader<Block = reth_primitives::Block> + HeaderProvider + Clone + Unpin + 'static,
 {
     /// Starts the networking stack given a [`NetworkConfig`] and returns a handle to the network.
     pub async fn start_network(self) -> Result<NetworkHandle, NetworkError> {

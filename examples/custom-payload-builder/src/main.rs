@@ -24,6 +24,7 @@ use reth_chainspec::ChainSpec;
 use reth_node_api::NodeTypesWithEngine;
 use reth_node_ethereum::{node::EthereumAddOns, EthEngineTypes, EthEvmConfig, EthereumNode};
 use reth_payload_builder::PayloadBuilderService;
+use reth_primitives::EthPrimitives;
 
 pub mod generator;
 pub mod job;
@@ -34,7 +35,13 @@ pub struct CustomPayloadBuilder;
 
 impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for CustomPayloadBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypesWithEngine<Engine = EthEngineTypes, ChainSpec = ChainSpec>>,
+    Node: FullNodeTypes<
+        Types: NodeTypesWithEngine<
+            Engine = EthEngineTypes,
+            ChainSpec = ChainSpec,
+            Primitives = EthPrimitives,
+        >,
+    >,
     Pool: TransactionPool + Unpin + 'static,
 {
     async fn spawn_payload_service(

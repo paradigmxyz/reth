@@ -7,7 +7,7 @@ use reth_trie::{
     prefix_set::TriePrefixSets,
     updates::{StorageTrieUpdates, TrieUpdates},
     AccountProof, HashedPostState, HashedStorage, IntermediateStateRootState, MultiProof,
-    StateRootProgress, StorageProof, TrieInput,
+    StateRootProgress, StorageMultiProof, StorageProof, TrieInput,
 };
 
 /// A type that can compute the state root of a given post state.
@@ -85,6 +85,14 @@ pub trait StorageRootProvider: Send + Sync {
         slot: B256,
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageProof>;
+
+    /// Returns the storage multiproof for target slots.
+    fn storage_multiproof(
+        &self,
+        address: Address,
+        slots: &[B256],
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<StorageMultiProof>;
 }
 
 /// A type that can generate state proof on top of a given post state.

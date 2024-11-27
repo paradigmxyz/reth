@@ -6,7 +6,7 @@ use crate::{
 use alloy_eips::eip2718::Encodable2718;
 use rayon::prelude::*;
 use reth_db::{tables, transaction::DbTxMut};
-use reth_provider::{BlockReader, DBProvider, TransactionsProvider};
+use reth_provider::{BlockReader, DBProvider};
 use reth_prune_types::{
     PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutputCheckpoint,
 };
@@ -25,7 +25,7 @@ impl TransactionLookup {
 
 impl<Provider> Segment<Provider> for TransactionLookup
 where
-    Provider: DBProvider<Tx: DbTxMut> + TransactionsProvider + BlockReader,
+    Provider: DBProvider<Tx: DbTxMut> + BlockReader<Transaction: Encodable2718>,
 {
     fn segment(&self) -> PruneSegment {
         PruneSegment::TransactionLookup

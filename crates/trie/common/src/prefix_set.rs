@@ -73,7 +73,7 @@ pub struct TriePrefixSets {
 /// # Examples
 ///
 /// ```
-/// use reth_trie::{prefix_set::PrefixSetMut, Nibbles};
+/// use reth_trie_common::{prefix_set::PrefixSetMut, Nibbles};
 ///
 /// let mut prefix_set_mut = PrefixSetMut::default();
 /// prefix_set_mut.insert(Nibbles::from_nibbles_unchecked(&[0xa, 0xb]));
@@ -211,8 +211,8 @@ impl PrefixSet {
 }
 
 impl<'a> IntoIterator for &'a PrefixSet {
-    type Item = &'a reth_trie_common::Nibbles;
-    type IntoIter = std::slice::Iter<'a, reth_trie_common::Nibbles>;
+    type Item = &'a Nibbles;
+    type IntoIter = std::slice::Iter<'a, Nibbles>;
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
     }

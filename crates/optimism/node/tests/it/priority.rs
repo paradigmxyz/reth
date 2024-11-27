@@ -25,6 +25,7 @@ use reth_optimism_node::{
     OpEngineTypes, OpNode,
 };
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
+use reth_optimism_primitives::OpPrimitives;
 use reth_payload_util::{PayloadTransactions, PayloadTransactionsChain, PayloadTransactionsFixed};
 use reth_primitives::{SealedBlock, Transaction, TransactionSigned, TransactionSignedEcRecovered};
 use reth_provider::providers::BlockchainProvider2;
@@ -90,8 +91,13 @@ fn build_components<Node>(
     OpConsensusBuilder,
 >
 where
-    Node:
-        FullNodeTypes<Types: NodeTypesWithEngine<Engine = OpEngineTypes, ChainSpec = OpChainSpec>>,
+    Node: FullNodeTypes<
+        Types: NodeTypesWithEngine<
+            Engine = OpEngineTypes,
+            ChainSpec = OpChainSpec,
+            Primitives = OpPrimitives,
+        >,
+    >,
 {
     let RollupArgs { disable_txpool_gossip, compute_pending_block, discovery_v4, .. } =
         RollupArgs::default();

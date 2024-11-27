@@ -72,6 +72,7 @@ mod tests {
     };
     use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{hex, Address, PrimitiveSignature as Signature, B256, U256};
+    use reth_primitives_traits::SignedTransaction;
     use std::str::FromStr;
 
     #[test]
