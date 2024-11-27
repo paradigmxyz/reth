@@ -415,8 +415,9 @@ impl<'a> arbitrary::Arbitrary<'a> for OpTransactionSigned {
         let signature = if is_deposit(&transaction) { TxDeposit::signature() } else { signature };
 
         let mut signed_tx = Self::new_unhashed(OpTransaction::new(transaction), signature);
-        let hash = signed_tx.recalculate_hash();
-        signed_tx.hash = hash;
+        if !signed_tx.tx_type().is_deposit() {
+            signed_tx.hash = signed_tx.recalculate_hash()
+        }
 
         Ok(signed_tx)
     }

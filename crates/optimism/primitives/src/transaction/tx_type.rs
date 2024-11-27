@@ -18,6 +18,13 @@ use reth_primitives_traits::{InMemorySize, TxType};
 #[into(u8)]
 pub struct OpTxType(AlloyOpTxType);
 
+impl OpTxType {
+    #[inline]
+    fn is_deposit(&self) -> bool {
+        matches!(self.0, AlloyOpTxType::Deposit)
+    }
+}
+
 impl TxType for OpTxType {
     #[inline]
     fn is_legacy(&self) -> bool {
