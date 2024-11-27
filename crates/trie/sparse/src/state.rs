@@ -1,6 +1,4 @@
-use std::iter::Peekable;
-
-use crate::{SparseStateTrieError, SparseStateTrieResult, SparseTrie};
+use crate::{RevealedSparseTrie, SparseStateTrieError, SparseStateTrieResult, SparseTrie};
 use alloy_primitives::{
     map::{HashMap, HashSet},
     Bytes, B256,
@@ -10,6 +8,7 @@ use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
     MultiProof, Nibbles, TrieNode,
 };
+use std::iter::Peekable;
 
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
 #[derive(Default, Debug)]
