@@ -193,8 +193,7 @@ pub(crate) struct StateRootTask<Factory> {
     tx: Sender<StateRootMessage>,
     /// Task configuration
     config: StateRootConfig<Factory>,
-    /// Current state
-    state: HashedPostState,
+    fetched_proof_targets: HashSet<B256>,
     /// Proof sequencing handler
     proof_sequencer: ProofSequencer,
     sparse_trie: Option<Box<SparseStateTrie>>,
@@ -215,7 +214,7 @@ where
             config,
             rx,
             tx,
-            state: Default::default(),
+            fetched_proof_targets: Default::default(),
             proof_sequencer: ProofSequencer::new(),
             sparse_trie: Some(Box::new(SparseStateTrie::default().with_updates(true))),
         }
@@ -241,10 +240,10 @@ where
         view: ConsistentDbView<Factory>,
         input: Arc<TrieInput>,
         update: EvmState,
-        state: &HashedPostState,
+        fetched_proof_targets: &HashSet<B256>,
         proof_sequence_number: u64,
         state_root_message_sender: Sender<StateRootMessage>,
-    ) {
+    ) -> HashMap<B256, HashSet<B256>> {
         let mut hashed_state_update = HashedPostState::default();
         for (address, account) in update {
             if account.is_touched() {
@@ -273,18 +272,16 @@ where
         let targets = hashed_state_update
             .accounts
             .keys()
-            .filter(|hashed_address| {
-                !state.accounts.contains_key(*hashed_address) &&
-                    !state.storages.contains_key(*hashed_address)
-            })
+            .filter(|hashed_address| !fetched_proof_targets.contains(*hashed_address))
             .map(|hashed_address| (*hashed_address, HashSet::default()))
             .chain(hashed_state_update.storages.iter().map(|(hashed_address, storage)| {
                 (*hashed_address, storage.storage.keys().copied().collect())
             }))
             .collect::<HashMap<_, _>>();
 
+        let proof_targets = targets.clone();
         rayon::spawn(move || {
-            debug!(target: "engine::root", ?targets, "Spawning proof task");
+            debug!(target: "engine::root", ?proof_targets, "Spawning proof task");
             let provider = match view.provider_ro() {
                 Ok(provider) => provider,
                 Err(error) => {
@@ -295,7 +292,7 @@ where
 
             // TODO: replace with parallel proof
             let result =
-                Proof::overlay_multiproof(provider.tx_ref(), input.as_ref().clone(), targets);
+                Proof::overlay_multiproof(provider.tx_ref(), input.as_ref().clone(), proof_targets);
             match result {
                 Ok(proof) => {
                     let _ = state_root_message_sender.send(StateRootMessage::ProofCalculated {
@@ -309,6 +306,8 @@ where
                 }
             }
         });
+
+        targets
     }
 
     /// Handler for new proof calculated, aggregates all the existing sequential proofs.
@@ -391,14 +390,16 @@ where
                             total_updates = updates_received,
                             "Received new state update"
                         );
-                        Self::on_state_update(
+                        let targets = Self::on_state_update(
                             self.config.consistent_view.clone(),
                             self.config.input.clone(),
                             update,
-                            &self.state,
+                            &self.fetched_proof_targets,
                             self.proof_sequencer.next_sequence(),
                             self.tx.clone(),
                         );
+                        self.fetched_proof_targets.extend(targets.keys());
+                        self.fetched_proof_targets.extend(targets.values().flatten());
                     }
                     StateRootMessage::ProofCalculated { proof, state_update, sequence_number } => {
                         proofs_processed += 1;
