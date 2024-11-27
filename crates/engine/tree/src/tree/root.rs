@@ -116,7 +116,7 @@ pub(crate) struct ProofSequencer {
     /// The next sequence number expected to be delivered.
     next_to_deliver: u64,
     /// Buffer for out-of-order proofs
-    pending_proofs: BTreeMap<u64, MultiProof>,
+    pending_proofs: BTreeMap<u64, (MultiProof, HashedPostState)>,
 }
 
 impl ProofSequencer {
@@ -133,10 +133,15 @@ impl ProofSequencer {
     }
 
     /// Adds a proof and returns all sequential proofs if we have a continuous sequence
-    pub(crate) fn add_proof(&mut self, sequence: u64, proof: MultiProof) -> Vec<MultiProof> {
+    pub(crate) fn add_proof(
+        &mut self,
+        sequence: u64,
+        proof: MultiProof,
+        state_update: HashedPostState,
+    ) -> Vec<(MultiProof, HashedPostState)> {
         debug!(target: "engine::tree", ?sequence, "Adding proof");
         if sequence >= self.next_to_deliver {
-            self.pending_proofs.insert(sequence, proof);
+            self.pending_proofs.insert(sequence, (proof, state_update));
         }
 
         // return early if we don't have the next expected proof
@@ -148,9 +153,9 @@ impl ProofSequencer {
         let mut current_sequence = self.next_to_deliver;
 
         // keep collecting proofs as long as we have consecutive sequence numbers
-        while let Some(proof) = self.pending_proofs.remove(&current_sequence) {
+        while let Some((proof, state_update)) = self.pending_proofs.remove(&current_sequence) {
             debug!(target: "engine::tree", ?current_sequence, "Collected proof for returning");
-            consecutive_proofs.push(proof);
+            consecutive_proofs.push((proof, state_update));
             current_sequence += 1;
 
             // if we don't have the next number, stop collecting
@@ -307,22 +312,28 @@ where
     }
 
     /// Handler for new proof calculated, aggregates all the existing sequential proofs.
-    fn on_proof(&mut self, proof: MultiProof, sequence_number: u64) -> Option<MultiProof> {
-        let ready_proofs = self.proof_sequencer.add_proof(sequence_number, proof);
+    fn on_proof(
+        &mut self,
+        proof: MultiProof,
+        state_update: HashedPostState,
+        sequence_number: u64,
+    ) -> Option<(MultiProof, HashedPostState)> {
+        let ready_proofs = self.proof_sequencer.add_proof(sequence_number, proof, state_update);
 
         if ready_proofs.is_empty() {
             None
         } else {
             // combine all ready proofs into one
-            ready_proofs.into_iter().reduce(|mut acc, proof| {
-                acc.extend(proof);
+            ready_proofs.into_iter().reduce(|mut acc, (proof, state)| {
+                acc.0.extend(proof);
+                acc.1.extend(state);
                 acc
             })
         }
     }
 
     /// Spawns root calculation with the current state and proofs
-    fn spawn_root_calculation(&mut self, multiproof: MultiProof) {
+    fn spawn_root_calculation(&mut self, multiproof: MultiProof, state: HashedPostState) {
         let Some(trie) = self.sparse_trie.take() else {
             return;
         };
@@ -334,7 +345,6 @@ where
             "Spawning root calculation"
         );
 
-        let state = std::mem::take(&mut self.state);
         let targets: FbHashMap<32, FbHashSet<32>> = state
             .accounts
             .keys()
@@ -365,6 +375,7 @@ where
 
     fn run(mut self) -> StateRootResult {
         let mut current_multiproof = MultiProof::default();
+        let mut current_state = HashedPostState::default();
         let mut updates_received = 0;
         let mut proofs_processed = 0;
         let mut roots_calculated = 0;
@@ -397,15 +408,17 @@ where
                             total_proofs = proofs_processed,
                             "Processing calculated proof"
                         );
-                        self.state.extend(state_update);
 
                         debug!(target: "engine::root", ?proof, "Proof calculated");
 
-                        if let Some(combined_proof) = self.on_proof(proof, sequence_number) {
+                        if let Some((combined_proof, combined_state)) =
+                            self.on_proof(proof, state_update, sequence_number)
+                        {
                             if self.sparse_trie.is_none() {
                                 current_multiproof.extend(combined_proof);
+                                current_state.extend(combined_state);
                             } else {
-                                self.spawn_root_calculation(combined_proof);
+                                self.spawn_root_calculation(combined_proof, combined_state);
                             }
                         }
                     }
@@ -442,7 +455,10 @@ where
                                 storage_proofs = current_multiproof.storages.len(),
                                 "Spawning subsequent root calculation"
                             );
-                            self.spawn_root_calculation(std::mem::take(&mut current_multiproof));
+                            self.spawn_root_calculation(
+                                std::mem::take(&mut current_multiproof),
+                                std::mem::take(&mut current_state),
+                            );
                         } else if all_proofs_received && no_pending {
                             debug!(
                                 target: "engine::root",
