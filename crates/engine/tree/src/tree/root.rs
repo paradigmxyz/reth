@@ -1,6 +1,6 @@
 //! State root task related functionality.
 
-use alloy_primitives::map::{FbHashMap, FbHashSet, HashMap, HashSet};
+use alloy_primitives::map::{FbHashMap, HashMap, HashSet};
 use alloy_rlp::{BufMut, Encodable};
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
@@ -230,6 +230,8 @@ where
     }
 
     /// Handles state updates.
+    ///
+    /// Returns proof targets derived from the state update.
     fn on_state_update(
         view: ConsistentDbView<Factory>,
         input: Arc<TrieInput>,
@@ -262,7 +264,7 @@ where
             }
         }
 
-        let proof_targets = get_proof_targets(hashed_state_update.clone());
+        let proof_targets = get_proof_targets(&hashed_state_update, fetched_proof_targets);
 
         // Dispatch proof gathering for this state update
         let targets = proof_targets.clone();
@@ -278,6 +280,7 @@ where
             // TODO: replace with parallel proof
             let result = Proof::overlay_multiproof(
                 provider.tx_ref(),
+                // TODO(alexey): this clone can be expensive, we should avoid it
                 input.as_ref().clone(),
                 targets.clone(),
             );
@@ -330,7 +333,8 @@ where
             "Spawning root calculation"
         );
 
-        let targets = get_proof_targets(state);
+        // TODO(alexey): store proof targets in `ProofSequecner` to avoid recomputing them
+        let targets = get_proof_targets(&state, &HashSet::default());
 
         let tx = self.tx.clone();
         rayon::spawn(move || {
@@ -352,8 +356,8 @@ where
     }
 
     fn run(mut self) -> StateRootResult {
-        let mut current_multiproof = MultiProof::default();
         let mut current_state_update = HashedPostState::default();
+        let mut current_multiproof = MultiProof::default();
         let mut updates_received = 0;
         let mut proofs_processed = 0;
         let mut roots_calculated = 0;
@@ -434,8 +438,8 @@ where
                                 "Spawning subsequent root calculation"
                             );
                             self.spawn_root_calculation(
-                                std::mem::take(&mut current_multiproof),
                                 std::mem::take(&mut current_state_update),
+                                std::mem::take(&mut current_multiproof),
                             );
                         } else if all_proofs_received && no_pending {
                             debug!(
@@ -468,11 +472,15 @@ where
     }
 }
 
-fn get_proof_targets(state_update: HashedPostState) -> FbHashMap<B256, FbHashSet<B256>> {
+fn get_proof_targets(
+    state_update: &HashedPostState,
+    fetched_proof_targets: &HashSet<B256>,
+) -> HashMap<B256, HashSet<B256>> {
     state_update
         .accounts
         .keys()
-        .map(|hashed_address| (*hashed_address, Default::default()))
+        .filter(|hashed_address| !fetched_proof_targets.contains(*hashed_address))
+        .map(|hashed_address| (*hashed_address, HashSet::default()))
         .chain(state_update.storages.iter().map(|(hashed_address, storage)| {
             (*hashed_address, storage.storage.keys().copied().collect())
         }))
@@ -484,7 +492,7 @@ fn get_proof_targets(state_update: HashedPostState) -> FbHashMap<B256, FbHashSet
 fn update_sparse_trie(
     mut trie: Box<SparseStateTrie>,
     multiproof: MultiProof,
-    targets: FbHashMap<32, FbHashSet<32>>,
+    targets: HashMap<B256, HashSet<B256>>,
     state: HashedPostState,
 ) -> SparseStateTrieResult<(Box<SparseStateTrie>, Duration)> {
     let started_at = Instant::now();

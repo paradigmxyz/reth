@@ -8,7 +8,7 @@ use crate::{
 };
 use alloy_primitives::{
     keccak256,
-    map::{FbHashMap, FbHashSet, HashMap, HashSet},
+    map::{HashMap, HashSet},
     Address, B256,
 };
 use alloy_rlp::{BufMut, Encodable};
@@ -89,7 +89,7 @@ where
     /// Generate a state multiproof according to specified targets.
     pub fn multiproof(
         mut self,
-        mut targets: FbHashMap<B256, FbHashSet<B256>>,
+        mut targets: HashMap<B256, HashSet<B256>>,
     ) -> Result<MultiProof, StateProofError> {
         let hashed_account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
         let trie_cursor = self.trie_cursor_factory.account_trie_cursor()?;
@@ -214,7 +214,7 @@ where
     /// Generate storage proof.
     pub fn storage_multiproof(
         mut self,
-        targets: FbHashSet<B256>,
+        targets: HashSet<B256>,
     ) -> Result<StorageMultiProof, StateProofError> {
         let mut hashed_storage_cursor =
             self.hashed_cursor_factory.hashed_storage_cursor(self.hashed_address)?;
