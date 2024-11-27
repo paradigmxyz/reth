@@ -63,7 +63,6 @@ pub struct StateRootHandle {
     rx: mpsc::Receiver<StateRootResult>,
 }
 
-#[allow(dead_code)]
 impl StateRootHandle {
     /// Creates a new handle from a receiver.
     pub(crate) const fn new(rx: mpsc::Receiver<StateRootResult>) -> Self {
