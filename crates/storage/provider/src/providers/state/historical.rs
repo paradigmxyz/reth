@@ -24,8 +24,8 @@ use reth_trie::{
     proof::{Proof, StorageProof},
     updates::TrieUpdates,
     witness::TrieWitness,
-    AccountProof, HashedPostState, HashedStorage, KeyHasher, MultiProof, StateRoot,
-    StorageMultiProof, StorageRoot, TrieInput,
+    AccountProof, HashedPostState, HashedStorage, KeyHasher, MultiProof, StorageMultiProof,
+    StorageRoot, TrieInput,
 };
 use reth_trie_db::{
     DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot,

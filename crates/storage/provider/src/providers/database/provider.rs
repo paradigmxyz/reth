@@ -16,8 +16,8 @@ use crate::{
     KeyHasherProvider, LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown,
     ProviderError, PruneCheckpointReader, PruneCheckpointWriter, RevertsInit,
     StageCheckpointReader, StateChangeWriter, StateCommitmentProvider, StateProviderBox,
-    StateReader, StateRootProviderExt, StateWriter, StaticFileProviderFactory, StatsReader,
-    StorageLocation, StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
+    StateRootProviderExt, StateWriter, StaticFileProviderFactory, StatsReader, StorageLocation,
+    StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
     TransactionsProviderExt, TrieWriter, WithdrawalsProvider,
 };
 use alloy_consensus::Header;
