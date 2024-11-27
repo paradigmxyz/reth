@@ -8,8 +8,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(not(feature = "std"), no_std)]
-// The `optimism` feature must be enabled to use this crate.
-#![cfg(feature = "optimism")]
 
 pub mod bedrock;
 pub mod transaction;

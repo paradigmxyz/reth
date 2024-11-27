@@ -11,7 +11,7 @@ use alloy_eips::{
     eip7702::SignedAuthorization,
 };
 use alloy_primitives::{
-    keccak256, Address, Bytes, PrimitiveSignature as Signature, TxHash, TxKind, Uint, B256, U256,
+    keccak256, Address, Bytes, PrimitiveSignature as Signature, TxHash, TxKind, Uint, B256,
 };
 use alloy_rlp::Header;
 use derive_more::{AsRef, Constructor, Deref};
@@ -22,8 +22,7 @@ use reth_primitives::{
     transaction::{recover_signer, recover_signer_unchecked},
     TransactionSigned,
 };
-use reth_primitives_traits::{FillTxEnv, InMemorySize, SignedTransaction};
-use revm_primitives::{AuthorizationList, TxEnv};
+use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use serde::{Deserialize, Serialize};
 
 use crate::{OpTransaction, OpTxType};
@@ -91,8 +90,13 @@ impl SignedTransaction for OpTransactionSigned {
     }
 }
 
-impl FillTxEnv for OpTransactionSigned {
-    fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address) {
+#[cfg(feature = "optimism")] // feature needed due to feature mess up from anti-pattern of this crate being imported into a
+                             // non-op-reth crate: reth-provider
+impl reth_primitives_traits::FillTxEnv for OpTransactionSigned {
+    fn fill_tx_env(&self, tx_env: &mut revm_primitives::TxEnv, sender: Address) {
+        use alloy_primitives::U256;
+        use revm_primitives::{AuthorizationList, OptimismFields};
+
         let envelope = self.encoded_2718();
 
         tx_env.caller = sender;
@@ -166,7 +170,7 @@ impl FillTxEnv for OpTransactionSigned {
                 tx_env.nonce = None;
                 tx_env.authorization_list = None;
 
-                tx_env.optimism = revm_primitives::OptimismFields {
+                tx_env.optimism = OptimismFields {
                     source_hash: Some(tx.source_hash),
                     mint: tx.mint,
                     is_system_transaction: Some(tx.is_system_transaction),
@@ -176,7 +180,7 @@ impl FillTxEnv for OpTransactionSigned {
             }
         }
 
-        tx_env.optimism = revm_primitives::OptimismFields {
+        tx_env.optimism = OptimismFields {
             source_hash: None,
             mint: None,
             is_system_transaction: Some(false),
