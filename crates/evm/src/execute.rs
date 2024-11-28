@@ -241,14 +241,14 @@ where
 }
 
 /// A strategy factory that can create block execution strategies.
-pub trait BlockExecutionStrategyFactory: Send + Sync + Clone + Unpin + 'static {
+pub trait BlockExecutionStrategyFactory<Block>: Send + Sync + Clone + Unpin + 'static {
     /// Associated strategy type.
     type Strategy<DB: Database<Error: Into<ProviderError> + Display>>: BlockExecutionStrategy<
         DB,
         Error = BlockExecutionError,
     >;
 
-    /// Creates a strategy using the give database.
+    /// Creates a strategy using the given database.
     fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
     where
         DB: Database<Error: Into<ProviderError> + Display>;
@@ -595,7 +595,7 @@ mod tests {
         finish_result: BundleState,
     }
 
-    impl BlockExecutionStrategyFactory for TestExecutorStrategyFactory {
+    impl BlockExecutionStrategyFactory<BlockWithSenders> for TestExecutorStrategyFactory {
         type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
             TestExecutorStrategy<DB, TestEvmConfig>;
 
