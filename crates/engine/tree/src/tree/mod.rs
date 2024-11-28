@@ -2532,7 +2532,9 @@ where
         state: ForkchoiceState,
         version: EngineApiMessageVersion,
     ) -> OnForkChoiceUpdated {
-        if let Err(err) = self.payload_validator.validate_payload_attributes_against_header(&attrs, head) {
+        if let Err(err) =
+            self.payload_validator.validate_payload_attributes_against_header(&attrs, head)
+        {
             warn!(target: "engine::tree", %err, ?head, "Invalid payload attributes");
             return OnForkChoiceUpdated::invalid_payload_attributes()
         }
