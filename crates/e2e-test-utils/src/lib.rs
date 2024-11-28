@@ -5,6 +5,7 @@ use reth_chainspec::EthChainSpec;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_network_api::test_utils::PeersHandleProvider;
+use reth_node_api::EngineValidator;
 use reth_node_builder::{
     components::NodeComponentsBuilder,
     rpc::{EngineValidatorAddOn, RethRpcAddOns},
@@ -18,7 +19,6 @@ use reth_provider::providers::{
     BlockchainProvider, BlockchainProvider2, NodeTypesForProvider, NodeTypesForTree,
 };
 use reth_rpc_server_types::RpcModuleSelection;
-use reth_node_api::EngineValidator;
 use reth_tasks::TaskManager;
 use std::sync::Arc;
 use tracing::{span, Level};
