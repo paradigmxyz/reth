@@ -7,9 +7,9 @@ use alloy_provider::{
     },
     Provider, ProviderBuilder, SendableTx,
 };
+use alloy_rpc_types_eth::TransactionRequest;
 use alloy_signer::SignerSync;
 use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
-use reth::rpc::types::TransactionRequest;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::{setup, setup_engine, transaction::TransactionTestContext};
 use reth_node_ethereum::EthereumNode;
