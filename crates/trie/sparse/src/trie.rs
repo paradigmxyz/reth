@@ -360,7 +360,11 @@ impl RevealedSparseTrie {
     /// Remove leaf node from the trie.
     pub fn remove_leaf(&mut self, path: &Nibbles) -> SparseTrieResult<()> {
         self.prefix_set.insert(path.clone());
-        self.values.remove(path);
+
+        if self.values.remove(path).is_none() {
+            // Leaf is not present in the trie.
+            return Ok(())
+        }
 
         // If the path wasn't present in `values`, we still need to walk the trie and ensure that
         // there is no node at the path. When a leaf node is a blinded `Hash`, it will have an entry
