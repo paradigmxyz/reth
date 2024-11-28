@@ -533,10 +533,10 @@ mod tests {
         providers::ConsistentDbView, test_utils::create_test_provider_factory, HashingWriter,
     };
     use reth_testing_utils::generators::{self, Rng};
-    use reth_trie::{test_utils::state_root, TrieInput};
+    use reth_trie::{test_utils::state_root, HashedStorage, TrieInput};
     use revm_primitives::{
-        Account as RevmAccount, AccountInfo, AccountStatus, Address, EvmState, EvmStorageSlot,
-        HashMap, B256, KECCAK_EMPTY, U256,
+        keccak256, Account as RevmAccount, AccountInfo, AccountStatus, Address, EvmState,
+        EvmStorageSlot, HashMap, B256, KECCAK_EMPTY, U256,
     };
     use std::sync::Arc;
 
@@ -632,11 +632,32 @@ mod tests {
         }
 
         for update in &state_updates {
-            let hashed_state_update = transform_state_update(update.clone());
-
-            hashed_state.extend(hashed_state_update);
-
             for (address, account) in update {
+                let hashed_address = keccak256(*address);
+
+                if account.is_touched() {
+                    let destroyed = account.is_selfdestructed();
+                    hashed_state.accounts.insert(
+                        hashed_address,
+                        if destroyed || account.is_empty() {
+                            None
+                        } else {
+                            Some(account.info.clone().into())
+                        },
+                    );
+                    if destroyed || !account.storage.is_empty() {
+                        let storage = account
+                            .storage
+                            .iter()
+                            .filter(|&(_slot, value)| (!destroyed && value.is_changed()))
+                            .map(|(slot, value)| {
+                                (keccak256(B256::from(*slot)), value.present_value)
+                            });
+                        hashed_state
+                            .storages
+                            .insert(hashed_address, HashedStorage::from_iter(destroyed, storage));
+                    }
+                }
                 let storage: HashMap<B256, U256> = account
                     .storage
                     .iter()
