@@ -449,9 +449,14 @@ where
                                 roots_calculated,
                                 "All proofs processed, ending calculation"
                             );
-                            let mut trie = self.sparse_trie.take().unwrap();
-                            let root = trie.root().unwrap();
-                            let trie_updates = trie.take_trie_updates().unwrap();
+                            let mut trie = self
+                                .sparse_trie
+                                .take()
+                                .expect("sparse trie update should not be in progress");
+                            let root = trie.root().expect("sparse trie should be revealed");
+                            let trie_updates = trie
+                                .take_trie_updates()
+                                .expect("sparse trie should have updates retention enabled");
                             return Ok((root, trie_updates));
                         }
                     }
