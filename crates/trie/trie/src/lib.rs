@@ -13,10 +13,6 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-/// Constants related to the trie computation.
-mod constants;
-pub use constants::*;
-
 /// The implementation of forward-only in-memory cursor.
 pub mod forward_cursor;
 
