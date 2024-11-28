@@ -474,6 +474,13 @@ impl RevealedSparseTrie {
                                 "Fetching and revealing the only remaining child of a branch node"
                             );
                             if let Some(node) = fetch_node(child_path.clone()) {
+                                debug!(
+                                    target: "trie::sparse",
+                                    ?removed_path,
+                                    ?child_path,
+                                    ?node,
+                                    "Revealing the only remaining child of a branch node"
+                                );
                                 self.reveal_node_or_hash(child_path.clone(), &node)?;
                             }
                         }
