@@ -1,19 +1,21 @@
-use crate::{RevealedSparseTrie, SparseStateTrieError, SparseStateTrieResult, SparseTrie};
+use crate::{
+    RevealedSparseTrie, SparseStateTrieError, SparseStateTrieResult, SparseTrie, SparseTrieError,
+};
 use alloy_primitives::{
     map::{HashMap, HashSet},
     Bytes, B256,
 };
-use alloy_rlp::Decodable;
+use alloy_rlp::{Decodable, Encodable};
+use reth_primitives_traits::Account;
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
-    MultiProof, Nibbles, TrieNode,
+    MultiProof, Nibbles, TrieAccount, TrieNode, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use std::iter::Peekable;
 
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct SparseStateTrie {
-    retain_updates: bool,
     /// Sparse account trie.
     state: SparseTrie,
     /// Sparse storage tries.
@@ -22,6 +24,23 @@ pub struct SparseStateTrie {
     revealed: HashMap<B256, HashSet<B256>>,
     /// Collection of addresses that had their storage tries wiped.
     wiped_storages: HashSet<B256>,
+    /// Flag indicating whether trie updates should be retained.
+    retain_updates: bool,
+    /// Reusable buffer for RLP encoding of trie accounts.
+    account_rlp_buf: Vec<u8>,
+}
+
+impl Default for SparseStateTrie {
+    fn default() -> Self {
+        Self {
+            state: Default::default(),
+            storages: Default::default(),
+            revealed: Default::default(),
+            wiped_storages: Default::default(),
+            retain_updates: false,
+            account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
+        }
+    }
 }
 
 impl SparseStateTrie {
@@ -184,6 +203,37 @@ impl SparseStateTrie {
         }
 
         Ok(Some(root_node))
+    }
+
+    /// Update or remove trie account based on new account info. This method will either recompute
+    /// the storage root based on update storage trie or look it up from existing leaf value.
+    ///
+    /// If the new account info and storage trie are empty, the account leaf will be removed.
+    pub fn update_account(&mut self, address: B256, account: Account) -> SparseStateTrieResult<()> {
+        let nibbles = Nibbles::unpack(address);
+        let storage_root = if let Some(storage_trie) = self.storages.get_mut(&address) {
+            storage_trie.root().ok_or(SparseTrieError::Blind)?
+        } else if self.revealed.contains_key(&address) {
+            let state = self.state.as_revealed_mut().ok_or(SparseTrieError::Blind)?;
+            // The account was revealed, either...
+            if let Some(value) = state.get_leaf_value(&nibbles) {
+                // ..it exists and we should take it's current storage root or...
+                TrieAccount::decode(&mut &value[..])?.storage_root
+            } else {
+                // ...the account is newly created and the storage trie is empty.
+                EMPTY_ROOT_HASH
+            }
+        } else {
+            return Err(SparseTrieError::Blind.into())
+        };
+
+        if account.is_empty() && storage_root == EMPTY_ROOT_HASH {
+            self.remove_account_leaf(&nibbles)
+        } else {
+            self.account_rlp_buf.clear();
+            TrieAccount::from((account, storage_root)).encode(&mut self.account_rlp_buf);
+            self.update_account_leaf(nibbles, self.account_rlp_buf.clone())
+        }
     }
 
     /// Update the account leaf node.

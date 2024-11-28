@@ -11,11 +11,11 @@ use revm_primitives::calc_excess_blob_gas;
 
 /// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
 #[inline]
-pub const fn validate_header_gas(header: &Header) -> Result<(), ConsensusError> {
-    if header.gas_used > header.gas_limit {
+pub fn validate_header_gas<H: BlockHeader>(header: &H) -> Result<(), ConsensusError> {
+    if header.gas_used() > header.gas_limit() {
         return Err(ConsensusError::HeaderGasUsedExceedsGasLimit {
-            gas_used: header.gas_used,
-            gas_limit: header.gas_limit,
+            gas_used: header.gas_used(),
+            gas_limit: header.gas_limit(),
         })
     }
     Ok(())
@@ -41,15 +41,16 @@ pub fn validate_header_base_fee<H: BlockHeader, ChainSpec: EthereumHardforks>(
 ///
 /// [EIP-4895]: https://eips.ethereum.org/EIPS/eip-4895
 #[inline]
-pub fn validate_shanghai_withdrawals(block: &SealedBlock) -> Result<(), ConsensusError> {
-    let withdrawals =
-        block.body.withdrawals.as_ref().ok_or(ConsensusError::BodyWithdrawalsMissing)?;
+pub fn validate_shanghai_withdrawals<H: BlockHeader, B: reth_primitives_traits::BlockBody>(
+    block: &SealedBlock<H, B>,
+) -> Result<(), ConsensusError> {
+    let withdrawals = block.body.withdrawals().ok_or(ConsensusError::BodyWithdrawalsMissing)?;
     let withdrawals_root = reth_primitives::proofs::calculate_withdrawals_root(withdrawals);
     let header_withdrawals_root =
-        block.withdrawals_root.as_ref().ok_or(ConsensusError::WithdrawalsRootMissing)?;
+        block.withdrawals_root().ok_or(ConsensusError::WithdrawalsRootMissing)?;
     if withdrawals_root != *header_withdrawals_root {
         return Err(ConsensusError::BodyWithdrawalsRootDiff(
-            GotExpected { got: withdrawals_root, expected: *header_withdrawals_root }.into(),
+            GotExpected { got: withdrawals_root, expected: header_withdrawals_root }.into(),
         ));
     }
     Ok(())

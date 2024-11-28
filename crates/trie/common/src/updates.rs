@@ -1,6 +1,8 @@
 use crate::{BranchNodeCompact, HashBuilder, Nibbles};
-use alloy_primitives::B256;
-use std::collections::{HashMap, HashSet};
+use alloy_primitives::{
+    map::{HashMap, HashSet},
+    B256,
+};
 
 /// The aggregation of trie updates.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
@@ -228,8 +230,8 @@ impl StorageTrieUpdates {
 #[cfg(any(test, feature = "serde"))]
 mod serde_nibbles_set {
     use crate::Nibbles;
+    use alloy_primitives::map::HashSet;
     use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
-    use std::collections::HashSet;
 
     pub(super) fn serialize<S>(map: &HashSet<Nibbles>, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -264,13 +266,13 @@ mod serde_nibbles_set {
 #[cfg(any(test, feature = "serde"))]
 mod serde_nibbles_map {
     use crate::Nibbles;
-    use alloy_primitives::hex;
+    use alloy_primitives::{hex, map::HashMap};
     use serde::{
         de::{Error, MapAccess, Visitor},
         ser::SerializeMap,
         Deserialize, Deserializer, Serialize, Serializer,
     };
-    use std::{collections::HashMap, marker::PhantomData};
+    use std::marker::PhantomData;
 
     pub(super) fn serialize<S, T>(
         map: &HashMap<Nibbles, T>,
@@ -314,7 +316,10 @@ mod serde_nibbles_map {
             where
                 A: MapAccess<'de>,
             {
-                let mut result = HashMap::with_capacity(map.size_hint().unwrap_or(0));
+                let mut result = HashMap::with_capacity_and_hasher(
+                    map.size_hint().unwrap_or(0),
+                    Default::default(),
+                );
 
                 while let Some((key, value)) = map.next_entry::<String, T>()? {
                     let decoded_key =
@@ -406,13 +411,13 @@ fn exclude_empty_from_pair<V>(
 #[cfg(feature = "serde-bincode-compat")]
 pub mod serde_bincode_compat {
     use crate::{BranchNodeCompact, Nibbles};
-    use alloy_primitives::B256;
+    use alloy_primitives::{
+        map::{HashMap, HashSet},
+        B256,
+    };
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
-    use std::{
-        borrow::Cow,
-        collections::{HashMap, HashSet},
-    };
+    use std::borrow::Cow;
 
     /// Bincode-compatible [`super::TrieUpdates`] serde implementation.
     ///
