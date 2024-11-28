@@ -1,7 +1,7 @@
 use alloy_primitives::BlockNumber;
 use reth_execution_types::ExecutionOutcome;
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::HashedPostStateSorted;
+use reth_trie::{HashedPostState, HashedPostStateSorted};
 use revm::db::{
     states::{PlainStateReverts, StateChangeset},
     OriginalValuesKnown,
@@ -53,4 +53,25 @@ pub trait StateWriter {
         block: BlockNumber,
         remove_receipts_from: StorageLocation,
     ) -> ProviderResult<ExecutionOutcome<Self::Receipt>>;
+}
+
+/// This just receives state, or [`ExecutionOutcome`], from the provider
+#[auto_impl::auto_impl(&, Arc, Box)]
+pub trait StateReader: Send + Sync {
+    /// Receipt type in [`ExecutionOutcome`].
+    type Receipt: Send + Sync;
+
+    /// Get the [`ExecutionOutcome`] for the given block
+    fn get_state(
+        &self,
+        block: BlockNumber,
+    ) -> ProviderResult<Option<ExecutionOutcome<Self::Receipt>>>;
+}
+
+/// This is responsible for fetching hashed state changes from a historical block, to the tip of the
+/// chain.
+#[auto_impl::auto_impl(&, Arc, Box)]
+pub trait HashedStateReader: Send + Sync {
+    /// Get the [`HashedPostState`] changes from the given block, to the tip of the chain.
+    fn get_hashed_reverts(&self, from: BlockNumber) -> ProviderResult<HashedPostState>;
 }

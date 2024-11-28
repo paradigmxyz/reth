@@ -13,7 +13,7 @@ mod header_sync_gap;
 pub use header_sync_gap::{HeaderSyncGap, HeaderSyncGapProvider};
 
 mod state;
-pub use state::StateWriter;
+pub use state::{HashedStateReader, StateReader, StateWriter};
 
 pub use reth_chainspec::ChainSpecProvider;
 

@@ -7,6 +7,7 @@ use reth_errors::ProviderResult;
 use reth_execution_errors::TrieWitnessError;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
+    HashedStateReader,
 };
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
@@ -197,7 +198,11 @@ pub(crate) struct StateRootTask<Factory> {
 #[allow(dead_code)]
 impl<Factory> StateRootTask<Factory>
 where
-    Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + Send + Sync + 'static,
+    Factory: DatabaseProviderFactory<Provider: BlockReader + HashedStateReader>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
 {
     /// Creates a new state root task with the unified message channel
     pub(crate) fn new(
@@ -483,7 +488,7 @@ pub fn calculate_state_root_from_proofs<Factory>(
     state: HashedPostState,
 ) -> ProviderResult<(B256, TrieUpdates, Duration)>
 where
-    Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone,
+    Factory: DatabaseProviderFactory<Provider: BlockReader + HashedStateReader> + Clone,
 {
     let started_at = Instant::now();
 
