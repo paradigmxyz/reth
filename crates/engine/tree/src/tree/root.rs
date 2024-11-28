@@ -158,15 +158,15 @@ impl ProofSequencer {
 /// Then it updates relevant leaves according to the result of the transaction.
 #[derive(Debug)]
 pub(crate) struct StateRootTask<Factory> {
-    /// Task configuration
+    /// Task configuration.
     config: StateRootConfig<Factory>,
-    /// Receiver for state root related messages
+    /// Receiver for state root related messages.
     rx: Receiver<StateRootMessage>,
-    /// Sender for state root related messages
+    /// Sender for state root related messages.
     tx: Sender<StateRootMessage>,
-    /// Proof targets that have been already fetched
-    fetched_proof_targets: HashSet<B256>,
-    /// Proof sequencing handler
+    /// Proof targets that have been already fetched.
+    fetched_proof_targets: HashMap<B256, HashSet<B256>>,
+    /// Proof sequencing handler.
     proof_sequencer: ProofSequencer,
     /// The sparse trie used for the state root calculation. If [`None`], then update is in
     /// progress.
@@ -216,7 +216,7 @@ where
         view: ConsistentDbView<Factory>,
         input: Arc<TrieInput>,
         update: EvmState,
-        fetched_proof_targets: &HashSet<B256>,
+        fetched_proof_targets: &HashMap<B256, HashSet<B256>>,
         proof_sequence_number: u64,
         state_root_message_sender: Sender<StateRootMessage>,
     ) -> HashMap<B256, HashSet<B256>> {
@@ -313,7 +313,7 @@ where
         );
 
         // TODO(alexey): store proof targets in `ProofSequecner` to avoid recomputing them
-        let targets = get_proof_targets(&state, &HashSet::default());
+        let targets = get_proof_targets(&state, &HashMap::default());
 
         let tx = self.tx.clone();
         rayon::spawn(move || {
@@ -360,8 +360,9 @@ where
                             self.proof_sequencer.next_sequence(),
                             self.tx.clone(),
                         );
-                        self.fetched_proof_targets.extend(targets.keys());
-                        self.fetched_proof_targets.extend(targets.values().flatten());
+                        for (address, slots) in targets {
+                            self.fetched_proof_targets.entry(address).or_default().extend(slots)
+                        }
                     }
                     StateRootMessage::ProofCalculated { proof, state_update, sequence_number } => {
                         proofs_processed += 1;
@@ -458,15 +459,27 @@ where
 
 fn get_proof_targets(
     state_update: &HashedPostState,
-    fetched_proof_targets: &HashSet<B256>,
+    fetched_proof_targets: &HashMap<B256, HashSet<B256>>,
 ) -> HashMap<B256, HashSet<B256>> {
     state_update
         .accounts
         .keys()
-        .filter(|hashed_address| !fetched_proof_targets.contains(*hashed_address))
+        .filter(|hashed_address| !fetched_proof_targets.contains_key(*hashed_address))
         .map(|hashed_address| (*hashed_address, HashSet::default()))
         .chain(state_update.storages.iter().map(|(hashed_address, storage)| {
-            (*hashed_address, storage.storage.keys().copied().collect())
+            let fetched_storage_proof_targets = fetched_proof_targets.get(hashed_address);
+            (
+                *hashed_address,
+                storage
+                    .storage
+                    .keys()
+                    .filter(|slot| {
+                        !fetched_storage_proof_targets
+                            .is_some_and(|targets| targets.contains(*slot))
+                    })
+                    .copied()
+                    .collect(),
+            )
         }))
         .collect()
 }
