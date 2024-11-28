@@ -1,13 +1,12 @@
 //! State root task related functionality.
 
-use alloy_primitives::map::{FbHashMap, HashMap, HashSet};
-use alloy_rlp::{BufMut, Encodable};
+use alloy_primitives::map::{HashMap, HashSet};
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
 };
 use reth_trie::{
     proof::Proof, updates::TrieUpdates, HashedPostState, HashedStorage, MultiProof, Nibbles,
-    TrieAccount, TrieInput, EMPTY_ROOT_HASH,
+    TrieInput,
 };
 use reth_trie_db::DatabaseProof;
 use reth_trie_parallel::root::ParallelStateRootError;
@@ -489,11 +488,9 @@ fn update_sparse_trie(
     trie.reveal_multiproof(targets, multiproof)?;
 
     // Update storage slots with new values and calculate storage roots.
-    let mut storage_roots = FbHashMap::default();
     for (address, storage) in state.storages {
         if storage.wiped {
             trie.wipe_storage(address)?;
-            storage_roots.insert(address, EMPTY_ROOT_HASH);
         }
 
         for (slot, value) in storage.storage {
@@ -510,27 +507,12 @@ fn update_sparse_trie(
             }
         }
 
-        storage_roots.insert(address, trie.storage_root(address).unwrap());
+        trie.storage_root(address).unwrap();
     }
 
-    // Update accounts with new values and include updated storage roots
+    // Update accounts with new values
     for (address, account) in state.accounts {
-        let account_nibbles = Nibbles::unpack(address);
-
-        if let Some(account) = account {
-            let storage_root = storage_roots
-                .remove(&address)
-                .map(Some)
-                .unwrap_or_else(|| trie.storage_root(address))
-                .unwrap_or(EMPTY_ROOT_HASH);
-
-            let mut encoded = Vec::with_capacity(128);
-            TrieAccount::from((account, storage_root)).encode(&mut encoded as &mut dyn BufMut);
-            trie.update_account_leaf(account_nibbles, encoded)?;
-        } else {
-            // TODO: handle blinded node error
-            trie.remove_account_leaf(&account_nibbles)?;
-        }
+        trie.update_account(address, account.unwrap_or_default())?;
     }
 
     trie.calculate_below_level(SPARSE_TRIE_INCREMENTAL_LEVEL);
