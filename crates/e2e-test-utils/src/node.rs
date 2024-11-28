@@ -269,11 +269,11 @@ where
 
         let start = std::time::Instant::now();
 
-        while !self
+        while self
             .inner
             .provider
             .sealed_header_by_id(BlockId::Number(BlockNumberOrTag::Latest))?
-            .map_or(false, |h| h.hash() == block)
+            .is_none_or(|h| h.hash() != block)
         {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 

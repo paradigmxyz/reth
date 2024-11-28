@@ -15,9 +15,8 @@ use reth_node_builder::{
 };
 use reth_node_core::args::{DiscoveryArgs, NetworkArgs, RpcServerArgs};
 use reth_primitives::EthPrimitives;
-use reth_provider::{
-    providers::{BlockchainProvider, BlockchainProvider2, NodeTypesForProvider, NodeTypesForTree},
-    HeaderProvider,
+use reth_provider::providers::{
+    BlockchainProvider, BlockchainProvider2, NodeTypesForProvider, NodeTypesForTree,
 };
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::TaskManager;
