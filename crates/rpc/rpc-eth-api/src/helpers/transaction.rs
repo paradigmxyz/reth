@@ -8,9 +8,10 @@ use alloy_network::TransactionBuilder;
 use alloy_primitives::{Address, Bytes, TxHash, B256};
 use alloy_rpc_types_eth::{transaction::TransactionRequest, BlockNumberOrTag, TransactionInfo};
 use futures::Future;
-use reth_primitives::{Receipt, SealedBlockWithSenders, TransactionMeta, TransactionSigned};
+use reth_primitives::{SealedBlockWithSenders, TransactionMeta, TransactionSigned};
 use reth_provider::{
-    BlockNumReader, BlockReaderIdExt, ProviderTx, ReceiptProvider, TransactionsProvider,
+    BlockNumReader, BlockReaderIdExt, ProviderReceipt, ProviderTx, ReceiptProvider,
+    TransactionsProvider,
 };
 use reth_rpc_eth_types::{
     utils::{binary_search, recover_raw_transaction},
@@ -159,7 +160,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         hash: TxHash,
     ) -> impl Future<
         Output = Result<
-            Option<(ProviderTx<Self::Provider>, TransactionMeta, Receipt)>,
+            Option<(ProviderTx<Self::Provider>, TransactionMeta, ProviderReceipt<Self::Provider>)>,
             Self::Error,
         >,
     > + Send

@@ -26,7 +26,7 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{Head, SealedBlock, SealedHeader};
+use reth_primitives::{EthPrimitives, Head, SealedBlock, SealedHeader};
 use reth_provider::{
     providers::ProviderNodeTypes, BlockIdReader, BlockReader, BlockSource, CanonChainTracker,
     ChainSpecProvider, ProviderError, StageCheckpointReader,
@@ -84,9 +84,15 @@ const MAX_INVALID_HEADERS: u32 = 512u32;
 pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 
 /// Helper trait expressing requirements for node types to be used in engine.
-pub trait EngineNodeTypes: ProviderNodeTypes + NodeTypesWithEngine {}
+pub trait EngineNodeTypes:
+    ProviderNodeTypes<Primitives = EthPrimitives> + NodeTypesWithEngine
+{
+}
 
-impl<T> EngineNodeTypes for T where T: ProviderNodeTypes + NodeTypesWithEngine {}
+impl<T> EngineNodeTypes for T where
+    T: ProviderNodeTypes<Primitives = EthPrimitives> + NodeTypesWithEngine
+{
+}
 
 /// Represents a pending forkchoice update.
 ///
@@ -2879,7 +2885,7 @@ mod tests {
             block1.header.set_difficulty(
                 MAINNET.fork(EthereumHardfork::Paris).ttd().unwrap() - U256::from(1),
             );
-            block1 = block1.unseal().seal_slow();
+            block1 = block1.unseal::<reth_primitives::Block>().seal_slow();
             let (block2, exec_result2) = data.blocks[1].clone();
             let mut block2 = block2.unseal().block;
             block2.body.withdrawals = None;

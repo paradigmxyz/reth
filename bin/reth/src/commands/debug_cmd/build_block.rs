@@ -25,7 +25,7 @@ use reth_fs_util as fs;
 use reth_node_api::{BlockTy, EngineApiMessageVersion, PayloadBuilderAttributes};
 use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider};
 use reth_primitives::{
-    BlobTransaction, BlockExt, PooledTransactionsElement, SealedBlock, SealedBlockWithSenders,
+    BlobTransaction, BlockExt, PooledTransactionsElement, SealedBlockFor, SealedBlockWithSenders,
     SealedHeader, Transaction, TransactionSigned,
 };
 use reth_provider::{
@@ -90,7 +90,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     fn lookup_best_block<N: ProviderNodeTypes<ChainSpec = C::ChainSpec>>(
         &self,
         factory: ProviderFactory<N>,
-    ) -> RethResult<Arc<SealedBlock>> {
+    ) -> RethResult<Arc<SealedBlockFor<BlockTy<N>>>> {
         let provider = factory.provider()?;
 
         let best_number =

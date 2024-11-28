@@ -1,5 +1,6 @@
 //! Canonical chain state notification trait and types.
 
+use alloy_eips::eip2718::Encodable2718;
 use derive_more::{Deref, DerefMut};
 use reth_execution_types::{BlockReceipts, Chain};
 use reth_primitives::{NodePrimitives, SealedBlockWithSenders, SealedHeader};
@@ -122,7 +123,7 @@ impl<N: NodePrimitives> CanonStateNotification<N> {
     ///
     /// Returns the new tip for [`Self::Reorg`] and [`Self::Commit`] variants which commit at least
     /// 1 new block.
-    pub fn tip(&self) -> &SealedBlockWithSenders {
+    pub fn tip(&self) -> &SealedBlockWithSenders<N::Block> {
         match self {
             Self::Commit { new } | Self::Reorg { new, .. } => new.tip(),
         }
@@ -133,7 +134,10 @@ impl<N: NodePrimitives> CanonStateNotification<N> {
     ///
     /// The boolean in the tuple (2nd element) denotes whether the receipt was from the reverted
     /// chain segment.
-    pub fn block_receipts(&self) -> Vec<(BlockReceipts<N::Receipt>, bool)> {
+    pub fn block_receipts(&self) -> Vec<(BlockReceipts<N::Receipt>, bool)>
+    where
+        N::SignedTx: Encodable2718,
+    {
         let mut receipts = Vec::new();
 
         // get old receipts
@@ -151,7 +155,9 @@ impl<N: NodePrimitives> CanonStateNotification<N> {
 
 /// Wrapper around a broadcast receiver that receives fork choice notifications.
 #[derive(Debug, Deref, DerefMut)]
-pub struct ForkChoiceNotifications(pub watch::Receiver<Option<SealedHeader>>);
+pub struct ForkChoiceNotifications<T = alloy_consensus::Header>(
+    pub watch::Receiver<Option<SealedHeader<T>>>,
+);
 
 /// A trait that allows to register to fork choice related events
 /// and get notified when a new fork choice is available.

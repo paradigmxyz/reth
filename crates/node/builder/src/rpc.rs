@@ -575,13 +575,35 @@ impl<N: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>> EthApi
     }
 }
 
+/// Helper trait that provides the validator for the engine API
+pub trait EngineValidatorAddOn<Node: FullNodeComponents>: Send {
+    /// The Validator type to use for the engine API.
+    type Validator: EngineValidator<<Node::Types as NodeTypesWithEngine>::Engine>;
+
+    /// Creates the engine validator for an engine API based node.
+    fn engine_validator(
+        &self,
+        ctx: &AddOnsContext<'_, Node>,
+    ) -> impl Future<Output = eyre::Result<Self::Validator>>;
+}
+
+impl<N, EthApi, EV> EngineValidatorAddOn<N> for RpcAddOns<N, EthApi, EV>
+where
+    N: FullNodeComponents,
+    EthApi: EthApiTypes,
+    EV: EngineValidatorBuilder<N>,
+{
+    type Validator = EV::Validator;
+
+    async fn engine_validator(&self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::Validator> {
+        self.engine_validator_builder.clone().build(ctx).await
+    }
+}
+
 /// A type that knows how to build the engine validator.
-pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send {
+pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Clone {
     /// The consensus implementation to build.
-    type Validator: EngineValidator<<Node::Types as NodeTypesWithEngine>::Engine>
-        + Clone
-        + Unpin
-        + 'static;
+    type Validator: EngineValidator<<Node::Types as NodeTypesWithEngine>::Engine>;
 
     /// Creates the engine validator.
     fn build(
@@ -595,7 +617,7 @@ where
     Node: FullNodeComponents,
     Validator:
         EngineValidator<<Node::Types as NodeTypesWithEngine>::Engine> + Clone + Unpin + 'static,
-    F: FnOnce(&AddOnsContext<'_, Node>) -> Fut + Send,
+    F: FnOnce(&AddOnsContext<'_, Node>) -> Fut + Send + Clone,
     Fut: Future<Output = eyre::Result<Validator>> + Send,
 {
     type Validator = Validator;

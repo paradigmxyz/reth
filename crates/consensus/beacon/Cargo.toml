@@ -17,6 +17,7 @@ reth-blockchain-tree-api.workspace = true
 reth-codecs.workspace = true
 reth-db-api.workspace = true
 reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 reth-stages-api.workspace = true
 reth-errors.workspace = true
 reth-provider.workspace = true

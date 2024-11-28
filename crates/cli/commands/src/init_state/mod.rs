@@ -11,7 +11,7 @@ use reth_provider::{
     BlockNumReader, DatabaseProviderFactory, StaticFileProviderFactory, StaticFileWriter,
 };
 
-use std::{fs::File, io::BufReader, path::PathBuf, str::FromStr};
+use std::{io::BufReader, path::PathBuf, str::FromStr};
 use tracing::info;
 
 pub mod without_evm;
@@ -115,8 +115,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateC
 
         info!(target: "reth::cli", "Initiating state dump");
 
-        let file = File::open(self.state)?;
-        let reader = BufReader::new(file);
+        let reader = BufReader::new(reth_fs_util::open(self.state)?);
 
         let hash = init_from_state_dump(reader, &provider_rw, config.stages.etl)?;
 

@@ -74,7 +74,7 @@ where
 
 impl<N> TransactionCompat for OpEthApi<N>
 where
-    N: FullNodeComponents,
+    N: FullNodeComponents<Provider: ReceiptProvider<Receipt = reth_primitives::Receipt>>,
 {
     type Transaction = Transaction;
     type Error = OpEthApiError;

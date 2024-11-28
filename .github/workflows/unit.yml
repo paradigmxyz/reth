@@ -61,7 +61,8 @@ jobs:
       - name: Run tests
         run: |
           cargo nextest run \
-            ${{ matrix.args }} --workspace --exclude ef-tests \
+            ${{ matrix.args }} --workspace \
+            --exclude ef-tests --no-tests=warn \
             --partition hash:${{ matrix.partition }}/2 \
             -E "!kind(test)"
 

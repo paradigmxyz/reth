@@ -6,9 +6,7 @@ use alloy_consensus::Header;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{BlockNumber, B256};
 use reth_db_models::StoredBlockBodyIndices;
-use reth_primitives::{
-    BlockWithSenders, Receipt, SealedBlockFor, SealedBlockWithSenders, SealedHeader,
-};
+use reth_primitives::{BlockWithSenders, SealedBlockFor, SealedBlockWithSenders, SealedHeader};
 use reth_storage_errors::provider::ProviderResult;
 use std::ops::RangeInclusive;
 
@@ -95,7 +93,7 @@ pub trait BlockReader:
     #[allow(clippy::type_complexity)]
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Receipt>)>>;
+    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Self::Receipt>)>>;
 
     /// Returns the ommers/uncle headers of the given block from the database.
     ///
@@ -186,7 +184,7 @@ impl<T: BlockReader> BlockReader for std::sync::Arc<T> {
     }
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Receipt>)>> {
+    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Self::Receipt>)>> {
         T::pending_block_and_receipts(self)
     }
     fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
@@ -255,7 +253,7 @@ impl<T: BlockReader> BlockReader for &T {
     }
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Receipt>)>> {
+    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Self::Receipt>)>> {
         T::pending_block_and_receipts(self)
     }
     fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {

@@ -26,6 +26,7 @@ reth-execution-types.workspace = true
 reth-node-core.workspace = true
 reth-optimism-node.workspace = true
 reth-primitives.workspace = true
+reth-fs-util.workspace = true
 
 # so jemalloc metrics can be included
 reth-node-metrics.workspace = true

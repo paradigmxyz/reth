@@ -212,7 +212,7 @@ pub async fn fee_history_cache_new_blocks_task<St, Provider, N>(
 ) where
     St: Stream<Item = CanonStateNotification<N>> + Unpin + 'static,
     Provider: BlockReaderIdExt + ChainSpecProvider + 'static,
-    N: NodePrimitives<Receipt = reth_primitives::Receipt>,
+    N: NodePrimitives<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>,
 {
     // We're listening for new blocks emitted when the node is in live sync.
     // If the node transitions to stage sync, we need to fetch the missing blocks
@@ -249,7 +249,7 @@ pub async fn fee_history_cache_new_blocks_task<St, Provider, N>(
                     break;
                 };
 
-                let committed = event .committed();
+                let committed = event.committed();
                 let (blocks, receipts): (Vec<_>, Vec<_>) = committed
                     .blocks_and_receipts()
                     .map(|(block, receipts)| {

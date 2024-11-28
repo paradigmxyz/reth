@@ -19,6 +19,7 @@ use reth_evm::{
     ConfigureEvmEnv,
 };
 use reth_primitives::{Block, BlockExt, SealedBlockWithSenders};
+use reth_primitives_traits::SignedTransaction;
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProofProvider, StateProviderFactory,
     TransactionVariant,
@@ -793,7 +794,7 @@ where
 #[async_trait]
 impl<Provider, Eth, BlockExecutor> DebugApiServer for DebugApi<Provider, Eth, BlockExecutor>
 where
-    Provider: BlockReaderIdExt<Block: Encodable>
+    Provider: BlockReaderIdExt<Block: Encodable, Receipt = reth_primitives::Receipt>
         + HeaderProvider
         + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + StateProviderFactory
