@@ -7,6 +7,7 @@ use reth_chainspec::{EthChainSpec, Head};
 use reth_node_api::{FullNodeComponents, NodePrimitives, NodeTypes};
 use reth_node_core::node_config::NodeConfig;
 use reth_primitives::EthPrimitives;
+use reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat;
 use reth_provider::BlockReader;
 use tokio::sync::mpsc;
 
@@ -52,7 +53,14 @@ impl<N: NodePrimitives> Debug for ExExContextDyn<N> {
 
 impl<Node> From<ExExContext<Node>> for ExExContextDyn<<Node::Types as NodeTypes>::Primitives>
 where
-    Node: FullNodeComponents,
+    Node: FullNodeComponents<
+        Types: NodeTypes<
+            Primitives: NodePrimitives<
+                BlockHeader: SerdeBincodeCompat,
+                BlockBody: SerdeBincodeCompat,
+            >,
+        >,
+    >,
     Node::Provider: Debug + BlockReader,
     Node::Executor: Debug,
 {

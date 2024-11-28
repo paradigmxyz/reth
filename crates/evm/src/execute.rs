@@ -503,7 +503,9 @@ where
 mod tests {
     use super::*;
     use alloy_primitives::U256;
+    use core::marker::PhantomData;
     use reth_chainspec::{ChainSpec, MAINNET};
+    use reth_primitives::EthPrimitives;
     use revm::db::{CacheDB, EmptyDBTyped};
     use revm_primitives::{bytes, TxEnv};
     use std::sync::Arc;
@@ -511,9 +513,8 @@ mod tests {
     #[derive(Clone, Default)]
     struct TestExecutorProvider;
 
-    impl BlockExecutorProvider<Block> for TestExecutorProvider {
-        type Receipt = Receipt;
-
+    impl BlockExecutorProvider for TestExecutorProvider {
+        type Primitives = EthPrimitives;
         type Executor<DB: Database<Error: Into<ProviderError> + Display>> = TestExecutor<DB>;
         type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> = TestExecutor<DB>;
 
@@ -611,6 +612,7 @@ mod tests {
     }
 
     impl BlockExecutionStrategyFactory for TestExecutorStrategyFactory {
+        type Primitives = EthPrimitives;
         type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
             TestExecutorStrategy<DB, TestEvmConfig>;
 
@@ -637,10 +639,12 @@ mod tests {
         }
     }
 
-    impl<DB> BlockExecutionStrategy<DB> for TestExecutorStrategy<DB, TestEvmConfig>
+    impl<DB> BlockExecutionStrategy for TestExecutorStrategy<DB, TestEvmConfig>
     where
         DB: Database,
     {
+        type DB = DB;
+        type Primitives = EthPrimitives;
         type Error = BlockExecutionError;
 
         fn apply_pre_execution_changes(

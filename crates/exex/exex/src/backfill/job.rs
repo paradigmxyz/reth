@@ -190,6 +190,7 @@ where
         self.into()
     }
 
+    #[expect(clippy::type_complexity)]
     pub(crate) fn execute_block(
         &self,
         block_number: u64,

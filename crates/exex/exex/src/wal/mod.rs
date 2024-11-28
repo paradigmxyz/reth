@@ -5,6 +5,7 @@ pub use cache::BlockCache;
 mod storage;
 use reth_node_api::NodePrimitives;
 use reth_primitives::EthPrimitives;
+use reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat;
 pub use storage::Storage;
 mod metrics;
 use metrics::Metrics;
@@ -38,7 +39,10 @@ pub struct Wal<N: NodePrimitives = EthPrimitives> {
     inner: Arc<WalInner<N>>,
 }
 
-impl<N: NodePrimitives> Wal<N> {
+impl<N> Wal<N>
+where
+    N: NodePrimitives<BlockHeader: SerdeBincodeCompat, BlockBody: SerdeBincodeCompat>,
+{
     /// Creates a new instance of [`Wal`].
     pub fn new(directory: impl AsRef<Path>) -> eyre::Result<Self> {
         Ok(Self { inner: Arc::new(WalInner::new(directory)?) })
@@ -86,7 +90,10 @@ struct WalInner<N: NodePrimitives> {
     metrics: Metrics,
 }
 
-impl<N: NodePrimitives> WalInner<N> {
+impl<N> WalInner<N>
+where
+    N: NodePrimitives<BlockHeader: SerdeBincodeCompat, BlockBody: SerdeBincodeCompat>,
+{
     fn new(directory: impl AsRef<Path>) -> eyre::Result<Self> {
         let mut wal = Self {
             next_file_id: AtomicU32::new(0),
@@ -204,7 +211,10 @@ pub struct WalHandle<N: NodePrimitives> {
     wal: Arc<WalInner<N>>,
 }
 
-impl<N: NodePrimitives> WalHandle<N> {
+impl<N> WalHandle<N>
+where
+    N: NodePrimitives<BlockHeader: SerdeBincodeCompat, BlockBody: SerdeBincodeCompat>,
+{
     /// Returns the notification for the given committed block hash if it exists.
     pub fn get_committed_notification_by_block_hash(
         &self,

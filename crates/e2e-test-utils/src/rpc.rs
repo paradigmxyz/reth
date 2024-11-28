@@ -1,7 +1,6 @@
 use alloy_consensus::TxEnvelope;
 use alloy_network::eip2718::Decodable2718;
 use alloy_primitives::{Bytes, B256};
-use alloy_rlp::Encodable;
 use reth_chainspec::EthereumHardforks;
 use reth_node_api::{FullNodeComponents, NodePrimitives};
 use reth_node_builder::{rpc::RpcRegistry, NodeTypes};
@@ -21,7 +20,10 @@ where
     Node: FullNodeComponents<
         Types: NodeTypes<
             ChainSpec: EthereumHardforks,
-            Primitives: NodePrimitives<Block: Encodable, Receipt = reth_primitives::Receipt>,
+            Primitives: NodePrimitives<
+                Block = reth_primitives::Block,
+                Receipt = reth_primitives::Receipt,
+            >,
         >,
     >,
     EthApi: EthApiSpec + EthTransactions + TraceExt,

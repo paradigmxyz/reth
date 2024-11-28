@@ -12,6 +12,7 @@ use reth_evm::execute::BlockExecutorProvider;
 use reth_metrics::{metrics::Counter, Metrics};
 use reth_node_api::NodePrimitives;
 use reth_primitives::{EthPrimitives, SealedHeader};
+use reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat;
 use reth_provider::HeaderProvider;
 use reth_tracing::tracing::{debug, warn};
 use std::{
@@ -349,7 +350,7 @@ where
 impl<P, N> ExExManager<P, N>
 where
     P: HeaderProvider,
-    N: NodePrimitives,
+    N: NodePrimitives<BlockHeader: SerdeBincodeCompat, BlockBody: SerdeBincodeCompat>,
 {
     /// Finalizes the WAL according to the passed finalized header.
     ///
@@ -423,7 +424,7 @@ where
 impl<P, N> Future for ExExManager<P, N>
 where
     P: HeaderProvider + Unpin + 'static,
-    N: NodePrimitives,
+    N: NodePrimitives<BlockBody: SerdeBincodeCompat, BlockHeader: SerdeBincodeCompat>,
 {
     type Output = eyre::Result<()>;
 
@@ -533,7 +534,7 @@ where
 
 /// A handle to communicate with the [`ExExManager`].
 #[derive(Debug)]
-pub struct ExExManagerHandle<N: NodePrimitives> {
+pub struct ExExManagerHandle<N: NodePrimitives = EthPrimitives> {
     /// Channel to send notifications to the `ExEx` manager.
     exex_tx: UnboundedSender<(ExExNotificationSource, ExExNotification<N>)>,
     /// The number of `ExEx`'s running on the node.

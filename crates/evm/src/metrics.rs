@@ -136,9 +136,14 @@ impl ExecutorMetrics {
     }
 
     /// Execute the given block and update metrics for the execution.
-    pub fn metered_one<F, R>(&self, input: BlockExecutionInput<'_, BlockWithSenders>, f: F) -> R
+    pub fn metered_one<F, R, B>(
+        &self,
+        input: BlockExecutionInput<'_, BlockWithSenders<B>>,
+        f: F,
+    ) -> R
     where
-        F: FnOnce(BlockExecutionInput<'_, BlockWithSenders>) -> R,
+        F: FnOnce(BlockExecutionInput<'_, BlockWithSenders<B>>) -> R,
+        B: reth_primitives_traits::Block,
     {
         self.metered(input.block, || f(input))
     }

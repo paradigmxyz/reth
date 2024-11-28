@@ -6,6 +6,7 @@ use reth_evm::execute::BlockExecutorProvider;
 use reth_exex_types::ExExHead;
 use reth_node_api::NodePrimitives;
 use reth_primitives::EthPrimitives;
+use reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat;
 use reth_provider::{BlockReader, Chain, HeaderProvider, StateProviderFactory};
 use reth_tracing::tracing::debug;
 use std::{
@@ -105,8 +106,13 @@ where
 impl<P, E> ExExNotificationsStream<E::Primitives> for ExExNotifications<P, E>
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>>
-        + Clone
+    E: BlockExecutorProvider<
+            Primitives: NodePrimitives<
+                Block = P::Block,
+                BlockHeader: SerdeBincodeCompat,
+                BlockBody: SerdeBincodeCompat,
+            >,
+        > + Clone
         + Unpin
         + 'static,
 {
@@ -157,8 +163,13 @@ where
 impl<P, E> Stream for ExExNotifications<P, E>
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>>
-        + Clone
+    E: BlockExecutorProvider<
+            Primitives: NodePrimitives<
+                Block = P::Block,
+                BlockHeader: SerdeBincodeCompat,
+                BlockBody: SerdeBincodeCompat,
+            >,
+        > + Clone
         + Unpin
         + 'static,
 {
@@ -231,9 +242,9 @@ where
     }
 }
 
-impl<P: Unpin, E: Unpin> Stream for ExExNotificationsWithoutHead<P, E>
+impl<P: Unpin, E> Stream for ExExNotificationsWithoutHead<P, E>
 where
-    E: BlockExecutorProvider,
+    E: Unpin + BlockExecutorProvider,
 {
     type Item = ExExNotification<E::Primitives>;
 
@@ -301,8 +312,13 @@ where
 impl<P, E> ExExNotificationsWithHead<P, E>
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>>
-        + Clone
+    E: BlockExecutorProvider<
+            Primitives: NodePrimitives<
+                Block = P::Block,
+                BlockHeader: SerdeBincodeCompat,
+                BlockBody: SerdeBincodeCompat,
+            >,
+        > + Clone
         + Unpin
         + 'static,
 {
@@ -381,8 +397,13 @@ where
 impl<P, E> Stream for ExExNotificationsWithHead<P, E>
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>>
-        + Clone
+    E: BlockExecutorProvider<
+            Primitives: NodePrimitives<
+                Block = P::Block,
+                BlockHeader: SerdeBincodeCompat,
+                BlockBody: SerdeBincodeCompat,
+            >,
+        > + Clone
         + Unpin
         + 'static,
 {

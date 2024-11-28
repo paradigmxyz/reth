@@ -10,7 +10,7 @@ use crate::{
 use alloy_consensus::Header;
 use reth_consensus::Consensus;
 use reth_evm::execute::BlockExecutorProvider;
-use reth_node_api::NodeTypesWithEngine;
+use reth_node_api::{NodeTypes, NodeTypesWithEngine};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_transaction_pool::TransactionPool;
 use std::{future::Future, marker::PhantomData};
@@ -377,7 +377,7 @@ where
     Fut: Future<Output = eyre::Result<Components<Node, Pool, EVM, Executor, Cons>>> + Send,
     Pool: TransactionPool + Unpin + 'static,
     EVM: ConfigureEvm<Header = Header>,
-    Executor: BlockExecutorProvider,
+    Executor: BlockExecutorProvider<Primitives = <Node::Types as NodeTypes>::Primitives>,
     Cons: Consensus + Clone + Unpin + 'static,
 {
     type Components = Components<Node, Pool, EVM, Executor, Cons>;

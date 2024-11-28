@@ -278,7 +278,12 @@ where
     Events: CanonStateSubscriptions<Primitives = EthPrimitives> + Clone + 'static,
     EvmConfig: ConfigureEvm<Header = alloy_consensus::Header>,
     EthApi: FullEthApiServer,
-    BlockExecutor: BlockExecutorProvider<Primitives: NodePrimitives<Block = reth_primitives::Block>>,
+    BlockExecutor: BlockExecutorProvider<
+        Primitives: NodePrimitives<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+        >,
+    >,
 {
     let module_config = module_config.into();
     server_config
@@ -630,7 +635,12 @@ where
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions<Primitives = EthPrimitives> + Clone + 'static,
     EvmConfig: ConfigureEvm<Header = Header>,
-    BlockExecutor: BlockExecutorProvider<Primitives: NodePrimitives<Block = reth_primitives::Block>>,
+    BlockExecutor: BlockExecutorProvider<
+        Primitives: NodePrimitives<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+        >,
+    >,
     Consensus: reth_consensus::Consensus + Clone + 'static,
 {
     /// Configures all [`RpcModule`]s specific to the given [`TransportRpcModuleConfig`] which can
@@ -1104,7 +1114,8 @@ where
             RpcBlock<EthApi::NetworkTypes>,
             RpcReceipt<EthApi::NetworkTypes>,
         > + EthApiTypes,
-    BlockExecutor: BlockExecutorProvider<Primitives: NodePrimitives<Block = reth_primitives::Block>>,
+    BlockExecutor:
+        BlockExecutorProvider<Primitives: NodePrimitives<Block = reth_primitives::Block>>,
 {
     /// Register Eth Namespace
     ///
@@ -1250,7 +1261,8 @@ where
     pub fn debug_api(&self) -> DebugApi<Provider, EthApi, BlockExecutor>
     where
         EthApi: EthApiSpec + EthTransactions + TraceExt,
-        BlockExecutor: BlockExecutorProvider<Primitives: NodePrimitives<Block = reth_primitives::Block>>,
+        BlockExecutor:
+            BlockExecutorProvider<Primitives: NodePrimitives<Block = reth_primitives::Block>>,
     {
         DebugApi::new(
             self.provider.clone(),
@@ -1306,7 +1318,12 @@ where
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions<Primitives = EthPrimitives> + Clone + 'static,
     EthApi: FullEthApiServer,
-    BlockExecutor: BlockExecutorProvider<Primitives: NodePrimitives<Block = reth_primitives::Block>>,
+    BlockExecutor: BlockExecutorProvider<
+        Primitives: NodePrimitives<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+        >,
+    >,
     Consensus: reth_consensus::Consensus + Clone + 'static,
 {
     /// Configures the auth module that includes the
