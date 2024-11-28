@@ -13,6 +13,7 @@ use reth_eth_wire::{
 };
 use reth_ethereum_forks::Head;
 use reth_network_api::{
+    events::{NetworkPeersEvents, PeerEvent},
     test_utils::{PeersHandle, PeersHandleProvider},
     BlockDownloaderProvider, DiscoveryEvent, NetworkError, NetworkEvent,
     NetworkEventListenerProvider, NetworkInfo, NetworkStatus, PeerInfo, PeerRequest, Peers,
@@ -62,6 +63,7 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
         tx_gossip_disabled: bool,
         discv4: Option<Discv4>,
         discv5: Option<Discv5>,
+        peer_events_sender: EventSender<PeerEvent>,
         event_sender: EventSender<NetworkEvent<PeerRequest<N>>>,
         nat: Option<NatResolver>,
     ) -> Self {
@@ -79,6 +81,7 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
             tx_gossip_disabled,
             discv4,
             discv5,
+            peer_events_sender,
             event_sender,
             nat,
         };
@@ -186,6 +189,12 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
 }
 
 // === API Implementations ===
+
+impl<N: NetworkPrimitives> NetworkPeersEvents for NetworkHandle<N> {
+    fn peer_events(&self) -> EventStream<PeerEvent> {
+        self.inner.peer_events_sender.new_listener()
+    }
+}
 
 impl NetworkEventListenerProvider for NetworkHandle<EthNetworkPrimitives> {
     fn event_listener(&self) -> EventStream<NetworkEvent<PeerRequest<EthNetworkPrimitives>>> {
@@ -435,6 +444,8 @@ struct NetworkInner<N: NetworkPrimitives = EthNetworkPrimitives> {
     discv4: Option<Discv4>,
     /// The instance of the discv5 service
     discv5: Option<Discv5>,
+    /// Sender for basic peer lifecycle events.
+    peer_events_sender: EventSender<PeerEvent>,
     /// Sender for high level network events.
     event_sender: EventSender<NetworkEvent<PeerRequest<N>>>,
     /// The NAT resolver

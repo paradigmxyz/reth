@@ -40,6 +40,7 @@ use reth_eth_wire::{
 };
 use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
 use reth_network_api::{
+    events::{PeerEvent, SessionInfo},
     NetworkEvent, NetworkEventListenerProvider, PeerRequest, PeerRequestSender, Peers,
 };
 use reth_network_p2p::{
@@ -1076,13 +1077,14 @@ where
     /// Handles a received event related to common network events.
     fn on_network_event(&mut self, event_result: NetworkEvent) {
         match event_result {
-            NetworkEvent::SessionClosed { peer_id, .. } => {
+            NetworkEvent::Peer(PeerEvent::SessionClosed { peer_id, .. }) => {
                 // remove the peer
                 self.peers.remove(&peer_id);
                 self.transaction_fetcher.remove_peer(&peer_id);
             }
-            NetworkEvent::SessionEstablished {
-                peer_id, client_version, messages, version, ..
+            NetworkEvent::RequestCapableSession {
+                info: SessionInfo { peer_id, client_version, version, .. },
+                messages,
             } => {
                 // Insert a new peer into the peerset.
                 let peer = PeerMetadata::new(
@@ -1969,27 +1971,12 @@ mod tests {
         let mut established = listener0.take(2);
         while let Some(ev) = established.next().await {
             match ev {
-                NetworkEvent::SessionEstablished {
-                    peer_id,
-                    remote_addr,
-                    client_version,
-                    capabilities,
-                    messages,
-                    status,
-                    version,
-                } => {
+                NetworkEvent::Peer(PeerEvent::SessionEstablished(info)) => {
                     // to insert a new peer in transactions peerset
-                    transactions.on_network_event(NetworkEvent::SessionEstablished {
-                        peer_id,
-                        remote_addr,
-                        client_version,
-                        capabilities,
-                        messages,
-                        status,
-                        version,
-                    })
+                    transactions
+                        .on_network_event(NetworkEvent::Peer(PeerEvent::SessionEstablished(info)))
                 }
-                NetworkEvent::PeerAdded(_peer_id) => continue,
+                NetworkEvent::Peer(PeerEvent::PeerAdded(_peer_id)) => continue,
                 ev => {
                     error!("unexpected event {ev:?}")
                 }
@@ -2055,27 +2042,13 @@ mod tests {
         let mut established = listener0.take(2);
         while let Some(ev) = established.next().await {
             match ev {
-                NetworkEvent::SessionEstablished {
-                    peer_id,
-                    remote_addr,
-                    client_version,
-                    capabilities,
-                    messages,
-                    status,
-                    version,
-                } => {
-                    // to insert a new peer in transactions peerset
-                    transactions.on_network_event(NetworkEvent::SessionEstablished {
-                        peer_id,
-                        remote_addr,
-                        client_version,
-                        capabilities,
-                        messages,
-                        status,
-                        version,
-                    })
+                NetworkEvent::Peer(PeerEvent::SessionEstablished(info)) =>
+                // to insert a new peer in transactions peerset
+                {
+                    transactions
+                        .on_network_event(NetworkEvent::Peer(PeerEvent::SessionEstablished(info)))
                 }
-                NetworkEvent::PeerAdded(_peer_id) => continue,
+                NetworkEvent::Peer(PeerEvent::PeerAdded(_peer_id)) => continue,
                 ev => {
                     error!("unexpected event {ev:?}")
                 }
@@ -2139,27 +2112,12 @@ mod tests {
         let mut established = listener0.take(2);
         while let Some(ev) = established.next().await {
             match ev {
-                NetworkEvent::SessionEstablished {
-                    peer_id,
-                    remote_addr,
-                    client_version,
-                    capabilities,
-                    messages,
-                    status,
-                    version,
-                } => {
+                NetworkEvent::Peer(PeerEvent::SessionEstablished(info)) => {
                     // to insert a new peer in transactions peerset
-                    transactions.on_network_event(NetworkEvent::SessionEstablished {
-                        peer_id,
-                        remote_addr,
-                        client_version,
-                        capabilities,
-                        messages,
-                        status,
-                        version,
-                    })
+                    transactions
+                        .on_network_event(NetworkEvent::Peer(PeerEvent::SessionEstablished(info)))
                 }
-                NetworkEvent::PeerAdded(_peer_id) => continue,
+                NetworkEvent::Peer(PeerEvent::PeerAdded(_peer_id)) => continue,
                 ev => {
                     error!("unexpected event {ev:?}")
                 }
@@ -2230,24 +2188,9 @@ mod tests {
         let mut established = listener0.take(2);
         while let Some(ev) = established.next().await {
             match ev {
-                NetworkEvent::SessionEstablished {
-                    peer_id,
-                    remote_addr,
-                    client_version,
-                    capabilities,
-                    messages,
-                    status,
-                    version,
-                } => transactions.on_network_event(NetworkEvent::SessionEstablished {
-                    peer_id,
-                    remote_addr,
-                    client_version,
-                    capabilities,
-                    messages,
-                    status,
-                    version,
-                }),
-                NetworkEvent::PeerAdded(_peer_id) => continue,
+                NetworkEvent::Peer(PeerEvent::SessionEstablished(info)) => transactions
+                    .on_network_event(NetworkEvent::Peer(PeerEvent::SessionEstablished(info))),
+                NetworkEvent::Peer(PeerEvent::PeerAdded(_peer_id)) => continue,
                 ev => {
                     error!("unexpected event {ev:?}")
                 }
@@ -2477,17 +2420,18 @@ mod tests {
         network.handle().update_sync_state(SyncState::Idle);
 
         // mock a peer
-        let (tx, _rx) = mpsc::channel(1);
-        tx_manager.on_network_event(NetworkEvent::SessionEstablished {
+        let (tx, _rx) = mpsc::channel::<PeerRequest>(1);
+        let session_info = SessionInfo {
             peer_id,
             remote_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
             client_version: Arc::from(""),
             capabilities: Arc::new(vec![].into()),
-            messages: PeerRequestSender::new(peer_id, tx),
             status: Arc::new(Default::default()),
             version: EthVersion::Eth68,
-        });
-
+        };
+        let messages: PeerRequestSender<PeerRequest> = PeerRequestSender::new(peer_id, tx);
+        tx_manager
+            .on_network_event(NetworkEvent::RequestCapableSession { info: session_info, messages });
         let mut propagate = vec![];
         let mut factory = MockTransactionFactory::default();
         let eip1559_tx = Arc::new(factory.create_eip1559());

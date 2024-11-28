@@ -16,23 +16,30 @@ use reth_tokio_util::EventStream;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-/// Provides event subscription for the network.
-#[auto_impl::auto_impl(&, Arc)]
-pub trait NetworkEventListenerProvider: Send + Sync {
-    /// Creates a new [`NetworkEvent`] listener channel.
-    fn event_listener(&self) -> EventStream<NetworkEvent>;
-    /// Returns a new [`DiscoveryEvent`] stream.
-    ///
-    /// This stream yields [`DiscoveryEvent`]s for each peer that is discovered.
-    fn discovery_listener(&self) -> UnboundedReceiverStream<DiscoveryEvent>;
+/// Represents information about an established peer session.
+#[derive(Debug, Clone)]
+pub struct SessionInfo {
+    /// The identifier of the peer to which a session was established.
+    pub peer_id: PeerId,
+    /// The remote addr of the peer to which a session was established.
+    pub remote_addr: SocketAddr,
+    /// The client version of the peer to which a session was established.
+    pub client_version: Arc<str>,
+    /// Capabilities the peer announced.
+    pub capabilities: Arc<Capabilities>,
+    /// The status of the peer to which a session was established.
+    pub status: Arc<Status>,
+    /// Negotiated eth version of the session.
+    pub version: EthVersion,
 }
 
-/// (Non-exhaustive) Events emitted by the network that are of interest for subscribers.
+/// (Non-exhaustive) List of the different events emitted by the network that are of interest for
+/// subscribers.
 ///
 /// This includes any event types that may be relevant to tasks, for metrics, keep track of peers
 /// etc.
-#[derive(Debug)]
-pub enum NetworkEvent<R = PeerRequest> {
+#[derive(Debug, Clone)]
+pub enum PeerEvent {
     /// Closed the peer session.
     SessionClosed {
         /// The identifier of the peer to which a session was closed.
@@ -40,56 +47,55 @@ pub enum NetworkEvent<R = PeerRequest> {
         /// Why the disconnect was triggered
         reason: Option<DisconnectReason>,
     },
-    /// Established a new session with the given peer.
-    SessionEstablished {
-        /// The identifier of the peer to which a session was established.
-        peer_id: PeerId,
-        /// The remote addr of the peer to which a session was established.
-        remote_addr: SocketAddr,
-        /// The client version of the peer to which a session was established.
-        client_version: Arc<str>,
-        /// Capabilities the peer announced
-        capabilities: Arc<Capabilities>,
-        /// A request channel to the session task.
-        messages: PeerRequestSender<R>,
-        /// The status of the peer to which a session was established.
-        status: Arc<Status>,
-        /// negotiated eth version of the session
-        version: EthVersion,
-    },
+    /// Established a new session with the given peer
+    SessionEstablished(SessionInfo),
     /// Event emitted when a new peer is added
     PeerAdded(PeerId),
     /// Event emitted when a new peer is removed
     PeerRemoved(PeerId),
 }
 
+/// (Non-exhaustive) Events that combine peer lifecycle with request handling capabilities.
+#[derive(Debug)]
+pub enum NetworkEvent<R = PeerRequest> {
+    /// Basic peer lifecycle event.
+    Peer(PeerEvent),
+    /// Session established with request capabilities.
+    RequestCapableSession {
+        /// Session information
+        info: SessionInfo,
+        /// A request channel to the session task.
+        messages: PeerRequestSender<R>,
+    },
+}
+
 impl<R> Clone for NetworkEvent<R> {
     fn clone(&self) -> Self {
         match self {
-            Self::SessionClosed { peer_id, reason } => {
-                Self::SessionClosed { peer_id: *peer_id, reason: *reason }
+            Self::Peer(event) => Self::Peer(event.clone()),
+            Self::RequestCapableSession { info, messages } => {
+                Self::RequestCapableSession { info: info.clone(), messages: messages.clone() }
             }
-            Self::SessionEstablished {
-                peer_id,
-                remote_addr,
-                client_version,
-                capabilities,
-                messages,
-                status,
-                version,
-            } => Self::SessionEstablished {
-                peer_id: *peer_id,
-                remote_addr: *remote_addr,
-                client_version: client_version.clone(),
-                capabilities: capabilities.clone(),
-                messages: messages.clone(),
-                status: status.clone(),
-                version: *version,
-            },
-            Self::PeerAdded(peer) => Self::PeerAdded(*peer),
-            Self::PeerRemoved(peer) => Self::PeerRemoved(*peer),
         }
     }
+}
+
+/// Provides peer event subscription for the network.
+#[auto_impl::auto_impl(&, Arc)]
+pub trait NetworkPeersEvents: Send + Sync {
+    /// Creates a new [`PeerEvent`] listener channel.
+    fn peer_events(&self) -> EventStream<PeerEvent>;
+}
+
+/// Provides event subscription for the network.
+#[auto_impl::auto_impl(&, Arc)]
+pub trait NetworkEventListenerProvider<R = PeerRequest>: NetworkPeersEvents {
+    /// Creates a new [`NetworkEvent`] listener channel.
+    fn event_listener(&self) -> EventStream<NetworkEvent<R>>;
+    /// Returns a new [`DiscoveryEvent`] stream.
+    ///
+    /// This stream yields [`DiscoveryEvent`]s for each peer that is discovered.
+    fn discovery_listener(&self) -> UnboundedReceiverStream<DiscoveryEvent>;
 }
 
 /// Events produced by the `Discovery` manager.
