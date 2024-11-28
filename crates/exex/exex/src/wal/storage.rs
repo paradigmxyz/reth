@@ -139,7 +139,7 @@ impl<N: NodePrimitives> Storage<N> {
         let size = file.metadata()?.len();
 
         // Deserialize using the bincode- and msgpack-compatible serde wrapper
-        let notification: reth_exex_types::serde_bincode_compat::ExExNotification<'_> =
+        let notification: reth_exex_types::serde_bincode_compat::ExExNotification<'_, N> =
             rmp_serde::decode::from_read(&mut file).map_err(|err| {
                 eyre::eyre!("failed to decode notification from {file_path:?}: {err:?}")
             })?;
@@ -163,7 +163,7 @@ impl<N: NodePrimitives> Storage<N> {
 
         // Serialize using the bincode- and msgpack-compatible serde wrapper
         let notification =
-            reth_exex_types::serde_bincode_compat::ExExNotification::from(notification);
+            reth_exex_types::serde_bincode_compat::ExExNotification::<N>::from(notification);
 
         reth_fs_util::atomic_write_file(&file_path, |file| {
             rmp_serde::encode::write(file, &notification)
