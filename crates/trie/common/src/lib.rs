@@ -11,6 +11,10 @@
 /// The implementation of hash builder.
 pub mod hash_builder;
 
+/// Constants related to the trie computation.
+mod constants;
+pub use constants::*;
+
 mod account;
 pub use account::TrieAccount;
 

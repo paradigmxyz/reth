@@ -1,7 +1,6 @@
 //! State root task related functionality.
 
-use alloy_primitives::map::{FbHashMap, HashMap, HashSet};
-use alloy_rlp::{BufMut, Encodable};
+use alloy_primitives::map::{HashMap, HashSet};
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
 };
@@ -10,8 +9,7 @@ use reth_trie::{
     proof::{Proof, StorageProof},
     trie_cursor::InMemoryTrieCursorFactory,
     updates::{TrieUpdates, TrieUpdatesSorted},
-    HashedPostState, HashedPostStateSorted, HashedStorage, MultiProof, Nibbles, TrieAccount,
-    TrieInput, EMPTY_ROOT_HASH,
+    HashedPostState, HashedPostStateSorted, HashedStorage, MultiProof, Nibbles, TrieInput,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseProof, DatabaseTrieCursorFactory};
 use reth_trie_parallel::root::ParallelStateRootError;
@@ -20,7 +18,7 @@ use revm_primitives::{keccak256, map::DefaultHashBuilder, EvmState, B256};
 use std::{
     collections::BTreeMap,
     sync::{
-        mpsc::{self, Receiver, RecvError, Sender},
+        mpsc::{self, Receiver, Sender},
         Arc,
     },
     time::{Duration, Instant},
@@ -61,23 +59,6 @@ pub(crate) struct StateRootConfig<Factory> {
     pub consistent_view: ConsistentDbView<Factory>,
     /// Latest trie input.
     pub input: Arc<TrieInput>,
-}
-
-/// Wrapper for std channel receiver to maintain compatibility with `UnboundedReceiverStream`
-#[derive(Debug)]
-pub(crate) struct StdReceiverStream {
-    rx: Receiver<EvmState>,
-}
-
-#[allow(dead_code)]
-impl StdReceiverStream {
-    pub(crate) const fn new(rx: Receiver<EvmState>) -> Self {
-        Self { rx }
-    }
-
-    pub(crate) fn recv(&self) -> Result<EvmState, RecvError> {
-        self.rx.recv()
-    }
 }
 
 /// Messages used internally by the state root task
@@ -529,11 +510,9 @@ fn update_sparse_trie<Factory: DatabaseProviderFactory>(
     trie.reveal_multiproof(targets, multiproof)?;
 
     // Update storage slots with new values and calculate storage roots.
-    let mut storage_roots = FbHashMap::default();
     for (address, storage) in state.storages {
         if storage.wiped {
             trie.wipe_storage(address)?;
-            storage_roots.insert(address, EMPTY_ROOT_HASH);
         }
 
         for (slot, value) in storage.storage {
@@ -571,50 +550,36 @@ fn update_sparse_trie<Factory: DatabaseProviderFactory>(
             }
         }
 
-        storage_roots.insert(address, trie.storage_root(address).unwrap());
+        trie.storage_root(address).unwrap();
     }
 
-    // Update accounts with new values and include updated storage roots
+    // Update accounts with new values
     for (address, account) in state.accounts {
-        let account_nibbles = Nibbles::unpack(address);
+        trie.update_account(address, account.unwrap_or_default(), |path| {
+            // Right pad the target with 0s.
+            let mut padded_key = path.pack();
+            padded_key.resize(32, 0);
+            let mut targets = HashMap::with_hasher(DefaultHashBuilder::default());
+            targets.insert(
+                B256::from_slice(&padded_key),
+                HashSet::with_hasher(DefaultHashBuilder::default()),
+            );
+            let proof = Proof::new(
+                InMemoryTrieCursorFactory::new(
+                    DatabaseTrieCursorFactory::new(provider.tx_ref()),
+                    &input_nodes_sorted,
+                ),
+                HashedPostStateCursorFactory::new(
+                    DatabaseHashedCursorFactory::new(provider.tx_ref()),
+                    &input_state_sorted,
+                ),
+            )
+            .multiproof(targets)
+            .unwrap();
 
-        if let Some(account) = account {
-            let storage_root = storage_roots
-                .remove(&address)
-                .map(Some)
-                .unwrap_or_else(|| trie.storage_root(address))
-                .unwrap_or(EMPTY_ROOT_HASH);
-
-            let mut encoded = Vec::with_capacity(128);
-            TrieAccount::from((account, storage_root)).encode(&mut encoded as &mut dyn BufMut);
-            trie.update_account_leaf(account_nibbles, encoded)?;
-        } else {
-            trie.remove_account_leaf(&account_nibbles, |path| {
-                // Right pad the target with 0s.
-                let mut padded_key = path.pack();
-                padded_key.resize(32, 0);
-                let mut targets = HashMap::with_hasher(DefaultHashBuilder::default());
-                targets.insert(
-                    B256::from_slice(&padded_key),
-                    HashSet::with_hasher(DefaultHashBuilder::default()),
-                );
-                let proof = Proof::new(
-                    InMemoryTrieCursorFactory::new(
-                        DatabaseTrieCursorFactory::new(provider.tx_ref()),
-                        &input_nodes_sorted,
-                    ),
-                    HashedPostStateCursorFactory::new(
-                        DatabaseHashedCursorFactory::new(provider.tx_ref()),
-                        &input_state_sorted,
-                    ),
-                )
-                .multiproof(targets)
-                .unwrap();
-
-                // The subtree only contains the proof for a single target.
-                proof.account_subtree.get(&path).cloned()
-            })?;
-        }
+            // The subtree only contains the proof for a single target.
+            proof.account_subtree.get(&path).cloned()
+        })?;
     }
 
     trie.calculate_below_level(SPARSE_TRIE_INCREMENTAL_LEVEL);
