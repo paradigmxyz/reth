@@ -475,7 +475,7 @@ fn get_proof_targets(
                     .keys()
                     .filter(|slot| {
                         !fetched_storage_proof_targets
-                            .map_or(false, |targets| targets.contains(*slot))
+                            .is_some_and(|targets| targets.contains(*slot))
                     })
                     .copied()
                     .collect(),
