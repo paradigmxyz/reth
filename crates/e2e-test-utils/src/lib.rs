@@ -1,27 +1,25 @@
 //! Utilities for end-to-end tests.
 
-use std::sync::Arc;
-
 use node::NodeTestContext;
-use reth::{
-    args::{DiscoveryArgs, NetworkArgs, RpcServerArgs},
-    blockchain_tree::externals::NodeTypesForTree,
-    builder::{NodeBuilder, NodeConfig, NodeHandle},
-    network::PeersHandleProvider,
-    primitives::EthPrimitives,
-    rpc::server_types::RpcModuleSelection,
-    tasks::TaskManager,
-};
 use reth_chainspec::EthChainSpec;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_engine_local::LocalPayloadAttributesBuilder;
+use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_builder::{
     components::NodeComponentsBuilder,
     rpc::{EngineValidatorAddOn, RethRpcAddOns},
-    EngineNodeLauncher, FullNodeTypesAdapter, Node, NodeAdapter, NodeComponents,
-    NodeTypesWithDBAdapter, NodeTypesWithEngine, PayloadAttributesBuilder, PayloadTypes,
+    EngineNodeLauncher, FullNodeTypesAdapter, Node, NodeAdapter, NodeBuilder, NodeComponents,
+    NodeConfig, NodeHandle, NodeTypesWithDBAdapter, NodeTypesWithEngine, PayloadAttributesBuilder,
+    PayloadTypes,
 };
-use reth_provider::providers::{BlockchainProvider, BlockchainProvider2, NodeTypesForProvider};
+use reth_node_core::args::{DiscoveryArgs, NetworkArgs, RpcServerArgs};
+use reth_primitives::EthPrimitives;
+use reth_provider::providers::{
+    BlockchainProvider, BlockchainProvider2, NodeTypesForProvider, NodeTypesForTree,
+};
+use reth_rpc_server_types::RpcModuleSelection;
+use reth_tasks::TaskManager;
+use std::sync::Arc;
 use tracing::{span, Level};
 use wallet::Wallet;
 
