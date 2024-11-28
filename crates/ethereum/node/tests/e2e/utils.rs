@@ -1,5 +1,5 @@
 use alloy_primitives::{Address, B256};
-use reth::rpc::types::engine::PayloadAttributes;
+use alloy_rpc_types_engine::PayloadAttributes;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 
 /// Helper function to create a new eth payload attributes

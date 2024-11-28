@@ -111,6 +111,7 @@ pub struct RevealedSparseTrie {
     prefix_set: PrefixSetMut,
     /// Reusable buffer for RLP encoding of nodes.
     rlp_buf: Vec<u8>,
+    /// Retained trie updates.
     updates: Option<SparseTrieUpdates>,
 }
 
@@ -607,8 +608,10 @@ impl RevealedSparseTrie {
 
     /// Wipe the trie, removing all values and nodes, and replacing the root with an empty node.
     pub fn wipe(&mut self) {
+        let updates_retained = self.updates.is_some();
         *self = Self::default();
         self.prefix_set = PrefixSetMut::all();
+        self.updates = updates_retained.then(SparseTrieUpdates::wiped);
     }
 
     /// Return the root of the sparse trie.
@@ -1030,12 +1033,18 @@ impl RlpNodeBuffers {
 pub struct SparseTrieUpdates {
     pub(crate) updated_nodes: HashMap<Nibbles, BranchNodeCompact>,
     pub(crate) removed_nodes: HashSet<Nibbles>,
+    pub(crate) wiped: bool,
+}
+
+impl SparseTrieUpdates {
+    /// Create new wiped sparse trie updates.
+    pub fn wiped() -> Self {
+        Self { wiped: true, ..Default::default() }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use super::*;
     use alloy_primitives::{map::HashSet, U256};
     use alloy_rlp::Encodable;
@@ -1057,6 +1066,7 @@ mod tests {
         proof::{ProofNodes, ProofRetainer},
         HashBuilder,
     };
+    use std::collections::BTreeMap;
 
     /// Pad nibbles to the length of a B256 hash with zeros on the left.
     fn pad_nibbles_left(nibbles: Nibbles) -> Nibbles {
