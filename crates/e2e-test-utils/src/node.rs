@@ -1,32 +1,27 @@
-use std::{marker::PhantomData, pin::Pin};
-
-use alloy_consensus::BlockHeader;
-use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
-use alloy_rpc_types_eth::BlockNumberOrTag;
-use eyre::Ok;
-use futures_util::Future;
-use reth::{
-    api::{BuiltPayload, EngineTypes, FullNodeComponents, PayloadBuilderAttributes},
-    builder::FullNode,
-    network::PeersHandleProvider,
-    providers::{BlockReader, BlockReaderIdExt, CanonStateSubscriptions, StageCheckpointReader},
-    rpc::{
-        api::eth::helpers::{EthApiSpec, EthTransactions, TraceExt},
-        types::engine::PayloadStatusEnum,
-    },
-};
-use reth_chainspec::EthereumHardforks;
-use reth_node_api::Block;
-use reth_node_builder::{rpc::RethRpcAddOns, NodeTypes, NodeTypesWithEngine};
-use reth_primitives::EthPrimitives;
-use reth_stages_types::StageId;
-use tokio_stream::StreamExt;
-use url::Url;
-
 use crate::{
     engine_api::EngineApiTestContext, network::NetworkTestContext, payload::PayloadTestContext,
     rpc::RpcTestContext, traits::PayloadEnvelopeExt,
 };
+use alloy_consensus::BlockHeader;
+use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
+use alloy_rpc_types_engine::PayloadStatusEnum;
+use alloy_rpc_types_eth::BlockNumberOrTag;
+use eyre::Ok;
+use futures_util::Future;
+use reth_chainspec::EthereumHardforks;
+use reth_network_api::test_utils::PeersHandleProvider;
+use reth_node_api::{Block, EngineTypes, FullNodeComponents};
+use reth_node_builder::{rpc::RethRpcAddOns, FullNode, NodeTypes, NodeTypesWithEngine};
+use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
+use reth_primitives::EthPrimitives;
+use reth_provider::{
+    BlockReader, BlockReaderIdExt, CanonStateSubscriptions, StageCheckpointReader,
+};
+use reth_rpc_eth_api::helpers::{EthApiSpec, EthTransactions, TraceExt};
+use reth_stages_types::StageId;
+use std::{marker::PhantomData, pin::Pin};
+use tokio_stream::StreamExt;
+use url::Url;
 
 /// An helper struct to handle node actions
 #[allow(missing_debug_implementations)]

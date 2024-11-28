@@ -4,7 +4,6 @@ use alloy_consensus::TxEip1559;
 use alloy_genesis::Genesis;
 use alloy_network::TxSignerSync;
 use alloy_primitives::{Address, ChainId, TxKind};
-use reth::{args::DatadirArgs, tasks::TaskManager};
 use reth_chainspec::EthChainSpec;
 use reth_db::test_utils::create_test_rw_db_with_path;
 use reth_e2e_test_utils::{
@@ -14,6 +13,7 @@ use reth_node_api::{FullNodeTypes, NodeTypesWithEngine};
 use reth_node_builder::{
     components::ComponentsBuilder, EngineNodeLauncher, NodeBuilder, NodeConfig,
 };
+use reth_node_core::args::DatadirArgs;
 use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
 use reth_optimism_node::{
     args::RollupArgs,
@@ -29,6 +29,7 @@ use reth_optimism_primitives::OpPrimitives;
 use reth_payload_util::{PayloadTransactions, PayloadTransactionsChain, PayloadTransactionsFixed};
 use reth_primitives::{SealedBlock, Transaction, TransactionSigned, TransactionSignedEcRecovered};
 use reth_provider::providers::BlockchainProvider2;
+use reth_tasks::TaskManager;
 use reth_transaction_pool::pool::BestPayloadTransactions;
 use std::sync::Arc;
 use tokio::sync::Mutex;

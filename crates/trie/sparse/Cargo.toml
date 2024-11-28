@@ -14,8 +14,9 @@ workspace = true
 
 [dependencies]
 # reth
-reth-tracing.workspace = true
+reth-primitives-traits.workspace = true
 reth-trie-common.workspace = true
+reth-tracing.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
