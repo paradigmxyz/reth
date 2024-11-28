@@ -7,11 +7,9 @@
 )]
 #![cfg_attr(all(not(test), feature = "optimism"), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-// The `optimism` feature must be enabled to use this crate.
-#![cfg(feature = "optimism")]
-// Don't use the crate if `scroll` feature is used.
 #![cfg_attr(feature = "scroll", allow(unused_crate_dependencies))]
-#![cfg(not(feature = "scroll"))]
+// The `optimism` feature must be enabled to use this crate.
+#![cfg(all(feature = "optimism", not(feature = "scroll")))]
 
 /// Optimism chain specification parser.
 pub mod chainspec;

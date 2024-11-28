@@ -13,35 +13,74 @@ workspace = true
 
 [dependencies]
 # alloy
+alloy-consensus.workspace = true
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
+alloy-rlp.workspace = true
+alloy-serde.workspace = true
 
 # reth
-reth-codecs.workspace = true
+reth-codecs = { workspace = true, optional = true }
+reth-codecs-derive = { workspace = true, optional = true }
 
 # scroll
 poseidon-bn254 = { workspace = true, features = ["bn254"] }
 
-# misc
-arbitrary = { workspace = true, features = ["derive"], optional = true }
-
 # required by reth-codecs
 bytes.workspace = true
-modular-bitfield.workspace = true
+modular-bitfield = { workspace = true, optional = true }
 serde.workspace = true
+
+# misc
+arbitrary = { workspace = true, features = ["derive"], optional = true }
 
 [dev-dependencies]
 alloy-primitives = { workspace = true, features = ["arbitrary"] }
 arbitrary = { workspace = true, features = ["derive"] }
+bincode.workspace = true
+rand.workspace = true
+reth-codecs = { workspace = true, features = ["test-utils"] }
+
+proptest-arbitrary-interop.workspace = true
+proptest.workspace = true
 test-fuzz.workspace = true
 
 [features]
-default = ["std"]
+default = [
+	"reth-codec",
+	"std"
+]
 std = [
 	"serde/std",
-	"alloy-primitives/std"
+	"alloy-primitives/std",
+	"reth-codecs/std",
+	"alloy-consensus/std",
+	"alloy-eips/std",
+	"alloy-rlp/std",
+	"alloy-serde/std",
+	"bytes/std",
+	"proptest/std",
+	"rand/std"
 ]
 arbitrary = [
 	"dep:arbitrary",
 	"alloy-primitives/arbitrary",
+	"alloy-consensus/arbitrary",
+	"alloy-eips/arbitrary",
+	"alloy-serde/arbitrary",
 	"reth-codecs/arbitrary"
+]
+reth-codec = [
+	"dep:reth-codecs",
+	"dep:reth-codecs-derive",
+	"modular-bitfield",
+	"std"
+]
+serde = [
+	"alloy-primitives/serde",
+	"alloy-consensus/serde",
+	"alloy-eips/serde",
+	"bytes/serde",
+	"rand/serde",
+	"reth-codecs/serde"
 ]

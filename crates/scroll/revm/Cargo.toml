@@ -33,7 +33,8 @@ c-kzg = ["revm/c-kzg"]
 optimism = ["revm/optimism"]
 serde = [
 	"revm/serde",
-	"serde/std"
+	"serde/std",
+	"reth-scroll-primitives/serde"
 ]
 scroll = []
 test-utils = ["revm/test-utils"]

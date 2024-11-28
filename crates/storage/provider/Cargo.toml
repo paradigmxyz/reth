@@ -118,6 +118,7 @@ serde = [
     "reth-codecs/serde",
     "reth-optimism-primitives?/serde",
     "reth-primitives-traits/serde",
+    "reth-scroll-primitives?/serde"
 ]
 test-utils = [
     "reth-db/test-utils",

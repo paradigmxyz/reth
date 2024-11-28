@@ -97,9 +97,9 @@ serde = [
     "bytes/serde",
     "rand/serde",
     "reth-codecs?/serde",
-    "revm-primitives/serde",
     "roaring/serde",
 	"revm-primitives/serde",
+	"reth-scroll-primitives?/serde"
 ]
 reth-codec = [
 	"dep:reth-codecs",

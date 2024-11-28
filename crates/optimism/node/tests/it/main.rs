@@ -3,10 +3,10 @@
 #![cfg_attr(feature = "scroll", allow(unused_crate_dependencies))]
 #![cfg(not(feature = "scroll"))]
 
-#[cfg(feature = "optimism")]
+#[cfg(all(feature = "optimism", not(feature = "scroll")))]
 mod builder;
 
-#[cfg(feature = "optimism")]
+#[cfg(all(feature = "optimism", not(feature = "scroll")))]
 mod priority;
 
 const fn main() {}

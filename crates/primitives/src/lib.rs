@@ -19,6 +19,11 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
+#[cfg(feature = "optimism")]
+use op_alloy_consensus as _;
+#[cfg(feature = "scroll")]
+use reth_scroll_primitives as _;
+
 extern crate alloc;
 
 #[cfg(feature = "alloy-compat")]

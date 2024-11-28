@@ -1,9 +1,7 @@
 #![allow(missing_docs, rustdoc::missing_crate_level_docs)]
-// The `optimism` feature must be enabled to use this crate.
-#![cfg(feature = "optimism")]
-// Don't use the crate if `scroll` feature is used.
 #![cfg_attr(feature = "scroll", allow(unused_crate_dependencies))]
-#![cfg(not(feature = "scroll"))]
+// The `optimism` feature must be enabled to use this crate.
+#![cfg(all(feature = "optimism", not(feature = "scroll")))]
 
 use clap::Parser;
 use reth_node_builder::{engine_tree_config::TreeConfig, EngineNodeLauncher};

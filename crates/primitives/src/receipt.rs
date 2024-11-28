@@ -40,7 +40,7 @@ pub struct Receipt {
     /// Log send from contracts.
     pub logs: Vec<Log>,
     /// Deposit nonce for Optimism deposit transactions
-    #[cfg(feature = "optimism")]
+    #[cfg(all(feature = "optimism", not(feature = "scroll")))]
     pub deposit_nonce: Option<u64>,
     /// Deposit receipt version for Optimism deposit transactions
     ///
@@ -48,7 +48,7 @@ pub struct Receipt {
     /// The deposit receipt version was introduced in Canyon to indicate an update to how
     /// receipt hashes should be computed when set. The state transition process
     /// ensures this is only set for post-Canyon deposit transactions.
-    #[cfg(feature = "optimism")]
+    #[cfg(all(feature = "optimism", not(feature = "scroll")))]
     pub deposit_receipt_version: Option<u64>,
 }
 
@@ -228,7 +228,7 @@ impl<'a> arbitrary::Arbitrary<'a> for Receipt {
         let logs = Vec::<Log>::arbitrary(u)?;
 
         // Only receipts for deposit transactions may contain a deposit nonce
-        #[cfg(feature = "optimism")]
+        #[cfg(all(feature = "optimism", not(feature = "scroll")))]
         let (deposit_nonce, deposit_receipt_version) = if tx_type == TxType::Deposit {
             let deposit_nonce = Option::<u64>::arbitrary(u)?;
             let deposit_nonce_version =
@@ -243,9 +243,9 @@ impl<'a> arbitrary::Arbitrary<'a> for Receipt {
             success,
             cumulative_gas_used,
             logs,
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             deposit_nonce,
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             deposit_receipt_version,
         })
     }
@@ -308,7 +308,7 @@ impl ReceiptWithBloom {
         let logs = alloy_rlp::Decodable::decode(b)?;
 
         let receipt = match tx_type {
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             TxType::Deposit => {
                 let remaining = |b: &[u8]| rlp_head.payload_length - (started_len - b.len()) > 0;
                 let deposit_nonce =
@@ -330,9 +330,9 @@ impl ReceiptWithBloom {
                 success,
                 cumulative_gas_used,
                 logs,
-                #[cfg(feature = "optimism")]
+                #[cfg(all(feature = "optimism", not(feature = "scroll")))]
                 deposit_nonce: None,
-                #[cfg(feature = "optimism")]
+                #[cfg(all(feature = "optimism", not(feature = "scroll")))]
                 deposit_receipt_version: None,
             },
         };
@@ -392,7 +392,7 @@ impl Decodable for ReceiptWithBloom {
                         buf.advance(1);
                         Self::decode_receipt(buf, TxType::Eip7702)
                     }
-                    #[cfg(feature = "optimism")]
+                    #[cfg(all(feature = "optimism", not(feature = "scroll")))]
                     op_alloy_consensus::DEPOSIT_TX_TYPE_ID => {
                         buf.advance(1);
                         Self::decode_receipt(buf, TxType::Deposit)
@@ -465,7 +465,7 @@ impl ReceiptWithBloomEncoder<'_> {
         rlp_head.payload_length += self.bloom.length();
         rlp_head.payload_length += self.receipt.logs.length();
 
-        #[cfg(feature = "optimism")]
+        #[cfg(all(feature = "optimism", not(feature = "scroll")))]
         if self.receipt.tx_type == TxType::Deposit {
             if let Some(deposit_nonce) = self.receipt.deposit_nonce {
                 rlp_head.payload_length += deposit_nonce.length();
@@ -485,7 +485,7 @@ impl ReceiptWithBloomEncoder<'_> {
         self.receipt.cumulative_gas_used.encode(out);
         self.bloom.encode(out);
         self.receipt.logs.encode(out);
-        #[cfg(feature = "optimism")]
+        #[cfg(all(feature = "optimism", not(feature = "scroll")))]
         if self.receipt.tx_type == TxType::Deposit {
             if let Some(deposit_nonce) = self.receipt.deposit_nonce {
                 deposit_nonce.encode(out)
@@ -527,9 +527,13 @@ impl ReceiptWithBloomEncoder<'_> {
             TxType::Eip7702 => {
                 out.put_u8(EIP7702_TX_TYPE_ID);
             }
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             TxType::Deposit => {
                 out.put_u8(op_alloy_consensus::DEPOSIT_TX_TYPE_ID);
+            }
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            TxType::L1Message => {
+                out.put_u8(reth_scroll_primitives::L1_MESSAGE_TRANSACTION_TYPE);
             }
         }
         out.put_slice(payload.as_ref());
@@ -596,9 +600,9 @@ mod tests {
                     bytes!("0100ff"),
                 )],
                 success: false,
-                #[cfg(feature = "optimism")]
+                #[cfg(all(feature = "optimism", not(feature = "scroll")))]
                 deposit_nonce: None,
-                #[cfg(feature = "optimism")]
+                #[cfg(all(feature = "optimism", not(feature = "scroll")))]
                 deposit_receipt_version: None,
             },
             bloom: [0; 256].into(),
@@ -630,9 +634,9 @@ mod tests {
                     bytes!("0100ff"),
                 )],
                 success: false,
-                #[cfg(feature = "optimism")]
+                #[cfg(all(feature = "optimism", not(feature = "scroll")))]
                 deposit_nonce: None,
-                #[cfg(feature = "optimism")]
+                #[cfg(all(feature = "optimism", not(feature = "scroll")))]
                 deposit_receipt_version: None,
             },
             bloom: [0; 256].into(),
@@ -642,7 +646,7 @@ mod tests {
         assert_eq!(receipt, expected);
     }
 
-    #[cfg(feature = "optimism")]
+    #[cfg(all(feature = "optimism", not(feature = "scroll")))]
     #[test]
     fn decode_deposit_receipt_regolith_roundtrip() {
         let data = hex!("7ef9010c0182b741b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0833d3bbf");
@@ -668,7 +672,7 @@ mod tests {
         assert_eq!(buf, &data[..]);
     }
 
-    #[cfg(feature = "optimism")]
+    #[cfg(all(feature = "optimism", not(feature = "scroll")))]
     #[test]
     fn decode_deposit_receipt_canyon_roundtrip() {
         let data = hex!("7ef9010d0182b741b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0833d3bbf01");
@@ -712,9 +716,9 @@ mod tests {
                     Bytes::from(vec![1; 0xffffff]),
                 ),
             ],
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             deposit_nonce: None,
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             deposit_receipt_version: None,
         };
 
@@ -732,9 +736,9 @@ mod tests {
                 success: true,
                 cumulative_gas_used: 21000,
                 logs: vec![],
-                #[cfg(feature = "optimism")]
+                #[cfg(all(feature = "optimism", not(feature = "scroll")))]
                 deposit_nonce: None,
-                #[cfg(feature = "optimism")]
+                #[cfg(all(feature = "optimism", not(feature = "scroll")))]
                 deposit_receipt_version: None,
             },
             bloom: Bloom::default(),
@@ -754,9 +758,9 @@ mod tests {
                 success: true,
                 cumulative_gas_used: 21000,
                 logs: vec![],
-                #[cfg(feature = "optimism")]
+                #[cfg(all(feature = "optimism", not(feature = "scroll")))]
                 deposit_nonce: None,
-                #[cfg(feature = "optimism")]
+                #[cfg(all(feature = "optimism", not(feature = "scroll")))]
                 deposit_receipt_version: None,
             },
             bloom: Bloom::default(),

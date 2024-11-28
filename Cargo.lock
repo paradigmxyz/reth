@@ -8612,6 +8612,7 @@ dependencies = [
  "reth-codecs",
  "reth-ethereum-forks",
  "reth-primitives-traits",
+ "reth-scroll-primitives",
  "reth-scroll-revm",
  "reth-static-file-types",
  "reth-testing-utils",
@@ -9130,12 +9131,21 @@ dependencies = [
 name = "reth-scroll-primitives"
 version = "1.1.2"
 dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
+ "alloy-rlp",
+ "alloy-serde",
  "arbitrary",
+ "bincode",
  "bytes",
  "modular-bitfield",
  "poseidon-bn254",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "rand 0.8.5",
  "reth-codecs",
+ "reth-codecs-derive",
  "serde",
  "test-fuzz",
 ]

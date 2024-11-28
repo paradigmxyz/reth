@@ -1,13 +1,13 @@
 use crate::{hash_code, POSEIDON_EMPTY};
 use alloy_primitives::B256;
-use reth_codecs::Compact;
 use serde::{Deserialize, Serialize};
 
 /// The extension for a Scroll account's representation in storage.
 ///
 /// The extension is used in order to maintain backwards compatibility if more fields need to be
 /// added to the account (see [reth codecs](reth_codecs::test_utils) for details).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Compact)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "reth-codec", derive(reth_codecs::Compact))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 pub struct AccountExtension {
     /// Size in bytes of the account's bytecode.

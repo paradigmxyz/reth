@@ -69,9 +69,12 @@ impl PooledTransactionsElement {
             }
             // Not supported because missing blob sidecar
             tx @ TransactionSigned { transaction: Transaction::Eip4844(_), .. } => Err(tx),
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             // Not supported because deposit transactions are never pooled
             tx @ TransactionSigned { transaction: Transaction::Deposit(_), .. } => Err(tx),
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            // Not supported because l1 message transactions are never pooled
+            tx @ TransactionSigned { transaction: Transaction::L1Message(_), .. } => Err(tx),
         }
     }
 
@@ -384,8 +387,10 @@ impl Decodable2718 for PooledTransactionsElement {
                     )),
                     Transaction::Eip1559(tx) => Ok(Self::Eip1559( Signed::new_unchecked(tx, typed_tx.signature, hash))),
                     Transaction::Eip7702(tx) => Ok(Self::Eip7702( Signed::new_unchecked(tx, typed_tx.signature, hash))),
-                    #[cfg(feature = "optimism")]
-                    Transaction::Deposit(_) => Err(RlpError::Custom("Optimism deposit transaction cannot be decoded to PooledTransactionsElement").into())
+                    #[cfg(all(feature = "optimism", not(feature = "scroll")))]
+                    Transaction::Deposit(_) => Err(RlpError::Custom("Optimism deposit transaction cannot be decoded to PooledTransactionsElement").into()),
+                    #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+                    Transaction::L1Message(_) => Err(RlpError::Custom("Scroll L1 message transaction cannot be decoded to PooledTransactionsElement").into())
                 }
             }
         }

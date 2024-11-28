@@ -19,12 +19,14 @@ use derive_more::{AsRef, Deref};
 use once_cell as _;
 #[cfg(not(feature = "std"))]
 use once_cell::sync::{Lazy as LazyLock, OnceCell as OnceLock};
-#[cfg(feature = "optimism")]
+#[cfg(all(feature = "optimism", not(feature = "scroll")))]
 use op_alloy_consensus::DepositTransaction;
-#[cfg(feature = "optimism")]
+#[cfg(all(feature = "optimism", not(feature = "scroll")))]
 use op_alloy_consensus::TxDeposit;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_primitives_traits::{InMemorySize, SignedTransaction};
+#[cfg(all(feature = "scroll", not(feature = "optimism")))]
+use reth_scroll_primitives::l1_transaction::TxL1Message;
 use revm_primitives::{AuthorizationList, TxEnv};
 use serde::{Deserialize, Serialize};
 use signature::decode_with_eip155_chain_id;
@@ -123,11 +125,14 @@ pub enum Transaction {
     /// functionality to the EOA.
     Eip7702(TxEip7702),
     /// Optimism deposit transaction.
-    #[cfg(feature = "optimism")]
+    #[cfg(all(feature = "optimism", not(feature = "scroll")))]
     Deposit(TxDeposit),
+    /// Scroll L1 messaging transaction.
+    #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+    L1Message(TxL1Message),
 }
 
-#[cfg(feature = "optimism")]
+#[cfg(all(feature = "optimism", not(feature = "scroll")))]
 impl DepositTransaction for Transaction {
     fn source_hash(&self) -> Option<B256> {
         match self {
@@ -177,10 +182,15 @@ impl<'a> arbitrary::Arbitrary<'a> for Transaction {
                 let tx = TxEip7702::arbitrary(u)?;
                 Self::Eip7702(tx)
             }
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             TxType::Deposit => {
                 let tx = TxDeposit::arbitrary(u)?;
                 Self::Deposit(tx)
+            }
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            TxType::L1Message => {
+                let tx = TxL1Message::arbitrary(u)?;
+                Self::L1Message(tx)
             }
         };
 
@@ -205,8 +215,10 @@ impl Transaction {
             Self::Eip1559(tx) => tx.signature_hash(),
             Self::Eip4844(tx) => tx.signature_hash(),
             Self::Eip7702(tx) => tx.signature_hash(),
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             Self::Deposit(_) => B256::ZERO,
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            Self::L1Message(_) => B256::ZERO,
         }
     }
 
@@ -218,8 +230,10 @@ impl Transaction {
             Self::Eip1559(TxEip1559 { chain_id: ref mut c, .. }) |
             Self::Eip4844(TxEip4844 { chain_id: ref mut c, .. }) |
             Self::Eip7702(TxEip7702 { chain_id: ref mut c, .. }) => *c = chain_id,
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             Self::Deposit(_) => { /* noop */ }
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            Self::L1Message(_) => { /* noop */ }
         }
     }
 
@@ -231,8 +245,10 @@ impl Transaction {
             Self::Eip1559(_) => TxType::Eip1559,
             Self::Eip4844(_) => TxType::Eip4844,
             Self::Eip7702(_) => TxType::Eip7702,
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             Self::Deposit(_) => TxType::Deposit,
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            Self::L1Message(_) => TxType::L1Message,
         }
     }
 
@@ -285,8 +301,10 @@ impl Transaction {
             Self::Eip1559(tx) => tx.encode_for_signing(out),
             Self::Eip4844(tx) => tx.encode_for_signing(out),
             Self::Eip7702(tx) => tx.encode_for_signing(out),
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             Self::Deposit(_) => {}
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            Self::L1Message(_) => {}
         }
     }
 
@@ -307,8 +325,10 @@ impl Transaction {
             Self::Eip7702(set_code_tx) => {
                 set_code_tx.eip2718_encode(signature, out);
             }
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             Self::Deposit(deposit_tx) => deposit_tx.eip2718_encode(out),
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            Self::L1Message(l1_message_tx) => l1_message_tx.eip2718_encode(out),
         }
     }
 
@@ -320,8 +340,10 @@ impl Transaction {
             Self::Eip1559(tx) => tx.gas_limit = gas_limit,
             Self::Eip4844(tx) => tx.gas_limit = gas_limit,
             Self::Eip7702(tx) => tx.gas_limit = gas_limit,
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             Self::Deposit(tx) => tx.gas_limit = gas_limit,
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            Self::L1Message(tx) => tx.gas_limit = gas_limit,
         }
     }
 
@@ -333,8 +355,10 @@ impl Transaction {
             Self::Eip1559(tx) => tx.nonce = nonce,
             Self::Eip4844(tx) => tx.nonce = nonce,
             Self::Eip7702(tx) => tx.nonce = nonce,
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             Self::Deposit(_) => { /* noop */ }
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            Self::L1Message(_) => { /* noop */ }
         }
     }
 
@@ -346,8 +370,10 @@ impl Transaction {
             Self::Eip1559(tx) => tx.value = value,
             Self::Eip4844(tx) => tx.value = value,
             Self::Eip7702(tx) => tx.value = value,
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             Self::Deposit(tx) => tx.value = value,
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            Self::L1Message(tx) => tx.value = value,
         }
     }
 
@@ -359,8 +385,10 @@ impl Transaction {
             Self::Eip1559(tx) => tx.input = input,
             Self::Eip4844(tx) => tx.input = input,
             Self::Eip7702(tx) => tx.input = input,
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             Self::Deposit(tx) => tx.input = input,
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            Self::L1Message(tx) => tx.input = input,
         }
     }
 
@@ -392,6 +420,13 @@ impl Transaction {
     #[inline]
     pub const fn is_eip7702(&self) -> bool {
         matches!(self, Self::Eip7702(_))
+    }
+
+    /// Returns true if the transaction is a Scroll L1 messaging transaction.
+    #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+    #[inline]
+    pub fn is_l1_message(&self) -> bool {
+        matches!(self, Self::L1Message(_))
     }
 
     /// Returns the [`TxLegacy`] variant if the transaction is a legacy transaction.
@@ -445,8 +480,10 @@ impl InMemorySize for Transaction {
             Self::Eip1559(tx) => tx.size(),
             Self::Eip4844(tx) => tx.size(),
             Self::Eip7702(tx) => tx.size(),
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             Self::Deposit(tx) => tx.size(),
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            Self::L1Message(tx) => tx.size(),
         }
     }
 }
@@ -476,8 +513,12 @@ impl reth_codecs::Compact for Transaction {
             Self::Eip7702(tx) => {
                 tx.to_compact(buf);
             }
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             Self::Deposit(tx) => {
+                tx.to_compact(buf);
+            }
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            Self::L1Message(tx) => {
                 tx.to_compact(buf);
             }
         }
@@ -524,10 +565,15 @@ impl reth_codecs::Compact for Transaction {
                         let (tx, buf) = TxEip7702::from_compact(buf, buf.len());
                         (Self::Eip7702(tx), buf)
                     }
-                    #[cfg(feature = "optimism")]
+                    #[cfg(all(feature = "optimism", not(feature = "scroll")))]
                     op_alloy_consensus::DEPOSIT_TX_TYPE_ID => {
                         let (tx, buf) = TxDeposit::from_compact(buf, buf.len());
                         (Self::Deposit(tx), buf)
+                    }
+                    #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+                    reth_scroll_primitives::L1_MESSAGE_TRANSACTION_TYPE => {
+                        let (tx, buf) = TxL1Message::from_compact(buf, buf.len());
+                        (Self::L1Message(tx), buf)
                     }
                     _ => unreachable!(
                         "Junk data in database: unknown Transaction variant: {identifier}"
@@ -553,8 +599,10 @@ impl alloy_consensus::Transaction for Transaction {
             Self::Eip1559(tx) => tx.chain_id(),
             Self::Eip4844(tx) => tx.chain_id(),
             Self::Eip7702(tx) => tx.chain_id(),
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             Self::Deposit(tx) => tx.chain_id(),
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            Self::L1Message(tx) => tx.chain_id(),
         }
     }
 
@@ -565,8 +613,10 @@ impl alloy_consensus::Transaction for Transaction {
             Self::Eip1559(tx) => tx.nonce(),
             Self::Eip4844(tx) => tx.nonce(),
             Self::Eip7702(tx) => tx.nonce(),
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             Self::Deposit(tx) => tx.nonce(),
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            Self::L1Message(tx) => tx.nonce(),
         }
     }
 
@@ -577,8 +627,10 @@ impl alloy_consensus::Transaction for Transaction {
             Self::Eip1559(tx) => tx.gas_limit(),
             Self::Eip4844(tx) => tx.gas_limit(),
             Self::Eip7702(tx) => tx.gas_limit(),
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             Self::Deposit(tx) => tx.gas_limit(),
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            Self::L1Message(tx) => tx.gas_limit(),
         }
     }
 
@@ -589,8 +641,10 @@ impl alloy_consensus::Transaction for Transaction {
             Self::Eip1559(tx) => tx.gas_price(),
             Self::Eip4844(tx) => tx.gas_price(),
             Self::Eip7702(tx) => tx.gas_price(),
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             Self::Deposit(tx) => tx.gas_price(),
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            Self::L1Message(tx) => tx.gas_price(),
         }
     }
 
@@ -601,8 +655,10 @@ impl alloy_consensus::Transaction for Transaction {
             Self::Eip1559(tx) => tx.max_fee_per_gas(),
             Self::Eip4844(tx) => tx.max_fee_per_gas(),
             Self::Eip7702(tx) => tx.max_fee_per_gas(),
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             Self::Deposit(tx) => tx.max_fee_per_gas(),
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            Self::L1Message(tx) => tx.max_fee_per_gas(),
         }
     }
 
@@ -613,8 +669,10 @@ impl alloy_consensus::Transaction for Transaction {
             Self::Eip1559(tx) => tx.max_priority_fee_per_gas(),
             Self::Eip4844(tx) => tx.max_priority_fee_per_gas(),
             Self::Eip7702(tx) => tx.max_priority_fee_per_gas(),
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             Self::Deposit(tx) => tx.max_priority_fee_per_gas(),
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            Self::L1Message(tx) => tx.max_priority_fee_per_gas(),
         }
     }
 
@@ -625,8 +683,10 @@ impl alloy_consensus::Transaction for Transaction {
             Self::Eip1559(tx) => tx.max_fee_per_blob_gas(),
             Self::Eip4844(tx) => tx.max_fee_per_blob_gas(),
             Self::Eip7702(tx) => tx.max_fee_per_blob_gas(),
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             Self::Deposit(tx) => tx.max_fee_per_blob_gas(),
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            Self::L1Message(tx) => tx.max_fee_per_blob_gas(),
         }
     }
 
@@ -637,8 +697,10 @@ impl alloy_consensus::Transaction for Transaction {
             Self::Eip1559(tx) => tx.priority_fee_or_price(),
             Self::Eip4844(tx) => tx.priority_fee_or_price(),
             Self::Eip7702(tx) => tx.priority_fee_or_price(),
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             Self::Deposit(tx) => tx.priority_fee_or_price(),
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            Self::L1Message(tx) => tx.priority_fee_or_price(),
         }
     }
 
@@ -649,8 +711,10 @@ impl alloy_consensus::Transaction for Transaction {
             Self::Eip1559(tx) => tx.effective_gas_price(base_fee),
             Self::Eip4844(tx) => tx.effective_gas_price(base_fee),
             Self::Eip7702(tx) => tx.effective_gas_price(base_fee),
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             Self::Deposit(tx) => tx.effective_gas_price(base_fee),
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            Self::L1Message(tx) => tx.effective_gas_price(base_fee),
         }
     }
 
@@ -658,8 +722,10 @@ impl alloy_consensus::Transaction for Transaction {
         match self {
             Self::Legacy(_) | Self::Eip2930(_) => false,
             Self::Eip1559(_) | Self::Eip4844(_) | Self::Eip7702(_) => true,
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             Self::Deposit(_) => false,
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            Self::L1Message(tx) => tx.is_dynamic_fee(),
         }
     }
 
@@ -670,8 +736,10 @@ impl alloy_consensus::Transaction for Transaction {
             Self::Eip1559(tx) => tx.kind(),
             Self::Eip4844(tx) => tx.kind(),
             Self::Eip7702(tx) => tx.kind(),
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             Self::Deposit(tx) => tx.kind(),
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            Self::L1Message(tx) => tx.kind(),
         }
     }
 
@@ -682,8 +750,10 @@ impl alloy_consensus::Transaction for Transaction {
             Self::Eip1559(tx) => tx.value(),
             Self::Eip4844(tx) => tx.value(),
             Self::Eip7702(tx) => tx.value(),
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             Self::Deposit(tx) => tx.value(),
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            Self::L1Message(tx) => tx.value(),
         }
     }
 
@@ -694,8 +764,10 @@ impl alloy_consensus::Transaction for Transaction {
             Self::Eip1559(tx) => tx.input(),
             Self::Eip4844(tx) => tx.input(),
             Self::Eip7702(tx) => tx.input(),
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             Self::Deposit(tx) => tx.input(),
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            Self::L1Message(tx) => tx.input(),
         }
     }
 
@@ -706,8 +778,10 @@ impl alloy_consensus::Transaction for Transaction {
             Self::Eip1559(tx) => tx.ty(),
             Self::Eip4844(tx) => tx.ty(),
             Self::Eip7702(tx) => tx.ty(),
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             Self::Deposit(tx) => tx.ty(),
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            Self::L1Message(tx) => tx.ty(),
         }
     }
 
@@ -718,8 +792,10 @@ impl alloy_consensus::Transaction for Transaction {
             Self::Eip1559(tx) => tx.access_list(),
             Self::Eip4844(tx) => tx.access_list(),
             Self::Eip7702(tx) => tx.access_list(),
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             Self::Deposit(tx) => tx.access_list(),
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            Self::L1Message(tx) => tx.access_list(),
         }
     }
 
@@ -730,8 +806,10 @@ impl alloy_consensus::Transaction for Transaction {
             Self::Eip1559(tx) => tx.blob_versioned_hashes(),
             Self::Eip4844(tx) => tx.blob_versioned_hashes(),
             Self::Eip7702(tx) => tx.blob_versioned_hashes(),
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             Self::Deposit(tx) => tx.blob_versioned_hashes(),
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            Self::L1Message(tx) => tx.blob_versioned_hashes(),
         }
     }
 
@@ -742,8 +820,10 @@ impl alloy_consensus::Transaction for Transaction {
             Self::Eip1559(tx) => tx.authorization_list(),
             Self::Eip4844(tx) => tx.authorization_list(),
             Self::Eip7702(tx) => tx.authorization_list(),
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             Self::Deposit(tx) => tx.authorization_list(),
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            Self::L1Message(tx) => tx.authorization_list(),
         }
     }
 }
@@ -799,9 +879,14 @@ impl TransactionSignedNoHash {
     pub fn recover_signer(&self) -> Option<Address> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
-        #[cfg(feature = "optimism")]
+        #[cfg(all(feature = "optimism", not(feature = "scroll")))]
         if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
             return Some(from)
+        }
+        // Scroll L1 messages don't have a signature.
+        #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+        if let Transaction::L1Message(TxL1Message { sender, .. }) = self.transaction {
+            return Some(sender)
         }
 
         let signature_hash = self.signature_hash();
@@ -827,7 +912,7 @@ impl TransactionSignedNoHash {
 
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
-        #[cfg(feature = "optimism")]
+        #[cfg(all(feature = "optimism", not(feature = "scroll")))]
         {
             if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
                 return Some(from)
@@ -840,6 +925,10 @@ impl TransactionSignedNoHash {
             if self.is_legacy() && self.signature == TxDeposit::signature() {
                 return Some(Address::ZERO)
             }
+        }
+        #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+        if let Transaction::L1Message(TxL1Message { sender, .. }) = self.transaction {
+            return Some(sender)
         }
 
         recover_signer_unchecked(&self.signature, keccak256(buffer))
@@ -1086,9 +1175,13 @@ impl TransactionSigned {
     pub fn recover_signer(&self) -> Option<Address> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
-        #[cfg(feature = "optimism")]
+        #[cfg(all(feature = "optimism", not(feature = "scroll")))]
         if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
             return Some(from)
+        }
+        #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+        if let Transaction::L1Message(TxL1Message { sender, .. }) = self.transaction {
+            return Some(sender)
         }
         let signature_hash = self.signature_hash();
         recover_signer(&self.signature, signature_hash)
@@ -1102,9 +1195,13 @@ impl TransactionSigned {
     pub fn recover_signer_unchecked(&self) -> Option<Address> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
-        #[cfg(feature = "optimism")]
+        #[cfg(all(feature = "optimism", not(feature = "scroll")))]
         if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
             return Some(from)
+        }
+        #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+        if let Transaction::L1Message(TxL1Message { sender, .. }) = self.transaction {
+            return Some(sender)
         }
         let signature_hash = self.signature_hash();
         recover_signer_unchecked(&self.signature, signature_hash)
@@ -1366,8 +1463,10 @@ impl reth_primitives_traits::FillTxEnv for TransactionSigned {
                 tx_env.authorization_list =
                     Some(AuthorizationList::Signed(tx.authorization_list.clone()));
             }
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             Transaction::Deposit(_) => {}
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            Transaction::L1Message(_) => {}
         }
     }
 }
@@ -1531,8 +1630,10 @@ impl Encodable2718 for TransactionSigned {
             Transaction::Eip7702(set_code_tx) => {
                 set_code_tx.eip2718_encoded_length(&self.signature)
             }
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             Transaction::Deposit(deposit_tx) => deposit_tx.eip2718_encoded_length(),
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            Transaction::L1Message(l1_message_tx) => l1_message_tx.eip2718_encoded_length(),
         }
     }
 
@@ -1565,10 +1666,15 @@ impl Decodable2718 for TransactionSigned {
                 let (tx, signature, hash) = TxEip4844::rlp_decode_signed(buf)?.into_parts();
                 Ok(Self { transaction: Transaction::Eip4844(tx), signature, hash: hash.into() })
             }
-            #[cfg(feature = "optimism")]
+            #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             TxType::Deposit => Ok(Self::new_unhashed(
                 Transaction::Deposit(TxDeposit::rlp_decode(buf)?),
                 TxDeposit::signature(),
+            )),
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            TxType::L1Message => Ok(Self::new_unhashed(
+                Transaction::L1Message(TxL1Message::rlp_decode(buf)?),
+                TxL1Message::signature(),
             )),
         }
     }
@@ -1621,18 +1727,22 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
         )
         .unwrap();
 
-        #[cfg(feature = "optimism")]
         // Both `Some(0)` and `None` values are encoded as empty string byte. This introduces
         // ambiguity in roundtrip tests. Patch the mint value of deposit transaction here, so that
         // it's `None` if zero.
+        #[cfg(all(feature = "optimism", not(feature = "scroll")))]
         if let Transaction::Deposit(ref mut tx_deposit) = transaction {
             if tx_deposit.mint == Some(0) {
                 tx_deposit.mint = None;
             }
         }
 
-        #[cfg(feature = "optimism")]
+        #[cfg(all(feature = "optimism", not(feature = "scroll")))]
         let signature = if transaction.is_deposit() { TxDeposit::signature() } else { signature };
+        #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+        let signature =
+            if transaction.is_l1_message() { TxL1Message::signature() } else { signature };
+
         Ok(Self::new_unhashed(transaction, signature))
     }
 }
@@ -1751,8 +1861,10 @@ pub mod serde_bincode_compat {
         Eip1559(TxEip1559<'a>),
         Eip4844(Cow<'a, TxEip4844>),
         Eip7702(TxEip7702<'a>),
-        #[cfg(feature = "optimism")]
+        #[cfg(all(feature = "optimism", not(feature = "scroll")))]
         Deposit(op_alloy_consensus::serde_bincode_compat::TxDeposit<'a>),
+        #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+        L1Message(Cow<'a, reth_scroll_primitives::l1_transaction::TxL1Message>),
     }
 
     impl<'a> From<&'a super::Transaction> for Transaction<'a> {
@@ -1763,10 +1875,12 @@ pub mod serde_bincode_compat {
                 super::Transaction::Eip1559(tx) => Self::Eip1559(TxEip1559::from(tx)),
                 super::Transaction::Eip4844(tx) => Self::Eip4844(Cow::Borrowed(tx)),
                 super::Transaction::Eip7702(tx) => Self::Eip7702(TxEip7702::from(tx)),
-                #[cfg(feature = "optimism")]
+                #[cfg(all(feature = "optimism", not(feature = "scroll")))]
                 super::Transaction::Deposit(tx) => {
                     Self::Deposit(op_alloy_consensus::serde_bincode_compat::TxDeposit::from(tx))
                 }
+                #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+                super::Transaction::L1Message(tx) => Self::L1Message(Cow::Borrowed(tx)),
             }
         }
     }
@@ -1779,8 +1893,10 @@ pub mod serde_bincode_compat {
                 Transaction::Eip1559(tx) => Self::Eip1559(tx.into()),
                 Transaction::Eip4844(tx) => Self::Eip4844(tx.into_owned()),
                 Transaction::Eip7702(tx) => Self::Eip7702(tx.into()),
-                #[cfg(feature = "optimism")]
+                #[cfg(all(feature = "optimism", not(feature = "scroll")))]
                 Transaction::Deposit(tx) => Self::Deposit(tx.into()),
+                #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+                Transaction::L1Message(tx) => Self::L1Message(tx.into_owned()),
             }
         }
     }

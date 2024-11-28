@@ -123,34 +123,64 @@ impl TryFrom<AnyRpcTransaction> for TransactionSigned {
                 let (tx, signature, hash) = tx.into_parts();
                 (Transaction::Eip7702(tx), signature, hash)
             }
-            #[cfg(feature = "optimism")]
-            AnyTxEnvelope::Unknown(alloy_network::UnknownTxEnvelope { hash, inner }) => {
+            #[cfg(any(feature = "optimism", feature = "scroll"))]
+            AnyTxEnvelope::Unknown(alloy_network::UnknownTxEnvelope { hash: _hash, inner }) => {
                 use alloy_consensus::Transaction as _;
 
-                if inner.ty() == crate::TxType::Deposit {
-                    let fields: op_alloy_rpc_types::OpTransactionFields = inner
-                        .fields
-                        .clone()
-                        .deserialize_into::<op_alloy_rpc_types::OpTransactionFields>()
-                        .map_err(|e| ConversionError::Custom(e.to_string()))?;
-                    (
-                        Transaction::Deposit(op_alloy_consensus::TxDeposit {
-                            source_hash: fields.source_hash.ok_or_else(|| {
-                                ConversionError::Custom("MissingSourceHash".to_string())
-                            })?,
-                            from: tx.from,
-                            to: revm_primitives::TxKind::from(inner.to()),
-                            mint: fields.mint.filter(|n| *n != 0),
-                            value: inner.value(),
-                            gas_limit: inner.gas_limit(),
-                            is_system_transaction: fields.is_system_tx.unwrap_or(false),
-                            input: inner.input().clone(),
-                        }),
-                        op_alloy_consensus::TxDeposit::signature(),
-                        hash,
-                    )
-                } else {
-                    return Err(ConversionError::Custom("unknown transaction type".to_string()))
+                match TryInto::<crate::TxType>::try_into(inner.ty())
+                    .map_err(|e| ConversionError::Custom(e.to_string()))?
+                {
+                    #[cfg(all(feature = "optimism", not(feature = "scroll")))]
+                    crate::TxType::Deposit => {
+                        let fields: op_alloy_rpc_types::OpTransactionFields = inner
+                            .fields
+                            .clone()
+                            .deserialize_into::<op_alloy_rpc_types::OpTransactionFields>()
+                            .map_err(|e| ConversionError::Custom(e.to_string()))?;
+                        (
+                            Transaction::Deposit(op_alloy_consensus::TxDeposit {
+                                source_hash: fields.source_hash.ok_or_else(|| {
+                                    ConversionError::Custom("MissingSourceHash".to_string())
+                                })?,
+                                from: tx.from,
+                                to: revm_primitives::TxKind::from(inner.to()),
+                                mint: fields.mint.filter(|n| *n != 0),
+                                value: inner.value(),
+                                gas_limit: inner.gas_limit(),
+                                is_system_transaction: fields.is_system_tx.unwrap_or(false),
+                                input: inner.input().clone(),
+                            }),
+                            op_alloy_consensus::TxDeposit::signature(),
+                            _hash,
+                        )
+                    }
+                    #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+                    crate::TxType::L1Message => {
+                        let fields =
+                            inner
+                                .fields
+                                .clone()
+                                .deserialize_into::<reth_scroll_primitives::ScrollL1MessageTransactionFields>()
+                                .map_err(|e| ConversionError::Custom(e.to_string()))?;
+                        (
+                            Transaction::L1Message(reth_scroll_primitives::TxL1Message {
+                                queue_index: fields.queue_index,
+                                gas_limit: inner.gas_limit(),
+                                to: inner.to().ok_or(ConversionError::Custom(
+                                    "Scroll L1 message transaction do not support create transaction"
+                                        .to_string(),
+                                ))?,
+                                value: inner.value(),
+                                sender: fields.sender,
+                                input: inner.input().clone(),
+                            }),
+                            reth_scroll_primitives::TxL1Message::signature(),
+                            _hash,
+                        )
+                    }
+                    _ => {
+                        return Err(ConversionError::Custom("unknown transaction type".to_string()))
+                    }
                 }
             }
             _ => return Err(ConversionError::Custom("unknown transaction type".to_string())),
@@ -161,7 +191,7 @@ impl TryFrom<AnyRpcTransaction> for TransactionSigned {
 }
 
 #[cfg(test)]
-#[cfg(feature = "optimism")]
+#[cfg(all(feature = "optimism", not(feature = "scroll")))]
 mod tests {
     use super::*;
     use alloy_primitives::{address, Address, B256, U256};
@@ -267,6 +297,51 @@ mod tests {
             assert!(!deposit_tx.is_system_transaction);
         } else {
             panic!("Expected Deposit transaction");
+        }
+    }
+}
+
+#[cfg(test)]
+#[cfg(all(feature = "scroll", not(feature = "optimism")))]
+mod tests {
+    use super::*;
+    use alloy_primitives::{address, U256};
+
+    #[test]
+    fn test_scroll_l1_message_tx() {
+        // https://scrollscan.com/tx/0x36199419dbdb7823235de4b73e3d90a61c7b1f343b7a682a271c3055249e81f9
+        let input = r#"{
+            "hash":"0x36199419dbdb7823235de4b73e3d90a61c7b1f343b7a682a271c3055249e81f9",
+            "nonce":"0x0",
+            "blockHash":"0x4aca26460c31be3948e8466681ad87891326a964422c9370d4c1913f3bed4b10",
+            "blockNumber":"0xabf06f",
+            "transactionIndex":"0x0",
+            "from":"0x7885bcbd5cecef1336b5300fb5186a12ddd8c478",
+            "to":"0x781e90f1c8fc4611c9b7497c3b47f99ef6969cbc",
+            "value":"0x0",
+            "gasPrice":"0x0",
+            "gas":"0x1e8480",
+            "input":"0x8ef1332e000000000000000000000000c186fa914353c44b2e33ebe05f21846f1048beda0000000000000000000000003bad7ad0728f9917d1bf08af5782dcbd516cdd96000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e76ab00000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000044493a4f84f464e58d4bfa93bcc57abfb14dbe1b8ff46cd132b5709aab227f269727943d2f000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+            "r":"0x0",
+            "s":"0x0",
+            "v":"0x0",
+            "type":"0x7e",
+            "queueIndex":"0xe76ab",
+            "sender":"0x7885bcbd5cecef1336b5300fb5186a12ddd8c478"
+        }"#;
+        let alloy_tx: WithOtherFields<alloy_rpc_types::Transaction<AnyTxEnvelope>> =
+            serde_json::from_str(input).expect("failed to deserialize");
+
+        let TransactionSigned { transaction: reth_tx, .. } =
+            alloy_tx.try_into().expect("failed to convert");
+        if let Transaction::L1Message(l1_message_tx) = reth_tx {
+            assert_eq!(l1_message_tx.queue_index, 0xe76ab);
+            assert_eq!(l1_message_tx.gas_limit, 0x1e8480);
+            assert_eq!(l1_message_tx.to, address!("781e90f1c8fc4611c9b7497c3b47f99ef6969cbc"));
+            assert_eq!(l1_message_tx.value, U256::ZERO);
+            assert_eq!(l1_message_tx.sender, address!("7885bcbd5cecef1336b5300fb5186a12ddd8c478"));
+        } else {
+            panic!("Expected L1 message transaction");
         }
     }
 }
