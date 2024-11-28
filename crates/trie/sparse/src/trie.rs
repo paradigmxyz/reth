@@ -461,7 +461,6 @@ impl RevealedSparseTrie {
                         // Get the only child node.
                         if self.nodes.get(&child_path).unwrap().is_hash() {
                             debug!(target: "trie::sparse", ?removed_path, ?child_path, "Fetching the only child of a branch node");
-                            drop(child);
                             if let Some(node) = fetch_node(child_path.clone()) {
                                 self.reveal_node_or_hash(child_path.clone(), &node)?;
                             }
@@ -1604,7 +1603,7 @@ mod tests {
     }
 
     #[test]
-    fn sparse_trie_remove_leaf_blinded() {
+    fn sparse_trie_remove_leaf_blinded_error() {
         let leaf = LeafNode::new(
             Nibbles::default(),
             alloy_rlp::encode_fixed_size(&U256::from(1)).to_vec(),
@@ -1634,6 +1633,42 @@ mod tests {
         );
     }
 
+    #[test]
+    fn sparse_trie_remove_leaf_blinded_fetch() {
+        let revealed_leaf = LeafNode::new(
+            Nibbles::default(),
+            alloy_rlp::encode_fixed_size(&U256::from(1)).to_vec(),
+        );
+        let blinded_leaf = LeafNode::new(
+            Nibbles::default(),
+            alloy_rlp::encode_fixed_size(&U256::from(2)).to_vec(),
+        );
+        let branch = TrieNode::Branch(BranchNode::new(
+            vec![
+                RlpNode::word_rlp(&B256::repeat_byte(1)),
+                RlpNode::from_raw_rlp(&alloy_rlp::encode(revealed_leaf.clone())).unwrap(),
+            ],
+            TrieMask::new(0b11),
+        ));
+
+        let mut sparse = RevealedSparseTrie::from_root(branch.clone(), false).unwrap();
+
+        // Reveal a branch node and one of its children
+        //
+        // Branch (Mask = 11)
+        // ├── 0 -> Hash (Path = 0)
+        // └── 1 -> Leaf (Path = 1)
+        sparse.reveal_node(Nibbles::default(), branch).unwrap();
+        sparse.reveal_node(Nibbles::from_nibbles([0x1]), TrieNode::Leaf(revealed_leaf)).unwrap();
+
+        // Removing a blinded leaf should result in an error
+        let result = sparse.remove_leaf(&Nibbles::from_nibbles([0x1]), |_| {
+            let mut buf = Vec::new();
+            blinded_leaf.encode(&mut buf);
+            Some(buf.into())
+        });
+        assert_matches!(result, Ok(()));
+    }
     #[allow(clippy::type_complexity)]
     #[test]
     fn sparse_trie_fuzz() {
