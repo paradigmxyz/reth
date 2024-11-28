@@ -584,12 +584,11 @@ pub trait EngineValidatorAddOn<Node: FullNodeComponents>: Send {
     fn engine_validator(
         &self,
         ctx: &AddOnsContext<'_, Node>,
-    ) -> impl Future<Output = eyre::Result<Self::Validator>> + Send;
+    ) -> impl Future<Output = eyre::Result<Self::Validator>>;
 }
 
 impl<N, EthApi, EV> EngineValidatorAddOn<N> for RpcAddOns<N, EthApi, EV>
 where
-    Self: Sync,
     N: FullNodeComponents,
     EthApi: EthApiTypes,
     EV: EngineValidatorBuilder<N>,
@@ -602,7 +601,7 @@ where
 }
 
 /// A type that knows how to build the engine validator.
-pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Clone {
+pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone {
     /// The consensus implementation to build.
     type Validator: EngineValidator<<Node::Types as NodeTypesWithEngine>::Engine>;
 
@@ -618,7 +617,7 @@ where
     Node: FullNodeComponents,
     Validator:
         EngineValidator<<Node::Types as NodeTypesWithEngine>::Engine> + Clone + Unpin + 'static,
-    F: FnOnce(&AddOnsContext<'_, Node>) -> Fut + Send + Clone,
+    F: FnOnce(&AddOnsContext<'_, Node>) -> Fut + Send + Sync + Clone,
     Fut: Future<Output = eyre::Result<Validator>> + Send,
 {
     type Validator = Validator;
