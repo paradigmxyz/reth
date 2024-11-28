@@ -503,16 +503,7 @@ fn update_sparse_trie(
     let started_at = Instant::now();
 
     // Reveal new accounts and storage slots.
-    for (address, slots) in targets {
-        let path = Nibbles::unpack(address);
-        trie.reveal_account(address, multiproof.account_proof_nodes(&path))?;
-
-        let storage_proofs = multiproof.storage_proof_nodes(address, slots);
-
-        for (slot, proof) in storage_proofs {
-            trie.reveal_storage_slot(address, slot, proof)?;
-        }
-    }
+    trie.reveal_multiproof(targets, multiproof)?;
 
     // Update storage slots with new values and calculate storage roots.
     let mut storage_roots = FbHashMap::default();
