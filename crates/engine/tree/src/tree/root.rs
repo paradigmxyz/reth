@@ -229,16 +229,20 @@ where
                 let info = if account.is_empty() { None } else { Some(account.info.into()) };
                 hashed_state_update.accounts.insert(hashed_address, info);
 
-                if destroyed || !account.storage.is_empty() {
-                    let storage = HashedStorage::from_iter(
-                        destroyed,
-                        account.storage.into_iter().filter_map(|(slot, value)| {
-                            value
-                                .is_changed()
-                                .then(|| (keccak256(B256::from(slot)), value.present_value))
-                        }),
+                let mut changed_storage_iter = account
+                    .storage
+                    .into_iter()
+                    .filter_map(|(slot, value)| {
+                        value
+                            .is_changed()
+                            .then(|| (keccak256(B256::from(slot)), value.present_value))
+                    })
+                    .peekable();
+                if destroyed || changed_storage_iter.peek().is_some() {
+                    hashed_state_update.storages.insert(
+                        hashed_address,
+                        HashedStorage::from_iter(destroyed, changed_storage_iter),
                     );
-                    hashed_state_update.storages.insert(hashed_address, storage);
                 }
             }
         }
