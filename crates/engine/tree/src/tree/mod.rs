@@ -1,8 +1,9 @@
 use crate::{
     backfill::{BackfillAction, BackfillSyncState},
     chain::FromOrchestrator,
-    engine::{DownloadRequest, EngineApiEvent, FromEngine},
+    engine::{DownloadRequest, EngineApiEvent, EngineApiKind, EngineApiRequest, FromEngine},
     persistence::PersistenceHandle,
+    tree::metrics::EngineApiMetrics,
 };
 use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::BlockNumHash;
@@ -24,18 +25,16 @@ use reth_blockchain_tree::{
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, MemoryOverlayStateProvider, NewCanonicalChain,
 };
-use reth_chainspec::EthereumHardforks;
 use reth_consensus::{Consensus, PostExecutionInput};
 use reth_engine_primitives::{
     BeaconEngineMessage, BeaconOnNewPayloadError, EngineApiMessageVersion, EngineTypes,
-    ForkchoiceStateTracker, OnForkChoiceUpdated,
+    EngineValidator, ForkchoiceStateTracker, OnForkChoiceUpdated,
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::execute::BlockExecutorProvider;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
-use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
     Block, EthPrimitives, GotExpected, NodePrimitives, SealedBlock, SealedBlockWithSenders,
     SealedHeader,
@@ -72,10 +71,6 @@ pub mod config;
 mod invalid_block_hook;
 mod metrics;
 mod persistence_state;
-use crate::{
-    engine::{EngineApiKind, EngineApiRequest},
-    tree::metrics::EngineApiMetrics,
-};
 pub use config::TreeConfig;
 pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
 pub use persistence_state::PersistenceState;
@@ -472,11 +467,14 @@ pub enum TreeAction {
 ///
 /// This type is responsible for processing engine API requests, maintaining the canonical state and
 /// emitting events.
-pub struct EngineApiTreeHandler<N, P, E, T: EngineTypes, Spec> {
+pub struct EngineApiTreeHandler<N, P, E, T, V>
+where
+    T: EngineTypes,
+{
     provider: P,
     executor_provider: E,
     consensus: Arc<dyn Consensus>,
-    payload_validator: ExecutionPayloadValidator<Spec>,
+    payload_validator: V,
     /// Keeps track of internals such as executed and buffered blocks.
     state: EngineApiTreeState,
     /// The half for sending messages to the engine.
@@ -516,8 +514,8 @@ pub struct EngineApiTreeHandler<N, P, E, T: EngineTypes, Spec> {
     _primtives: PhantomData<N>,
 }
 
-impl<N, P: Debug, E: Debug, T: EngineTypes + Debug, Spec: Debug> std::fmt::Debug
-    for EngineApiTreeHandler<N, P, E, T, Spec>
+impl<N, P: Debug, E: Debug, T: EngineTypes + Debug, V: Debug> std::fmt::Debug
+    for EngineApiTreeHandler<N, P, E, T, V>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineApiTreeHandler")
@@ -540,7 +538,7 @@ impl<N, P: Debug, E: Debug, T: EngineTypes + Debug, Spec: Debug> std::fmt::Debug
     }
 }
 
-impl<N, P, E, T, Spec> EngineApiTreeHandler<N, P, E, T, Spec>
+impl<N, P, E, T, V> EngineApiTreeHandler<N, P, E, T, V>
 where
     N: NodePrimitives,
     P: DatabaseProviderFactory
@@ -552,7 +550,7 @@ where
     <P as DatabaseProviderFactory>::Provider: BlockReader,
     E: BlockExecutorProvider,
     T: EngineTypes,
-    Spec: Send + Sync + EthereumHardforks + 'static,
+    V: EngineValidator<T, Block = reth_primitives::Block>,
 {
     /// Creates a new [`EngineApiTreeHandler`].
     #[allow(clippy::too_many_arguments)]
@@ -560,7 +558,7 @@ where
         provider: P,
         executor_provider: E,
         consensus: Arc<dyn Consensus>,
-        payload_validator: ExecutionPayloadValidator<Spec>,
+        payload_validator: V,
         outgoing: UnboundedSender<EngineApiEvent>,
         state: EngineApiTreeState,
         canonical_in_memory_state: CanonicalInMemoryState,
@@ -609,7 +607,7 @@ where
         provider: P,
         executor_provider: E,
         consensus: Arc<dyn Consensus>,
-        payload_validator: ExecutionPayloadValidator<Spec>,
+        payload_validator: V,
         persistence: PersistenceHandle,
         payload_builder: PayloadBuilderHandle<T>,
         canonical_in_memory_state: CanonicalInMemoryState,
@@ -2629,7 +2627,7 @@ mod tests {
     use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
     use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
     use reth_engine_primitives::ForkchoiceStatus;
-    use reth_ethereum_engine_primitives::EthEngineTypes;
+    use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
     use reth_evm::test_utils::MockExecutorProvider;
     use reth_primitives::{BlockExt, EthPrimitives};
     use reth_provider::test_utils::MockEthProvider;
@@ -2701,7 +2699,7 @@ mod tests {
             MockEthProvider,
             MockExecutorProvider,
             EthEngineTypes,
-            ChainSpec,
+            EthereumEngineValidator,
         >,
         to_tree_tx: Sender<FromEngine<EngineApiRequest<EthEngineTypes>>>,
         from_tree_rx: UnboundedReceiver<EngineApiEvent>,
@@ -2736,7 +2734,7 @@ mod tests {
             let provider = MockEthProvider::default();
             let executor_provider = MockExecutorProvider::default();
 
-            let payload_validator = ExecutionPayloadValidator::new(chain_spec.clone());
+            let payload_validator = EthereumEngineValidator::new(chain_spec.clone());
 
             let (from_tree_tx, from_tree_rx) = unbounded_channel();
 
