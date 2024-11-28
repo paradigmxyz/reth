@@ -16,7 +16,7 @@ pub fn validate_header_gas<H: BlockHeader>(header: &H) -> Result<(), ConsensusEr
         return Err(ConsensusError::HeaderGasUsedExceedsGasLimit {
             gas_used: header.gas_used(),
             gas_limit: header.gas_limit(),
-        });
+        })
     }
     Ok(())
 }
