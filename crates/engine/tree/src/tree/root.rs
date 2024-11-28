@@ -489,25 +489,24 @@ fn update_sparse_trie(
 
     // Update storage slots with new values and calculate storage roots.
     for (address, storage) in state.storages {
+        let storage_trie = trie.revealed_storage_trie_mut(&address)?;
+
         if storage.wiped {
-            trie.wipe_storage(address)?;
+            storage_trie.wipe();
         }
 
         for (slot, value) in storage.storage {
             let slot_nibbles = Nibbles::unpack(slot);
             if value.is_zero() {
                 // TODO: handle blinded node error
-                trie.remove_storage_leaf(address, &slot_nibbles)?;
+                storage_trie.remove_leaf(&slot_nibbles)?;
             } else {
-                trie.update_storage_leaf(
-                    address,
-                    slot_nibbles,
-                    alloy_rlp::encode_fixed_size(&value).to_vec(),
-                )?;
+                storage_trie
+                    .update_leaf(slot_nibbles, alloy_rlp::encode_fixed_size(&value).to_vec())?;
             }
         }
 
-        trie.storage_root(address).unwrap();
+        storage_trie.root();
     }
 
     // Update accounts with new values

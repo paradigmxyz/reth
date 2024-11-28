@@ -62,9 +62,17 @@ impl SparseStateTrie {
         self.revealed.get(account).is_some_and(|slots| slots.contains(slot))
     }
 
-    /// Returned mutable reference to storage sparse trie if it was revealed.
+    /// Returns mutable reference to storage sparse trie if it was revealed.
     pub fn storage_trie_mut(&mut self, account: &B256) -> Option<&mut RevealedSparseTrie> {
         self.storages.get_mut(account).and_then(|e| e.as_revealed_mut())
+    }
+
+    /// Returns mutable reference to storage sparse trie that is expected to have been revealed.
+    pub fn revealed_storage_trie_mut(
+        &mut self,
+        account: &B256,
+    ) -> SparseStateTrieResult<&mut RevealedSparseTrie> {
+        Ok(self.storage_trie_mut(account).ok_or(SparseTrieError::Blind)?)
     }
 
     /// Reveal unknown trie paths from provided leaf path and its proof for the account.
