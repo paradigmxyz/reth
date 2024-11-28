@@ -528,7 +528,6 @@ pub(super) mod serde_bincode_compat {
     use reth_primitives::{
         serde_bincode_compat::SealedBlockWithSenders, EthPrimitives, NodePrimitives,
     };
-    use reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat;
     use reth_trie_common::serde_bincode_compat::updates::TrieUpdates;
     use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
@@ -552,7 +551,7 @@ pub(super) mod serde_bincode_compat {
     #[derive(Debug, Serialize, Deserialize)]
     pub struct Chain<'a, N = EthPrimitives>
     where
-        N: NodePrimitives<BlockHeader: SerdeBincodeCompat, BlockBody: SerdeBincodeCompat>,
+        N: NodePrimitives,
     {
         blocks: SealedBlocksWithSenders<'a, N::Block>,
         execution_outcome: Cow<'a, ExecutionOutcome<N::Receipt>>,
@@ -566,7 +565,7 @@ pub(super) mod serde_bincode_compat {
 
     impl<B> Serialize for SealedBlocksWithSenders<'_, B>
     where
-        B: reth_primitives_traits::Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>,
+        B: reth_primitives_traits::Block,
     {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where
@@ -584,7 +583,7 @@ pub(super) mod serde_bincode_compat {
 
     impl<'de, B> Deserialize<'de> for SealedBlocksWithSenders<'_, B>
     where
-        B: reth_primitives_traits::Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>,
+        B: reth_primitives_traits::Block,
     {
         fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where
@@ -599,7 +598,7 @@ pub(super) mod serde_bincode_compat {
 
     impl<'a, N> From<&'a super::Chain<N>> for Chain<'a, N>
     where
-        N: NodePrimitives<BlockHeader: SerdeBincodeCompat, BlockBody: SerdeBincodeCompat>,
+        N: NodePrimitives,
     {
         fn from(value: &'a super::Chain<N>) -> Self {
             Self {
@@ -612,7 +611,7 @@ pub(super) mod serde_bincode_compat {
 
     impl<'a, N> From<Chain<'a, N>> for super::Chain<N>
     where
-        N: NodePrimitives<BlockHeader: SerdeBincodeCompat, BlockBody: SerdeBincodeCompat>,
+        N: NodePrimitives,
     {
         fn from(value: Chain<'a, N>) -> Self {
             Self {
