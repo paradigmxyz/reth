@@ -1,12 +1,13 @@
 use crate::{node::OpAddOns, OpBuiltPayload, OpNode as OtherOpNode, OpPayloadBuilderAttributes};
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, B256};
-use reth::{rpc::types::engine::PayloadAttributes, tasks::TaskManager};
+use alloy_rpc_types_engine::PayloadAttributes;
 use reth_e2e_test_utils::{
     transaction::TransactionTestContext, wallet::Wallet, Adapter, NodeHelperType,
 };
 use reth_optimism_chainspec::OpChainSpecBuilder;
 use reth_payload_builder::EthPayloadBuilderAttributes;
+use reth_tasks::TaskManager;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 

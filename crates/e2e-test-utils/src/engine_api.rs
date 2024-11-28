@@ -1,20 +1,17 @@
 use crate::traits::PayloadEnvelopeExt;
 use alloy_primitives::B256;
+use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatusEnum};
 use jsonrpsee::{
     core::client::ClientT,
     http_client::{transport::HttpBackend, HttpClient},
 };
-use reth::{
-    api::{EngineTypes, PayloadBuilderAttributes},
-    providers::CanonStateNotificationStream,
-    rpc::{
-        api::EngineApiClient,
-        types::engine::{ForkchoiceState, PayloadStatusEnum},
-    },
-};
 use reth_chainspec::EthereumHardforks;
+use reth_node_api::EngineTypes;
 use reth_node_builder::BuiltPayload;
 use reth_payload_builder::PayloadId;
+use reth_payload_primitives::PayloadBuilderAttributes;
+use reth_provider::CanonStateNotificationStream;
+use reth_rpc_api::EngineApiClient;
 use reth_rpc_layer::AuthClientService;
 use std::{marker::PhantomData, sync::Arc};
 
@@ -83,7 +80,7 @@ impl<E: EngineTypes, ChainSpec: EthereumHardforks> EngineApiTestContext<E, Chain
             .await?
         };
 
-        assert_eq!(submission.status, expected_status);
+        assert_eq!(submission.status.as_str(), expected_status.as_str());
 
         Ok(submission.latest_valid_hash.unwrap_or_default())
     }
