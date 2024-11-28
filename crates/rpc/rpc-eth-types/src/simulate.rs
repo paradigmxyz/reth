@@ -12,16 +12,12 @@ use reth_primitives::{
     proofs::{calculate_receipt_root, calculate_transaction_root},
     BlockBody, BlockWithSenders, Receipt, TransactionSigned,
 };
-use reth_revm::database::StateProviderDatabase;
 use reth_rpc_server_types::result::rpc_err;
 use reth_rpc_types_compat::{block::from_block, TransactionCompat};
-use reth_storage_api::StateRootProvider;
-use reth_trie::{HashedPostState, HashedStorage};
-use revm::{db::CacheDB, Database};
-use revm_primitives::{keccak256, Address, BlockEnv, Bytes, ExecutionResult, TxKind, B256, U256};
+use revm::Database;
+use revm_primitives::{Address, BlockEnv, Bytes, ExecutionResult, TxKind, B256, U256};
 
 use crate::{
-    cache::db::StateProviderTraitObjWrapper,
     error::{api::FromEthApiError, ToRpcError},
     EthApiError, RevertError, RpcInvalidTransactionError,
 };
@@ -143,7 +139,6 @@ where
 }
 
 /// Handles outputs of the calls execution and builds a [`SimulatedBlock`].
-#[expect(clippy::complexity)]
 pub fn build_block<T: TransactionCompat<Error: FromEthApiError>>(
     results: Vec<(Address, ExecutionResult)>,
     transactions: Vec<TransactionSigned>,
@@ -151,7 +146,6 @@ pub fn build_block<T: TransactionCompat<Error: FromEthApiError>>(
     parent_hash: B256,
     total_difficulty: U256,
     full_transactions: bool,
-    db: &CacheDB<StateProviderDatabase<StateProviderTraitObjWrapper<'_>>>,
     tx_resp_builder: &T,
 ) -> Result<SimulatedBlock<Block<T::Transaction>>, T::Error> {
     let mut calls: Vec<SimCallResult> = Vec::with_capacity(results.len());
