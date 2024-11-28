@@ -55,9 +55,13 @@ where
             let signer = signers.choose(rng).unwrap();
             let tx_type = TxType::try_from(rng.gen_range(0..=4) as u64).unwrap();
 
-            let nonce = provider.get_transaction_count(signer.address()).block_id(BlockId::Number(BlockNumberOrTag::Pending)).await?;
+            let nonce = provider
+                .get_transaction_count(signer.address())
+                .block_id(BlockId::Number(BlockNumberOrTag::Pending))
+                .await?;
 
-            let mut tx = TransactionRequest::default().with_from(signer.address()).with_nonce(nonce);
+            let mut tx =
+                TransactionRequest::default().with_from(signer.address()).with_nonce(nonce);
 
             let should_create =
                 rng.gen::<bool>() && tx_type != TxType::Eip4844 && tx_type != TxType::Eip7702;
@@ -88,17 +92,20 @@ where
                 let auth = Authorization {
                     chain_id: provider.get_chain_id().await?,
                     address: *call_destinations.choose(rng).unwrap(),
-                    nonce: provider.get_transaction_count(signer.address()).block_id(BlockId::Number(BlockNumberOrTag::Pending)).await?,
+                    nonce: provider
+                        .get_transaction_count(signer.address())
+                        .block_id(BlockId::Number(BlockNumberOrTag::Pending))
+                        .await?,
                 };
                 let sig = signer.sign_hash_sync(&auth.signature_hash())?;
                 tx = tx.with_authorization_list(vec![auth.into_signed(sig)])
             }
 
-            let gas = if let Ok(gas) = provider.estimate_gas(&tx).block(BlockId::Number(BlockNumberOrTag::Pending)).await {
-                gas
-            } else {
-                1_000_000
-            };
+            let gas = provider
+                .estimate_gas(&tx)
+                .block(BlockId::Number(BlockNumberOrTag::Pending))
+                .await
+                .unwrap_or(1_000_000);
 
             tx.set_gas_limit(gas);
 

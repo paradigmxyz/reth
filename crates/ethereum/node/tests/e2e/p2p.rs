@@ -1,8 +1,6 @@
 use crate::utils::{advance_with_random_transactions, eth_payload_attributes};
-use alloy_provider::{
-    Provider, ProviderBuilder,
-};
-use rand::{rngs::StdRng,Rng, SeedableRng};
+use alloy_provider::{Provider, ProviderBuilder};
+use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::{setup, setup_engine, transaction::TransactionTestContext};
 use reth_node_ethereum::EthereumNode;
@@ -112,14 +110,13 @@ async fn test_long_reorg() -> eyre::Result<()> {
     let mut first_node = nodes.pop().unwrap();
     let mut second_node = nodes.pop().unwrap();
 
-    let first_priovider = ProviderBuilder::new().on_http(first_node.rpc_url());
-    let second_provider = ProviderBuilder::new().on_http(second_node.rpc_url());
+    let first_provider = ProviderBuilder::new().on_http(first_node.rpc_url());
 
     // Advance first node 100 blocks.
     advance_with_random_transactions(&mut first_node, 100, &mut rng, false).await?;
 
     // Sync second node to 20th block.
-    let head = first_priovider.get_block_by_number(20.into(), false.into()).await?.unwrap();
+    let head = first_provider.get_block_by_number(20.into(), false.into()).await?.unwrap();
     second_node.sync_to(head.header.hash).await?;
 
     // Produce a fork chain with blocks 21.40
@@ -127,13 +124,15 @@ async fn test_long_reorg() -> eyre::Result<()> {
     advance_with_random_transactions(&mut second_node, 40, &mut rng, true).await?;
 
     // Reorg first node from 100th block to new 60th block.
-    let reorg_head = second_provider.get_block_by_number(60.into(), false.into()).await?.unwrap().header.hash;
-    first_node.sync_to(reorg_head).await?;
+    first_node.sync_to(second_node.block_hash(60)).await?;
 
     // Advance second node 20 blocks and ensure that first noce is able to follow it.
     advance_with_random_transactions(&mut second_node, 20, &mut rng, true).await?;
-    let canonical_head = second_provider.get_block_by_number(80.into(), false.into()).await?.unwrap().header.hash;
-    first_node.sync_to(canonical_head).await?;
+    first_node.sync_to(second_node.block_hash(80)).await?;
+
+    // Ensure that it works the other way around too.
+    advance_with_random_transactions(&mut first_node, 20, &mut rng, true).await?;
+    second_node.sync_to(first_node.block_hash(100)).await?;
 
     Ok(())
 }

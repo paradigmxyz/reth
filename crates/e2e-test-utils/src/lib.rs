@@ -1,7 +1,6 @@
 //! Utilities for end-to-end tests.
 
 use node::NodeTestContext;
-use reth_provider::HeaderProvider;
 use reth_chainspec::EthChainSpec;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_engine_local::LocalPayloadAttributesBuilder;
@@ -16,8 +15,9 @@ use reth_node_builder::{
 };
 use reth_node_core::args::{DiscoveryArgs, NetworkArgs, RpcServerArgs};
 use reth_primitives::EthPrimitives;
-use reth_provider::providers::{
-    BlockchainProvider, BlockchainProvider2, NodeTypesForProvider, NodeTypesForTree,
+use reth_provider::{
+    providers::{BlockchainProvider, BlockchainProvider2, NodeTypesForProvider, NodeTypesForTree},
+    HeaderProvider,
 };
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::TaskManager;

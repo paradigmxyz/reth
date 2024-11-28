@@ -3,12 +3,12 @@ use crate::{
     rpc::RpcTestContext, traits::PayloadEnvelopeExt,
 };
 use alloy_consensus::BlockHeader;
+use alloy_eips::BlockId;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
 use alloy_rpc_types_engine::PayloadStatusEnum;
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use eyre::Ok;
 use futures_util::Future;
-use alloy_eips::BlockId;
 use reth_chainspec::EthereumHardforks;
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_api::{Block, EngineTypes, FullNodeComponents};
@@ -253,6 +253,16 @@ where
         Ok(())
     }
 
+    /// Gets block hash by number.
+    pub fn block_hash(&self, number: u64) -> BlockHash {
+        self.inner
+            .provider
+            .sealed_header_by_number_or_tag(BlockNumberOrTag::Number(number))
+            .unwrap()
+            .unwrap()
+            .hash()
+    }
+
     /// Sends FCU and waits for the node to sync to the given block.
     pub async fn sync_to(&self, block: BlockHash) -> eyre::Result<()> {
         self.engine_api.update_forkchoice(block, block).await?;
@@ -263,9 +273,7 @@ where
             .inner
             .provider
             .sealed_header_by_id(BlockId::Number(BlockNumberOrTag::Latest))?
-            .map_or(false, |h| {
-                h.hash() == block
-            })
+            .map_or(false, |h| h.hash() == block)
         {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
@@ -273,7 +281,8 @@ where
         }
 
         // Hack to make sure that all components have time to process canonical state update.
-        // Othewise, this might result in e.g "nonce too low" errors when advancing chain further, making tests flaky.
+        // Otherwise, this might result in e.g "nonce too low" errors when advancing chain further,
+        // making tests flaky.
         tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
 
         Ok(())
