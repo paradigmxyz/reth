@@ -81,7 +81,7 @@ async fn main() {
         // For the sake of the example we only print the session established event
         // with the chain specific details
         match evt {
-            NetworkEvent::RequestCapableSession { info, .. } => {
+            NetworkEvent::ActivePeerSession { info, .. } => {
                 let SessionInfo { status, client_version, peer_id, .. } = info;
                 info!(peers=%net_handle.num_connected_peers() , %peer_id, chain = %status.chain, ?client_version, "Session established with a new peer.");
             }

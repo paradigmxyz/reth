@@ -653,9 +653,7 @@ impl NetworkEventStream {
         let mut peers = Vec::with_capacity(num);
         while let Some(ev) = self.inner.next().await {
             match ev {
-                NetworkEvent::RequestCapableSession {
-                    info: SessionInfo { peer_id, .. }, ..
-                } => {
+                NetworkEvent::ActivePeerSession { info: SessionInfo { peer_id, .. }, .. } => {
                     peers.push(peer_id);
                     num -= 1;
                     if num == 0 {
@@ -678,7 +676,7 @@ impl NetworkEventStream {
         };
 
         match self.inner.next().await {
-            Some(NetworkEvent::RequestCapableSession {
+            Some(NetworkEvent::ActivePeerSession {
                 info: SessionInfo { peer_id: peer_id2, .. },
                 ..
             }) => {

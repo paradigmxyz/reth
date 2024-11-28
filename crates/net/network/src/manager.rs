@@ -724,7 +724,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                 };
 
                 self.event_sender
-                    .notify(NetworkEvent::RequestCapableSession { info: session_info, messages });
+                    .notify(NetworkEvent::ActivePeerSession { info: session_info, messages });
             }
             SwarmEvent::PeerAdded(peer_id) => {
                 trace!(target: "net", ?peer_id, "Peer added");

@@ -65,7 +65,7 @@ async fn test_establish_connections() {
                 NetworkEvent::Peer(PeerEvent::SessionClosed { .. } | PeerEvent::PeerRemoved(_)) => {
                     panic!("unexpected event")
                 }
-                NetworkEvent::RequestCapableSession { info, .. } |
+                NetworkEvent::ActivePeerSession { info, .. } |
                 NetworkEvent::Peer(PeerEvent::SessionEstablished(info)) => {
                     let SessionInfo { peer_id, .. } = info;
                     assert!(expected_connections.remove(&peer_id));

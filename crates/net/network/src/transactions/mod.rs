@@ -1082,7 +1082,7 @@ where
                 self.peers.remove(&peer_id);
                 self.transaction_fetcher.remove_peer(&peer_id);
             }
-            NetworkEvent::RequestCapableSession {
+            NetworkEvent::ActivePeerSession {
                 info: SessionInfo { peer_id, client_version, version, .. },
                 messages,
             } => {
@@ -2431,7 +2431,7 @@ mod tests {
         };
         let messages: PeerRequestSender<PeerRequest> = PeerRequestSender::new(peer_id, tx);
         tx_manager
-            .on_network_event(NetworkEvent::RequestCapableSession { info: session_info, messages });
+            .on_network_event(NetworkEvent::ActivePeerSession { info: session_info, messages });
         let mut propagate = vec![];
         let mut factory = MockTransactionFactory::default();
         let eip1559_tx = Arc::new(factory.create_eip1559());

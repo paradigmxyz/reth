@@ -55,13 +55,14 @@ pub enum PeerEvent {
     PeerRemoved(PeerId),
 }
 
-/// (Non-exhaustive) Events that combine peer lifecycle with request handling capabilities.
+/// (Non-exhaustive) Network events representing peer lifecycle events and session requests.
+/// sessions
 #[derive(Debug)]
 pub enum NetworkEvent<R = PeerRequest> {
     /// Basic peer lifecycle event.
     Peer(PeerEvent),
-    /// Session established with request capabilities.
-    RequestCapableSession {
+    /// Session established with requests.
+    ActivePeerSession {
         /// Session information
         info: SessionInfo,
         /// A request channel to the session task.
@@ -73,8 +74,8 @@ impl<R> Clone for NetworkEvent<R> {
     fn clone(&self) -> Self {
         match self {
             Self::Peer(event) => Self::Peer(event.clone()),
-            Self::RequestCapableSession { info, messages } => {
-                Self::RequestCapableSession { info: info.clone(), messages: messages.clone() }
+            Self::ActivePeerSession { info, messages } => {
+                Self::ActivePeerSession { info: info.clone(), messages: messages.clone() }
             }
         }
     }

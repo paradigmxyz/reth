@@ -142,7 +142,7 @@ async fn test_sending_invalid_transactions() {
             NetworkEvent::Peer(PeerEvent::SessionClosed { peer_id, .. }) => {
                 assert_eq!(peer_id, *peer0.peer_id());
             }
-            NetworkEvent::RequestCapableSession { .. } |
+            NetworkEvent::ActivePeerSession { .. } |
             NetworkEvent::Peer(PeerEvent::SessionEstablished { .. }) => {
                 panic!("unexpected SessionEstablished event")
             }
