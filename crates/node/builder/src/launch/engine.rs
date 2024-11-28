@@ -19,8 +19,8 @@ use reth_exex::ExExManagerHandle;
 use reth_network::{NetworkSyncUpdater, SyncState};
 use reth_network_api::BlockDownloaderProvider;
 use reth_node_api::{
-    BuiltPayload, FullNodeTypes, NodeTypesWithEngine, PayloadAttributesBuilder, PayloadBuilder,
-    PayloadTypes,
+    BlockTy, BuiltPayload, EngineValidator, FullNodeTypes, NodeTypesWithEngine,
+    PayloadAttributesBuilder, PayloadBuilder, PayloadTypes,
 };
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
@@ -75,7 +75,14 @@ where
     T: FullNodeTypes<Types = Types, Provider = BlockchainProvider2<Types>>,
     CB: NodeComponentsBuilder<T>,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
-        + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
+        + EngineValidatorAddOn<
+            NodeAdapter<T, CB::Components>,
+            Validator: EngineValidator<
+                <Types as NodeTypesWithEngine>::Engine,
+                Block = BlockTy<Types>,
+            >,
+        >,
+
     LocalPayloadAttributesBuilder<Types::ChainSpec>: PayloadAttributesBuilder<
         <<Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
     >,
@@ -196,9 +203,23 @@ where
                 pruner_builder.finished_exex_height(exex_manager_handle.finished_height());
         }
         let pruner = pruner_builder.build_with_provider_factory(ctx.provider_factory().clone());
-
         let pruner_events = pruner.events();
         info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
+
+        let event_sender = EventSender::default();
+        let beacon_engine_handle =
+            BeaconConsensusEngineHandle::new(consensus_engine_tx.clone(), event_sender.clone());
+
+        // extract the jwt secret from the args if possible
+        let jwt_secret = ctx.auth_jwt_secret()?;
+
+        let add_ons_ctx = AddOnsContext {
+            node: ctx.node_adapter().clone(),
+            config: ctx.node_config(),
+            beacon_engine_handle: beacon_engine_handle.clone(),
+            jwt_secret,
+        };
+        let engine_payload_validator = add_ons.engine_validator(&add_ons_ctx).await?;
 
         let mut engine_service = if ctx.is_dev() {
             let eth_service = LocalEngineService::new(
@@ -208,6 +229,7 @@ where
                 ctx.blockchain_db().clone(),
                 pruner,
                 ctx.components().payload_builder().clone(),
+                engine_payload_validator,
                 engine_tree_config,
                 ctx.invalid_block_hook()?,
                 ctx.sync_metrics_tx(),
@@ -231,6 +253,7 @@ where
                 ctx.blockchain_db().clone(),
                 pruner,
                 ctx.components().payload_builder().clone(),
+                engine_payload_validator,
                 engine_tree_config,
                 ctx.invalid_block_hook()?,
                 ctx.sync_metrics_tx(),
@@ -238,11 +261,6 @@ where
 
             Either::Right(eth_service)
         };
-
-        let event_sender = EventSender::default();
-
-        let beacon_engine_handle =
-            BeaconConsensusEngineHandle::new(consensus_engine_tx, event_sender.clone());
 
         info!(target: "reth::cli", "Consensus engine initialized");
 
@@ -268,16 +286,6 @@ where
                 events,
             ),
         );
-
-        // extract the jwt secret from the args if possible
-        let jwt_secret = ctx.auth_jwt_secret()?;
-
-        let add_ons_ctx = AddOnsContext {
-            node: ctx.node_adapter().clone(),
-            config: ctx.node_config(),
-            beacon_engine_handle,
-            jwt_secret,
-        };
 
         let RpcHandle { rpc_server_handles, rpc_registry } =
             add_ons.launch_add_ons(add_ons_ctx).await?;

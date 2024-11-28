@@ -3,7 +3,7 @@ use pin_project::pin_project;
 use reth_beacon_consensus::{BeaconConsensusEngineEvent, EngineNodeTypes};
 use reth_chainspec::EthChainSpec;
 use reth_consensus::Consensus;
-use reth_engine_primitives::BeaconEngineMessage;
+use reth_engine_primitives::{BeaconEngineMessage, EngineValidator};
 use reth_engine_tree::{
     backfill::PipelineSync,
     download::BasicBlockDownloader,
@@ -17,9 +17,8 @@ pub use reth_engine_tree::{
 };
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network_p2p::EthBlockClient;
-use reth_node_types::NodeTypesWithEngine;
+use reth_node_types::{BlockTy, NodeTypesWithEngine};
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_payload_validator::ExecutionPayloadValidator;
 use reth_provider::{providers::BlockchainProvider2, ProviderFactory};
 use reth_prune::PrunerWithFactory;
 use reth_stages_api::{MetricEventsSender, Pipeline};
@@ -65,7 +64,7 @@ where
 {
     /// Constructor for `EngineService`.
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub fn new<V>(
         consensus: Arc<dyn Consensus>,
         executor_factory: E,
         chain_spec: Arc<N::ChainSpec>,
@@ -77,10 +76,14 @@ where
         blockchain_db: BlockchainProvider2<N>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         payload_builder: PayloadBuilderHandle<N::Engine>,
+        payload_validator: V,
         tree_config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook>,
         sync_metrics_tx: MetricEventsSender,
-    ) -> Self {
+    ) -> Self
+    where
+        V: EngineValidator<N::Engine, Block = BlockTy<N>>,
+    {
         let engine_kind =
             if chain_spec.is_optimism() { EngineApiKind::OpStack } else { EngineApiKind::Ethereum };
 
@@ -88,7 +91,6 @@ where
 
         let persistence_handle =
             PersistenceHandle::spawn_service(provider, pruner, sync_metrics_tx);
-        let payload_validator = ExecutionPayloadValidator::new(chain_spec);
 
         let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
 
@@ -148,7 +150,7 @@ mod tests {
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_engine_primitives::BeaconEngineMessage;
     use reth_engine_tree::{test_utils::TestPipelineBuilder, tree::NoopInvalidBlockHook};
-    use reth_ethereum_engine_primitives::EthEngineTypes;
+    use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_exex_types::FinishedExExHeight;
     use reth_network_p2p::test_utils::TestFullBlockClient;
@@ -186,7 +188,7 @@ mod tests {
         let blockchain_db =
             BlockchainProvider2::with_latest(provider_factory.clone(), SealedHeader::default())
                 .unwrap();
-
+        let engine_payload_validator = EthereumEngineValidator::new(chain_spec.clone());
         let (_tx, rx) = watch::channel(FinishedExExHeight::NoExExs);
         let pruner = Pruner::new_with_factory(provider_factory.clone(), vec![], 0, 0, None, rx);
 
@@ -204,6 +206,7 @@ mod tests {
             blockchain_db,
             pruner,
             PayloadBuilderHandle::new(tx),
+            engine_payload_validator,
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
             sync_metrics_tx,
