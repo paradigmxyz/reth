@@ -7,6 +7,8 @@ use alloy_consensus::{
     Eip658Value, TxReceipt,
 };
 use alloy_eips::eip2718::Encodable2718;
+#[cfg(all(feature = "scroll", not(feature = "optimism")))]
+use alloy_primitives::U256;
 use alloy_primitives::{Bloom, Log, B256};
 use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
 use bytes::{Buf, BufMut};
@@ -50,6 +52,12 @@ pub struct Receipt {
     /// ensures this is only set for post-Canyon deposit transactions.
     #[cfg(all(feature = "optimism", not(feature = "scroll")))]
     pub deposit_receipt_version: Option<u64>,
+    /// Additional fee to cover l1 data availability costs.
+    /// L1 fee is not part of the consensus encoding of a receipt.
+    /// <https://github.com/scroll-tech/go-ethereum/blob/9fff27e4f34fb5097100ed76ee725ce056267f4b/core/types/receipt.go#L96-L102>
+    #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+    #[rlp(skip)]
+    pub l1_fee: U256,
 }
 
 impl Receipt {
@@ -247,6 +255,8 @@ impl<'a> arbitrary::Arbitrary<'a> for Receipt {
             deposit_nonce,
             #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             deposit_receipt_version,
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            l1_fee: U256::arbitrary(u)?,
         })
     }
 }
@@ -334,6 +344,8 @@ impl ReceiptWithBloom {
                 deposit_nonce: None,
                 #[cfg(all(feature = "optimism", not(feature = "scroll")))]
                 deposit_receipt_version: None,
+                #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+                l1_fee: U256::ZERO,
             },
         };
 
@@ -571,9 +583,13 @@ mod tests {
 
     #[test]
     fn test_decode_receipt() {
-        #[cfg(not(feature = "optimism"))]
+        #[cfg(all(not(feature = "optimism"), not(feature = "scroll")))]
         reth_codecs::test_utils::test_decode::<Receipt>(&hex!(
             "c428b52ffd23fc42696156b10200f034792b6a94c3850215c2fef7aea361a0c31b79d9a32652eefc0d4e2e730036061cff7344b6fc6132b50cda0ed810a991ae58ef013150c12b2522533cb3b3a8b19b7786a8b5ff1d3cdc84225e22b02def168c8858df"
+        ));
+        #[cfg(feature = "scroll")]
+        reth_codecs::test_utils::test_decode::<Receipt>(&hex!(
+            "c42128b52ffd23fc42696159c90200f034792b6a94c3850215c2fef7aea361a0c31b79d9a32652eefc0d4e2e730036061cff7344b6fc6132b50cda0ed810a991ae58ef013150c12b2522533cb3b3a8b19b7786a8b5ff1d3cdc84225e22b02def168c8858dfffffff"
         ));
         #[cfg(feature = "optimism")]
         reth_codecs::test_utils::test_decode::<Receipt>(&hex!(
@@ -604,6 +620,8 @@ mod tests {
                 deposit_nonce: None,
                 #[cfg(all(feature = "optimism", not(feature = "scroll")))]
                 deposit_receipt_version: None,
+                #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+                l1_fee: U256::ZERO,
             },
             bloom: [0; 256].into(),
         };
@@ -638,6 +656,8 @@ mod tests {
                 deposit_nonce: None,
                 #[cfg(all(feature = "optimism", not(feature = "scroll")))]
                 deposit_receipt_version: None,
+                #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+                l1_fee: U256::ZERO,
             },
             bloom: [0; 256].into(),
         };
@@ -720,6 +740,8 @@ mod tests {
             deposit_nonce: None,
             #[cfg(all(feature = "optimism", not(feature = "scroll")))]
             deposit_receipt_version: None,
+            #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+            l1_fee: U256::from(0xffffff),
         };
 
         let mut data = vec![];
@@ -740,6 +762,8 @@ mod tests {
                 deposit_nonce: None,
                 #[cfg(all(feature = "optimism", not(feature = "scroll")))]
                 deposit_receipt_version: None,
+                #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+                l1_fee: U256::from(0xffffff),
             },
             bloom: Bloom::default(),
         };
@@ -762,6 +786,8 @@ mod tests {
                 deposit_nonce: None,
                 #[cfg(all(feature = "optimism", not(feature = "scroll")))]
                 deposit_receipt_version: None,
+                #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+                l1_fee: U256::from(0xffffff),
             },
             bloom: Bloom::default(),
         };

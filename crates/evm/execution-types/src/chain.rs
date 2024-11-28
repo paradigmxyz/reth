@@ -817,6 +817,8 @@ mod tests {
             cumulative_gas_used: 46913,
             logs: vec![],
             success: true,
+            #[cfg(feature = "scroll")]
+            l1_fee: alloy_primitives::U256::ZERO,
         };
 
         // Create another random receipt object, receipt2
@@ -825,6 +827,8 @@ mod tests {
             cumulative_gas_used: 1325345,
             logs: vec![],
             success: true,
+            #[cfg(feature = "scroll")]
+            l1_fee: alloy_primitives::U256::ZERO,
         };
 
         // Create a Receipts object with a vector of receipt vectors

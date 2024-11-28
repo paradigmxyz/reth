@@ -94,6 +94,8 @@ mod tests {
                 success: true,
                 cumulative_gas_used: 102068,
                 logs,
+                #[cfg(feature = "scroll")]
+                l1_fee: U256::from(0xffffff),
             },
             bloom,
         };
