@@ -16,7 +16,7 @@ use reth_ethereum_consensus::GAS_LIMIT_BOUND_DIVISOR;
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
-    Block, GotExpected, NodePrimitives, Receipt, SealedBlockWithSenders, SealedHeader,
+    Block, GotExpected, NodePrimitives, SealedBlockWithSenders, SealedHeader,
 };
 use reth_provider::{
     AccountReader, BlockExecutionInput, BlockExecutionOutput, BlockReaderIdExt, HeaderProvider,
@@ -97,7 +97,7 @@ where
         + AccountReader
         + WithdrawalsProvider
         + 'static,
-    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = Provider::Block>>,
+    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>>,
 {
     /// Validates the given block and a [`BidTrace`] against it.
     pub async fn validate_message_against_block(
@@ -257,10 +257,10 @@ where
     ///
     /// Firstly attempts to verify the payment by checking the state changes, otherwise falls back
     /// to checking the latest block transaction.
-    fn ensure_payment(
+    fn ensure_payment<R: reth_primitives_traits::Receipt>(
         &self,
         block: &Block,
-        output: &BlockExecutionOutput<Receipt>,
+        output: &BlockExecutionOutput<R>,
         message: &BidTrace,
     ) -> Result<(), ValidationApiError> {
         let (mut balance_before, balance_after) = if let Some(acc) =
@@ -294,7 +294,7 @@ where
             .zip(block.body.transactions.last())
             .ok_or(ValidationApiError::ProposerPayment)?;
 
-        if !receipt.success {
+        if !receipt.status() {
             return Err(ValidationApiError::ProposerPayment)
         }
 

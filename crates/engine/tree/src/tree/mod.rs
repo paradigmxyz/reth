@@ -540,7 +540,7 @@ impl<N, P: Debug, E: Debug, T: EngineTypes + Debug, V: Debug> std::fmt::Debug
 
 impl<N, P, E, T, V> EngineApiTreeHandler<N, P, E, T, V>
 where
-    N: NodePrimitives,
+    N: NodePrimitives<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>,
     P: DatabaseProviderFactory
         + BlockReader<Block = reth_primitives::Block>
         + StateProviderFactory
@@ -548,7 +548,7 @@ where
         + Clone
         + 'static,
     <P as DatabaseProviderFactory>::Provider: BlockReader,
-    E: BlockExecutorProvider,
+    E: BlockExecutorProvider<Primitives = N>,
     T: EngineTypes,
     V: EngineValidator<T, Block = reth_primitives::Block>,
 {
