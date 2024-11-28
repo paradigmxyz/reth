@@ -524,11 +524,15 @@ fn update_sparse_trie(
 
         for (slot, value) in storage.storage {
             let slot_path = Nibbles::unpack(slot);
-            trie.update_storage_leaf(
-                address,
-                slot_path,
-                alloy_rlp::encode_fixed_size(&value).to_vec(),
-            )?;
+            if value.is_zero() {
+                trie.remove_storage_leaf(address, &slot_path)?;
+            } else {
+                trie.update_storage_leaf(
+                    address,
+                    slot_path,
+                    alloy_rlp::encode_fixed_size(&value).to_vec(),
+                )?;
+            }
         }
 
         storage_roots.insert(address, trie.storage_root(address).unwrap());
