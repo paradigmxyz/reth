@@ -1,5 +1,5 @@
 use crate::Tables;
-use metrics::{Gauge, Histogram};
+use metrics::Histogram;
 use reth_metrics::{metrics::Counter, Metrics};
 use rustc_hash::FxHashMap;
 use std::time::{Duration, Instant};
