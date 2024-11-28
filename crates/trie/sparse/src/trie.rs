@@ -1,5 +1,9 @@
 use crate::{SparseTrieError, SparseTrieResult};
-use alloy_primitives::{hex, keccak256, map::HashMap, B256};
+use alloy_primitives::{
+    hex, keccak256,
+    map::{HashMap, HashSet},
+    B256,
+};
 use alloy_rlp::Decodable;
 use reth_tracing::tracing::debug;
 use reth_trie_common::{
