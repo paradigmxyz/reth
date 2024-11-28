@@ -98,6 +98,7 @@ pub(super) mod serde_bincode_compat {
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
     #[allow(missing_docs)]
+    #[serde(bound = "")]
     pub enum ExExNotification<'a, N = EthPrimitives>
     where
         N: NodePrimitives<BlockHeader: SerdeBincodeCompat, BlockBody: SerdeBincodeCompat>,
