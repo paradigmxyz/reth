@@ -184,8 +184,8 @@ where
 
         let mut node = NodeTestContext::new(node, attributes_generator).await?;
 
-        let first_block = node.inner.provider.sealed_header(0)?.unwrap().hash();
-        node.engine_api.update_forkchoice(first_block, first_block).await?;
+        let genesis = node.block_hash(0);
+        node.engine_api.update_forkchoice(genesis, genesis).await?;
 
         // Connect each node in a chain.
         if let Some(previous_node) = nodes.last_mut() {
