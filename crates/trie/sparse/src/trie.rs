@@ -356,6 +356,8 @@ impl RevealedSparseTrie {
     }
 
     /// Remove leaf node from the trie.
+    ///
+    /// The `fetch_node` closure is used to fetch and reveal blinded nodes.
     pub fn remove_leaf(
         &mut self,
         path: &Nibbles,
@@ -458,16 +460,28 @@ impl RevealedSparseTrie {
                         let mut child_path = removed_path.clone();
                         child_path.push_unchecked(child_nibble);
 
-                        // Get the only child node.
+                        // Reveal the only child node if it's a hash node.
                         if self.nodes.get(&child_path).unwrap().is_hash() {
-                            debug!(target: "trie::sparse", ?removed_path, ?child_path, "Fetching the only child of a branch node");
+                            debug!(
+                                target: "trie::sparse",
+                                ?removed_path,
+                                ?child_path,
+                                "Fetching and revealing the only remaining child of a branch node"
+                            );
                             if let Some(node) = fetch_node(child_path.clone()) {
                                 self.reveal_node_or_hash(child_path.clone(), &node)?;
                             }
                         }
 
+                        // Get the only child node.
                         let child = self.nodes.get(&child_path).unwrap();
-                        debug!(target: "trie::sparse", ?removed_path, ?child_path, ?child, "Branch node has only one child");
+                        debug!(
+                            target: "trie::sparse",
+                            ?removed_path,
+                            ?child_path,
+                            ?child,
+                            "Branch node has only one child left"
+                        );
 
                         let mut delete_child = false;
                         let new_node = match child {
