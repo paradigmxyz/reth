@@ -514,12 +514,17 @@ fn update_sparse_trie(
         }
 
         for (slot, value) in storage.storage {
-            let slot_path = Nibbles::unpack(slot);
-            trie.update_storage_leaf(
-                address,
-                slot_path,
-                alloy_rlp::encode_fixed_size(&value).to_vec(),
-            )?;
+            let slot_nibbles = Nibbles::unpack(slot);
+            if value.is_zero() {
+                // TODO: handle blinded node error
+                trie.remove_storage_leaf(address, &slot_nibbles)?;
+            } else {
+                trie.update_storage_leaf(
+                    address,
+                    slot_nibbles,
+                    alloy_rlp::encode_fixed_size(&value).to_vec(),
+                )?;
+            }
         }
 
         storage_roots.insert(address, trie.storage_root(address).unwrap());
@@ -527,7 +532,7 @@ fn update_sparse_trie(
 
     // Update accounts with new values and include updated storage roots
     for (address, account) in state.accounts {
-        let path = Nibbles::unpack(address);
+        let account_nibbles = Nibbles::unpack(address);
 
         if let Some(account) = account {
             let storage_root = storage_roots
@@ -538,9 +543,10 @@ fn update_sparse_trie(
 
             let mut encoded = Vec::with_capacity(128);
             TrieAccount::from((account, storage_root)).encode(&mut encoded as &mut dyn BufMut);
-            trie.update_account_leaf(path, encoded)?;
+            trie.update_account_leaf(account_nibbles, encoded)?;
         } else {
-            trie.remove_account_leaf(&path)?;
+            // TODO: handle blinded node error
+            trie.remove_account_leaf(&account_nibbles)?;
         }
     }
 
