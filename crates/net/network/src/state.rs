@@ -437,7 +437,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
                 }
             }
 
-            'inner: loop {
+            loop {
                 // need to buffer results here to make borrow checker happy
                 let mut closed_sessions = Vec::new();
                 let mut received_responses = Vec::new();
@@ -477,7 +477,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
                 }
 
                 if received_responses.is_empty() {
-                    break 'inner;
+                    break;
                 }
 
                 for (peer_id, resp) in received_responses {
