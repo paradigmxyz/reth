@@ -138,6 +138,7 @@ mod network;
 mod session;
 mod state;
 mod swarm;
+mod test_only;
 
 pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};
 pub use reth_eth_wire_types::{EthNetworkPrimitives, NetworkPrimitives};

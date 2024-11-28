@@ -140,6 +140,11 @@ test-utils = [
 ]
 
 [[bench]]
-name = "bench"
+name = "broadcast"
+required-features = ["test-utils"]
+harness = false
+
+[[bench]]
+name = "transaction_manager"
 required-features = ["test-utils"]
 harness = false
