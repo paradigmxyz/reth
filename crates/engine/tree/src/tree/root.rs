@@ -226,20 +226,19 @@ where
                 let hashed_address = keccak256(address);
 
                 let destroyed = account.is_selfdestructed();
-                hashed_state_update.accounts.insert(
-                    hashed_address,
-                    if destroyed || account.is_empty() { None } else { Some(account.info.into()) },
-                );
+                let info = if account.is_empty() { None } else { Some(account.info.into()) };
+                hashed_state_update.accounts.insert(hashed_address, info);
 
                 if destroyed || !account.storage.is_empty() {
-                    let storage = account.storage.into_iter().filter_map(|(slot, value)| {
-                        value
-                            .is_changed()
-                            .then(|| (keccak256(B256::from(slot)), value.present_value))
-                    });
-                    hashed_state_update
-                        .storages
-                        .insert(hashed_address, HashedStorage::from_iter(destroyed, storage));
+                    let storage = HashedStorage::from_iter(
+                        destroyed,
+                        account.storage.into_iter().filter_map(|(slot, value)| {
+                            value
+                                .is_changed()
+                                .then(|| (keccak256(B256::from(slot)), value.present_value))
+                        }),
+                    );
+                    hashed_state_update.storages.insert(hashed_address, storage);
                 }
             }
         }
