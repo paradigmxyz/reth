@@ -174,9 +174,9 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
 
 /// Helper type for the output of executing a block.
 #[derive(Debug, Clone)]
-pub struct ExecuteOutput {
+pub struct ExecuteOutput<T> {
     /// Receipts obtained after executing a block.
-    pub receipts: Vec<Receipt>,
+    pub receipts: Vec<T>,
     /// Cumulative gas used in the block execution.
     pub gas_used: u64,
 }
@@ -204,7 +204,7 @@ where
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<ExecuteOutput, Self::Error>;
+    ) -> Result<ExecuteOutput<Receipt>, Self::Error>;
 
     /// Applies any necessary changes after executing the block's transactions.
     fn apply_post_execution_changes(
@@ -693,7 +693,7 @@ mod tests {
         let expected_gas_used = 10;
         let expected_receipts = vec![Receipt::default()];
         let expected_execute_transactions_result =
-            ExecuteOutput { receipts: expected_receipts.clone(), gas_used: expected_gas_used };
+            ExecuteOutput::<Receipt> { receipts: expected_receipts.clone(), gas_used: expected_gas_used };
         let expected_apply_post_execution_changes_result = Requests::new(vec![bytes!("deadbeef")]);
         let expected_finish_result = BundleState::default();
 
