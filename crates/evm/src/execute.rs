@@ -692,8 +692,10 @@ mod tests {
     fn test_strategy() {
         let expected_gas_used = 10;
         let expected_receipts = vec![Receipt::default()];
-        let expected_execute_transactions_result =
-            ExecuteOutput::<Receipt> { receipts: expected_receipts.clone(), gas_used: expected_gas_used };
+        let expected_execute_transactions_result = ExecuteOutput::<Receipt> {
+            receipts: expected_receipts.clone(),
+            gas_used: expected_gas_used,
+        };
         let expected_apply_post_execution_changes_result = Requests::new(vec![bytes!("deadbeef")]);
         let expected_finish_result = BundleState::default();
 
