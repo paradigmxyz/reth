@@ -13,7 +13,7 @@ use alloy_eips::eip7685::Requests;
 use alloy_primitives::BlockNumber;
 use core::{fmt::Display, marker::PhantomData};
 use reth_consensus::ConsensusError;
-use reth_primitives::{BlockWithSenders, Receipt};
+use reth_primitives::{BlockWithSenders, NodePrimitives, Receipt};
 use reth_prune_types::PruneModes;
 use reth_revm::batch::BlockBatchRecord;
 use revm::{
@@ -182,7 +182,7 @@ pub struct ExecuteOutput {
 }
 
 /// Defines the strategy for executing a single block.
-pub trait BlockExecutionStrategy<DB>
+pub trait BlockExecutionStrategy<DB, N: NodePrimitives = reth_primitives::EthPrimitives>
 where
     DB: Database,
 {
@@ -211,7 +211,7 @@ where
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-        receipts: &[Receipt],
+        receipts: &[N::Receipt],
     ) -> Result<Requests, Self::Error>;
 
     /// Returns a reference to the current state.
@@ -233,7 +233,7 @@ where
     fn validate_block_post_execution(
         &self,
         _block: &BlockWithSenders,
-        _receipts: &[Receipt],
+        _receipts: &[N::Receipt],
         _requests: &Requests,
     ) -> Result<(), ConsensusError> {
         Ok(())
