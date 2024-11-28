@@ -560,7 +560,13 @@ impl RevealedSparseTrie {
                     {
                         let mut current = current.clone();
                         current.extend_from_slice_unchecked(key);
-                        assert!(path.starts_with(&current));
+                        assert!(
+                            path.starts_with(&current),
+                            "path: {:?}, current: {:?}, key: {:?}",
+                            path,
+                            current,
+                            key
+                        );
                     }
 
                     let path = current.clone();
@@ -569,7 +575,14 @@ impl RevealedSparseTrie {
                 }
                 SparseNode::Branch { state_mask, .. } => {
                     let nibble = path[current.len()];
-                    debug_assert!(state_mask.is_bit_set(nibble));
+                    debug_assert!(
+                        state_mask.is_bit_set(nibble),
+                        "current: {:?}, path: {:?}, nibble: {:?}, state_mask: {:?}",
+                        current,
+                        path,
+                        nibble,
+                        state_mask
+                    );
 
                     // If the branch node has a child that is a leaf node that we're removing,
                     // we need to unset this nibble.
