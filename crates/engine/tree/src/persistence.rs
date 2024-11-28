@@ -192,15 +192,19 @@ pub enum PersistenceAction {
 
 /// A handle to the persistence service
 #[derive(Debug, Clone)]
-pub struct PersistenceHandle {
+pub struct PersistenceHandle<N: PersistenceNodeTypes = reth_primitives::EthPrimitives> {
     /// The channel used to communicate with the persistence service
     sender: Sender<PersistenceAction>,
+    _marker: std::marker::PhantomData<N>,
 }
 
-impl PersistenceHandle {
+impl<N: PersistenceNodeTypes> PersistenceHandle<N> {
     /// Create a new [`PersistenceHandle`] from a [`Sender<PersistenceAction>`].
     pub const fn new(sender: Sender<PersistenceAction>) -> Self {
-        Self { sender }
+        Self { 
+            sender,
+            _marker: std::marker::PhantomData,
+        }
     }
 
     /// Create a new [`PersistenceHandle`], and spawn the persistence service.
