@@ -173,10 +173,11 @@ where
 /// Bincode-compatible [`SealedHeader`] serde implementation.
 #[cfg(feature = "serde-bincode-compat")]
 pub(super) mod serde_bincode_compat {
-    use alloy_consensus::serde_bincode_compat::Header;
     use alloy_primitives::BlockHash;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
+
+    use crate::serde_bincode_compat::SerdeBincodeCompat;
 
     /// Bincode-compatible [`super::SealedHeader`] serde implementation.
     ///
@@ -193,26 +194,30 @@ pub(super) mod serde_bincode_compat {
     ///     header: SealedHeader,
     /// }
     /// ```
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct SealedHeader<'a> {
+    #[derive(derive_more::Debug, Serialize, Deserialize)]
+    #[debug(bound(H::BincodeRepr<'a>: core::fmt::Debug))]
+    pub struct SealedHeader<'a, H: SerdeBincodeCompat = super::Header> {
         hash: BlockHash,
-        header: Header<'a>,
+        header: H::BincodeRepr<'a>,
     }
 
-    impl<'a> From<&'a super::SealedHeader> for SealedHeader<'a> {
-        fn from(value: &'a super::SealedHeader) -> Self {
-            Self { hash: value.hash, header: Header::from(&value.header) }
+    impl<'a, H: SerdeBincodeCompat> From<&'a super::SealedHeader<H>> for SealedHeader<'a, H> {
+        fn from(value: &'a super::SealedHeader<H>) -> Self {
+            Self { hash: value.hash, header: (&value.header).into() }
         }
     }
 
-    impl<'a> From<SealedHeader<'a>> for super::SealedHeader {
-        fn from(value: SealedHeader<'a>) -> Self {
+    impl<'a, H: SerdeBincodeCompat> From<SealedHeader<'a, H>> for super::SealedHeader<H> {
+        fn from(value: SealedHeader<'a, H>) -> Self {
             Self { hash: value.hash, header: value.header.into() }
         }
     }
 
-    impl SerializeAs<super::SealedHeader> for SealedHeader<'_> {
-        fn serialize_as<S>(source: &super::SealedHeader, serializer: S) -> Result<S::Ok, S::Error>
+    impl<H: SerdeBincodeCompat> SerializeAs<super::SealedHeader<H>> for SealedHeader<'_, H> {
+        fn serialize_as<S>(
+            source: &super::SealedHeader<H>,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
         where
             S: Serializer,
         {
@@ -220,8 +225,10 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<'de> DeserializeAs<'de, super::SealedHeader> for SealedHeader<'de> {
-        fn deserialize_as<D>(deserializer: D) -> Result<super::SealedHeader, D::Error>
+    impl<'de, H: SerdeBincodeCompat> DeserializeAs<'de, super::SealedHeader<H>>
+        for SealedHeader<'de, H>
+    {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::SealedHeader<H>, D::Error>
         where
             D: Deserializer<'de>,
         {
@@ -229,6 +236,9 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
+    impl<H: SerdeBincodeCompat> SerdeBincodeCompat for super::SealedHeader<H> {
+        type BincodeRepr<'a> = SealedHeader<'a, H>;
+    }
     #[cfg(test)]
     mod tests {
         use super::super::{serde_bincode_compat, SealedHeader};
