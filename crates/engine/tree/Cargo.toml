@@ -21,7 +21,6 @@ reth-consensus.workspace = true
 reth-engine-primitives.workspace = true
 reth-errors.workspace = true
 reth-evm.workspace = true
-reth-execution-errors.workspace = true
 reth-network-p2p.workspace = true
 reth-payload-builder-primitives.workspace = true
 reth-payload-builder.workspace = true
@@ -93,10 +92,6 @@ rand.workspace = true
 
 [[bench]]
 name = "channel_perf"
-harness = false
-
-[[bench]]
-name = "state_root_from_proofs"
 harness = false
 
 [features]
