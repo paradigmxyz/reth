@@ -166,6 +166,11 @@ impl RevealedSparseTrie {
         self.updates.as_ref().map_or(Cow::Owned(SparseTrieUpdates::default()), Cow::Borrowed)
     }
 
+    /// Returns a reference to the leaf value if present.
+    pub fn get_leaf_value(&self, path: &Nibbles) -> Option<&Vec<u8>> {
+        self.values.get(path)
+    }
+
     /// Takes and returns the retained sparse node updates
     pub fn take_updates(&mut self) -> SparseTrieUpdates {
         self.updates.take().unwrap_or_default()
