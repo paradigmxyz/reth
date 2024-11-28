@@ -203,7 +203,11 @@ where
                     account.encode(&mut account_rlp as &mut dyn BufMut);
 
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
-                    storages.insert(hashed_address, storage_multiproof);
+
+                    // We might be adding leaves that are not necessarily our proof targets.
+                    if targets.contains_key(&hashed_address) {
+                        storages.insert(hashed_address, storage_multiproof);
+                    }
                 }
             }
         }
