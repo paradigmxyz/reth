@@ -480,7 +480,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
                 self.on_session_closed(peer)
             }
 
-            let mut has_received_responses = !received_responses.is_empty();
+            let has_received_responses = !received_responses.is_empty();
 
             for (peer_id, resp) in received_responses {
                 if let Some(action) = self.on_eth_response(peer_id, resp) {
