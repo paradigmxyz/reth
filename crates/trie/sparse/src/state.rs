@@ -209,7 +209,11 @@ impl SparseStateTrie {
     /// the storage root based on update storage trie or look it up from existing leaf value.
     ///
     /// If the new account info and storage trie are empty, the account leaf will be removed.
-    pub fn update_account(&mut self, address: B256, account: Account) -> SparseStateTrieResult<()> {
+    pub fn update_account(
+        &mut self,
+        address: B256,
+        account: Option<Account>,
+    ) -> SparseStateTrieResult<()> {
         let nibbles = Nibbles::unpack(address);
         let storage_root = if let Some(storage_trie) = self.storages.get_mut(&address) {
             storage_trie.root().ok_or(SparseTrieError::Blind)?
@@ -227,12 +231,13 @@ impl SparseStateTrie {
             return Err(SparseTrieError::Blind.into())
         };
 
-        if account.is_empty() && storage_root == EMPTY_ROOT_HASH {
-            self.remove_account_leaf(&nibbles)
-        } else {
-            self.account_rlp_buf.clear();
-            TrieAccount::from((account, storage_root)).encode(&mut self.account_rlp_buf);
-            self.update_account_leaf(nibbles, self.account_rlp_buf.clone())
+        match account {
+            Some(account) if !account.is_empty() || storage_root != EMPTY_ROOT_HASH => {
+                self.account_rlp_buf.clear();
+                TrieAccount::from((account, storage_root)).encode(&mut self.account_rlp_buf);
+                self.update_account_leaf(nibbles, self.account_rlp_buf.clone())
+            }
+            _ => self.remove_account_leaf(&nibbles),
         }
     }
 
