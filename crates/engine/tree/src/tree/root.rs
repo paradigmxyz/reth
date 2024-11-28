@@ -1,13 +1,12 @@
 //! State root task related functionality.
 
-use alloy_primitives::map::{FbHashMap, HashMap, HashSet};
-use alloy_rlp::{BufMut, Encodable};
+use alloy_primitives::map::{HashMap, HashSet};
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
 };
 use reth_trie::{
     proof::Proof, updates::TrieUpdates, HashedPostState, HashedStorage, MultiProof, Nibbles,
-    TrieAccount, TrieInput, EMPTY_ROOT_HASH,
+    TrieInput,
 };
 use reth_trie_db::DatabaseProof;
 use reth_trie_parallel::root::ParallelStateRootError;
@@ -507,6 +506,8 @@ fn update_sparse_trie(
                 )?;
             }
         }
+
+        trie.storage_root(address).unwrap();
     }
 
     // Update accounts with new values
