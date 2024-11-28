@@ -1,32 +1,32 @@
-
 #[cfg(test)]
 mod tests {
-    use crate::test_utils::Testnet;
-    use crate::transactions::TransactionPropagationMode::Max;
-    use crate::transactions::TransactionsManagerConfig;
+    use crate::{
+        test_utils::Testnet,
+        transactions::{TransactionPropagationMode::Max, TransactionsManagerConfig},
+    };
     use alloy_primitives::U256;
     use rand::thread_rng;
-    use reth_provider::test_utils::ExtendedAccount;
-    use reth_provider::test_utils::MockEthProvider;
+    use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_tracing::init_test_tracing;
-    use reth_transaction_pool::test_utils::TransactionGenerator;
-    use reth_transaction_pool::PoolTransaction;
-    use reth_transaction_pool::TransactionPool;
+    use reth_transaction_pool::{
+        test_utils::TransactionGenerator, PoolTransaction, TransactionPool,
+    };
     use tokio::time::Duration;
 
     #[tokio::test]
     async fn test_playground() {
         init_test_tracing();
-        let mut tx_manager_config = TransactionsManagerConfig::default();
-        tx_manager_config.propagation_mode = Max(0);
-        tx_manager_config.transaction_fetcher_config.max_inflight_requests = 1;
+
+        let mut config =
+            TransactionsManagerConfig { propagation_mode: Max(0), ..Default::default() };
+        config.transaction_fetcher_config.max_inflight_requests = 1;
 
         let provider = MockEthProvider::default();
         let num_peers = 10;
         let net = Testnet::create_with(num_peers, provider.clone()).await;
 
         // install request handlers
-        let net = net.with_eth_pool_config(tx_manager_config);
+        let net = net.with_eth_pool_config(config);
         let handle = net.spawn();
 
         // connect all the peers first
@@ -37,8 +37,8 @@ mod tests {
             listening_peer.pool().unwrap().pending_transactions_listener();
 
         let num_tx_per_peer = 10;
-        let mut all_tx_hashes = Vec::new();
 
+        // Generate transactions for peers
         for i in 1..num_peers {
             let peer = &handle.peers()[i];
             let peer_pool = peer.pool().unwrap();
@@ -48,8 +48,7 @@ mod tests {
                 let tx = gen.gen_eip1559_pooled();
                 let sender = tx.sender();
                 provider.add_account(sender, ExtendedAccount::new(0, U256::from(100_000_000)));
-                peer_pool.add_external_transaction(tx.clone()).await.unwrap();
-                all_tx_hashes.push(tx.hash().clone());
+                peer_pool.add_external_transaction(tx).await.unwrap();
             }
         }
 

@@ -457,7 +457,11 @@ where
     }
 
     /// Map transactions manager with custom config
-    pub fn map_transactions_manager_with_config<P>(self, pool: P, config: TransactionsManagerConfig) -> Peer<C, P>
+    pub fn map_transactions_manager_with_config<P>(
+        self,
+        pool: P,
+        config: TransactionsManagerConfig,
+    ) -> Peer<C, P>
     where
         P: TransactionPool,
     {

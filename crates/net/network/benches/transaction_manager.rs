@@ -1,10 +1,14 @@
+#![allow(missing_docs)]
 use alloy_primitives::U256;
 use criterion::*;
 use pprof::criterion::{Output, PProfProfiler};
 use rand::thread_rng;
-use reth_network::test_utils::Testnet;
-use reth_network::transactions::TransactionPropagationMode::Max;
-use reth_network::transactions::TransactionsManagerConfig;
+use reth_network::{
+    test_utils::Testnet,
+    transactions::{
+        TransactionFetcherConfig, TransactionPropagationMode::Max, TransactionsManagerConfig,
+    },
+};
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 use reth_transaction_pool::{test_utils::TransactionGenerator, PoolTransaction, TransactionPool};
 use tokio::runtime::Runtime as TokioRuntime;
@@ -26,9 +30,14 @@ pub fn tx_fetch_bench(c: &mut Criterion) {
             || {
                 tokio::task::block_in_place(|| {
                     tokio::runtime::Handle::current().block_on(async {
-                        let mut tx_manager_config = TransactionsManagerConfig::default();
-                        tx_manager_config.propagation_mode = Max(0);
-                        tx_manager_config.transaction_fetcher_config.max_inflight_requests = 1;
+                        let tx_manager_config = TransactionsManagerConfig {
+                            propagation_mode: Max(0),
+                            transaction_fetcher_config: TransactionFetcherConfig {
+                                max_inflight_requests: 1,
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        };
 
                         let provider = MockEthProvider::default();
                         let num_peers = 10;
@@ -46,7 +55,6 @@ pub fn tx_fetch_bench(c: &mut Criterion) {
                             listening_peer.pool().unwrap().pending_transactions_listener();
 
                         let num_tx_per_peer = 10;
-                        let mut all_tx_hashes = Vec::new();
 
                         for i in 1..num_peers {
                             let peer = &handle.peers()[i];
@@ -61,7 +69,6 @@ pub fn tx_fetch_bench(c: &mut Criterion) {
                                     ExtendedAccount::new(0, U256::from(100_000_000)),
                                 );
                                 peer_pool.add_external_transaction(tx.clone()).await.unwrap();
-                                all_tx_hashes.push(tx.hash().clone());
                             }
                         }
 
@@ -74,7 +81,7 @@ pub fn tx_fetch_bench(c: &mut Criterion) {
             },
             |(mut listening_peer_tx_listener, total_expected_tx)| async move {
                 let mut received_tx = 0;
-                while let Some(_) = listening_peer_tx_listener.recv().await {
+                while listening_peer_tx_listener.recv().await.is_some() {
                     received_tx += 1;
                     if received_tx >= total_expected_tx {
                         break;
