@@ -857,6 +857,16 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     pub fn trie_updates(&self) -> &TrieUpdates {
         &self.trie
     }
+
+    /// Returns a state root of the block.
+    pub fn state_root(&self) -> B256 {
+        self.block.header.header().state_root()
+    }
+
+    /// Sets the trie updates for the block.
+    pub fn set_trie_updates(&mut self, trie: TrieUpdates) {
+        self.trie = Arc::new(trie);
+    }
 }
 
 /// Non-empty chain of blocks.

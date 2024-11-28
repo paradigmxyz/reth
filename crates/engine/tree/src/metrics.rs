@@ -21,4 +21,6 @@ pub(crate) struct PersistenceMetrics {
     pub(crate) save_blocks_duration_seconds: Histogram,
     /// How long it took for blocks to be pruned
     pub(crate) prune_before_duration_seconds: Histogram,
+    /// The height of blocks was persisted
+    pub(crate) persistence_height: Gauge,
 }
