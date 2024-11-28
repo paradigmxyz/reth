@@ -1,17 +1,21 @@
 //! State root task related functionality.
 
 use alloy_primitives::map::{HashMap, HashSet};
+use rayon::prelude::*;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
 };
+use reth_revm::{
+    db::{states::bundle_state::BundleRetention, BundleState},
+    CacheState, TransitionState,
+};
 use reth_trie::{
-    proof::Proof, updates::TrieUpdates, HashedPostState, HashedStorage, MultiProof, Nibbles,
-    TrieInput,
+    proof::Proof, updates::TrieUpdates, HashedPostState, MultiProof, Nibbles, TrieInput,
 };
 use reth_trie_db::DatabaseProof;
 use reth_trie_parallel::root::ParallelStateRootError;
 use reth_trie_sparse::{SparseStateTrie, SparseStateTrieResult, SparseTrieError};
-use revm_primitives::{keccak256, EvmState, B256};
+use revm_primitives::{EvmState, EvmStorage, B256, U256};
 use std::{
     collections::BTreeMap,
     sync::{
@@ -222,29 +226,7 @@ where
         proof_sequence_number: u64,
         state_root_message_sender: Sender<StateRootMessage>,
     ) -> HashMap<B256, HashSet<B256>> {
-        let mut hashed_state_update = HashedPostState::default();
-        for (address, account) in update {
-            if account.is_touched() {
-                let hashed_address = keccak256(address);
-
-                let destroyed = account.is_selfdestructed();
-                hashed_state_update.accounts.insert(
-                    hashed_address,
-                    if destroyed || account.is_empty() { None } else { Some(account.info.into()) },
-                );
-
-                if destroyed || !account.storage.is_empty() {
-                    let storage = account.storage.into_iter().filter_map(|(slot, value)| {
-                        value
-                            .is_changed()
-                            .then(|| (keccak256(B256::from(slot)), value.present_value))
-                    });
-                    hashed_state_update
-                        .storages
-                        .insert(hashed_address, HashedStorage::from_iter(destroyed, storage));
-                }
-            }
-        }
+        let hashed_state_update = transform_state_update(update);
 
         let proof_targets = get_proof_targets(&hashed_state_update, fetched_proof_targets);
 
@@ -520,6 +502,29 @@ fn update_sparse_trie(
     Ok((trie, elapsed))
 }
 
+/// Transform an EVM state update into a hashed post state.
+fn transform_state_update(update: EvmState) -> HashedPostState {
+    let mut cache_state = CacheState::default();
+    for (address, account) in &update {
+        let plain_storage = convert_storage(account.storage.clone());
+        cache_state.insert_account_with_storage(*address, account.info.clone(), plain_storage);
+    }
+
+    let account_transitions = cache_state.apply_evm_state(update);
+    let mut transition_state = TransitionState::default();
+    transition_state.add_transitions(account_transitions);
+
+    let mut bundle_state = BundleState::default();
+    bundle_state.apply_transitions_and_create_reverts(transition_state, BundleRetention::Reverts);
+
+    HashedPostState::from_bundle_state(bundle_state.state.par_iter())
+}
+
+/// Convert EVM storage format to plain storage format
+fn convert_storage(storage: EvmStorage) -> HashMap<U256, U256> {
+    storage.into_iter().map(|(key, slot)| (key, slot.present_value)).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -627,34 +632,11 @@ mod tests {
         }
 
         for update in &state_updates {
+            let hashed_state_update = transform_state_update(update.clone());
+
+            hashed_state.extend(hashed_state_update);
+
             for (address, account) in update {
-                let hashed_address = keccak256(*address);
-
-                if account.is_touched() {
-                    let destroyed = account.is_selfdestructed();
-                    hashed_state.accounts.insert(
-                        hashed_address,
-                        if destroyed || account.is_empty() {
-                            None
-                        } else {
-                            Some(account.info.clone().into())
-                        },
-                    );
-
-                    if destroyed || !account.storage.is_empty() {
-                        let storage = account
-                            .storage
-                            .iter()
-                            .filter(|&(_slot, value)| (!destroyed && value.is_changed()))
-                            .map(|(slot, value)| {
-                                (keccak256(B256::from(*slot)), value.present_value)
-                            });
-                        hashed_state
-                            .storages
-                            .insert(hashed_address, HashedStorage::from_iter(destroyed, storage));
-                    }
-                }
-
                 let storage: HashMap<B256, U256> = account
                     .storage
                     .iter()
