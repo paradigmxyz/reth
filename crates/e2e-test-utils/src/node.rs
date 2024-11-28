@@ -272,6 +272,10 @@ where
             assert!(start.elapsed() <= std::time::Duration::from_secs(10), "timed out");
         }
 
+        // Hack to make sure that all components have time to process canonical state update.
+        // Othewise, this might result in e.g "nonce too low" errors when advancing chain further, making tests flaky.
+        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+
         Ok(())
     }
 

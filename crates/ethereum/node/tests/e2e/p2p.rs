@@ -115,14 +115,22 @@ async fn test_long_reorg() -> eyre::Result<()> {
     let first_priovider = ProviderBuilder::new().on_http(first_node.rpc_url());
     let second_provider = ProviderBuilder::new().on_http(second_node.rpc_url());
 
+    // Advance first node 100 blocks.
     advance_with_random_transactions(&mut first_node, 100, &mut rng, false).await?;
-    let head = first_priovider.get_block_by_number(20.into(), false.into()).await?.unwrap().header.hash;
-    second_node.sync_to(head).await?;
 
+    // Sync second node to 20th block.
+    let head = first_priovider.get_block_by_number(20.into(), false.into()).await?.unwrap();
+    second_node.sync_to(head.header.hash).await?;
+
+    // Produce a fork chain with blocks 21.40
+    second_node.payload.timestamp = head.header.timestamp;
     advance_with_random_transactions(&mut second_node, 40, &mut rng, true).await?;
+
+    // Reorg first node from 100th block to new 60th block.
     let reorg_head = second_provider.get_block_by_number(60.into(), false.into()).await?.unwrap().header.hash;
     first_node.sync_to(reorg_head).await?;
 
+    // Advance second node 20 blocks and ensure that first noce is able to follow it.
     advance_with_random_transactions(&mut second_node, 20, &mut rng, true).await?;
     let canonical_head = second_provider.get_block_by_number(80.into(), false.into()).await?.unwrap().header.hash;
     first_node.sync_to(canonical_head).await?;
