@@ -16,7 +16,7 @@ use revm_primitives::{keccak256, EvmState, B256};
 use std::{
     collections::BTreeMap,
     sync::{
-        mpsc::{self, Receiver, RecvError, Sender},
+        mpsc::{self, Receiver, Sender},
         Arc,
     },
     time::{Duration, Instant},
@@ -57,23 +57,6 @@ pub(crate) struct StateRootConfig<Factory> {
     pub consistent_view: ConsistentDbView<Factory>,
     /// Latest trie input.
     pub input: Arc<TrieInput>,
-}
-
-/// Wrapper for std channel receiver to maintain compatibility with `UnboundedReceiverStream`
-#[derive(Debug)]
-pub(crate) struct StdReceiverStream {
-    rx: Receiver<EvmState>,
-}
-
-#[allow(dead_code)]
-impl StdReceiverStream {
-    pub(crate) const fn new(rx: Receiver<EvmState>) -> Self {
-        Self { rx }
-    }
-
-    pub(crate) fn recv(&self) -> Result<EvmState, RecvError> {
-        self.rx.recv()
-    }
 }
 
 /// Messages used internally by the state root task
