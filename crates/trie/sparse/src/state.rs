@@ -7,6 +7,7 @@ use alloy_primitives::{
 };
 use alloy_rlp::{Decodable, Encodable};
 use reth_primitives_traits::Account;
+use reth_trie::TRIE_ACCOUNT_RLP_MAX_SIZE;
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
     MultiProof, Nibbles, TrieAccount, TrieNode, EMPTY_ROOT_HASH,
@@ -16,7 +17,6 @@ use std::iter::Peekable;
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
 #[derive(Default, Debug)]
 pub struct SparseStateTrie {
-    retain_updates: bool,
     /// Sparse account trie.
     state: SparseTrie,
     /// Sparse storage tries.
@@ -25,6 +25,23 @@ pub struct SparseStateTrie {
     revealed: HashMap<B256, HashSet<B256>>,
     /// Collection of addresses that had their storage tries wiped.
     wiped_storages: HashSet<B256>,
+    /// Flag indicating whether trie updates should be retained.
+    retain_updates: bool,
+    /// Re-usable buffer for RLP encoding of trie accounts.
+    account_rlp_buf: Vec<u8>,
+}
+
+impl Default for SparseStateTrie {
+    fn default() -> Self {
+        Self {
+            state: Default::default(),
+            storages: Default::default(),
+            revealed: Default::default(),
+            wiped_storages: Default::default(),
+            retain_updates: false,
+            account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
+        }
+    }
 }
 
 impl SparseStateTrie {
@@ -209,9 +226,9 @@ impl SparseStateTrie {
             return Err(SparseTrieError::Blind.into())
         };
 
-        let mut buf = vec![];
-        TrieAccount::from((account, storage_root)).encode(&mut buf);
-        self.update_account_leaf(nibbles, buf)
+        self.account_rlp_buf.clear();
+        TrieAccount::from((account, storage_root)).encode(&mut self.account_rlp_buf);
+        self.update_account_leaf(nibbles, self.account_rlp_buf.clone())
     }
 
     /// Update the account leaf node.
