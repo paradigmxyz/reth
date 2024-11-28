@@ -13,7 +13,7 @@ use alloy_eips::eip7685::Requests;
 use alloy_primitives::BlockNumber;
 use core::{fmt::Display, marker::PhantomData};
 use reth_consensus::ConsensusError;
-use reth_primitives::{BlockWithSenders, Receipt};
+use reth_primitives::{BlockWithSenders, NodePrimitives, Receipt};
 use reth_prune_types::PruneModes;
 use reth_revm::batch::BlockBatchRecord;
 use revm::{
@@ -129,7 +129,9 @@ pub trait BatchExecutor<DB> {
 }
 
 /// A type that can create a new executor for block execution.
-pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
+pub trait BlockExecutorProvider<N: NodePrimitives = reth_primitives::EthPrimitives>:
+    Send + Sync + Clone + Unpin + 'static
+{
     /// An executor that can execute a single block given a database.
     ///
     /// # Verification
@@ -143,16 +145,16 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     /// the returned state.
     type Executor<DB: Database<Error: Into<ProviderError> + Display>>: for<'a> Executor<
         DB,
-        Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
-        Output = BlockExecutionOutput<Receipt>,
+        Input<'a> = BlockExecutionInput<'a, BlockWithSenders<N::Block>>,
+        Output = BlockExecutionOutput<N::Receipt>,
         Error = BlockExecutionError,
     >;
 
     /// An executor that can execute a batch of blocks given a database.
     type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>>: for<'a> BatchExecutor<
         DB,
-        Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
-        Output = ExecutionOutcome,
+        Input<'a> = BlockExecutionInput<'a, BlockWithSenders<N::Block>>,
+        Output = ExecutionOutcome<N::Receipt>,
         Error = BlockExecutionError,
     >;
 
