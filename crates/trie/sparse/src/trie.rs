@@ -481,7 +481,10 @@ impl RevealedSparseTrie {
                                     ?node,
                                     "Revealing the only remaining child of a branch node"
                                 );
-                                self.reveal_node_or_hash(child_path.clone(), &node)?;
+                                self.reveal_node(
+                                    child_path.clone(),
+                                    TrieNode::decode(&mut &node[..])?,
+                                )?;
                             }
                         }
 
