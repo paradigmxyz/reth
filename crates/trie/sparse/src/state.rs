@@ -1,12 +1,15 @@
-use crate::{RevealedSparseTrie, SparseStateTrieError, SparseStateTrieResult, SparseTrie};
+use crate::{
+    RevealedSparseTrie, SparseStateTrieError, SparseStateTrieResult, SparseTrie, SparseTrieError,
+};
 use alloy_primitives::{
     map::{HashMap, HashSet},
     Bytes, B256,
 };
-use alloy_rlp::Decodable;
+use alloy_rlp::{Decodable, Encodable};
+use reth_primitives_traits::Account;
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
-    MultiProof, Nibbles, TrieNode,
+    MultiProof, Nibbles, TrieAccount, TrieNode, EMPTY_ROOT_HASH,
 };
 use std::iter::Peekable;
 
@@ -184,6 +187,31 @@ impl SparseStateTrie {
         }
 
         Ok(Some(root_node))
+    }
+
+    /// Update trie account with new account info. This method will either recompute the storage
+    /// root based on update storage trie or look it up from existing leaf value.
+    pub fn update_account(&mut self, address: B256, account: Account) -> SparseStateTrieResult<()> {
+        let nibbles = Nibbles::unpack(address);
+        let storage_root = if let Some(storage_trie) = self.storages.get_mut(&address) {
+            storage_trie.root().ok_or(SparseTrieError::Blind)?
+        } else if self.revealed.contains_key(&address) {
+            let state = self.state.as_revealed_mut().ok_or(SparseTrieError::Blind)?;
+            // The account was revealed, either...
+            if let Some(value) = state.get_leaf_value(&nibbles) {
+                // ..it exists and we should take it's current storage root or...
+                TrieAccount::decode(&mut &value[..])?.storage_root
+            } else {
+                // ...the account is newly created and the storage trie is empty.
+                EMPTY_ROOT_HASH
+            }
+        } else {
+            return Err(SparseTrieError::Blind.into())
+        };
+
+        let mut buf = vec![];
+        TrieAccount::from((account, storage_root)).encode(&mut buf);
+        self.update_account_leaf(nibbles, buf)
     }
 
     /// Update the account leaf node.
