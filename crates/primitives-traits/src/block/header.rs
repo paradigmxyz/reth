@@ -49,5 +49,6 @@ impl<T> BlockHeader for T where
         + InMemorySize
         + MaybeSerde
         + MaybeArbitrary
+        + MaybeSerdeBincodeCompat
 {
 }
