@@ -330,7 +330,7 @@ pub fn validate_against_parent_4844<H: BlockHeader>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{TxEip4844, EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH};
+    use alloy_consensus::{Header, TxEip4844, EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH};
     use alloy_eips::{
         eip4895::{Withdrawal, Withdrawals},
         BlockHashOrNumber,
