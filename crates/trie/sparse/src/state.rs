@@ -26,7 +26,7 @@ pub struct SparseStateTrie {
     wiped_storages: HashSet<B256>,
     /// Flag indicating whether trie updates should be retained.
     retain_updates: bool,
-    /// Re-usable buffer for RLP encoding of trie accounts.
+    /// Reusable buffer for RLP encoding of trie accounts.
     account_rlp_buf: Vec<u8>,
 }
 
