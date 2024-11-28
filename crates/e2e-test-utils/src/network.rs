@@ -1,7 +1,7 @@
 use futures_util::StreamExt;
 use reth_network_api::{
-    test_utils::PeersHandleProvider, NetworkEvent, NetworkEventListenerProvider, PeersInfo,
-    events::PeerEvent
+    events::PeerEvent, test_utils::PeersHandleProvider, NetworkEvent, NetworkEventListenerProvider,
+    PeersInfo,
 };
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_tokio_util::EventStream;
