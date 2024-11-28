@@ -480,6 +480,8 @@ impl<N: NetworkPrimitives> NetworkState<N> {
                 self.on_session_closed(peer)
             }
 
+            let mut has_received_responses = !received_responses.is_empty();
+
             for (peer_id, resp) in received_responses {
                 if let Some(action) = self.on_eth_response(peer_id, resp) {
                     self.queued_messages.push_back(action);
@@ -491,7 +493,9 @@ impl<N: NetworkPrimitives> NetworkState<N> {
                 self.on_peer_action(action);
             }
 
-            if self.queued_messages.is_empty() {
+            // We need to poll again tn case we have received any responses because they may have
+            // triggered follow-up requests.
+            if self.queued_messages.is_empty() && !has_received_responses {
                 return Poll::Pending
             }
         }
