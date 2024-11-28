@@ -1681,11 +1681,14 @@ mod tests {
         sparse.reveal_node(Nibbles::from_nibbles([0x1]), TrieNode::Leaf(revealed_leaf)).unwrap();
 
         // Removing a blinded leaf should result in an error
+        let mut fetch_called = false;
         let result = sparse.remove_leaf(&Nibbles::from_nibbles([0x1]), |_| {
+            fetch_called = true;
             let mut buf = Vec::new();
             blinded_leaf.encode(&mut buf);
             Some(buf.into())
         });
+        assert!(fetch_called);
         assert_matches!(result, Ok(()));
     }
     #[allow(clippy::type_complexity)]
