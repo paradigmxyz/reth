@@ -53,7 +53,7 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     type Evm: ConfigureEvm<Header = Header>;
 
     /// The type that knows how to execute blocks.
-    type Executor: BlockExecutorProvider;
+    type Executor: BlockExecutorProvider<Primitives = <Self::Types as NodeTypes>::Primitives>;
 
     /// The consensus type of the node.
     type Consensus: Consensus + Clone + Unpin + 'static;

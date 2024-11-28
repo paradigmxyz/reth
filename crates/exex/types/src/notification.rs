@@ -7,30 +7,30 @@ use reth_primitives_traits::NodePrimitives;
 /// Notifications sent to an `ExEx`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum ExExNotification<P: NodePrimitives = reth_chain_state::EthPrimitives> {
+pub enum ExExNotification<N: NodePrimitives = reth_chain_state::EthPrimitives> {
     /// Chain got committed without a reorg, and only the new chain is returned.
     ChainCommitted {
         /// The new chain after commit.
-        new: Arc<Chain<P>>,
+        new: Arc<Chain<N>>,
     },
     /// Chain got reorged, and both the old and the new chains are returned.
     ChainReorged {
         /// The old chain before reorg.
-        old: Arc<Chain<P>>,
+        old: Arc<Chain<N>>,
         /// The new chain after reorg.
-        new: Arc<Chain<P>>,
+        new: Arc<Chain<N>>,
     },
     /// Chain got reverted, and only the old chain is returned.
     ChainReverted {
         /// The old chain before reversion.
-        old: Arc<Chain<P>>,
+        old: Arc<Chain<N>>,
     },
 }
 
-impl ExExNotification {
+impl<N: NodePrimitives> ExExNotification<N> {
     /// Returns the committed chain from the [`Self::ChainCommitted`] and [`Self::ChainReorged`]
     /// variants, if any.
-    pub fn committed_chain(&self) -> Option<Arc<Chain>> {
+    pub fn committed_chain(&self) -> Option<Arc<Chain<N>>> {
         match self {
             Self::ChainCommitted { new } | Self::ChainReorged { old: _, new } => Some(new.clone()),
             Self::ChainReverted { .. } => None,
@@ -39,7 +39,7 @@ impl ExExNotification {
 
     /// Returns the reverted chain from the [`Self::ChainReorged`] and [`Self::ChainReverted`]
     /// variants, if any.
-    pub fn reverted_chain(&self) -> Option<Arc<Chain>> {
+    pub fn reverted_chain(&self) -> Option<Arc<Chain<N>>> {
         match self {
             Self::ChainReorged { old, new: _ } | Self::ChainReverted { old } => Some(old.clone()),
             Self::ChainCommitted { .. } => None,
