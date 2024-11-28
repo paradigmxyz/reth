@@ -583,14 +583,14 @@ mod tests {
         _chain_spec: Arc<ChainSpec>,
         _evm_config: EvmConfig,
         state: State<DB>,
-        execute_transactions_result: ExecuteOutput,
+        execute_transactions_result: ExecuteOutput<Receipt>,
         apply_post_execution_changes_result: Requests,
         finish_result: BundleState,
     }
 
     #[derive(Clone)]
     struct TestExecutorStrategyFactory {
-        execute_transactions_result: ExecuteOutput,
+        execute_transactions_result: ExecuteOutput<Receipt>,
         apply_post_execution_changes_result: Requests,
         finish_result: BundleState,
     }
@@ -640,7 +640,7 @@ mod tests {
             &mut self,
             _block: &BlockWithSenders,
             _total_difficulty: U256,
-        ) -> Result<ExecuteOutput, Self::Error> {
+        ) -> Result<ExecuteOutput<Receipt>, Self::Error> {
             Ok(self.execute_transactions_result.clone())
         }
 
