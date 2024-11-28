@@ -66,7 +66,7 @@ mod tests {
             noop_network_provider,
             cache.clone(),
             GasPriceOracle::new(noop_provider, Default::default(), cache.clone()),
-            ETHEREUM_BLOCK_GAS_LIMIT,
+            ETHEREUM_BLOCK_GAS_LIMIT.into(),
             DEFAULT_MAX_SIMULATE_BLOCKS,
             DEFAULT_ETH_PROOF_WINDOW,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
