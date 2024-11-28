@@ -830,11 +830,11 @@ pub(super) mod serde_bincode_compat {
     /// }
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
-    pub struct SealedBlock<
-        'a,
-        H: SerdeBincodeCompat = super::Header,
-        B: SerdeBincodeCompat = super::BlockBody,
-    > {
+    pub struct SealedBlock<'a, H = super::Header, B = super::BlockBody>
+    where
+        H: SerdeBincodeCompat,
+        B: SerdeBincodeCompat,
+    {
         header: SealedHeader<'a, H>,
         body: B::BincodeRepr<'a>,
     }
@@ -896,31 +896,26 @@ pub(super) mod serde_bincode_compat {
     /// }
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
-    pub struct SealedBlockWithSenders<'a, B: reth_primitives_traits::Block = super::Block>
+    pub struct SealedBlockWithSenders<'a, B = super::Block>
     where
-        B::Header: SerdeBincodeCompat,
-        B::Body: SerdeBincodeCompat,
+        B: reth_primitives_traits::Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>,
     {
         block: SealedBlock<'a, B::Header, B::Body>,
         senders: Cow<'a, Vec<Address>>,
     }
 
-    impl<'a, B: reth_primitives_traits::Block> From<&'a super::SealedBlockWithSenders<B>>
-        for SealedBlockWithSenders<'a, B>
+    impl<'a, B> From<&'a super::SealedBlockWithSenders<B>> for SealedBlockWithSenders<'a, B>
     where
-        B::Header: SerdeBincodeCompat,
-        B::Body: SerdeBincodeCompat,
+        B: reth_primitives_traits::Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>,
     {
         fn from(value: &'a super::SealedBlockWithSenders<B>) -> Self {
             Self { block: SealedBlock::from(&value.block), senders: Cow::Borrowed(&value.senders) }
         }
     }
 
-    impl<'a, B: reth_primitives_traits::Block> From<SealedBlockWithSenders<'a, B>>
-        for super::SealedBlockWithSenders<B>
+    impl<'a, B> From<SealedBlockWithSenders<'a, B>> for super::SealedBlockWithSenders<B>
     where
-        B::Header: SerdeBincodeCompat,
-        B::Body: SerdeBincodeCompat,
+        B: reth_primitives_traits::Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>,
     {
         fn from(value: SealedBlockWithSenders<'a, B>) -> Self {
             Self { block: value.block.into(), senders: value.senders.into_owned() }
