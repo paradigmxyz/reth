@@ -512,7 +512,7 @@ fn update_sparse_trie(
 
     // Update accounts with new values
     for (address, account) in state.accounts {
-        trie.update_account(address, account)?;
+        trie.update_account(address, account.unwrap_or_default())?;
     }
 
     trie.calculate_below_level(SPARSE_TRIE_INCREMENTAL_LEVEL);
