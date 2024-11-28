@@ -444,32 +444,31 @@ impl<N: NetworkPrimitives> NetworkState<N> {
 
                 // poll all connected peers for responses
                 for (id, peer) in &mut self.active_peers {
-                    if let Some(mut response) = peer.pending_response.take() {
-                        match response.poll(cx) {
-                            Poll::Ready(res) => {
-                                // check if the error is due to a closed channel to the session
-                                if res.err().is_some_and(|err| err.is_channel_closed()) {
-                                    debug!(
-                                        target: "net",
-                                        ?id,
-                                        "Request canceled, response channel from session closed."
-                                    );
-                                    // if the channel is closed, this means the peer session is also
-                                    // closed, in which case we can invoke the
-                                    // [Self::on_closed_session]
-                                    // immediately, preventing followup requests and propagate the
-                                    // connection dropped error
-                                    closed_sessions.push(*id);
-                                } else {
-                                    received_responses.push((*id, res));
-                                }
+                    let Some(mut response) = peer.pending_response.take() else { continue };
+                    match response.poll(cx) {
+                        Poll::Ready(res) => {
+                            // check if the error is due to a closed channel to the session
+                            if res.err().is_some_and(|err| err.is_channel_closed()) {
+                                debug!(
+                                    target: "net",
+                                    ?id,
+                                    "Request canceled, response channel from session closed."
+                                );
+                                // if the channel is closed, this means the peer session is also
+                                // closed, in which case we can invoke the
+                                // [Self::on_closed_session]
+                                // immediately, preventing followup requests and propagate the
+                                // connection dropped error
+                                closed_sessions.push(*id);
+                            } else {
+                                received_responses.push((*id, res));
                             }
-                            Poll::Pending => {
-                                // not ready yet, store again.
-                                peer.pending_response = Some(response);
-                            }
-                        };
-                    }
+                        }
+                        Poll::Pending => {
+                            // not ready yet, store again.
+                            peer.pending_response = Some(response);
+                        }
+                    };
                 }
 
                 for peer in closed_sessions {
