@@ -22,8 +22,6 @@ pub struct SparseStateTrie {
     storages: HashMap<B256, SparseTrie>,
     /// Collection of revealed account and storage keys.
     revealed: HashMap<B256, HashSet<B256>>,
-    /// Collection of addresses that had their storage tries wiped.
-    wiped_storages: HashSet<B256>,
     /// Flag indicating whether trie updates should be retained.
     retain_updates: bool,
     /// Reusable buffer for RLP encoding of trie accounts.
@@ -36,7 +34,6 @@ impl Default for SparseStateTrie {
             state: Default::default(),
             storages: Default::default(),
             revealed: Default::default(),
-            wiped_storages: Default::default(),
             retain_updates: false,
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
         }
@@ -275,9 +272,10 @@ impl SparseStateTrie {
 
     /// Wipe the storage trie at the provided address.
     pub fn wipe_storage(&mut self, address: B256) -> SparseStateTrieResult<()> {
-        let Some(trie) = self.storages.get_mut(&address) else { return Ok(()) };
-        self.wiped_storages.insert(address);
-        trie.wipe().map_err(Into::into)
+        if let Some(trie) = self.storages.get_mut(&address) {
+            trie.wipe()?;
+        }
+        Ok(())
     }
 
     /// Calculates the hashes of the nodes below the provided level.
@@ -302,8 +300,8 @@ impl SparseStateTrie {
         self.state.as_revealed_mut().map(|state| {
             let updates = state.take_updates();
             TrieUpdates {
-                account_nodes: HashMap::from_iter(updates.updated_nodes),
-                removed_nodes: HashSet::from_iter(updates.removed_nodes),
+                account_nodes: updates.updated_nodes,
+                removed_nodes: updates.removed_nodes,
                 storage_tries: self
                     .storages
                     .iter_mut()
@@ -311,9 +309,9 @@ impl SparseStateTrie {
                         let trie = trie.as_revealed_mut().unwrap();
                         let updates = trie.take_updates();
                         let updates = StorageTrieUpdates {
-                            is_deleted: self.wiped_storages.contains(address),
-                            storage_nodes: HashMap::from_iter(updates.updated_nodes),
-                            removed_nodes: HashSet::from_iter(updates.removed_nodes),
+                            is_deleted: updates.wiped,
+                            storage_nodes: updates.updated_nodes,
+                            removed_nodes: updates.removed_nodes,
                         };
                         (*address, updates)
                     })
