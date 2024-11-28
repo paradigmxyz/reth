@@ -20,7 +20,7 @@ use reth_evm::{
     system_calls::{OnStateHook, SystemCaller},
     ConfigureEvm, TxEnvOverrides,
 };
-use reth_primitives::{Block, BlockWithSenders, Receipt};
+use reth_primitives::{BlockWithSenders, Receipt};
 use reth_revm::db::State;
 use revm_primitives::{
     db::{Database, DatabaseCommit},
@@ -55,7 +55,8 @@ impl<EvmConfig> EthExecutionStrategyFactory<EvmConfig> {
     }
 }
 
-impl<EvmConfig> BlockExecutionStrategyFactory<Block> for EthExecutionStrategyFactory<EvmConfig>
+impl<EvmConfig> BlockExecutionStrategyFactory<BlockWithSenders>
+    for EthExecutionStrategyFactory<EvmConfig>
 where
     EvmConfig:
         Clone + Unpin + Sync + Send + 'static + ConfigureEvm<Header = alloy_consensus::Header>,

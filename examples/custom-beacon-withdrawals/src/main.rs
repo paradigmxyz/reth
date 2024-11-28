@@ -87,7 +87,7 @@ pub struct CustomExecutorStrategyFactory {
     evm_config: EthEvmConfig,
 }
 
-impl BlockExecutionStrategyFactory for CustomExecutorStrategyFactory {
+impl BlockExecutionStrategyFactory<BlockWithSenders> for CustomExecutorStrategyFactory {
     type Strategy<DB: Database<Error: Into<ProviderError> + Display>> = CustomExecutorStrategy<DB>;
 
     fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>

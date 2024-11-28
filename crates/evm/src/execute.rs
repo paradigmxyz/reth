@@ -13,7 +13,7 @@ use alloy_eips::eip7685::Requests;
 use alloy_primitives::BlockNumber;
 use core::{fmt::Display, marker::PhantomData};
 use reth_consensus::ConsensusError;
-use reth_primitives::{Block, BlockWithSenders, Receipt};
+use reth_primitives::{BlockWithSenders, Receipt};
 use reth_prune_types::PruneModes;
 use reth_revm::batch::BlockBatchRecord;
 use revm::{
@@ -278,7 +278,7 @@ impl<F> BasicBlockExecutorProvider<F> {
 
 impl<F> BlockExecutorProvider for BasicBlockExecutorProvider<F>
 where
-    F: BlockExecutionStrategyFactory<Block>,
+    F: BlockExecutionStrategyFactory<BlockWithSenders>,
 {
     type Executor<DB: Database<Error: Into<ProviderError> + Display>> =
         BasicBlockExecutor<F::Strategy<DB>, DB>;
