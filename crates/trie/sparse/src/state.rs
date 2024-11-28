@@ -7,15 +7,14 @@ use alloy_primitives::{
 };
 use alloy_rlp::{Decodable, Encodable};
 use reth_primitives_traits::Account;
-use reth_trie::TRIE_ACCOUNT_RLP_MAX_SIZE;
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
-    MultiProof, Nibbles, TrieAccount, TrieNode, EMPTY_ROOT_HASH,
+    MultiProof, Nibbles, TrieAccount, TrieNode, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use std::iter::Peekable;
 
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct SparseStateTrie {
     /// Sparse account trie.
     state: SparseTrie,
