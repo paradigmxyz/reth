@@ -126,7 +126,7 @@ async fn test_long_reorg() -> eyre::Result<()> {
     // Reorg first node from 100th block to new 60th block.
     first_node.sync_to(second_node.block_hash(60)).await?;
 
-    // Advance second node 20 blocks and ensure that first noce is able to follow it.
+    // Advance second node 20 blocks and ensure that first node is able to follow it.
     advance_with_random_transactions(&mut second_node, 20, &mut rng, true).await?;
     first_node.sync_to(second_node.block_hash(80)).await?;
 
