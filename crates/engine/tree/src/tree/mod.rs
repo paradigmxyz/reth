@@ -3,6 +3,7 @@ use crate::{
     chain::FromOrchestrator,
     engine::{DownloadRequest, EngineApiEvent, FromEngine},
     persistence::PersistenceHandle,
+    tree::persistence_state::PersistenceReceiver,
 };
 use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::BlockNumHash;
@@ -514,6 +515,8 @@ pub struct EngineApiTreeHandler<N, P, E, T: EngineTypes, Spec> {
     engine_kind: EngineApiKind,
     /// Captures the types the engine operates on
     _primtives: PhantomData<N>,
+    /// Flag indicating whether to compute the state root in the background.
+    compute_state_root_in_background: bool,
 }
 
 impl<N, P: Debug, E: Debug, T: EngineTypes + Debug, Spec: Debug> std::fmt::Debug
@@ -536,6 +539,7 @@ impl<N, P: Debug, E: Debug, T: EngineTypes + Debug, Spec: Debug> std::fmt::Debug
             .field("metrics", &self.metrics)
             .field("invalid_block_hook", &format!("{:p}", self.invalid_block_hook))
             .field("engine_kind", &self.engine_kind)
+            .field("compute_state_root_in_background", &self.compute_state_root_in_background)
             .finish()
     }
 }
@@ -569,9 +573,9 @@ where
         payload_builder: PayloadBuilderHandle<T>,
         config: TreeConfig,
         engine_kind: EngineApiKind,
+        compute_state_root_in_background: bool,
     ) -> Self {
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
-
         Self {
             provider,
             executor_provider,
@@ -591,6 +595,7 @@ where
             invalid_block_hook: Box::new(NoopInvalidBlockHook),
             engine_kind,
             _primtives: Default::default(),
+            compute_state_root_in_background,
         }
     }
 
@@ -616,6 +621,7 @@ where
         config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook>,
         kind: EngineApiKind,
+        compute_state_root_in_background: bool,
     ) -> (Sender<FromEngine<EngineApiRequest<T>>>, UnboundedReceiver<EngineApiEvent>) {
         let best_block_number = provider.best_block_number().unwrap_or(0);
         let header = provider.sealed_header(best_block_number).ok().flatten().unwrap_or_default();
@@ -646,10 +652,14 @@ where
             payload_builder,
             config,
             kind,
+            compute_state_root_in_background,
         );
         task.set_invalid_block_hook(invalid_block_hook);
         let incoming = task.incoming_tx.clone();
-        std::thread::Builder::new().name("Tree Task".to_string()).spawn(|| task.run()).unwrap();
+        std::thread::Builder::new()
+            .name("Tree Task".to_string())
+            .spawn(move || task.run())
+            .unwrap();
         (incoming, outgoing)
     }
 
@@ -661,7 +671,7 @@ where
     /// Run the engine API handler.
     ///
     /// This will block the current thread and process incoming messages.
-    pub fn run(mut self) {
+    pub fn run(&mut self) {
         loop {
             match self.try_recv_engine_message() {
                 Ok(Some(msg)) => {
@@ -1156,9 +1166,17 @@ where
                     self.persistence_state.start(rx);
                 }
             } else if self.should_persist() {
-                let blocks_to_persist = self.get_canonical_blocks_to_persist();
+                let (blocks_to_persist, parent_hash) = self.get_canonical_blocks_to_persist();
                 if blocks_to_persist.is_empty() {
                     debug!(target: "engine::tree", "Returned empty set of blocks to persist");
+                } else if self.compute_state_root_in_background {
+                    let (tx, rx) = oneshot::channel();
+                    let _ = self.persistence.save_blocks_with_state_root_calculation(
+                        blocks_to_persist,
+                        parent_hash,
+                        tx,
+                    );
+                    self.persistence_state.start_with_root_update(rx);
                 } else {
                     debug!(target: "engine::tree", blocks = ?blocks_to_persist.iter().map(|block| block.block.num_hash()).collect::<Vec<_>>(), "Persisting blocks");
                     let (tx, rx) = oneshot::channel();
@@ -1169,33 +1187,75 @@ where
         }
 
         if self.persistence_state.in_progress() {
-            let (mut rx, start_time) = self
+            let (rx, start_time) = self
                 .persistence_state
                 .rx
                 .take()
                 .expect("if a persistence task is in progress Receiver must be Some");
-            // Check if persistence has complete
-            match rx.try_recv() {
-                Ok(last_persisted_hash_num) => {
-                    self.metrics.engine.persistence_duration.record(start_time.elapsed());
-                    let Some(BlockNumHash {
-                        hash: last_persisted_block_hash,
-                        number: last_persisted_block_number,
-                    }) = last_persisted_hash_num
-                    else {
-                        // if this happened, then we persisted no blocks because we sent an
-                        // empty vec of blocks
-                        warn!(target: "engine::tree", "Persistence task completed but did not persist any blocks");
-                        return Ok(())
-                    };
 
-                    debug!(target: "engine::tree", ?last_persisted_block_hash, ?last_persisted_block_number, "Finished persisting, calling finish");
-                    self.persistence_state
-                        .finish(last_persisted_block_hash, last_persisted_block_number);
-                    self.on_new_persisted_block()?;
+            match rx {
+                PersistenceReceiver::Simple(mut rx) => {
+                    // Check if persistence has complete
+                    match rx.try_recv() {
+                        Ok(last_persisted_hash_num) => {
+                            self.metrics.engine.persistence_duration.record(start_time.elapsed());
+                            let Some(BlockNumHash {
+                                hash: last_persisted_block_hash,
+                                number: last_persisted_block_number,
+                            }) = last_persisted_hash_num
+                            else {
+                                // if this happened, then we persisted no blocks because we sent an
+                                // empty vec of blocks
+                                warn!(target: "engine::tree", "Persistence task completed but did not persist any blocks");
+                                return Ok(())
+                            };
+
+                            debug!(target: "engine::tree", ?last_persisted_block_hash, ?last_persisted_block_number, "Finished persisting, calling finish");
+                            self.persistence_state
+                                .finish(last_persisted_block_hash, last_persisted_block_number);
+                            self.on_new_persisted_block()?;
+                        }
+                        Err(TryRecvError::Closed) => return Err(TryRecvError::Closed.into()),
+                        Err(TryRecvError::Empty) => {
+                            self.persistence_state.rx =
+                                Some((PersistenceReceiver::Simple(rx), start_time))
+                        }
+                    }
                 }
-                Err(TryRecvError::Closed) => return Err(TryRecvError::Closed.into()),
-                Err(TryRecvError::Empty) => self.persistence_state.rx = Some((rx, start_time)),
+                PersistenceReceiver::WithRootUpdates(mut rx) => {
+                    // Check if persistence has complete
+                    match rx.try_recv() {
+                        Ok(persistence_result) => {
+                            let elapsed = start_time.elapsed();
+                            let (last_persisted_hash_num, root_updates) = persistence_result;
+                            self.metrics
+                                .block_validation
+                                .record_state_root(&root_updates, elapsed.as_secs_f64());
+
+                            self.metrics.engine.persistence_duration.record(elapsed);
+                            let Some(BlockNumHash {
+                                hash: last_persisted_block_hash,
+                                number: last_persisted_block_number,
+                            }) = last_persisted_hash_num
+                            else {
+                                // if this happened, then we persisted no blocks because we sent an
+                                // empty vec of blocks
+                                warn!(target: "engine::tree", "Persistence task completed but did not persist any blocks");
+                                return Ok(())
+                            };
+
+                            trace!(target: "engine::tree", ?last_persisted_block_hash, ?last_persisted_block_number, "Finished persisting, calling finish");
+                            self.persistence_state
+                                .finish(last_persisted_block_hash, last_persisted_block_number);
+                            self.on_new_persisted_block()?;
+                        }
+                        Err(TryRecvError::Closed) => return Err(TryRecvError::Closed.into()),
+                        Err(TryRecvError::Empty) => {
+                            self.persistence_state.rx =
+                                Some((PersistenceReceiver::WithRootUpdates(rx), start_time))
+                        }
+                    }
+                }
             }
         }
         Ok(())
@@ -1489,7 +1549,7 @@ where
     /// Returns a batch of consecutive canonical blocks to persist in the range
     /// `(last_persisted_number .. canonical_head - threshold]` . The expected
     /// order is oldest -> newest.
-    fn get_canonical_blocks_to_persist(&self) -> Vec<ExecutedBlock> {
+    fn get_canonical_blocks_to_persist(&self) -> (Vec<ExecutedBlock>, B256) {
         let mut blocks_to_persist = Vec::new();
         let mut current_hash = self.state.tree_state.canonical_block_hash();
         let last_persisted_number = self.persistence_state.last_persisted_block.number;
@@ -1515,7 +1575,7 @@ where
         // reverse the order so that the oldest block comes first
         blocks_to_persist.reverse();
 
-        blocks_to_persist
+        (blocks_to_persist, current_hash)
     }
 
     /// This clears the blocks from the in-memory tree state that have been persisted to the
@@ -2238,56 +2298,61 @@ where
         }
 
         let hashed_state = HashedPostState::from_bundle_state(&output.state.state);
+        let mut trie_output: TrieUpdates = TrieUpdates::default();
 
         trace!(target: "engine::tree", block=?sealed_block.num_hash(), "Calculating block state root");
-        let root_time = Instant::now();
-        let mut state_root_result = None;
+        if !self.compute_state_root_in_background {
+            let root_time = Instant::now();
+            let mut state_root_result = None;
+            // TODO: switch to calculate state root using `StateRootTask`.
 
-        // TODO: switch to calculate state root using `StateRootTask`.
+            // We attempt to compute state root in parallel if we are currently not persisting
+            // anything to database. This is safe, because the database state cannot
+            // change until we finish parallel computation. It is important that nothing
+            // is being persisted as we are computing in parallel, because we initialize
+            // a different database transaction per thread and it might end up with a
+            // different view of the database.
+            let persistence_in_progress = self.persistence_state.in_progress();
+            if !persistence_in_progress {
+                state_root_result = match self
+                    .compute_state_root_parallel(block.parent_hash, &hashed_state)
+                {
+                    Ok((state_root, trie_output)) => Some((state_root, trie_output)),
+                    Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(error))) => {
+                        debug!(target: "engine", %error, "Parallel state root computation failed consistency check, falling back");
+                        None
+                    }
+                    Err(error) => return Err(InsertBlockErrorKindTwo::Other(Box::new(error))),
+                };
+            }
 
-        // We attempt to compute state root in parallel if we are currently not persisting anything
-        // to database. This is safe, because the database state cannot change until we
-        // finish parallel computation. It is important that nothing is being persisted as
-        // we are computing in parallel, because we initialize a different database transaction
-        // per thread and it might end up with a different view of the database.
-        let persistence_in_progress = self.persistence_state.in_progress();
-        if !persistence_in_progress {
-            state_root_result = match self
-                .compute_state_root_parallel(block.parent_hash, &hashed_state)
-            {
-                Ok((state_root, trie_output)) => Some((state_root, trie_output)),
-                Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(error))) => {
-                    debug!(target: "engine", %error, "Parallel state root computation failed consistency check, falling back");
-                    None
-                }
-                Err(error) => return Err(InsertBlockErrorKindTwo::Other(Box::new(error))),
+            let (state_root, _trie_output) = if let Some(result) = state_root_result {
+                result
+            } else {
+                debug!(target: "engine::tree", block=?sealed_block.num_hash(), persistence_in_progress, "Failed to compute state root in parallel");
+                state_provider.state_root_with_updates(hashed_state.clone())?
             };
+
+            if state_root != block.state_root {
+                // call post-block hook
+                self.invalid_block_hook.on_invalid_block(
+                    &parent_block,
+                    &block.clone().seal_slow(),
+                    &output,
+                    Some((&trie_output, state_root)),
+                );
+                return Err(ConsensusError::BodyStateRootDiff(
+                    GotExpected { got: state_root, expected: block.state_root }.into(),
+                )
+                .into())
+            }
+            trie_output = _trie_output;
+            let root_elapsed = root_time.elapsed();
+            self.metrics
+                .block_validation
+                .record_state_root(&trie_output, root_elapsed.as_secs_f64());
+            debug!(target: "engine::tree", ?root_elapsed, block=?sealed_block.num_hash(), "Calculated state root");
         }
-
-        let (state_root, trie_output) = if let Some(result) = state_root_result {
-            result
-        } else {
-            debug!(target: "engine::tree", block=?sealed_block.num_hash(), persistence_in_progress, "Failed to compute state root in parallel");
-            state_provider.state_root_with_updates(hashed_state.clone())?
-        };
-
-        if state_root != block.state_root {
-            // call post-block hook
-            self.invalid_block_hook.on_invalid_block(
-                &parent_block,
-                &block.clone().seal_slow(),
-                &output,
-                Some((&trie_output, state_root)),
-            );
-            return Err(ConsensusError::BodyStateRootDiff(
-                GotExpected { got: state_root, expected: block.state_root }.into(),
-            )
-            .into())
-        }
-
-        let root_elapsed = root_time.elapsed();
-        self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
-        debug!(target: "engine::tree", ?root_elapsed, block=?sealed_block.num_hash(), "Calculated state root");
 
         let executed: ExecutedBlock = ExecutedBlock {
             block: sealed_block.clone(),
@@ -2761,6 +2826,7 @@ mod tests {
                 payload_builder,
                 TreeConfig::default(),
                 EngineApiKind::Ethereum,
+                false,
             );
 
             let block_builder = TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());
@@ -3082,10 +3148,10 @@ mod tests {
         let blocks: Vec<_> = test_block_builder
             .get_executed_blocks(1..tree_config.persistence_threshold() + 2)
             .collect();
-        let test_harness = TestHarness::new(chain_spec).with_blocks(blocks.clone());
+        let mut test_harness = TestHarness::new(chain_spec).with_blocks(blocks.clone());
         std::thread::Builder::new()
             .name("Tree Task".to_string())
-            .spawn(|| test_harness.tree.run())
+            .spawn(move || test_harness.tree.run())
             .unwrap();
 
         // send a message to the tree to enter the main loop.
@@ -3587,7 +3653,7 @@ mod tests {
             .with_persistence_threshold(persistence_threshold)
             .with_memory_block_buffer_target(memory_block_buffer_target);
 
-        let blocks_to_persist = test_harness.tree.get_canonical_blocks_to_persist();
+        let (blocks_to_persist, _) = test_harness.tree.get_canonical_blocks_to_persist();
 
         let expected_blocks_to_persist_length: usize =
             (canonical_head_number - memory_block_buffer_target - last_persisted_block_number)
@@ -3608,7 +3674,7 @@ mod tests {
 
         assert!(test_harness.tree.state.tree_state.block_by_hash(fork_block_hash).is_some());
 
-        let blocks_to_persist = test_harness.tree.get_canonical_blocks_to_persist();
+        let (blocks_to_persist, _) = test_harness.tree.get_canonical_blocks_to_persist();
         assert_eq!(blocks_to_persist.len(), expected_blocks_to_persist_length);
 
         // check that the fork block is not included in the blocks to persist

@@ -1,8 +1,18 @@
 use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
+use reth_trie::updates::TrieUpdates;
 use std::{collections::VecDeque, time::Instant};
 use tokio::sync::oneshot;
 use tracing::{debug, trace};
+
+/// Enum to represent different types of persistence receivers.
+#[derive(Debug)]
+pub(crate) enum PersistenceReceiver {
+    /// Receiver for simple persistence tasks.
+    Simple(oneshot::Receiver<Option<BlockNumHash>>),
+    /// Receiver for persistence tasks with root updates.
+    WithRootUpdates(oneshot::Receiver<(Option<BlockNumHash>, TrieUpdates)>),
+}
 
 /// The state of the persistence task.
 #[derive(Default, Debug)]
@@ -13,12 +23,13 @@ pub struct PersistenceState {
     pub(crate) last_persisted_block: BlockNumHash,
     /// Receiver end of channel where the result of the persistence task will be
     /// sent when done. A None value means there's no persistence task in progress.
-    pub(crate) rx: Option<(oneshot::Receiver<Option<BlockNumHash>>, Instant)>,
+    pub(crate) rx: Option<(PersistenceReceiver, Instant)>,
     /// The block above which blocks should be removed from disk, because there has been an on disk
     /// reorg.
     pub(crate) remove_above_state: VecDeque<u64>,
 }
 
+/// The state of the persistence task.
 impl PersistenceState {
     /// Determines if there is a persistence task in progress by checking if the
     /// receiver is set.
@@ -28,7 +39,15 @@ impl PersistenceState {
 
     /// Sets state for a started persistence task.
     pub(crate) fn start(&mut self, rx: oneshot::Receiver<Option<BlockNumHash>>) {
-        self.rx = Some((rx, Instant::now()));
+        self.rx = Some((PersistenceReceiver::Simple(rx), Instant::now()));
+    }
+
+    /// Sets state for a started persistence task with root updates.
+    pub(crate) fn start_with_root_update(
+        &mut self,
+        rx: oneshot::Receiver<(Option<BlockNumHash>, TrieUpdates)>,
+    ) {
+        self.rx = Some((PersistenceReceiver::WithRootUpdates(rx), Instant::now()));
     }
 
     /// Sets the `remove_above_state`, to the new tip number specified, only if it is less than the

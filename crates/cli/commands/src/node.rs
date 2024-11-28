@@ -110,6 +110,15 @@ pub struct NodeCommand<
     /// Additional cli arguments
     #[command(flatten, next_help_heading = "Extension")]
     pub ext: Ext,
+
+    /// Enables state root computation in the background with a persistent database.
+    ///
+    /// This option is intended for performance optimization when importing blocks
+    /// during live sync. It allows state root calculations to be performed
+    /// concurrently with other operations, potentially reducing overall
+    /// processing time.
+    #[arg(long = "compute-state-root-in-background", default_value_t = false)]
+    pub compute_state_root_in_background: bool,
 }
 
 impl<C: ChainSpecParser> NodeCommand<C> {
@@ -160,6 +169,7 @@ impl<
             dev,
             pruning,
             ext,
+            compute_state_root_in_background,
         } = self;
 
         // set up node config
@@ -177,6 +187,7 @@ impl<
             db,
             dev,
             pruning,
+            compute_state_root_in_background,
         };
 
         let data_dir = node_config.datadir();

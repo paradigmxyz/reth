@@ -1,14 +1,19 @@
 use crate::metrics::PersistenceMetrics;
 use alloy_eips::BlockNumHash;
+use alloy_primitives::B256;
 use reth_chain_state::ExecutedBlock;
 use reth_errors::ProviderError;
-use reth_primitives::EthPrimitives;
+use reth_primitives::{EthPrimitives, GotExpected};
 use reth_provider::{
-    providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockHashReader,
-    ChainStateBlockWriter, DatabaseProviderFactory, ProviderFactory, StaticFileProviderFactory,
+    providers::{ConsistentDbView, ProviderNodeTypes},
+    writer::UnifiedStorageWriter,
+    BlockHashReader, BlockReader, ChainStateBlockWriter, DatabaseProviderFactory, ProviderFactory,
+    StateProviderFactory, StateReader, StaticFileProviderFactory,
 };
 use reth_prune::{PrunerError, PrunerOutput, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
+use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
+use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use std::{
     sync::mpsc::{Receiver, SendError, Sender},
     time::Instant,
@@ -30,9 +35,11 @@ impl<T> PersistenceNodeTypes for T where T: ProviderNodeTypes<Primitives = EthPr
 /// This should be spawned in its own thread with [`std::thread::spawn`], since this performs
 /// blocking I/O operations in an endless loop.
 #[derive(Debug)]
-pub struct PersistenceService<N: ProviderNodeTypes> {
+pub struct PersistenceService<N: ProviderNodeTypes, P> {
     /// The provider factory to use
     provider: ProviderFactory<N>,
+    /// The view provider
+    view_provider: P,
     /// Incoming requests
     incoming: Receiver<PersistenceAction>,
     /// The pruner
@@ -43,15 +50,27 @@ pub struct PersistenceService<N: ProviderNodeTypes> {
     sync_metrics_tx: MetricEventsSender,
 }
 
-impl<N: ProviderNodeTypes> PersistenceService<N> {
+impl<N: ProviderNodeTypes, P> PersistenceService<N, P>
+where
+    P: DatabaseProviderFactory + BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+    <P as DatabaseProviderFactory>::Provider: BlockReader,
+{
     /// Create a new persistence service
     pub fn new(
         provider: ProviderFactory<N>,
+        view_provider: P,
         incoming: Receiver<PersistenceAction>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
     ) -> Self {
-        Self { provider, incoming, pruner, metrics: PersistenceMetrics::default(), sync_metrics_tx }
+        Self {
+            provider,
+            view_provider,
+            incoming,
+            pruner,
+            metrics: PersistenceMetrics::default(),
+            sync_metrics_tx,
+        }
     }
 
     /// Prunes block data before the given block hash according to the configured prune
@@ -66,7 +85,11 @@ impl<N: ProviderNodeTypes> PersistenceService<N> {
     }
 }
 
-impl<N: PersistenceNodeTypes> PersistenceService<N> {
+impl<N: PersistenceNodeTypes, P> PersistenceService<N, P>
+where
+    P: DatabaseProviderFactory + BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+    <P as DatabaseProviderFactory>::Provider: BlockReader,
+{
     /// This is the main loop, that will listen to database events and perform the requested
     /// database actions
     pub fn run(mut self) -> Result<(), PersistenceError> {
@@ -84,6 +107,30 @@ impl<N: PersistenceNodeTypes> PersistenceService<N> {
                 PersistenceAction::SaveBlocks(blocks, sender) => {
                     let result = self.on_save_blocks(blocks)?;
                     let result_number = result.map(|r| r.number);
+
+                    // we ignore the error because the caller may or may not care about the result
+                    let _ = sender.send(result);
+
+                    if let Some(block_number) = result_number {
+                        // send new sync metrics based on saved blocks
+                        let _ = self
+                            .sync_metrics_tx
+                            .send(MetricEvent::SyncHeight { height: block_number });
+
+                        if self.pruner.is_pruning_needed(block_number) {
+                            // We log `PrunerOutput` inside the `Pruner`
+                            let _ = self.prune_before(block_number)?;
+                        }
+                    }
+                }
+                PersistenceAction::SaveBlocksWithStateRootCalculation(
+                    blocks,
+                    parent_hash,
+                    sender,
+                ) => {
+                    let result =
+                        self.on_save_block_with_state_root_calculation(blocks, parent_hash)?;
+                    let result_number = result.0.map(|r| r.number);
 
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(result);
@@ -151,7 +198,89 @@ impl<N: PersistenceNodeTypes> PersistenceService<N> {
             UnifiedStorageWriter::commit(provider_rw)?;
         }
         self.metrics.save_blocks_duration_seconds.record(start_time.elapsed());
+        self.metrics
+            .persistence_height
+            .set(last_block_hash_num.as_ref().map(|b| b.number).unwrap_or(0) as f64);
         Ok(last_block_hash_num)
+    }
+
+    fn on_save_block_with_state_root_calculation(
+        &self,
+        mut blocks: Vec<ExecutedBlock>,
+        parent_hash: B256,
+    ) -> Result<(Option<BlockNumHash>, TrieUpdates), PersistenceError> {
+        debug!(target: "engine::persistence", first=?blocks.first().map(|b| b.block.num_hash()), last=?blocks.last().map(|b| b.block.num_hash()), "Saving range of blocks");
+
+        let state_root_result = self
+            .compute_state_root_in_batch_blocks(blocks.clone(), parent_hash)
+            .map_err(PersistenceError::StateRootError)?;
+
+        if let Some(last_block) = blocks.last_mut() {
+            last_block.set_trie_updates(state_root_result.1.clone());
+        }
+
+        let save_blocks_result = self.on_save_blocks(blocks)?;
+        Ok((save_blocks_result, state_root_result.1))
+    }
+
+    fn compute_state_root_in_batch_blocks(
+        &self,
+        blocks: Vec<ExecutedBlock>,
+        parent_hash: B256,
+    ) -> Result<(B256, TrieUpdates), AdvanceCalculateStateRootError> {
+        let mut hashed_state = HashedPostState::default();
+        for block in &blocks {
+            hashed_state.extend(block.hashed_state().clone());
+        }
+        let block_number = blocks.last().unwrap().block().number;
+        let block_hash = blocks.last().unwrap().block().hash();
+        let target_state_root = blocks.last().unwrap().state_root();
+
+        let root_time = Instant::now();
+        debug!(target: "engine::persistence", ?block_number, ?block_hash, "Computing state root");
+        let state_root_result = match self.compute_state_root_parallel(parent_hash, &hashed_state) {
+            Ok((state_root, trie_output)) => Some((state_root, trie_output)),
+            Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(error))) => {
+                debug!(target: "engine::persistence", %error, "Parallel state root computation failed consistency check, falling back");
+                None
+            }
+            Err(error) => return Err(AdvanceCalculateStateRootError::ComputeFailed(error)),
+        };
+
+        let (state_root, trie_output) = if let Some(result) = state_root_result {
+            result
+        } else {
+            return Err(AdvanceCalculateStateRootError::ResultNotFound());
+        };
+
+        let root_elapsed = root_time.elapsed();
+        debug!(target: "engine::persistence", ?block_number, ?block_hash, ?state_root, ?root_elapsed, "Computed state root");
+
+        if state_root != target_state_root {
+            return Err(AdvanceCalculateStateRootError::StateRootDiff(GotExpected {
+                got: state_root,
+                expected: target_state_root,
+            }))
+        }
+
+        Ok((state_root, trie_output))
+    }
+
+    fn compute_state_root_parallel(
+        &self,
+        parent_hash: B256,
+        hashed_state: &HashedPostState,
+    ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
+        let consistent_view = ConsistentDbView::new_with_latest_tip(self.view_provider.clone())?;
+        let mut input = TrieInput::default();
+
+        let revert_state = consistent_view.revert_state(parent_hash)?;
+        input.append(revert_state);
+
+        // Extend with block we are validating root for.
+        input.append_ref(hashed_state);
+
+        ParallelStateRoot::new(consistent_view, input).incremental_root_with_updates()
     }
 }
 
@@ -165,6 +294,28 @@ pub enum PersistenceError {
     /// A provider error
     #[error(transparent)]
     ProviderError(#[from] ProviderError),
+
+    /// A state root error
+    #[error(transparent)]
+    StateRootError(#[from] AdvanceCalculateStateRootError),
+}
+
+/// This is an error that can come from advancing state root calculation. Either this can be a
+/// [`ProviderError`], or this can be a [`GotExpected`]
+#[derive(Debug, Error)]
+pub enum AdvanceCalculateStateRootError {
+    /// A provider error
+    #[error(transparent)]
+    Provider(#[from] ProviderError),
+    /// An error that can come from a state root diff
+    #[error(transparent)]
+    StateRootDiff(#[from] GotExpected<B256>),
+    /// An error that can come from a parallel state root error
+    #[error(transparent)]
+    ComputeFailed(#[from] ParallelStateRootError),
+    /// An error that can come from a trie update
+    #[error("Result not found")]
+    ResultNotFound(),
 }
 
 /// A signal to the persistence service that part of the tree state can be persisted.
@@ -176,6 +327,15 @@ pub enum PersistenceAction {
     /// First, header, transaction, and receipt-related data should be written to static files.
     /// Then the execution history-related data will be written to the database.
     SaveBlocks(Vec<ExecutedBlock>, oneshot::Sender<Option<BlockNumHash>>),
+
+    /// The section of tree state that should be persisted. These blocks are expected in order of
+    /// increasing block number.
+    /// This action will also calculate the state root for the given blocks.
+    SaveBlocksWithStateRootCalculation(
+        Vec<ExecutedBlock>,
+        B256,
+        oneshot::Sender<(Option<BlockNumHash>, TrieUpdates)>,
+    ),
 
     /// Removes block data above the given block number from the database.
     ///
@@ -204,11 +364,21 @@ impl PersistenceHandle {
     }
 
     /// Create a new [`PersistenceHandle`], and spawn the persistence service.
-    pub fn spawn_service<N: PersistenceNodeTypes>(
+    pub fn spawn_service<N: PersistenceNodeTypes, P>(
         provider_factory: ProviderFactory<N>,
+        view_provider: P,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
-    ) -> Self {
+    ) -> Self
+    where
+        P: DatabaseProviderFactory
+            + BlockReader
+            + StateProviderFactory
+            + StateReader
+            + Clone
+            + 'static,
+        <P as DatabaseProviderFactory>::Provider: BlockReader,
+    {
         // create the initial channels
         let (db_service_tx, db_service_rx) = std::sync::mpsc::channel();
 
@@ -216,8 +386,14 @@ impl PersistenceHandle {
         let persistence_handle = Self::new(db_service_tx);
 
         // spawn the persistence service
-        let db_service =
-            PersistenceService::new(provider_factory, db_service_rx, pruner, sync_metrics_tx);
+        let db_service = PersistenceService::new(
+            provider_factory,
+            view_provider,
+            db_service_rx,
+            pruner,
+            sync_metrics_tx,
+        );
+
         std::thread::Builder::new()
             .name("Persistence Service".to_string())
             .spawn(|| {
@@ -256,6 +432,23 @@ impl PersistenceHandle {
     }
 
     /// Persists the finalized block number on disk.
+    /// This will also calculate the state root for the given blocks.
+    /// The resulting [`TrieUpdates`] is returned in the receiver end of the sender argument.
+    /// The new tip hash is returned in the receiver end of the sender argument.
+    pub fn save_blocks_with_state_root_calculation(
+        &self,
+        blocks: Vec<ExecutedBlock>,
+        parent_hash: B256,
+        tx: oneshot::Sender<(Option<BlockNumHash>, TrieUpdates)>,
+    ) -> Result<(), SendError<PersistenceAction>> {
+        self.send_action(PersistenceAction::SaveBlocksWithStateRootCalculation(
+            blocks,
+            parent_hash,
+            tx,
+        ))
+    }
+
+    /// Persists the finalized block number on disk.
     pub fn save_finalized_block_number(
         &self,
         finalized_block: u64,
@@ -291,12 +484,13 @@ mod tests {
     use alloy_primitives::B256;
     use reth_chain_state::test_utils::TestBlockBuilder;
     use reth_exex_types::FinishedExExHeight;
-    use reth_provider::test_utils::create_test_provider_factory;
+    use reth_provider::{providers::BlockchainProvider2, test_utils::create_test_provider_factory};
     use reth_prune::Pruner;
     use tokio::sync::mpsc::unbounded_channel;
 
     fn default_persistence_handle() -> PersistenceHandle {
         let provider = create_test_provider_factory();
+        let view_provider = BlockchainProvider2::new(provider.clone()).unwrap();
 
         let (_finished_exex_height_tx, finished_exex_height_rx) =
             tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
@@ -305,7 +499,8 @@ mod tests {
             Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
 
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
-        PersistenceHandle::spawn_service(provider, pruner, sync_metrics_tx)
+
+        PersistenceHandle::spawn_service(provider, view_provider, pruner, sync_metrics_tx)
     }
 
     #[tokio::test]

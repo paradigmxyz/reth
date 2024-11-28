@@ -129,6 +129,9 @@ pub struct NodeConfig<ChainSpec> {
 
     /// All pruning related arguments
     pub pruning: PruningArgs,
+
+    /// Compute state root in background
+    pub compute_state_root_in_background: bool,
 }
 
 impl NodeConfig<ChainSpec> {
@@ -157,6 +160,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             dev: DevArgs::default(),
             pruning: PruningArgs::default(),
             datadir: DatadirArgs::default(),
+            compute_state_root_in_background: false,
         }
     }
 
@@ -445,6 +449,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             db: self.db,
             dev: self.dev,
             pruning: self.pruning,
+            compute_state_root_in_background: self.compute_state_root_in_background,
         }
     }
 }
@@ -471,6 +476,7 @@ impl<ChainSpec> Clone for NodeConfig<ChainSpec> {
             dev: self.dev,
             pruning: self.pruning.clone(),
             datadir: self.datadir.clone(),
+            compute_state_root_in_background: false,
         }
     }
 }
