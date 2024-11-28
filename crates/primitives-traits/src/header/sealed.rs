@@ -213,11 +213,8 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<H: SerdeBincodeCompat> SerializeAs<super::SealedHeader<H>> for SealedHeader<'_, H> {
-        fn serialize_as<S>(
-            source: &super::SealedHeader<H>,
-            serializer: S,
-        ) -> Result<S::Ok, S::Error>
+    impl SerializeAs<super::SealedHeader> for SealedHeader<'_> {
+        fn serialize_as<S>(source: &super::SealedHeader, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: Serializer,
         {
@@ -225,10 +222,8 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<'de, H: SerdeBincodeCompat> DeserializeAs<'de, super::SealedHeader<H>>
-        for SealedHeader<'de, H>
-    {
-        fn deserialize_as<D>(deserializer: D) -> Result<super::SealedHeader<H>, D::Error>
+    impl<'de> DeserializeAs<'de, super::SealedHeader> for SealedHeader<'de> {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::SealedHeader, D::Error>
         where
             D: Deserializer<'de>,
         {
