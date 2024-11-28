@@ -197,8 +197,12 @@ impl SparseStateTrie {
     }
 
     /// Remove the account leaf node.
-    pub fn remove_account_leaf(&mut self, path: &Nibbles) -> SparseStateTrieResult<()> {
-        self.state.remove_leaf(path)?;
+    pub fn remove_account_leaf(
+        &mut self,
+        path: &Nibbles,
+        fetch_node: impl FnMut(Nibbles) -> Option<Bytes>,
+    ) -> SparseStateTrieResult<()> {
+        self.state.remove_leaf(path, fetch_node)?;
         Ok(())
     }
 
@@ -218,8 +222,9 @@ impl SparseStateTrie {
         &mut self,
         address: B256,
         slot: &Nibbles,
+        fetch_node: impl FnMut(Nibbles) -> Option<Bytes>,
     ) -> SparseStateTrieResult<()> {
-        self.storages.entry(address).or_default().remove_leaf(slot)?;
+        self.storages.entry(address).or_default().remove_leaf(slot, fetch_node)?;
         Ok(())
     }
 

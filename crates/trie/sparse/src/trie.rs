@@ -2,7 +2,7 @@ use crate::{SparseTrieError, SparseTrieResult};
 use alloy_primitives::{
     hex, keccak256,
     map::{HashMap, HashSet},
-    B256,
+    Bytes, B256,
 };
 use alloy_rlp::Decodable;
 use reth_tracing::tracing::debug;
@@ -69,9 +69,13 @@ impl SparseTrie {
     }
 
     /// Remove the leaf node.
-    pub fn remove_leaf(&mut self, path: &Nibbles) -> SparseTrieResult<()> {
+    pub fn remove_leaf(
+        &mut self,
+        path: &Nibbles,
+        fetch_node: impl FnMut(Nibbles) -> Option<Bytes>,
+    ) -> SparseTrieResult<()> {
         let revealed = self.as_revealed_mut().ok_or(SparseTrieError::Blind)?;
-        revealed.remove_leaf(path)?;
+        revealed.remove_leaf(path, fetch_node)?;
         Ok(())
     }
 
@@ -352,7 +356,11 @@ impl RevealedSparseTrie {
     }
 
     /// Remove leaf node from the trie.
-    pub fn remove_leaf(&mut self, path: &Nibbles) -> SparseTrieResult<()> {
+    pub fn remove_leaf(
+        &mut self,
+        path: &Nibbles,
+        mut fetch_node: impl FnMut(Nibbles) -> Option<Bytes>,
+    ) -> SparseTrieResult<()> {
         self.prefix_set.insert(path.clone());
         self.values.remove(path);
 
@@ -450,9 +458,16 @@ impl RevealedSparseTrie {
                         let mut child_path = removed_path.clone();
                         child_path.push_unchecked(child_nibble);
 
-                        // Remove the only child node.
-                        let child = self.nodes.get(&child_path).unwrap();
+                        // Get the only child node.
+                        if self.nodes.get(&child_path).unwrap().is_hash() {
+                            debug!(target: "trie::sparse", ?removed_path, ?child_path, "Fetching the only child of a branch node");
+                            drop(child);
+                            if let Some(node) = fetch_node(child_path.clone()) {
+                                self.reveal_node_or_hash(child_path.clone(), &node)?;
+                            }
+                        }
 
+                        let child = self.nodes.get(&child_path).unwrap();
                         debug!(target: "trie::sparse", ?removed_path, ?child_path, ?child, "Branch node has only one child");
 
                         let mut delete_child = false;
@@ -986,6 +1001,11 @@ impl SparseNode {
     pub const fn new_leaf(key: Nibbles) -> Self {
         Self::Leaf { key, hash: None }
     }
+
+    /// Returns true if the node is a hash node.
+    pub const fn is_hash(&self) -> bool {
+        matches!(self, Self::Hash(_))
+    }
 }
 
 #[derive(Debug)]
@@ -1409,7 +1429,9 @@ mod tests {
             ])
         );
 
-        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3])).unwrap();
+        sparse
+            .remove_leaf(&Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), |_| unreachable!())
+            .unwrap();
 
         // Extension (Key = 5)
         // └── Branch (Mask = 1001)
@@ -1460,7 +1482,9 @@ mod tests {
             ])
         );
 
-        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1])).unwrap();
+        sparse
+            .remove_leaf(&Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), |_| unreachable!())
+            .unwrap();
 
         // Extension (Key = 5)
         // └── Branch (Mask = 1001)
@@ -1496,7 +1520,9 @@ mod tests {
             ])
         );
 
-        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2])).unwrap();
+        sparse
+            .remove_leaf(&Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), |_| unreachable!())
+            .unwrap();
 
         // Extension (Key = 5)
         // └── Branch (Mask = 1001)
@@ -1529,7 +1555,9 @@ mod tests {
             ])
         );
 
-        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0])).unwrap();
+        sparse
+            .remove_leaf(&Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), |_| unreachable!())
+            .unwrap();
 
         // Extension (Key = 5)
         // └── Branch (Mask = 1001)
@@ -1551,7 +1579,9 @@ mod tests {
             ])
         );
 
-        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3])).unwrap();
+        sparse
+            .remove_leaf(&Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), |_| unreachable!())
+            .unwrap();
 
         // Leaf (Key = 53302)
         pretty_assertions::assert_eq!(
@@ -1562,7 +1592,9 @@ mod tests {
             ),])
         );
 
-        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2])).unwrap();
+        sparse
+            .remove_leaf(&Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]), |_| unreachable!())
+            .unwrap();
 
         // Empty
         pretty_assertions::assert_eq!(
@@ -1597,7 +1629,7 @@ mod tests {
 
         // Removing a blinded leaf should result in an error
         assert_matches!(
-            sparse.remove_leaf(&Nibbles::from_nibbles([0x0])),
+            sparse.remove_leaf(&Nibbles::from_nibbles([0x0]), |_| unreachable!()),
             Err(SparseTrieError::BlindedNode { path, hash }) if path == Nibbles::from_nibbles([0x0]) && hash == B256::repeat_byte(1)
         );
     }
@@ -1652,7 +1684,7 @@ mod tests {
                     // that the sparse trie root still matches the hash builder root
                     for key in keys_to_delete {
                         state.remove(&key).unwrap();
-                        sparse.remove_leaf(&key).unwrap();
+                        sparse.remove_leaf(&key, |_| unreachable!()).unwrap();
                     }
 
                     // We need to clone the sparse trie, so that all updated branch nodes are
@@ -1844,7 +1876,7 @@ mod tests {
         );
 
         // Remove the leaf for the first key
-        sparse.remove_leaf(&key1()).unwrap();
+        sparse.remove_leaf(&key1(), |_| unreachable!()).unwrap();
 
         // Check that the branch node was turned into an extension node
         assert_eq!(
