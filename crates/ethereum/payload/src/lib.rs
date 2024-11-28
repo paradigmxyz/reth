@@ -351,7 +351,21 @@ where
             )
             .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
 
-        Some(Requests::new(vec![deposit_requests, withdrawal_requests, consolidation_requests]))
+        let mut requests = Requests::default();
+
+        if !deposit_requests.is_empty() {
+            requests.push_request(core::iter::once(0).chain(deposit_requests).collect());
+        }
+
+        if !withdrawal_requests.is_empty() {
+            requests.push_request(core::iter::once(1).chain(withdrawal_requests).collect());
+        }
+
+        if !consolidation_requests.is_empty() {
+            requests.push_request(core::iter::once(2).chain(consolidation_requests).collect());
+        }
+
+        Some(requests)
     } else {
         None
     };
@@ -438,6 +452,7 @@ where
         blob_gas_used: blob_gas_used.map(Into::into),
         excess_blob_gas: excess_blob_gas.map(Into::into),
         requests_hash,
+        target_blobs_per_block: None,
     };
 
     let withdrawals = chain_spec

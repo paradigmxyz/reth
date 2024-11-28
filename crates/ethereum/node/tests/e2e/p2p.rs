@@ -93,7 +93,7 @@ async fn e2e_test_send_transactions() -> eyre::Result<()> {
         let mut pending = vec![];
         for _ in 0..tx_count {
             let signer = signers.choose(&mut rng).unwrap();
-            let tx_type = TxType::try_from(rng.gen_range(0..=4)).unwrap();
+            let tx_type = TxType::try_from(rng.gen_range(0..=4) as u64).unwrap();
 
             let mut tx = TransactionRequest::default().with_from(signer.address());
 

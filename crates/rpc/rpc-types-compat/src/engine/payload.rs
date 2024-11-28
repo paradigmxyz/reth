@@ -5,7 +5,6 @@ use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, Header, EMPTY_OMMER_RO
 use alloy_eips::{
     eip2718::{Decodable2718, Encodable2718},
     eip4895::Withdrawals,
-    eip7685::Requests,
 };
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types_engine::{
@@ -77,6 +76,7 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
         ommers_hash: EMPTY_OMMER_ROOT_HASH,
         difficulty: Default::default(),
         nonce: Default::default(),
+        target_blobs_per_block: None,
     };
 
     Ok(Block { header, body: BlockBody { transactions, ..Default::default() } })
@@ -270,7 +270,7 @@ pub fn try_into_block(
     };
 
     base_payload.header.parent_beacon_block_root = sidecar.parent_beacon_block_root();
-    base_payload.header.requests_hash = sidecar.requests().map(Requests::requests_hash);
+    base_payload.header.requests_hash = sidecar.requests_hash();
 
     Ok(base_payload)
 }

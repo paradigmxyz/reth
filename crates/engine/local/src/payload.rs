@@ -1,6 +1,7 @@
 //! The implementation of the [`PayloadAttributesBuilder`] for the
 //! [`LocalEngineService`](super::service::LocalEngineService).
 
+use alloy_eips::eip4844;
 use alloy_primitives::{Address, B256};
 use reth_chainspec::EthereumHardforks;
 use reth_ethereum_engine_primitives::EthPayloadAttributes;
@@ -39,6 +40,14 @@ where
                 .chain_spec
                 .is_cancun_active_at_timestamp(timestamp)
                 .then(B256::random),
+            target_blobs_per_block: self
+                .chain_spec
+                .is_prague_active_at_timestamp(timestamp)
+                .then_some(eip4844::TARGET_BLOBS_PER_BLOCK),
+            max_blobs_per_block: self
+                .chain_spec
+                .is_prague_active_at_timestamp(timestamp)
+                .then_some(eip4844::MAX_BLOBS_PER_BLOCK as u64),
         }
     }
 }

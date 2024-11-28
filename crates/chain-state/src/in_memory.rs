@@ -12,7 +12,7 @@ use reth_chainspec::ChainInfo;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives::{
-    BlockWithSenders, HeaderExt, NodePrimitives, Receipts, SealedBlock, SealedBlockFor,
+    BlockWithSenders, NodePrimitives, Receipts, SealedBlock, SealedBlockFor,
     SealedBlockWithSenders, SealedHeader, TransactionMeta,
 };
 use reth_primitives_traits::{Block, BlockBody as _, SignedTransaction};

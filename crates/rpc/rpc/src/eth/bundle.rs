@@ -1,7 +1,7 @@
 //! `Eth` bundle implementation and helpers.
 
 use alloy_consensus::Transaction as _;
-use alloy_primitives::{Address, Keccak256, U256};
+use alloy_primitives::{Keccak256, U256};
 use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthChainSpec;
