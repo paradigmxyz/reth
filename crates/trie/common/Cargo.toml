@@ -18,7 +18,8 @@ alloy-rlp = { workspace = true, features = ["arrayvec"] }
 alloy-trie.workspace = true
 alloy-consensus.workspace = true
 alloy-genesis.workspace = true
-
+alloy-rpc-types-eth.workspace = true
+alloy-serde.workspace = true
 reth-primitives-traits.workspace = true
 reth-codecs.workspace = true
 revm-primitives.workspace = true
@@ -54,6 +55,7 @@ serde_json.workspace = true
 serde_with.workspace = true
 
 [features]
+eip1186 = []
 serde = [
     "dep:serde",
     "bytes/serde",

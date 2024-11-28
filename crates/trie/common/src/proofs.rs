@@ -8,6 +8,10 @@ use alloy_primitives::{
     Address, Bytes, B256, U256,
 };
 use alloy_rlp::{encode_fixed_size, Decodable, EMPTY_STRING_CODE};
+#[cfg(feature = "eip1186")]
+use alloy_rpc_types_eth::{EIP1186AccountProofResponse, EIP1186StorageProof};
+#[cfg(feature = "eip1186")]
+use alloy_serde::JsonStorageKey;
 use alloy_trie::{
     nodes::TrieNode,
     proof::{verify_proof, ProofNodes, ProofVerificationError},
@@ -188,6 +192,38 @@ pub struct AccountProof {
     pub storage_root: B256,
     /// Array of storage proofs as requested.
     pub storage_proofs: Vec<StorageProof>,
+}
+
+#[cfg(feature = "eip1186")]
+impl AccountProof {
+    /// Convert into an EIP-1186 account proof response
+    pub fn into_eip1186_response(self, slots: Vec<JsonStorageKey>) -> EIP1186AccountProofResponse {
+        let info = self.info.unwrap_or_default();
+        EIP1186AccountProofResponse {
+            address: self.address,
+            balance: info.balance,
+            code_hash: info.get_bytecode_hash(),
+            nonce: info.nonce,
+            storage_hash: self.storage_root,
+            account_proof: self.proof,
+            storage_proof: self
+                .storage_proofs
+                .into_iter()
+                .filter_map(|proof| {
+                    let input_slot = slots.iter().find(|s| s.as_b256() == proof.key)?;
+                    Some(proof.into_eip1186_proof(*input_slot))
+                })
+                .collect(),
+        }
+    }
+}
+
+impl StorageProof {
+    #[cfg(feature = "eip1186")]
+    /// Convert into an EIP-1186 storage proof
+    pub fn into_eip1186_proof(self, slot: JsonStorageKey) -> EIP1186StorageProof {
+        EIP1186StorageProof { key: slot, value: self.value, proof: self.proof }
+    }
 }
 
 impl Default for AccountProof {
