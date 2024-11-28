@@ -1,6 +1,6 @@
 //! Traits for configuring a node.
 
-use crate::{ConfigureEvm, FullNodePrimitives};
+use crate::ConfigureEvm;
 use alloy_consensus::Header;
 use alloy_rpc_types_engine::JwtSecret;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
@@ -21,7 +21,7 @@ use std::{future::Future, marker::PhantomData};
 /// Its types are configured by node internally and are not intended to be user configurable.
 pub trait FullNodeTypes: Send + Sync + Unpin + 'static {
     /// Node's types with the database.
-    type Types: NodeTypesWithDB<Primitives: FullNodePrimitives> + NodeTypesWithEngine;
+    type Types: NodeTypesWithDB + NodeTypesWithEngine;
     /// The provider type used to interact with the node.
     type Provider: FullProvider<Self::Types>;
 }
@@ -37,7 +37,7 @@ pub struct FullNodeTypesAdapter<Types, Provider> {
 
 impl<Types, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, Provider>
 where
-    Types: NodeTypesWithDB<Primitives: FullNodePrimitives> + NodeTypesWithEngine,
+    Types: NodeTypesWithDB + NodeTypesWithEngine,
     Provider: FullProvider<Types>,
 {
     type Types = Types;

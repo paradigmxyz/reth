@@ -12,7 +12,6 @@ use reth_evm::execute::BlockExecutorProvider;
 use reth_metrics::{metrics::Counter, Metrics};
 use reth_node_api::NodePrimitives;
 use reth_primitives::{EthPrimitives, SealedHeader};
-use reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat;
 use reth_provider::HeaderProvider;
 use reth_tracing::tracing::{debug, warn};
 use std::{
@@ -350,7 +349,7 @@ where
 impl<P, N> ExExManager<P, N>
 where
     P: HeaderProvider,
-    N: NodePrimitives<BlockHeader: SerdeBincodeCompat, BlockBody: SerdeBincodeCompat>,
+    N: NodePrimitives,
 {
     /// Finalizes the WAL according to the passed finalized header.
     ///
@@ -424,7 +423,7 @@ where
 impl<P, N> Future for ExExManager<P, N>
 where
     P: HeaderProvider + Unpin + 'static,
-    N: NodePrimitives<BlockBody: SerdeBincodeCompat, BlockHeader: SerdeBincodeCompat>,
+    N: NodePrimitives,
 {
     type Output = eyre::Result<()>;
 

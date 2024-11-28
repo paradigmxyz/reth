@@ -5,7 +5,6 @@ pub use cache::BlockCache;
 mod storage;
 use reth_node_api::NodePrimitives;
 use reth_primitives::EthPrimitives;
-use reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat;
 pub use storage::Storage;
 mod metrics;
 use metrics::Metrics;
@@ -41,7 +40,7 @@ pub struct Wal<N: NodePrimitives = EthPrimitives> {
 
 impl<N> Wal<N>
 where
-    N: NodePrimitives<BlockHeader: SerdeBincodeCompat, BlockBody: SerdeBincodeCompat>,
+    N: NodePrimitives,
 {
     /// Creates a new instance of [`Wal`].
     pub fn new(directory: impl AsRef<Path>) -> eyre::Result<Self> {
@@ -92,7 +91,7 @@ struct WalInner<N: NodePrimitives> {
 
 impl<N> WalInner<N>
 where
-    N: NodePrimitives<BlockHeader: SerdeBincodeCompat, BlockBody: SerdeBincodeCompat>,
+    N: NodePrimitives,
 {
     fn new(directory: impl AsRef<Path>) -> eyre::Result<Self> {
         let mut wal = Self {
@@ -213,7 +212,7 @@ pub struct WalHandle<N: NodePrimitives> {
 
 impl<N> WalHandle<N>
 where
-    N: NodePrimitives<BlockHeader: SerdeBincodeCompat, BlockBody: SerdeBincodeCompat>,
+    N: NodePrimitives,
 {
     /// Returns the notification for the given committed block hash if it exists.
     pub fn get_committed_notification_by_block_hash(

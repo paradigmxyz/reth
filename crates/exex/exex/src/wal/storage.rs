@@ -8,7 +8,6 @@ use eyre::OptionExt;
 use reth_exex_types::ExExNotification;
 use reth_node_api::NodePrimitives;
 use reth_primitives::EthPrimitives;
-use reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat;
 use reth_tracing::tracing::debug;
 use tracing::instrument;
 
@@ -27,7 +26,7 @@ pub struct Storage<N: NodePrimitives = EthPrimitives> {
 
 impl<N> Storage<N>
 where
-    N: NodePrimitives<BlockHeader: SerdeBincodeCompat, BlockBody: SerdeBincodeCompat>,
+    N: NodePrimitives,
 {
     /// Creates a new instance of [`Storage`] backed by the file at the given path and creates
     /// it doesn't exist.

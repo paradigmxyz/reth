@@ -3,7 +3,6 @@ use reth_exex_types::ExExHead;
 use reth_node_api::{FullNodeComponents, NodePrimitives, NodeTypes};
 use reth_node_core::node_config::NodeConfig;
 use reth_primitives::Head;
-use reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat;
 use reth_provider::BlockReader;
 use reth_tasks::TaskExecutor;
 use std::fmt::Debug;
@@ -60,9 +59,7 @@ where
     Node: FullNodeComponents,
     Node::Provider: Debug + BlockReader,
     Node::Executor: Debug,
-    Node::Types: NodeTypes<
-        Primitives: NodePrimitives<BlockHeader: SerdeBincodeCompat, BlockBody: SerdeBincodeCompat>,
-    >,
+    Node::Types: NodeTypes<Primitives: NodePrimitives>,
 {
     /// Returns dynamic version of the context
     pub fn into_dyn(self) -> ExExContextDyn<<Node::Types as NodeTypes>::Primitives> {
@@ -73,9 +70,7 @@ where
 impl<Node> ExExContext<Node>
 where
     Node: FullNodeComponents,
-    Node::Types: NodeTypes<
-        Primitives: NodePrimitives<BlockHeader: SerdeBincodeCompat, BlockBody: SerdeBincodeCompat>,
-    >,
+    Node::Types: NodeTypes<Primitives: NodePrimitives>,
 {
     /// Returns the transaction pool of the node.
     pub fn pool(&self) -> &Node::Pool {
