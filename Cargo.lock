@@ -6827,6 +6827,7 @@ dependencies = [
  "reth-chainspec",
  "reth-consensus",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-storage-api",
  "revm-primitives",
 ]
