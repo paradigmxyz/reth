@@ -11,11 +11,11 @@ use revm_primitives::calc_excess_blob_gas;
 
 /// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
 #[inline]
-pub const fn validate_header_gas(header: &Header) -> Result<(), ConsensusError> {
-    if header.gas_used > header.gas_limit {
+pub fn validate_header_gas<H: BlockHeader>(header: &H) -> Result<(), ConsensusError> {
+    if header.gas_used() > header.gas_limit() {
         return Err(ConsensusError::HeaderGasUsedExceedsGasLimit {
-            gas_used: header.gas_used,
-            gas_limit: header.gas_limit,
+            gas_used: header.gas_used(),
+            gas_limit: header.gas_limit(),
         })
     }
     Ok(())
