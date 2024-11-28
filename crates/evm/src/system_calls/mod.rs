@@ -3,7 +3,9 @@
 use crate::ConfigureEvm;
 use alloc::{boxed::Box, sync::Arc};
 use alloy_consensus::Header;
-use alloy_eips::eip7685::Requests;
+use alloy_eips::{
+    eip7002::WITHDRAWAL_REQUEST_TYPE, eip7251::CONSOLIDATION_REQUEST_TYPE, eip7685::Requests,
+};
 use alloy_primitives::Bytes;
 use core::fmt::Display;
 use reth_chainspec::EthereumHardforks;
@@ -132,13 +134,19 @@ where
         // Collect all EIP-7685 requests
         let withdrawal_requests = self.apply_withdrawal_requests_contract_call(evm)?;
         if !withdrawal_requests.is_empty() {
-            requests.push_request(core::iter::once(1).chain(withdrawal_requests).collect());
+            requests.push_request(
+                core::iter::once(WITHDRAWAL_REQUEST_TYPE).chain(withdrawal_requests).collect(),
+            );
         }
 
         // Collect all EIP-7251 requests
         let consolidation_requests = self.apply_consolidation_requests_contract_call(evm)?;
         if !consolidation_requests.is_empty() {
-            requests.push_request(core::iter::once(2).chain(consolidation_requests).collect());
+            requests.push_request(
+                core::iter::once(CONSOLIDATION_REQUEST_TYPE)
+                    .chain(consolidation_requests)
+                    .collect(),
+            );
         }
 
         Ok(requests)

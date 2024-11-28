@@ -358,11 +358,17 @@ where
         }
 
         if !withdrawal_requests.is_empty() {
-            requests.push_request(core::iter::once(1).chain(withdrawal_requests).collect());
+            requests.push_request(
+                core::iter::once(WITHDRAWAL_REQUEST_TYPE).chain(withdrawal_requests).collect(),
+            );
         }
 
         if !consolidation_requests.is_empty() {
-            requests.push_request(core::iter::once(2).chain(consolidation_requests).collect());
+            requests.push_request(
+                core::iter::once(CONSOLIDATION_REQUEST_TYPE)
+                    .chain(consolidation_requests)
+                    .collect(),
+            );
         }
 
         Some(requests)
