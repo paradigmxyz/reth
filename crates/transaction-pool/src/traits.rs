@@ -806,7 +806,7 @@ pub trait BestTransactions: Iterator + Send {
     /// Implementers must ensure all subsequent transaction _don't_ depend on this transaction.
     /// In other words, this must remove the given transaction _and_ drain all transaction that
     /// depend on it.
-    fn mark_invalid(&mut self, transaction: &Self::Item);
+    fn mark_invalid(&mut self, transaction: &Self::Item, kind: InvalidPoolTransactionError);
 
     /// An iterator may be able to receive additional pending transactions that weren't present it
     /// the pool when it was created.
@@ -868,8 +868,8 @@ impl<T> BestTransactions for Box<T>
 where
     T: BestTransactions + ?Sized,
 {
-    fn mark_invalid(&mut self, transaction: &Self::Item) {
-        (**self).mark_invalid(transaction);
+    fn mark_invalid(&mut self, transaction: &Self::Item, kind: InvalidPoolTransactionError) {
+        (**self).mark_invalid(transaction, kind)
     }
 
     fn no_updates(&mut self) {
@@ -887,7 +887,7 @@ where
 
 /// A no-op implementation that yields no transactions.
 impl<T> BestTransactions for std::iter::Empty<T> {
-    fn mark_invalid(&mut self, _tx: &T) {}
+    fn mark_invalid(&mut self, _tx: &T, _kind: InvalidPoolTransactionError) {}
 
     fn no_updates(&mut self) {}
 
