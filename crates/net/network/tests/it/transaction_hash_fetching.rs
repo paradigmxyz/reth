@@ -1,11 +1,11 @@
 #[cfg(test)]
 mod tests {
-    use crate::{
+    use alloy_primitives::U256;
+    use rand::thread_rng;
+    use reth_network::{
         test_utils::Testnet,
         transactions::{TransactionPropagationMode::Max, TransactionsManagerConfig},
     };
-    use alloy_primitives::U256;
-    use rand::thread_rng;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_tracing::init_test_tracing;
     use reth_transaction_pool::{
