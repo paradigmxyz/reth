@@ -6,17 +6,14 @@ use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
     SignedBidSubmissionV3, SignedBidSubmissionV4,
 };
+use alloy_rpc_types_engine::BlobsBundleV1;
+use alloy_rpc_types_eth::TransactionRequest;
 use rand::{rngs::StdRng, Rng, SeedableRng};
-use reth::{
-    payload::BuiltPayload,
-    rpc::{
-        compat::engine::payload::block_to_payload_v3,
-        types::{engine::BlobsBundleV1, TransactionRequest},
-    },
-};
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::setup_engine;
+use reth_node_core::rpc::compat::engine::payload::block_to_payload_v3;
 use reth_node_ethereum::EthereumNode;
+use reth_payload_primitives::BuiltPayload;
 use std::sync::Arc;
 
 alloy_sol_types::sol! {
