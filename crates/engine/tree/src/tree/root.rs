@@ -10,7 +10,7 @@ use reth_trie::{
 };
 use reth_trie_db::DatabaseProof;
 use reth_trie_parallel::root::ParallelStateRootError;
-use reth_trie_sparse::{SparseStateTrie, SparseStateTrieResult};
+use reth_trie_sparse::{SparseStateTrie, SparseStateTrieResult, SparseTrieError};
 use revm_primitives::{keccak256, EvmState, B256};
 use std::{
     collections::BTreeMap,
@@ -489,7 +489,7 @@ fn update_sparse_trie(
 
     // Update storage slots with new values and calculate storage roots.
     for (address, storage) in state.storages {
-        let storage_trie = trie.revealed_storage_trie_mut(&address)?;
+        let storage_trie = trie.storage_trie_mut(&address).ok_or(SparseTrieError::Blind)?;
 
         if storage.wiped {
             storage_trie.wipe();
