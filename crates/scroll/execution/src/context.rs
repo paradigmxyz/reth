@@ -1,68 +1,75 @@
-#[cfg(feature = "test-utils")]
-use reth_revm::{database::StateProviderDatabase, db::CacheDB};
-use reth_revm::{Database, State};
+#![allow(clippy::useless_conversion)]
+
+#[cfg(any(not(feature = "scroll"), feature = "test-utils"))]
+use reth_revm::{cached::CachedReadsDbMut, revm::CacheDB, DatabaseRef};
+use reth_revm::{
+    database::{EvmStateProvider, StateProviderDatabase},
+    revm::State,
+};
+#[cfg(feature = "scroll")]
+use reth_scroll_storage::ScrollStateProviderDatabase;
 
 /// Finalize the execution of the type and return the output
-pub trait FinalizeExecution<Output> {
+pub trait FinalizeExecution {
+    /// The output of the finalization.
+    type Output;
+
     /// Finalize the state and return the output.
-    fn finalize(&mut self) -> Output;
+    fn finalize(&mut self) -> Self::Output;
 }
 
-impl<DB: Database + ContextFul> FinalizeExecution<reth_scroll_revm::states::ScrollBundleState>
-    for State<DB>
-{
-    fn finalize(&mut self) -> reth_scroll_revm::states::ScrollBundleState {
+#[cfg(feature = "scroll")]
+impl<DB: EvmStateProvider> FinalizeExecution for State<ScrollStateProviderDatabase<DB>> {
+    type Output = reth_revm::states::ScrollBundleState;
+
+    fn finalize(&mut self) -> Self::Output {
         let bundle = self.take_bundle();
-        (bundle, self.database.context()).into()
+        (bundle, &self.database.post_execution_context).into()
     }
 }
-
-/// A type that returns additional execution context.
-pub trait ContextFul: WithContext<Context = ExecutionContext> {}
-impl<T> ContextFul for T where T: WithContext<Context = ExecutionContext> {}
-
-/// Types that can provide a context.
-#[auto_impl::auto_impl(&, &mut)]
-pub trait WithContext {
-    /// The context returned.
-    type Context;
-
-    /// Returns the context from the type.
-    fn context(&self) -> &Self::Context;
-}
-
-#[cfg(not(feature = "scroll"))]
-type ExecutionContext = ();
-#[cfg(feature = "scroll")]
-type ExecutionContext = reth_scroll_primitives::ScrollPostExecutionContext;
 
 #[cfg(feature = "scroll")]
-impl<DB> WithContext for reth_scroll_storage::ScrollStateProviderDatabase<DB> {
-    type Context = ExecutionContext;
+impl<DB: EvmStateProvider> FinalizeExecution for State<&mut ScrollStateProviderDatabase<DB>> {
+    type Output = reth_revm::states::ScrollBundleState;
 
-    fn context(&self) -> &Self::Context {
-        &self.post_execution_context
+    fn finalize(&mut self) -> Self::Output {
+        let bundle = self.take_bundle();
+        (bundle, &self.database.post_execution_context).into()
     }
 }
 
-#[cfg(feature = "test-utils")]
-static DEFAULT_CONTEXT: std::sync::LazyLock<ExecutionContext> =
-    std::sync::LazyLock::new(Default::default);
+#[cfg(any(not(feature = "scroll"), feature = "test-utils"))]
+impl<DB: EvmStateProvider> FinalizeExecution for State<StateProviderDatabase<DB>> {
+    type Output = reth_revm::db::BundleState;
 
-#[cfg(feature = "test-utils")]
-impl<DB> WithContext for StateProviderDatabase<DB> {
-    type Context = ExecutionContext;
-
-    fn context(&self) -> &Self::Context {
-        &DEFAULT_CONTEXT
+    fn finalize(&mut self) -> Self::Output {
+        self.take_bundle().into()
     }
 }
 
-#[cfg(feature = "test-utils")]
-impl<DB> WithContext for CacheDB<DB> {
-    type Context = ExecutionContext;
+#[cfg(any(not(feature = "scroll"), feature = "test-utils"))]
+impl<DB: EvmStateProvider> FinalizeExecution for State<&mut StateProviderDatabase<DB>> {
+    type Output = reth_revm::db::BundleState;
 
-    fn context(&self) -> &Self::Context {
-        &DEFAULT_CONTEXT
+    fn finalize(&mut self) -> Self::Output {
+        self.take_bundle().into()
+    }
+}
+
+#[cfg(any(not(feature = "scroll"), feature = "test-utils"))]
+impl<DB: DatabaseRef> FinalizeExecution for State<CacheDB<DB>> {
+    type Output = reth_revm::db::BundleState;
+
+    fn finalize(&mut self) -> Self::Output {
+        self.take_bundle().into()
+    }
+}
+
+#[cfg(any(not(feature = "scroll"), feature = "test-utils"))]
+impl<DB: DatabaseRef> FinalizeExecution for State<CachedReadsDbMut<'_, DB>> {
+    type Output = reth_revm::db::BundleState;
+
+    fn finalize(&mut self) -> Self::Output {
+        self.take_bundle().into()
     }
 }

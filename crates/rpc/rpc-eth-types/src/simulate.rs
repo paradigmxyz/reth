@@ -12,7 +12,6 @@ use reth_primitives::{
     proofs::{calculate_receipt_root, calculate_transaction_root},
     BlockBody, BlockWithSenders, Receipt, TransactionSigned,
 };
-use reth_revm::database::StateProviderDatabase;
 use reth_rpc_server_types::result::rpc_err;
 use reth_rpc_types_compat::{block::from_block, TransactionCompat};
 use reth_storage_api::StateRootProvider;
@@ -151,7 +150,12 @@ pub fn build_block<T: TransactionCompat<Error: FromEthApiError>>(
     parent_hash: B256,
     total_difficulty: U256,
     full_transactions: bool,
-    db: &CacheDB<StateProviderDatabase<StateProviderTraitObjWrapper<'_>>>,
+    #[cfg(feature = "scroll")] db: &CacheDB<
+        reth_scroll_storage::ScrollStateProviderDatabase<StateProviderTraitObjWrapper<'_>>,
+    >,
+    #[cfg(not(feature = "scroll"))] db: &CacheDB<
+        reth_revm::database::StateProviderDatabase<StateProviderTraitObjWrapper<'_>>,
+    >,
     tx_resp_builder: &T,
 ) -> Result<SimulatedBlock<Block<T::Transaction>>, T::Error> {
     let mut calls: Vec<SimCallResult> = Vec::with_capacity(results.len());
@@ -232,7 +236,13 @@ pub fn build_block<T: TransactionCompat<Error: FromEthApiError>>(
     let mut hashed_state = HashedPostState::default();
     for (address, account) in &db.accounts {
         let hashed_address = keccak256(address);
-        hashed_state.accounts.insert(hashed_address, Some(account.info.clone().into()));
+        #[cfg(feature = "scroll")]
+        let hashed_account =
+            Into::<revm::AccountInfo>::into((account.info.clone(), &db.db.post_execution_context))
+                .into();
+        #[cfg(not(feature = "scroll"))]
+        let hashed_account = account.info.clone().into();
+        hashed_state.accounts.insert(hashed_address, Some(hashed_account));
 
         let storage = hashed_state
             .storages

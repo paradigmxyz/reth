@@ -472,6 +472,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::useless_conversion)]
+
     use super::*;
     use crate::{
         test_utils::create_test_provider_factory, AccountReader, StorageTrieWriter, TrieWriter,
@@ -570,13 +572,13 @@ mod tests {
 
         let mut state = State::builder().with_bundle_update().build();
         state.insert_not_existing(address_a);
-        state.insert_account(address_b, account_b.clone());
+        state.insert_account(address_b, account_b.clone().into());
 
         // 0x00.. is created
         state.commit(HashMap::from_iter([(
             address_a,
             RevmAccount {
-                info: account_a.clone(),
+                info: account_a.clone().into(),
                 status: AccountStatus::Touched | AccountStatus::Created,
                 storage: HashMap::default(),
             },
@@ -586,7 +588,7 @@ mod tests {
         state.commit(HashMap::from_iter([(
             address_b,
             RevmAccount {
-                info: account_b_changed.clone(),
+                info: account_b_changed.clone().into(),
                 status: AccountStatus::Touched,
                 storage: HashMap::default(),
             },
@@ -596,8 +598,10 @@ mod tests {
         let mut revm_bundle_state = state.take_bundle();
 
         // Write plain state and reverts separately.
-        let reverts = revm_bundle_state.take_all_reverts().to_plain_state_reverts();
-        let plain_state = revm_bundle_state.to_plain_state(OriginalValuesKnown::Yes);
+        let reverts: revm::db::states::PlainStateReverts =
+            revm_bundle_state.take_all_reverts().to_plain_state_reverts().into();
+        let plain_state: revm::db::states::StateChangeset =
+            revm_bundle_state.to_plain_state(OriginalValuesKnown::Yes).into();
         assert!(plain_state.storage.is_empty());
         assert!(plain_state.contracts.is_empty());
         provider.write_state_changes(plain_state).expect("Could not write plain state to DB");
@@ -638,14 +642,14 @@ mod tests {
         );
 
         let mut state = State::builder().with_bundle_update().build();
-        state.insert_account(address_b, account_b_changed.clone());
+        state.insert_account(address_b, account_b_changed.clone().into());
 
         // 0xff.. is destroyed
         state.commit(HashMap::from_iter([(
             address_b,
             RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::SelfDestructed,
-                info: account_b_changed,
+                info: account_b_changed.into(),
                 storage: HashMap::default(),
             },
         )]));
@@ -654,8 +658,10 @@ mod tests {
         let mut revm_bundle_state = state.take_bundle();
 
         // Write plain state and reverts separately.
-        let reverts = revm_bundle_state.take_all_reverts().to_plain_state_reverts();
-        let plain_state = revm_bundle_state.to_plain_state(OriginalValuesKnown::Yes);
+        let reverts: revm::db::states::PlainStateReverts =
+            revm_bundle_state.take_all_reverts().to_plain_state_reverts().into();
+        let plain_state: revm::db::states::StateChangeset =
+            revm_bundle_state.to_plain_state(OriginalValuesKnown::Yes).into();
         // Account B selfdestructed so flag for it should be present.
         assert_eq!(
             plain_state.storage,
@@ -699,7 +705,7 @@ mod tests {
         state.insert_not_existing(address_a);
         state.insert_account_with_storage(
             address_b,
-            account_b.clone(),
+            account_b.clone().into(),
             HashMap::from_iter([(U256::from(1), U256::from(1))]),
         );
 
@@ -708,7 +714,7 @@ mod tests {
                 address_a,
                 RevmAccount {
                     status: AccountStatus::Touched | AccountStatus::Created,
-                    info: RevmAccountInfo::default(),
+                    info: RevmAccountInfo::default().into(),
                     // 0x00 => 0 => 1
                     // 0x01 => 0 => 2
                     storage: HashMap::from_iter([
@@ -727,7 +733,7 @@ mod tests {
                 address_b,
                 RevmAccount {
                     status: AccountStatus::Touched,
-                    info: account_b,
+                    info: account_b.into(),
                     // 0x01 => 1 => 2
                     storage: HashMap::from_iter([(
                         U256::from(1),
@@ -744,7 +750,7 @@ mod tests {
         state.merge_transitions(BundleRetention::Reverts);
 
         let outcome =
-            ExecutionOutcome::new(state.take_bundle(), Receipts::default(), 1, Vec::new());
+            ExecutionOutcome::new(state.take_bundle().into(), Receipts::default(), 1, Vec::new());
         let mut writer = UnifiedStorageWriter::from_database(&provider);
         writer
             .write_to_storage(outcome, OriginalValuesKnown::Yes)
@@ -832,20 +838,20 @@ mod tests {
 
         // Delete account A
         let mut state = State::builder().with_bundle_update().build();
-        state.insert_account(address_a, RevmAccountInfo::default());
+        state.insert_account(address_a, RevmAccountInfo::default().into());
 
         state.commit(HashMap::from_iter([(
             address_a,
             RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::SelfDestructed,
-                info: RevmAccountInfo::default(),
+                info: RevmAccountInfo::default().into(),
                 storage: HashMap::default(),
             },
         )]));
 
         state.merge_transitions(BundleRetention::Reverts);
         let outcome =
-            ExecutionOutcome::new(state.take_bundle(), Receipts::default(), 2, Vec::new());
+            ExecutionOutcome::new(state.take_bundle().into(), Receipts::default(), 2, Vec::new());
         let mut writer = UnifiedStorageWriter::from_database(&provider);
         writer
             .write_to_storage(outcome, OriginalValuesKnown::Yes)
@@ -894,7 +900,7 @@ mod tests {
         init_state.commit(HashMap::from_iter([(
             address1,
             RevmAccount {
-                info: account_info.clone(),
+                info: account_info.clone().into(),
                 status: AccountStatus::Touched | AccountStatus::Created,
                 // 0x00 => 0 => 1
                 // 0x01 => 0 => 2
@@ -912,8 +918,12 @@ mod tests {
         )]));
         init_state.merge_transitions(BundleRetention::Reverts);
 
-        let outcome =
-            ExecutionOutcome::new(init_state.take_bundle(), Receipts::default(), 0, Vec::new());
+        let outcome = ExecutionOutcome::new(
+            init_state.take_bundle().into(),
+            Receipts::default(),
+            0,
+            Vec::new(),
+        );
         let mut writer = UnifiedStorageWriter::from_database(&provider);
         writer
             .write_to_storage(outcome, OriginalValuesKnown::Yes)
@@ -922,7 +932,7 @@ mod tests {
         let mut state = State::builder().with_bundle_update().build();
         state.insert_account_with_storage(
             address1,
-            account_info.clone(),
+            account_info.clone().into(),
             HashMap::from_iter([(U256::ZERO, U256::from(1)), (U256::from(1), U256::from(2))]),
         );
 
@@ -931,7 +941,7 @@ mod tests {
             address1,
             RevmAccount {
                 status: AccountStatus::Touched,
-                info: account_info.clone(),
+                info: account_info.clone().into(),
                 // 0x00 => 1 => 2
                 storage: HashMap::from_iter([(
                     U256::ZERO,
@@ -950,7 +960,7 @@ mod tests {
             address1,
             RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::SelfDestructed,
-                info: account_info.clone(),
+                info: account_info.clone().into(),
                 storage: HashMap::default(),
             },
         )]));
@@ -961,7 +971,7 @@ mod tests {
             address1,
             RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::Created,
-                info: account_info.clone(),
+                info: account_info.clone().into(),
                 storage: HashMap::default(),
             },
         )]));
@@ -972,7 +982,7 @@ mod tests {
             address1,
             RevmAccount {
                 status: AccountStatus::Touched,
-                info: account_info.clone(),
+                info: account_info.clone().into(),
                 // 0x00 => 0 => 2
                 // 0x02 => 0 => 4
                 // 0x06 => 0 => 6
@@ -999,7 +1009,7 @@ mod tests {
             address1,
             RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::SelfDestructed,
-                info: account_info.clone(),
+                info: account_info.clone().into(),
                 storage: HashMap::default(),
             },
         )]));
@@ -1010,7 +1020,7 @@ mod tests {
             address1,
             RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::Created,
-                info: account_info.clone(),
+                info: account_info.clone().into(),
                 storage: HashMap::default(),
             },
         )]));
@@ -1018,7 +1028,7 @@ mod tests {
             address1,
             RevmAccount {
                 status: AccountStatus::Touched,
-                info: account_info.clone(),
+                info: account_info.clone().into(),
                 // 0x00 => 0 => 2
                 storage: HashMap::from_iter([(
                     U256::ZERO,
@@ -1030,7 +1040,7 @@ mod tests {
             address1,
             RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::SelfDestructed,
-                info: account_info.clone(),
+                info: account_info.clone().into(),
                 storage: HashMap::default(),
             },
         )]));
@@ -1038,7 +1048,7 @@ mod tests {
             address1,
             RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::Created,
-                info: account_info.clone(),
+                info: account_info.clone().into(),
                 storage: HashMap::default(),
             },
         )]));
@@ -1049,7 +1059,7 @@ mod tests {
             address1,
             RevmAccount {
                 status: AccountStatus::Touched,
-                info: account_info,
+                info: account_info.into(),
                 // 0x00 => 0 => 9
                 storage: HashMap::from_iter([(
                     U256::ZERO,
@@ -1059,7 +1069,7 @@ mod tests {
         )]));
         state.merge_transitions(BundleRetention::Reverts);
 
-        let bundle = state.take_bundle();
+        let bundle = state.take_bundle().into();
 
         let outcome: ExecutionOutcome =
             ExecutionOutcome::new(bundle, Receipts::default(), 1, Vec::new());
@@ -1210,7 +1220,7 @@ mod tests {
         init_state.commit(HashMap::from_iter([(
             address1,
             RevmAccount {
-                info: account1.clone(),
+                info: account1.clone().into(),
                 status: AccountStatus::Touched | AccountStatus::Created,
                 // 0x00 => 0 => 1
                 // 0x01 => 0 => 2
@@ -1227,8 +1237,12 @@ mod tests {
             },
         )]));
         init_state.merge_transitions(BundleRetention::Reverts);
-        let outcome =
-            ExecutionOutcome::new(init_state.take_bundle(), Receipts::default(), 0, Vec::new());
+        let outcome = ExecutionOutcome::new(
+            init_state.take_bundle().into(),
+            Receipts::default(),
+            0,
+            Vec::new(),
+        );
         let mut writer = UnifiedStorageWriter::from_database(&provider);
         writer
             .write_to_storage(outcome, OriginalValuesKnown::Yes)
@@ -1237,7 +1251,7 @@ mod tests {
         let mut state = State::builder().with_bundle_update().build();
         state.insert_account_with_storage(
             address1,
-            account1.clone(),
+            account1.clone().into(),
             HashMap::from_iter([(U256::ZERO, U256::from(1)), (U256::from(1), U256::from(2))]),
         );
 
@@ -1246,7 +1260,7 @@ mod tests {
             address1,
             RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::SelfDestructed,
-                info: account1.clone(),
+                info: account1.clone().into(),
                 storage: HashMap::default(),
             },
         )]));
@@ -1255,7 +1269,7 @@ mod tests {
             address1,
             RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::Created,
-                info: account1.clone(),
+                info: account1.clone().into(),
                 storage: HashMap::default(),
             },
         )]));
@@ -1264,7 +1278,7 @@ mod tests {
             address1,
             RevmAccount {
                 status: AccountStatus::Touched,
-                info: account1,
+                info: account1.into(),
                 // 0x01 => 0 => 5
                 storage: HashMap::from_iter([(
                     U256::from(1),
@@ -1276,7 +1290,7 @@ mod tests {
         // Commit block #1 changes to the database.
         state.merge_transitions(BundleRetention::Reverts);
         let outcome =
-            ExecutionOutcome::new(state.take_bundle(), Receipts::default(), 1, Vec::new());
+            ExecutionOutcome::new(state.take_bundle().into(), Receipts::default(), 1, Vec::new());
         let mut writer = UnifiedStorageWriter::from_database(&provider);
         writer
             .write_to_storage(outcome, OriginalValuesKnown::Yes)
@@ -1381,7 +1395,7 @@ mod tests {
                 StateRoot::overlay_root(
                     tx,
                     ExecutionOutcome::<Receipt>::new(
-                        state.bundle_state.clone(),
+                        state.bundle_state.clone().into(),
                         Receipts::default(),
                         0,
                         Vec::new()
@@ -1408,7 +1422,7 @@ mod tests {
             address1,
             RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::SelfDestructed,
-                info: RevmAccountInfo::default(),
+                info: RevmAccountInfo::default().into(),
                 storage: HashMap::default(),
             },
         )]));

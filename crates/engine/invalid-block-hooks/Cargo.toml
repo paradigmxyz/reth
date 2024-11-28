@@ -28,6 +28,11 @@ alloy-rlp.workspace = true
 alloy-rpc-types-debug.workspace = true
 alloy-consensus.workspace = true
 
+# scroll
+reth-scroll-execution.workspace = true
+reth-scroll-storage = { workspace = true, optional = true }
+reth-scroll-revm = { workspace = true, optional = true }
+
 # async
 futures.workspace = true
 
@@ -37,3 +42,14 @@ jsonrpsee.workspace = true
 pretty_assertions = "1.4"
 serde.workspace = true
 serde_json.workspace = true
+
+[features]
+scroll = [
+    "reth-evm/scroll",
+    "reth-primitives/scroll",
+    "reth-revm/scroll",
+    "reth-provider/scroll",
+    "reth-trie/scroll",
+    "reth-scroll-storage",
+    "reth-scroll-revm"
+]

@@ -1,21 +1,24 @@
-//! This example shows how to implement a custom [EngineTypes].
+//! This example shows how to implement a custom `EngineTypes`.
 //!
-//! The [EngineTypes] trait can be implemented to configure the engine to work with custom types,
+//! The `EngineTypes` trait can be implemented to configure the engine to work with custom types,
 //! as long as those types implement certain traits.
 //!
 //! Custom payload attributes can be supported by implementing two main traits:
 //!
-//! [PayloadAttributes] can be implemented for payload attributes types that are used as
+//! `PayloadAttributes` can be implemented for payload attributes types that are used as
 //! arguments to the `engine_forkchoiceUpdated` method. This type should be used to define and
 //! _spawn_ payload jobs.
 //!
-//! [PayloadBuilderAttributes] can be implemented for payload attributes types that _describe_
+//! `PayloadBuilderAttributes` can be implemented for payload attributes types that _describe_
 //! running payload jobs.
 //!
-//! Once traits are implemented and custom types are defined, the [EngineTypes] trait can be
+//! Once traits are implemented and custom types are defined, the `EngineTypes` trait can be
 //! implemented:
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
+// Don't use the crate if `scroll` feature is used.
+#![cfg_attr(feature = "scroll", allow(unused_crate_dependencies))]
+#![cfg(not(feature = "scroll"))]
 
 use std::{convert::Infallible, sync::Arc};
 

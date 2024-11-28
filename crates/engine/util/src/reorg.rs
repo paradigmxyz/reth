@@ -21,11 +21,11 @@ use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{proofs, Block, BlockBody, Receipt, Receipts};
 use reth_provider::{BlockReader, ExecutionOutcome, ProviderError, StateProviderFactory};
 use reth_revm::{
-    database::StateProviderDatabase,
     db::{states::bundle_state::BundleRetention, State},
     DatabaseCommit,
 };
 use reth_rpc_types_compat::engine::payload::block_to_payload;
+use reth_scroll_execution::FinalizeExecution;
 use reth_trie::HashedPostState;
 use revm_primitives::{
     calc_excess_blob_gas, BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg,
@@ -292,10 +292,11 @@ where
 
     // Configure state
     let state_provider = provider.state_by_block_hash(reorg_target.parent_hash)?;
-    let mut state = State::builder()
-        .with_database_ref(StateProviderDatabase::new(&state_provider))
-        .with_bundle_update()
-        .build();
+    #[cfg(not(feature = "scroll"))]
+    let mut db = reth_revm::database::StateProviderDatabase::new(&state_provider);
+    #[cfg(feature = "scroll")]
+    let mut db = reth_scroll_storage::ScrollStateProviderDatabase::new(&state_provider);
+    let mut state = State::builder().with_database(&mut db).with_bundle_update().build();
 
     // Configure environments
     let mut cfg = CfgEnvWithHandlerCfg::new(Default::default(), Default::default());
@@ -377,9 +378,9 @@ where
     // and 4788 contract call
     state.merge_transitions(BundleRetention::PlainState);
 
-    let outcome: ExecutionOutcome = ExecutionOutcome::new(
-        state.take_bundle(),
-        Receipts::from(vec![receipts]),
+    let outcome = ExecutionOutcome::new(
+        state.finalize(),
+        Receipts::<Receipt>::from(vec![receipts]),
         reorg_target.number,
         Default::default(),
     );

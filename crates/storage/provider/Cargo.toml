@@ -138,4 +138,13 @@ test-utils = [
     "reth-stages-types/test-utils",
     "reth-optimism-primitives?/arbitrary",
 ]
-scroll = ["reth-scroll-primitives"]
+scroll = [
+    "reth-primitives/scroll",
+    "reth-testing-utils/scroll",
+    "reth-db/scroll",
+    "reth-trie-db/scroll",
+    "reth-trie/scroll",
+    "reth-execution-types/scroll",
+    "reth-evm/scroll",
+    "reth-scroll-primitives"
+]

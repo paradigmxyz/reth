@@ -12,6 +12,10 @@
 //! cast rpc txpoolExt_transactionCount
 //! ```
 
+// Don't use the crate if `scroll` feature is used.
+#![cfg_attr(feature = "scroll", allow(unused_crate_dependencies))]
+#![cfg(not(feature = "scroll"))]
+
 use clap::Parser;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth::{chainspec::EthereumChainSpecParser, cli::Cli};

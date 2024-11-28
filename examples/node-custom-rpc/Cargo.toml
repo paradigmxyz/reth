@@ -15,3 +15,6 @@ jsonrpsee = { workspace = true, features = ["server", "macros"] }
 
 [dev-dependencies]
 tokio.workspace = true
+
+[features]
+scroll = []

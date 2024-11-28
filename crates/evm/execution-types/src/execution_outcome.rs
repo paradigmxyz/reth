@@ -774,10 +774,26 @@ mod tests {
         let address3 = Address::random();
 
         // Set up account info with some changes
-        let account_info1 =
-            AccountInfo { nonce: 1, balance: U256::from(100), code_hash: B256::ZERO, code: None };
-        let account_info2 =
-            AccountInfo { nonce: 2, balance: U256::from(200), code_hash: B256::ZERO, code: None };
+        let account_info1 = AccountInfo {
+            nonce: 1,
+            balance: U256::from(100),
+            code_hash: B256::ZERO,
+            code: None,
+            #[cfg(feature = "scroll")]
+            code_size: 0,
+            #[cfg(feature = "scroll")]
+            poseidon_code_hash: B256::ZERO,
+        };
+        let account_info2 = AccountInfo {
+            nonce: 2,
+            balance: U256::from(200),
+            code_hash: B256::ZERO,
+            code: None,
+            #[cfg(feature = "scroll")]
+            code_size: 0,
+            #[cfg(feature = "scroll")]
+            poseidon_code_hash: B256::ZERO,
+        };
 
         // Set up the bundle state with these accounts
         let mut bundle_state = BundleState::default();

@@ -30,3 +30,10 @@ futures.workspace = true
 # misc
 serde.workspace = true
 thiserror.workspace = true
+
+[features]
+scroll = [
+    "reth-execution-types/scroll",
+    "reth-primitives/scroll",
+    "reth-trie/scroll"
+]

@@ -66,6 +66,25 @@ impl Account {
     pub fn get_bytecode_hash(&self) -> B256 {
         self.bytecode_hash.unwrap_or(KECCAK_EMPTY)
     }
+
+    /// Convert an [`revm_primitives::shared::AccountInfo`] into an [`Account`]
+    pub fn from_account_info(info: revm_primitives::shared::AccountInfo) -> Self {
+        Self {
+            balance: info.balance,
+            nonce: info.nonce,
+            bytecode_hash: (info.code_hash != KECCAK_EMPTY).then_some(info.code_hash),
+            #[cfg(feature = "scroll")]
+            account_extension: Some(
+                info.code
+                    .map(|code| {
+                        reth_scroll_primitives::AccountExtension::from_bytecode(
+                            &code.original_byte_slice(),
+                        )
+                    })
+                    .unwrap_or(reth_scroll_primitives::AccountExtension::empty()),
+            ),
+        }
+    }
 }
 
 /// Bytecode for an account.
@@ -233,16 +252,10 @@ impl From<Account> for revm_primitives::shared::AccountInfo {
     }
 }
 
-// TODO (scroll): remove at last Scroll `Account` related PR.
-#[cfg(feature = "scroll")]
+#[cfg(all(feature = "scroll", feature = "test-utils"))]
 impl From<revm_primitives::shared::AccountInfo> for Account {
-    fn from(revm_acc: revm_primitives::shared::AccountInfo) -> Self {
-        Self {
-            balance: revm_acc.balance,
-            nonce: revm_acc.nonce,
-            bytecode_hash: (revm_acc.code_hash != KECCAK_EMPTY).then_some(revm_acc.code_hash),
-            account_extension: None,
-        }
+    fn from(info: revm_primitives::shared::AccountInfo) -> Self {
+        Self::from_account_info(info)
     }
 }
 

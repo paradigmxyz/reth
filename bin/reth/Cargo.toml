@@ -120,6 +120,7 @@ jemalloc-prof = [
 	"reth-cli-util/jemalloc-prof"
 ]
 tracy-allocator = ["reth-cli-util/tracy-allocator"]
+scroll = []
 
 min-error-logs = ["tracing/release_max_level_error"]
 min-warn-logs = ["tracing/release_max_level_warn"]

@@ -1,6 +1,9 @@
 //! This example shows how to configure custom components for a reth node.
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
+// Don't use the crate if `scroll` feature is used.
+#![cfg_attr(feature = "scroll", allow(unused_crate_dependencies))]
+#![cfg(not(feature = "scroll"))]
 
 use reth::{
     api::NodeTypes,

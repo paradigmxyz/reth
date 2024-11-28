@@ -429,7 +429,7 @@ reth-trie-db = { path = "crates/trie/db" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
 
 # revm
-revm = { version = "18.0.0", features = ["std"], default-features = false }
+revm = { package = "reth-scroll-revm", path = "crates/scroll/revm", default-features = false }
 revm-inspectors = "0.11.0"
 revm-primitives = { version = "14.0.0", features = [
     "std",

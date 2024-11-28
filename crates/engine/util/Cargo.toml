@@ -31,6 +31,10 @@ alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
 
+# scroll
+reth-scroll-execution.workspace = true
+reth-scroll-storage = { workspace = true, optional = true }
+
 # async
 tokio = { workspace = true, default-features = false }
 tokio-util.workspace = true
@@ -54,3 +58,4 @@ optimism = [
     "reth-provider/optimism",
     "revm-primitives/optimism",
 ]
+scroll = ["reth-scroll-storage"]

@@ -16,6 +16,9 @@
 //! See lighthouse beacon Node API: <https://lighthouse-book.sigmaprime.io/api-bn.html#beacon-node-api>
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
+// Don't use the crate if `scroll` feature is used.
+#![cfg_attr(feature = "scroll", allow(unused_crate_dependencies))]
+#![cfg(not(feature = "scroll"))]
 
 use alloy_rpc_types_beacon::events::PayloadAttributesEvent;
 use clap::Parser;

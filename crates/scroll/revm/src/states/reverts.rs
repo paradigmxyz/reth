@@ -47,26 +47,34 @@ impl ScrollReverts {
         }
     }
 
-    /// Consume reverts and create plain state reverts.
+    /// Generate a [`ScrollPlainStateReverts`].
     ///
     /// Note that account are sorted by address.
-    pub fn into_plain_state_reverts(mut self) -> ScrollPlainStateReverts {
+    pub fn to_plain_state_reverts(&self) -> ScrollPlainStateReverts {
         let mut state_reverts = ScrollPlainStateReverts::with_capacity(self.0.len());
-        for reverts in self.0.drain(..) {
+        for reverts in &self.0 {
             // pessimistically pre-allocate assuming _all_ accounts changed.
             let mut accounts = Vec::with_capacity(reverts.len());
             let mut storage = Vec::with_capacity(reverts.len());
             for (address, revert_account) in reverts {
-                match revert_account.account {
-                    ScrollAccountInfoRevert::RevertTo(acc) => accounts.push((address, Some(acc))),
-                    ScrollAccountInfoRevert::DeleteIt => accounts.push((address, None)),
+                match &revert_account.account {
+                    ScrollAccountInfoRevert::RevertTo(acc) => {
+                        // cloning is cheap, because account info has 3 small
+                        // fields and a Bytes
+                        accounts.push((*address, Some(acc.clone())))
+                    }
+                    ScrollAccountInfoRevert::DeleteIt => accounts.push((*address, None)),
                     ScrollAccountInfoRevert::DoNothing => (),
                 }
                 if revert_account.wipe_storage || !revert_account.storage.is_empty() {
                     storage.push(PlainStorageRevert {
-                        address,
+                        address: *address,
                         wiped: revert_account.wipe_storage,
-                        storage_revert: revert_account.storage.into_iter().collect::<Vec<_>>(),
+                        storage_revert: revert_account
+                            .storage
+                            .iter()
+                            .map(|(k, v)| (*k, *v))
+                            .collect::<Vec<_>>(),
                     });
                 }
             }

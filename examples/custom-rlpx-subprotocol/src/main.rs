@@ -8,6 +8,10 @@
 //!
 //! This launch a regular reth node with a custom rlpx subprotocol.
 
+// Don't use the crate if `scroll` feature is used.
+#![cfg_attr(feature = "scroll", allow(unused_crate_dependencies))]
+#![cfg(not(feature = "scroll"))]
+
 mod subprotocol;
 
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};

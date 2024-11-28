@@ -20,8 +20,9 @@ alloy-rlp = { workspace = true, features = ["arrayvec"] }
 alloy-trie = { workspace = true, features = ["serde"] }
 alloy-consensus.workspace = true
 alloy-genesis.workspace = true
-revm-primitives.workspace = true
 
+# revm-primitives scroll re-export
+revm-primitives = { package = "reth-scroll-revm", path = "../../scroll/revm" }
 reth-scroll-primitives = { workspace = true, optional = true }
 
 bytes.workspace = true
@@ -51,7 +52,8 @@ test-utils = [
 	"dep:hash-db",
 	"arbitrary",
 	"reth-primitives-traits/test-utils",
-	"reth-codecs/test-utils"
+	"reth-codecs/test-utils",
+	"revm-primitives/test-utils"
 ]
 arbitrary = [
 	"alloy-trie/arbitrary",
@@ -64,4 +66,8 @@ arbitrary = [
 	"reth-codecs/arbitrary",
 	"reth-scroll-primitives?/arbitrary"
 ]
-scroll = ["reth-scroll-primitives"]
+scroll = [
+	"reth-primitives-traits/scroll",
+	"dep:reth-scroll-primitives",
+	"revm-primitives/scroll"
+]

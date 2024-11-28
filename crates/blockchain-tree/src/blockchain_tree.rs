@@ -1400,9 +1400,9 @@ mod tests {
         },
         ProviderFactory, StorageLocation,
     };
-    use reth_revm::primitives::AccountInfo;
     use reth_stages_api::StageCheckpoint;
     use reth_trie::{root::state_root_unhashed, StateRoot};
+    use revm::AccountInfo;
     use std::collections::HashMap;
 
     fn setup_externals(

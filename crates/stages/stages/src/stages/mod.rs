@@ -121,9 +121,10 @@ mod tests {
                     nonce: 0,
                     balance: U256::ZERO,
                     bytecode_hash: Some(code_hash),
-                    // TODO (scroll): use `from_bytecode`.
                     #[cfg(feature = "scroll")]
-                    account_extension: Some(reth_scroll_primitives::AccountExtension::empty()),
+                    account_extension: Some(
+                        reth_scroll_primitives::AccountExtension::from_bytecode(&code),
+                    ),
                 },
             )
             .unwrap();

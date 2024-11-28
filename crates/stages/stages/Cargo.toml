@@ -41,6 +41,7 @@ reth-testing-utils = { workspace = true, optional = true }
 
 # scroll
 reth-scroll-primitives = { workspace = true, optional = true }
+reth-scroll-storage = { workspace = true, optional = true }
 
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
@@ -120,7 +121,21 @@ test-utils = [
     "reth-trie/test-utils",
     "reth-prune-types/test-utils",
 ]
-scroll = ["reth-scroll-primitives"]
+scroll = [
+    "reth-primitives-traits/scroll",
+    "reth-testing-utils?/scroll",
+    "reth-trie/scroll",
+    "reth-provider/scroll",
+    "reth-primitives/scroll",
+    "reth-evm/scroll",
+    "reth-execution-types/scroll",
+    "reth-trie-db/scroll",
+    "reth-db/scroll",
+    "reth-evm-ethereum/scroll",
+    "reth-exex/scroll",
+    "reth-scroll-storage/scroll",
+    "reth-scroll-primitives"
+]
 
 [[bench]]
 name = "criterion"

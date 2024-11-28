@@ -9,6 +9,9 @@
 //! If no recipients are specified, all transactions will be traced.
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
+// Don't use the crate if `scroll` feature is used.
+#![cfg_attr(feature = "scroll", allow(unused_crate_dependencies))]
+#![cfg(not(feature = "scroll"))]
 
 use alloy_primitives::Address;
 use alloy_rpc_types_trace::{parity::TraceType, tracerequest::TraceCallRequest};

@@ -80,6 +80,11 @@ optimism = ["reth-primitives/optimism", "reth-db/optimism"]
 # Features for vergen to generate correct env vars
 jemalloc = ["reth-cli-util/jemalloc"]
 asm-keccak = ["reth-primitives/asm-keccak", "alloy-primitives/asm-keccak"]
+scroll = [
+    "reth-primitives/scroll",
+    "reth-db/scroll",
+    "reth-rpc-eth-types/scroll",
+]
 
 [build-dependencies]
 vergen = { version = "8.0.0", features = ["build", "cargo", "git", "gitcl"] }

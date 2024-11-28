@@ -167,6 +167,11 @@ serde-bincode-compat = [
 	"serde_with",
 	"alloy-eips/serde-bincode-compat",
 ]
+scroll = [
+	"reth-trie-common/scroll",
+	"reth-primitives-traits/scroll",
+	"reth-testing-utils/scroll"
+]
 
 [[bench]]
 name = "recover_ecdsa_crit"

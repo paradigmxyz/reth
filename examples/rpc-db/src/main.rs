@@ -12,6 +12,10 @@
 //! cast rpc myrpcExt_customMethod
 //! ```
 
+// Don't use the crate if `scroll` feature is used.
+#![cfg_attr(feature = "scroll", allow(unused_crate_dependencies))]
+#![cfg(not(feature = "scroll"))]
+
 use std::{path::Path, sync::Arc};
 
 use reth::{

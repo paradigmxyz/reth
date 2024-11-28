@@ -20,7 +20,7 @@ use std::{
     ops::RangeInclusive,
 };
 
-/// An code copy of the [`BundleState`] modified with Scroll compatible fields.
+/// A code copy of the [`BundleState`] modified with Scroll compatible fields.
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ScrollBundleState {
@@ -70,9 +70,19 @@ impl From<(BundleState, &ScrollPostExecutionContext)> for ScrollBundleState {
     }
 }
 
+// This conversion can cause a loss of information since performed without additional context.
+#[cfg(any(not(feature = "scroll"), feature = "test-utils"))]
+impl From<BundleState> for ScrollBundleState {
+    fn from(bundle: BundleState) -> Self {
+        (bundle, &ScrollPostExecutionContext::default()).into()
+    }
+}
+
+// This conversion can cause a loss of information since performed without additional context.
+#[cfg(any(not(feature = "scroll"), feature = "test-utils"))]
 impl From<(BundleState, &())> for ScrollBundleState {
     fn from((bundle, _): (BundleState, &())) -> Self {
-        (bundle, &ScrollPostExecutionContext::default()).into()
+        bundle.into()
     }
 }
 
@@ -272,19 +282,20 @@ impl ScrollBundleState {
         self.reverts.extend(other.reverts);
     }
 
-    /// Consume the bundle state and return plain state.
-    pub fn into_plain_state(self, is_value_known: OriginalValuesKnown) -> ScrollStateChangeset {
+    /// Generate a [`ScrollStateChangeset`] from the bundle state without consuming
+    /// it.
+    pub fn to_plain_state(&self, is_value_known: OriginalValuesKnown) -> ScrollStateChangeset {
         // pessimistically pre-allocate assuming _all_ accounts changed.
         let state_len = self.state.len();
         let mut accounts = Vec::with_capacity(state_len);
         let mut storage = Vec::with_capacity(state_len);
 
-        for (address, account) in self.state {
+        for (address, account) in &self.state {
             // append account info if it is changed.
             let was_destroyed = account.was_destroyed();
             if is_value_known.is_not_known() || account.is_info_changed() {
-                let info = account.info.map(ScrollAccountInfo::without_code);
-                accounts.push((address, info));
+                let info = account.info.as_ref().map(ScrollAccountInfo::copy_without_code);
+                accounts.push((*address, info));
             }
 
             // append storage changes
@@ -293,7 +304,7 @@ impl ScrollBundleState {
             // database so we can check if plain state was wiped or not.
             let mut account_storage_changed = Vec::with_capacity(account.storage.len());
 
-            for (key, slot) in account.storage {
+            for (key, slot) in account.storage.iter().map(|(k, v)| (*k, *v)) {
                 // If storage was destroyed that means that storage was wiped.
                 // In that case we need to check if present storage value is different then ZERO.
                 let destroyed_and_not_zero = was_destroyed && !slot.present_value.is_zero();
@@ -313,29 +324,30 @@ impl ScrollBundleState {
             if !account_storage_changed.is_empty() || was_destroyed {
                 // append storage changes to account.
                 storage.push(PlainStorageChangeset {
-                    address,
+                    address: *address,
                     wipe_storage: was_destroyed,
                     storage: account_storage_changed,
                 });
             }
         }
+
         let contracts = self
             .contracts
-            .into_iter()
+            .iter()
             // remove empty bytecodes
-            .filter(|(b, _)| *b != KECCAK_EMPTY)
+            .filter(|(b, _)| **b != KECCAK_EMPTY)
+            .map(|(b, code)| (*b, code.clone()))
             .collect::<Vec<_>>();
         ScrollStateChangeset { accounts, storage, contracts }
     }
 
-    /// Consume the bundle state and split it into reverts and plain state.
-    pub fn into_plain_state_and_reverts(
-        mut self,
+    /// Generate a [`ScrollStateChangeset`] and [`ScrollPlainStateReverts`] from the bundle
+    /// state.
+    pub fn to_plain_state_and_reverts(
+        &self,
         is_value_known: OriginalValuesKnown,
     ) -> (ScrollStateChangeset, ScrollPlainStateReverts) {
-        let reverts = self.take_all_reverts();
-        let plain_state = self.into_plain_state(is_value_known);
-        (plain_state, reverts.into_plain_state_reverts())
+        (self.to_plain_state(is_value_known), self.reverts.to_plain_state_reverts())
     }
 
     /// Take first N raw reverts from the [`ScrollBundleState`].

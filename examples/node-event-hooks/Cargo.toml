@@ -8,3 +8,6 @@ license.workspace = true
 [dependencies]
 reth.workspace = true
 reth-node-ethereum.workspace = true
+
+[features]
+scroll = []

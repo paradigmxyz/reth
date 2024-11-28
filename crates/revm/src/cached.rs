@@ -4,9 +4,12 @@ use alloy_primitives::{
     Address, B256, U256,
 };
 use core::cell::RefCell;
-use revm::primitives::{
-    db::{Database, DatabaseRef},
-    AccountInfo, Bytecode,
+use revm::{
+    primitives::{
+        db::{Database, DatabaseRef},
+        Bytecode,
+    },
+    shared::AccountInfo,
 };
 
 /// A container type that caches reads from an underlying [`DatabaseRef`].

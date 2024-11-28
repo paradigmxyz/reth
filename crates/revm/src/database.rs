@@ -3,11 +3,7 @@ use alloy_primitives::{Address, B256, U256};
 use core::ops::{Deref, DerefMut};
 use reth_primitives::Account;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use revm::{
-    db::DatabaseRef,
-    primitives::{AccountInfo, Bytecode},
-    Database,
-};
+use revm::{db::DatabaseRef, primitives::Bytecode, shared::AccountInfo, Database};
 
 /// A helper trait responsible for providing state necessary for EVM execution.
 ///

@@ -23,6 +23,9 @@ reth-consensus.workspace = true
 # Ethereum
 revm-primitives.workspace = true
 
+# scroll
+reth-scroll-execution.workspace = true
+
 # Alloy
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
@@ -54,4 +57,7 @@ std = [
 	"revm-primitives/std",
 	"secp256k1/std"
 ]
-scroll = []
+scroll = [
+	"reth-primitives/scroll",
+	"reth-testing-utils/scroll",
+]

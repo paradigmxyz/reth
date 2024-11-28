@@ -20,3 +20,6 @@ alloy-consensus.workspace = true
 
 eyre.workspace = true
 tokio.workspace = true
+
+[features]
+scroll = []

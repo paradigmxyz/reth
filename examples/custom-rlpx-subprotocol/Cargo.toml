@@ -19,3 +19,6 @@ eyre.workspace = true
 rand.workspace = true
 tracing.workspace = true
 alloy-primitives.workspace = true
+
+[features]
+scroll = []

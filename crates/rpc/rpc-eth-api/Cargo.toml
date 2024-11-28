@@ -43,6 +43,10 @@ alloy-rpc-types-eth.workspace = true
 alloy-rpc-types-mev.workspace = true
 alloy-consensus.workspace = true
 
+# scroll
+reth-scroll-execution.workspace = true
+reth-scroll-storage = { workspace = true, optional = true }
+
 # rpc
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
 jsonrpsee-types.workspace = true
@@ -61,3 +65,13 @@ tracing.workspace = true
 [features]
 js-tracer = ["revm-inspectors/js-tracer", "reth-rpc-eth-types/js-tracer"]
 client = ["jsonrpsee/client", "jsonrpsee/async-client"]
+scroll = [
+    "reth-trie/scroll",
+    "reth-provider/scroll",
+    "reth-execution-types/scroll",
+    "reth-revm/scroll",
+    "reth-primitives/scroll",
+    "reth-evm/scroll",
+    "reth-rpc-eth-types/scroll",
+    "reth-scroll-storage"
+]

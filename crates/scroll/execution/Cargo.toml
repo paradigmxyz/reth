@@ -14,22 +14,11 @@ workspace = true
 [dependencies]
 # reth
 reth-revm.workspace = true
-
-# scroll
-reth-scroll-primitives = { workspace = true, optional = true }
-reth-scroll-revm.workspace = true
 reth-scroll-storage = { workspace = true, optional = true }
-
-# misc
-auto_impl.workspace = true
 
 [features]
 scroll = [
-	"reth-scroll-primitives",
-	"reth-scroll-revm/scroll",
 	"reth-scroll-storage/scroll",
+	"reth-revm/scroll"
 ]
-test-utils = [
-	"reth-scroll-revm/test-utils",
-	"reth-revm/test-utils"
-]
+test-utils = ["reth-revm/test-utils"]

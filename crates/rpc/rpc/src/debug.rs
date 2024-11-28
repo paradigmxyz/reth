@@ -608,7 +608,10 @@ where
 
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash.into(), move |state_provider| {
+                #[cfg(not(feature = "scroll"))]
                 let db = StateProviderDatabase::new(&state_provider);
+                #[cfg(feature = "scroll")]
+                let db = reth_scroll_storage::ScrollStateProviderDatabase::new(&state_provider);
                 let block_executor = this.inner.block_executor.executor(db);
 
                 let mut witness_record = ExecutionWitnessRecord::default();
@@ -617,7 +620,11 @@ where
                     .execute_with_state_closure(
                         (&(*block).clone().unseal(), block.difficulty).into(),
                         |statedb: &State<_>| {
-                            witness_record.record_executed_state(statedb);
+                            witness_record.record_executed_state(
+                                statedb,
+                                #[cfg(feature = "scroll")]
+                                &statedb.database.post_execution_context,
+                            );
                         },
                     )
                     .map_err(|err| EthApiError::Internal(err.into()))?;

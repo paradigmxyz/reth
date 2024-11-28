@@ -152,7 +152,13 @@ jobs:
         with:
           cache-on-failure: true
       - uses: taiki-e/install-action@cargo-udeps
-      - run: cargo udeps --workspace --lib --examples --tests --benches --all-features --locked --exclude "reth-optimism-*" --exclude op-reth
+        # due to the scroll feature flag, we need to exclude some crates that were annotated with
+        # #![cfg(not(feature = "scroll))].
+      - run: |
+          cargo udeps --workspace --lib --examples --tests --benches --all-features --locked \
+            --exclude "reth-optimism-*" --exclude op-reth --exclude "example-*" --exclude reth \
+            --exclude reth-e2e-test-utils --exclude reth-ethereum-payload-builder --exclude reth-exex-test-utils \
+            --exclude reth-node-ethereum
 
   book:
     name: book

@@ -42,18 +42,6 @@ impl From<(AccountInfo, &ScrollPostExecutionContext)> for ScrollAccountInfo {
     }
 }
 
-// This conversion causes a loss of information.
-impl From<ScrollAccountInfo> for AccountInfo {
-    fn from(info: ScrollAccountInfo) -> Self {
-        Self {
-            balance: info.balance,
-            nonce: info.nonce,
-            code_hash: info.code_hash,
-            code: info.code,
-        }
-    }
-}
-
 impl Default for ScrollAccountInfo {
     fn default() -> Self {
         Self {
@@ -86,6 +74,26 @@ impl ScrollAccountInfo {
     ) -> Self {
         let code_size = code.len() as u64;
         Self { balance, nonce, code: Some(code), code_hash, code_size, poseidon_code_hash }
+    }
+
+    /// Returns a copy of this account with the [`Bytecode`] removed. This is
+    /// useful when creating journals or snapshots of the state, where it is
+    /// desirable to store the code blobs elsewhere.
+    ///
+    /// ## Note
+    ///
+    /// This is distinct from [`ScrollAccountInfo::without_code`] in that it returns
+    /// a new `ScrollAccountInfo` instance with the code removed.
+    /// [`ScrollAccountInfo::without_code`] will modify and return the same instance.
+    pub const fn copy_without_code(&self) -> Self {
+        Self {
+            balance: self.balance,
+            nonce: self.nonce,
+            code_hash: self.code_hash,
+            code: None,
+            code_size: self.code_size,
+            poseidon_code_hash: self.poseidon_code_hash,
+        }
     }
 
     /// Returns account info without the code.

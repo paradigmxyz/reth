@@ -12,27 +12,33 @@ use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
 use reth_primitives::{BlockWithSenders, Receipt};
 use reth_prune_types::PruneModes;
+use reth_scroll_execution::FinalizeExecution;
 use reth_storage_errors::provider::ProviderError;
+use revm::{db::BundleState, State};
 use revm_primitives::db::Database;
 
 // re-export Either
 pub use futures_util::future::Either;
-use revm::State;
 
 impl<A, B> BlockExecutorProvider for Either<A, B>
 where
     A: BlockExecutorProvider,
     B: BlockExecutorProvider,
 {
-    type Executor<DB: Database<Error: Into<ProviderError> + Display>> =
-        Either<A::Executor<DB>, B::Executor<DB>>;
+    type Executor<DB: Database<Error: Into<ProviderError> + Display>>
+        = Either<A::Executor<DB>, B::Executor<DB>>
+    where
+        State<DB>: FinalizeExecution<Output = BundleState>;
 
-    type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> =
-        Either<A::BatchExecutor<DB>, B::BatchExecutor<DB>>;
+    type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>>
+        = Either<A::BatchExecutor<DB>, B::BatchExecutor<DB>>
+    where
+        State<DB>: FinalizeExecution<Output = BundleState>;
 
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
         DB: Database<Error: Into<ProviderError> + Display>,
+        State<DB>: FinalizeExecution<Output = BundleState>,
     {
         match self {
             Self::Left(a) => Either::Left(a.executor(db)),
@@ -43,6 +49,7 @@ where
     fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
     where
         DB: Database<Error: Into<ProviderError> + Display>,
+        State<DB>: FinalizeExecution<Output = BundleState>,
     {
         match self {
             Self::Left(a) => Either::Left(a.batch_executor(db)),

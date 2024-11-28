@@ -11,6 +11,10 @@
 //! > "All components initialized" – once all components have been initialized
 //! > "Node started" – once the node has been started.
 
+// Don't use the crate if `scroll` feature is used.
+#![cfg_attr(feature = "scroll", allow(unused_crate_dependencies))]
+#![cfg(not(feature = "scroll"))]
+
 use reth::cli::Cli;
 use reth_node_ethereum::EthereumNode;
 

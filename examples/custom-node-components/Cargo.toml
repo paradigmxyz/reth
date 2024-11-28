@@ -13,3 +13,6 @@ reth-transaction-pool.workspace = true
 reth-tracing.workspace = true
 
 eyre.workspace = true
+
+[features]
+scroll = []

@@ -12,4 +12,8 @@ alloy-rpc-types-eth.workspace = true
 clap = { workspace = true, features = ["derive"] }
 futures-util.workspace = true
 alloy-primitives.workspace = true
+
 alloy-eips.workspace = true
+
+[features]
+scroll = []

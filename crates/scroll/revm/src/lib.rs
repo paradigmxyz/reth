@@ -4,9 +4,11 @@
 #![warn(unused_crate_dependencies)]
 
 pub mod states;
+#[cfg(feature = "test-utils")]
+mod test_utils;
 
 #[cfg(feature = "optimism")]
-pub use revm::primitives::OptimismFields;
+pub use revm::{primitives::OptimismFields, L1BlockInfo, L1_BLOCK_CONTRACT};
 
 pub use revm::{
     db::*,
@@ -15,7 +17,8 @@ pub use revm::{
         keccak256, AuthorizationList, Bytecode, BytecodeDecodeError, JumpTable,
         LegacyAnalyzedBytecode, TxEnv, TxKind,
     },
-    Evm, EvmBuilder, GetInspector,
+    ContextPrecompile, ContextPrecompiles, Evm, EvmBuilder, EvmContext, GetInspector, Inspector,
+    JournaledState,
 };
 
 #[cfg(feature = "scroll")]
@@ -26,12 +29,22 @@ pub use states::ScrollAccountInfo;
 
 /// Shared module, available for all feature flags.
 pub mod shared {
-    pub use revm::primitives::AccountInfo;
+    pub use revm::{db::states::BundleState, primitives::AccountInfo};
+}
+
+/// Match the `revm` module structure
+pub mod handler {
+    pub use revm::handler::*;
 }
 
 /// Match the `revm` module structure
 pub mod interpreter {
     pub use revm::interpreter::*;
+}
+
+/// Match the `revm` module structure
+pub mod inspectors {
+    pub use revm::inspectors::*;
 }
 
 /// Match the `revm` module structure

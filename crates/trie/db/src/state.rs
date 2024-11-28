@@ -91,8 +91,8 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     ///         nonce: 1,
     ///         balance: U256::from(10),
     ///         bytecode_hash: None,
-    ///         // TODO (scroll): remove at last Scroll `Account` related PR.
-    ///         ..Default::default()
+    ///         #[cfg(feature = "scroll")]
+    ///         account_extension: None,
     ///     }),
     /// );
     ///

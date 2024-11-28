@@ -25,3 +25,6 @@ eyre.workspace = true
 tokio.workspace = true
 thiserror.workspace = true
 serde.workspace = true
+
+[features]
+scroll = []

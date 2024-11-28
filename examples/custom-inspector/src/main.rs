@@ -9,6 +9,9 @@
 //! If no recipients are specified, all transactions will be inspected.
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
+// Don't use the crate if `scroll` feature is used.
+#![cfg_attr(feature = "scroll", allow(unused_crate_dependencies))]
+#![cfg(not(feature = "scroll"))]
 
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::Address;

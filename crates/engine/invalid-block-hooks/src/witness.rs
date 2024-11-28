@@ -13,12 +13,12 @@ use reth_evm::{
 use reth_primitives::{Receipt, SealedBlockWithSenders, SealedHeader};
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
-    database::StateProviderDatabase,
     db::states::bundle_state::BundleRetention,
     primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg},
     DatabaseCommit, StateBuilder,
 };
 use reth_rpc_api::DebugApiClient;
+use reth_scroll_execution::FinalizeExecution;
 use reth_tracing::tracing::warn;
 use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage};
 use serde::Serialize;
@@ -68,12 +68,12 @@ where
         // TODO(alexey): unify with `DebugApi::debug_execution_witness`
 
         // Setup database.
-        let mut db = StateBuilder::new()
-            .with_database(StateProviderDatabase::new(
-                self.provider.state_by_block_hash(parent_header.hash())?,
-            ))
-            .with_bundle_update()
-            .build();
+        let provider = self.provider.state_by_block_hash(parent_header.hash())?;
+        #[cfg(not(feature = "scroll"))]
+        let state = reth_revm::database::StateProviderDatabase::new(provider);
+        #[cfg(feature = "scroll")]
+        let state = reth_scroll_storage::ScrollStateProviderDatabase::new(provider);
+        let mut db = StateBuilder::new().with_database(state).with_bundle_update().build();
 
         // Setup environment for the execution.
         let mut cfg = CfgEnvWithHandlerCfg::new(Default::default(), Default::default());
@@ -121,7 +121,7 @@ where
         db.merge_transitions(BundleRetention::Reverts);
 
         // Take the bundle state
-        let mut bundle_state = db.take_bundle();
+        let mut bundle_state = db.finalize();
 
         // Initialize a map of preimages.
         let mut state_preimages = HashMap::default();
@@ -133,9 +133,17 @@ where
         let mut hashed_state = HashedPostState::from_bundle_state(&bundle_state.state);
         for (address, account) in db.cache.accounts {
             let hashed_address = keccak256(address);
-            hashed_state
-                .accounts
-                .insert(hashed_address, account.account.as_ref().map(|a| a.info.clone().into()));
+            #[cfg(feature = "scroll")]
+            let hashed_account = account.account.as_ref().map(|a| {
+                Into::<reth_scroll_revm::AccountInfo>::into((
+                    a.info.clone(),
+                    &db.database.post_execution_context,
+                ))
+                .into()
+            });
+            #[cfg(not(feature = "scroll"))]
+            let hashed_account = account.account.as_ref().map(|a| a.info.clone().into());
+            hashed_state.accounts.insert(hashed_address, hashed_account);
 
             let storage = hashed_state
                 .storages

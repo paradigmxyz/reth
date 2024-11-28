@@ -59,7 +59,8 @@ impl HashedPostState {
             .into_par_iter()
             .map(|(address, account)| {
                 let hashed_address = keccak256(address);
-                let hashed_account = account.account.as_ref().map(|a| a.info.clone().into());
+                let hashed_account =
+                    account.account.as_ref().map(|a| Account::from_account_info(a.info.clone()));
                 let hashed_storage = HashedStorage::from_plain_storage(
                     account.status,
                     account.account.as_ref().map(|a| a.storage.iter()).into_iter().flatten(),
@@ -348,13 +349,14 @@ impl HashedStorageSorted {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::Bytes;
+    use alloy_primitives::{Address, Bytes};
     use revm::{
         db::{
-            states::{plain_account::PlainStorage, StorageSlot},
-            PlainAccount, StorageWithOriginalValues,
+            states::{plain_account::PlainStorage, CacheAccount, StorageSlot},
+            BundleAccount, StorageWithOriginalValues,
         },
         primitives::{AccountInfo, Bytecode},
+        PlainAccount,
     };
 
     #[test]
@@ -442,6 +444,10 @@ mod tests {
             nonce: 42,
             code_hash: B256::random(),
             code: Some(Bytecode::LegacyRaw(Bytes::from(vec![1, 2]))),
+            #[cfg(feature = "scroll")]
+            code_size: 2,
+            #[cfg(feature = "scroll")]
+            poseidon_code_hash: B256::random(),
         };
 
         let mut storage = StorageWithOriginalValues::default();
@@ -481,7 +487,7 @@ mod tests {
         let address = Address::random();
 
         // Create mock account info.
-        let account_info = AccountInfo {
+        let account_info = revm::shared::AccountInfo {
             balance: U256::from(500),
             nonce: 5,
             code_hash: B256::random(),
@@ -525,6 +531,10 @@ mod tests {
             nonce: 1,
             code_hash: B256::random(),
             code: None,
+            #[cfg(feature = "scroll")]
+            code_size: 10,
+            #[cfg(feature = "scroll")]
+            poseidon_code_hash: B256::random(),
         };
 
         // Create hashed accounts with addresses.

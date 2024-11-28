@@ -64,6 +64,9 @@ revm = { workspace = true, features = [
 ] }
 revm-primitives = { workspace = true, features = ["serde"] }
 
+# scroll
+reth-scroll-storage = { workspace = true, optional = true }
+
 # rpc
 jsonrpsee.workspace = true
 http.workspace = true
@@ -102,3 +105,15 @@ jsonrpsee = { workspace = true, features = ["client"] }
 
 [features]
 js-tracer = ["revm-inspectors/js-tracer", "reth-rpc-eth-types/js-tracer"]
+scroll = [
+    "reth-trie/scroll",
+    "reth-evm/scroll",
+    "reth-rpc-eth-types/scroll",
+    "reth-primitives/scroll",
+    "reth-revm/scroll",
+    "reth-provider/scroll",
+    "reth-testing-utils/scroll",
+    "reth-evm-ethereum/scroll",
+    "reth-rpc-eth-api/scroll",
+    "reth-scroll-storage/scroll",
+]
