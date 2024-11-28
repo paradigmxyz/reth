@@ -137,9 +137,7 @@ impl ProofSequencer {
             }
         }
 
-        if !consecutive_proofs.is_empty() {
-            self.next_to_deliver += consecutive_proofs.len() as u64;
-        }
+        self.next_to_deliver += consecutive_proofs.len() as u64;
 
         consecutive_proofs
     }
