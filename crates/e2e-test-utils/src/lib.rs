@@ -1,7 +1,6 @@
 //! Utilities for end-to-end tests.
 
 use std::sync::Arc;
-
 use node::NodeTestContext;
 use reth::{
     args::{DiscoveryArgs, NetworkArgs, RpcServerArgs},
@@ -15,6 +14,7 @@ use reth::{
 use reth_chainspec::EthChainSpec;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_engine_local::LocalPayloadAttributesBuilder;
+use reth_node_api::EngineValidator;
 use reth_node_builder::{
     components::NodeComponentsBuilder,
     rpc::{EngineValidatorAddOn, RethRpcAddOns},
@@ -133,7 +133,13 @@ where
         >,
     >,
     N::AddOns: RethRpcAddOns<Adapter<N, BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>>>
-        + EngineValidatorAddOn<Adapter<N, BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>>>,
+        + EngineValidatorAddOn<
+            Adapter<N, BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>>,
+            Validator: EngineValidator<
+                N::Engine,
+                Block = reth_primitives::Block,
+            >,
+        >,
     LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
         <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
     >,

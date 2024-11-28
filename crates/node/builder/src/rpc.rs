@@ -584,11 +584,12 @@ pub trait EngineValidatorAddOn<Node: FullNodeComponents>: Send {
     fn engine_validator(
         &self,
         ctx: &AddOnsContext<'_, Node>,
-    ) -> impl Future<Output = eyre::Result<Self::Validator>>;
+    ) -> impl Future<Output = eyre::Result<Self::Validator>> + Send;
 }
 
 impl<N, EthApi, EV> EngineValidatorAddOn<N> for RpcAddOns<N, EthApi, EV>
 where
+    Self: Sync,
     N: FullNodeComponents,
     EthApi: EthApiTypes,
     EV: EngineValidatorBuilder<N>,
