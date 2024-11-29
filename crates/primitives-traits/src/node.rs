@@ -2,7 +2,7 @@ use core::fmt;
 
 use crate::{
     Block, BlockBody, BlockHeader, FullBlock, FullBlockBody, FullBlockHeader, FullReceipt,
-    FullSignedTx, FullTxType, MaybeArbitrary, MaybeSerde,
+    FullSignedTx, FullTxType, MaybeArbitrary, MaybeSerde, Receipt,
 };
 
 /// Configures all the primitive types of the node.
@@ -38,17 +38,7 @@ pub trait NodePrimitives:
         + MaybeArbitrary
         + 'static;
     /// A receipt.
-    type Receipt: Send
-        + Sync
-        + Unpin
-        + Clone
-        + Default
-        + fmt::Debug
-        + PartialEq
-        + Eq
-        + MaybeSerde
-        + MaybeArbitrary
-        + 'static;
+    type Receipt: Receipt;
 }
 /// Helper trait that sets trait bounds on [`NodePrimitives`].
 pub trait FullNodePrimitives

@@ -6,10 +6,11 @@
 //!   node after static file producer has finished
 
 use crate::{db_ext::DbTxPruneExt, segments::PruneInput, PrunerError};
-use reth_db::{tables, transaction::DbTxMut};
+use reth_db::{table::Value, tables, transaction::DbTxMut};
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    errors::provider::ProviderResult, BlockReader, DBProvider, PruneCheckpointWriter,
-    TransactionsProvider,
+    errors::provider::ProviderResult, BlockReader, DBProvider, NodePrimitivesProvider,
+    PruneCheckpointWriter, TransactionsProvider,
 };
 use reth_prune_types::{
     PruneCheckpoint, PruneProgress, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
@@ -21,7 +22,10 @@ pub(crate) fn prune<Provider>(
     input: PruneInput,
 ) -> Result<SegmentOutput, PrunerError>
 where
-    Provider: DBProvider<Tx: DbTxMut> + TransactionsProvider + BlockReader,
+    Provider: DBProvider<Tx: DbTxMut>
+        + TransactionsProvider
+        + BlockReader
+        + NodePrimitivesProvider<Primitives: NodePrimitives<Receipt: Value>>,
 {
     let tx_range = match input.get_next_tx_num_range(provider)? {
         Some(range) => range,
@@ -35,7 +39,9 @@ where
     let mut limiter = input.limiter;
 
     let mut last_pruned_transaction = tx_range_end;
-    let (pruned, done) = provider.tx_ref().prune_table_with_range::<tables::Receipts>(
+    let (pruned, done) = provider.tx_ref().prune_table_with_range::<tables::Receipts<
+        <Provider::Primitives as NodePrimitives>::Receipt,
+    >>(
         tx_range,
         &mut limiter,
         |_| false,
