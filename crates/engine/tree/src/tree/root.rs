@@ -1,13 +1,15 @@
 //! State root task related functionality.
 
 use alloy_primitives::map::{HashMap, HashSet};
+use alloy_rlp::Decodable;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
 };
 use reth_trie::{
-    proof::Proof, updates::TrieUpdates, HashedPostState, HashedStorage, MultiProof, Nibbles,
-    TrieInput,
+    proof::Proof, updates::TrieUpdates, HashedPostState, HashedStorage, LeafNode, MultiProof,
+    Nibbles, TrieInput, TrieNode,
 };
+use reth_trie_common::proof::ProofNodes;
 use reth_trie_db::DatabaseProof;
 use reth_trie_parallel::root::ParallelStateRootError;
 use reth_trie_sparse::{SparseStateTrie, SparseStateTrieResult, SparseTrieError};
@@ -168,6 +170,7 @@ pub(crate) struct StateRootTask<Factory> {
     /// The sparse trie used for the state root calculation. If [`None`], then update is in
     /// progress.
     sparse_trie: Option<Box<SparseStateTrie>>,
+    proof_nodes: Option<ProofNodes>,
 }
 
 #[allow(dead_code)]
@@ -180,6 +183,7 @@ where
         config: StateRootConfig<Factory>,
         tx: Sender<StateRootMessage>,
         rx: Receiver<StateRootMessage>,
+        proof_nodes: Option<ProofNodes>,
     ) -> Self {
         Self {
             config,
@@ -188,6 +192,7 @@ where
             fetched_proof_targets: Default::default(),
             proof_sequencer: ProofSequencer::new(),
             sparse_trie: Some(Box::new(SparseStateTrie::default().with_updates(true))),
+            proof_nodes,
         }
     }
 
@@ -438,6 +443,26 @@ where
                             let trie_updates = trie
                                 .take_trie_updates()
                                 .expect("sparse trie should have updates retention enabled");
+
+                            if let Some(proof_nodes) = self.proof_nodes.take() {
+                                for (path, node) in proof_nodes.into_nodes_sorted() {
+                                    let node = TrieNode::decode(&mut &node[..])
+                                        .expect("invalid trie node");
+
+                                    if let TrieNode::Leaf(LeafNode { key, value }) = node {
+                                        let mut full = path.clone();
+                                        full.extend_from_slice(&key);
+
+                                        let sparse_node = trie.get_leaf_value(&full);
+                                        assert_eq!(
+                                            sparse_node,
+                                            Some(&value),
+                                            "leaf node at path {path:?} does not match the proof"
+                                        );
+                                    }
+                                }
+                            }
+
                             return Ok((root, trie_updates));
                         }
                     }
@@ -682,7 +707,7 @@ mod tests {
             consistent_view: ConsistentDbView::new(factory, None),
             input: Arc::new(TrieInput::from_state(hashed_state)),
         };
-        let task = StateRootTask::new(config, tx.clone(), rx);
+        let task = StateRootTask::new(config, tx.clone(), rx, None);
         let handle = task.spawn();
 
         for update in state_updates {

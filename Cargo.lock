@@ -7291,6 +7291,7 @@ dependencies = [
  "reth-testing-utils",
  "reth-tracing",
  "reth-trie",
+ "reth-trie-common",
  "reth-trie-db",
  "reth-trie-parallel",
  "reth-trie-sparse",

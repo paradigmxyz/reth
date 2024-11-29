@@ -17,6 +17,7 @@ use reth_trie::{
     walker::TrieWalker,
     HashBuilder, Nibbles, StorageRoot, TrieAccount, TrieInput, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
+use reth_trie_common::proof::ProofNodes;
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
@@ -62,20 +63,27 @@ where
 {
     /// Calculate incremental state root in parallel.
     pub fn incremental_root(self) -> Result<B256, ParallelStateRootError> {
-        self.calculate(false).map(|(root, _)| root)
+        self.calculate(false, false).map(|(root, _, _)| root)
     }
 
     /// Calculate incremental state root with updates in parallel.
     pub fn incremental_root_with_updates(
         self,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
-        self.calculate(true)
+        self.calculate(true, false).map(|(root, updates, _)| (root, updates))
+    }
+
+    pub fn incremental_root_with_updates_and_proofs(
+        self,
+    ) -> Result<(B256, TrieUpdates, ProofNodes), ParallelStateRootError> {
+        self.calculate(true, true)
     }
 
     fn calculate(
         self,
         retain_updates: bool,
-    ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
+        retain_proofs: bool,
+    ) -> Result<(B256, TrieUpdates, ProofNodes), ParallelStateRootError> {
         let mut tracker = ParallelTrieTracker::default();
         let trie_nodes_sorted = Arc::new(self.input.nodes.into_sorted());
         let hashed_state_sorted = Arc::new(self.input.state.into_sorted());
@@ -139,6 +147,12 @@ where
             &hashed_state_sorted,
         );
 
+        let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
+        if retain_proofs {
+            hash_builder = hash_builder
+                .with_proof_retainer(prefix_sets.account_prefix_set.iter().cloned().collect());
+        }
+
         let walker = TrieWalker::new(
             trie_cursor_factory.account_trie_cursor().map_err(ProviderError::Database)?,
             prefix_sets.account_prefix_set,
@@ -149,7 +163,6 @@ where
             hashed_cursor_factory.hashed_account_cursor().map_err(ProviderError::Database)?,
         );
 
-        let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
         let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
         while let Some(node) = account_node_iter.try_next().map_err(ProviderError::Database)? {
             match node {
@@ -193,6 +206,7 @@ where
         }
 
         let root = hash_builder.root();
+        let proof_nodes = hash_builder.take_proof_nodes();
 
         let removed_keys = account_node_iter.walker.take_removed_keys();
         trie_updates.finalize(hash_builder, removed_keys, prefix_sets.destroyed_accounts);
@@ -213,7 +227,7 @@ where
             "calculated state root"
         );
 
-        Ok((root, trie_updates))
+        Ok((root, trie_updates, proof_nodes))
     }
 }
 

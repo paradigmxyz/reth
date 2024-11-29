@@ -47,6 +47,7 @@ use reth_provider::{
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
+use reth_trie_common::proof::ProofNodes;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::ResultAndState;
 use root::{StateRootConfig, StateRootMessage, StateRootTask};
@@ -2215,16 +2216,10 @@ where
 
         let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
 
-        let input = self
-            .compute_trie_input(consistent_view.clone(), block.parent_hash)
-            .map_err(|e| InsertBlockErrorKindTwo::Other(Box::new(e)))?;
-        let state_root_config = StateRootConfig { consistent_view, input: Arc::new(input) };
-        let state_root_task =
-            StateRootTask::new(state_root_config, state_root_tx.clone(), state_root_rx);
-        let state_root_handle = state_root_task.spawn();
+        let state_hook_tx = state_root_tx.clone();
         let state_hook = move |result_and_state: &ResultAndState| {
             let _ =
-                state_root_tx.send(StateRootMessage::StateUpdate(result_and_state.state.clone()));
+                state_hook_tx.send(StateRootMessage::StateUpdate(result_and_state.state.clone()));
         };
 
         let output = self.metrics.executor.execute_metered(
@@ -2270,7 +2265,7 @@ where
             input.append_ref(&hashed_state);
 
             state_root_result = match self.compute_state_root_parallel(consistent_view, input) {
-                Ok((state_root, trie_output)) => Some((state_root, trie_output)),
+                Ok(result) => Some(result),
                 Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(error))) => {
                     debug!(target: "engine", %error, "Parallel state root computation failed consistency check, falling back");
                     None
@@ -2280,6 +2275,14 @@ where
         }
 
         let (state_root, trie_output) = if let Some(result) = state_root_result {
+            let input = self
+                .compute_trie_input(consistent_view.clone(), block.parent_hash)
+                .map_err(|e| InsertBlockErrorKindTwo::Other(Box::new(e)))?;
+            let state_root_config = StateRootConfig { consistent_view, input: Arc::new(input) };
+            let state_root_task =
+                StateRootTask::new(state_root_config, state_root_tx, state_root_rx, Some(result.2));
+            let state_root_handle = state_root_task.spawn();
+
             match state_root_handle.wait_for_result() {
                 Ok(state_root_task_result) => {
                     info!(target: "engine::tree", block=?sealed_block.num_hash(), state_root_task_result=?state_root_task_result.0,  regular_state_root_result = ?result.0);
@@ -2289,7 +2292,8 @@ where
                     info!(target: "engine::tree", error=?e, "on state root task wait_for_result")
                 }
             }
-            result
+
+            (result.0, result.1)
         } else {
             debug!(target: "engine::tree", block=?sealed_block.num_hash(), persistence_in_progress, "Failed to compute state root in parallel");
             state_provider.state_root_with_updates(hashed_state.clone())?
@@ -2382,8 +2386,8 @@ where
         &self,
         consistent_view: ConsistentDbView<P>,
         input: TrieInput,
-    ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
-        ParallelStateRoot::new(consistent_view, input).incremental_root_with_updates()
+    ) -> Result<(B256, TrieUpdates, ProofNodes), ParallelStateRootError> {
+        ParallelStateRoot::new(consistent_view, input).incremental_root_with_updates_and_proofs()
     }
 
     /// Handles an error that occurred while inserting a block.
