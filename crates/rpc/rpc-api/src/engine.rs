@@ -153,8 +153,8 @@ pub trait EngineApi<Engine: EngineTypes> {
     ///
     /// Post Shanghai forkchoice update handler
     ///
-    /// This is the same as `forkchoiceUpdatedWithWitnessV1`, but expects an additional `withdrawals` field in
-    /// the `payloadAttributes`, if payload attributes are provided.
+    /// This is the same as `forkchoiceUpdatedWithWitnessV1`, but expects an additional
+    /// `withdrawals` field in the `payloadAttributes`, if payload attributes are provided.
     ///
     /// Caution: This should not accept the `parentBeaconBlockRoot` field in the payload
     /// attributes.
@@ -312,7 +312,6 @@ pub trait EngineApi<Engine: EngineTypes> {
     /// This function operates in a stateless mode on top of a provided witness.
     ///
     /// See also <https://gist.github.com/karalabe/47c906f0ab4fdc5b8b791b74f084e5f9>
-    ///
     #[method(name = "executeStatelessPayloadV2")]
     async fn execute_stateless_payload_v2(
         &self,
