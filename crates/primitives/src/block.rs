@@ -744,7 +744,7 @@ pub(super) mod serde_bincode_compat {
     use alloy_consensus::serde_bincode_compat::Header;
     use alloy_eips::eip4895::Withdrawals;
     use alloy_primitives::Address;
-    use reth_primitives_traits::serde_bincode_compat::SealedHeader;
+    use reth_primitives_traits::serde_bincode_compat::{SealedHeader, SerdeBincodeCompat};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -810,6 +810,10 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
+    impl SerdeBincodeCompat for super::BlockBody {
+        type BincodeRepr<'a> = BlockBody<'a>;
+    }
+
     /// Bincode-compatible [`super::SealedBlock`] serde implementation.
     ///
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
@@ -826,19 +830,34 @@ pub(super) mod serde_bincode_compat {
     /// }
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
-    pub struct SealedBlock<'a> {
-        header: SealedHeader<'a>,
-        body: BlockBody<'a>,
+    pub struct SealedBlock<'a, H = super::Header, B = super::BlockBody>
+    where
+        H: SerdeBincodeCompat,
+        B: SerdeBincodeCompat,
+    {
+        header: SealedHeader<'a, H>,
+        body: B::BincodeRepr<'a>,
     }
 
-    impl<'a> From<&'a super::SealedBlock> for SealedBlock<'a> {
-        fn from(value: &'a super::SealedBlock) -> Self {
-            Self { header: SealedHeader::from(&value.header), body: BlockBody::from(&value.body) }
+    impl<'a, H, B> From<&'a super::SealedBlock<H, B>> for SealedBlock<'a, H, B>
+    where
+        H: SerdeBincodeCompat,
+        B: SerdeBincodeCompat,
+    {
+        fn from(value: &'a super::SealedBlock<H, B>) -> Self {
+            Self {
+                header: SealedHeader::from(&value.header),
+                body: B::BincodeRepr::from(&value.body),
+            }
         }
     }
 
-    impl<'a> From<SealedBlock<'a>> for super::SealedBlock {
-        fn from(value: SealedBlock<'a>) -> Self {
+    impl<'a, H, B> From<SealedBlock<'a, H, B>> for super::SealedBlock<H, B>
+    where
+        H: SerdeBincodeCompat,
+        B: SerdeBincodeCompat,
+    {
+        fn from(value: SealedBlock<'a, H, B>) -> Self {
             Self { header: value.header.into(), body: value.body.into() }
         }
     }
@@ -877,19 +896,28 @@ pub(super) mod serde_bincode_compat {
     /// }
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
-    pub struct SealedBlockWithSenders<'a> {
-        block: SealedBlock<'a>,
+    pub struct SealedBlockWithSenders<'a, B = super::Block>
+    where
+        B: reth_primitives_traits::Block,
+    {
+        block: SealedBlock<'a, B::Header, B::Body>,
         senders: Cow<'a, Vec<Address>>,
     }
 
-    impl<'a> From<&'a super::SealedBlockWithSenders> for SealedBlockWithSenders<'a> {
-        fn from(value: &'a super::SealedBlockWithSenders) -> Self {
+    impl<'a, B> From<&'a super::SealedBlockWithSenders<B>> for SealedBlockWithSenders<'a, B>
+    where
+        B: reth_primitives_traits::Block,
+    {
+        fn from(value: &'a super::SealedBlockWithSenders<B>) -> Self {
             Self { block: SealedBlock::from(&value.block), senders: Cow::Borrowed(&value.senders) }
         }
     }
 
-    impl<'a> From<SealedBlockWithSenders<'a>> for super::SealedBlockWithSenders {
-        fn from(value: SealedBlockWithSenders<'a>) -> Self {
+    impl<'a, B> From<SealedBlockWithSenders<'a, B>> for super::SealedBlockWithSenders<B>
+    where
+        B: reth_primitives_traits::Block,
+    {
+        fn from(value: SealedBlockWithSenders<'a, B>) -> Self {
             Self { block: value.block.into(), senders: value.senders.into_owned() }
         }
     }

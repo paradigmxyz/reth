@@ -277,7 +277,7 @@ pub struct OpExecutorBuilder;
 
 impl<Node> ExecutorBuilder<Node> for OpExecutorBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
 {
     type EVM = OpEvmConfig;
     type Executor = BasicBlockExecutorProvider<OpExecutionStrategyFactory>;

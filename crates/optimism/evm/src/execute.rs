@@ -20,6 +20,7 @@ use reth_evm::{
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::validate_block_post_execution;
 use reth_optimism_forks::OpHardfork;
+use reth_optimism_primitives::OpPrimitives;
 use reth_primitives::{BlockWithSenders, Receipt, TxType};
 use reth_revm::{Database, State};
 use revm_primitives::{db::DatabaseCommit, EnvWithHandlerCfg, ResultAndState, U256};
@@ -53,6 +54,7 @@ where
     EvmConfig:
         Clone + Unpin + Sync + Send + 'static + ConfigureEvm<Header = alloy_consensus::Header>,
 {
+    type Primitives = OpPrimitives;
     type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
         OpExecutionStrategy<DB, EvmConfig>;
 
@@ -109,11 +111,13 @@ where
     }
 }
 
-impl<DB, EvmConfig> BlockExecutionStrategy<DB> for OpExecutionStrategy<DB, EvmConfig>
+impl<DB, EvmConfig> BlockExecutionStrategy for OpExecutionStrategy<DB, EvmConfig>
 where
     DB: Database<Error: Into<ProviderError> + Display>,
     EvmConfig: ConfigureEvm<Header = alloy_consensus::Header>,
 {
+    type DB = DB;
+    type Primitives = OpPrimitives;
     type Error = BlockExecutionError;
 
     fn init(&mut self, tx_env_overrides: Box<dyn TxEnvOverrides>) {

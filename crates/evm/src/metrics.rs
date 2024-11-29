@@ -3,6 +3,7 @@
 //! Block processing related to syncing should take care to update the metrics by using either
 //! [`ExecutorMetrics::execute_metered`] or [`ExecutorMetrics::metered_one`].
 use crate::{execute::Executor, system_calls::OnStateHook};
+use alloy_consensus::BlockHeader;
 use metrics::{Counter, Gauge, Histogram};
 use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput};
 use reth_metrics::Metrics;
@@ -69,9 +70,10 @@ pub struct ExecutorMetrics {
 }
 
 impl ExecutorMetrics {
-    fn metered<F, R>(&self, block: &BlockWithSenders, f: F) -> R
+    fn metered<F, R, B>(&self, block: &BlockWithSenders<B>, f: F) -> R
     where
         F: FnOnce() -> R,
+        B: reth_primitives_traits::Block,
     {
         // Execute the block and record the elapsed time.
         let execute_start = Instant::now();
@@ -79,8 +81,8 @@ impl ExecutorMetrics {
         let execution_duration = execute_start.elapsed().as_secs_f64();
 
         // Update gas metrics.
-        self.gas_processed_total.increment(block.gas_used);
-        self.gas_per_second.set(block.gas_used as f64 / execution_duration);
+        self.gas_processed_total.increment(block.header().gas_used());
+        self.gas_per_second.set(block.header().gas_used() as f64 / execution_duration);
         self.execution_histogram.record(execution_duration);
         self.execution_duration.set(execution_duration);
 
@@ -94,19 +96,20 @@ impl ExecutorMetrics {
     /// of accounts, storage slots and bytecodes loaded and updated.
     /// Execute the given block using the provided [`Executor`] and update metrics for the
     /// execution.
-    pub fn execute_metered<'a, E, DB, O, Error>(
+    pub fn execute_metered<'a, E, DB, O, Error, B>(
         &self,
         executor: E,
-        input: BlockExecutionInput<'a, BlockWithSenders>,
+        input: BlockExecutionInput<'a, BlockWithSenders<B>>,
         state_hook: Box<dyn OnStateHook>,
     ) -> Result<BlockExecutionOutput<O>, Error>
     where
         E: Executor<
             DB,
-            Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
+            Input<'a> = BlockExecutionInput<'a, BlockWithSenders<B>>,
             Output = BlockExecutionOutput<O>,
             Error = Error,
         >,
+        B: reth_primitives_traits::Block,
     {
         // clone here is cheap, all the metrics are Option<Arc<_>>. additionally
         // they are gloally registered so that the data recorded in the hook will
@@ -133,9 +136,14 @@ impl ExecutorMetrics {
     }
 
     /// Execute the given block and update metrics for the execution.
-    pub fn metered_one<F, R>(&self, input: BlockExecutionInput<'_, BlockWithSenders>, f: F) -> R
+    pub fn metered_one<F, R, B>(
+        &self,
+        input: BlockExecutionInput<'_, BlockWithSenders<B>>,
+        f: F,
+    ) -> R
     where
-        F: FnOnce(BlockExecutionInput<'_, BlockWithSenders>) -> R,
+        F: FnOnce(BlockExecutionInput<'_, BlockWithSenders<B>>) -> R,
+        B: reth_primitives_traits::Block,
     {
         self.metered(input.block, || f(input))
     }
