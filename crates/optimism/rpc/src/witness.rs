@@ -58,7 +58,7 @@ where
         + 'static,
     EvmConfig: ConfigureEvm<Header = Header> + 'static,
 {
-    fn execute_payload(
+    async fn execute_payload(
         &self,
         parent_block_hash: B256,
         attributes: OpPayloadAttributes,
