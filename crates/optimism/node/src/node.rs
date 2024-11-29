@@ -7,6 +7,7 @@ use crate::{
     OpEngineTypes,
 };
 use alloy_consensus::Header;
+use alloy_primitives::Address;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_db::transaction::{DbTx, DbTxMut};
@@ -183,7 +184,7 @@ where
     }
 
     fn add_ons(&self) -> Self::AddOns {
-        OpAddOns::new(self.args.sequencer_http.clone())
+        OpAddOns::new(self.args.sequencer_http.clone(), self.args.storage_proof_only.clone())
     }
 }
 
@@ -204,14 +205,14 @@ pub struct OpAddOns<N: FullNodeComponents>(pub RpcAddOns<N, OpEthApi<N>, OpEngin
 
 impl<N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>> Default for OpAddOns<N> {
     fn default() -> Self {
-        Self::new(None)
+        Self::new(None, vec![])
     }
 }
 
 impl<N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>> OpAddOns<N> {
-    /// Create a new instance with the given `sequencer_http` URL.
-    pub fn new(sequencer_http: Option<String>) -> Self {
-        Self(RpcAddOns::new(move |ctx| OpEthApi::new(ctx, sequencer_http), Default::default()))
+    /// Create a new instance with the given `sequencer_http` URL and list of storage proof-only addresses.
+    pub fn new(sequencer_http: Option<String>, storage_proof_addresses: Vec<Address> ) -> Self {
+        Self(RpcAddOns::new(move |ctx| OpEthApi::new(ctx, sequencer_http, storage_proof_addresses), Default::default()))
     }
 }
 

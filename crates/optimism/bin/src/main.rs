@@ -28,6 +28,7 @@ fn main() {
             }
             let use_legacy_engine = rollup_args.legacy;
             let sequencer_http_arg = rollup_args.sequencer_http.clone();
+            let storage_proof_only = rollup_args.storage_proof_only.clone();
             match use_legacy_engine {
                 false => {
                     let engine_tree_config = TreeConfig::default()
@@ -36,7 +37,7 @@ fn main() {
                     let handle = builder
                         .with_types_and_provider::<OpNode, BlockchainProvider2<_>>()
                         .with_components(OpNode::components(rollup_args))
-                        .with_add_ons(OpAddOns::new(sequencer_http_arg))
+                        .with_add_ons(OpAddOns::new(sequencer_http_arg, storage_proof_only))
                         .launch_with_fn(|builder| {
                             let launcher = EngineNodeLauncher::new(
                                 builder.task_executor().clone(),

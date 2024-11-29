@@ -2,6 +2,7 @@
 
 //! clap [Args](clap::Args) for optimism rollup configuration
 
+use alloy_primitives::Address;
 use reth_node_builder::engine_tree_config::{
     DEFAULT_MEMORY_BLOCK_BUFFER_TARGET, DEFAULT_PERSISTENCE_THRESHOLD,
 };
@@ -56,6 +57,11 @@ pub struct RollupArgs {
     /// Configure the target number of blocks to keep in memory.
     #[arg(long = "engine.memory-block-buffer-target", conflicts_with = "legacy", default_value_t = DEFAULT_MEMORY_BLOCK_BUFFER_TARGET)]
     pub memory_block_buffer_target: u64,
+
+    /// List of addresses that _ONLY_ return storage proofs _WITHOUT_ an account proof when called
+    /// with `eth_getProof`.
+    #[arg(long = "rpc.storage_proof_addresses", value_delimiter = ',', num_args(1..))]
+    pub storage_proof_only: Vec<Address>,
 }
 
 impl Default for RollupArgs {
@@ -70,6 +76,7 @@ impl Default for RollupArgs {
             legacy: false,
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
+            storage_proof_only: vec![]
         }
     }
 }
