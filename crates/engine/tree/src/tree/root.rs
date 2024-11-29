@@ -559,7 +559,7 @@ fn update_sparse_trie<Factory: DatabaseProviderFactory>(
     input_state_sorted: HashedPostStateSorted,
     prefix_sets: TriePrefixSetsMut,
 ) -> SparseStateTrieResult<(Box<SparseStateTrie>, Duration)> {
-    trace!(target: "engine::root::sparse", "Updating sparse trie");
+    trace!(target: "engine::root::sparse", ?targets, ?multiproof, "Updating sparse trie");
     let started_at = Instant::now();
 
     // Reveal new accounts and storage slots.
