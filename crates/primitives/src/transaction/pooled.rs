@@ -8,6 +8,7 @@ use super::{
 use crate::{
     BlobTransaction, Transaction, TransactionSigned, TransactionSignedEcRecovered, TxType,
 };
+use alloc::vec::Vec;
 use alloy_consensus::{
     constants::EIP4844_TX_TYPE_ID,
     transaction::{TxEip1559, TxEip2930, TxEip4844, TxLegacy},
