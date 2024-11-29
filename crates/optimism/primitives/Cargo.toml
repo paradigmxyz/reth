@@ -55,7 +55,7 @@ std = [
     "alloy-eips/std",
     "alloy-primitives/std",
     "revm-primitives?/std",
-    "serde/std",
+    "serde?/std",
     "secp256k1?/std",
     "reth-codecs?/std",
 ]
