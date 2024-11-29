@@ -216,7 +216,12 @@ impl SparseStateTrie {
     /// the storage root based on update storage trie or look it up from existing leaf value.
     ///
     /// If the new account info and storage trie are empty, the account leaf will be removed.
-    pub fn update_account(&mut self, address: B256, account: Account) -> SparseStateTrieResult<()> {
+    pub fn update_account(
+        &mut self,
+        address: B256,
+        account: Account,
+        fetch_node: impl FnMut(Nibbles) -> Option<Bytes>,
+    ) -> SparseStateTrieResult<()> {
         let nibbles = Nibbles::unpack(address);
         let storage_root = if let Some(storage_trie) = self.storages.get_mut(&address) {
             trace!(target: "trie::sparse", ?address, "Calculating storage root to update account");
@@ -238,7 +243,7 @@ impl SparseStateTrie {
 
         if account.is_empty() && storage_root == EMPTY_ROOT_HASH {
             trace!(target: "trie::sparse", ?address, "Removing account");
-            self.remove_account_leaf(&nibbles)
+            self.remove_account_leaf(&nibbles, fetch_node)
         } else {
             trace!(target: "trie::sparse", ?address, "Updating account");
             self.account_rlp_buf.clear();
@@ -258,8 +263,12 @@ impl SparseStateTrie {
     }
 
     /// Remove the account leaf node.
-    pub fn remove_account_leaf(&mut self, path: &Nibbles) -> SparseStateTrieResult<()> {
-        self.state.remove_leaf(path)?;
+    pub fn remove_account_leaf(
+        &mut self,
+        path: &Nibbles,
+        fetch_node: impl FnMut(Nibbles) -> Option<Bytes>,
+    ) -> SparseStateTrieResult<()> {
+        self.state.remove_leaf(path, fetch_node)?;
         Ok(())
     }
 
@@ -279,8 +288,9 @@ impl SparseStateTrie {
         &mut self,
         address: B256,
         slot: &Nibbles,
+        fetch_node: impl FnMut(Nibbles) -> Option<Bytes>,
     ) -> SparseStateTrieResult<()> {
-        self.storages.entry(address).or_default().remove_leaf(slot)?;
+        self.storages.entry(address).or_default().remove_leaf(slot, fetch_node)?;
         Ok(())
     }
 
