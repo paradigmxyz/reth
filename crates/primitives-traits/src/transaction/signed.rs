@@ -1,7 +1,7 @@
 //! API of a signed transaction.
 
 use crate::{FillTxEnv, InMemorySize, MaybeArbitrary, MaybeCompact, MaybeSerde, TxType};
-use alloc::fmt;
+use alloc::{fmt, vec::Vec};
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
 use alloy_primitives::{keccak256, Address, PrimitiveSignature, TxHash, B256};
 use core::hash::Hash;
@@ -61,7 +61,13 @@ pub trait SignedTransaction:
     ///
     /// Returns `None` if the transaction's signature is invalid, see also
     /// `reth_primitives::transaction::recover_signer_unchecked`.
-    fn recover_signer_unchecked(&self) -> Option<Address>;
+    fn recover_signer_unchecked(&self) -> Option<Address> {
+        self.recover_signer_unchecked_with_buf(&mut Vec::new())
+    }
+
+    /// Same as [`Self::recover_signer_unchecked`] but receives a buffer to operate on. This is used
+    /// during batch recovery to avoid allocating a new buffer for each transaction.
+    fn recover_signer_unchecked_with_buf(&self, buf: &mut Vec<u8>) -> Option<Address>;
 
     /// Calculate transaction hash, eip2728 transaction does not contain rlp header and start with
     /// tx type.

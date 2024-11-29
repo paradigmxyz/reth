@@ -806,7 +806,7 @@ pub trait BestTransactions: Iterator + Send {
     /// Implementers must ensure all subsequent transaction _don't_ depend on this transaction.
     /// In other words, this must remove the given transaction _and_ drain all transaction that
     /// depend on it.
-    fn mark_invalid(&mut self, transaction: &Self::Item);
+    fn mark_invalid(&mut self, transaction: &Self::Item, kind: InvalidPoolTransactionError);
 
     /// An iterator may be able to receive additional pending transactions that weren't present it
     /// the pool when it was created.
@@ -868,8 +868,8 @@ impl<T> BestTransactions for Box<T>
 where
     T: BestTransactions + ?Sized,
 {
-    fn mark_invalid(&mut self, transaction: &Self::Item) {
-        (**self).mark_invalid(transaction);
+    fn mark_invalid(&mut self, transaction: &Self::Item, kind: InvalidPoolTransactionError) {
+        (**self).mark_invalid(transaction, kind)
     }
 
     fn no_updates(&mut self) {
@@ -887,7 +887,7 @@ where
 
 /// A no-op implementation that yields no transactions.
 impl<T> BestTransactions for std::iter::Empty<T> {
-    fn mark_invalid(&mut self, _tx: &T) {}
+    fn mark_invalid(&mut self, _tx: &T, _kind: InvalidPoolTransactionError) {}
 
     fn no_updates(&mut self) {}
 
@@ -977,6 +977,13 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
     /// Define a method to convert from the `Consensus` type to `Self`
     fn try_from_consensus(tx: Self::Consensus) -> Result<Self, Self::TryFromConsensusError> {
         tx.try_into()
+    }
+
+    /// Clone the transaction into a consensus variant.
+    ///
+    /// This method is preferred when the [`PoolTransaction`] already wraps the consensus variant.
+    fn clone_into_consensus(&self) -> Self::Consensus {
+        self.clone().into_consensus()
     }
 
     /// Define a method to convert from the `Self` type to `Consensus`
@@ -1236,6 +1243,10 @@ impl PoolTransaction for EthPooledTransaction {
     type Consensus = TransactionSignedEcRecovered;
 
     type Pooled = PooledTransactionsElementEcRecovered;
+
+    fn clone_into_consensus(&self) -> Self::Consensus {
+        self.transaction().clone()
+    }
 
     fn try_consensus_into_pooled(
         tx: Self::Consensus,

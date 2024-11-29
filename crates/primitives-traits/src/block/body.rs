@@ -4,7 +4,10 @@ use alloc::{fmt, vec::Vec};
 
 use alloy_eips::eip4895::Withdrawals;
 
-use crate::{FullSignedTx, InMemorySize, MaybeArbitrary, MaybeSerde, SignedTransaction};
+use crate::{
+    FullSignedTx, InMemorySize, MaybeArbitrary, MaybeSerde, MaybeSerdeBincodeCompat,
+    SignedTransaction,
+};
 
 /// Helper trait that unifies all behaviour required by transaction to support full node operations.
 pub trait FullBlockBody: BlockBody<Transaction: FullSignedTx> {}
@@ -26,6 +29,7 @@ pub trait BlockBody:
     + InMemorySize
     + MaybeSerde
     + MaybeArbitrary
+    + MaybeSerdeBincodeCompat
 {
     /// Ordered list of signed transactions as committed in block.
     type Transaction: SignedTransaction;

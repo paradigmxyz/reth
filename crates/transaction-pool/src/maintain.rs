@@ -602,7 +602,7 @@ where
         .into_iter()
         .map(|tx| {
             let recovered: TransactionSignedEcRecovered =
-                tx.transaction.clone().into_consensus().into();
+                tx.transaction.clone_into_consensus().into();
             recovered.into_signed()
         })
         .collect::<Vec<_>>();

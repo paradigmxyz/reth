@@ -1489,7 +1489,7 @@ impl<T: SignedTransaction> PropagateTransaction<T> {
         P: PoolTransaction<Consensus: Into<T>>,
     {
         let size = tx.encoded_length();
-        let transaction = tx.transaction.clone().into_consensus().into();
+        let transaction = tx.transaction.clone_into_consensus().into();
         let transaction = Arc::new(transaction);
         Self { size, transaction }
     }
