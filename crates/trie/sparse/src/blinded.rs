@@ -37,11 +37,11 @@ impl BlindedProviderFactory for DefaultBlindedProviderFactory {
     type StorageNodeProvider = DefaultBlindedProvider;
 
     fn account_node_provider(&self) -> Self::AccountNodeProvider {
-        DefaultBlindedProvider::default()
+        DefaultBlindedProvider
     }
 
     fn storage_node_provider(&self) -> Self::StorageNodeProvider {
-        DefaultBlindedProvider::default()
+        DefaultBlindedProvider
     }
 }
 

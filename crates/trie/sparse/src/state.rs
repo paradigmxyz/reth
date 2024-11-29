@@ -301,8 +301,8 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
 impl<F> SparseStateTrie<F>
 where
     F: BlindedProviderFactory,
-    SparseTrieError: From<<F::AccountNodeProvider as BlindedProvider>::Error>,
-    SparseTrieError: From<<F::StorageNodeProvider as BlindedProvider>::Error>,
+    SparseTrieError: From<<F::AccountNodeProvider as BlindedProvider>::Error>
+        + From<<F::StorageNodeProvider as BlindedProvider>::Error>,
 {
     /// Update or remove trie account based on new account info. This method will either recompute
     /// the storage root based on update storage trie or look it up from existing leaf value.

@@ -35,7 +35,7 @@ impl<P> Default for SparseTrie<P> {
 
 impl SparseTrie {
     /// Creates new blind trie.
-    pub fn blind() -> Self {
+    pub const fn blind() -> Self {
         Self::Blind
     }
 
@@ -1099,7 +1099,7 @@ impl SparseNode {
         Self::Leaf { key, hash: None }
     }
 
-    /// Returns `true`` if the node is a hash node.
+    /// Returns `true` if the node is a hash node.
     pub const fn is_hash(&self) -> bool {
         matches!(self, Self::Hash(_))
     }
