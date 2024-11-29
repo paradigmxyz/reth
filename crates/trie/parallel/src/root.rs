@@ -149,6 +149,7 @@ where
 
         let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
         if retain_proofs {
+            trace!(target: "trie::parallel_state_root", prefix_set = ?prefix_sets.account_prefix_set, "Enabling proof retainer");
             hash_builder = hash_builder
                 .with_proof_retainer(prefix_sets.account_prefix_set.iter().cloned().collect());
         }
