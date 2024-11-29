@@ -1,4 +1,4 @@
-use crate::{SparseTrieError, SparseTrieResult};
+use crate::{blinded::DefaultBlindedProvider, SparseTrieError, SparseTrieResult};
 use alloy_primitives::{
     hex, keccak256,
     map::{HashMap, HashSet},
@@ -16,33 +16,29 @@ use std::{borrow::Cow, fmt};
 
 /// Inner representation of the sparse trie.
 /// Sparse trie is blind by default until nodes are revealed.
-#[derive(PartialEq, Eq, Default, Debug)]
-pub enum SparseTrie {
+#[derive(PartialEq, Eq, Debug)]
+pub enum SparseTrie<P = DefaultBlindedProvider> {
     /// None of the trie nodes are known.
-    #[default]
     Blind,
     /// The trie nodes have been revealed.
-    Revealed(Box<RevealedSparseTrie>),
+    Revealed(Box<RevealedSparseTrie<P>>),
+}
+
+impl<P> Default for SparseTrie<P> {
+    fn default() -> Self {
+        Self::Blind
+    }
 }
 
 impl SparseTrie {
+    /// Creates new blind trie.
+    pub fn blind() -> Self {
+        Self::Blind
+    }
+
     /// Creates new revealed empty trie.
     pub fn revealed_empty() -> Self {
         Self::Revealed(Box::default())
-    }
-
-    /// Returns `true` if the sparse trie has no revealed nodes.
-    pub const fn is_blind(&self) -> bool {
-        matches!(self, Self::Blind)
-    }
-
-    /// Returns mutable reference to revealed sparse trie if the trie is not blind.
-    pub fn as_revealed_mut(&mut self) -> Option<&mut RevealedSparseTrie> {
-        if let Self::Revealed(revealed) = self {
-            Some(revealed)
-        } else {
-            None
-        }
     }
 
     /// Reveals the root node if the trie is blinded.
@@ -55,8 +51,42 @@ impl SparseTrie {
         root: TrieNode,
         retain_updates: bool,
     ) -> SparseTrieResult<&mut RevealedSparseTrie> {
+        self.reveal_root_with_provider(Default::default(), root, retain_updates)
+    }
+}
+
+impl<P> SparseTrie<P> {
+    /// Returns `true` if the sparse trie has no revealed nodes.
+    pub const fn is_blind(&self) -> bool {
+        matches!(self, Self::Blind)
+    }
+
+    /// Returns mutable reference to revealed sparse trie if the trie is not blind.
+    pub fn as_revealed_mut(&mut self) -> Option<&mut RevealedSparseTrie<P>> {
+        if let Self::Revealed(revealed) = self {
+            Some(revealed)
+        } else {
+            None
+        }
+    }
+
+    /// Reveals the root node if the trie is blinded.
+    ///
+    /// # Returns
+    ///
+    /// Mutable reference to [`RevealedSparseTrie`].
+    pub fn reveal_root_with_provider(
+        &mut self,
+        provider: P,
+        root: TrieNode,
+        retain_updates: bool,
+    ) -> SparseTrieResult<&mut RevealedSparseTrie<P>> {
         if self.is_blind() {
-            *self = Self::Revealed(Box::new(RevealedSparseTrie::from_root(root, retain_updates)?))
+            *self = Self::Revealed(Box::new(RevealedSparseTrie::from_provider_and_root(
+                provider,
+                root,
+                retain_updates,
+            )?))
         }
         Ok(self.as_revealed_mut().unwrap())
     }
@@ -102,27 +132,29 @@ impl SparseTrie {
 ///   The opposite is also true.
 /// - All keys in `values` collection are full leaf paths.
 #[derive(Clone, PartialEq, Eq)]
-pub struct RevealedSparseTrie {
+pub struct RevealedSparseTrie<P = DefaultBlindedProvider> {
+    /// Blinded node provider.
+    provider: P,
     /// All trie nodes.
     nodes: HashMap<Nibbles, SparseNode>,
     /// All leaf values.
     values: HashMap<Nibbles, Vec<u8>>,
     /// Prefix set.
     prefix_set: PrefixSetMut,
-    /// Reusable buffer for RLP encoding of nodes.
-    rlp_buf: Vec<u8>,
     /// Retained trie updates.
     updates: Option<SparseTrieUpdates>,
+    /// Reusable buffer for RLP encoding of nodes.
+    rlp_buf: Vec<u8>,
 }
 
-impl fmt::Debug for RevealedSparseTrie {
+impl<P> fmt::Debug for RevealedSparseTrie<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RevealedSparseTrie")
             .field("nodes", &self.nodes)
             .field("values", &self.values)
             .field("prefix_set", &self.prefix_set)
-            .field("rlp_buf", &hex::encode(&self.rlp_buf))
             .field("updates", &self.updates)
+            .field("rlp_buf", &hex::encode(&self.rlp_buf))
             .finish()
     }
 }
@@ -130,11 +162,12 @@ impl fmt::Debug for RevealedSparseTrie {
 impl Default for RevealedSparseTrie {
     fn default() -> Self {
         Self {
+            provider: Default::default(),
             nodes: HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]),
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
-            rlp_buf: Vec::new(),
             updates: None,
+            rlp_buf: Vec::new(),
         }
     }
 }
@@ -143,6 +176,7 @@ impl RevealedSparseTrie {
     /// Create new revealed sparse trie from the given root node.
     pub fn from_root(node: TrieNode, retain_updates: bool) -> SparseTrieResult<Self> {
         let mut this = Self {
+            provider: Default::default(),
             nodes: HashMap::default(),
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
@@ -152,6 +186,39 @@ impl RevealedSparseTrie {
         .with_updates(retain_updates);
         this.reveal_node(Nibbles::default(), node)?;
         Ok(this)
+    }
+}
+
+impl<P> RevealedSparseTrie<P> {
+    /// Create new revealed sparse trie from the given root node.
+    pub fn from_provider_and_root(
+        provider: P,
+        node: TrieNode,
+        retain_updates: bool,
+    ) -> SparseTrieResult<Self> {
+        let mut this = Self {
+            provider,
+            nodes: HashMap::default(),
+            values: HashMap::default(),
+            prefix_set: PrefixSetMut::default(),
+            rlp_buf: Vec::new(),
+            updates: None,
+        }
+        .with_updates(retain_updates);
+        this.reveal_node(Nibbles::default(), node)?;
+        Ok(this)
+    }
+
+    /// TODO:
+    pub fn with_provider<BP>(self, provider: BP) -> RevealedSparseTrie<BP> {
+        RevealedSparseTrie {
+            provider,
+            nodes: self.nodes,
+            values: self.values,
+            prefix_set: self.prefix_set,
+            updates: self.updates,
+            rlp_buf: self.rlp_buf,
+        }
     }
 
     /// Set the retention of branch node updates and deletions.
@@ -621,10 +688,17 @@ impl RevealedSparseTrie {
 
     /// Wipe the trie, removing all values and nodes, and replacing the root with an empty node.
     pub fn wipe(&mut self) {
-        let updates_retained = self.updates.is_some();
-        *self = Self::default();
-        self.prefix_set = PrefixSetMut::all();
-        self.updates = updates_retained.then(SparseTrieUpdates::wiped);
+        // let updates_retained = self.updates.is_some();
+        // *self = Self {
+        //     provider: self.provider,
+        //     nodes: HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]),
+        //     values: HashMap::default(),
+        //     prefix_set: PrefixSetMut::all(),
+        //     updates: updates_retained.then(SparseTrieUpdates::wiped),
+        //     rlp_buf: self.rlp_buf,
+        // }
+        // TODO:
+        unimplemented!()
     }
 
     /// Return the root of the sparse trie.
@@ -1190,7 +1264,7 @@ mod tests {
 
     #[test]
     fn sparse_trie_is_blind() {
-        assert!(SparseTrie::default().is_blind());
+        assert!(SparseTrie::blind().is_blind());
         assert!(!SparseTrie::revealed_empty().is_blind());
     }
 
