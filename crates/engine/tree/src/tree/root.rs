@@ -793,4 +793,136 @@ mod tests {
         assert_eq!(ready.len(), 5);
         assert!(!sequencer.has_pending());
     }
+
+    fn create_get_proof_targets_state() -> HashedPostState {
+        let mut state = HashedPostState::default();
+
+        let addr1 = B256::random();
+        let addr2 = B256::random();
+        state.accounts.insert(addr1, Some(Default::default()));
+        state.accounts.insert(addr2, Some(Default::default()));
+
+        let mut storage = HashedStorage::default();
+        let slot1 = B256::random();
+        let slot2 = B256::random();
+        storage.storage.insert(slot1, U256::ZERO);
+        storage.storage.insert(slot2, U256::from(1));
+        state.storages.insert(addr1, storage);
+
+        state
+    }
+
+    #[test]
+    fn test_get_proof_targets_new_account_targets() {
+        let state = create_get_proof_targets_state();
+        let fetched = HashMap::default();
+
+        let targets = get_proof_targets(&state, &fetched);
+
+        // should return all accounts as targets since nothing was fetched before
+        assert_eq!(targets.len(), state.accounts.len());
+        for addr in state.accounts.keys() {
+            assert!(targets.contains_key(addr));
+        }
+    }
+
+    #[test]
+    fn test_get_proof_targets_new_storage_targets() {
+        let state = create_get_proof_targets_state();
+        let fetched = HashMap::default();
+
+        let targets = get_proof_targets(&state, &fetched);
+
+        // verify storage slots are included for accounts with storage
+        for (addr, storage) in &state.storages {
+            assert!(targets.contains_key(addr));
+            let target_slots = &targets[addr];
+            assert_eq!(target_slots.len(), storage.storage.len());
+            for slot in storage.storage.keys() {
+                assert!(target_slots.contains(slot));
+            }
+        }
+    }
+
+    #[test]
+    fn test_get_proof_targets_filter_already_fetched_accounts() {
+        let mut state = create_get_proof_targets_state();
+        let mut fetched = HashMap::default();
+
+        // create a new account without storage
+        let new_addr = B256::random();
+        state.accounts.insert(new_addr, Some(Default::default()));
+
+        // mark one account without storage as already fetched
+        fetched.insert(new_addr, HashSet::default());
+
+        let targets = get_proof_targets(&state, &fetched);
+
+        // should not include the already fetched account that has no storage
+        assert!(!targets.contains_key(&new_addr));
+
+        // should include accounts with storage even if fetched
+        for (addr, _) in state.storages.iter() {
+            assert!(targets.contains_key(addr));
+        }
+    }
+
+    #[test]
+    fn test_get_proof_targets_filter_already_fetched_storage() {
+        let state = create_get_proof_targets_state();
+        let mut fetched = HashMap::default();
+
+        // mark one storage slot as already fetched
+        let (addr, storage) = state.storages.iter().next().unwrap();
+        let mut fetched_slots = HashSet::default();
+        let fetched_slot = *storage.storage.keys().next().unwrap();
+        fetched_slots.insert(fetched_slot);
+        fetched.insert(*addr, fetched_slots);
+
+        let targets = get_proof_targets(&state, &fetched);
+
+        // should not include the already fetched storage slot
+        let target_slots = &targets[addr];
+        assert!(!target_slots.contains(&fetched_slot));
+        assert_eq!(target_slots.len(), storage.storage.len() - 1);
+    }
+
+    #[test]
+    fn test_get_proof_targets_empty_state() {
+        let state = HashedPostState::default();
+        let fetched = HashMap::default();
+
+        let targets = get_proof_targets(&state, &fetched);
+
+        assert!(targets.is_empty());
+    }
+
+    #[test]
+    fn test_get_proof_targets_mixed_fetched_state() {
+        let mut state = HashedPostState::default();
+        let mut fetched = HashMap::default();
+
+        let addr1 = B256::random();
+        let addr2 = B256::random();
+        let slot1 = B256::random();
+        let slot2 = B256::random();
+
+        state.accounts.insert(addr1, Some(Default::default()));
+        state.accounts.insert(addr2, Some(Default::default()));
+
+        let mut storage = HashedStorage::default();
+        storage.storage.insert(slot1, U256::ZERO);
+        storage.storage.insert(slot2, U256::from(1));
+        state.storages.insert(addr1, storage);
+
+        let mut fetched_slots = HashSet::default();
+        fetched_slots.insert(slot1);
+        fetched.insert(addr1, fetched_slots);
+
+        let targets = get_proof_targets(&state, &fetched);
+
+        assert!(targets.contains_key(&addr2));
+        assert!(!targets[&addr1].contains(&slot1));
+        assert!(targets[&addr1].contains(&slot2));
+    }
 }
