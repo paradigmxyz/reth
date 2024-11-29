@@ -267,11 +267,6 @@ impl<H, B> SealedBlock<H, B> {
 }
 
 impl SealedBlock {
-    /// Unseal the block
-    pub fn unseal(self) -> Block {
-        Block { header: self.header.unseal(), body: self.body }
-    }
-
     /// Returns an iterator over all blob transactions of the block
     #[inline]
     pub fn blob_transactions_iter(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
@@ -391,6 +386,14 @@ where
         Ok(SealedBlockWithSenders { block: self, senders })
     }
 
+    /// Unseal the block
+    pub fn unseal<Block>(self) -> Block
+    where
+        Block: reth_primitives_traits::Block<Header = H, Body = B>,
+    {
+        Block::new(self.header.unseal(), self.body)
+    }
+
     /// Ensures that the transaction root in the block header is valid.
     ///
     /// The transaction root is the Keccak 256-bit hash of the root node of the trie structure
@@ -455,7 +458,7 @@ where
 impl<H, B> reth_primitives_traits::Block for SealedBlock<H, B>
 where
     H: reth_primitives_traits::BlockHeader + 'static,
-    B: reth_primitives_traits::BlockBody + 'static,
+    B: reth_primitives_traits::BlockBody<OmmerHeader = H> + 'static,
     Self: Serialize + for<'a> Deserialize<'a>,
 {
     type Header = H;
@@ -489,6 +492,11 @@ where
     }
 }
 
+/// A helepr trait to construct [`SealedBlock`] from a [`reth_primitives_traits::Block`].
+pub type SealedBlockFor<B> = SealedBlock<
+    <B as reth_primitives_traits::Block>::Header,
+    <B as reth_primitives_traits::Block>::Body,
+>;
 /// Sealed block with senders recovered from transactions.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Deref, DerefMut)]
 pub struct SealedBlockWithSenders<B: reth_primitives_traits::Block = Block> {
@@ -661,12 +669,6 @@ impl BlockBody {
     pub fn blob_versioned_hashes(&self) -> Vec<&B256> {
         self.blob_versioned_hashes_iter().collect()
     }
-
-    /// Returns an iterator over all transactions.
-    #[inline]
-    pub fn transactions(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
-        self.transactions.iter()
-    }
 }
 
 impl InMemorySize for BlockBody {
@@ -685,6 +687,7 @@ impl InMemorySize for BlockBody {
 
 impl reth_primitives_traits::BlockBody for BlockBody {
     type Transaction = TransactionSigned;
+    type OmmerHeader = Header;
 
     fn transactions(&self) -> &[Self::Transaction] {
         &self.transactions
@@ -692,6 +695,14 @@ impl reth_primitives_traits::BlockBody for BlockBody {
 
     fn into_transactions(self) -> Vec<Self::Transaction> {
         self.transactions
+    }
+
+    fn withdrawals(&self) -> Option<&Withdrawals> {
+        self.withdrawals.as_ref()
+    }
+
+    fn ommers(&self) -> Option<&[Self::OmmerHeader]> {
+        Some(&self.ommers)
     }
 }
 
@@ -1169,7 +1180,7 @@ mod tests {
     fn test_default_seal() {
         let block: SealedBlock = SealedBlock::default();
         let sealed = block.hash();
-        let block = block.unseal();
+        let block: Block = block.unseal();
         let block = block.seal_slow();
         assert_eq!(sealed, block.hash());
     }

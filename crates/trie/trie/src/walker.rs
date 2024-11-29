@@ -3,9 +3,8 @@ use crate::{
     trie_cursor::{CursorSubNode, TrieCursor},
     BranchNodeCompact, Nibbles,
 };
-use alloy_primitives::B256;
+use alloy_primitives::{map::HashSet, B256};
 use reth_storage_errors::db::DatabaseError;
-use std::collections::HashSet;
 
 #[cfg(feature = "metrics")]
 use crate::metrics::WalkerMetrics;
@@ -58,8 +57,13 @@ impl<C> TrieWalker<C> {
 
     /// Split the walker into stack and trie updates.
     pub fn split(mut self) -> (Vec<CursorSubNode>, HashSet<Nibbles>) {
-        let keys = self.removed_keys.take();
-        (self.stack, keys.unwrap_or_default())
+        let keys = self.take_removed_keys();
+        (self.stack, keys)
+    }
+
+    /// Take removed keys from the walker.
+    pub fn take_removed_keys(&mut self) -> HashSet<Nibbles> {
+        self.removed_keys.take().unwrap_or_default()
     }
 
     /// Prints the current stack of trie nodes.

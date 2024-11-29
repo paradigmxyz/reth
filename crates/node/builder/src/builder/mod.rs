@@ -34,7 +34,7 @@ use reth_node_core::{
 };
 use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider},
-    ChainSpecProvider, FullProvider,
+    BlockReader, ChainSpecProvider, FullProvider,
 };
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, TransactionPool};
@@ -244,7 +244,7 @@ where
     /// Configures the types of the node.
     pub fn with_types<T>(self) -> NodeBuilderWithTypes<RethFullAdapter<DB, T>>
     where
-        T: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesForProvider,
+        T: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesForTree,
     {
         self.with_types_and_provider()
     }
@@ -268,7 +268,7 @@ where
         node: N,
     ) -> NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>
     where
-        N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec> + NodeTypesForProvider,
+        N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec> + NodeTypesForTree,
     {
         self.with_types().with_components(node.components_builder()).with_add_ons(node.add_ons())
     }
@@ -305,7 +305,7 @@ where
     /// Configures the types of the node.
     pub fn with_types<T>(self) -> WithLaunchContext<NodeBuilderWithTypes<RethFullAdapter<DB, T>>>
     where
-        T: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesForProvider,
+        T: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesForTree,
     {
         WithLaunchContext { builder: self.builder.with_types(), task_executor: self.task_executor }
     }
@@ -336,7 +336,7 @@ where
         NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
     >
     where
-        N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec> + NodeTypesForProvider,
+        N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec> + NodeTypesForTree,
     {
         self.with_types().with_components(node.components_builder()).with_add_ons(node.add_ons())
     }
@@ -651,6 +651,8 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     pub fn start_network<Pool>(&self, builder: NetworkBuilder<(), ()>, pool: Pool) -> NetworkHandle
     where
         Pool: TransactionPool + Unpin + 'static,
+        Node::Provider:
+            BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>,
     {
         self.start_network_with(builder, pool, Default::default())
     }
@@ -669,6 +671,8 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     ) -> NetworkHandle
     where
         Pool: TransactionPool + Unpin + 'static,
+        Node::Provider:
+            BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>,
     {
         let (handle, network, txpool, eth) = builder
             .transactions(pool, tx_config)

@@ -18,6 +18,7 @@ reth-errors.workspace = true
 reth-execution-types.workspace = true
 reth-metrics.workspace = true
 reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 reth-storage-api.workspace = true
 reth-trie.workspace = true
 
@@ -34,7 +35,6 @@ tokio-stream = { workspace = true, features = ["sync"] }
 tracing.workspace = true
 
 # misc
-auto_impl.workspace = true
 derive_more.workspace = true
 metrics.workspace = true
 parking_lot.workspace = true
@@ -62,6 +62,7 @@ test-utils = [
     "revm",
     "reth-chainspec/test-utils",
     "reth-primitives/test-utils",
+    "reth-primitives-traits/test-utils",
     "reth-trie/test-utils",
     "revm?/test-utils",
 ]

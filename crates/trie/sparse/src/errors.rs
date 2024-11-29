@@ -1,7 +1,7 @@
 //! Errors for sparse trie.
 
 use alloy_primitives::{Bytes, B256};
-use reth_trie::Nibbles;
+use reth_trie_common::Nibbles;
 use thiserror::Error;
 
 use crate::SparseNode;

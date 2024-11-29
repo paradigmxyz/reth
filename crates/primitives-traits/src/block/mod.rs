@@ -44,7 +44,7 @@ pub trait Block:
     type Header: BlockHeader + 'static;
 
     /// The block's body contains the transactions in the block.
-    type Body: BlockBody + Send + Sync + Unpin + 'static;
+    type Body: BlockBody<OmmerHeader = Self::Header> + Send + Sync + Unpin + 'static;
 
     /// Create new block instance.
     fn new(header: Self::Header, body: Self::Body) -> Self;

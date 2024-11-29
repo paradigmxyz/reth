@@ -75,7 +75,11 @@ struct EngineApiInner<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec
 impl<Provider, EngineT, Pool, Validator, ChainSpec>
     EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: HeaderProvider
+        + BlockReader<Block = reth_primitives::Block>
+        + StateProviderFactory
+        + EvmEnvProvider
+        + 'static,
     EngineT: EngineTypes,
     Pool: TransactionPool + 'static,
     Validator: EngineValidator<EngineT>,
@@ -487,7 +491,7 @@ where
         f: F,
     ) -> EngineApiResult<Vec<Option<R>>>
     where
-        F: Fn(Block) -> R + Send + 'static,
+        F: Fn(Provider::Block) -> R + Send + 'static,
         R: Send + 'static,
     {
         let (tx, rx) = oneshot::channel();
@@ -735,7 +739,11 @@ where
 impl<Provider, EngineT, Pool, Validator, ChainSpec> EngineApiServer<EngineT>
     for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: HeaderProvider
+        + BlockReader<Block = reth_primitives::Block>
+        + StateProviderFactory
+        + EvmEnvProvider
+        + 'static,
     EngineT: EngineTypes,
     Pool: TransactionPool + 'static,
     Validator: EngineValidator<EngineT>,

@@ -41,7 +41,11 @@ where
     N: ProviderNodeTypes,
     Client: EthBlockClient + 'static,
     Executor: BlockExecutorProvider,
-    N::Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>,
+    N::Primitives: FullNodePrimitives<
+        Block = reth_primitives::Block,
+        BlockBody = reth_primitives::BlockBody,
+        Receipt = reth_primitives::Receipt,
+    >,
 {
     // building network downloaders using the fetch client
     let header_downloader = ReverseHeadersDownloaderBuilder::new(config.headers)
@@ -89,7 +93,11 @@ where
     H: HeaderDownloader<Header = alloy_consensus::Header> + 'static,
     B: BodyDownloader<Body = BodyTy<N>> + 'static,
     Executor: BlockExecutorProvider,
-    N::Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>,
+    N::Primitives: FullNodePrimitives<
+        Block = reth_primitives::Block,
+        BlockBody = reth_primitives::BlockBody,
+        Receipt = reth_primitives::Receipt,
+    >,
 {
     let mut builder = Pipeline::<N>::builder();
 

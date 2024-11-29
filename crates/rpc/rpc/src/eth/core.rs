@@ -8,6 +8,7 @@ use alloy_network::Ethereum;
 use alloy_primitives::U256;
 use derive_more::Deref;
 use reth_ethereum_payload_builder::EthereumPayloadBuilder;
+use reth_primitives::NodePrimitives;
 use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},
@@ -104,7 +105,12 @@ where
     ) -> Self
     where
         Tasks: TaskSpawner + Clone + 'static,
-        Events: CanonStateSubscriptions,
+        Events: CanonStateSubscriptions<
+            Primitives: NodePrimitives<
+                Block = reth_primitives::Block,
+                Receipt = reth_primitives::Receipt,
+            >,
+        >,
     {
         let blocking_task_pool =
             BlockingTaskPool::build().expect("failed to build blocking task pool");
@@ -447,7 +453,7 @@ mod tests {
     use crate::EthApi;
 
     fn build_test_eth_api<
-        P: BlockReaderIdExt
+        P: BlockReaderIdExt<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
             + BlockReader
             + ChainSpecProvider<ChainSpec = ChainSpec>
             + EvmEnvProvider

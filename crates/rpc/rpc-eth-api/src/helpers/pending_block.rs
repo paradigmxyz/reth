@@ -11,15 +11,20 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
+    proofs::calculate_transaction_root, Block, BlockBody, BlockExt, InvalidTransactionError,
     Receipt, SealedBlockWithSenders, SealedHeader, TransactionSignedEcRecovered,
 };
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderError,
-    ReceiptProvider, StateProviderFactory,
+    ProviderReceipt, ReceiptProvider, StateProviderFactory,
 };
 use reth_revm::primitives::{BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, ExecutionResult, SpecId};
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
-use reth_transaction_pool::TransactionPool;
+use reth_transaction_pool::{
+    error::InvalidPoolTransactionError, BestTransactionsAttributes, TransactionPool,
+};
+use reth_trie::HashedPostState;
+use revm::{db::states::bundle_state::BundleRetention, DatabaseCommit, State};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use tracing::debug;
@@ -30,8 +35,10 @@ use tracing::debug;
 pub trait LoadPendingBlock:
     EthApiTypes
     + RpcNodeCore<
-        Provider: BlockReaderIdExt
-                      + EvmEnvProvider
+        Provider: BlockReaderIdExt<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+        > + EvmEnvProvider
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                       + StateProviderFactory,
         Pool: TransactionPool,
@@ -99,9 +106,18 @@ pub trait LoadPendingBlock:
     }
 
     /// Returns the locally built pending block
+    #[expect(clippy::type_complexity)]
     fn local_pending_block(
         &self,
-    ) -> impl Future<Output = Result<Option<(SealedBlockWithSenders, Vec<Receipt>)>, Self::Error>> + Send
+    ) -> impl Future<
+        Output = Result<
+            Option<(
+                SealedBlockWithSenders<<Self::Provider as BlockReader>::Block>,
+                Vec<ProviderReceipt<Self::Provider>>,
+            )>,
+            Self::Error,
+        >,
+    > + Send
     where
         Self: SpawnBlocking,
     {

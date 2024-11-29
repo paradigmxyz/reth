@@ -1,10 +1,14 @@
 //! Optimism Node types config.
 
-use std::sync::Arc;
-
+use crate::{
+    args::RollupArgs,
+    engine::OpEngineValidator,
+    txpool::{OpTransactionPool, OpTransactionValidator},
+    OpEngineTypes,
+};
 use alloy_consensus::Header;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
-use reth_chainspec::{EthChainSpec, Hardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_db::transaction::{DbTx, DbTxMut};
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, PeersInfo};
@@ -17,7 +21,7 @@ use reth_node_builder::{
         PayloadServiceBuilder, PoolBuilder, PoolBuilderConfigOverrides,
     },
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
-    rpc::{EngineValidatorBuilder, RethRpcAddOns, RpcAddOns, RpcHandle},
+    rpc::{EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcAddOns, RpcHandle},
     BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig,
 };
 use reth_optimism_chainspec::OpChainSpec;
@@ -32,8 +36,8 @@ use reth_optimism_rpc::{
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::BlockBody;
 use reth_provider::{
-    providers::ChainStorage, BlockBodyWriter, CanonStateSubscriptions, DBProvider, EthStorage,
-    ProviderResult,
+    providers::ChainStorage, BlockBodyReader, BlockBodyWriter, CanonStateSubscriptions,
+    ChainSpecProvider, DBProvider, EthStorage, ProviderResult, ReadBodyInput,
 };
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
@@ -42,13 +46,7 @@ use reth_transaction_pool::{
     TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
-
-use crate::{
-    args::RollupArgs,
-    engine::OpEngineValidator,
-    txpool::{OpTransactionPool, OpTransactionValidator},
-    OpEngineTypes,
-};
+use std::sync::Arc;
 
 /// Storage implementation for Optimism.
 #[derive(Debug, Default, Clone)]
@@ -72,7 +70,31 @@ impl<Provider: DBProvider<Tx: DbTxMut>> BlockBodyWriter<Provider, BlockBody> for
     }
 }
 
+impl<Provider: DBProvider + ChainSpecProvider<ChainSpec: EthereumHardforks>>
+    BlockBodyReader<Provider> for OpStorage
+{
+    type Block = reth_primitives::Block;
+
+    fn read_block_bodies(
+        &self,
+        provider: &Provider,
+        inputs: Vec<ReadBodyInput<'_, Self::Block>>,
+    ) -> ProviderResult<Vec<BlockBody>> {
+        self.0.read_block_bodies(provider, inputs)
+    }
+}
+
 impl ChainStorage<OpPrimitives> for OpStorage {
+    fn reader<TX, Types>(
+        &self,
+    ) -> impl reth_provider::ChainStorageReader<reth_provider::DatabaseProvider<TX, Types>, OpPrimitives>
+    where
+        TX: DbTx + 'static,
+        Types: reth_provider::providers::NodeTypesForProvider<Primitives = OpPrimitives>,
+    {
+        self
+    }
+
     fn writer<TX, Types>(
         &self,
     ) -> impl reth_provider::ChainStorageWriter<reth_provider::DatabaseProvider<TX, Types>, OpPrimitives>
@@ -83,6 +105,7 @@ impl ChainStorage<OpPrimitives> for OpStorage {
         self
     }
 }
+
 /// Type configuration for a regular Optimism node.
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
@@ -110,7 +133,11 @@ impl OpNode {
     >
     where
         Node: FullNodeTypes<
-            Types: NodeTypesWithEngine<Engine = OpEngineTypes, ChainSpec = OpChainSpec>,
+            Types: NodeTypesWithEngine<
+                Engine = OpEngineTypes,
+                ChainSpec = OpChainSpec,
+                Primitives = OpPrimitives,
+            >,
         >,
     {
         let RollupArgs { disable_txpool_gossip, compute_pending_block, discovery_v4, .. } = args;
@@ -175,13 +202,13 @@ impl NodeTypesWithEngine for OpNode {
 #[derive(Debug)]
 pub struct OpAddOns<N: FullNodeComponents>(pub RpcAddOns<N, OpEthApi<N>, OpEngineValidatorBuilder>);
 
-impl<N: FullNodeComponents> Default for OpAddOns<N> {
+impl<N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>> Default for OpAddOns<N> {
     fn default() -> Self {
         Self::new(None)
     }
 }
 
-impl<N: FullNodeComponents> OpAddOns<N> {
+impl<N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>> OpAddOns<N> {
     /// Create a new instance with the given `sequencer_http` URL.
     pub fn new(sequencer_http: Option<String>) -> Self {
         Self(RpcAddOns::new(move |ctx| OpEthApi::new(ctx, sequencer_http), Default::default()))
@@ -231,6 +258,18 @@ where
     }
 }
 
+impl<N> EngineValidatorAddOn<N> for OpAddOns<N>
+where
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>,
+    OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
+{
+    type Validator = OpEngineValidator;
+
+    async fn engine_validator(&self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::Validator> {
+        OpEngineValidatorBuilder::default().build(ctx).await
+    }
+}
+
 /// A regular optimism evm and executor builder.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
@@ -268,7 +307,7 @@ pub struct OpPoolBuilder {
 
 impl<Node> PoolBuilder<Node> for OpPoolBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
 {
     type Pool = OpTransactionPool<Node::Provider, DiskFileBlobStore>;
 
@@ -389,7 +428,11 @@ where
     ) -> eyre::Result<PayloadBuilderHandle<OpEngineTypes>>
     where
         Node: FullNodeTypes<
-            Types: NodeTypesWithEngine<Engine = OpEngineTypes, ChainSpec = OpChainSpec>,
+            Types: NodeTypesWithEngine<
+                Engine = OpEngineTypes,
+                ChainSpec = OpChainSpec,
+                Primitives = OpPrimitives,
+            >,
         >,
         Pool: TransactionPool + Unpin + 'static,
         Evm: ConfigureEvm<Header = Header>,
@@ -424,8 +467,13 @@ where
 
 impl<Node, Pool, Txs> PayloadServiceBuilder<Node, Pool> for OpPayloadBuilder<Txs>
 where
-    Node:
-        FullNodeTypes<Types: NodeTypesWithEngine<Engine = OpEngineTypes, ChainSpec = OpChainSpec>>,
+    Node: FullNodeTypes<
+        Types: NodeTypesWithEngine<
+            Engine = OpEngineTypes,
+            ChainSpec = OpChainSpec,
+            Primitives = OpPrimitives,
+        >,
+    >,
     Pool: TransactionPool + Unpin + 'static,
     Txs: OpPayloadTransactions,
 {
@@ -497,7 +545,7 @@ impl OpNetworkBuilder {
 
 impl<Node, Pool> NetworkBuilder<Node, Pool> for OpNetworkBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
     Pool: TransactionPool + Unpin + 'static,
 {
     async fn build_network(

@@ -37,10 +37,12 @@ where
             Network = Network,
             PayloadBuilder = EthereumPayloadBuilder<EvmConfig>,
         >,
-    Provider: BlockReaderIdExt
-        + EvmEnvProvider
-        + ChainSpecProvider<ChainSpec = ChainSpec>
-        + StateProviderFactory,
+    Provider: BlockReaderIdExt<
+                Block = reth_primitives::Block,
+                Receipt = reth_primitives::Receipt,
+            > + EvmEnvProvider
+                          + ChainSpecProvider<ChainSpec = ChainSpec>
+                          + StateProviderFactory,
     Pool: TransactionPool,
     EvmConfig: ConfigureEvm<Header = Header>,
     ChainSpec: EthChainSpec + EthereumHardforks,

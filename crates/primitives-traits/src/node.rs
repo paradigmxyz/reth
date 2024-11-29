@@ -1,7 +1,8 @@
 use core::fmt;
 
 use crate::{
-    FullBlock, FullBlockBody, FullBlockHeader, FullReceipt, FullSignedTx, FullTxType, MaybeSerde,
+    Block, BlockBody, BlockHeader, FullBlock, FullBlockBody, FullBlockHeader, FullReceipt,
+    FullSignedTx, FullTxType, MaybeArbitrary, MaybeSerde, Receipt,
 };
 
 /// Configures all the primitive types of the node.
@@ -9,44 +10,24 @@ pub trait NodePrimitives:
     Send + Sync + Unpin + Clone + Default + fmt::Debug + PartialEq + Eq + 'static
 {
     /// Block primitive.
-    type Block: Send
-        + Sync
-        + Unpin
-        + Clone
-        + Default
-        + fmt::Debug
-        + PartialEq
-        + Eq
-        + MaybeSerde
-        + 'static;
+    type Block: Block<Header = Self::BlockHeader, Body = Self::BlockBody>;
     /// Block header primitive.
-    type BlockHeader: Send
-        + Sync
-        + Unpin
-        + Clone
-        + Default
-        + fmt::Debug
-        + PartialEq
-        + Eq
-        + MaybeSerde
-        + 'static;
+    type BlockHeader: BlockHeader;
     /// Block body primitive.
-    type BlockBody: Send
-        + Sync
-        + Unpin
-        + Clone
-        + Default
-        + fmt::Debug
-        + PartialEq
-        + Eq
-        + MaybeSerde
-        + 'static;
+    type BlockBody: BlockBody<Transaction = Self::SignedTx, OmmerHeader = Self::BlockHeader>;
     /// Signed version of the transaction type.
-    type SignedTx: Send + Sync + Unpin + Clone + fmt::Debug + PartialEq + Eq + MaybeSerde + 'static;
+    type SignedTx: Send
+        + Sync
+        + Unpin
+        + Clone
+        + fmt::Debug
+        + PartialEq
+        + Eq
+        + MaybeSerde
+        + MaybeArbitrary
+        + 'static;
     /// Transaction envelope type ID.
-    type TxType: Send + Sync + Unpin + Clone + Default + fmt::Debug + PartialEq + Eq + 'static;
-    /// A receipt.
-    type Receipt: Send
+    type TxType: Send
         + Sync
         + Unpin
         + Clone
@@ -54,19 +35,11 @@ pub trait NodePrimitives:
         + fmt::Debug
         + PartialEq
         + Eq
-        + MaybeSerde
+        + MaybeArbitrary
         + 'static;
+    /// A receipt.
+    type Receipt: Receipt;
 }
-
-impl NodePrimitives for () {
-    type Block = ();
-    type BlockHeader = ();
-    type BlockBody = ();
-    type SignedTx = ();
-    type TxType = ();
-    type Receipt = ();
-}
-
 /// Helper trait that sets trait bounds on [`NodePrimitives`].
 pub trait FullNodePrimitives
 where
@@ -109,5 +82,11 @@ impl<T> FullNodePrimitives for T where
 {
 }
 
-/// Helper adapter type for accessing [`NodePrimitives`] receipt type.
+/// Helper adapter type for accessing [`NodePrimitives`] block header types.
+pub type HeaderTy<N> = <N as NodePrimitives>::BlockHeader;
+
+/// Helper adapter type for accessing [`NodePrimitives`] block body types.
+pub type BodyTy<N> = <N as NodePrimitives>::BlockBody;
+
+/// Helper adapter type for accessing [`NodePrimitives`] receipt types.
 pub type ReceiptTy<N> = <N as NodePrimitives>::Receipt;
