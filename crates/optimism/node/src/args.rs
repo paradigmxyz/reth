@@ -60,7 +60,7 @@ pub struct RollupArgs {
 
     /// List of addresses that _ONLY_ return storage proofs _WITHOUT_ an account proof when called
     /// with `eth_getProof`.
-    #[arg(long = "rpc.storage_proof_addresses", value_delimiter = ',', num_args(1..))]
+    #[arg(long = "rpc.storage-proof-addresses", value_delimiter = ',', num_args(1..))]
     pub storage_proof_only: Vec<Address>,
 }
 
@@ -76,7 +76,7 @@ impl Default for RollupArgs {
             legacy: false,
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
-            storage_proof_only: vec![]
+            storage_proof_only: vec![],
         }
     }
 }

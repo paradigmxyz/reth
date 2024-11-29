@@ -210,9 +210,13 @@ impl<N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>> Default
 }
 
 impl<N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>> OpAddOns<N> {
-    /// Create a new instance with the given `sequencer_http` URL and list of storage proof-only addresses.
-    pub fn new(sequencer_http: Option<String>, storage_proof_addresses: Vec<Address> ) -> Self {
-        Self(RpcAddOns::new(move |ctx| OpEthApi::new(ctx, sequencer_http, storage_proof_addresses), Default::default()))
+    /// Create a new instance with the given `sequencer_http` URL and list of storage proof-only
+    /// addresses.
+    pub fn new(sequencer_http: Option<String>, storage_proof_addresses: Vec<Address>) -> Self {
+        Self(RpcAddOns::new(
+            move |ctx| OpEthApi::new(ctx, sequencer_http, storage_proof_addresses),
+            Default::default(),
+        ))
     }
 }
 

@@ -90,7 +90,11 @@ where
     >,
 {
     /// Creates a new instance for given context.
-    pub fn new(ctx: &EthApiBuilderCtx<N>, sequencer_http: Option<String>, storage_proof_only: Vec<Address>) -> Self {
+    pub fn new(
+        ctx: &EthApiBuilderCtx<N>,
+        sequencer_http: Option<String>,
+        storage_proof_only: Vec<Address>,
+    ) -> Self {
         let blocking_task_pool =
             BlockingTaskPool::build().expect("failed to build blocking task pool");
 
