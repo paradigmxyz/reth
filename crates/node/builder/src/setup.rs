@@ -12,7 +12,7 @@ use reth_downloaders::{
 use reth_evm::execute::BlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
 use reth_network_p2p::{
-    bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader, BlockClient
+    bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader, BlockClient,
 };
 use reth_node_api::{BodyTy, HeaderTy};
 use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
