@@ -1,10 +1,11 @@
 use crate::segments::Segment;
 use alloy_primitives::BlockNumber;
-use reth_db::tables;
+use reth_codecs::Compact;
+use reth_db::{table::Value, tables};
 use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    providers::{StaticFileProvider, StaticFileWriter},
-    BlockReader, DBProvider,
+    providers::StaticFileWriter, BlockReader, DBProvider, StaticFileProviderFactory,
 };
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
@@ -14,7 +15,12 @@ use std::ops::RangeInclusive;
 #[derive(Debug, Default)]
 pub struct Transactions;
 
-impl<Provider: DBProvider + BlockReader> Segment<Provider> for Transactions {
+impl<Provider> Segment<Provider> for Transactions
+where
+    Provider: StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value + Compact>>
+        + DBProvider
+        + BlockReader,
+{
     fn segment(&self) -> StaticFileSegment {
         StaticFileSegment::Transactions
     }
@@ -24,22 +30,22 @@ impl<Provider: DBProvider + BlockReader> Segment<Provider> for Transactions {
     fn copy_to_static_files(
         &self,
         provider: Provider,
-        static_file_provider: StaticFileProvider,
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()> {
+        let static_file_provider = provider.static_file_provider();
         let mut static_file_writer = static_file_provider
             .get_writer(*block_range.start(), StaticFileSegment::Transactions)?;
 
         for block in block_range {
-            let _static_file_block = static_file_writer.increment_block(block)?;
-            debug_assert_eq!(_static_file_block, block);
+            static_file_writer.increment_block(block)?;
 
             let block_body_indices = provider
                 .block_body_indices(block)?
                 .ok_or(ProviderError::BlockBodyIndicesNotFound(block))?;
 
-            let mut transactions_cursor =
-                provider.tx_ref().cursor_read::<tables::Transactions>()?;
+            let mut transactions_cursor = provider.tx_ref().cursor_read::<tables::Transactions<
+                <Provider::Primitives as NodePrimitives>::SignedTx,
+            >>()?;
             let transactions_walker =
                 transactions_cursor.walk_range(block_body_indices.tx_num_range())?;
 

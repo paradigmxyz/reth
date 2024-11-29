@@ -10,10 +10,7 @@ use alloy_rpc_types_mev::{
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
-use reth_primitives::{
-    revm_primitives::db::{DatabaseCommit, DatabaseRef},
-    TransactionSigned,
-};
+use reth_primitives::TransactionSigned;
 use reth_provider::{ChainSpecProvider, HeaderProvider};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::MevSimApiServer;
@@ -26,6 +23,7 @@ use reth_tasks::pool::BlockingTaskGuard;
 use revm::{
     db::CacheDB,
     primitives::{Address, EnvWithHandlerCfg, ResultAndState, SpecId, TxEnv},
+    DatabaseCommit, DatabaseRef,
 };
 use std::{sync::Arc, time::Duration};
 use tracing::info;

@@ -1,31 +1,30 @@
 //! Blocks/Headers management for the p2p network.
 
+use crate::{
+    budget::DEFAULT_BUDGET_TRY_DRAIN_DOWNLOADERS, metered_poll_nested_stream_with_budget,
+    metrics::EthRequestHandlerMetrics,
+};
+use alloy_consensus::Header;
+use alloy_eips::BlockHashOrNumber;
+use alloy_rlp::Encodable;
+use futures::StreamExt;
+use reth_eth_wire::{
+    BlockBodies, BlockHeaders, EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, GetNodeData,
+    GetReceipts, HeadersDirection, NetworkPrimitives, NodeData, Receipts,
+};
+use reth_network_api::test_utils::PeersHandle;
+use reth_network_p2p::error::RequestResult;
+use reth_network_peers::PeerId;
+use reth_primitives_traits::Block;
+use reth_storage_api::{BlockReader, HeaderProvider, ReceiptProvider};
 use std::{
     future::Future,
     pin::Pin,
     task::{Context, Poll},
     time::Duration,
 };
-
-use alloy_eips::BlockHashOrNumber;
-use alloy_rlp::Encodable;
-use futures::StreamExt;
-use reth_eth_wire::{
-    BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders, GetNodeData, GetReceipts,
-    HeadersDirection, NodeData, Receipts,
-};
-use reth_network_api::test_utils::PeersHandle;
-use reth_network_p2p::error::RequestResult;
-use reth_network_peers::PeerId;
-use reth_primitives::{BlockBody, Header};
-use reth_storage_api::{BlockReader, HeaderProvider, ReceiptProvider};
 use tokio::sync::{mpsc::Receiver, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
-
-use crate::{
-    budget::DEFAULT_BUDGET_TRY_DRAIN_DOWNLOADERS, metered_poll_nested_stream_with_budget,
-    metrics::EthRequestHandlerMetrics,
-};
 
 // Limits: <https://github.com/ethereum/go-ethereum/blob/b0d44338bbcefee044f1f635a84487cbbd8f0538/eth/protocols/eth/handler.go#L34-L56>
 
@@ -53,7 +52,7 @@ const SOFT_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
 /// This can be spawned to another task and is supposed to be run as background service.
 #[derive(Debug)]
 #[must_use = "Manager does nothing unless polled."]
-pub struct EthRequestHandler<C> {
+pub struct EthRequestHandler<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The client type that can interact with the chain.
     client: C,
     /// Used for reporting peers.
@@ -61,15 +60,15 @@ pub struct EthRequestHandler<C> {
     #[allow(dead_code)]
     peers: PeersHandle,
     /// Incoming request from the [`NetworkManager`](crate::NetworkManager).
-    incoming_requests: ReceiverStream<IncomingEthRequest>,
+    incoming_requests: ReceiverStream<IncomingEthRequest<N>>,
     /// Metrics for the eth request handler.
     metrics: EthRequestHandlerMetrics,
 }
 
 // === impl EthRequestHandler ===
-impl<C> EthRequestHandler<C> {
+impl<C, N: NetworkPrimitives> EthRequestHandler<C, N> {
     /// Create a new instance
-    pub fn new(client: C, peers: PeersHandle, incoming: Receiver<IncomingEthRequest>) -> Self {
+    pub fn new(client: C, peers: PeersHandle, incoming: Receiver<IncomingEthRequest<N>>) -> Self {
         Self {
             client,
             peers,
@@ -81,7 +80,7 @@ impl<C> EthRequestHandler<C> {
 
 impl<C> EthRequestHandler<C>
 where
-    C: BlockReader + HeaderProvider + ReceiptProvider,
+    C: BlockReader + HeaderProvider + ReceiptProvider<Receipt = reth_primitives::Receipt>,
 {
     /// Returns the list of requested headers
     fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<Header> {
@@ -147,7 +146,7 @@ where
         &self,
         _peer_id: PeerId,
         request: GetBlockHeaders,
-        response: oneshot::Sender<RequestResult<BlockHeaders>>,
+        response: oneshot::Sender<RequestResult<BlockHeaders<Header>>>,
     ) {
         self.metrics.eth_headers_requests_received_total.increment(1);
         let headers = self.get_headers_response(request);
@@ -158,7 +157,9 @@ where
         &self,
         _peer_id: PeerId,
         request: GetBlockBodies,
-        response: oneshot::Sender<RequestResult<BlockBodies>>,
+        response: oneshot::Sender<
+            RequestResult<BlockBodies<<C::Block as reth_primitives_traits::Block>::Body>>,
+        >,
     ) {
         self.metrics.eth_bodies_requests_received_total.increment(1);
         let mut bodies = Vec::new();
@@ -167,8 +168,7 @@ where
 
         for hash in request.0 {
             if let Some(block) = self.client.block_by_hash(hash).unwrap_or_default() {
-                let body: BlockBody = block.into();
-
+                let (_, body) = block.split();
                 total_bytes += body.length();
                 bodies.push(body);
 
@@ -224,7 +224,9 @@ where
 /// This should be spawned or used as part of `tokio::select!`.
 impl<C> Future for EthRequestHandler<C>
 where
-    C: BlockReader + HeaderProvider + Unpin,
+    C: BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
+        + HeaderProvider
+        + Unpin,
 {
     type Output = ();
 
@@ -271,7 +273,7 @@ where
 
 /// All `eth` request related to blocks delegated by the network.
 #[derive(Debug)]
-pub enum IncomingEthRequest {
+pub enum IncomingEthRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Request Block headers from the peer.
     ///
     /// The response should be sent through the channel.
@@ -281,7 +283,7 @@ pub enum IncomingEthRequest {
         /// The specific block headers requested.
         request: GetBlockHeaders,
         /// The channel sender for the response containing block headers.
-        response: oneshot::Sender<RequestResult<BlockHeaders>>,
+        response: oneshot::Sender<RequestResult<BlockHeaders<N::BlockHeader>>>,
     },
     /// Request Block bodies from the peer.
     ///
@@ -292,7 +294,7 @@ pub enum IncomingEthRequest {
         /// The specific block bodies requested.
         request: GetBlockBodies,
         /// The channel sender for the response containing block bodies.
-        response: oneshot::Sender<RequestResult<BlockBodies>>,
+        response: oneshot::Sender<RequestResult<BlockBodies<N::BlockBody>>>,
     },
     /// Request Node Data from the peer.
     ///

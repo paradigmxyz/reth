@@ -23,7 +23,7 @@ crc = "3"
 
 # misc
 serde = { workspace = true, features = ["derive"], optional = true }
-thiserror = { workspace = true, default-features = false }
+thiserror.workspace = true
 dyn-clone.workspace = true
 rustc-hash = { workspace = true, optional = true }
 

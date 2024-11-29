@@ -14,10 +14,10 @@ pub use storage_root_targets::StorageRootTargets;
 pub mod stats;
 
 /// Implementation of parallel state root computation.
-pub mod parallel_root;
+pub mod root;
 
 /// Implementation of parallel proof computation.
-pub mod parallel_proof;
+pub mod proof;
 
 /// Parallel state root metrics.
 #[cfg(feature = "metrics")]

@@ -1,4 +1,3 @@
-use crate::{PayloadBuilderError, PayloadEvents, PayloadKind, PayloadTypes};
 use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
     eip7685::Requests,
@@ -7,50 +6,6 @@ use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
 use reth_chain_state::ExecutedBlock;
 use reth_primitives::SealedBlock;
-use tokio::sync::oneshot;
-
-/// A type that can request, subscribe to and resolve payloads.
-#[async_trait::async_trait]
-pub trait PayloadBuilder: Send + Unpin {
-    /// The Payload type for the builder.
-    type PayloadType: PayloadTypes;
-    /// The error type returned by the builder.
-    type Error: Into<PayloadBuilderError>;
-
-    /// Sends a message to the service to start building a new payload for the given payload.
-    ///
-    /// Returns a receiver that will receive the payload id.
-    fn send_new_payload(
-        &self,
-        attr: <Self::PayloadType as PayloadTypes>::PayloadBuilderAttributes,
-    ) -> oneshot::Receiver<Result<PayloadId, Self::Error>>;
-
-    /// Returns the best payload for the given identifier.
-    async fn best_payload(
-        &self,
-        id: PayloadId,
-    ) -> Option<Result<<Self::PayloadType as PayloadTypes>::BuiltPayload, Self::Error>>;
-
-    /// Resolves the payload job and returns the best payload that has been built so far.
-    async fn resolve_kind(
-        &self,
-        id: PayloadId,
-        kind: PayloadKind,
-    ) -> Option<Result<<Self::PayloadType as PayloadTypes>::BuiltPayload, Self::Error>>;
-
-    /// Resolves the payload job as fast and possible and returns the best payload that has been
-    /// built so far.
-    async fn resolve(
-        &self,
-        id: PayloadId,
-    ) -> Option<Result<<Self::PayloadType as PayloadTypes>::BuiltPayload, Self::Error>> {
-        self.resolve_kind(id, PayloadKind::Earliest).await
-    }
-
-    /// Sends a message to the service to subscribe to payload events.
-    /// Returns a receiver that will receive them.
-    async fn subscribe(&self) -> Result<PayloadEvents<Self::PayloadType>, Self::Error>;
-}
 
 /// Represents a built payload type that contains a built [`SealedBlock`] and can be converted into
 /// engine API execution payloads.

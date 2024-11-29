@@ -15,7 +15,7 @@ const SECP256K1N_HALF: U256 = U256::from_be_bytes([
 pub(crate) fn decode_with_eip155_chain_id(
     buf: &mut &[u8],
 ) -> alloy_rlp::Result<(Signature, Option<u64>)> {
-    let v: u64 = Decodable::decode(buf)?;
+    let v = Decodable::decode(buf)?;
     let r: U256 = Decodable::decode(buf)?;
     let s: U256 = Decodable::decode(buf)?;
 
@@ -72,6 +72,7 @@ mod tests {
     };
     use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{hex, Address, PrimitiveSignature as Signature, B256, U256};
+    use reth_primitives_traits::SignedTransaction;
     use std::str::FromStr;
 
     #[test]

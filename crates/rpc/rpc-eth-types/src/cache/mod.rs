@@ -1,5 +1,6 @@
 //! Async caching support for eth RPC
 
+use alloy_consensus::Header;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::B256;
 use futures::{future::Either, Stream, StreamExt};
@@ -7,7 +8,7 @@ use reth_chain_state::CanonStateNotification;
 use reth_errors::{ProviderError, ProviderResult};
 use reth_evm::{provider::EvmEnvProvider, ConfigureEvm};
 use reth_execution_types::Chain;
-use reth_primitives::{Header, Receipt, SealedBlockWithSenders, TransactionSigned};
+use reth_primitives::{Receipt, SealedBlockWithSenders, TransactionSigned};
 use reth_storage_api::{BlockReader, StateProviderFactory, TransactionVariant};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use revm::primitives::{BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId};
@@ -104,7 +105,12 @@ impl EthStateCache {
         evm_config: EvmConfig,
     ) -> Self
     where
-        Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
+        Provider: StateProviderFactory
+            + BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
+            + EvmEnvProvider
+            + Clone
+            + Unpin
+            + 'static,
         EvmConfig: ConfigureEvm<Header = Header>,
     {
         Self::spawn_with(provider, config, TokioTaskExecutor::default(), evm_config)
@@ -121,7 +127,12 @@ impl EthStateCache {
         evm_config: EvmConfig,
     ) -> Self
     where
-        Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
+        Provider: StateProviderFactory
+            + BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
+            + EvmEnvProvider
+            + Clone
+            + Unpin
+            + 'static,
         Tasks: TaskSpawner + Clone + 'static,
         EvmConfig: ConfigureEvm<Header = Header>,
     {
@@ -336,7 +347,12 @@ where
 
 impl<Provider, Tasks, EvmConfig> Future for EthStateCacheService<Provider, Tasks, EvmConfig>
 where
-    Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
+    Provider: StateProviderFactory
+        + BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
+        + EvmEnvProvider
+        + Clone
+        + Unpin
+        + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     EvmConfig: ConfigureEvm<Header = Header>,
 {

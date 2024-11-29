@@ -278,7 +278,13 @@ where
     .await
     .unwrap();
     EthApiClient::<Transaction, Block, Receipt>::syncing(client).await.unwrap();
-    EthApiClient::<Transaction, Block, Receipt>::send_transaction(client, transaction_request)
+    EthApiClient::<Transaction, Block, Receipt>::send_transaction(
+        client,
+        transaction_request.clone(),
+    )
+    .await
+    .unwrap_err();
+    EthApiClient::<Transaction, Block, Receipt>::sign_transaction(client, transaction_request)
         .await
         .unwrap_err();
     EthApiClient::<Transaction, Block, Receipt>::hashrate(client).await.unwrap();
@@ -317,12 +323,6 @@ where
         .await
         .err()
         .unwrap()
-    ));
-    assert!(is_unimplemented(
-        EthApiClient::<Transaction, Block, Receipt>::sign_transaction(client, call_request.clone())
-            .await
-            .err()
-            .unwrap()
     ));
 }
 

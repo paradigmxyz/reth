@@ -1,12 +1,8 @@
 //! [EIP-4895](https://eips.ethereum.org/EIPS/eip-4895) Withdrawal types.
 
-/// Re-export from `alloy_eips`.
-#[doc(inline)]
-pub use alloy_eips::eip4895::Withdrawal;
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use alloy_eips::eip4895::Withdrawal;
     use alloy_primitives::Address;
     use alloy_rlp::{RlpDecodable, RlpEncodable};
     use proptest::proptest;

@@ -75,7 +75,11 @@ struct EngineApiInner<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec
 impl<Provider, EngineT, Pool, Validator, ChainSpec>
     EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: HeaderProvider
+        + BlockReader<Block = reth_primitives::Block>
+        + StateProviderFactory
+        + EvmEnvProvider
+        + 'static,
     EngineT: EngineTypes,
     Pool: TransactionPool + 'static,
     Validator: EngineValidator<EngineT>,
@@ -153,6 +157,20 @@ where
             .inspect(|_| self.inner.on_new_payload_response())?)
     }
 
+    /// Metered version of `new_payload_v1`.
+    async fn new_payload_v1_metered(
+        &self,
+        payload: ExecutionPayloadV1,
+    ) -> EngineApiResult<PayloadStatus> {
+        let start = Instant::now();
+        let gas_used = payload.gas_used;
+        let res = Self::new_payload_v1(self, payload).await;
+        let elapsed = start.elapsed();
+        self.inner.metrics.latency.new_payload_v1.record(elapsed);
+        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
+        res
+    }
+
     /// See also <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/shanghai.md#engine_newpayloadv2>
     pub async fn new_payload_v2(
         &self,
@@ -172,6 +190,20 @@ where
             .new_payload(payload, ExecutionPayloadSidecar::none())
             .await
             .inspect(|_| self.inner.on_new_payload_response())?)
+    }
+
+    /// Metered version of `new_payload_v2`.
+    pub async fn new_payload_v2_metered(
+        &self,
+        payload: ExecutionPayloadInputV2,
+    ) -> EngineApiResult<PayloadStatus> {
+        let start = Instant::now();
+        let gas_used = payload.execution_payload.gas_used;
+        let res = Self::new_payload_v2(self, payload).await;
+        let elapsed = start.elapsed();
+        self.inner.metrics.latency.new_payload_v2.record(elapsed);
+        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
+        res
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_newpayloadv3>
@@ -205,6 +237,23 @@ where
             .inspect(|_| self.inner.on_new_payload_response())?)
     }
 
+    // Metrics version of `new_payload_v3`
+    async fn new_payload_v3_metered(
+        &self,
+        payload: ExecutionPayloadV3,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+    ) -> RpcResult<PayloadStatus> {
+        let start = Instant::now();
+        let gas_used = payload.payload_inner.payload_inner.gas_used;
+        let res =
+            Self::new_payload_v3(self, payload, versioned_hashes, parent_beacon_block_root).await;
+        let elapsed = start.elapsed();
+        self.inner.metrics.latency.new_payload_v3.record(elapsed);
+        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
+        Ok(res?)
+    }
+
     /// See also <https://github.com/ethereum/execution-apis/blob/7907424db935b93c2fe6a3c0faab943adebe8557/src/engine/prague.md#engine_newpayloadv4>
     pub async fn new_payload_v4(
         &self,
@@ -235,6 +284,30 @@ where
             )
             .await
             .inspect(|_| self.inner.on_new_payload_response())?)
+    }
+
+    /// Metrics version of `new_payload_v4`
+    async fn new_payload_v4_metered(
+        &self,
+        payload: ExecutionPayloadV3,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+        execution_requests: Requests,
+    ) -> RpcResult<PayloadStatus> {
+        let start = Instant::now();
+        let gas_used = payload.payload_inner.payload_inner.gas_used;
+        let res = Self::new_payload_v4(
+            self,
+            payload,
+            versioned_hashes,
+            parent_beacon_block_root,
+            execution_requests,
+        )
+        .await;
+        let elapsed = start.elapsed();
+        self.inner.metrics.latency.new_payload_v4.record(elapsed);
+        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
+        Ok(res?)
     }
 
     /// Sends a message to the beacon consensus engine to update the fork choice _without_
@@ -418,7 +491,7 @@ where
         f: F,
     ) -> EngineApiResult<Vec<Option<R>>>
     where
-        F: Fn(Block) -> R + Send + 'static,
+        F: Fn(Provider::Block) -> R + Send + 'static,
         R: Send + 'static,
     {
         let (tx, rx) = oneshot::channel();
@@ -666,7 +739,11 @@ where
 impl<Provider, EngineT, Pool, Validator, ChainSpec> EngineApiServer<EngineT>
     for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: HeaderProvider
+        + BlockReader<Block = reth_primitives::Block>
+        + StateProviderFactory
+        + EvmEnvProvider
+        + 'static,
     EngineT: EngineTypes,
     Pool: TransactionPool + 'static,
     Validator: EngineValidator<EngineT>,
@@ -677,26 +754,14 @@ where
     /// Caution: This should not accept the `withdrawals` field
     async fn new_payload_v1(&self, payload: ExecutionPayloadV1) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV1");
-        let start = Instant::now();
-        let gas_used = payload.gas_used;
-        let res = Self::new_payload_v1(self, payload).await;
-        let elapsed = start.elapsed();
-        self.inner.metrics.latency.new_payload_v1.record(elapsed);
-        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
-        Ok(res?)
+        Ok(self.new_payload_v1_metered(payload).await?)
     }
 
     /// Handler for `engine_newPayloadV2`
     /// See also <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/shanghai.md#engine_newpayloadv2>
     async fn new_payload_v2(&self, payload: ExecutionPayloadInputV2) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV2");
-        let start = Instant::now();
-        let gas_used = payload.execution_payload.gas_used;
-        let res = Self::new_payload_v2(self, payload).await;
-        let elapsed = start.elapsed();
-        self.inner.metrics.latency.new_payload_v2.record(elapsed);
-        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
-        Ok(res?)
+        Ok(self.new_payload_v2_metered(payload).await?)
     }
 
     /// Handler for `engine_newPayloadV3`
@@ -708,14 +773,7 @@ where
         parent_beacon_block_root: B256,
     ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV3");
-        let start = Instant::now();
-        let gas_used = payload.payload_inner.payload_inner.gas_used;
-        let res =
-            Self::new_payload_v3(self, payload, versioned_hashes, parent_beacon_block_root).await;
-        let elapsed = start.elapsed();
-        self.inner.metrics.latency.new_payload_v3.record(elapsed);
-        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
-        Ok(res?)
+        Ok(self.new_payload_v3_metered(payload, versioned_hashes, parent_beacon_block_root).await?)
     }
 
     /// Handler for `engine_newPayloadV4`
@@ -728,20 +786,14 @@ where
         execution_requests: Requests,
     ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV4");
-        let start = Instant::now();
-        let gas_used = payload.payload_inner.payload_inner.gas_used;
-        let res = Self::new_payload_v4(
-            self,
-            payload,
-            versioned_hashes,
-            parent_beacon_block_root,
-            execution_requests,
-        )
-        .await;
-        let elapsed = start.elapsed();
-        self.inner.metrics.latency.new_payload_v4.record(elapsed);
-        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
-        Ok(res?)
+        Ok(self
+            .new_payload_v4_metered(
+                payload,
+                versioned_hashes,
+                parent_beacon_block_root,
+                execution_requests,
+            )
+            .await?)
     }
 
     /// Handler for `engine_forkchoiceUpdatedV1`
@@ -979,8 +1031,9 @@ mod tests {
     use super::*;
     use alloy_rpc_types_engine::{ClientCode, ClientVersionV1};
     use assert_matches::assert_matches;
-    use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage};
+    use reth_beacon_consensus::BeaconConsensusEngineEvent;
     use reth_chainspec::{ChainSpec, MAINNET};
+    use reth_engine_primitives::BeaconEngineMessage;
     use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::SealedBlock;

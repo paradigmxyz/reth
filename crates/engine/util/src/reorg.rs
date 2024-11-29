@@ -1,14 +1,16 @@
 //! Stream wrapper that simulates reorgs.
 
-use alloy_consensus::Transaction;
+use alloy_consensus::{Header, Transaction};
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState, PayloadStatus,
 };
 use futures::{stream::FuturesUnordered, Stream, StreamExt, TryFutureExt};
 use itertools::Either;
-use reth_beacon_consensus::{BeaconEngineMessage, BeaconOnNewPayloadError, OnForkChoiceUpdated};
-use reth_engine_primitives::{EngineApiMessageVersion, EngineTypes};
+use reth_engine_primitives::{
+    BeaconEngineMessage, BeaconOnNewPayloadError, EngineApiMessageVersion, EngineTypes,
+    OnForkChoiceUpdated,
+};
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
 use reth_ethereum_forks::EthereumHardforks;
 use reth_evm::{
@@ -16,7 +18,7 @@ use reth_evm::{
     ConfigureEvm,
 };
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{proofs, Block, BlockBody, Header, Receipt, Receipts};
+use reth_primitives::{proofs, Block, BlockBody, BlockExt, Receipt, Receipts};
 use reth_provider::{BlockReader, ExecutionOutcome, ProviderError, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
@@ -25,9 +27,7 @@ use reth_revm::{
 };
 use reth_rpc_types_compat::engine::payload::block_to_payload;
 use reth_trie::HashedPostState;
-use revm_primitives::{
-    calc_excess_blob_gas, BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg,
-};
+use revm_primitives::{calc_excess_blob_gas, EVMError, EnvWithHandlerCfg};
 use std::{
     collections::VecDeque,
     future::Future,
@@ -107,7 +107,7 @@ impl<S, Engine, Provider, Evm, Spec> Stream for EngineReorg<S, Engine, Provider,
 where
     S: Stream<Item = BeaconEngineMessage<Engine>>,
     Engine: EngineTypes,
-    Provider: BlockReader + StateProviderFactory,
+    Provider: BlockReader<Block = reth_primitives::Block> + StateProviderFactory,
     Evm: ConfigureEvm<Header = Header>,
     Spec: EthereumHardforks,
 {
@@ -254,7 +254,7 @@ fn create_reorg_head<Provider, Evm, Spec>(
     next_sidecar: ExecutionPayloadSidecar,
 ) -> RethResult<(ExecutionPayload, ExecutionPayloadSidecar)>
 where
-    Provider: BlockReader + StateProviderFactory,
+    Provider: BlockReader<Block = reth_primitives::Block> + StateProviderFactory,
     Evm: ConfigureEvm<Header = Header>,
     Spec: EthereumHardforks,
 {
@@ -296,9 +296,7 @@ where
         .build();
 
     // Configure environments
-    let mut cfg = CfgEnvWithHandlerCfg::new(Default::default(), Default::default());
-    let mut block_env = BlockEnv::default();
-    evm_config.fill_cfg_and_block_env(&mut cfg, &mut block_env, &reorg_target.header, U256::MAX);
+    let (cfg, block_env) = evm_config.cfg_and_block_env(&reorg_target.header, U256::MAX);
     let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default());
     let mut evm = evm_config.evm_with_env(&mut state, env);
 
@@ -337,7 +335,7 @@ where
             // Treat error as fatal
             Err(error) => {
                 return Err(RethError::Execution(BlockExecutionError::Validation(
-                    BlockValidationError::EVM { hash: tx.hash, error: Box::new(error) },
+                    BlockValidationError::EVM { hash: tx.hash(), error: Box::new(error) },
                 )))
             }
         };
@@ -375,7 +373,7 @@ where
     // and 4788 contract call
     state.merge_transitions(BundleRetention::PlainState);
 
-    let outcome = ExecutionOutcome::new(
+    let outcome: ExecutionOutcome = ExecutionOutcome::new(
         state.take_bundle(),
         Receipts::from(vec![receipts]),
         reorg_target.number,

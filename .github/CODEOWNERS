@@ -20,11 +20,11 @@ crates/fs-util/             @onbjerg @emhane
 crates/metrics/             @onbjerg
 crates/net/                 @emhane @mattsse @Rjected
 crates/net/downloaders/     @onbjerg @rkrasiuk @emhane
-crates/node/                @mattsse @Rjected @onbjerg
+crates/node/                @mattsse @Rjected @onbjerg @emhane @klkvr
 crates/optimism/            @mattsse @Rjected @fgimenez @emhane
 crates/payload/             @mattsse @Rjected
-crates/primitives/          @Rjected
-crates/primitives-traits/   @Rjected @joshieDo
+crates/primitives/          @Rjected @emhane @mattsse @klkvr
+crates/primitives-traits/   @Rjected @joshieDo @emhane @mattsse @klkvr
 crates/prune/               @shekhirin @joshieDo
 crates/revm/                @mattsse @rakita
 crates/rpc/                 @mattsse @Rjected @emhane

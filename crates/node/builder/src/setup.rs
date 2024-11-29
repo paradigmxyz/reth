@@ -12,8 +12,9 @@ use reth_downloaders::{
 use reth_evm::execute::BlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
 use reth_network_p2p::{
-    bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader, BlockClient,
+    bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader, EthBlockClient,
 };
+use reth_node_api::{BodyTy, FullNodePrimitives};
 use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
 use reth_stages::{prelude::DefaultStages, stages::ExecutionStage, Pipeline, StageSet};
 use reth_static_file::StaticFileProducer;
@@ -26,7 +27,7 @@ use tokio::sync::watch;
 pub fn build_networked_pipeline<N, Client, Executor>(
     config: &StageConfig,
     client: Client,
-    consensus: Arc<dyn Consensus>,
+    consensus: Arc<dyn Consensus<Client::Header, Client::Body>>,
     provider_factory: ProviderFactory<N>,
     task_executor: &TaskExecutor,
     metrics_tx: reth_stages::MetricEventsSender,
@@ -38,12 +39,17 @@ pub fn build_networked_pipeline<N, Client, Executor>(
 ) -> eyre::Result<Pipeline<N>>
 where
     N: ProviderNodeTypes,
-    Client: BlockClient + 'static,
+    Client: EthBlockClient + 'static,
     Executor: BlockExecutorProvider,
+    N::Primitives: FullNodePrimitives<
+        Block = reth_primitives::Block,
+        BlockBody = reth_primitives::BlockBody,
+        Receipt = reth_primitives::Receipt,
+    >,
 {
     // building network downloaders using the fetch client
     let header_downloader = ReverseHeadersDownloaderBuilder::new(config.headers)
-        .build(client.clone(), Arc::clone(&consensus))
+        .build(client.clone(), consensus.clone().as_header_validator())
         .into_task_with(task_executor);
 
     let body_downloader = BodiesDownloaderBuilder::new(config.bodies)
@@ -84,9 +90,14 @@ pub fn build_pipeline<N, H, B, Executor>(
 ) -> eyre::Result<Pipeline<N>>
 where
     N: ProviderNodeTypes,
-    H: HeaderDownloader + 'static,
-    B: BodyDownloader + 'static,
+    H: HeaderDownloader<Header = alloy_consensus::Header> + 'static,
+    B: BodyDownloader<Body = BodyTy<N>> + 'static,
     Executor: BlockExecutorProvider,
+    N::Primitives: FullNodePrimitives<
+        Block = reth_primitives::Block,
+        BlockBody = reth_primitives::BlockBody,
+        Receipt = reth_primitives::Receipt,
+    >,
 {
     let mut builder = Pipeline::<N>::builder();
 

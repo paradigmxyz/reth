@@ -19,7 +19,7 @@ pub use hardfork::OpHardfork;
 use reth_ethereum_forks::EthereumHardforks;
 
 /// Extends [`EthereumHardforks`] with optimism helper methods.
-pub trait OptimismHardforks: EthereumHardforks {
+pub trait OpHardforks: EthereumHardforks {
     /// Convenience method to check if [`OpHardfork::Bedrock`] is active at a given block
     /// number.
     fn is_bedrock_active_at_block(&self, block_number: u64) -> bool {

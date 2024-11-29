@@ -4,7 +4,8 @@ use alloy_primitives::{
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, StorageProof,
+    updates::{StorageTrieUpdates, TrieUpdates},
+    AccountProof, HashedPostState, HashedStorage, MultiProof, StorageMultiProof, StorageProof,
     TrieInput,
 };
 
@@ -56,6 +57,14 @@ pub trait StorageRootProvider: Send + Sync {
         slot: B256,
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageProof>;
+
+    /// Returns the storage multiproof for target slots.
+    fn storage_multiproof(
+        &self,
+        address: Address,
+        slots: &[B256],
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<StorageMultiProof>;
 }
 
 /// A type that can generate state proof on top of a given post state.
@@ -84,4 +93,34 @@ pub trait StateProofProvider: Send + Sync {
         input: TrieInput,
         target: HashedPostState,
     ) -> ProviderResult<HashMap<B256, Bytes>>;
+}
+
+/// Trie Writer
+#[auto_impl::auto_impl(&, Arc, Box)]
+pub trait TrieWriter: Send + Sync {
+    /// Writes trie updates to the database.
+    ///
+    /// Returns the number of entries modified.
+    fn write_trie_updates(&self, trie_updates: &TrieUpdates) -> ProviderResult<usize>;
+}
+
+/// Storage Trie Writer
+#[auto_impl::auto_impl(&, Arc, Box)]
+pub trait StorageTrieWriter: Send + Sync {
+    /// Writes storage trie updates from the given storage trie map.
+    ///
+    /// First sorts the storage trie updates by the hashed address key, writing in sorted order.
+    ///
+    /// Returns the number of entries modified.
+    fn write_storage_trie_updates(
+        &self,
+        storage_tries: &HashMap<B256, StorageTrieUpdates>,
+    ) -> ProviderResult<usize>;
+
+    /// Writes storage trie updates for the given hashed address.
+    fn write_individual_storage_trie_updates(
+        &self,
+        hashed_address: B256,
+        updates: &StorageTrieUpdates,
+    ) -> ProviderResult<usize>;
 }

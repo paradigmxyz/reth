@@ -1,14 +1,14 @@
 //! `BeaconConsensusEngine` external API
 
-use crate::{
-    engine::message::OnForkChoiceUpdated, BeaconConsensusEngineEvent, BeaconEngineMessage,
-    BeaconForkChoiceUpdateError, BeaconOnNewPayloadError,
-};
+use crate::{BeaconConsensusEngineEvent, BeaconForkChoiceUpdateError};
 use alloy_rpc_types_engine::{
     ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
 };
 use futures::TryFutureExt;
-use reth_engine_primitives::{EngineApiMessageVersion, EngineTypes};
+use reth_engine_primitives::{
+    BeaconEngineMessage, BeaconOnNewPayloadError, EngineApiMessageVersion, EngineTypes,
+    OnForkChoiceUpdated,
+};
 use reth_errors::RethResult;
 use reth_tokio_util::{EventSender, EventStream};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};

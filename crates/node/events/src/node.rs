@@ -5,15 +5,13 @@ use alloy_consensus::constants::GWEI_TO_WEI;
 use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use futures::Stream;
-use reth_beacon_consensus::{
-    BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress, ForkchoiceStatus,
-};
-use reth_network::NetworkEvent;
+use reth_beacon_consensus::{BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress};
+use reth_engine_primitives::ForkchoiceStatus;
 use reth_network_api::PeersInfo;
 use reth_primitives_traits::{format_gas, format_gas_throughput};
-use reth_prune::PrunerEvent;
+use reth_prune_types::PrunerEvent;
 use reth_stages::{EntitiesCheckpoint, ExecOutput, PipelineEvent, StageCheckpoint, StageId};
-use reth_static_file::StaticFileProducerEvent;
+use reth_static_file_types::StaticFileProducerEvent;
 use std::{
     fmt::{Display, Formatter},
     future::Future,
@@ -213,12 +211,6 @@ impl NodeState {
         }
     }
 
-    fn handle_network_event(&self, _: NetworkEvent) {
-        // NOTE(onbjerg): This used to log established/disconnecting sessions, but this is already
-        // logged in the networking component. I kept this stub in case we want to catch other
-        // networking events later on.
-    }
-
     fn handle_consensus_engine_event(&mut self, event: BeaconConsensusEngineEvent) {
         match event {
             BeaconConsensusEngineEvent::ForkchoiceUpdated(state, status) => {
@@ -309,7 +301,11 @@ impl NodeState {
                 info!(tip_block_number, "Pruner started");
             }
             PrunerEvent::Finished { tip_block_number, elapsed, stats } => {
-                info!(tip_block_number, ?elapsed, ?stats, "Pruner finished");
+                let stats = format!(
+                    "[{}]",
+                    stats.iter().map(|item| item.to_string()).collect::<Vec<_>>().join(", ")
+                );
+                info!(tip_block_number, ?elapsed, %stats, "Pruner finished");
             }
         }
     }
@@ -356,8 +352,6 @@ struct CurrentStage {
 /// A node event.
 #[derive(Debug)]
 pub enum NodeEvent {
-    /// A network event.
-    Network(NetworkEvent),
     /// A sync pipeline event.
     Pipeline(PipelineEvent),
     /// A consensus engine event.
@@ -371,12 +365,6 @@ pub enum NodeEvent {
     /// Used to encapsulate various conditions or situations that do not
     /// naturally fit into the other more specific variants.
     Other(String),
-}
-
-impl From<NetworkEvent> for NodeEvent {
-    fn from(event: NetworkEvent) -> Self {
-        Self::Network(event)
-    }
 }
 
 impl From<PipelineEvent> for NodeEvent {
@@ -525,9 +513,6 @@ where
 
         while let Poll::Ready(Some(event)) = this.events.as_mut().poll_next(cx) {
             match event {
-                NodeEvent::Network(event) => {
-                    this.state.handle_network_event(event);
-                }
                 NodeEvent::Pipeline(event) => {
                     this.state.handle_pipeline_event(event);
                 }

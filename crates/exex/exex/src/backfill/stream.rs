@@ -103,7 +103,13 @@ where
 impl<E, P> Stream for StreamBackfillJob<E, P, SingleBlockStreamItem>
 where
     E: BlockExecutorProvider + Clone + Send + 'static,
-    P: HeaderProvider + BlockReader + StateProviderFactory + Clone + Send + Unpin + 'static,
+    P: HeaderProvider
+        + BlockReader<Block = reth_primitives::Block>
+        + StateProviderFactory
+        + Clone
+        + Send
+        + Unpin
+        + 'static,
 {
     type Item = BackfillJobResult<SingleBlockStreamItem>;
 
@@ -136,7 +142,13 @@ where
 impl<E, P> Stream for StreamBackfillJob<E, P, BatchBlockStreamItem>
 where
     E: BlockExecutorProvider + Clone + Send + 'static,
-    P: HeaderProvider + BlockReader + StateProviderFactory + Clone + Send + Unpin + 'static,
+    P: HeaderProvider
+        + BlockReader<Block = reth_primitives::Block>
+        + StateProviderFactory
+        + Clone
+        + Send
+        + Unpin
+        + 'static,
 {
     type Item = BackfillJobResult<BatchBlockStreamItem>;
 

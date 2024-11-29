@@ -4,10 +4,27 @@ use alloy_consensus::{Signed, Transaction as _, TxEip4844Variant, TxEnvelope};
 use alloy_network::{Ethereum, Network};
 use alloy_rpc_types_eth::{Transaction, TransactionInfo};
 use reth_primitives::{TransactionSigned, TransactionSignedEcRecovered};
+use reth_rpc_eth_api::EthApiTypes;
+use reth_rpc_eth_types::EthApiError;
 use reth_rpc_types_compat::TransactionCompat;
 
+/// A standalone [`EthApiTypes`] implementation for Ethereum.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct EthereumEthApiTypes(EthTxBuilder);
+
+impl EthApiTypes for EthereumEthApiTypes {
+    type Error = EthApiError;
+    type NetworkTypes = Ethereum;
+    type TransactionCompat = EthTxBuilder;
+
+    fn tx_resp_builder(&self) -> &Self::TransactionCompat {
+        &self.0
+    }
+}
+
 /// Builds RPC transaction response for l1.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
+#[non_exhaustive]
 pub struct EthTxBuilder;
 
 impl TransactionCompat for EthTxBuilder
@@ -16,13 +33,16 @@ where
 {
     type Transaction = <Ethereum as Network>::TransactionResponse;
 
+    type Error = EthApiError;
+
     fn fill(
         &self,
         tx: TransactionSignedEcRecovered,
         tx_info: TransactionInfo,
-    ) -> Self::Transaction {
+    ) -> Result<Self::Transaction, Self::Error> {
         let from = tx.signer();
-        let TransactionSigned { transaction, signature, hash } = tx.into_signed();
+        let hash = tx.hash();
+        let TransactionSigned { transaction, signature, .. } = tx.into_signed();
 
         let inner: TxEnvelope = match transaction {
             reth_primitives::Transaction::Legacy(tx) => {
@@ -54,14 +74,14 @@ where
             })
             .unwrap_or_else(|| inner.max_fee_per_gas());
 
-        Transaction {
+        Ok(Transaction {
             inner,
             block_hash,
             block_number,
             transaction_index,
             from,
             effective_gas_price: Some(effective_gas_price),
-        }
+        })
     }
 
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {

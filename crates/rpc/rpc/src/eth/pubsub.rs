@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::TxHash;
 use alloy_rpc_types_eth::{
     pubsub::{
@@ -15,6 +16,7 @@ use jsonrpsee::{
     server::SubscriptionMessage, types::ErrorObject, PendingSubscriptionSink, SubscriptionSink,
 };
 use reth_network_api::NetworkInfo;
+use reth_primitives::NodePrimitives;
 use reth_provider::{BlockReader, CanonStateSubscriptions, EvmEnvProvider};
 use reth_rpc_eth_api::{pubsub::EthPubSubApiServer, TransactionCompat};
 use reth_rpc_eth_types::logs_utils;
@@ -27,6 +29,7 @@ use tokio_stream::{
     wrappers::{BroadcastStream, ReceiverStream},
     Stream,
 };
+use tracing::error;
 
 /// `Eth` pubsub RPC implementation.
 ///
@@ -83,7 +86,14 @@ impl<Provider, Pool, Events, Network, Eth> EthPubSubApiServer<Eth::Transaction>
 where
     Provider: BlockReader + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + 'static,
-    Events: CanonStateSubscriptions + Clone + 'static,
+    Events: CanonStateSubscriptions<
+            Primitives: NodePrimitives<
+                SignedTx: Encodable2718,
+                BlockHeader = reth_primitives::Header,
+                Receipt = reth_primitives::Receipt,
+            >,
+        > + Clone
+        + 'static,
     Network: NetworkInfo + Clone + 'static,
     Eth: TransactionCompat + 'static,
 {
@@ -116,7 +126,14 @@ async fn handle_accepted<Provider, Pool, Events, Network, Eth>(
 where
     Provider: BlockReader + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + 'static,
-    Events: CanonStateSubscriptions + Clone + 'static,
+    Events: CanonStateSubscriptions<
+            Primitives: NodePrimitives<
+                SignedTx: Encodable2718,
+                BlockHeader = reth_primitives::Header,
+                Receipt = reth_primitives::Receipt,
+            >,
+        > + Clone
+        + 'static,
     Network: NetworkInfo + Clone + 'static,
     Eth: TransactionCompat,
 {
@@ -146,11 +163,23 @@ where
                 match params {
                     Params::Bool(true) => {
                         // full transaction objects requested
-                        let stream = pubsub.full_pending_transaction_stream().map(|tx| {
-                            EthSubscriptionResult::FullTransaction(Box::new(from_recovered(
+                        let stream = pubsub.full_pending_transaction_stream().filter_map(|tx| {
+                            let tx_value = match from_recovered(
                                 tx.transaction.to_recovered_transaction(),
                                 &tx_resp_builder,
-                            )))
+                            ) {
+                                Ok(tx) => {
+                                    Some(EthSubscriptionResult::FullTransaction(Box::new(tx)))
+                                }
+                                Err(err) => {
+                                    error!(target = "rpc",
+                                        %err,
+                                        "Failed to fill transaction with block context"
+                                    );
+                                    None
+                                }
+                            };
+                            std::future::ready(tx_value)
                         });
                         return pipe_from_stream(accepted_sink, stream).await
                     }
@@ -320,7 +349,13 @@ where
 impl<Provider, Pool, Events, Network> EthPubSubInner<Provider, Pool, Events, Network>
 where
     Provider: BlockReader + EvmEnvProvider + 'static,
-    Events: CanonStateSubscriptions + 'static,
+    Events: CanonStateSubscriptions<
+            Primitives: NodePrimitives<
+                SignedTx: Encodable2718,
+                BlockHeader = reth_primitives::Header,
+                Receipt = reth_primitives::Receipt,
+            >,
+        > + 'static,
     Network: NetworkInfo + 'static,
     Pool: 'static,
 {

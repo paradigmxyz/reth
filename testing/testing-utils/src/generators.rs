@@ -1,14 +1,14 @@
 //! Generators for different data structures like block headers, block bodies and ranges of those.
 
-use alloy_consensus::{Transaction as _, TxLegacy};
+use alloy_consensus::{Header, Transaction as _, TxLegacy};
 use alloy_eips::eip4895::{Withdrawal, Withdrawals};
-use alloy_primitives::{Address, BlockNumber, Bytes, Sealable, TxKind, B256, U256};
+use alloy_primitives::{Address, BlockNumber, Bytes, TxKind, B256, U256};
 pub use rand::Rng;
 use rand::{
     distributions::uniform::SampleRange, rngs::StdRng, seq::SliceRandom, thread_rng, SeedableRng,
 };
 use reth_primitives::{
-    proofs, sign_message, Account, BlockBody, Header, Log, Receipt, SealedBlock, SealedHeader,
+    proofs, sign_message, Account, BlockBody, Log, Receipt, SealedBlock, SealedHeader,
     StorageEntry, Transaction, TransactionSigned,
 };
 use secp256k1::{Keypair, Secp256k1};
@@ -99,16 +99,14 @@ pub fn random_header_range<R: Rng>(
 ///
 /// The header is assumed to not be correct if validated.
 pub fn random_header<R: Rng>(rng: &mut R, number: u64, parent: Option<B256>) -> SealedHeader {
-    let header = reth_primitives::Header {
+    let header = alloy_consensus::Header {
         number,
         nonce: rng.gen(),
         difficulty: U256::from(rng.gen::<u32>()),
         parent_hash: parent.unwrap_or_default(),
         ..Default::default()
     };
-    let sealed = header.seal_slow();
-    let (header, seal) = sealed.into_parts();
-    SealedHeader::new(header, seal)
+    SealedHeader::seal(header)
 }
 
 /// Generates a random legacy [Transaction].
@@ -151,7 +149,7 @@ pub fn sign_tx_with_key_pair(key_pair: Keypair, tx: Transaction) -> TransactionS
     let signature =
         sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
 
-    TransactionSigned::from_transaction_and_signature(tx, signature)
+    TransactionSigned::new_unhashed(tx, signature)
 }
 
 /// Generates a set of [Keypair]s based on the desired count.
@@ -203,7 +201,7 @@ pub fn random_block<R: Rng>(rng: &mut R, number: u64, block_params: BlockParams)
     });
     let withdrawals_root = withdrawals.as_ref().map(|w| proofs::calculate_withdrawals_root(w));
 
-    let sealed = Header {
+    let header = Header {
         parent_hash: block_params.parent.unwrap_or_default(),
         number,
         gas_used: total_gas,
@@ -215,13 +213,10 @@ pub fn random_block<R: Rng>(rng: &mut R, number: u64, block_params: BlockParams)
         requests_hash: None,
         withdrawals_root,
         ..Default::default()
-    }
-    .seal_slow();
-
-    let (header, seal) = sealed.into_parts();
+    };
 
     SealedBlock {
-        header: SealedHeader::new(header, seal),
+        header: SealedHeader::seal(header),
         body: BlockBody { transactions, ommers, withdrawals: withdrawals.map(Withdrawals::new) },
     }
 }
@@ -458,6 +453,7 @@ mod tests {
     use alloy_eips::eip2930::AccessList;
     use alloy_primitives::{hex, PrimitiveSignature as Signature};
     use reth_primitives::public_key_to_address;
+    use reth_primitives_traits::SignedTransaction;
     use std::str::FromStr;
 
     #[test]
@@ -484,7 +480,7 @@ mod tests {
                 sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), signature_hash)
                     .unwrap();
 
-            let signed = TransactionSigned::from_transaction_and_signature(tx.clone(), signature);
+            let signed = TransactionSigned::new_unhashed(tx.clone(), signature);
             let recovered = signed.recover_signer().unwrap();
 
             let expected = public_key_to_address(key_pair.public_key());

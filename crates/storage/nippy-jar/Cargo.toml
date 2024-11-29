@@ -35,10 +35,5 @@ rand = { workspace = true, features = ["small_rng"] }
 tempfile.workspace = true
 
 [features]
-default = ["std"]
+default = []
 test-utils = []
-std = [
-	"thiserror/std",
-	"lz4_flex/std",
-	"serde/std"
-]

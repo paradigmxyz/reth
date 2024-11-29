@@ -1,15 +1,18 @@
 //! Database access for `eth_` transaction RPC methods. Loads transaction and receipt data w.r.t.
 //! network.
 
-use alloy_consensus::Transaction;
+use alloy_consensus::{BlockHeader, Transaction};
 use alloy_dyn_abi::TypedData;
 use alloy_eips::{eip2718::Encodable2718, BlockId};
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{Address, Bytes, TxHash, B256};
 use alloy_rpc_types_eth::{transaction::TransactionRequest, BlockNumberOrTag, TransactionInfo};
 use futures::Future;
-use reth_primitives::{Receipt, SealedBlockWithSenders, TransactionMeta, TransactionSigned};
-use reth_provider::{BlockNumReader, BlockReaderIdExt, ReceiptProvider, TransactionsProvider};
+use reth_primitives::{SealedBlockWithSenders, TransactionMeta, TransactionSigned};
+use reth_provider::{
+    BlockNumReader, BlockReaderIdExt, ProviderReceipt, ProviderTx, ReceiptProvider,
+    TransactionsProvider,
+};
 use reth_rpc_eth_types::{
     utils::{binary_search, recover_raw_transaction},
     EthApiError, SignError, TransactionSource,
@@ -18,13 +21,12 @@ use reth_rpc_types_compat::transaction::{from_recovered, from_recovered_with_blo
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 use std::sync::Arc;
 
-use crate::{
-    FromEthApiError, FullEthApiTypes, IntoEthApiError, RpcNodeCore, RpcNodeCoreExt, RpcReceipt,
-    RpcTransaction,
-};
-
 use super::{
-    Call, EthApiSpec, EthSigner, LoadBlock, LoadPendingBlock, LoadReceipt, LoadState, SpawnBlocking,
+    EthApiSpec, EthSigner, LoadBlock, LoadPendingBlock, LoadReceipt, LoadState, SpawnBlocking,
+};
+use crate::{
+    helpers::estimate::EstimateCall, FromEthApiError, FullEthApiTypes, IntoEthApiError,
+    RpcNodeCore, RpcNodeCoreExt, RpcReceipt, RpcTransaction,
 };
 
 /// Transaction related functions for the [`EthApiServer`](crate::EthApiServer) trait in
@@ -61,10 +63,13 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     /// Checks the pool and state.
     ///
     /// Returns `Ok(None)` if no matching transaction was found.
+    #[expect(clippy::complexity)]
     fn transaction_by_hash(
         &self,
         hash: B256,
-    ) -> impl Future<Output = Result<Option<TransactionSource>, Self::Error>> + Send {
+    ) -> impl Future<
+        Output = Result<Option<TransactionSource<ProviderTx<Self::Provider>>>, Self::Error>,
+    > + Send {
         LoadTransaction::transaction_by_hash(self, hash)
     }
 
@@ -149,19 +154,22 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     }
 
     /// Helper method that loads a transaction and its receipt.
+    #[expect(clippy::complexity)]
     fn load_transaction_and_receipt(
         &self,
         hash: TxHash,
     ) -> impl Future<
-        Output = Result<Option<(TransactionSigned, TransactionMeta, Receipt)>, Self::Error>,
+        Output = Result<
+            Option<(ProviderTx<Self::Provider>, TransactionMeta, ProviderReceipt<Self::Provider>)>,
+            Self::Error,
+        >,
     > + Send
     where
         Self: 'static,
     {
-        let this = self.clone();
+        let provider = self.provider().clone();
         self.spawn_blocking_io(move |_| {
-            let (tx, meta) = match this
-                .provider()
+            let (tx, meta) = match provider
                 .transaction_by_hash_with_meta(hash)
                 .map_err(Self::Error::from_eth_err)?
             {
@@ -169,11 +177,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 None => return Ok(None),
             };
 
-            let receipt =
-                match this.provider().receipt_by_hash(hash).map_err(Self::Error::from_eth_err)? {
-                    Some(recpt) => recpt,
-                    None => return Ok(None),
-                };
+            let receipt = match provider.receipt_by_hash(hash).map_err(Self::Error::from_eth_err)? {
+                Some(recpt) => recpt,
+                None => return Ok(None),
+            };
 
             Ok(Some((tx, meta, receipt)))
         })
@@ -193,8 +200,8 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         async move {
             if let Some(block) = self.block_with_senders(block_id).await? {
                 let block_hash = block.hash();
-                let block_number = block.number;
-                let base_fee_per_gas = block.base_fee_per_gas;
+                let block_number = block.number();
+                let base_fee_per_gas = block.base_fee_per_gas();
                 if let Some((signer, tx)) = block.transactions_with_sender().nth(index) {
                     let tx_info = TransactionInfo {
                         hash: Some(tx.hash()),
@@ -208,7 +215,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                         tx.clone().with_signer(*signer),
                         tx_info,
                         self.tx_resp_builder(),
-                    )))
+                    )?))
                 }
             }
 
@@ -233,7 +240,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     RpcNodeCore::pool(self).get_transaction_by_sender_and_nonce(sender, nonce)
                 {
                     let transaction = tx.transaction.clone().into_consensus();
-                    return Ok(Some(from_recovered(transaction.into(), self.tx_resp_builder())));
+                    return Ok(Some(from_recovered(transaction.into(), self.tx_resp_builder())?));
                 }
             }
 
@@ -269,8 +276,8 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 .await?
                 .and_then(|block| {
                     let block_hash = block.hash();
-                    let block_number = block.number;
-                    let base_fee_per_gas = block.base_fee_per_gas;
+                    let block_number = block.number();
+                    let base_fee_per_gas = block.base_fee_per_gas();
 
                     block
                         .transactions_with_sender()
@@ -291,7 +298,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                             )
                         })
                 })
-                .ok_or(EthApiError::HeaderNotFound(block_id).into())
+                .ok_or(EthApiError::HeaderNotFound(block_id))?
                 .map(Some)
         }
     }
@@ -309,7 +316,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     {
         async move {
             if let Some(block) = self.block_with_senders(block_id).await? {
-                if let Some(tx) = block.transactions().nth(index) {
+                if let Some(tx) = block.transactions().get(index) {
                     return Ok(Some(tx.encoded_2718().into()))
                 }
             }
@@ -326,7 +333,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         tx: Bytes,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
         async move {
-            let recovered = recover_raw_transaction(tx.clone())?;
+            let recovered = recover_raw_transaction(tx)?;
             let pool_transaction =
                 <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered.into());
 
@@ -348,7 +355,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         mut request: TransactionRequest,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send
     where
-        Self: EthApiSpec + LoadBlock + LoadPendingBlock + Call,
+        Self: EthApiSpec + LoadBlock + LoadPendingBlock + EstimateCall,
     {
         async move {
             let from = match request.from {
@@ -400,16 +407,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         txn: TransactionRequest,
     ) -> impl Future<Output = Result<TransactionSigned, Self::Error>> + Send {
         async move {
-            let signers: Vec<_> = self.signers().read().iter().cloned().collect();
-            for signer in signers {
-                if signer.is_signer_for(from) {
-                    return match signer.sign_transaction(txn, from).await {
-                        Ok(tx) => Ok(tx),
-                        Err(e) => Err(e.into_eth_err()),
-                    }
-                }
-            }
-            Err(EthApiError::InvalidTransactionSignature.into())
+            self.find_signer(from)?
+                .sign_transaction(txn, from)
+                .await
+                .map_err(Self::Error::from_eth_err)
         }
     }
 
@@ -427,6 +428,22 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 .map_err(Self::Error::from_eth_err)?
                 .as_bytes()
                 .into())
+        }
+    }
+
+    /// Signs a transaction request using the given account in request
+    /// Returns the EIP-2718 encoded signed transaction.
+    fn sign_transaction(
+        &self,
+        request: TransactionRequest,
+    ) -> impl Future<Output = Result<Bytes, Self::Error>> + Send {
+        async move {
+            let from = match request.from {
+                Some(from) => from,
+                None => return Err(SignError::NoAccount.into_eth_err()),
+            };
+
+            Ok(self.sign_request(&from, request).await?.encoded_2718().into())
         }
     }
 
@@ -468,10 +485,13 @@ pub trait LoadTransaction:
     /// Checks the pool and state.
     ///
     /// Returns `Ok(None)` if no matching transaction was found.
+    #[expect(clippy::complexity)]
     fn transaction_by_hash(
         &self,
         hash: B256,
-    ) -> impl Future<Output = Result<Option<TransactionSource>, Self::Error>> + Send {
+    ) -> impl Future<
+        Output = Result<Option<TransactionSource<ProviderTx<Self::Provider>>>, Self::Error>,
+    > + Send {
         async move {
             // Try to find the transaction on disk
             let mut resp = self

@@ -1,8 +1,8 @@
 //! Provider trait for populating the EVM environment.
 
 use crate::ConfigureEvmEnv;
+use alloy_consensus::Header;
 use alloy_eips::BlockHashOrNumber;
-use reth_primitives::Header;
 use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId};
 

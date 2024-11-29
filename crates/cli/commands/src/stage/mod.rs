@@ -2,12 +2,12 @@
 
 use std::sync::Arc;
 
+use crate::common::CliNodeTypes;
 use clap::{Parser, Subcommand};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_evm::execute::BlockExecutorProvider;
-use reth_node_builder::NodeTypesWithEngine;
 
 pub mod drop;
 pub mod dump;
@@ -43,7 +43,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
     /// Execute `stage` command
     pub async fn execute<N, E, F>(self, ctx: CliContext, executor: F) -> eyre::Result<()>
     where
-        N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>,
+        N: CliNodeTypes<ChainSpec = C::ChainSpec>,
         E: BlockExecutorProvider,
         F: FnOnce(Arc<C::ChainSpec>) -> E,
     {

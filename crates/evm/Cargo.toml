@@ -30,6 +30,7 @@ revm-primitives.workspace = true
 # alloy
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
+alloy-consensus.workspace = true
 
 auto_impl.workspace = true
 futures-util.workspace = true

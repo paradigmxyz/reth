@@ -18,13 +18,13 @@ use reth_evm::{
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, SystemCaller},
-    ConfigureEvm,
+    ConfigureEvm, TxEnvOverrides,
 };
 use reth_primitives::{BlockWithSenders, Receipt};
 use reth_revm::db::State;
 use revm_primitives::{
     db::{Database, DatabaseCommit},
-    BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState, U256,
+    EnvWithHandlerCfg, ResultAndState, U256,
 };
 
 /// Factory for [`EthExecutionStrategy`].
@@ -83,6 +83,8 @@ where
     chain_spec: Arc<ChainSpec>,
     /// How to create an EVM.
     evm_config: EvmConfig,
+    /// Optional overrides for the transactions environment.
+    tx_env_overrides: Option<Box<dyn TxEnvOverrides>>,
     /// Current state for block execution.
     state: State<DB>,
     /// Utility to call system smart contracts.
@@ -96,7 +98,7 @@ where
     /// Creates a new [`EthExecutionStrategy`]
     pub fn new(state: State<DB>, chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
         let system_caller = SystemCaller::new(evm_config.clone(), chain_spec.clone());
-        Self { state, chain_spec, evm_config, system_caller }
+        Self { state, chain_spec, evm_config, system_caller, tx_env_overrides: None }
     }
 }
 
@@ -115,10 +117,7 @@ where
         header: &alloy_consensus::Header,
         total_difficulty: U256,
     ) -> EnvWithHandlerCfg {
-        let mut cfg = CfgEnvWithHandlerCfg::new(Default::default(), Default::default());
-        let mut block_env = BlockEnv::default();
-        self.evm_config.fill_cfg_and_block_env(&mut cfg, &mut block_env, header, total_difficulty);
-
+        let (cfg, block_env) = self.evm_config.cfg_and_block_env(header, total_difficulty);
         EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default())
     }
 }
@@ -129,6 +128,10 @@ where
     EvmConfig: ConfigureEvm<Header = alloy_consensus::Header>,
 {
     type Error = BlockExecutionError;
+
+    fn init(&mut self, tx_env_overrides: Box<dyn TxEnvOverrides>) {
+        self.tx_env_overrides = Some(tx_env_overrides);
+    }
 
     fn apply_pre_execution_changes(
         &mut self,
@@ -171,6 +174,10 @@ where
             }
 
             self.evm_config.fill_tx_env(evm.tx_mut(), transaction, *sender);
+
+            if let Some(tx_env_overrides) = &mut self.tx_env_overrides {
+                tx_env_overrides.apply(evm.tx_mut());
+            }
 
             // Execute transaction.
             let result_and_state = evm.transact().map_err(move |err| {
@@ -309,7 +316,9 @@ mod tests {
         BasicBlockExecutorProvider, BatchExecutor, BlockExecutorProvider, Executor,
     };
     use reth_execution_types::BlockExecutionOutput;
-    use reth_primitives::{public_key_to_address, Account, Block, BlockBody, Transaction};
+    use reth_primitives::{
+        public_key_to_address, Account, Block, BlockBody, BlockExt, Transaction,
+    };
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, TransitionState,
     };

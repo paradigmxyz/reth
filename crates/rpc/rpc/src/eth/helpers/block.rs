@@ -32,7 +32,6 @@ where
             let block_hash = block.hash();
             let excess_blob_gas = block.excess_blob_gas;
             let timestamp = block.timestamp;
-            let block = block.unseal();
 
             return block
                 .body
@@ -42,7 +41,7 @@ where
                 .enumerate()
                 .map(|(idx, (tx, receipt))| {
                     let meta = TransactionMeta {
-                        tx_hash: tx.hash,
+                        tx_hash: tx.hash(),
                         index: idx as u64,
                         block_hash,
                         block_number,

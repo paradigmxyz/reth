@@ -2,10 +2,12 @@ use crate::segments::{
     AccountHistory, ReceiptsByLogs, Segment, SenderRecovery, StorageHistory, TransactionLookup,
     UserReceipts,
 };
-use reth_db::transaction::DbTxMut;
+use alloy_eips::eip2718::Encodable2718;
+use reth_db::{table::Value, transaction::DbTxMut};
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::StaticFileProvider, BlockReader, DBProvider, PruneCheckpointWriter,
-    TransactionsProvider,
+    StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
 
@@ -45,12 +47,15 @@ impl<Provider> SegmentSet<Provider> {
 
 impl<Provider> SegmentSet<Provider>
 where
-    Provider: DBProvider<Tx: DbTxMut> + TransactionsProvider + PruneCheckpointWriter + BlockReader,
+    Provider: StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value, Receipt: Value>>
+        + DBProvider<Tx: DbTxMut>
+        + PruneCheckpointWriter
+        + BlockReader<Transaction: Encodable2718>,
 {
     /// Creates a [`SegmentSet`] from an existing components, such as [`StaticFileProvider`] and
     /// [`PruneModes`].
     pub fn from_components(
-        static_file_provider: StaticFileProvider,
+        static_file_provider: StaticFileProvider<Provider::Primitives>,
         prune_modes: PruneModes,
     ) -> Self {
         let PruneModes {

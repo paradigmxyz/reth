@@ -8,6 +8,7 @@ use reth_network_p2p::headers::{
 use reth_primitives::SealedHeader;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
+    fmt::Debug,
     future::Future,
     pin::Pin,
     task::{ready, Context, Poll},
@@ -22,15 +23,15 @@ pub const HEADERS_TASK_BUFFER_SIZE: usize = 8;
 /// A [HeaderDownloader] that drives a spawned [HeaderDownloader] on a spawned task.
 #[derive(Debug)]
 #[pin_project]
-pub struct TaskDownloader {
+pub struct TaskDownloader<H> {
     #[pin]
-    from_downloader: ReceiverStream<HeadersDownloaderResult<Vec<SealedHeader>>>,
-    to_downloader: UnboundedSender<DownloaderUpdates>,
+    from_downloader: ReceiverStream<HeadersDownloaderResult<Vec<SealedHeader<H>>, H>>,
+    to_downloader: UnboundedSender<DownloaderUpdates<H>>,
 }
 
 // === impl TaskDownloader ===
 
-impl TaskDownloader {
+impl<H: Send + Sync + Unpin + 'static> TaskDownloader<H> {
     /// Spawns the given `downloader` via [`tokio::task::spawn`] and returns a [`TaskDownloader`]
     /// that's connected to that task.
     ///
@@ -44,9 +45,10 @@ impl TaskDownloader {
     /// # use std::sync::Arc;
     /// # use reth_downloaders::headers::reverse_headers::ReverseHeadersDownloader;
     /// # use reth_downloaders::headers::task::TaskDownloader;
-    /// # use reth_consensus::Consensus;
+    /// # use reth_consensus::HeaderValidator;
     /// # use reth_network_p2p::headers::client::HeadersClient;
-    /// # fn t<H: HeadersClient + 'static>(consensus:Arc<dyn Consensus>, client: Arc<H>) {
+    /// # use reth_primitives_traits::BlockHeader;
+    /// # fn t<H: HeadersClient<Header: BlockHeader> + 'static>(consensus:Arc<dyn HeaderValidator<H::Header>>, client: Arc<H>) {
     ///    let downloader = ReverseHeadersDownloader::<H>::builder().build(
     ///        client,
     ///        consensus
@@ -55,7 +57,7 @@ impl TaskDownloader {
     /// # }
     pub fn spawn<T>(downloader: T) -> Self
     where
-        T: HeaderDownloader + 'static,
+        T: HeaderDownloader<Header = H> + 'static,
     {
         Self::spawn_with(downloader, &TokioTaskExecutor::default())
     }
@@ -64,7 +66,7 @@ impl TaskDownloader {
     /// that's connected to that task.
     pub fn spawn_with<T, S>(downloader: T, spawner: &S) -> Self
     where
-        T: HeaderDownloader + 'static,
+        T: HeaderDownloader<Header = H> + 'static,
         S: TaskSpawner,
     {
         let (headers_tx, headers_rx) = mpsc::channel(HEADERS_TASK_BUFFER_SIZE);
@@ -81,12 +83,14 @@ impl TaskDownloader {
     }
 }
 
-impl HeaderDownloader for TaskDownloader {
-    fn update_sync_gap(&mut self, head: SealedHeader, target: SyncTarget) {
+impl<H: Debug + Send + Sync + Unpin + 'static> HeaderDownloader for TaskDownloader<H> {
+    type Header = H;
+
+    fn update_sync_gap(&mut self, head: SealedHeader<H>, target: SyncTarget) {
         let _ = self.to_downloader.send(DownloaderUpdates::UpdateSyncGap(head, target));
     }
 
-    fn update_local_head(&mut self, head: SealedHeader) {
+    fn update_local_head(&mut self, head: SealedHeader<H>) {
         let _ = self.to_downloader.send(DownloaderUpdates::UpdateLocalHead(head));
     }
 
@@ -99,8 +103,8 @@ impl HeaderDownloader for TaskDownloader {
     }
 }
 
-impl Stream for TaskDownloader {
-    type Item = HeadersDownloaderResult<Vec<SealedHeader>>;
+impl<H> Stream for TaskDownloader<H> {
+    type Item = HeadersDownloaderResult<Vec<SealedHeader<H>>, H>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.project().from_downloader.poll_next(cx)
@@ -108,9 +112,10 @@ impl Stream for TaskDownloader {
 }
 
 /// A [`HeaderDownloader`] that runs on its own task
-struct SpawnedDownloader<T> {
-    updates: UnboundedReceiverStream<DownloaderUpdates>,
-    headers_tx: PollSender<HeadersDownloaderResult<Vec<SealedHeader>>>,
+#[expect(clippy::complexity)]
+struct SpawnedDownloader<T: HeaderDownloader> {
+    updates: UnboundedReceiverStream<DownloaderUpdates<T::Header>>,
+    headers_tx: PollSender<HeadersDownloaderResult<Vec<SealedHeader<T::Header>>, T::Header>>,
     downloader: T,
 }
 
@@ -170,9 +175,9 @@ impl<T: HeaderDownloader> Future for SpawnedDownloader<T> {
 }
 
 /// Commands delegated tot the spawned [`HeaderDownloader`]
-enum DownloaderUpdates {
-    UpdateSyncGap(SealedHeader, SyncTarget),
-    UpdateLocalHead(SealedHeader),
+enum DownloaderUpdates<H> {
+    UpdateSyncGap(SealedHeader<H>, SyncTarget),
+    UpdateLocalHead(SealedHeader<H>),
     UpdateSyncTarget(SyncTarget),
     SetBatchSize(usize),
 }

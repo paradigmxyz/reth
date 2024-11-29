@@ -20,10 +20,11 @@ extern crate alloc;
 use core::convert::Infallible;
 
 use alloc::{sync::Arc, vec::Vec};
+use alloy_consensus::Header;
 use alloy_primitives::{Address, Bytes, TxKind, U256};
 use reth_chainspec::{ChainSpec, Head};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
-use reth_primitives::{transaction::FillTxEnv, Header, TransactionSigned};
+use reth_primitives::{transaction::FillTxEnv, TransactionSigned};
 use revm_primitives::{
     AnalysisKind, BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, Env, SpecId, TxEnv,
 };
@@ -54,7 +55,7 @@ impl EthEvmConfig {
     }
 
     /// Returns the chain spec associated with this configuration.
-    pub fn chain_spec(&self) -> &ChainSpec {
+    pub const fn chain_spec(&self) -> &Arc<ChainSpec> {
         &self.chain_spec
     }
 }
@@ -195,31 +196,22 @@ impl ConfigureEvm for EthEvmConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::constants::KECCAK_EMPTY;
+    use alloy_consensus::{constants::KECCAK_EMPTY, Header};
     use alloy_genesis::Genesis;
     use alloy_primitives::{B256, U256};
     use reth_chainspec::{Chain, ChainSpec, MAINNET};
     use reth_evm::execute::ProviderError;
-    use reth_primitives::{
-        revm_primitives::{BlockEnv, CfgEnv, SpecId},
-        Header,
-    };
     use reth_revm::{
         db::{CacheDB, EmptyDBTyped},
         inspectors::NoOpInspector,
+        primitives::{BlockEnv, CfgEnv, SpecId},
         JournaledState,
     };
-    use revm_primitives::{CfgEnvWithHandlerCfg, EnvWithHandlerCfg, HandlerCfg};
+    use revm_primitives::{EnvWithHandlerCfg, HandlerCfg};
     use std::collections::HashSet;
 
     #[test]
     fn test_fill_cfg_and_block_env() {
-        // Create a new configuration environment
-        let mut cfg_env = CfgEnvWithHandlerCfg::new_with_spec_id(CfgEnv::default(), SpecId::LATEST);
-
-        // Create a default block environment
-        let mut block_env = BlockEnv::default();
-
         // Create a default header
         let header = Header::default();
 
@@ -238,12 +230,8 @@ mod tests {
 
         // Use the `EthEvmConfig` to fill the `cfg_env` and `block_env` based on the ChainSpec,
         // Header, and total difficulty
-        EthEvmConfig::new(Arc::new(chain_spec.clone())).fill_cfg_and_block_env(
-            &mut cfg_env,
-            &mut block_env,
-            &header,
-            total_difficulty,
-        );
+        let (cfg_env, _) = EthEvmConfig::new(Arc::new(chain_spec.clone()))
+            .cfg_and_block_env(&header, total_difficulty);
 
         // Assert that the chain ID in the `cfg_env` is correctly set to the chain ID of the
         // ChainSpec

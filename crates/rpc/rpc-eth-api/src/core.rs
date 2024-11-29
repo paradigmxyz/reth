@@ -501,7 +501,8 @@ where
         trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionByHash");
         Ok(EthTransactions::transaction_by_hash(self, hash)
             .await?
-            .map(|tx| tx.into_transaction(self.tx_resp_builder())))
+            .map(|tx| tx.into_transaction(self.tx_resp_builder()))
+            .transpose()?)
     }
 
     /// Handler for: `eth_getRawTransactionByBlockHashAndIndex`
@@ -624,6 +625,7 @@ where
         block_number: Option<BlockId>,
     ) -> RpcResult<Vec<SimulatedBlock<RpcBlock<T::NetworkTypes>>>> {
         trace!(target: "rpc::eth", ?block_number, "Serving eth_simulateV1");
+        let _permit = self.tracing_task_guard().clone().acquire_owned().await;
         Ok(EthCall::simulate_v1(self, payload, block_number).await?)
     }
 
@@ -779,8 +781,9 @@ where
     }
 
     /// Handler for: `eth_signTransaction`
-    async fn sign_transaction(&self, _transaction: TransactionRequest) -> RpcResult<Bytes> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn sign_transaction(&self, request: TransactionRequest) -> RpcResult<Bytes> {
+        trace!(target: "rpc::eth", ?request, "Serving eth_signTransaction");
+        Ok(EthTransactions::sign_transaction(self, request).await?)
     }
 
     /// Handler for: `eth_signTypedData`

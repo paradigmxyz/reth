@@ -5,9 +5,9 @@ use reth_db::tables;
 use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
 use reth_provider::test_utils::create_test_provider_factory;
 use reth_trie::{
-    prefix_set::PrefixSetMut, trie_cursor::TrieCursor, walker::TrieWalker, StorageTrieEntry,
+    prefix_set::PrefixSetMut, trie_cursor::TrieCursor, walker::TrieWalker, BranchNodeCompact,
+    Nibbles, StorageTrieEntry,
 };
-use reth_trie_common::{BranchNodeCompact, Nibbles};
 use reth_trie_db::{DatabaseAccountTrieCursor, DatabaseStorageTrieCursor};
 
 #[test]

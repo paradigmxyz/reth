@@ -1,10 +1,10 @@
 //! Helper function for Receipt root calculation for Optimism hardforks.
 
 use alloy_primitives::B256;
+use alloy_trie::root::ordered_trie_root_with_encoder;
 use reth_chainspec::ChainSpec;
 use reth_optimism_forks::OpHardfork;
 use reth_primitives::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef};
-use reth_trie_common::root::ordered_trie_root_with_encoder;
 
 /// Calculates the receipt root for a header.
 pub(crate) fn calculate_receipt_root_optimism(

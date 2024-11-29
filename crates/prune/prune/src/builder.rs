@@ -1,11 +1,13 @@
 use crate::{segments::SegmentSet, Pruner};
+use alloy_eips::eip2718::Encodable2718;
 use reth_chainspec::MAINNET;
 use reth_config::PruneConfig;
-use reth_db::transaction::DbTxMut;
+use reth_db::{table::Value, transaction::DbTxMut};
 use reth_exex_types::FinishedExExHeight;
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::StaticFileProvider, BlockReader, DBProvider, DatabaseProviderFactory,
-    PruneCheckpointWriter, StaticFileProviderFactory, TransactionsProvider,
+    NodePrimitivesProvider, PruneCheckpointWriter, StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
 use std::time::Duration;
@@ -76,8 +78,15 @@ impl PrunerBuilder {
     /// Builds a [Pruner] from the current configuration with the given provider factory.
     pub fn build_with_provider_factory<PF>(self, provider_factory: PF) -> Pruner<PF::ProviderRW, PF>
     where
-        PF: DatabaseProviderFactory<ProviderRW: PruneCheckpointWriter + BlockReader>
-            + StaticFileProviderFactory,
+        PF: DatabaseProviderFactory<
+                ProviderRW: PruneCheckpointWriter
+                                + BlockReader<Transaction: Encodable2718>
+                                + StaticFileProviderFactory<
+                    Primitives: NodePrimitives<SignedTx: Value, Receipt: Value>,
+                >,
+            > + StaticFileProviderFactory<
+                Primitives = <PF::ProviderRW as NodePrimitivesProvider>::Primitives,
+            >,
     {
         let segments =
             SegmentSet::from_components(provider_factory.static_file_provider(), self.segments);
@@ -93,10 +102,15 @@ impl PrunerBuilder {
     }
 
     /// Builds a [Pruner] from the current configuration with the given static file provider.
-    pub fn build<Provider>(self, static_file_provider: StaticFileProvider) -> Pruner<Provider, ()>
+    pub fn build<Provider>(
+        self,
+        static_file_provider: StaticFileProvider<Provider::Primitives>,
+    ) -> Pruner<Provider, ()>
     where
-        Provider:
-            DBProvider<Tx: DbTxMut> + BlockReader + PruneCheckpointWriter + TransactionsProvider,
+        Provider: StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value, Receipt: Value>>
+            + DBProvider<Tx: DbTxMut>
+            + BlockReader<Transaction: Encodable2718>
+            + PruneCheckpointWriter,
     {
         let segments = SegmentSet::<Provider>::from_components(static_file_provider, self.segments);
 

@@ -1,6 +1,7 @@
 //! Shared models for <https://github.com/ethereum/tests>
 
 use crate::{assert::assert_equal, Error};
+use alloy_consensus::Header as RethHeader;
 use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::{keccak256, Address, Bloom, Bytes, B256, B64, U256};
 use reth_chainspec::{ChainSpec, ChainSpecBuilder};
@@ -9,9 +10,7 @@ use reth_db_api::{
     cursor::DbDupCursorRO,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{
-    Account as RethAccount, Bytecode, Header as RethHeader, SealedHeader, StorageEntry,
-};
+use reth_primitives::{Account as RethAccount, Bytecode, SealedHeader, StorageEntry};
 use serde::Deserialize;
 use std::{collections::BTreeMap, ops::Deref};
 

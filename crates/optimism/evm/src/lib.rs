@@ -13,15 +13,16 @@
 extern crate alloc;
 
 use alloc::{sync::Arc, vec::Vec};
+use alloy_consensus::Header;
 use alloy_primitives::{Address, U256};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
 use reth_optimism_chainspec::{DecodeError, OpChainSpec};
-use reth_primitives::{
-    revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
-    transaction::FillTxEnv,
-    Head, Header, TransactionSigned,
+use reth_primitives::{transaction::FillTxEnv, Head, TransactionSigned};
+use reth_revm::{
+    inspector_handle_register,
+    primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
+    Database, Evm, EvmBuilder, GetInspector,
 };
-use reth_revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
 
 mod config;
 pub use config::{revm_spec, revm_spec_by_timestamp_after_bedrock};
@@ -49,7 +50,7 @@ impl OpEvmConfig {
     }
 
     /// Returns the chain spec associated with this configuration.
-    pub fn chain_spec(&self) -> &OpChainSpec {
+    pub const fn chain_spec(&self) -> &Arc<OpChainSpec> {
         &self.chain_spec
     }
 }
@@ -200,7 +201,7 @@ impl ConfigureEvm for OpEvmConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::constants::KECCAK_EMPTY;
+    use alloy_consensus::{constants::KECCAK_EMPTY, Header};
     use alloy_eips::eip7685::Requests;
     use alloy_genesis::Genesis;
     use alloy_primitives::{bytes, Address, LogData, B256, U256};
@@ -210,17 +211,15 @@ mod tests {
         AccountRevertInit, BundleStateInit, Chain, ExecutionOutcome, RevertsInit,
     };
     use reth_optimism_chainspec::BASE_MAINNET;
-    use reth_primitives::{
-        revm_primitives::{AccountInfo, BlockEnv, CfgEnv, SpecId},
-        Account, Header, Log, Receipt, Receipts, SealedBlockWithSenders, TxType,
-    };
-
+    use reth_optimism_primitives::OpPrimitives;
+    use reth_primitives::{Account, Log, Receipt, Receipts, SealedBlockWithSenders, TxType};
     use reth_revm::{
         db::{BundleState, CacheDB, EmptyDBTyped},
         inspectors::NoOpInspector,
+        primitives::{AccountInfo, BlockEnv, CfgEnv, SpecId},
         JournaledState,
     };
-    use revm_primitives::{CfgEnvWithHandlerCfg, EnvWithHandlerCfg, HandlerCfg};
+    use revm_primitives::{EnvWithHandlerCfg, HandlerCfg};
     use std::{
         collections::{HashMap, HashSet},
         sync::Arc,
@@ -232,12 +231,6 @@ mod tests {
 
     #[test]
     fn test_fill_cfg_and_block_env() {
-        // Create a new configuration environment
-        let mut cfg_env = CfgEnvWithHandlerCfg::new_with_spec_id(CfgEnv::default(), SpecId::LATEST);
-
-        // Create a default block environment
-        let mut block_env = BlockEnv::default();
-
         // Create a default header
         let header = Header::default();
 
@@ -254,10 +247,10 @@ mod tests {
         // Define the total difficulty as zero (default)
         let total_difficulty = U256::ZERO;
 
-        // Use the `OpEvmConfig` to fill the `cfg_env` and `block_env` based on the ChainSpec,
+        // Use the `OpEvmConfig` to create the `cfg_env` and `block_env` based on the ChainSpec,
         // Header, and total difficulty
-        OpEvmConfig::new(Arc::new(OpChainSpec { inner: chain_spec.clone() }))
-            .fill_cfg_and_block_env(&mut cfg_env, &mut block_env, &header, total_difficulty);
+        let (cfg_env, _) = OpEvmConfig::new(Arc::new(OpChainSpec { inner: chain_spec.clone() }))
+            .cfg_and_block_env(&header, total_difficulty);
 
         // Assert that the chain ID in the `cfg_env` is correctly set to the chain ID of the
         // ChainSpec
@@ -551,7 +544,7 @@ mod tests {
     #[test]
     fn receipts_by_block_hash() {
         // Create a default SealedBlockWithSenders object
-        let block = SealedBlockWithSenders::default();
+        let block: SealedBlockWithSenders = Default::default();
 
         // Define block hashes for block1 and block2
         let block1_hash = B256::new([0x01; 32]);
@@ -603,7 +596,8 @@ mod tests {
 
         // Create a Chain object with a BTreeMap of blocks mapped to their block numbers,
         // including block1_hash and block2_hash, and the execution_outcome
-        let chain = Chain::new([block1, block2], execution_outcome.clone(), None);
+        let chain: Chain<OpPrimitives> =
+            Chain::new([block1, block2], execution_outcome.clone(), None);
 
         // Assert that the proper receipt vector is returned for block1_hash
         assert_eq!(chain.receipts_by_block_hash(block1_hash), Some(vec![&receipt1]));
@@ -820,7 +814,7 @@ mod tests {
         };
 
         // Create an empty Receipts object
-        let receipts_empty = Receipts { receipt_vec: vec![] };
+        let receipts_empty = Receipts::<Receipt> { receipt_vec: vec![] };
 
         // Define the first block number
         let first_block = 123;
