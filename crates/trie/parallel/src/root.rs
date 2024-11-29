@@ -115,10 +115,10 @@ where
                         trie_cursor_factory,
                         hashed_state,
                         hashed_address,
+                        prefix_set,
                         #[cfg(feature = "metrics")]
                         metrics,
                     )
-                    .with_prefix_set(prefix_set)
                     .calculate(retain_updates)?)
                 })();
                 let _ = tx.send(result);
@@ -173,6 +173,7 @@ where
                                 trie_cursor_factory.clone(),
                                 hashed_cursor_factory.clone(),
                                 hashed_address,
+                                Default::default(),
                                 #[cfg(feature = "metrics")]
                                 self.metrics.storage_trie.clone(),
                             )
