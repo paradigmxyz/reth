@@ -56,8 +56,7 @@ type BlockLruCache<L> = MultiConsumerLruCache<
 type ReceiptsLruCache<L> =
     MultiConsumerLruCache<B256, Arc<Vec<Receipt>>, L, ReceiptsResponseSender>;
 
-type EnvLruCache<L> =
-    MultiConsumerLruCache<B256, (CfgEnvWithHandlerCfg, BlockEnv), L, EnvResponseSender>;
+type EnvLruCache<L> = MultiConsumerLruCache<B256, Header, L, EnvResponseSender>;
 
 /// Provides async access to cached eth data
 ///
@@ -229,7 +228,7 @@ pub(crate) struct EthStateCacheService<
 > where
     LimitBlocks: Limiter<B256, Arc<SealedBlockWithSenders>>,
     LimitReceipts: Limiter<B256, Arc<Vec<Receipt>>>,
-    LimitEnvs: Limiter<B256, (CfgEnvWithHandlerCfg, BlockEnv)>,
+    LimitEnvs: Limiter<B256, Header>,
 {
     /// The type used to lookup data from disk
     provider: Provider,
@@ -423,8 +422,18 @@ where
                         }
                         CacheAction::GetEnv { block_hash, response_tx } => {
                             // check if env data is cached
-                            if let Some(env) = this.evm_env_cache.get(&block_hash).cloned() {
-                                let _ = response_tx.send(Ok(env));
+                            if let Some(header) = this.evm_env_cache.get(&block_hash).cloned() {
+                                let evm_config = this.evm_config.clone();
+                                let mut cfg = CfgEnvWithHandlerCfg::new_with_spec_id(
+                                    CfgEnv::default(),
+                                    SpecId::LATEST,
+                                );
+                                let mut block_env = BlockEnv::default();
+                                let res = this
+                                    .provider
+                                    .env_with_header(&header, evm_config)
+                                    .map(|_| (cfg, block_env));
+                                let _ = response_tx.send(res);
                                 continue
                             }
 
@@ -434,26 +443,17 @@ where
                                 let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
                                 let rate_limiter = this.rate_limiter.clone();
-                                let evm_config = this.evm_config.clone();
                                 this.action_task_spawner.spawn_blocking(Box::pin(async move {
                                     // Acquire permit
                                     let _permit = rate_limiter.acquire().await;
-                                    let mut cfg = CfgEnvWithHandlerCfg::new_with_spec_id(
-                                        CfgEnv::default(),
-                                        SpecId::LATEST,
-                                    );
-                                    let mut block_env = BlockEnv::default();
-                                    let res = provider
-                                        .fill_env_at(
-                                            &mut cfg,
-                                            &mut block_env,
-                                            block_hash.into(),
-                                            evm_config,
-                                        )
-                                        .map(|_| (cfg, block_env));
+                                    let header = provider.header(&block_hash).and_then(|header| {
+                                        header.ok_or_else(|| {
+                                            ProviderError::HeaderNotFound(block_hash.into())
+                                        })
+                                    });
                                     let _ = action_tx.send(CacheAction::EnvResult {
                                         block_hash,
-                                        res: Box::new(res),
+                                        res: Box::new(header),
                                     });
                                 }));
                             }
@@ -546,7 +546,7 @@ enum CacheAction {
     },
     EnvResult {
         block_hash: B256,
-        res: Box<ProviderResult<(CfgEnvWithHandlerCfg, BlockEnv)>>,
+        res: Box<ProviderResult<Header>>,
     },
     CacheNewCanonicalChain {
         chain_change: ChainChange,
