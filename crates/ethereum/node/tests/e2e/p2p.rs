@@ -1,19 +1,9 @@
-use crate::utils::eth_payload_attributes;
-use alloy_consensus::TxType;
-use alloy_primitives::bytes;
-use alloy_provider::{
-    network::{
-        Ethereum, EthereumWallet, NetworkWallet, TransactionBuilder, TransactionBuilder7702,
-    },
-    Provider, ProviderBuilder, SendableTx,
-};
-use alloy_rpc_types_eth::TransactionRequest;
-use alloy_signer::SignerSync;
-use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
+use crate::utils::{advance_with_random_transactions, eth_payload_attributes};
+use alloy_provider::{Provider, ProviderBuilder};
+use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::{setup, setup_engine, transaction::TransactionTestContext};
 use reth_node_ethereum::EthereumNode;
-use revm::primitives::{AccessListItem, Authorization};
 use std::sync::Arc;
 
 #[tokio::test]
@@ -76,80 +66,12 @@ async fn e2e_test_send_transactions() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, wallet) =
+    let (mut nodes, _tasks, _) =
         setup_engine::<EthereumNode>(2, chain_spec.clone(), false, eth_payload_attributes).await?;
     let mut node = nodes.pop().unwrap();
-    let signers = wallet.gen();
     let provider = ProviderBuilder::new().with_recommended_fillers().on_http(node.rpc_url());
 
-    // simple contract which writes to storage on any call
-    let dummy_bytecode = bytes!("6080604052348015600f57600080fd5b50602880601d6000396000f3fe4360a09081523360c0526040608081905260e08152902080805500fea164736f6c6343000810000a");
-    let mut call_destinations = signers.iter().map(|s| s.address()).collect::<Vec<_>>();
-
-    // Produce 100 random blocks with random transactions
-    for _ in 0..100 {
-        let tx_count = rng.gen_range(1..20);
-
-        let mut pending = vec![];
-        for _ in 0..tx_count {
-            let signer = signers.choose(&mut rng).unwrap();
-            let tx_type = TxType::try_from(rng.gen_range(0..=4)).unwrap();
-
-            let mut tx = TransactionRequest::default().with_from(signer.address());
-
-            let should_create =
-                rng.gen::<bool>() && tx_type != TxType::Eip4844 && tx_type != TxType::Eip7702;
-            if should_create {
-                tx = tx.into_create().with_input(dummy_bytecode.clone());
-            } else {
-                tx = tx.with_to(*call_destinations.choose(&mut rng).unwrap()).with_input(
-                    (0..rng.gen_range(0..10000)).map(|_| rng.gen()).collect::<Vec<u8>>(),
-                );
-            }
-
-            if matches!(tx_type, TxType::Legacy | TxType::Eip2930) {
-                tx = tx.with_gas_price(provider.get_gas_price().await?);
-            }
-
-            if rng.gen::<bool>() || tx_type == TxType::Eip2930 {
-                tx = tx.with_access_list(
-                    vec![AccessListItem {
-                        address: *call_destinations.choose(&mut rng).unwrap(),
-                        storage_keys: (0..rng.gen_range(0..100)).map(|_| rng.gen()).collect(),
-                    }]
-                    .into(),
-                );
-            }
-
-            if tx_type == TxType::Eip7702 {
-                let signer = signers.choose(&mut rng).unwrap();
-                let auth = Authorization {
-                    chain_id: provider.get_chain_id().await?,
-                    address: *call_destinations.choose(&mut rng).unwrap(),
-                    nonce: provider.get_transaction_count(signer.address()).await?,
-                };
-                let sig = signer.sign_hash_sync(&auth.signature_hash())?;
-                tx = tx.with_authorization_list(vec![auth.into_signed(sig)])
-            }
-
-            let SendableTx::Builder(tx) = provider.fill(tx).await? else { unreachable!() };
-            let tx =
-                NetworkWallet::<Ethereum>::sign_request(&EthereumWallet::new(signer.clone()), tx)
-                    .await?;
-
-            pending.push(provider.send_tx_envelope(tx).await?);
-        }
-
-        let (payload, _) = node.advance_block().await?;
-        assert!(payload.block().raw_transactions().len() == tx_count);
-
-        for pending in pending {
-            let receipt = pending.get_receipt().await?;
-            if let Some(address) = receipt.contract_address {
-                call_destinations.push(address);
-            }
-        }
-    }
+    advance_with_random_transactions(&mut node, 100, &mut rng, true).await?;
 
     let second_node = nodes.pop().unwrap();
     let second_provider =
@@ -159,15 +81,58 @@ async fn e2e_test_send_transactions() -> eyre::Result<()> {
 
     let head =
         provider.get_block_by_number(Default::default(), false.into()).await?.unwrap().header.hash;
-    second_node.engine_api.update_forkchoice(head, head).await?;
 
-    let start = std::time::Instant::now();
+    second_node.sync_to(head).await?;
 
-    while provider.get_block_number().await? != second_provider.get_block_number().await? {
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    Ok(())
+}
 
-        assert!(start.elapsed() <= std::time::Duration::from_secs(10), "timed out");
-    }
+#[tokio::test]
+async fn test_long_reorg() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let seed: [u8; 32] = rand::thread_rng().gen();
+    let mut rng = StdRng::from_seed(seed);
+    println!("Seed: {:?}", seed);
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .cancun_activated()
+            .prague_activated()
+            .build(),
+    );
+
+    let (mut nodes, _tasks, _) =
+        setup_engine::<EthereumNode>(2, chain_spec.clone(), false, eth_payload_attributes).await?;
+
+    let mut first_node = nodes.pop().unwrap();
+    let mut second_node = nodes.pop().unwrap();
+
+    let first_provider = ProviderBuilder::new().on_http(first_node.rpc_url());
+
+    // Advance first node 100 blocks.
+    advance_with_random_transactions(&mut first_node, 100, &mut rng, false).await?;
+
+    // Sync second node to 20th block.
+    let head = first_provider.get_block_by_number(20.into(), false.into()).await?.unwrap();
+    second_node.sync_to(head.header.hash).await?;
+
+    // Produce a fork chain with blocks 21.60
+    second_node.payload.timestamp = head.header.timestamp;
+    advance_with_random_transactions(&mut second_node, 40, &mut rng, true).await?;
+
+    // Reorg first node from 100th block to new 60th block.
+    first_node.sync_to(second_node.block_hash(60)).await?;
+
+    // Advance second node 20 blocks and ensure that first node is able to follow it.
+    advance_with_random_transactions(&mut second_node, 20, &mut rng, true).await?;
+    first_node.sync_to(second_node.block_hash(80)).await?;
+
+    // Ensure that it works the other way around too.
+    advance_with_random_transactions(&mut first_node, 20, &mut rng, true).await?;
+    second_node.sync_to(first_node.block_hash(100)).await?;
 
     Ok(())
 }

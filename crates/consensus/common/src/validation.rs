@@ -65,11 +65,14 @@ pub fn validate_shanghai_withdrawals<H: BlockHeader, B: reth_primitives_traits::
 ///
 /// [EIP-4844]: https://eips.ethereum.org/EIPS/eip-4844
 #[inline]
-pub fn validate_cancun_gas(block: &SealedBlock) -> Result<(), ConsensusError> {
+pub fn validate_cancun_gas<H: BlockHeader, B: reth_primitives_traits::BlockBody>(
+    block: &SealedBlock<H, B>,
+) -> Result<(), ConsensusError> {
     // Check that the blob gas used in the header matches the sum of the blob gas used by each
     // blob tx
-    let header_blob_gas_used = block.blob_gas_used.ok_or(ConsensusError::BlobGasUsedMissing)?;
-    let total_blob_gas = block.blob_gas_used();
+    let header_blob_gas_used =
+        block.header().blob_gas_used().ok_or(ConsensusError::BlobGasUsedMissing)?;
+    let total_blob_gas = block.body.blob_gas_used();
     if total_blob_gas != header_blob_gas_used {
         return Err(ConsensusError::BlobGasUsedDiff(GotExpected {
             got: header_blob_gas_used,

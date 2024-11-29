@@ -65,7 +65,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn new<B, V>(
         consensus: Arc<dyn Consensus>,
-        executor_factory: impl BlockExecutorProvider,
+        executor_factory: impl BlockExecutorProvider<Primitives = N::Primitives>,
         provider: ProviderFactory<N>,
         blockchain_db: BlockchainProvider2<N>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,

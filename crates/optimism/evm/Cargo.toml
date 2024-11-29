@@ -32,6 +32,7 @@ alloy-consensus.workspace = true
 reth-optimism-consensus.workspace = true
 reth-optimism-chainspec.workspace = true
 reth-optimism-forks.workspace = true
+reth-optimism-primitives.workspace = true
 
 # revm
 revm.workspace = true

@@ -5,7 +5,7 @@ use alloy_primitives::{
     B256,
 };
 use alloy_rlp::Decodable;
-use reth_tracing::tracing::debug;
+use reth_tracing::tracing::trace;
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
     BranchNodeCompact, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, RlpNode, TrieMask,
@@ -371,7 +371,7 @@ impl RevealedSparseTrie {
         // in `nodes`, but not in the `values`.
 
         let mut removed_nodes = self.take_nodes_for_path(path)?;
-        debug!(target: "trie::sparse", ?path, ?removed_nodes, "Removed nodes for path");
+        trace!(target: "trie::sparse", ?path, ?removed_nodes, "Removed nodes for path");
         // Pop the first node from the stack which is the leaf node we want to remove.
         let mut child = removed_nodes.pop().expect("leaf exists");
         #[cfg(debug_assertions)]
@@ -459,7 +459,7 @@ impl RevealedSparseTrie {
                         // Remove the only child node.
                         let child = self.nodes.get(&child_path).unwrap();
 
-                        debug!(target: "trie::sparse", ?removed_path, ?child_path, ?child, "Branch node has only one child");
+                        trace!(target: "trie::sparse", ?removed_path, ?child_path, ?child, "Branch node has only one child");
 
                         let mut delete_child = false;
                         let new_node = match child {
@@ -520,7 +520,7 @@ impl RevealedSparseTrie {
                 node: new_node.clone(),
                 unset_branch_nibble: None,
             };
-            debug!(target: "trie::sparse", ?removed_path, ?new_node, "Re-inserting the node");
+            trace!(target: "trie::sparse", ?removed_path, ?new_node, "Re-inserting the node");
             self.nodes.insert(removed_path, new_node);
         }
 
@@ -561,7 +561,13 @@ impl RevealedSparseTrie {
                     {
                         let mut current = current.clone();
                         current.extend_from_slice_unchecked(key);
-                        assert!(path.starts_with(&current));
+                        assert!(
+                            path.starts_with(&current),
+                            "path: {:?}, current: {:?}, key: {:?}",
+                            path,
+                            current,
+                            key
+                        );
                     }
 
                     let path = current.clone();
@@ -570,7 +576,14 @@ impl RevealedSparseTrie {
                 }
                 SparseNode::Branch { state_mask, .. } => {
                     let nibble = path[current.len()];
-                    debug_assert!(state_mask.is_bit_set(nibble));
+                    debug_assert!(
+                        state_mask.is_bit_set(nibble),
+                        "current: {:?}, path: {:?}, nibble: {:?}, state_mask: {:?}",
+                        current,
+                        path,
+                        nibble,
+                        state_mask
+                    );
 
                     // If the branch node has a child that is a leaf node that we're removing,
                     // we need to unset this nibble.
