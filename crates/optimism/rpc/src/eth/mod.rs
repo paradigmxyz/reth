@@ -83,7 +83,7 @@ where
                       + 'static,
     >,
 {
-    /// Creates a new instance for given context.
+    /// Build a [`OpEthApi`] using [`OpEthApiBuilder`].
     pub fn builder(ctx: &EthApiBuilderCtx<N>) -> OpEthApiBuilder<'_, N> {
         OpEthApiBuilder::new(ctx)
     }

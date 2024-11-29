@@ -218,7 +218,8 @@ impl<N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>> Default
 }
 
 impl<N: FullNodeComponents> OpAddOns<N> {
-    fn builder() -> OpAddOnsBuilder<N> {
+    /// Build a [`OpAddOns`] using [`OpAddOnsBuilder`].
+    pub fn builder() -> OpAddOnsBuilder<N> {
         OpAddOnsBuilder::default()
     }
 }
