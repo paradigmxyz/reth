@@ -11,7 +11,6 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    proofs::calculate_transaction_root, Block, BlockBody, BlockExt, InvalidTransactionError,
     Receipt, SealedBlockWithSenders, SealedHeader, TransactionSignedEcRecovered,
 };
 use reth_provider::{
@@ -20,11 +19,7 @@ use reth_provider::{
 };
 use reth_revm::primitives::{BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, ExecutionResult, SpecId};
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
-use reth_transaction_pool::{
-    error::InvalidPoolTransactionError, BestTransactionsAttributes, TransactionPool,
-};
-use reth_trie::HashedPostState;
-use revm::{db::states::bundle_state::BundleRetention, DatabaseCommit, State};
+use reth_transaction_pool::TransactionPool;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use tracing::debug;
