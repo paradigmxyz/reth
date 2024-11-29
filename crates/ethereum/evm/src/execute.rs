@@ -7,7 +7,7 @@ use crate::{
 use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
 use alloy_consensus::Transaction as _;
 use alloy_eips::eip7685::Requests;
-use core::fmt::Display;
+use core::fmt::{Debug, Display};
 use reth_chainspec::{ChainSpec, EthereumHardfork, EthereumHardforks, MAINNET};
 use reth_consensus::ConsensusError;
 use reth_ethereum_consensus::validate_block_post_execution;
@@ -24,7 +24,8 @@ use reth_primitives::{BlockWithSenders, EthPrimitives, Receipt};
 use reth_revm::db::State;
 use revm_primitives::{
     db::{Database, DatabaseCommit},
-    EnvWithHandlerCfg, ResultAndState, U256,
+    Account, AccountStatus, Bytes, EnvWithHandlerCfg, EvmState, EvmStorageSlot, ExecutionResult,
+    Output, ResultAndState, SuccessReason, U256,
 };
 
 /// Factory for [`EthExecutionStrategy`].
@@ -258,8 +259,51 @@ where
         }
         // increment balances
         self.state
-            .increment_balances(balance_increments)
+            .increment_balances(balance_increments.clone())
             .map_err(|_| BlockValidationError::IncrementBalanceFailed)?;
+
+        let mut balance_state =
+            EvmState::with_capacity_and_hasher(balance_increments.len(), Default::default());
+        for (address, balance) in balance_increments {
+            if balance == 0 {
+                continue;
+            }
+
+            let account =
+                self.state.load_cache_account(address).map_err(|err| format!("{err}")).unwrap();
+            let transition_account = account.increment_balance(balance).unwrap();
+            balance_state.insert(
+                address,
+                Account {
+                    info: transition_account.info.unwrap(),
+                    storage: transition_account
+                        .storage
+                        .into_iter()
+                        .map(|(k, v)| {
+                            (
+                                k,
+                                EvmStorageSlot {
+                                    original_value: v.original_value(),
+                                    present_value: v.present_value,
+                                    is_cold: false,
+                                },
+                            )
+                        })
+                        .collect(),
+                    status: AccountStatus::Touched,
+                },
+            );
+        }
+        self.system_caller.on_state(&ResultAndState {
+            result: ExecutionResult::Success {
+                reason: SuccessReason::Stop,
+                gas_used: 0,
+                gas_refunded: 0,
+                logs: vec![],
+                output: Output::Call(Bytes::default()),
+            },
+            state: balance_state,
+        });
 
         Ok(requests)
     }
