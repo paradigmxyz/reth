@@ -638,8 +638,12 @@ impl NetworkEventStream {
     /// Awaits the next event for an established session
     pub async fn next_session_established(&mut self) -> Option<PeerId> {
         while let Some(ev) = self.inner.next().await {
-            if let NetworkEvent::Peer(PeerEvent::SessionEstablished(info)) = ev {
-                return Some(info.peer_id)
+            match ev {
+                NetworkEvent::ActivePeerSession { info, .. } |
+                NetworkEvent::Peer(PeerEvent::SessionEstablished(info)) => {
+                    return Some(info.peer_id)
+                }
+                _ => continue,
             }
         }
         None
@@ -648,7 +652,7 @@ impl NetworkEventStream {
     /// Awaits the next `num` events for an established session
     pub async fn take_session_established(&mut self, mut num: usize) -> Vec<PeerId> {
         if num == 0 {
-            return Vec::new();
+            return Vec::new()
         }
         let mut peers = Vec::with_capacity(num);
         while let Some(ev) = self.inner.next().await {
