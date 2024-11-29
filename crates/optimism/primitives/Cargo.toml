@@ -84,7 +84,7 @@ serde = [
     "op-alloy-consensus/serde",
     "rand/serde",
     "revm-primitives?/serde",
-    "secp256k1/serde",
+    "secp256k1?/serde",
 ]
 arbitrary = [
     "dep:arbitrary",
