@@ -29,6 +29,7 @@ reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
 reth-revm.workspace = true
+reth-scroll-primitives = { workspace = true, optional = true }
 reth-stages-api.workspace = true
 reth-tasks.workspace = true
 reth-trie-db.workspace = true
@@ -116,3 +117,4 @@ test-utils = [
     "reth-prune-types?/test-utils",
     "reth-trie-db/test-utils",
 ]
+scroll = ["reth-scroll-primitives"]

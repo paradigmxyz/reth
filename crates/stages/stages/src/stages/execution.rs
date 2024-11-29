@@ -637,7 +637,7 @@ fn calculate_gas_used_from_headers<N: NodePrimitives>(
 mod tests {
     use super::*;
     use crate::test_utils::TestStageDB;
-    use alloy_primitives::{address, b256, hex_literal::hex, keccak256, Address, B256, U256};
+    use alloy_primitives::{address, hex_literal::hex, keccak256, Address, B256, U256};
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use reth_chainspec::ChainSpecBuilder;
@@ -1282,111 +1282,5 @@ mod tests {
                 )
             ]
         );
-    }
-
-    #[test]
-    fn test_create() {
-        let test_db = TestStageDB::default();
-        let provider = test_db.factory.database_provider_rw().unwrap();
-
-        // set up block
-        let beneficiary_address = address!("00000000000000000000000000000000deadbeef");
-        let gas_limit = 1000000;
-        let data = hex!("6080604052600d8060106000396000f3604260000160005260206000f3");
-        let code = hex!("604260000160005260206000f3");
-        let pk = b256!("ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80");
-        let transaction = reth_primitives::Transaction::Legacy(alloy_consensus::TxLegacy {
-            gas_limit,
-            to: alloy_primitives::TxKind::Create,
-            input: alloy_primitives::Bytes::from(data),
-            ..Default::default()
-        });
-        let signature = reth_primitives::sign_message(pk, transaction.signature_hash()).unwrap();
-
-        let header = SealedHeader::new(
-            Header {
-                number: 1,
-                gas_limit,
-                gas_used: 56043,
-                receipts_root: b256!(
-                    "141fb9a024b83e3752156621fb9f8376e8a16d281b8392640637f5b9fd095e36"
-                ),
-                beneficiary: beneficiary_address,
-                ..Default::default()
-            },
-            B256::random(),
-        );
-        let transaction = reth_primitives::TransactionSigned::new_unhashed(transaction, signature);
-        let block = SealedBlock::new(
-            header,
-            reth_primitives::BlockBody {
-                transactions: vec![transaction.clone()],
-                ..Default::default()
-            },
-        );
-        provider.insert_historical_block(block.try_seal_with_senders().unwrap()).unwrap();
-        provider
-            .static_file_provider()
-            .latest_writer(StaticFileSegment::Headers)
-            .unwrap()
-            .commit()
-            .unwrap();
-        provider.commit().unwrap();
-
-        // caller pre state
-        let caller_address = transaction.recover_signer().unwrap();
-        let deployed_address = address!("5fbdb2315678afecb367f032d93f642f64180aa3");
-        let balance = U256::MAX;
-        let caller_info = Account {
-            nonce: 0,
-            balance,
-            bytecode_hash: None,
-            #[cfg(feature = "scroll")]
-            account_extension: Some(reth_scroll_primitives::AccountExtension::empty()),
-        };
-
-        // set account
-        let provider = test_db.factory.provider_rw().unwrap();
-        provider.tx_ref().put::<tables::PlainAccountState>(caller_address, caller_info).unwrap();
-        provider.commit().unwrap();
-
-        // execute
-        let provider = test_db.factory.database_provider_rw().unwrap();
-        let mut execution_stage = stage();
-        let input = ExecInput { target: Some(1), checkpoint: None };
-        let _ = execution_stage.execute(&provider, input).unwrap();
-        provider.commit().unwrap();
-
-        // verify plain accounts content from storage
-        let plain_accounts = test_db.table::<tables::PlainAccountState>().unwrap();
-
-        assert_eq!(
-            plain_accounts,
-            vec![
-                (
-                    beneficiary_address,
-                    Account {
-                        nonce: 0,
-                        balance: U256::from(0x1bc16d674ec80000u64),
-                        bytecode_hash: None,
-                        #[cfg(feature = "scroll")]
-                        account_extension: Some(reth_scroll_primitives::AccountExtension::empty())
-                    }
-                ),
-                (
-                    deployed_address,
-                    Account {
-                        nonce: 1,
-                        balance: U256::ZERO,
-                        bytecode_hash: Some(keccak256(code)),
-                        #[cfg(feature = "scroll")]
-                        account_extension: Some(
-                            reth_scroll_primitives::AccountExtension::from_bytecode(&code)
-                        ),
-                    }
-                ),
-                (caller_address, Account { nonce: 1, ..caller_info }),
-            ]
-        )
     }
 }

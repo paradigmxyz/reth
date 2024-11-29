@@ -558,6 +558,10 @@ mod tests {
             } else {
                 Some(revm_account.info.code_hash)
             },
+            #[cfg(feature = "scroll")]
+            account_extension: revm_account.info.code.as_ref().map(|code| {
+                reth_scroll_primitives::AccountExtension::from_bytecode(&code.original_byte_slice())
+            }),
         }
     }
 
