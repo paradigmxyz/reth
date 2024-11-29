@@ -23,7 +23,7 @@ alloy-consensus.workspace = true
 alloy-rlp.workspace = true
 alloy-eips.workspace = true
 revm-primitives = { workspace = true, optional = true }
-secp256k1.workspace = true
+secp256k1 = { workspace = true, optional = true }
 
 # op
 op-alloy-consensus.workspace = true
@@ -57,7 +57,7 @@ std = [
     "alloy-primitives/std",
     "revm-primitives?/std",
     "serde/std",
-    "secp256k1/std",
+    "secp256k1?/std",
     "reth-codecs/std",
 ]
 optimism = [
@@ -89,6 +89,7 @@ serde = [
 ]
 arbitrary = [
     "dep:arbitrary",
+    "dep:secp256k1",
     "reth-primitives-traits/arbitrary",
     "reth-primitives/arbitrary",
     "reth-codecs?/arbitrary",
