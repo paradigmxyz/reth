@@ -20,7 +20,7 @@ use reth_evm::{
     system_calls::{OnStateHook, SystemCaller},
     ConfigureEvm, TxEnvOverrides,
 };
-use reth_primitives::{BlockWithSenders, Receipt};
+use reth_primitives::{BlockWithSenders, EthPrimitives, Receipt};
 use reth_revm::db::State;
 use revm_primitives::{
     db::{Database, DatabaseCommit},
@@ -60,6 +60,8 @@ where
     EvmConfig:
         Clone + Unpin + Sync + Send + 'static + ConfigureEvm<Header = alloy_consensus::Header>,
 {
+    type Primitives = EthPrimitives;
+
     type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
         EthExecutionStrategy<DB, EvmConfig>;
 
@@ -122,12 +124,15 @@ where
     }
 }
 
-impl<DB, EvmConfig> BlockExecutionStrategy<DB> for EthExecutionStrategy<DB, EvmConfig>
+impl<DB, EvmConfig> BlockExecutionStrategy for EthExecutionStrategy<DB, EvmConfig>
 where
     DB: Database<Error: Into<ProviderError> + Display>,
     EvmConfig: ConfigureEvm<Header = alloy_consensus::Header>,
 {
+    type DB = DB;
     type Error = BlockExecutionError;
+
+    type Primitives = EthPrimitives;
 
     fn init(&mut self, tx_env_overrides: Box<dyn TxEnvOverrides>) {
         self.tx_env_overrides = Some(tx_env_overrides);

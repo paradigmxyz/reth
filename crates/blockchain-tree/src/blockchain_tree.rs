@@ -95,7 +95,7 @@ impl<N: NodeTypesWithDB, E> BlockchainTree<N, E> {
 impl<N, E> BlockchainTree<N, E>
 where
     N: TreeNodeTypes,
-    E: BlockExecutorProvider,
+    E: BlockExecutorProvider<Primitives = N::Primitives>,
 {
     /// Builds the blockchain tree for the node.
     ///

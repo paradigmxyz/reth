@@ -17,7 +17,7 @@ use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{GotExpected, SealedBlockWithSenders, SealedHeader};
 use reth_provider::{
-    providers::{BundleStateProvider, ConsistentDbView, ProviderNodeTypes},
+    providers::{BundleStateProvider, ConsistentDbView, TreeNodeTypes},
     DBProvider, FullExecutionDataProvider, ProviderError, StateRootProvider,
     TryIntoHistoricalStateProvider,
 };
@@ -76,8 +76,8 @@ impl AppendableChain {
         block_validation_kind: BlockValidationKind,
     ) -> Result<Self, InsertBlockErrorKind>
     where
-        N: ProviderNodeTypes,
-        E: BlockExecutorProvider,
+        N: TreeNodeTypes,
+        E: BlockExecutorProvider<Primitives = N::Primitives>,
     {
         let execution_outcome = ExecutionOutcome::default();
         let empty = BTreeMap::new();
@@ -114,8 +114,8 @@ impl AppendableChain {
         block_validation_kind: BlockValidationKind,
     ) -> Result<Self, InsertBlockErrorKind>
     where
-        N: ProviderNodeTypes,
-        E: BlockExecutorProvider,
+        N: TreeNodeTypes,
+        E: BlockExecutorProvider<Primitives = N::Primitives>,
     {
         let parent_number =
             block.number.checked_sub(1).ok_or(BlockchainTreeError::GenesisBlockHasNoParent)?;
@@ -177,8 +177,8 @@ impl AppendableChain {
     ) -> Result<(ExecutionOutcome, Option<TrieUpdates>), BlockExecutionError>
     where
         EDP: FullExecutionDataProvider,
-        N: ProviderNodeTypes,
-        E: BlockExecutorProvider,
+        N: TreeNodeTypes,
+        E: BlockExecutorProvider<Primitives = N::Primitives>,
     {
         // some checks are done before blocks comes here.
         externals.consensus.validate_header_against_parent(&block, parent_block)?;
@@ -284,8 +284,8 @@ impl AppendableChain {
         block_validation_kind: BlockValidationKind,
     ) -> Result<(), InsertBlockErrorKind>
     where
-        N: ProviderNodeTypes,
-        E: BlockExecutorProvider,
+        N: TreeNodeTypes,
+        E: BlockExecutorProvider<Primitives = N::Primitives>,
     {
         let parent_block = self.chain.tip();
 

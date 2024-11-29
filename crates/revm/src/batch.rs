@@ -14,7 +14,7 @@ use revm::db::states::bundle_state::BundleRetention;
 ///  - recording receipts during execution of multiple blocks.
 ///  - pruning receipts according to the pruning configuration.
 ///  - batch range if known
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct BlockBatchRecord<T = reth_primitives::Receipt> {
     /// Pruning configuration.
     prune_modes: PruneModes,
@@ -41,6 +41,19 @@ pub struct BlockBatchRecord<T = reth_primitives::Receipt> {
     first_block: Option<BlockNumber>,
     /// The maximum known block.
     tip: Option<BlockNumber>,
+}
+
+impl<T> Default for BlockBatchRecord<T> {
+    fn default() -> Self {
+        Self {
+            prune_modes: Default::default(),
+            receipts: Default::default(),
+            requests: Default::default(),
+            pruning_address_filter: Default::default(),
+            first_block: Default::default(),
+            tip: Default::default(),
+        }
+    }
 }
 
 impl<T> BlockBatchRecord<T> {
@@ -83,10 +96,7 @@ impl<T> BlockBatchRecord<T> {
     }
 
     /// Returns all recorded receipts.
-    pub fn take_receipts(&mut self) -> Receipts<T>
-    where
-        T: Default,
-    {
+    pub fn take_receipts(&mut self) -> Receipts<T> {
         core::mem::take(&mut self.receipts)
     }
 

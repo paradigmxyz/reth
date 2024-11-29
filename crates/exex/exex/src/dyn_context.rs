@@ -4,8 +4,9 @@
 use std::fmt::Debug;
 
 use reth_chainspec::{EthChainSpec, Head};
-use reth_node_api::FullNodeComponents;
+use reth_node_api::{FullNodeComponents, NodePrimitives, NodeTypes};
 use reth_node_core::node_config::NodeConfig;
+use reth_primitives::EthPrimitives;
 use reth_provider::BlockReader;
 use tokio::sync::mpsc;
 
@@ -13,7 +14,7 @@ use crate::{ExExContext, ExExEvent, ExExNotificationsStream};
 
 // TODO(0xurb) - add `node` after abstractions
 /// Captures the context that an `ExEx` has access to.
-pub struct ExExContextDyn {
+pub struct ExExContextDyn<N: NodePrimitives = EthPrimitives> {
     /// The current head of the blockchain at launch.
     pub head: Head,
     /// The config of the node
@@ -34,10 +35,10 @@ pub struct ExExContextDyn {
     ///
     /// Once an [`ExExNotification`](crate::ExExNotification) is sent over the channel, it is
     /// considered delivered by the node.
-    pub notifications: Box<dyn ExExNotificationsStream>,
+    pub notifications: Box<dyn ExExNotificationsStream<N>>,
 }
 
-impl Debug for ExExContextDyn {
+impl<N: NodePrimitives> Debug for ExExContextDyn<N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ExExContext")
             .field("head", &self.head)
@@ -49,16 +50,16 @@ impl Debug for ExExContextDyn {
     }
 }
 
-impl<Node> From<ExExContext<Node>> for ExExContextDyn
+impl<Node> From<ExExContext<Node>> for ExExContextDyn<<Node::Types as NodeTypes>::Primitives>
 where
-    Node: FullNodeComponents,
-    Node::Provider: Debug + BlockReader<Block = reth_primitives::Block>,
+    Node: FullNodeComponents<Types: NodeTypes<Primitives: NodePrimitives>>,
+    Node::Provider: Debug + BlockReader,
     Node::Executor: Debug,
 {
     fn from(ctx: ExExContext<Node>) -> Self {
         let config =
             ctx.config.map_chainspec(|chainspec| Box::new(chainspec) as Box<dyn EthChainSpec>);
-        let notifications = Box::new(ctx.notifications) as Box<dyn ExExNotificationsStream>;
+        let notifications = Box::new(ctx.notifications) as Box<_>;
 
         Self {
             head: ctx.head,
