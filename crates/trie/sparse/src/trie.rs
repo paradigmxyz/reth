@@ -209,7 +209,7 @@ impl<P> RevealedSparseTrie<P> {
         Ok(this)
     }
 
-    /// TODO:
+    /// Set new blinded node provider on sparse trie.
     pub fn with_provider<BP>(self, provider: BP) -> RevealedSparseTrie<BP> {
         RevealedSparseTrie {
             provider,
