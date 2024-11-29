@@ -18,14 +18,14 @@ use std::iter::Peekable;
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
 #[derive(Debug)]
 pub struct SparseStateTrie<F: BlindedProviderFactory = DefaultBlindedProviderFactory> {
+    /// Blinded node provider factory.
+    provider_factory: F,
     /// Sparse account trie.
     state: SparseTrie<F::AccountNodeProvider>,
     /// Sparse storage tries.
     storages: HashMap<B256, SparseTrie<F::StorageNodeProvider>>,
     /// Collection of revealed account and storage keys.
     revealed: HashMap<B256, HashSet<B256>>,
-    /// Blinded node provider factory.
-    provider_factory: F,
     /// Flag indicating whether trie updates should be retained.
     retain_updates: bool,
     /// Reusable buffer for RLP encoding of trie accounts.
