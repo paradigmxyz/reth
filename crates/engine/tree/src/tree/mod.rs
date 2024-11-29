@@ -2275,9 +2275,12 @@ where
         }
 
         let (state_root, trie_output) = if let Some(result) = state_root_result {
-            let input = self
+            let mut input = self
                 .compute_trie_input(consistent_view.clone(), block.parent_hash)
                 .map_err(|e| InsertBlockErrorKindTwo::Other(Box::new(e)))?;
+            // Extend with block we are validating root for.
+            input.append_ref(&hashed_state);
+
             let state_root_config = StateRootConfig { consistent_view, input: Arc::new(input) };
             let state_root_task =
                 StateRootTask::new(state_root_config, state_root_tx, state_root_rx, Some(result.2));
