@@ -585,7 +585,10 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// empty blocks and this function wouldn't be called.
     ///
     /// Returns the current [`TxNumber`] as seen in the static file.
-    pub fn append_receipt(&mut self, tx_num: TxNumber, receipt: &Receipt) -> ProviderResult<()> {
+    pub fn append_receipt(&mut self, tx_num: TxNumber, receipt: &N::Receipt) -> ProviderResult<()>
+    where
+        N::Receipt: Compact,
+    {
         let start = Instant::now();
         self.ensure_no_queued_prune()?;
 

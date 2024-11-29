@@ -1,10 +1,11 @@
 use crate::{
     backfill::{BackfillAction, BackfillSyncState},
     chain::FromOrchestrator,
-    engine::{DownloadRequest, EngineApiEvent, FromEngine},
+    engine::{DownloadRequest, EngineApiEvent, EngineApiKind, EngineApiRequest, FromEngine},
     persistence::PersistenceHandle,
+    tree::metrics::EngineApiMetrics,
 };
-use alloy_consensus::Header;
+use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{
     map::{HashMap, HashSet},
@@ -24,19 +25,20 @@ use reth_blockchain_tree::{
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, MemoryOverlayStateProvider, NewCanonicalChain,
 };
-use reth_chainspec::EthereumHardforks;
 use reth_consensus::{Consensus, PostExecutionInput};
 use reth_engine_primitives::{
     BeaconEngineMessage, BeaconOnNewPayloadError, EngineApiMessageVersion, EngineTypes,
-    ForkchoiceStateTracker, OnForkChoiceUpdated,
+    EngineValidator, ForkchoiceStateTracker, OnForkChoiceUpdated,
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::execute::BlockExecutorProvider;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
-use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{Block, GotExpected, SealedBlock, SealedBlockWithSenders, SealedHeader};
+use reth_primitives::{
+    Block, EthPrimitives, GotExpected, NodePrimitives, SealedBlock, SealedBlockWithSenders,
+    SealedHeader,
+};
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, ExecutionOutcome,
     ProviderError, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
@@ -51,6 +53,7 @@ use std::{
     cmp::Ordering,
     collections::{btree_map, hash_map, BTreeMap, VecDeque},
     fmt::Debug,
+    marker::PhantomData,
     ops::Bound,
     sync::{
         mpsc::{Receiver, RecvError, RecvTimeoutError, Sender},
@@ -68,10 +71,6 @@ pub mod config;
 mod invalid_block_hook;
 mod metrics;
 mod persistence_state;
-use crate::{
-    engine::{EngineApiKind, EngineApiRequest},
-    tree::metrics::EngineApiMetrics,
-};
 pub use config::TreeConfig;
 pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
 pub use persistence_state::PersistenceState;
@@ -86,17 +85,17 @@ mod root;
 /// - This only stores blocks that are connected to the canonical chain.
 /// - All executed blocks are valid and have been executed.
 #[derive(Debug, Default)]
-pub struct TreeState {
+pub struct TreeState<N: NodePrimitives = EthPrimitives> {
     /// __All__ unique executed blocks by block hash that are connected to the canonical chain.
     ///
     /// This includes blocks of all forks.
-    blocks_by_hash: HashMap<B256, ExecutedBlock>,
+    blocks_by_hash: HashMap<B256, ExecutedBlock<N>>,
     /// Executed blocks grouped by their respective block number.
     ///
     /// This maps unique block number to all known blocks for that height.
     ///
     /// Note: there can be multiple blocks at the same height due to forks.
-    blocks_by_number: BTreeMap<BlockNumber, Vec<ExecutedBlock>>,
+    blocks_by_number: BTreeMap<BlockNumber, Vec<ExecutedBlock<N>>>,
     /// Map of any parent block hash to its children.
     parent_to_child: HashMap<B256, HashSet<B256>>,
     /// Map of hash to trie updates for canonical blocks that are persisted but not finalized.
@@ -107,7 +106,7 @@ pub struct TreeState {
     current_canonical_head: BlockNumHash,
 }
 
-impl TreeState {
+impl<N: NodePrimitives> TreeState<N> {
     /// Returns a new, empty tree state that points to the given canonical head.
     fn new(current_canonical_head: BlockNumHash) -> Self {
         Self {
@@ -125,12 +124,12 @@ impl TreeState {
     }
 
     /// Returns the [`ExecutedBlock`] by hash.
-    fn executed_block_by_hash(&self, hash: B256) -> Option<&ExecutedBlock> {
+    fn executed_block_by_hash(&self, hash: B256) -> Option<&ExecutedBlock<N>> {
         self.blocks_by_hash.get(&hash)
     }
 
     /// Returns the block by hash.
-    fn block_by_hash(&self, hash: B256) -> Option<Arc<SealedBlock>> {
+    fn block_by_hash(&self, hash: B256) -> Option<Arc<SealedBlock<N::BlockHeader, N::BlockBody>>> {
         self.blocks_by_hash.get(&hash).map(|b| b.block.clone())
     }
 
@@ -138,12 +137,12 @@ impl TreeState {
     /// newest to oldest. And the parent hash of the oldest block that is missing from the buffer.
     ///
     /// Returns `None` if the block for the given hash is not found.
-    fn blocks_by_hash(&self, hash: B256) -> Option<(B256, Vec<ExecutedBlock>)> {
+    fn blocks_by_hash(&self, hash: B256) -> Option<(B256, Vec<ExecutedBlock<N>>)> {
         let block = self.blocks_by_hash.get(&hash).cloned()?;
-        let mut parent_hash = block.block().parent_hash;
+        let mut parent_hash = block.block().parent_hash();
         let mut blocks = vec![block];
         while let Some(executed) = self.blocks_by_hash.get(&parent_hash) {
-            parent_hash = executed.block.parent_hash;
+            parent_hash = executed.block.parent_hash();
             blocks.push(executed.clone());
         }
 
@@ -151,10 +150,10 @@ impl TreeState {
     }
 
     /// Insert executed block into the state.
-    fn insert_executed(&mut self, executed: ExecutedBlock) {
+    fn insert_executed(&mut self, executed: ExecutedBlock<N>) {
         let hash = executed.block.hash();
-        let parent_hash = executed.block.parent_hash;
-        let block_number = executed.block.number;
+        let parent_hash = executed.block.parent_hash();
+        let block_number = executed.block.number();
 
         if self.blocks_by_hash.contains_key(&hash) {
             return;
@@ -182,11 +181,11 @@ impl TreeState {
     /// ## Returns
     ///
     /// The removed block and the block hashes of its children.
-    fn remove_by_hash(&mut self, hash: B256) -> Option<(ExecutedBlock, HashSet<B256>)> {
+    fn remove_by_hash(&mut self, hash: B256) -> Option<(ExecutedBlock<N>, HashSet<B256>)> {
         let executed = self.blocks_by_hash.remove(&hash)?;
 
         // Remove this block from collection of children of its parent block.
-        let parent_entry = self.parent_to_child.entry(executed.block.parent_hash);
+        let parent_entry = self.parent_to_child.entry(executed.block.parent_hash());
         if let hash_map::Entry::Occupied(mut entry) = parent_entry {
             entry.get_mut().remove(&hash);
 
@@ -199,7 +198,7 @@ impl TreeState {
         let children = self.parent_to_child.remove(&hash).unwrap_or_default();
 
         // Remove this block from `blocks_by_number`.
-        let block_number_entry = self.blocks_by_number.entry(executed.block.number);
+        let block_number_entry = self.blocks_by_number.entry(executed.block.number());
         if let btree_map::Entry::Occupied(mut entry) = block_number_entry {
             // We have to find the index of the block since it exists in a vec
             if let Some(index) = entry.get().iter().position(|b| b.block.hash() == hash) {
@@ -223,7 +222,7 @@ impl TreeState {
         }
 
         while let Some(executed) = self.blocks_by_hash.get(&current_block) {
-            current_block = executed.block.parent_hash;
+            current_block = executed.block.parent_hash();
             if current_block == hash {
                 return true
             }
@@ -251,14 +250,14 @@ impl TreeState {
         // upper bound
         let mut current_block = self.current_canonical_head.hash;
         while let Some(executed) = self.blocks_by_hash.get(&current_block) {
-            current_block = executed.block.parent_hash;
-            if executed.block.number <= upper_bound {
+            current_block = executed.block.parent_hash();
+            if executed.block.number() <= upper_bound {
                 debug!(target: "engine::tree", num_hash=?executed.block.num_hash(), "Attempting to remove block walking back from the head");
                 if let Some((removed, _)) = self.remove_by_hash(executed.block.hash()) {
                     debug!(target: "engine::tree", num_hash=?removed.block.num_hash(), "Removed block walking back from the head");
                     // finally, move the trie updates
                     self.persisted_trie_updates
-                        .insert(removed.block.hash(), (removed.block.number, removed.trie));
+                        .insert(removed.block.hash(), (removed.block.number(), removed.trie));
                 }
             }
         }
@@ -468,11 +467,14 @@ pub enum TreeAction {
 ///
 /// This type is responsible for processing engine API requests, maintaining the canonical state and
 /// emitting events.
-pub struct EngineApiTreeHandler<P, E, T: EngineTypes, Spec> {
+pub struct EngineApiTreeHandler<N, P, E, T, V>
+where
+    T: EngineTypes,
+{
     provider: P,
     executor_provider: E,
     consensus: Arc<dyn Consensus>,
-    payload_validator: ExecutionPayloadValidator<Spec>,
+    payload_validator: V,
     /// Keeps track of internals such as executed and buffered blocks.
     state: EngineApiTreeState,
     /// The half for sending messages to the engine.
@@ -508,10 +510,12 @@ pub struct EngineApiTreeHandler<P, E, T: EngineTypes, Spec> {
     invalid_block_hook: Box<dyn InvalidBlockHook>,
     /// The engine API variant of this handler
     engine_kind: EngineApiKind,
+    /// Captures the types the engine operates on
+    _primtives: PhantomData<N>,
 }
 
-impl<P: Debug, E: Debug, T: EngineTypes + Debug, Spec: Debug> std::fmt::Debug
-    for EngineApiTreeHandler<P, E, T, Spec>
+impl<N, P: Debug, E: Debug, T: EngineTypes + Debug, V: Debug> std::fmt::Debug
+    for EngineApiTreeHandler<N, P, E, T, V>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineApiTreeHandler")
@@ -534,13 +538,19 @@ impl<P: Debug, E: Debug, T: EngineTypes + Debug, Spec: Debug> std::fmt::Debug
     }
 }
 
-impl<P, E, T, Spec> EngineApiTreeHandler<P, E, T, Spec>
+impl<N, P, E, T, V> EngineApiTreeHandler<N, P, E, T, V>
 where
-    P: DatabaseProviderFactory + BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+    N: NodePrimitives,
+    P: DatabaseProviderFactory
+        + BlockReader<Block = reth_primitives::Block>
+        + StateProviderFactory
+        + StateReader<Receipt = reth_primitives::Receipt>
+        + Clone
+        + 'static,
     <P as DatabaseProviderFactory>::Provider: BlockReader,
     E: BlockExecutorProvider,
     T: EngineTypes,
-    Spec: Send + Sync + EthereumHardforks + 'static,
+    V: EngineValidator<T, Block = reth_primitives::Block>,
 {
     /// Creates a new [`EngineApiTreeHandler`].
     #[allow(clippy::too_many_arguments)]
@@ -548,7 +558,7 @@ where
         provider: P,
         executor_provider: E,
         consensus: Arc<dyn Consensus>,
-        payload_validator: ExecutionPayloadValidator<Spec>,
+        payload_validator: V,
         outgoing: UnboundedSender<EngineApiEvent>,
         state: EngineApiTreeState,
         canonical_in_memory_state: CanonicalInMemoryState,
@@ -578,6 +588,7 @@ where
             incoming_tx,
             invalid_block_hook: Box::new(NoopInvalidBlockHook),
             engine_kind,
+            _primtives: Default::default(),
         }
     }
 
@@ -596,7 +607,7 @@ where
         provider: P,
         executor_provider: E,
         consensus: Arc<dyn Consensus>,
-        payload_validator: ExecutionPayloadValidator<Spec>,
+        payload_validator: V,
         persistence: PersistenceHandle,
         payload_builder: PayloadBuilderHandle<T>,
         canonical_in_memory_state: CanonicalInMemoryState,
@@ -1207,8 +1218,17 @@ where
                 match request {
                     EngineApiRequest::InsertExecutedBlock(block) => {
                         debug!(target: "engine::tree", block=?block.block().num_hash(), "inserting already executed block");
+                        let now = Instant::now();
+                        let sealed_block = block.block.clone();
                         self.state.tree_state.insert_executed(block);
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
+
+                        self.emit_event(EngineApiEvent::BeaconConsensus(
+                            BeaconConsensusEngineEvent::CanonicalBlockAdded(
+                                sealed_block,
+                                now.elapsed(),
+                            ),
+                        ));
                     }
                     EngineApiRequest::Beacon(request) => {
                         match request {
@@ -1539,8 +1559,8 @@ where
             .ok_or_else(|| ProviderError::HeaderNotFound(hash.into()))?;
         let execution_output = self
             .provider
-            .get_state(block.number)?
-            .ok_or_else(|| ProviderError::StateForNumberNotFound(block.number))?;
+            .get_state(block.number())?
+            .ok_or_else(|| ProviderError::StateForNumberNotFound(block.number()))?;
         let hashed_state = execution_output.hash_state_slow();
 
         Ok(Some(ExecutedBlock {
@@ -2267,7 +2287,7 @@ where
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
         debug!(target: "engine::tree", ?root_elapsed, block=?sealed_block.num_hash(), "Calculated state root");
 
-        let executed = ExecutedBlock {
+        let executed: ExecutedBlock = ExecutedBlock {
             block: sealed_block.clone(),
             senders: Arc::new(block.senders),
             execution_output: Arc::new(ExecutionOutcome::from((output, block_number))),
@@ -2607,8 +2627,9 @@ mod tests {
     use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
     use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
     use reth_engine_primitives::ForkchoiceStatus;
-    use reth_ethereum_engine_primitives::EthEngineTypes;
+    use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
     use reth_evm::test_utils::MockExecutorProvider;
+    use reth_primitives::{BlockExt, EthPrimitives};
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::{block_to_payload_v1, payload::block_to_payload_v3};
     use reth_trie::updates::TrieUpdates;
@@ -2673,8 +2694,13 @@ mod tests {
     }
 
     struct TestHarness {
-        tree:
-            EngineApiTreeHandler<MockEthProvider, MockExecutorProvider, EthEngineTypes, ChainSpec>,
+        tree: EngineApiTreeHandler<
+            EthPrimitives,
+            MockEthProvider,
+            MockExecutorProvider,
+            EthEngineTypes,
+            EthereumEngineValidator,
+        >,
         to_tree_tx: Sender<FromEngine<EngineApiRequest<EthEngineTypes>>>,
         from_tree_rx: UnboundedReceiver<EngineApiEvent>,
         blocks: Vec<ExecutedBlock>,
@@ -2708,7 +2734,7 @@ mod tests {
             let provider = MockEthProvider::default();
             let executor_provider = MockExecutorProvider::default();
 
-            let payload_validator = ExecutionPayloadValidator::new(chain_spec.clone());
+            let payload_validator = EthereumEngineValidator::new(chain_spec.clone());
 
             let (from_tree_tx, from_tree_rx) = unbounded_channel();
 
@@ -2933,7 +2959,7 @@ mod tests {
                 EngineApiEvent::BeaconConsensus(
                     BeaconConsensusEngineEvent::CanonicalBlockAdded(block, _),
                 ) => {
-                    assert!(block.hash() == expected_hash);
+                    assert_eq!(block.hash(), expected_hash);
                 }
                 _ => panic!("Unexpected event: {:#?}", event),
             }

@@ -3,9 +3,10 @@ use crate::{
     BlockSource, BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
     CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
     DatabaseProviderFactory, EvmEnvProvider, FullExecutionDataProvider, HeaderProvider,
-    ProviderError, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
-    StageCheckpointReader, StateProviderBox, StateProviderFactory, StaticFileProviderFactory,
-    TransactionVariant, TransactionsProvider, TreeViewer, WithdrawalsProvider,
+    NodePrimitivesProvider, ProviderError, PruneCheckpointReader, ReceiptProvider,
+    ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox, StateProviderFactory,
+    StaticFileProviderFactory, TransactionVariant, TransactionsProvider, TreeViewer,
+    WithdrawalsProvider,
 };
 use alloy_consensus::Header;
 use alloy_eips::{
@@ -23,10 +24,10 @@ use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_db::table::Value;
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
-use reth_node_types::{FullNodePrimitives, NodeTypes, NodeTypesWithDB, TxTy};
+use reth_node_types::{BlockTy, FullNodePrimitives, NodeTypes, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives::{
-    Account, Block, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    TransactionMeta, TransactionSigned,
+    Account, BlockWithSenders, EthPrimitives, Receipt, SealedBlock, SealedBlockFor,
+    SealedBlockWithSenders, SealedHeader, TransactionMeta,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -77,7 +78,9 @@ where
         ChainSpec: EthereumHardforks,
         Storage: ChainStorage<Self::Primitives>,
         Primitives: FullNodePrimitives<
-            SignedTx: Value + From<TransactionSigned> + Into<TransactionSigned>,
+            SignedTx: Value,
+            Receipt: Value,
+            BlockHeader = alloy_consensus::Header,
         >,
     >,
 {
@@ -88,7 +91,9 @@ impl<T> NodeTypesForProvider for T where
         ChainSpec: EthereumHardforks,
         Storage: ChainStorage<T::Primitives>,
         Primitives: FullNodePrimitives<
-            SignedTx: Value + From<TransactionSigned> + Into<TransactionSigned>,
+            SignedTx: Value,
+            Receipt: Value,
+            BlockHeader = alloy_consensus::Header,
         >,
     >
 {
@@ -100,8 +105,17 @@ where
     Self: NodeTypesForProvider + NodeTypesWithDB,
 {
 }
-
 impl<T> ProviderNodeTypes for T where T: NodeTypesForProvider + NodeTypesWithDB {}
+
+/// A helper trait with requirements for [`NodeTypesForProvider`] to be used within legacy
+/// blockchain tree.
+pub trait NodeTypesForTree: NodeTypesForProvider<Primitives = EthPrimitives> {}
+impl<T> NodeTypesForTree for T where T: NodeTypesForProvider<Primitives = EthPrimitives> {}
+
+/// Helper trait with requirements for [`ProviderNodeTypes`] to be used within legacy blockchain
+/// tree.
+pub trait TreeNodeTypes: ProviderNodeTypes + NodeTypesForTree {}
+impl<T> TreeNodeTypes for T where T: ProviderNodeTypes + NodeTypesForTree {}
 
 /// The main type for interacting with the blockchain.
 ///
@@ -113,9 +127,9 @@ pub struct BlockchainProvider<N: NodeTypesWithDB> {
     /// Provider type used to access the database.
     database: ProviderFactory<N>,
     /// The blockchain tree instance.
-    tree: Arc<dyn TreeViewer>,
+    tree: Arc<dyn TreeViewer<Primitives = N::Primitives>>,
     /// Tracks the chain info wrt forkchoice updates
-    chain_info: ChainInfoTracker,
+    chain_info: ChainInfoTracker<reth_primitives::EthPrimitives>,
 }
 
 impl<N: ProviderNodeTypes> Clone for BlockchainProvider<N> {
@@ -131,7 +145,7 @@ impl<N: ProviderNodeTypes> Clone for BlockchainProvider<N> {
 impl<N: NodeTypesWithDB> BlockchainProvider<N> {
     /// Sets the treeviewer for the provider.
     #[doc(hidden)]
-    pub fn with_tree(mut self, tree: Arc<dyn TreeViewer>) -> Self {
+    pub fn with_tree(mut self, tree: Arc<dyn TreeViewer<Primitives = N::Primitives>>) -> Self {
         self.tree = tree;
         self
     }
@@ -143,7 +157,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     /// if it exists.
     pub fn with_blocks(
         database: ProviderFactory<N>,
-        tree: Arc<dyn TreeViewer>,
+        tree: Arc<dyn TreeViewer<Primitives = N::Primitives>>,
         latest: SealedHeader,
         finalized: Option<SealedHeader>,
         safe: Option<SealedHeader>,
@@ -153,7 +167,10 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
 
     /// Create a new provider using only the database and the tree, fetching the latest header from
     /// the database to initialize the provider.
-    pub fn new(database: ProviderFactory<N>, tree: Arc<dyn TreeViewer>) -> ProviderResult<Self> {
+    pub fn new(
+        database: ProviderFactory<N>,
+        tree: Arc<dyn TreeViewer<Primitives = N::Primitives>>,
+    ) -> ProviderResult<Self> {
         let provider = database.provider()?;
         let best = provider.chain_info()?;
         let latest_header = provider
@@ -220,6 +237,10 @@ where
     }
 }
 
+impl<N: ProviderNodeTypes> NodePrimitivesProvider for BlockchainProvider<N> {
+    type Primitives = N::Primitives;
+}
+
 impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider<N> {
     type DB = N::DB;
     type Provider = <ProviderFactory<N> as DatabaseProviderFactory>::Provider;
@@ -235,8 +256,6 @@ impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider<N> {
-    type Primitives = N::Primitives;
-
     fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         self.database.static_file_provider()
     }
@@ -329,8 +348,14 @@ impl<N: ProviderNodeTypes> BlockIdReader for BlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider<N> {
-    fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> ProviderResult<Option<Block>> {
+impl<N: TreeNodeTypes> BlockReader for BlockchainProvider<N> {
+    type Block = BlockTy<N>;
+
+    fn find_block_by_hash(
+        &self,
+        hash: B256,
+        source: BlockSource,
+    ) -> ProviderResult<Option<Self::Block>> {
         let block = match source {
             BlockSource::Any => {
                 // check database first
@@ -349,22 +374,26 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider<N> {
         Ok(block)
     }
 
-    fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Block>> {
+    fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
         match id {
             BlockHashOrNumber::Hash(hash) => self.find_block_by_hash(hash, BlockSource::Any),
             BlockHashOrNumber::Number(num) => self.database.block_by_number(num),
         }
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlock>> {
+    fn pending_block(&self) -> ProviderResult<Option<SealedBlockFor<Self::Block>>> {
         Ok(self.tree.pending_block())
     }
 
-    fn pending_block_with_senders(&self) -> ProviderResult<Option<SealedBlockWithSenders>> {
+    fn pending_block_with_senders(
+        &self,
+    ) -> ProviderResult<Option<SealedBlockWithSenders<Self::Block>>> {
         Ok(self.tree.pending_block_with_senders())
     }
 
-    fn pending_block_and_receipts(&self) -> ProviderResult<Option<(SealedBlock, Vec<Receipt>)>> {
+    fn pending_block_and_receipts(
+        &self,
+    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Receipt>)>> {
         Ok(self.tree.pending_block_and_receipts())
     }
 
@@ -389,7 +418,7 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider<N> {
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<BlockWithSenders>> {
+    ) -> ProviderResult<Option<BlockWithSenders<Self::Block>>> {
         self.database.block_with_senders(id, transaction_kind)
     }
 
@@ -397,25 +426,25 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider<N> {
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<SealedBlockWithSenders>> {
+    ) -> ProviderResult<Option<SealedBlockWithSenders<Self::Block>>> {
         self.database.sealed_block_with_senders(id, transaction_kind)
     }
 
-    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
+    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Self::Block>> {
         self.database.block_range(range)
     }
 
     fn block_with_senders_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<BlockWithSenders>> {
+    ) -> ProviderResult<Vec<BlockWithSenders<Self::Block>>> {
         self.database.block_with_senders_range(range)
     }
 
     fn sealed_block_with_senders_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
+    ) -> ProviderResult<Vec<SealedBlockWithSenders<Self::Block>>> {
         self.database.sealed_block_with_senders_range(range)
     }
 }
@@ -487,27 +516,32 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> ReceiptProvider for BlockchainProvider<N> {
-    fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
+    type Receipt = ReceiptTy<N>;
+
+    fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
         self.database.receipt(id)
     }
 
-    fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
+    fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Receipt>> {
         self.database.receipt_by_hash(hash)
     }
 
-    fn receipts_by_block(&self, block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>> {
+    fn receipts_by_block(
+        &self,
+        block: BlockHashOrNumber,
+    ) -> ProviderResult<Option<Vec<Self::Receipt>>> {
         self.database.receipts_by_block(block)
     }
 
     fn receipts_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<Receipt>> {
+    ) -> ProviderResult<Vec<Self::Receipt>> {
         self.database.receipts_by_tx_range(range)
     }
 }
 
-impl<N: ProviderNodeTypes> ReceiptProviderIdExt for BlockchainProvider<N> {
+impl<N: TreeNodeTypes> ReceiptProviderIdExt for BlockchainProvider<N> {
     fn receipts_by_block_id(&self, block: BlockId) -> ProviderResult<Option<Vec<Receipt>>> {
         match block {
             BlockId::Hash(rpc_block_hash) => {
@@ -844,7 +878,7 @@ impl<N: ProviderNodeTypes> BlockReaderIdExt for BlockchainProvider<N>
 where
     Self: BlockReader + ReceiptProviderIdExt,
 {
-    fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Block>> {
+    fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Block>> {
         match id {
             BlockId::Number(num) => self.block_by_number_or_tag(num),
             BlockId::Hash(hash) => {
@@ -929,7 +963,7 @@ impl<N: ProviderNodeTypes> BlockchainTreePendingStateProvider for BlockchainProv
 }
 
 impl<N: ProviderNodeTypes> CanonStateSubscriptions for BlockchainProvider<N> {
-    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
+    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<Self::Primitives> {
         self.tree.subscribe_to_canonical_state()
     }
 }

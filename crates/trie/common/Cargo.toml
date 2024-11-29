@@ -12,14 +12,15 @@ description = "Commonly used types for trie usage in reth."
 workspace = true
 
 [dependencies]
-reth-primitives-traits = { workspace = true, features = ["serde"] }
-reth-codecs.workspace = true
-
+# alloy
 alloy-primitives.workspace = true
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
-alloy-trie = { workspace = true, features = ["serde"] }
+alloy-trie.workspace = true
 alloy-consensus.workspace = true
 alloy-genesis.workspace = true
+
+reth-primitives-traits.workspace = true
+reth-codecs.workspace = true
 
 # revm-primitives scroll re-export
 revm-primitives = { package = "reth-scroll-revm", path = "../../scroll/revm" }
@@ -27,9 +28,13 @@ reth-scroll-primitives = { workspace = true, optional = true }
 
 bytes.workspace = true
 derive_more.workspace = true
-serde.workspace = true
 itertools.workspace = true
-nybbles = { workspace = true, features = ["serde", "rlp"] }
+nybbles = { workspace = true, features = ["rlp"] }
+
+# `serde` feature
+serde = { workspace = true, optional = true }
+
+serde_with = { workspace = true, optional = true }
 
 # `test-utils` feature
 hash-db = { version = "=0.15.2", optional = true }
@@ -37,33 +42,57 @@ plain_hasher = { version = "0.2", optional = true }
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 
 [dev-dependencies]
+reth-primitives-traits = { workspace = true, features = ["serde"] }
 alloy-primitives = { workspace = true, features = ["getrandom"] }
+alloy-trie = { workspace = true, features = ["arbitrary", "serde"] }
+hash-db = "=0.15.2"
+plain_hasher = "0.2"
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
-hash-db = "=0.15.2"
-plain_hasher = "0.2"
-
+criterion.workspace = true
+bincode.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_with.workspace = true
 reth-scroll-primitives.workspace = true
 
 [features]
+serde = [
+    "dep:serde",
+    "bytes/serde",
+    "nybbles/serde",
+    "alloy-primitives/serde",
+    "alloy-consensus/serde",
+    "alloy-trie/serde",
+    "revm-primitives/serde",
+    "reth-primitives-traits/serde",
+    "reth-codecs/serde",
+    "reth-scroll-primitives?/serde"
+]
+serde-bincode-compat = [
+    "serde",
+	"reth-primitives-traits/serde-bincode-compat",
+	"alloy-consensus/serde-bincode-compat",
+    "dep:serde_with"
+]
 test-utils = [
-	"dep:plain_hasher",
-	"dep:hash-db",
-	"arbitrary",
-	"reth-primitives-traits/test-utils",
-	"reth-codecs/test-utils",
+    "dep:plain_hasher",
+    "dep:hash-db",
+    "arbitrary",
+    "reth-primitives-traits/test-utils",
+    "reth-codecs/test-utils",
 	"revm-primitives/test-utils"
 ]
 arbitrary = [
-	"alloy-trie/arbitrary",
-	"dep:arbitrary",
-	"reth-primitives-traits/arbitrary",
-	"alloy-consensus/arbitrary",
-	"alloy-primitives/arbitrary",
-	"nybbles/arbitrary",
-	"revm-primitives/arbitrary",
-	"reth-codecs/arbitrary",
+    "alloy-trie/arbitrary",
+    "dep:arbitrary",
+    "reth-primitives-traits/arbitrary",
+    "alloy-consensus/arbitrary",
+    "alloy-primitives/arbitrary",
+    "nybbles/arbitrary",
+    "revm-primitives/arbitrary",
+    "reth-codecs/arbitrary",
 	"reth-scroll-primitives?/arbitrary"
 ]
 scroll = [
@@ -71,3 +100,7 @@ scroll = [
 	"dep:reth-scroll-primitives",
 	"revm-primitives/scroll"
 ]
+
+[[bench]]
+name = "prefix_set"
+harness = false

@@ -18,10 +18,7 @@ use reth::{
     providers::ProviderError,
     revm::{
         interpreter::Host,
-        primitives::{
-            address, Address, BlockEnv, Bytes, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg,
-            TransactTo, TxEnv, U256,
-        },
+        primitives::{address, Address, Bytes, Env, EnvWithHandlerCfg, TransactTo, TxEnv, U256},
         shared::BundleState,
         Database, DatabaseCommit, Evm, State,
     },
@@ -142,10 +139,7 @@ where
         header: &alloy_consensus::Header,
         total_difficulty: U256,
     ) -> EnvWithHandlerCfg {
-        let mut cfg = CfgEnvWithHandlerCfg::new(Default::default(), Default::default());
-        let mut block_env = BlockEnv::default();
-        self.evm_config.fill_cfg_and_block_env(&mut cfg, &mut block_env, header, total_difficulty);
-
+        let (cfg, block_env) = self.evm_config.cfg_and_block_env(header, total_difficulty);
         EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default())
     }
 }

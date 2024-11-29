@@ -15,11 +15,11 @@ use reth_execution_types::ExecutionOutcome;
 use reth_node_core::version::SHORT_VERSION;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::bedrock::is_dup_tx;
-use reth_primitives::Receipts;
+use reth_primitives::{NodePrimitives, Receipts};
 use reth_provider::{
     providers::ProviderNodeTypes, writer::UnifiedStorageWriter, DatabaseProviderFactory,
     OriginalValuesKnown, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
-    StateWriter, StaticFileProviderFactory, StaticFileWriter, StatsReader,
+    StateWriter, StaticFileProviderFactory, StatsReader, StorageLocation,
 };
 use reth_stages::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
@@ -85,7 +85,10 @@ pub async fn import_receipts_from_file<N, P, F>(
     filter: F,
 ) -> eyre::Result<()>
 where
-    N: ProviderNodeTypes<ChainSpec = OpChainSpec>,
+    N: ProviderNodeTypes<
+        ChainSpec = OpChainSpec,
+        Primitives: NodePrimitives<Receipt = reth_primitives::Receipt>,
+    >,
     P: AsRef<Path>,
     F: FnMut(u64, &mut Receipts) -> usize,
 {
@@ -123,7 +126,7 @@ pub async fn import_receipts_from_reader<N, F>(
     mut filter: F,
 ) -> eyre::Result<ImportReceiptsResult>
 where
-    N: ProviderNodeTypes,
+    N: ProviderNodeTypes<Primitives: NodePrimitives<Receipt = reth_primitives::Receipt>>,
     F: FnMut(u64, &mut Receipts) -> usize,
 {
     let static_file_provider = provider_factory.static_file_provider();
@@ -219,11 +222,11 @@ where
             ExecutionOutcome::new(Default::default(), receipts, first_block, Default::default());
 
         // finally, write the receipts
-        let mut storage_writer = UnifiedStorageWriter::from(
-            &provider,
-            static_file_provider.latest_writer(StaticFileSegment::Receipts)?,
-        );
-        storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::Yes)?;
+        provider.write_state(
+            execution_outcome,
+            OriginalValuesKnown::Yes,
+            StorageLocation::StaticFiles,
+        )?;
     }
 
     // Only commit if we have imported as many receipts as the number of transactions.

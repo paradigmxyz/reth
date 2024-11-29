@@ -18,7 +18,9 @@ use reth_optimism_forks::OpHardforks;
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_payload_util::PayloadTransactions;
-use reth_primitives::{proofs, Block, BlockBody, Receipt, SealedHeader, TransactionSigned, TxType};
+use reth_primitives::{
+    proofs, Block, BlockBody, BlockExt, Receipt, SealedHeader, TransactionSigned, TxType,
+};
 use reth_provider::{ProviderError, StateProofProvider, StateProviderFactory, StateRootProvider};
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{

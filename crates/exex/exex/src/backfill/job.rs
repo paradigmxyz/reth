@@ -4,12 +4,14 @@ use std::{
     time::{Duration, Instant},
 };
 
+use alloy_consensus::BlockHeader;
 use alloy_primitives::BlockNumber;
 use reth_evm::execute::{
     BatchExecutor, BlockExecutionError, BlockExecutionOutput, BlockExecutorProvider, Executor,
 };
-use reth_primitives::{Block, BlockWithSenders, Receipt};
-use reth_primitives_traits::format_gas_throughput;
+use reth_node_api::{Block as _, BlockBody as _};
+use reth_primitives::{BlockExt, BlockWithSenders, Receipt};
+use reth_primitives_traits::{format_gas_throughput, SignedTransaction};
 use reth_provider::{
     BlockReader, Chain, HeaderProvider, ProviderError, StateProviderFactory, TransactionVariant,
 };
@@ -37,7 +39,9 @@ pub struct BackfillJob<E, P> {
 impl<E, P> Iterator for BackfillJob<E, P>
 where
     E: BlockExecutorProvider,
-    P: HeaderProvider + BlockReader + StateProviderFactory,
+    P: HeaderProvider
+        + BlockReader<Transaction: SignedTransaction, Block = reth_primitives::Block>
+        + StateProviderFactory,
 {
     type Item = BackfillJobResult<Chain>;
 
@@ -53,7 +57,9 @@ where
 impl<E, P> BackfillJob<E, P>
 where
     E: BlockExecutorProvider,
-    P: BlockReader + HeaderProvider + StateProviderFactory,
+    P: BlockReader<Transaction: SignedTransaction, Block = reth_primitives::Block>
+        + HeaderProvider
+        + StateProviderFactory,
 {
     /// Converts the backfill job into a single block backfill job.
     pub fn into_single_blocks(self) -> SingleBlockBackfillJob<E, P> {
@@ -106,10 +112,10 @@ where
 
             fetch_block_duration += fetch_block_start.elapsed();
 
-            cumulative_gas += block.gas_used;
+            cumulative_gas += block.gas_used();
 
             // Configure the executor to use the current state.
-            trace!(target: "exex::backfill", number = block_number, txs = block.body.transactions.len(), "Executing block");
+            trace!(target: "exex::backfill", number = block_number, txs = block.body.transactions().len(), "Executing block");
 
             // Execute the block
             let execute_start = Instant::now();
@@ -117,8 +123,7 @@ where
             // Unseal the block for execution
             let (block, senders) = block.into_components();
             let (unsealed_header, hash) = block.header.split();
-            let block =
-                Block { header: unsealed_header, body: block.body }.with_senders_unchecked(senders);
+            let block = P::Block::new(unsealed_header, block.body).with_senders_unchecked(senders);
 
             executor.execute_and_verify_one((&block, td).into())?;
             execution_duration += execute_start.elapsed();
@@ -140,7 +145,7 @@ where
             }
         }
 
-        let last_block_number = blocks.last().expect("blocks should not be empty").number;
+        let last_block_number = blocks.last().expect("blocks should not be empty").number();
         debug!(
             target: "exex::backfill",
             range = ?*self.range.start()..=last_block_number,
@@ -171,7 +176,7 @@ pub struct SingleBlockBackfillJob<E, P> {
 impl<E, P> Iterator for SingleBlockBackfillJob<E, P>
 where
     E: BlockExecutorProvider,
-    P: HeaderProvider + BlockReader + StateProviderFactory,
+    P: HeaderProvider + BlockReader<Block = reth_primitives::Block> + StateProviderFactory,
 {
     type Item = BackfillJobResult<(BlockWithSenders, BlockExecutionOutput<Receipt>)>;
 
@@ -183,7 +188,7 @@ where
 impl<E, P> SingleBlockBackfillJob<E, P>
 where
     E: BlockExecutorProvider,
-    P: HeaderProvider + BlockReader + StateProviderFactory,
+    P: HeaderProvider + BlockReader<Block = reth_primitives::Block> + StateProviderFactory,
 {
     /// Converts the single block backfill job into a stream.
     pub fn into_stream(
@@ -195,7 +200,7 @@ where
     pub(crate) fn execute_block(
         &self,
         block_number: u64,
-    ) -> BackfillJobResult<(BlockWithSenders, BlockExecutionOutput<Receipt>)> {
+    ) -> BackfillJobResult<(BlockWithSenders<P::Block>, BlockExecutionOutput<Receipt>)> {
         let td = self
             .provider
             .header_td_by_number(block_number)?
@@ -212,7 +217,7 @@ where
             self.provider.history_by_block_number(block_number.saturating_sub(1))?,
         ));
 
-        trace!(target: "exex::backfill", number = block_number, txs = block_with_senders.block.body.transactions.len(), "Executing block");
+        trace!(target: "exex::backfill", number = block_number, txs = block_with_senders.block.body().transactions().len(), "Executing block");
 
         let block_execution_output = executor.execute((&block_with_senders, td).into())?;
 

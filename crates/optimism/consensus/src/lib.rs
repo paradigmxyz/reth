@@ -93,8 +93,8 @@ impl Consensus for OpBeaconConsensus {
 
 impl HeaderValidator for OpBeaconConsensus {
     fn validate_header(&self, header: &SealedHeader) -> Result<(), ConsensusError> {
-        validate_header_gas(header)?;
-        validate_header_base_fee(header, &self.chain_spec)
+        validate_header_gas(header.header())?;
+        validate_header_base_fee(header.header(), &self.chain_spec)
     }
 
     fn validate_header_against_parent(

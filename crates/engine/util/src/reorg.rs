@@ -18,7 +18,7 @@ use reth_evm::{
     ConfigureEvm,
 };
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{proofs, Block, BlockBody, Receipt, Receipts};
+use reth_primitives::{proofs, Block, BlockBody, BlockExt, Receipt, Receipts};
 use reth_provider::{BlockReader, ExecutionOutcome, ProviderError, StateProviderFactory};
 use reth_revm::{
     db::{states::bundle_state::BundleRetention, State},
@@ -27,9 +27,7 @@ use reth_revm::{
 use reth_rpc_types_compat::engine::payload::block_to_payload;
 use reth_scroll_execution::FinalizeExecution;
 use reth_trie::HashedPostState;
-use revm_primitives::{
-    calc_excess_blob_gas, BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg,
-};
+use revm_primitives::{calc_excess_blob_gas, EVMError, EnvWithHandlerCfg};
 use std::{
     collections::VecDeque,
     future::Future,
@@ -109,7 +107,7 @@ impl<S, Engine, Provider, Evm, Spec> Stream for EngineReorg<S, Engine, Provider,
 where
     S: Stream<Item = BeaconEngineMessage<Engine>>,
     Engine: EngineTypes,
-    Provider: BlockReader + StateProviderFactory,
+    Provider: BlockReader<Block = reth_primitives::Block> + StateProviderFactory,
     Evm: ConfigureEvm<Header = Header>,
     Spec: EthereumHardforks,
 {
@@ -256,7 +254,7 @@ fn create_reorg_head<Provider, Evm, Spec>(
     next_sidecar: ExecutionPayloadSidecar,
 ) -> RethResult<(ExecutionPayload, ExecutionPayloadSidecar)>
 where
-    Provider: BlockReader + StateProviderFactory,
+    Provider: BlockReader<Block = reth_primitives::Block> + StateProviderFactory,
     Evm: ConfigureEvm<Header = Header>,
     Spec: EthereumHardforks,
 {
@@ -299,9 +297,7 @@ where
     let mut state = State::builder().with_database(&mut db).with_bundle_update().build();
 
     // Configure environments
-    let mut cfg = CfgEnvWithHandlerCfg::new(Default::default(), Default::default());
-    let mut block_env = BlockEnv::default();
-    evm_config.fill_cfg_and_block_env(&mut cfg, &mut block_env, &reorg_target.header, U256::MAX);
+    let (cfg, block_env) = evm_config.cfg_and_block_env(&reorg_target.header, U256::MAX);
     let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default());
     let mut evm = evm_config.evm_with_env(&mut state, env);
 

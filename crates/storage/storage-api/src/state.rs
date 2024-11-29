@@ -8,6 +8,7 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, StorageValue
 use auto_impl::auto_impl;
 use reth_primitives::Bytecode;
 use reth_storage_errors::provider::ProviderResult;
+use reth_trie_db::StateCommitment;
 
 /// Type alias of boxed [`StateProvider`].
 pub type StateProviderBox = Box<dyn StateProvider>;
@@ -79,6 +80,12 @@ pub trait StateProvider:
             None => Ok(None),
         }
     }
+}
+
+/// Trait implemented for database providers that can provide the [`StateCommitment`] type.
+pub trait StateCommitmentProvider {
+    /// The [`StateCommitment`] type that can be used to perform state commitment operations.
+    type StateCommitment: StateCommitment;
 }
 
 /// Trait implemented for database providers that can be converted into a historical state provider.

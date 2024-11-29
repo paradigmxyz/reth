@@ -102,6 +102,8 @@ jobs:
             if [ $BLOCK_GETH -ge 100 ] && [ $BLOCK_RETH -ge 100 ] ; then exit 0; fi
             echo "Waiting for clients to advance..., Reth: $BLOCK_RETH Geth: $BLOCK_GETH"
           done
+          kurtosis service logs -a op-devnet op-el-2-op-reth-op-node-op-kurtosis
+          kurtosis service logs -a op-devnet op-cl-2-op-node-op-reth-op-kurtosis
           exit 1
 
 

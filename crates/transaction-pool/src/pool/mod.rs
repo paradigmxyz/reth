@@ -88,7 +88,6 @@ use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 
 use alloy_eips::eip4844::BlobTransactionSidecar;
-use reth_primitives::PooledTransactionsElement;
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -340,14 +339,27 @@ where
         }
     }
 
-    /// Returns converted [`PooledTransactionsElement`] for the given transaction hashes.
+    /// Returns pooled transactions for the given transaction hashes.
     pub(crate) fn get_pooled_transaction_elements(
         &self,
         tx_hashes: Vec<TxHash>,
         limit: GetPooledTransactionLimit,
-    ) -> Vec<PooledTransactionsElement>
+    ) -> Vec<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>
     where
         <V as TransactionValidator>::Transaction: EthPoolTransaction,
+    {
+        self.get_pooled_transactions_as(tx_hashes, limit)
+    }
+
+    /// Returns pooled transactions for the given transaction hashes as the requested type.
+    pub(crate) fn get_pooled_transactions_as<P>(
+        &self,
+        tx_hashes: Vec<TxHash>,
+        limit: GetPooledTransactionLimit,
+    ) -> Vec<P>
+    where
+        <V as TransactionValidator>::Transaction: EthPoolTransaction,
+        <<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled: Into<P>,
     {
         let transactions = self.get_all(tx_hashes);
         let mut elements = Vec::with_capacity(transactions.len());
@@ -369,15 +381,15 @@ where
         elements
     }
 
-    /// Returns converted [`PooledTransactionsElement`] for the given transaction hash.
+    /// Returns converted pooled transaction for the given transaction hash.
     pub(crate) fn get_pooled_transaction_element(
         &self,
         tx_hash: TxHash,
-    ) -> Option<PooledTransactionsElement>
+    ) -> Option<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>
     where
         <V as TransactionValidator>::Transaction: EthPoolTransaction,
     {
-        self.get(&tx_hash).and_then(|tx| self.to_pooled_transaction(tx).map(Into::into))
+        self.get(&tx_hash).and_then(|tx| self.to_pooled_transaction(tx))
     }
 
     /// Updates the entire pool after a new block was executed.
@@ -676,6 +688,14 @@ where
     ) -> Box<dyn crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<T::Transaction>>>>
     {
         self.get_pool_data().best_transactions_with_attributes(best_transactions_attributes)
+    }
+
+    /// Returns only the first `max` transactions in the pending pool.
+    pub(crate) fn pending_transactions_max(
+        &self,
+        max: usize,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.get_pool_data().pending_transactions_iter().take(max).collect()
     }
 
     /// Returns all transactions from the pending sub-pool

@@ -25,7 +25,7 @@ use reth_revm::db::{BundleState, State};
 use reth_scroll_execution::FinalizeExecution;
 use revm_primitives::{
     db::{Database, DatabaseCommit},
-    BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState, U256,
+    EnvWithHandlerCfg, ResultAndState, U256,
 };
 
 /// Factory for [`EthExecutionStrategy`].
@@ -121,10 +121,7 @@ where
         header: &alloy_consensus::Header,
         total_difficulty: U256,
     ) -> EnvWithHandlerCfg {
-        let mut cfg = CfgEnvWithHandlerCfg::new(Default::default(), Default::default());
-        let mut block_env = BlockEnv::default();
-        self.evm_config.fill_cfg_and_block_env(&mut cfg, &mut block_env, header, total_difficulty);
-
+        let (cfg, block_env) = self.evm_config.cfg_and_block_env(header, total_difficulty);
         EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default())
     }
 }
@@ -324,7 +321,9 @@ mod tests {
         BasicBlockExecutorProvider, BatchExecutor, BlockExecutorProvider, Executor,
     };
     use reth_execution_types::BlockExecutionOutput;
-    use reth_primitives::{public_key_to_address, Account, Block, BlockBody, Transaction};
+    use reth_primitives::{
+        public_key_to_address, Account, Block, BlockBody, BlockExt, Transaction,
+    };
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, TransitionState,
     };

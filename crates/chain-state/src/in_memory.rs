@@ -4,17 +4,18 @@ use crate::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
     ChainInfoTracker, MemoryOverlayStateProvider,
 };
-use alloy_consensus::Header;
-use alloy_eips::{BlockHashOrNumber, BlockNumHash};
+use alloy_consensus::BlockHeader;
+use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber, BlockNumHash};
 use alloy_primitives::{map::HashMap, Address, TxHash, B256};
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives::{
-    BlockWithSenders, NodePrimitives, Receipts, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    TransactionMeta, TransactionSigned,
+    BlockWithSenders, HeaderExt, NodePrimitives, Receipts, SealedBlock, SealedBlockFor,
+    SealedBlockWithSenders, SealedHeader, TransactionMeta,
 };
+use reth_primitives_traits::{Block, BlockBody as _, SignedTransaction};
 use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
@@ -134,7 +135,7 @@ impl<N: NodePrimitives> InMemoryState<N> {
 pub(crate) struct CanonicalInMemoryStateInner<N: NodePrimitives> {
     /// Tracks certain chain information, such as the canonical head, safe head, and finalized
     /// head.
-    pub(crate) chain_info_tracker: ChainInfoTracker,
+    pub(crate) chain_info_tracker: ChainInfoTracker<N>,
     /// Tracks blocks at the tip of the chain that have not been persisted to disk yet.
     pub(crate) in_memory_state: InMemoryState<N>,
     /// A broadcast stream that emits events when the canonical chain is updated.
@@ -158,6 +159,9 @@ impl<N: NodePrimitives> CanonicalInMemoryStateInner<N> {
     }
 }
 
+type PendingBlockAndReceipts<N> =
+    (SealedBlockFor<<N as NodePrimitives>::Block>, Vec<reth_primitives_traits::ReceiptTy<N>>);
+
 /// This type is responsible for providing the blocks, receipts, and state for
 /// all canonical blocks not on disk yet and keeps track of the block range that
 /// is in memory.
@@ -173,8 +177,8 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         blocks: HashMap<B256, Arc<BlockState<N>>>,
         numbers: BTreeMap<u64, B256>,
         pending: Option<BlockState<N>>,
-        finalized: Option<SealedHeader>,
-        safe: Option<SealedHeader>,
+        finalized: Option<SealedHeader<N::BlockHeader>>,
+        safe: Option<SealedHeader<N::BlockHeader>>,
     ) -> Self {
         let in_memory_state = InMemoryState::new(blocks, numbers, pending);
         let header = in_memory_state
@@ -201,9 +205,9 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     /// Create a new in memory state with the given local head and finalized header
     /// if it exists.
     pub fn with_head(
-        head: SealedHeader,
-        finalized: Option<SealedHeader>,
-        safe: Option<SealedHeader>,
+        head: SealedHeader<N::BlockHeader>,
+        finalized: Option<SealedHeader<N::BlockHeader>>,
+        safe: Option<SealedHeader<N::BlockHeader>>,
     ) -> Self {
         let chain_info_tracker = ChainInfoTracker::new(head, finalized, safe);
         let in_memory_state = InMemoryState::default();
@@ -224,7 +228,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     }
 
     /// Returns the header corresponding to the given hash.
-    pub fn header_by_hash(&self, hash: B256) -> Option<SealedHeader> {
+    pub fn header_by_hash(&self, hash: B256) -> Option<SealedHeader<N::BlockHeader>> {
         self.state_by_hash(hash).map(|block| block.block_ref().block.header.clone())
     }
 
@@ -238,7 +242,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     /// Note: This assumes that the parent block of the pending block is canonical.
     pub fn set_pending_block(&self, pending: ExecutedBlock<N>) {
         // fetch the state of the pending block's parent block
-        let parent = self.state_by_hash(pending.block().parent_hash);
+        let parent = self.state_by_hash(pending.block().parent_hash());
         let pending = BlockState::with_parent(pending, parent);
         self.inner.in_memory_state.pending.send_modify(|p| {
             p.replace(pending);
@@ -262,14 +266,14 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             // we first remove the blocks from the reorged chain
             for block in reorged {
                 let hash = block.block().hash();
-                let number = block.block().number;
+                let number = block.block().number();
                 blocks.remove(&hash);
                 numbers.remove(&number);
             }
 
             // insert the new blocks
             for block in new_blocks {
-                let parent = blocks.get(&block.block().parent_hash).cloned();
+                let parent = blocks.get(&block.block().parent_hash()).cloned();
                 let block_state = BlockState::with_parent(block, parent);
                 let hash = block_state.hash();
                 let number = block_state.number();
@@ -329,16 +333,16 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             // height)
             let mut old_blocks = blocks
                 .drain()
-                .filter(|(_, b)| b.block_ref().block().number > persisted_height)
+                .filter(|(_, b)| b.block_ref().block().number() > persisted_height)
                 .map(|(_, b)| b.block.clone())
                 .collect::<Vec<_>>();
 
             // sort the blocks by number so we can insert them back in natural order (low -> high)
-            old_blocks.sort_unstable_by_key(|block| block.block().number);
+            old_blocks.sort_unstable_by_key(|block| block.block().number());
 
             // re-insert the blocks in natural order and connect them to their parent blocks
             for block in old_blocks {
-                let parent = blocks.get(&block.block().parent_hash).cloned();
+                let parent = blocks.get(&block.block().parent_hash()).cloned();
                 let block_state = BlockState::with_parent(block, parent);
                 let hash = block_state.hash();
                 let number = block_state.number();
@@ -351,7 +355,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             // also shift the pending state if it exists
             self.inner.in_memory_state.pending.send_modify(|p| {
                 if let Some(p) = p.as_mut() {
-                    p.parent = blocks.get(&p.block_ref().block.parent_hash).cloned();
+                    p.parent = blocks.get(&p.block_ref().block.parent_hash()).cloned();
                 }
             });
         }
@@ -427,59 +431,62 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     }
 
     /// Canonical head setter.
-    pub fn set_canonical_head(&self, header: SealedHeader) {
+    pub fn set_canonical_head(&self, header: SealedHeader<N::BlockHeader>) {
         self.inner.chain_info_tracker.set_canonical_head(header);
     }
 
     /// Safe head setter.
-    pub fn set_safe(&self, header: SealedHeader) {
+    pub fn set_safe(&self, header: SealedHeader<N::BlockHeader>) {
         self.inner.chain_info_tracker.set_safe(header);
     }
 
     /// Finalized head setter.
-    pub fn set_finalized(&self, header: SealedHeader) {
+    pub fn set_finalized(&self, header: SealedHeader<N::BlockHeader>) {
         self.inner.chain_info_tracker.set_finalized(header);
     }
 
     /// Canonical head getter.
-    pub fn get_canonical_head(&self) -> SealedHeader {
+    pub fn get_canonical_head(&self) -> SealedHeader<N::BlockHeader> {
         self.inner.chain_info_tracker.get_canonical_head()
     }
 
     /// Finalized header getter.
-    pub fn get_finalized_header(&self) -> Option<SealedHeader> {
+    pub fn get_finalized_header(&self) -> Option<SealedHeader<N::BlockHeader>> {
         self.inner.chain_info_tracker.get_finalized_header()
     }
 
     /// Safe header getter.
-    pub fn get_safe_header(&self) -> Option<SealedHeader> {
+    pub fn get_safe_header(&self) -> Option<SealedHeader<N::BlockHeader>> {
         self.inner.chain_info_tracker.get_safe_header()
     }
 
     /// Returns the `SealedHeader` corresponding to the pending state.
-    pub fn pending_sealed_header(&self) -> Option<SealedHeader> {
+    pub fn pending_sealed_header(&self) -> Option<SealedHeader<N::BlockHeader>> {
         self.pending_state().map(|h| h.block_ref().block().header.clone())
     }
 
     /// Returns the `Header` corresponding to the pending state.
-    pub fn pending_header(&self) -> Option<Header> {
+    pub fn pending_header(&self) -> Option<N::BlockHeader> {
         self.pending_sealed_header().map(|sealed_header| sealed_header.unseal())
     }
 
     /// Returns the `SealedBlock` corresponding to the pending state.
-    pub fn pending_block(&self) -> Option<SealedBlock> {
+    pub fn pending_block(&self) -> Option<SealedBlock<N::BlockHeader, N::BlockBody>> {
         self.pending_state().map(|block_state| block_state.block_ref().block().clone())
     }
 
     /// Returns the `SealedBlockWithSenders` corresponding to the pending state.
-    pub fn pending_block_with_senders(&self) -> Option<SealedBlockWithSenders> {
+    pub fn pending_block_with_senders(&self) -> Option<SealedBlockWithSenders<N::Block>>
+    where
+        N::SignedTx: SignedTransaction,
+    {
         self.pending_state()
             .and_then(|block_state| block_state.block_ref().block().clone().seal_with_senders())
     }
 
     /// Returns a tuple with the `SealedBlock` corresponding to the pending
     /// state and a vector of its `Receipt`s.
-    pub fn pending_block_and_receipts(&self) -> Option<(SealedBlock, Vec<N::Receipt>)> {
+    pub fn pending_block_and_receipts(&self) -> Option<PendingBlockAndReceipts<N>> {
         self.pending_state().map(|block_state| {
             (block_state.block_ref().block().clone(), block_state.executed_block_receipts())
         })
@@ -491,12 +498,14 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     }
 
     /// Subscribe to new safe block events.
-    pub fn subscribe_safe_block(&self) -> watch::Receiver<Option<SealedHeader>> {
+    pub fn subscribe_safe_block(&self) -> watch::Receiver<Option<SealedHeader<N::BlockHeader>>> {
         self.inner.chain_info_tracker.subscribe_safe_block()
     }
 
     /// Subscribe to new finalized block events.
-    pub fn subscribe_finalized_block(&self) -> watch::Receiver<Option<SealedHeader>> {
+    pub fn subscribe_finalized_block(
+        &self,
+    ) -> watch::Receiver<Option<SealedHeader<N::BlockHeader>>> {
         self.inner.chain_info_tracker.subscribe_finalized_block()
     }
 
@@ -532,10 +541,18 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     }
 
     /// Returns a `TransactionSigned` for the given `TxHash` if found.
-    pub fn transaction_by_hash(&self, hash: TxHash) -> Option<TransactionSigned> {
+    pub fn transaction_by_hash(&self, hash: TxHash) -> Option<N::SignedTx>
+    where
+        N::SignedTx: Encodable2718,
+    {
         for block_state in self.canonical_chain() {
-            if let Some(tx) =
-                block_state.block_ref().block().body.transactions().find(|tx| tx.hash() == hash)
+            if let Some(tx) = block_state
+                .block_ref()
+                .block()
+                .body
+                .transactions()
+                .iter()
+                .find(|tx| tx.trie_hash() == hash)
             {
                 return Some(tx.clone())
             }
@@ -548,24 +565,28 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     pub fn transaction_by_hash_with_meta(
         &self,
         tx_hash: TxHash,
-    ) -> Option<(TransactionSigned, TransactionMeta)> {
+    ) -> Option<(N::SignedTx, TransactionMeta)>
+    where
+        N::SignedTx: Encodable2718,
+    {
         for block_state in self.canonical_chain() {
             if let Some((index, tx)) = block_state
                 .block_ref()
                 .block()
                 .body
                 .transactions()
+                .iter()
                 .enumerate()
-                .find(|(_, tx)| tx.hash() == tx_hash)
+                .find(|(_, tx)| tx.trie_hash() == tx_hash)
             {
                 let meta = TransactionMeta {
                     tx_hash,
                     index: index as u64,
                     block_hash: block_state.hash(),
-                    block_number: block_state.block_ref().block.number,
-                    base_fee: block_state.block_ref().block.header.base_fee_per_gas,
-                    timestamp: block_state.block_ref().block.timestamp,
-                    excess_blob_gas: block_state.block_ref().block.excess_blob_gas,
+                    block_number: block_state.block_ref().block.number(),
+                    base_fee: block_state.block_ref().block.header.base_fee_per_gas(),
+                    timestamp: block_state.block_ref().block.timestamp(),
+                    excess_blob_gas: block_state.block_ref().block.excess_blob_gas(),
                 };
                 return Some((tx.clone(), meta))
             }
@@ -616,14 +637,15 @@ impl<N: NodePrimitives> BlockState<N> {
     }
 
     /// Returns the block with senders for the state.
-    pub fn block_with_senders(&self) -> BlockWithSenders {
+    pub fn block_with_senders(&self) -> BlockWithSenders<N::Block> {
         let block = self.block.block().clone();
         let senders = self.block.senders().clone();
-        BlockWithSenders::new_unchecked(block.unseal(), senders)
+        let (header, body) = block.split();
+        BlockWithSenders::new_unchecked(N::Block::new(header.unseal(), body), senders)
     }
 
     /// Returns the sealed block with senders for the state.
-    pub fn sealed_block_with_senders(&self) -> SealedBlockWithSenders {
+    pub fn sealed_block_with_senders(&self) -> SealedBlockWithSenders<N::Block> {
         let block = self.block.block().clone();
         let senders = self.block.senders().clone();
         SealedBlockWithSenders { block, senders }
@@ -636,13 +658,13 @@ impl<N: NodePrimitives> BlockState<N> {
 
     /// Returns the block number of executed block that determines the state.
     pub fn number(&self) -> u64 {
-        self.block.block().number
+        self.block.block().number()
     }
 
     /// Returns the state root after applying the executed block that determines
     /// the state.
     pub fn state_root(&self) -> B256 {
-        self.block.block().header.state_root
+        self.block.block().header.state_root()
     }
 
     /// Returns the `Receipts` of executed block that determines the state.
@@ -728,14 +750,18 @@ impl<N: NodePrimitives> BlockState<N> {
     }
 
     /// Tries to find a transaction by [`TxHash`] in the chain ending at this block.
-    pub fn transaction_on_chain(&self, hash: TxHash) -> Option<TransactionSigned> {
+    pub fn transaction_on_chain(&self, hash: TxHash) -> Option<N::SignedTx>
+    where
+        N::SignedTx: Encodable2718,
+    {
         self.chain().find_map(|block_state| {
             block_state
                 .block_ref()
                 .block()
                 .body
                 .transactions()
-                .find(|tx| tx.hash() == hash)
+                .iter()
+                .find(|tx| tx.trie_hash() == hash)
                 .cloned()
         })
     }
@@ -744,24 +770,28 @@ impl<N: NodePrimitives> BlockState<N> {
     pub fn transaction_meta_on_chain(
         &self,
         tx_hash: TxHash,
-    ) -> Option<(TransactionSigned, TransactionMeta)> {
+    ) -> Option<(N::SignedTx, TransactionMeta)>
+    where
+        N::SignedTx: Encodable2718,
+    {
         self.chain().find_map(|block_state| {
             block_state
                 .block_ref()
                 .block()
                 .body
                 .transactions()
+                .iter()
                 .enumerate()
-                .find(|(_, tx)| tx.hash() == tx_hash)
+                .find(|(_, tx)| tx.trie_hash() == tx_hash)
                 .map(|(index, tx)| {
                     let meta = TransactionMeta {
                         tx_hash,
                         index: index as u64,
                         block_hash: block_state.hash(),
-                        block_number: block_state.block_ref().block.number,
-                        base_fee: block_state.block_ref().block.header.base_fee_per_gas,
-                        timestamp: block_state.block_ref().block.timestamp,
-                        excess_blob_gas: block_state.block_ref().block.excess_blob_gas,
+                        block_number: block_state.block_ref().block.number(),
+                        base_fee: block_state.block_ref().block.header.base_fee_per_gas(),
+                        timestamp: block_state.block_ref().block.timestamp(),
+                        excess_blob_gas: block_state.block_ref().block.excess_blob_gas(),
                     };
                     (tx.clone(), meta)
                 })
@@ -773,7 +803,7 @@ impl<N: NodePrimitives> BlockState<N> {
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct ExecutedBlock<N: NodePrimitives = reth_primitives::EthPrimitives> {
     /// Sealed block the rest of fields refer to.
-    pub block: Arc<SealedBlock>,
+    pub block: Arc<SealedBlockFor<N::Block>>,
     /// Block's senders.
     pub senders: Arc<Vec<Address>>,
     /// Block's execution outcome.
@@ -787,7 +817,7 @@ pub struct ExecutedBlock<N: NodePrimitives = reth_primitives::EthPrimitives> {
 impl<N: NodePrimitives> ExecutedBlock<N> {
     /// [`ExecutedBlock`] constructor.
     pub const fn new(
-        block: Arc<SealedBlock>,
+        block: Arc<SealedBlockFor<N::Block>>,
         senders: Arc<Vec<Address>>,
         execution_output: Arc<ExecutionOutcome<N::Receipt>>,
         hashed_state: Arc<HashedPostState>,
@@ -797,7 +827,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     }
 
     /// Returns a reference to the executed block.
-    pub fn block(&self) -> &SealedBlock {
+    pub fn block(&self) -> &SealedBlockFor<N::Block> {
         &self.block
     }
 
@@ -809,7 +839,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     /// Returns a [`SealedBlockWithSenders`]
     ///
     /// Note: this clones the block and senders.
-    pub fn sealed_block_with_senders(&self) -> SealedBlockWithSenders {
+    pub fn sealed_block_with_senders(&self) -> SealedBlockWithSenders<N::Block> {
         SealedBlockWithSenders { block: (*self.block).clone(), senders: (*self.senders).clone() }
     }
 
@@ -847,7 +877,7 @@ pub enum NewCanonicalChain<N: NodePrimitives = reth_primitives::EthPrimitives> {
     },
 }
 
-impl<N: NodePrimitives> NewCanonicalChain<N> {
+impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
     /// Returns the length of the new chain.
     pub fn new_block_count(&self) -> usize {
         match self {
@@ -900,7 +930,7 @@ impl<N: NodePrimitives> NewCanonicalChain<N> {
     ///
     /// Returns the new tip for [`Self::Reorg`] and [`Self::Commit`] variants which commit at least
     /// 1 new block.
-    pub fn tip(&self) -> &SealedBlock {
+    pub fn tip(&self) -> &SealedBlockFor<N::Block> {
         match self {
             Self::Commit { new } | Self::Reorg { new, .. } => {
                 new.last().expect("non empty blocks").block()
@@ -922,7 +952,9 @@ mod tests {
         AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
         StorageRootProvider,
     };
-    use reth_trie::{AccountProof, HashedStorage, MultiProof, StorageProof, TrieInput};
+    use reth_trie::{
+        AccountProof, HashedStorage, MultiProof, StorageMultiProof, StorageProof, TrieInput,
+    };
 
     fn create_mock_state(
         test_block_builder: &mut TestBlockBuilder<EthPrimitives>,
@@ -1031,6 +1063,15 @@ mod tests {
             _hashed_storage: HashedStorage,
         ) -> ProviderResult<StorageProof> {
             Ok(StorageProof::new(slot))
+        }
+
+        fn storage_multiproof(
+            &self,
+            _address: Address,
+            _slots: &[B256],
+            _hashed_storage: HashedStorage,
+        ) -> ProviderResult<StorageMultiProof> {
+            Ok(StorageMultiProof::empty())
         }
     }
 

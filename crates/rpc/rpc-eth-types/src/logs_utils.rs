@@ -8,6 +8,7 @@ use alloy_rpc_types_eth::{FilteredParams, Log};
 use reth_chainspec::ChainInfo;
 use reth_errors::ProviderError;
 use reth_primitives::{Receipt, SealedBlockWithSenders};
+use reth_primitives_traits::SignedTransaction;
 use reth_storage_api::BlockReader;
 use std::sync::Arc;
 
@@ -58,7 +59,7 @@ pub enum ProviderOrBlock<'a, P: BlockReader> {
 
 /// Appends all matching logs of a block's receipts.
 /// If the log matches, look up the corresponding transaction hash.
-pub fn append_matching_block_logs<P: BlockReader>(
+pub fn append_matching_block_logs<P: BlockReader<Transaction: SignedTransaction>>(
     all_logs: &mut Vec<Log>,
     provider_or_block: ProviderOrBlock<'_, P>,
     filter: &FilteredParams,

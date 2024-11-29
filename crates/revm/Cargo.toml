@@ -58,11 +58,11 @@ test-utils = [
 ]
 serde = [
     "revm/serde",
-    "reth-trie?/serde",
     "alloy-eips/serde",
     "alloy-primitives/serde",
     "alloy-consensus/serde",
     "reth-primitives-traits/serde",
+    "reth-trie?/serde",
     "reth-scroll-primitives?/serde"
 ]
 scroll = [

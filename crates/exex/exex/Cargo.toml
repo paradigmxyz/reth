@@ -38,6 +38,7 @@ reth-tracing.workspace = true
 reth-scroll-storage = { workspace = true, optional = true }
 
 # alloy
+alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
 

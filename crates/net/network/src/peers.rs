@@ -375,7 +375,7 @@ impl PeersManager {
             if peer.is_trusted() || peer.is_static() {
                 // For misbehaving trusted or static peers, we provide a bit more leeway when
                 // penalizing them.
-                ban_duration = self.backoff_durations.medium;
+                ban_duration = self.backoff_durations.low / 2;
             }
         }
 
