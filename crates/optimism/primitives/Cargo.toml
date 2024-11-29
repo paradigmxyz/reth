@@ -60,7 +60,7 @@ std = [
     "reth-codecs?/std",
 ]
 optimism = [
-    "revm-primitives/optimism",
+    "revm-primitives?/optimism",
     "reth-primitives/optimism",
     "reth-codecs?/optimism",
 ]
@@ -83,7 +83,7 @@ serde = [
     "reth-codecs?/serde",
     "op-alloy-consensus/serde",
     "rand/serde",
-    "revm-primitives/serde",
+    "revm-primitives?/serde",
     "secp256k1/serde",
 ]
 arbitrary = [
