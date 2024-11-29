@@ -457,9 +457,8 @@ where
 
 impl<H, B> reth_primitives_traits::Block for SealedBlock<H, B>
 where
-    H: reth_primitives_traits::BlockHeader + 'static,
-    B: reth_primitives_traits::BlockBody<OmmerHeader = H> + 'static,
-    Self: Serialize + for<'a> Deserialize<'a>,
+    H: reth_primitives_traits::BlockHeader,
+    B: reth_primitives_traits::BlockBody<OmmerHeader = H>,
 {
     type Header = H;
     type Body = B;
