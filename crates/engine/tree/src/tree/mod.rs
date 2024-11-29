@@ -34,7 +34,7 @@ use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::execute::BlockExecutorProvider;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
-use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
+use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_primitives::{
     Block, EthPrimitives, GotExpected, NodePrimitives, SealedBlock, SealedBlockWithSenders,
     SealedHeader,
@@ -2532,12 +2532,10 @@ where
         state: ForkchoiceState,
         version: EngineApiMessageVersion,
     ) -> OnForkChoiceUpdated {
-        // 7. Client software MUST ensure that payloadAttributes.timestamp is greater than timestamp
-        //    of a block referenced by forkchoiceState.headBlockHash. If this condition isn't held
-        //    client software MUST respond with -38003: `Invalid payload attributes` and MUST NOT
-        //    begin a payload build process. In such an event, the forkchoiceState update MUST NOT
-        //    be rolled back.
-        if attrs.timestamp() <= head.timestamp {
+        if let Err(err) =
+            self.payload_validator.validate_payload_attributes_against_header(&attrs, head)
+        {
+            warn!(target: "engine::tree", %err, ?head, "Invalid payload attributes");
             return OnForkChoiceUpdated::invalid_payload_attributes()
         }
 
