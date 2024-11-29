@@ -7,6 +7,7 @@ use alloy_primitives::{
 };
 use alloy_rlp::{Decodable, Encodable};
 use reth_primitives_traits::Account;
+use reth_tracing::tracing::trace;
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
     MultiProof, Nibbles, TrieAccount, TrieNode, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
@@ -149,6 +150,7 @@ impl SparseStateTrie {
             // Reveal the remaining proof nodes.
             for (path, bytes) in account_nodes {
                 let node = TrieNode::decode(&mut &bytes[..])?;
+                trace!(target: "trie::sparse", ?path, ?node, "Revealing account node");
                 trie.reveal_node(path, node)?;
             }
         }
@@ -168,6 +170,7 @@ impl SparseStateTrie {
                 // Reveal the remaining proof nodes.
                 for (path, bytes) in storage_nodes {
                     let node = TrieNode::decode(&mut &bytes[..])?;
+                    trace!(target: "trie::sparse", ?account, ?path, ?node, "Revealing storage node");
                     trie.reveal_node(path, node)?;
                 }
             }
@@ -209,8 +212,10 @@ impl SparseStateTrie {
     pub fn update_account(&mut self, address: B256, account: Account) -> SparseStateTrieResult<()> {
         let nibbles = Nibbles::unpack(address);
         let storage_root = if let Some(storage_trie) = self.storages.get_mut(&address) {
+            trace!(target: "trie::sparse", ?address, "Calculating storage root to update account");
             storage_trie.root().ok_or(SparseTrieError::Blind)?
         } else if self.revealed.contains_key(&address) {
+            trace!(target: "trie::sparse", ?address, "Retrieving storage root from account leaf to update account");
             let state = self.state.as_revealed_mut().ok_or(SparseTrieError::Blind)?;
             // The account was revealed, either...
             if let Some(value) = state.get_leaf_value(&nibbles) {
@@ -225,8 +230,10 @@ impl SparseStateTrie {
         };
 
         if account.is_empty() && storage_root == EMPTY_ROOT_HASH {
+            trace!(target: "trie::sparse", ?address, "Removing account");
             self.remove_account_leaf(&nibbles)
         } else {
+            trace!(target: "trie::sparse", ?address, "Updating account");
             self.account_rlp_buf.clear();
             TrieAccount::from((account, storage_root)).encode(&mut self.account_rlp_buf);
             self.update_account_leaf(nibbles, self.account_rlp_buf.clone())

@@ -224,6 +224,7 @@ where
         for (address, account) in update {
             if account.is_touched() {
                 let hashed_address = keccak256(address);
+                trace!(target: "engine::root", ?address, ?hashed_address, "Adding account to state update");
 
                 let destroyed = account.is_selfdestructed();
                 let info = if account.is_empty() { None } else { Some(account.info.into()) };
@@ -377,6 +378,8 @@ where
                             "Processing calculated proof"
                         );
 
+                        trace!(target: "engine::root", ?proof, "Proof calculated");
+
                         if let Some((combined_proof, combined_state_update)) =
                             self.on_proof(sequence_number, proof, state_update)
                         {
@@ -496,6 +499,7 @@ fn update_sparse_trie(
     targets: HashMap<B256, HashSet<B256>>,
     state: HashedPostState,
 ) -> SparseStateTrieResult<(Box<SparseStateTrie>, Duration)> {
+    trace!(target: "engine::root::sparse", "Updating sparse trie");
     let started_at = Instant::now();
 
     // Reveal new accounts and storage slots.
@@ -503,18 +507,23 @@ fn update_sparse_trie(
 
     // Update storage slots with new values and calculate storage roots.
     for (address, storage) in state.storages {
+        trace!(target: "engine::root::sparse", ?address, "Updating storage");
         let storage_trie = trie.storage_trie_mut(&address).ok_or(SparseTrieError::Blind)?;
 
         if storage.wiped {
+            trace!(target: "engine::root::sparse", ?address, "Wiping storage");
             storage_trie.wipe();
         }
 
         for (slot, value) in storage.storage {
             let slot_nibbles = Nibbles::unpack(slot);
             if value.is_zero() {
+                trace!(target: "engine::root::sparse", ?address, ?slot, "Removing storage slot");
+
                 // TODO: handle blinded node error
                 storage_trie.remove_leaf(&slot_nibbles)?;
             } else {
+                trace!(target: "engine::root::sparse", ?address, ?slot, "Updating storage slot");
                 storage_trie
                     .update_leaf(slot_nibbles, alloy_rlp::encode_fixed_size(&value).to_vec())?;
             }
@@ -525,6 +534,7 @@ fn update_sparse_trie(
 
     // Update accounts with new values
     for (address, account) in state.accounts {
+        trace!(target: "engine::root::sparse", ?address, "Updating account");
         trie.update_account(address, account.unwrap_or_default())?;
     }
 
