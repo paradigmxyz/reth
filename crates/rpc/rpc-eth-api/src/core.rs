@@ -625,6 +625,7 @@ where
         block_number: Option<BlockId>,
     ) -> RpcResult<Vec<SimulatedBlock<RpcBlock<T::NetworkTypes>>>> {
         trace!(target: "rpc::eth", ?block_number, "Serving eth_simulateV1");
+        let _permit = self.tracing_task_guard().clone().acquire_owned().await;
         Ok(EthCall::simulate_v1(self, payload, block_number).await?)
     }
 
