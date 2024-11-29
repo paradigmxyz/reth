@@ -121,7 +121,11 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
     ///
     /// Note: this only propagates the transactions that are known to the pool.
     pub fn propagate_hashes_to(&self, hash: impl IntoIterator<Item = TxHash>, peer: PeerId) {
-        self.send(TransactionsCommand::PropagateHashesTo(hash.into_iter().collect(), peer))
+        let hashes = hash.into_iter().collect::<Vec<_>>();
+        if hashes.is_empty() {
+            return
+        }
+        self.send(TransactionsCommand::PropagateHashesTo(hashes, peer))
     }
 
     /// Request the active peer IDs from the [`TransactionsManager`].
@@ -136,7 +140,7 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
     /// Do nothing if transactions are empty.
     pub fn propagate_transactions_to(&self, transactions: Vec<TxHash>, peer: PeerId) {
         if transactions.is_empty() {
-            return;
+            return
         }
         self.send(TransactionsCommand::PropagateTransactionsTo(transactions, peer))
     }
@@ -149,7 +153,7 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
     /// Do nothing if transactions are empty.
     pub fn propagate_transactions(&self, transactions: Vec<TxHash>) {
         if transactions.is_empty() {
-            return;
+            return
         }
         self.send(TransactionsCommand::PropagateTransactions(transactions))
     }
@@ -159,6 +163,9 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
         &self,
         peers: Vec<PeerId>,
     ) -> Result<HashMap<PeerId, HashSet<TxHash>>, RecvError> {
+        if peers.is_empty() {
+            return Ok(Default::default())
+        }
         let (tx, rx) = oneshot::channel();
         self.send(TransactionsCommand::GetTransactionHashes { peers, tx });
         rx.await
