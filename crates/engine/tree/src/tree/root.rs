@@ -252,6 +252,8 @@ where
                         HashedStorage::from_iter(destroyed, changed_storage_iter),
                     );
                 }
+            } else {
+                trace!(target: "engine::root", ?address, hashed_address = ?keccak256(address), "Account was not touched");
             }
         }
 
