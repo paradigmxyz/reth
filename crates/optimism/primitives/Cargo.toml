@@ -82,7 +82,7 @@ serde = [
     "bytes/serde",
     "reth-codecs?/serde",
     "op-alloy-consensus/serde",
-    "rand/serde",
+    "rand?/serde",
     "revm-primitives?/serde",
     "secp256k1?/serde",
 ]
