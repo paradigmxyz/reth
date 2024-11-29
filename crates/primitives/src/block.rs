@@ -417,13 +417,14 @@ where
         Ok(())
     }
 
-    /// Returns a vector of transactions RLP encoded with
-    /// [`alloy_eips::eip2718::Encodable2718::encoded_2718`].
-    pub fn raw_transactions(&self) -> Vec<Bytes>
-    where
-        B::Transaction: Encodable2718,
-    {
-        self.body.transactions().iter().map(|tx| tx.encoded_2718().into()).collect()
+    /// Returns a vector of encoded 2718 transactions.
+    ///
+    /// This is also known as `raw transactions`.
+    ///
+    /// See also [`Encodable2718`].
+    #[doc(alias = "raw_transactions")]
+    pub fn encoded_2718_transactions(&self) -> Vec<Bytes> {
+        self.body.encoded_2718_transactions()
     }
 }
 
