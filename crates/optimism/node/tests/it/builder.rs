@@ -14,8 +14,8 @@ fn test_basic_setup() {
     let _builder = NodeBuilder::new(config)
         .with_database(db)
         .with_types::<OpNode>()
-        .with_components(OpNode::components(Default::default()))
-        .with_add_ons(OpAddOns::new(None, vec![]))
+        .with_components(OpNode::components(&Default::default()))
+        .with_add_ons(OpAddOns::builder().build())
         .on_component_initialized(move |ctx| {
             let _provider = ctx.provider();
             Ok(())

@@ -84,7 +84,7 @@ where
     >,
 {
     /// Build a [`OpEthApi`] using [`OpEthApiBuilder`].
-    pub fn builder(ctx: &EthApiBuilderCtx<N>) -> OpEthApiBuilder<'_, N> {
+    pub const fn builder(ctx: &EthApiBuilderCtx<N>) -> OpEthApiBuilder<'_, N> {
         OpEthApiBuilder::new(ctx)
     }
 }
@@ -360,7 +360,7 @@ pub struct OpEthApiBuilder<'a, N: RpcNodeCore> {
 
 impl<'a, N: RpcNodeCore> OpEthApiBuilder<'a, N> {
     /// Creates a [`OpEthApiBuilder`] instance from [`EthApiBuilderCtx`].
-    pub fn new(ctx: &'a EthApiBuilderCtx<N>) -> Self {
+    pub const fn new(ctx: &'a EthApiBuilderCtx<N>) -> Self {
         Self { ctx, sequencer_client: None, storage_proof_only: vec![] }
     }
 
@@ -378,7 +378,7 @@ impl<'a, N: RpcNodeCore> OpEthApiBuilder<'a, N> {
     }
 }
 
-impl<N: RpcNodeCore> OpEthApiBuilder<'_, N>
+impl<N> OpEthApiBuilder<'_, N>
 where
     N: RpcNodeCore<
         Provider: BlockReaderIdExt
