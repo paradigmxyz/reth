@@ -6,7 +6,7 @@ use alloy_primitives::B256;
 use futures::{future::Either, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
 use reth_errors::{ProviderError, ProviderResult};
-use reth_evm::{provider::EvmEnvProvider, ConfigureEvm};
+use reth_evm::provider::EvmEnvProvider;
 use reth_execution_types::Chain;
 use reth_primitives::{Receipt, SealedBlockWithSenders, TransactionSigned};
 use reth_storage_api::{BlockReader, StateProviderFactory, TransactionVariant};
@@ -68,15 +68,14 @@ pub struct EthStateCache {
 
 impl EthStateCache {
     /// Creates and returns both [`EthStateCache`] frontend and the memory bound service.
-    fn create<Provider, Tasks, EvmConfig>(
+    fn create<Provider, Tasks>(
         provider: Provider,
         action_task_spawner: Tasks,
-        evm_config: EvmConfig,
         max_blocks: u32,
         max_receipts: u32,
         max_envs: u32,
         max_concurrent_db_operations: usize,
-    ) -> (Self, EthStateCacheService<Provider, Tasks, EvmConfig>) {
+    ) -> (Self, EthStateCacheService<Provider, Tasks>) {
         let (to_service, rx) = unbounded_channel();
         let service = EthStateCacheService {
             provider,
@@ -87,7 +86,6 @@ impl EthStateCache {
             action_rx: UnboundedReceiverStream::new(rx),
             action_task_spawner,
             rate_limiter: Arc::new(Semaphore::new(max_concurrent_db_operations)),
-            evm_config,
         };
         let cache = Self { to_service };
         (cache, service)
@@ -97,11 +95,7 @@ impl EthStateCache {
     /// [`tokio::spawn`].
     ///
     /// See also [`Self::spawn_with`]
-    pub fn spawn<Provider, EvmConfig>(
-        provider: Provider,
-        config: EthStateCacheConfig,
-        evm_config: EvmConfig,
-    ) -> Self
+    pub fn spawn<Provider>(provider: Provider, config: EthStateCacheConfig) -> Self
     where
         Provider: StateProviderFactory
             + BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
@@ -109,20 +103,18 @@ impl EthStateCache {
             + Clone
             + Unpin
             + 'static,
-        EvmConfig: ConfigureEvm<Header = Header>,
     {
-        Self::spawn_with(provider, config, TokioTaskExecutor::default(), evm_config)
+        Self::spawn_with(provider, config, TokioTaskExecutor::default())
     }
 
     /// Creates a new async LRU backed cache service task and spawns it to a new task via the given
     /// spawner.
     ///
     /// The cache is memory limited by the given max bytes values.
-    pub fn spawn_with<Provider, Tasks, EvmConfig>(
+    pub fn spawn_with<Provider, Tasks>(
         provider: Provider,
         config: EthStateCacheConfig,
         executor: Tasks,
-        evm_config: EvmConfig,
     ) -> Self
     where
         Provider: StateProviderFactory
@@ -132,14 +124,12 @@ impl EthStateCache {
             + Unpin
             + 'static,
         Tasks: TaskSpawner + Clone + 'static,
-        EvmConfig: ConfigureEvm<Header = Header>,
     {
         let EthStateCacheConfig { max_blocks, max_receipts, max_envs, max_concurrent_db_requests } =
             config;
         let (this, service) = Self::create(
             provider,
             executor.clone(),
-            evm_config,
             max_blocks,
             max_receipts,
             max_envs,
@@ -241,15 +231,12 @@ pub(crate) struct EthStateCacheService<
     action_task_spawner: Tasks,
     /// Rate limiter
     rate_limiter: Arc<Semaphore>,
-    /// The type that determines how to configure the EVM.
-    evm_config: EvmConfig,
 }
 
-impl<Provider, Tasks, EvmConfig> EthStateCacheService<Provider, Tasks, EvmConfig>
+impl<Provider, Tasks> EthStateCacheService<Provider, Tasks>
 where
     Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    EvmConfig: ConfigureEvm<Header = Header>,
 {
     fn on_new_block(
         &mut self,
@@ -339,7 +326,7 @@ where
     }
 }
 
-impl<Provider, Tasks, EvmConfig> Future for EthStateCacheService<Provider, Tasks, EvmConfig>
+impl<Provider, Tasks> Future for EthStateCacheService<Provider, Tasks>
 where
     Provider: StateProviderFactory
         + BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
@@ -348,7 +335,6 @@ where
         + Unpin
         + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    EvmConfig: ConfigureEvm<Header = Header>,
 {
     type Output = ();
 
