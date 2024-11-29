@@ -30,6 +30,7 @@ pub trait BlockBody:
     + MaybeSerde
     + MaybeArbitrary
     + MaybeSerdeBincodeCompat
+    + 'static
 {
     /// Ordered list of signed transactions as committed in block.
     type Transaction: SignedTransaction;
