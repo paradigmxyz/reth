@@ -230,8 +230,11 @@ where
         ctx: reth_node_api::AddOnsContext<'_, N>,
     ) -> eyre::Result<Self::Handle> {
         // install additional OP specific rpc methods
-        let debug_ext =
-            OpDebugWitnessApi::new(ctx.node.provider().clone(), ctx.node.evm_config().clone());
+        let debug_ext = OpDebugWitnessApi::new(
+            ctx.node.provider().clone(),
+            ctx.node.evm_config().clone(),
+            Box::new(ctx.task_executor().clone()),
+        );
 
         self.0
             .launch_add_ons_with(ctx, move |modules| {

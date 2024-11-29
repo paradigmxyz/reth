@@ -63,7 +63,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     /// Checks the pool and state.
     ///
     /// Returns `Ok(None)` if no matching transaction was found.
-    #[expect(clippy::complexity)]
+    #[allow(clippy::complexity)]
     fn transaction_by_hash(
         &self,
         hash: B256,
@@ -154,7 +154,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     }
 
     /// Helper method that loads a transaction and its receipt.
-    #[expect(clippy::complexity)]
+    #[allow(clippy::complexity)]
     fn load_transaction_and_receipt(
         &self,
         hash: TxHash,
@@ -485,7 +485,7 @@ pub trait LoadTransaction:
     /// Checks the pool and state.
     ///
     /// Returns `Ok(None)` if no matching transaction was found.
-    #[expect(clippy::complexity)]
+    #[allow(clippy::complexity)]
     fn transaction_by_hash(
         &self,
         hash: B256,

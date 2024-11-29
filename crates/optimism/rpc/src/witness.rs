@@ -3,6 +3,7 @@
 use alloy_consensus::Header;
 use alloy_primitives::B256;
 use alloy_rpc_types_debug::ExecutionWitness;
+use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
 use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_chainspec::ChainSpecProvider;
@@ -13,6 +14,7 @@ use reth_primitives::SealedHeader;
 use reth_provider::{BlockReaderIdExt, ProviderError, ProviderResult, StateProviderFactory};
 pub use reth_rpc_api::DebugExecutionWitnessApiServer;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
+use reth_tasks::TaskSpawner;
 use std::{fmt::Debug, sync::Arc};
 
 /// An extension to the `debug_` namespace of the RPC API.
@@ -24,8 +26,8 @@ impl<Provider, EvmConfig> OpDebugWitnessApi<Provider, EvmConfig> {
     /// Creates a new instance of the `OpDebugWitnessApi`.
     pub fn new(provider: Provider, evm_config: EvmConfig) -> Self {
         let builder = OpPayloadBuilder::new(evm_config);
-        let inner = OpDebugWitnessApiInner { provider, builder };
-        Self { inner: Arc::new(inner) }
+        let inner = OpDebugWitnessApiInner { provider, builder, task_spawner };
+        Self { inner: Arc::new(Semaphore::new(inner)) }
     }
 }
 
@@ -42,6 +44,7 @@ where
     }
 }
 
+#[async_trait]
 impl<Provider, EvmConfig> DebugExecutionWitnessApiServer<OpPayloadAttributes>
     for OpDebugWitnessApi<Provider, EvmConfig>
 where
@@ -78,4 +81,5 @@ impl<Provider, EvmConfig> Debug for OpDebugWitnessApi<Provider, EvmConfig> {
 struct OpDebugWitnessApiInner<Provider, EvmConfig> {
     provider: Provider,
     builder: OpPayloadBuilder<EvmConfig>,
+    task_spawner: Box<dyn TaskSpawner>,
 }

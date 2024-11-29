@@ -211,7 +211,7 @@ pub trait EthBlocks: LoadBlock {
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` blocks RPC methods.
 pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
     /// Returns the block object for the given block id.
-    #[expect(clippy::type_complexity)]
+    #[allow(clippy::type_complexity)]
     fn block_with_senders(
         &self,
         block_id: BlockId,
