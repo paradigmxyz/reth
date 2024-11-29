@@ -175,13 +175,15 @@ where
         ));
         info!(target: "reth::cli", "StaticFileProducer initialized");
 
+        let consensus = Arc::new(ctx.components().consensus().clone());
+
         // Configure the pipeline
         let pipeline_exex_handle =
             exex_manager_handle.clone().unwrap_or_else(ExExManagerHandle::empty);
         let pipeline = build_networked_pipeline(
             &ctx.toml_config().stages,
             network_client.clone(),
-            ctx.consensus(),
+            consensus.clone(),
             ctx.provider_factory().clone(),
             ctx.task_executor(),
             ctx.sync_metrics_tx(),
@@ -223,7 +225,7 @@ where
 
         let mut engine_service = if ctx.is_dev() {
             let eth_service = LocalEngineService::new(
-                ctx.consensus(),
+                consensus.clone(),
                 ctx.components().block_executor().clone(),
                 ctx.provider_factory().clone(),
                 ctx.blockchain_db().clone(),
@@ -242,7 +244,7 @@ where
             Either::Left(eth_service)
         } else {
             let eth_service = EngineService::new(
-                ctx.consensus(),
+                consensus.clone(),
                 ctx.components().block_executor().clone(),
                 ctx.chain_spec(),
                 network_client.clone(),

@@ -2,7 +2,7 @@ use futures::{Stream, StreamExt};
 use pin_project::pin_project;
 use reth_beacon_consensus::{BeaconConsensusEngineEvent, EngineNodeTypes};
 use reth_chainspec::EthChainSpec;
-use reth_consensus::Consensus;
+use reth_consensus::FullConsensus;
 use reth_engine_primitives::{BeaconEngineMessage, EngineValidator};
 use reth_engine_tree::{
     backfill::PipelineSync,
@@ -65,7 +65,7 @@ where
     /// Constructor for `EngineService`.
     #[allow(clippy::too_many_arguments)]
     pub fn new<V>(
-        consensus: Arc<dyn Consensus>,
+        consensus: Arc<dyn FullConsensus>,
         executor_factory: E,
         chain_spec: Arc<N::ChainSpec>,
         client: Client,
@@ -87,7 +87,7 @@ where
         let engine_kind =
             if chain_spec.is_optimism() { EngineApiKind::OpStack } else { EngineApiKind::Ethereum };
 
-        let downloader = BasicBlockDownloader::new(client, consensus.clone());
+        let downloader = BasicBlockDownloader::new(client, consensus.clone().as_consensus());
 
         let persistence_handle =
             PersistenceHandle::spawn_service(provider, pruner, sync_metrics_tx);

@@ -25,7 +25,7 @@ use reth_blockchain_tree::{
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, MemoryOverlayStateProvider, NewCanonicalChain,
 };
-use reth_consensus::{Consensus, PostExecutionInput};
+use reth_consensus::{Consensus, FullConsensus, PostExecutionInput};
 use reth_engine_primitives::{
     BeaconEngineMessage, BeaconOnNewPayloadError, EngineApiMessageVersion, EngineTypes,
     EngineValidator, ForkchoiceStateTracker, OnForkChoiceUpdated,
@@ -473,7 +473,7 @@ where
 {
     provider: P,
     executor_provider: E,
-    consensus: Arc<dyn Consensus>,
+    consensus: Arc<dyn FullConsensus>,
     payload_validator: V,
     /// Keeps track of internals such as executed and buffered blocks.
     state: EngineApiTreeState,
@@ -557,7 +557,7 @@ where
     pub fn new(
         provider: P,
         executor_provider: E,
-        consensus: Arc<dyn Consensus>,
+        consensus: Arc<dyn FullConsensus>,
         payload_validator: V,
         outgoing: UnboundedSender<EngineApiEvent>,
         state: EngineApiTreeState,
@@ -606,7 +606,7 @@ where
     pub fn spawn_new(
         provider: P,
         executor_provider: E,
-        consensus: Arc<dyn Consensus>,
+        consensus: Arc<dyn FullConsensus>,
         payload_validator: V,
         persistence: PersistenceHandle,
         payload_builder: PayloadBuilderHandle<T>,

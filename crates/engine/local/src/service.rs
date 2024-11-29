@@ -18,7 +18,7 @@ use crate::miner::{LocalMiner, MiningMode};
 use futures_util::{Stream, StreamExt};
 use reth_beacon_consensus::{BeaconConsensusEngineEvent, EngineNodeTypes};
 use reth_chainspec::EthChainSpec;
-use reth_consensus::Consensus;
+use reth_consensus::FullConsensus;
 use reth_engine_primitives::{BeaconEngineMessage, EngineValidator};
 use reth_engine_service::service::EngineMessageStream;
 use reth_engine_tree::{
@@ -64,7 +64,7 @@ where
     /// Constructor for [`LocalEngineService`].
     #[allow(clippy::too_many_arguments)]
     pub fn new<B, V>(
-        consensus: Arc<dyn Consensus>,
+        consensus: Arc<dyn FullConsensus>,
         executor_factory: impl BlockExecutorProvider<Primitives = N::Primitives>,
         provider: ProviderFactory<N>,
         blockchain_db: BlockchainProvider2<N>,
