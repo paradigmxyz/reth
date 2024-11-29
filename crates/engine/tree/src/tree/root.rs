@@ -464,31 +464,50 @@ where
     }
 }
 
+/// Returns accounts only with those storages that were not already fetched, and
+/// if there are no such storages and the account itself was already fetched, the
+/// account shouldn't be included.
 fn get_proof_targets(
     state_update: &HashedPostState,
     fetched_proof_targets: &HashMap<B256, HashSet<B256>>,
 ) -> HashMap<B256, HashSet<B256>> {
-    state_update
-        .accounts
-        .keys()
-        .filter(|hashed_address| !fetched_proof_targets.contains_key(*hashed_address))
-        .map(|hashed_address| (*hashed_address, HashSet::default()))
-        .chain(state_update.storages.iter().map(|(hashed_address, storage)| {
-            let fetched_storage_proof_targets = fetched_proof_targets.get(hashed_address);
-            (
-                *hashed_address,
-                storage
-                    .storage
-                    .keys()
-                    .filter(|slot| {
-                        !fetched_storage_proof_targets
-                            .is_some_and(|targets| targets.contains(*slot))
-                    })
-                    .copied()
-                    .collect(),
-            )
-        }))
-        .collect()
+    let mut targets = HashMap::default();
+
+    // first collect all new accounts (not previously fetched)
+    for &hashed_address in state_update.accounts.keys() {
+        if !fetched_proof_targets.contains_key(&hashed_address) {
+            targets.insert(hashed_address, HashSet::default());
+        }
+    }
+
+    // then process storage slots for all accounts in the state update
+    for (hashed_address, storage) in state_update.storages.iter() {
+        // only process storage if we either:
+        // 1. haven't fetched this account at all (it's in our targets), or
+        // 2. have fetched the account but need new storage slots
+        if targets.contains_key(hashed_address) ||
+            fetched_proof_targets.contains_key(hashed_address)
+        {
+            let target_slots = targets.entry(*hashed_address).or_default();
+            let fetched_storage_slots = fetched_proof_targets.get(hashed_address);
+
+            // add only storage slots that haven't been fetched yet
+            for slot in storage.storage.keys() {
+                if !fetched_storage_slots.is_some_and(|fetched_slots| fetched_slots.contains(slot))
+                {
+                    target_slots.insert(*slot);
+                }
+            }
+
+            // if we didn't find any new storage slots and this account was previously fetched,
+            // remove it from targets
+            if target_slots.is_empty() && fetched_proof_targets.contains_key(hashed_address) {
+                targets.remove(hashed_address);
+            }
+        }
+    }
+
+    targets
 }
 
 /// Updates the sparse trie with the given proofs and state, and returns the updated trie and the
@@ -846,25 +865,25 @@ mod tests {
 
     #[test]
     fn test_get_proof_targets_filter_already_fetched_accounts() {
-        let mut state = create_get_proof_targets_state();
+        let state = create_get_proof_targets_state();
         let mut fetched = HashMap::default();
 
-        // create a new account without storage
-        let new_addr = B256::random();
-        state.accounts.insert(new_addr, Some(Default::default()));
+        // select an account that has no storage updates
+        let fetched_addr = state
+            .accounts
+            .keys()
+            .find(|&&addr| !state.storages.contains_key(&addr))
+            .expect("Should have an account without storage");
 
-        // mark one account without storage as already fetched
-        fetched.insert(new_addr, HashSet::default());
+        // mark the account as already fetched
+        fetched.insert(*fetched_addr, HashSet::default());
 
         let targets = get_proof_targets(&state, &fetched);
 
-        // should not include the already fetched account that has no storage
-        assert!(!targets.contains_key(&new_addr));
-
-        // should include accounts with storage even if fetched
-        for addr in state.storages.keys() {
-            assert!(targets.contains_key(addr));
-        }
+        // should not include the already fetched account since it has no storage updates
+        assert!(!targets.contains_key(fetched_addr));
+        // other accounts should still be included
+        assert_eq!(targets.len(), state.accounts.len() - 1);
     }
 
     #[test]
