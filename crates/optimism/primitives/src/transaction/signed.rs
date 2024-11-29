@@ -1,5 +1,6 @@
 //! A signed Optimism transaction.
 
+use alloc::vec::Vec;
 use core::mem;
 
 use alloy_consensus::{
@@ -11,7 +12,7 @@ use alloy_eips::{
     eip7702::SignedAuthorization,
 };
 use alloy_primitives::{
-    keccak256, Address, Bytes, PrimitiveSignature as Signature, TxHash, TxKind, Uint, B256,
+    keccak256, Address, Bytes, PrimitiveSignature as Signature, TxHash, TxKind, Uint, B256, U256,
 };
 use alloy_rlp::Header;
 use derive_more::{AsRef, Constructor, Deref};
@@ -23,6 +24,7 @@ use reth_primitives::{
     TransactionSigned,
 };
 use reth_primitives_traits::{InMemorySize, SignedTransaction};
+use revm_primitives::{AuthorizationList, OptimismFields, TxEnv};
 use serde::{Deserialize, Serialize};
 
 use crate::{OpTransaction, OpTxType};
@@ -102,10 +104,7 @@ impl SignedTransaction for OpTransactionSigned {
 }
 
 impl reth_primitives_traits::FillTxEnv for OpTransactionSigned {
-    fn fill_tx_env(&self, tx_env: &mut revm_primitives::TxEnv, sender: Address) {
-        use alloy_primitives::U256;
-        use revm_primitives::{AuthorizationList, OptimismFields};
-
+    fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address) {
         let envelope = self.encoded_2718();
 
         tx_env.caller = sender;
