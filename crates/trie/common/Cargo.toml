@@ -55,7 +55,6 @@ bincode.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true
-
 reth-scroll-primitives.workspace = true
 
 [features]
@@ -69,7 +68,7 @@ serde = [
     "revm-primitives/serde",
     "reth-primitives-traits/serde",
     "reth-codecs/serde",
-    "reth-scroll-primitives/serde"
+    "reth-scroll-primitives?/serde"
 ]
 serde-bincode-compat = [
     "serde",
