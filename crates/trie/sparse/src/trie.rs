@@ -639,6 +639,7 @@ impl RevealedSparseTrie {
     pub fn root(&mut self) -> B256 {
         // take the current prefix set.
         let mut prefix_set = std::mem::take(&mut self.prefix_set).freeze();
+        trace!(target: "trie::sparse", ?prefix_set, "Calculating the root");
         let rlp_node = self.rlp_node_allocate(Nibbles::default(), &mut prefix_set);
         if let Some(root_hash) = rlp_node.as_hash() {
             root_hash
