@@ -10,7 +10,7 @@ use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
 pub use reth_primitives_traits::test_utils::{generate_valid_header, valid_header_strategy};
-use reth_primitives_traits::{BlockBody as _, InMemorySize, SignedTransaction};
+use reth_primitives_traits::{BlockBody as _, InMemorySize, SignedTransaction, Transaction};
 use serde::{Deserialize, Serialize};
 
 /// Ethereum full block.
@@ -601,9 +601,9 @@ impl<'a> arbitrary::Arbitrary<'a> for SealedBlockWithSenders {
     Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, RlpEncodable, RlpDecodable,
 )]
 #[rlp(trailing)]
-pub struct BlockBody {
+pub struct BlockBody<T = TransactionSigned> {
     /// Transactions in the block
-    pub transactions: Vec<TransactionSigned>,
+    pub transactions: Vec<T>,
     /// Uncle headers for the given block
     pub ommers: Vec<Header>,
     /// Withdrawals in the block.
@@ -614,41 +614,6 @@ impl BlockBody {
     /// Create a [`Block`] from the body and its header.
     pub const fn into_block(self, header: Header) -> Block {
         Block { header, body: self }
-    }
-
-    /// Calculate the ommers root for the block body.
-    pub fn calculate_ommers_root(&self) -> B256 {
-        crate::proofs::calculate_ommers_root(&self.ommers)
-    }
-
-    /// Calculate the withdrawals root for the block body, if withdrawals exist. If there are no
-    /// withdrawals, this will return `None`.
-    pub fn calculate_withdrawals_root(&self) -> Option<B256> {
-        self.withdrawals.as_ref().map(|w| crate::proofs::calculate_withdrawals_root(w))
-    }
-
-    /// Returns whether or not the block body contains any blob transactions.
-    #[inline]
-    pub fn has_blob_transactions(&self) -> bool {
-        self.transactions.iter().any(|tx| tx.is_eip4844())
-    }
-
-    /// Returns whether or not the block body contains any EIP-7702 transactions.
-    #[inline]
-    pub fn has_eip7702_transactions(&self) -> bool {
-        self.transactions.iter().any(|tx| tx.is_eip7702())
-    }
-
-    /// Returns an iterator over all blob transactions of the block
-    #[inline]
-    pub fn blob_transactions_iter(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
-        self.transactions.iter().filter(|tx| tx.is_eip4844())
-    }
-
-    /// Returns only the blob transactions, if any, from the block body.
-    #[inline]
-    pub fn blob_transactions(&self) -> Vec<&TransactionSigned> {
-        self.blob_transactions_iter().collect()
     }
 
     /// Returns an iterator over all blob versioned hashes from the block body.
@@ -666,12 +631,51 @@ impl BlockBody {
     }
 }
 
-impl InMemorySize for BlockBody {
+impl<T> BlockBody<T> {
+    /// Calculate the ommers root for the block body.
+    pub fn calculate_ommers_root(&self) -> B256 {
+        crate::proofs::calculate_ommers_root(&self.ommers)
+    }
+
+    /// Calculate the withdrawals root for the block body, if withdrawals exist. If there are no
+    /// withdrawals, this will return `None`.
+    pub fn calculate_withdrawals_root(&self) -> Option<B256> {
+        self.withdrawals.as_ref().map(|w| crate::proofs::calculate_withdrawals_root(w))
+    }
+}
+
+impl<T: Transaction> BlockBody<T> {
+    /// Returns whether or not the block body contains any blob transactions.
+    #[inline]
+    pub fn has_blob_transactions(&self) -> bool {
+        self.transactions.iter().any(|tx| tx.is_eip4844())
+    }
+
+    /// Returns whether or not the block body contains any EIP-7702 transactions.
+    #[inline]
+    pub fn has_eip7702_transactions(&self) -> bool {
+        self.transactions.iter().any(|tx| tx.is_eip7702())
+    }
+
+    /// Returns an iterator over all blob transactions of the block
+    #[inline]
+    pub fn blob_transactions_iter(&self) -> impl Iterator<Item = &T> + '_ {
+        self.transactions.iter().filter(|tx| tx.is_eip4844())
+    }
+
+    /// Returns only the blob transactions, if any, from the block body.
+    #[inline]
+    pub fn blob_transactions(&self) -> Vec<&T> {
+        self.blob_transactions_iter().collect()
+    }
+}
+
+impl<T: InMemorySize> InMemorySize for BlockBody<T> {
     /// Calculates a heuristic for the in-memory size of the [`BlockBody`].
     #[inline]
     fn size(&self) -> usize {
-        self.transactions.iter().map(TransactionSigned::size).sum::<usize>() +
-            self.transactions.capacity() * core::mem::size_of::<TransactionSigned>() +
+        self.transactions.iter().map(T::size).sum::<usize>() +
+            self.transactions.capacity() * core::mem::size_of::<T>() +
             self.ommers.iter().map(Header::size).sum::<usize>() +
             self.ommers.capacity() * core::mem::size_of::<Header>() +
             self.withdrawals
@@ -1210,7 +1214,7 @@ mod tests {
 
     #[test]
     fn empty_block_rlp() {
-        let body = BlockBody::default();
+        let body: BlockBody<TransactionSigned> = BlockBody::default();
         let mut buf = Vec::new();
         body.encode(&mut buf);
         let decoded = BlockBody::decode(&mut buf.as_slice()).unwrap();
