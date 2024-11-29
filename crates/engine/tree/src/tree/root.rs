@@ -248,7 +248,27 @@ where
             }
         }
 
-        let proof_targets = get_proof_targets(&hashed_state_update, fetched_proof_targets);
+        let proof_targets = hashed_state_update
+            .accounts
+            .keys()
+            .filter(|hashed_address| !fetched_proof_targets.contains_key(*hashed_address))
+            .map(|hashed_address| (*hashed_address, HashSet::default()))
+            .chain(hashed_state_update.storages.iter().map(|(hashed_address, storage)| {
+                let fetched_storage_proof_targets = fetched_proof_targets.get(hashed_address);
+                (
+                    *hashed_address,
+                    storage
+                        .storage
+                        .keys()
+                        .filter(|slot| {
+                            !fetched_storage_proof_targets
+                                .is_some_and(|targets| targets.contains(*slot))
+                        })
+                        .copied()
+                        .collect(),
+                )
+            }))
+            .collect::<HashMap<_, HashSet<_>>>();
 
         // Dispatch proof gathering for this state update
         let targets = proof_targets.clone();
@@ -318,7 +338,14 @@ where
         );
 
         // TODO(alexey): store proof targets in `ProofSequecner` to avoid recomputing them
-        let targets = get_proof_targets(&state, &HashMap::default());
+        let targets = state
+            .accounts
+            .keys()
+            .map(|hashed_address| (*hashed_address, HashSet::default()))
+            .chain(state.storages.iter().map(|(hashed_address, storage)| {
+                (*hashed_address, storage.storage.keys().copied().collect())
+            }))
+            .collect::<HashMap<_, HashSet<_>>>();
 
         let tx = self.tx.clone();
         rayon::spawn(move || {
@@ -462,33 +489,6 @@ where
             }
         }
     }
-}
-
-fn get_proof_targets(
-    state_update: &HashedPostState,
-    fetched_proof_targets: &HashMap<B256, HashSet<B256>>,
-) -> HashMap<B256, HashSet<B256>> {
-    state_update
-        .accounts
-        .keys()
-        .filter(|hashed_address| !fetched_proof_targets.contains_key(*hashed_address))
-        .map(|hashed_address| (*hashed_address, HashSet::default()))
-        .chain(state_update.storages.iter().map(|(hashed_address, storage)| {
-            let fetched_storage_proof_targets = fetched_proof_targets.get(hashed_address);
-            (
-                *hashed_address,
-                storage
-                    .storage
-                    .keys()
-                    .filter(|slot| {
-                        !fetched_storage_proof_targets
-                            .is_some_and(|targets| targets.contains(*slot))
-                    })
-                    .copied()
-                    .collect(),
-            )
-        }))
-        .collect()
 }
 
 /// Updates the sparse trie with the given proofs and state, and returns the updated trie and the
