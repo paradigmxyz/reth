@@ -65,7 +65,8 @@ serde = [
 	"alloy-consensus/serde",
 	"alloy-trie/serde",
 	"revm/serde",
-	"reth-trie-common/serde"
+	"reth-trie-common/serde",
+	"reth-primitives-traits/serde"
 ]
 test-utils = [
 	"triehash",

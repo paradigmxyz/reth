@@ -68,7 +68,8 @@ serde = [
     "alloy-trie/serde",
     "revm-primitives/serde",
     "reth-primitives-traits/serde",
-    "reth-codecs/serde"
+    "reth-codecs/serde",
+    "reth-scroll-primitives/serde"
 ]
 serde-bincode-compat = [
     "serde",
