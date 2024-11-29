@@ -6,6 +6,7 @@ use reth_provider::{
 };
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
+    prefix_set::TriePrefixSetsMut,
     proof::{Proof, StorageProof},
     trie_cursor::InMemoryTrieCursorFactory,
     updates::{TrieUpdates, TrieUpdatesSorted},
@@ -323,6 +324,7 @@ where
         let provider_ro = self.config.consistent_view.provider_ro();
         let nodes_sorted = self.config.input.nodes.clone().into_sorted();
         let state_sorted = self.config.input.state.clone().into_sorted();
+        let prefix_sets = self.config.input.prefix_sets.clone();
 
         let tx = self.tx.clone();
         rayon::spawn(move || {
@@ -339,6 +341,7 @@ where
                 provider_ro,
                 nodes_sorted,
                 state_sorted,
+                prefix_sets,
             );
             match result {
                 Ok((trie, elapsed)) => {
@@ -503,6 +506,7 @@ fn update_sparse_trie<Factory: DatabaseProviderFactory>(
     provider: Factory::Provider,
     input_nodes_sorted: TrieUpdatesSorted,
     input_state_sorted: HashedPostStateSorted,
+    prefix_sets: TriePrefixSetsMut,
 ) -> SparseStateTrieResult<(Box<SparseStateTrie>, Duration)> {
     let started_at = Instant::now();
 
@@ -524,6 +528,9 @@ fn update_sparse_trie<Factory: DatabaseProviderFactory>(
                     padded_key.resize(32, 0);
                     let mut targets = HashSet::with_hasher(DefaultHashBuilder::default());
                     targets.insert(B256::from_slice(&padded_key));
+
+                    let storage_prefix_set =
+                        prefix_sets.storage_prefix_sets.get(&address).cloned().unwrap_or_default();
                     let proof = StorageProof::new_hashed(
                         InMemoryTrieCursorFactory::new(
                             DatabaseTrieCursorFactory::new(provider.tx_ref()),
@@ -535,6 +542,7 @@ fn update_sparse_trie<Factory: DatabaseProviderFactory>(
                         ),
                         address,
                     )
+                    .with_prefix_set_mut(storage_prefix_set)
                     .storage_multiproof(targets)
                     .unwrap();
 
@@ -574,6 +582,7 @@ fn update_sparse_trie<Factory: DatabaseProviderFactory>(
                     &input_state_sorted,
                 ),
             )
+            .with_prefix_sets_mut(prefix_sets.clone())
             .multiproof(targets)
             .unwrap();
 
