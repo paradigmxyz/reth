@@ -82,6 +82,7 @@ pub mod serde_bincode_compat {
 
 /// Temp helper struct for integrating [`NodePrimitives`].
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
 pub struct EthPrimitives;
 
 impl reth_primitives_traits::NodePrimitives for EthPrimitives {

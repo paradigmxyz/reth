@@ -24,8 +24,10 @@ impl<N> LoadPendingBlock for OpEthApi<N>
 where
     Self: SpawnBlocking,
     N: RpcNodeCore<
-        Provider: BlockReaderIdExt<Block = reth_primitives::Block>
-                      + EvmEnvProvider
+        Provider: BlockReaderIdExt<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+        > + EvmEnvProvider
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                       + StateProviderFactory,
         Pool: TransactionPool,

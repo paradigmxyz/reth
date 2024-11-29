@@ -28,7 +28,10 @@ use tracing::info;
 pub(crate) async fn dump_merkle_stage<
     N: ProviderNodeTypes<
         DB = Arc<DatabaseEnv>,
-        Primitives: NodePrimitives<Block = reth_primitives::Block>,
+        Primitives: NodePrimitives<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+        >,
     >,
 >(
     db_tool: &DbTool<N>,
@@ -74,7 +77,12 @@ pub(crate) async fn dump_merkle_stage<
 
 /// Dry-run an unwind to FROM block and copy the necessary table data to the new database.
 fn unwind_and_copy<
-    N: ProviderNodeTypes<Primitives: NodePrimitives<Block = reth_primitives::Block>>,
+    N: ProviderNodeTypes<
+        Primitives: NodePrimitives<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+        >,
+    >,
 >(
     db_tool: &DbTool<N>,
     range: (u64, u64),

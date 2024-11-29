@@ -1,13 +1,14 @@
 use alloy_primitives::{Address, TxNumber};
 use reth_config::config::SenderRecoveryConfig;
 use reth_consensus::ConsensusError;
-use reth_db::{static_file::TransactionMask, tables, RawValue};
+use reth_db::{static_file::TransactionMask, table::Value, tables, RawValue};
 use reth_db_api::{
     cursor::DbCursorRW,
     transaction::{DbTx, DbTxMut},
     DbTxUnwindExt,
 };
-use reth_primitives::{GotExpected, StaticFileSegment, TransactionSignedNoHash};
+use reth_primitives::{GotExpected, NodePrimitives, StaticFileSegment};
+use reth_primitives_traits::SignedTransaction;
 use reth_provider::{
     BlockReader, DBProvider, HeaderProvider, ProviderError, PruneCheckpointReader,
     StaticFileProviderFactory, StatsReader,
@@ -59,7 +60,7 @@ impl<Provider> Stage<Provider> for SenderRecoveryStage
 where
     Provider: DBProvider<Tx: DbTxMut>
         + BlockReader
-        + StaticFileProviderFactory
+        + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value + SignedTransaction>>
         + StatsReader
         + PruneCheckpointReader,
 {
@@ -233,7 +234,9 @@ fn setup_range_recovery<Provider>(
     provider: &Provider,
 ) -> mpsc::Sender<Vec<(Range<u64>, RecoveryResultSender)>>
 where
-    Provider: DBProvider + HeaderProvider + StaticFileProviderFactory,
+    Provider: DBProvider
+        + HeaderProvider
+        + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value + SignedTransaction>>,
 {
     let (tx_sender, tx_receiver) = mpsc::channel::<Vec<(Range<u64>, RecoveryResultSender)>>();
     let static_file_provider = provider.static_file_provider();
@@ -254,9 +257,9 @@ where
                     chunk_range.clone(),
                     |cursor, number| {
                         Ok(cursor
-                            .get_one::<TransactionMask<RawValue<TransactionSignedNoHash>>>(
-                                number.into(),
-                            )?
+                            .get_one::<TransactionMask<
+                                RawValue<<Provider::Primitives as NodePrimitives>::SignedTx>,
+                            >>(number.into())?
                             .map(|tx| (number, tx)))
                     },
                     |_| true,
@@ -300,17 +303,18 @@ where
 }
 
 #[inline]
-fn recover_sender(
-    (tx_id, tx): (TxNumber, TransactionSignedNoHash),
+fn recover_sender<T: SignedTransaction>(
+    (tx_id, tx): (TxNumber, T),
     rlp_buf: &mut Vec<u8>,
 ) -> Result<(u64, Address), Box<SenderRecoveryStageError>> {
+    rlp_buf.clear();
     // We call [Signature::encode_and_recover_unchecked] because transactions run in the pipeline
     // are known to be valid - this means that we do not need to check whether or not the `s`
     // value is greater than `secp256k1n / 2` if past EIP-2. There are transactions
     // pre-homestead which have large `s` values, so using [Signature::recover_signer] here
     // would not be backwards-compatible.
     let sender = tx
-        .encode_and_recover_unchecked(rlp_buf)
+        .recover_signer_unchecked_with_buf(rlp_buf)
         .ok_or(SenderRecoveryStageError::FailedRecovery(FailedSenderRecoveryError { tx: tx_id }))?;
 
     Ok((tx_id, sender))

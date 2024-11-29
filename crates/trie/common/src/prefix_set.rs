@@ -1,9 +1,9 @@
 use crate::Nibbles;
-use alloy_primitives::B256;
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
+use alloy_primitives::{
+    map::{HashMap, HashSet},
+    B256,
 };
+use std::sync::Arc;
 
 /// Collection of mutable prefix sets.
 #[derive(Clone, Default, Debug)]

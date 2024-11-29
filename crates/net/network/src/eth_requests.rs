@@ -80,7 +80,7 @@ impl<C, N: NetworkPrimitives> EthRequestHandler<C, N> {
 
 impl<C> EthRequestHandler<C>
 where
-    C: BlockReader + HeaderProvider + ReceiptProvider,
+    C: BlockReader + HeaderProvider + ReceiptProvider<Receipt = reth_primitives::Receipt>,
 {
     /// Returns the list of requested headers
     fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<Header> {
@@ -224,7 +224,9 @@ where
 /// This should be spawned or used as part of `tokio::select!`.
 impl<C> Future for EthRequestHandler<C>
 where
-    C: BlockReader<Block = reth_primitives::Block> + HeaderProvider + Unpin,
+    C: BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
+        + HeaderProvider
+        + Unpin,
 {
     type Output = ();
 

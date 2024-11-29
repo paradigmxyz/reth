@@ -29,7 +29,7 @@ pub struct EthHandlers<Provider, Pool, Network, Events, EthApi: EthApiTypes> {
 impl<Provider, Pool, Network, Events, EthApi> EthHandlers<Provider, Pool, Network, Events, EthApi>
 where
     Provider: StateProviderFactory
-        + BlockReader<Block = reth_primitives::Block>
+        + BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
         + EvmEnvProvider
         + Clone
         + Unpin

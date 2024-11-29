@@ -114,7 +114,7 @@ pub trait StorageTrieWriter: Send + Sync {
     /// Returns the number of entries modified.
     fn write_storage_trie_updates(
         &self,
-        storage_tries: &std::collections::HashMap<B256, StorageTrieUpdates>,
+        storage_tries: &HashMap<B256, StorageTrieUpdates>,
     ) -> ProviderResult<usize>;
 
     /// Writes storage trie updates for the given hashed address.

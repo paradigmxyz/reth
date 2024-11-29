@@ -13,8 +13,8 @@ use reth_provider::{
     errors::provider::ProviderResult, providers::StaticFileWriter, writer::UnifiedStorageWriter,
     BlockHashReader, BlockNumReader, BundleStateInit, ChainSpecProvider, DBProvider,
     DatabaseProviderFactory, ExecutionOutcome, HashingWriter, HeaderProvider, HistoryWriter,
-    OriginalValuesKnown, ProviderError, RevertsInit, StageCheckpointWriter, StateChangeWriter,
-    StateWriter, StaticFileProviderFactory, StorageLocation, TrieWriter,
+    OriginalValuesKnown, ProviderError, RevertsInit, StageCheckpointWriter, StateWriter,
+    StaticFileProviderFactory, StorageLocation, TrieWriter,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
@@ -75,7 +75,7 @@ where
         + HistoryWriter
         + HeaderProvider
         + HashingWriter
-        + StateChangeWriter
+        + StateWriter
         + StateWriter
         + AsRef<PF::ProviderRW>,
 {
@@ -146,7 +146,6 @@ pub fn insert_genesis_state<'a, 'b, Provider>(
 where
     Provider: StaticFileProviderFactory
         + DBProvider<Tx: DbTxMut>
-        + StateChangeWriter
         + HeaderProvider
         + StateWriter
         + AsRef<Provider>,
@@ -163,7 +162,6 @@ pub fn insert_state<'a, 'b, Provider>(
 where
     Provider: StaticFileProviderFactory
         + DBProvider<Tx: DbTxMut>
-        + StateChangeWriter
         + HeaderProvider
         + StateWriter
         + AsRef<Provider>,
@@ -233,11 +231,7 @@ where
         Vec::new(),
     );
 
-    provider.write_to_storage(
-        execution_outcome,
-        OriginalValuesKnown::Yes,
-        StorageLocation::Database,
-    )?;
+    provider.write_state(execution_outcome, OriginalValuesKnown::Yes, StorageLocation::Database)?;
 
     trace!(target: "reth::cli", "Inserted state");
 
@@ -355,7 +349,6 @@ where
         + HistoryWriter
         + HeaderProvider
         + HashingWriter
-        + StateChangeWriter
         + TrieWriter
         + StateWriter
         + AsRef<Provider>,
@@ -478,7 +471,6 @@ where
         + HashingWriter
         + HistoryWriter
         + StateWriter
-        + StateChangeWriter
         + AsRef<Provider>,
 {
     let accounts_len = collector.len();
