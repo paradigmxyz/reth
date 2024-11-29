@@ -11,7 +11,6 @@ use reth_execution_types::Chain;
 use reth_primitives::{Receipt, SealedBlockWithSenders, TransactionSigned};
 use reth_storage_api::{BlockReader, StateProviderFactory, TransactionVariant};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
-use revm::primitives::{BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId};
 use schnellru::{ByLength, Limiter};
 use std::{
     future::Future,
@@ -44,7 +43,7 @@ type BlockWithSendersResponseSender =
 type ReceiptsResponseSender = oneshot::Sender<ProviderResult<Option<Arc<Vec<Receipt>>>>>;
 
 /// The type that can send the response to a requested env
-type EnvResponseSender = oneshot::Sender<ProviderResult<(CfgEnvWithHandlerCfg, BlockEnv)>>;
+type EnvResponseSender = oneshot::Sender<ProviderResult<Header>>;
 
 type BlockLruCache<L> = MultiConsumerLruCache<
     B256,
@@ -191,10 +190,7 @@ impl EthStateCache {
     ///
     /// Returns an error if the corresponding header (required for populating the envs) was not
     /// found.
-    pub async fn get_evm_env(
-        &self,
-        block_hash: B256,
-    ) -> ProviderResult<(CfgEnvWithHandlerCfg, BlockEnv)> {
+    pub async fn get_evm_env(&self, block_hash: B256) -> ProviderResult<Header> {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetEnv { block_hash, response_tx });
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
@@ -221,7 +217,6 @@ impl EthStateCache {
 pub(crate) struct EthStateCacheService<
     Provider,
     Tasks,
-    EvmConfig,
     LimitBlocks = ByLength,
     LimitReceipts = ByLength,
     LimitEnvs = ByLength,
@@ -423,17 +418,7 @@ where
                         CacheAction::GetEnv { block_hash, response_tx } => {
                             // check if env data is cached
                             if let Some(header) = this.evm_env_cache.get(&block_hash).cloned() {
-                                let evm_config = this.evm_config.clone();
-                                let mut cfg = CfgEnvWithHandlerCfg::new_with_spec_id(
-                                    CfgEnv::default(),
-                                    SpecId::LATEST,
-                                );
-                                let mut block_env = BlockEnv::default();
-                                let res = this
-                                    .provider
-                                    .env_with_header(&header, evm_config)
-                                    .map(|_| (cfg, block_env));
-                                let _ = response_tx.send(res);
+                                let _ = response_tx.send(Ok(header));
                                 continue
                             }
 
