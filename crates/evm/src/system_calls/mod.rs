@@ -19,7 +19,7 @@ mod eip7251;
 
 /// A hook that is called after each state change.
 pub trait OnStateHook {
-    /// Invoked with the result and state after each system call.
+    /// Invoked with the state after each system call.
     fn on_state(&mut self, state: &EvmState);
 }
 
