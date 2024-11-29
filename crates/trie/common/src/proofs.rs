@@ -8,9 +8,7 @@ use alloy_primitives::{
     Address, Bytes, B256, U256,
 };
 use alloy_rlp::{encode_fixed_size, Decodable, EMPTY_STRING_CODE};
-#[cfg(feature = "eip1186")]
 use alloy_rpc_types_eth::{EIP1186AccountProofResponse, EIP1186StorageProof};
-#[cfg(feature = "eip1186")]
 use alloy_serde::JsonStorageKey;
 use alloy_trie::{
     nodes::TrieNode,
@@ -218,14 +216,6 @@ impl AccountProof {
     }
 }
 
-impl StorageProof {
-    #[cfg(feature = "eip1186")]
-    /// Convert into an EIP-1186 storage proof
-    pub fn into_eip1186_proof(self, slot: JsonStorageKey) -> EIP1186StorageProof {
-        EIP1186StorageProof { key: slot, value: self.value, proof: self.proof }
-    }
-}
-
 impl Default for AccountProof {
     fn default() -> Self {
         Self::new(Address::default())
@@ -278,6 +268,14 @@ pub struct StorageProof {
     /// Array of rlp-serialized merkle trie nodes which starting from the storage root node and
     /// following the path of the hashed storage slot as key.
     pub proof: Vec<Bytes>,
+}
+
+impl StorageProof {
+    #[cfg(feature = "eip1186")]
+    /// Convert into an EIP-1186 storage proof
+    pub fn into_eip1186_proof(self, slot: JsonStorageKey) -> EIP1186StorageProof {
+        EIP1186StorageProof { key: slot, value: self.value, proof: self.proof }
+    }
 }
 
 impl StorageProof {
