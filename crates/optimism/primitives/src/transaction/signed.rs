@@ -38,7 +38,7 @@ pub struct OpTransactionSigned {
     /// Raw transaction info
     #[deref]
     #[as_ref]
-    pub transaction: OpTransaction, /* todo: replace with https://github.com/paradigmxyz/reth/issues/12473 */
+    pub transaction: OpTransaction,
 }
 
 impl OpTransactionSigned {
