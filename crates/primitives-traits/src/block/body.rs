@@ -1,8 +1,8 @@
 //! Block body abstraction.
 
 use alloc::{fmt, vec::Vec};
-
-use alloy_eips::eip4895::Withdrawals;
+use alloy_consensus::Transaction;
+use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, eip4895::Withdrawals};
 
 use crate::{
     FullSignedTx, InMemorySize, MaybeArbitrary, MaybeSerde, MaybeSerdeBincodeCompat,
@@ -49,4 +49,14 @@ pub trait BlockBody:
 
     /// Returns block ommers if any.
     fn ommers(&self) -> Option<&[Self::OmmerHeader]>;
+
+    /// Calculates the total blob gas used by _all_ EIP-4844 transactions in the block.
+    fn blob_gas_used(&self) -> u64 {
+        // TODO(mattss): simplify after <https://github.com/alloy-rs/alloy/pull/1704>
+        self.transactions()
+            .iter()
+            .filter_map(|tx| tx.blob_versioned_hashes())
+            .map(|hashes| hashes.len() as u64 * DATA_GAS_PER_BLOB)
+            .sum()
+    }
 }

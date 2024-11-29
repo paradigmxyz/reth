@@ -273,11 +273,6 @@ impl SealedBlock {
         self.body.blob_transactions_iter()
     }
 
-    /// Calculates the total gas used by blob transactions in the sealed block.
-    pub fn blob_gas_used(&self) -> u64 {
-        self.blob_transactions().iter().filter_map(|tx| tx.blob_gas_used()).sum()
-    }
-
     /// Returns whether or not the block contains any blob transactions.
     #[inline]
     pub fn has_blob_transactions(&self) -> bool {
