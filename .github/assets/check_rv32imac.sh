@@ -3,11 +3,7 @@ set +e  # Disable immediate exit on error
 
 # Array of crates to check
 crates_to_check=(
-    reth-evm
-    reth-primitives
-    reth-primitives-traits
-    reth-optimism-forks
-    reth-optimism-chainspec
+    reth-codecs-derive
 )
 
 # Array to hold the results
