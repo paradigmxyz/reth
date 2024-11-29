@@ -12,6 +12,7 @@ use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_primitives::Account;
 use revm::db::{states::CacheAccount, AccountStatus, BundleAccount};
 use std::borrow::Cow;
+use tracing::trace;
 
 /// Representation of in-memory hashed state.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
@@ -33,6 +34,7 @@ impl HashedPostState {
             .into_par_iter()
             .map(|(address, account)| {
                 let hashed_address = keccak256(address);
+                trace!(target: "trie::state", ?address, ?hashed_address, "Hashing account");
                 let hashed_account = account.info.clone().map(Into::into);
                 let hashed_storage = HashedStorage::from_plain_storage(
                     account.status,
