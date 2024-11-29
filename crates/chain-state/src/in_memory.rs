@@ -12,8 +12,8 @@ use reth_chainspec::ChainInfo;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives::{
-    BlockWithSenders, HeaderExt, NodePrimitives, Receipts, SealedBlock, SealedBlockFor,
-    SealedBlockWithSenders, SealedHeader, TransactionMeta,
+    BlockWithSenders, EthPrimitives, HeaderExt, NodePrimitives, Receipts, SealedBlock,
+    SealedBlockFor, SealedBlockWithSenders, SealedHeader, TransactionMeta,
 };
 use reth_primitives_traits::{Block, BlockBody as _, SignedTransaction};
 use reth_storage_api::StateProviderBox;
@@ -51,7 +51,7 @@ pub(crate) struct InMemoryStateMetrics {
 /// This holds, because only lookup by number functions need to acquire the numbers lock first to
 /// get the block hash.
 #[derive(Debug, Default)]
-pub(crate) struct InMemoryState<N: NodePrimitives = reth_primitives::EthPrimitives> {
+pub(crate) struct InMemoryState<N: NodePrimitives = EthPrimitives> {
     /// All canonical blocks that are not on disk yet.
     blocks: RwLock<HashMap<B256, Arc<BlockState<N>>>>,
     /// Mapping of block numbers to block hashes.
@@ -166,7 +166,7 @@ type PendingBlockAndReceipts<N> =
 /// all canonical blocks not on disk yet and keeps track of the block range that
 /// is in memory.
 #[derive(Debug, Clone)]
-pub struct CanonicalInMemoryState<N: NodePrimitives = reth_primitives::EthPrimitives> {
+pub struct CanonicalInMemoryState<N: NodePrimitives = EthPrimitives> {
     pub(crate) inner: Arc<CanonicalInMemoryStateInner<N>>,
 }
 
@@ -598,7 +598,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 /// State after applying the given block, this block is part of the canonical chain that partially
 /// stored in memory and can be traced back to a canonical block on disk.
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct BlockState<N: NodePrimitives = reth_primitives::EthPrimitives> {
+pub struct BlockState<N: NodePrimitives = EthPrimitives> {
     /// The executed block that determines the state after this block has been executed.
     block: ExecutedBlock<N>,
     /// The block's parent block if it exists.
@@ -801,7 +801,7 @@ impl<N: NodePrimitives> BlockState<N> {
 
 /// Represents an executed block stored in-memory.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
-pub struct ExecutedBlock<N: NodePrimitives = reth_primitives::EthPrimitives> {
+pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
     /// Sealed block the rest of fields refer to.
     pub block: Arc<SealedBlockFor<N::Block>>,
     /// Block's senders.
@@ -861,7 +861,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
 
 /// Non-empty chain of blocks.
 #[derive(Debug)]
-pub enum NewCanonicalChain<N: NodePrimitives = reth_primitives::EthPrimitives> {
+pub enum NewCanonicalChain<N: NodePrimitives = EthPrimitives> {
     /// A simple append to the current canonical head
     Commit {
         /// all blocks that lead back to the canonical head
