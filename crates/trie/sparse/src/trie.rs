@@ -688,17 +688,10 @@ impl<P> RevealedSparseTrie<P> {
 
     /// Wipe the trie, removing all values and nodes, and replacing the root with an empty node.
     pub fn wipe(&mut self) {
-        // let updates_retained = self.updates.is_some();
-        // *self = Self {
-        //     provider: self.provider,
-        //     nodes: HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]),
-        //     values: HashMap::default(),
-        //     prefix_set: PrefixSetMut::all(),
-        //     updates: updates_retained.then(SparseTrieUpdates::wiped),
-        //     rlp_buf: self.rlp_buf,
-        // }
-        // TODO:
-        unimplemented!()
+        self.nodes = HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]);
+        self.values = HashMap::default();
+        self.prefix_set = PrefixSetMut::all();
+        self.updates = self.updates.is_some().then(SparseTrieUpdates::wiped);
     }
 
     /// Return the root of the sparse trie.
