@@ -35,12 +35,12 @@ pub fn build_networked_pipeline<N, Client, Executor>(
     max_block: Option<BlockNumber>,
     static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     executor: Executor,
-    exex_manager_handle: ExExManagerHandle,
+    exex_manager_handle: ExExManagerHandle<N::Primitives>,
 ) -> eyre::Result<Pipeline<N>>
 where
     N: ProviderNodeTypes,
     Client: EthBlockClient + 'static,
-    Executor: BlockExecutorProvider,
+    Executor: BlockExecutorProvider<Primitives = N::Primitives>,
     N::Primitives: FullNodePrimitives<
         Block = reth_primitives::Block,
         BlockBody = reth_primitives::BlockBody,
@@ -86,13 +86,13 @@ pub fn build_pipeline<N, H, B, Executor>(
     prune_config: Option<PruneConfig>,
     static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     executor: Executor,
-    exex_manager_handle: ExExManagerHandle,
+    exex_manager_handle: ExExManagerHandle<N::Primitives>,
 ) -> eyre::Result<Pipeline<N>>
 where
     N: ProviderNodeTypes,
     H: HeaderDownloader<Header = alloy_consensus::Header> + 'static,
     B: BodyDownloader<Body = BodyTy<N>> + 'static,
-    Executor: BlockExecutorProvider,
+    Executor: BlockExecutorProvider<Primitives = N::Primitives>,
     N::Primitives: FullNodePrimitives<
         Block = reth_primitives::Block,
         BlockBody = reth_primitives::BlockBody,

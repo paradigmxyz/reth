@@ -60,7 +60,7 @@ impl<N, Client, E> EngineService<N, Client, E>
 where
     N: EngineNodeTypes + PersistenceNodeTypes,
     Client: EthBlockClient + 'static,
-    E: BlockExecutorProvider + 'static,
+    E: BlockExecutorProvider<Primitives = N::Primitives> + 'static,
 {
     /// Constructor for `EngineService`.
     #[allow(clippy::too_many_arguments)]
