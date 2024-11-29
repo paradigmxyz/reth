@@ -448,20 +448,29 @@ where
                                 .expect("sparse trie should have updates retention enabled");
 
                             if let Some(proof_nodes) = self.proof_nodes.take() {
+                                let mut account_prefix_sets = self
+                                    .config
+                                    .input
+                                    .prefix_sets
+                                    .account_prefix_set
+                                    .clone()
+                                    .freeze();
                                 for (path, node) in proof_nodes.into_nodes_sorted() {
-                                    let node = TrieNode::decode(&mut &node[..])
-                                        .expect("invalid trie node");
+                                    if account_prefix_sets.contains(&path) {
+                                        let node = TrieNode::decode(&mut &node[..])
+                                            .expect("invalid trie node");
 
-                                    if let TrieNode::Leaf(LeafNode { key, value }) = node {
-                                        let mut full = path.clone();
-                                        full.extend_from_slice(&key);
+                                        if let TrieNode::Leaf(LeafNode { key, value }) = node {
+                                            let mut full = path.clone();
+                                            full.extend_from_slice(&key);
 
-                                        let sparse_node = trie.get_leaf_value(&full);
-                                        assert_eq!(
+                                            let sparse_node = trie.get_leaf_value(&full);
+                                            assert_eq!(
                                             sparse_node,
                                             Some(&value),
                                             "leaf value at path {path:?} does not match the proof"
                                         );
+                                        }
                                     }
                                 }
                             }
