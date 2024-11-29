@@ -60,6 +60,45 @@ pub trait EngineApi<Engine: EngineTypes> {
         execution_requests: Requests,
     ) -> RpcResult<PayloadStatus>;
 
+    /// Analogous to `new_payload_v1`, but with the addition of a witness.
+    ///
+    /// Caution: This should not accept the `withdrawals` field
+    #[method(name = "newPayloadWithWitnessV1")]
+    async fn new_payload_with_witness_v1(
+        &self,
+        payload: ExecutionPayloadV1,
+    ) -> RpcResult<PayloadStatus>;
+
+    /// Analogous to `new_payload_v2`, but with the addition of a witness.
+    #[method(name = "newPayloadWithWitnessV2")]
+    async fn new_payload_with_witness_v2(
+        &self,
+        payload: ExecutionPayloadInputV2,
+    ) -> RpcResult<PayloadStatus>;
+
+    /// Analogous to `new_payload_v3`, but with the addition of a witness.
+    ///
+    /// Post Cancun payload handler
+    #[method(name = "newPayloadWithWitnessV3")]
+    async fn new_payload_with_witness_v3(
+        &self,
+        payload: ExecutionPayloadV3,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+    ) -> RpcResult<PayloadStatus>;
+
+    /// Analogous to `new_payload_v4`, but with the addition of a witness.
+    ///
+    /// Post Prague payload handler
+    #[method(name = "newPayloadWithWitnessV4")]
+    async fn new_payload_with_witness_v4(
+        &self,
+        payload: ExecutionPayloadV3,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+        execution_requests: Requests,
+    ) -> RpcResult<PayloadStatus>;
+
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_forkchoiceupdatedv1>
     ///
     /// Caution: This should not accept the `withdrawals` field in the payload attributes.
@@ -95,6 +134,45 @@ pub trait EngineApi<Engine: EngineTypes> {
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3>
     #[method(name = "forkchoiceUpdatedV3")]
     async fn fork_choice_updated_v3(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<Engine::PayloadAttributes>,
+    ) -> RpcResult<ForkchoiceUpdated>;
+
+    /// Analogous to `fork_choice_updated_v1`, but with the addition of a witness.
+    ///
+    /// Caution: This should not accept the `withdrawals` field in the payload attributes.
+    #[method(name = "forkchoiceUpdatedWithWitnessV1")]
+    async fn fork_choice_updated_with_witness_v1(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<Engine::PayloadAttributes>,
+    ) -> RpcResult<ForkchoiceUpdated>;
+
+    /// Analogous to `fork_choice_updated_v2`, but with the addition of a witness.
+    ///
+    /// Post Shanghai forkchoice update handler
+    ///
+    /// This is the same as `forkchoiceUpdatedWithWitnessV1`, but expects an additional `withdrawals` field in
+    /// the `payloadAttributes`, if payload attributes are provided.
+    ///
+    /// Caution: This should not accept the `parentBeaconBlockRoot` field in the payload
+    /// attributes.
+    #[method(name = "forkchoiceUpdatedWithWitnessV2")]
+    async fn fork_choice_updated_with_witness_v2(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<Engine::PayloadAttributes>,
+    ) -> RpcResult<ForkchoiceUpdated>;
+
+    /// Analogous to `fork_choice_updated_v3`, but with the addition of a witness.
+    /// Post Cancun forkchoice update handler
+    ///
+    /// This is the same as `forkchoiceUpdatedWithWitnessV2`, but expects an additional
+    /// `parentBeaconBlockRoot` field in the `payloadAttributes`, if payload attributes
+    /// are provided.
+    #[method(name = "forkchoiceUpdatedWithWitnessV3")]
+    async fn fork_choice_updated_with_witness_v3(
         &self,
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<Engine::PayloadAttributes>,
@@ -217,6 +295,58 @@ pub trait EngineApi<Engine: EngineTypes> {
         &self,
         versioned_hashes: Vec<B256>,
     ) -> RpcResult<Vec<Option<BlobAndProofV1>>>;
+
+    /// Analogous to newPayloadV1.
+    /// This function operates in a stateless mode on top of a provided witness.
+    ///
+    /// See also <https://gist.github.com/karalabe/47c906f0ab4fdc5b8b791b74f084e5f9>
+    ///
+    /// Caution: This should not accept the `withdrawals` field
+    #[method(name = "executeStatelessPayloadV1")]
+    async fn execute_stateless_payload_v1(
+        &self,
+        payload: ExecutionPayloadV1,
+    ) -> RpcResult<PayloadStatus>;
+
+    /// Analogous to newPayloadV2.
+    /// This function operates in a stateless mode on top of a provided witness.
+    ///
+    /// See also <https://gist.github.com/karalabe/47c906f0ab4fdc5b8b791b74f084e5f9>
+    ///
+    #[method(name = "executeStatelessPayloadV2")]
+    async fn execute_stateless_payload_v2(
+        &self,
+        payload: ExecutionPayloadInputV2,
+    ) -> RpcResult<PayloadStatus>;
+
+    /// Analogous to newPayloadV3.
+    /// This function operates in a stateless mode on top of a provided witness.
+    ///
+    /// See also <https://gist.github.com/karalabe/47c906f0ab4fdc5b8b791b74f084e5f9>
+    ///
+    /// Post Cancun payload handler
+    #[method(name = "executeStatelessPayloadV3")]
+    async fn execute_stateless_payload_v3(
+        &self,
+        payload: ExecutionPayloadV3,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+    ) -> RpcResult<PayloadStatus>;
+
+    /// Analogous to newPayloadV4.
+    /// This function operates in a stateless mode on top of a provided witness.
+    ///
+    /// See also <https://gist.github.com/karalabe/47c906f0ab4fdc5b8b791b74f084e5f9>
+    ///
+    /// Post Prague payload handler
+    #[method(name = "executeStatelessPayloadV4")]
+    async fn execute_stateless_payload_v4(
+        &self,
+        payload: ExecutionPayloadV3,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+        execution_requests: Requests,
+    ) -> RpcResult<PayloadStatus>;
 }
 
 /// A subset of the ETH rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
