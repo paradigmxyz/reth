@@ -23,7 +23,7 @@ crc = "3"
 
 # misc
 serde = { workspace = true, features = ["derive"], optional = true }
-thiserror-no-std = { workspace = true, default-features = false }
+thiserror.workspace = true
 dyn-clone.workspace = true
 rustc-hash = { workspace = true, optional = true }
 
@@ -56,7 +56,7 @@ serde = [
 std = [
 	"alloy-chains/std",
 	"alloy-primitives/std",
-	"thiserror-no-std/std",
+	"thiserror/std",
 	"rustc-hash/std",
 	"alloy-consensus/std",
 	"once_cell/std",
