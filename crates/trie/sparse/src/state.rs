@@ -167,6 +167,7 @@ impl SparseStateTrie {
             let mut storage_nodes = storage_subtree.into_iter().peekable();
 
             if let Some(root_node) = self.validate_root_node(&mut storage_nodes)? {
+                trace!(target: "trie::sparse", ?account, ?root_node, "Revealing storage root");
                 // Reveal root node if it wasn't already.
                 let trie = self
                     .storages
