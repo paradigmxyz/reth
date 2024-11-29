@@ -28,7 +28,7 @@ pub mod noop;
 /// test helpers for mocking consensus
 pub mod test_utils;
 
-/// Post execution input passed to [`Consensus::validate_block_post_execution`].
+/// Post execution input passed to [`FullConsensus::validate_block_post_execution`].
 #[derive(Debug)]
 pub struct PostExecutionInput<'a, R = Receipt> {
     /// Receipts of the block.

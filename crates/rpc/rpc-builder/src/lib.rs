@@ -49,7 +49,7 @@
 //!         CanonStateSubscriptions<Primitives = reth_primitives::EthPrimitives> + Clone + 'static,
 //!     EvmConfig: ConfigureEvm<Header = Header>,
 //!     BlockExecutor: BlockExecutorProvider<Primitives = Events::Primitives>,
-//!     Consensus: reth_consensus::Consensus + Clone + 'static,
+//!     Consensus: reth_consensus::FullConsensus + Clone + 'static,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -131,7 +131,7 @@
 //!     EngineT: EngineTypes,
 //!     EvmConfig: ConfigureEvm<Header = Header>,
 //!     BlockExecutor: BlockExecutorProvider<Primitives = Events::Primitives>,
-//!     Consensus: reth_consensus::Consensus + Clone + 'static,
+//!     Consensus: reth_consensus::FullConsensus + Clone + 'static,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
