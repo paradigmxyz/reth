@@ -70,13 +70,7 @@ pub type EthApiNodeBackend<N> = EthApiInner<
 pub struct OpEthApi<N: RpcNodeCore> {
     /// Gateway to node's core components.
     #[deref]
-    inner: Arc<EthApiNodeBackend<N>>,
-    /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
-    /// network.
-    sequencer_client: Option<SequencerClient>,
-    /// List of addresses that _ONLY_ return storage proofs _WITHOUT_ an account proof when called
-    /// with `eth_getProof`.
-    storage_proof_only: Vec<Address>,
+    inner: Arc<OpEthApiInner<N>>,
 }
 
 impl<N> OpEthApi<N>
@@ -90,35 +84,8 @@ where
     >,
 {
     /// Creates a new instance for given context.
-    pub fn new(
-        ctx: &EthApiBuilderCtx<N>,
-        sequencer_http: Option<String>,
-        storage_proof_only: Vec<Address>,
-    ) -> Self {
-        let blocking_task_pool =
-            BlockingTaskPool::build().expect("failed to build blocking task pool");
-
-        let inner = EthApiInner::new(
-            ctx.provider.clone(),
-            ctx.pool.clone(),
-            ctx.network.clone(),
-            ctx.cache.clone(),
-            ctx.new_gas_price_oracle(),
-            ctx.config.rpc_gas_cap,
-            ctx.config.rpc_max_simulate_blocks,
-            ctx.config.eth_proof_window,
-            blocking_task_pool,
-            ctx.new_fee_history_cache(),
-            ctx.evm_config.clone(),
-            ctx.executor.clone(),
-            ctx.config.proof_permits,
-        );
-
-        Self {
-            inner: Arc::new(inner),
-            sequencer_client: sequencer_http.map(SequencerClient::new),
-            storage_proof_only,
-        }
+    pub fn builder(ctx: &EthApiBuilderCtx<N>) -> OpEthApiBuilder<'_, N> {
+        OpEthApiBuilder::new(ctx)
     }
 }
 
@@ -360,5 +327,94 @@ where
 impl<N: RpcNodeCore> fmt::Debug for OpEthApi<N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OpEthApi").finish_non_exhaustive()
+    }
+}
+
+/// Container type `OpEthApi`
+#[derive(Deref)]
+#[allow(missing_debug_implementations)]
+pub struct OpEthApiInner<N: RpcNodeCore> {
+    /// Gateway to node's core components.
+    #[deref]
+    eth_api: EthApiNodeBackend<N>,
+    /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
+    /// network.
+    sequencer_client: Option<SequencerClient>,
+    /// List of addresses that _ONLY_ return storage proofs _WITHOUT_ an account proof when called
+    /// with `eth_getProof`.
+    storage_proof_only: Vec<Address>,
+}
+
+/// A type that knows how to build a [`OpEthApi`].
+#[allow(missing_debug_implementations)]
+pub struct OpEthApiBuilder<'a, N: RpcNodeCore> {
+    /// Gateway to node's core components.
+    ctx: &'a EthApiBuilderCtx<N>,
+    /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
+    /// network.
+    sequencer_client: Option<SequencerClient>,
+    /// List of addresses that _ONLY_ return storage proofs _WITHOUT_ an account proof when called
+    /// with `eth_getProof`.
+    storage_proof_only: Vec<Address>,
+}
+
+impl<'a, N: RpcNodeCore> OpEthApiBuilder<'a, N> {
+    /// Creates a [`OpEthApiBuilder`] instance from [`EthApiBuilderCtx`].
+    pub fn new(ctx: &'a EthApiBuilderCtx<N>) -> Self {
+        Self { ctx, sequencer_client: None, storage_proof_only: vec![] }
+    }
+
+    /// With a [SequencerClient].
+    pub fn with_sequencer(mut self, sequencer_client: String) -> Self {
+        self.sequencer_client = Some(SequencerClient::new(sequencer_client));
+        self
+    }
+
+    /// With a list of addresses that _ONLY_ return storage proofs _WITHOUT_ an account proof when
+    /// called with `eth_getProof`.
+    pub fn with_storage_proof_only(mut self, storage_proof_only: Vec<Address>) -> Self {
+        self.storage_proof_only = storage_proof_only;
+        self
+    }
+}
+
+impl<'a, N: RpcNodeCore> OpEthApiBuilder<'a, N>
+where
+    N: RpcNodeCore<
+        Provider: BlockReaderIdExt
+                      + ChainSpecProvider
+                      + CanonStateSubscriptions<Primitives = OpPrimitives>
+                      + Clone
+                      + 'static,
+    >,
+{
+    /// Builds an instance of [`OpEthApi`]
+    pub fn build(self) -> OpEthApi<N> {
+        let blocking_task_pool =
+            BlockingTaskPool::build().expect("failed to build blocking task pool");
+
+        let eth_api = EthApiInner::new(
+            self.ctx.provider.clone(),
+            self.ctx.pool.clone(),
+            self.ctx.network.clone(),
+            self.ctx.cache.clone(),
+            self.ctx.new_gas_price_oracle(),
+            self.ctx.config.rpc_gas_cap,
+            self.ctx.config.rpc_max_simulate_blocks,
+            self.ctx.config.eth_proof_window,
+            blocking_task_pool,
+            self.ctx.new_fee_history_cache(),
+            self.ctx.evm_config.clone(),
+            self.ctx.executor.clone(),
+            self.ctx.config.proof_permits,
+        );
+
+        OpEthApi {
+            inner: Arc::new(OpEthApiInner {
+                eth_api,
+                sequencer_client: self.sequencer_client,
+                storage_proof_only: self.storage_proof_only,
+            }),
+        }
     }
 }

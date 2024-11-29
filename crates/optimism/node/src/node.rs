@@ -214,7 +214,16 @@ impl<N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>> OpAddOn
     /// addresses.
     pub fn new(sequencer_http: Option<String>, storage_proof_addresses: Vec<Address>) -> Self {
         Self(RpcAddOns::new(
-            move |ctx| OpEthApi::new(ctx, sequencer_http, storage_proof_addresses),
+            move |ctx| {
+                let mut builder =
+                    OpEthApi::builder(ctx).with_storage_proof_only(storage_proof_addresses);
+
+                if let Some(sequencer_http) = sequencer_http {
+                    builder = builder.with_sequencer(sequencer_http)
+                }
+
+                builder.build()
+            },
             Default::default(),
         ))
     }
