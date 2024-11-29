@@ -12,7 +12,7 @@ use reth_trie::{
     trie_cursor::InMemoryTrieCursorFactory,
     updates::{TrieUpdates, TrieUpdatesSorted},
     HashedPostState, HashedPostStateSorted, HashedStorage, LeafNode, MultiProof, Nibbles,
-    TrieInput, TrieNode,
+    TrieAccount, TrieInput, TrieNode,
 };
 use reth_trie_common::proof::ProofNodes;
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseProof, DatabaseTrieCursorFactory};
@@ -519,10 +519,14 @@ where
                                             account_prefix_sets.contains(&full);
                                         trace!(target: "engine::root", ?full, ?prefix_set_contains, "Checking leaf node");
                                         if prefix_set_contains {
-                                            let sparse_node = trie.get_leaf_value(&full);
+                                            let sparse_account = trie
+                                                .get_leaf_value(&full)
+                                                .map(|v| TrieAccount::decode(&mut &v[..]).unwrap());
+                                            let proof_account =
+                                                TrieAccount::decode(&mut &value[..]).unwrap();
                                             assert_eq!(
-                                                sparse_node,
-                                                Some(&value),
+                                                sparse_account,
+                                                Some(proof_account),
                                                 "leaf value at path {path:?} does not match the proof"
                                             );
                                         }
