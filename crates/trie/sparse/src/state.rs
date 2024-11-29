@@ -1,5 +1,5 @@
 use crate::{
-    blinded::{BlindedProviderFactory, DefaultBlindedProviderFactory},
+    blinded::{BlindedProvider, BlindedProviderFactory, DefaultBlindedProviderFactory},
     RevealedSparseTrie, SparseStateTrieError, SparseStateTrieResult, SparseTrie, SparseTrieError,
 };
 use alloy_primitives::{
@@ -222,41 +222,6 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         Ok(Some(root_node))
     }
 
-    /// Update or remove trie account based on new account info. This method will either recompute
-    /// the storage root based on update storage trie or look it up from existing leaf value.
-    ///
-    /// If the new account info and storage trie are empty, the account leaf will be removed.
-    pub fn update_account(&mut self, address: B256, account: Account) -> SparseStateTrieResult<()> {
-        let nibbles = Nibbles::unpack(address);
-        let storage_root = if let Some(storage_trie) = self.storages.get_mut(&address) {
-            trace!(target: "trie::sparse", ?address, "Calculating storage root to update account");
-            storage_trie.root().ok_or(SparseTrieError::Blind)?
-        } else if self.revealed.contains_key(&address) {
-            trace!(target: "trie::sparse", ?address, "Retrieving storage root from account leaf to update account");
-            let state = self.state.as_revealed_mut().ok_or(SparseTrieError::Blind)?;
-            // The account was revealed, either...
-            if let Some(value) = state.get_leaf_value(&nibbles) {
-                // ..it exists and we should take it's current storage root or...
-                TrieAccount::decode(&mut &value[..])?.storage_root
-            } else {
-                // ...the account is newly created and the storage trie is empty.
-                EMPTY_ROOT_HASH
-            }
-        } else {
-            return Err(SparseTrieError::Blind.into())
-        };
-
-        if account.is_empty() && storage_root == EMPTY_ROOT_HASH {
-            trace!(target: "trie::sparse", ?address, "Removing account");
-            self.remove_account_leaf(&nibbles)
-        } else {
-            trace!(target: "trie::sparse", ?address, "Updating account");
-            self.account_rlp_buf.clear();
-            TrieAccount::from((account, storage_root)).encode(&mut self.account_rlp_buf);
-            self.update_account_leaf(nibbles, self.account_rlp_buf.clone())
-        }
-    }
-
     /// Update the account leaf node.
     pub fn update_account_leaf(
         &mut self,
@@ -264,12 +229,6 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         value: Vec<u8>,
     ) -> SparseStateTrieResult<()> {
         self.state.update_leaf(path, value)?;
-        Ok(())
-    }
-
-    /// Remove the account leaf node.
-    pub fn remove_account_leaf(&mut self, path: &Nibbles) -> SparseStateTrieResult<()> {
-        self.state.remove_leaf(path)?;
         Ok(())
     }
 
@@ -282,19 +241,6 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     ) -> SparseStateTrieResult<()> {
         if let Some(storage_trie) = self.storages.get_mut(&address) {
             Ok(storage_trie.update_leaf(slot, value)?)
-        } else {
-            Err(SparseStateTrieError::Sparse(SparseTrieError::Blind))
-        }
-    }
-
-    /// Update the leaf node of a storage trie at the provided address.
-    pub fn remove_storage_leaf(
-        &mut self,
-        address: B256,
-        slot: &Nibbles,
-    ) -> SparseStateTrieResult<()> {
-        if let Some(storage_trie) = self.storages.get_mut(&address) {
-            Ok(storage_trie.remove_leaf(slot)?)
         } else {
             Err(SparseStateTrieError::Sparse(SparseTrieError::Blind))
         }
@@ -349,6 +295,67 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                     .collect(),
             }
         })
+    }
+}
+
+impl<F> SparseStateTrie<F>
+where
+    F: BlindedProviderFactory,
+    SparseTrieError: From<<F::AccountNodeProvider as BlindedProvider>::Error>,
+    SparseTrieError: From<<F::StorageNodeProvider as BlindedProvider>::Error>,
+{
+    /// Update or remove trie account based on new account info. This method will either recompute
+    /// the storage root based on update storage trie or look it up from existing leaf value.
+    ///
+    /// If the new account info and storage trie are empty, the account leaf will be removed.
+    pub fn update_account(&mut self, address: B256, account: Account) -> SparseStateTrieResult<()> {
+        let nibbles = Nibbles::unpack(address);
+        let storage_root = if let Some(storage_trie) = self.storages.get_mut(&address) {
+            trace!(target: "trie::sparse", ?address, "Calculating storage root to update account");
+            storage_trie.root().ok_or(SparseTrieError::Blind)?
+        } else if self.revealed.contains_key(&address) {
+            trace!(target: "trie::sparse", ?address, "Retrieving storage root from account leaf to update account");
+            let state = self.state.as_revealed_mut().ok_or(SparseTrieError::Blind)?;
+            // The account was revealed, either...
+            if let Some(value) = state.get_leaf_value(&nibbles) {
+                // ..it exists and we should take it's current storage root or...
+                TrieAccount::decode(&mut &value[..])?.storage_root
+            } else {
+                // ...the account is newly created and the storage trie is empty.
+                EMPTY_ROOT_HASH
+            }
+        } else {
+            return Err(SparseTrieError::Blind.into())
+        };
+
+        if account.is_empty() && storage_root == EMPTY_ROOT_HASH {
+            trace!(target: "trie::sparse", ?address, "Removing account");
+            self.remove_account_leaf(&nibbles)
+        } else {
+            trace!(target: "trie::sparse", ?address, "Updating account");
+            self.account_rlp_buf.clear();
+            TrieAccount::from((account, storage_root)).encode(&mut self.account_rlp_buf);
+            self.update_account_leaf(nibbles, self.account_rlp_buf.clone())
+        }
+    }
+
+    /// Remove the account leaf node.
+    pub fn remove_account_leaf(&mut self, path: &Nibbles) -> SparseStateTrieResult<()> {
+        self.state.remove_leaf(path)?;
+        Ok(())
+    }
+
+    /// Update the leaf node of a storage trie at the provided address.
+    pub fn remove_storage_leaf(
+        &mut self,
+        address: B256,
+        slot: &Nibbles,
+    ) -> SparseStateTrieResult<()> {
+        if let Some(storage_trie) = self.storages.get_mut(&address) {
+            Ok(storage_trie.remove_leaf(slot)?)
+        } else {
+            Err(SparseStateTrieError::Sparse(SparseTrieError::Blind))
+        }
     }
 }
 
