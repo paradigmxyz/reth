@@ -299,7 +299,7 @@ impl<N> Default for OpAddOnsBuilder<N> {
 }
 
 impl<N> OpAddOnsBuilder<N> {
-    /// With a [SequencerClient].
+    /// With a [`SequencerClient`].
     pub fn with_sequencer(mut self, sequencer_client: String) -> Self {
         self.sequencer_client = Some(SequencerClient::new(sequencer_client));
         self
