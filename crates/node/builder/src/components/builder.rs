@@ -8,7 +8,7 @@ use crate::{
     BuilderContext, ConfigureEvm, FullNodeTypes,
 };
 use alloy_consensus::Header;
-use reth_consensus::Consensus;
+use reth_consensus::FullConsensus;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_node_api::{NodeTypes, NodeTypesWithEngine};
 use reth_payload_builder::PayloadBuilderHandle;
@@ -378,7 +378,7 @@ where
     Pool: TransactionPool + Unpin + 'static,
     EVM: ConfigureEvm<Header = Header>,
     Executor: BlockExecutorProvider<Primitives = <Node::Types as NodeTypes>::Primitives>,
-    Cons: Consensus + Clone + Unpin + 'static,
+    Cons: FullConsensus<<Node::Types as NodeTypes>::Primitives> + Clone + Unpin + 'static,
 {
     type Components = Components<Node, Pool, EVM, Executor, Cons>;
 
