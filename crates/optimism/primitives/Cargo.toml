@@ -15,7 +15,7 @@ workspace = true
 # reth
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
-reth-codecs = { workspace = true, optional = true, features = ["optimism"] }
+reth-codecs = { workspace = true, optional = true }
 
 # ethereum
 alloy-primitives.workspace = true
@@ -51,19 +51,18 @@ default = ["std", "reth-codec"]
 std = [
     "reth-primitives/std",
     "reth-primitives-traits/std",
-    "reth-codecs/std",
     "alloy-consensus/std",
     "alloy-eips/std",
     "alloy-primitives/std",
     "revm-primitives?/std",
     "serde/std",
     "secp256k1?/std",
-    "reth-codecs/std",
+    "reth-codecs?/std",
 ]
 optimism = [
     "revm-primitives/optimism",
-    "reth-codecs/optimism",
     "reth-primitives/optimism",
+    "reth-codecs?/optimism",
 ]
 reth-codec = [
     "dep:reth-codecs",
