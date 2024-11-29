@@ -460,7 +460,7 @@ where
                                         assert_eq!(
                                             sparse_node,
                                             Some(&value),
-                                            "leaf node at path {path:?} does not match the proof"
+                                            "leaf value at path {path:?} does not match the proof"
                                         );
                                     }
                                 }

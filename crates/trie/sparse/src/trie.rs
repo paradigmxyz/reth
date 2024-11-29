@@ -228,6 +228,7 @@ impl RevealedSparseTrie {
                 Some(SparseNode::Hash(_)) | None => {
                     let mut full = path.clone();
                     full.extend_from_slice_unchecked(&leaf.key);
+                    trace!(target: "trie::sparse", ?full, ?path, "Inserting revealed leaf node value");
                     self.values.insert(full, leaf.value);
                     self.nodes.insert(path, SparseNode::new_leaf(leaf.key));
                 }
@@ -268,6 +269,7 @@ impl RevealedSparseTrie {
     /// Update the leaf node with provided value.
     pub fn update_leaf(&mut self, path: Nibbles, value: Vec<u8>) -> SparseTrieResult<()> {
         self.prefix_set.insert(path.clone());
+        trace!(target: "trie::sparse", ?path, "Inserting updated leaf node value");
         let existing = self.values.insert(path.clone(), value);
         if existing.is_some() {
             // trie structure unchanged, return immediately
@@ -359,6 +361,7 @@ impl RevealedSparseTrie {
 
     /// Remove leaf node from the trie.
     pub fn remove_leaf(&mut self, path: &Nibbles) -> SparseTrieResult<()> {
+        trace!(target: "trie::sparse", ?path, "Removing leaf node value");
         if self.values.remove(path).is_none() {
             // Leaf is not present in the trie.
             return Ok(())
