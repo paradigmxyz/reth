@@ -2298,6 +2298,7 @@ where
             match state_root_handle.wait_for_result() {
                 Ok(state_root_task_result) => {
                     info!(target: "engine::tree", block=?sealed_block.num_hash(), state_root_task_result=?state_root_task_result.0,  regular_state_root_result = ?result.0);
+                    info!(target: "engine::tree", block=?sealed_block.num_hash(), state_root_task_trie_updates=?state_root_task_result.1,  regular_state_root_trie_updates = ?result.1);
                 }
                 Err(e) => {
                     info!(target: "engine::tree", error=?e, "on state root task wait_for_result")
