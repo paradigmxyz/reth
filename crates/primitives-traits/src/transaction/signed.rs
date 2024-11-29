@@ -1,7 +1,7 @@
 //! API of a signed transaction.
 
 use crate::{FillTxEnv, InMemorySize, MaybeArbitrary, MaybeCompact, MaybeSerde, TxType};
-use alloc::fmt;
+use alloc::{fmt, vec::Vec};
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
 use alloy_primitives::{keccak256, Address, PrimitiveSignature, TxHash, B256};
 use core::hash::Hash;
