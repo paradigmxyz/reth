@@ -10,7 +10,7 @@ use reth_trie::{
 };
 use reth_trie_db::DatabaseProof;
 use reth_trie_parallel::root::ParallelStateRootError;
-use reth_trie_sparse::{SparseStateTrie, SparseStateTrieResult};
+use reth_trie_sparse::{SparseStateTrie, SparseStateTrieResult, SparseTrieError};
 use revm_primitives::{keccak256, EvmState, B256};
 use std::{
     collections::BTreeMap,
@@ -137,9 +137,7 @@ impl ProofSequencer {
             }
         }
 
-        if !consecutive_proofs.is_empty() {
-            self.next_to_deliver += consecutive_proofs.len() as u64;
-        }
+        self.next_to_deliver += consecutive_proofs.len() as u64;
 
         consecutive_proofs
     }
@@ -160,15 +158,15 @@ impl ProofSequencer {
 /// Then it updates relevant leaves according to the result of the transaction.
 #[derive(Debug)]
 pub(crate) struct StateRootTask<Factory> {
-    /// Task configuration
+    /// Task configuration.
     config: StateRootConfig<Factory>,
-    /// Receiver for state root related messages
+    /// Receiver for state root related messages.
     rx: Receiver<StateRootMessage>,
-    /// Sender for state root related messages
+    /// Sender for state root related messages.
     tx: Sender<StateRootMessage>,
-    /// Proof targets that have been already fetched
-    fetched_proof_targets: HashSet<B256>,
-    /// Proof sequencing handler
+    /// Proof targets that have been already fetched.
+    fetched_proof_targets: HashMap<B256, HashSet<B256>>,
+    /// Proof sequencing handler.
     proof_sequencer: ProofSequencer,
     /// The sparse trie used for the state root calculation. If [`None`], then update is in
     /// progress.
@@ -218,7 +216,7 @@ where
         view: ConsistentDbView<Factory>,
         input: Arc<TrieInput>,
         update: EvmState,
-        fetched_proof_targets: &HashSet<B256>,
+        fetched_proof_targets: &HashMap<B256, HashSet<B256>>,
         proof_sequence_number: u64,
         state_root_message_sender: Sender<StateRootMessage>,
     ) -> HashMap<B256, HashSet<B256>> {
@@ -229,20 +227,23 @@ where
                 trace!(target: "engine::root", ?address, ?hashed_address, "Adding account to state update");
 
                 let destroyed = account.is_selfdestructed();
-                hashed_state_update.accounts.insert(
-                    hashed_address,
-                    if destroyed || account.is_empty() { None } else { Some(account.info.into()) },
-                );
+                let info = if account.is_empty() { None } else { Some(account.info.into()) };
+                hashed_state_update.accounts.insert(hashed_address, info);
 
-                if destroyed || !account.storage.is_empty() {
-                    let storage = account.storage.into_iter().filter_map(|(slot, value)| {
+                let mut changed_storage_iter = account
+                    .storage
+                    .into_iter()
+                    .filter_map(|(slot, value)| {
                         value
                             .is_changed()
                             .then(|| (keccak256(B256::from(slot)), value.present_value))
-                    });
-                    hashed_state_update
-                        .storages
-                        .insert(hashed_address, HashedStorage::from_iter(destroyed, storage));
+                    })
+                    .peekable();
+                if destroyed || changed_storage_iter.peek().is_some() {
+                    hashed_state_update.storages.insert(
+                        hashed_address,
+                        HashedStorage::from_iter(destroyed, changed_storage_iter),
+                    );
                 }
             }
         }
@@ -317,7 +318,7 @@ where
         );
 
         // TODO(alexey): store proof targets in `ProofSequecner` to avoid recomputing them
-        let targets = get_proof_targets(&state, &HashSet::default());
+        let targets = get_proof_targets(&state, &HashMap::default());
 
         let tx = self.tx.clone();
         rayon::spawn(move || {
@@ -364,8 +365,9 @@ where
                             self.proof_sequencer.next_sequence(),
                             self.tx.clone(),
                         );
-                        self.fetched_proof_targets.extend(targets.keys());
-                        self.fetched_proof_targets.extend(targets.values().flatten());
+                        for (address, slots) in targets {
+                            self.fetched_proof_targets.entry(address).or_default().extend(slots)
+                        }
                     }
                     StateRootMessage::ProofCalculated { proof, state_update, sequence_number } => {
                         proofs_processed += 1;
@@ -464,15 +466,27 @@ where
 
 fn get_proof_targets(
     state_update: &HashedPostState,
-    fetched_proof_targets: &HashSet<B256>,
+    fetched_proof_targets: &HashMap<B256, HashSet<B256>>,
 ) -> HashMap<B256, HashSet<B256>> {
     state_update
         .accounts
         .keys()
-        .filter(|hashed_address| !fetched_proof_targets.contains(*hashed_address))
+        .filter(|hashed_address| !fetched_proof_targets.contains_key(*hashed_address))
         .map(|hashed_address| (*hashed_address, HashSet::default()))
         .chain(state_update.storages.iter().map(|(hashed_address, storage)| {
-            (*hashed_address, storage.storage.keys().copied().collect())
+            let fetched_storage_proof_targets = fetched_proof_targets.get(hashed_address);
+            (
+                *hashed_address,
+                storage
+                    .storage
+                    .keys()
+                    .filter(|slot| {
+                        !fetched_storage_proof_targets
+                            .is_some_and(|targets| targets.contains(*slot))
+                    })
+                    .copied()
+                    .collect(),
+            )
         }))
         .collect()
 }
@@ -494,9 +508,11 @@ fn update_sparse_trie(
     // Update storage slots with new values and calculate storage roots.
     for (address, storage) in state.storages {
         trace!(target: "engine::root::sparse", ?address, "Updating storage");
+        let storage_trie = trie.storage_trie_mut(&address).ok_or(SparseTrieError::Blind)?;
+
         if storage.wiped {
             trace!(target: "engine::root::sparse", ?address, "Wiping storage");
-            trie.wipe_storage(address)?;
+            storage_trie.wipe();
         }
 
         for (slot, value) in storage.storage {
@@ -505,18 +521,15 @@ fn update_sparse_trie(
                 trace!(target: "engine::root::sparse", ?address, ?slot, "Removing storage slot");
 
                 // TODO: handle blinded node error
-                trie.remove_storage_leaf(address, &slot_nibbles)?;
+                storage_trie.remove_leaf(&slot_nibbles)?;
             } else {
                 trace!(target: "engine::root::sparse", ?address, ?slot, "Updating storage slot");
-                trie.update_storage_leaf(
-                    address,
-                    slot_nibbles,
-                    alloy_rlp::encode_fixed_size(&value).to_vec(),
-                )?;
+                storage_trie
+                    .update_leaf(slot_nibbles, alloy_rlp::encode_fixed_size(&value).to_vec())?;
             }
         }
 
-        trie.storage_root(address).unwrap();
+        storage_trie.root();
     }
 
     // Update accounts with new values

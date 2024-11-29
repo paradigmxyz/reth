@@ -70,7 +70,7 @@ pub trait LaunchNode<Target> {
     type Node;
 
     /// Create and return a new node asynchronously.
-    fn launch_node(self, target: Target) -> impl Future<Output = eyre::Result<Self::Node>> + Send;
+    fn launch_node(self, target: Target) -> impl Future<Output = eyre::Result<Self::Node>>;
 }
 
 impl<F, Target, Fut, Node> LaunchNode<Target> for F
@@ -80,7 +80,7 @@ where
 {
     type Node = Node;
 
-    fn launch_node(self, target: Target) -> impl Future<Output = eyre::Result<Self::Node>> + Send {
+    fn launch_node(self, target: Target) -> impl Future<Output = eyre::Result<Self::Node>> {
         self(target)
     }
 }
