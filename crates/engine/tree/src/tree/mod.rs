@@ -469,11 +469,12 @@ pub enum TreeAction {
 /// emitting events.
 pub struct EngineApiTreeHandler<N, P, E, T, V>
 where
+    N: NodePrimitives,
     T: EngineTypes,
 {
     provider: P,
     executor_provider: E,
-    consensus: Arc<dyn FullConsensus>,
+    consensus: Arc<dyn FullConsensus<N>>,
     payload_validator: V,
     /// Keeps track of internals such as executed and buffered blocks.
     state: EngineApiTreeState,
@@ -498,7 +499,7 @@ where
     backfill_sync_state: BackfillSyncState,
     /// Keeps track of the state of the canonical chain that isn't persisted yet.
     /// This is intended to be accessed from external sources, such as rpc.
-    canonical_in_memory_state: CanonicalInMemoryState,
+    canonical_in_memory_state: CanonicalInMemoryState<N>,
     /// Handle to the payload builder that will receive payload attributes for valid forkchoice
     /// updates
     payload_builder: PayloadBuilderHandle<T>,
