@@ -32,7 +32,7 @@ use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::{
     witness::{DebugExecutionWitnessApiServer, OpDebugWitnessApi},
-    OpEthApi,
+    OpEthApi, SequencerClient,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::BlockBody;
@@ -47,7 +47,7 @@ use reth_transaction_pool::{
     TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
 
 /// Storage implementation for Optimism.
 #[derive(Debug, Default, Clone)]
@@ -123,7 +123,7 @@ impl OpNode {
 
     /// Returns the components for the given [`RollupArgs`].
     pub fn components<Node>(
-        args: RollupArgs,
+        args: &RollupArgs,
     ) -> ComponentsBuilder<
         Node,
         OpPoolBuilder,
@@ -145,9 +145,9 @@ impl OpNode {
         ComponentsBuilder::default()
             .node_types::<Node>()
             .pool(OpPoolBuilder::default())
-            .payload(OpPayloadBuilder::new(compute_pending_block))
+            .payload(OpPayloadBuilder::new(*compute_pending_block))
             .network(OpNetworkBuilder {
-                disable_txpool_gossip,
+                disable_txpool_gossip: *disable_txpool_gossip,
                 disable_discovery_v4: !discovery_v4,
             })
             .executor(OpExecutorBuilder::default())
@@ -179,12 +179,20 @@ where
         OpAddOns<NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>>;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
-        let Self { args } = self;
-        Self::components(args.clone())
+        Self::components(&self.args)
     }
 
     fn add_ons(&self) -> Self::AddOns {
-        OpAddOns::new(self.args.sequencer_http.clone(), self.args.storage_proof_only.clone())
+        let mut builder = OpAddOns::builder();
+        if let Some(sequencer) = &self.args.sequencer_http {
+            builder = builder.with_sequencer(sequencer.clone());
+        }
+
+        if !self.args.storage_proof_only.is_empty() {
+            builder = builder.with_storage_proof_only(self.args.storage_proof_only.clone());
+        }
+
+        builder.build()
     }
 }
 
@@ -205,27 +213,13 @@ pub struct OpAddOns<N: FullNodeComponents>(pub RpcAddOns<N, OpEthApi<N>, OpEngin
 
 impl<N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>> Default for OpAddOns<N> {
     fn default() -> Self {
-        Self::new(None, vec![])
+        Self::builder().build()
     }
 }
 
-impl<N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>> OpAddOns<N> {
-    /// Create a new instance with the given `sequencer_http` URL and list of storage proof-only
-    /// addresses.
-    pub fn new(sequencer_http: Option<String>, storage_proof_addresses: Vec<Address>) -> Self {
-        Self(RpcAddOns::new(
-            move |ctx| {
-                let mut builder =
-                    OpEthApi::builder(ctx).with_storage_proof_only(storage_proof_addresses);
-
-                if let Some(sequencer_http) = sequencer_http {
-                    builder = builder.with_sequencer(sequencer_http)
-                }
-
-                builder.build()
-            },
-            Default::default(),
-        ))
+impl<N: FullNodeComponents> OpAddOns<N> {
+    fn builder() -> OpAddOnsBuilder<N> {
+        OpAddOnsBuilder::default()
     }
 }
 
@@ -281,6 +275,67 @@ where
 
     async fn engine_validator(&self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::Validator> {
         OpEngineValidatorBuilder::default().build(ctx).await
+    }
+}
+
+/// A regular optimism evm and executor builder.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct OpAddOnsBuilder<N> {
+    /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
+    /// network.
+    sequencer_client: Option<SequencerClient>,
+    /// List of addresses that _ONLY_ return storage proofs _WITHOUT_ an account proof when called
+    /// with `eth_getProof`.
+    storage_proof_only: Vec<Address>,
+    _marker: PhantomData<N>,
+}
+
+impl<N> Default for OpAddOnsBuilder<N> {
+    fn default() -> Self {
+        Self { sequencer_client: None, storage_proof_only: vec![], _marker: PhantomData }
+    }
+}
+
+impl<N> OpAddOnsBuilder<N> {
+    /// With a [SequencerClient].
+    pub fn with_sequencer(mut self, sequencer_client: String) -> Self {
+        self.sequencer_client = Some(SequencerClient::new(sequencer_client));
+        self
+    }
+
+    /// With a list of addresses that _ONLY_ return storage proofs _WITHOUT_ an account proof when
+    /// called with `eth_getProof`.
+    pub fn with_storage_proof_only(mut self, storage_proof_only: Vec<Address>) -> Self {
+        self.storage_proof_only = storage_proof_only;
+        self
+    }
+}
+
+impl<N> OpAddOnsBuilder<N>
+where
+    N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>,
+{
+    /// Builds an instance of [`OpAddOns`].
+    pub fn build(self) -> OpAddOns<N> {
+        let Self { sequencer_client, storage_proof_only, .. } = self;
+
+        OpAddOns(RpcAddOns::new(
+            move |ctx| {
+                let mut builder = OpEthApi::builder(ctx);
+
+                if let Some(sequencer_client) = sequencer_client {
+                    builder = builder.with_sequencer(sequencer_client)
+                }
+
+                if !storage_proof_only.is_empty() {
+                    builder = builder.with_storage_proof_only(storage_proof_only);
+                }
+
+                builder.build()
+            },
+            Default::default(),
+        ))
     }
 }
 
