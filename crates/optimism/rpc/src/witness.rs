@@ -24,10 +24,14 @@ pub struct OpDebugWitnessApi<Provider, EvmConfig> {
 
 impl<Provider, EvmConfig> OpDebugWitnessApi<Provider, EvmConfig> {
     /// Creates a new instance of the `OpDebugWitnessApi`.
-    pub fn new(provider: Provider, evm_config: EvmConfig) -> Self {
+    pub fn new(
+        provider: Provider,
+        evm_config: EvmConfig,
+        task_spawner: Box<dyn TaskSpawner>,
+    ) -> Self {
         let builder = OpPayloadBuilder::new(evm_config);
         let inner = OpDebugWitnessApiInner { provider, builder, task_spawner };
-        Self { inner: Arc::new(Semaphore::new(inner)) }
+        Self { inner: Arc::new(inner) }
     }
 }
 
@@ -44,7 +48,7 @@ where
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl<Provider, EvmConfig> DebugExecutionWitnessApiServer<OpPayloadAttributes>
     for OpDebugWitnessApi<Provider, EvmConfig>
 where
