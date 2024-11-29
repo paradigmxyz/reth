@@ -134,7 +134,7 @@ impl<ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug> HeaderVa
 
         // Ensures that EIP-4844 fields are valid once cancun is active.
         if self.chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
-            validate_4844_header_standalone(header)?;
+            validate_4844_header_standalone(header.header())?;
         } else if header.blob_gas_used.is_some() {
             return Err(ConsensusError::BlobGasUsedUnexpected)
         } else if header.excess_blob_gas.is_some() {
@@ -159,19 +159,23 @@ impl<ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug> HeaderVa
         header: &SealedHeader,
         parent: &SealedHeader,
     ) -> Result<(), ConsensusError> {
-        validate_against_parent_hash_number(header, parent)?;
+        validate_against_parent_hash_number(header.header(), parent)?;
 
-        validate_against_parent_timestamp(header, parent)?;
+        validate_against_parent_timestamp(header.header(), parent.header())?;
 
         // TODO Check difficulty increment between parent and self
         // Ace age did increment it by some formula that we need to follow.
         self.validate_against_parent_gas_limit(header, parent)?;
 
-        validate_against_parent_eip1559_base_fee(header, parent, &self.chain_spec)?;
+        validate_against_parent_eip1559_base_fee(
+            header.header(),
+            parent.header(),
+            &self.chain_spec,
+        )?;
 
         // ensure that the blob gas fields for this block
         if self.chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
-            validate_against_parent_4844(header, parent)?;
+            validate_against_parent_4844(header.header(), parent.header())?;
         }
 
         Ok(())

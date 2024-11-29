@@ -101,17 +101,21 @@ impl HeaderValidator for OpBeaconConsensus {
         header: &SealedHeader,
         parent: &SealedHeader,
     ) -> Result<(), ConsensusError> {
-        validate_against_parent_hash_number(header, parent)?;
+        validate_against_parent_hash_number(header.header(), parent)?;
 
         if self.chain_spec.is_bedrock_active_at_block(header.number) {
-            validate_against_parent_timestamp(header, parent)?;
+            validate_against_parent_timestamp(header.header(), parent.header())?;
         }
 
-        validate_against_parent_eip1559_base_fee(header, parent, &self.chain_spec)?;
+        validate_against_parent_eip1559_base_fee(
+            header.header(),
+            parent.header(),
+            &self.chain_spec,
+        )?;
 
         // ensure that the blob gas fields for this block
         if self.chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
-            validate_against_parent_4844(header, parent)?;
+            validate_against_parent_4844(header.header(), parent.header())?;
         }
 
         Ok(())
