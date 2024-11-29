@@ -8,10 +8,11 @@ use super::{
 use crate::{
     BlobTransaction, Transaction, TransactionSigned, TransactionSignedEcRecovered, TxType,
 };
+use alloc::vec::Vec;
 use alloy_consensus::{
     constants::EIP4844_TX_TYPE_ID,
     transaction::{TxEip1559, TxEip2930, TxEip4844, TxLegacy},
-    Signed, TxEip4844WithSidecar,
+    SignableTransaction, Signed, TxEip4844WithSidecar,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Result, Encodable2718},
@@ -27,6 +28,7 @@ use bytes::Buf;
 use core::hash::{Hash, Hasher};
 use derive_more::{AsRef, Deref};
 use reth_primitives_traits::{InMemorySize, SignedTransaction};
+use revm_primitives::keccak256;
 use serde::{Deserialize, Serialize};
 
 /// A response to `GetPooledTransactions`. This can include either a blob transaction, or a
@@ -150,6 +152,18 @@ impl PooledTransactionsElement {
         match self.recover_signer() {
             None => Err(self),
             Some(signer) => Ok(PooledTransactionsElementEcRecovered { transaction: self, signer }),
+        }
+    }
+
+    /// This encodes the transaction _without_ the signature, and is only suitable for creating a
+    /// hash intended for signing.
+    pub fn encode_for_signing(&self, out: &mut dyn bytes::BufMut) {
+        match self {
+            Self::Legacy(tx) => tx.tx().encode_for_signing(out),
+            Self::Eip2930(tx) => tx.tx().encode_for_signing(out),
+            Self::Eip1559(tx) => tx.tx().encode_for_signing(out),
+            Self::BlobTransaction(tx) => tx.tx().encode_for_signing(out),
+            Self::Eip7702(tx) => tx.tx().encode_for_signing(out),
         }
     }
 
@@ -600,8 +614,9 @@ impl SignedTransaction for PooledTransactionsElement {
         recover_signer(self.signature(), signature_hash)
     }
 
-    fn recover_signer_unchecked(&self) -> Option<Address> {
-        let signature_hash = self.signature_hash();
+    fn recover_signer_unchecked_with_buf(&self, buf: &mut Vec<u8>) -> Option<Address> {
+        self.encode_for_signing(buf);
+        let signature_hash = keccak256(buf);
         recover_signer_unchecked(self.signature(), signature_hash)
     }
 }
