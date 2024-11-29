@@ -1131,6 +1131,7 @@ where
                 self.transaction_fetcher.remove_peer(&peer_id);
             }
             NetworkEvent::ActivePeerSession { info, messages } => {
+                // process active peer session and broadcast available transaction from the pool
                 self.handle_peer_session(info, messages);
             }
             NetworkEvent::Peer(PeerEvent::SessionEstablished(info)) => {

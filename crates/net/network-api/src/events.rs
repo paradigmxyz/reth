@@ -47,7 +47,7 @@ pub enum PeerEvent {
         /// Why the disconnect was triggered
         reason: Option<DisconnectReason>,
     },
-    /// Established a new session with the given peer
+    /// Established a new session with the given peer.
     SessionEstablished(SessionInfo),
     /// Event emitted when a new peer is added
     PeerAdded(PeerId),
