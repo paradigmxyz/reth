@@ -21,14 +21,14 @@ use reth_consensus_common::validation::{
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
-use reth_primitives::{BlockBody, BlockWithSenders, GotExpected, SealedBlock, SealedHeader};
+use reth_primitives::{BlockBody, GotExpected, SealedBlock, SealedHeader};
 use std::{sync::Arc, time::SystemTime};
 
 mod proof;
 pub use proof::calculate_receipt_root_no_memo_optimism;
 
 mod validation;
-pub use validation::validate_block_post_execution;
+pub use validation::validate_post_execution;
 
 /// Optimism consensus implementation.
 ///
@@ -81,12 +81,13 @@ impl Consensus for OpBeaconConsensus {
         Ok(())
     }
 
-    fn validate_block_post_execution(
+    fn validate_post_execution(
         &self,
-        block: &BlockWithSenders,
+        header: &Header,
+        _body: &BlockBody,
         input: PostExecutionInput<'_>,
     ) -> Result<(), ConsensusError> {
-        validate_block_post_execution(block, &self.chain_spec, input.receipts)
+        validate_post_execution(header, &self.chain_spec, input.receipts)
     }
 }
 

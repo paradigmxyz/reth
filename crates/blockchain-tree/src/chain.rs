@@ -211,8 +211,8 @@ impl AppendableChain {
 
         let state = executor.execute((&block, U256::MAX).into())?;
         externals.consensus.validate_block_post_execution(
-            &block,
-            PostExecutionInput::new(&state.receipts, &state.requests),
+            &block.block,
+            PostExecutionInput::new(&block.senders, &state.receipts, &state.requests),
         )?;
 
         let initial_execution_outcome = ExecutionOutcome::from((state, block.number));

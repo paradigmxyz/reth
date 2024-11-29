@@ -14,10 +14,10 @@ extern crate alloc;
 use alloc::{fmt::Debug, sync::Arc, vec::Vec};
 use alloy_consensus::Header;
 use alloy_eips::eip7685::Requests;
-use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256, U256};
+use alloy_primitives::{Address, BlockHash, BlockNumber, Bloom, B256, U256};
 use reth_primitives::{
-    BlockBody, BlockWithSenders, GotExpected, GotExpectedBoxed, InvalidTransactionError, Receipt,
-    SealedBlock, SealedHeader,
+    BlockBody, GotExpected, GotExpectedBoxed, InvalidTransactionError, Receipt, SealedBlock,
+    SealedHeader,
 };
 use reth_primitives_traits::constants::MINIMUM_GAS_LIMIT;
 
@@ -31,6 +31,8 @@ pub mod test_utils;
 /// Post execution input passed to [`Consensus::validate_block_post_execution`].
 #[derive(Debug)]
 pub struct PostExecutionInput<'a, R = Receipt> {
+    /// Block senders.
+    pub senders: &'a [Address],
     /// Receipts of the block.
     pub receipts: &'a [R],
     /// EIP-7685 requests of the block.
@@ -39,8 +41,8 @@ pub struct PostExecutionInput<'a, R = Receipt> {
 
 impl<'a, R> PostExecutionInput<'a, R> {
     /// Creates a new instance of `PostExecutionInput`.
-    pub const fn new(receipts: &'a [R], requests: &'a Requests) -> Self {
-        Self { receipts, requests }
+    pub const fn new(senders: &'a [Address], receipts: &'a [R], requests: &'a Requests) -> Self {
+        Self { senders, receipts, requests }
     }
 }
 
@@ -74,11 +76,27 @@ pub trait Consensus<H = Header, B = BlockBody>:
     /// See the Yellow Paper sections 4.3.2 "Holistic Validity".
     ///
     /// Note: validating blocks does not include other validations of the Consensus
-    fn validate_block_post_execution(
+    fn validate_post_execution(
         &self,
-        block: &BlockWithSenders,
+        header: &H,
+        body: &B,
         input: PostExecutionInput<'_>,
     ) -> Result<(), ConsensusError>;
+
+    /// A helper to invoke [`Self::validate_post_execution`] by passing a
+    /// [`reth_primitives_traits::Block`] implementation.
+    #[auto_impl(keep_default_for(&, Arc))]
+    fn validate_block_post_execution<Block>(
+        &self,
+        block: &Block,
+        input: PostExecutionInput<'_>,
+    ) -> Result<(), ConsensusError>
+    where
+        Self: Sized,
+        Block: reth_primitives_traits::Block<Header = H, Body = B>,
+    {
+        self.validate_post_execution(block.header(), block.body(), input)
+    }
 }
 
 /// HeaderValidator is a protocol that validates headers and their relationships.

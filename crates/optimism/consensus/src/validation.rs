@@ -1,15 +1,16 @@
 use crate::proof::calculate_receipt_root_optimism;
+use alloy_consensus::Header;
 use alloy_primitives::{Bloom, B256};
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus::ConsensusError;
-use reth_primitives::{gas_spent_by_transactions, BlockWithSenders, GotExpected, Receipt};
+use reth_primitives::{gas_spent_by_transactions, GotExpected, Receipt};
 
 /// Validate a block with regard to execution results:
 ///
 /// - Compares the receipts root in the block header to the block body
 /// - Compares the gas used in the block header to the actual gas usage after execution
-pub fn validate_block_post_execution(
-    block: &BlockWithSenders,
+pub fn validate_post_execution(
+    header: &Header,
     chain_spec: &ChainSpec,
     receipts: &[Receipt],
 ) -> Result<(), ConsensusError> {
@@ -17,13 +18,13 @@ pub fn validate_block_post_execution(
     // operation as hashing that is required for state root got calculated in every
     // transaction This was replaced with is_success flag.
     // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
-    if chain_spec.is_byzantium_active_at_block(block.header.number) {
+    if chain_spec.is_byzantium_active_at_block(header.number) {
         if let Err(error) = verify_receipts(
-            block.header.receipts_root,
-            block.header.logs_bloom,
+            header.receipts_root,
+            header.logs_bloom,
             receipts,
             chain_spec,
-            block.timestamp,
+            header.timestamp,
         ) {
             tracing::debug!(%error, ?receipts, "receipts verification failed");
             return Err(error)
@@ -33,9 +34,9 @@ pub fn validate_block_post_execution(
     // Check if gas used matches the value set in header.
     let cumulative_gas_used =
         receipts.last().map(|receipt| receipt.cumulative_gas_used).unwrap_or(0);
-    if block.gas_used != cumulative_gas_used {
+    if header.gas_used != cumulative_gas_used {
         return Err(ConsensusError::BlockGasUsed {
-            gas: GotExpected { got: cumulative_gas_used, expected: block.gas_used },
+            gas: GotExpected { got: cumulative_gas_used, expected: header.gas_used },
             gas_spent_by_tx: gas_spent_by_transactions(receipts),
         })
     }

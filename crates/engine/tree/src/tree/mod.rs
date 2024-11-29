@@ -2222,8 +2222,8 @@ where
         trace!(target: "engine::tree", elapsed=?exec_time.elapsed(), ?block_number, "Executed block");
 
         if let Err(err) = self.consensus.validate_block_post_execution(
-            &block,
-            PostExecutionInput::new(&output.receipts, &output.requests),
+            &block.block,
+            PostExecutionInput::new(&block.senders, &output.receipts, &output.requests),
         ) {
             // call post-block hook
             self.invalid_block_hook.on_invalid_block(

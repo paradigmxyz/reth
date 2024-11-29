@@ -1,7 +1,7 @@
 use crate::{Consensus, ConsensusError, HeaderValidator, PostExecutionInput};
 use alloy_primitives::U256;
 use core::sync::atomic::{AtomicBool, Ordering};
-use reth_primitives::{BlockWithSenders, SealedBlock, SealedHeader};
+use reth_primitives::{SealedBlock, SealedHeader};
 
 /// Consensus engine implementation for testing
 #[derive(Debug)]
@@ -70,9 +70,10 @@ impl<H, B> Consensus<H, B> for TestConsensus {
         }
     }
 
-    fn validate_block_post_execution(
+    fn validate_post_execution(
         &self,
-        _block: &BlockWithSenders,
+        _header: &H,
+        _body: &B,
         _input: PostExecutionInput<'_>,
     ) -> Result<(), ConsensusError> {
         if self.fail_validation() {

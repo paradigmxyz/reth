@@ -1,25 +1,26 @@
+use alloy_consensus::BlockHeader;
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{Bloom, B256};
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
-use reth_primitives::{gas_spent_by_transactions, BlockWithSenders, GotExpected, Receipt};
+use reth_primitives::{gas_spent_by_transactions, GotExpected, Receipt};
 
 /// Validate a block with regard to execution results:
 ///
 /// - Compares the receipts root in the block header to the block body
 /// - Compares the gas used in the block header to the actual gas usage after execution
-pub fn validate_block_post_execution<ChainSpec: EthereumHardforks>(
-    block: &BlockWithSenders,
-    chain_spec: &ChainSpec,
+pub fn validate_post_execution<H: BlockHeader>(
+    header: &H,
+    chain_spec: impl EthereumHardforks,
     receipts: &[Receipt],
     requests: &Requests,
 ) -> Result<(), ConsensusError> {
     // Check if gas used matches the value set in header.
     let cumulative_gas_used =
         receipts.last().map(|receipt| receipt.cumulative_gas_used).unwrap_or(0);
-    if block.gas_used != cumulative_gas_used {
+    if header.gas_used() != cumulative_gas_used {
         return Err(ConsensusError::BlockGasUsed {
-            gas: GotExpected { got: cumulative_gas_used, expected: block.gas_used },
+            gas: GotExpected { got: cumulative_gas_used, expected: header.gas_used() },
             gas_spent_by_tx: gas_spent_by_transactions(receipts),
         })
     }
@@ -28,18 +29,16 @@ pub fn validate_block_post_execution<ChainSpec: EthereumHardforks>(
     // operation as hashing that is required for state root got calculated in every
     // transaction This was replaced with is_success flag.
     // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
-    if chain_spec.is_byzantium_active_at_block(block.header.number) {
-        if let Err(error) =
-            verify_receipts(block.header.receipts_root, block.header.logs_bloom, receipts)
-        {
+    if chain_spec.is_byzantium_active_at_block(header.number()) {
+        if let Err(error) = verify_receipts(header.receipts_root(), header.logs_bloom(), receipts) {
             tracing::debug!(%error, ?receipts, "receipts verification failed");
             return Err(error)
         }
     }
 
     // Validate that the header requests hash matches the calculated requests hash
-    if chain_spec.is_prague_active_at_timestamp(block.timestamp) {
-        let Some(header_requests_hash) = block.header.requests_hash else {
+    if chain_spec.is_prague_active_at_timestamp(header.timestamp()) {
+        let Some(header_requests_hash) = header.requests_hash() else {
             return Err(ConsensusError::RequestsHashMissing)
         };
         let requests_hash = requests.requests_hash();

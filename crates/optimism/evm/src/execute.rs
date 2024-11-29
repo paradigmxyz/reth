@@ -18,7 +18,7 @@ use reth_evm::{
     ConfigureEvm, TxEnvOverrides,
 };
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_consensus::validate_block_post_execution;
+use reth_optimism_consensus::validate_post_execution;
 use reth_optimism_forks::OpHardfork;
 use reth_optimism_primitives::OpPrimitives;
 use reth_primitives::{BlockWithSenders, Receipt, TxType};
@@ -284,7 +284,7 @@ where
         receipts: &[Receipt],
         _requests: &Requests,
     ) -> Result<(), ConsensusError> {
-        validate_block_post_execution(block, &self.chain_spec.clone(), receipts)
+        validate_post_execution(&block.header, &self.chain_spec.clone(), receipts)
     }
 }
 

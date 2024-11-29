@@ -10,7 +10,7 @@ use alloy_eips::eip7685::Requests;
 use core::fmt::Display;
 use reth_chainspec::{ChainSpec, EthereumHardfork, EthereumHardforks, MAINNET};
 use reth_consensus::ConsensusError;
-use reth_ethereum_consensus::validate_block_post_execution;
+use reth_ethereum_consensus::validate_post_execution;
 use reth_evm::{
     execute::{
         BasicBlockExecutorProvider, BlockExecutionError, BlockExecutionStrategy,
@@ -282,7 +282,7 @@ where
         receipts: &[Receipt],
         requests: &Requests,
     ) -> Result<(), ConsensusError> {
-        validate_block_post_execution(block, &self.chain_spec.clone(), receipts, requests)
+        validate_post_execution(&block.header, &self.chain_spec, receipts, requests)
     }
 }
 

@@ -18,7 +18,7 @@ use reth_consensus_common::validation::{
     validate_against_parent_timestamp, validate_block_pre_execution, validate_body_against_header,
     validate_header_base_fee, validate_header_extradata, validate_header_gas,
 };
-use reth_primitives::{BlockBody, BlockWithSenders, SealedBlock, SealedHeader};
+use reth_primitives::{BlockBody, SealedBlock, SealedHeader};
 use reth_primitives_traits::constants::MINIMUM_GAS_LIMIT;
 use std::{fmt::Debug, sync::Arc, time::SystemTime};
 
@@ -26,7 +26,7 @@ use std::{fmt::Debug, sync::Arc, time::SystemTime};
 pub const GAS_LIMIT_BOUND_DIVISOR: u64 = 1024;
 
 mod validation;
-pub use validation::validate_block_post_execution;
+pub use validation::validate_post_execution;
 
 /// Ethereum beacon consensus
 ///
@@ -105,12 +105,13 @@ impl<ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug> Consensu
         validate_block_pre_execution(block, &self.chain_spec)
     }
 
-    fn validate_block_post_execution(
+    fn validate_post_execution(
         &self,
-        block: &BlockWithSenders,
+        header: &Header,
+        _body: &BlockBody,
         input: PostExecutionInput<'_>,
     ) -> Result<(), ConsensusError> {
-        validate_block_post_execution(block, &self.chain_spec, input.receipts, input.requests)
+        validate_post_execution(header, &self.chain_spec, input.receipts, input.requests)
     }
 }
 
