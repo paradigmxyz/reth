@@ -480,6 +480,7 @@ where
                                     .freeze();
                                 for (path, node) in proof_nodes.into_nodes_sorted() {
                                     if account_prefix_sets.contains(&path) {
+                                        trace!(target: "engine::root", ?path, "Checking leaf node");
                                         let node = TrieNode::decode(&mut &node[..])
                                             .expect("invalid trie node");
 
@@ -489,10 +490,10 @@ where
 
                                             let sparse_node = trie.get_leaf_value(&full);
                                             assert_eq!(
-                                            sparse_node,
-                                            Some(&value),
-                                            "leaf value at path {path:?} does not match the proof"
-                                        );
+                                                sparse_node,
+                                                Some(&value),
+                                                "leaf value at path {path:?} does not match the proof"
+                                            );
                                         }
                                     }
                                 }
