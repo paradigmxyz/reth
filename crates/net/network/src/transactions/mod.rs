@@ -132,7 +132,12 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
     }
 
     /// Manually propagate full transactions to a specific peer.
+    ///
+    /// Do nothing if transactions are empty.
     pub fn propagate_transactions_to(&self, transactions: Vec<TxHash>, peer: PeerId) {
+        if transactions.is_empty() {
+            return;
+        }
         self.send(TransactionsCommand::PropagateTransactionsTo(transactions, peer))
     }
 
@@ -140,7 +145,12 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
     ///
     /// It's up to the [`TransactionsManager`] whether the transactions are sent as hashes or in
     /// full.
+    ///
+    /// Do nothing if transactions are empty.
     pub fn propagate_transactions(&self, transactions: Vec<TxHash>) {
+        if transactions.is_empty() {
+            return;
+        }
         self.send(TransactionsCommand::PropagateTransactions(transactions))
     }
 
