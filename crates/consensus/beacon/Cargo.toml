@@ -14,12 +14,16 @@ workspace = true
 # reth
 reth-ethereum-consensus.workspace = true
 reth-blockchain-tree-api.workspace = true
+reth-codecs.workspace = true
+reth-db-api.workspace = true
 reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 reth-stages-api.workspace = true
 reth-errors.workspace = true
 reth-provider.workspace = true
 reth-tasks.workspace = true
 reth-payload-builder.workspace = true
+reth-payload-builder-primitives.workspace = true
 reth-payload-primitives.workspace = true
 reth-payload-validator.workspace = true
 reth-prune.workspace = true
@@ -32,8 +36,9 @@ reth-chainspec = { workspace = true, optional = true }
 
 # ethereum
 alloy-primitives.workspace = true
-alloy-rpc-types-engine.workspace = true
+alloy-rpc-types-engine = { workspace = true, features = ["std"] }
 alloy-eips.workspace = true
+alloy-consensus.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }
@@ -73,15 +78,17 @@ reth-exex-types.workspace = true
 reth-prune-types.workspace = true
 reth-chainspec.workspace = true
 alloy-genesis.workspace = true
-
 assert_matches.workspace = true
 
 [features]
 optimism = [
+    "reth-blockchain-tree/optimism",
+    "reth-codecs/optimism",
     "reth-chainspec",
+    "reth-db-api/optimism",
+    "reth-db/optimism",
+    "reth-downloaders/optimism",
     "reth-primitives/optimism",
     "reth-provider/optimism",
-    "reth-blockchain-tree/optimism",
-    "reth-db/optimism",
-    "reth-db-api/optimism",
+    "reth-downloaders/optimism",
 ]

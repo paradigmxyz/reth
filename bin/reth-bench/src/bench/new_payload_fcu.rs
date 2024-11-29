@@ -18,7 +18,7 @@ use clap::Parser;
 use csv::Writer;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
-use reth_primitives::Block;
+use reth_primitives::{Block, BlockExt};
 use reth_rpc_types_compat::engine::payload::block_to_payload;
 use std::time::Instant;
 use tracing::{debug, info};
@@ -43,16 +43,17 @@ impl Command {
         let (sender, mut receiver) = tokio::sync::mpsc::channel(1000);
         tokio::task::spawn(async move {
             while benchmark_mode.contains(next_block) {
-                let block_res = block_provider.get_block_by_number(next_block.into(), true).await;
+                let block_res =
+                    block_provider.get_block_by_number(next_block.into(), true.into()).await;
                 let block = block_res.unwrap().unwrap();
                 let block_hash = block.header.hash;
-                let block = Block::try_from(block.inner).unwrap().seal(block_hash);
+                let block = Block::try_from(block).unwrap().seal(block_hash);
                 let head_block_hash = block.hash();
                 let safe_block_hash = block_provider
-                    .get_block_by_number(block.number.saturating_sub(32).into(), false);
+                    .get_block_by_number(block.number.saturating_sub(32).into(), false.into());
 
                 let finalized_block_hash = block_provider
-                    .get_block_by_number(block.number.saturating_sub(64).into(), false);
+                    .get_block_by_number(block.number.saturating_sub(64).into(), false.into());
 
                 let (safe, finalized) = tokio::join!(safe_block_hash, finalized_block_hash,);
 
@@ -74,11 +75,11 @@ impl Command {
 
         while let Some((block, head, safe, finalized)) = receiver.recv().await {
             // just put gas used here
-            let gas_used = block.header.gas_used;
+            let gas_used = block.gas_used;
             let block_number = block.header.number;
 
             let versioned_hashes: Vec<B256> =
-                block.blob_versioned_hashes().into_iter().copied().collect();
+                block.body.blob_versioned_hashes().into_iter().copied().collect();
             let parent_beacon_block_root = block.parent_beacon_block_root;
             let payload = block_to_payload(block);
 

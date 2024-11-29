@@ -1,11 +1,12 @@
 //! Command for debugging merkle trie calculation.
 use crate::{args::NetworkArgs, utils::get_single_header};
+use alloy_eips::BlockHashOrNumber;
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
-use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
+use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
 use reth_config::Config;
@@ -16,13 +17,12 @@ use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_network_p2p::full_block::FullBlockClient;
-use reth_node_api::{NodeTypesWithDB, NodeTypesWithEngine};
+use reth_node_api::{BlockTy, NodePrimitives};
 use reth_node_ethereum::EthExecutorProvider;
-use reth_primitives::BlockHashOrNumber;
 use reth_provider::{
-    writer::UnifiedStorageWriter, BlockNumReader, BlockWriter, ChainSpecProvider,
+    providers::ProviderNodeTypes, BlockNumReader, BlockWriter, ChainSpecProvider,
     DatabaseProviderFactory, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
-    ProviderError, ProviderFactory, StateWriter, StaticFileProviderFactory,
+    ProviderError, ProviderFactory, StateWriter, StorageLocation,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::{
@@ -56,7 +56,15 @@ pub struct Command<C: ChainSpecParser> {
 }
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
-    async fn build_network<N: NodeTypesWithDB<ChainSpec = C::ChainSpec>>(
+    async fn build_network<
+        N: ProviderNodeTypes<
+            ChainSpec = C::ChainSpec,
+            Primitives: NodePrimitives<
+                Block = reth_primitives::Block,
+                Receipt = reth_primitives::Receipt,
+            >,
+        >,
+    >(
         &self,
         config: &Config,
         task_executor: TaskExecutor,
@@ -78,7 +86,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     }
 
     /// Execute `merkle-debug` command
-    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
         self,
         ctx: CliContext,
     ) -> eyre::Result<()> {
@@ -145,24 +153,24 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         for block in blocks.into_iter().rev() {
             let block_number = block.number;
             let sealed_block = block
-                .try_seal_with_senders()
+                .try_seal_with_senders::<BlockTy<N>>()
                 .map_err(|block| eyre::eyre!("Error sealing block with senders: {block:?}"))?;
             trace!(target: "reth::cli", block_number, "Executing block");
 
-            provider_rw.insert_block(sealed_block.clone())?;
+            provider_rw.insert_block(sealed_block.clone(), StorageLocation::Database)?;
 
             td += sealed_block.difficulty;
             let mut executor = executor_provider.batch_executor(StateProviderDatabase::new(
-                LatestStateProviderRef::new(
-                    provider_rw.tx_ref(),
-                    provider_rw.static_file_provider().clone(),
-                ),
+                LatestStateProviderRef::new(&provider_rw),
             ));
             executor.execute_and_verify_one((&sealed_block.clone().unseal(), td).into())?;
             let execution_outcome = executor.finalize();
 
-            let mut storage_writer = UnifiedStorageWriter::from_database(&provider_rw);
-            storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::Yes)?;
+            provider_rw.write_state(
+                execution_outcome,
+                OriginalValuesKnown::Yes,
+                StorageLocation::Database,
+            )?;
 
             let checkpoint = Some(StageCheckpoint::new(
                 block_number

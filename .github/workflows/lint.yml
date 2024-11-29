@@ -18,10 +18,10 @@ jobs:
       matrix:
         include:
           - type: ethereum
-            args: --bin reth --workspace --locked
+            args: --bin reth --workspace --lib --examples --tests --benches --locked
             features: "ethereum asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
           - type: optimism
-            args: --bin op-reth --workspace --locked
+            args: --bin op-reth --workspace --lib --examples --tests --benches --locked
             features: "optimism asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
           - type: book
             args: --manifest-path book/sources/Cargo.toml --workspace --bins
@@ -71,9 +71,25 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - uses: dcarbone/install-jq-action@v2
+      - uses: dcarbone/install-jq-action@v3
       - name: Run Wasm checks
         run: .github/assets/check_wasm.sh
+
+  riscv:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          target: riscv32imac-unknown-none-elf
+      - uses: taiki-e/install-action@cargo-hack
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - uses: dcarbone/install-jq-action@v3
+      - name: Run RISC-V checks
+        run: .github/assets/check_rv32imac.sh
 
   crate-checks:
     runs-on: ubuntu-latest

@@ -1,12 +1,13 @@
 //! Loads OP pending block for a RPC response.
 
+use crate::OpEthApi;
+use alloy_consensus::Header;
+use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{BlockNumber, B256};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
-use reth_primitives::{
-    revm_primitives::BlockEnv, BlockNumberOrTag, Header, Receipt, SealedBlockWithSenders,
-};
+use reth_primitives::{Receipt, SealedBlockWithSenders};
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ExecutionOutcome,
     ReceiptProvider, StateProviderFactory,
@@ -17,15 +18,16 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
 use reth_transaction_pool::TransactionPool;
-
-use crate::OpEthApi;
+use revm::primitives::BlockEnv;
 
 impl<N> LoadPendingBlock for OpEthApi<N>
 where
     Self: SpawnBlocking,
     N: RpcNodeCore<
-        Provider: BlockReaderIdExt
-                      + EvmEnvProvider
+        Provider: BlockReaderIdExt<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+        > + EvmEnvProvider
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                       + StateProviderFactory,
         Pool: TransactionPool,

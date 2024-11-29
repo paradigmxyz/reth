@@ -2,7 +2,7 @@
 
 /// Optimism specific payload building errors.
 #[derive(Debug, thiserror::Error)]
-pub enum OptimismPayloadBuilderError {
+pub enum OpPayloadBuilderError {
     /// Thrown when a transaction fails to convert to a
     /// [`reth_primitives::TransactionSignedEcRecovered`].
     #[error("failed to convert deposit transaction to TransactionSignedEcRecovered")]

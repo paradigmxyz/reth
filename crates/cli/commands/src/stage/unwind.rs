@@ -1,8 +1,8 @@
 //! Unwinding a certain block range
 
-use crate::common::{AccessRights, Environment, EnvironmentArgs};
+use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{BlockNumber, B256};
+use alloy_primitives::B256;
 use clap::{Parser, Subcommand};
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
@@ -13,11 +13,11 @@ use reth_db::DatabaseEnv;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
-use reth_node_builder::{NodeTypesWithDB, NodeTypesWithEngine};
 use reth_node_core::args::NetworkArgs;
 use reth_provider::{
     providers::ProviderNodeTypes, BlockExecutionWriter, BlockNumReader, ChainSpecProvider,
     ChainStateBlockReader, ChainStateBlockWriter, ProviderFactory, StaticFileProviderFactory,
+    StorageLocation,
 };
 use reth_prune::PruneModes;
 use reth_stages::{
@@ -26,7 +26,7 @@ use reth_stages::{
     ExecutionStageThresholds, Pipeline, StageSet,
 };
 use reth_static_file::StaticFileProducer;
-use std::{ops::RangeInclusive, sync::Arc};
+use std::sync::Arc;
 use tokio::sync::watch;
 use tracing::info;
 
@@ -50,21 +50,16 @@ pub struct Command<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
     /// Execute `db stage unwind` command
-    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
-        self,
-    ) -> eyre::Result<()> {
+    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(self) -> eyre::Result<()> {
         let Environment { provider_factory, config, .. } = self.env.init::<N>(AccessRights::RW)?;
 
-        let range = self.command.unwind_range(provider_factory.clone())?;
-        if *range.start() == 0 {
-            eyre::bail!("Cannot unwind genesis block")
-        }
+        let target = self.command.unwind_target(provider_factory.clone())?;
 
         let highest_static_file_block = provider_factory
             .static_file_provider()
             .get_highest_static_files()
             .max()
-            .filter(|highest_static_file_block| highest_static_file_block >= range.start());
+            .filter(|highest_static_file_block| *highest_static_file_block > target);
 
         // Execute a pipeline unwind if the start of the range overlaps the existing static
         // files. If that's the case, then copy all available data from MDBX to static files, and
@@ -78,9 +73,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             }
 
             if let Some(highest_static_file_block) = highest_static_file_block {
-                info!(target: "reth::cli", ?range, ?highest_static_file_block, "Executing a pipeline unwind.");
+                info!(target: "reth::cli", ?target, ?highest_static_file_block, "Executing a pipeline unwind.");
             } else {
-                info!(target: "reth::cli", ?range, "Executing a pipeline unwind.");
+                info!(target: "reth::cli", ?target, "Executing a pipeline unwind.");
             }
 
             // This will build an offline-only pipeline if the `offline` flag is enabled
@@ -89,34 +84,30 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             // Move all applicable data from database to static files.
             pipeline.move_to_static_files()?;
 
-            pipeline.unwind((*range.start()).saturating_sub(1), None)?;
+            pipeline.unwind(target, None)?;
         } else {
-            info!(target: "reth::cli", ?range, "Executing a database unwind.");
+            info!(target: "reth::cli", ?target, "Executing a database unwind.");
             let provider = provider_factory.provider_rw()?;
 
-            let _ = provider
-                .take_block_and_execution_range(range.clone())
+            provider
+                .remove_block_and_execution_above(target, StorageLocation::Both)
                 .map_err(|err| eyre::eyre!("Transaction error on unwind: {err}"))?;
 
             // update finalized block if needed
             let last_saved_finalized_block_number = provider.last_finalized_block_number()?;
-            let range_min =
-                range.clone().min().ok_or(eyre::eyre!("Could not fetch lower range end"))?;
-            if last_saved_finalized_block_number.is_none() ||
-                Some(range_min) < last_saved_finalized_block_number
-            {
-                provider.save_finalized_block_number(BlockNumber::from(range_min))?;
+            if last_saved_finalized_block_number.is_none_or(|f| f > target) {
+                provider.save_finalized_block_number(target)?;
             }
 
             provider.commit()?;
         }
 
-        info!(target: "reth::cli", range=?range.clone(), count=range.count(), "Unwound blocks");
+        info!(target: "reth::cli", ?target, "Unwound blocks");
 
         Ok(())
     }
 
-    fn build_pipeline<N: NodeTypesWithDB<ChainSpec = C::ChainSpec>>(
+    fn build_pipeline<N: ProviderNodeTypes<ChainSpec = C::ChainSpec> + CliNodeTypes>(
         self,
         config: Config,
         provider_factory: ProviderFactory<N>,
@@ -186,13 +177,11 @@ enum Subcommands {
 }
 
 impl Subcommands {
-    /// Returns the block range to unwind.
-    ///
-    /// This returns an inclusive range: [target..=latest]
-    fn unwind_range<N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>>(
+    /// Returns the block to unwind to. The returned block will stay in database.
+    fn unwind_target<N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>>(
         &self,
         factory: ProviderFactory<N>,
-    ) -> eyre::Result<RangeInclusive<u64>> {
+    ) -> eyre::Result<u64> {
         let provider = factory.provider()?;
         let last = provider.last_block_number()?;
         let target = match self {
@@ -203,11 +192,11 @@ impl Subcommands {
                 BlockHashOrNumber::Number(num) => *num,
             },
             Self::NumBlocks { amount } => last.saturating_sub(*amount),
-        } + 1;
+        };
         if target > last {
             eyre::bail!("Target block number is higher than the latest block number")
         }
-        Ok(target..=last)
+        Ok(target)
     }
 }
 

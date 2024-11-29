@@ -78,7 +78,8 @@ use crate::{
         PoolTransaction, PropagatedTransactions, TransactionOrigin,
     },
     validate::{TransactionValidationOutcome, ValidPoolTransaction},
-    CanonicalStateUpdate, PoolConfig, TransactionOrdering, TransactionValidator,
+    CanonicalStateUpdate, EthPoolTransaction, PoolConfig, TransactionOrdering,
+    TransactionValidator,
 };
 use alloy_primitives::{Address, TxHash, B256};
 use best::BestTransactions;
@@ -86,10 +87,7 @@ use parking_lot::{Mutex, RwLock, RwLockReadGuard};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 
-use reth_primitives::{
-    BlobTransaction, BlobTransactionSidecar, PooledTransactionsElement, TransactionSigned,
-    TransactionSignedEcRecovered,
-};
+use alloy_eips::eip4844::BlobTransactionSidecar;
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -106,7 +104,9 @@ use crate::{
     traits::{GetPooledTransactionLimit, NewBlobSidecar, TransactionListenerKind},
     validate::ValidTransaction,
 };
-pub use best::{BestTransactionFilter, BestTransactionsWithPrioritizedSenders};
+pub use best::{
+    BestPayloadTransactions, BestTransactionFilter, BestTransactionsWithPrioritizedSenders,
+};
 pub use blob::{blob_tx_priority, fee_delta};
 pub use events::{FullTransactionEvent, TransactionEvent};
 pub use listener::{AllTransactionsEvents, TransactionEvents};
@@ -302,58 +302,76 @@ where
         self.get_pool_data().all().transactions_iter().filter(|tx| tx.propagate).collect()
     }
 
-    /// Returns the [`BlobTransaction`] for the given transaction if the sidecar exists.
-    ///
-    /// Caution: this assumes the given transaction is eip-4844
-    fn get_blob_transaction(&self, transaction: TransactionSigned) -> Option<BlobTransaction> {
-        if let Ok(Some(sidecar)) = self.blob_store.get(transaction.hash()) {
-            if let Ok(blob) = BlobTransaction::try_from_signed(transaction, sidecar) {
-                return Some(blob)
-            }
-        }
-        None
+    /// Returns only the first `max` transactions in the pool.
+    pub(crate) fn pooled_transactions_max(
+        &self,
+        max: usize,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.get_pool_data().all().transactions_iter().filter(|tx| tx.propagate).take(max).collect()
     }
 
-    /// Returns converted [`PooledTransactionsElement`] for the given transaction hashes.
+    /// Converts the internally tracked transaction to the pooled format.
+    ///
+    /// If the transaction is an EIP-4844 transaction, the blob sidecar is fetched from the blob
+    /// store and attached to the transaction.
+    fn to_pooled_transaction(
+        &self,
+        transaction: Arc<ValidPoolTransaction<T::Transaction>>,
+    ) -> Option<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>
+    where
+        <V as TransactionValidator>::Transaction: EthPoolTransaction,
+    {
+        if transaction.is_eip4844() {
+            let sidecar = self.blob_store.get(*transaction.hash()).ok()??;
+            transaction.transaction.clone().try_into_pooled_eip4844(sidecar)
+        } else {
+            transaction
+                .transaction
+                .clone()
+                .try_into_pooled()
+                .inspect_err(|err| {
+                    debug!(
+                        target: "txpool", %err,
+                        "failed to convert transaction to pooled element; skipping",
+                    );
+                })
+                .ok()
+        }
+    }
+
+    /// Returns pooled transactions for the given transaction hashes.
     pub(crate) fn get_pooled_transaction_elements(
         &self,
         tx_hashes: Vec<TxHash>,
         limit: GetPooledTransactionLimit,
-    ) -> Vec<PooledTransactionsElement>
+    ) -> Vec<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>
     where
-        <V as TransactionValidator>::Transaction:
-            PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
+        <V as TransactionValidator>::Transaction: EthPoolTransaction,
+    {
+        self.get_pooled_transactions_as(tx_hashes, limit)
+    }
+
+    /// Returns pooled transactions for the given transaction hashes as the requested type.
+    pub(crate) fn get_pooled_transactions_as<P>(
+        &self,
+        tx_hashes: Vec<TxHash>,
+        limit: GetPooledTransactionLimit,
+    ) -> Vec<P>
+    where
+        <V as TransactionValidator>::Transaction: EthPoolTransaction,
+        <<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled: Into<P>,
     {
         let transactions = self.get_all(tx_hashes);
         let mut elements = Vec::with_capacity(transactions.len());
         let mut size = 0;
         for transaction in transactions {
             let encoded_len = transaction.encoded_length();
-            let recovered: TransactionSignedEcRecovered =
-                transaction.transaction.clone().into_consensus().into();
-            let tx = recovered.into_signed();
-            let pooled = if tx.is_eip4844() {
-                // for EIP-4844 transactions, we need to fetch the blob sidecar from the blob store
-                if let Some(blob) = self.get_blob_transaction(tx) {
-                    PooledTransactionsElement::BlobTransaction(blob)
-                } else {
-                    continue
-                }
-            } else {
-                match PooledTransactionsElement::try_from(tx) {
-                    Ok(element) => element,
-                    Err(err) => {
-                        debug!(
-                            target: "txpool", %err,
-                            "failed to convert transaction to pooled element; skipping",
-                        );
-                        continue
-                    }
-                }
+            let Some(pooled) = self.to_pooled_transaction(transaction) else {
+                continue;
             };
 
             size += encoded_len;
-            elements.push(pooled);
+            elements.push(pooled.into());
 
             if limit.exceeds(size) {
                 break
@@ -363,25 +381,15 @@ where
         elements
     }
 
-    /// Returns converted [`PooledTransactionsElement`] for the given transaction hash.
+    /// Returns converted pooled transaction for the given transaction hash.
     pub(crate) fn get_pooled_transaction_element(
         &self,
         tx_hash: TxHash,
-    ) -> Option<PooledTransactionsElement>
+    ) -> Option<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>
     where
-        <V as TransactionValidator>::Transaction:
-            PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
+        <V as TransactionValidator>::Transaction: EthPoolTransaction,
     {
-        self.get(&tx_hash).and_then(|transaction| {
-            let recovered: TransactionSignedEcRecovered =
-                transaction.transaction.clone().into_consensus().into();
-            let tx = recovered.into_signed();
-            if tx.is_eip4844() {
-                self.get_blob_transaction(tx).map(PooledTransactionsElement::BlobTransaction)
-            } else {
-                PooledTransactionsElement::try_from(tx).ok()
-            }
-        })
+        self.get(&tx_hash).and_then(|tx| self.to_pooled_transaction(tx))
     }
 
     /// Updates the entire pool after a new block was executed.
@@ -389,7 +397,9 @@ where
         trace!(target: "txpool", ?update, "updating pool on canonical state change");
 
         let block_info = update.block_info();
-        let CanonicalStateUpdate { new_tip, changed_accounts, mined_transactions, .. } = update;
+        let CanonicalStateUpdate {
+            new_tip, changed_accounts, mined_transactions, update_kind, ..
+        } = update;
         self.validator.on_new_head_block(new_tip);
 
         let changed_senders = self.changed_senders(changed_accounts.into_iter());
@@ -399,6 +409,7 @@ where
             block_info,
             mined_transactions,
             changed_senders,
+            update_kind,
         );
 
         // This will discard outdated transactions based on the account's nonce
@@ -679,6 +690,14 @@ where
         self.get_pool_data().best_transactions_with_attributes(best_transactions_attributes)
     }
 
+    /// Returns only the first `max` transactions in the pending pool.
+    pub(crate) fn pending_transactions_max(
+        &self,
+        max: usize,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.get_pool_data().pending_transactions_iter().take(max).collect()
+    }
+
     /// Returns all transactions from the pending sub-pool
     pub(crate) fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         self.get_pool_data().pending_transactions()
@@ -783,6 +802,14 @@ where
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let sender_id = self.get_sender_id(sender);
         self.get_pool_data().pending_txs_by_sender(sender_id)
+    }
+
+    /// Returns all pending transactions filtered by predicate
+    pub(crate) fn pending_transactions_with_predicate(
+        &self,
+        predicate: impl FnMut(&ValidPoolTransaction<T::Transaction>) -> bool,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.get_pool_data().pending_transactions_with_predicate(predicate)
     }
 
     /// Returns all pending transactions of the address by sender
@@ -1287,7 +1314,7 @@ mod tests {
 
             // Insert the sidecar into the blob store if the current index is within the blob limit.
             if n < blob_limit.max_txs {
-                blob_store.insert(tx.get_hash(), sidecar.clone()).unwrap();
+                blob_store.insert(*tx.get_hash(), sidecar.clone()).unwrap();
             }
 
             // Add the transaction to the pool with external origin and valid outcome.

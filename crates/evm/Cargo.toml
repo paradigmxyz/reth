@@ -30,6 +30,7 @@ revm-primitives.workspace = true
 # alloy
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
+alloy-consensus.workspace = true
 
 auto_impl.workspace = true
 futures-util.workspace = true
@@ -40,6 +41,7 @@ parking_lot = { workspace = true, optional = true }
 parking_lot.workspace = true
 reth-ethereum-forks.workspace = true
 alloy-consensus.workspace = true
+metrics-util = { workspace = true, features = ["debugging"] }
 
 [features]
 default = ["std"]
@@ -57,12 +59,12 @@ std = [
     "revm/std",
 ]
 test-utils = [
-	"dep:parking_lot",
-	"reth-chainspec/test-utils",
-	"reth-consensus/test-utils",
-	"reth-primitives/test-utils",
-	"reth-primitives-traits/test-utils",
-	"reth-revm/test-utils",
-	"revm/test-utils",
-	"reth-prune-types/test-utils"
+    "dep:parking_lot",
+    "reth-chainspec/test-utils",
+    "reth-consensus/test-utils",
+    "reth-primitives/test-utils",
+    "reth-primitives-traits/test-utils",
+    "reth-revm/test-utils",
+    "revm/test-utils",
+    "reth-prune-types/test-utils"
 ]

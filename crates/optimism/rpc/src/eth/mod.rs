@@ -8,9 +8,11 @@ mod call;
 mod pending_block;
 
 pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
+use reth_optimism_primitives::OpPrimitives;
 
 use std::{fmt, sync::Arc};
 
+use alloy_consensus::Header;
 use alloy_primitives::U256;
 use derive_more::Deref;
 use op_alloy_network::Optimism;
@@ -18,10 +20,9 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_node_builder::EthApiBuilderCtx;
-use reth_primitives::Header;
 use reth_provider::{
-    BlockNumReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, EvmEnvProvider,
-    StageCheckpointReader, StateProviderFactory,
+    BlockNumReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
+    EvmEnvProvider, StageCheckpointReader, StateProviderFactory,
 };
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
@@ -71,7 +72,11 @@ pub struct OpEthApi<N: RpcNodeCore> {
 impl<N> OpEthApi<N>
 where
     N: RpcNodeCore<
-        Provider: BlockReaderIdExt + ChainSpecProvider + CanonStateSubscriptions + Clone + 'static,
+        Provider: BlockReaderIdExt
+                      + ChainSpecProvider
+                      + CanonStateSubscriptions<Primitives = OpPrimitives>
+                      + Clone
+                      + 'static,
     >,
 {
     /// Creates a new instance for given context.
@@ -119,8 +124,9 @@ where
 {
     type Provider = N::Provider;
     type Pool = N::Pool;
-    type Network = <N as RpcNodeCore>::Network;
     type Evm = <N as RpcNodeCore>::Evm;
+    type Network = <N as RpcNodeCore>::Network;
+    type PayloadBuilder = ();
 
     #[inline]
     fn pool(&self) -> &Self::Pool {
@@ -135,6 +141,11 @@ where
     #[inline]
     fn network(&self) -> &Self::Network {
         self.inner.network()
+    }
+
+    #[inline]
+    fn payload_builder(&self) -> &Self::PayloadBuilder {
+        &()
     }
 
     #[inline]
@@ -243,7 +254,7 @@ where
 
 impl<N> Trace for OpEthApi<N>
 where
-    Self: LoadState<Evm: ConfigureEvm<Header = Header>>,
+    Self: RpcNodeCore<Provider: BlockReader> + LoadState<Evm: ConfigureEvm<Header = Header>>,
     N: RpcNodeCore,
 {
 }

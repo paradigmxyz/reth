@@ -851,7 +851,7 @@ struct LIBMDBX_API_TYPE slice : public ::MDBX_val {
   /// \brief Checks whether the content of the slice is printable.
   /// \param [in] disable_utf8 By default if `disable_utf8` is `false` function
   /// checks that content bytes are printable ASCII-7 characters or a valid UTF8
-  /// sequences. Otherwise, if if `disable_utf8` is `true` function checks that
+  /// sequences. Otherwise, if `disable_utf8` is `true` function checks that
   /// content bytes are printable extended 8-bit ASCII codes.
   MDBX_NOTHROW_PURE_FUNCTION bool
   is_printable(bool disable_utf8 = false) const noexcept;

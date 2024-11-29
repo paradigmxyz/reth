@@ -36,7 +36,7 @@ The defaults shipped with Reth try to be relatively reasonable, but may not be o
 
 ### `headers`
 
-The headers section controls both the behavior of the header stage, which download historical headers, as well as the primary downloader that fetches headers over P2P.
+The headers section controls both the behavior of the header stage, which downloads historical headers, as well as the primary downloader that fetches headers over P2P.
 
 ```toml
 [stages.headers]
@@ -65,7 +65,7 @@ commit_threshold = 10000
 
 ### `bodies`
 
-The bodies section controls both the behavior of the bodies stage, which download historical block bodies, as well as the primary downloader that fetches block bodies over P2P.
+The bodies section controls both the behavior of the bodies stage, which downloads historical block bodies, as well as the primary downloader that fetches block bodies over P2P.
 
 ```toml
 [stages.bodies]
@@ -102,7 +102,7 @@ The sender recovery stage recovers the address of transaction senders using tran
 
 ```toml
 [stages.sender_recovery]
-# The amount of transactions to recover senders for before
+# The number of transactions to recover senders for before
 # writing the results to disk.
 #
 # Lower thresholds correspond to more frequent disk I/O (writes),

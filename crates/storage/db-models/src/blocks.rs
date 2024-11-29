@@ -1,8 +1,8 @@
 use std::ops::Range;
 
+use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::TxNumber;
 use reth_codecs::{add_arbitrary_tests, Compact};
-use reth_primitives::Withdrawals;
 use serde::{Deserialize, Serialize};
 
 /// Total number of transactions.
@@ -12,7 +12,7 @@ pub type NumTransactions = u64;
 ///
 /// It has the pointer to the transaction Number of the first
 /// transaction in the block and the total number of transactions.
-#[derive(Debug, Default, Eq, PartialEq, Clone, Serialize, Deserialize, Compact)]
+#[derive(Debug, Default, Eq, PartialEq, Clone, Copy, Serialize, Deserialize, Compact)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(compact)]
 pub struct StoredBlockBodyIndices {

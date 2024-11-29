@@ -5,9 +5,10 @@ use crate::{
     error::PoolError,
     metrics::MaintainPoolMetrics,
     traits::{CanonicalStateUpdate, TransactionPool, TransactionPoolExt},
-    BlockInfo, PoolTransaction,
+    BlockInfo, PoolTransaction, PoolUpdateKind,
 };
-use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable};
+use alloy_eips::BlockNumberOrTag;
+use alloy_primitives::{Address, BlockHash, BlockNumber};
 use futures_util::{
     future::{BoxFuture, Fuse, FusedFuture},
     FutureExt, Stream, StreamExt,
@@ -17,9 +18,10 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
 use reth_primitives::{
-    BlockNumberOrTag, PooledTransactionsElementEcRecovered, SealedHeader, TransactionSigned,
+    PooledTransactionsElementEcRecovered, SealedHeader, TransactionSigned,
     TransactionSignedEcRecovered,
 };
+use reth_primitives_traits::SignedTransaction;
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{
@@ -27,6 +29,7 @@ use std::{
     collections::HashSet,
     hash::{Hash, Hasher},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 use tokio::sync::oneshot;
 use tracing::{debug, error, info, trace, warn};
@@ -104,9 +107,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
     let MaintainPoolConfig { max_update_depth, max_reload_accounts, .. } = config;
     // ensure the pool points to latest state
     if let Ok(Some(latest)) = client.header_by_number_or_tag(BlockNumberOrTag::Latest) {
-        let sealed = latest.seal_slow();
-        let (header, seal) = sealed.into_parts();
-        let latest = SealedHeader::new(header, seal);
+        let latest = SealedHeader::seal(latest);
         let chain_spec = client.chain_spec();
         let info = BlockInfo {
             block_gas_limit: latest.gas_limit,
@@ -317,7 +318,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 // find all transactions that were mined in the old chain but not in the new chain
                 let pruned_old_transactions = old_blocks
                     .transactions_ecrecovered()
-                    .filter(|tx| !new_mined_transactions.contains(&tx.hash))
+                    .filter(|tx| !new_mined_transactions.contains(tx.tx_hash()))
                     .filter_map(|tx| {
                         if tx.is_eip4844() {
                             // reorged blobs no longer include the blob, which is necessary for
@@ -325,9 +326,10 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                             // been validated previously, we still need the blob in order to
                             // accurately set the transaction's
                             // encoded-length which is propagated over the network.
-                            pool.get_blob(tx.hash)
+                            pool.get_blob(TransactionSigned::hash(&tx))
                                 .ok()
                                 .flatten()
+                                .map(Arc::unwrap_or_clone)
                                 .and_then(|sidecar| {
                                     PooledTransactionsElementEcRecovered::try_from_blob_transaction(
                                         tx, sidecar,
@@ -351,6 +353,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                     changed_accounts,
                     // all transactions mined in the new chain need to be removed from the pool
                     mined_transactions: new_blocks.transaction_hashes().collect(),
+                    update_kind: PoolUpdateKind::Reorg,
                 };
                 pool.on_canonical_state_change(update);
 
@@ -433,6 +436,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                     pending_block_blob_fee,
                     changed_accounts,
                     mined_transactions,
+                    update_kind: PoolUpdateKind::Commit,
                 };
                 pool.on_canonical_state_change(update);
 
@@ -598,7 +602,7 @@ where
         .into_iter()
         .map(|tx| {
             let recovered: TransactionSignedEcRecovered =
-                tx.transaction.clone().into_consensus().into();
+                tx.transaction.clone_into_consensus().into();
             recovered.into_signed()
         })
         .collect::<Vec<_>>();

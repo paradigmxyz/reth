@@ -3,9 +3,11 @@
 use crate::{
     errors::P2PStreamError, message::MessageError, version::ParseVersionError, DisconnectReason,
 };
+use alloy_chains::Chain;
 use alloy_primitives::B256;
-use reth_chainspec::Chain;
-use reth_primitives::{GotExpected, GotExpectedBoxed, ValidationError};
+use reth_eth_wire_types::EthVersion;
+use reth_ethereum_forks::ValidationError;
+use reth_primitives_traits::{GotExpected, GotExpectedBoxed};
 use std::io;
 
 /// Errors when sending/receiving messages
@@ -88,7 +90,7 @@ pub enum EthHandshakeError {
     MismatchedGenesis(GotExpectedBoxed<B256>),
     #[error("mismatched protocol version in status message: {0}")]
     /// Mismatched protocol versions in status messages.
-    MismatchedProtocolVersion(GotExpected<u8>),
+    MismatchedProtocolVersion(GotExpected<EthVersion>),
     #[error("mismatched chain in status message: {0}")]
     /// Mismatch in chain details in status messages.
     MismatchedChain(GotExpected<Chain>),

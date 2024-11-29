@@ -1,12 +1,5 @@
 //! A generic [`NodeComponentsBuilder`]
 
-use std::{future::Future, marker::PhantomData};
-
-use reth_consensus::Consensus;
-use reth_evm::execute::BlockExecutorProvider;
-use reth_primitives::Header;
-use reth_transaction_pool::TransactionPool;
-
 use crate::{
     components::{
         Components, ConsensusBuilder, ExecutorBuilder, NetworkBuilder, NodeComponents,
@@ -14,6 +7,13 @@ use crate::{
     },
     BuilderContext, ConfigureEvm, FullNodeTypes,
 };
+use alloy_consensus::Header;
+use reth_consensus::Consensus;
+use reth_evm::execute::BlockExecutorProvider;
+use reth_node_api::{NodeTypes, NodeTypesWithEngine};
+use reth_payload_builder::PayloadBuilderHandle;
+use reth_transaction_pool::TransactionPool;
+use std::{future::Future, marker::PhantomData};
 
 /// A generic, general purpose and customizable [`NodeComponentsBuilder`] implementation.
 ///
@@ -358,7 +358,10 @@ impl Default for ComponentsBuilder<(), (), (), (), (), ()> {
 /// A type that's responsible for building the components of the node.
 pub trait NodeComponentsBuilder<Node: FullNodeTypes>: Send {
     /// The components for the node with the given types
-    type Components: NodeComponents<Node>;
+    type Components: NodeComponents<
+        Node,
+        PayloadBuilder = PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>,
+    >;
 
     /// Consumes the type and returns the created components.
     fn build_components(
@@ -374,7 +377,7 @@ where
     Fut: Future<Output = eyre::Result<Components<Node, Pool, EVM, Executor, Cons>>> + Send,
     Pool: TransactionPool + Unpin + 'static,
     EVM: ConfigureEvm<Header = Header>,
-    Executor: BlockExecutorProvider,
+    Executor: BlockExecutorProvider<Primitives = <Node::Types as NodeTypes>::Primitives>,
     Cons: Consensus + Clone + Unpin + 'static,
 {
     type Components = Components<Node, Pool, EVM, Executor, Cons>;

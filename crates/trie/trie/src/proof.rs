@@ -4,7 +4,7 @@ use crate::{
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
     trie_cursor::TrieCursorFactory,
     walker::TrieWalker,
-    HashBuilder, Nibbles,
+    HashBuilder, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use alloy_primitives::{
     keccak256,
@@ -103,8 +103,11 @@ where
         let retainer = targets.keys().map(Nibbles::unpack).collect();
         let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
 
-        let mut storages = HashMap::default();
-        let mut account_rlp = Vec::with_capacity(128);
+        // Initialize all storage multiproofs as empty.
+        // Storage multiproofs for non empty tries will be overwritten if necessary.
+        let mut storages: HashMap<_, _> =
+            targets.keys().map(|key| (*key, StorageMultiProof::empty())).collect();
+        let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
         let mut account_node_iter = TrieNodeIter::new(walker, hashed_account_cursor);
         while let Some(account_node) = account_node_iter.try_next()? {
             match account_node {
@@ -132,6 +135,8 @@ where
                     account.encode(&mut account_rlp as &mut dyn BufMut);
 
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
+
+                    // Overwrite storage multiproof.
                     storages.insert(hashed_address, storage_multiproof);
                 }
             }

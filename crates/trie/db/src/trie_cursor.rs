@@ -11,9 +11,8 @@ use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     trie_cursor::{TrieCursor, TrieCursorFactory},
     updates::StorageTrieUpdates,
-    BranchNodeCompact, Nibbles, StoredNibbles, StoredNibblesSubKey,
+    BranchNodeCompact, Nibbles, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey,
 };
-use reth_trie_common::StorageTrieEntry;
 
 /// Wrapper struct for database transaction implementing trie cursor factory trait.
 #[derive(Debug)]

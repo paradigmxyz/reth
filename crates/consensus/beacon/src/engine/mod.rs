@@ -1,4 +1,5 @@
-use alloy_eips::merge::EPOCH_SLOTS;
+use alloy_consensus::{BlockHeader, Header};
+use alloy_eips::{merge::EPOCH_SLOTS, BlockNumHash};
 use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_types_engine::{
     ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
@@ -10,17 +11,22 @@ use reth_blockchain_tree_api::{
     error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
     BlockStatus, BlockValidationKind, BlockchainTreeEngine, CanonicalOutcome, InsertPayloadOk,
 };
-use reth_engine_primitives::{EngineApiMessageVersion, EngineTypes, PayloadTypes};
+use reth_engine_primitives::{
+    BeaconEngineMessage, BeaconOnNewPayloadError, EngineApiMessageVersion, EngineTypes,
+    ForkchoiceStateHash, ForkchoiceStateTracker, ForkchoiceStatus, OnForkChoiceUpdated,
+    PayloadTypes,
+};
 use reth_errors::{BlockValidationError, ProviderResult, RethError, RethResult};
 use reth_network_p2p::{
     sync::{NetworkSyncUpdater, SyncState},
-    BlockClient,
+    EthBlockClient,
 };
-use reth_node_types::NodeTypesWithEngine;
+use reth_node_types::{Block, BlockTy, NodeTypesWithEngine};
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_payload_primitives::{PayloadAttributes, PayloadBuilder, PayloadBuilderAttributes};
+use reth_payload_builder_primitives::PayloadBuilder;
+use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{BlockNumHash, Head, Header, SealedBlock, SealedHeader};
+use reth_primitives::{EthPrimitives, Head, SealedBlock, SealedHeader};
 use reth_provider::{
     providers::ProviderNodeTypes, BlockIdReader, BlockReader, BlockSource, CanonChainTracker,
     ChainSpecProvider, ProviderError, StageCheckpointReader,
@@ -41,14 +47,8 @@ use tokio::sync::{
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
 
-mod message;
-pub use message::{BeaconEngineMessage, OnForkChoiceUpdated};
-
 mod error;
-pub use error::{
-    BeaconConsensusEngineError, BeaconEngineResult, BeaconForkChoiceUpdateError,
-    BeaconOnNewPayloadError,
-};
+pub use error::{BeaconConsensusEngineError, BeaconEngineResult, BeaconForkChoiceUpdateError};
 
 mod invalid_headers;
 pub use invalid_headers::InvalidHeaderCache;
@@ -58,9 +58,6 @@ pub use event::{BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress};
 
 mod handle;
 pub use handle::BeaconConsensusEngineHandle;
-
-mod forkchoice;
-pub use forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker, ForkchoiceStatus};
 
 mod metrics;
 use metrics::EngineMetrics;
@@ -87,9 +84,15 @@ const MAX_INVALID_HEADERS: u32 = 512u32;
 pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 
 /// Helper trait expressing requirements for node types to be used in engine.
-pub trait EngineNodeTypes: ProviderNodeTypes + NodeTypesWithEngine {}
+pub trait EngineNodeTypes:
+    ProviderNodeTypes<Primitives = EthPrimitives> + NodeTypesWithEngine
+{
+}
 
-impl<T> EngineNodeTypes for T where T: ProviderNodeTypes + NodeTypesWithEngine {}
+impl<T> EngineNodeTypes for T where
+    T: ProviderNodeTypes<Primitives = EthPrimitives> + NodeTypesWithEngine
+{
+}
 
 /// Represents a pending forkchoice update.
 ///
@@ -174,7 +177,7 @@ type PendingForkchoiceUpdate<PayloadAttributes> =
 pub struct BeaconConsensusEngine<N, BT, Client>
 where
     N: EngineNodeTypes,
-    Client: BlockClient,
+    Client: EthBlockClient,
     BT: BlockchainTreeEngine
         + BlockReader
         + BlockIdReader
@@ -231,13 +234,13 @@ impl<N, BT, Client> BeaconConsensusEngine<N, BT, Client>
 where
     N: EngineNodeTypes,
     BT: BlockchainTreeEngine
-        + BlockReader
+        + BlockReader<Block = BlockTy<N>>
         + BlockIdReader
         + CanonChainTracker
         + StageCheckpointReader
         + ChainSpecProvider<ChainSpec = N::ChainSpec>
         + 'static,
-    Client: BlockClient + 'static,
+    Client: EthBlockClient + 'static,
 {
     /// Create a new instance of the [`BeaconConsensusEngine`].
     #[allow(clippy::too_many_arguments)]
@@ -949,7 +952,7 @@ where
                 .blockchain
                 .find_block_by_hash(safe_block_hash, BlockSource::Any)?
                 .ok_or(ProviderError::UnknownBlockHash(safe_block_hash))?;
-            self.blockchain.set_safe(SealedHeader::new(safe.header, safe_block_hash));
+            self.blockchain.set_safe(SealedHeader::new(safe.split().0, safe_block_hash));
         }
         Ok(())
     }
@@ -969,9 +972,9 @@ where
                 .blockchain
                 .find_block_by_hash(finalized_block_hash, BlockSource::Any)?
                 .ok_or(ProviderError::UnknownBlockHash(finalized_block_hash))?;
-            self.blockchain.finalize_block(finalized.number)?;
+            self.blockchain.finalize_block(finalized.header().number())?;
             self.blockchain
-                .set_finalized(SealedHeader::new(finalized.header, finalized_block_hash));
+                .set_finalized(SealedHeader::new(finalized.split().0, finalized_block_hash));
         }
         Ok(())
     }
@@ -1799,9 +1802,9 @@ where
 impl<N, BT, Client> Future for BeaconConsensusEngine<N, BT, Client>
 where
     N: EngineNodeTypes,
-    Client: BlockClient + 'static,
+    Client: EthBlockClient + 'static,
     BT: BlockchainTreeEngine
-        + BlockReader
+        + BlockReader<Block = BlockTy<N>>
         + BlockIdReader
         + CanonChainTracker
         + StageCheckpointReader
@@ -1994,7 +1997,9 @@ mod tests {
     use alloy_rpc_types_engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
     use assert_matches::assert_matches;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
-    use reth_provider::{BlockWriter, ProviderFactory};
+    use reth_node_types::FullNodePrimitives;
+    use reth_primitives::BlockExt;
+    use reth_provider::{BlockWriter, ProviderFactory, StorageLocation};
     use reth_rpc_types_compat::engine::payload::block_to_payload_v1;
     use reth_stages::{ExecOutput, PipelineError, StageError};
     use reth_stages_api::StageCheckpoint;
@@ -2172,7 +2177,10 @@ mod tests {
         assert_matches!(rx.await, Ok(Ok(())));
     }
 
-    fn insert_blocks<'a, N: ProviderNodeTypes>(
+    fn insert_blocks<
+        'a,
+        N: ProviderNodeTypes<Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>>,
+    >(
         provider_factory: ProviderFactory<N>,
         mut blocks: impl Iterator<Item = &'a SealedBlock>,
     ) {
@@ -2182,6 +2190,7 @@ mod tests {
                 provider
                     .insert_block(
                         b.clone().try_seal_with_senders().expect("invalid tx signature in block"),
+                        StorageLocation::Database,
                     )
                     .map(drop)
             })
@@ -2876,7 +2885,7 @@ mod tests {
             block1.header.set_difficulty(
                 MAINNET.fork(EthereumHardfork::Paris).ttd().unwrap() - U256::from(1),
             );
-            block1 = block1.unseal().seal_slow();
+            block1 = block1.unseal::<reth_primitives::Block>().seal_slow();
             let (block2, exec_result2) = data.blocks[1].clone();
             let mut block2 = block2.unseal().block;
             block2.body.withdrawals = None;

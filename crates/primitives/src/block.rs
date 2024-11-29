@@ -1,16 +1,16 @@
 use crate::{
-    GotExpected, Header, SealedHeader, TransactionSigned, TransactionSignedEcRecovered, Withdrawals,
+    traits::BlockExt, transaction::SignedTransactionIntoRecoveredExt, BlockBodyTxExt, GotExpected,
+    SealedHeader, TransactionSigned, TransactionSignedEcRecovered,
 };
 use alloc::vec::Vec;
-pub use alloy_eips::eip1898::{
-    BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, ForkBlock, RpcBlockHash,
-};
-use alloy_eips::eip2718::Encodable2718;
-use alloy_primitives::{Address, Bytes, Sealable, B256};
+use alloy_consensus::Header;
+use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
+use alloy_primitives::{Address, Bytes, B256};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
 pub use reth_primitives_traits::test_utils::{generate_valid_header, valid_header_strategy};
+use reth_primitives_traits::{BlockBody as _, InMemorySize, SignedTransaction};
 use serde::{Deserialize, Serialize};
 
 /// Ethereum full block.
@@ -26,73 +26,31 @@ pub struct Block {
     pub body: BlockBody,
 }
 
-impl Block {
-    /// Calculate the header hash and seal the block so that it can't be changed.
-    pub fn seal_slow(self) -> SealedBlock {
-        let sealed = self.header.seal_slow();
-        let (header, seal) = sealed.into_parts();
-        SealedBlock { header: SealedHeader::new(header, seal), body: self.body }
+impl reth_primitives_traits::Block for Block {
+    type Header = Header;
+    type Body = BlockBody;
+
+    fn new(header: Self::Header, body: Self::Body) -> Self {
+        Self { header, body }
     }
 
-    /// Seal the block with a known hash.
-    ///
-    /// WARNING: This method does not perform validation whether the hash is correct.
-    pub fn seal(self, hash: B256) -> SealedBlock {
-        SealedBlock { header: SealedHeader::new(self.header, hash), body: self.body }
+    fn header(&self) -> &Self::Header {
+        &self.header
     }
 
-    /// Expensive operation that recovers transaction signer. See [`SealedBlockWithSenders`].
-    pub fn senders(&self) -> Option<Vec<Address>> {
-        self.body.recover_signers()
+    fn body(&self) -> &Self::Body {
+        &self.body
     }
 
-    /// Transform into a [`BlockWithSenders`].
-    ///
-    /// # Panics
-    ///
-    /// If the number of senders does not match the number of transactions in the block
-    /// and the signer recovery for one of the transactions fails.
-    ///
-    /// Note: this is expected to be called with blocks read from disk.
-    #[track_caller]
-    pub fn with_senders_unchecked(self, senders: Vec<Address>) -> BlockWithSenders {
-        self.try_with_senders_unchecked(senders).expect("stored block is valid")
+    fn split(self) -> (Self::Header, Self::Body) {
+        (self.header, self.body)
     }
+}
 
-    /// Transform into a [`BlockWithSenders`] using the given senders.
-    ///
-    /// If the number of senders does not match the number of transactions in the block, this falls
-    /// back to manually recovery, but _without ensuring that the signature has a low `s` value_.
-    /// See also [`TransactionSigned::recover_signer_unchecked`]
-    ///
-    /// Returns an error if a signature is invalid.
-    #[track_caller]
-    pub fn try_with_senders_unchecked(
-        self,
-        senders: Vec<Address>,
-    ) -> Result<BlockWithSenders, Self> {
-        let senders = if self.body.transactions.len() == senders.len() {
-            senders
-        } else {
-            let Some(senders) = self.body.recover_signers() else { return Err(self) };
-            senders
-        };
-
-        Ok(BlockWithSenders { block: self, senders })
-    }
-
-    /// **Expensive**. Transform into a [`BlockWithSenders`] by recovering senders in the contained
-    /// transactions.
-    ///
-    /// Returns `None` if a transaction is invalid.
-    pub fn with_recovered_senders(self) -> Option<BlockWithSenders> {
-        let senders = self.senders()?;
-        Some(BlockWithSenders { block: self, senders })
-    }
-
+impl InMemorySize for Block {
     /// Calculates a heuristic for the in-memory size of the [`Block`].
     #[inline]
-    pub fn size(&self) -> usize {
+    fn size(&self) -> usize {
         self.header.size() + self.body.size()
     }
 }
@@ -150,26 +108,26 @@ mod block_rlp {
     }
 
     impl Encodable for Block {
-        fn length(&self) -> usize {
-            let helper: HelperRef<'_, _> = self.into();
-            helper.length()
-        }
-
         fn encode(&self, out: &mut dyn bytes::BufMut) {
             let helper: HelperRef<'_, _> = self.into();
             helper.encode(out)
+        }
+
+        fn length(&self) -> usize {
+            let helper: HelperRef<'_, _> = self.into();
+            helper.length()
         }
     }
 
     impl Encodable for SealedBlock {
-        fn length(&self) -> usize {
-            let helper: HelperRef<'_, _> = self.into();
-            helper.length()
-        }
-
         fn encode(&self, out: &mut dyn bytes::BufMut) {
             let helper: HelperRef<'_, _> = self.into();
             helper.encode(out)
+        }
+
+        fn length(&self) -> usize {
+            let helper: HelperRef<'_, _> = self.into();
+            helper.length()
         }
     }
 }
@@ -194,39 +152,44 @@ impl<'a> arbitrary::Arbitrary<'a> for Block {
 
 /// Sealed block with senders recovered from transactions.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deref, DerefMut)]
-pub struct BlockWithSenders {
+pub struct BlockWithSenders<B = Block> {
     /// Block
     #[deref]
     #[deref_mut]
-    pub block: Block,
+    pub block: B,
     /// List of senders that match the transactions in the block
     pub senders: Vec<Address>,
 }
 
-impl BlockWithSenders {
+impl<B: reth_primitives_traits::Block> BlockWithSenders<B> {
+    /// New block with senders
+    pub const fn new_unchecked(block: B, senders: Vec<Address>) -> Self {
+        Self { block, senders }
+    }
+
     /// New block with senders. Return none if len of tx and senders does not match
-    pub fn new(block: Block, senders: Vec<Address>) -> Option<Self> {
-        (block.body.transactions.len() == senders.len()).then_some(Self { block, senders })
+    pub fn new(block: B, senders: Vec<Address>) -> Option<Self> {
+        (block.body().transactions().len() == senders.len()).then_some(Self { block, senders })
     }
 
     /// Seal the block with a known hash.
     ///
     /// WARNING: This method does not perform validation whether the hash is correct.
     #[inline]
-    pub fn seal(self, hash: B256) -> SealedBlockWithSenders {
+    pub fn seal(self, hash: B256) -> SealedBlockWithSenders<B> {
         let Self { block, senders } = self;
-        SealedBlockWithSenders { block: block.seal(hash), senders }
+        SealedBlockWithSenders::<B> { block: block.seal(hash), senders }
     }
 
     /// Calculate the header hash and seal the block with senders so that it can't be changed.
     #[inline]
-    pub fn seal_slow(self) -> SealedBlockWithSenders {
+    pub fn seal_slow(self) -> SealedBlockWithSenders<B> {
         SealedBlockWithSenders { block: self.block.seal_slow(), senders: self.senders }
     }
 
     /// Split Structure to its components
     #[inline]
-    pub fn into_components(self) -> (Block, Vec<Address>) {
+    pub fn into_components(self) -> (B, Vec<Address>) {
         (self.block, self.senders)
     }
 
@@ -234,18 +197,27 @@ impl BlockWithSenders {
     #[inline]
     pub fn transactions_with_sender(
         &self,
-    ) -> impl Iterator<Item = (&Address, &TransactionSigned)> + '_ {
-        self.senders.iter().zip(self.block.body.transactions())
+    ) -> impl Iterator<Item = (&Address, &<B::Body as reth_primitives_traits::BlockBody>::Transaction)>
+           + '_ {
+        self.senders.iter().zip(self.block.body().transactions())
     }
 
     /// Returns an iterator over all transactions in the chain.
     #[inline]
     pub fn into_transactions_ecrecovered(
         self,
-    ) -> impl Iterator<Item = TransactionSignedEcRecovered> {
+    ) -> impl Iterator<
+        Item = TransactionSignedEcRecovered<
+            <B::Body as reth_primitives_traits::BlockBody>::Transaction,
+        >,
+    >
+    where
+        <B::Body as reth_primitives_traits::BlockBody>::Transaction: SignedTransaction,
+    {
         self.block
-            .body
-            .transactions
+            .split()
+            .1
+            .into_transactions()
             .into_iter()
             .zip(self.senders)
             .map(|(tx, sender)| tx.with_signer(sender))
@@ -253,30 +225,31 @@ impl BlockWithSenders {
 
     /// Consumes the block and returns the transactions of the block.
     #[inline]
-    pub fn into_transactions(self) -> Vec<TransactionSigned> {
-        self.block.body.transactions
+    pub fn into_transactions(
+        self,
+    ) -> Vec<<B::Body as reth_primitives_traits::BlockBody>::Transaction> {
+        self.block.split().1.into_transactions()
     }
 }
 
 /// Sealed Ethereum full block.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
-#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp, 32))]
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Deref, DerefMut)]
-pub struct SealedBlock {
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Deref, DerefMut)]
+pub struct SealedBlock<H = Header, B = BlockBody> {
     /// Locked block header.
     #[deref]
     #[deref_mut]
-    pub header: SealedHeader,
+    pub header: SealedHeader<H>,
     /// Block body.
-    pub body: BlockBody,
+    pub body: B,
 }
 
-impl SealedBlock {
+impl<H, B> SealedBlock<H, B> {
     /// Create a new sealed block instance using the sealed header and block body.
     #[inline]
-    pub const fn new(header: SealedHeader, body: BlockBody) -> Self {
+    pub const fn new(header: SealedHeader<H>, body: B) -> Self {
         Self { header, body }
     }
 
@@ -286,104 +259,18 @@ impl SealedBlock {
         self.header.hash()
     }
 
-    /// Splits the sealed block into underlying components
-    #[inline]
-    pub fn split(self) -> (SealedHeader, Vec<TransactionSigned>, Vec<Header>) {
-        (self.header, self.body.transactions, self.body.ommers)
-    }
-
     /// Splits the [`BlockBody`] and [`SealedHeader`] into separate components
     #[inline]
-    pub fn split_header_body(self) -> (SealedHeader, BlockBody) {
+    pub fn split_header_body(self) -> (SealedHeader<H>, B) {
         (self.header, self.body)
     }
+}
 
+impl SealedBlock {
     /// Returns an iterator over all blob transactions of the block
     #[inline]
     pub fn blob_transactions_iter(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
         self.body.blob_transactions_iter()
-    }
-
-    /// Returns only the blob transactions, if any, from the block body.
-    #[inline]
-    pub fn blob_transactions(&self) -> Vec<&TransactionSigned> {
-        self.blob_transactions_iter().collect()
-    }
-
-    /// Returns an iterator over all blob versioned hashes from the block body.
-    #[inline]
-    pub fn blob_versioned_hashes_iter(&self) -> impl Iterator<Item = &B256> + '_ {
-        self.blob_transactions_iter()
-            .filter_map(|tx| tx.as_eip4844().map(|blob_tx| &blob_tx.blob_versioned_hashes))
-            .flatten()
-    }
-
-    /// Returns all blob versioned hashes from the block body.
-    #[inline]
-    pub fn blob_versioned_hashes(&self) -> Vec<&B256> {
-        self.blob_versioned_hashes_iter().collect()
-    }
-
-    /// Expensive operation that recovers transaction signer. See [`SealedBlockWithSenders`].
-    pub fn senders(&self) -> Option<Vec<Address>> {
-        self.body.recover_signers()
-    }
-
-    /// Seal sealed block with recovered transaction senders.
-    pub fn seal_with_senders(self) -> Option<SealedBlockWithSenders> {
-        self.try_seal_with_senders().ok()
-    }
-
-    /// Seal sealed block with recovered transaction senders.
-    pub fn try_seal_with_senders(self) -> Result<SealedBlockWithSenders, Self> {
-        match self.senders() {
-            Some(senders) => Ok(SealedBlockWithSenders { block: self, senders }),
-            None => Err(self),
-        }
-    }
-
-    /// Transform into a [`SealedBlockWithSenders`].
-    ///
-    /// # Panics
-    ///
-    /// If the number of senders does not match the number of transactions in the block
-    /// and the signer recovery for one of the transactions fails.
-    #[track_caller]
-    pub fn with_senders_unchecked(self, senders: Vec<Address>) -> SealedBlockWithSenders {
-        self.try_with_senders_unchecked(senders).expect("stored block is valid")
-    }
-
-    /// Transform into a [`SealedBlockWithSenders`] using the given senders.
-    ///
-    /// If the number of senders does not match the number of transactions in the block, this falls
-    /// back to manually recovery, but _without ensuring that the signature has a low `s` value_.
-    /// See also [`TransactionSigned::recover_signer_unchecked`]
-    ///
-    /// Returns an error if a signature is invalid.
-    #[track_caller]
-    pub fn try_with_senders_unchecked(
-        self,
-        senders: Vec<Address>,
-    ) -> Result<SealedBlockWithSenders, Self> {
-        let senders = if self.body.transactions.len() == senders.len() {
-            senders
-        } else {
-            let Some(senders) = self.body.recover_signers() else { return Err(self) };
-            senders
-        };
-
-        Ok(SealedBlockWithSenders { block: self, senders })
-    }
-
-    /// Unseal the block
-    pub fn unseal(self) -> Block {
-        Block { header: self.header.unseal(), body: self.body }
-    }
-
-    /// Calculates a heuristic for the in-memory size of the [`SealedBlock`].
-    #[inline]
-    pub fn size(&self) -> usize {
-        self.header.size() + self.body.size()
     }
 
     /// Calculates the total gas used by blob transactions in the sealed block.
@@ -403,6 +290,110 @@ impl SealedBlock {
         self.body.has_eip7702_transactions()
     }
 
+    /// Returns only the blob transactions, if any, from the block body.
+    #[inline]
+    pub fn blob_transactions(&self) -> Vec<&TransactionSigned> {
+        self.blob_transactions_iter().collect()
+    }
+
+    /// Returns an iterator over all blob versioned hashes from the block body.
+    #[inline]
+    pub fn blob_versioned_hashes_iter(&self) -> impl Iterator<Item = &B256> + '_ {
+        self.blob_transactions_iter()
+            .filter_map(|tx| tx.as_eip4844().map(|blob_tx| &blob_tx.blob_versioned_hashes))
+            .flatten()
+    }
+}
+
+impl<H, B> SealedBlock<H, B>
+where
+    H: reth_primitives_traits::BlockHeader,
+    B: reth_primitives_traits::BlockBody,
+{
+    /// Splits the sealed block into underlying components
+    #[inline]
+    pub fn split(self) -> (SealedHeader<H>, B) {
+        (self.header, self.body)
+    }
+
+    /// Expensive operation that recovers transaction signer. See [`SealedBlockWithSenders`].
+    pub fn senders(&self) -> Option<Vec<Address>>
+    where
+        B::Transaction: SignedTransaction,
+    {
+        self.body.recover_signers()
+    }
+
+    /// Seal sealed block with recovered transaction senders.
+    pub fn seal_with_senders<T>(self) -> Option<SealedBlockWithSenders<T>>
+    where
+        B::Transaction: SignedTransaction,
+        T: reth_primitives_traits::Block<Header = H, Body = B>,
+    {
+        self.try_seal_with_senders().ok()
+    }
+
+    /// Seal sealed block with recovered transaction senders.
+    pub fn try_seal_with_senders<T>(self) -> Result<SealedBlockWithSenders<T>, Self>
+    where
+        B::Transaction: SignedTransaction,
+        T: reth_primitives_traits::Block<Header = H, Body = B>,
+    {
+        match self.senders() {
+            Some(senders) => Ok(SealedBlockWithSenders { block: self, senders }),
+            None => Err(self),
+        }
+    }
+
+    /// Transform into a [`SealedBlockWithSenders`].
+    ///
+    /// # Panics
+    ///
+    /// If the number of senders does not match the number of transactions in the block
+    /// and the signer recovery for one of the transactions fails.
+    #[track_caller]
+    pub fn with_senders_unchecked<T>(self, senders: Vec<Address>) -> SealedBlockWithSenders<T>
+    where
+        B::Transaction: SignedTransaction,
+        T: reth_primitives_traits::Block<Header = H, Body = B>,
+    {
+        self.try_with_senders_unchecked(senders).expect("stored block is valid")
+    }
+
+    /// Transform into a [`SealedBlockWithSenders`] using the given senders.
+    ///
+    /// If the number of senders does not match the number of transactions in the block, this falls
+    /// back to manually recovery, but _without ensuring that the signature has a low `s` value_.
+    /// See also [`TransactionSigned::recover_signer_unchecked`]
+    ///
+    /// Returns an error if a signature is invalid.
+    #[track_caller]
+    pub fn try_with_senders_unchecked<T>(
+        self,
+        senders: Vec<Address>,
+    ) -> Result<SealedBlockWithSenders<T>, Self>
+    where
+        B::Transaction: SignedTransaction,
+        T: reth_primitives_traits::Block<Header = H, Body = B>,
+    {
+        let senders = if self.body.transactions().len() == senders.len() {
+            senders
+        } else {
+            let Some(senders) = self.body.recover_signers_unchecked() else { return Err(self) };
+            senders
+        };
+
+        Ok(SealedBlockWithSenders { block: self, senders })
+    }
+
+    /// Unseal the block
+    pub fn unseal<Block>(self) -> Block
+    where
+        Block: reth_primitives_traits::Block<Header = H, Body = B>,
+    {
+        Block::new(self.header.unseal(), self.body)
+    }
+
     /// Ensures that the transaction root in the block header is valid.
     ///
     /// The transaction root is the Keccak 256-bit hash of the root node of the trie structure
@@ -415,13 +406,16 @@ impl SealedBlock {
     ///
     /// Returns `Err(error)` if the transaction root validation fails, providing a `GotExpected`
     /// error containing the calculated and expected roots.
-    pub fn ensure_transaction_root_valid(&self) -> Result<(), GotExpected<B256>> {
+    pub fn ensure_transaction_root_valid(&self) -> Result<(), GotExpected<B256>>
+    where
+        B::Transaction: Encodable2718,
+    {
         let calculated_root = self.body.calculate_tx_root();
 
-        if self.header.transactions_root != calculated_root {
+        if self.header.transactions_root() != calculated_root {
             return Err(GotExpected {
                 got: calculated_root,
-                expected: self.header.transactions_root,
+                expected: self.header.transactions_root(),
             })
         }
 
@@ -430,8 +424,18 @@ impl SealedBlock {
 
     /// Returns a vector of transactions RLP encoded with
     /// [`alloy_eips::eip2718::Encodable2718::encoded_2718`].
-    pub fn raw_transactions(&self) -> Vec<Bytes> {
-        self.body.transactions().map(|tx| tx.encoded_2718().into()).collect()
+    pub fn raw_transactions(&self) -> Vec<Bytes>
+    where
+        B::Transaction: Encodable2718,
+    {
+        self.body.transactions().iter().map(|tx| tx.encoded_2718().into()).collect()
+    }
+}
+
+impl<H: InMemorySize, B: InMemorySize> InMemorySize for SealedBlock<H, B> {
+    #[inline]
+    fn size(&self) -> usize {
+        self.header.size() + self.body.size()
     }
 }
 
@@ -441,39 +445,102 @@ impl From<SealedBlock> for Block {
     }
 }
 
+impl<H, B> Default for SealedBlock<H, B>
+where
+    SealedHeader<H>: Default,
+    B: Default,
+{
+    fn default() -> Self {
+        Self { header: Default::default(), body: Default::default() }
+    }
+}
+
+impl<H, B> reth_primitives_traits::Block for SealedBlock<H, B>
+where
+    H: reth_primitives_traits::BlockHeader + 'static,
+    B: reth_primitives_traits::BlockBody<OmmerHeader = H> + 'static,
+    Self: Serialize + for<'a> Deserialize<'a>,
+{
+    type Header = H;
+    type Body = B;
+
+    fn new(header: Self::Header, body: Self::Body) -> Self {
+        Self { header: SealedHeader::seal(header), body }
+    }
+
+    fn header(&self) -> &Self::Header {
+        self.header.header()
+    }
+
+    fn body(&self) -> &Self::Body {
+        &self.body
+    }
+
+    fn split(self) -> (Self::Header, Self::Body) {
+        (self.header.unseal(), self.body)
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a, H, B> arbitrary::Arbitrary<'a> for SealedBlock<H, B>
+where
+    SealedHeader<H>: arbitrary::Arbitrary<'a>,
+    B: arbitrary::Arbitrary<'a>,
+{
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self { header: u.arbitrary()?, body: u.arbitrary()? })
+    }
+}
+
+/// A helepr trait to construct [`SealedBlock`] from a [`reth_primitives_traits::Block`].
+pub type SealedBlockFor<B> = SealedBlock<
+    <B as reth_primitives_traits::Block>::Header,
+    <B as reth_primitives_traits::Block>::Body,
+>;
 /// Sealed block with senders recovered from transactions.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Deref, DerefMut)]
-pub struct SealedBlockWithSenders {
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Deref, DerefMut)]
+pub struct SealedBlockWithSenders<B: reth_primitives_traits::Block = Block> {
     /// Sealed block
     #[deref]
     #[deref_mut]
-    pub block: SealedBlock,
+    #[serde(bound = "SealedBlock<B::Header, B::Body>: Serialize + serde::de::DeserializeOwned")]
+    pub block: SealedBlock<B::Header, B::Body>,
     /// List of senders that match transactions from block.
     pub senders: Vec<Address>,
 }
 
-impl SealedBlockWithSenders {
-    /// New sealed block with sender. Return none if len of tx and senders does not match
-    pub fn new(block: SealedBlock, senders: Vec<Address>) -> Option<Self> {
-        (block.body.transactions.len() == senders.len()).then_some(Self { block, senders })
+impl<B: reth_primitives_traits::Block> Default for SealedBlockWithSenders<B> {
+    fn default() -> Self {
+        Self { block: SealedBlock::default(), senders: Default::default() }
     }
+}
 
+impl<B: reth_primitives_traits::Block> SealedBlockWithSenders<B> {
+    /// New sealed block with sender. Return none if len of tx and senders does not match
+    pub fn new(block: SealedBlock<B::Header, B::Body>, senders: Vec<Address>) -> Option<Self> {
+        (block.body.transactions().len() == senders.len()).then_some(Self { block, senders })
+    }
+}
+
+impl<B: reth_primitives_traits::Block> SealedBlockWithSenders<B> {
     /// Split Structure to its components
     #[inline]
-    pub fn into_components(self) -> (SealedBlock, Vec<Address>) {
+    pub fn into_components(self) -> (SealedBlock<B::Header, B::Body>, Vec<Address>) {
         (self.block, self.senders)
     }
 
     /// Returns the unsealed [`BlockWithSenders`]
     #[inline]
-    pub fn unseal(self) -> BlockWithSenders {
-        let Self { block, senders } = self;
-        BlockWithSenders { block: block.unseal(), senders }
+    pub fn unseal(self) -> BlockWithSenders<B> {
+        let (block, senders) = self.into_components();
+        let (header, body) = block.split();
+        let header = header.unseal();
+        BlockWithSenders::new_unchecked(B::new(header, body), senders)
     }
 
     /// Returns an iterator over all transactions in the block.
     #[inline]
-    pub fn transactions(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
+    pub fn transactions(&self) -> &[<B::Body as reth_primitives_traits::BlockBody>::Transaction] {
         self.block.body.transactions()
     }
 
@@ -481,24 +548,34 @@ impl SealedBlockWithSenders {
     #[inline]
     pub fn transactions_with_sender(
         &self,
-    ) -> impl Iterator<Item = (&Address, &TransactionSigned)> + '_ {
+    ) -> impl Iterator<Item = (&Address, &<B::Body as reth_primitives_traits::BlockBody>::Transaction)>
+           + '_ {
         self.senders.iter().zip(self.block.body.transactions())
     }
 
     /// Consumes the block and returns the transactions of the block.
     #[inline]
-    pub fn into_transactions(self) -> Vec<TransactionSigned> {
-        self.block.body.transactions
+    pub fn into_transactions(
+        self,
+    ) -> Vec<<B::Body as reth_primitives_traits::BlockBody>::Transaction> {
+        self.block.body.into_transactions()
     }
 
     /// Returns an iterator over all transactions in the chain.
     #[inline]
     pub fn into_transactions_ecrecovered(
         self,
-    ) -> impl Iterator<Item = TransactionSignedEcRecovered> {
+    ) -> impl Iterator<
+        Item = TransactionSignedEcRecovered<
+            <B::Body as reth_primitives_traits::BlockBody>::Transaction,
+        >,
+    >
+    where
+        <B::Body as reth_primitives_traits::BlockBody>::Transaction: SignedTransaction,
+    {
         self.block
             .body
-            .transactions
+            .into_transactions()
             .into_iter()
             .zip(self.senders)
             .map(|(tx, sender)| tx.with_signer(sender))
@@ -508,7 +585,7 @@ impl SealedBlockWithSenders {
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for SealedBlockWithSenders {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let block = SealedBlock::arbitrary(u)?;
+        let block: SealedBlock = SealedBlock::arbitrary(u)?;
 
         let senders = block
             .body
@@ -544,11 +621,6 @@ impl BlockBody {
         Block { header, body: self }
     }
 
-    /// Calculate the transaction root for the block body.
-    pub fn calculate_tx_root(&self) -> B256 {
-        crate::proofs::calculate_transaction_root(&self.transactions)
-    }
-
     /// Calculate the ommers root for the block body.
     pub fn calculate_ommers_root(&self) -> B256 {
         crate::proofs::calculate_ommers_root(&self.ommers)
@@ -558,11 +630,6 @@ impl BlockBody {
     /// withdrawals, this will return `None`.
     pub fn calculate_withdrawals_root(&self) -> Option<B256> {
         self.withdrawals.as_ref().map(|w| crate::proofs::calculate_withdrawals_root(w))
-    }
-
-    /// Recover signer addresses for all transactions in the block body.
-    pub fn recover_signers(&self) -> Option<Vec<Address>> {
-        TransactionSigned::recover_signers(&self.transactions, self.transactions.len())
     }
 
     /// Returns whether or not the block body contains any blob transactions.
@@ -602,16 +669,12 @@ impl BlockBody {
     pub fn blob_versioned_hashes(&self) -> Vec<&B256> {
         self.blob_versioned_hashes_iter().collect()
     }
+}
 
-    /// Returns an iterator over all transactions.
-    #[inline]
-    pub fn transactions(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
-        self.transactions.iter()
-    }
-
+impl InMemorySize for BlockBody {
     /// Calculates a heuristic for the in-memory size of the [`BlockBody`].
     #[inline]
-    pub fn size(&self) -> usize {
+    fn size(&self) -> usize {
         self.transactions.iter().map(TransactionSigned::size).sum::<usize>() +
             self.transactions.capacity() * core::mem::size_of::<TransactionSigned>() +
             self.ommers.iter().map(Header::size).sum::<usize>() +
@@ -619,6 +682,27 @@ impl BlockBody {
             self.withdrawals
                 .as_ref()
                 .map_or(core::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
+    }
+}
+
+impl reth_primitives_traits::BlockBody for BlockBody {
+    type Transaction = TransactionSigned;
+    type OmmerHeader = Header;
+
+    fn transactions(&self) -> &[Self::Transaction] {
+        &self.transactions
+    }
+
+    fn into_transactions(self) -> Vec<Self::Transaction> {
+        self.transactions
+    }
+
+    fn withdrawals(&self) -> Option<&Withdrawals> {
+        self.withdrawals.as_ref()
+    }
+
+    fn ommers(&self) -> Option<&[Self::OmmerHeader]> {
+        Some(&self.ommers)
     }
 }
 
@@ -658,8 +742,9 @@ impl<'a> arbitrary::Arbitrary<'a> for BlockBody {
 pub(super) mod serde_bincode_compat {
     use alloc::{borrow::Cow, vec::Vec};
     use alloy_consensus::serde_bincode_compat::Header;
+    use alloy_eips::eip4895::Withdrawals;
     use alloy_primitives::Address;
-    use reth_primitives_traits::{serde_bincode_compat::SealedHeader, Withdrawals};
+    use reth_primitives_traits::serde_bincode_compat::{SealedHeader, SerdeBincodeCompat};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -725,6 +810,10 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
+    impl SerdeBincodeCompat for super::BlockBody {
+        type BincodeRepr<'a> = BlockBody<'a>;
+    }
+
     /// Bincode-compatible [`super::SealedBlock`] serde implementation.
     ///
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
@@ -741,19 +830,34 @@ pub(super) mod serde_bincode_compat {
     /// }
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
-    pub struct SealedBlock<'a> {
-        header: SealedHeader<'a>,
-        body: BlockBody<'a>,
+    pub struct SealedBlock<'a, H = super::Header, B = super::BlockBody>
+    where
+        H: SerdeBincodeCompat,
+        B: SerdeBincodeCompat,
+    {
+        header: SealedHeader<'a, H>,
+        body: B::BincodeRepr<'a>,
     }
 
-    impl<'a> From<&'a super::SealedBlock> for SealedBlock<'a> {
-        fn from(value: &'a super::SealedBlock) -> Self {
-            Self { header: SealedHeader::from(&value.header), body: BlockBody::from(&value.body) }
+    impl<'a, H, B> From<&'a super::SealedBlock<H, B>> for SealedBlock<'a, H, B>
+    where
+        H: SerdeBincodeCompat,
+        B: SerdeBincodeCompat,
+    {
+        fn from(value: &'a super::SealedBlock<H, B>) -> Self {
+            Self {
+                header: SealedHeader::from(&value.header),
+                body: B::BincodeRepr::from(&value.body),
+            }
         }
     }
 
-    impl<'a> From<SealedBlock<'a>> for super::SealedBlock {
-        fn from(value: SealedBlock<'a>) -> Self {
+    impl<'a, H, B> From<SealedBlock<'a, H, B>> for super::SealedBlock<H, B>
+    where
+        H: SerdeBincodeCompat,
+        B: SerdeBincodeCompat,
+    {
+        fn from(value: SealedBlock<'a, H, B>) -> Self {
             Self { header: value.header.into(), body: value.body.into() }
         }
     }
@@ -792,19 +896,28 @@ pub(super) mod serde_bincode_compat {
     /// }
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
-    pub struct SealedBlockWithSenders<'a> {
-        block: SealedBlock<'a>,
+    pub struct SealedBlockWithSenders<'a, B = super::Block>
+    where
+        B: reth_primitives_traits::Block,
+    {
+        block: SealedBlock<'a, B::Header, B::Body>,
         senders: Cow<'a, Vec<Address>>,
     }
 
-    impl<'a> From<&'a super::SealedBlockWithSenders> for SealedBlockWithSenders<'a> {
-        fn from(value: &'a super::SealedBlockWithSenders) -> Self {
+    impl<'a, B> From<&'a super::SealedBlockWithSenders<B>> for SealedBlockWithSenders<'a, B>
+    where
+        B: reth_primitives_traits::Block,
+    {
+        fn from(value: &'a super::SealedBlockWithSenders<B>) -> Self {
             Self { block: SealedBlock::from(&value.block), senders: Cow::Borrowed(&value.senders) }
         }
     }
 
-    impl<'a> From<SealedBlockWithSenders<'a>> for super::SealedBlockWithSenders {
-        fn from(value: SealedBlockWithSenders<'a>) -> Self {
+    impl<'a, B> From<SealedBlockWithSenders<'a, B>> for super::SealedBlockWithSenders<B>
+    where
+        B: reth_primitives_traits::Block,
+    {
+        fn from(value: SealedBlockWithSenders<'a, B>) -> Self {
             Self { block: value.block.into(), senders: value.senders.into_owned() }
         }
     }
@@ -906,11 +1019,20 @@ pub(super) mod serde_bincode_compat {
 
 #[cfg(test)]
 mod tests {
-    use super::{BlockNumberOrTag::*, *};
-    use alloy_eips::eip1898::HexStringMissingPrefixError;
+    use super::*;
+    use alloy_eips::{
+        eip1898::HexStringMissingPrefixError, BlockId, BlockNumberOrTag, BlockNumberOrTag::*,
+        RpcBlockHash,
+    };
     use alloy_primitives::hex_literal::hex;
     use alloy_rlp::{Decodable, Encodable};
     use std::str::FromStr;
+
+    const fn _traits() {
+        const fn assert_block<T: reth_primitives_traits::Block>() {}
+        assert_block::<Block>();
+        assert_block::<SealedBlock>();
+    }
 
     /// Check parsing according to EIP-1898.
     #[test]
@@ -1075,18 +1197,18 @@ mod tests {
             Some(BlockWithSenders { block: block.clone(), senders: vec![sender] })
         );
         let sealed = block.seal_slow();
-        assert_eq!(SealedBlockWithSenders::new(sealed.clone(), vec![]), None);
+        assert_eq!(SealedBlockWithSenders::<Block>::new(sealed.clone(), vec![]), None);
         assert_eq!(
-            SealedBlockWithSenders::new(sealed.clone(), vec![sender]),
+            SealedBlockWithSenders::<Block>::new(sealed.clone(), vec![sender]),
             Some(SealedBlockWithSenders { block: sealed, senders: vec![sender] })
         );
     }
 
     #[test]
     fn test_default_seal() {
-        let block = SealedBlock::default();
+        let block: SealedBlock = SealedBlock::default();
         let sealed = block.hash();
-        let block = block.unseal();
+        let block: Block = block.unseal();
         let block = block.seal_slow();
         assert_eq!(sealed, block.hash());
     }

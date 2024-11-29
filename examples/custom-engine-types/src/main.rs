@@ -17,11 +17,7 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-use std::{convert::Infallible, sync::Arc};
-
-use serde::{Deserialize, Serialize};
-use thiserror::Error;
-
+use alloy_eips::eip4895::Withdrawals;
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, B256};
 use alloy_rpc_types::{
@@ -32,7 +28,7 @@ use alloy_rpc_types::{
     Withdrawal,
 };
 use reth::{
-    api::PayloadTypes,
+    api::{InvalidPayloadAttributesError, PayloadTypes},
     builder::{
         components::{ComponentsBuilder, PayloadServiceBuilder},
         node::{NodeTypes, NodeTypesWithEngine},
@@ -41,8 +37,13 @@ use reth::{
         PayloadBuilderConfig,
     },
     network::NetworkHandle,
-    providers::{CanonStateSubscriptions, StateProviderFactory},
-    rpc::eth::EthApi,
+    payload::ExecutionPayloadValidator,
+    primitives::{Block, EthPrimitives, SealedBlockFor},
+    providers::{CanonStateSubscriptions, EthStorage, StateProviderFactory},
+    rpc::{
+        eth::EthApi,
+        types::engine::{ExecutionPayload, ExecutionPayloadSidecar, PayloadError},
+    },
     tasks::TaskManager,
     transaction_pool::TransactionPool,
 };
@@ -68,8 +69,11 @@ use reth_payload_builder::{
     EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderError, PayloadBuilderHandle,
     PayloadBuilderService,
 };
-use reth_primitives::Withdrawals;
 use reth_tracing::{RethTracer, Tracer};
+use reth_trie_db::MerklePatriciaTrie;
+use serde::{Deserialize, Serialize};
+use std::{convert::Infallible, sync::Arc};
+use thiserror::Error;
 
 /// A custom payload attributes type.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -160,7 +164,7 @@ impl PayloadTypes for CustomEngineTypes {
 }
 
 impl EngineTypes for CustomEngineTypes {
-    type ExecutionPayloadV1 = ExecutionPayloadV1;
+    type ExecutionPayloadEnvelopeV1 = ExecutionPayloadV1;
     type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadEnvelopeV3 = ExecutionPayloadEnvelopeV3;
     type ExecutionPayloadEnvelopeV4 = ExecutionPayloadEnvelopeV4;
@@ -169,19 +173,34 @@ impl EngineTypes for CustomEngineTypes {
 /// Custom engine validator
 #[derive(Debug, Clone)]
 pub struct CustomEngineValidator {
-    chain_spec: Arc<ChainSpec>,
+    inner: ExecutionPayloadValidator<ChainSpec>,
+}
+
+impl CustomEngineValidator {
+    /// Instantiates a new validator.
+    pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
+        Self { inner: ExecutionPayloadValidator::new(chain_spec) }
+    }
+
+    /// Returns the chain spec used by the validator.
+    #[inline]
+    fn chain_spec(&self) -> &ChainSpec {
+        self.inner.chain_spec()
+    }
 }
 
 impl<T> EngineValidator<T> for CustomEngineValidator
 where
     T: EngineTypes<PayloadAttributes = CustomPayloadAttributes>,
 {
+    type Block = Block;
+
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,
         payload_or_attrs: PayloadOrAttributes<'_, T::PayloadAttributes>,
     ) -> Result<(), EngineObjectValidationError> {
-        validate_version_specific_fields(&self.chain_spec, version, payload_or_attrs)
+        validate_version_specific_fields(self.chain_spec(), version, payload_or_attrs)
     }
 
     fn ensure_well_formed_attributes(
@@ -189,7 +208,7 @@ where
         version: EngineApiMessageVersion,
         attributes: &T::PayloadAttributes,
     ) -> Result<(), EngineObjectValidationError> {
-        validate_version_specific_fields(&self.chain_spec, version, attributes.into())?;
+        validate_version_specific_fields(self.chain_spec(), version, attributes.into())?;
 
         // custom validation logic - ensure that the custom field is not zero
         if attributes.custom == 0 {
@@ -198,6 +217,23 @@ where
             ))
         }
 
+        Ok(())
+    }
+
+    fn ensure_well_formed_payload(
+        &self,
+        payload: ExecutionPayload,
+        sidecar: ExecutionPayloadSidecar,
+    ) -> Result<SealedBlockFor<Self::Block>, PayloadError> {
+        self.inner.ensure_well_formed_payload(payload, sidecar)
+    }
+
+    fn validate_payload_attributes_against_header(
+        &self,
+        _attr: &<T as PayloadTypes>::PayloadAttributes,
+        _header: &<Self::Block as reth::api::Block>::Header,
+    ) -> Result<(), InvalidPayloadAttributesError> {
+        // skip default timestamp validation
         Ok(())
     }
 }
@@ -216,7 +252,7 @@ where
     type Validator = CustomEngineValidator;
 
     async fn build(self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::Validator> {
-        Ok(CustomEngineValidator { chain_spec: ctx.config.chain.clone() })
+        Ok(CustomEngineValidator::new(ctx.config.chain.clone()))
     }
 }
 
@@ -226,8 +262,10 @@ struct MyCustomNode;
 
 /// Configure the node types
 impl NodeTypes for MyCustomNode {
-    type Primitives = ();
+    type Primitives = EthPrimitives;
     type ChainSpec = ChainSpec;
+    type StateCommitment = MerklePatriciaTrie;
+    type Storage = EthStorage;
 }
 
 /// Configure the node types with the custom engine types
@@ -252,7 +290,14 @@ pub type MyNodeAddOns<N> = RpcAddOns<
 /// This provides a preset configuration for the node
 impl<N> Node<N> for MyCustomNode
 where
-    N: FullNodeTypes<Types: NodeTypesWithEngine<Engine = CustomEngineTypes, ChainSpec = ChainSpec>>,
+    N: FullNodeTypes<
+        Types: NodeTypesWithEngine<
+            Engine = CustomEngineTypes,
+            ChainSpec = ChainSpec,
+            Primitives = EthPrimitives,
+            Storage = EthStorage,
+        >,
+    >,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
@@ -289,7 +334,11 @@ pub struct CustomPayloadServiceBuilder;
 impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for CustomPayloadServiceBuilder
 where
     Node: FullNodeTypes<
-        Types: NodeTypesWithEngine<Engine = CustomEngineTypes, ChainSpec = ChainSpec>,
+        Types: NodeTypesWithEngine<
+            Engine = CustomEngineTypes,
+            ChainSpec = ChainSpec,
+            Primitives = EthPrimitives,
+        >,
     >,
     Pool: TransactionPool + Unpin + 'static,
 {

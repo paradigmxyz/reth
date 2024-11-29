@@ -17,6 +17,7 @@ use reth_primitives::{
 };
 
 mod masks;
+pub use masks::*;
 
 /// Alias type for a map of [`StaticFileSegment`] and sorted lists of existing static file ranges.
 type SortedStaticFiles =
@@ -38,7 +39,7 @@ pub fn iter_static_files(path: impl AsRef<Path>) -> Result<SortedStaticFiles, Ni
         .collect::<Vec<_>>();
 
     for entry in entries {
-        if entry.metadata().map_or(false, |metadata| metadata.is_file()) {
+        if entry.metadata().is_ok_and(|metadata| metadata.is_file()) {
             if let Some((segment, _)) =
                 StaticFileSegment::parse_filename(&entry.file_name().to_string_lossy())
             {

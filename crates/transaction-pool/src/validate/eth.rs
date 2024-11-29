@@ -17,7 +17,8 @@ use alloy_consensus::constants::{
 };
 use alloy_eips::eip4844::MAX_BLOBS_PER_BLOCK;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
-use reth_primitives::{GotExpected, InvalidTransactionError, SealedBlock};
+use reth_primitives::{InvalidTransactionError, SealedBlock};
+use reth_primitives_traits::GotExpected;
 use reth_storage_api::{AccountReader, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use revm::{
@@ -106,6 +107,19 @@ where
 }
 
 /// A [`TransactionValidator`] implementation that validates ethereum transaction.
+///
+/// It supports all known ethereum transaction types:
+/// - Legacy
+/// - EIP-2718
+/// - EIP-1559
+/// - EIP-4844
+/// - EIP-7702
+///
+/// And enforces additional constraints such as:
+/// - Maximum transaction size
+/// - Maximum gas limit
+///
+/// And adheres to the configured [`LocalTransactionConfig`].
 #[derive(Debug)]
 pub(crate) struct EthTransactionValidatorInner<Client, T> {
     /// Spec of the chain
@@ -383,11 +397,12 @@ where
         let cost = transaction.cost();
 
         // Checks for max cost
-        if cost > account.balance {
+        if cost > &account.balance {
+            let expected = *cost;
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::InsufficientFunds(
-                    GotExpected { got: account.balance, expected: cost }.into(),
+                    GotExpected { got: account.balance, expected }.into(),
                 )
                 .into(),
             )

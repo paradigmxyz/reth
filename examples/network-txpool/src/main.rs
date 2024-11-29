@@ -82,7 +82,7 @@ impl TransactionValidator for OkValidator {
     ) -> TransactionValidationOutcome<Self::Transaction> {
         // Always return valid
         TransactionValidationOutcome::Valid {
-            balance: transaction.cost(),
+            balance: *transaction.cost(),
             state_nonce: transaction.nonce(),
             transaction: ValidTransaction::Valid(transaction),
             propagate: false,

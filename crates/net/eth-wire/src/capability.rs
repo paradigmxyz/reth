@@ -5,10 +5,11 @@ use crate::{
     p2pstream::MAX_RESERVED_MESSAGE_ID,
     protocol::{ProtoVersion, Protocol},
     version::ParseVersionError,
-    Capability, EthMessage, EthMessageID, EthVersion,
+    Capability, EthMessageID, EthVersion,
 };
 use alloy_primitives::bytes::Bytes;
 use derive_more::{Deref, DerefMut};
+use reth_eth_wire_types::{EthMessage, EthNetworkPrimitives, NetworkPrimitives};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{
@@ -26,14 +27,34 @@ pub struct RawCapabilityMessage {
     pub payload: Bytes,
 }
 
+impl RawCapabilityMessage {
+    /// Creates a new capability message with the given id and payload.
+    pub const fn new(id: usize, payload: Bytes) -> Self {
+        Self { id, payload }
+    }
+
+    /// Creates a raw message for the eth sub-protocol.
+    ///
+    /// Caller must ensure that the rlp encoded `payload` matches the given `id`.
+    ///
+    /// See also  [`EthMessage`]
+    pub const fn eth(id: EthMessageID, payload: Bytes) -> Self {
+        Self::new(id as usize, payload)
+    }
+}
+
 /// Various protocol related event types bubbled up from a session that need to be handled by the
 /// network.
 #[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum CapabilityMessage {
+pub enum CapabilityMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Eth sub-protocol message.
-    Eth(EthMessage),
-    /// Any other capability message.
+    #[cfg_attr(
+        feature = "serde",
+        serde(bound = "EthMessage<N>: Serialize + serde::de::DeserializeOwned")
+    )]
+    Eth(EthMessage<N>),
+    /// Any other or manually crafted eth message.
     Other(RawCapabilityMessage),
 }
 

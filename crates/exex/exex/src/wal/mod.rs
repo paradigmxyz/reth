@@ -3,6 +3,8 @@
 mod cache;
 pub use cache::BlockCache;
 mod storage;
+use reth_node_api::NodePrimitives;
+use reth_primitives::EthPrimitives;
 pub use storage::Storage;
 mod metrics;
 use metrics::Metrics;
@@ -32,23 +34,26 @@ use reth_tracing::tracing::{debug, instrument};
 /// 2. When the chain is finalized, call [`Wal::finalize`] to prevent the infinite growth of the
 ///    WAL.
 #[derive(Debug, Clone)]
-pub struct Wal {
-    inner: Arc<WalInner>,
+pub struct Wal<N: NodePrimitives = EthPrimitives> {
+    inner: Arc<WalInner<N>>,
 }
 
-impl Wal {
+impl<N> Wal<N>
+where
+    N: NodePrimitives,
+{
     /// Creates a new instance of [`Wal`].
     pub fn new(directory: impl AsRef<Path>) -> eyre::Result<Self> {
         Ok(Self { inner: Arc::new(WalInner::new(directory)?) })
     }
 
     /// Returns a read-only handle to the WAL.
-    pub fn handle(&self) -> WalHandle {
+    pub fn handle(&self) -> WalHandle<N> {
         WalHandle { wal: self.inner.clone() }
     }
 
     /// Commits the notification to WAL.
-    pub fn commit(&self, notification: &ExExNotification) -> eyre::Result<()> {
+    pub fn commit(&self, notification: &ExExNotification<N>) -> eyre::Result<()> {
         self.inner.commit(notification)
     }
 
@@ -63,23 +68,31 @@ impl Wal {
     /// Returns an iterator over all notifications in the WAL.
     pub fn iter_notifications(
         &self,
-    ) -> eyre::Result<Box<dyn Iterator<Item = eyre::Result<ExExNotification>> + '_>> {
+    ) -> eyre::Result<Box<dyn Iterator<Item = eyre::Result<ExExNotification<N>>> + '_>> {
         self.inner.iter_notifications()
+    }
+
+    /// Returns the number of blocks in the WAL.
+    pub fn num_blocks(&self) -> usize {
+        self.inner.block_cache().num_blocks()
     }
 }
 
 /// Inner type for the WAL.
 #[derive(Debug)]
-struct WalInner {
+struct WalInner<N: NodePrimitives> {
     next_file_id: AtomicU32,
     /// The underlying WAL storage backed by a file.
-    storage: Storage,
+    storage: Storage<N>,
     /// WAL block cache. See [`cache::BlockCache`] docs for more details.
     block_cache: RwLock<BlockCache>,
     metrics: Metrics,
 }
 
-impl WalInner {
+impl<N> WalInner<N>
+where
+    N: NodePrimitives,
+{
     fn new(directory: impl AsRef<Path>) -> eyre::Result<Self> {
         let mut wal = Self {
             next_file_id: AtomicU32::new(0),
@@ -132,7 +145,7 @@ impl WalInner {
         reverted_block_range = ?notification.reverted_chain().as_ref().map(|chain| chain.range()),
         committed_block_range = ?notification.committed_chain().as_ref().map(|chain| chain.range())
     ))]
-    fn commit(&self, notification: &ExExNotification) -> eyre::Result<()> {
+    fn commit(&self, notification: &ExExNotification<N>) -> eyre::Result<()> {
         let mut block_cache = self.block_cache.write();
 
         let file_id = self.next_file_id.fetch_add(1, Ordering::Relaxed);
@@ -182,7 +195,7 @@ impl WalInner {
     /// Returns an iterator over all notifications in the WAL.
     fn iter_notifications(
         &self,
-    ) -> eyre::Result<Box<dyn Iterator<Item = eyre::Result<ExExNotification>> + '_>> {
+    ) -> eyre::Result<Box<dyn Iterator<Item = eyre::Result<ExExNotification<N>>> + '_>> {
         let Some(range) = self.storage.files_range()? else {
             return Ok(Box::new(std::iter::empty()))
         };
@@ -193,16 +206,19 @@ impl WalInner {
 
 /// A read-only handle to the WAL that can be shared.
 #[derive(Debug)]
-pub struct WalHandle {
-    wal: Arc<WalInner>,
+pub struct WalHandle<N: NodePrimitives> {
+    wal: Arc<WalInner<N>>,
 }
 
-impl WalHandle {
+impl<N> WalHandle<N>
+where
+    N: NodePrimitives,
+{
     /// Returns the notification for the given committed block hash if it exists.
     pub fn get_committed_notification_by_block_hash(
         &self,
         block_hash: &B256,
-    ) -> eyre::Result<Option<ExExNotification>> {
+    ) -> eyre::Result<Option<ExExNotification<N>>> {
         let Some(file_id) = self.wal.block_cache().get_file_id_by_committed_block_hash(block_hash)
         else {
             return Ok(None)
@@ -231,13 +247,13 @@ mod tests {
     use crate::wal::{cache::CachedBlock, Wal};
 
     fn read_notifications(wal: &Wal) -> eyre::Result<Vec<ExExNotification>> {
-        let Some(files_range) = wal.inner.storage.files_range()? else { return Ok(Vec::new()) };
-
-        wal.inner
-            .storage
-            .iter_notifications(files_range)
-            .map(|entry| Ok(entry?.2))
-            .collect::<eyre::Result<_>>()
+        wal.inner.storage.files_range()?.map_or(Ok(Vec::new()), |range| {
+            wal.inner
+                .storage
+                .iter_notifications(range)
+                .map(|entry| entry.map(|(_, _, n)| n))
+                .collect()
+        })
     }
 
     fn sort_committed_blocks(
@@ -263,21 +279,25 @@ mod tests {
         // Create 4 canonical blocks and one reorged block with number 2
         let blocks = random_block_range(&mut rng, 0..=3, BlockRangeParams::default())
             .into_iter()
-            .map(|block| block.seal_with_senders().ok_or_eyre("failed to recover senders"))
+            .map(|block| {
+                block
+                    .seal_with_senders::<reth_primitives::Block>()
+                    .ok_or_eyre("failed to recover senders")
+            })
             .collect::<eyre::Result<Vec<_>>>()?;
         let block_1_reorged = random_block(
             &mut rng,
             1,
             BlockParams { parent: Some(blocks[0].hash()), ..Default::default() },
         )
-        .seal_with_senders()
+        .seal_with_senders::<reth_primitives::Block>()
         .ok_or_eyre("failed to recover senders")?;
         let block_2_reorged = random_block(
             &mut rng,
             2,
             BlockParams { parent: Some(blocks[1].hash()), ..Default::default() },
         )
-        .seal_with_senders()
+        .seal_with_senders::<reth_primitives::Block>()
         .ok_or_eyre("failed to recover senders")?;
 
         // Create notifications for the above blocks.

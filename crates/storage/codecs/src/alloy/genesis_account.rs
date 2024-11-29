@@ -11,6 +11,7 @@ use reth_codecs_derive::add_arbitrary_tests;
 ///
 /// Notice: Make sure this struct is 1:1 with `alloy_genesis::GenesisAccount`
 #[derive(Debug, Clone, PartialEq, Eq, Compact)]
+#[reth_codecs(crate = "crate")]
 pub(crate) struct GenesisAccountRef<'a> {
     /// The nonce of the account at genesis.
     nonce: Option<u64>,
@@ -27,12 +28,13 @@ pub(crate) struct GenesisAccountRef<'a> {
 /// Acts as bridge which simplifies Compact implementation for
 /// `AlloyGenesisAccount`.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Compact)]
+#[reth_codecs(crate = "crate")]
 #[cfg_attr(
     any(test, feature = "test-utils"),
     derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize)
 )]
 #[cfg_attr(feature = "test-utils", allow(unreachable_pub), visibility::make(pub))]
-#[add_arbitrary_tests(compact)]
+#[add_arbitrary_tests(crate, compact)]
 pub(crate) struct GenesisAccount {
     /// The nonce of the account at genesis.
     nonce: Option<u64>,
@@ -47,21 +49,23 @@ pub(crate) struct GenesisAccount {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Compact)]
+#[reth_codecs(crate = "crate")]
 #[cfg_attr(
     any(test, feature = "test-utils"),
     derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize)
 )]
-#[add_arbitrary_tests(compact)]
+#[add_arbitrary_tests(crate, compact)]
 pub(crate) struct StorageEntries {
     entries: Vec<StorageEntry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Compact)]
+#[reth_codecs(crate = "crate")]
 #[cfg_attr(
     any(test, feature = "test-utils"),
     derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize)
 )]
-#[add_arbitrary_tests(compact)]
+#[add_arbitrary_tests(crate, compact)]
 pub(crate) struct StorageEntry {
     key: B256,
     value: B256,

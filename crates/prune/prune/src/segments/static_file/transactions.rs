@@ -3,8 +3,12 @@ use crate::{
     segments::{PruneInput, Segment},
     PrunerError,
 };
-use reth_db::{tables, transaction::DbTxMut};
-use reth_provider::{providers::StaticFileProvider, BlockReader, DBProvider, TransactionsProvider};
+use reth_db::{table::Value, tables, transaction::DbTxMut};
+use reth_primitives_traits::NodePrimitives;
+use reth_provider::{
+    providers::StaticFileProvider, BlockReader, DBProvider, StaticFileProviderFactory,
+    TransactionsProvider,
+};
 use reth_prune_types::{
     PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
 };
@@ -12,19 +16,22 @@ use reth_static_file_types::StaticFileSegment;
 use tracing::trace;
 
 #[derive(Debug)]
-pub struct Transactions {
-    static_file_provider: StaticFileProvider,
+pub struct Transactions<N> {
+    static_file_provider: StaticFileProvider<N>,
 }
 
-impl Transactions {
-    pub const fn new(static_file_provider: StaticFileProvider) -> Self {
+impl<N> Transactions<N> {
+    pub const fn new(static_file_provider: StaticFileProvider<N>) -> Self {
         Self { static_file_provider }
     }
 }
 
-impl<Provider> Segment<Provider> for Transactions
+impl<Provider> Segment<Provider> for Transactions<Provider::Primitives>
 where
-    Provider: DBProvider<Tx: DbTxMut> + TransactionsProvider + BlockReader,
+    Provider: DBProvider<Tx: DbTxMut>
+        + TransactionsProvider
+        + BlockReader
+        + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value>>,
 {
     fn segment(&self) -> PruneSegment {
         PruneSegment::Transactions
@@ -52,7 +59,9 @@ where
         let mut limiter = input.limiter;
 
         let mut last_pruned_transaction = *tx_range.end();
-        let (pruned, done) = provider.tx_ref().prune_table_with_range::<tables::Transactions>(
+        let (pruned, done) = provider.tx_ref().prune_table_with_range::<tables::Transactions<
+            <Provider::Primitives as NodePrimitives>::SignedTx,
+        >>(
             tx_range,
             &mut limiter,
             |_| false,

@@ -48,7 +48,8 @@ optimism = [
 ]
 
 dev = [
-	"reth-optimism-cli/dev"
+	"reth-optimism-cli/dev",
+	"reth-optimism-primitives/arbitrary",
 ]
 
 min-error-logs = ["tracing/release_max_level_error"]

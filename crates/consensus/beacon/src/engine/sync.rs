@@ -4,13 +4,14 @@ use crate::{
     engine::metrics::EngineSyncMetrics, BeaconConsensusEngineEvent,
     ConsensusEngineLiveSyncProgress, EthBeaconConsensus,
 };
+use alloy_consensus::Header;
 use alloy_primitives::{BlockNumber, B256};
 use futures::FutureExt;
 use reth_network_p2p::{
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
-    BlockClient,
+    EthBlockClient,
 };
-use reth_primitives::SealedBlock;
+use reth_primitives::{BlockBody, EthPrimitives, NodePrimitives, SealedBlock};
 use reth_provider::providers::ProviderNodeTypes;
 use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult};
 use reth_tasks::TaskSpawner;
@@ -34,7 +35,7 @@ use tracing::trace;
 pub(crate) struct EngineSyncController<N, Client>
 where
     N: ProviderNodeTypes,
-    Client: BlockClient,
+    Client: EthBlockClient,
 {
     /// A downloader that can download full blocks from the network.
     full_block_client: FullBlockClient<Client>,
@@ -64,7 +65,7 @@ where
 impl<N, Client> EngineSyncController<N, Client>
 where
     N: ProviderNodeTypes,
-    Client: BlockClient + 'static,
+    Client: EthBlockClient + 'static,
 {
     /// Create a new instance
     pub(crate) fn new(
@@ -345,25 +346,33 @@ where
 
 /// A wrapper type around [`SealedBlock`] that implements the [Ord] trait by block number.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct OrderedSealedBlock(SealedBlock);
+struct OrderedSealedBlock<H = Header, B = BlockBody>(SealedBlock<H, B>);
 
-impl PartialOrd for OrderedSealedBlock {
+impl<H, B> PartialOrd for OrderedSealedBlock<H, B>
+where
+    H: reth_primitives_traits::BlockHeader + 'static,
+    B: reth_primitives_traits::BlockBody + 'static,
+{
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for OrderedSealedBlock {
+impl<H, B> Ord for OrderedSealedBlock<H, B>
+where
+    H: reth_primitives_traits::BlockHeader + 'static,
+    B: reth_primitives_traits::BlockBody + 'static,
+{
     fn cmp(&self, other: &Self) -> Ordering {
-        self.0.number.cmp(&other.0.number)
+        self.0.number().cmp(&other.0.number())
     }
 }
 
 /// The event type emitted by the [`EngineSyncController`].
 #[derive(Debug)]
-pub(crate) enum EngineSyncEvent {
+pub(crate) enum EngineSyncEvent<N: NodePrimitives = EthPrimitives> {
     /// A full block has been downloaded from the network.
-    FetchedFullBlock(SealedBlock),
+    FetchedFullBlock(SealedBlock<N::BlockHeader, N::BlockBody>),
     /// Pipeline started syncing
     ///
     /// This is none if the pipeline is triggered without a specific target.
@@ -410,12 +419,12 @@ impl<N: ProviderNodeTypes> PipelineState<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::Sealable;
+    use alloy_consensus::Header;
     use assert_matches::assert_matches;
     use futures::poll;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
     use reth_network_p2p::{either::Either, test_utils::TestFullBlockClient};
-    use reth_primitives::{BlockBody, Header, SealedHeader};
+    use reth_primitives::{BlockBody, SealedHeader};
     use reth_provider::{
         test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
         ExecutionOutcome,
@@ -522,7 +531,7 @@ mod tests {
         ) -> EngineSyncController<N, Either<Client, TestFullBlockClient>>
         where
             N: ProviderNodeTypes,
-            Client: BlockClient + 'static,
+            Client: EthBlockClient + 'static,
         {
             let client = self
                 .client
@@ -599,9 +608,7 @@ mod tests {
             header.parent_hash = hash;
             header.number += 1;
             header.timestamp += 1;
-            let sealed = header.seal_slow();
-            let (header, seal) = sealed.into_parts();
-            sealed_header = SealedHeader::new(header, seal);
+            sealed_header = SealedHeader::seal(header);
             client.insert(sealed_header.clone(), body.clone());
         }
     }
@@ -617,14 +624,12 @@ mod tests {
         );
 
         let client = TestFullBlockClient::default();
-        let sealed = Header {
+        let header = Header {
             base_fee_per_gas: Some(7),
             gas_limit: chain_spec.max_gas_limit,
             ..Default::default()
-        }
-        .seal_slow();
-        let (header, seal) = sealed.into_parts();
-        let header = SealedHeader::new(header, seal);
+        };
+        let header = SealedHeader::seal(header);
         insert_headers_into_client(&client, header, 0..10);
 
         // set up a pipeline

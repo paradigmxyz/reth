@@ -1,61 +1,80 @@
 //! Transaction abstraction
 
-use core::{fmt::Debug, hash::Hash};
-
-use alloy_primitives::{TxKind, B256};
-
-use reth_codecs::Compact;
-use serde::{Deserialize, Serialize};
-
+pub mod execute;
 pub mod signed;
+pub mod tx_type;
 
-#[allow(dead_code)]
+use crate::{InMemorySize, MaybeArbitrary, MaybeCompact, MaybeSerde};
+use core::{fmt, hash::Hash};
+
+use alloy_consensus::constants::{
+    EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
+    LEGACY_TX_TYPE_ID,
+};
+
+/// Helper trait that unifies all behaviour required by transaction to support full node operations.
+pub trait FullTransaction: Transaction + MaybeCompact {}
+
+impl<T> FullTransaction for T where T: Transaction + MaybeCompact {}
+
 /// Abstraction of a transaction.
 pub trait Transaction:
-    Debug
-    + Default
+    Send
+    + Sync
+    + Unpin
     + Clone
+    + fmt::Debug
     + Eq
     + PartialEq
     + Hash
-    + Serialize
-    + alloy_rlp::Encodable
-    + alloy_rlp::Decodable
-    + for<'de> Deserialize<'de>
     + alloy_consensus::Transaction
+    + InMemorySize
+    + MaybeSerde
     + MaybeArbitrary
 {
-    /// Heavy operation that return signature hash over rlp encoded transaction.
-    /// It is only for signature signing or signer recovery.
-    fn signature_hash(&self) -> B256;
+    /// Returns true if the transaction is a legacy transaction.
+    #[inline]
+    fn is_legacy(&self) -> bool {
+        self.ty() == LEGACY_TX_TYPE_ID
+    }
 
-    /// Gets the transaction's [`TxKind`], which is the address of the recipient or
-    /// [`TxKind::Create`] if the transaction is a contract creation.
-    fn kind(&self) -> TxKind;
+    /// Returns true if the transaction is an EIP-2930 transaction.
+    #[inline]
+    fn is_eip2930(&self) -> bool {
+        self.ty() == EIP2930_TX_TYPE_ID
+    }
 
-    /// Returns true if the tx supports dynamic fees
-    fn is_dynamic_fee(&self) -> bool;
+    /// Returns true if the transaction is an EIP-1559 transaction.
+    #[inline]
+    fn is_eip1559(&self) -> bool {
+        self.ty() == EIP1559_TX_TYPE_ID
+    }
 
-    /// Returns the effective gas price for the given base fee.
-    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128;
+    /// Returns true if the transaction is an EIP-4844 transaction.
+    #[inline]
+    fn is_eip4844(&self) -> bool {
+        self.ty() == EIP4844_TX_TYPE_ID
+    }
 
-    /// This encodes the transaction _without_ the signature, and is only suitable for creating a
-    /// hash intended for signing.
-    fn encode_without_signature(&self, out: &mut dyn bytes::BufMut);
-
-    /// Calculates a heuristic for the in-memory size of the [Transaction].
-    fn size(&self) -> usize;
+    /// Returns true if the transaction is an EIP-7702 transaction.
+    #[inline]
+    fn is_eip7702(&self) -> bool {
+        self.ty() == EIP7702_TX_TYPE_ID
+    }
 }
 
-#[cfg(not(feature = "arbitrary"))]
-/// Helper trait that requires arbitrary implementation if the feature is enabled.
-pub trait MaybeArbitrary {}
-
-#[cfg(feature = "arbitrary")]
-/// Helper trait that requires arbitrary implementation if the feature is enabled.
-pub trait MaybeArbitrary: for<'a> arbitrary::Arbitrary<'a> {}
-
-/// Helper trait that unifies all behaviour required by transaction to support full node operations.
-pub trait FullTransaction: Transaction + Compact {}
-
-impl<T> FullTransaction for T where T: Transaction + Compact {}
+impl<T> Transaction for T where
+    T: Send
+        + Sync
+        + Unpin
+        + Clone
+        + fmt::Debug
+        + Eq
+        + PartialEq
+        + Hash
+        + alloy_consensus::Transaction
+        + InMemorySize
+        + MaybeSerde
+        + MaybeArbitrary
+{
+}

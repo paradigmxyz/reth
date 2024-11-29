@@ -1,4 +1,5 @@
 use crate::BeaconSidecarConfig;
+use alloy_consensus::Transaction as _;
 use alloy_primitives::B256;
 use alloy_rpc_types_beacon::sidecar::{BeaconBlobBundle, SidecarIterator};
 use eyre::Result;
@@ -13,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::VecDeque,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 use thiserror::Error;
@@ -96,6 +98,7 @@ where
     fn process_block(&mut self, block: &SealedBlockWithSenders) {
         let txs: Vec<_> = block
             .transactions()
+            .iter()
             .filter(|tx| tx.is_eip4844())
             .map(|tx| (tx.clone(), tx.blob_versioned_hashes().unwrap().len()))
             .collect();
@@ -110,9 +113,10 @@ where
         match self.pool.get_all_blobs_exact(txs.iter().map(|(tx, _)| tx.hash()).collect()) {
             Ok(blobs) => {
                 actions_to_queue.reserve_exact(txs.len());
-                for ((tx, _), sidecar) in txs.iter().zip(blobs.iter()) {
-                    let transaction = BlobTransaction::try_from_signed(tx.clone(), sidecar.clone())
-                        .expect("should not fail to convert blob tx if it is already eip4844");
+                for ((tx, _), sidecar) in txs.iter().zip(blobs.into_iter()) {
+                    let transaction =
+                        BlobTransaction::try_from_signed(tx.clone(), Arc::unwrap_or_clone(sidecar))
+                            .expect("should not fail to convert blob tx if it is already eip4844");
 
                     let block_metadata = BlockMetadata {
                         block_hash: block.hash(),
@@ -188,6 +192,7 @@ where
                             for (_, block) in old.blocks().iter() {
                                 let txs: Vec<BlobTransactionEvent> = block
                                     .transactions()
+                                    .iter()
                                     .filter(|tx: &&reth::primitives::TransactionSigned| {
                                         tx.is_eip4844()
                                     })

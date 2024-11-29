@@ -2,20 +2,21 @@
 
 use std::sync::Arc;
 
+use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::TxHash;
-use alloy_rpc_types::{
+use alloy_rpc_types_eth::{
     pubsub::{
         Params, PubSubSyncStatus, SubscriptionKind, SubscriptionResult as EthSubscriptionResult,
         SyncStatusMetadata,
     },
-    FilteredParams, Header, Log, Transaction,
+    FilteredParams, Header, Log,
 };
-use alloy_serde::WithOtherFields;
 use futures::StreamExt;
 use jsonrpsee::{
     server::SubscriptionMessage, types::ErrorObject, PendingSubscriptionSink, SubscriptionSink,
 };
 use reth_network_api::NetworkInfo;
+use reth_primitives::NodePrimitives;
 use reth_provider::{BlockReader, CanonStateSubscriptions, EvmEnvProvider};
 use reth_rpc_eth_api::{pubsub::EthPubSubApiServer, TransactionCompat};
 use reth_rpc_eth_types::logs_utils;
@@ -28,6 +29,7 @@ use tokio_stream::{
     wrappers::{BroadcastStream, ReceiverStream},
     Stream,
 };
+use tracing::error;
 
 /// `Eth` pubsub RPC implementation.
 ///
@@ -84,7 +86,14 @@ impl<Provider, Pool, Events, Network, Eth> EthPubSubApiServer<Eth::Transaction>
 where
     Provider: BlockReader + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + 'static,
-    Events: CanonStateSubscriptions + Clone + 'static,
+    Events: CanonStateSubscriptions<
+            Primitives: NodePrimitives<
+                SignedTx: Encodable2718,
+                BlockHeader = reth_primitives::Header,
+                Receipt = reth_primitives::Receipt,
+            >,
+        > + Clone
+        + 'static,
     Network: NetworkInfo + Clone + 'static,
     Eth: TransactionCompat + 'static,
 {
@@ -117,17 +126,22 @@ async fn handle_accepted<Provider, Pool, Events, Network, Eth>(
 where
     Provider: BlockReader + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + 'static,
-    Events: CanonStateSubscriptions + Clone + 'static,
+    Events: CanonStateSubscriptions<
+            Primitives: NodePrimitives<
+                SignedTx: Encodable2718,
+                BlockHeader = reth_primitives::Header,
+                Receipt = reth_primitives::Receipt,
+            >,
+        > + Clone
+        + 'static,
     Network: NetworkInfo + Clone + 'static,
     Eth: TransactionCompat,
 {
     match kind {
         SubscriptionKind::NewHeads => {
-            let stream = pubsub.new_headers_stream().map(|header| {
-                EthSubscriptionResult::<WithOtherFields<Transaction>>::Header(Box::new(
-                    header.into(),
-                ))
-            });
+            let stream = pubsub
+                .new_headers_stream()
+                .map(|header| EthSubscriptionResult::<()>::Header(Box::new(header.into())));
             pipe_from_stream(accepted_sink, stream).await
         }
         SubscriptionKind::Logs => {
@@ -139,9 +153,9 @@ where
                 }
                 _ => FilteredParams::default(),
             };
-            let stream = pubsub.log_stream(filter).map(|log| {
-                EthSubscriptionResult::<WithOtherFields<Transaction>>::Log(Box::new(log))
-            });
+            let stream = pubsub
+                .log_stream(filter)
+                .map(|log| EthSubscriptionResult::<()>::Log(Box::new(log)));
             pipe_from_stream(accepted_sink, stream).await
         }
         SubscriptionKind::NewPendingTransactions => {
@@ -149,11 +163,23 @@ where
                 match params {
                     Params::Bool(true) => {
                         // full transaction objects requested
-                        let stream = pubsub.full_pending_transaction_stream().map(|tx| {
-                            EthSubscriptionResult::FullTransaction(Box::new(from_recovered(
+                        let stream = pubsub.full_pending_transaction_stream().filter_map(|tx| {
+                            let tx_value = match from_recovered(
                                 tx.transaction.to_recovered_transaction(),
                                 &tx_resp_builder,
-                            )))
+                            ) {
+                                Ok(tx) => {
+                                    Some(EthSubscriptionResult::FullTransaction(Box::new(tx)))
+                                }
+                                Err(err) => {
+                                    error!(target = "rpc",
+                                        %err,
+                                        "Failed to fill transaction with block context"
+                                    );
+                                    None
+                                }
+                            };
+                            std::future::ready(tx_value)
                         });
                         return pipe_from_stream(accepted_sink, stream).await
                     }
@@ -170,7 +196,7 @@ where
 
             let stream = pubsub
                 .pending_transaction_hashes_stream()
-                .map(EthSubscriptionResult::<WithOtherFields<Transaction>>::TransactionHash);
+                .map(EthSubscriptionResult::<()>::TransactionHash);
             pipe_from_stream(accepted_sink, stream).await
         }
         SubscriptionKind::Syncing => {
@@ -323,7 +349,13 @@ where
 impl<Provider, Pool, Events, Network> EthPubSubInner<Provider, Pool, Events, Network>
 where
     Provider: BlockReader + EvmEnvProvider + 'static,
-    Events: CanonStateSubscriptions + 'static,
+    Events: CanonStateSubscriptions<
+            Primitives: NodePrimitives<
+                SignedTx: Encodable2718,
+                BlockHeader = reth_primitives::Header,
+                Receipt = reth_primitives::Receipt,
+            >,
+        > + 'static,
     Network: NetworkInfo + 'static,
     Pool: 'static,
 {
@@ -332,7 +364,7 @@ where
         self.chain_events.canonical_state_stream().flat_map(|new_chain| {
             let headers = new_chain.committed().headers().collect::<Vec<_>>();
             futures::stream::iter(
-                headers.into_iter().map(reth_rpc_types_compat::block::from_primitive_with_hash),
+                headers.into_iter().map(|h| Header::from_consensus(h.into(), None, None)),
             )
         })
     }

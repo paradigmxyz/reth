@@ -1,32 +1,21 @@
-use std::sync::Arc;
-
-use crate::utils::eth_payload_attributes;
+use alloy_eips::eip2718::Encodable2718;
 use alloy_genesis::Genesis;
 use alloy_primitives::{b256, hex};
 use futures::StreamExt;
-use reth::{args::DevArgs, rpc::api::eth::helpers::EthTransactions};
 use reth_chainspec::ChainSpec;
-use reth_e2e_test_utils::setup;
-use reth_node_api::FullNodeComponents;
+use reth_node_api::{FullNodeComponents, FullNodePrimitives, NodeTypes};
 use reth_node_builder::{
     rpc::RethRpcAddOns, EngineNodeLauncher, FullNode, NodeBuilder, NodeConfig, NodeHandle,
 };
+use reth_node_core::args::DevArgs;
 use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
 use reth_provider::{providers::BlockchainProvider2, CanonStateSubscriptions};
+use reth_rpc_eth_api::helpers::EthTransactions;
 use reth_tasks::TaskManager;
+use std::sync::Arc;
 
 #[tokio::test]
 async fn can_run_dev_node() -> eyre::Result<()> {
-    reth_tracing::init_test_tracing();
-    let (mut nodes, _tasks, _) =
-        setup::<EthereumNode>(1, custom_chain(), true, eth_payload_attributes).await?;
-
-    assert_chain_advances(nodes.pop().unwrap().inner).await;
-    Ok(())
-}
-
-#[tokio::test]
-async fn can_run_dev_node_new_engine() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let tasks = TaskManager::current();
     let exec = tasks.executor();
@@ -58,6 +47,7 @@ async fn assert_chain_advances<N, AddOns>(node: FullNode<N, AddOns>)
 where
     N: FullNodeComponents<Provider: CanonStateSubscriptions>,
     AddOns: RethRpcAddOns<N, EthApi: EthTransactions>,
+    N::Types: NodeTypes<Primitives: FullNodePrimitives>,
 {
     let mut notifications = node.provider.canonical_state_stream();
 
@@ -75,8 +65,8 @@ where
 
     let head = notifications.next().await.unwrap();
 
-    let tx = head.tip().transactions().next().unwrap();
-    assert_eq!(tx.hash(), hash);
+    let tx = &head.tip().transactions()[0];
+    assert_eq!(tx.trie_hash(), hash);
     println!("mined transaction: {hash}");
 }
 
