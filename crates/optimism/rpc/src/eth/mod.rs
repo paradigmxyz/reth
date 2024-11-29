@@ -378,7 +378,7 @@ impl<'a, N: RpcNodeCore> OpEthApiBuilder<'a, N> {
     }
 }
 
-impl<'a, N: RpcNodeCore> OpEthApiBuilder<'a, N>
+impl<N: RpcNodeCore> OpEthApiBuilder<'_, N>
 where
     N: RpcNodeCore<
         Provider: BlockReaderIdExt
