@@ -862,7 +862,7 @@ mod tests {
         assert!(!targets.contains_key(&new_addr));
 
         // should include accounts with storage even if fetched
-        for (addr, _) in state.storages.iter() {
+        for addr in state.storages.keys() {
             assert!(targets.contains_key(addr));
         }
     }
