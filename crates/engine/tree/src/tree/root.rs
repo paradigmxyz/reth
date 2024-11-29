@@ -293,10 +293,11 @@ where
                 provider.tx_ref(),
                 // TODO(alexey): this clone can be expensive, we should avoid it
                 input.as_ref().clone(),
-                targets,
+                targets.clone(),
             );
             match result {
                 Ok(proof) => {
+                    trace!(target: "engine::root", ?targets, ?proof, "Proof calculated");
                     let _ = state_root_message_sender.send(StateRootMessage::ProofCalculated {
                         proof,
                         state_update: hashed_state_update,
@@ -559,7 +560,7 @@ fn update_sparse_trie<Factory: DatabaseProviderFactory>(
     input_state_sorted: HashedPostStateSorted,
     prefix_sets: TriePrefixSetsMut,
 ) -> SparseStateTrieResult<(Box<SparseStateTrie>, Duration)> {
-    trace!(target: "engine::root::sparse", ?targets, ?multiproof, "Updating sparse trie");
+    trace!(target: "engine::root::sparse", "Updating sparse trie");
     let started_at = Instant::now();
 
     // Reveal new accounts and storage slots.
