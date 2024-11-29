@@ -2305,9 +2305,9 @@ where
                     if diff.has_differences() {
                         info!(target: "engine::tree",
                               block=?sealed_block.num_hash(),
-                              storage_nodes_only_in_first= ?diff.storage_nodes_only_in_first,
-                              storage_nodes_only_in_second= ?diff.storage_nodes_only_in_second,
-                              storage_nodes_with_differences= ?diff.storage_nodes_with_differences,
+                              storage_tries_only_in_first= ?diff.storage_tries_only_in_first,
+                              storage_tries_only_in_second= ?diff.storage_tries_only_in_second,
+                              storage_tries_with_differences= ?diff.storage_tries_with_differences,
                               "Found differences in TrieUpdates");
                     } else {
                         debug!(target: "engine::tree", block=?sealed_block.num_hash(), "TrieUpdates match exactly");
