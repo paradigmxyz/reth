@@ -4,25 +4,27 @@
 #![cfg_attr(feature = "scroll", allow(unused_crate_dependencies))]
 #![cfg(not(feature = "scroll"))]
 
-use std::sync::Arc;
-
 use node::NodeTestContext;
-use reth::{
-    args::{DiscoveryArgs, NetworkArgs, RpcServerArgs},
-    builder::{FullNodePrimitives, NodeBuilder, NodeConfig, NodeHandle},
-    network::PeersHandleProvider,
-    rpc::server_types::RpcModuleSelection,
-    tasks::TaskManager,
-};
 use reth_chainspec::EthChainSpec;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_engine_local::LocalPayloadAttributesBuilder;
+use reth_network_api::test_utils::PeersHandleProvider;
+use reth_node_api::EngineValidator;
 use reth_node_builder::{
-    components::NodeComponentsBuilder, rpc::RethRpcAddOns, EngineNodeLauncher,
-    FullNodeTypesAdapter, Node, NodeAdapter, NodeComponents, NodeTypesWithDBAdapter,
-    NodeTypesWithEngine, PayloadAttributesBuilder, PayloadTypes,
+    components::NodeComponentsBuilder,
+    rpc::{EngineValidatorAddOn, RethRpcAddOns},
+    EngineNodeLauncher, FullNodeTypesAdapter, Node, NodeAdapter, NodeBuilder, NodeComponents,
+    NodeConfig, NodeHandle, NodeTypesWithDBAdapter, NodeTypesWithEngine, PayloadAttributesBuilder,
+    PayloadTypes,
 };
-use reth_provider::providers::{BlockchainProvider, BlockchainProvider2, NodeTypesForProvider};
+use reth_node_core::args::{DiscoveryArgs, NetworkArgs, RpcServerArgs};
+use reth_primitives::EthPrimitives;
+use reth_provider::providers::{
+    BlockchainProvider, BlockchainProvider2, NodeTypesForProvider, NodeTypesForTree,
+};
+use reth_rpc_server_types::RpcModuleSelection;
+use reth_tasks::TaskManager;
+use std::sync::Arc;
 use tracing::{span, Level};
 use wallet::Wallet;
 
@@ -57,13 +59,12 @@ pub async fn setup<N>(
     attributes_generator: impl Fn(u64) -> <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes + Copy + 'static,
 ) -> eyre::Result<(Vec<NodeHelperType<N, N::AddOns>>, TaskManager, Wallet)>
 where
-    N: Default + Node<TmpNodeAdapter<N>> + NodeTypesForProvider + NodeTypesWithEngine,
+    N: Default + Node<TmpNodeAdapter<N>> + NodeTypesForTree + NodeTypesWithEngine,
     N::ComponentsBuilder: NodeComponentsBuilder<
         TmpNodeAdapter<N>,
         Components: NodeComponents<TmpNodeAdapter<N>, Network: PeersHandleProvider>,
     >,
     N::AddOns: RethRpcAddOns<Adapter<N>>,
-    N::Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>,
 {
     let tasks = TaskManager::current();
     let exec = tasks.executor();
@@ -125,7 +126,7 @@ pub async fn setup_engine<N>(
 where
     N: Default
         + Node<TmpNodeAdapter<N, BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>>>
-        + NodeTypesWithEngine
+        + NodeTypesWithEngine<Primitives = EthPrimitives>
         + NodeTypesForProvider,
     N::ComponentsBuilder: NodeComponentsBuilder<
         TmpNodeAdapter<N, BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>>,
@@ -134,11 +135,14 @@ where
             Network: PeersHandleProvider,
         >,
     >,
-    N::AddOns: RethRpcAddOns<Adapter<N, BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>>>,
+    N::AddOns: RethRpcAddOns<Adapter<N, BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>>>
+        + EngineValidatorAddOn<
+            Adapter<N, BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>>,
+            Validator: EngineValidator<N::Engine, Block = reth_primitives::Block>,
+        >,
     LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
         <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
     >,
-    N::Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>,
 {
     let tasks = TaskManager::current();
     let exec = tasks.executor();

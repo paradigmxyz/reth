@@ -207,17 +207,11 @@ mod tests {
         primitives::{BlockEnv, CfgEnv, SpecId},
         JournaledState,
     };
-    use revm_primitives::{CfgEnvWithHandlerCfg, EnvWithHandlerCfg, HandlerCfg};
+    use revm_primitives::{EnvWithHandlerCfg, HandlerCfg};
     use std::collections::HashSet;
 
     #[test]
     fn test_fill_cfg_and_block_env() {
-        // Create a new configuration environment
-        let mut cfg_env = CfgEnvWithHandlerCfg::new_with_spec_id(CfgEnv::default(), SpecId::LATEST);
-
-        // Create a default block environment
-        let mut block_env = BlockEnv::default();
-
         // Create a default header
         let header = Header::default();
 
@@ -236,12 +230,8 @@ mod tests {
 
         // Use the `EthEvmConfig` to fill the `cfg_env` and `block_env` based on the ChainSpec,
         // Header, and total difficulty
-        EthEvmConfig::new(Arc::new(chain_spec.clone())).fill_cfg_and_block_env(
-            &mut cfg_env,
-            &mut block_env,
-            &header,
-            total_difficulty,
-        );
+        let (cfg_env, _) = EthEvmConfig::new(Arc::new(chain_spec.clone()))
+            .cfg_and_block_env(&header, total_difficulty);
 
         // Assert that the chain ID in the `cfg_env` is correctly set to the chain ID of the
         // ChainSpec

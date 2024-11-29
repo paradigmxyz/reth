@@ -346,9 +346,9 @@ tables! {
     }
 
     /// Canonical only Stores transaction receipts.
-    table Receipts {
+    table Receipts<R = Receipt> {
         type Key = TxNumber;
-        type Value = Receipt;
+        type Value = R;
     }
 
     /// Stores all smart contract bytecodes.

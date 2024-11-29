@@ -26,6 +26,9 @@ use reth_scroll_primitives as _;
 
 extern crate alloc;
 
+mod traits;
+pub use traits::*;
+
 #[cfg(feature = "alloy-compat")]
 mod alloy_compat;
 mod block;
@@ -37,7 +40,9 @@ pub use reth_static_file_types as static_file;
 pub mod transaction;
 #[cfg(any(test, feature = "arbitrary"))]
 pub use block::{generate_valid_header, valid_header_strategy};
-pub use block::{Block, BlockBody, BlockWithSenders, SealedBlock, SealedBlockWithSenders};
+pub use block::{
+    Block, BlockBody, BlockWithSenders, SealedBlock, SealedBlockFor, SealedBlockWithSenders,
+};
 #[cfg(feature = "reth-codec")]
 pub use compression::*;
 pub use receipt::{
@@ -82,6 +87,7 @@ pub mod serde_bincode_compat {
 
 /// Temp helper struct for integrating [`NodePrimitives`].
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
 pub struct EthPrimitives;
 
 impl reth_primitives_traits::NodePrimitives for EthPrimitives {

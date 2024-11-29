@@ -15,7 +15,7 @@ use alloy_rpc_types_engine::{
 };
 use reth_primitives::{
     proofs::{self},
-    Block, BlockBody, SealedBlock, TransactionSigned,
+    Block, BlockBody, BlockExt, SealedBlock, TransactionSigned,
 };
 
 /// Converts [`ExecutionPayloadV1`] to [`Block`]
@@ -363,6 +363,7 @@ mod tests {
         CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ExecutionPayloadV1,
         ExecutionPayloadV2, ExecutionPayloadV3,
     };
+    use reth_primitives::BlockExt;
 
     #[test]
     fn roundtrip_payload_to_block() {

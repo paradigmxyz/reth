@@ -29,13 +29,13 @@ reth-transaction-pool.workspace = true
 reth-trie.workspace = true
 
 # ethereum
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-sol-types.workspace = true
 alloy-rpc-types-eth.workspace = true
 revm-inspectors.workspace = true
 revm-primitives = { workspace = true, features = ["dev"] }
-alloy-eips.workspace = true
 
 # scroll
 revm.workspace = true

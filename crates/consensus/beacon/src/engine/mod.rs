@@ -1,4 +1,4 @@
-use alloy_consensus::Header;
+use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::{merge::EPOCH_SLOTS, BlockNumHash};
 use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_types_engine::{
@@ -21,12 +21,12 @@ use reth_network_p2p::{
     sync::{NetworkSyncUpdater, SyncState},
     EthBlockClient,
 };
-use reth_node_types::NodeTypesWithEngine;
+use reth_node_types::{Block, BlockTy, NodeTypesWithEngine};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{Head, SealedBlock, SealedHeader};
+use reth_primitives::{EthPrimitives, Head, SealedBlock, SealedHeader};
 use reth_provider::{
     providers::ProviderNodeTypes, BlockIdReader, BlockReader, BlockSource, CanonChainTracker,
     ChainSpecProvider, ProviderError, StageCheckpointReader,
@@ -84,9 +84,15 @@ const MAX_INVALID_HEADERS: u32 = 512u32;
 pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 
 /// Helper trait expressing requirements for node types to be used in engine.
-pub trait EngineNodeTypes: ProviderNodeTypes + NodeTypesWithEngine {}
+pub trait EngineNodeTypes:
+    ProviderNodeTypes<Primitives = EthPrimitives> + NodeTypesWithEngine
+{
+}
 
-impl<T> EngineNodeTypes for T where T: ProviderNodeTypes + NodeTypesWithEngine {}
+impl<T> EngineNodeTypes for T where
+    T: ProviderNodeTypes<Primitives = EthPrimitives> + NodeTypesWithEngine
+{
+}
 
 /// Represents a pending forkchoice update.
 ///
@@ -228,7 +234,7 @@ impl<N, BT, Client> BeaconConsensusEngine<N, BT, Client>
 where
     N: EngineNodeTypes,
     BT: BlockchainTreeEngine
-        + BlockReader
+        + BlockReader<Block = BlockTy<N>>
         + BlockIdReader
         + CanonChainTracker
         + StageCheckpointReader
@@ -946,7 +952,7 @@ where
                 .blockchain
                 .find_block_by_hash(safe_block_hash, BlockSource::Any)?
                 .ok_or(ProviderError::UnknownBlockHash(safe_block_hash))?;
-            self.blockchain.set_safe(SealedHeader::new(safe.header, safe_block_hash));
+            self.blockchain.set_safe(SealedHeader::new(safe.split().0, safe_block_hash));
         }
         Ok(())
     }
@@ -966,9 +972,9 @@ where
                 .blockchain
                 .find_block_by_hash(finalized_block_hash, BlockSource::Any)?
                 .ok_or(ProviderError::UnknownBlockHash(finalized_block_hash))?;
-            self.blockchain.finalize_block(finalized.number)?;
+            self.blockchain.finalize_block(finalized.header().number())?;
             self.blockchain
-                .set_finalized(SealedHeader::new(finalized.header, finalized_block_hash));
+                .set_finalized(SealedHeader::new(finalized.split().0, finalized_block_hash));
         }
         Ok(())
     }
@@ -1798,7 +1804,7 @@ where
     N: EngineNodeTypes,
     Client: EthBlockClient + 'static,
     BT: BlockchainTreeEngine
-        + BlockReader
+        + BlockReader<Block = BlockTy<N>>
         + BlockIdReader
         + CanonChainTracker
         + StageCheckpointReader
@@ -1992,6 +1998,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_node_types::FullNodePrimitives;
+    use reth_primitives::BlockExt;
     use reth_provider::{BlockWriter, ProviderFactory, StorageLocation};
     use reth_rpc_types_compat::engine::payload::block_to_payload_v1;
     use reth_stages::{ExecOutput, PipelineError, StageError};
@@ -2878,7 +2885,7 @@ mod tests {
             block1.header.set_difficulty(
                 MAINNET.fork(EthereumHardfork::Paris).ttd().unwrap() - U256::from(1),
             );
-            block1 = block1.unseal().seal_slow();
+            block1 = block1.unseal::<reth_primitives::Block>().seal_slow();
             let (block2, exec_result2) = data.blocks[1].clone();
             let mut block2 = block2.unseal().block;
             block2.body.withdrawals = None;

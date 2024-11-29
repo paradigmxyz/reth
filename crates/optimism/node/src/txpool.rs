@@ -69,7 +69,7 @@ impl<Client, Tx> OpTransactionValidator<Client, Tx> {
 
 impl<Client, Tx> OpTransactionValidator<Client, Tx>
 where
-    Client: StateProviderFactory + BlockReaderIdExt,
+    Client: StateProviderFactory + BlockReaderIdExt<Block = reth_primitives::Block>,
     Tx: EthPoolTransaction,
 {
     /// Create a new [`OpTransactionValidator`].
@@ -195,7 +195,7 @@ where
 
 impl<Client, Tx> TransactionValidator for OpTransactionValidator<Client, Tx>
 where
-    Client: StateProviderFactory + BlockReaderIdExt,
+    Client: StateProviderFactory + BlockReaderIdExt<Block = reth_primitives::Block>,
     Tx: EthPoolTransaction,
 {
     type Transaction = Tx;

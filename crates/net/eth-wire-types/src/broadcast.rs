@@ -1,15 +1,14 @@
 //! Types for broadcasting new data.
 
 use crate::{EthMessage, EthVersion, NetworkPrimitives};
+use alloy_primitives::{Bytes, TxHash, B256, U128};
 use alloy_rlp::{
     Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
 };
-
-use alloy_primitives::{Bytes, TxHash, B256, U128};
 use derive_more::{Constructor, Deref, DerefMut, From, IntoIterator};
 use reth_codecs_derive::{add_arbitrary_tests, generate_tests};
-use reth_primitives::{PooledTransactionsElement, TransactionSigned};
-
+use reth_primitives::TransactionSigned;
+use reth_primitives_traits::SignedTransaction;
 use std::{
     collections::{HashMap, HashSet},
     mem,
@@ -555,7 +554,7 @@ pub trait HandleVersionedMempoolData {
     fn msg_version(&self) -> EthVersion;
 }
 
-impl HandleMempoolData for Vec<PooledTransactionsElement> {
+impl<T: SignedTransaction> HandleMempoolData for Vec<T> {
     fn is_empty(&self) -> bool {
         self.is_empty()
     }
@@ -565,7 +564,7 @@ impl HandleMempoolData for Vec<PooledTransactionsElement> {
     }
 
     fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) {
-        self.retain(|tx| f(tx.hash()))
+        self.retain(|tx| f(tx.tx_hash()))
     }
 }
 

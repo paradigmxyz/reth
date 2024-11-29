@@ -5,6 +5,7 @@ use alloy_primitives::{map::HashSet, Bytes, TxHash, B256};
 use alloy_rpc_types_eth::{transaction::TransactionRequest, Index};
 use alloy_rpc_types_trace::{
     filter::TraceFilter,
+    opcode::BlockOpcodeGas,
     parity::{LocalizedTransactionTrace, TraceResults, TraceType},
     tracerequest::TraceCallRequest,
 };
@@ -22,6 +23,9 @@ type RawTransactionTraceResult<'a> =
 
 /// A result type for the `trace_block` method that also captures the requested block.
 pub type TraceBlockResult = Result<(Vec<LocalizedTransactionTrace>, BlockId), (RpcError, BlockId)>;
+
+/// A result type for the `trace_blockOpcodeGas` method that also captures the requested block.
+pub type TraceBlockOpCodeGasResult = Result<(BlockOpcodeGas, BlockId), (RpcError, BlockId)>;
 
 /// Type alias representing the result of replaying a transaction.
 pub type ReplayTransactionResult = Result<(TraceResults, TxHash), (RpcError, TxHash)>;
@@ -61,6 +65,18 @@ pub trait TraceApiExt {
     ///
     /// See also [`StreamExt::buffer_unordered`].
     fn trace_block_buffered_unordered<I, B>(&self, params: I, n: usize) -> TraceBlockStream<'_>
+    where
+        I: IntoIterator<Item = B>,
+        B: Into<BlockId>;
+
+    /// Returns a new stream that yields the traces the opcodes for the given blocks.
+    ///
+    /// See also [`StreamExt::buffered`].
+    fn trace_block_opcode_gas_unordered<I, B>(
+        &self,
+        params: I,
+        n: usize,
+    ) -> TraceBlockOpcodeGasStream<'_>
     where
         I: IntoIterator<Item = B>,
         B: Into<BlockId>;
@@ -269,6 +285,26 @@ impl<T: TraceApiClient + Sync> TraceApiExt for T {
         TraceBlockStream { stream: Box::pin(stream) }
     }
 
+    fn trace_block_opcode_gas_unordered<I, B>(
+        &self,
+        params: I,
+        n: usize,
+    ) -> TraceBlockOpcodeGasStream<'_>
+    where
+        I: IntoIterator<Item = B>,
+        B: Into<BlockId>,
+    {
+        let blocks = params.into_iter().map(|b| b.into()).collect::<Vec<_>>();
+        let stream = futures::stream::iter(blocks.into_iter().map(move |block| async move {
+            match self.trace_block_opcode_gas(block).await {
+                Ok(result) => Ok((result.unwrap(), block)),
+                Err(err) => Err((err, block)),
+            }
+        }))
+        .buffered(n);
+        TraceBlockOpcodeGasStream { stream: Box::pin(stream) }
+    }
+
     fn replay_transactions<I>(
         &self,
         tx_hashes: I,
@@ -403,6 +439,38 @@ impl Stream for TraceBlockStream<'_> {
 impl std::fmt::Debug for TraceBlockStream<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TraceBlockStream").finish_non_exhaustive()
+    }
+}
+
+/// A stream that yields the opcodes for the requested blocks.
+#[must_use = "streams do nothing unless polled"]
+pub struct TraceBlockOpcodeGasStream<'a> {
+    stream: Pin<Box<dyn Stream<Item = TraceBlockOpCodeGasResult> + 'a>>,
+}
+
+impl TraceBlockOpcodeGasStream<'_> {
+    /// Returns the next error result of the stream.
+    pub async fn next_err(&mut self) -> Option<(RpcError, BlockId)> {
+        loop {
+            match self.next().await? {
+                Ok(_) => continue,
+                Err(err) => return Some(err),
+            }
+        }
+    }
+}
+
+impl Stream for TraceBlockOpcodeGasStream<'_> {
+    type Item = TraceBlockOpCodeGasResult;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.stream.as_mut().poll_next(cx)
+    }
+}
+
+impl std::fmt::Debug for TraceBlockOpcodeGasStream<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TraceBlockOpcodeGasStream").finish_non_exhaustive()
     }
 }
 
@@ -669,5 +737,15 @@ mod tests {
 
         println!("Total successes: {successes}");
         println!("Total failures: {failures}");
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn block_opcode_gas_stream() {
+        let client = HttpClientBuilder::default().build("http://localhost:8545").unwrap();
+        let block = vec![BlockNumberOrTag::Latest];
+        let mut stream = client.trace_block_opcode_gas_unordered(block, 2);
+        assert_is_stream(&stream);
+        let _opcodes = stream.next().await.unwrap();
     }
 }

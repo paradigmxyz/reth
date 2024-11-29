@@ -24,6 +24,7 @@ secp256k1 = { workspace = true, features = ["rand"] }
 
 [dev-dependencies]
 alloy-eips.workspace = true
+reth-primitives-traits .workspace = true
 
 [features]
 scroll = ["reth-primitives/scroll"]

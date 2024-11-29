@@ -13,8 +13,8 @@ use reth_provider::{
     errors::provider::ProviderResult, providers::StaticFileWriter, writer::UnifiedStorageWriter,
     BlockHashReader, BlockNumReader, BundleStateInit, ChainSpecProvider, DBProvider,
     DatabaseProviderFactory, ExecutionOutcome, HashingWriter, HeaderProvider, HistoryWriter,
-    OriginalValuesKnown, ProviderError, RevertsInit, StageCheckpointWriter, StateChangeWriter,
-    StateWriter, StaticFileProviderFactory, TrieWriter,
+    OriginalValuesKnown, ProviderError, RevertsInit, StageCheckpointWriter, StateWriter,
+    StaticFileProviderFactory, StorageLocation, TrieWriter,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
@@ -75,7 +75,8 @@ where
         + HistoryWriter
         + HeaderProvider
         + HashingWriter
-        + StateChangeWriter
+        + StateWriter
+        + StateWriter
         + AsRef<PF::ProviderRW>,
 {
     let chain = factory.chain_spec();
@@ -145,8 +146,8 @@ pub fn insert_genesis_state<'a, 'b, Provider>(
 where
     Provider: StaticFileProviderFactory
         + DBProvider<Tx: DbTxMut>
-        + StateChangeWriter
         + HeaderProvider
+        + StateWriter
         + AsRef<Provider>,
 {
     insert_state(provider, alloc, 0)
@@ -161,8 +162,8 @@ pub fn insert_state<'a, 'b, Provider>(
 where
     Provider: StaticFileProviderFactory
         + DBProvider<Tx: DbTxMut>
-        + StateChangeWriter
         + HeaderProvider
+        + StateWriter
         + AsRef<Provider>,
 {
     let capacity = alloc.size_hint().1.unwrap_or(0);
@@ -236,8 +237,7 @@ where
         Vec::new(),
     );
 
-    let mut storage_writer = UnifiedStorageWriter::from_database(&provider);
-    storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::Yes)?;
+    provider.write_state(execution_outcome, OriginalValuesKnown::Yes, StorageLocation::Database)?;
 
     trace!(target: "reth::cli", "Inserted state");
 
@@ -355,8 +355,8 @@ where
         + HistoryWriter
         + HeaderProvider
         + HashingWriter
-        + StateChangeWriter
         + TrieWriter
+        + StateWriter
         + AsRef<Provider>,
 {
     let block = provider_rw.last_block_number()?;
@@ -476,7 +476,7 @@ where
         + HeaderProvider
         + HashingWriter
         + HistoryWriter
-        + StateChangeWriter
+        + StateWriter
         + AsRef<Provider>,
 {
     let accounts_len = collector.len();

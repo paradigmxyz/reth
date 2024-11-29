@@ -2,7 +2,11 @@
 
 use crate::{Nibbles, TrieAccount};
 use alloy_consensus::constants::KECCAK_EMPTY;
-use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
+use alloy_primitives::{
+    keccak256,
+    map::{hash_map, HashMap},
+    Address, Bytes, B256, U256,
+};
 use alloy_rlp::{encode_fixed_size, Decodable, EMPTY_STRING_CODE};
 use alloy_trie::{
     nodes::TrieNode,
@@ -11,8 +15,6 @@ use alloy_trie::{
 };
 use itertools::Itertools;
 use reth_primitives_traits::Account;
-use serde::{Deserialize, Serialize};
-use std::collections::{hash_map, HashMap};
 
 /// The state multiproof of target accounts and multiproofs of their storage tries.
 /// Multiproof is effectively a state subtrie that only contains the nodes
@@ -26,6 +28,31 @@ pub struct MultiProof {
 }
 
 impl MultiProof {
+    /// Return the account proof nodes for the given account path.
+    pub fn account_proof_nodes(&self, path: &Nibbles) -> Vec<(Nibbles, Bytes)> {
+        self.account_subtree.matching_nodes_sorted(path)
+    }
+
+    /// Return the storage proof nodes for the given storage slots of the account path.
+    pub fn storage_proof_nodes(
+        &self,
+        hashed_address: B256,
+        slots: impl IntoIterator<Item = B256>,
+    ) -> Vec<(B256, Vec<(Nibbles, Bytes)>)> {
+        self.storages
+            .get(&hashed_address)
+            .map(|storage_mp| {
+                slots
+                    .into_iter()
+                    .map(|slot| {
+                        let nibbles = Nibbles::unpack(slot);
+                        (slot, storage_mp.subtree.matching_nodes_sorted(&nibbles))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// Construct the account proof from the multiproof.
     pub fn account_proof(
         &self,
@@ -37,10 +64,9 @@ impl MultiProof {
 
         // Retrieve the account proof.
         let proof = self
-            .account_subtree
-            .matching_nodes_iter(&nibbles)
-            .sorted_by(|a, b| a.0.cmp(b.0))
-            .map(|(_, node)| node.clone())
+            .account_proof_nodes(&nibbles)
+            .into_iter()
+            .map(|(_, node)| node)
             .collect::<Vec<_>>();
 
         // Inspect the last node in the proof. If it's a leaf node with matching suffix,
@@ -152,8 +178,9 @@ impl StorageMultiProof {
 }
 
 /// The merkle proof with the relevant account info.
-#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, PartialEq, Eq, Debug)]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "serde"), serde(rename_all = "camelCase"))]
 pub struct AccountProof {
     /// The address associated with the account.
     pub address: Address,
@@ -208,7 +235,8 @@ impl AccountProof {
 }
 
 /// The merkle proof of the storage entry.
-#[derive(Clone, PartialEq, Eq, Default, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Default, Debug)]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
 pub struct StorageProof {
     /// The raw storage key.
     pub key: B256,

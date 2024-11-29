@@ -6,10 +6,10 @@ use reth_blockchain_tree_api::{
     BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
     InsertPayloadOk,
 };
-use reth_primitives::{Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader};
+use reth_primitives::{EthPrimitives, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader};
 use reth_provider::{
     BlockchainTreePendingStateProvider, CanonStateNotificationSender, CanonStateNotifications,
-    CanonStateSubscriptions, FullExecutionDataProvider,
+    CanonStateSubscriptions, FullExecutionDataProvider, NodePrimitivesProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use std::collections::BTreeMap;
@@ -124,6 +124,10 @@ impl BlockchainTreePendingStateProvider for NoopBlockchainTree {
     ) -> Option<Box<dyn FullExecutionDataProvider>> {
         None
     }
+}
+
+impl NodePrimitivesProvider for NoopBlockchainTree {
+    type Primitives = EthPrimitives;
 }
 
 impl CanonStateSubscriptions for NoopBlockchainTree {

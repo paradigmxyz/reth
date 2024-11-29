@@ -1,5 +1,3 @@
-use std::{collections::HashMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
-
 use alloy_consensus::Header;
 use alloy_primitives::{keccak256, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
@@ -11,17 +9,18 @@ use reth_evm::{
     state_change::post_block_balance_increments, system_calls::SystemCaller, ConfigureEvm,
 };
 use reth_primitives::{Receipt, SealedBlockWithSenders, SealedHeader};
+use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
-    db::states::bundle_state::BundleRetention,
-    primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg},
-    DatabaseCommit, StateBuilder,
+    db::states::bundle_state::BundleRetention, primitives::EnvWithHandlerCfg, DatabaseCommit,
+    StateBuilder,
 };
 use reth_rpc_api::DebugApiClient;
 use reth_scroll_execution::FinalizeExecution;
 use reth_tracing::tracing::warn;
 use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage};
 use serde::Serialize;
+use std::{collections::HashMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
 
 /// Generates a witness for the given block and saves it to a file.
 #[derive(Debug)]
@@ -76,9 +75,7 @@ where
         let mut db = StateBuilder::new().with_database(state).with_bundle_update().build();
 
         // Setup environment for the execution.
-        let mut cfg = CfgEnvWithHandlerCfg::new(Default::default(), Default::default());
-        let mut block_env = BlockEnv::default();
-        self.evm_config.fill_cfg_and_block_env(&mut cfg, &mut block_env, block.header(), U256::MAX);
+        let (cfg, block_env) = self.evm_config.cfg_and_block_env(block.header(), U256::MAX);
 
         // Setup EVM
         let mut evm = self.evm_config.evm_with_env(

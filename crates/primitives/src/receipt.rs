@@ -139,7 +139,6 @@ impl InMemorySize for Receipt {
     Debug,
     PartialEq,
     Eq,
-    Default,
     Serialize,
     Deserialize,
     From,
@@ -192,6 +191,12 @@ impl From<Receipt> for ReceiptWithBloom {
     fn from(receipt: Receipt) -> Self {
         let bloom = receipt.bloom_slow();
         Self { receipt, bloom }
+    }
+}
+
+impl<T> Default for Receipts<T> {
+    fn default() -> Self {
+        Self { receipt_vec: Vec::new() }
     }
 }
 

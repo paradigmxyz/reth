@@ -1124,7 +1124,7 @@ impl PartialEq for TransactionSigned {
     fn eq(&self, other: &Self) -> bool {
         self.signature == other.signature &&
             self.transaction == other.transaction &&
-            self.hash_ref() == other.hash_ref()
+            self.tx_hash() == other.tx_hash()
     }
 }
 
@@ -1143,11 +1143,6 @@ impl TransactionSigned {
         Self { hash: Default::default(), signature, transaction }
     }
 
-    /// Transaction signature.
-    pub const fn signature(&self) -> &Signature {
-        &self.signature
-    }
-
     /// Transaction
     pub const fn transaction(&self) -> &Transaction {
         &self.transaction
@@ -1155,56 +1150,7 @@ impl TransactionSigned {
 
     /// Transaction hash. Used to identify transaction.
     pub fn hash(&self) -> TxHash {
-        *self.hash_ref()
-    }
-
-    /// Reference to transaction hash. Used to identify transaction.
-    pub fn hash_ref(&self) -> &TxHash {
-        self.hash.get_or_init(|| self.recalculate_hash())
-    }
-
-    /// Recover signer from signature and hash.
-    ///
-    /// Returns `None` if the transaction's signature is invalid following [EIP-2](https://eips.ethereum.org/EIPS/eip-2), see also [`recover_signer`].
-    ///
-    /// Note:
-    ///
-    /// This can fail for some early ethereum mainnet transactions pre EIP-2, use
-    /// [`Self::recover_signer_unchecked`] if you want to recover the signer without ensuring that
-    /// the signature has a low `s` value.
-    pub fn recover_signer(&self) -> Option<Address> {
-        // Optimism's Deposit transaction does not have a signature. Directly return the
-        // `from` address.
-        #[cfg(all(feature = "optimism", not(feature = "scroll")))]
-        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from)
-        }
-        #[cfg(all(feature = "scroll", not(feature = "optimism")))]
-        if let Transaction::L1Message(TxL1Message { sender, .. }) = self.transaction {
-            return Some(sender)
-        }
-        let signature_hash = self.signature_hash();
-        recover_signer(&self.signature, signature_hash)
-    }
-
-    /// Recover signer from signature and hash _without ensuring that the signature has a low `s`
-    /// value_.
-    ///
-    /// Returns `None` if the transaction's signature is invalid, see also
-    /// [`recover_signer_unchecked`].
-    pub fn recover_signer_unchecked(&self) -> Option<Address> {
-        // Optimism's Deposit transaction does not have a signature. Directly return the
-        // `from` address.
-        #[cfg(all(feature = "optimism", not(feature = "scroll")))]
-        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from)
-        }
-        #[cfg(all(feature = "scroll", not(feature = "optimism")))]
-        if let Transaction::L1Message(TxL1Message { sender, .. }) = self.transaction {
-            return Some(sender)
-        }
-        let signature_hash = self.signature_hash();
-        recover_signer_unchecked(&self.signature, signature_hash)
+        *self.tx_hash()
     }
 
     /// Recovers a list of signers from a transaction list iterator.
@@ -1370,7 +1316,7 @@ impl SignedTransaction for TransactionSigned {
     type Type = TxType;
 
     fn tx_hash(&self) -> &TxHash {
-        self.hash_ref()
+        self.hash.get_or_init(|| self.recalculate_hash())
     }
 
     fn signature(&self) -> &Signature {
@@ -1378,11 +1324,31 @@ impl SignedTransaction for TransactionSigned {
     }
 
     fn recover_signer(&self) -> Option<Address> {
+        // Optimism's Deposit transaction does not have a signature. Directly return the
+        // `from` address.
+        #[cfg(all(feature = "optimism", not(feature = "scroll")))]
+        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
+            return Some(from)
+        }
+        #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+        if let Transaction::L1Message(TxL1Message { sender, .. }) = self.transaction {
+            return Some(sender)
+        }
         let signature_hash = self.signature_hash();
         recover_signer(&self.signature, signature_hash)
     }
 
     fn recover_signer_unchecked(&self) -> Option<Address> {
+        // Optimism's Deposit transaction does not have a signature. Directly return the
+        // `from` address.
+        #[cfg(all(feature = "optimism", not(feature = "scroll")))]
+        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
+            return Some(from)
+        }
+        #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+        if let Transaction::L1Message(TxL1Message { sender, .. }) = self.transaction {
+            return Some(sender)
+        }
         let signature_hash = self.signature_hash();
         recover_signer_unchecked(&self.signature, signature_hash)
     }
@@ -1822,6 +1788,11 @@ pub trait SignedTransactionIntoRecoveredExt: SignedTransaction {
         let signer = self.recover_signer_unchecked()?;
         Some(TransactionSignedEcRecovered::from_signed_transaction(self, signer))
     }
+
+    /// Returns the [`TransactionSignedEcRecovered`] transaction with the given sender.
+    fn with_signer(self, signer: Address) -> TransactionSignedEcRecovered<Self> {
+        TransactionSignedEcRecovered::from_signed_transaction(self, signer)
+    }
 }
 
 impl<T> SignedTransactionIntoRecoveredExt for T where T: SignedTransaction {}
@@ -2052,6 +2023,22 @@ where
     }
 }
 
+/// Recovers a list of signers from a transaction list iterator _without ensuring that the
+/// signature has a low `s` value_.
+///
+/// Returns `None`, if some transaction's signature is invalid.
+pub fn recover_signers_unchecked<'a, I, T>(txes: I, num_txes: usize) -> Option<Vec<Address>>
+where
+    T: SignedTransaction,
+    I: IntoParallelIterator<Item = &'a T> + IntoIterator<Item = &'a T> + Send,
+{
+    if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
+        txes.into_iter().map(|tx| tx.recover_signer_unchecked()).collect()
+    } else {
+        txes.into_par_iter().map(|tx| tx.recover_signer_unchecked()).collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
@@ -2066,6 +2053,7 @@ mod tests {
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
     use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_codecs::Compact;
+    use reth_primitives_traits::SignedTransaction;
     use std::str::FromStr;
 
     #[test]

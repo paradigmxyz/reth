@@ -1,7 +1,7 @@
 //! Helper function for calculating Merkle proofs and hashes.
 
-use crate::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef, TransactionSigned};
-use alloc::vec::Vec;
+use crate::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef};
+use alloc::{borrow::Borrow, vec::Vec};
 use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawal};
 use alloy_primitives::{keccak256, B256};
@@ -12,9 +12,9 @@ use alloy_trie::root::{ordered_trie_root, ordered_trie_root_with_encoder};
 /// `(rlp(index), encoded(tx))` pairs.
 pub fn calculate_transaction_root<T>(transactions: &[T]) -> B256
 where
-    T: AsRef<TransactionSigned>,
+    T: Encodable2718,
 {
-    ordered_trie_root_with_encoder(transactions, |tx: &T, buf| tx.as_ref().encode_2718(buf))
+    ordered_trie_root_with_encoder(transactions, |tx, buf| tx.borrow().encode_2718(buf))
 }
 
 /// Calculates the root hash of the withdrawals.

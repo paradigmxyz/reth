@@ -163,11 +163,12 @@ test-utils = [
 	"revm-primitives/test-utils"
 ]
 serde-bincode-compat = [
+	"serde_with",
+	"alloy-eips/serde-bincode-compat",
 	"alloy-consensus/serde-bincode-compat",
 	"op-alloy-consensus?/serde-bincode-compat",
 	"reth-primitives-traits/serde-bincode-compat",
-	"serde_with",
-	"alloy-eips/serde-bincode-compat",
+	"reth-trie-common/serde-bincode-compat",
 ]
 scroll = [
 	"reth-trie-common/scroll",

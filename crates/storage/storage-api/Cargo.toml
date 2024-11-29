@@ -23,6 +23,7 @@ reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
 reth-trie.workspace = true
+reth-trie-db.workspace = true
 reth-db.workspace = true
 
 # ethereum

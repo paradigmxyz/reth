@@ -1,7 +1,8 @@
+use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_engine_primitives::ForkchoiceStatus;
-use reth_primitives::{SealedBlock, SealedHeader};
+use reth_primitives::{EthPrimitives, NodePrimitives, SealedBlock, SealedHeader};
 use std::{
     fmt::{Display, Formatter, Result},
     sync::Arc,
@@ -10,23 +11,23 @@ use std::{
 
 /// Events emitted by [`crate::BeaconConsensusEngine`].
 #[derive(Clone, Debug)]
-pub enum BeaconConsensusEngineEvent {
+pub enum BeaconConsensusEngineEvent<N: NodePrimitives = EthPrimitives> {
     /// The fork choice state was updated, and the current fork choice status
     ForkchoiceUpdated(ForkchoiceState, ForkchoiceStatus),
     /// A block was added to the fork chain.
-    ForkBlockAdded(Arc<SealedBlock>, Duration),
+    ForkBlockAdded(Arc<SealedBlock<N::BlockHeader, N::BlockBody>>, Duration),
     /// A block was added to the canonical chain, and the elapsed time validating the block
-    CanonicalBlockAdded(Arc<SealedBlock>, Duration),
+    CanonicalBlockAdded(Arc<SealedBlock<N::BlockHeader, N::BlockBody>>, Duration),
     /// A canonical chain was committed, and the elapsed time committing the data
-    CanonicalChainCommitted(Box<SealedHeader>, Duration),
+    CanonicalChainCommitted(Box<SealedHeader<N::BlockHeader>>, Duration),
     /// The consensus engine is involved in live sync, and has specific progress
     LiveSyncProgress(ConsensusEngineLiveSyncProgress),
 }
 
-impl BeaconConsensusEngineEvent {
+impl<N: NodePrimitives> BeaconConsensusEngineEvent<N> {
     /// Returns the canonical header if the event is a
     /// [`BeaconConsensusEngineEvent::CanonicalChainCommitted`].
-    pub const fn canonical_header(&self) -> Option<&SealedHeader> {
+    pub const fn canonical_header(&self) -> Option<&SealedHeader<N::BlockHeader>> {
         match self {
             Self::CanonicalChainCommitted(header, _) => Some(header),
             _ => None,
@@ -34,7 +35,10 @@ impl BeaconConsensusEngineEvent {
     }
 }
 
-impl Display for BeaconConsensusEngineEvent {
+impl<N> Display for BeaconConsensusEngineEvent<N>
+where
+    N: NodePrimitives<BlockHeader: BlockHeader>,
+{
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         match self {
             Self::ForkchoiceUpdated(state, status) => {
