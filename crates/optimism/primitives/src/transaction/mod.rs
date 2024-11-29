@@ -5,7 +5,7 @@ pub mod tx_type;
 
 use alloy_primitives::{bytes, Bytes, TxKind, Uint, B256};
 
-use alloy_consensus::{constants::EIP7702_TX_TYPE_ID, TxLegacy};
+use alloy_consensus::{constants::EIP7702_TX_TYPE_ID, SignableTransaction, TxLegacy};
 use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization};
 use derive_more::{Constructor, Deref, From};
 use op_alloy_consensus::{OpTypedTransaction, DEPOSIT_TX_TYPE_ID};
@@ -21,6 +21,20 @@ use reth_primitives_traits::InMemorySize;
 #[derive(Debug, Clone, PartialEq, Eq, Deref, Hash, From)]
 /// Optimistic transaction.
 pub struct OpTransaction(OpTypedTransaction);
+
+impl OpTransaction {
+    /// This encodes the transaction _without_ the signature, and is only suitable for creating a
+    /// hash intended for signing.
+    pub fn encode_for_signing(&self, out: &mut dyn bytes::BufMut) {
+        match self.deref() {
+            OpTypedTransaction::Legacy(tx) => tx.encode_for_signing(out),
+            OpTypedTransaction::Eip2930(tx) => tx.encode_for_signing(out),
+            OpTypedTransaction::Eip1559(tx) => tx.encode_for_signing(out),
+            OpTypedTransaction::Eip7702(tx) => tx.encode_for_signing(out),
+            OpTypedTransaction::Deposit(_) => {}
+        }
+    }
+}
 
 impl Default for OpTransaction {
     fn default() -> Self {

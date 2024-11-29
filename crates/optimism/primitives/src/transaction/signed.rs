@@ -88,6 +88,17 @@ impl SignedTransaction for OpTransactionSigned {
     fn recalculate_hash(&self) -> B256 {
         keccak256(self.encoded_2718())
     }
+
+    fn recover_signer_unchecked_with_buf(&self, buf: &mut Vec<u8>) -> Option<Address> {
+        // Optimism's Deposit transaction does not have a signature. Directly return the
+        // `from` address.
+        if let OpTypedTransaction::Deposit(TxDeposit { from, .. }) = *self.transaction {
+            return Some(from)
+        }
+        self.encode_for_signing(buf);
+        let signature_hash = keccak256(buf);
+        recover_signer_unchecked(&self.signature, signature_hash)
+    }
 }
 
 impl reth_primitives_traits::FillTxEnv for OpTransactionSigned {
