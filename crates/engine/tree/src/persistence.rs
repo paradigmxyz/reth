@@ -2,7 +2,7 @@ use crate::metrics::PersistenceMetrics;
 use alloy_eips::BlockNumHash;
 use reth_chain_state::ExecutedBlock;
 use reth_errors::ProviderError;
-use reth_primitives::EthPrimitives;
+use reth_primitives::{EthPrimitives, NodePrimitives};
 use reth_provider::{
     providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockHashReader,
     ChainStateBlockWriter, DatabaseProviderFactory, ProviderFactory, StaticFileProviderFactory,
@@ -192,13 +192,13 @@ pub enum PersistenceAction {
 
 /// A handle to the persistence service
 #[derive(Debug, Clone)]
-pub struct PersistenceHandle<N: PersistenceNodeTypes = reth_primitives::EthPrimitives> {
+pub struct PersistenceHandle<N: NodePrimitives = EthPrimitives> {
     /// The channel used to communicate with the persistence service
     sender: Sender<PersistenceAction>,
     _marker: std::marker::PhantomData<N>,
 }
 
-impl<N: PersistenceNodeTypes> PersistenceHandle<N> {
+impl<N: NodePrimitives> PersistenceHandle<N> {
     /// Create a new [`PersistenceHandle`] from a [`Sender<PersistenceAction>`].
     pub const fn new(sender: Sender<PersistenceAction>) -> Self {
         Self { 
@@ -208,7 +208,7 @@ impl<N: PersistenceNodeTypes> PersistenceHandle<N> {
     }
 
     /// Create a new [`PersistenceHandle`], and spawn the persistence service.
-    pub fn spawn_service<N: PersistenceNodeTypes>(
+    pub fn spawn_service<N: NodePrimitives>(
         provider_factory: ProviderFactory<N>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
