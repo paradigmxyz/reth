@@ -158,7 +158,7 @@ where
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<ExecuteOutput, Self::Error> {
+    ) -> Result<ExecuteOutput<Receipt>, Self::Error> {
         let env = self.evm_env_for_block(&block.header, total_difficulty);
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
 
