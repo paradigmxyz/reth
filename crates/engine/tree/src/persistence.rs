@@ -2,7 +2,7 @@ use crate::metrics::PersistenceMetrics;
 use alloy_eips::BlockNumHash;
 use reth_chain_state::ExecutedBlock;
 use reth_errors::ProviderError;
-use reth_primitives::EthPrimitives;
+use reth_primitives::{EthPrimitives, NodePrimitives};
 use reth_provider::{
     providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockHashReader,
     ChainStateBlockWriter, DatabaseProviderFactory, ProviderFactory, StaticFileProviderFactory,
@@ -192,15 +192,16 @@ pub enum PersistenceAction {
 
 /// A handle to the persistence service
 #[derive(Debug, Clone)]
-pub struct PersistenceHandle {
+pub struct PersistenceHandle<N: NodePrimitives = EthPrimitives> {
     /// The channel used to communicate with the persistence service
     sender: Sender<PersistenceAction>,
+    _marker: std::marker::PhantomData<N>,
 }
 
-impl PersistenceHandle {
+impl<T: NodePrimitives> PersistenceHandle<T> {
     /// Create a new [`PersistenceHandle`] from a [`Sender<PersistenceAction>`].
     pub const fn new(sender: Sender<PersistenceAction>) -> Self {
-        Self { sender }
+        Self { sender, _marker: std::marker::PhantomData }
     }
 
     /// Create a new [`PersistenceHandle`], and spawn the persistence service.
