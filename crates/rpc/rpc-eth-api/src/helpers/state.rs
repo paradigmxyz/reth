@@ -234,11 +234,8 @@ pub trait LoadState:
                     .map_err(Self::Error::from_eth_err)?
                     .ok_or(EthApiError::HeaderNotFound(at))?;
 
-                let header = self
-                    .cache()
-                    .get_evm_env(block_hash)
-                    .await
-                    .map_err(Self::Error::from_eth_err)?;
+                let header =
+                    self.cache().get_header(block_hash).await.map_err(Self::Error::from_eth_err)?;
                 let evm_config = self.evm_config().clone();
                 let (cfg, block_env) = self
                     .provider()

@@ -1,6 +1,6 @@
 use clap::Args;
 use reth_rpc_server_types::constants::cache::{
-    DEFAULT_BLOCK_CACHE_MAX_LEN, DEFAULT_CONCURRENT_DB_REQUESTS, DEFAULT_ENV_CACHE_MAX_LEN,
+    DEFAULT_BLOCK_CACHE_MAX_LEN, DEFAULT_CONCURRENT_DB_REQUESTS, DEFAULT_HEADER_CACHE_MAX_LEN,
     DEFAULT_RECEIPT_CACHE_MAX_LEN,
 };
 
@@ -22,12 +22,12 @@ pub struct RpcStateCacheArgs {
     )]
     pub max_receipts: u32,
 
-    /// Max number of bytes for cached env data.
+    /// Max number of headers in cache.
     #[arg(
         long = "rpc-cache.max-envs",
-        default_value_t = DEFAULT_ENV_CACHE_MAX_LEN,
+        default_value_t = DEFAULT_HEADER_CACHE_MAX_LEN,
     )]
-    pub max_envs: u32,
+    pub max_headers: u32,
 
     /// Max number of concurrent database requests.
     #[arg(
@@ -42,7 +42,7 @@ impl Default for RpcStateCacheArgs {
         Self {
             max_blocks: DEFAULT_BLOCK_CACHE_MAX_LEN,
             max_receipts: DEFAULT_RECEIPT_CACHE_MAX_LEN,
-            max_envs: DEFAULT_ENV_CACHE_MAX_LEN,
+            max_headers: DEFAULT_HEADER_CACHE_MAX_LEN,
             max_concurrent_db_requests: DEFAULT_CONCURRENT_DB_REQUESTS,
         }
     }
