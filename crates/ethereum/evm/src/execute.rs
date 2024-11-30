@@ -160,7 +160,7 @@ where
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<ExecuteOutput, Self::Error> {
+    ) -> Result<ExecuteOutput<Receipt>, Self::Error> {
         let env = self.evm_env_for_block(&block.header, total_difficulty);
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
 
@@ -193,7 +193,7 @@ where
                     error: Box::new(new_err),
                 }
             })?;
-            self.system_caller.on_state(&result_and_state);
+            self.system_caller.on_state(&result_and_state.state);
             let ResultAndState { result, state } = result_and_state;
             evm.db_mut().commit(state);
 

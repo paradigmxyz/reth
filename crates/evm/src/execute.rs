@@ -599,14 +599,14 @@ mod tests {
         _chain_spec: Arc<ChainSpec>,
         _evm_config: EvmConfig,
         state: State<DB>,
-        execute_transactions_result: ExecuteOutput,
+        execute_transactions_result: ExecuteOutput<Receipt>,
         apply_post_execution_changes_result: Requests,
         finish_result: BundleState,
     }
 
     #[derive(Clone)]
     struct TestExecutorStrategyFactory {
-        execute_transactions_result: ExecuteOutput,
+        execute_transactions_result: ExecuteOutput<Receipt>,
         apply_post_execution_changes_result: Requests,
         finish_result: BundleState,
     }
@@ -659,7 +659,7 @@ mod tests {
             &mut self,
             _block: &BlockWithSenders,
             _total_difficulty: U256,
-        ) -> Result<ExecuteOutput, Self::Error> {
+        ) -> Result<ExecuteOutput<Receipt>, Self::Error> {
             Ok(self.execute_transactions_result.clone())
         }
 
@@ -711,8 +711,10 @@ mod tests {
     fn test_strategy() {
         let expected_gas_used = 10;
         let expected_receipts = vec![Receipt::default()];
-        let expected_execute_transactions_result =
-            ExecuteOutput { receipts: expected_receipts.clone(), gas_used: expected_gas_used };
+        let expected_execute_transactions_result = ExecuteOutput::<Receipt> {
+            receipts: expected_receipts.clone(),
+            gas_used: expected_gas_used,
+        };
         let expected_apply_post_execution_changes_result = Requests::new(vec![bytes!("deadbeef")]);
         let expected_finish_result = BundleState::default();
 

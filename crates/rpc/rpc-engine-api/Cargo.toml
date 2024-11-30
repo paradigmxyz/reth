@@ -54,7 +54,6 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
 reth-tokio-util.workspace = true
 reth-testing-utils.workspace = true
-
 alloy-rlp.workspace = true
 
 assert_matches.workspace = true

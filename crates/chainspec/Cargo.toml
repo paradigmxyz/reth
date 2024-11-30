@@ -47,7 +47,8 @@ std = [
 	"alloy-trie/std",
 	"reth-primitives-traits/std",
 	"alloy-consensus/std",
-	"once_cell/std"
+	"once_cell/std",
+	"alloy-rlp/std"
 ]
 arbitrary = [
 	"alloy-chains/arbitrary",

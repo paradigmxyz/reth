@@ -113,8 +113,8 @@ pub mod cache {
     /// Default cache size for the receipts cache: 2000 receipts.
     pub const DEFAULT_RECEIPT_CACHE_MAX_LEN: u32 = 2000;
 
-    /// Default cache size for the env cache: 1000 envs.
-    pub const DEFAULT_ENV_CACHE_MAX_LEN: u32 = 1000;
+    /// Default cache size for the header cache: 1000 headers.
+    pub const DEFAULT_HEADER_CACHE_MAX_LEN: u32 = 1000;
 
     /// Default number of concurrent database requests.
     pub const DEFAULT_CONCURRENT_DB_REQUESTS: usize = 512;

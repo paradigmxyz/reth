@@ -49,7 +49,7 @@
 //!         CanonStateSubscriptions<Primitives = reth_primitives::EthPrimitives> + Clone + 'static,
 //!     EvmConfig: ConfigureEvm<Header = Header>,
 //!     BlockExecutor: BlockExecutorProvider<Primitives = Events::Primitives>,
-//!     Consensus: reth_consensus::Consensus + Clone + 'static,
+//!     Consensus: reth_consensus::FullConsensus + Clone + 'static,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -131,7 +131,7 @@
 //!     EngineT: EngineTypes,
 //!     EvmConfig: ConfigureEvm<Header = Header>,
 //!     BlockExecutor: BlockExecutorProvider<Primitives = Events::Primitives>,
-//!     Consensus: reth_consensus::Consensus + Clone + 'static,
+//!     Consensus: reth_consensus::FullConsensus + Clone + 'static,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -194,7 +194,7 @@ use jsonrpsee::{
     Methods, RpcModule,
 };
 use reth_chainspec::EthereumHardforks;
-use reth_consensus::Consensus;
+use reth_consensus::FullConsensus;
 use reth_engine_primitives::EngineTypes;
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
@@ -266,7 +266,7 @@ pub async fn launch<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi, B
     evm_config: EvmConfig,
     eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi>,
     block_executor: BlockExecutor,
-    consensus: Arc<dyn Consensus>,
+    consensus: Arc<dyn FullConsensus>,
 ) -> Result<RpcServerHandle, RpcError>
 where
     Provider: FullRpcProvider<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
@@ -641,7 +641,7 @@ where
             Receipt = reth_primitives::Receipt,
         >,
     >,
-    Consensus: reth_consensus::Consensus + Clone + 'static,
+    Consensus: reth_consensus::FullConsensus + Clone + 'static,
 {
     /// Configures all [`RpcModule`]s specific to the given [`TransportRpcModuleConfig`] which can
     /// be used to start the transport server(s).
@@ -1293,7 +1293,7 @@ where
     /// Instantiates `ValidationApi`
     pub fn validation_api(&self) -> ValidationApi<Provider, BlockExecutor>
     where
-        Consensus: reth_consensus::Consensus + Clone + 'static,
+        Consensus: reth_consensus::FullConsensus + Clone + 'static,
     {
         ValidationApi::new(
             self.provider.clone(),
@@ -1324,7 +1324,7 @@ where
             Receipt = reth_primitives::Receipt,
         >,
     >,
-    Consensus: reth_consensus::Consensus + Clone + 'static,
+    Consensus: reth_consensus::FullConsensus + Clone + 'static,
 {
     /// Configures the auth module that includes the
     ///   * `engine_` namespace
