@@ -23,7 +23,7 @@ revm-primitives.workspace = true
 
 alloy-genesis.workspace = true
 alloy-rpc-types-eth = { workspace = true, optional = true }
-alloy-serde.workspace = true
+alloy-serde = { workspace = true, optional = true }
 
 bytes.workspace = true
 derive_more.workspace = true
@@ -56,7 +56,10 @@ serde_json.workspace = true
 serde_with.workspace = true
 
 [features]
-eip1186 = []
+eip1186 = [
+    "dep:alloy-rpc-types-eth",
+    "dep:alloy-serde",
+]
 serde = [
     "dep:serde",
     "bytes/serde",
