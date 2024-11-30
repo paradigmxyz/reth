@@ -60,6 +60,7 @@ std = [
 	"rustc-hash/std",
 	"alloy-consensus/std",
 	"once_cell/std",
-	"serde?/std"
+	"serde?/std",
+	"alloy-rlp/std"
 ]
 rustc-hash = ["dep:rustc-hash"]
