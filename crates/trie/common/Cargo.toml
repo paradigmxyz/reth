@@ -17,12 +17,13 @@ alloy-primitives.workspace = true
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
 alloy-trie.workspace = true
 alloy-consensus.workspace = true
-alloy-genesis.workspace = true
-alloy-rpc-types-eth = {workspace = true, optional = true}
-alloy-serde.workspace = true
 reth-primitives-traits.workspace = true
 reth-codecs.workspace = true
 revm-primitives.workspace = true
+
+alloy-genesis.workspace = true
+alloy-rpc-types-eth = { workspace = true, optional = true }
+alloy-serde.workspace = true
 
 bytes.workspace = true
 derive_more.workspace = true
