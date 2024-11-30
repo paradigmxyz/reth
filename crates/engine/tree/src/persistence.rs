@@ -169,13 +169,13 @@ pub enum PersistenceError {
 
 /// A signal to the persistence service that part of the tree state can be persisted.
 #[derive(Debug)]
-pub enum PersistenceAction {
+pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
     /// The section of tree state that should be persisted. These blocks are expected in order of
     /// increasing block number.
     ///
     /// First, header, transaction, and receipt-related data should be written to static files.
     /// Then the execution history-related data will be written to the database.
-    SaveBlocks(Vec<ExecutedBlock>, oneshot::Sender<Option<BlockNumHash>>),
+    SaveBlocks(Vec<ExecutedBlock<N>>, oneshot::Sender<Option<BlockNumHash>>),
 
     /// Removes block data above the given block number from the database.
     ///
