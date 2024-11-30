@@ -21,7 +21,7 @@ use reth_network_p2p::{
     sync::{NetworkSyncUpdater, SyncState},
     EthBlockClient,
 };
-use reth_node_types::{Block, BlockTy, NodeTypesWithEngine};
+use reth_node_types::{Block, BlockTy, HeaderTy, NodeTypesWithEngine};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
@@ -234,7 +234,7 @@ impl<N, BT, Client> BeaconConsensusEngine<N, BT, Client>
 where
     N: EngineNodeTypes,
     BT: BlockchainTreeEngine
-        + BlockReader<Block = BlockTy<N>>
+        + BlockReader<Block = BlockTy<N>, Header = HeaderTy<N>>
         + BlockIdReader
         + CanonChainTracker
         + StageCheckpointReader
@@ -1804,7 +1804,7 @@ where
     N: EngineNodeTypes,
     Client: EthBlockClient + 'static,
     BT: BlockchainTreeEngine
-        + BlockReader<Block = BlockTy<N>>
+        + BlockReader<Block = BlockTy<N>, Header = HeaderTy<N>>
         + BlockIdReader
         + CanonChainTracker
         + StageCheckpointReader

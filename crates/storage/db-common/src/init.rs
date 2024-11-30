@@ -1,5 +1,6 @@
 //! Reth genesis initialization utility functions.
 
+use alloy_consensus::BlockHeader;
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{Address, B256, U256};
 use reth_chainspec::EthChainSpec;
@@ -8,7 +9,9 @@ use reth_config::config::EtlConfig;
 use reth_db::tables;
 use reth_db_api::{transaction::DbTxMut, DatabaseError};
 use reth_etl::Collector;
-use reth_primitives::{Account, Bytecode, GotExpected, Receipts, StaticFileSegment, StorageEntry};
+use reth_primitives::{
+    Account, Bytecode, GotExpected, NodePrimitives, Receipts, StaticFileSegment, StorageEntry,
+};
 use reth_provider::{
     errors::provider::ProviderResult, providers::StaticFileWriter, writer::UnifiedStorageWriter,
     BlockHashReader, BlockNumReader, BundleStateInit, ChainSpecProvider, DBProvider,
@@ -78,7 +81,7 @@ where
         + StateWriter
         + StateWriter
         + AsRef<PF::ProviderRW>,
-    PF::ChainSpec: EthChainSpec<Header = reth_primitives::Header>,
+    PF::ChainSpec: EthChainSpec<<PF::Primitives as NodePrimitives>::BlockHeader>,
 {
     let chain = factory.chain_spec();
 
@@ -307,8 +310,14 @@ pub fn insert_genesis_header<Provider, Spec>(
     chain: &Spec,
 ) -> ProviderResult<()>
 where
+<<<<<<< HEAD
     Provider: StaticFileProviderFactory + DBProvider<Tx: DbTxMut>,
     Spec: EthChainSpec<Header = reth_primitives::Header>,
+=======
+    Provider: StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Compact>>
+        + DBProvider<Tx: DbTxMut>,
+    Spec: EthChainSpec,
+>>>>>>> f73cd5ba5 (wip)
 {
     let (header, block_hash) = (chain.genesis_header(), chain.genesis_hash());
     let static_file_provider = provider.static_file_provider();
@@ -359,7 +368,7 @@ where
     let expected_state_root = provider_rw
         .header_by_number(block)?
         .ok_or_else(|| ProviderError::HeaderNotFound(block.into()))?
-        .state_root;
+        .state_root();
 
     // first line can be state root
     let dump_state_root = parse_state_root(&mut reader)?;
