@@ -198,17 +198,14 @@ pub struct PersistenceHandle<N: NodePrimitives = EthPrimitives> {
     _marker: std::marker::PhantomData<N>,
 }
 
-impl<N: NodePrimitives> PersistenceHandle<N> {
+impl<T: NodePrimitives> PersistenceHandle<T> {
     /// Create a new [`PersistenceHandle`] from a [`Sender<PersistenceAction>`].
     pub const fn new(sender: Sender<PersistenceAction>) -> Self {
-        Self { 
-            sender,
-            _marker: std::marker::PhantomData,
-        }
+        Self { sender, _marker: std::marker::PhantomData }
     }
 
     /// Create a new [`PersistenceHandle`], and spawn the persistence service.
-    pub fn spawn_service<N: NodePrimitives>(
+    pub fn spawn_service<N: PersistenceNodeTypes>(
         provider_factory: ProviderFactory<N>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
