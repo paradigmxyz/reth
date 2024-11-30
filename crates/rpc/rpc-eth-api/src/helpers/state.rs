@@ -12,8 +12,8 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
 use reth_evm::ConfigureEvmEnv;
 use reth_provider::{
-    BlockIdReader, BlockNumReader, ChainSpecProvider, StateProvider, StateProviderBox,
-    StateProviderFactory,
+    BlockIdReader, BlockNumReader, ChainSpecProvider, EvmEnvProvider as _, StateProvider,
+    StateProviderBox, StateProviderFactory,
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlockEnv, RpcInvalidTransactionError};
 use reth_transaction_pool::TransactionPool;
@@ -229,12 +229,15 @@ pub trait LoadState:
                     .block_hash_for_id(at)
                     .map_err(Self::Error::from_eth_err)?
                     .ok_or(EthApiError::HeaderNotFound(at))?;
-                let (cfg, env) = self
-                    .cache()
-                    .get_evm_env(block_hash)
-                    .await
+
+                let header =
+                    self.cache().get_header(block_hash).await.map_err(Self::Error::from_eth_err)?;
+                let evm_config = self.evm_config().clone();
+                let (cfg, block_env) = self
+                    .provider()
+                    .env_with_header(&header, evm_config)
                     .map_err(Self::Error::from_eth_err)?;
-                Ok((cfg, env, block_hash.into()))
+                Ok((cfg, block_env, block_hash.into()))
             }
         }
     }
