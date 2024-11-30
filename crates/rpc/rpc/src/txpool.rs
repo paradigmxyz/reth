@@ -49,7 +49,7 @@ where
         {
             content.entry(tx.sender()).or_default().insert(
                 tx.nonce().to_string(),
-                from_recovered(tx.clone().into_consensus().into(), resp_builder)?,
+                from_recovered(tx.clone_into_consensus().into(), resp_builder)?,
             );
 
             Ok(())
@@ -101,7 +101,7 @@ where
             inspect: &mut BTreeMap<Address, BTreeMap<String, TxpoolInspectSummary>>,
         ) {
             let entry = inspect.entry(tx.sender()).or_default();
-            let tx: TransactionSignedEcRecovered = tx.clone().into_consensus().into();
+            let tx: TransactionSignedEcRecovered = tx.clone_into_consensus().into();
             entry.insert(
                 tx.nonce().to_string(),
                 TxpoolInspectSummary {

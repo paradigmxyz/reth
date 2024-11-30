@@ -1,14 +1,17 @@
 use crate::{
     wal::Wal, ExExEvent, ExExNotification, ExExNotifications, FinishedExExHeight, WalHandle,
 };
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use futures::StreamExt;
 use itertools::Itertools;
 use metrics::Gauge;
 use reth_chain_state::ForkChoiceStream;
 use reth_chainspec::Head;
+use reth_evm::execute::BlockExecutorProvider;
 use reth_metrics::{metrics::Counter, Metrics};
-use reth_primitives::SealedHeader;
+use reth_node_api::NodePrimitives;
+use reth_primitives::{EthPrimitives, SealedHeader};
 use reth_provider::HeaderProvider;
 use reth_tracing::tracing::{debug, warn};
 use std::{
@@ -69,13 +72,13 @@ struct ExExMetrics {
 /// [`ExExHandle::new`] should be given to the `ExEx`, while the handle itself should be given to
 /// the manager in [`ExExManager::new`].
 #[derive(Debug)]
-pub struct ExExHandle {
+pub struct ExExHandle<N: NodePrimitives = EthPrimitives> {
     /// The execution extension's ID.
     id: String,
     /// Metrics for an `ExEx`.
     metrics: ExExMetrics,
     /// Channel to send [`ExExNotification`]s to the `ExEx`.
-    sender: PollSender<ExExNotification>,
+    sender: PollSender<ExExNotification<N>>,
     /// Channel to receive [`ExExEvent`]s from the `ExEx`.
     receiver: UnboundedReceiver<ExExEvent>,
     /// The ID of the next notification to send to this `ExEx`.
@@ -86,17 +89,17 @@ pub struct ExExHandle {
     finished_height: Option<BlockNumHash>,
 }
 
-impl ExExHandle {
+impl<N: NodePrimitives> ExExHandle<N> {
     /// Create a new handle for the given `ExEx`.
     ///
     /// Returns the handle, as well as a [`UnboundedSender`] for [`ExExEvent`]s and a
     /// [`mpsc::Receiver`] for [`ExExNotification`]s that should be given to the `ExEx`.
-    pub fn new<P, E>(
+    pub fn new<P, E: BlockExecutorProvider<Primitives = N>>(
         id: String,
         node_head: Head,
         provider: P,
         executor: E,
-        wal_handle: WalHandle,
+        wal_handle: WalHandle<N>,
     ) -> (Self, UnboundedSender<ExExEvent>, ExExNotifications<P, E>) {
         let (notification_tx, notification_rx) = mpsc::channel(1);
         let (event_tx, event_rx) = mpsc::unbounded_channel();
@@ -124,21 +127,21 @@ impl ExExHandle {
     fn send(
         &mut self,
         cx: &mut Context<'_>,
-        (notification_id, notification): &(usize, ExExNotification),
-    ) -> Poll<Result<(), PollSendError<ExExNotification>>> {
+        (notification_id, notification): &(usize, ExExNotification<N>),
+    ) -> Poll<Result<(), PollSendError<ExExNotification<N>>>> {
         if let Some(finished_height) = self.finished_height {
             match notification {
                 ExExNotification::ChainCommitted { new } => {
                     // Skip the chain commit notification if the finished height of the ExEx is
                     // higher than or equal to the tip of the new notification.
                     // I.e., the ExEx has already processed the notification.
-                    if finished_height.number >= new.tip().number {
+                    if finished_height.number >= new.tip().number() {
                         debug!(
                             target: "exex::manager",
                             exex_id = %self.id,
                             %notification_id,
                             ?finished_height,
-                            new_tip = %new.tip().number,
+                            new_tip = %new.tip().number(),
                             "Skipping notification"
                         );
 
@@ -208,15 +211,15 @@ pub struct ExExManagerMetrics {
 /// - Error handling
 /// - Monitoring
 #[derive(Debug)]
-pub struct ExExManager<P> {
+pub struct ExExManager<P, N: NodePrimitives> {
     /// Provider for querying headers.
     provider: P,
 
     /// Handles to communicate with the `ExEx`'s.
-    exex_handles: Vec<ExExHandle>,
+    exex_handles: Vec<ExExHandle<N>>,
 
     /// [`ExExNotification`] channel from the [`ExExManagerHandle`]s.
-    handle_rx: UnboundedReceiver<(ExExNotificationSource, ExExNotification)>,
+    handle_rx: UnboundedReceiver<(ExExNotificationSource, ExExNotification<N>)>,
 
     /// The minimum notification ID currently present in the buffer.
     min_id: usize,
@@ -226,7 +229,7 @@ pub struct ExExManager<P> {
     ///
     /// The first element of the tuple is a monotonically increasing ID unique to the notification
     /// (the second element of the tuple).
-    buffer: VecDeque<(usize, ExExNotification)>,
+    buffer: VecDeque<(usize, ExExNotification<N>)>,
     /// Max size of the internal state notifications buffer.
     max_capacity: usize,
     /// Current state notifications buffer capacity.
@@ -241,17 +244,20 @@ pub struct ExExManager<P> {
     finished_height: watch::Sender<FinishedExExHeight>,
 
     /// Write-Ahead Log for the [`ExExNotification`]s.
-    wal: Wal,
+    wal: Wal<N>,
     /// A stream of finalized headers.
     finalized_header_stream: ForkChoiceStream<SealedHeader>,
 
     /// A handle to the `ExEx` manager.
-    handle: ExExManagerHandle,
+    handle: ExExManagerHandle<N>,
     /// Metrics for the `ExEx` manager.
     metrics: ExExManagerMetrics,
 }
 
-impl<P> ExExManager<P> {
+impl<P, N> ExExManager<P, N>
+where
+    N: NodePrimitives,
+{
     /// Create a new [`ExExManager`].
     ///
     /// You must provide an [`ExExHandle`] for each `ExEx` and the maximum capacity of the
@@ -261,9 +267,9 @@ impl<P> ExExManager<P> {
     /// notifications over [`ExExManagerHandle`]s until there is capacity again.
     pub fn new(
         provider: P,
-        handles: Vec<ExExHandle>,
+        handles: Vec<ExExHandle<N>>,
         max_capacity: usize,
-        wal: Wal,
+        wal: Wal<N>,
         finalized_header_stream: ForkChoiceStream<SealedHeader>,
     ) -> Self {
         let num_exexs = handles.len();
@@ -314,7 +320,7 @@ impl<P> ExExManager<P> {
     }
 
     /// Returns the handle to the manager.
-    pub fn handle(&self) -> ExExManagerHandle {
+    pub fn handle(&self) -> ExExManagerHandle<N> {
         self.handle.clone()
     }
 
@@ -333,16 +339,17 @@ impl<P> ExExManager<P> {
 
     /// Pushes a new notification into the managers internal buffer, assigning the notification a
     /// unique ID.
-    fn push_notification(&mut self, notification: ExExNotification) {
+    fn push_notification(&mut self, notification: ExExNotification<N>) {
         let next_id = self.next_id;
         self.buffer.push_back((next_id, notification));
         self.next_id += 1;
     }
 }
 
-impl<P> ExExManager<P>
+impl<P, N> ExExManager<P, N>
 where
     P: HeaderProvider,
+    N: NodePrimitives,
 {
     /// Finalizes the WAL according to the passed finalized header.
     ///
@@ -413,9 +420,10 @@ where
     }
 }
 
-impl<P> Future for ExExManager<P>
+impl<P, N> Future for ExExManager<P, N>
 where
     P: HeaderProvider + Unpin + 'static,
+    N: NodePrimitives,
 {
     type Output = eyre::Result<()>;
 
@@ -456,8 +464,9 @@ where
         // Drain handle notifications
         while this.buffer.len() < this.max_capacity {
             if let Poll::Ready(Some((source, notification))) = this.handle_rx.poll_recv(cx) {
-                let committed_tip = notification.committed_chain().map(|chain| chain.tip().number);
-                let reverted_tip = notification.reverted_chain().map(|chain| chain.tip().number);
+                let committed_tip =
+                    notification.committed_chain().map(|chain| chain.tip().number());
+                let reverted_tip = notification.reverted_chain().map(|chain| chain.tip().number());
                 debug!(target: "exex::manager", ?committed_tip, ?reverted_tip, "Received new notification");
 
                 // Commit to WAL only notifications from blockchain tree. Pipeline notifications
@@ -524,9 +533,9 @@ where
 
 /// A handle to communicate with the [`ExExManager`].
 #[derive(Debug)]
-pub struct ExExManagerHandle {
+pub struct ExExManagerHandle<N: NodePrimitives = EthPrimitives> {
     /// Channel to send notifications to the `ExEx` manager.
-    exex_tx: UnboundedSender<(ExExNotificationSource, ExExNotification)>,
+    exex_tx: UnboundedSender<(ExExNotificationSource, ExExNotification<N>)>,
     /// The number of `ExEx`'s running on the node.
     num_exexs: usize,
     /// A watch channel denoting whether the manager is ready for new notifications or not.
@@ -544,7 +553,7 @@ pub struct ExExManagerHandle {
     finished_height: watch::Receiver<FinishedExExHeight>,
 }
 
-impl ExExManagerHandle {
+impl<N: NodePrimitives> ExExManagerHandle<N> {
     /// Creates an empty manager handle.
     ///
     /// Use this if there is no manager present.
@@ -571,8 +580,8 @@ impl ExExManagerHandle {
     pub fn send(
         &self,
         source: ExExNotificationSource,
-        notification: ExExNotification,
-    ) -> Result<(), SendError<(ExExNotificationSource, ExExNotification)>> {
+        notification: ExExNotification<N>,
+    ) -> Result<(), SendError<(ExExNotificationSource, ExExNotification<N>)>> {
         self.exex_tx.send((source, notification))
     }
 
@@ -583,8 +592,8 @@ impl ExExManagerHandle {
     pub async fn send_async(
         &mut self,
         source: ExExNotificationSource,
-        notification: ExExNotification,
-    ) -> Result<(), SendError<(ExExNotificationSource, ExExNotification)>> {
+        notification: ExExNotification<N>,
+    ) -> Result<(), SendError<(ExExNotificationSource, ExExNotification<N>)>> {
         self.ready().await;
         self.exex_tx.send((source, notification))
     }
@@ -633,7 +642,7 @@ async fn make_wait_future(mut rx: watch::Receiver<bool>) -> watch::Receiver<bool
     rx
 }
 
-impl Clone for ExExManagerHandle {
+impl<N: NodePrimitives> Clone for ExExManagerHandle<N> {
     fn clone(&self) -> Self {
         Self {
             exex_tx: self.exex_tx.clone(),
@@ -653,6 +662,7 @@ mod tests {
     use futures::{StreamExt, TryStreamExt};
     use rand::Rng;
     use reth_db_common::init::init_genesis;
+    use reth_evm::test_utils::MockExecutorProvider;
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_primitives::SealedBlockWithSenders;
     use reth_provider::{
@@ -673,8 +683,13 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let wal = Wal::new(temp_dir.path()).unwrap();
 
-        let (mut exex_handle, event_tx, mut _notification_rx) =
-            ExExHandle::new("test_exex".to_string(), Head::default(), (), (), wal.handle());
+        let (mut exex_handle, event_tx, mut _notification_rx) = ExExHandle::new(
+            "test_exex".to_string(),
+            Head::default(),
+            (),
+            MockExecutorProvider::default(),
+            wal.handle(),
+        );
 
         // Send an event and check that it's delivered correctly
         let event = ExExEvent::FinishedHeight(BlockNumHash::new(42, B256::random()));
@@ -688,8 +703,13 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let wal = Wal::new(temp_dir.path()).unwrap();
 
-        let (exex_handle_1, _, _) =
-            ExExHandle::new("test_exex_1".to_string(), Head::default(), (), (), wal.handle());
+        let (exex_handle_1, _, _) = ExExHandle::new(
+            "test_exex_1".to_string(),
+            Head::default(),
+            (),
+            MockExecutorProvider::default(),
+            wal.handle(),
+        );
 
         assert!(!ExExManager::new((), vec![], 0, wal.clone(), empty_finalized_header_stream())
             .handle
@@ -705,8 +725,13 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let wal = Wal::new(temp_dir.path()).unwrap();
 
-        let (exex_handle_1, _, _) =
-            ExExHandle::new("test_exex_1".to_string(), Head::default(), (), (), wal.handle());
+        let (exex_handle_1, _, _) = ExExHandle::new(
+            "test_exex_1".to_string(),
+            Head::default(),
+            (),
+            MockExecutorProvider::default(),
+            wal.handle(),
+        );
 
         assert!(!ExExManager::new((), vec![], 0, wal.clone(), empty_finalized_header_stream())
             .handle
@@ -728,8 +753,13 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let wal = Wal::new(temp_dir.path()).unwrap();
 
-        let (exex_handle, _, _) =
-            ExExHandle::new("test_exex".to_string(), Head::default(), (), (), wal.handle());
+        let (exex_handle, _, _) = ExExHandle::new(
+            "test_exex".to_string(),
+            Head::default(),
+            (),
+            MockExecutorProvider::default(),
+            wal.handle(),
+        );
 
         // Create a mock ExExManager and add the exex_handle to it
         let mut exex_manager =
@@ -778,8 +808,13 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let wal = Wal::new(temp_dir.path()).unwrap();
 
-        let (exex_handle, _, _) =
-            ExExHandle::new("test_exex".to_string(), Head::default(), (), (), wal.handle());
+        let (exex_handle, _, _) = ExExHandle::new(
+            "test_exex".to_string(),
+            Head::default(),
+            (),
+            MockExecutorProvider::default(),
+            wal.handle(),
+        );
 
         // Create a mock ExExManager and add the exex_handle to it
         let max_capacity = 5;
@@ -824,8 +859,13 @@ mod tests {
 
         let provider_factory = create_test_provider_factory();
 
-        let (exex_handle, event_tx, mut _notification_rx) =
-            ExExHandle::new("test_exex".to_string(), Head::default(), (), (), wal.handle());
+        let (exex_handle, event_tx, mut _notification_rx) = ExExHandle::new(
+            "test_exex".to_string(),
+            Head::default(),
+            (),
+            MockExecutorProvider::default(),
+            wal.handle(),
+        );
 
         // Check initial block height
         assert!(exex_handle.finished_height.is_none());
@@ -874,10 +914,20 @@ mod tests {
         let provider_factory = create_test_provider_factory();
 
         // Create two `ExExHandle` instances
-        let (exex_handle1, event_tx1, _) =
-            ExExHandle::new("test_exex1".to_string(), Head::default(), (), (), wal.handle());
-        let (exex_handle2, event_tx2, _) =
-            ExExHandle::new("test_exex2".to_string(), Head::default(), (), (), wal.handle());
+        let (exex_handle1, event_tx1, _) = ExExHandle::new(
+            "test_exex1".to_string(),
+            Head::default(),
+            (),
+            MockExecutorProvider::default(),
+            wal.handle(),
+        );
+        let (exex_handle2, event_tx2, _) = ExExHandle::new(
+            "test_exex2".to_string(),
+            Head::default(),
+            (),
+            MockExecutorProvider::default(),
+            wal.handle(),
+        );
 
         let block1 = BlockNumHash::new(42, B256::random());
         let block2 = BlockNumHash::new(10, B256::random());
@@ -921,10 +971,20 @@ mod tests {
         let provider_factory = create_test_provider_factory();
 
         // Create two `ExExHandle` instances
-        let (exex_handle1, event_tx1, _) =
-            ExExHandle::new("test_exex1".to_string(), Head::default(), (), (), wal.handle());
-        let (exex_handle2, event_tx2, _) =
-            ExExHandle::new("test_exex2".to_string(), Head::default(), (), (), wal.handle());
+        let (exex_handle1, event_tx1, _) = ExExHandle::new(
+            "test_exex1".to_string(),
+            Head::default(),
+            (),
+            MockExecutorProvider::default(),
+            wal.handle(),
+        );
+        let (exex_handle2, event_tx2, _) = ExExHandle::new(
+            "test_exex2".to_string(),
+            Head::default(),
+            (),
+            MockExecutorProvider::default(),
+            wal.handle(),
+        );
 
         // Assert that the initial block height is `None` for the first `ExExHandle`.
         assert!(exex_handle1.finished_height.is_none());
@@ -974,8 +1034,13 @@ mod tests {
 
         let provider_factory = create_test_provider_factory();
 
-        let (exex_handle_1, _, _) =
-            ExExHandle::new("test_exex_1".to_string(), Head::default(), (), (), wal.handle());
+        let (exex_handle_1, _, _) = ExExHandle::new(
+            "test_exex_1".to_string(),
+            Head::default(),
+            (),
+            MockExecutorProvider::default(),
+            wal.handle(),
+        );
 
         // Create an ExExManager with a small max capacity
         let max_capacity = 2;

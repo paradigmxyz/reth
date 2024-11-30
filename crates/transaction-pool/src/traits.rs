@@ -979,6 +979,13 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
         tx.try_into()
     }
 
+    /// Clone the transaction into a consensus variant.
+    ///
+    /// This method is preferred when the [`PoolTransaction`] already wraps the consensus variant.
+    fn clone_into_consensus(&self) -> Self::Consensus {
+        self.clone().into_consensus()
+    }
+
     /// Define a method to convert from the `Self` type to `Consensus`
     fn into_consensus(self) -> Self::Consensus {
         self.into()
@@ -1236,6 +1243,10 @@ impl PoolTransaction for EthPooledTransaction {
     type Consensus = TransactionSignedEcRecovered;
 
     type Pooled = PooledTransactionsElementEcRecovered;
+
+    fn clone_into_consensus(&self) -> Self::Consensus {
+        self.transaction().clone()
+    }
 
     fn try_consensus_into_pooled(
         tx: Self::Consensus,

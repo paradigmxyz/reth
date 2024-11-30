@@ -57,7 +57,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactionsWithFees<T> {
             if best.transaction.max_fee_per_gas() >= self.base_fee as u128 &&
                 best.transaction
                     .max_fee_per_blob_gas()
-                    .map_or(true, |fee| fee >= self.base_fee_per_blob_gas as u128)
+                    .is_none_or(|fee| fee >= self.base_fee_per_blob_gas as u128)
             {
                 return Some(best);
             }

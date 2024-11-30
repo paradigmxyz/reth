@@ -525,7 +525,9 @@ pub(super) mod serde_bincode_compat {
     use crate::ExecutionOutcome;
     use alloc::borrow::Cow;
     use alloy_primitives::BlockNumber;
-    use reth_primitives::serde_bincode_compat::SealedBlockWithSenders;
+    use reth_primitives::{
+        serde_bincode_compat::SealedBlockWithSenders, EthPrimitives, NodePrimitives,
+    };
     use reth_trie_common::serde_bincode_compat::updates::TrieUpdates;
     use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
@@ -547,18 +549,24 @@ pub(super) mod serde_bincode_compat {
     /// }
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
-    pub struct Chain<'a> {
-        blocks: SealedBlocksWithSenders<'a>,
-        execution_outcome: Cow<'a, ExecutionOutcome>,
+    pub struct Chain<'a, N = EthPrimitives>
+    where
+        N: NodePrimitives,
+    {
+        blocks: SealedBlocksWithSenders<'a, N::Block>,
+        execution_outcome: Cow<'a, ExecutionOutcome<N::Receipt>>,
         trie_updates: Option<TrieUpdates<'a>>,
     }
 
     #[derive(Debug)]
-    struct SealedBlocksWithSenders<'a>(
-        Cow<'a, BTreeMap<BlockNumber, reth_primitives::SealedBlockWithSenders>>,
+    struct SealedBlocksWithSenders<'a, B: reth_primitives_traits::Block>(
+        Cow<'a, BTreeMap<BlockNumber, reth_primitives::SealedBlockWithSenders<B>>>,
     );
 
-    impl Serialize for SealedBlocksWithSenders<'_> {
+    impl<B> Serialize for SealedBlocksWithSenders<'_, B>
+    where
+        B: reth_primitives_traits::Block,
+    {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: Serializer,
@@ -573,20 +581,26 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<'de> Deserialize<'de> for SealedBlocksWithSenders<'_> {
+    impl<'de, B> Deserialize<'de> for SealedBlocksWithSenders<'_, B>
+    where
+        B: reth_primitives_traits::Block,
+    {
         fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where
             D: Deserializer<'de>,
         {
             Ok(Self(Cow::Owned(
-                BTreeMap::<BlockNumber, SealedBlockWithSenders<'_>>::deserialize(deserializer)
+                BTreeMap::<BlockNumber, SealedBlockWithSenders<'_, B>>::deserialize(deserializer)
                     .map(|blocks| blocks.into_iter().map(|(n, b)| (n, b.into())).collect())?,
             )))
         }
     }
 
-    impl<'a> From<&'a super::Chain> for Chain<'a> {
-        fn from(value: &'a super::Chain) -> Self {
+    impl<'a, N> From<&'a super::Chain<N>> for Chain<'a, N>
+    where
+        N: NodePrimitives,
+    {
+        fn from(value: &'a super::Chain<N>) -> Self {
             Self {
                 blocks: SealedBlocksWithSenders(Cow::Borrowed(&value.blocks)),
                 execution_outcome: Cow::Borrowed(&value.execution_outcome),
@@ -595,8 +609,11 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<'a> From<Chain<'a>> for super::Chain {
-        fn from(value: Chain<'a>) -> Self {
+    impl<'a, N> From<Chain<'a, N>> for super::Chain<N>
+    where
+        N: NodePrimitives,
+    {
+        fn from(value: Chain<'a, N>) -> Self {
             Self {
                 blocks: value.blocks.0.into_owned(),
                 execution_outcome: value.execution_outcome.into_owned(),
