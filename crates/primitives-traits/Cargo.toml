@@ -62,7 +62,8 @@ std = [
 	"alloy-primitives/std",
 	"revm-primitives/std",
 	"serde?/std",
-	"serde_with?/std"
+	"serde_with?/std",
+	"alloy-rlp/std"
 ]
 test-utils = [
 	"arbitrary",
