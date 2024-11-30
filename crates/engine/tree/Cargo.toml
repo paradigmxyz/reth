@@ -16,7 +16,7 @@ reth-beacon-consensus.workspace = true
 reth-blockchain-tree-api.workspace = true
 reth-blockchain-tree.workspace = true
 reth-chain-state.workspace = true
-reth-chainspec.workspace = true
+reth-chainspec = { workspace = true, optional = true }
 reth-consensus.workspace = true
 reth-engine-primitives.workspace = true
 reth-errors.workspace = true
@@ -25,7 +25,6 @@ reth-network-p2p.workspace = true
 reth-payload-builder-primitives.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-primitives.workspace = true
-reth-payload-validator.workspace = true
 reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true

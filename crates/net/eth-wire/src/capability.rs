@@ -27,6 +27,22 @@ pub struct RawCapabilityMessage {
     pub payload: Bytes,
 }
 
+impl RawCapabilityMessage {
+    /// Creates a new capability message with the given id and payload.
+    pub const fn new(id: usize, payload: Bytes) -> Self {
+        Self { id, payload }
+    }
+
+    /// Creates a raw message for the eth sub-protocol.
+    ///
+    /// Caller must ensure that the rlp encoded `payload` matches the given `id`.
+    ///
+    /// See also  [`EthMessage`]
+    pub const fn eth(id: EthMessageID, payload: Bytes) -> Self {
+        Self::new(id as usize, payload)
+    }
+}
+
 /// Various protocol related event types bubbled up from a session that need to be handled by the
 /// network.
 #[derive(Debug)]
@@ -38,7 +54,7 @@ pub enum CapabilityMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
         serde(bound = "EthMessage<N>: Serialize + serde::de::DeserializeOwned")
     )]
     Eth(EthMessage<N>),
-    /// Any other capability message.
+    /// Any other or manually crafted eth message.
     Other(RawCapabilityMessage),
 }
 

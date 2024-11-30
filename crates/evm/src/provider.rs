@@ -3,6 +3,7 @@
 use crate::ConfigureEvmEnv;
 use alloy_consensus::Header;
 use alloy_eips::BlockHashOrNumber;
+use reth_primitives::NodePrimitives;
 use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId};
 
@@ -12,7 +13,7 @@ use revm::primitives::{BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId};
 /// This type is mainly used to provide required data to configure the EVM environment that is
 /// usually stored on disk.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait EvmEnvProvider: Send + Sync {
+pub trait EvmEnvProvider<N: NodePrimitives = reth_primitives::EthPrimitives>: Send + Sync {
     /// Fills the [`CfgEnvWithHandlerCfg`] and [BlockEnv] fields with values specific to the given
     /// [BlockHashOrNumber].
     fn fill_env_at<EvmConfig>(
@@ -26,10 +27,10 @@ pub trait EvmEnvProvider: Send + Sync {
         EvmConfig: ConfigureEvmEnv<Header = Header>;
 
     /// Fills the default [`CfgEnvWithHandlerCfg`] and [BlockEnv] fields with values specific to the
-    /// given [Header].
+    /// given block header.
     fn env_with_header<EvmConfig>(
         &self,
-        header: &Header,
+        header: &N::BlockHeader,
         evm_config: EvmConfig,
     ) -> ProviderResult<(CfgEnvWithHandlerCfg, BlockEnv)>
     where
@@ -42,12 +43,12 @@ pub trait EvmEnvProvider: Send + Sync {
     }
 
     /// Fills the [`CfgEnvWithHandlerCfg`] and [BlockEnv]  fields with values specific to the given
-    /// [Header].
+    /// block header.
     fn fill_env_with_header<EvmConfig>(
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,
         block_env: &mut BlockEnv,
-        header: &Header,
+        header: &N::BlockHeader,
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
@@ -64,11 +65,11 @@ pub trait EvmEnvProvider: Send + Sync {
     where
         EvmConfig: ConfigureEvmEnv<Header = Header>;
 
-    /// Fills the [`CfgEnvWithHandlerCfg`] fields with values specific to the given [Header].
+    /// Fills the [`CfgEnvWithHandlerCfg`] fields with values specific to the given block header.
     fn fill_cfg_env_with_header<EvmConfig>(
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,
-        header: &Header,
+        header: &N::BlockHeader,
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where

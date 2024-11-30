@@ -68,9 +68,7 @@ pub use header::{BlockWithParent, Header, HeaderError, SealedHeader};
 ///
 /// Read more: <https://github.com/bincode-org/bincode/issues/326>
 #[cfg(feature = "serde-bincode-compat")]
-pub mod serde_bincode_compat {
-    pub use super::header::{serde_bincode_compat as header, serde_bincode_compat::*};
-}
+pub mod serde_bincode_compat;
 
 /// Heuristic size trait
 pub mod size;
@@ -118,3 +116,16 @@ pub trait MaybeCompact {}
 impl<T> MaybeCompact for T where T: reth_codecs::Compact {}
 #[cfg(not(feature = "reth-codec"))]
 impl<T> MaybeCompact for T {}
+
+/// Helper trait that requires serde bincode compatibility implementation.
+#[cfg(feature = "serde-bincode-compat")]
+pub trait MaybeSerdeBincodeCompat: crate::serde_bincode_compat::SerdeBincodeCompat {}
+/// Noop. Helper trait that would require serde bincode compatibility implementation if
+/// `serde-bincode-compat` feature were enabled.
+#[cfg(not(feature = "serde-bincode-compat"))]
+pub trait MaybeSerdeBincodeCompat {}
+
+#[cfg(feature = "serde-bincode-compat")]
+impl<T> MaybeSerdeBincodeCompat for T where T: crate::serde_bincode_compat::SerdeBincodeCompat {}
+#[cfg(not(feature = "serde-bincode-compat"))]
+impl<T> MaybeSerdeBincodeCompat for T {}
