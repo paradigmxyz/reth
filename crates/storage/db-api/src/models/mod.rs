@@ -189,9 +189,9 @@ impl Decode for ClientVersion {
 
 /// Implements compression for Compact type.
 macro_rules! impl_compression_for_compact {
-    ($($name:tt),+) => {
+    ($($name:ident$(<$($generic:ident),*>)?),+) => {
         $(
-            impl Compress for $name {
+            impl$(<$($generic: core::fmt::Debug + Send + Sync + Compact),*>)? Compress for $name$(<$($generic),*>)? {
                 type Compressed = Vec<u8>;
 
                 fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(self, buf: &mut B) {
@@ -199,8 +199,8 @@ macro_rules! impl_compression_for_compact {
                 }
             }
 
-            impl Decompress for $name {
-                fn decompress(value: &[u8]) -> Result<$name, $crate::DatabaseError> {
+            impl$(<$($generic: core::fmt::Debug + Send + Sync + Compact),*>)? Decompress for $name$(<$($generic),*>)? {
+                fn decompress(value: &[u8]) -> Result<$name$(<$($generic),*>)?, $crate::DatabaseError> {
                     let (obj, _) = Compact::from_compact(value, value.len());
                     Ok(obj)
                 }
@@ -222,7 +222,7 @@ impl_compression_for_compact!(
     StoredNibblesSubKey,
     StorageTrieEntry,
     StoredBlockBodyIndices,
-    StoredBlockOmmers,
+    StoredBlockOmmers<H>,
     StoredBlockWithdrawals,
     Bytecode,
     AccountBeforeTx,
