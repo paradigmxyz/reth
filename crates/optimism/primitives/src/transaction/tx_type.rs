@@ -93,7 +93,7 @@ impl Default for OpTxType {
 
 impl PartialEq<u8> for OpTxType {
     fn eq(&self, other: &u8) -> bool {
-        self.0.eq(other) // Use inner type's implementation
+        self.0.eq(other)
     }
 }
 
