@@ -8,8 +8,9 @@ use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{
     state_change::post_block_balance_increments, system_calls::SystemCaller, ConfigureEvm,
 };
+use reth_node_types::NodeTypes;
 use reth_primitives::{Receipt, SealedBlockWithSenders, SealedHeader};
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{ReceiptTy, SignedTransaction};
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase, db::states::bundle_state::BundleRetention,
@@ -52,6 +53,7 @@ where
     P: StateProviderFactory
         + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
         + Send
+        + NodeTypes
         + Sync
         + 'static,
     EvmConfig: ConfigureEvm<Header = Header>,
@@ -60,7 +62,7 @@ where
         &self,
         parent_header: &SealedHeader,
         block: &SealedBlockWithSenders,
-        output: &BlockExecutionOutput<Receipt>,
+        output: &BlockExecutionOutput<ReceiptTy<P::Primitives>>,
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) -> eyre::Result<()> {
         // TODO(alexey): unify with `DebugApi::debug_execution_witness`
