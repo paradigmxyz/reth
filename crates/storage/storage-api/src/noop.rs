@@ -1,16 +1,15 @@
 //! Various noop implementations for traits.
 
-use std::sync::Arc;
-
 use crate::{BlockHashReader, BlockNumReader};
 use alloy_primitives::{BlockNumber, B256};
-use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec};
+use reth_chainspec::{ChainInfo, ChainSpec, ChainSpecProvider, EthChainSpec, MAINNET};
 use reth_storage_errors::provider::ProviderResult;
+use std::sync::Arc;
 
 /// Supports various api interfaces for testing purposes.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 #[non_exhaustive]
-pub struct NoopBlockReader<ChainSpec> {
+pub struct NoopBlockReader<ChainSpec = reth_chainspec::ChainSpec> {
     chain_spec: Arc<ChainSpec>,
 }
 
@@ -18,6 +17,21 @@ impl<ChainSpec> NoopBlockReader<ChainSpec> {
     /// Create a new instance of the `NoopBlockReader`.
     pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { chain_spec }
+    }
+}
+
+impl NoopBlockReader<ChainSpec> {
+    /// Create a new instance of the [`NoopBlockReader`] with the mainnet chain spec.
+    pub fn mainnet() -> Self {
+        Self::new(MAINNET.clone())
+    }
+}
+
+impl<ChainSpec> Clone for NoopBlockReader<ChainSpec> {
+    fn clone(&self) -> Self {
+        Self {
+            chain_spec: Arc::clone(&self.chain_spec),
+        }
     }
 }
 
