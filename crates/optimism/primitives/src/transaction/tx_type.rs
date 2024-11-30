@@ -5,8 +5,7 @@
 use core::fmt::Debug;
 
 use alloy_primitives::{U64, U8};
-use alloy_rlp::{Decodable, Encodable, Error};
-use bytes::BufMut;
+use alloy_rlp::{Error, RlpDecodable, RlpEncodable};
 use derive_more::{
     derive::{From, Into},
     Display,
@@ -16,7 +15,21 @@ use reth_primitives_traits::{InMemorySize, TxType};
 
 /// Wrapper type for [`op_alloy_consensus::OpTxType`] to implement
 /// [`TxType`] trait.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Display, Ord, Hash, From, Into)]
+#[derive(
+    Debug,
+    Copy,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Display,
+    Ord,
+    Hash,
+    From,
+    Into,
+    RlpDecodable,
+    RlpEncodable,
+)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[into(u8)]
 pub struct OpTxType(AlloyOpTxType);
@@ -80,8 +93,7 @@ impl Default for OpTxType {
 
 impl PartialEq<u8> for OpTxType {
     fn eq(&self, other: &u8) -> bool {
-        let self_as_u8: u8 = (*self).into();
-        &self_as_u8 == other
+        self.0.eq(other) // Use inner type's implementation
     }
 }
 
@@ -89,10 +101,7 @@ impl TryFrom<u64> for OpTxType {
     type Error = Error;
 
     fn try_from(value: u64) -> Result<Self, Self::Error> {
-        if value > u8::MAX as u64 {
-            return Err(Error::Custom("value out of range"));
-        }
-        Self::try_from(value as u8)
+        AlloyOpTxType::try_from(value).map(OpTxType).map_err(|_| Error::Custom("invalid tx type"))
     }
 }
 
@@ -100,35 +109,7 @@ impl TryFrom<U64> for OpTxType {
     type Error = Error;
 
     fn try_from(value: U64) -> Result<Self, Self::Error> {
-        let u64_value: u64 = value.try_into().map_err(|_| Error::Custom("value out of range"))?;
-        Self::try_from(u64_value)
-    }
-}
-
-impl Encodable for OpTxType {
-    fn length(&self) -> usize {
-        let value: u8 = (*self).into();
-        value.length()
-    }
-
-    fn encode(&self, out: &mut dyn BufMut) {
-        let value: u8 = (*self).into();
-        value.encode(out);
-    }
-}
-
-impl Decodable for OpTxType {
-    fn decode(buf: &mut &[u8]) -> Result<Self, alloy_rlp::Error> {
-        // Decode the u8 value from RLP
-        let value = if buf.is_empty() {
-            return Err(alloy_rlp::Error::InputTooShort);
-        } else if buf[0] == 0x80 {
-            0 // Special case: RLP encoding for integer 0 is `b"\x80"`
-        } else {
-            u8::decode(buf)?
-        };
-
-        Self::try_from(value).map_err(|_| alloy_rlp::Error::Custom("Invalid transaction type"))
+        AlloyOpTxType::try_from(value).map(OpTxType).map_err(|_| Error::Custom("invalid tx type"))
     }
 }
 
@@ -182,6 +163,7 @@ impl reth_codecs::Compact for OpTxType {
 mod tests {
     use super::*;
     use alloy_consensus::constants::EIP7702_TX_TYPE_ID;
+    use alloy_rlp::{Decodable, Encodable};
     use bytes::BytesMut;
     use op_alloy_consensus::DEPOSIT_TX_TYPE_ID;
     use reth_codecs::{txtype::*, Compact};
@@ -230,7 +212,7 @@ mod tests {
     #[test]
     fn test_try_from_u64_out_of_range() {
         let result = OpTxType::try_from(u64::MAX);
-        assert_eq!(result, Err(Error::Custom("value out of range")));
+        assert_eq!(result, Err(Error::Custom("invalid tx type")));
     }
 
     #[test]
@@ -257,13 +239,12 @@ mod tests {
         let op_tx = OpTxType(AlloyOpTxType::Legacy);
         let mut buf = BytesMut::new();
         op_tx.encode(&mut buf);
-        assert_eq!(buf, BytesMut::from(&[0x80][..]));
+        assert_eq!(buf, BytesMut::from(&[0xc1, 0x80][..]));
     }
 
     #[test]
     fn test_decodable_success() {
-        // Using the RLP-encoded form of 0, which is `b"\x80"`
-        let mut buf: &[u8] = &[0x80];
+        let mut buf: &[u8] = &[0xc1, 0x80];
         let decoded_tx = OpTxType::decode(&mut buf).unwrap();
         assert_eq!(decoded_tx, OpTxType(AlloyOpTxType::Legacy));
     }
