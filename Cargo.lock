@@ -7709,6 +7709,7 @@ dependencies = [
  "reth-chainspec",
  "reth-engine-primitives",
  "reth-evm",
+ "reth-node-types",
  "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",

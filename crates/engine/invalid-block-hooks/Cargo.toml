@@ -22,6 +22,7 @@ reth-revm = { workspace = true, features = ["serde"] }
 reth-rpc-api = { workspace = true, features = ["client"] }
 reth-tracing.workspace = true
 reth-trie.workspace = true
+reth-node-types.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
