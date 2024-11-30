@@ -381,8 +381,8 @@ RPC State Cache:
 
           [default: 2000]
 
-      --rpc-cache.max-envs <MAX_ENVS>
-          Max number of bytes for cached env data
+      --rpc-cache.max-envs <MAX_HEADERS>
+          Max number of headers in cache
 
           [default: 1000]
 
