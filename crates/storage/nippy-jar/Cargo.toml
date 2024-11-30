@@ -34,7 +34,6 @@ derive_more.workspace = true
 rand = { workspace = true, features = ["small_rng"] }
 tempfile.workspace = true
 
-
 [features]
 default = []
 test-utils = []

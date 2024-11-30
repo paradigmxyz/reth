@@ -26,7 +26,7 @@ use reth_evm::execute::{
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_node_ethereum::{node::EthereumAddOns, BasicBlockExecutorProvider, EthereumNode};
-use reth_primitives::{BlockWithSenders, Receipt};
+use reth_primitives::{BlockWithSenders, EthPrimitives, Receipt};
 use std::{fmt::Display, sync::Arc};
 
 pub const SYSTEM_ADDRESS: Address = address!("fffffffffffffffffffffffffffffffffffffffe");
@@ -59,7 +59,7 @@ pub struct CustomExecutorBuilder;
 
 impl<Types, Node> ExecutorBuilder<Node> for CustomExecutorBuilder
 where
-    Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
+    Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
 {
     type EVM = EthEvmConfig;
@@ -88,6 +88,7 @@ pub struct CustomExecutorStrategyFactory {
 }
 
 impl BlockExecutionStrategyFactory for CustomExecutorStrategyFactory {
+    type Primitives = EthPrimitives;
     type Strategy<DB: Database<Error: Into<ProviderError> + Display>> = CustomExecutorStrategy<DB>;
 
     fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
@@ -135,10 +136,12 @@ where
     }
 }
 
-impl<DB> BlockExecutionStrategy<DB> for CustomExecutorStrategy<DB>
+impl<DB> BlockExecutionStrategy for CustomExecutorStrategy<DB>
 where
     DB: Database<Error: Into<ProviderError> + Display>,
 {
+    type DB = DB;
+    type Primitives = EthPrimitives;
     type Error = BlockExecutionError;
 
     fn apply_pre_execution_changes(

@@ -17,7 +17,7 @@ use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
-use reth_consensus::Consensus;
+use reth_consensus::{Consensus, FullConsensus};
 use reth_errors::RethResult;
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
@@ -128,7 +128,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     ) -> eyre::Result<()> {
         let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
 
-        let consensus: Arc<dyn Consensus> =
+        let consensus: Arc<dyn FullConsensus> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
 
         let executor = EthExecutorProvider::ethereum(provider_factory.chain_spec());

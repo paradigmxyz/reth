@@ -309,7 +309,7 @@ impl From<Vec<B256>> for NewPooledTransactionHashes66 {
     }
 }
 
-/// Same as [`NewPooledTransactionHashes66`] but extends that that beside the transaction hashes,
+/// Same as [`NewPooledTransactionHashes66`] but extends that beside the transaction hashes,
 /// the node sends the transaction types and their sizes (as defined in EIP-2718) as well.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

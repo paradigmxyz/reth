@@ -12,7 +12,9 @@
 use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH};
 use alloy_primitives::{B64, U256};
 use reth_chainspec::EthereumHardforks;
-use reth_consensus::{Consensus, ConsensusError, HeaderValidator, PostExecutionInput};
+use reth_consensus::{
+    Consensus, ConsensusError, FullConsensus, HeaderValidator, PostExecutionInput,
+};
 use reth_consensus_common::validation::{
     validate_against_parent_4844, validate_against_parent_eip1559_base_fee,
     validate_against_parent_hash_number, validate_against_parent_timestamp,
@@ -21,6 +23,7 @@ use reth_consensus_common::validation::{
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
+use reth_optimism_primitives::OpPrimitives;
 use reth_primitives::{BlockBody, BlockWithSenders, GotExpected, SealedBlock, SealedHeader};
 use std::{sync::Arc, time::SystemTime};
 
@@ -43,6 +46,16 @@ impl OpBeaconConsensus {
     /// Create a new instance of [`OpBeaconConsensus`]
     pub const fn new(chain_spec: Arc<OpChainSpec>) -> Self {
         Self { chain_spec }
+    }
+}
+
+impl FullConsensus<OpPrimitives> for OpBeaconConsensus {
+    fn validate_block_post_execution(
+        &self,
+        block: &BlockWithSenders,
+        input: PostExecutionInput<'_>,
+    ) -> Result<(), ConsensusError> {
+        validate_block_post_execution(block, &self.chain_spec, input.receipts)
     }
 }
 
@@ -80,14 +93,6 @@ impl Consensus for OpBeaconConsensus {
 
         Ok(())
     }
-
-    fn validate_block_post_execution(
-        &self,
-        block: &BlockWithSenders,
-        input: PostExecutionInput<'_>,
-    ) -> Result<(), ConsensusError> {
-        validate_block_post_execution(block, &self.chain_spec, input.receipts)
-    }
 }
 
 impl HeaderValidator for OpBeaconConsensus {
@@ -101,17 +106,21 @@ impl HeaderValidator for OpBeaconConsensus {
         header: &SealedHeader,
         parent: &SealedHeader,
     ) -> Result<(), ConsensusError> {
-        validate_against_parent_hash_number(header, parent)?;
+        validate_against_parent_hash_number(header.header(), parent)?;
 
         if self.chain_spec.is_bedrock_active_at_block(header.number) {
-            validate_against_parent_timestamp(header, parent)?;
+            validate_against_parent_timestamp(header.header(), parent.header())?;
         }
 
-        validate_against_parent_eip1559_base_fee(header, parent, &self.chain_spec)?;
+        validate_against_parent_eip1559_base_fee(
+            header.header(),
+            parent.header(),
+            &self.chain_spec,
+        )?;
 
         // ensure that the blob gas fields for this block
         if self.chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
-            validate_against_parent_4844(header, parent)?;
+            validate_against_parent_4844(header.header(), parent.header())?;
         }
 
         Ok(())

@@ -7,6 +7,7 @@ use alloy_primitives::{
 };
 use alloy_rlp::{Decodable, Encodable};
 use reth_primitives_traits::Account;
+use reth_tracing::tracing::trace;
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
     MultiProof, Nibbles, TrieAccount, TrieNode, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
@@ -22,8 +23,6 @@ pub struct SparseStateTrie {
     storages: HashMap<B256, SparseTrie>,
     /// Collection of revealed account and storage keys.
     revealed: HashMap<B256, HashSet<B256>>,
-    /// Collection of addresses that had their storage tries wiped.
-    wiped_storages: HashSet<B256>,
     /// Flag indicating whether trie updates should be retained.
     retain_updates: bool,
     /// Reusable buffer for RLP encoding of trie accounts.
@@ -36,7 +35,6 @@ impl Default for SparseStateTrie {
             state: Default::default(),
             storages: Default::default(),
             revealed: Default::default(),
-            wiped_storages: Default::default(),
             retain_updates: false,
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
         }
@@ -65,7 +63,7 @@ impl SparseStateTrie {
         self.revealed.get(account).is_some_and(|slots| slots.contains(slot))
     }
 
-    /// Returned mutable reference to storage sparse trie if it was revealed.
+    /// Returns mutable reference to storage sparse trie if it was revealed.
     pub fn storage_trie_mut(&mut self, account: &B256) -> Option<&mut RevealedSparseTrie> {
         self.storages.get_mut(account).and_then(|e| e.as_revealed_mut())
     }
@@ -152,6 +150,7 @@ impl SparseStateTrie {
             // Reveal the remaining proof nodes.
             for (path, bytes) in account_nodes {
                 let node = TrieNode::decode(&mut &bytes[..])?;
+                trace!(target: "trie::sparse", ?path, ?node, "Revealing account node");
                 trie.reveal_node(path, node)?;
             }
         }
@@ -171,6 +170,7 @@ impl SparseStateTrie {
                 // Reveal the remaining proof nodes.
                 for (path, bytes) in storage_nodes {
                     let node = TrieNode::decode(&mut &bytes[..])?;
+                    trace!(target: "trie::sparse", ?account, ?path, ?node, "Revealing storage node");
                     trie.reveal_node(path, node)?;
                 }
             }
@@ -212,8 +212,10 @@ impl SparseStateTrie {
     pub fn update_account(&mut self, address: B256, account: Account) -> SparseStateTrieResult<()> {
         let nibbles = Nibbles::unpack(address);
         let storage_root = if let Some(storage_trie) = self.storages.get_mut(&address) {
+            trace!(target: "trie::sparse", ?address, "Calculating storage root to update account");
             storage_trie.root().ok_or(SparseTrieError::Blind)?
         } else if self.revealed.contains_key(&address) {
+            trace!(target: "trie::sparse", ?address, "Retrieving storage root from account leaf to update account");
             let state = self.state.as_revealed_mut().ok_or(SparseTrieError::Blind)?;
             // The account was revealed, either...
             if let Some(value) = state.get_leaf_value(&nibbles) {
@@ -228,8 +230,10 @@ impl SparseStateTrie {
         };
 
         if account.is_empty() && storage_root == EMPTY_ROOT_HASH {
+            trace!(target: "trie::sparse", ?address, "Removing account");
             self.remove_account_leaf(&nibbles)
         } else {
+            trace!(target: "trie::sparse", ?address, "Updating account");
             self.account_rlp_buf.clear();
             TrieAccount::from((account, storage_root)).encode(&mut self.account_rlp_buf);
             self.update_account_leaf(nibbles, self.account_rlp_buf.clone())
@@ -275,9 +279,10 @@ impl SparseStateTrie {
 
     /// Wipe the storage trie at the provided address.
     pub fn wipe_storage(&mut self, address: B256) -> SparseStateTrieResult<()> {
-        let Some(trie) = self.storages.get_mut(&address) else { return Ok(()) };
-        self.wiped_storages.insert(address);
-        trie.wipe().map_err(Into::into)
+        if let Some(trie) = self.storages.get_mut(&address) {
+            trie.wipe()?;
+        }
+        Ok(())
     }
 
     /// Calculates the hashes of the nodes below the provided level.
@@ -302,8 +307,8 @@ impl SparseStateTrie {
         self.state.as_revealed_mut().map(|state| {
             let updates = state.take_updates();
             TrieUpdates {
-                account_nodes: HashMap::from_iter(updates.updated_nodes),
-                removed_nodes: HashSet::from_iter(updates.removed_nodes),
+                account_nodes: updates.updated_nodes,
+                removed_nodes: updates.removed_nodes,
                 storage_tries: self
                     .storages
                     .iter_mut()
@@ -311,9 +316,9 @@ impl SparseStateTrie {
                         let trie = trie.as_revealed_mut().unwrap();
                         let updates = trie.take_updates();
                         let updates = StorageTrieUpdates {
-                            is_deleted: self.wiped_storages.contains(address),
-                            storage_nodes: HashMap::from_iter(updates.updated_nodes),
-                            removed_nodes: HashSet::from_iter(updates.removed_nodes),
+                            is_deleted: updates.wiped,
+                            storage_nodes: updates.updated_nodes,
+                            removed_nodes: updates.removed_nodes,
                         };
                         (*address, updates)
                     })

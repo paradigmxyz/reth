@@ -9,22 +9,26 @@ use crate::{
     utils::get_single_header,
 };
 use alloy_consensus::BlockHeader;
+use alloy_eips::BlockHashOrNumber;
+use alloy_primitives::{BlockNumber, B256};
 use eyre::eyre;
 use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
 use reth_config::config::PruneConfig;
+use reth_ethereum_forks::Head;
 use reth_network_p2p::headers::client::HeadersClient;
-use serde::{de::DeserializeOwned, Serialize};
-use std::{fs, path::Path};
-
-use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{BlockNumber, B256};
-use reth_primitives::{Head, SealedHeader};
+use reth_primitives_traits::SealedHeader;
 use reth_stages_types::StageId;
 use reth_storage_api::{
     BlockHashReader, DatabaseProviderFactory, HeaderProvider, StageCheckpointReader,
 };
 use reth_storage_errors::provider::ProviderResult;
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use serde::{de::DeserializeOwned, Serialize};
+use std::{
+    fs,
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tracing::*;
 
 /// This includes all necessary configuration to launch the node.

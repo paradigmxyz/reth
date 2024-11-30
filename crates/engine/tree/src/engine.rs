@@ -10,7 +10,7 @@ use futures::{Stream, StreamExt};
 use reth_beacon_consensus::BeaconConsensusEngineEvent;
 use reth_chain_state::ExecutedBlock;
 use reth_engine_primitives::{BeaconEngineMessage, EngineTypes};
-use reth_primitives::SealedBlockWithSenders;
+use reth_primitives::{NodePrimitives, SealedBlockWithSenders};
 use std::{
     collections::HashSet,
     fmt::Display,
@@ -270,25 +270,25 @@ impl<T: EngineTypes> From<EngineApiRequest<T>> for FromEngine<EngineApiRequest<T
 
 /// Events emitted by the engine API handler.
 #[derive(Debug)]
-pub enum EngineApiEvent {
+pub enum EngineApiEvent<N: NodePrimitives = reth_primitives::EthPrimitives> {
     /// Event from the consensus engine.
     // TODO(mattsse): find a more appropriate name for this variant, consider phasing it out.
-    BeaconConsensus(BeaconConsensusEngineEvent),
+    BeaconConsensus(BeaconConsensusEngineEvent<N>),
     /// Backfill action is needed.
     BackfillAction(BackfillAction),
     /// Block download is needed.
     Download(DownloadRequest),
 }
 
-impl EngineApiEvent {
+impl<N: NodePrimitives> EngineApiEvent<N> {
     /// Returns `true` if the event is a backfill action.
     pub const fn is_backfill_action(&self) -> bool {
         matches!(self, Self::BackfillAction(_))
     }
 }
 
-impl From<BeaconConsensusEngineEvent> for EngineApiEvent {
-    fn from(event: BeaconConsensusEngineEvent) -> Self {
+impl<N: NodePrimitives> From<BeaconConsensusEngineEvent<N>> for EngineApiEvent<N> {
+    fn from(event: BeaconConsensusEngineEvent<N>) -> Self {
         Self::BeaconConsensus(event)
     }
 }
