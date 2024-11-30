@@ -6,12 +6,13 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+reth.workspace = true
 reth-network.workspace = true
 reth-exex.workspace = true
 reth-node-api.workspace = true
 reth-tracing.workspace = true
 reth-node-ethereum.workspace = true
-reth.workspace = true
+reth-chain-state.workspace = true
 reth-execution-types.workspace = true
 reth-exex-test-utils.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }

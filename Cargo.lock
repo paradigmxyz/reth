@@ -2963,6 +2963,7 @@ dependencies = [
  "eyre",
  "futures",
  "reth",
+ "reth-chain-state",
  "reth-execution-types",
  "reth-exex",
  "reth-exex-test-utils",
