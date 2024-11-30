@@ -17,11 +17,13 @@ alloy-primitives.workspace = true
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
 alloy-trie.workspace = true
 alloy-consensus.workspace = true
-alloy-genesis.workspace = true
-
 reth-primitives-traits.workspace = true
 reth-codecs.workspace = true
 revm-primitives.workspace = true
+
+alloy-genesis.workspace = true
+alloy-rpc-types-eth = { workspace = true, optional = true }
+alloy-serde = { workspace = true, optional = true }
 
 bytes.workspace = true
 derive_more.workspace = true
@@ -54,6 +56,10 @@ serde_json.workspace = true
 serde_with.workspace = true
 
 [features]
+eip1186 = [
+    "dep:alloy-rpc-types-eth",
+    "dep:alloy-serde",
+]
 serde = [
     "dep:serde",
     "bytes/serde",
@@ -61,6 +67,7 @@ serde = [
     "alloy-primitives/serde",
     "alloy-consensus/serde",
     "alloy-trie/serde",
+    "alloy-rpc-types-eth/serde",
     "revm-primitives/serde",
     "reth-primitives-traits/serde",
     "reth-codecs/serde"
@@ -79,14 +86,16 @@ test-utils = [
     "reth-codecs/test-utils",
 ]
 arbitrary = [
-    "alloy-trie/arbitrary",
-    "dep:arbitrary",
-    "reth-primitives-traits/arbitrary",
-    "alloy-consensus/arbitrary",
-    "alloy-primitives/arbitrary",
-    "nybbles/arbitrary",
-    "revm-primitives/arbitrary",
-    "reth-codecs/arbitrary",
+	"alloy-trie/arbitrary",
+	"dep:arbitrary",
+	"alloy-serde/arbitrary",
+	"reth-primitives-traits/arbitrary",
+	"alloy-consensus/arbitrary",
+	"alloy-primitives/arbitrary",
+	"nybbles/arbitrary",
+	"revm-primitives/arbitrary",
+	"reth-codecs/arbitrary",
+	"alloy-rpc-types-eth?/arbitrary"
 ]
 
 [[bench]]
