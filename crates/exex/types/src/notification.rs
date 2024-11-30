@@ -73,12 +73,11 @@ impl<P: NodePrimitives> From<CanonStateNotification<P>> for ExExNotification<P> 
 /// Bincode-compatible [`ExExNotification`] serde implementation.
 #[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
 pub(super) mod serde_bincode_compat {
-    use std::sync::Arc;
-
     use reth_execution_types::serde_bincode_compat::Chain;
     use reth_primitives::{EthPrimitives, NodePrimitives};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
+    use std::sync::Arc;
 
     /// Bincode-compatible [`super::ExExNotification`] serde implementation.
     ///
@@ -171,16 +170,14 @@ pub(super) mod serde_bincode_compat {
 
     #[cfg(test)]
     mod tests {
-        use std::sync::Arc;
-
+        use super::super::{serde_bincode_compat, ExExNotification};
         use arbitrary::Arbitrary;
         use rand::Rng;
         use reth_execution_types::Chain;
         use reth_primitives::SealedBlockWithSenders;
         use serde::{Deserialize, Serialize};
         use serde_with::serde_as;
-
-        use super::super::{serde_bincode_compat, ExExNotification};
+        use std::sync::Arc;
 
         #[test]
         fn test_exex_notification_bincode_roundtrip() {

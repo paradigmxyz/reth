@@ -63,13 +63,14 @@ where
 
     // We're traversing the path in lexicographical order.
     for expected in expected {
-        let got = walker.advance().unwrap();
+        walker.advance().unwrap();
+        let got = walker.key().cloned();
         assert_eq!(got.unwrap(), Nibbles::from_nibbles_unchecked(expected.clone()));
     }
 
     // There should be 8 paths traversed in total from 3 branches.
-    let got = walker.advance().unwrap();
-    assert!(got.is_none());
+    walker.advance().unwrap();
+    assert!(walker.key().is_none());
 }
 
 #[test]

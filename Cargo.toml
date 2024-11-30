@@ -429,7 +429,7 @@ revm-primitives = { version = "14.0.0", features = [
 ], default-features = false }
 
 # eth
-alloy-chains = "0.1.32"
+alloy-chains = { version = "0.1.32", default-features = false }
 alloy-dyn-abi = "0.8.11"
 alloy-primitives = { version = "0.8.11", default-features = false }
 alloy-rlp = "0.3.4"
