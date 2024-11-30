@@ -1,4 +1,5 @@
 use crate::{
+    capability::RawCapabilityMessage,
     errors::{EthHandshakeError, EthStreamError},
     message::{EthBroadcastMessage, ProtocolBroadcastMessage},
     p2pstream::HANDSHAKE_TIMEOUT,
@@ -250,6 +251,12 @@ where
             ProtocolBroadcastMessage::from(item),
         )))?;
 
+        Ok(())
+    }
+
+    /// Sends a raw capability message directly over the stream
+    pub fn start_send_raw(&mut self, msg: RawCapabilityMessage) -> Result<(), EthStreamError> {
+        self.inner.start_send_unpin(msg.payload)?;
         Ok(())
     }
 }
