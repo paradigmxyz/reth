@@ -1,6 +1,7 @@
 //! Loads a pending block from database. Helper trait for `eth_` block, transaction, call and trace
 //! RPC methods.
-
+use super::{EthApiSpec, LoadPendingBlock, SpawnBlocking};
+use crate::{EthApiTypes, FromEthApiError, RpcNodeCore, RpcNodeCoreExt};
 use alloy_consensus::{constants::KECCAK_EMPTY, Header};
 use alloy_eips::BlockId;
 use alloy_primitives::{Address, Bytes, B256, U256};
@@ -15,13 +16,8 @@ use reth_provider::{
     StateProviderFactory,
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlockEnv, RpcInvalidTransactionError};
-use reth_rpc_types_compat::proof::from_primitive_account_proof;
 use reth_transaction_pool::TransactionPool;
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
-
-use crate::{EthApiTypes, FromEthApiError, RpcNodeCore, RpcNodeCoreExt};
-
-use super::{EthApiSpec, LoadPendingBlock, SpawnBlocking};
 
 /// Helper methods for `eth_` methods relating to state (accounts).
 pub trait EthState: LoadState + SpawnBlocking {
@@ -122,7 +118,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                 let proof = state
                     .proof(Default::default(), address, &storage_keys)
                     .map_err(Self::Error::from_eth_err)?;
-                Ok(from_primitive_account_proof(proof, keys))
+                Ok(proof.into_eip1186_response(keys))
             })
             .await
         })
