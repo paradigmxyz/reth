@@ -30,6 +30,7 @@ pub trait BlockHeader:
     + MaybeSerde
     + MaybeArbitrary
     + MaybeSerdeBincodeCompat
+    + AsRef<Self>
     + 'static
 {
 }
@@ -51,6 +52,7 @@ impl<T> BlockHeader for T where
         + MaybeSerde
         + MaybeArbitrary
         + MaybeSerdeBincodeCompat
+        + AsRef<Self>
         + 'static
 {
 }

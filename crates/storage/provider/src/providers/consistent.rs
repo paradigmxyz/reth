@@ -6,13 +6,13 @@ use crate::{
     StageCheckpointReader, StateReader, StaticFileProviderFactory, TransactionVariant,
     TransactionsProvider, WithdrawalsProvider,
 };
+use alloy_consensus::BlockHeader;
 use alloy_eips::{
     eip2718::Encodable2718,
     eip4895::{Withdrawal, Withdrawals},
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, HashOrNumber,
 };
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
-use reth_primitives::Header;
 use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStateProviderRef};
 use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_db::models::BlockNumberAddress;
@@ -1025,7 +1025,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_tx(
             id.into(),
             |provider| provider.transaction_block(id),
-            |_, _, block_state| Ok(Some(block_state.block_ref().block().number)),
+            |_, _, block_state| Ok(Some(block_state.block_ref().block().number())),
         )
     }
 
@@ -1230,7 +1230,7 @@ impl<N: ProviderNodeTypes> StageCheckpointReader for ConsistentProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> EvmEnvProvider for ConsistentProvider<N> {
+impl<N: ProviderNodeTypes> EvmEnvProvider<HeaderTy<N>> for ConsistentProvider<N> {
     fn fill_env_at<EvmConfig>(
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,
@@ -1239,7 +1239,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for ConsistentProvider<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv<Header = Header>,
+        EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
     {
         let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
         let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
@@ -1250,15 +1250,15 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for ConsistentProvider<N> {
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,
         block_env: &mut BlockEnv,
-        header: &Header,
+        header: &HeaderTy<N>,
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv<Header = Header>,
+        EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
     {
         let total_difficulty = self
-            .header_td_by_number(header.number)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
+            .header_td_by_number(header.number())?
+            .ok_or_else(|| ProviderError::HeaderNotFound(header.number().into()))?;
         evm_config.fill_cfg_and_block_env(cfg, block_env, header, total_difficulty);
         Ok(())
     }
@@ -1270,7 +1270,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for ConsistentProvider<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv<Header = Header>,
+        EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
     {
         let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
         let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
@@ -1280,15 +1280,15 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for ConsistentProvider<N> {
     fn fill_cfg_env_with_header<EvmConfig>(
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,
-        header: &Header,
+        header: &HeaderTy<N>,
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv<Header = Header>,
+        EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
     {
         let total_difficulty = self
-            .header_td_by_number(header.number)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
+            .header_td_by_number(header.number())?
+            .ok_or_else(|| ProviderError::HeaderNotFound(header.number().into()))?;
         evm_config.fill_cfg_env(cfg, header, total_difficulty);
         Ok(())
     }

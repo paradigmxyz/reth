@@ -7,13 +7,13 @@ use crate::{
     traits::{CanonicalStateUpdate, TransactionPool, TransactionPoolExt},
     BlockInfo, PoolTransaction, PoolUpdateKind,
 };
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Address, BlockHash, BlockNumber};
 use futures_util::{
     future::{BoxFuture, Fuse, FusedFuture},
     FutureExt, Stream, StreamExt,
 };
-use alloy_consensus::BlockHeader;
 use reth_chain_state::CanonStateNotification;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_execution_types::ChangedAccount;

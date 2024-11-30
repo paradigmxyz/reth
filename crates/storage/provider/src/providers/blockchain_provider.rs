@@ -31,7 +31,7 @@ use reth_primitives::{
     SealedBlockFor, SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta,
     TransactionSigned, TransactionSignedNoHash,
 };
-use reth_primitives_traits::{BlockBody as _};
+use reth_primitives_traits::BlockBody as _;
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{DBProvider, NodePrimitivesProvider, StorageChangeSetReader};
@@ -179,7 +179,7 @@ impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider2<N> 
 
 impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
     type Header = HeaderTy<N>;
-    
+
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
         self.consistent_provider()?.header(block_hash)
     }
@@ -481,7 +481,7 @@ impl<N: ProviderNodeTypes> StageCheckpointReader for BlockchainProvider2<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes> EvmEnvProvider<HeaderTy<N>> for BlockchainProvider2<N> {
     fn fill_env_at<EvmConfig>(
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,
@@ -490,7 +490,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider2<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv<Header = Header>,
+        EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
     {
         self.consistent_provider()?.fill_env_at(cfg, block_env, at, evm_config)
     }
@@ -499,11 +499,11 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider2<N> {
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,
         block_env: &mut BlockEnv,
-        header: &Header,
+        header: &HeaderTy<N>,
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv<Header = Header>,
+        EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
     {
         self.consistent_provider()?.fill_env_with_header(cfg, block_env, header, evm_config)
     }
@@ -515,7 +515,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider2<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv<Header = Header>,
+        EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
     {
         self.consistent_provider()?.fill_cfg_env_at(cfg, at, evm_config)
     }
@@ -523,11 +523,11 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider2<N> {
     fn fill_cfg_env_with_header<EvmConfig>(
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,
-        header: &Header,
+        header: &HeaderTy<N>,
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv<Header = Header>,
+        EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
     {
         self.consistent_provider()?.fill_cfg_env_with_header(cfg, header, evm_config)
     }
@@ -710,12 +710,14 @@ impl<N: NodeTypesWithDB<Primitives = EthPrimitives>> CanonStateSubscriptions
 }
 
 impl<N: ProviderNodeTypes> ForkChoiceSubscriptions for BlockchainProvider2<N> {
-    fn subscribe_safe_block(&self) -> ForkChoiceNotifications {
+    type Header = HeaderTy<N>;
+
+    fn subscribe_safe_block(&self) -> ForkChoiceNotifications<Self::Header> {
         let receiver = self.canonical_in_memory_state.subscribe_safe_block();
         ForkChoiceNotifications(receiver)
     }
 
-    fn subscribe_finalized_block(&self) -> ForkChoiceNotifications {
+    fn subscribe_finalized_block(&self) -> ForkChoiceNotifications<Self::Header> {
         let receiver = self.canonical_in_memory_state.subscribe_finalized_block();
         ForkChoiceNotifications(receiver)
     }

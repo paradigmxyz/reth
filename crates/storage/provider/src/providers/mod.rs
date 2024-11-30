@@ -1,6 +1,6 @@
 use crate::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    BlockSource, BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
+    BlockSource, BlockchainTreePendingStateProvider, CanonStateNotifications,
     CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
     DatabaseProviderFactory, EvmEnvProvider, FullExecutionDataProvider, HeaderProvider,
     NodePrimitivesProvider, ProviderError, PruneCheckpointReader, ReceiptProvider,
@@ -24,7 +24,9 @@ use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_db::table::Value;
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
-use reth_node_types::{BlockTy, FullNodePrimitives, NodeTypes, NodeTypesWithDB, ReceiptTy, TxTy};
+use reth_node_types::{
+    BlockTy, FullNodePrimitives, HeaderTy, NodeTypes, NodeTypesWithDB, ReceiptTy, TxTy,
+};
 use reth_primitives::{
     Account, BlockWithSenders, EthPrimitives, Receipt, SealedBlock, SealedBlockFor,
     SealedBlockWithSenders, SealedHeader, TransactionMeta,
@@ -37,7 +39,6 @@ use std::{
     collections::BTreeMap,
     ops::{RangeBounds, RangeInclusive},
     sync::Arc,
-    time::Instant,
 };
 
 use tracing::trace;
@@ -61,7 +62,6 @@ mod bundle_state_provider;
 pub use bundle_state_provider::BundleStateProvider;
 
 mod consistent_view;
-use alloy_rpc_types_engine::ForkchoiceState;
 pub use consistent_view::{ConsistentDbView, ConsistentViewError};
 
 mod blockchain_provider;
@@ -77,11 +77,7 @@ where
     Self: NodeTypes<
         ChainSpec: EthereumHardforks,
         Storage: ChainStorage<Self::Primitives>,
-        Primitives: FullNodePrimitives<
-            SignedTx: Value,
-            Receipt: Value,
-            BlockHeader: Value,
-        >,
+        Primitives: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
     >,
 {
 }
@@ -90,11 +86,7 @@ impl<T> NodeTypesForProvider for T where
     T: NodeTypes<
         ChainSpec: EthereumHardforks,
         Storage: ChainStorage<T::Primitives>,
-        Primitives: FullNodePrimitives<
-            SignedTx: Value,
-            Receipt: Value,
-            BlockHeader: Value,
-        >,
+        Primitives: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
     >
 {
 }
@@ -595,7 +587,7 @@ impl<N: ProviderNodeTypes> StageCheckpointReader for BlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider<N> {
+impl<N: TreeNodeTypes> EvmEnvProvider for BlockchainProvider<N> {
     fn fill_env_at<EvmConfig>(
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,
@@ -842,8 +834,7 @@ impl<N: ProviderNodeTypes> BlockchainTreeViewer for BlockchainProvider<N> {
     }
 }
 
-impl<N: TreeNodeTypes> BlockReaderIdExt for BlockchainProvider<N>
-{
+impl<N: TreeNodeTypes> BlockReaderIdExt for BlockchainProvider<N> {
     fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Block>> {
         match id {
             BlockId::Number(num) => self.block_by_number_or_tag(num),
@@ -862,7 +853,10 @@ impl<N: TreeNodeTypes> BlockReaderIdExt for BlockchainProvider<N>
         }
     }
 
-    fn header_by_number_or_tag(&self, id: BlockNumberOrTag) -> ProviderResult<Option<Self::Header>> {
+    fn header_by_number_or_tag(
+        &self,
+        id: BlockNumberOrTag,
+    ) -> ProviderResult<Option<Self::Header>> {
         Ok(match id {
             BlockNumberOrTag::Latest => Some(self.chain_info.get_canonical_head().unseal()),
             BlockNumberOrTag::Finalized => {
@@ -893,7 +887,10 @@ impl<N: TreeNodeTypes> BlockReaderIdExt for BlockchainProvider<N>
         }
     }
 
-    fn sealed_header_by_id(&self, id: BlockId) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
+    fn sealed_header_by_id(
+        &self,
+        id: BlockId,
+    ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
         Ok(match id {
             BlockId::Number(num) => self.sealed_header_by_number_or_tag(num)?,
             BlockId::Hash(hash) => self.header(&hash.block_hash)?.map(SealedHeader::seal),
@@ -934,7 +931,9 @@ impl<N: ProviderNodeTypes> CanonStateSubscriptions for BlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> ForkChoiceSubscriptions for BlockchainProvider<N> {
+impl<N: TreeNodeTypes> ForkChoiceSubscriptions for BlockchainProvider<N> {
+    type Header = HeaderTy<N>;
+
     fn subscribe_safe_block(&self) -> ForkChoiceNotifications {
         let receiver = self.chain_info.subscribe_safe_block();
         ForkChoiceNotifications(receiver)
