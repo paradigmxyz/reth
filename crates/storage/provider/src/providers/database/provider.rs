@@ -19,6 +19,7 @@ use crate::{
     StorageLocation, StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
     TransactionsProviderExt, TrieWriter, WithdrawalsProvider,
 };
+use alloy_consensus::BlockHeader;
 use alloy_consensus::Header;
 use alloy_eips::{
     eip2718::Encodable2718,
@@ -52,8 +53,7 @@ use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_network_p2p::headers::downloader::SyncTarget;
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives::{
-    Account, BlockExt, BlockWithSenders, Bytecode, GotExpected, SealedBlock, SealedBlockFor,
-    SealedBlockWithSenders, SealedHeader, StaticFileSegment, StorageEntry, TransactionMeta,
+    Account, BlockExt, BlockWithSenders, Bytecode, GotExpected, NodePrimitives, SealedBlock, SealedBlockFor, SealedBlockWithSenders, SealedHeader, StaticFileSegment, StorageEntry, TransactionMeta
 };
 use reth_primitives_traits::{Block as _, BlockBody as _, SignedTransaction};
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
@@ -326,7 +326,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let parent_state_root = self
             .header_by_number(parent_number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(parent_number.into()))?
-            .state_root;
+            .state_root();
 
         // state root should be always correct as we are reverting state.
         // but for sake of double verification we will check it again.
@@ -420,7 +420,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> StateCommitmentProvider for DatabaseProvi
     type StateCommitment = N::StateCommitment;
 }
 
-impl<Tx: DbTx + DbTxMut + 'static, N: NodeTypesForProvider + 'static> DatabaseProvider<Tx, N> {
+impl<Tx: DbTx + DbTxMut + 'static, N: NodeTypesForProvider<Primitives: NodePrimitives<BlockHeader = Header>>> DatabaseProvider<Tx, N> {
     // TODO: uncomment below, once `reth debug_cmd` has been feature gated with dev.
     // #[cfg(any(test, feature = "test-utils"))]
     /// Inserts an historical block. **Used for setting up test environments**
@@ -634,7 +634,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             // have enough information to return the block anyways, so
             // we skip the block.
             if let Some((_, block_body_indices)) =
-                block_body_cursor.seek_exact(header.as_ref().number)?
+                block_body_cursor.seek_exact(header.as_ref().number())?
             {
                 let tx_range = block_body_indices.tx_num_range();
                 present_headers.push((header, tx_range));
@@ -943,7 +943,7 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: DbTx + 'static, N: NodeTypes> HeaderSyncGapProvider for DatabaseProvider<TX, N> {
+impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderSyncGapProvider for DatabaseProvider<TX, N> {
     fn sync_gap(
         &self,
         tip: watch::Receiver<B256>,
@@ -987,7 +987,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> HeaderSyncGapProvider for DatabaseProvide
     }
 }
 
-impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> HeaderProvider
+impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderProvider
     for DatabaseProvider<TX, N>
 {
     type Header = HeaderTy<N>;
@@ -1005,7 +1005,7 @@ impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> HeaderProvi
             StaticFileSegment::Headers,
             num,
             |static_file| static_file.header_by_number(num),
-            || Ok(self.tx.get::<tables::Headers>(num)?),
+            || Ok(self.tx.get::<tables::Headers<Self::Header>>(num)?),
         )
     }
 
@@ -1040,7 +1040,7 @@ impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> HeaderProvi
             StaticFileSegment::Headers,
             to_range(range),
             |static_file, range, _| static_file.headers_range(range),
-            |range, _| self.cursor_read_collect::<tables::Headers>(range).map_err(Into::into),
+            |range, _| self.cursor_read_collect::<tables::Headers<Self::Header>>(range).map_err(Into::into),
             |_| true,
         )
     }
@@ -1077,7 +1077,7 @@ impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> HeaderProvi
             |static_file, range, predicate| static_file.sealed_headers_while(range, predicate),
             |range, mut predicate| {
                 let mut headers = vec![];
-                for entry in self.tx.cursor_read::<tables::Headers>()?.walk_range(range)? {
+                for entry in self.tx.cursor_read::<tables::Headers<Self::Header>>()?.walk_range(range)? {
                     let (number, header) = entry?;
                     let hash = self
                         .block_hash(number)?
@@ -1226,7 +1226,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
                 return Ok(Some(Vec::new()))
             }
 
-            let ommers = self.tx.get::<tables::BlockOmmers>(number)?.map(|o| o.ommers);
+            let ommers = self.tx.get::<tables::BlockOmmers<Self::Header>>(number)?.map(|o| o.ommers);
             return Ok(ommers)
         }
 
@@ -1626,7 +1626,7 @@ impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> Withdrawals
     }
 }
 
-impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> EvmEnvProvider
+impl<TX: DbTx + 'static, N: NodeTypesForProvider> EvmEnvProvider
     for DatabaseProvider<TX, N>
 {
     fn fill_env_at<EvmConfig>(
@@ -2821,18 +2821,18 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         block: SealedBlockWithSenders<Self::Block>,
         write_to: StorageLocation,
     ) -> ProviderResult<StoredBlockBodyIndices> {
-        let block_number = block.number;
+        let block_number = block.number();
 
         let mut durations_recorder = metrics::DurationsRecorder::default();
 
         // total difficulty
         let ttd = if block_number == 0 {
-            block.difficulty
+            block.difficulty()
         } else {
             let parent_block_number = block_number - 1;
             let parent_ttd = self.header_td_by_number(parent_block_number)?.unwrap_or_default();
             durations_recorder.record_relative(metrics::Action::GetParentTD);
-            parent_ttd + block.difficulty
+            parent_ttd + block.difficulty()
         };
 
         if write_to.database() {
@@ -2840,7 +2840,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             durations_recorder.record_relative(metrics::Action::InsertCanonicalHeaders);
 
             // Put header with canonical hashes.
-            self.tx.put::<tables::Headers>(block_number, block.header.as_ref().clone())?;
+            self.tx.put::<tables::Headers<HeaderTy<N>>>(block_number, block.header.as_ref().clone())?;
             durations_recorder.record_relative(metrics::Action::InsertHeaders);
 
             self.tx.put::<tables::HeaderTerminalDifficulties>(block_number, ttd.into())?;
@@ -2987,7 +2987,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             self.tx.delete::<tables::HeaderNumbers>(hash, None)?;
             rev_headers.delete_current()?;
         }
-        self.remove::<tables::Headers>(block + 1..)?;
+        self.remove::<tables::Headers<HeaderTy<N>>>(block + 1..)?;
         self.remove::<tables::HeaderTerminalDifficulties>(block + 1..)?;
 
         // First transaction to be removed
@@ -3071,10 +3071,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             return Ok(())
         }
 
-        let first_number = blocks.first().unwrap().number;
+        let first_number = blocks.first().unwrap().number();
 
         let last = blocks.last().unwrap();
-        let last_block_number = last.number;
+        let last_block_number = last.number();
 
         let mut durations_recorder = metrics::DurationsRecorder::default();
 

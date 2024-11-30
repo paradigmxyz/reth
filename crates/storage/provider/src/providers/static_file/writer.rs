@@ -526,10 +526,10 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// Returns the current [`BlockNumber`] as seen in the static file.
     pub fn append_header(
         &mut self,
-        header: &Header,
+        header: &N::BlockHeader,
         total_difficulty: U256,
         hash: &BlockHash,
-    ) -> ProviderResult<()> {
+    ) -> ProviderResult<()> where N::BlockHeader: Compact {
         let start = Instant::now();
         self.ensure_no_queued_prune()?;
 

@@ -91,7 +91,9 @@ impl<'a, N: NodePrimitives> StaticFileJarProvider<'a, N> {
 }
 
 impl<N: NodePrimitives> HeaderProvider for StaticFileJarProvider<'_, N> {
-    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
+    type Header = N::BlockHeader;
+
+    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
         Ok(self
             .cursor()?
             .get_two::<HeaderWithHashMask<Header>>(block_hash.into())?
@@ -99,7 +101,7 @@ impl<N: NodePrimitives> HeaderProvider for StaticFileJarProvider<'_, N> {
             .map(|(header, _)| header))
     }
 
-    fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Header>> {
+    fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::Header>> {
         self.cursor()?.get_one::<HeaderMask<Header>>(num.into())
     }
 
@@ -115,7 +117,7 @@ impl<N: NodePrimitives> HeaderProvider for StaticFileJarProvider<'_, N> {
         Ok(self.cursor()?.get_one::<TotalDifficultyMask>(num.into())?.map(Into::into))
     }
 
-    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
+    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Self::Header>> {
         let range = to_range(range);
 
         let mut cursor = self.cursor()?;
@@ -130,7 +132,7 @@ impl<N: NodePrimitives> HeaderProvider for StaticFileJarProvider<'_, N> {
         Ok(headers)
     }
 
-    fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
+    fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
         Ok(self
             .cursor()?
             .get_two::<HeaderWithHashMask<Header>>(number.into())?
@@ -140,8 +142,8 @@ impl<N: NodePrimitives> HeaderProvider for StaticFileJarProvider<'_, N> {
     fn sealed_headers_while(
         &self,
         range: impl RangeBounds<BlockNumber>,
-        mut predicate: impl FnMut(&SealedHeader) -> bool,
-    ) -> ProviderResult<Vec<SealedHeader>> {
+        mut predicate: impl FnMut(&SealedHeader<Self::Header>) -> bool,
+    ) -> ProviderResult<Vec<SealedHeader<Self::Header>>> {
         let range = to_range(range);
 
         let mut cursor = self.cursor()?;

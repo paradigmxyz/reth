@@ -80,7 +80,7 @@ where
         Primitives: FullNodePrimitives<
             SignedTx: Value,
             Receipt: Value,
-            BlockHeader = alloy_consensus::Header,
+            BlockHeader: Value,
         >,
     >,
 {
@@ -93,7 +93,7 @@ impl<T> NodeTypesForProvider for T where
         Primitives: FullNodePrimitives<
             SignedTx: Value,
             Receipt: Value,
-            BlockHeader = alloy_consensus::Header,
+            BlockHeader: Value,
         >,
     >
 {
@@ -151,7 +151,7 @@ impl<N: NodeTypesWithDB> BlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> BlockchainProvider<N> {
+impl<N: TreeNodeTypes> BlockchainProvider<N> {
     /// Create new provider instance that wraps the database and the blockchain tree, using the
     /// provided latest header to initialize the chain info tracker, alongside the finalized header
     /// if it exists.
@@ -261,7 +261,9 @@ impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider<N> {
+impl<N: TreeNodeTypes> HeaderProvider for BlockchainProvider<N> {
+    type Header = Header;
+
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
         self.database.header(block_hash)
     }
@@ -666,7 +668,7 @@ impl<N: ProviderNodeTypes> ChainSpecProvider for BlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
+impl<N: TreeNodeTypes> StateProviderFactory for BlockchainProvider<N> {
     /// Storage provider for latest block
     fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", "Getting latest block state provider");
@@ -840,43 +842,7 @@ impl<N: ProviderNodeTypes> BlockchainTreeViewer for BlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> CanonChainTracker for BlockchainProvider<N>
-where
-    Self: BlockReader,
-{
-    fn on_forkchoice_update_received(&self, _update: &ForkchoiceState) {
-        // update timestamp
-        self.chain_info.on_forkchoice_update_received();
-    }
-
-    fn last_received_update_timestamp(&self) -> Option<Instant> {
-        self.chain_info.last_forkchoice_update_received_at()
-    }
-
-    fn on_transition_configuration_exchanged(&self) {
-        self.chain_info.on_transition_configuration_exchanged();
-    }
-
-    fn last_exchanged_transition_configuration_timestamp(&self) -> Option<Instant> {
-        self.chain_info.last_transition_configuration_exchanged_at()
-    }
-
-    fn set_canonical_head(&self, header: SealedHeader) {
-        self.chain_info.set_canonical_head(header);
-    }
-
-    fn set_safe(&self, header: SealedHeader) {
-        self.chain_info.set_safe(header);
-    }
-
-    fn set_finalized(&self, header: SealedHeader) {
-        self.chain_info.set_finalized(header);
-    }
-}
-
-impl<N: ProviderNodeTypes> BlockReaderIdExt for BlockchainProvider<N>
-where
-    Self: BlockReader + ReceiptProviderIdExt,
+impl<N: TreeNodeTypes> BlockReaderIdExt for BlockchainProvider<N>
 {
     fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Block>> {
         match id {
@@ -896,7 +862,7 @@ where
         }
     }
 
-    fn header_by_number_or_tag(&self, id: BlockNumberOrTag) -> ProviderResult<Option<Header>> {
+    fn header_by_number_or_tag(&self, id: BlockNumberOrTag) -> ProviderResult<Option<Self::Header>> {
         Ok(match id {
             BlockNumberOrTag::Latest => Some(self.chain_info.get_canonical_head().unseal()),
             BlockNumberOrTag::Finalized => {
@@ -912,7 +878,7 @@ where
     fn sealed_header_by_number_or_tag(
         &self,
         id: BlockNumberOrTag,
-    ) -> ProviderResult<Option<SealedHeader>> {
+    ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
         match id {
             BlockNumberOrTag::Latest => Ok(Some(self.chain_info.get_canonical_head())),
             BlockNumberOrTag::Finalized => Ok(self.chain_info.get_finalized_header()),
@@ -927,21 +893,21 @@ where
         }
     }
 
-    fn sealed_header_by_id(&self, id: BlockId) -> ProviderResult<Option<SealedHeader>> {
+    fn sealed_header_by_id(&self, id: BlockId) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
         Ok(match id {
             BlockId::Number(num) => self.sealed_header_by_number_or_tag(num)?,
             BlockId::Hash(hash) => self.header(&hash.block_hash)?.map(SealedHeader::seal),
         })
     }
 
-    fn header_by_id(&self, id: BlockId) -> ProviderResult<Option<Header>> {
+    fn header_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Header>> {
         Ok(match id {
             BlockId::Number(num) => self.header_by_number_or_tag(num)?,
             BlockId::Hash(hash) => self.header(&hash.block_hash)?,
         })
     }
 
-    fn ommers_by_id(&self, id: BlockId) -> ProviderResult<Option<Vec<Header>>> {
+    fn ommers_by_id(&self, id: BlockId) -> ProviderResult<Option<Vec<Self::Header>>> {
         match id {
             BlockId::Number(num) => self.ommers_by_number_or_tag(num),
             BlockId::Hash(hash) => {

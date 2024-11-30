@@ -25,13 +25,13 @@ use reth_db::{models::BlockNumberAddress, transaction::DbTx, Database};
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::ExecutionOutcome;
-use reth_node_types::{BlockTy, NodeTypesWithDB, ReceiptTy, TxTy};
+use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives::{
     Account, Block, BlockWithSenders, EthPrimitives, NodePrimitives, Receipt, SealedBlock,
     SealedBlockFor, SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta,
     TransactionSigned, TransactionSignedNoHash,
 };
-use reth_primitives_traits::{BlockBody as _, HeaderTy};
+use reth_primitives_traits::{BlockBody as _};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{DBProvider, NodePrimitivesProvider, StorageChangeSetReader};
@@ -179,6 +179,7 @@ impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider2<N> 
 
 impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
     type Header = HeaderTy<N>;
+    
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
         self.consistent_provider()?.header(block_hash)
     }
@@ -659,40 +660,6 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider2<N> {
                 self.state_by_block_hash(hash)
             }
         }
-    }
-}
-
-impl<N: ProviderNodeTypes> CanonChainTracker for BlockchainProvider2<N>
-where
-    Self: BlockReader,
-{
-    fn on_forkchoice_update_received(&self, _update: &ForkchoiceState) {
-        // update timestamp
-        self.canonical_in_memory_state.on_forkchoice_update_received();
-    }
-
-    fn last_received_update_timestamp(&self) -> Option<Instant> {
-        self.canonical_in_memory_state.last_received_update_timestamp()
-    }
-
-    fn on_transition_configuration_exchanged(&self) {
-        self.canonical_in_memory_state.on_transition_configuration_exchanged();
-    }
-
-    fn last_exchanged_transition_configuration_timestamp(&self) -> Option<Instant> {
-        self.canonical_in_memory_state.last_exchanged_transition_configuration_timestamp()
-    }
-
-    fn set_canonical_head(&self, header: SealedHeader<Self::Header>) {
-        self.canonical_in_memory_state.set_canonical_head(header);
-    }
-
-    fn set_safe(&self, header: SealedHeader<Self::Header>) {
-        self.canonical_in_memory_state.set_safe(header);
-    }
-
-    fn set_finalized(&self, header: SealedHeader<Self::Header>) {
-        self.canonical_in_memory_state.set_finalized(header);
     }
 }
 

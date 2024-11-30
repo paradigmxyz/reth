@@ -12,6 +12,7 @@ use alloy_eips::{
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, HashOrNumber,
 };
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
+use reth_primitives::Header;
 use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStateProviderRef};
 use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_db::models::BlockNumberAddress;
@@ -629,7 +630,7 @@ impl<N: ProviderNodeTypes> StaticFileProviderFactory for ConsistentProvider<N> {
 impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
     type Header = HeaderTy<N>;
 
-    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<HeaderTy<N>>> {
+    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
         self.get_in_memory_or_storage_by_block(
             (*block_hash).into(),
             |db_provider| db_provider.header(block_hash),
@@ -637,7 +638,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
         )
     }
 
-    fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<HeaderTy<N>>> {
+    fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::Header>> {
         self.get_in_memory_or_storage_by_block(
             num.into(),
             |db_provider| db_provider.header_by_number(num),
@@ -679,7 +680,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
     fn headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<HeaderTy<N>>> {
+    ) -> ProviderResult<Vec<Self::Header>> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
             |db_provider, range, _| db_provider.headers_range(range),
@@ -691,7 +692,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
     fn sealed_header(
         &self,
         number: BlockNumber,
-    ) -> ProviderResult<Option<SealedHeader<HeaderTy<N>>>> {
+    ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
         self.get_in_memory_or_storage_by_block(
             number.into(),
             |db_provider| db_provider.sealed_header(number),
@@ -702,7 +703,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
     fn sealed_headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<SealedHeader<HeaderTy<N>>>> {
+    ) -> ProviderResult<Vec<SealedHeader<Self::Header>>> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
             |db_provider, range, _| db_provider.sealed_headers_range(range),
@@ -714,8 +715,8 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
     fn sealed_headers_while(
         &self,
         range: impl RangeBounds<BlockNumber>,
-        predicate: impl FnMut(&SealedHeader<HeaderTy<N>>) -> bool,
-    ) -> ProviderResult<Vec<SealedHeader<HeaderTy<N>>>> {
+        predicate: impl FnMut(&SealedHeader<Self::Header>) -> bool,
+    ) -> ProviderResult<Vec<SealedHeader<Self::Header>>> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
             |db_provider, range, predicate| db_provider.sealed_headers_while(range, predicate),
@@ -875,7 +876,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
                 // Iterate from the lowest block in memory until our target block
                 for state in block_state.chain().collect::<Vec<_>>().into_iter().rev() {
                     let block_tx_count = state.block_ref().block.body.transactions().len() as u64;
-                    if state.block_ref().block().number == number {
+                    if state.block_ref().block().number() == number {
                         stored_indices.tx_count = block_tx_count;
                     } else {
                         stored_indices.first_tx_num += block_tx_count;
