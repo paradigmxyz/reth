@@ -65,12 +65,7 @@ where
         EvmConfig: ConfigureEvm<Header = Header>,
         Tasks: TaskSpawner + Clone + 'static,
     {
-        let cache = EthStateCache::spawn_with(
-            provider.clone(),
-            config.cache,
-            executor.clone(),
-            evm_config.clone(),
-        );
+        let cache = EthStateCache::spawn_with(provider.clone(), config.cache, executor.clone());
 
         let new_canonical_blocks = events.canonical_state_stream();
         let c = cache.clone();
