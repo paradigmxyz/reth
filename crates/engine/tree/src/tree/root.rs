@@ -481,7 +481,7 @@ fn get_proof_targets(
     }
 
     // then process storage slots for all accounts in the state update
-    for (hashed_address, storage) in state_update.storages.iter() {
+    for (hashed_address, storage) in &state_update.storages {
         // only process storage if we either:
         // 1. haven't fetched this account at all (it's in our targets), or
         // 2. have fetched the account but need new storage slots
