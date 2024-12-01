@@ -5,9 +5,9 @@ pub const TRIE_ACCOUNT_RLP_MAX_SIZE: usize = 110;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TrieAccount;
     use alloy_primitives::{B256, U256};
     use alloy_rlp::Encodable;
-    use reth_trie_common::TrieAccount;
 
     #[test]
     fn account_rlp_max_size() {

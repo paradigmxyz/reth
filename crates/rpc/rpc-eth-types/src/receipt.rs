@@ -1,12 +1,12 @@
 //! RPC receipt response builder, extends a layer one receipt with layer two data.
 
+use super::{EthApiError, EthResult};
 use alloy_consensus::{ReceiptEnvelope, Transaction};
 use alloy_primitives::{Address, TxKind};
 use alloy_rpc_types_eth::{Log, ReceiptWithBloom, TransactionReceipt};
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned, TxType};
+use reth_primitives_traits::SignedTransaction;
 use revm_primitives::calc_blob_gasprice;
-
-use super::{EthApiError, EthResult};
 
 /// Builds an [`TransactionReceipt`] obtaining the inner receipt envelope from the given closure.
 pub fn build_receipt<T>(

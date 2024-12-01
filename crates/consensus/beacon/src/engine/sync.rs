@@ -4,13 +4,14 @@ use crate::{
     engine::metrics::EngineSyncMetrics, BeaconConsensusEngineEvent,
     ConsensusEngineLiveSyncProgress, EthBeaconConsensus,
 };
+use alloy_consensus::Header;
 use alloy_primitives::{BlockNumber, B256};
 use futures::FutureExt;
 use reth_network_p2p::{
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
     EthBlockClient,
 };
-use reth_primitives::SealedBlock;
+use reth_primitives::{BlockBody, EthPrimitives, NodePrimitives, SealedBlock};
 use reth_provider::providers::ProviderNodeTypes;
 use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult};
 use reth_tasks::TaskSpawner;
@@ -345,25 +346,33 @@ where
 
 /// A wrapper type around [`SealedBlock`] that implements the [Ord] trait by block number.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct OrderedSealedBlock(SealedBlock);
+struct OrderedSealedBlock<H = Header, B = BlockBody>(SealedBlock<H, B>);
 
-impl PartialOrd for OrderedSealedBlock {
+impl<H, B> PartialOrd for OrderedSealedBlock<H, B>
+where
+    H: reth_primitives_traits::BlockHeader + 'static,
+    B: reth_primitives_traits::BlockBody + 'static,
+{
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for OrderedSealedBlock {
+impl<H, B> Ord for OrderedSealedBlock<H, B>
+where
+    H: reth_primitives_traits::BlockHeader + 'static,
+    B: reth_primitives_traits::BlockBody + 'static,
+{
     fn cmp(&self, other: &Self) -> Ordering {
-        self.0.number.cmp(&other.0.number)
+        self.0.number().cmp(&other.0.number())
     }
 }
 
 /// The event type emitted by the [`EngineSyncController`].
 #[derive(Debug)]
-pub(crate) enum EngineSyncEvent {
+pub(crate) enum EngineSyncEvent<N: NodePrimitives = EthPrimitives> {
     /// A full block has been downloaded from the network.
-    FetchedFullBlock(SealedBlock),
+    FetchedFullBlock(SealedBlock<N::BlockHeader, N::BlockBody>),
     /// Pipeline started syncing
     ///
     /// This is none if the pipeline is triggered without a specific target.

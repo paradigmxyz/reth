@@ -15,7 +15,7 @@ use alloy_rpc_types_engine::{
 };
 use reth_primitives::{
     proofs::{self},
-    Block, BlockBody, SealedBlock, TransactionSigned,
+    Block, BlockBody, BlockExt, SealedBlock, TransactionSigned,
 };
 
 /// Converts [`ExecutionPayloadV1`] to [`Block`]
@@ -124,7 +124,7 @@ pub fn block_to_payload(value: SealedBlock) -> ExecutionPayload {
 
 /// Converts [`SealedBlock`] to [`ExecutionPayloadV1`]
 pub fn block_to_payload_v1(value: SealedBlock) -> ExecutionPayloadV1 {
-    let transactions = value.raw_transactions();
+    let transactions = value.encoded_2718_transactions();
     ExecutionPayloadV1 {
         parent_hash: value.parent_hash,
         fee_recipient: value.beneficiary,
@@ -145,7 +145,7 @@ pub fn block_to_payload_v1(value: SealedBlock) -> ExecutionPayloadV1 {
 
 /// Converts [`SealedBlock`] to [`ExecutionPayloadV2`]
 pub fn block_to_payload_v2(value: SealedBlock) -> ExecutionPayloadV2 {
-    let transactions = value.raw_transactions();
+    let transactions = value.encoded_2718_transactions();
 
     ExecutionPayloadV2 {
         payload_inner: ExecutionPayloadV1 {
@@ -170,7 +170,7 @@ pub fn block_to_payload_v2(value: SealedBlock) -> ExecutionPayloadV2 {
 
 /// Converts [`SealedBlock`] to [`ExecutionPayloadV3`], and returns the parent beacon block root.
 pub fn block_to_payload_v3(value: SealedBlock) -> ExecutionPayloadV3 {
-    let transactions = value.raw_transactions();
+    let transactions = value.encoded_2718_transactions();
     ExecutionPayloadV3 {
         blob_gas_used: value.blob_gas_used.unwrap_or_default(),
         excess_blob_gas: value.excess_blob_gas.unwrap_or_default(),
@@ -334,7 +334,7 @@ pub fn convert_to_payload_body_v1(value: Block) -> ExecutionPayloadBodyV1 {
 
 /// Transforms a [`SealedBlock`] into a [`ExecutionPayloadV1`]
 pub fn execution_payload_from_sealed_block(value: SealedBlock) -> ExecutionPayloadV1 {
-    let transactions = value.raw_transactions();
+    let transactions = value.encoded_2718_transactions();
     ExecutionPayloadV1 {
         parent_hash: value.parent_hash,
         fee_recipient: value.beneficiary,
@@ -363,6 +363,7 @@ mod tests {
         CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ExecutionPayloadV1,
         ExecutionPayloadV2, ExecutionPayloadV3,
     };
+    use reth_primitives::BlockExt;
 
     #[test]
     fn roundtrip_payload_to_block() {

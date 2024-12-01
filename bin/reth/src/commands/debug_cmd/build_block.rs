@@ -17,16 +17,16 @@ use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
-use reth_consensus::Consensus;
+use reth_consensus::{Consensus, FullConsensus};
 use reth_errors::RethResult;
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
-use reth_node_api::{EngineApiMessageVersion, PayloadBuilderAttributes};
+use reth_node_api::{BlockTy, EngineApiMessageVersion, PayloadBuilderAttributes};
 use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider};
 use reth_primitives::{
-    BlobTransaction, PooledTransactionsElement, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    Transaction, TransactionSigned,
+    BlobTransaction, BlockExt, PooledTransactionsElement, SealedBlockFor, SealedBlockWithSenders,
+    SealedHeader, Transaction, TransactionSigned,
 };
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
@@ -90,7 +90,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     fn lookup_best_block<N: ProviderNodeTypes<ChainSpec = C::ChainSpec>>(
         &self,
         factory: ProviderFactory<N>,
-    ) -> RethResult<Arc<SealedBlock>> {
+    ) -> RethResult<Arc<SealedBlockFor<BlockTy<N>>>> {
         let provider = factory.provider()?;
 
         let best_number =
@@ -128,7 +128,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     ) -> eyre::Result<()> {
         let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
 
-        let consensus: Arc<dyn Consensus> =
+        let consensus: Arc<dyn FullConsensus> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
 
         let executor = EthExecutorProvider::ethereum(provider_factory.chain_spec());
@@ -259,7 +259,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
                 let senders = block.senders().expect("sender recovery failed");
                 let block_with_senders =
-                    SealedBlockWithSenders::new(block.clone(), senders).unwrap();
+                    SealedBlockWithSenders::<BlockTy<N>>::new(block.clone(), senders).unwrap();
 
                 let db = StateProviderDatabase::new(blockchain_db.latest()?);
                 let executor =

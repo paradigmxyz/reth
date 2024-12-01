@@ -419,6 +419,7 @@ reth-trie = { path = "crates/trie/trie" }
 reth-trie-common = { path = "crates/trie/common" }
 reth-trie-db = { path = "crates/trie/db" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
+reth-trie-sparse = { path = "crates/trie/sparse" }
 
 # revm
 revm = { version = "18.0.0", features = ["std"], default-features = false }
@@ -428,10 +429,10 @@ revm-primitives = { version = "14.0.0", features = [
 ], default-features = false }
 
 # eth
-alloy-chains = "0.1.32"
+alloy-chains = { version = "0.1.32", default-features = false }
 alloy-dyn-abi = "0.8.11"
 alloy-primitives = { version = "0.8.11", default-features = false }
-alloy-rlp = "0.3.4"
+alloy-rlp = { version = "0.3.4", default-features = false }
 alloy-sol-types = "0.8.11"
 alloy-trie = { version = "0.7", default-features = false }
 
@@ -516,14 +517,13 @@ rustc-hash = { version = "2.0", default-features = false }
 schnellru = "0.2"
 serde = { version = "1.0", default-features = false }
 serde_json = "1.0.94"
-serde_with = "3.3.0"
+serde_with = { version = "3", default-features = false, features = ["macros"] }
 sha2 = { version = "0.10", default-features = false }
 shellexpand = "3.0.0"
 smallvec = "1"
 strum = { version = "0.26", default-features = false }
 syn = "2.0"
-thiserror = "1.0"
-thiserror-no-std = { version = "2.0.2", default-features = false }
+thiserror = { version = "2.0.0", default-features = false }
 tracing = "0.1.0"
 tracing-appender = "0.2"
 url = "2.3"

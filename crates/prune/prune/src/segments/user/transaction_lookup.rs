@@ -3,9 +3,10 @@ use crate::{
     segments::{PruneInput, Segment, SegmentOutput},
     PrunerError,
 };
+use alloy_eips::eip2718::Encodable2718;
 use rayon::prelude::*;
 use reth_db::{tables, transaction::DbTxMut};
-use reth_provider::{BlockReader, DBProvider, TransactionsProvider};
+use reth_provider::{BlockReader, DBProvider};
 use reth_prune_types::{
     PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutputCheckpoint,
 };
@@ -24,7 +25,7 @@ impl TransactionLookup {
 
 impl<Provider> Segment<Provider> for TransactionLookup
 where
-    Provider: DBProvider<Tx: DbTxMut> + TransactionsProvider + BlockReader,
+    Provider: DBProvider<Tx: DbTxMut> + BlockReader<Transaction: Encodable2718>,
 {
     fn segment(&self) -> PruneSegment {
         PruneSegment::TransactionLookup
@@ -58,7 +59,7 @@ where
         let hashes = provider
             .transactions_by_tx_range(tx_range.clone())?
             .into_par_iter()
-            .map(|transaction| transaction.hash())
+            .map(|transaction| transaction.trie_hash())
             .collect::<Vec<_>>();
 
         // Number of transactions retrieved from the database should match the tx range count

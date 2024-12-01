@@ -69,7 +69,7 @@ impl<Client, Tx> OpTransactionValidator<Client, Tx> {
 
 impl<Client, Tx> OpTransactionValidator<Client, Tx>
 where
-    Client: StateProviderFactory + BlockReaderIdExt,
+    Client: StateProviderFactory + BlockReaderIdExt<Block = reth_primitives::Block>,
     Tx: EthPoolTransaction,
 {
     /// Create a new [`OpTransactionValidator`].
@@ -142,7 +142,7 @@ where
             let l1_block_info = self.block_info.l1_block_info.read().clone();
 
             let mut encoded = Vec::with_capacity(valid_tx.transaction().encoded_length());
-            let tx: TransactionSigned = valid_tx.transaction().clone().into_consensus().into();
+            let tx: TransactionSigned = valid_tx.transaction().clone_into_consensus().into();
             tx.encode_2718(&mut encoded);
 
             let cost_addition = match l1_block_info.l1_tx_data_fee(
@@ -195,7 +195,7 @@ where
 
 impl<Client, Tx> TransactionValidator for OpTransactionValidator<Client, Tx>
 where
-    Client: StateProviderFactory + BlockReaderIdExt,
+    Client: StateProviderFactory + BlockReaderIdExt<Block = reth_primitives::Block>,
     Tx: EthPoolTransaction,
 {
     type Transaction = Tx;

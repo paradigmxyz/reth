@@ -57,7 +57,7 @@ pub trait EstimateCall: Call {
         request.nonce = None;
 
         // Keep a copy of gas related request values
-        let tx_request_gas_limit = request.gas;
+        let tx_request_gas_limit = request.gas.map(U256::from);
         let tx_request_gas_price = request.gas_price;
         // the gas limit of the corresponding block
         let block_env_gas_limit = block.gas_limit;
@@ -65,7 +65,13 @@ pub trait EstimateCall: Call {
         // Determine the highest possible gas limit, considering both the request's specified limit
         // and the block's limit.
         let mut highest_gas_limit = tx_request_gas_limit
-            .map(|tx_gas_limit| U256::from(tx_gas_limit).max(block_env_gas_limit))
+            .map(|mut tx_gas_limit| {
+                if block_env_gas_limit < tx_gas_limit {
+                    // requested gas limit is higher than the allowed gas limit, capping
+                    tx_gas_limit = block_env_gas_limit;
+                }
+                tx_gas_limit
+            })
             .unwrap_or(block_env_gas_limit);
 
         // Configure the evm env

@@ -4,6 +4,7 @@ use crate::{Transaction, TransactionSigned};
 use alloy_consensus::{transaction::RlpEcdsaTx, Signed, TxEip4844WithSidecar};
 use alloy_eips::eip4844::BlobTransactionSidecar;
 use derive_more::Deref;
+use reth_primitives_traits::InMemorySize;
 use serde::{Deserialize, Serialize};
 
 /// A response to `GetPooledTransactions` that includes blob data, their commitments, and their
@@ -70,6 +71,16 @@ impl BlobTransaction {
         let (transaction, signature, hash) =
             TxEip4844WithSidecar::rlp_decode_signed(data)?.into_parts();
         Ok(Self(Signed::new_unchecked(transaction, signature, hash)))
+    }
+}
+
+impl InMemorySize for BlobTransaction {
+    fn size(&self) -> usize {
+        // TODO(mattsse): replace with next alloy bump
+        self.0.hash().size() +
+            self.0.signature().size() +
+            self.0.tx().tx().size() +
+            self.0.tx().sidecar.size()
     }
 }
 

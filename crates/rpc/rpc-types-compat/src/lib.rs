@@ -12,7 +12,5 @@
 
 pub mod block;
 pub mod engine;
-pub mod proof;
 pub mod transaction;
-
 pub use transaction::TransactionCompat;

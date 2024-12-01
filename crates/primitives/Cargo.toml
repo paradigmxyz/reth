@@ -103,7 +103,9 @@ std = [
 	"revm-primitives/std",
 	"secp256k1?/std",
 	"serde/std",
-	"alloy-trie/std"
+	"alloy-trie/std",
+	"serde_with?/std",
+	"alloy-rlp/std"
 ]
 reth-codec = [
 	"dep:reth-codecs",
@@ -158,11 +160,12 @@ test-utils = [
 	"arbitrary",
 ]
 serde-bincode-compat = [
+	"serde_with",
+	"alloy-eips/serde-bincode-compat",
 	"alloy-consensus/serde-bincode-compat",
 	"op-alloy-consensus?/serde-bincode-compat",
 	"reth-primitives-traits/serde-bincode-compat",
-	"serde_with",
-	"alloy-eips/serde-bincode-compat",
+	"reth-trie-common/serde-bincode-compat",
 ]
 
 [[bench]]

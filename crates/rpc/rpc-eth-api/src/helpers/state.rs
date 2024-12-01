@@ -1,6 +1,7 @@
 //! Loads a pending block from database. Helper trait for `eth_` block, transaction, call and trace
 //! RPC methods.
-
+use super::{EthApiSpec, LoadPendingBlock, SpawnBlocking};
+use crate::{EthApiTypes, FromEthApiError, RpcNodeCore, RpcNodeCoreExt};
 use alloy_consensus::{constants::KECCAK_EMPTY, Header};
 use alloy_eips::BlockId;
 use alloy_primitives::{Address, Bytes, B256, U256};
@@ -11,17 +12,12 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
 use reth_evm::ConfigureEvmEnv;
 use reth_provider::{
-    BlockIdReader, BlockNumReader, ChainSpecProvider, StateProvider, StateProviderBox,
-    StateProviderFactory,
+    BlockIdReader, BlockNumReader, ChainSpecProvider, EvmEnvProvider as _, StateProvider,
+    StateProviderBox, StateProviderFactory,
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlockEnv, RpcInvalidTransactionError};
-use reth_rpc_types_compat::proof::from_primitive_account_proof;
 use reth_transaction_pool::TransactionPool;
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
-
-use crate::{EthApiTypes, FromEthApiError, RpcNodeCore, RpcNodeCoreExt};
-
-use super::{EthApiSpec, LoadPendingBlock, SpawnBlocking};
 
 /// Helper methods for `eth_` methods relating to state (accounts).
 pub trait EthState: LoadState + SpawnBlocking {
@@ -122,7 +118,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                 let proof = state
                     .proof(Default::default(), address, &storage_keys)
                     .map_err(Self::Error::from_eth_err)?;
-                Ok(from_primitive_account_proof(proof, keys))
+                Ok(proof.into_eip1186_response(keys))
             })
             .await
         })
@@ -233,12 +229,15 @@ pub trait LoadState:
                     .block_hash_for_id(at)
                     .map_err(Self::Error::from_eth_err)?
                     .ok_or(EthApiError::HeaderNotFound(at))?;
-                let (cfg, env) = self
-                    .cache()
-                    .get_evm_env(block_hash)
-                    .await
+
+                let header =
+                    self.cache().get_header(block_hash).await.map_err(Self::Error::from_eth_err)?;
+                let evm_config = self.evm_config().clone();
+                let (cfg, block_env) = self
+                    .provider()
+                    .env_with_header(&header, evm_config)
                     .map_err(Self::Error::from_eth_err)?;
-                Ok((cfg, env, block_hash.into()))
+                Ok((cfg, block_env, block_hash.into()))
             }
         }
     }

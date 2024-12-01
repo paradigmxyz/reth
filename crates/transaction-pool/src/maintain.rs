@@ -21,6 +21,7 @@ use reth_primitives::{
     PooledTransactionsElementEcRecovered, SealedHeader, TransactionSigned,
     TransactionSignedEcRecovered,
 };
+use reth_primitives_traits::SignedTransaction;
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{
@@ -317,7 +318,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 // find all transactions that were mined in the old chain but not in the new chain
                 let pruned_old_transactions = old_blocks
                     .transactions_ecrecovered()
-                    .filter(|tx| !new_mined_transactions.contains(tx.hash_ref()))
+                    .filter(|tx| !new_mined_transactions.contains(tx.tx_hash()))
                     .filter_map(|tx| {
                         if tx.is_eip4844() {
                             // reorged blobs no longer include the blob, which is necessary for
@@ -460,7 +461,7 @@ impl FinalizedBlockTracker {
         let finalized = finalized_block?;
         self.last_finalized_block
             .replace(finalized)
-            .map_or(true, |last| last < finalized)
+            .is_none_or(|last| last < finalized)
             .then_some(finalized)
     }
 }
@@ -601,7 +602,7 @@ where
         .into_iter()
         .map(|tx| {
             let recovered: TransactionSignedEcRecovered =
-                tx.transaction.clone().into_consensus().into();
+                tx.transaction.clone_into_consensus().into();
             recovered.into_signed()
         })
         .collect::<Vec<_>>();

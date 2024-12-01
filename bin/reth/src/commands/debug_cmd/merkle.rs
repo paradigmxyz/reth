@@ -17,11 +17,12 @@ use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_network_p2p::full_block::FullBlockClient;
+use reth_node_api::{BlockTy, NodePrimitives};
 use reth_node_ethereum::EthExecutorProvider;
 use reth_provider::{
-    providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockNumReader, BlockWriter,
-    ChainSpecProvider, DatabaseProviderFactory, HeaderProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderError, ProviderFactory, StateWriter, StorageLocation,
+    providers::ProviderNodeTypes, BlockNumReader, BlockWriter, ChainSpecProvider,
+    DatabaseProviderFactory, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
+    ProviderError, ProviderFactory, StateWriter, StorageLocation,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::{
@@ -55,7 +56,15 @@ pub struct Command<C: ChainSpecParser> {
 }
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
-    async fn build_network<N: ProviderNodeTypes<ChainSpec = C::ChainSpec>>(
+    async fn build_network<
+        N: ProviderNodeTypes<
+            ChainSpec = C::ChainSpec,
+            Primitives: NodePrimitives<
+                Block = reth_primitives::Block,
+                Receipt = reth_primitives::Receipt,
+            >,
+        >,
+    >(
         &self,
         config: &Config,
         task_executor: TaskExecutor,
@@ -144,7 +153,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         for block in blocks.into_iter().rev() {
             let block_number = block.number;
             let sealed_block = block
-                .try_seal_with_senders()
+                .try_seal_with_senders::<BlockTy<N>>()
                 .map_err(|block| eyre::eyre!("Error sealing block with senders: {block:?}"))?;
             trace!(target: "reth::cli", block_number, "Executing block");
 
@@ -157,8 +166,11 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             executor.execute_and_verify_one((&sealed_block.clone().unseal(), td).into())?;
             let execution_outcome = executor.finalize();
 
-            let mut storage_writer = UnifiedStorageWriter::from_database(&provider_rw);
-            storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::Yes)?;
+            provider_rw.write_state(
+                execution_outcome,
+                OriginalValuesKnown::Yes,
+                StorageLocation::Database,
+            )?;
 
             let checkpoint = Some(StageCheckpoint::new(
                 block_number

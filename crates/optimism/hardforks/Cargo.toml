@@ -30,7 +30,8 @@ default = ["std"]
 std = [
 	"alloy-primitives/std",
 	"once_cell/std",
-	"serde?/std"
+	"serde?/std",
+	"alloy-chains/std"
 ]
 serde = [
 	"dep:serde",

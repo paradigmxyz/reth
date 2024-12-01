@@ -58,6 +58,7 @@ impl<N> LoadTransaction for OpEthApi<N>
 where
     Self: SpawnBlocking + FullEthApiTypes,
     N: RpcNodeCore<Provider: TransactionsProvider, Pool: TransactionPool>,
+    Self::Pool: TransactionPool,
 {
 }
 
@@ -73,7 +74,7 @@ where
 
 impl<N> TransactionCompat for OpEthApi<N>
 where
-    N: FullNodeComponents,
+    N: FullNodeComponents<Provider: ReceiptProvider<Receipt = reth_primitives::Receipt>>,
 {
     type Transaction = Transaction;
     type Error = OpEthApiError;

@@ -6,6 +6,8 @@ use std::{
 
 use eyre::OptionExt;
 use reth_exex_types::ExExNotification;
+use reth_node_api::NodePrimitives;
+use reth_primitives::EthPrimitives;
 use reth_tracing::tracing::debug;
 use tracing::instrument;
 
@@ -16,18 +18,22 @@ static FILE_EXTENSION: &str = "wal";
 /// Each notification is represented by a single file that contains a MessagePack-encoded
 /// notification.
 #[derive(Debug, Clone)]
-pub struct Storage {
+pub struct Storage<N: NodePrimitives = EthPrimitives> {
     /// The path to the WAL file.
     path: PathBuf,
+    _pd: std::marker::PhantomData<N>,
 }
 
-impl Storage {
+impl<N> Storage<N>
+where
+    N: NodePrimitives,
+{
     /// Creates a new instance of [`Storage`] backed by the file at the given path and creates
     /// it doesn't exist.
     pub(super) fn new(path: impl AsRef<Path>) -> eyre::Result<Self> {
         reth_fs_util::create_dir_all(&path)?;
 
-        Ok(Self { path: path.as_ref().to_path_buf() })
+        Ok(Self { path: path.as_ref().to_path_buf(), _pd: std::marker::PhantomData })
     }
 
     fn file_path(&self, id: u32) -> PathBuf {
@@ -110,7 +116,7 @@ impl Storage {
     pub(super) fn iter_notifications(
         &self,
         range: RangeInclusive<u32>,
-    ) -> impl Iterator<Item = eyre::Result<(u32, u64, ExExNotification)>> + '_ {
+    ) -> impl Iterator<Item = eyre::Result<(u32, u64, ExExNotification<N>)>> + '_ {
         range.map(move |id| {
             let (notification, size) =
                 self.read_notification(id)?.ok_or_eyre("notification {id} not found")?;
@@ -124,7 +130,7 @@ impl Storage {
     pub(super) fn read_notification(
         &self,
         file_id: u32,
-    ) -> eyre::Result<Option<(ExExNotification, u64)>> {
+    ) -> eyre::Result<Option<(ExExNotification<N>, u64)>> {
         let file_path = self.file_path(file_id);
         debug!(target: "exex::wal::storage", ?file_path, "Reading notification from WAL");
 
@@ -136,7 +142,7 @@ impl Storage {
         let size = file.metadata()?.len();
 
         // Deserialize using the bincode- and msgpack-compatible serde wrapper
-        let notification: reth_exex_types::serde_bincode_compat::ExExNotification<'_> =
+        let notification: reth_exex_types::serde_bincode_compat::ExExNotification<'_, N> =
             rmp_serde::decode::from_read(&mut file).map_err(|err| {
                 eyre::eyre!("failed to decode notification from {file_path:?}: {err:?}")
             })?;
@@ -153,14 +159,14 @@ impl Storage {
     pub(super) fn write_notification(
         &self,
         file_id: u32,
-        notification: &ExExNotification,
+        notification: &ExExNotification<N>,
     ) -> eyre::Result<u64> {
         let file_path = self.file_path(file_id);
         debug!(target: "exex::wal::storage", ?file_path, "Writing notification to WAL");
 
         // Serialize using the bincode- and msgpack-compatible serde wrapper
         let notification =
-            reth_exex_types::serde_bincode_compat::ExExNotification::from(notification);
+            reth_exex_types::serde_bincode_compat::ExExNotification::<N>::from(notification);
 
         reth_fs_util::atomic_write_file(&file_path, |file| {
             rmp_serde::encode::write(file, &notification)
@@ -186,7 +192,7 @@ mod tests {
         let mut rng = generators::rng();
 
         let temp_dir = tempfile::tempdir()?;
-        let storage = Storage::new(&temp_dir)?;
+        let storage: Storage = Storage::new(&temp_dir)?;
 
         let old_block = random_block(&mut rng, 0, Default::default())
             .seal_with_senders()
@@ -215,7 +221,7 @@ mod tests {
     #[test]
     fn test_files_range() -> eyre::Result<()> {
         let temp_dir = tempfile::tempdir()?;
-        let storage = Storage::new(&temp_dir)?;
+        let storage: Storage = Storage::new(&temp_dir)?;
 
         // Create WAL files
         File::create(storage.file_path(1))?;
