@@ -93,6 +93,6 @@ fn custom_chain() -> Arc<ChainSpec> {
     }
 }
 "#;
-    let genesis: Genesis = serde_json::from_str(custom_genesis).unwrap();
+    let genesis: Genesis = serde_json::from_str(custom_genesis)?;
     Arc::new(genesis.into())
 }
