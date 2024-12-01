@@ -652,7 +652,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     where
         Pool: TransactionPool + Unpin + 'static,
         Node::Provider:
-            BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>,
+            BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt, Header = reth_primitives::Header>,
     {
         self.start_network_with(builder, pool, Default::default())
     }
@@ -672,7 +672,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     where
         Pool: TransactionPool + Unpin + 'static,
         Node::Provider:
-            BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>,
+            BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt, Header = reth_primitives::Header>,
     {
         let (handle, network, txpool, eth) = builder
             .transactions(pool, tx_config)

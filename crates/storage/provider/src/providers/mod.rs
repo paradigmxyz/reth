@@ -13,6 +13,9 @@ use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
 };
+use reth_storage_api::CanonChainTracker;
+use std::time::Instant;
+use alloy_rpc_types_engine::ForkchoiceState;
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use reth_blockchain_tree_api::{
     error::{CanonicalError, InsertBlockError},
@@ -831,6 +834,38 @@ impl<N: ProviderNodeTypes> BlockchainTreeViewer for BlockchainProvider<N> {
 
     fn receipts_by_block_hash(&self, block_hash: BlockHash) -> Option<Vec<Receipt>> {
         self.tree.receipts_by_block_hash(block_hash)
+    }
+}
+
+impl<N: TreeNodeTypes> CanonChainTracker for BlockchainProvider<N>
+{
+    fn on_forkchoice_update_received(&self, _update: &ForkchoiceState) {
+        // update timestamp
+        self.chain_info.on_forkchoice_update_received();
+    }
+
+    fn last_received_update_timestamp(&self) -> Option<Instant> {
+        self.chain_info.last_forkchoice_update_received_at()
+    }
+
+    fn on_transition_configuration_exchanged(&self) {
+        self.chain_info.on_transition_configuration_exchanged();
+    }
+
+    fn last_exchanged_transition_configuration_timestamp(&self) -> Option<Instant> {
+        self.chain_info.last_transition_configuration_exchanged_at()
+    }
+
+    fn set_canonical_head(&self, header: SealedHeader) {
+        self.chain_info.set_canonical_head(header);
+    }
+
+    fn set_safe(&self, header: SealedHeader) {
+        self.chain_info.set_safe(header);
+    }
+
+    fn set_finalized(&self, header: SealedHeader) {
+        self.chain_info.set_finalized(header);
     }
 }
 
