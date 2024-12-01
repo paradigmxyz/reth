@@ -19,7 +19,7 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
 use reth_primitives::{
-    PooledTransactionsElementEcRecovered, SealedHeader, TransactionSigned,
+    HeaderExt, PooledTransactionsElementEcRecovered, SealedHeader, TransactionSigned,
     TransactionSignedEcRecovered,
 };
 use reth_primitives_traits::SignedTransaction;

@@ -193,7 +193,7 @@ where
 
 impl<Provider, P, D> Stage<Provider> for HeaderStage<P, D>
 where
-    P: HeaderSyncGapProvider,
+    P: HeaderSyncGapProvider<Header = alloy_consensus::Header>,
     D: HeaderDownloader<Header = alloy_consensus::Header>,
     Provider: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory,
 {

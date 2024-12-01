@@ -33,26 +33,12 @@ pub trait BlockHeader:
     + AsRef<Self>
     + 'static
 {
+    /// Returns whether this header corresponds to an empty block.
+    fn is_empty(&self) -> bool;
 }
 
-impl<T> BlockHeader for T where
-    T: Send
-        + Sync
-        + Unpin
-        + Clone
-        + Default
-        + fmt::Debug
-        + PartialEq
-        + Eq
-        + alloy_rlp::Encodable
-        + alloy_rlp::Decodable
-        + alloy_consensus::BlockHeader
-        + Sealable
-        + InMemorySize
-        + MaybeSerde
-        + MaybeArbitrary
-        + MaybeSerdeBincodeCompat
-        + AsRef<Self>
-        + 'static
-{
+impl BlockHeader for alloy_consensus::Header {
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
 }
