@@ -72,7 +72,10 @@ impl From<DatabaseError> for InitDatabaseError {
 /// Write the genesis block if it has not already been written
 pub fn init_genesis<PF>(factory: &PF) -> Result<B256, InitDatabaseError>
 where
-    PF: DatabaseProviderFactory + StaticFileProviderFactory + ChainSpecProvider + BlockHashReader,
+    PF: DatabaseProviderFactory
+        + StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Compact>>
+        + ChainSpecProvider
+        + BlockHashReader,
     PF::ProviderRW: StaticFileProviderFactory<Primitives = PF::Primitives>
         + StageCheckpointWriter
         + HistoryWriter
@@ -81,7 +84,7 @@ where
         + StateWriter
         + StateWriter
         + AsRef<PF::ProviderRW>,
-    PF::ChainSpec: EthChainSpec<<PF::Primitives as NodePrimitives>::BlockHeader>,
+    PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
 {
     let chain = factory.chain_spec();
 
@@ -310,21 +313,16 @@ pub fn insert_genesis_header<Provider, Spec>(
     chain: &Spec,
 ) -> ProviderResult<()>
 where
-<<<<<<< HEAD
-    Provider: StaticFileProviderFactory + DBProvider<Tx: DbTxMut>,
-    Spec: EthChainSpec<Header = reth_primitives::Header>,
-=======
     Provider: StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Compact>>
         + DBProvider<Tx: DbTxMut>,
-    Spec: EthChainSpec,
->>>>>>> f73cd5ba5 (wip)
+    Spec: EthChainSpec<Header = <Provider::Primitives as NodePrimitives>::BlockHeader>,
 {
     let (header, block_hash) = (chain.genesis_header(), chain.genesis_hash());
     let static_file_provider = provider.static_file_provider();
 
     match static_file_provider.block_hash(0) {
         Ok(None) | Err(ProviderError::MissingStaticFileBlock(StaticFileSegment::Headers, 0)) => {
-            let (difficulty, hash) = (header.difficulty, block_hash);
+            let (difficulty, hash) = (header.difficulty(), block_hash);
             let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
             writer.append_header(header, difficulty, &hash)?;
         }

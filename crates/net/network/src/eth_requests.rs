@@ -4,7 +4,7 @@ use crate::{
     budget::DEFAULT_BUDGET_TRY_DRAIN_DOWNLOADERS, metered_poll_nested_stream_with_budget,
     metrics::EthRequestHandlerMetrics,
 };
-use alloy_consensus::{BlockHeader};
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
 use alloy_rlp::Encodable;
 use futures::StreamExt;
