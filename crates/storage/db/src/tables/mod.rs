@@ -139,6 +139,7 @@ macro_rules! tables {
             impl$(<$($generic),*>)? reth_db_api::table::Table for $name$(<$($generic),*>)?
             where
                 $value: reth_db_api::table::Value + 'static
+                $($(,$generic: Send + Sync)*)?
             {
                 const NAME: &'static str = table_names::$name;
                 const DUPSORT: bool = tables!(@bool $($subkey)?);
@@ -314,9 +315,9 @@ tables! {
     }
 
     /// Stores the uncles/ommers of the block.
-    table BlockOmmers {
+    table BlockOmmers<H = Header> {
         type Key = BlockNumber;
-        type Value = StoredBlockOmmers;
+        type Value = StoredBlockOmmers<H>;
     }
 
     /// Stores the block withdrawals.

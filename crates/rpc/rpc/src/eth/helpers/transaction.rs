@@ -57,7 +57,7 @@ mod tests {
         let pool = testing_pool();
 
         let evm_config = EthEvmConfig::new(noop_provider.chain_spec());
-        let cache = EthStateCache::spawn(noop_provider, Default::default(), evm_config.clone());
+        let cache = EthStateCache::spawn(noop_provider, Default::default());
         let fee_history_cache =
             FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default());
         let eth_api = EthApi::new(
