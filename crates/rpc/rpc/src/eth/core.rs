@@ -14,6 +14,7 @@ use reth_rpc_eth_api::{
     node::RpcNodeCoreExt,
     EthApiTypes, RpcNodeCore,
 };
+use alloy_consensus::BlockHeader;
 use reth_rpc_eth_types::{
     EthApiBuilderCtx, EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle,
     PendingBlock,
@@ -286,7 +287,7 @@ where
                 .header_by_number_or_tag(BlockNumberOrTag::Latest)
                 .ok()
                 .flatten()
-                .map(|header| header.number)
+                .map(|header| header.number())
                 .unwrap_or_default(),
         );
 

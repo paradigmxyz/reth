@@ -202,7 +202,7 @@ pub trait EthFees: LoadFee {
                     last_header.next_block_base_fee(
                     self.provider()
                         .chain_spec()
-                        .base_fee_params_at_timestamp(last_header.timestamp()))
+                        .base_fee_params_at_timestamp(last_header.timestamp())).unwrap_or_default() as u128
                 );
 
                 // Same goes for the `base_fee_per_blob_gas`:

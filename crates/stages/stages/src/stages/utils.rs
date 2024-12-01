@@ -258,7 +258,7 @@ pub(crate) fn missing_static_data_error<Provider>(
     segment: StaticFileSegment,
 ) -> Result<StageError, ProviderError>
 where
-    Provider: BlockReader + StaticFileProviderFactory,
+    Provider: BlockReader<Header = reth_primitives::Header> + StaticFileProviderFactory,
 {
     let mut last_block =
         static_file_provider.get_highest_static_file_block(segment).unwrap_or_default();
