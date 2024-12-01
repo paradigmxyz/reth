@@ -34,7 +34,7 @@ pub struct PersistenceService<N: ProviderNodeTypes> {
     /// The provider factory to use
     provider: ProviderFactory<N>,
     /// Incoming requests
-    incoming: Receiver<PersistenceAction>,
+    incoming: Receiver<PersistenceAction<N::Primitives>>,
     /// The pruner
     pruner: PrunerWithFactory<ProviderFactory<N>>,
     /// metrics
@@ -47,7 +47,7 @@ impl<N: ProviderNodeTypes> PersistenceService<N> {
     /// Create a new persistence service
     pub fn new(
         provider: ProviderFactory<N>,
-        incoming: Receiver<PersistenceAction>,
+        incoming: Receiver<PersistenceAction<N::Primitives>>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
     ) -> Self {
