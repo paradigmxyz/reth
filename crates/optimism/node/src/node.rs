@@ -145,9 +145,9 @@ impl OpNode {
         ComponentsBuilder::default()
             .node_types::<Node>()
             .pool(OpPoolBuilder::default())
-            .payload(OpPayloadBuilder::new(*compute_pending_block))
+            .payload(OpPayloadBuilder::new(compute_pending_block))
             .network(OpNetworkBuilder {
-                disable_txpool_gossip: *disable_txpool_gossip,
+                disable_txpool_gossip: disable_txpool_gossip,
                 disable_discovery_v4: !discovery_v4,
             })
             .executor(OpExecutorBuilder::default())
@@ -179,7 +179,7 @@ where
         OpAddOns<NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>>;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
-        Self::components(&self.args)
+        Self::components(self.args.clone())
     }
 
     fn add_ons(&self) -> Self::AddOns {

@@ -17,7 +17,6 @@ use alloy_eips::BlockId;
 use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_eth::EIP1186AccountProofResponse;
 use alloy_serde::JsonStorageKey;
-use derive_more::Deref;
 use op_alloy_network::Optimism;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
@@ -66,10 +65,9 @@ pub type EthApiNodeBackend<N> = EthApiInner<
 ///
 /// This type implements the [`FullEthApi`](reth_rpc_eth_api::helpers::FullEthApi) by implemented
 /// all the `Eth` helper traits and prerequisite traits.
-#[derive(Deref, Clone)]
+#[derive(Clone)]
 pub struct OpEthApi<N: RpcNodeCore> {
     /// Gateway to node's core components.
-    #[deref]
     inner: Arc<OpEthApiInner<N>>,
 }
 
@@ -115,17 +113,17 @@ where
 
     #[inline]
     fn pool(&self) -> &Self::Pool {
-        self.inner.pool()
+        self.inner.eth_api.pool()
     }
 
     #[inline]
     fn evm_config(&self) -> &Self::Evm {
-        self.inner.evm_config()
+        self.inner.eth_api.evm_config()
     }
 
     #[inline]
     fn network(&self) -> &Self::Network {
-        self.inner.network()
+        self.inner.eth_api.network()
     }
 
     #[inline]
@@ -135,7 +133,7 @@ where
 
     #[inline]
     fn provider(&self) -> &Self::Provider {
-        self.inner.provider()
+        self.inner.eth_api.provider()
     }
 }
 
@@ -145,7 +143,7 @@ where
 {
     #[inline]
     fn cache(&self) -> &EthStateCache {
-        self.inner.cache()
+        self.inner.eth_api.cache()
     }
 }
 
@@ -160,12 +158,12 @@ where
 {
     #[inline]
     fn starting_block(&self) -> U256 {
-        self.inner.starting_block()
+        self.inner.eth_api.starting_block()
     }
 
     #[inline]
     fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
-        self.inner.signers()
+        self.inner.eth_api.signers()
     }
 }
 
@@ -176,17 +174,17 @@ where
 {
     #[inline]
     fn io_task_spawner(&self) -> impl TaskSpawner {
-        self.inner.task_spawner()
+        self.inner.eth_api.task_spawner()
     }
 
     #[inline]
     fn tracing_task_pool(&self) -> &BlockingTaskPool {
-        self.inner.blocking_task_pool()
+        self.inner.eth_api.blocking_task_pool()
     }
 
     #[inline]
     fn tracing_task_guard(&self) -> &BlockingTaskGuard {
-        self.inner.blocking_task_guard()
+        self.inner.eth_api.blocking_task_guard()
     }
 }
 
@@ -202,12 +200,12 @@ where
 {
     #[inline]
     fn gas_oracle(&self) -> &GasPriceOracle<Self::Provider> {
-        self.inner.gas_oracle()
+        self.inner.eth_api.gas_oracle()
     }
 
     #[inline]
     fn fee_history_cache(&self) -> &FeeHistoryCache {
-        self.inner.fee_history_cache()
+        self.inner.eth_api.fee_history_cache()
     }
 }
 
@@ -226,7 +224,7 @@ where
 {
     #[inline]
     fn max_proof_window(&self) -> u64 {
-        self.inner.eth_proof_window()
+        self.inner.eth_api.eth_proof_window()
     }
 
     fn get_proof(
@@ -258,7 +256,7 @@ where
                 .map_err(Self::Error::from_eth_err)?
                 .ok_or(EthApiError::HeaderNotFound(block_id))?;
 
-            if self.storage_proof_only.contains(&address) {
+            if self.inner.storage_proof_only.contains(&address) {
                 self.spawn_blocking_io(move |this| {
                     let b256_keys: Vec<B256> = keys.iter().map(|k| k.as_b256()).collect();
                     let state = this.state_at_block_id(block_number.into())?;
@@ -320,7 +318,7 @@ where
     N: RpcNodeCore,
 {
     fn with_dev_accounts(&self) {
-        *self.inner.signers().write() = DevSigner::random_signers(20)
+        *self.inner.eth_api.signers().write() = DevSigner::random_signers(20)
     }
 }
 
@@ -331,11 +329,9 @@ impl<N: RpcNodeCore> fmt::Debug for OpEthApi<N> {
 }
 
 /// Container type `OpEthApi`
-#[derive(Deref)]
 #[allow(missing_debug_implementations)]
-pub struct OpEthApiInner<N: RpcNodeCore> {
+struct OpEthApiInner<N: RpcNodeCore> {
     /// Gateway to node's core components.
-    #[deref]
     eth_api: EthApiNodeBackend<N>,
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
