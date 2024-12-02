@@ -59,7 +59,6 @@ pub enum ProviderOrBlock<'a, P: BlockReader> {
 
 /// Appends all matching logs of a block's receipts.
 /// If the log matches, look up the corresponding transaction hash.
-#[allow(clippy::too_many_arguments)]
 pub fn append_matching_block_logs<P: BlockReader<Transaction: SignedTransaction>>(
     all_logs: &mut Vec<Log>,
     provider_or_block: ProviderOrBlock<'_, P>,
