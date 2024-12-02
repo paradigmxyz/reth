@@ -377,7 +377,9 @@ mod tests {
     #[cfg(not(feature = "optimism"))]
     use alloy_primitives::LogData;
     use alloy_primitives::{Address, B256};
-    use reth_primitives::{Receipts, TxType};
+    use reth_primitives::Receipts;
+    #[cfg(not(feature = "optimism"))]
+    use reth_primitives::TxType;
 
     #[test]
     #[cfg(not(feature = "optimism"))]
