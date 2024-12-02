@@ -821,10 +821,6 @@ where
         // there is no node at the path. When a leaf node is a blinded `Hash`, it will have an entry
         // in `nodes`, but not in the `values`.
 
-        // If the path wasn't present in `values`, we still need to walk the trie and ensure that
-        // there is no node at the path. When a leaf node is a blinded `Hash`, it will have an entry
-        // in `nodes`, but not in the `values`.
-
         let mut removed_nodes = self.take_nodes_for_path(path)?;
         trace!(target: "trie::sparse", ?path, ?removed_nodes, "Removed nodes for path");
         // Pop the first node from the stack which is the leaf node we want to remove.
