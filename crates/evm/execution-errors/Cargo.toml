@@ -32,5 +32,6 @@ std = [
 	"alloy-primitives/std",
 	"revm-primitives/std",
 	"alloy-rlp/std",
-	"derive_more/std"
+	"derive_more/std",
+	"nybbles/std"
 ]
