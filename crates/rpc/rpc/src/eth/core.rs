@@ -439,8 +439,11 @@ mod tests {
     use crate::EthApi;
 
     fn build_test_eth_api<
-        P: BlockReaderIdExt<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
-            + BlockReader
+        P: BlockReaderIdExt<
+                Block = reth_primitives::Block,
+                Receipt = reth_primitives::Receipt,
+                Header = reth_primitives::Header,
+            > + BlockReader
             + ChainSpecProvider<ChainSpec = ChainSpec>
             + EvmEnvProvider
             + StateProviderFactory

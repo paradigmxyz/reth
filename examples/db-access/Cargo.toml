@@ -14,6 +14,7 @@ reth-provider.workspace = true
 reth-node-ethereum.workspace = true
 reth-node-types.workspace = true
 
+alloy-consensus.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-primitives.workspace = true
 
