@@ -65,7 +65,8 @@ std = [
 	"revm-primitives/std",
 	"revm/std",
 	"reth-ethereum-forks/std",
-	"derive_more/std"
+	"derive_more/std",
+	"reth-optimism-forks/std"
 ]
 optimism = [
 	"reth-primitives/optimism",
