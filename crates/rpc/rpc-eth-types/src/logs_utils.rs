@@ -68,7 +68,7 @@ pub fn append_matching_block_logs<P: BlockReader<Transaction: SignedTransaction>
     receipts: &[Receipt],
     removed: bool,
     block_timestamp: u64,
-) -> Result<Option<u64>, ProviderError> {
+) -> Result<(), ProviderError> {
     // Tracks the index of a log in the entire block.
     let mut log_index: u64 = 0;
 
@@ -133,7 +133,7 @@ pub fn append_matching_block_logs<P: BlockReader<Transaction: SignedTransaction>
             log_index += 1;
         }
     }
-    Ok(None)
+    Ok(())
 }
 
 /// Returns true if the log matches the filter and should be included
