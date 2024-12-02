@@ -25,7 +25,7 @@ use reth_blockchain_tree::{
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, MemoryOverlayStateProvider, NewCanonicalChain,
 };
-use reth_consensus::{Consensus, PostExecutionInput};
+use reth_consensus::{Consensus, FullConsensus, PostExecutionInput};
 use reth_engine_primitives::{
     BeaconEngineMessage, BeaconOnNewPayloadError, EngineApiMessageVersion, EngineTypes,
     EngineValidator, ForkchoiceStateTracker, OnForkChoiceUpdated,
@@ -34,7 +34,7 @@ use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::execute::BlockExecutorProvider;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
-use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
+use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_primitives::{
     Block, EthPrimitives, GotExpected, NodePrimitives, SealedBlock, SealedBlockWithSenders,
     SealedHeader,
@@ -48,7 +48,7 @@ use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use revm_primitives::ResultAndState;
+use revm_primitives::EvmState;
 use std::{
     cmp::Ordering,
     collections::{btree_map, hash_map, BTreeMap, VecDeque},
@@ -473,7 +473,7 @@ where
 {
     provider: P,
     executor_provider: E,
-    consensus: Arc<dyn Consensus>,
+    consensus: Arc<dyn FullConsensus>,
     payload_validator: V,
     /// Keeps track of internals such as executed and buffered blocks.
     state: EngineApiTreeState,
@@ -540,15 +540,19 @@ impl<N, P: Debug, E: Debug, T: EngineTypes + Debug, V: Debug> std::fmt::Debug
 
 impl<N, P, E, T, V> EngineApiTreeHandler<N, P, E, T, V>
 where
-    N: NodePrimitives,
+    N: NodePrimitives<
+        Block = reth_primitives::Block,
+        BlockHeader = reth_primitives::Header,
+        Receipt = reth_primitives::Receipt,
+    >,
     P: DatabaseProviderFactory
-        + BlockReader<Block = reth_primitives::Block>
+        + BlockReader<Block = N::Block, Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader<Receipt = reth_primitives::Receipt>
         + Clone
         + 'static,
     <P as DatabaseProviderFactory>::Provider: BlockReader,
-    E: BlockExecutorProvider,
+    E: BlockExecutorProvider<Primitives = N>,
     T: EngineTypes,
     V: EngineValidator<T, Block = reth_primitives::Block>,
 {
@@ -557,7 +561,7 @@ where
     pub fn new(
         provider: P,
         executor_provider: E,
-        consensus: Arc<dyn Consensus>,
+        consensus: Arc<dyn FullConsensus>,
         payload_validator: V,
         outgoing: UnboundedSender<EngineApiEvent>,
         state: EngineApiTreeState,
@@ -606,7 +610,7 @@ where
     pub fn spawn_new(
         provider: P,
         executor_provider: E,
-        consensus: Arc<dyn Consensus>,
+        consensus: Arc<dyn FullConsensus>,
         payload_validator: V,
         persistence: PersistenceHandle,
         payload_builder: PayloadBuilderHandle<T>,
@@ -1357,7 +1361,7 @@ where
             // update the tracked chain height, after backfill sync both the canonical height and
             // persisted height are the same
             self.state.tree_state.set_canonical_head(new_head.num_hash());
-            self.persistence_state.finish(new_head.hash(), new_head.number);
+            self.persistence_state.finish(new_head.hash(), new_head.number());
 
             // update the tracked canonical head
             self.canonical_in_memory_state.set_canonical_head(new_head);
@@ -1622,7 +1626,7 @@ where
 
         // the hash could belong to an unknown block or a persisted block
         if let Some(header) = self.provider.header(&hash)? {
-            debug!(target: "engine::tree", %hash, number = %header.number, "found canonical state for block in database");
+            debug!(target: "engine::tree", %hash, number = %header.number(), "found canonical state for block in database");
             // the block is known and persisted
             let historical = self.provider.state_by_block_hash(hash)?;
             return Ok(Some(historical))
@@ -2212,7 +2216,7 @@ where
 
         // TODO: create StateRootTask with the receiving end of a channel and
         // pass the sending end of the channel to the state hook.
-        let noop_state_hook = |_result_and_state: &ResultAndState| {};
+        let noop_state_hook = |_state: &EvmState| {};
         let output = self.metrics.executor.execute_metered(
             executor,
             (&block, U256::MAX).into(),
@@ -2532,12 +2536,10 @@ where
         state: ForkchoiceState,
         version: EngineApiMessageVersion,
     ) -> OnForkChoiceUpdated {
-        // 7. Client software MUST ensure that payloadAttributes.timestamp is greater than timestamp
-        //    of a block referenced by forkchoiceState.headBlockHash. If this condition isn't held
-        //    client software MUST respond with -38003: `Invalid payload attributes` and MUST NOT
-        //    begin a payload build process. In such an event, the forkchoiceState update MUST NOT
-        //    be rolled back.
-        if attrs.timestamp() <= head.timestamp {
+        if let Err(err) =
+            self.payload_validator.validate_payload_attributes_against_header(&attrs, head)
+        {
+            warn!(target: "engine::tree", %err, ?head, "Invalid payload attributes");
             return OnForkChoiceUpdated::invalid_payload_attributes()
         }
 

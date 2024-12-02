@@ -1,4 +1,5 @@
-use reth_db::transaction::DbTxMut;
+use reth_db::{table::Value, transaction::DbTxMut};
+use reth_primitives::NodePrimitives;
 use reth_provider::{
     BlockReader, DBProvider, PruneCheckpointReader, PruneCheckpointWriter,
     StaticFileProviderFactory,
@@ -41,7 +42,7 @@ where
         + PruneCheckpointReader
         + PruneCheckpointWriter
         + BlockReader
-        + StaticFileProviderFactory,
+        + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value, Receipt: Value>>,
 {
     fn id(&self) -> StageId {
         StageId::Prune
@@ -130,7 +131,7 @@ where
         + PruneCheckpointReader
         + PruneCheckpointWriter
         + BlockReader
-        + StaticFileProviderFactory,
+        + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value, Receipt: Value>>,
 {
     fn id(&self) -> StageId {
         StageId::PruneSenderRecovery

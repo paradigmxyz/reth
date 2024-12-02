@@ -9,6 +9,7 @@ use reth_db::{
 };
 use reth_db_api::table::{Decompress, DupSort, Table};
 use reth_db_common::DbTool;
+use reth_node_api::{ReceiptTy, TxTy};
 use reth_node_builder::NodeTypesWithDB;
 use reth_provider::{providers::ProviderNodeTypes, StaticFileProviderFactory};
 use reth_static_file_types::StaticFileSegment;
@@ -65,14 +66,12 @@ impl Command {
                     StaticFileSegment::Headers => {
                         (table_key::<tables::Headers>(&key)?, <HeaderWithHashMask<Header>>::MASK)
                     }
-                    StaticFileSegment::Transactions => (
-                        table_key::<tables::Transactions>(&key)?,
-                        <TransactionMask<<Transactions as Table>::Value>>::MASK,
-                    ),
-                    StaticFileSegment::Receipts => (
-                        table_key::<tables::Receipts>(&key)?,
-                        <ReceiptMask<<Receipts as Table>::Value>>::MASK,
-                    ),
+                    StaticFileSegment::Transactions => {
+                        (table_key::<tables::Transactions>(&key)?, <TransactionMask<TxTy<N>>>::MASK)
+                    }
+                    StaticFileSegment::Receipts => {
+                        (table_key::<tables::Receipts>(&key)?, <ReceiptMask<ReceiptTy<N>>>::MASK)
+                    }
                 };
 
                 let content = tool.provider_factory.static_file_provider().find_static_file(

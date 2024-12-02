@@ -95,7 +95,7 @@ impl<N: NodeTypesWithDB, E> BlockchainTree<N, E> {
 impl<N, E> BlockchainTree<N, E>
 where
     N: TreeNodeTypes,
-    E: BlockExecutorProvider,
+    E: BlockExecutorProvider<Primitives = N::Primitives>,
 {
     /// Builds the blockchain tree for the node.
     ///
@@ -1424,7 +1424,12 @@ mod tests {
     }
 
     fn setup_genesis<
-        N: ProviderNodeTypes<Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>>,
+        N: ProviderNodeTypes<
+            Primitives: FullNodePrimitives<
+                BlockBody = reth_primitives::BlockBody,
+                BlockHeader = reth_primitives::Header,
+            >,
+        >,
     >(
         factory: &ProviderFactory<N>,
         mut genesis: SealedBlock,

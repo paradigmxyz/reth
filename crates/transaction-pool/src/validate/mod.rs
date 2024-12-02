@@ -375,6 +375,13 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.is_eip4844() != other.is_eip4844()
     }
 
+    /// Converts to this type into the consensus transaction of the pooled transaction.
+    ///
+    /// Note: this takes `&self` since indented usage is via `Arc<Self>`.
+    pub fn to_consensus(&self) -> T::Consensus {
+        self.transaction.clone_into_consensus()
+    }
+
     /// Determines whether a candidate transaction (`maybe_replacement`) is underpriced compared to
     /// an existing transaction in the pool.
     ///
@@ -433,7 +440,7 @@ impl<T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>> ValidPoo
     ///
     /// Note: this takes `&self` since indented usage is via `Arc<Self>`.
     pub fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
-        self.transaction.clone().into_consensus().into()
+        self.to_consensus().into()
     }
 }
 

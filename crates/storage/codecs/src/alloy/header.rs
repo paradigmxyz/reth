@@ -58,6 +58,7 @@ pub(crate) struct Header {
 #[reth_codecs(crate = "crate")]
 pub(crate) struct HeaderExt {
     requests_hash: Option<B256>,
+    target_blobs_per_block: Option<u64>,
 }
 
 impl HeaderExt {
@@ -65,7 +66,7 @@ impl HeaderExt {
     ///
     /// Required since [`Header`] uses `Option<HeaderExt>` as a field.
     const fn into_option(self) -> Option<Self> {
-        if self.requests_hash.is_some() {
+        if self.requests_hash.is_some() || self.target_blobs_per_block.is_some() {
             Some(self)
         } else {
             None
@@ -78,7 +79,7 @@ impl Compact for AlloyHeader {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        let extra_fields = HeaderExt { requests_hash: self.requests_hash };
+        let extra_fields = HeaderExt { requests_hash: self.requests_hash, target_blobs_per_block: self.target_blobs_per_block };
 
         let header = Header {
             parent_hash: self.parent_hash,
@@ -128,8 +129,9 @@ impl Compact for AlloyHeader {
             blob_gas_used: header.blob_gas_used,
             excess_blob_gas: header.excess_blob_gas,
             parent_beacon_block_root: header.parent_beacon_block_root,
-            requests_hash: header.extra_fields.and_then(|h| h.requests_hash),
+            requests_hash: header.extra_fields.as_ref().and_then(|h| h.requests_hash),
             extra_data: header.extra_data,
+            target_blobs_per_block: header.extra_fields.as_ref().and_then(|h| h.target_blobs_per_block),
         };
         (alloy_header, buf)
     }
@@ -188,7 +190,7 @@ mod tests {
     #[test]
     fn test_extra_fields() {
         let mut header = HOLESKY_BLOCK;
-        header.extra_fields = Some(HeaderExt { requests_hash: Some(B256::random()) });
+        header.extra_fields = Some(HeaderExt { requests_hash: Some(B256::random()), target_blobs_per_block: Some(3) });
 
         let mut encoded_header = vec![];
         let len = header.to_compact(&mut encoded_header);

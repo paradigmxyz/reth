@@ -194,8 +194,11 @@ where
 
 impl<C, Pool> Testnet<C, Pool>
 where
-    C: BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
-        + HeaderProvider
+    C: BlockReader<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+            Header = reth_primitives::Header,
+        > + HeaderProvider
         + Clone
         + Unpin
         + 'static,
@@ -257,8 +260,11 @@ impl<C, Pool> fmt::Debug for Testnet<C, Pool> {
 
 impl<C, Pool> Future for Testnet<C, Pool>
 where
-    C: BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
-        + HeaderProvider
+    C: BlockReader<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+            Header = reth_primitives::Header,
+        > + HeaderProvider
         + Unpin
         + 'static,
     Pool: TransactionPool + Unpin + 'static,
@@ -455,8 +461,11 @@ where
 
 impl<C, Pool> Future for Peer<C, Pool>
 where
-    C: BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
-        + HeaderProvider
+    C: BlockReader<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+            Header = reth_primitives::Header,
+        > + HeaderProvider
         + Unpin
         + 'static,
     Pool: TransactionPool + Unpin + 'static,

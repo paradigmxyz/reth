@@ -58,5 +58,6 @@ serde = [
 	"parking_lot/serde",
 	"rand/serde",
 	"secp256k1/serde",
-	"trust-dns-resolver/serde"
+	"trust-dns-resolver/serde",
+	"reth-ethereum-forks/serde"
 ]

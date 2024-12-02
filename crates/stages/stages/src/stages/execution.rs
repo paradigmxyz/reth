@@ -67,7 +67,10 @@ use super::missing_static_data_error;
 ///   values to [`tables::PlainStorageState`]
 // false positive, we cannot derive it if !DB: Debug.
 #[allow(missing_debug_implementations)]
-pub struct ExecutionStage<E> {
+pub struct ExecutionStage<E>
+where
+    E: BlockExecutorProvider,
+{
     /// The stage's internal block executor
     executor_provider: E,
     /// The commit thresholds of the execution stage.
@@ -82,25 +85,28 @@ pub struct ExecutionStage<E> {
     /// Input for the post execute commit hook.
     /// Set after every [`ExecutionStage::execute`] and cleared after
     /// [`ExecutionStage::post_execute_commit`].
-    post_execute_commit_input: Option<Chain>,
+    post_execute_commit_input: Option<Chain<E::Primitives>>,
     /// Input for the post unwind commit hook.
     /// Set after every [`ExecutionStage::unwind`] and cleared after
     /// [`ExecutionStage::post_unwind_commit`].
-    post_unwind_commit_input: Option<Chain>,
+    post_unwind_commit_input: Option<Chain<E::Primitives>>,
     /// Handle to communicate with `ExEx` manager.
-    exex_manager_handle: ExExManagerHandle,
+    exex_manager_handle: ExExManagerHandle<E::Primitives>,
     /// Executor metrics.
     metrics: ExecutorMetrics,
 }
 
-impl<E> ExecutionStage<E> {
+impl<E> ExecutionStage<E>
+where
+    E: BlockExecutorProvider,
+{
     /// Create new execution stage with specified config.
     pub fn new(
         executor_provider: E,
         thresholds: ExecutionStageThresholds,
         external_clean_threshold: u64,
         prune_modes: PruneModes,
-        exex_manager_handle: ExExManagerHandle,
+        exex_manager_handle: ExExManagerHandle<E::Primitives>,
     ) -> Self {
         Self {
             external_clean_threshold,
@@ -187,7 +193,10 @@ impl<E> ExecutionStage<E> {
         unwind_to: Option<u64>,
     ) -> Result<(), StageError>
     where
-        Provider: StaticFileProviderFactory + DBProvider + BlockReader + HeaderProvider,
+        Provider: StaticFileProviderFactory
+            + DBProvider
+            + BlockReader
+            + HeaderProvider<Header = reth_primitives::Header>,
     {
         // If thre's any receipts pruning configured, receipts are written directly to database and
         // inconsistencies are expected.
@@ -257,13 +266,15 @@ impl<E> ExecutionStage<E> {
 
 impl<E, Provider> Stage<Provider> for ExecutionStage<E>
 where
-    E: BlockExecutorProvider,
+    E: BlockExecutorProvider<Primitives: NodePrimitives<BlockHeader = alloy_consensus::Header>>,
     Provider: DBProvider
-        + BlockReader<Block = reth_primitives::Block>
-        + StaticFileProviderFactory
+        + BlockReader<
+            Block = <E::Primitives as NodePrimitives>::Block,
+            Header = <E::Primitives as NodePrimitives>::BlockHeader,
+        > + StaticFileProviderFactory
         + StatsReader
         + BlockHashReader
-        + StateWriter<Receipt = reth_primitives::Receipt>
+        + StateWriter<Receipt = <E::Primitives as NodePrimitives>::Receipt>
         + StateCommitmentProvider,
 {
     /// Return the id of the stage
@@ -373,7 +384,7 @@ where
             }
 
             stage_progress = block_number;
-            stage_checkpoint.progress.processed += block.gas_used();
+            stage_checkpoint.progress.processed += block.header().gas_used();
 
             // If we have ExExes we need to save the block in memory for later
             if self.exex_manager_handle.has_exexs() {
@@ -512,7 +523,8 @@ where
                 stage_checkpoint.progress.processed -= provider
                     .block_by_number(block_number)?
                     .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?
-                    .gas_used;
+                    .header()
+                    .gas_used();
             }
         }
         let checkpoint = if let Some(stage_checkpoint) = stage_checkpoint {

@@ -23,7 +23,7 @@ where
     N: RpcNodeCore,
 {
     fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
-        self.inner.signers()
+        self.inner.eth_api.signers()
     }
 
     /// Decodes and recovers the transaction and submits it to the pool.
@@ -68,7 +68,7 @@ where
 {
     /// Returns the [`SequencerClient`] if one is set.
     pub fn raw_tx_forwarder(&self) -> Option<SequencerClient> {
-        self.sequencer_client.clone()
+        self.inner.sequencer_client.clone()
     }
 }
 
@@ -106,6 +106,7 @@ where
             }
             reth_primitives::Transaction::Deposit(tx) => {
                 self.inner
+                    .eth_api
                     .provider()
                     .receipt_by_hash(hash)
                     .map_err(Self::Error::from_eth_err)?

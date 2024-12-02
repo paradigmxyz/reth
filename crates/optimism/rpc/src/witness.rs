@@ -37,7 +37,7 @@ impl<Provider, EvmConfig> OpDebugWitnessApi<Provider, EvmConfig> {
 
 impl<Provider, EvmConfig> OpDebugWitnessApi<Provider, EvmConfig>
 where
-    Provider: BlockReaderIdExt,
+    Provider: BlockReaderIdExt<Header = reth_primitives::Header>,
 {
     /// Fetches the parent header by hash.
     fn parent_header(&self, parent_block_hash: B256) -> ProviderResult<SealedHeader> {
@@ -52,7 +52,7 @@ where
 impl<Provider, EvmConfig> DebugExecutionWitnessApiServer<OpPayloadAttributes>
     for OpDebugWitnessApi<Provider, EvmConfig>
 where
-    Provider: BlockReaderIdExt
+    Provider: BlockReaderIdExt<Header = reth_primitives::Header>
         + StateProviderFactory
         + ChainSpecProvider<ChainSpec = OpChainSpec>
         + 'static,

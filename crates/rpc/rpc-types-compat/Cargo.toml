@@ -14,10 +14,8 @@ workspace = true
 [dependencies]
 # reth
 reth-primitives.workspace = true
-reth-trie-common.workspace = true
 
 # ethereum
-alloy-serde.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true

@@ -23,11 +23,11 @@ pub use pool::*;
 
 use crate::{ConfigureEvm, FullNodeTypes};
 use alloy_consensus::Header;
-use reth_consensus::Consensus;
+use reth_consensus::FullConsensus;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network::NetworkHandle;
 use reth_network_api::FullNetwork;
-use reth_node_api::NodeTypesWithEngine;
+use reth_node_api::{NodeTypes, NodeTypesWithEngine};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_transaction_pool::TransactionPool;
 
@@ -44,10 +44,10 @@ pub trait NodeComponents<T: FullNodeTypes>: Clone + Unpin + Send + Sync + 'stati
     type Evm: ConfigureEvm<Header = Header>;
 
     /// The type that knows how to execute blocks.
-    type Executor: BlockExecutorProvider;
+    type Executor: BlockExecutorProvider<Primitives = <T::Types as NodeTypes>::Primitives>;
 
     /// The consensus type of the node.
-    type Consensus: Consensus + Clone + Unpin + 'static;
+    type Consensus: FullConsensus<<T::Types as NodeTypes>::Primitives> + Clone + Unpin + 'static;
 
     /// Network API.
     type Network: FullNetwork;
@@ -99,8 +99,8 @@ where
     Node: FullNodeTypes,
     Pool: TransactionPool + Unpin + 'static,
     EVM: ConfigureEvm<Header = Header>,
-    Executor: BlockExecutorProvider,
-    Cons: Consensus + Clone + Unpin + 'static,
+    Executor: BlockExecutorProvider<Primitives = <Node::Types as NodeTypes>::Primitives>,
+    Cons: FullConsensus<<Node::Types as NodeTypes>::Primitives> + Clone + Unpin + 'static,
 {
     type Pool = Pool;
     type Evm = EVM;
@@ -140,7 +140,7 @@ where
     Pool: TransactionPool,
     EVM: ConfigureEvm<Header = Header>,
     Executor: BlockExecutorProvider,
-    Cons: Consensus + Clone,
+    Cons: Clone,
 {
     fn clone(&self) -> Self {
         Self {

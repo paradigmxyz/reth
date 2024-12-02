@@ -46,15 +46,16 @@ op-alloy-rpc-types.workspace = true
 [features]
 default = ["std"]
 std = [
-    "alloy-chains/std",
-    "alloy-genesis/std",
-    "alloy-primitives/std",
-    "alloy-eips/std",
-    "op-alloy-rpc-types/std",
-    "reth-chainspec/std",
-    "reth-ethereum-forks/std",
-    "reth-primitives-traits/std",
-    "reth-optimism-forks/std",
-    "alloy-consensus/std",
-    "once_cell/std",
+	"alloy-chains/std",
+	"alloy-genesis/std",
+	"alloy-primitives/std",
+	"alloy-eips/std",
+	"op-alloy-rpc-types/std",
+	"reth-chainspec/std",
+	"reth-ethereum-forks/std",
+	"reth-primitives-traits/std",
+	"reth-optimism-forks/std",
+	"alloy-consensus/std",
+	"once_cell/std",
+	"derive_more/std"
 ]

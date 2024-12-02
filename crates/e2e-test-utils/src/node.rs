@@ -3,6 +3,7 @@ use crate::{
     rpc::RpcTestContext, traits::PayloadEnvelopeExt,
 };
 use alloy_consensus::BlockHeader;
+use alloy_eips::BlockId;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
 use alloy_rpc_types_engine::PayloadStatusEnum;
 use alloy_rpc_types_eth::BlockNumberOrTag;
@@ -134,8 +135,8 @@ where
         Ok((self.payload.expect_built_payload().await?, eth_attr))
     }
 
-    /// Advances the node forward one block
-    pub async fn advance_block(
+    /// Triggers payload building job and submits it to the engine.
+    pub async fn build_and_submit_payload(
         &mut self,
     ) -> eyre::Result<(Engine::BuiltPayload, Engine::PayloadBuilderAttributes)>
     where
@@ -146,13 +147,27 @@ where
     {
         let (payload, eth_attr) = self.new_payload().await?;
 
-        let block_hash = self
-            .engine_api
+        self.engine_api
             .submit_payload(payload.clone(), eth_attr.clone(), PayloadStatusEnum::Valid)
             .await?;
 
+        Ok((payload, eth_attr))
+    }
+
+    /// Advances the node forward one block
+    pub async fn advance_block(
+        &mut self,
+    ) -> eyre::Result<(Engine::BuiltPayload, Engine::PayloadBuilderAttributes)>
+    where
+        <Engine as EngineTypes>::ExecutionPayloadEnvelopeV3:
+            From<Engine::BuiltPayload> + PayloadEnvelopeExt,
+        <Engine as EngineTypes>::ExecutionPayloadEnvelopeV4:
+            From<Engine::BuiltPayload> + PayloadEnvelopeExt,
+    {
+        let (payload, eth_attr) = self.build_and_submit_payload().await?;
+
         // trigger forkchoice update via engine api to commit the block to the blockchain
-        self.engine_api.update_forkchoice(block_hash, block_hash).await?;
+        self.engine_api.update_forkchoice(payload.block().hash(), payload.block().hash()).await?;
 
         Ok((payload, eth_attr))
     }
@@ -235,6 +250,41 @@ where
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Gets block hash by number.
+    pub fn block_hash(&self, number: u64) -> BlockHash {
+        self.inner
+            .provider
+            .sealed_header_by_number_or_tag(BlockNumberOrTag::Number(number))
+            .unwrap()
+            .unwrap()
+            .hash()
+    }
+
+    /// Sends FCU and waits for the node to sync to the given block.
+    pub async fn sync_to(&self, block: BlockHash) -> eyre::Result<()> {
+        self.engine_api.update_forkchoice(block, block).await?;
+
+        let start = std::time::Instant::now();
+
+        while self
+            .inner
+            .provider
+            .sealed_header_by_id(BlockId::Number(BlockNumberOrTag::Latest))?
+            .is_none_or(|h| h.hash() != block)
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+            assert!(start.elapsed() <= std::time::Duration::from_secs(10), "timed out");
+        }
+
+        // Hack to make sure that all components have time to process canonical state update.
+        // Otherwise, this might result in e.g "nonce too low" errors when advancing chain further,
+        // making tests flaky.
+        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+
         Ok(())
     }
 
