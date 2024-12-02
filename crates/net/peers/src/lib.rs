@@ -56,11 +56,12 @@
 
 extern crate alloc;
 
-use alloc::string::String;
+use alloc::{
+    format,
+    string::{String, ToString},
+};
 use alloy_primitives::B512;
 use core::str::FromStr;
-use alloc::format;
-use alloc::string::ToString;
 
 // Re-export PeerId for ease of use.
 pub use enr::Enr;

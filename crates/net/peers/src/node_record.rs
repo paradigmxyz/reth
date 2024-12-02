@@ -1,7 +1,10 @@
 //! Commonly used `NodeRecord` type for peers.
 
 use crate::PeerId;
-use alloc::format;
+use alloc::{
+    format,
+    string::{String, ToString},
+};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use core::{
     fmt,
@@ -10,8 +13,6 @@ use core::{
     num::ParseIntError,
     str::FromStr,
 };
-use alloc::string::String;
-use alloc::string::ToString;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 
 #[cfg(feature = "secp256k1")]

@@ -1,16 +1,15 @@
 //! `NodeRecord` type that uses a domain instead of an IP.
 
 use crate::{NodeRecord, PeerId};
-use alloc::string::String;
-use serde_with::{DeserializeFromStr, SerializeDisplay};
+use alloc::string::{String, ToString};
 use core::{
     fmt::{self, Write},
     net::IpAddr,
     num::ParseIntError,
     str::FromStr,
 };
+use serde_with::{DeserializeFromStr, SerializeDisplay};
 use url::Host;
-use alloc::string::ToString;
 
 /// Represents the node record of a trusted peer. The only difference between this and a
 /// [`NodeRecord`] is that this does not contain the IP address of the peer, but rather a domain
@@ -72,16 +71,16 @@ impl TrustedPeer {
         };
         // Resolve the domain to an IP address
         let mut ips = std::net::ToSocketAddrs::to_socket_addrs(&(domain, 0))?;
-        let ip = ips
-            .next()
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::AddrNotAvailable, "No IP found"))?;
+        let ip = ips.next().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::AddrNotAvailable, "No IP found")
+        })?;
 
         Ok(self.to_node_record(ip.ip()))
     }
 
     /// Resolves the host in a [`TrustedPeer`] to an IP address, returning a [`NodeRecord`].
     #[cfg(any(test, feature = "net"))]
-    pub async fn resolve(&self) -> Result<NodeRecord, Error> {
+    pub async fn resolve(&self) -> Result<NodeRecord, std::io::Error> {
         let domain = match self.try_node_record() {
             Ok(record) => return Ok(record),
             Err(domain) => domain,
@@ -89,9 +88,9 @@ impl TrustedPeer {
 
         // Resolve the domain to an IP address
         let mut ips = tokio::net::lookup_host(format!("{domain}:0")).await?;
-        let ip = ips
-            .next()
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::AddrNotAvailable, "No IP found"))?;
+        let ip = ips.next().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::AddrNotAvailable, "No IP found")
+        })?;
 
         Ok(self.to_node_record(ip.ip()))
     }
