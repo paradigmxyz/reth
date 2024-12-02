@@ -1,6 +1,6 @@
 use crate::{
-    config::NetworkMode, protocol::RlpxSubProtocol, swarm::NetworkConnectionState,
-    transactions::TransactionsHandle, FetchClient,
+    config::NetworkMode, message::PeerMessage, protocol::RlpxSubProtocol,
+    swarm::NetworkConnectionState, transactions::TransactionsHandle, FetchClient,
 };
 use alloy_primitives::B256;
 use enr::Enr;
@@ -134,6 +134,11 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
             peer_id,
             msg: SharedTransactions(msg),
         })
+    }
+
+    /// Send eth message to the peer.
+    pub fn send_eth_message(&self, peer_id: PeerId, message: PeerMessage<N>) {
+        self.send_message(NetworkHandleMessage::EthMessage { peer_id, message })
     }
 
     /// Send message to get the [`TransactionsHandle`].
@@ -480,6 +485,13 @@ pub(crate) enum NetworkHandleMessage<N: NetworkPrimitives = EthNetworkPrimitives
         peer_id: PeerId,
         /// The request to send to the peer's sessions.
         request: PeerRequest<N>,
+    },
+    /// Sends an `eth` protocol message to the peer.
+    EthMessage {
+        /// The peer to send the message to.
+        peer_id: PeerId,
+        /// The message to send to the peer's sessions.
+        message: PeerMessage<N>,
     },
     /// Applies a reputation change to the given peer.
     ReputationChange(PeerId, ReputationChangeKind),
