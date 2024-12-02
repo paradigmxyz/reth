@@ -25,7 +25,7 @@ use revm::{
     db::{states::bundle_state::BundleRetention, BundleState},
     State,
 };
-use revm_primitives::{db::Database, Account, AccountStatus, EvmState, EvmStorageSlot, U256};
+use revm_primitives::{db::Database, Account, AccountStatus, EvmState, U256};
 
 /// A general purpose executor trait that executes an input (e.g. block) and produces an output
 /// (e.g. state changes and receipts).
@@ -521,17 +521,13 @@ where
             BlockExecutionError::msg("could not load account for balance increment")
         })?;
 
-        let storage = account
-            .storage
-            .iter()
-            .map(|(k, v)| {
-                (*k, EvmStorageSlot { original_value: *v, present_value: *v, is_cold: false })
-            })
-            .collect();
-
         Ok((
             *address,
-            Account { info: account.info.clone(), storage, status: AccountStatus::Touched },
+            Account {
+                info: account.info.clone(),
+                storage: Default::default(),
+                status: AccountStatus::Touched,
+            },
         ))
     };
 
