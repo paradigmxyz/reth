@@ -255,18 +255,26 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     }
 
     /// Calculates the hashes of the nodes below the provided level.
-    pub fn calculate_below_level(&mut self, level: usize) {
-        self.state.calculate_below_level(level);
+    pub fn calculate_below_level(
+        &mut self,
+        level: usize,
+        fetch_node: &mut impl FnMut(Nibbles) -> Option<Bytes>,
+    ) {
+        self.state.calculate_below_level(level, fetch_node);
     }
 
     /// Returns storage sparse trie root if the trie has been revealed.
-    pub fn storage_root(&mut self, account: B256) -> Option<B256> {
-        self.storages.get_mut(&account).and_then(|trie| trie.root())
+    pub fn storage_root(
+        &mut self,
+        account: B256,
+        fetch_node: &mut impl FnMut(Nibbles) -> Option<Bytes>,
+    ) -> Option<B256> {
+        self.storages.get_mut(&account).and_then(|trie| trie.root(fetch_node))
     }
 
     /// Returns sparse trie root if the trie has been revealed.
-    pub fn root(&mut self) -> Option<B256> {
-        self.state.root()
+    pub fn root(&mut self, fetch_node: &mut impl FnMut(Nibbles) -> Option<Bytes>) -> Option<B256> {
+        self.state.root(fetch_node)
     }
 
     /// Returns [`TrieUpdates`] by taking the updates from the revealed sparse tries.
@@ -312,12 +320,12 @@ where
         &mut self,
         address: B256,
         account: Account,
-        fetch_node: impl FnMut(Nibbles) -> Option<Bytes>,
+        fetch_node: &mut impl FnMut(Nibbles) -> Option<Bytes>,
     ) -> SparseStateTrieResult<()> {
         let nibbles = Nibbles::unpack(address);
         let storage_root = if let Some(storage_trie) = self.storages.get_mut(&address) {
             trace!(target: "trie::sparse", ?address, "Calculating storage root to update account");
-            storage_trie.root().ok_or(SparseTrieError::Blind)?
+            storage_trie.root(fetch_node).ok_or(SparseTrieError::Blind)?
         } else if self.revealed.contains_key(&address) {
             trace!(target: "trie::sparse", ?address, "Retrieving storage root from account leaf to update account");
             let state = self.state.as_revealed_mut().ok_or(SparseTrieError::Blind)?;
@@ -348,7 +356,7 @@ where
     pub fn remove_account_leaf(
         &mut self,
         path: &Nibbles,
-        fetch_node: impl FnMut(Nibbles) -> Option<Bytes>,
+        fetch_node: &mut impl FnMut(Nibbles) -> Option<Bytes>,
     ) -> SparseStateTrieResult<()> {
         self.state.remove_leaf(path, fetch_node)?;
         Ok(())
@@ -359,7 +367,7 @@ where
         &mut self,
         address: B256,
         slot: &Nibbles,
-        fetch_node: impl FnMut(Nibbles) -> Option<Bytes>,
+        fetch_node: &mut impl FnMut(Nibbles) -> Option<Bytes>,
     ) -> SparseStateTrieResult<()> {
         if let Some(storage_trie) = self.storages.get_mut(&address) {
             Ok(storage_trie.remove_leaf(slot, fetch_node)?)

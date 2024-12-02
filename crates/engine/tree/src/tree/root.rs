@@ -461,7 +461,39 @@ where
                                 .sparse_trie
                                 .take()
                                 .expect("sparse trie update should not be in progress");
-                            let root = trie.root().expect("sparse trie should be revealed");
+                            let provider = self.config.consistent_view.provider_ro().unwrap();
+                            let input_nodes_sorted = self.config.input.nodes.clone().into_sorted();
+                            let input_state_sorted = self.config.input.state.clone().into_sorted();
+                            let prefix_sets = self.config.input.prefix_sets.clone();
+                            let root = trie
+                                .root(&mut |path| {
+                                    // Right pad the target with 0s.
+                                    let mut padded_key = path.pack();
+                                    padded_key.resize(32, 0);
+                                    let mut targets =
+                                        HashMap::with_hasher(DefaultHashBuilder::default());
+                                    targets.insert(
+                                        B256::from_slice(&padded_key),
+                                        HashSet::with_hasher(DefaultHashBuilder::default()),
+                                    );
+                                    let proof = Proof::new(
+                                        InMemoryTrieCursorFactory::new(
+                                            DatabaseTrieCursorFactory::new(provider.tx_ref()),
+                                            &input_nodes_sorted,
+                                        ),
+                                        HashedPostStateCursorFactory::new(
+                                            DatabaseHashedCursorFactory::new(provider.tx_ref()),
+                                            &input_state_sorted,
+                                        ),
+                                    )
+                                    .with_prefix_sets_mut(prefix_sets.clone())
+                                    .multiproof(targets)
+                                    .unwrap();
+
+                                    // The subtree only contains the proof for a single target.
+                                    proof.account_subtree.get(&path).cloned()
+                                })
+                                .expect("sparse trie should be revealed");
                             let trie_updates = trie
                                 .take_trie_updates()
                                 .expect("sparse trie should have updates retention enabled");
@@ -538,6 +570,34 @@ fn update_sparse_trie<Factory: DatabaseProviderFactory>(
 
     // Update storage slots with new values and calculate storage roots.
     for (address, storage) in state.storages {
+        let mut fetch_node = |path: Nibbles| {
+            // Right pad the target with 0s.
+            let mut padded_key = path.pack();
+            padded_key.resize(32, 0);
+            let mut targets = HashSet::with_hasher(DefaultHashBuilder::default());
+            targets.insert(B256::from_slice(&padded_key));
+
+            let storage_prefix_set =
+                prefix_sets.storage_prefix_sets.get(&address).cloned().unwrap_or_default();
+            let proof = StorageProof::new_hashed(
+                InMemoryTrieCursorFactory::new(
+                    DatabaseTrieCursorFactory::new(provider.tx_ref()),
+                    &input_nodes_sorted,
+                ),
+                HashedPostStateCursorFactory::new(
+                    DatabaseHashedCursorFactory::new(provider.tx_ref()),
+                    &input_state_sorted,
+                ),
+                address,
+            )
+            .with_prefix_set_mut(storage_prefix_set)
+            .storage_multiproof(targets)
+            .unwrap();
+
+            // The subtree only contains the proof for a single target.
+            proof.subtree.get(&path).cloned()
+        };
+
         trace!(target: "engine::root::sparse", ?address, "Updating storage");
         let storage_trie = trie.storage_trie_mut(&address).ok_or(SparseTrieError::Blind)?;
 
@@ -551,33 +611,7 @@ fn update_sparse_trie<Factory: DatabaseProviderFactory>(
             if value.is_zero() {
                 trace!(target: "engine::root::sparse", ?address, ?slot, "Removing storage slot");
 
-                storage_trie.remove_leaf(&slot_nibbles, |path| {
-                    // Right pad the target with 0s.
-                    let mut padded_key = path.pack();
-                    padded_key.resize(32, 0);
-                    let mut targets = HashSet::with_hasher(DefaultHashBuilder::default());
-                    targets.insert(B256::from_slice(&padded_key));
-
-                    let storage_prefix_set =
-                        prefix_sets.storage_prefix_sets.get(&address).cloned().unwrap_or_default();
-                    let proof = StorageProof::new_hashed(
-                        InMemoryTrieCursorFactory::new(
-                            DatabaseTrieCursorFactory::new(provider.tx_ref()),
-                            &input_nodes_sorted,
-                        ),
-                        HashedPostStateCursorFactory::new(
-                            DatabaseHashedCursorFactory::new(provider.tx_ref()),
-                            &input_state_sorted,
-                        ),
-                        address,
-                    )
-                    .with_prefix_set_mut(storage_prefix_set)
-                    .storage_multiproof(targets)
-                    .unwrap();
-
-                    // The subtree only contains the proof for a single target.
-                    proof.subtree.get(&path).cloned()
-                })?;
+                storage_trie.remove_leaf(&slot_nibbles, &mut fetch_node)?;
             } else {
                 trace!(target: "engine::root::sparse", ?address, ?slot, "Updating storage slot");
                 storage_trie
@@ -585,41 +619,43 @@ fn update_sparse_trie<Factory: DatabaseProviderFactory>(
             }
         }
 
-        storage_trie.root();
+        storage_trie.root(&mut fetch_node);
     }
+
+    let mut fetch_node = |path: Nibbles| {
+        // Right pad the target with 0s.
+        let mut padded_key = path.pack();
+        padded_key.resize(32, 0);
+        let mut targets = HashMap::with_hasher(DefaultHashBuilder::default());
+        targets.insert(
+            B256::from_slice(&padded_key),
+            HashSet::with_hasher(DefaultHashBuilder::default()),
+        );
+        let proof = Proof::new(
+            InMemoryTrieCursorFactory::new(
+                DatabaseTrieCursorFactory::new(provider.tx_ref()),
+                &input_nodes_sorted,
+            ),
+            HashedPostStateCursorFactory::new(
+                DatabaseHashedCursorFactory::new(provider.tx_ref()),
+                &input_state_sorted,
+            ),
+        )
+        .with_prefix_sets_mut(prefix_sets.clone())
+        .multiproof(targets)
+        .unwrap();
+
+        // The subtree only contains the proof for a single target.
+        proof.account_subtree.get(&path).cloned()
+    };
 
     // Update accounts with new values
     for (address, account) in state.accounts {
         trace!(target: "engine::root::sparse", ?address, "Updating account");
-        trie.update_account(address, account.unwrap_or_default(), |path| {
-            // Right pad the target with 0s.
-            let mut padded_key = path.pack();
-            padded_key.resize(32, 0);
-            let mut targets = HashMap::with_hasher(DefaultHashBuilder::default());
-            targets.insert(
-                B256::from_slice(&padded_key),
-                HashSet::with_hasher(DefaultHashBuilder::default()),
-            );
-            let proof = Proof::new(
-                InMemoryTrieCursorFactory::new(
-                    DatabaseTrieCursorFactory::new(provider.tx_ref()),
-                    &input_nodes_sorted,
-                ),
-                HashedPostStateCursorFactory::new(
-                    DatabaseHashedCursorFactory::new(provider.tx_ref()),
-                    &input_state_sorted,
-                ),
-            )
-            .with_prefix_sets_mut(prefix_sets.clone())
-            .multiproof(targets)
-            .unwrap();
-
-            // The subtree only contains the proof for a single target.
-            proof.account_subtree.get(&path).cloned()
-        })?;
+        trie.update_account(address, account.unwrap_or_default(), &mut fetch_node)?;
     }
 
-    trie.calculate_below_level(SPARSE_TRIE_INCREMENTAL_LEVEL);
+    trie.calculate_below_level(SPARSE_TRIE_INCREMENTAL_LEVEL, &mut fetch_node);
     let elapsed = started_at.elapsed();
 
     Ok((trie, elapsed))
