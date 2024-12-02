@@ -609,12 +609,11 @@ mod tests {
     use reth_db::DatabaseEnv;
     use reth_db_api::{
         cursor::DbCursorRO,
-        models::{storage_sharded_key::StorageShardedKey, ShardedKey},
+        models::{storage_sharded_key::StorageShardedKey, IntegerList, ShardedKey},
         table::{Table, TableRow},
         transaction::DbTx,
         Database,
     };
-    use reth_primitives_traits::IntegerList;
     use reth_provider::{
         test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
         ProviderFactory,

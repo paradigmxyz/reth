@@ -6953,6 +6953,7 @@ dependencies = [
  "reth-stages-types",
  "reth-storage-errors",
  "reth-trie-common",
+ "roaring",
  "serde",
  "test-fuzz",
 ]
@@ -8670,7 +8671,6 @@ dependencies = [
  "rand 0.8.5",
  "reth-codecs",
  "revm-primitives",
- "roaring",
  "serde",
  "serde_json",
  "serde_with",
@@ -9720,7 +9720,6 @@ checksum = "f81dc953b2244ddd5e7860cb0bb2a790494b898ef321d4aff8e260efab60cc88"
 dependencies = [
  "bytemuck",
  "byteorder",
- "serde",
 ]
 
 [[package]]

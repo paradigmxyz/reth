@@ -31,9 +31,6 @@ pub use transaction::{
     FullTransaction, Transaction,
 };
 
-mod integer_list;
-pub use integer_list::{IntegerList, IntegerListError};
-
 pub mod block;
 pub use block::{
     body::{BlockBody, FullBlockBody},
