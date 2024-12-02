@@ -237,7 +237,11 @@ where
                     .filter_map(|(slot, value)| {
                         value
                             .is_changed()
-                            .then(|| (keccak256(B256::from(slot)), value.present_value))
+                            .then(|| {
+                                let hashed_slot = keccak256(B256::from(slot));
+                                trace!(target: "engine::root", ?address, ?hashed_address, ?slot, ?hashed_slot, "Adding storage to state update");
+                                (hashed_slot, value.present_value)
+                            })
                     })
                     .peekable();
                 if destroyed || changed_storage_iter.peek().is_some() {
