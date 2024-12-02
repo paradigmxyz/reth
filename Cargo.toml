@@ -339,7 +339,7 @@ reth-eth-wire-types = { path = "crates/net/eth-wire-types" }
 reth-ethereum-cli = { path = "crates/ethereum/cli" }
 reth-ethereum-consensus = { path = "crates/ethereum/consensus" }
 reth-ethereum-engine-primitives = { path = "crates/ethereum/engine-primitives" }
-reth-ethereum-forks = { path = "crates/ethereum-forks" }
+reth-ethereum-forks = { path = "crates/ethereum-forks", default-features = false }
 reth-ethereum-payload-builder = { path = "crates/ethereum/payload" }
 reth-etl = { path = "crates/etl" }
 reth-evm = { path = "crates/evm" }

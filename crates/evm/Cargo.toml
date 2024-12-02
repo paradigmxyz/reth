@@ -46,17 +46,18 @@ metrics-util = { workspace = true, features = ["debugging"] }
 [features]
 default = ["std"]
 std = [
-    "dep:metrics",
-    "dep:reth-metrics",
-    "reth-consensus/std",
-    "reth-primitives/std",
-    "reth-primitives-traits/std",
-    "reth-revm/std",
-    "alloy-eips/std",
-    "alloy-primitives/std",
-    "alloy-consensus/std",
-    "revm-primitives/std",
-    "revm/std",
+	"dep:metrics",
+	"dep:reth-metrics",
+	"reth-consensus/std",
+	"reth-primitives/std",
+	"reth-primitives-traits/std",
+	"reth-revm/std",
+	"alloy-eips/std",
+	"alloy-primitives/std",
+	"alloy-consensus/std",
+	"revm-primitives/std",
+	"revm/std",
+	"reth-ethereum-forks/std"
 ]
 test-utils = [
     "dep:parking_lot",
