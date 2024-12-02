@@ -37,7 +37,7 @@ where
 {
     #[inline]
     fn pending_block(&self) -> &tokio::sync::Mutex<Option<PendingBlock>> {
-        self.inner.pending_block()
+        self.inner.eth_api.pending_block()
     }
 
     /// Returns the locally built pending block
