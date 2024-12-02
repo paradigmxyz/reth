@@ -255,6 +255,7 @@ where
         }
 
         // Dispatch proof gathering for this state update
+        trace!(target: "engine::root", ?proof_targets, "Spawning proof task");
         rayon::spawn(move || {
             let provider = match view.provider_ro() {
                 Ok(provider) => provider,
