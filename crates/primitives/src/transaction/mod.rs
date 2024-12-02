@@ -1620,6 +1620,9 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
     }
 }
 
+/// Type alias kept for backward compatibility.
+pub type TransactionSignedEcRecovered<T = TransactionSigned> = RecoveredTx<T>;
+
 /// Signed transaction with recovered signer.
 #[derive(Debug, Clone, PartialEq, Hash, Eq, AsRef, Deref)]
 pub struct RecoveredTx<T = TransactionSigned> {
