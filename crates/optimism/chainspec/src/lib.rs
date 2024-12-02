@@ -193,7 +193,7 @@ impl OpChainSpec {
     ) -> Result<U256, DecodeError> {
         let is_holocene_activated = self
             .inner
-            .is_fork_active_at_timestamp(reth_optimism_forks::OpHardfork::Holocene, timestamp);
+            .is_fork_active_at_timestamp(reth_optimism_forks::OpHardfork::Holocene, parent.timestamp);
         // If we are in the Holocene, we need to use the base fee params
         // from the parent block's extra data.
         // Else, use the base fee params (default values) from chainspec
