@@ -1,3 +1,4 @@
+use alloc::vec;
 use alloy_primitives::U256;
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition};
 
