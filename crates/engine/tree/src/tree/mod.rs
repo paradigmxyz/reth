@@ -2230,6 +2230,18 @@ where
 
         trace!(target: "engine::tree", elapsed=?exec_time.elapsed(), ?block_number, "Executed block");
 
+        let balance_changes = output
+            .state
+            .state
+            .iter()
+            .map(|(address, account)| {
+                let old_balance = account.original_info.as_ref().map(|info| info.balance);
+                let new_balance = account.info.as_ref().map(|info| info.balance);
+                (address, old_balance, new_balance)
+            })
+            .collect::<Vec<_>>();
+        trace!(target: "engine::tree", ?block_number, ?balance_changes, "Block balance changes");
+
         if let Err(err) = self.consensus.validate_block_post_execution(
             &block,
             PostExecutionInput::new(&output.receipts, &output.requests),
