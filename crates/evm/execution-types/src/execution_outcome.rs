@@ -334,7 +334,7 @@ impl<T> ExecutionOutcome<T> {
     }
 }
 
-impl<T: Receipt> ExecutionOutcome<T> {
+impl<T: Receipt<Log = Log>> ExecutionOutcome<T> {
     /// Returns an iterator over all block logs.
     pub fn logs(&self, block_number: BlockNumber) -> Option<impl Iterator<Item = &Log>> {
         let index = self.block_number_to_index(block_number)?;

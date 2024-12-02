@@ -90,7 +90,7 @@ where
     Provider: StaticFileProviderFactory
         + DatabaseProviderFactory<
             Provider: StaticFileProviderFactory<
-                Primitives: NodePrimitives<SignedTx: Value + Compact>,
+                Primitives: NodePrimitives<SignedTx: Value + Compact, BlockHeader: Value + Compact>,
             > + StageCheckpointReader
                           + BlockReader,
         >,

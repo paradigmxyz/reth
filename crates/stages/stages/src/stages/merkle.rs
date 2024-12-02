@@ -1,3 +1,4 @@
+use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockNumber, B256};
 use reth_codecs::Compact;
 use reth_consensus::ConsensusError;
@@ -135,7 +136,7 @@ where
     Provider: DBProvider<Tx: DbTxMut>
         + TrieWriter
         + StatsReader
-        + HeaderProvider
+        + HeaderProvider<Header = alloy_consensus::Header>
         + StageCheckpointReader
         + StageCheckpointWriter,
 {
@@ -168,7 +169,7 @@ where
         let target_block = provider
             .header_by_number(to_block)?
             .ok_or_else(|| ProviderError::HeaderNotFound(to_block.into()))?;
-        let target_block_root = target_block.state_root;
+        let target_block_root = target_block.state_root();
 
         let mut checkpoint = self.get_execution_checkpoint(provider)?;
         let (trie_root, entities_checkpoint) = if range.is_empty() {

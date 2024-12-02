@@ -525,6 +525,16 @@ impl alloy_consensus::Transaction for PooledTransactionsElement {
         }
     }
 
+    fn is_create(&self) -> bool {
+        match self {
+            Self::Legacy(tx) => tx.tx().is_create(),
+            Self::Eip2930(tx) => tx.tx().is_create(),
+            Self::Eip1559(tx) => tx.tx().is_create(),
+            Self::Eip7702(tx) => tx.tx().is_create(),
+            Self::BlobTransaction(tx) => tx.tx().is_create(),
+        }
+    }
+
     fn value(&self) -> U256 {
         match self {
             Self::Legacy(tx) => tx.tx().value(),

@@ -644,6 +644,9 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     let _ = tx.send(None);
                 }
             }
+            NetworkHandleMessage::EthMessage { peer_id, message } => {
+                self.swarm.sessions_mut().send_message(&peer_id, message)
+            }
         }
     }
 

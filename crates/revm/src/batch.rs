@@ -3,7 +3,7 @@
 use alloc::vec::Vec;
 
 use alloy_eips::eip7685::Requests;
-use alloy_primitives::{map::HashSet, Address, BlockNumber};
+use alloy_primitives::{map::HashSet, Address, BlockNumber, Log};
 use reth_execution_errors::{BlockExecutionError, InternalBlockExecutionError};
 use reth_primitives::Receipts;
 use reth_primitives_traits::Receipt;
@@ -112,7 +112,7 @@ impl<T> BlockBatchRecord<T> {
 
     /// Returns the [`BundleRetention`] for the given block based on the configured prune modes.
     pub fn bundle_retention(&self, block_number: BlockNumber) -> BundleRetention {
-        if self.tip.map_or(true, |tip| {
+        if self.tip.is_none_or(|tip| {
             !self
                 .prune_modes
                 .account_history
@@ -131,7 +131,7 @@ impl<T> BlockBatchRecord<T> {
     /// Save receipts to the executor.
     pub fn save_receipts(&mut self, receipts: Vec<T>) -> Result<(), BlockExecutionError>
     where
-        T: Receipt,
+        T: Receipt<Log = Log>,
     {
         let mut receipts = receipts.into_iter().map(Some).collect();
         // Prune receipts if necessary.
@@ -144,7 +144,7 @@ impl<T> BlockBatchRecord<T> {
     /// Prune receipts according to the pruning configuration.
     fn prune_receipts(&mut self, receipts: &mut Vec<Option<T>>) -> Result<(), PruneSegmentError>
     where
-        T: Receipt,
+        T: Receipt<Log = Log>,
     {
         let (Some(first_block), Some(tip)) = (self.first_block, self.tip) else { return Ok(()) };
 

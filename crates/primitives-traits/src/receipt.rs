@@ -22,7 +22,7 @@ pub trait Receipt:
     + Clone
     + Default
     + fmt::Debug
-    + TxReceipt
+    + TxReceipt<Log = alloy_primitives::Log>
     + alloy_rlp::Encodable
     + alloy_rlp::Decodable
     + MaybeSerde

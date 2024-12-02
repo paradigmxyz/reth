@@ -4,9 +4,10 @@ set +e  # Disable immediate exit on error
 # Array of crates to check
 crates_to_check=(
     reth-codecs-derive
+    reth-ethereum-forks
+    reth-primitives-traits
     # reth-evm
     # reth-primitives
-    # reth-primitives-traits
     # reth-optimism-forks
     # reth-optimism-chainspec
 )

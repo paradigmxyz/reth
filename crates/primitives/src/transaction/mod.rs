@@ -308,7 +308,7 @@ impl Transaction {
                 set_code_tx.eip2718_encode(signature, out);
             }
             #[cfg(feature = "optimism")]
-            Self::Deposit(deposit_tx) => deposit_tx.eip2718_encode(out),
+            Self::Deposit(deposit_tx) => deposit_tx.encode_2718(out),
         }
     }
 
@@ -672,6 +672,18 @@ impl alloy_consensus::Transaction for Transaction {
             Self::Eip7702(tx) => tx.kind(),
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => tx.kind(),
+        }
+    }
+
+    fn is_create(&self) -> bool {
+        match self {
+            Self::Legacy(tx) => tx.is_create(),
+            Self::Eip2930(tx) => tx.is_create(),
+            Self::Eip1559(tx) => tx.is_create(),
+            Self::Eip4844(tx) => tx.is_create(),
+            Self::Eip7702(tx) => tx.is_create(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.is_create(),
         }
     }
 
@@ -1390,6 +1402,10 @@ impl alloy_consensus::Transaction for TransactionSigned {
 
     fn kind(&self) -> TxKind {
         self.deref().kind()
+    }
+
+    fn is_create(&self) -> bool {
+        self.deref().is_create()
     }
 
     fn value(&self) -> U256 {

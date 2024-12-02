@@ -29,6 +29,7 @@ alloy-consensus.workspace = true
 
 # codecs
 modular-bitfield.workspace = true
+roaring = "0.10.2"
 parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
 serde = { workspace = true, default-features = false }
 

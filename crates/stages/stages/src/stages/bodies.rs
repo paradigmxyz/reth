@@ -75,7 +75,9 @@ impl<D: BodyDownloader> BodyStage<D> {
         unwind_block: Option<u64>,
     ) -> Result<(), StageError>
     where
-        Provider: DBProvider<Tx: DbTxMut> + BlockReader + StaticFileProviderFactory,
+        Provider: DBProvider<Tx: DbTxMut>
+            + BlockReader<Header = reth_primitives::Header>
+            + StaticFileProviderFactory,
     {
         // Get id for the next tx_num of zero if there are no transactions.
         let next_tx_num = provider
@@ -152,7 +154,7 @@ where
     Provider: DBProvider<Tx: DbTxMut>
         + StaticFileProviderFactory
         + StatsReader
-        + BlockReader
+        + BlockReader<Header = reth_primitives::Header>
         + BlockWriter<Block: Block<Body = D::Body>>,
     D: BodyDownloader<Body: BlockBody<Transaction: Compact>>,
 {
