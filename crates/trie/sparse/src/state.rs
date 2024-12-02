@@ -53,6 +53,18 @@ impl SparseStateTrie {
 }
 
 impl<F: BlindedProviderFactory> SparseStateTrie<F> {
+    /// Create new [`SparseStateTrie`] with blinded node provider factory.
+    pub fn new(provider_factory: F) -> Self {
+        Self {
+            provider_factory,
+            state: Default::default(),
+            storages: Default::default(),
+            revealed: Default::default(),
+            retain_updates: false,
+            account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
+        }
+    }
+
     /// Set the retention of branch node updates and deletions.
     pub const fn with_updates(mut self, retain_updates: bool) -> Self {
         self.retain_updates = retain_updates;
