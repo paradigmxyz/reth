@@ -3,7 +3,6 @@
 use crate::SparseTrieError;
 use alloy_primitives::Bytes;
 use reth_trie_common::Nibbles;
-use std::convert::Infallible;
 
 /// Factory for instantiating blinded node providers.
 pub trait BlindedProviderFactory {
@@ -50,7 +49,7 @@ impl BlindedProviderFactory for DefaultBlindedProviderFactory {
 pub struct DefaultBlindedProvider;
 
 impl BlindedProvider for DefaultBlindedProvider {
-    type Error = Infallible;
+    type Error = SparseTrieError;
 
     fn blinded_node(&mut self, _path: Nibbles) -> Result<Option<Bytes>, Self::Error> {
         Ok(None)
