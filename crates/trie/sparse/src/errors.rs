@@ -1,5 +1,7 @@
 //! Errors for sparse trie.
 
+use std::convert::Infallible;
+
 use alloy_primitives::{Bytes, B256};
 use reth_trie_common::Nibbles;
 use thiserror::Error;
@@ -56,4 +58,7 @@ pub enum SparseTrieError {
     /// RLP error.
     #[error(transparent)]
     Rlp(#[from] alloy_rlp::Error),
+    /// Infallible.
+    #[error(transparent)]
+    Infallible(#[from] Infallible),
 }
