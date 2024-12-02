@@ -31,6 +31,7 @@ where
         Primitives: NodePrimitives<
             Block = reth_primitives::Block,
             Receipt = reth_primitives::Receipt,
+            BlockHeader = reth_primitives::Header,
         >,
     >,
     E: BlockExecutorProvider<Primitives = N::Primitives>,
@@ -143,6 +144,7 @@ fn unwind_and_copy<
         Primitives: NodePrimitives<
             Block = reth_primitives::Block,
             Receipt = reth_primitives::Receipt,
+            BlockHeader = reth_primitives::Header,
         >,
     >,
 >(
@@ -186,6 +188,7 @@ where
         Primitives: NodePrimitives<
             Block = reth_primitives::Block,
             Receipt = reth_primitives::Receipt,
+            BlockHeader = reth_primitives::Header,
         >,
     >,
     E: BlockExecutorProvider<Primitives = N::Primitives>,

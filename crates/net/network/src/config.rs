@@ -147,8 +147,11 @@ where
 
 impl<C> NetworkConfig<C>
 where
-    C: BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
-        + HeaderProvider
+    C: BlockReader<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+            Header = reth_primitives::Header,
+        > + HeaderProvider
         + Clone
         + Unpin
         + 'static,

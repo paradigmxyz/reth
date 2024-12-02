@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_network::Ethereum;
 use alloy_primitives::U256;
@@ -286,7 +287,7 @@ where
                 .header_by_number_or_tag(BlockNumberOrTag::Latest)
                 .ok()
                 .flatten()
-                .map(|header| header.number)
+                .map(|header| header.number())
                 .unwrap_or_default(),
         );
 
@@ -438,8 +439,11 @@ mod tests {
     use crate::EthApi;
 
     fn build_test_eth_api<
-        P: BlockReaderIdExt<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
-            + BlockReader
+        P: BlockReaderIdExt<
+                Block = reth_primitives::Block,
+                Receipt = reth_primitives::Receipt,
+                Header = reth_primitives::Header,
+            > + BlockReader
             + ChainSpecProvider<ChainSpec = ChainSpec>
             + EvmEnvProvider
             + StateProviderFactory

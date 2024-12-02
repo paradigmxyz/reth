@@ -391,6 +391,8 @@ mod tests {
     }
 
     impl HeaderProvider for Provider {
+        type Header = Header;
+
         fn is_known(&self, _block_hash: &BlockHash) -> ProviderResult<bool> {
             Ok(self.is_known)
         }

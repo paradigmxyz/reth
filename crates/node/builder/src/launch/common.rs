@@ -385,6 +385,7 @@ where
             Block = reth_primitives::Block,
             BlockBody = reth_primitives::BlockBody,
             Receipt = reth_primitives::Receipt,
+            BlockHeader = reth_primitives::Header,
         >,
     {
         let factory = ProviderFactory::new(
@@ -456,6 +457,7 @@ where
             Block = reth_primitives::Block,
             BlockBody = reth_primitives::BlockBody,
             Receipt = reth_primitives::Receipt,
+            BlockHeader = reth_primitives::Header,
         >,
     {
         let factory = self.create_provider_factory().await?;

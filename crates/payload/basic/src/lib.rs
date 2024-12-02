@@ -132,7 +132,11 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
 impl<Client, Pool, Tasks, Builder> PayloadJobGenerator
     for BasicPayloadJobGenerator<Client, Pool, Tasks, Builder>
 where
-    Client: StateProviderFactory + BlockReaderIdExt + Clone + Unpin + 'static,
+    Client: StateProviderFactory
+        + BlockReaderIdExt<Header = alloy_consensus::Header>
+        + Clone
+        + Unpin
+        + 'static,
     Pool: TransactionPool + Unpin + 'static,
     Tasks: TaskSpawner + Clone + Unpin + 'static,
     Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,

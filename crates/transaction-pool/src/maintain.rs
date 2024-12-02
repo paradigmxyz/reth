@@ -7,6 +7,7 @@ use crate::{
     traits::{CanonicalStateUpdate, TransactionPool, TransactionPoolExt},
     BlockInfo, PoolTransaction, PoolUpdateKind,
 };
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Address, BlockHash, BlockNumber};
 use futures_util::{
@@ -110,11 +111,13 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
         let latest = SealedHeader::seal(latest);
         let chain_spec = client.chain_spec();
         let info = BlockInfo {
-            block_gas_limit: latest.gas_limit,
+            block_gas_limit: latest.gas_limit(),
             last_seen_block_hash: latest.hash(),
-            last_seen_block_number: latest.number,
+            last_seen_block_number: latest.number(),
             pending_basefee: latest
-                .next_block_base_fee(chain_spec.base_fee_params_at_timestamp(latest.timestamp + 12))
+                .next_block_base_fee(
+                    chain_spec.base_fee_params_at_timestamp(latest.timestamp() + 12),
+                )
                 .unwrap_or_default(),
             pending_blob_fee: latest.next_block_blob_fee(),
         };
