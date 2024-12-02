@@ -48,7 +48,8 @@ std = [
 	"reth-primitives-traits/std",
 	"alloy-consensus/std",
 	"once_cell/std",
-	"alloy-rlp/std"
+	"alloy-rlp/std",
+	"reth-ethereum-forks/std"
 ]
 arbitrary = [
 	"alloy-chains/arbitrary",
