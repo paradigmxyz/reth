@@ -2987,6 +2987,7 @@ dependencies = [
 name = "example-db-access"
 version = "0.0.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "alloy-rpc-types-eth",
  "eyre",
@@ -6952,6 +6953,7 @@ dependencies = [
  "reth-stages-types",
  "reth-storage-errors",
  "reth-trie-common",
+ "roaring",
  "serde",
  "test-fuzz",
 ]
@@ -7202,6 +7204,7 @@ dependencies = [
 name = "reth-engine-local"
 version = "1.1.2"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "eyre",
@@ -8461,7 +8464,6 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
- "alloy-rlp",
  "arbitrary",
  "bytes",
  "derive_more 1.0.0",
@@ -8482,7 +8484,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-debug",
  "alloy-rpc-types-eth",
- "derive_more 1.0.0",
  "jsonrpsee-core",
  "jsonrpsee-types",
  "op-alloy-consensus",
@@ -8664,12 +8665,12 @@ dependencies = [
  "bytes",
  "derive_more 1.0.0",
  "modular-bitfield",
+ "op-alloy-consensus",
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.8.5",
  "reth-codecs",
  "revm-primitives",
- "roaring",
  "serde",
  "serde_json",
  "serde_with",
@@ -9719,7 +9720,6 @@ checksum = "f81dc953b2244ddd5e7860cb0bb2a790494b898ef321d4aff8e260efab60cc88"
 dependencies = [
  "bytemuck",
  "byteorder",
- "serde",
 ]
 
 [[package]]

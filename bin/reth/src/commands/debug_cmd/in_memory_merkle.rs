@@ -63,6 +63,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             Primitives: NodePrimitives<
                 Block = reth_primitives::Block,
                 Receipt = reth_primitives::Receipt,
+                BlockHeader = reth_primitives::Header,
             >,
         >,
     >(

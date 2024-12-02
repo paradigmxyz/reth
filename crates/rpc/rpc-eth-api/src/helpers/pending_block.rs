@@ -3,7 +3,7 @@
 
 use super::SpawnBlocking;
 use crate::{EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
-use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH};
+use alloy_consensus::{BlockHeader, Header, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{
     eip4844::MAX_DATA_GAS_PER_BLOCK, eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE,
 };
@@ -50,6 +50,7 @@ pub trait LoadPendingBlock:
         Provider: BlockReaderIdExt<
             Block = reth_primitives::Block,
             Receipt = reth_primitives::Receipt,
+            Header = reth_primitives::Header,
         > + EvmEnvProvider
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                       + StateProviderFactory,
@@ -88,7 +89,7 @@ pub trait LoadPendingBlock:
             let chain_spec = self.provider().chain_spec();
 
             latest_header.base_fee_per_gas = latest_header.next_block_base_fee(
-                chain_spec.base_fee_params_at_timestamp(latest_header.timestamp),
+                chain_spec.base_fee_params_at_timestamp(latest_header.timestamp()),
             );
 
             // update excess blob gas consumed above target

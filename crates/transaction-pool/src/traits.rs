@@ -1061,6 +1061,11 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
     /// [`TxKind::Create`] if the transaction is a contract creation.
     fn kind(&self) -> TxKind;
 
+    /// Returns true if the transaction is a contract creation.
+    /// We don't provide a default implementation via `kind` as it copies the 21-byte
+    /// [`TxKind`] for this simple check. A proper implementation shouldn't allocate.
+    fn is_create(&self) -> bool;
+
     /// Returns the recipient of the transaction if it is not a [`TxKind::Create`]
     /// transaction.
     fn to(&self) -> Option<Address> {
@@ -1109,7 +1114,7 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
         &self,
         max_init_code_size: usize,
     ) -> Result<(), InvalidPoolTransactionError> {
-        if self.kind().is_create() && self.input().len() > max_init_code_size {
+        if self.is_create() && self.input().len() > max_init_code_size {
             Err(InvalidPoolTransactionError::ExceedsMaxInitCodeSize(
                 self.size(),
                 max_init_code_size,
@@ -1326,6 +1331,11 @@ impl PoolTransaction for EthPooledTransaction {
     /// [`TxKind::Create`] if the transaction is a contract creation.
     fn kind(&self) -> TxKind {
         self.transaction.kind()
+    }
+
+    /// Returns true if the transaction is a contract creation.
+    fn is_create(&self) -> bool {
+        self.transaction.is_create()
     }
 
     fn input(&self) -> &[u8] {

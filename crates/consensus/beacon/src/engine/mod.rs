@@ -21,7 +21,7 @@ use reth_network_p2p::{
     sync::{NetworkSyncUpdater, SyncState},
     EthBlockClient,
 };
-use reth_node_types::{Block, BlockTy, NodeTypesWithEngine};
+use reth_node_types::{Block, BlockTy, HeaderTy, NodeTypesWithEngine};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
@@ -234,9 +234,9 @@ impl<N, BT, Client> BeaconConsensusEngine<N, BT, Client>
 where
     N: EngineNodeTypes,
     BT: BlockchainTreeEngine
-        + BlockReader<Block = BlockTy<N>>
+        + BlockReader<Block = BlockTy<N>, Header = HeaderTy<N>>
         + BlockIdReader
-        + CanonChainTracker
+        + CanonChainTracker<Header = HeaderTy<N>>
         + StageCheckpointReader
         + ChainSpecProvider<ChainSpec = N::ChainSpec>
         + 'static,
@@ -1804,9 +1804,9 @@ where
     N: EngineNodeTypes,
     Client: EthBlockClient + 'static,
     BT: BlockchainTreeEngine
-        + BlockReader<Block = BlockTy<N>>
+        + BlockReader<Block = BlockTy<N>, Header = HeaderTy<N>>
         + BlockIdReader
-        + CanonChainTracker
+        + CanonChainTracker<Header = HeaderTy<N>>
         + StageCheckpointReader
         + ChainSpecProvider<ChainSpec = N::ChainSpec>
         + Unpin
@@ -2179,7 +2179,12 @@ mod tests {
 
     fn insert_blocks<
         'a,
-        N: ProviderNodeTypes<Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>>,
+        N: ProviderNodeTypes<
+            Primitives: FullNodePrimitives<
+                BlockBody = reth_primitives::BlockBody,
+                BlockHeader = reth_primitives::Header,
+            >,
+        >,
     >(
         provider_factory: ProviderFactory<N>,
         mut blocks: impl Iterator<Item = &'a SealedBlock>,

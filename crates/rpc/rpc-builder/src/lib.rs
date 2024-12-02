@@ -41,6 +41,7 @@
 //!             Transaction = TransactionSigned,
 //!             Block = reth_primitives::Block,
 //!             Receipt = reth_primitives::Receipt,
+//!             Header = reth_primitives::Header,
 //!         > + AccountReader
 //!         + ChangeSetReader,
 //!     Pool: TransactionPool + Unpin + 'static,
@@ -121,6 +122,7 @@
 //!             Transaction = TransactionSigned,
 //!             Block = reth_primitives::Block,
 //!             Receipt = reth_primitives::Receipt,
+//!             Header = reth_primitives::Header,
 //!         > + AccountReader
 //!         + ChangeSetReader,
 //!     Pool: TransactionPool + Unpin + 'static,
@@ -201,7 +203,7 @@ use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_primitives::{EthPrimitives, NodePrimitives};
 use reth_provider::{
     AccountReader, BlockReader, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
-    EvmEnvProvider, FullRpcProvider, ReceiptProvider, StateProviderFactory,
+    EvmEnvProvider, FullRpcProvider, HeaderProvider, ReceiptProvider, StateProviderFactory,
 };
 use reth_rpc::{
     AdminApi, DebugApi, EngineEthApi, EthBundle, NetApi, OtterscanApi, RPCApi, RethApi, TraceApi,
@@ -269,8 +271,11 @@ pub async fn launch<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi, B
     consensus: Arc<dyn FullConsensus>,
 ) -> Result<RpcServerHandle, RpcError>
 where
-    Provider: FullRpcProvider<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
-        + AccountReader
+    Provider: FullRpcProvider<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+            Header = reth_primitives::Header,
+        > + AccountReader
         + ChangeSetReader,
     Pool: TransactionPool + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
@@ -667,6 +672,7 @@ where
         Provider: BlockReader<
             Block = <EthApi::Provider as BlockReader>::Block,
             Receipt = <EthApi::Provider as ReceiptProvider>::Receipt,
+            Header = <EthApi::Provider as HeaderProvider>::Header,
         >,
     {
         let Self {
@@ -743,7 +749,11 @@ where
     ) -> RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
     where
         EthApi: EthApiTypes + 'static,
-        Provider: BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>,
+        Provider: BlockReader<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+            Header = reth_primitives::Header,
+        >,
     {
         let Self {
             provider,
@@ -781,6 +791,7 @@ where
         Provider: BlockReader<
             Block = <EthApi::Provider as BlockReader>::Block,
             Receipt = <EthApi::Provider as ReceiptProvider>::Receipt,
+            Header = <EthApi::Provider as HeaderProvider>::Header,
         >,
     {
         let mut modules = TransportRpcModules::default();
@@ -940,8 +951,11 @@ impl<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
     RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
 where
     Provider: StateProviderFactory
-        + BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
-        + EvmEnvProvider
+        + BlockReader<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+            Header = reth_primitives::Header,
+        > + EvmEnvProvider
         + Clone
         + Unpin
         + 'static,
@@ -1311,6 +1325,7 @@ where
     Provider: FullRpcProvider<
             Block = <EthApi::Provider as BlockReader>::Block,
             Receipt = <EthApi::Provider as ReceiptProvider>::Receipt,
+            Header = <EthApi::Provider as HeaderProvider>::Header,
         > + AccountReader
         + ChangeSetReader,
     Pool: TransactionPool + 'static,

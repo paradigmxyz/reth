@@ -1,3 +1,4 @@
+use alloy_consensus::BlockHeader;
 use alloy_primitives::{Address, B256};
 use alloy_rpc_types_eth::{Filter, FilteredParams};
 use reth_chainspec::ChainSpecBuilder;
@@ -193,7 +194,7 @@ fn receipts_provider_example<
     // receipts and do something with the data
     // 1. get the bloom from the header
     let header = provider.header_by_number(header_num)?.unwrap();
-    let bloom = header.logs_bloom;
+    let bloom = header.logs_bloom();
 
     // 2. Construct the address/topics filters
     // For a hypothetical address, we'll want to filter down for a specific indexed topic (e.g.

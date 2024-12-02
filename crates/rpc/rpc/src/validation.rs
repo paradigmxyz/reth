@@ -89,7 +89,7 @@ where
 
 impl<Provider, E> ValidationApi<Provider, E>
 where
-    Provider: BlockReaderIdExt
+    Provider: BlockReaderIdExt<Header = reth_primitives::Header>
         + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + StateProviderFactory
         + HeaderProvider
@@ -410,7 +410,7 @@ where
 #[async_trait]
 impl<Provider, E> BlockSubmissionValidationApiServer for ValidationApi<Provider, E>
 where
-    Provider: BlockReaderIdExt
+    Provider: BlockReaderIdExt<Header = reth_primitives::Header>
         + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + StateProviderFactory
         + HeaderProvider

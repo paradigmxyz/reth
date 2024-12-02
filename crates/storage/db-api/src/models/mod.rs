@@ -8,9 +8,8 @@ use alloy_consensus::Header;
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{Address, Bytes, Log, B256, U256};
 use reth_codecs::{add_arbitrary_tests, Compact};
-use reth_primitives::{
-    Account, Bytecode, Receipt, StorageEntry, TransactionSigned, TransactionSignedNoHash, TxType,
-};
+use reth_primitives::{Receipt, StorageEntry, TransactionSigned, TransactionSignedNoHash, TxType};
+use reth_primitives_traits::{Account, Bytecode};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
 use reth_trie_common::{StoredNibbles, StoredNibblesSubKey, *};
@@ -24,6 +23,7 @@ pub mod storage_sharded_key;
 
 pub use accounts::*;
 pub use blocks::*;
+pub use integer_list::IntegerList;
 pub use reth_db_models::{
     AccountBeforeTx, ClientVersion, StoredBlockBodyIndices, StoredBlockWithdrawals,
 };
