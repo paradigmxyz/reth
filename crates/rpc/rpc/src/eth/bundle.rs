@@ -62,6 +62,7 @@ where
             gas_limit,
             difficulty,
             base_fee,
+            ..
         } = bundle;
         if txs.is_empty() {
             return Err(EthApiError::InvalidParams(
