@@ -18,7 +18,7 @@ use reth_revm::{
 use reth_rpc_api::DebugApiClient;
 use reth_scroll_execution::FinalizeExecution;
 use reth_tracing::tracing::warn;
-use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage};
+use reth_trie::{updates::TrieUpdates, HashedStorage};
 use serde::Serialize;
 use std::{collections::HashMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
 
@@ -127,7 +127,7 @@ where
         //
         // Note: We grab *all* accounts in the cache here, as the `BundleState` prunes
         // referenced accounts + storage slots.
-        let mut hashed_state = HashedPostState::from_bundle_state(&bundle_state.state);
+        let mut hashed_state = db.database.hashed_post_state(&bundle_state);
         for (address, account) in db.cache.accounts {
             let hashed_address = keccak256(address);
             #[cfg(feature = "scroll")]

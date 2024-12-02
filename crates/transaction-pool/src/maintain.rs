@@ -461,7 +461,7 @@ impl FinalizedBlockTracker {
         let finalized = finalized_block?;
         self.last_finalized_block
             .replace(finalized)
-            .map_or(true, |last| last < finalized)
+            .is_none_or(|last| last < finalized)
             .then_some(finalized)
     }
 }

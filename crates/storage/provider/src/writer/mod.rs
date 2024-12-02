@@ -236,7 +236,7 @@ mod tests {
     };
     use reth_execution_types::ExecutionOutcome;
     use reth_primitives::{Account, Receipt, Receipts, StorageEntry};
-    use reth_storage_api::DatabaseProviderFactory;
+    use reth_storage_api::{DatabaseProviderFactory, HashedPostStateProvider};
     use reth_trie::{
         test_utils::{state_root, storage_root_prehashed},
         HashedPostState, HashedStorage, StateRoot, StorageRoot,
@@ -1135,18 +1135,13 @@ mod tests {
         let mut state = State::builder().with_bundle_update().build();
 
         let assert_state_root = |state: &State<EmptyDB>, expected: &PreState, msg| {
+            #[cfg(feature = "scroll")]
+            let bundle_state = &(state.bundle_state.clone(), &()).into();
+            #[cfg(not(feature = "scroll"))]
+            let bundle_state = &state.bundle_state;
             assert_eq!(
-                StateRoot::overlay_root(
-                    tx,
-                    ExecutionOutcome::<Receipt>::new(
-                        state.bundle_state.clone().into(),
-                        Receipts::default(),
-                        0,
-                        Vec::new()
-                    )
-                    .hash_state_slow(),
-                )
-                .unwrap(),
+                StateRoot::overlay_root(tx, provider_factory.hashed_post_state(bundle_state))
+                    .unwrap(),
                 state_root(expected.clone().into_iter().map(|(address, (account, storage))| (
                     address,
                     (account, storage.into_iter())

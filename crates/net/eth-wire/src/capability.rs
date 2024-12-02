@@ -319,7 +319,7 @@ pub fn shared_capability_offsets(
             // highest wins, others are ignored
             if shared_capabilities
                 .get(&peer_capability.name)
-                .map_or(true, |v| peer_capability.version > v.version)
+                .is_none_or(|v| peer_capability.version > v.version)
             {
                 shared_capabilities.insert(
                     peer_capability.name.clone(),
