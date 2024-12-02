@@ -39,6 +39,8 @@ where
                 .chain_spec
                 .is_cancun_active_at_timestamp(timestamp)
                 .then(B256::random),
+            target_blobs_per_block: None,
+            max_blobs_per_block: None,
         }
     }
 }

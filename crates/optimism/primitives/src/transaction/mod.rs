@@ -123,6 +123,10 @@ impl alloy_consensus::Transaction for OpTransaction {
         self.0.kind()
     }
 
+    fn is_create(&self) -> bool {
+        self.0.is_create()
+    }
+
     fn value(&self) -> Uint<256, 4> {
         self.0.value()
     }

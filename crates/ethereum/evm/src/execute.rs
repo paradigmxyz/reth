@@ -4,7 +4,7 @@ use crate::{
     dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
     EthEvmConfig,
 };
-use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::Transaction as _;
 use alloy_eips::eip7685::Requests;
 use core::fmt::Display;
@@ -232,7 +232,12 @@ where
             let deposit_requests =
                 crate::eip6110::parse_deposits_from_receipts(&self.chain_spec, receipts)?;
 
-            let mut requests = Requests::new(vec![deposit_requests]);
+            let mut requests = Requests::default();
+
+            if !deposit_requests.is_empty() {
+                requests.push_request(core::iter::once(0).chain(deposit_requests).collect());
+            }
+
             requests.extend(self.system_caller.apply_post_execution_changes(&mut evm)?);
             requests
         } else {
@@ -1127,9 +1132,9 @@ mod tests {
         let receipt = receipts.first().unwrap();
         assert!(receipt.success);
 
-        assert!(requests[0].is_empty(), "there should be no deposits");
-        assert!(!requests[1].is_empty(), "there should be a withdrawal");
-        assert!(requests[2].is_empty(), "there should be no consolidations");
+        // There should be exactly one entry with withdrawal requests
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0][0], 1);
     }
 
     #[test]
