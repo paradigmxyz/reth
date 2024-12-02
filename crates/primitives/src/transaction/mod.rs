@@ -1,10 +1,7 @@
 //! Transaction types.
 
 use alloc::vec::Vec;
-use alloy_consensus::{
-    transaction::RlpEcdsaTx, SignableTransaction, Signed, Transaction as _, TxEip1559, TxEip2930,
-    TxEip4844, TxEip4844Variant, TxEip7702, TxLegacy, TypedTransaction,
-};
+use alloy_consensus::{transaction::RlpEcdsaTx, SignableTransaction, Signed, Transaction as _, TxEip1559, TxEip2930, TxEip4844, TxEip4844Variant, TxEip7702, TxLegacy, Typed2718, TypedTransaction};
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
     eip2930::AccessList,
@@ -1267,6 +1264,12 @@ impl SignedTransaction for TransactionSigned {
         self.encode_for_signing(buf);
         let signature_hash = keccak256(buf);
         recover_signer_unchecked(&self.signature, signature_hash)
+    }
+}
+
+impl Typed2718 for TransactionSigned  {
+    fn ty(&self) -> u8 {
+        alloy_consensus::Transaction::ty(self)
     }
 }
 
