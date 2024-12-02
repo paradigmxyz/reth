@@ -21,7 +21,6 @@ reth-codecs = { workspace = true, optional = true, features = ["optimism"] }
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
-alloy-rlp.workspace = true
 
 # op
 op-alloy-consensus.workspace = true
@@ -51,7 +50,6 @@ std = [
 	"alloy-eips/std",
 	"alloy-primitives/std",
 	"serde/std",
-	"alloy-rlp/std"
 ]
 reth-codec = [
     "dep:reth-codecs",
