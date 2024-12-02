@@ -1,13 +1,14 @@
 #![allow(missing_docs)]
 
 use alloy_consensus::EMPTY_ROOT_HASH;
-use alloy_primitives::{hex_literal::hex, keccak256, Address, B256, U256};
+use alloy_primitives::{hex_literal::hex, keccak256, map::HashMap, Address, B256, U256};
+use alloy_rlp::Encodable;
 use proptest::{prelude::ProptestConfig, proptest};
 use proptest_arbitrary_interop::arb;
 use reth_db::{tables, test_utils::TempDatabase, DatabaseEnv};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
-    transaction::DbTxMut,
+    transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{Account, StorageEntry};
 use reth_provider::{
@@ -15,25 +16,15 @@ use reth_provider::{
     StorageTrieWriter, TrieWriter,
 };
 use reth_trie::{
-    prefix_set::PrefixSetMut,
+    prefix_set::{PrefixSetMut, TriePrefixSets},
     test_utils::{state_root, state_root_prehashed, storage_root, storage_root_prehashed},
     triehash::KeccakHasher,
-    BranchNodeCompact, StateRoot, StorageRoot, TrieMask,
+    updates::StorageTrieUpdates,
+    BranchNodeCompact, HashBuilder, IntermediateStateRootState, Nibbles, StateRoot,
+    StateRootProgress, StorageRoot, TrieAccount, TrieMask,
 };
 use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot};
-use std::{
-    collections::{BTreeMap, HashMap},
-    ops::Mul,
-    str::FromStr,
-    sync::Arc,
-};
-
-use alloy_rlp::Encodable;
-use reth_db_api::transaction::DbTx;
-use reth_trie::{
-    prefix_set::TriePrefixSets, updates::StorageTrieUpdates, HashBuilder,
-    IntermediateStateRootState, Nibbles, StateRootProgress, TrieAccount,
-};
+use std::{collections::BTreeMap, ops::Mul, str::FromStr, sync::Arc};
 
 fn insert_account(
     tx: &impl DbTxMut,

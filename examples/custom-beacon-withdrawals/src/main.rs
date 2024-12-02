@@ -15,10 +15,7 @@ use reth::{
     providers::ProviderError,
     revm::{
         interpreter::Host,
-        primitives::{
-            address, Address, BlockEnv, Bytes, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg,
-            TransactTo, TxEnv, U256,
-        },
+        primitives::{address, Address, Bytes, Env, EnvWithHandlerCfg, TransactTo, TxEnv, U256},
         Database, DatabaseCommit, Evm, State,
     },
 };
@@ -29,7 +26,7 @@ use reth_evm::execute::{
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_node_ethereum::{node::EthereumAddOns, BasicBlockExecutorProvider, EthereumNode};
-use reth_primitives::{BlockWithSenders, Receipt};
+use reth_primitives::{BlockWithSenders, EthPrimitives, Receipt};
 use std::{fmt::Display, sync::Arc};
 
 pub const SYSTEM_ADDRESS: Address = address!("fffffffffffffffffffffffffffffffffffffffe");
@@ -62,7 +59,7 @@ pub struct CustomExecutorBuilder;
 
 impl<Types, Node> ExecutorBuilder<Node> for CustomExecutorBuilder
 where
-    Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
+    Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
 {
     type EVM = EthEvmConfig;
@@ -91,6 +88,7 @@ pub struct CustomExecutorStrategyFactory {
 }
 
 impl BlockExecutionStrategyFactory for CustomExecutorStrategyFactory {
+    type Primitives = EthPrimitives;
     type Strategy<DB: Database<Error: Into<ProviderError> + Display>> = CustomExecutorStrategy<DB>;
 
     fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
@@ -133,18 +131,17 @@ where
         header: &alloy_consensus::Header,
         total_difficulty: U256,
     ) -> EnvWithHandlerCfg {
-        let mut cfg = CfgEnvWithHandlerCfg::new(Default::default(), Default::default());
-        let mut block_env = BlockEnv::default();
-        self.evm_config.fill_cfg_and_block_env(&mut cfg, &mut block_env, header, total_difficulty);
-
+        let (cfg, block_env) = self.evm_config.cfg_and_block_env(header, total_difficulty);
         EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default())
     }
 }
 
-impl<DB> BlockExecutionStrategy<DB> for CustomExecutorStrategy<DB>
+impl<DB> BlockExecutionStrategy for CustomExecutorStrategy<DB>
 where
     DB: Database<Error: Into<ProviderError> + Display>,
 {
+    type DB = DB;
+    type Primitives = EthPrimitives;
     type Error = BlockExecutionError;
 
     fn apply_pre_execution_changes(
@@ -164,7 +161,7 @@ where
         &mut self,
         _block: &BlockWithSenders,
         _total_difficulty: U256,
-    ) -> Result<ExecuteOutput, Self::Error> {
+    ) -> Result<ExecuteOutput<Receipt>, Self::Error> {
         Ok(ExecuteOutput { receipts: vec![], gas_used: 0 })
     }
 

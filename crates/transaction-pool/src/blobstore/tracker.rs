@@ -1,8 +1,9 @@
 //! Support for maintaining the blob pool.
 
+use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{BlockNumber, B256};
 use reth_execution_types::ChainBlocks;
-use reth_primitives_traits::BlockBody as _;
+use reth_primitives_traits::{Block, BlockBody, SignedTransaction, TxType};
 use std::collections::BTreeMap;
 
 /// The type that is used to track canonical blob transactions.
@@ -38,14 +39,17 @@ impl BlobStoreCanonTracker {
     ///
     /// Note: In case this is a chain that's part of a reorg, this replaces previously tracked
     /// blocks.
-    pub fn add_new_chain_blocks(&mut self, blocks: &ChainBlocks<'_>) {
+    pub fn add_new_chain_blocks<B>(&mut self, blocks: &ChainBlocks<'_, B>)
+    where
+        B: Block<Body: BlockBody<Transaction: SignedTransaction>>,
+    {
         let blob_txs = blocks.iter().map(|(num, block)| {
             let iter = block
                 .body
                 .transactions()
                 .iter()
-                .filter(|tx| tx.transaction.is_eip4844())
-                .map(|tx| tx.hash());
+                .filter(|tx| tx.tx_type().is_eip4844())
+                .map(|tx| tx.trie_hash());
             (*num, iter)
         });
         self.add_blocks(blob_txs);

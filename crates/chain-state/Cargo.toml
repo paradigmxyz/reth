@@ -35,7 +35,6 @@ tokio-stream = { workspace = true, features = ["sync"] }
 tracing.workspace = true
 
 # misc
-auto_impl.workspace = true
 derive_more.workspace = true
 metrics.workspace = true
 parking_lot.workspace = true

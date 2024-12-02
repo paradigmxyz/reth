@@ -21,6 +21,7 @@ reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
 reth-prune-types.workspace = true
 reth-consensus.workspace = true
+reth-consensus-common.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
@@ -32,6 +33,7 @@ alloy-consensus.workspace = true
 reth-optimism-consensus.workspace = true
 reth-optimism-chainspec.workspace = true
 reth-optimism-forks.workspace = true
+reth-optimism-primitives.workspace = true
 
 # revm
 revm.workspace = true

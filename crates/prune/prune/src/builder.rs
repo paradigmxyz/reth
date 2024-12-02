@@ -2,11 +2,12 @@ use crate::{segments::SegmentSet, Pruner};
 use alloy_eips::eip2718::Encodable2718;
 use reth_chainspec::MAINNET;
 use reth_config::PruneConfig;
-use reth_db::transaction::DbTxMut;
+use reth_db::{table::Value, transaction::DbTxMut};
 use reth_exex_types::FinishedExExHeight;
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::StaticFileProvider, BlockReader, DBProvider, DatabaseProviderFactory,
-    PruneCheckpointWriter, StaticFileProviderFactory,
+    NodePrimitivesProvider, PruneCheckpointWriter, StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
 use std::time::Duration;
@@ -80,9 +81,11 @@ impl PrunerBuilder {
         PF: DatabaseProviderFactory<
                 ProviderRW: PruneCheckpointWriter
                                 + BlockReader<Transaction: Encodable2718>
-                                + StaticFileProviderFactory,
+                                + StaticFileProviderFactory<
+                    Primitives: NodePrimitives<SignedTx: Value, Receipt: Value>,
+                >,
             > + StaticFileProviderFactory<
-                Primitives = <PF::ProviderRW as StaticFileProviderFactory>::Primitives,
+                Primitives = <PF::ProviderRW as NodePrimitivesProvider>::Primitives,
             >,
     {
         let segments =
@@ -104,7 +107,7 @@ impl PrunerBuilder {
         static_file_provider: StaticFileProvider<Provider::Primitives>,
     ) -> Pruner<Provider, ()>
     where
-        Provider: StaticFileProviderFactory
+        Provider: StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value, Receipt: Value>>
             + DBProvider<Tx: DbTxMut>
             + BlockReader<Transaction: Encodable2718>
             + PruneCheckpointWriter,

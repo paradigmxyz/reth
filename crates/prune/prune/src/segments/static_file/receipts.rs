@@ -2,7 +2,8 @@ use crate::{
     segments::{PruneInput, Segment},
     PrunerError,
 };
-use reth_db::transaction::DbTxMut;
+use reth_db::{table::Value, transaction::DbTxMut};
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     errors::provider::ProviderResult, providers::StaticFileProvider, BlockReader, DBProvider,
     PruneCheckpointWriter, StaticFileProviderFactory, TransactionsProvider,
@@ -23,7 +24,7 @@ impl<N> Receipts<N> {
 
 impl<Provider> Segment<Provider> for Receipts<Provider::Primitives>
 where
-    Provider: StaticFileProviderFactory
+    Provider: StaticFileProviderFactory<Primitives: NodePrimitives<Receipt: Value>>
         + DBProvider<Tx: DbTxMut>
         + PruneCheckpointWriter
         + TransactionsProvider

@@ -1,34 +1,19 @@
 use crate::{
-    providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter as SfWriter},
-    writer::static_file::StaticFileWriter,
-    BlockExecutionWriter, BlockWriter, HistoryWriter, StateChangeWriter, StateWriter,
-    StaticFileProviderFactory, StorageLocation, TrieWriter,
+    providers::{StaticFileProvider, StaticFileWriter as SfWriter},
+    BlockExecutionWriter, BlockWriter, HistoryWriter, StateWriter, StaticFileProviderFactory,
+    StorageLocation, TrieWriter,
 };
-use alloy_primitives::BlockNumber;
+use alloy_consensus::BlockHeader;
 use reth_chain_state::ExecutedBlock;
-use reth_db::{
-    cursor::DbCursorRO,
-    tables,
-    transaction::{DbTx, DbTxMut},
-};
-use reth_errors::{ProviderError, ProviderResult};
-use reth_execution_types::ExecutionOutcome;
-use reth_primitives::StaticFileSegment;
-use reth_storage_api::{
-    DBProvider, HeaderProvider, ReceiptWriter, StageCheckpointWriter, TransactionsProviderExt,
-};
+use reth_db::transaction::{DbTx, DbTxMut};
+use reth_errors::ProviderResult;
+use reth_primitives::{NodePrimitives, StaticFileSegment};
+use reth_primitives_traits::SignedTransaction;
+use reth_storage_api::{DBProvider, StageCheckpointWriter, TransactionsProviderExt};
 use reth_storage_errors::writer::UnifiedStorageWriterError;
 use revm::db::OriginalValuesKnown;
+use std::sync::Arc;
 use tracing::debug;
-
-mod database;
-mod static_file;
-use database::DatabaseWriter;
-
-enum StorageType<C = (), S = ()> {
-    Database(C),
-    StaticFile(S),
-}
 
 /// [`UnifiedStorageWriter`] is responsible for managing the writing to storage with both database
 /// and static file providers.
@@ -79,14 +64,6 @@ impl<'a, ProviderDB, ProviderSF> UnifiedStorageWriter<'a, ProviderDB, ProviderSF
     /// If the static file instance is not set.
     fn static_file(&self) -> &ProviderSF {
         self.static_file.as_ref().expect("should exist")
-    }
-
-    /// Returns a mutable reference to the static file instance.
-    ///
-    /// # Panics
-    /// If the static file instance is not set.
-    fn static_file_mut(&mut self) -> &mut ProviderSF {
-        self.static_file.as_mut().expect("should exist")
     }
 
     /// Ensures that the static file instance is set.
@@ -144,10 +121,10 @@ impl UnifiedStorageWriter<'_, (), ()> {
 impl<ProviderDB> UnifiedStorageWriter<'_, ProviderDB, &StaticFileProvider<ProviderDB::Primitives>>
 where
     ProviderDB: DBProvider<Tx: DbTx + DbTxMut>
-        + BlockWriter<Block = reth_primitives::Block>
+        + BlockWriter
         + TransactionsProviderExt
-        + StateChangeWriter
         + TrieWriter
+        + StateWriter
         + HistoryWriter
         + StageCheckpointWriter
         + BlockExecutionWriter
@@ -155,7 +132,11 @@ where
         + StaticFileProviderFactory,
 {
     /// Writes executed blocks and receipts to storage.
-    pub fn save_blocks(&self, blocks: &[ExecutedBlock]) -> ProviderResult<()> {
+    pub fn save_blocks<N>(&self, blocks: Vec<ExecutedBlock<N>>) -> ProviderResult<()>
+    where
+        N: NodePrimitives<SignedTx: SignedTransaction>,
+        ProviderDB: BlockWriter<Block = N::Block> + StateWriter<Receipt = N::Receipt>,
+    {
         if blocks.is_empty() {
             debug!(target: "provider::storage_writer", "Attempted to write empty block range");
             return Ok(())
@@ -163,23 +144,14 @@ where
 
         // NOTE: checked non-empty above
         let first_block = blocks.first().unwrap().block();
-        let last_block = blocks.last().unwrap().block().clone();
-        let first_number = first_block.number;
-        let last_block_number = last_block.number;
+
+        let last_block = blocks.last().unwrap().block();
+        let first_number = first_block.number();
+        let last_block_number = last_block.number();
 
         debug!(target: "provider::storage_writer", block_count = %blocks.len(), "Writing blocks and execution data to storage");
 
-        // Only write receipts to static files if there is no receipt pruning configured.
-        let mut state_writer = if self.database().prune_modes_ref().has_receipts_pruning() {
-            UnifiedStorageWriter::from_database(self.database())
-        } else {
-            UnifiedStorageWriter::from(
-                self.database(),
-                self.static_file().get_writer(first_block.number, StaticFileSegment::Receipts)?,
-            )
-        };
-
-        // TODO: remove all the clones and do performant / batched writes for each type of object
+        // TODO: Do performant / batched writes for each type of object
         // instead of a loop over all blocks,
         // meaning:
         //  * blocks
@@ -188,23 +160,24 @@ where
         //  * trie updates (cannot naively extend, need helper)
         //  * indices (already done basically)
         // Insert the blocks
-        for block in blocks {
-            let sealed_block =
-                block.block().clone().try_with_senders_unchecked(block.senders().clone()).unwrap();
+        for ExecutedBlock { block, senders, execution_output, hashed_state, trie } in blocks {
+            let sealed_block = Arc::unwrap_or_clone(block)
+                .try_with_senders_unchecked(Arc::unwrap_or_clone(senders))
+                .unwrap();
             self.database().insert_block(sealed_block, StorageLocation::Both)?;
 
             // Write state and changesets to the database.
             // Must be written after blocks because of the receipt lookup.
-            let execution_outcome = block.execution_outcome().clone();
-            state_writer.write_to_storage(execution_outcome, OriginalValuesKnown::No)?;
+            self.database().write_state(
+                Arc::unwrap_or_clone(execution_output),
+                OriginalValuesKnown::No,
+                StorageLocation::StaticFiles,
+            )?;
 
             // insert hashes and intermediate merkle nodes
-            {
-                let trie_updates = block.trie_updates().clone();
-                let hashed_state = block.hashed_state();
-                self.database().write_hashed_state(&hashed_state.clone().into_sorted())?;
-                self.database().write_trie_updates(&trie_updates)?;
-            }
+            self.database()
+                .write_hashed_state(&Arc::unwrap_or_clone(hashed_state).into_sorted())?;
+            self.database().write_trie_updates(&trie)?;
         }
 
         // update history indices
@@ -222,24 +195,15 @@ where
     /// database and static files. This is exclusive, i.e., it only removes blocks above
     /// `block_number`, and does not remove `block_number`.
     pub fn remove_blocks_above(&self, block_number: u64) -> ProviderResult<()> {
+        // IMPORTANT: we use `block_number+1` to make sure we remove only what is ABOVE the block
+        debug!(target: "provider::storage_writer", ?block_number, "Removing blocks from database above block_number");
+        self.database().remove_block_and_execution_above(block_number, StorageLocation::Both)?;
+
         // Get highest static file block for the total block range
         let highest_static_file_block = self
             .static_file()
             .get_highest_static_file_block(StaticFileSegment::Headers)
             .expect("todo: error handling, headers should exist");
-
-        // Get the total txs for the block range, so we have the correct number of columns for
-        // receipts and transactions
-        // IMPORTANT: we use `block_number+1` to make sure we remove only what is ABOVE the block
-        let tx_range = self
-            .database()
-            .transaction_range_by_block_range(block_number + 1..=highest_static_file_block)?;
-        // We are using end + 1 - start here because the returned range is inclusive.
-        let total_txs = (tx_range.end() + 1).saturating_sub(*tx_range.start());
-
-        // IMPORTANT: we use `block_number+1` to make sure we remove only what is ABOVE the block
-        debug!(target: "provider::storage_writer", ?block_number, "Removing blocks from database above block_number");
-        self.database().remove_block_and_execution_above(block_number, StorageLocation::Both)?;
 
         // IMPORTANT: we use `highest_static_file_block.saturating_sub(block_number)` to make sure
         // we remove only what is ABOVE the block.
@@ -250,155 +214,6 @@ where
         self.static_file()
             .get_writer(block_number, StaticFileSegment::Headers)?
             .prune_headers(highest_static_file_block.saturating_sub(block_number))?;
-
-        if !self.database().prune_modes_ref().has_receipts_pruning() {
-            self.static_file()
-                .get_writer(block_number, StaticFileSegment::Receipts)?
-                .prune_receipts(total_txs, block_number)?;
-        }
-
-        Ok(())
-    }
-}
-
-impl<ProviderDB>
-    UnifiedStorageWriter<'_, ProviderDB, StaticFileProviderRWRefMut<'_, ProviderDB::Primitives>>
-where
-    ProviderDB: DBProvider<Tx: DbTx> + HeaderProvider + StaticFileProviderFactory,
-{
-    /// Ensures that the static file writer is set and of the right [`StaticFileSegment`] variant.
-    ///
-    /// # Returns
-    /// - `Ok(())` if the static file writer is set.
-    /// - `Err(StorageWriterError::MissingStaticFileWriter)` if the static file instance is not set.
-    fn ensure_static_file_segment(
-        &self,
-        segment: StaticFileSegment,
-    ) -> Result<(), UnifiedStorageWriterError> {
-        match &self.static_file {
-            Some(writer) => {
-                if writer.user_header().segment() == segment {
-                    Ok(())
-                } else {
-                    Err(UnifiedStorageWriterError::IncorrectStaticFileWriter(
-                        writer.user_header().segment(),
-                        segment,
-                    ))
-                }
-            }
-            None => Err(UnifiedStorageWriterError::MissingStaticFileWriter),
-        }
-    }
-}
-
-impl<ProviderDB>
-    UnifiedStorageWriter<'_, ProviderDB, StaticFileProviderRWRefMut<'_, ProviderDB::Primitives>>
-where
-    ProviderDB: DBProvider<Tx: DbTxMut + DbTx> + HeaderProvider + StaticFileProviderFactory,
-{
-    /// Appends receipts block by block.
-    ///
-    /// ATTENTION: If called from [`UnifiedStorageWriter`] without a static file producer, it will
-    /// always write them to database. Otherwise, it will look into the pruning configuration to
-    /// decide.
-    ///
-    /// NOTE: The static file writer used to construct this [`UnifiedStorageWriter`] MUST be a
-    /// writer for the Receipts segment.
-    ///
-    /// # Parameters
-    /// - `initial_block_number`: The starting block number.
-    /// - `blocks`: An iterator over blocks, each block having a vector of optional receipts. If
-    ///   `receipt` is `None`, it has been pruned.
-    pub fn append_receipts_from_blocks(
-        &mut self,
-        initial_block_number: BlockNumber,
-        blocks: impl Iterator<Item = Vec<Option<reth_primitives::Receipt>>>,
-    ) -> ProviderResult<()> {
-        let mut bodies_cursor =
-            self.database().tx_ref().cursor_read::<tables::BlockBodyIndices>()?;
-
-        // We write receipts to database in two situations:
-        // * If we are in live sync. In this case, `UnifiedStorageWriter` is built without a static
-        //   file writer.
-        // * If there is any kind of receipt pruning
-        let mut storage_type = if self.static_file.is_none() ||
-            self.database().prune_modes_ref().has_receipts_pruning()
-        {
-            StorageType::Database(self.database().tx_ref().cursor_write::<tables::Receipts>()?)
-        } else {
-            self.ensure_static_file_segment(StaticFileSegment::Receipts)?;
-            StorageType::StaticFile(self.static_file_mut())
-        };
-
-        let mut last_tx_idx = None;
-        for (idx, receipts) in blocks.enumerate() {
-            let block_number = initial_block_number + idx as u64;
-
-            let mut first_tx_index =
-                bodies_cursor.seek_exact(block_number)?.map(|(_, indices)| indices.first_tx_num());
-
-            // If there are no indices, that means there have been no transactions
-            //
-            // So instead of returning an error, use zero
-            if block_number == initial_block_number && first_tx_index.is_none() {
-                first_tx_index = Some(0);
-            }
-
-            let first_tx_index = first_tx_index
-                .or(last_tx_idx)
-                .ok_or(ProviderError::BlockBodyIndicesNotFound(block_number))?;
-
-            // update for empty blocks
-            last_tx_idx = Some(first_tx_index);
-
-            match &mut storage_type {
-                StorageType::Database(cursor) => {
-                    DatabaseWriter(cursor).append_block_receipts(
-                        first_tx_index,
-                        block_number,
-                        receipts,
-                    )?;
-                }
-                StorageType::StaticFile(sf) => {
-                    StaticFileWriter(*sf).append_block_receipts(
-                        first_tx_index,
-                        block_number,
-                        receipts,
-                    )?;
-                }
-            };
-        }
-
-        Ok(())
-    }
-}
-
-impl<ProviderDB> StateWriter
-    for UnifiedStorageWriter<'_, ProviderDB, StaticFileProviderRWRefMut<'_, ProviderDB::Primitives>>
-where
-    ProviderDB: DBProvider<Tx: DbTxMut + DbTx>
-        + StateChangeWriter
-        + HeaderProvider
-        + StaticFileProviderFactory,
-{
-    /// Write the data and receipts to the database or static files if `static_file_producer` is
-    /// `Some`. It should be `None` if there is any kind of pruning/filtering over the receipts.
-    fn write_to_storage(
-        &mut self,
-        execution_outcome: ExecutionOutcome,
-        is_value_known: OriginalValuesKnown,
-    ) -> ProviderResult<()> {
-        let (plain_state, reverts) =
-            execution_outcome.bundle.to_plain_state_and_reverts(is_value_known);
-
-        self.database().write_state_reverts(reverts, execution_outcome.first_block)?;
-
-        self.append_receipts_from_blocks(
-            execution_outcome.first_block,
-            execution_outcome.receipts.into_iter(),
-        )?;
-
-        self.database().write_state_changes(plain_state)?;
 
         Ok(())
     }
@@ -417,6 +232,7 @@ mod tests {
         models::{AccountBeforeTx, BlockNumberAddress},
         transaction::{DbTx, DbTxMut},
     };
+    use reth_execution_types::ExecutionOutcome;
     use reth_primitives::{Account, Receipt, Receipts, StorageEntry};
     use reth_storage_api::DatabaseProviderFactory;
     use reth_trie::{
@@ -679,9 +495,8 @@ mod tests {
 
         let outcome =
             ExecutionOutcome::new(state.take_bundle(), Receipts::default(), 1, Vec::new());
-        let mut writer = UnifiedStorageWriter::from_database(&provider);
-        writer
-            .write_to_storage(outcome, OriginalValuesKnown::Yes)
+        provider
+            .write_state(outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
             .expect("Could not write bundle state to DB");
 
         // Check plain storage state
@@ -780,9 +595,8 @@ mod tests {
         state.merge_transitions(BundleRetention::Reverts);
         let outcome =
             ExecutionOutcome::new(state.take_bundle(), Receipts::default(), 2, Vec::new());
-        let mut writer = UnifiedStorageWriter::from_database(&provider);
-        writer
-            .write_to_storage(outcome, OriginalValuesKnown::Yes)
+        provider
+            .write_state(outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
             .expect("Could not write bundle state to DB");
 
         assert_eq!(
@@ -848,9 +662,8 @@ mod tests {
 
         let outcome =
             ExecutionOutcome::new(init_state.take_bundle(), Receipts::default(), 0, Vec::new());
-        let mut writer = UnifiedStorageWriter::from_database(&provider);
-        writer
-            .write_to_storage(outcome, OriginalValuesKnown::Yes)
+        provider
+            .write_state(outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
             .expect("Could not write bundle state to DB");
 
         let mut state = State::builder().with_bundle_update().build();
@@ -997,9 +810,8 @@ mod tests {
 
         let outcome: ExecutionOutcome =
             ExecutionOutcome::new(bundle, Receipts::default(), 1, Vec::new());
-        let mut writer = UnifiedStorageWriter::from_database(&provider);
-        writer
-            .write_to_storage(outcome, OriginalValuesKnown::Yes)
+        provider
+            .write_state(outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
             .expect("Could not write bundle state to DB");
 
         let mut storage_changeset_cursor = provider
@@ -1163,9 +975,8 @@ mod tests {
         init_state.merge_transitions(BundleRetention::Reverts);
         let outcome =
             ExecutionOutcome::new(init_state.take_bundle(), Receipts::default(), 0, Vec::new());
-        let mut writer = UnifiedStorageWriter::from_database(&provider);
-        writer
-            .write_to_storage(outcome, OriginalValuesKnown::Yes)
+        provider
+            .write_state(outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
             .expect("Could not write bundle state to DB");
 
         let mut state = State::builder().with_bundle_update().build();
@@ -1211,9 +1022,8 @@ mod tests {
         state.merge_transitions(BundleRetention::Reverts);
         let outcome =
             ExecutionOutcome::new(state.take_bundle(), Receipts::default(), 1, Vec::new());
-        let mut writer = UnifiedStorageWriter::from_database(&provider);
-        writer
-            .write_to_storage(outcome, OriginalValuesKnown::Yes)
+        provider
+            .write_state(outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
             .expect("Could not write bundle state to DB");
 
         let mut storage_changeset_cursor = provider

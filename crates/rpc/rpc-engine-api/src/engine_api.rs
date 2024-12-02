@@ -1,12 +1,17 @@
 use crate::{
     capabilities::EngineCapabilities, metrics::EngineApiMetrics, EngineApiError, EngineApiResult,
 };
-use alloy_eips::{eip1898::BlockHashOrNumber, eip4844::BlobAndProofV1, eip7685::Requests};
+use alloy_eips::{
+    eip1898::BlockHashOrNumber,
+    eip4844::BlobAndProofV1,
+    eip7685::{Requests, RequestsOrHash},
+};
 use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionPayload, ExecutionPayloadBodiesV1,
     ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3,
-    ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration,
+    ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus, PraguePayloadFields,
+    TransitionConfiguration,
 };
 use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
@@ -279,7 +284,11 @@ where
                 payload,
                 ExecutionPayloadSidecar::v4(
                     CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
-                    execution_requests,
+                    PraguePayloadFields {
+                        requests: RequestsOrHash::Requests(execution_requests),
+                        // TODO: add as an argument and handle in `try_into_block`
+                        target_blobs_per_block: 0,
+                    },
                 ),
             )
             .await

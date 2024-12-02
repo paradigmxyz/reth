@@ -13,7 +13,6 @@ use rayon::ThreadPoolBuilder;
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::{Chain, EthChainSpec, EthereumHardforks};
 use reth_config::{config::EtlConfig, PruneConfig};
-use reth_consensus::Consensus;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_db_common::init::{init_genesis, InitDatabaseError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
@@ -382,7 +381,11 @@ where
     pub async fn create_provider_factory<N>(&self) -> eyre::Result<ProviderFactory<N>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
-        N::Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>,
+        N::Primitives: FullNodePrimitives<
+            Block = reth_primitives::Block,
+            BlockBody = reth_primitives::BlockBody,
+            Receipt = reth_primitives::Receipt,
+        >,
     {
         let factory = ProviderFactory::new(
             self.right().clone(),
@@ -449,7 +452,11 @@ where
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<ChainSpec>, ProviderFactory<N>>>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
-        N::Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>,
+        N::Primitives: FullNodePrimitives<
+            Block = reth_primitives::Block,
+            BlockBody = reth_primitives::BlockBody,
+            Receipt = reth_primitives::Receipt,
+        >,
     {
         let factory = self.create_provider_factory().await?;
         let ctx = LaunchContextWith {
@@ -673,7 +680,6 @@ where
         let components = components_builder.build_components(&builder_ctx).await?;
 
         let blockchain_db = self.blockchain_db().clone();
-        let consensus = Arc::new(components.consensus().clone());
 
         let node_adapter = NodeAdapter {
             components,
@@ -691,7 +697,6 @@ where
             },
             node_adapter,
             head,
-            consensus,
         };
 
         let ctx = LaunchContextWith {
@@ -845,11 +850,6 @@ where
         self.ensure_chain_specific_db_checks()?;
 
         Ok(None)
-    }
-
-    /// Returns the configured `Consensus`.
-    pub fn consensus(&self) -> Arc<dyn Consensus> {
-        self.right().consensus.clone()
     }
 
     /// Returns the metrics sender.
@@ -1021,7 +1021,6 @@ where
     db_provider_container: WithMeteredProvider<T::Types>,
     node_adapter: NodeAdapter<T, CB::Components>,
     head: Head,
-    consensus: Arc<dyn Consensus>,
 }
 
 #[cfg(test)]

@@ -80,7 +80,7 @@ pub struct TestExecutorBuilder;
 
 impl<Node> ExecutorBuilder<Node> for TestExecutorBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
 {
     type EVM = EthEvmConfig;
     type Executor = MockExecutorProvider;

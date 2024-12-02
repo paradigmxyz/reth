@@ -4,7 +4,7 @@ use crate::{
     dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
     EthEvmConfig,
 };
-use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::Transaction as _;
 use alloy_eips::eip7685::Requests;
 use core::fmt::Display;
@@ -20,11 +20,11 @@ use reth_evm::{
     system_calls::{OnStateHook, SystemCaller},
     ConfigureEvm, TxEnvOverrides,
 };
-use reth_primitives::{BlockWithSenders, Receipt};
+use reth_primitives::{BlockWithSenders, EthPrimitives, Receipt};
 use reth_revm::db::State;
 use revm_primitives::{
     db::{Database, DatabaseCommit},
-    BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState, U256,
+    EnvWithHandlerCfg, ResultAndState, U256,
 };
 
 /// Factory for [`EthExecutionStrategy`].
@@ -60,6 +60,8 @@ where
     EvmConfig:
         Clone + Unpin + Sync + Send + 'static + ConfigureEvm<Header = alloy_consensus::Header>,
 {
+    type Primitives = EthPrimitives;
+
     type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
         EthExecutionStrategy<DB, EvmConfig>;
 
@@ -117,20 +119,20 @@ where
         header: &alloy_consensus::Header,
         total_difficulty: U256,
     ) -> EnvWithHandlerCfg {
-        let mut cfg = CfgEnvWithHandlerCfg::new(Default::default(), Default::default());
-        let mut block_env = BlockEnv::default();
-        self.evm_config.fill_cfg_and_block_env(&mut cfg, &mut block_env, header, total_difficulty);
-
+        let (cfg, block_env) = self.evm_config.cfg_and_block_env(header, total_difficulty);
         EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default())
     }
 }
 
-impl<DB, EvmConfig> BlockExecutionStrategy<DB> for EthExecutionStrategy<DB, EvmConfig>
+impl<DB, EvmConfig> BlockExecutionStrategy for EthExecutionStrategy<DB, EvmConfig>
 where
     DB: Database<Error: Into<ProviderError> + Display>,
     EvmConfig: ConfigureEvm<Header = alloy_consensus::Header>,
 {
+    type DB = DB;
     type Error = BlockExecutionError;
+
+    type Primitives = EthPrimitives;
 
     fn init(&mut self, tx_env_overrides: Box<dyn TxEnvOverrides>) {
         self.tx_env_overrides = Some(tx_env_overrides);
@@ -158,7 +160,7 @@ where
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<ExecuteOutput, Self::Error> {
+    ) -> Result<ExecuteOutput<Receipt>, Self::Error> {
         let env = self.evm_env_for_block(&block.header, total_difficulty);
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
 
@@ -191,7 +193,7 @@ where
                     error: Box::new(new_err),
                 }
             })?;
-            self.system_caller.on_state(&result_and_state);
+            self.system_caller.on_state(&result_and_state.state);
             let ResultAndState { result, state } = result_and_state;
             evm.db_mut().commit(state);
 
@@ -230,7 +232,12 @@ where
             let deposit_requests =
                 crate::eip6110::parse_deposits_from_receipts(&self.chain_spec, receipts)?;
 
-            let mut requests = Requests::new(vec![deposit_requests]);
+            let mut requests = Requests::default();
+
+            if !deposit_requests.is_empty() {
+                requests.push_request(core::iter::once(0).chain(deposit_requests).collect());
+            }
+
             requests.extend(self.system_caller.apply_post_execution_changes(&mut evm)?);
             requests
         } else {
@@ -1125,9 +1132,9 @@ mod tests {
         let receipt = receipts.first().unwrap();
         assert!(receipt.success);
 
-        assert!(requests[0].is_empty(), "there should be no deposits");
-        assert!(!requests[1].is_empty(), "there should be a withdrawal");
-        assert!(requests[2].is_empty(), "there should be no consolidations");
+        // There should be exactly one entry with withdrawal requests
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0][0], 1);
     }
 
     #[test]

@@ -1,6 +1,7 @@
 //! Error types emitted by types or implementations of this crate.
 
 use alloy_primitives::B256;
+use alloy_rpc_types_engine::ForkchoiceUpdateError;
 use reth_errors::{ProviderError, RethError};
 use revm_primitives::EVMError;
 use tokio::sync::oneshot;
@@ -53,7 +54,7 @@ impl From<oneshot::error::RecvError> for PayloadBuilderError {
     }
 }
 
-/// Thrown when the payload or attributes are known to be invalid before processing.
+/// Thrown when the payload or attributes are known to be invalid __before__ processing.
 ///
 /// This is used mainly for
 /// [`validate_version_specific_fields`](crate::validate_version_specific_fields), which validates
@@ -113,5 +114,22 @@ impl EngineObjectValidationError {
         E: core::error::Error + Send + Sync + 'static,
     {
         Self::InvalidParams(Box::new(error))
+    }
+}
+
+/// Thrown when validating the correctness of a payloadattributes object.
+#[derive(thiserror::Error, Debug)]
+pub enum InvalidPayloadAttributesError {
+    /// Thrown if the timestamp of the payload attributes is invalid according to the engine specs.
+    #[error("parent beacon block root not supported before V3")]
+    InvalidTimestamp,
+    /// Another type of error that is not covered by the above variants.
+    #[error("Invalid params: {0}")]
+    InvalidParams(#[from] Box<dyn core::error::Error + Send + Sync>),
+}
+
+impl From<InvalidPayloadAttributesError> for ForkchoiceUpdateError {
+    fn from(_: InvalidPayloadAttributesError) -> Self {
+        Self::UpdatedInvalidPayloadAttributes
     }
 }

@@ -3,19 +3,19 @@
 use alloy_primitives::B256;
 use clap::Parser;
 use reth_beacon_consensus::EthBeaconConsensus;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_chainspec::EthChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_config::{config::EtlConfig, Config};
 use reth_db::{init_db, open_db_read_only, DatabaseEnv};
 use reth_db_common::init::init_genesis;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_evm::noop::NoopBlockExecutorProvider;
-use reth_node_api::FullNodePrimitives;
 use reth_node_builder::{NodeTypesWithDBAdapter, NodeTypesWithEngine};
 use reth_node_core::{
     args::{DatabaseArgs, DatadirArgs},
     dirs::{ChainPath, DataDirPath},
 };
+use reth_primitives::EthPrimitives;
 use reth_provider::{
     providers::{NodeTypesForProvider, StaticFileProvider},
     ProviderFactory, StaticFileProviderFactory,
@@ -54,13 +54,13 @@ pub struct EnvironmentArgs<C: ChainSpecParser> {
     pub db: DatabaseArgs,
 }
 
-impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> EnvironmentArgs<C> {
+impl<C: ChainSpecParser> EnvironmentArgs<C> {
     /// Initializes environment according to [`AccessRights`] and returns an instance of
     /// [`Environment`].
-    pub fn init<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
-        &self,
-        access: AccessRights,
-    ) -> eyre::Result<Environment<N>> {
+    pub fn init<N: CliNodeTypes>(&self, access: AccessRights) -> eyre::Result<Environment<N>>
+    where
+        C: ChainSpecParser<ChainSpec = N::ChainSpec>,
+    {
         let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain());
         let db_path = data_dir.db();
         let sf_path = data_dir.static_files();
@@ -109,12 +109,15 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Environmen
     /// If it's a read-write environment and an issue is found, it will attempt to heal (including a
     /// pipeline unwind). Otherwise, it will print out an warning, advising the user to restart the
     /// node to heal.
-    fn create_provider_factory<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
+    fn create_provider_factory<N: CliNodeTypes>(
         &self,
         config: &Config,
         db: Arc<DatabaseEnv>,
         static_file_provider: StaticFileProvider<N::Primitives>,
-    ) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>> {
+    ) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>>
+    where
+        C: ChainSpecParser<ChainSpec = N::ChainSpec>,
+    {
         let has_receipt_pruning = config.prune.as_ref().is_some_and(|a| a.has_receipts_pruning());
         let prune_modes =
             config.prune.as_ref().map(|prune| prune.segments.clone()).unwrap_or_default();
@@ -196,22 +199,10 @@ impl AccessRights {
 /// Helper trait with a common set of requirements for the
 /// [`NodeTypes`](reth_node_builder::NodeTypes) in CLI.
 pub trait CliNodeTypes:
-    NodeTypesWithEngine
-    + NodeTypesForProvider<
-        Primitives: FullNodePrimitives<
-            Block = reth_primitives::Block,
-            BlockBody = reth_primitives::BlockBody,
-        >,
-    >
+    NodeTypesWithEngine + NodeTypesForProvider<Primitives = EthPrimitives>
 {
 }
 impl<N> CliNodeTypes for N where
-    N: NodeTypesWithEngine
-        + NodeTypesForProvider<
-            Primitives: FullNodePrimitives<
-                Block = reth_primitives::Block,
-                BlockBody = reth_primitives::BlockBody,
-            >,
-        >
+    N: NodeTypesWithEngine + NodeTypesForProvider<Primitives = EthPrimitives>
 {
 }

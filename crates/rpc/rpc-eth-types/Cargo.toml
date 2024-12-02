@@ -15,7 +15,6 @@ workspace = true
 reth-chainspec.workspace = true
 reth-chain-state.workspace = true
 reth-errors.workspace = true
-reth-evm.workspace = true
 reth-execution-types.workspace = true
 reth-metrics.workspace = true
 reth-primitives = { workspace = true, features = ["secp256k1"] }

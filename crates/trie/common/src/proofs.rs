@@ -2,7 +2,11 @@
 
 use crate::{Nibbles, TrieAccount};
 use alloy_consensus::constants::KECCAK_EMPTY;
-use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
+use alloy_primitives::{
+    keccak256,
+    map::{hash_map, HashMap},
+    Address, Bytes, B256, U256,
+};
 use alloy_rlp::{encode_fixed_size, Decodable, EMPTY_STRING_CODE};
 use alloy_trie::{
     nodes::TrieNode,
@@ -11,7 +15,6 @@ use alloy_trie::{
 };
 use itertools::Itertools;
 use reth_primitives_traits::Account;
-use std::collections::{hash_map, HashMap};
 
 /// The state multiproof of target accounts and multiproofs of their storage tries.
 /// Multiproof is effectively a state subtrie that only contains the nodes
@@ -171,8 +174,8 @@ impl StorageMultiProof {
 
 /// The merkle proof with the relevant account info.
 #[derive(Clone, PartialEq, Eq, Debug)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "serde"), serde(rename_all = "camelCase"))]
 pub struct AccountProof {
     /// The address associated with the account.
     pub address: Address,
@@ -185,6 +188,33 @@ pub struct AccountProof {
     pub storage_root: B256,
     /// Array of storage proofs as requested.
     pub storage_proofs: Vec<StorageProof>,
+}
+
+#[cfg(feature = "eip1186")]
+impl AccountProof {
+    /// Convert into an EIP-1186 account proof response
+    pub fn into_eip1186_response(
+        self,
+        slots: Vec<alloy_serde::JsonStorageKey>,
+    ) -> alloy_rpc_types_eth::EIP1186AccountProofResponse {
+        let info = self.info.unwrap_or_default();
+        alloy_rpc_types_eth::EIP1186AccountProofResponse {
+            address: self.address,
+            balance: info.balance,
+            code_hash: info.get_bytecode_hash(),
+            nonce: info.nonce,
+            storage_hash: self.storage_root,
+            account_proof: self.proof,
+            storage_proof: self
+                .storage_proofs
+                .into_iter()
+                .filter_map(|proof| {
+                    let input_slot = slots.iter().find(|s| s.as_b256() == proof.key)?;
+                    Some(proof.into_eip1186_proof(*input_slot))
+                })
+                .collect(),
+        }
+    }
 }
 
 impl Default for AccountProof {
@@ -228,7 +258,7 @@ impl AccountProof {
 
 /// The merkle proof of the storage entry.
 #[derive(Clone, PartialEq, Eq, Default, Debug)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
 pub struct StorageProof {
     /// The raw storage key.
     pub key: B256,
@@ -239,6 +269,17 @@ pub struct StorageProof {
     /// Array of rlp-serialized merkle trie nodes which starting from the storage root node and
     /// following the path of the hashed storage slot as key.
     pub proof: Vec<Bytes>,
+}
+
+impl StorageProof {
+    /// Convert into an EIP-1186 storage proof
+    #[cfg(feature = "eip1186")]
+    pub fn into_eip1186_proof(
+        self,
+        slot: alloy_serde::JsonStorageKey,
+    ) -> alloy_rpc_types_eth::EIP1186StorageProof {
+        alloy_rpc_types_eth::EIP1186StorageProof { key: slot, value: self.value, proof: self.proof }
+    }
 }
 
 impl StorageProof {

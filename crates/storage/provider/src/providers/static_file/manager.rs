@@ -1341,10 +1341,12 @@ impl<N: NodePrimitives> BlockHashReader for StaticFileProvider<N> {
     }
 }
 
-impl<N: NodePrimitives<SignedTx: Value + SignedTransaction>> ReceiptProvider
+impl<N: NodePrimitives<SignedTx: Value + SignedTransaction, Receipt: Value>> ReceiptProvider
     for StaticFileProvider<N>
 {
-    fn receipt(&self, num: TxNumber) -> ProviderResult<Option<Receipt>> {
+    type Receipt = N::Receipt;
+
+    fn receipt(&self, num: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
         self.get_segment_provider_from_transaction(StaticFileSegment::Receipts, num, None)
             .and_then(|provider| provider.receipt(num))
             .or_else(|err| {
@@ -1356,31 +1358,36 @@ impl<N: NodePrimitives<SignedTx: Value + SignedTransaction>> ReceiptProvider
             })
     }
 
-    fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
+    fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Receipt>> {
         if let Some(num) = self.transaction_id(hash)? {
             return self.receipt(num)
         }
         Ok(None)
     }
 
-    fn receipts_by_block(&self, _block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>> {
+    fn receipts_by_block(
+        &self,
+        _block: BlockHashOrNumber,
+    ) -> ProviderResult<Option<Vec<Self::Receipt>>> {
         unreachable!()
     }
 
     fn receipts_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<Receipt>> {
+    ) -> ProviderResult<Vec<Self::Receipt>> {
         self.fetch_range_with_predicate(
             StaticFileSegment::Receipts,
             to_range(range),
-            |cursor, number| cursor.get_one::<ReceiptMask<Receipt>>(number.into()),
+            |cursor, number| cursor.get_one::<ReceiptMask<Self::Receipt>>(number.into()),
             |_| true,
         )
     }
 }
 
-impl<N: FullNodePrimitives<SignedTx: Value>> TransactionsProviderExt for StaticFileProvider<N> {
+impl<N: FullNodePrimitives<SignedTx: Value, Receipt: Value>> TransactionsProviderExt
+    for StaticFileProvider<N>
+{
     fn transaction_hashes_by_range(
         &self,
         tx_range: Range<TxNumber>,
@@ -1415,7 +1422,7 @@ impl<N: FullNodePrimitives<SignedTx: Value>> TransactionsProviderExt for StaticF
                     chunk_range,
                     |cursor, number| {
                         Ok(cursor
-                            .get_one::<TransactionMask<TransactionSignedNoHash>>(number.into())?
+                            .get_one::<TransactionMask<Self::Transaction>>(number.into())?
                             .map(|transaction| {
                                 rlp_buf.clear();
                                 let _ = channel_tx
@@ -1575,7 +1582,7 @@ impl<N: NodePrimitives> BlockNumReader for StaticFileProvider<N> {
     }
 }
 
-impl<N: FullNodePrimitives<SignedTx: Value>> BlockReader for StaticFileProvider<N> {
+impl<N: FullNodePrimitives<SignedTx: Value, Receipt: Value>> BlockReader for StaticFileProvider<N> {
     type Block = N::Block;
 
     fn find_block_by_hash(
@@ -1606,7 +1613,7 @@ impl<N: FullNodePrimitives<SignedTx: Value>> BlockReader for StaticFileProvider<
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Receipt>)>> {
+    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Self::Receipt>)>> {
         // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
@@ -1685,7 +1692,7 @@ impl<N: NodePrimitives> StatsReader for StaticFileProvider<N> {
                 .map(|block| block + 1)
                 .unwrap_or_default()
                 as usize),
-            tables::Receipts::NAME => Ok(self
+            tables::Receipts::<Receipt>::NAME => Ok(self
                 .get_highest_static_file_tx(StaticFileSegment::Receipts)
                 .map(|receipts| receipts + 1)
                 .unwrap_or_default() as usize),
@@ -1701,11 +1708,14 @@ impl<N: NodePrimitives> StatsReader for StaticFileProvider<N> {
 
 /// Calculates the tx hash for the given transaction and its id.
 #[inline]
-fn calculate_hash(
-    entry: (TxNumber, TransactionSignedNoHash),
+fn calculate_hash<T>(
+    entry: (TxNumber, T),
     rlp_buf: &mut Vec<u8>,
-) -> Result<(B256, TxNumber), Box<ProviderError>> {
+) -> Result<(B256, TxNumber), Box<ProviderError>>
+where
+    T: Encodable2718,
+{
     let (tx_id, tx) = entry;
-    tx.transaction.eip2718_encode(&tx.signature, rlp_buf);
+    tx.encode_2718(rlp_buf);
     Ok((keccak256(rlp_buf), tx_id))
 }

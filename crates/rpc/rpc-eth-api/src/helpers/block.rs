@@ -7,8 +7,10 @@ use alloy_eips::BlockId;
 use alloy_rpc_types_eth::{Block, Header, Index};
 use futures::Future;
 use reth_node_api::BlockBody;
-use reth_primitives::{Receipt, SealedBlockFor, SealedBlockWithSenders};
-use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider};
+use reth_primitives::{SealedBlockFor, SealedBlockWithSenders};
+use reth_provider::{
+    BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider, ProviderReceipt,
+};
 use reth_rpc_types_compat::block::from_block;
 
 use crate::{
@@ -24,7 +26,7 @@ pub type BlockReceiptsResult<N, E> = Result<Option<Vec<RpcReceipt<N>>>, E>;
 pub type BlockAndReceiptsResult<Eth> = Result<
     Option<(
         SealedBlockFor<<<Eth as RpcNodeCore>::Provider as BlockReader>::Block>,
-        Arc<Vec<Receipt>>,
+        Arc<Vec<ProviderReceipt<<Eth as RpcNodeCore>::Provider>>>,
     )>,
     <Eth as EthApiTypes>::Error,
 >;

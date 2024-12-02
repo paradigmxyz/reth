@@ -7,6 +7,7 @@ use alloy_eips::BlockNumberOrTag;
 use alloy_network::Ethereum;
 use alloy_primitives::U256;
 use derive_more::Deref;
+use reth_primitives::NodePrimitives;
 use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},
@@ -102,7 +103,12 @@ where
     ) -> Self
     where
         Tasks: TaskSpawner + Clone + 'static,
-        Events: CanonStateSubscriptions,
+        Events: CanonStateSubscriptions<
+            Primitives: NodePrimitives<
+                Block = reth_primitives::Block,
+                Receipt = reth_primitives::Receipt,
+            >,
+        >,
     {
         let blocking_task_pool =
             BlockingTaskPool::build().expect("failed to build blocking task pool");
@@ -432,7 +438,7 @@ mod tests {
     use crate::EthApi;
 
     fn build_test_eth_api<
-        P: BlockReaderIdExt<Block = reth_primitives::Block>
+        P: BlockReaderIdExt<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
             + BlockReader
             + ChainSpecProvider<ChainSpec = ChainSpec>
             + EvmEnvProvider
@@ -444,7 +450,7 @@ mod tests {
         provider: P,
     ) -> EthApi<P, TestPool, NoopNetwork, EthEvmConfig> {
         let evm_config = EthEvmConfig::new(provider.chain_spec());
-        let cache = EthStateCache::spawn(provider.clone(), Default::default(), evm_config.clone());
+        let cache = EthStateCache::spawn(provider.clone(), Default::default());
         let fee_history_cache =
             FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default());
 

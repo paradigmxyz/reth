@@ -166,7 +166,9 @@ fn block_provider_example<T: BlockReader<Block = reth_primitives::Block>>(
 
 /// The `ReceiptProvider` allows querying the receipts tables.
 fn receipts_provider_example<
-    T: ReceiptProvider + TransactionsProvider<Transaction = TransactionSigned> + HeaderProvider,
+    T: ReceiptProvider<Receipt = reth_primitives::Receipt>
+        + TransactionsProvider<Transaction = TransactionSigned>
+        + HeaderProvider,
 >(
     provider: T,
 ) -> eyre::Result<()> {

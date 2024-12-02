@@ -121,7 +121,11 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
     ///
     /// Note: this only propagates the transactions that are known to the pool.
     pub fn propagate_hashes_to(&self, hash: impl IntoIterator<Item = TxHash>, peer: PeerId) {
-        self.send(TransactionsCommand::PropagateHashesTo(hash.into_iter().collect(), peer))
+        let hashes = hash.into_iter().collect::<Vec<_>>();
+        if hashes.is_empty() {
+            return
+        }
+        self.send(TransactionsCommand::PropagateHashesTo(hashes, peer))
     }
 
     /// Request the active peer IDs from the [`TransactionsManager`].
@@ -132,7 +136,12 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
     }
 
     /// Manually propagate full transactions to a specific peer.
+    ///
+    /// Do nothing if transactions are empty.
     pub fn propagate_transactions_to(&self, transactions: Vec<TxHash>, peer: PeerId) {
+        if transactions.is_empty() {
+            return
+        }
         self.send(TransactionsCommand::PropagateTransactionsTo(transactions, peer))
     }
 
@@ -140,7 +149,12 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
     ///
     /// It's up to the [`TransactionsManager`] whether the transactions are sent as hashes or in
     /// full.
+    ///
+    /// Do nothing if transactions are empty.
     pub fn propagate_transactions(&self, transactions: Vec<TxHash>) {
+        if transactions.is_empty() {
+            return
+        }
         self.send(TransactionsCommand::PropagateTransactions(transactions))
     }
 
@@ -149,6 +163,9 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
         &self,
         peers: Vec<PeerId>,
     ) -> Result<HashMap<PeerId, HashSet<TxHash>>, RecvError> {
+        if peers.is_empty() {
+            return Ok(Default::default())
+        }
         let (tx, rx) = oneshot::channel();
         self.send(TransactionsCommand::GetTransactionHashes { peers, tx });
         rx.await
@@ -212,7 +229,7 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     /// From which we get all new incoming transaction related messages.
     network_events: EventStream<NetworkEvent<PeerRequest<N>>>,
     /// Transaction fetcher to handle inflight and missing transaction requests.
-    transaction_fetcher: TransactionFetcher,
+    transaction_fetcher: TransactionFetcher<N>,
     /// All currently pending transactions grouped by peers.
     ///
     /// This way we can track incoming transactions and prevent multiple pool imports for the same
@@ -235,7 +252,7 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     /// Bad imports.
     bad_imports: LruCache<TxHash>,
     /// All the connected peers.
-    peers: HashMap<PeerId, PeerMetadata>,
+    peers: HashMap<PeerId, PeerMetadata<N>>,
     /// Send half for the command channel.
     ///
     /// This is kept so that a new [`TransactionsHandle`] can be created at any time.
@@ -681,9 +698,13 @@ where
 impl<Pool, N> TransactionsManager<Pool, N>
 where
     Pool: TransactionPool,
-    N: NetworkPrimitives<BroadcastedTransaction: SignedTransaction>,
+    N: NetworkPrimitives<
+        BroadcastedTransaction: SignedTransaction,
+        PooledTransaction: SignedTransaction,
+    >,
     <<Pool as TransactionPool>::Transaction as PoolTransaction>::Consensus:
         Into<N::BroadcastedTransaction>,
+    <<Pool as TransactionPool>::Transaction as PoolTransaction>::Pooled: Into<N::PooledTransaction>,
 {
     /// Invoked when transactions in the local mempool are considered __pending__.
     ///
@@ -955,43 +976,45 @@ where
         // notify pool so events get fired
         self.pool.on_propagated(propagated);
     }
-}
 
-impl<Pool> TransactionsManager<Pool>
-where
-    Pool: TransactionPool + 'static,
-    <<Pool as TransactionPool>::Transaction as PoolTransaction>::Consensus: Into<TransactionSigned>,
-{
     /// Request handler for an incoming request for transactions
     fn on_get_pooled_transactions(
         &mut self,
         peer_id: PeerId,
         request: GetPooledTransactions,
-        response: oneshot::Sender<RequestResult<PooledTransactions>>,
+        response: oneshot::Sender<RequestResult<PooledTransactions<N::PooledTransaction>>>,
     ) {
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             if self.network.tx_gossip_disabled() {
                 let _ = response.send(Ok(PooledTransactions::default()));
                 return
             }
-            let transactions = self.pool.get_pooled_transaction_elements(
+            let transactions = self.pool.get_pooled_transactions_as::<N::PooledTransaction>(
                 request.0,
                 GetPooledTransactionLimit::ResponseSizeSoftLimit(
                     self.transaction_fetcher.info.soft_limit_byte_size_pooled_transactions_response,
                 ),
             );
 
-            trace!(target: "net::tx::propagation", sent_txs=?transactions.iter().map(|tx| *tx.hash()), "Sending requested transactions to peer");
+            trace!(target: "net::tx::propagation", sent_txs=?transactions.iter().map(|tx| tx.tx_hash()), "Sending requested transactions to peer");
 
             // we sent a response at which point we assume that the peer is aware of the
             // transactions
-            peer.seen_transactions.extend(transactions.iter().map(|tx| *tx.hash()));
+            peer.seen_transactions.extend(transactions.iter().map(|tx| *tx.tx_hash()));
 
             let resp = PooledTransactions(transactions);
             let _ = response.send(Ok(resp));
         }
     }
+}
 
+impl<Pool> TransactionsManager<Pool>
+where
+    Pool: TransactionPool + 'static,
+    <<Pool as TransactionPool>::Transaction as PoolTransaction>::Consensus: Into<TransactionSigned>,
+    <<Pool as TransactionPool>::Transaction as PoolTransaction>::Pooled:
+        Into<PooledTransactionsElement>,
+{
     /// Handles dedicated transaction events related to the `eth` protocol.
     fn on_network_tx_event(&mut self, event: NetworkTransactionEvent) {
         match event {
@@ -1291,6 +1314,8 @@ impl<Pool> Future for TransactionsManager<Pool>
 where
     Pool: TransactionPool + Unpin + 'static,
     <<Pool as TransactionPool>::Transaction as PoolTransaction>::Consensus: Into<TransactionSigned>,
+    <<Pool as TransactionPool>::Transaction as PoolTransaction>::Pooled:
+        Into<PooledTransactionsElement>,
 {
     type Output = ();
 
@@ -1481,7 +1506,7 @@ impl<T: SignedTransaction> PropagateTransaction<T> {
         P: PoolTransaction<Consensus: Into<T>>,
     {
         let size = tx.encoded_length();
-        let transaction = tx.transaction.clone().into_consensus().into();
+        let transaction = tx.transaction.clone_into_consensus().into();
         let transaction = Arc::new(transaction);
         Self { size, transaction }
     }
@@ -1723,23 +1748,23 @@ impl TransactionSource {
 
 /// Tracks a single peer in the context of [`TransactionsManager`].
 #[derive(Debug)]
-pub struct PeerMetadata {
+pub struct PeerMetadata<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Optimistically keeps track of transactions that we know the peer has seen. Optimistic, in
     /// the sense that transactions are preemptively marked as seen by peer when they are sent to
     /// the peer.
     seen_transactions: LruCache<TxHash>,
     /// A communication channel directly to the peer's session task.
-    request_tx: PeerRequestSender,
+    request_tx: PeerRequestSender<PeerRequest<N>>,
     /// negotiated version of the session.
     version: EthVersion,
     /// The peer's client version.
     client_version: Arc<str>,
 }
 
-impl PeerMetadata {
+impl<N: NetworkPrimitives> PeerMetadata<N> {
     /// Returns a new instance of [`PeerMetadata`].
     fn new(
-        request_tx: PeerRequestSender,
+        request_tx: PeerRequestSender<PeerRequest<N>>,
         version: EthVersion,
         client_version: Arc<str>,
         max_transactions_seen_by_peer: u32,
@@ -2178,7 +2203,7 @@ mod tests {
         .await;
 
         assert!(!pool.is_empty());
-        assert!(pool.get(signed_tx.hash_ref()).is_some());
+        assert!(pool.get(signed_tx.tx_hash()).is_some());
         handle.terminate().await;
     }
 

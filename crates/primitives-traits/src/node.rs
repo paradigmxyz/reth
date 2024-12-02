@@ -2,7 +2,7 @@ use core::fmt;
 
 use crate::{
     Block, BlockBody, BlockHeader, FullBlock, FullBlockBody, FullBlockHeader, FullReceipt,
-    FullSignedTx, FullTxType, MaybeSerde,
+    FullSignedTx, FullTxType, MaybeArbitrary, MaybeSerde, Receipt,
 };
 
 /// Configures all the primitive types of the node.
@@ -14,13 +14,20 @@ pub trait NodePrimitives:
     /// Block header primitive.
     type BlockHeader: BlockHeader;
     /// Block body primitive.
-    type BlockBody: BlockBody<Transaction = Self::SignedTx>;
+    type BlockBody: BlockBody<Transaction = Self::SignedTx, OmmerHeader = Self::BlockHeader>;
     /// Signed version of the transaction type.
-    type SignedTx: Send + Sync + Unpin + Clone + fmt::Debug + PartialEq + Eq + MaybeSerde + 'static;
+    type SignedTx: Send
+        + Sync
+        + Unpin
+        + Clone
+        + fmt::Debug
+        + PartialEq
+        + Eq
+        + MaybeSerde
+        + MaybeArbitrary
+        + 'static;
     /// Transaction envelope type ID.
-    type TxType: Send + Sync + Unpin + Clone + Default + fmt::Debug + PartialEq + Eq + 'static;
-    /// A receipt.
-    type Receipt: Send
+    type TxType: Send
         + Sync
         + Unpin
         + Clone
@@ -28,8 +35,10 @@ pub trait NodePrimitives:
         + fmt::Debug
         + PartialEq
         + Eq
-        + MaybeSerde
+        + MaybeArbitrary
         + 'static;
+    /// A receipt.
+    type Receipt: Receipt;
 }
 /// Helper trait that sets trait bounds on [`NodePrimitives`].
 pub trait FullNodePrimitives

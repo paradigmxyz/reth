@@ -5,14 +5,11 @@ use alloy_primitives::{
     B256,
 };
 use alloy_rlp::Decodable;
-use reth_tracing::tracing::debug;
-use reth_trie::{
-    prefix_set::{PrefixSet, PrefixSetMut},
-    BranchNodeCompact, RlpNode,
-};
+use reth_tracing::tracing::trace;
 use reth_trie_common::{
-    BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, TrieMask, TrieNode, CHILD_INDEX_RANGE,
-    EMPTY_ROOT_HASH,
+    prefix_set::{PrefixSet, PrefixSetMut},
+    BranchNodeCompact, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, RlpNode, TrieMask,
+    TrieNode, CHILD_INDEX_RANGE, EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
 use std::{borrow::Cow, fmt};
@@ -114,6 +111,7 @@ pub struct RevealedSparseTrie {
     prefix_set: PrefixSetMut,
     /// Reusable buffer for RLP encoding of nodes.
     rlp_buf: Vec<u8>,
+    /// Retained trie updates.
     updates: Option<SparseTrieUpdates>,
 }
 
@@ -169,6 +167,11 @@ impl RevealedSparseTrie {
         self.updates.as_ref().map_or(Cow::Owned(SparseTrieUpdates::default()), Cow::Borrowed)
     }
 
+    /// Returns a reference to the leaf value if present.
+    pub fn get_leaf_value(&self, path: &Nibbles) -> Option<&Vec<u8>> {
+        self.values.get(path)
+    }
+
     /// Takes and returns the retained sparse node updates
     pub fn take_updates(&mut self) -> SparseTrieUpdates {
         self.updates.take().unwrap_or_default()
@@ -176,7 +179,6 @@ impl RevealedSparseTrie {
 
     /// Reveal the trie node only if it was not known already.
     pub fn reveal_node(&mut self, path: Nibbles, node: TrieNode) -> SparseTrieResult<()> {
-        // TODO: revise all inserts to not overwrite existing entries
         match node {
             TrieNode::EmptyRoot => {
                 debug_assert!(path.is_empty());
@@ -369,7 +371,7 @@ impl RevealedSparseTrie {
         // in `nodes`, but not in the `values`.
 
         let mut removed_nodes = self.take_nodes_for_path(path)?;
-        debug!(target: "trie::sparse", ?path, ?removed_nodes, "Removed nodes for path");
+        trace!(target: "trie::sparse", ?path, ?removed_nodes, "Removed nodes for path");
         // Pop the first node from the stack which is the leaf node we want to remove.
         let mut child = removed_nodes.pop().expect("leaf exists");
         #[cfg(debug_assertions)]
@@ -457,7 +459,7 @@ impl RevealedSparseTrie {
                         // Remove the only child node.
                         let child = self.nodes.get(&child_path).unwrap();
 
-                        debug!(target: "trie::sparse", ?removed_path, ?child_path, ?child, "Branch node has only one child");
+                        trace!(target: "trie::sparse", ?removed_path, ?child_path, ?child, "Branch node has only one child");
 
                         let mut delete_child = false;
                         let new_node = match child {
@@ -518,7 +520,7 @@ impl RevealedSparseTrie {
                 node: new_node.clone(),
                 unset_branch_nibble: None,
             };
-            debug!(target: "trie::sparse", ?removed_path, ?new_node, "Re-inserting the node");
+            trace!(target: "trie::sparse", ?removed_path, ?new_node, "Re-inserting the node");
             self.nodes.insert(removed_path, new_node);
         }
 
@@ -559,7 +561,13 @@ impl RevealedSparseTrie {
                     {
                         let mut current = current.clone();
                         current.extend_from_slice_unchecked(key);
-                        assert!(path.starts_with(&current));
+                        assert!(
+                            path.starts_with(&current),
+                            "path: {:?}, current: {:?}, key: {:?}",
+                            path,
+                            current,
+                            key
+                        );
                     }
 
                     let path = current.clone();
@@ -568,7 +576,14 @@ impl RevealedSparseTrie {
                 }
                 SparseNode::Branch { state_mask, .. } => {
                     let nibble = path[current.len()];
-                    debug_assert!(state_mask.is_bit_set(nibble));
+                    debug_assert!(
+                        state_mask.is_bit_set(nibble),
+                        "current: {:?}, path: {:?}, nibble: {:?}, state_mask: {:?}",
+                        current,
+                        path,
+                        nibble,
+                        state_mask
+                    );
 
                     // If the branch node has a child that is a leaf node that we're removing,
                     // we need to unset this nibble.
@@ -606,8 +621,10 @@ impl RevealedSparseTrie {
 
     /// Wipe the trie, removing all values and nodes, and replacing the root with an empty node.
     pub fn wipe(&mut self) {
+        let updates_retained = self.updates.is_some();
         *self = Self::default();
         self.prefix_set = PrefixSetMut::all();
+        self.updates = updates_retained.then(SparseTrieUpdates::wiped);
     }
 
     /// Return the root of the sparse trie.
@@ -1029,12 +1046,18 @@ impl RlpNodeBuffers {
 pub struct SparseTrieUpdates {
     pub(crate) updated_nodes: HashMap<Nibbles, BranchNodeCompact>,
     pub(crate) removed_nodes: HashSet<Nibbles>,
+    pub(crate) wiped: bool,
+}
+
+impl SparseTrieUpdates {
+    /// Create new wiped sparse trie updates.
+    pub fn wiped() -> Self {
+        Self { wiped: true, ..Default::default() }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use super::*;
     use alloy_primitives::{map::HashSet, U256};
     use alloy_rlp::Encodable;
@@ -1056,6 +1079,7 @@ mod tests {
         proof::{ProofNodes, ProofRetainer},
         HashBuilder,
     };
+    use std::collections::BTreeMap;
 
     /// Pad nibbles to the length of a B256 hash with zeros on the left.
     fn pad_nibbles_left(nibbles: Nibbles) -> Nibbles {

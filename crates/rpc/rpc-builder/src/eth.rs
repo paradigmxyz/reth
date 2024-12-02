@@ -1,5 +1,6 @@
 use alloy_consensus::Header;
 use reth_evm::ConfigureEvm;
+use reth_primitives::EthPrimitives;
 use reth_provider::{BlockReader, CanonStateSubscriptions, EvmEnvProvider, StateProviderFactory};
 use reth_rpc::{EthFilter, EthPubSub};
 use reth_rpc_eth_api::EthApiTypes;
@@ -28,14 +29,14 @@ pub struct EthHandlers<Provider, Pool, Network, Events, EthApi: EthApiTypes> {
 impl<Provider, Pool, Network, Events, EthApi> EthHandlers<Provider, Pool, Network, Events, EthApi>
 where
     Provider: StateProviderFactory
-        + BlockReader<Block = reth_primitives::Block>
+        + BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
         + EvmEnvProvider
         + Clone
         + Unpin
         + 'static,
     Pool: Send + Sync + Clone + 'static,
     Network: Clone + 'static,
-    Events: CanonStateSubscriptions + Clone + 'static,
+    Events: CanonStateSubscriptions<Primitives = EthPrimitives> + Clone + 'static,
     EthApi: EthApiTypes + 'static,
 {
     /// Returns a new instance with handlers for `eth` namespace.
@@ -64,12 +65,7 @@ where
         EvmConfig: ConfigureEvm<Header = Header>,
         Tasks: TaskSpawner + Clone + 'static,
     {
-        let cache = EthStateCache::spawn_with(
-            provider.clone(),
-            config.cache,
-            executor.clone(),
-            evm_config.clone(),
-        );
+        let cache = EthStateCache::spawn_with(provider.clone(), config.cache, executor.clone());
 
         let new_canonical_blocks = events.canonical_state_stream();
         let c = cache.clone();

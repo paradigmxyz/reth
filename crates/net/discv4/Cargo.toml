@@ -19,7 +19,7 @@ reth-net-nat.workspace = true
 reth-network-peers = { workspace = true, features = ["secp256k1"] }
 
 # ethereum
-alloy-primitives.workspace = true
+alloy-primitives = { workspace = true, features = ["rand"] }
 alloy-rlp = { workspace = true, features = ["derive"] }
 discv5.workspace = true
 secp256k1 = { workspace = true, features = [
