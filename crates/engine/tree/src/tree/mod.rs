@@ -2303,14 +2303,19 @@ where
                     );
                     let diff = compare_trie_updates(&task_trie_updates, &regular_trie_updates);
                     if diff.has_differences() {
-                        info!(
-                            target: "engine::tree",
-                            block=?sealed_block.num_hash(),
-                            storage_tries_only_in_first = ?diff.storage_tries_only_in_first,
-                            storage_tries_only_in_second = ?diff.storage_tries_only_in_second,
-                            storage_tries_with_differences = ?diff.storage_tries_with_differences,
-                            "Found differences in TrieUpdates"
-                        );
+                        for key in diff.storage_tries_with_differences.keys() {
+                            let task = task_trie_updates.storage_tries.get(key);
+                            let regular = regular_trie_updates.storage_tries.get(key);
+                            debug!(target: "engine::tree", ?key, ?task, ?regular, "Difference in storage trie");
+                        }
+                        // info!(
+                        //     target: "engine::tree",
+                        //     block=?sealed_block.num_hash(),
+                        //     storage_tries_only_in_first = ?diff.storage_tries_only_in_first,
+                        //     storage_tries_only_in_second = ?diff.storage_tries_only_in_second,
+                        //     storage_tries_with_differences =
+                        // ?diff.storage_tries_with_differences,     "Found
+                        // differences in TrieUpdates" );
                     } else {
                         debug!(target: "engine::tree", block=?sealed_block.num_hash(), "TrieUpdates match exactly");
                     }
