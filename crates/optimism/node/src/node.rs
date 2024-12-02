@@ -46,7 +46,7 @@ use reth_transaction_pool::{
     TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
-use std::{marker::PhantomData, sync::Arc};
+use std::sync::Arc;
 
 /// Storage implementation for Optimism.
 #[derive(Debug, Default, Clone)]
@@ -182,7 +182,7 @@ where
     }
 
     fn add_ons(&self) -> Self::AddOns {
-        OpAddOns::builder().with_sequencer(self.args.sequencer_http.clone()).build()
+        Self::AddOns::builder().with_sequencer(self.args.sequencer_http.clone()).build()
     }
 }
 
@@ -207,9 +207,9 @@ impl<N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>> Default
     }
 }
 
-impl<N: FullNodeComponents> OpAddOns<N> {
+impl<N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>> OpAddOns<N> {
     /// Build a [`OpAddOns`] using [`OpAddOnsBuilder`].
-    pub fn builder() -> OpAddOnsBuilder<N> {
+    pub fn builder() -> OpAddOnsBuilder {
         OpAddOnsBuilder::default()
     }
 }
@@ -270,22 +270,15 @@ where
 }
 
 /// A regular optimism evm and executor builder.
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 #[non_exhaustive]
-pub struct OpAddOnsBuilder<N> {
+pub struct OpAddOnsBuilder {
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
     sequencer_client: Option<SequencerClient>,
-    _marker: PhantomData<N>,
 }
 
-impl<N> Default for OpAddOnsBuilder<N> {
-    fn default() -> Self {
-        Self { sequencer_client: None, _marker: PhantomData }
-    }
-}
-
-impl<N> OpAddOnsBuilder<N> {
+impl OpAddOnsBuilder {
     /// With a [`SequencerClient`].
     pub fn with_sequencer(mut self, sequencer_client: Option<String>) -> Self {
         self.sequencer_client = sequencer_client.map(SequencerClient::new);
@@ -293,12 +286,12 @@ impl<N> OpAddOnsBuilder<N> {
     }
 }
 
-impl<N> OpAddOnsBuilder<N>
-where
-    N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>,
-{
+impl OpAddOnsBuilder {
     /// Builds an instance of [`OpAddOns`].
-    pub fn build(self) -> OpAddOns<N> {
+    pub fn build<N>(self) -> OpAddOns<N>
+    where
+        N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>,
+    {
         let Self { sequencer_client, .. } = self;
 
         OpAddOns(RpcAddOns::new(
