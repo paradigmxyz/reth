@@ -1253,7 +1253,7 @@ mod tests {
 
         let block = BlockWithSenders {
             block: Block {
-                header: header.clone(),
+                header,
                 body: BlockBody {
                     transactions: vec![],
                     ommers: vec![],

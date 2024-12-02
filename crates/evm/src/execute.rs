@@ -512,42 +512,34 @@ pub fn balance_increment_state<DB>(
 where
     DB: Database,
 {
-    let mut create_account =
-        |address: &Address, balance_inc: u128| -> Result<(Address, Account), BlockExecutionError> {
-            let account = state.load_cache_account(*address).map_err(|_| {
-                BlockExecutionError::msg("could not load account for balance increment")
-            })?;
+    let mut load_account = |address: &Address| -> Result<(Address, Account), BlockExecutionError> {
+        let cache_account = state.load_cache_account(*address).map_err(|_| {
+            BlockExecutionError::msg("could not load account for balance increment")
+        })?;
 
-            let transition_account = account
-                .increment_balance(balance_inc)
-                .ok_or(BlockValidationError::IncrementBalanceFailed)?;
+        let account = cache_account.account.as_ref().ok_or_else(|| {
+            BlockExecutionError::msg("could not load account for balance increment")
+        })?;
 
-            let info = transition_account.info.ok_or_else(|| {
-                BlockExecutionError::msg("empty account info after balance increment")
-            })?;
+        let storage = account
+            .storage
+            .clone()
+            .into_iter()
+            .map(|(k, v)| {
+                (k, EvmStorageSlot { original_value: v, present_value: v, is_cold: false })
+            })
+            .collect();
 
-            let storage = transition_account
-                .storage
-                .into_iter()
-                .map(|(k, v)| {
-                    (
-                        k,
-                        EvmStorageSlot {
-                            original_value: v.original_value(),
-                            present_value: v.present_value,
-                            is_cold: false,
-                        },
-                    )
-                })
-                .collect();
-
-            Ok((*address, Account { info, storage, status: AccountStatus::Touched }))
-        };
+        Ok((
+            *address,
+            Account { info: account.info.clone(), storage, status: AccountStatus::Touched },
+        ))
+    };
 
     balance_increments
         .iter()
         .filter(|(_, &balance)| balance != 0)
-        .map(|(addr, &balance)| create_account(addr, balance))
+        .map(|(addr, _)| load_account(addr))
         .collect::<Result<EvmState, _>>()
 }
 
