@@ -41,6 +41,7 @@
 //!             Transaction = TransactionSigned,
 //!             Block = reth_primitives::Block,
 //!             Receipt = reth_primitives::Receipt,
+//!             Header = reth_primitives::Header,
 //!         > + AccountReader
 //!         + ChangeSetReader,
 //!     Pool: TransactionPool + Unpin + 'static,
@@ -121,6 +122,7 @@
 //!             Transaction = TransactionSigned,
 //!             Block = reth_primitives::Block,
 //!             Receipt = reth_primitives::Receipt,
+//!             Header = reth_primitives::Header,
 //!         > + AccountReader
 //!         + ChangeSetReader,
 //!     Pool: TransactionPool + Unpin + 'static,
