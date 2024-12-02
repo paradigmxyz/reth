@@ -89,6 +89,7 @@ serde = [
 	"reth-codecs/serde",
 	"alloy-chains/serde",
 	"reth-primitives-traits/serde",
+	"reth-ethereum-forks/serde"
 ]
 
 [[test]]

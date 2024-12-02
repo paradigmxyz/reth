@@ -105,7 +105,8 @@ std = [
 	"serde/std",
 	"alloy-trie/std",
 	"serde_with?/std",
-	"alloy-rlp/std"
+	"alloy-rlp/std",
+	"reth-ethereum-forks/std"
 ]
 reth-codec = [
 	"dep:reth-codecs",
