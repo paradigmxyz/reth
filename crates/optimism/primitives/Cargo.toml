@@ -50,6 +50,8 @@ std = [
 	"alloy-eips/std",
 	"alloy-primitives/std",
 	"serde/std",
+	"bytes/std",
+	"derive_more/std"
 ]
 reth-codec = [
     "dep:reth-codecs",
