@@ -365,8 +365,8 @@ impl<'a, N: RpcNodeCore> OpEthApiBuilder<'a, N> {
     }
 
     /// With a [`SequencerClient`].
-    pub fn with_sequencer(mut self, sequencer_client: SequencerClient) -> Self {
-        self.sequencer_client = Some(sequencer_client);
+    pub fn with_sequencer(mut self, sequencer_client: Option<SequencerClient>) -> Self {
+        self.sequencer_client = sequencer_client;
         self
     }
 

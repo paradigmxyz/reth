@@ -183,16 +183,10 @@ where
     }
 
     fn add_ons(&self) -> Self::AddOns {
-        let mut builder = OpAddOns::builder();
-        if let Some(sequencer) = &self.args.sequencer_http {
-            builder = builder.with_sequencer(sequencer.clone());
-        }
-
-        if !self.args.storage_proof_only.is_empty() {
-            builder = builder.with_storage_proof_only(self.args.storage_proof_only.clone());
-        }
-
-        builder.build()
+        OpAddOns::builder()
+            .with_sequencer(self.args.sequencer_http.clone())
+            .with_storage_proof_only(self.args.storage_proof_only.clone())
+            .build()
     }
 }
 
@@ -300,8 +294,8 @@ impl<N> Default for OpAddOnsBuilder<N> {
 
 impl<N> OpAddOnsBuilder<N> {
     /// With a [`SequencerClient`].
-    pub fn with_sequencer(mut self, sequencer_client: String) -> Self {
-        self.sequencer_client = Some(SequencerClient::new(sequencer_client));
+    pub fn with_sequencer(mut self, sequencer_client: Option<String>) -> Self {
+        self.sequencer_client = sequencer_client.map(SequencerClient::new);
         self
     }
 
@@ -323,17 +317,10 @@ where
 
         OpAddOns(RpcAddOns::new(
             move |ctx| {
-                let mut builder = OpEthApi::builder(ctx);
-
-                if let Some(sequencer_client) = sequencer_client {
-                    builder = builder.with_sequencer(sequencer_client)
-                }
-
-                if !storage_proof_only.is_empty() {
-                    builder = builder.with_storage_proof_only(storage_proof_only);
-                }
-
-                builder.build()
+                OpEthApi::builder(ctx)
+                    .with_sequencer(sequencer_client)
+                    .with_storage_proof_only(storage_proof_only)
+                    .build()
             },
             Default::default(),
         ))
