@@ -156,7 +156,13 @@ impl<'b, Provider: DBProvider + BlockNumReader + StateCommitmentProvider>
             );
         }
 
-        Ok(HashedStorage::from_reverts(self.tx(), address, self.block_number)?)
+        Ok(
+            HashedStorage::from_reverts::<<Provider::StateCommitment as StateCommitment>::KeyHasher>(
+                self.tx(),
+                address,
+                self.block_number,
+            )?,
+        )
     }
 
     fn history_info<T, K>(
