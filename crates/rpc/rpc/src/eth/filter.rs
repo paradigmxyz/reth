@@ -1,14 +1,5 @@
 //! `eth_` `Filter` RPC handler implementation
 
-use std::{
-    collections::HashMap,
-    fmt,
-    iter::StepBy,
-    ops::RangeInclusive,
-    sync::Arc,
-    time::{Duration, Instant},
-};
-
 use alloy_consensus::BlockHeader;
 use alloy_primitives::TxHash;
 use alloy_rpc_types_eth::{
