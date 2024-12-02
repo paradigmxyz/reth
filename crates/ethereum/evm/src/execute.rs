@@ -257,11 +257,14 @@ where
             // return balance to DAO beneficiary.
             *balance_increments.entry(DAO_HARDFORK_BENEFICIARY).or_default() += drained_balance;
         }
-
         // increment balances
+        self.state
+            .increment_balances(balance_increments.clone())
+            .map_err(|_| BlockValidationError::IncrementBalanceFailed)?;
+
         let mut balance_state =
             EvmState::with_capacity_and_hasher(balance_increments.len(), Default::default());
-        for (address, balance) in balance_increments.clone() {
+        for (address, balance) in balance_increments {
             if balance == 0 {
                 continue;
             }
@@ -301,10 +304,6 @@ where
             },
             state: balance_state,
         });
-
-        self.state
-            .increment_balances(balance_increments)
-            .map_err(|_| BlockValidationError::IncrementBalanceFailed)?;
 
         Ok(requests)
     }
