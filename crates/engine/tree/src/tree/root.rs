@@ -475,7 +475,7 @@ fn get_proof_targets(
 
     // first collect all new accounts (not previously fetched)
     for &hashed_address in state_update.accounts.keys() {
-        if let Entry::Vacant(_) = fetched_proof_targets.entry(hashed_address) {
+        if fetched_proof_targets.contains_key(&hashed_address) {
             targets.insert(hashed_address, HashSet::default());
         }
     }
