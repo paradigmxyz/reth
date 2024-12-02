@@ -5,13 +5,17 @@ use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
 };
 use reth_trie::{
-    proof::Proof, updates::TrieUpdates, HashedPostState, HashedStorage, MultiProof, Nibbles,
-    TrieInput,
+    hashed_cursor::HashedPostStateCursorFactory,
+    prefix_set::TriePrefixSetsMut,
+    proof::{Proof, StorageProof},
+    trie_cursor::InMemoryTrieCursorFactory,
+    updates::{TrieUpdates, TrieUpdatesSorted},
+    HashedPostState, HashedPostStateSorted, HashedStorage, MultiProof, Nibbles, TrieInput,
 };
-use reth_trie_db::DatabaseProof;
+use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseProof, DatabaseTrieCursorFactory};
 use reth_trie_parallel::root::ParallelStateRootError;
 use reth_trie_sparse::{SparseStateTrie, SparseStateTrieResult, SparseTrieError};
-use revm_primitives::{keccak256, EvmState, B256};
+use revm_primitives::{keccak256, map::DefaultHashBuilder, EvmState, B256};
 use std::{
     collections::BTreeMap,
     sync::{
@@ -316,10 +320,28 @@ where
 
         // TODO(alexey): store proof targets in `ProofSequecner` to avoid recomputing them
         let targets = get_proof_targets(&state, &HashMap::default());
+        let provider_ro = self.config.consistent_view.provider_ro();
+        let nodes_sorted = self.config.input.nodes.clone().into_sorted();
+        let state_sorted = self.config.input.state.clone().into_sorted();
+        let prefix_sets = self.config.input.prefix_sets.clone();
 
         let tx = self.tx.clone();
         rayon::spawn(move || {
-            let result = update_sparse_trie(trie, multiproof, targets, state);
+            let Ok(provider_ro) = provider_ro else {
+                error!(target: "engine::root", "Failed to get read-only provider for sparse trie update");
+                return;
+            };
+
+            let result = update_sparse_trie::<Factory>(
+                trie,
+                multiproof,
+                targets,
+                state,
+                provider_ro,
+                nodes_sorted,
+                state_sorted,
+                prefix_sets,
+            );
             match result {
                 Ok((trie, elapsed)) => {
                     trace!(
@@ -490,11 +512,15 @@ fn get_proof_targets(
 
 /// Updates the sparse trie with the given proofs and state, and returns the updated trie and the
 /// time it took.
-fn update_sparse_trie(
+fn update_sparse_trie<Factory: DatabaseProviderFactory>(
     mut trie: Box<SparseStateTrie>,
     multiproof: MultiProof,
     targets: HashMap<B256, HashSet<B256>>,
     state: HashedPostState,
+    provider: Factory::Provider,
+    input_nodes_sorted: TrieUpdatesSorted,
+    input_state_sorted: HashedPostStateSorted,
+    prefix_sets: TriePrefixSetsMut,
 ) -> SparseStateTrieResult<(Box<SparseStateTrie>, Duration)> {
     trace!(target: "engine::root::sparse", "Updating sparse trie");
     let started_at = Instant::now();
@@ -517,8 +543,33 @@ fn update_sparse_trie(
             if value.is_zero() {
                 trace!(target: "engine::root::sparse", ?address, ?slot, "Removing storage slot");
 
-                // TODO: handle blinded node error
-                storage_trie.remove_leaf(&slot_nibbles)?;
+                trie.remove_storage_leaf(address, &slot_nibbles, |path| {
+                    // Right pad the target with 0s.
+                    let mut padded_key = path.pack();
+                    padded_key.resize(32, 0);
+                    let mut targets = HashSet::with_hasher(DefaultHashBuilder::default());
+                    targets.insert(B256::from_slice(&padded_key));
+
+                    let storage_prefix_set =
+                        prefix_sets.storage_prefix_sets.get(&address).cloned().unwrap_or_default();
+                    let proof = StorageProof::new_hashed(
+                        InMemoryTrieCursorFactory::new(
+                            DatabaseTrieCursorFactory::new(provider.tx_ref()),
+                            &input_nodes_sorted,
+                        ),
+                        HashedPostStateCursorFactory::new(
+                            DatabaseHashedCursorFactory::new(provider.tx_ref()),
+                            &input_state_sorted,
+                        ),
+                        address,
+                    )
+                    .with_prefix_set_mut(storage_prefix_set)
+                    .storage_multiproof(targets)
+                    .unwrap();
+
+                    // The subtree only contains the proof for a single target.
+                    proof.subtree.get(&path).cloned()
+                })?;
             } else {
                 trace!(target: "engine::root::sparse", ?address, ?slot, "Updating storage slot");
                 storage_trie
@@ -532,7 +583,32 @@ fn update_sparse_trie(
     // Update accounts with new values
     for (address, account) in state.accounts {
         trace!(target: "engine::root::sparse", ?address, "Updating account");
-        trie.update_account(address, account.unwrap_or_default())?;
+        trie.update_account(address, account.unwrap_or_default(), |path| {
+            // Right pad the target with 0s.
+            let mut padded_key = path.pack();
+            padded_key.resize(32, 0);
+            let mut targets = HashMap::with_hasher(DefaultHashBuilder::default());
+            targets.insert(
+                B256::from_slice(&padded_key),
+                HashSet::with_hasher(DefaultHashBuilder::default()),
+            );
+            let proof = Proof::new(
+                InMemoryTrieCursorFactory::new(
+                    DatabaseTrieCursorFactory::new(provider.tx_ref()),
+                    &input_nodes_sorted,
+                ),
+                HashedPostStateCursorFactory::new(
+                    DatabaseHashedCursorFactory::new(provider.tx_ref()),
+                    &input_state_sorted,
+                ),
+            )
+            .with_prefix_sets_mut(prefix_sets.clone())
+            .multiproof(targets)
+            .unwrap();
+
+            // The subtree only contains the proof for a single target.
+            proof.account_subtree.get(&path).cloned()
+        })?;
     }
 
     trie.calculate_below_level(SPARSE_TRIE_INCREMENTAL_LEVEL);
