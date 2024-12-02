@@ -166,7 +166,6 @@ impl core::error::Error for ProviderError {
     fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         match self {
             Self::Database(source) => core::error::Error::source(source),
-            Self::Rlp(source) => core::error::Error::source(source),
             Self::StorageLockError(source) => core::error::Error::source(source),
             Self::UnifiedStorageWriterError(source) => core::error::Error::source(source),
             _ => Option::None,
