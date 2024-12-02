@@ -26,7 +26,7 @@ use rand::{
 };
 use reth_primitives::{
     transaction::TryFromRecoveredTransactionError, PooledTransactionsElementEcRecovered,
-    Transaction, TransactionSigned, TransactionSignedEcRecovered, TxType,
+    RecoveredTx, Transaction, TransactionSigned, TxType,
 };
 use reth_primitives_traits::InMemorySize;
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
@@ -592,7 +592,7 @@ impl MockTransaction {
 impl PoolTransaction for MockTransaction {
     type TryFromConsensusError = TryFromRecoveredTransactionError;
 
-    type Consensus = TransactionSignedEcRecovered;
+    type Consensus = RecoveredTx;
 
     type Pooled = PooledTransactionsElementEcRecovered;
 
@@ -804,10 +804,10 @@ impl EthPoolTransaction for MockTransaction {
     }
 }
 
-impl TryFrom<TransactionSignedEcRecovered> for MockTransaction {
+impl TryFrom<RecoveredTx> for MockTransaction {
     type Error = TryFromRecoveredTransactionError;
 
-    fn try_from(tx: TransactionSignedEcRecovered) -> Result<Self, Self::Error> {
+    fn try_from(tx: RecoveredTx) -> Result<Self, Self::Error> {
         let sender = tx.signer();
         let transaction = tx.into_signed();
         let hash = transaction.hash();
@@ -926,7 +926,7 @@ impl From<PooledTransactionsElementEcRecovered> for MockTransaction {
     }
 }
 
-impl From<MockTransaction> for TransactionSignedEcRecovered {
+impl From<MockTransaction> for RecoveredTx {
     fn from(tx: MockTransaction) -> Self {
         let signed_tx =
             TransactionSigned::new(tx.clone().into(), Signature::test_signature(), *tx.hash());
@@ -1029,11 +1029,9 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
 
         arb::<(TransactionSigned, Address)>()
             .prop_map(|(signed_transaction, signer)| {
-                TransactionSignedEcRecovered::from_signed_transaction(signed_transaction, signer)
+                RecoveredTx::from_signed_transaction(signed_transaction, signer)
                     .try_into()
-                    .expect(
-                        "Failed to create an Arbitrary MockTransaction via TransactionSignedEcRecovered",
-                    )
+                    .expect("Failed to create an Arbitrary MockTransaction via RecoveredTx")
             })
             .boxed()
     }

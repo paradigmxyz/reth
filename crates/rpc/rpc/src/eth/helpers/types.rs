@@ -3,7 +3,7 @@
 use alloy_consensus::{Signed, Transaction as _, TxEip4844Variant, TxEnvelope};
 use alloy_network::{Ethereum, Network};
 use alloy_rpc_types_eth::{Transaction, TransactionInfo};
-use reth_primitives::{TransactionSigned, TransactionSignedEcRecovered};
+use reth_primitives::{RecoveredTx, TransactionSigned};
 use reth_rpc_eth_api::EthApiTypes;
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_types_compat::TransactionCompat;
@@ -37,7 +37,7 @@ where
 
     fn fill(
         &self,
-        tx: TransactionSignedEcRecovered,
+        tx: RecoveredTx,
         tx_info: TransactionInfo,
     ) -> Result<Self::Transaction, Self::Error> {
         let from = tx.signer();
