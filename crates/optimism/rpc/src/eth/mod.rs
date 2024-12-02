@@ -261,7 +261,7 @@ struct OpEthApiInner<N: RpcNodeCore> {
 }
 
 /// A type that knows how to build a [`OpEthApi`].
-#[allow(missing_debug_implementations)]
+#[derive(Debug, Default)]
 pub struct OpEthApiBuilder {
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
