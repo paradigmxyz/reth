@@ -52,9 +52,15 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
 
+extern crate alloc;
+
+use alloc::string::String;
 use alloy_primitives::B512;
-use std::str::FromStr;
+use core::str::FromStr;
+use alloc::format;
+use alloc::string::ToString;
 
 // Re-export PeerId for ease of use.
 pub use enr::Enr;
@@ -186,8 +192,8 @@ impl FromStr for AnyNode {
     }
 }
 
-impl std::fmt::Display for AnyNode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for AnyNode {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::NodeRecord(record) => write!(f, "{record}"),
             #[cfg(feature = "secp256k1")]
