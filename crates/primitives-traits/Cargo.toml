@@ -30,7 +30,6 @@ op-alloy-consensus = { workspace = true, optional = true }
 byteorder = { workspace = true, optional = true }
 bytes.workspace = true
 derive_more.workspace = true
-roaring = "0.10.2"
 serde_with = { workspace = true, optional = true }
 auto_impl.workspace = true
 
@@ -100,7 +99,6 @@ serde = [
 	"rand/serde",
 	"reth-codecs?/serde",
 	"revm-primitives/serde",
-	"roaring/serde",
 	"revm-primitives/serde",
 	"op-alloy-consensus?/serde"
 ]
