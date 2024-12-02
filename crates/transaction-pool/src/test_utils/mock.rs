@@ -719,6 +719,16 @@ impl PoolTransaction for MockTransaction {
         }
     }
 
+    /// Returns true if the transaction is a contract creation.
+    fn is_create(&self) -> bool {
+        match self {
+            Self::Legacy { to, .. } | Self::Eip1559 { to, .. } | Self::Eip2930 { to, .. } => {
+                to.is_create()
+            }
+            Self::Eip4844 { .. } => false,
+        }
+    }
+
     /// Returns the input data associated with the transaction.
     fn input(&self) -> &[u8] {
         self.get_input()

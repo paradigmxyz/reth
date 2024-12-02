@@ -815,7 +815,7 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
     let gas_after_merge = validate_initial_tx_gas(
         spec_id,
         transaction.input(),
-        transaction.kind().is_create(),
+        transaction.is_create(),
         transaction.access_list().map(|list| list.0.as_slice()).unwrap_or(&[]),
         transaction.authorization_count() as u64,
     );
