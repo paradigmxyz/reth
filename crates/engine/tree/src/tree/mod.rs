@@ -2303,10 +2303,24 @@ where
                     );
                     let diff = compare_trie_updates(&task_trie_updates, &regular_trie_updates);
                     if diff.has_differences() {
-                        for key in diff.storage_tries_with_differences.keys() {
-                            let task = task_trie_updates.storage_tries.get(key);
-                            let regular = regular_trie_updates.storage_tries.get(key);
-                            debug!(target: "engine::tree", ?key, ?task, ?regular, "Difference in storage trie");
+                        for address in diff.storage_tries_with_differences.keys() {
+                            let task = task_trie_updates.storage_tries.get(address);
+                            let regular = regular_trie_updates.storage_tries.get(address);
+                            for path in task
+                                .map_or_else(HashSet::new, |tries| {
+                                    tries.storage_nodes.keys().collect()
+                                })
+                                .union(&regular.map_or_else(HashSet::new, |tries| {
+                                    tries.storage_nodes.keys().collect()
+                                }))
+                            {
+                                let task_entry = task.map(|tries| tries.storage_nodes.get(*path));
+                                let regular_entry =
+                                    regular.map(|tries| tries.storage_nodes.get(*path));
+                                if task_entry != regular_entry {
+                                    debug!(target: "engine::tree", ?address, ?path, ?task_entry, ?regular_entry, "Difference in storage trie updates");
+                                }
+                            }
                         }
                         // info!(
                         //     target: "engine::tree",
