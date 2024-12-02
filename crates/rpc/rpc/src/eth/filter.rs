@@ -1,14 +1,5 @@
 //! `eth_` `Filter` RPC handler implementation
 
-use std::{
-    collections::HashMap,
-    fmt,
-    iter::StepBy,
-    ops::RangeInclusive,
-    sync::Arc,
-    time::{Duration, Instant},
-};
-
 use alloy_primitives::TxHash;
 use alloy_rpc_types_eth::{
     BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
@@ -30,6 +21,14 @@ use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
 use reth_rpc_types_compat::transaction::from_recovered;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
+use std::{
+    collections::HashMap,
+    fmt,
+    iter::StepBy,
+    ops::RangeInclusive,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::{
     sync::{mpsc::Receiver, Mutex},
     time::MissedTickBehavior,
@@ -517,9 +516,11 @@ where
                         // logs of a single block
                         let is_multi_block_range = from_block != to_block;
                         if is_multi_block_range && all_logs.len() > self.max_logs_per_response {
-                            return Err(EthFilterError::QueryExceedsMaxResults(
-                                self.max_logs_per_response,
-                            ))
+                            return Err(EthFilterError::QueryExceedsMaxResults {
+                                max_logs: self.max_logs_per_response,
+                                from_block,
+                                to_block: num_hash.number.saturating_sub(1),
+                            });
                         }
                     }
                 }
@@ -724,8 +725,15 @@ pub enum EthFilterError {
     #[error("query exceeds max block range {0}")]
     QueryExceedsMaxBlocks(u64),
     /// Query result is too large.
-    #[error("query exceeds max results {0}")]
-    QueryExceedsMaxResults(usize),
+    #[error("query exceeds max results {max_logs}, retry with the range {from_block}-{to_block}")]
+    QueryExceedsMaxResults {
+        /// Maximum number of logs allowed per response
+        max_logs: usize,
+        /// Start block of the suggested retry range
+        from_block: u64,
+        /// End block of the suggested retry range (last successfully processed block)
+        to_block: u64,
+    },
     /// Error serving request in `eth_` namespace.
     #[error(transparent)]
     EthAPIError(#[from] EthApiError),
@@ -747,7 +755,7 @@ impl From<EthFilterError> for jsonrpsee::types::error::ErrorObject<'static> {
             EthFilterError::EthAPIError(err) => err.into(),
             err @ (EthFilterError::InvalidBlockRangeParams |
             EthFilterError::QueryExceedsMaxBlocks(_) |
-            EthFilterError::QueryExceedsMaxResults(_)) => {
+            EthFilterError::QueryExceedsMaxResults { .. }) => {
                 rpc_error_with_code(jsonrpsee::types::error::INVALID_PARAMS_CODE, err.to_string())
             }
         }
