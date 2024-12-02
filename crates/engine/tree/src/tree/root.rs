@@ -489,14 +489,18 @@ fn get_proof_targets(
             fetched_proof_targets.contains_key(hashed_address)
         {
             let target_slots = targets.entry(*hashed_address).or_default();
-            let fetched_storage_slots = fetched_proof_targets.get(hashed_address);
-
-            // add only storage slots that haven't been fetched yet
-            for slot in storage.storage.keys() {
-                if !fetched_storage_slots.is_some_and(|fetched_slots| fetched_slots.contains(slot))
-                {
-                    target_slots.insert(*slot);
+            if let Some(fetched_storage_slots) = fetched_proof_targets.get(hashed_address) {
+                // We have previously fetched slots for this address
+                // Only add slots that haven't been fetched yet
+                for slot in storage.storage.keys() {
+                    if !fetched_storage_slots.contains(slot) {
+                        target_slots.insert(*slot);
+                    }
                 }
+            } else {
+                // No slots have been fetched for this address yet
+                // Add all slots from the storage
+                target_slots.extend(storage.storage.keys().copied());
             }
 
             // if we didn't find any new storage slots and this account was previously fetched,
