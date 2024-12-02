@@ -34,7 +34,7 @@ fn main() {
                         .with_memory_block_buffer_target(rollup_args.memory_block_buffer_target);
                     let handle = builder
                         .with_types_and_provider::<OpNode, BlockchainProvider2<_>>()
-                        .with_components(OpNode::components(&rollup_args))
+                        .with_components(OpNode::components(rollup_args.clone()))
                         .with_add_ons(OpNode::new(rollup_args).add_ons())
                         .launch_with_fn(|builder| {
                             let launcher = EngineNodeLauncher::new(

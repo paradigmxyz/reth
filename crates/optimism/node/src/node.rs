@@ -123,7 +123,7 @@ impl OpNode {
 
     /// Returns the components for the given [`RollupArgs`].
     pub fn components<Node>(
-        args: &RollupArgs,
+        args: RollupArgs,
     ) -> ComponentsBuilder<
         Node,
         OpPoolBuilder,
