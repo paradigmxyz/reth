@@ -2272,7 +2272,7 @@ where
             input.append_ref(&hashed_state);
 
             state_root_result = match self.compute_state_root_parallel(consistent_view, input) {
-                Ok((state_root, trie_output)) => Some((state_root, trie_output)),
+                Ok((state_root, trie_output)) => Some((state_root, trie_output, Instant::now())),
                 Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(error))) => {
                     debug!(target: "engine", %error, "Parallel state root computation failed consistency check, falling back");
                     None
@@ -2281,11 +2281,27 @@ where
             };
         }
 
-        let (state_root, trie_output) = if let Some(result) = state_root_result {
+        let (state_root, trie_output) = if let Some((
+            regular_state_root,
+            regular_trie_updates,
+            regular_finished_at,
+        )) = state_root_result
+        {
             match state_root_handle.wait_for_result() {
-                Ok(state_root_task_result) => {
-                    info!(target: "engine::tree", block=?sealed_block.num_hash(), state_root_task_result=?state_root_task_result.0,  regular_state_root_result = ?result.0);
-                    let diff = compare_trie_updates(&state_root_task_result.1, &result.1);
+                (Ok((task_state_root, task_trie_updates)), task_finished_at) => {
+                    let state_root_task_elapsed = task_finished_at - start;
+                    let regular_state_root_elapsed = regular_finished_at - start;
+                    info!(
+                        target: "engine::tree",
+                        block = ?sealed_block.num_hash(),
+                        ?task_state_root,
+                        ?regular_state_root,
+                        "match" = ?task_state_root == regular_state_root,
+                        task_elapsed = ?state_root_task_elapsed,
+                        regular_elapsed = ?regular_state_root_elapsed,
+                        "State root task finished"
+                    );
+                    let diff = compare_trie_updates(&task_trie_updates, &regular_trie_updates);
                     if diff.has_differences() {
                         // info!(target: "engine::tree",
                         //       block=?sealed_block.num_hash(),
@@ -2298,11 +2314,12 @@ where
                         debug!(target: "engine::tree", block=?sealed_block.num_hash(), "TrieUpdates match exactly");
                     }
                 }
-                Err(e) => {
+                (Err(e), _) => {
                     info!(target: "engine::tree", error=?e, "on state root task wait_for_result")
                 }
             }
-            result
+
+            (regular_state_root, regular_trie_updates)
         } else {
             debug!(target: "engine::tree", block=?sealed_block.num_hash(), persistence_in_progress, "Failed to compute state root in parallel");
             state_provider.state_root_with_updates(hashed_state.clone())?

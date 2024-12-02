@@ -36,17 +36,17 @@ pub(crate) type StateRootResult = Result<(B256, TrieUpdates), ParallelStateRootE
 #[derive(Debug)]
 pub(crate) struct StateRootHandle {
     /// Channel for receiving the final result.
-    rx: mpsc::Receiver<StateRootResult>,
+    rx: mpsc::Receiver<(StateRootResult, Instant)>,
 }
 
 impl StateRootHandle {
     /// Creates a new handle from a receiver.
-    pub(crate) const fn new(rx: mpsc::Receiver<StateRootResult>) -> Self {
+    pub(crate) const fn new(rx: mpsc::Receiver<(StateRootResult, Instant)>) -> Self {
         Self { rx }
     }
 
     /// Waits for the state root calculation to complete.
-    pub(crate) fn wait_for_result(self) -> StateRootResult {
+    pub(crate) fn wait_for_result(self) -> (StateRootResult, Instant) {
         self.rx.recv().expect("state root task was dropped without sending result")
     }
 }
@@ -203,7 +203,7 @@ where
             .spawn(move || {
                 debug!(target: "engine::tree", "Starting state root task");
                 let result = self.run();
-                let _ = tx.send(result);
+                let _ = tx.send((result, Instant::now()));
             })
             .expect("failed to spawn state root thread");
 
@@ -782,7 +782,7 @@ mod tests {
         }
         drop(tx);
 
-        let (root_from_task, _) = handle.wait_for_result().expect("task failed");
+        let (root_from_task, _) = handle.wait_for_result().0.expect("task failed");
         let root_from_base = state_root(accumulated_state);
 
         assert_eq!(
