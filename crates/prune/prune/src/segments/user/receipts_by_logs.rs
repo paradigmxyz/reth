@@ -3,8 +3,12 @@ use crate::{
     segments::{PruneInput, Segment},
     PrunerError,
 };
-use reth_db::{tables, transaction::DbTxMut};
-use reth_provider::{BlockReader, DBProvider, PruneCheckpointWriter, TransactionsProvider};
+use alloy_consensus::TxReceipt;
+use reth_db::{table::Value, tables, transaction::DbTxMut};
+use reth_primitives_traits::NodePrimitives;
+use reth_provider::{
+    BlockReader, DBProvider, NodePrimitivesProvider, PruneCheckpointWriter, TransactionsProvider,
+};
 use reth_prune_types::{
     PruneCheckpoint, PruneMode, PruneProgress, PrunePurpose, PruneSegment, ReceiptsLogPruneConfig,
     SegmentOutput, MINIMUM_PRUNING_DISTANCE,
@@ -23,7 +27,11 @@ impl ReceiptsByLogs {
 
 impl<Provider> Segment<Provider> for ReceiptsByLogs
 where
-    Provider: DBProvider<Tx: DbTxMut> + PruneCheckpointWriter + TransactionsProvider + BlockReader,
+    Provider: DBProvider<Tx: DbTxMut>
+        + PruneCheckpointWriter
+        + TransactionsProvider
+        + BlockReader
+        + NodePrimitivesProvider<Primitives: NodePrimitives<Receipt: Value>>,
 {
     fn segment(&self) -> PruneSegment {
         PruneSegment::ContractLogs
@@ -141,12 +149,14 @@ where
             // Delete receipts, except the ones in the inclusion list
             let mut last_skipped_transaction = 0;
             let deleted;
-            (deleted, done) = provider.tx_ref().prune_table_with_range::<tables::Receipts>(
+            (deleted, done) = provider.tx_ref().prune_table_with_range::<tables::Receipts<
+                <Provider::Primitives as NodePrimitives>::Receipt,
+            >>(
                 tx_range,
                 &mut limiter,
                 |(tx_num, receipt)| {
                     let skip = num_addresses > 0 &&
-                        receipt.logs.iter().any(|log| {
+                        receipt.logs().iter().any(|log| {
                             filtered_addresses[..num_addresses].contains(&&log.address)
                         });
 

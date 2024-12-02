@@ -55,7 +55,7 @@ pub enum PeerMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     PooledTransactions(NewPooledTransactionHashes),
     /// All `eth` request variants.
     EthRequest(PeerRequest<N>),
-    /// Other than eth namespace message
+    /// Any other or manually crafted eth message.
     Other(RawCapabilityMessage),
 }
 

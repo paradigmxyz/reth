@@ -461,7 +461,7 @@ impl FinalizedBlockTracker {
         let finalized = finalized_block?;
         self.last_finalized_block
             .replace(finalized)
-            .map_or(true, |last| last < finalized)
+            .is_none_or(|last| last < finalized)
             .then_some(finalized)
     }
 }
@@ -602,7 +602,7 @@ where
         .into_iter()
         .map(|tx| {
             let recovered: TransactionSignedEcRecovered =
-                tx.transaction.clone().into_consensus().into();
+                tx.transaction.clone_into_consensus().into();
             recovered.into_signed()
         })
         .collect::<Vec<_>>();

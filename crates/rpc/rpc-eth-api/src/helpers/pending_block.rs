@@ -467,6 +467,7 @@ pub trait LoadPendingBlock:
             extra_data: Default::default(),
             parent_beacon_block_root,
             requests_hash,
+            target_blobs_per_block: None,
         };
 
         // Convert Vec<Option<Receipt>> to Vec<Receipt>

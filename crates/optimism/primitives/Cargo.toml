@@ -44,13 +44,14 @@ arbitrary.workspace = true
 [features]
 default = ["std", "reth-codec"]
 std = [
-    "reth-primitives-traits/std",
-    "reth-primitives/std",
-    "reth-codecs/std",
-    "alloy-consensus/std",
-    "alloy-eips/std",
-    "alloy-primitives/std",
-    "serde/std",
+	"reth-primitives-traits/std",
+	"reth-primitives/std",
+	"reth-codecs/std",
+	"alloy-consensus/std",
+	"alloy-eips/std",
+	"alloy-primitives/std",
+	"serde/std",
+	"alloy-rlp/std"
 ]
 reth-codec = [
     "dep:reth-codecs",

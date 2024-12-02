@@ -115,19 +115,20 @@ where
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
                 TrieElement::Leaf(hashed_address, account) => {
+                    let proof_targets = targets.remove(&hashed_address);
+                    let leaf_is_proof_target = proof_targets.is_some();
                     let storage_prefix_set = self
                         .prefix_sets
                         .storage_prefix_sets
                         .remove(&hashed_address)
                         .unwrap_or_default();
-                    let proof_targets = targets.remove(&hashed_address).unwrap_or_default();
                     let storage_multiproof = StorageProof::new_hashed(
                         self.trie_cursor_factory.clone(),
                         self.hashed_cursor_factory.clone(),
                         hashed_address,
                     )
                     .with_prefix_set_mut(storage_prefix_set)
-                    .storage_multiproof(proof_targets)?;
+                    .storage_multiproof(proof_targets.unwrap_or_default())?;
 
                     // Encode account
                     account_rlp.clear();
@@ -136,8 +137,11 @@ where
 
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
 
-                    // Overwrite storage multiproof.
-                    storages.insert(hashed_address, storage_multiproof);
+                    // We might be adding leaves that are not necessarily our proof targets.
+                    if leaf_is_proof_target {
+                        // Overwrite storage multiproof.
+                        storages.insert(hashed_address, storage_multiproof);
+                    }
                 }
             }
         }

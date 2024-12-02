@@ -103,7 +103,10 @@ std = [
 	"revm-primitives/std",
 	"secp256k1?/std",
 	"serde/std",
-	"alloy-trie/std"
+	"alloy-trie/std",
+	"serde_with?/std",
+	"alloy-rlp/std",
+	"reth-ethereum-forks/std"
 ]
 reth-codec = [
 	"dep:reth-codecs",
