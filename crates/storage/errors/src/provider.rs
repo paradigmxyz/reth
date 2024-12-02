@@ -3,7 +3,8 @@ use alloc::{boxed::Box, string::String};
 use alloy_eips::{BlockHashOrNumber, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxNumber, B256};
 use derive_more::Display;
-use reth_primitives::{GotExpected, StaticFileSegment};
+use reth_primitives_traits::GotExpected;
+use reth_static_file_types::StaticFileSegment;
 
 /// Provider result type.
 pub type ProviderResult<Ok> = Result<Ok, ProviderError>;
