@@ -382,6 +382,12 @@ impl<N: NodePrimitives> TreeState<N> {
     ///
     /// If the two blocks are the same, this returns `false`.
     fn is_descendant(&self, first: BlockNumHash, second: &Header) -> bool {
+        // If the second block's parent is the first block's hash, then it is a direct descendant
+        // and we can return early.
+        if second.parent_hash == first.hash {
+            return true
+        }
+
         // If the second block is lower than, or has the same block number, they are not
         // descendants.
         if second.number <= first.number {
@@ -394,8 +400,8 @@ impl<N: NodePrimitives> TreeState<N> {
             return false
         };
 
-        while current_block.number > first.number {
-            let Some(block) = self.block_by_hash(current_block.header.parent_hash) else {
+        while current_block.number() > first.number {
+            let Some(block) = self.block_by_hash(current_block.header.parent_hash()) else {
                 // If we can't find its parent in the tree, we can't continue, so return false
                 return false
             };
@@ -1222,12 +1228,13 @@ where
     fn persist_blocks(&mut self, blocks_to_persist: Vec<ExecutedBlock>) {
         if blocks_to_persist.is_empty() {
             debug!(target: "engine::tree", "Returned empty set of blocks to persist");
-        } else {
-            debug!(target: "engine::tree", blocks = ?blocks_to_persist.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
-            let (tx, rx) = oneshot::channel();
-            let _ = self.persistence.save_blocks(blocks_to_persist.clone(), tx);
-            self.persistence_state.start_save(blocks_to_persist, rx);
+            return
         }
+
+        debug!(target: "engine::tree", blocks = ?blocks_to_persist.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
+        let (tx, rx) = oneshot::channel();
+        let _ = self.persistence.save_blocks(blocks_to_persist.clone(), tx);
+        self.persistence_state.start_save(blocks_to_persist, rx);
     }
 
     /// Attempts to advance the persistence state.
@@ -2325,7 +2332,7 @@ where
         // in-memory trie updates we collect in `compute_state_root_parallel`.
         //
         // See https://github.com/paradigmxyz/reth/issues/12688 for more details
-        let is_descendant_block = self.persistence_state.current_action().map_or(true, |action| {
+        let is_descendant_block = self.persistence_state.current_action().is_none_or(|action| {
             match action {
                 CurrentPersistenceAction::SavingBlocks { blocks } => {
                     // Get the highest block num and hash
