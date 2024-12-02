@@ -1,7 +1,7 @@
 use crate::PayloadTransactions;
 use alloy_consensus::Transaction;
 use alloy_primitives::Address;
-use reth_primitives::TransactionSignedEcRecovered;
+use reth_primitives::RecoveredTx;
 
 /// An implementation of [`crate::traits::PayloadTransactions`] that yields
 /// a pre-defined set of transactions.
@@ -26,8 +26,8 @@ impl<T> PayloadTransactionsFixed<T> {
     }
 }
 
-impl PayloadTransactions for PayloadTransactionsFixed<TransactionSignedEcRecovered> {
-    fn next(&mut self, _ctx: ()) -> Option<TransactionSignedEcRecovered> {
+impl PayloadTransactions for PayloadTransactionsFixed<RecoveredTx> {
+    fn next(&mut self, _ctx: ()) -> Option<RecoveredTx> {
         (self.index < self.transactions.len()).then(|| {
             let tx = self.transactions[self.index].clone();
             self.index += 1;
@@ -92,7 +92,7 @@ where
     B: PayloadTransactions,
     A: PayloadTransactions,
 {
-    fn next(&mut self, ctx: ()) -> Option<TransactionSignedEcRecovered> {
+    fn next(&mut self, ctx: ()) -> Option<RecoveredTx> {
         while let Some(tx) = self.before.next(ctx) {
             if let Some(before_max_gas) = self.before_max_gas {
                 if self.before_gas + tx.transaction.gas_limit() <= before_max_gas {

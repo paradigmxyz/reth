@@ -18,7 +18,7 @@ use reth_evm::{
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
     proofs::calculate_transaction_root, Block, BlockBody, BlockExt, InvalidTransactionError,
-    Receipt, SealedBlockWithSenders, SealedHeader, TransactionSignedEcRecovered,
+    Receipt, RecoveredTx, SealedBlockWithSenders, SealedHeader,
 };
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderError,
@@ -194,7 +194,7 @@ pub trait LoadPendingBlock:
     /// Assembles a [`Receipt`] for a transaction, based on its [`ExecutionResult`].
     fn assemble_receipt(
         &self,
-        tx: &TransactionSignedEcRecovered,
+        tx: &RecoveredTx,
         result: ExecutionResult,
         cumulative_gas_used: u64,
     ) -> Receipt {

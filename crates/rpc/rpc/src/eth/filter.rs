@@ -9,7 +9,7 @@ use alloy_rpc_types_eth::{
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_chainspec::ChainInfo;
-use reth_primitives::{Receipt, SealedBlockWithSenders, TransactionSignedEcRecovered};
+use reth_primitives::{Receipt, RecoveredTx, SealedBlockWithSenders};
 use reth_provider::{BlockIdReader, BlockReader, ProviderError};
 use reth_rpc_eth_api::{
     EthApiTypes, EthFilterApiServer, FullEthApiTypes, RpcTransaction, TransactionCompat,
@@ -621,7 +621,7 @@ where
     /// Returns all new pending transactions received since the last poll.
     async fn drain(&self) -> FilterChanges<TxCompat::Transaction>
     where
-        T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
+        T: PoolTransaction<Consensus: Into<RecoveredTx>>,
     {
         let mut pending_txs = Vec::new();
         let mut prepared_stream = self.txs_stream.lock().await;
@@ -651,7 +651,7 @@ trait FullTransactionsFilter<T>: fmt::Debug + Send + Sync + Unpin + 'static {
 impl<T, TxCompat> FullTransactionsFilter<TxCompat::Transaction>
     for FullTransactionsReceiver<T, TxCompat>
 where
-    T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>> + 'static,
+    T: PoolTransaction<Consensus: Into<RecoveredTx>> + 'static,
     TxCompat: TransactionCompat + 'static,
 {
     async fn drain(&self) -> FilterChanges<TxCompat::Transaction> {

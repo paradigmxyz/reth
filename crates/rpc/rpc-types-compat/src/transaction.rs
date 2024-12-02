@@ -8,7 +8,7 @@ use alloy_rpc_types_eth::{
     request::{TransactionInput, TransactionRequest},
     TransactionInfo,
 };
-use reth_primitives::{TransactionSigned, TransactionSignedEcRecovered};
+use reth_primitives::{RecoveredTx, TransactionSigned};
 use serde::{Deserialize, Serialize};
 
 /// Create a new rpc transaction result for a mined transaction, using the given block hash,
@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 /// The block hash, number, and tx index fields should be from the original block where the
 /// transaction was mined.
 pub fn from_recovered_with_block_context<Tx, T: TransactionCompat<Tx>>(
-    tx: TransactionSignedEcRecovered<Tx>,
+    tx: RecoveredTx<Tx>,
     tx_info: TransactionInfo,
     resp_builder: &T,
 ) -> Result<T::Transaction, T::Error> {
@@ -27,7 +27,7 @@ pub fn from_recovered_with_block_context<Tx, T: TransactionCompat<Tx>>(
 /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
 /// environment related fields to `None`.
 pub fn from_recovered<Tx, T: TransactionCompat<Tx>>(
-    tx: TransactionSignedEcRecovered<Tx>,
+    tx: RecoveredTx<Tx>,
     resp_builder: &T,
 ) -> Result<T::Transaction, T::Error> {
     resp_builder.fill(tx, TransactionInfo::default())
@@ -53,7 +53,7 @@ pub trait TransactionCompat<T = TransactionSigned>:
     /// environment related fields to `None`.
     fn fill(
         &self,
-        tx: TransactionSignedEcRecovered<T>,
+        tx: RecoveredTx<T>,
         tx_inf: TransactionInfo,
     ) -> Result<Self::Transaction, Self::Error>;
 
@@ -63,8 +63,8 @@ pub trait TransactionCompat<T = TransactionSigned>:
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction);
 }
 
-/// Convert [`TransactionSignedEcRecovered`] to [`TransactionRequest`]
-pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> TransactionRequest {
+/// Convert [`RecoveredTx`] to [`TransactionRequest`]
+pub fn transaction_to_call_request(tx: RecoveredTx) -> TransactionRequest {
     let from = tx.signer();
     let to = Some(tx.transaction.to().into());
     let gas = tx.transaction.gas_limit();

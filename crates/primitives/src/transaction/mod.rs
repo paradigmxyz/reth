@@ -1107,56 +1107,56 @@ impl TransactionSigned {
         }
     }
 
-    /// Returns the [`TransactionSignedEcRecovered`] transaction with the given sender.
+    /// Returns the [`RecoveredTx`] transaction with the given sender.
     #[inline]
-    pub const fn with_signer(self, signer: Address) -> TransactionSignedEcRecovered {
-        TransactionSignedEcRecovered::from_signed_transaction(self, signer)
+    pub const fn with_signer(self, signer: Address) -> RecoveredTx {
+        RecoveredTx::from_signed_transaction(self, signer)
     }
 
-    /// Consumes the type, recover signer and return [`TransactionSignedEcRecovered`]
+    /// Consumes the type, recover signer and return [`RecoveredTx`]
     ///
     /// Returns `None` if the transaction's signature is invalid, see also [`Self::recover_signer`].
-    pub fn into_ecrecovered(self) -> Option<TransactionSignedEcRecovered> {
+    pub fn into_ecrecovered(self) -> Option<RecoveredTx> {
         let signer = self.recover_signer()?;
-        Some(TransactionSignedEcRecovered { signed_transaction: self, signer })
+        Some(RecoveredTx { signed_transaction: self, signer })
     }
 
-    /// Consumes the type, recover signer and return [`TransactionSignedEcRecovered`] _without
+    /// Consumes the type, recover signer and return [`RecoveredTx`] _without
     /// ensuring that the signature has a low `s` value_ (EIP-2).
     ///
     /// Returns `None` if the transaction's signature is invalid, see also
     /// [`Self::recover_signer_unchecked`].
-    pub fn into_ecrecovered_unchecked(self) -> Option<TransactionSignedEcRecovered> {
+    pub fn into_ecrecovered_unchecked(self) -> Option<RecoveredTx> {
         let signer = self.recover_signer_unchecked()?;
-        Some(TransactionSignedEcRecovered { signed_transaction: self, signer })
+        Some(RecoveredTx { signed_transaction: self, signer })
     }
 
-    /// Tries to recover signer and return [`TransactionSignedEcRecovered`] by cloning the type.
-    pub fn try_ecrecovered(&self) -> Option<TransactionSignedEcRecovered> {
+    /// Tries to recover signer and return [`RecoveredTx`] by cloning the type.
+    pub fn try_ecrecovered(&self) -> Option<RecoveredTx> {
         let signer = self.recover_signer()?;
-        Some(TransactionSignedEcRecovered { signed_transaction: self.clone(), signer })
+        Some(RecoveredTx { signed_transaction: self.clone(), signer })
     }
 
-    /// Tries to recover signer and return [`TransactionSignedEcRecovered`].
+    /// Tries to recover signer and return [`RecoveredTx`].
     ///
     /// Returns `Err(Self)` if the transaction's signature is invalid, see also
     /// [`Self::recover_signer`].
-    pub fn try_into_ecrecovered(self) -> Result<TransactionSignedEcRecovered, Self> {
+    pub fn try_into_ecrecovered(self) -> Result<RecoveredTx, Self> {
         match self.recover_signer() {
             None => Err(self),
-            Some(signer) => Ok(TransactionSignedEcRecovered { signed_transaction: self, signer }),
+            Some(signer) => Ok(RecoveredTx { signed_transaction: self, signer }),
         }
     }
 
-    /// Tries to recover signer and return [`TransactionSignedEcRecovered`]. _without ensuring that
+    /// Tries to recover signer and return [`RecoveredTx`]. _without ensuring that
     /// the signature has a low `s` value_ (EIP-2).
     ///
     /// Returns `Err(Self)` if the transaction's signature is invalid, see also
     /// [`Self::recover_signer_unchecked`].
-    pub fn try_into_ecrecovered_unchecked(self) -> Result<TransactionSignedEcRecovered, Self> {
+    pub fn try_into_ecrecovered_unchecked(self) -> Result<RecoveredTx, Self> {
         match self.recover_signer_unchecked() {
             None => Err(self),
-            Some(signer) => Ok(TransactionSignedEcRecovered { signed_transaction: self, signer }),
+            Some(signer) => Ok(RecoveredTx { signed_transaction: self, signer }),
         }
     }
 
@@ -1433,8 +1433,8 @@ impl alloy_consensus::Transaction for TransactionSigned {
     }
 }
 
-impl From<TransactionSignedEcRecovered> for TransactionSigned {
-    fn from(recovered: TransactionSignedEcRecovered) -> Self {
+impl From<RecoveredTx> for TransactionSigned {
+    fn from(recovered: RecoveredTx) -> Self {
         recovered.signed_transaction
     }
 }
@@ -1620,9 +1620,12 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
     }
 }
 
+/// Type alias kept for backward compatibility.
+pub type TransactionSignedEcRecovered<T = TransactionSigned> = RecoveredTx<T>;
+
 /// Signed transaction with recovered signer.
 #[derive(Debug, Clone, PartialEq, Hash, Eq, AsRef, Deref)]
-pub struct TransactionSignedEcRecovered<T = TransactionSigned> {
+pub struct RecoveredTx<T = TransactionSigned> {
     /// Signer of the transaction
     signer: Address,
     /// Signed transaction
@@ -1631,9 +1634,9 @@ pub struct TransactionSignedEcRecovered<T = TransactionSigned> {
     signed_transaction: T,
 }
 
-// === impl TransactionSignedEcRecovered ===
+// === impl RecoveredTx ===
 
-impl<T> TransactionSignedEcRecovered<T> {
+impl<T> RecoveredTx<T> {
     /// Signer of transaction recovered from signature
     pub const fn signer(&self) -> Address {
         self.signer
@@ -1654,7 +1657,7 @@ impl<T> TransactionSignedEcRecovered<T> {
         (self.signed_transaction, self.signer)
     }
 
-    /// Create [`TransactionSignedEcRecovered`] from [`TransactionSigned`] and [`Address`] of the
+    /// Create [`RecoveredTx`] from [`TransactionSigned`] and [`Address`] of the
     /// signer.
     #[inline]
     pub const fn from_signed_transaction(signed_transaction: T, signer: Address) -> Self {
@@ -1662,7 +1665,7 @@ impl<T> TransactionSignedEcRecovered<T> {
     }
 }
 
-impl<T: Encodable> Encodable for TransactionSignedEcRecovered<T> {
+impl<T: Encodable> Encodable for RecoveredTx<T> {
     /// This encodes the transaction _with_ the signature, and an rlp header.
     ///
     /// Refer to docs for [`TransactionSigned::encode`] for details on the exact format.
@@ -1675,7 +1678,7 @@ impl<T: Encodable> Encodable for TransactionSignedEcRecovered<T> {
     }
 }
 
-impl<T: SignedTransaction> Decodable for TransactionSignedEcRecovered<T> {
+impl<T: SignedTransaction> Decodable for RecoveredTx<T> {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let signed_transaction = T::decode(buf)?;
         let signer = signed_transaction
@@ -1685,20 +1688,38 @@ impl<T: SignedTransaction> Decodable for TransactionSignedEcRecovered<T> {
     }
 }
 
-/// Extension trait for [`SignedTransaction`] to convert it into [`TransactionSignedEcRecovered`].
+impl<T: Encodable2718> Encodable2718 for RecoveredTx<T> {
+    fn type_flag(&self) -> Option<u8> {
+        self.signed_transaction.type_flag()
+    }
+
+    fn encode_2718_len(&self) -> usize {
+        self.signed_transaction.encode_2718_len()
+    }
+
+    fn encode_2718(&self, out: &mut dyn alloy_rlp::BufMut) {
+        self.signed_transaction.encode_2718(out)
+    }
+
+    fn trie_hash(&self) -> B256 {
+        self.signed_transaction.trie_hash()
+    }
+}
+
+/// Extension trait for [`SignedTransaction`] to convert it into [`RecoveredTx`].
 pub trait SignedTransactionIntoRecoveredExt: SignedTransaction {
-    /// Consumes the type, recover signer and return [`TransactionSignedEcRecovered`] _without
+    /// Consumes the type, recover signer and return [`RecoveredTx`] _without
     /// ensuring that the signature has a low `s` value_ (EIP-2).
     ///
     /// Returns `None` if the transaction's signature is invalid.
-    fn into_ecrecovered_unchecked(self) -> Option<TransactionSignedEcRecovered<Self>> {
+    fn into_ecrecovered_unchecked(self) -> Option<RecoveredTx<Self>> {
         let signer = self.recover_signer_unchecked()?;
-        Some(TransactionSignedEcRecovered::from_signed_transaction(self, signer))
+        Some(RecoveredTx::from_signed_transaction(self, signer))
     }
 
-    /// Returns the [`TransactionSignedEcRecovered`] transaction with the given sender.
-    fn with_signer(self, signer: Address) -> TransactionSignedEcRecovered<Self> {
-        TransactionSignedEcRecovered::from_signed_transaction(self, signer)
+    /// Returns the [`RecoveredTx`] transaction with the given sender.
+    fn with_signer(self, signer: Address) -> RecoveredTx<Self> {
+        RecoveredTx::from_signed_transaction(self, signer)
     }
 }
 
@@ -1944,7 +1965,7 @@ where
 mod tests {
     use crate::{
         transaction::{TxEip1559, TxKind, TxLegacy},
-        Transaction, TransactionSigned, TransactionSignedEcRecovered,
+        RecoveredTx, Transaction, TransactionSigned,
     };
     use alloy_consensus::Transaction as _;
     use alloy_eips::eip2718::{Decodable2718, Encodable2718};
@@ -2205,8 +2226,7 @@ mod tests {
         let tx = TransactionSigned::decode(&mut &input[..]).unwrap();
         let recovered = tx.into_ecrecovered().unwrap();
 
-        let decoded =
-            TransactionSignedEcRecovered::decode(&mut &alloy_rlp::encode(&recovered)[..]).unwrap();
+        let decoded = RecoveredTx::decode(&mut &alloy_rlp::encode(&recovered)[..]).unwrap();
         assert_eq!(recovered, decoded)
     }
 

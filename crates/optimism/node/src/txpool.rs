@@ -237,7 +237,7 @@ mod tests {
     use alloy_primitives::{PrimitiveSignature as Signature, TxKind, U256};
     use op_alloy_consensus::TxDeposit;
     use reth_chainspec::MAINNET;
-    use reth_primitives::{Transaction, TransactionSigned, TransactionSignedEcRecovered};
+    use reth_primitives::{RecoveredTx, Transaction, TransactionSigned};
     use reth_provider::test_utils::MockEthProvider;
     use reth_transaction_pool::{
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
@@ -266,8 +266,7 @@ mod tests {
         });
         let signature = Signature::test_signature();
         let signed_tx = TransactionSigned::new_unhashed(deposit_tx, signature);
-        let signed_recovered =
-            TransactionSignedEcRecovered::from_signed_transaction(signed_tx, signer);
+        let signed_recovered = RecoveredTx::from_signed_transaction(signed_tx, signer);
         let len = signed_recovered.encode_2718_len();
         let pooled_tx = EthPooledTransaction::new(signed_recovered, len);
         let outcome = validator.validate_one(origin, pooled_tx);

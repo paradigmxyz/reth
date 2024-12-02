@@ -52,8 +52,8 @@ pub use static_file::StaticFileSegment;
 pub use transaction::{
     util::secp256k1::{public_key_to_address, recover_signer_unchecked, sign_message},
     BlobTransaction, InvalidTransactionError, PooledTransactionsElement,
-    PooledTransactionsElementEcRecovered, Transaction, TransactionMeta, TransactionSigned,
-    TransactionSignedEcRecovered, TransactionSignedNoHash, TxType,
+    PooledTransactionsElementEcRecovered, RecoveredTx, Transaction, TransactionMeta,
+    TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxType,
 };
 
 // Re-exports

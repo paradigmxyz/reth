@@ -7,7 +7,7 @@ use crate::{
 use alloy_primitives::Address;
 use core::fmt;
 use reth_payload_util::PayloadTransactions;
-use reth_primitives::{InvalidTransactionError, TransactionSignedEcRecovered};
+use reth_primitives::{InvalidTransactionError, RecoveredTx};
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet, VecDeque},
     sync::Arc,
@@ -226,7 +226,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
 #[derive(Debug)]
 pub struct BestPayloadTransactions<T, I>
 where
-    T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
+    T: PoolTransaction<Consensus: Into<RecoveredTx>>,
     I: Iterator<Item = Arc<ValidPoolTransaction<T>>>,
 {
     invalid: HashSet<Address>,
@@ -235,7 +235,7 @@ where
 
 impl<T, I> BestPayloadTransactions<T, I>
 where
-    T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
+    T: PoolTransaction<Consensus: Into<RecoveredTx>>,
     I: Iterator<Item = Arc<ValidPoolTransaction<T>>>,
 {
     /// Create a new `BestPayloadTransactions` with the given iterator.
@@ -246,10 +246,10 @@ where
 
 impl<T, I> PayloadTransactions for BestPayloadTransactions<T, I>
 where
-    T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
+    T: PoolTransaction<Consensus: Into<RecoveredTx>>,
     I: Iterator<Item = Arc<ValidPoolTransaction<T>>>,
 {
-    fn next(&mut self, _ctx: ()) -> Option<TransactionSignedEcRecovered> {
+    fn next(&mut self, _ctx: ()) -> Option<RecoveredTx> {
         loop {
             let tx = self.best.next()?;
             if self.invalid.contains(&tx.sender()) {

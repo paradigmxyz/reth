@@ -4,8 +4,8 @@
 #[derive(Debug, thiserror::Error)]
 pub enum OpPayloadBuilderError {
     /// Thrown when a transaction fails to convert to a
-    /// [`reth_primitives::TransactionSignedEcRecovered`].
-    #[error("failed to convert deposit transaction to TransactionSignedEcRecovered")]
+    /// [`reth_primitives::RecoveredTx`].
+    #[error("failed to convert deposit transaction to RecoveredTx")]
     TransactionEcRecoverFailed,
     /// Thrown when the L1 block info could not be parsed from the calldata of the
     /// first transaction supplied in the payload attributes.

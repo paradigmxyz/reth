@@ -14,9 +14,8 @@ use reth_chainspec::{ChainSpec, EthereumHardfork, MIN_TRANSACTION_GAS};
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{
     proofs::{calculate_receipt_root, calculate_transaction_root, calculate_withdrawals_root},
-    BlockBody, EthPrimitives, NodePrimitives, Receipt, Receipts, SealedBlock,
+    BlockBody, EthPrimitives, NodePrimitives, Receipt, Receipts, RecoveredTx, SealedBlock,
     SealedBlockWithSenders, SealedHeader, Transaction, TransactionSigned,
-    TransactionSignedEcRecovered,
 };
 use reth_storage_api::NodePrimitivesProvider;
 use reth_trie::{root::state_root_unhashed, updates::TrieUpdates, HashedPostState};
@@ -91,7 +90,7 @@ impl TestBlockBuilder {
     ) -> SealedBlockWithSenders {
         let mut rng = thread_rng();
 
-        let mock_tx = |nonce: u64| -> TransactionSignedEcRecovered {
+        let mock_tx = |nonce: u64| -> RecoveredTx {
             let tx = Transaction::Eip1559(TxEip1559 {
                 chain_id: self.chain_spec.chain.id(),
                 nonce,
@@ -109,7 +108,7 @@ impl TestBlockBuilder {
 
         let num_txs = rng.gen_range(0..5);
         let signer_balance_decrease = Self::single_tx_cost() * U256::from(num_txs);
-        let transactions: Vec<TransactionSignedEcRecovered> = (0..num_txs)
+        let transactions: Vec<RecoveredTx> = (0..num_txs)
             .map(|_| {
                 let tx = mock_tx(self.signer_build_account_info.nonce);
                 self.signer_build_account_info.nonce += 1;
