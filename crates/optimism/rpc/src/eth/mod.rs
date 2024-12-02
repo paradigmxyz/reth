@@ -13,19 +13,15 @@ use reth_optimism_primitives::OpPrimitives;
 use std::{fmt, sync::Arc};
 
 use alloy_consensus::Header;
-use alloy_eips::BlockId;
-use alloy_primitives::{Address, B256, U256};
-use alloy_rpc_types_eth::EIP1186AccountProofResponse;
-use alloy_serde::JsonStorageKey;
+use alloy_primitives::{ U256};
 use op_alloy_network::Optimism;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_errors::RethError;
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_node_builder::EthApiBuilderCtx;
 use reth_provider::{
-    BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions,
-    ChainSpecProvider, EvmEnvProvider, StageCheckpointReader, StateProviderFactory,
+    BlockNumReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
+    EvmEnvProvider, StageCheckpointReader, StateProviderFactory,
 };
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
@@ -33,17 +29,14 @@ use reth_rpc_eth_api::{
         AddDevSigners, EthApiSpec, EthFees, EthSigner, EthState, LoadBlock, LoadFee, LoadState,
         SpawnBlocking, Trace,
     },
-    EthApiTypes, FromEthApiError, RpcNodeCore, RpcNodeCoreExt,
+    EthApiTypes, RpcNodeCore, RpcNodeCoreExt,
 };
-use reth_rpc_eth_types::{EthApiError, EthStateCache, FeeHistoryCache, GasPriceOracle};
-use reth_rpc_types_compat::proof::from_primitive_account_proof;
+use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner,
 };
 use reth_transaction_pool::TransactionPool;
-use reth_trie_common::AccountProof;
-use std::future::Future;
 
 use crate::{OpEthApiError, SequencerClient};
 
@@ -226,77 +219,6 @@ where
     fn max_proof_window(&self) -> u64 {
         self.inner.eth_api.eth_proof_window()
     }
-
-    fn get_proof(
-        &self,
-        address: Address,
-        keys: Vec<JsonStorageKey>,
-        block_id: Option<BlockId>,
-    ) -> Result<
-        impl Future<Output = Result<EIP1186AccountProofResponse, Self::Error>> + Send,
-        Self::Error,
-    >
-    where
-        Self: EthApiSpec,
-    {
-        Ok(async move {
-            let _permit = self
-                .acquire_owned()
-                .await
-                .map_err(RethError::other)
-                .map_err(EthApiError::Internal)?;
-
-            let chain_info = self.chain_info().map_err(Self::Error::from_eth_err)?;
-            let block_id = block_id.unwrap_or_default();
-
-            // Check whether the distance to the block exceeds the maximum configured window.
-            let block_number = self
-                .provider()
-                .block_number_for_id(block_id)
-                .map_err(Self::Error::from_eth_err)?
-                .ok_or(EthApiError::HeaderNotFound(block_id))?;
-
-            if self.inner.storage_proof_only.contains(&address) {
-                self.spawn_blocking_io(move |this| {
-                    let b256_keys: Vec<B256> = keys.iter().map(|k| k.as_b256()).collect();
-                    let state = this.state_at_block_id(block_number.into())?;
-
-                    let proofs = state
-                        .storage_multiproof(address, &b256_keys, Default::default())
-                        .map_err(EthApiError::from_eth_err)?;
-
-                    let account_proof = AccountProof {
-                        address,
-                        storage_root: proofs.root,
-                        storage_proofs: b256_keys
-                            .into_iter()
-                            .map(|k| proofs.storage_proof(k))
-                            .collect::<Result<_, _>>()
-                            .map_err(RethError::other)
-                            .map_err(Self::Error::from_eth_err)?,
-                        ..Default::default()
-                    };
-                    Ok(from_primitive_account_proof(account_proof, keys))
-                })
-                .await
-            } else {
-                let max_window = self.max_proof_window();
-                if chain_info.best_number.saturating_sub(block_number) > max_window {
-                    return Err(EthApiError::ExceedsMaxProofWindow.into())
-                }
-
-                self.spawn_blocking_io(move |this| {
-                    let state = this.state_at_block_id(block_id)?;
-                    let storage_keys = keys.iter().map(|key| key.as_b256()).collect::<Vec<_>>();
-                    let proof = state
-                        .proof(Default::default(), address, &storage_keys)
-                        .map_err(Self::Error::from_eth_err)?;
-                    Ok(from_primitive_account_proof(proof, keys))
-                })
-                .await
-            }
-        })
-    }
 }
 
 impl<N> EthFees for OpEthApi<N>
@@ -336,9 +258,6 @@ struct OpEthApiInner<N: RpcNodeCore> {
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
     sequencer_client: Option<SequencerClient>,
-    /// List of addresses that _ONLY_ return storage proofs _WITHOUT_ an account proof when called
-    /// with `eth_getProof`.
-    storage_proof_only: Vec<Address>,
 }
 
 /// A type that knows how to build a [`OpEthApi`].
@@ -349,27 +268,17 @@ pub struct OpEthApiBuilder<'a, N: RpcNodeCore> {
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
     sequencer_client: Option<SequencerClient>,
-    /// List of addresses that _ONLY_ return storage proofs _WITHOUT_ an account proof when called
-    /// with `eth_getProof`.
-    storage_proof_only: Vec<Address>,
 }
 
 impl<'a, N: RpcNodeCore> OpEthApiBuilder<'a, N> {
     /// Creates a [`OpEthApiBuilder`] instance from [`EthApiBuilderCtx`].
     pub const fn new(ctx: &'a EthApiBuilderCtx<N>) -> Self {
-        Self { ctx, sequencer_client: None, storage_proof_only: vec![] }
+        Self { ctx, sequencer_client: None }
     }
 
     /// With a [`SequencerClient`].
     pub fn with_sequencer(mut self, sequencer_client: Option<SequencerClient>) -> Self {
         self.sequencer_client = sequencer_client;
-        self
-    }
-
-    /// With a list of addresses that _ONLY_ return storage proofs _WITHOUT_ an account proof when
-    /// called with `eth_getProof`.
-    pub fn with_storage_proof_only(mut self, storage_proof_only: Vec<Address>) -> Self {
-        self.storage_proof_only = storage_proof_only;
         self
     }
 }
@@ -409,7 +318,6 @@ where
             inner: Arc::new(OpEthApiInner {
                 eth_api,
                 sequencer_client: self.sequencer_client,
-                storage_proof_only: self.storage_proof_only,
             }),
         }
     }

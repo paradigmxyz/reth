@@ -7,7 +7,6 @@ use crate::{
     OpEngineTypes,
 };
 use alloy_consensus::Header;
-use alloy_primitives::Address;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_db::transaction::{DbTx, DbTxMut};
@@ -147,7 +146,7 @@ impl OpNode {
             .pool(OpPoolBuilder::default())
             .payload(OpPayloadBuilder::new(compute_pending_block))
             .network(OpNetworkBuilder {
-                disable_txpool_gossip: disable_txpool_gossip,
+                disable_txpool_gossip,
                 disable_discovery_v4: !discovery_v4,
             })
             .executor(OpExecutorBuilder::default())
@@ -183,10 +182,7 @@ where
     }
 
     fn add_ons(&self) -> Self::AddOns {
-        OpAddOns::builder()
-            .with_sequencer(self.args.sequencer_http.clone())
-            .with_storage_proof_only(self.args.storage_proof_only.clone())
-            .build()
+        OpAddOns::builder().with_sequencer(self.args.sequencer_http.clone()).build()
     }
 }
 
@@ -280,15 +276,12 @@ pub struct OpAddOnsBuilder<N> {
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
     sequencer_client: Option<SequencerClient>,
-    /// List of addresses that _ONLY_ return storage proofs _WITHOUT_ an account proof when called
-    /// with `eth_getProof`.
-    storage_proof_only: Vec<Address>,
     _marker: PhantomData<N>,
 }
 
 impl<N> Default for OpAddOnsBuilder<N> {
     fn default() -> Self {
-        Self { sequencer_client: None, storage_proof_only: vec![], _marker: PhantomData }
+        Self { sequencer_client: None, _marker: PhantomData }
     }
 }
 
@@ -296,13 +289,6 @@ impl<N> OpAddOnsBuilder<N> {
     /// With a [`SequencerClient`].
     pub fn with_sequencer(mut self, sequencer_client: Option<String>) -> Self {
         self.sequencer_client = sequencer_client.map(SequencerClient::new);
-        self
-    }
-
-    /// With a list of addresses that _ONLY_ return storage proofs _WITHOUT_ an account proof when
-    /// called with `eth_getProof`.
-    pub fn with_storage_proof_only(mut self, storage_proof_only: Vec<Address>) -> Self {
-        self.storage_proof_only = storage_proof_only;
         self
     }
 }
@@ -313,15 +299,10 @@ where
 {
     /// Builds an instance of [`OpAddOns`].
     pub fn build(self) -> OpAddOns<N> {
-        let Self { sequencer_client, storage_proof_only, .. } = self;
+        let Self { sequencer_client, .. } = self;
 
         OpAddOns(RpcAddOns::new(
-            move |ctx| {
-                OpEthApi::builder(ctx)
-                    .with_sequencer(sequencer_client)
-                    .with_storage_proof_only(storage_proof_only)
-                    .build()
-            },
+            move |ctx| OpEthApi::builder(ctx).with_sequencer(sequencer_client).build(),
             Default::default(),
         ))
     }

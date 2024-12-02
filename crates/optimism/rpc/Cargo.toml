@@ -14,7 +14,6 @@ workspace = true
 [dependencies]
 # reth
 reth-evm.workspace = true
-reth-errors.workspace = true
 reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-rpc-eth-api.workspace = true
@@ -24,12 +23,10 @@ reth-tasks = { workspace = true, features = ["rayon"] }
 reth-transaction-pool.workspace = true
 reth-rpc.workspace = true
 reth-rpc-api.workspace = true
-reth-rpc-types-compat.workspace = true
 reth-node-api.workspace = true
 reth-network-api.workspace = true
 reth-node-builder.workspace = true
 reth-chainspec.workspace = true
-reth-trie-common.workspace = true
 
 # op-reth
 reth-optimism-chainspec.workspace = true
@@ -44,7 +41,6 @@ alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-rpc-types-debug.workspace = true
-alloy-serde.workspace = true
 alloy-consensus.workspace = true
 op-alloy-network.workspace = true
 op-alloy-rpc-types.workspace = true
