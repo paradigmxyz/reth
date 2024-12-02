@@ -1031,7 +1031,7 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
             .prop_map(|(signed_transaction, signer)| {
                 RecoveredTx::from_signed_transaction(signed_transaction, signer)
                     .try_into()
-                    .expect("Failed to create an Arbitrary MockTransaction via Recovered")
+                    .expect("Failed to create an Arbitrary MockTransaction via RecoveredTx")
             })
             .boxed()
     }

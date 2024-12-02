@@ -436,7 +436,7 @@ impl<B: Block<Body: BlockBody<Transaction: SignedTransaction>>> ChainBlocks<'_, 
         self.blocks.values().flat_map(|block| block.transactions_with_sender())
     }
 
-    /// Returns an iterator over all [`Recovered`] in the blocks
+    /// Returns an iterator over all [`RecoveredTx`] in the blocks
     ///
     /// Note: This clones the transactions since it is assumed this is part of a shared [Chain].
     #[inline]

@@ -436,7 +436,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
 }
 
 impl<T: PoolTransaction<Consensus: Into<RecoveredTx>>> ValidPoolTransaction<T> {
-    /// Converts to this type into a [`Recovered`].
+    /// Converts to this type into a [`RecoveredTx`].
     ///
     /// Note: this takes `&self` since indented usage is via `Arc<Self>`.
     pub fn to_recovered_transaction(&self) -> RecoveredTx {

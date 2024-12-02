@@ -63,7 +63,7 @@ pub trait TransactionCompat<T = TransactionSigned>:
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction);
 }
 
-/// Convert [`Recovered`] to [`TransactionRequest`]
+/// Convert [`RecoveredTx`] to [`TransactionRequest`]
 pub fn transaction_to_call_request(tx: RecoveredTx) -> TransactionRequest {
     let from = tx.signer();
     let to = Some(tx.transaction.to().into());

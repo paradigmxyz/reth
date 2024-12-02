@@ -74,7 +74,7 @@ impl PooledTransactionsElement {
         }
     }
 
-    /// Converts from an EIP-4844 [`Recovered`] to a
+    /// Converts from an EIP-4844 [`RecoveredTx`] to a
     /// [`PooledTransactionsElementEcRecovered`] with the given sidecar.
     ///
     /// Returns an `Err` containing the original `TransactionSigned` if the transaction is not
@@ -164,7 +164,7 @@ impl PooledTransactionsElement {
         }
     }
 
-    /// Create [`Recovered`] by converting this transaction into
+    /// Create [`RecoveredTx`] by converting this transaction into
     /// [`TransactionSigned`] and [`Address`] of the signer.
     pub fn into_ecrecovered_transaction(self, signer: Address) -> RecoveredTx {
         RecoveredTx::from_signed_transaction(self.into_transaction(), signer)
@@ -691,13 +691,13 @@ impl<'a> arbitrary::Arbitrary<'a> for PooledTransactionsElement {
 pub type PooledTransactionsElementEcRecovered<T = PooledTransactionsElement> = RecoveredTx<T>;
 
 impl PooledTransactionsElementEcRecovered {
-    /// Transform back to [`Recovered`]
+    /// Transform back to [`RecoveredTx`]
     pub fn into_ecrecovered_transaction(self) -> RecoveredTx {
         let (tx, signer) = self.to_components();
         tx.into_ecrecovered_transaction(signer)
     }
 
-    /// Converts from an EIP-4844 [`Recovered`] to a
+    /// Converts from an EIP-4844 [`RecoveredTx`] to a
     /// [`PooledTransactionsElementEcRecovered`] with the given sidecar.
     ///
     /// Returns the transaction is not an EIP-4844 transaction.
