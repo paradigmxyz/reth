@@ -23,6 +23,9 @@ alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 revm-primitives.workspace = true
 
+# op
+op-alloy-consensus = { workspace = true, optional = true }
+
 # misc
 byteorder = { workspace = true, optional = true }
 bytes.workspace = true
@@ -78,28 +81,34 @@ arbitrary = [
 	"dep:proptest-arbitrary-interop",
 	"alloy-eips/arbitrary",
 	"revm-primitives/arbitrary",
-	"reth-codecs?/arbitrary"
+	"reth-codecs?/arbitrary",
+	"op-alloy-consensus?/arbitrary"
 ]
 serde-bincode-compat = [
 	"serde",
 	"serde_with",
 	"alloy-consensus/serde-bincode-compat",
-	"alloy-eips/serde-bincode-compat"
+	"alloy-eips/serde-bincode-compat",
+	"op-alloy-consensus?/serde-bincode-compat"
 ]
 serde = [
 	"dep:serde",
 	"alloy-consensus/serde",
-    "alloy-eips/serde",
-    "alloy-primitives/serde",
-    "bytes/serde",
-    "rand/serde",
-    "reth-codecs?/serde",
-    "revm-primitives/serde",
-    "roaring/serde",
+	"alloy-eips/serde",
+	"alloy-primitives/serde",
+	"bytes/serde",
+	"rand/serde",
+	"reth-codecs?/serde",
 	"revm-primitives/serde",
+	"roaring/serde",
+	"revm-primitives/serde",
+	"op-alloy-consensus?/serde"
 ]
 reth-codec = [
 	"dep:reth-codecs",
 	"dep:modular-bitfield",
 	"dep:byteorder",
+]
+op = [
+	"dep:op-alloy-consensus",
 ]
