@@ -17,7 +17,7 @@ use reth_trie_parallel::root::ParallelStateRootError;
 use reth_trie_sparse::{SparseStateTrie, SparseStateTrieResult, SparseTrieError};
 use revm_primitives::{keccak256, map::DefaultHashBuilder, EvmState, B256};
 use std::{
-    collections::{hash_map::Entry, BTreeMap},
+    collections::BTreeMap,
     sync::{
         mpsc::{self, Receiver, Sender},
         Arc,
@@ -217,7 +217,7 @@ where
         view: ConsistentDbView<Factory>,
         input: Arc<TrieInput>,
         update: EvmState,
-        fetched_proof_targets: &mut HashMap<B256, HashSet<B256>>,
+        fetched_proof_targets: &HashMap<B256, HashSet<B256>>,
         proof_sequence_number: u64,
         state_root_message_sender: Sender<StateRootMessage>,
     ) -> HashMap<B256, HashSet<B256>> {
@@ -319,7 +319,7 @@ where
         );
 
         // TODO(alexey): store proof targets in `ProofSequecner` to avoid recomputing them
-        let targets = get_proof_targets(&state, &mut HashMap::default());
+        let targets = get_proof_targets(&state, &HashMap::default());
         let provider_ro = self.config.consistent_view.provider_ro();
         let nodes_sorted = self.config.input.nodes.clone().into_sorted();
         let state_sorted = self.config.input.state.clone().into_sorted();
@@ -380,7 +380,7 @@ where
                             self.config.consistent_view.clone(),
                             self.config.input.clone(),
                             update,
-                            &mut self.fetched_proof_targets,
+                            &self.fetched_proof_targets,
                             self.proof_sequencer.next_sequence(),
                             self.tx.clone(),
                         );
@@ -488,13 +488,13 @@ where
 /// account shouldn't be included.
 fn get_proof_targets(
     state_update: &HashedPostState,
-    fetched_proof_targets: &mut HashMap<B256, HashSet<B256>>,
+    fetched_proof_targets: &HashMap<B256, HashSet<B256>>,
 ) -> HashMap<B256, HashSet<B256>> {
     let mut targets = HashMap::default();
 
     // first collect all new accounts (not previously fetched)
     for &hashed_address in state_update.accounts.keys() {
-        if let Entry::Vacant(_) = fetched_proof_targets.entry(hashed_address) {
+        if !fetched_proof_targets.contains_key(&hashed_address) {
             targets.insert(hashed_address, HashSet::default());
         }
     }
@@ -894,9 +894,9 @@ mod tests {
     #[test]
     fn test_get_proof_targets_new_account_targets() {
         let state = create_get_proof_targets_state();
-        let mut fetched = HashMap::default();
+        let fetched = HashMap::default();
 
-        let targets = get_proof_targets(&state, &mut fetched);
+        let targets = get_proof_targets(&state, &fetched);
 
         // should return all accounts as targets since nothing was fetched before
         assert_eq!(targets.len(), state.accounts.len());
@@ -908,9 +908,9 @@ mod tests {
     #[test]
     fn test_get_proof_targets_new_storage_targets() {
         let state = create_get_proof_targets_state();
-        let mut fetched = HashMap::default();
+        let fetched = HashMap::default();
 
-        let targets = get_proof_targets(&state, &mut fetched);
+        let targets = get_proof_targets(&state, &fetched);
 
         // verify storage slots are included for accounts with storage
         for (addr, storage) in &state.storages {
@@ -938,7 +938,7 @@ mod tests {
         // mark the account as already fetched
         fetched.insert(*fetched_addr, HashSet::default());
 
-        let targets = get_proof_targets(&state, &mut fetched);
+        let targets = get_proof_targets(&state, &fetched);
 
         // should not include the already fetched account since it has no storage updates
         assert!(!targets.contains_key(fetched_addr));
@@ -958,7 +958,7 @@ mod tests {
         fetched_slots.insert(fetched_slot);
         fetched.insert(*addr, fetched_slots);
 
-        let targets = get_proof_targets(&state, &mut fetched);
+        let targets = get_proof_targets(&state, &fetched);
 
         // should not include the already fetched storage slot
         let target_slots = &targets[addr];
@@ -969,9 +969,9 @@ mod tests {
     #[test]
     fn test_get_proof_targets_empty_state() {
         let state = HashedPostState::default();
-        let mut fetched = HashMap::default();
+        let fetched = HashMap::default();
 
-        let targets = get_proof_targets(&state, &mut fetched);
+        let targets = get_proof_targets(&state, &fetched);
 
         assert!(targets.is_empty());
     }
@@ -998,7 +998,7 @@ mod tests {
         fetched_slots.insert(slot1);
         fetched.insert(addr1, fetched_slots);
 
-        let targets = get_proof_targets(&state, &mut fetched);
+        let targets = get_proof_targets(&state, &fetched);
 
         assert!(targets.contains_key(&addr2));
         assert!(!targets[&addr1].contains(&slot1));
@@ -1008,7 +1008,7 @@ mod tests {
     #[test]
     fn test_get_proof_targets_unmodified_account_with_storage() {
         let mut state = HashedPostState::default();
-        let mut fetched = HashMap::default();
+        let fetched = HashMap::default();
 
         let addr = B256::random();
         let slot1 = B256::random();
@@ -1024,7 +1024,7 @@ mod tests {
         assert!(!state.accounts.contains_key(&addr));
         assert!(!fetched.contains_key(&addr));
 
-        let targets = get_proof_targets(&state, &mut fetched);
+        let targets = get_proof_targets(&state, &fetched);
 
         // verify that we still get the storage slots for the unmodified account
         assert!(targets.contains_key(&addr));
