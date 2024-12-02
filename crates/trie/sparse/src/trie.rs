@@ -822,8 +822,12 @@ where
         path: &Nibbles,
         mut fetch_node: impl FnMut(Nibbles) -> Option<Bytes>,
     ) -> SparseTrieResult<()> {
+        if self.values.remove(path).is_none() {
+            // Leaf is not present in the trie.
+            return Ok(())
+        }
+
         self.prefix_set.insert(path.clone());
-        self.values.remove(path);
 
         // If the path wasn't present in `values`, we still need to walk the trie and ensure that
         // there is no node at the path. When a leaf node is a blinded `Hash`, it will have an entry
