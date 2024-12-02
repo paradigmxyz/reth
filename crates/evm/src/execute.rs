@@ -503,7 +503,7 @@ where
 }
 
 /// Creates an `EvmState` from a map of balance increments and the current state
-/// to load accounts from.
+/// to load accounts from. No balance increment is done in the function.
 /// Zero balance increments are ignored and won't create state entries.
 pub fn balance_increment_state<DB>(
     balance_increments: &HashMap<Address, u128, DefaultHashBuilder>,
@@ -864,8 +864,8 @@ mod tests {
         let result = balance_increment_state(&increments, &mut state).unwrap();
 
         assert_eq!(result.len(), 2);
-        assert_eq!(result.get(&addr1).unwrap().info.balance, U256::from(150));
-        assert_eq!(result.get(&addr2).unwrap().info.balance, U256::from(300));
+        assert_eq!(result.get(&addr1).unwrap().info.balance, U256::from(100));
+        assert_eq!(result.get(&addr2).unwrap().info.balance, U256::from(200));
     }
 
     #[test]
@@ -887,6 +887,6 @@ mod tests {
 
         assert_eq!(result.len(), 1, "Only non-zero increments should be included");
         assert!(!result.contains_key(&addr1), "Zero increment account should not be included");
-        assert_eq!(result.get(&addr2).unwrap().info.balance, U256::from(300));
+        assert_eq!(result.get(&addr2).unwrap().info.balance, U256::from(200));
     }
 }
