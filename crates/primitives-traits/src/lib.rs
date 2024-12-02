@@ -58,7 +58,7 @@ pub use storage::StorageEntry;
 pub mod header;
 #[cfg(any(test, feature = "arbitrary", feature = "test-utils"))]
 pub use header::test_utils;
-pub use header::{BlockWithParent, Header, HeaderError, SealedHeader};
+pub use header::{Header, HeaderError, SealedHeader};
 
 /// Bincode-compatible serde implementations for common abstracted types in Reth.
 ///
