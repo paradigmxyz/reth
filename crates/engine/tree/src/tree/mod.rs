@@ -47,7 +47,6 @@ use reth_provider::{
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
-use reth_trie_common::proof::ProofNodes;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::EvmState;
 use root::{StateRootConfig, StateRootMessage, StateRootTask};
@@ -2216,11 +2215,16 @@ where
 
         let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
 
-        let state_hook_tx = state_root_tx.clone();
+        let input = self
+            .compute_trie_input(consistent_view.clone(), block.parent_hash)
+            .map_err(|e| InsertBlockErrorKindTwo::Other(Box::new(e)))?;
+        let state_root_config = StateRootConfig { consistent_view, input: Arc::new(input) };
+        let state_root_task =
+            StateRootTask::new(state_root_config, state_root_tx.clone(), state_root_rx, None);
+        let state_root_handle = state_root_task.spawn();
         let state_hook = move |state: &EvmState| {
-            let _ = state_hook_tx.send(StateRootMessage::StateUpdate(state.clone()));
+            let _ = state_root_tx.send(StateRootMessage::StateUpdate(state.clone()));
         };
-
         let output = self.metrics.executor.execute_metered(
             executor,
             (&block, U256::MAX).into(),
@@ -2228,18 +2232,6 @@ where
         )?;
 
         trace!(target: "engine::tree", elapsed=?exec_time.elapsed(), ?block_number, "Executed block");
-
-        let balance_changes = output
-            .state
-            .state
-            .iter()
-            .map(|(address, account)| {
-                let old_balance = account.original_info.as_ref().map(|info| info.balance);
-                let new_balance = account.info.as_ref().map(|info| info.balance);
-                (address, old_balance, new_balance)
-            })
-            .collect::<Vec<_>>();
-        trace!(target: "engine::tree", ?block_number, ?balance_changes, "Block balance changes");
 
         if let Err(err) = self.consensus.validate_block_post_execution(
             &block,
@@ -2286,20 +2278,9 @@ where
         }
 
         let (state_root, trie_output) = if let Some(result) = state_root_result {
-            let mut input = self
-                .compute_trie_input(consistent_view.clone(), block.parent_hash)
-                .map_err(|e| InsertBlockErrorKindTwo::Other(Box::new(e)))?;
-            // Extend with block we are validating root for.
-            input.append_ref(&hashed_state);
-
-            let state_root_config = StateRootConfig { consistent_view, input: Arc::new(input) };
-            let state_root_task =
-                StateRootTask::new(state_root_config, state_root_tx, state_root_rx, Some(result.2));
-            let state_root_handle = state_root_task.spawn();
-
             match state_root_handle.wait_for_result() {
                 Ok(state_root_task_result) => {
-                    info!(target: "engine::tree", block=?sealed_block.num_hash(), state_root_task_result=?state_root_task_result.0,  regular_state_root_result = ?result.0);
+                    info!(target: "engine::tree", block=?sealed_block.num_hash(), state_root_task_result=?state_root_task_result.0,  regular_state_root_result = ?result.0, "State root task completed");
                 }
                 Err(e) => {
                     info!(target: "engine::tree", error=?e, "on state root task wait_for_result")
@@ -2399,8 +2380,8 @@ where
         &self,
         consistent_view: ConsistentDbView<P>,
         input: TrieInput,
-    ) -> Result<(B256, TrieUpdates, ProofNodes), ParallelStateRootError> {
-        ParallelStateRoot::new(consistent_view, input).incremental_root_with_updates_and_proofs()
+    ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
+        ParallelStateRoot::new(consistent_view, input).incremental_root_with_updates()
     }
 
     /// Handles an error that occurred while inserting a block.
