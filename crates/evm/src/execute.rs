@@ -523,10 +523,9 @@ where
 
         let storage = account
             .storage
-            .clone()
-            .into_iter()
+            .iter()
             .map(|(k, v)| {
-                (k, EvmStorageSlot { original_value: v, present_value: v, is_cold: false })
+                (*k, EvmStorageSlot { original_value: *v, present_value: *v, is_cold: false })
             })
             .collect();
 
