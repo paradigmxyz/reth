@@ -144,7 +144,7 @@ impl AnyNode {
                 let node_record = NodeRecord {
                     address: enr
                         .ip4()
-                        .map(std::net::IpAddr::from)
+                        .map(core::net::IpAddr::from)
                         .or_else(|| enr.ip6().map(std::net::IpAddr::from))?,
                     tcp_port: enr.tcp4().or_else(|| enr.tcp6())?,
                     udp_port: enr.udp4().or_else(|| enr.udp6())?,
