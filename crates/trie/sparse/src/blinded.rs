@@ -1,7 +1,7 @@
 //! Traits and default implementations related to retrieval of blinded trie nodes.
 
 use crate::SparseTrieError;
-use alloy_primitives::Bytes;
+use alloy_primitives::{Bytes, B256};
 use reth_trie_common::Nibbles;
 
 /// Factory for instantiating blinded node providers.
@@ -15,7 +15,7 @@ pub trait BlindedProviderFactory {
     fn account_node_provider(&self) -> Self::AccountNodeProvider;
 
     /// Returns blinded storage node provider.
-    fn storage_node_provider(&self) -> Self::StorageNodeProvider;
+    fn storage_node_provider(&self, account: B256) -> Self::StorageNodeProvider;
 }
 
 /// Trie node provider for retrieving blinded nodes.
@@ -39,7 +39,7 @@ impl BlindedProviderFactory for DefaultBlindedProviderFactory {
         DefaultBlindedProvider
     }
 
-    fn storage_node_provider(&self) -> Self::StorageNodeProvider {
+    fn storage_node_provider(&self, _account: B256) -> Self::StorageNodeProvider {
         DefaultBlindedProvider
     }
 }

@@ -129,7 +129,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
 
         // Reveal root node if it wasn't already.
         let trie = self.storages.entry(account).or_default().reveal_root_with_provider(
-            self.provider_factory.storage_node_provider(),
+            self.provider_factory.storage_node_provider(account),
             root_node,
             self.retain_updates,
         )?;
@@ -179,7 +179,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
             if let Some(root_node) = self.validate_root_node(&mut storage_nodes)? {
                 // Reveal root node if it wasn't already.
                 let trie = self.storages.entry(account).or_default().reveal_root_with_provider(
-                    self.provider_factory.storage_node_provider(),
+                    self.provider_factory.storage_node_provider(account),
                     root_node,
                     self.retain_updates,
                 )?;
