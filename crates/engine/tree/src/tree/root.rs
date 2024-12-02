@@ -482,25 +482,15 @@ fn get_proof_targets(
 
     // then process storage slots for all accounts in the state update
     for (hashed_address, storage) in &state_update.storages {
-        let target_slots = targets.entry(*hashed_address).or_default();
-        if let Some(fetched_storage_slots) = fetched_proof_targets.get(hashed_address) {
-            // We have previously fetched slots for this address
-            // Only add slots that haven't been fetched yet
-            for slot in storage.storage.keys() {
-                if !fetched_storage_slots.contains(slot) {
-                    target_slots.insert(*slot);
-                }
-            }
-        } else {
-            // No slots have been fetched for this address yet
-            // Add all slots from the storage
-            target_slots.extend(storage.storage.keys().copied());
-        }
+        let fetched = fetched_proof_targets.get(hashed_address);
+        let mut changed_slots = storage
+            .storage
+            .keys()
+            .filter(|slot| !fetched.is_some_and(|f| f.contains(*slot)))
+            .peekable();
 
-        // if we didn't find any new storage slots and this account was previously fetched,
-        // remove it from targets
-        if target_slots.is_empty() && fetched_proof_targets.contains_key(hashed_address) {
-            targets.remove(hashed_address);
+        if changed_slots.peek().is_some() {
+            targets.entry(*hashed_address).or_default().extend(changed_slots);
         }
     }
 
