@@ -3,6 +3,7 @@
 use crate::{InMemorySize, MaybeArbitrary, MaybeCompact};
 use alloy_primitives::{U64, U8};
 use core::fmt;
+use alloy_consensus::Typed2718;
 
 /// Helper trait that unifies all behaviour required by transaction type ID to support full node
 /// operations.
@@ -30,23 +31,10 @@ pub trait TxType:
     + TryFrom<U64>
     + alloy_rlp::Encodable
     + alloy_rlp::Decodable
+    + Typed2718
     + InMemorySize
     + MaybeArbitrary
 {
-    /// Returns `true` if this is a legacy transaction.
-    fn is_legacy(&self) -> bool;
-
-    /// Returns `true` if this is an eip-2930 transaction.
-    fn is_eip2930(&self) -> bool;
-
-    /// Returns `true` if this is an eip-1559 transaction.
-    fn is_eip1559(&self) -> bool;
-
-    /// Returns `true` if this is an eip-4844 transaction.
-    fn is_eip4844(&self) -> bool;
-
-    /// Returns `true` if this is an eip-7702 transaction.
-    fn is_eip7702(&self) -> bool;
 
     /// Returns whether this transaction type can be __broadcasted__ as full transaction over the
     /// network.
@@ -60,24 +48,6 @@ pub trait TxType:
 }
 
 #[cfg(feature = "op")]
-impl TxType for op_alloy_consensus::OpTxType {
-    fn is_legacy(&self) -> bool {
-        matches!(self, Self::Legacy)
-    }
+impl TxType for op_alloy_consensus::OpTxType {}
 
-    fn is_eip2930(&self) -> bool {
-        matches!(self, Self::Eip2930)
-    }
-
-    fn is_eip1559(&self) -> bool {
-        matches!(self, Self::Eip1559)
-    }
-
-    fn is_eip4844(&self) -> bool {
-        false
-    }
-
-    fn is_eip7702(&self) -> bool {
-        matches!(self, Self::Eip7702)
-    }
-}
+impl TxType for alloy_consensus::TxType {}
