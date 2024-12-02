@@ -70,6 +70,7 @@ exclude_crates=(
   reth-transaction-pool # c-kzg
   reth-trie-parallel # tokio
   reth-testing-utils
+  reth-network-peers
 )
 
 # Array to hold the results
