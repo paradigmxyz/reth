@@ -67,9 +67,7 @@ where
     type Error = SparseTrieError;
 
     fn blinded_node(&mut self, path: Nibbles) -> Result<Option<Bytes>, Self::Error> {
-        let mut padded_key = path.pack();
-        padded_key.resize(32, 0);
-        let targets = HashMap::from_iter([(B256::from_slice(&padded_key), HashSet::default())]);
+        let targets = HashMap::from_iter([(pad_path_to_key(&path), HashSet::default())]);
         let proof =
             Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
                 .with_prefix_sets_mut(self.prefix_sets.as_ref().clone())
