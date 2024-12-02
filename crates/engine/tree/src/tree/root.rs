@@ -482,11 +482,13 @@ fn get_proof_targets(
 
     // then process storage slots for all accounts in the state update
     for (hashed_address, storage) in &state_update.storages {
-        // only process storage if we either:
-        // 1. haven't fetched this account at all (it's in our targets), or
-        // 2. have fetched the account but need new storage slots
+        // only process storage if account:
+        // 1. is new (in targets), or
+        // 2. was previously fetched (in fetched_proof_targets), or
+        // 3. has storage updates even if not modified
         if targets.contains_key(hashed_address) ||
-            fetched_proof_targets.contains_key(hashed_address)
+            fetched_proof_targets.contains_key(hashed_address) ||
+            state_update.storages.contains_key(hashed_address)
         {
             let target_slots = targets.entry(*hashed_address).or_default();
             if let Some(fetched_storage_slots) = fetched_proof_targets.get(hashed_address) {
@@ -947,5 +949,35 @@ mod tests {
         assert!(targets.contains_key(&addr2));
         assert!(!targets[&addr1].contains(&slot1));
         assert!(targets[&addr1].contains(&slot2));
+    }
+
+    #[test]
+    fn test_get_proof_targets_unmodified_account_with_storage() {
+        let mut state = HashedPostState::default();
+        let mut fetched = HashMap::default();
+
+        let addr = B256::random();
+        let slot1 = B256::random();
+        let slot2 = B256::random();
+
+        // don't add the account to state.accounts (simulating unmodified account)
+        // but add storage updates for this account
+        let mut storage = HashedStorage::default();
+        storage.storage.insert(slot1, U256::from(1));
+        storage.storage.insert(slot2, U256::from(2));
+        state.storages.insert(addr, storage);
+
+        assert!(!state.accounts.contains_key(&addr));
+        assert!(!fetched.contains_key(&addr));
+
+        let targets = get_proof_targets(&state, &mut fetched);
+
+        // verify that we still get the storage slots for the unmodified account
+        assert!(targets.contains_key(&addr));
+
+        let target_slots = &targets[&addr];
+        assert_eq!(target_slots.len(), 2);
+        assert!(target_slots.contains(&slot1));
+        assert!(target_slots.contains(&slot2));
     }
 }
