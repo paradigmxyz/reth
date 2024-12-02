@@ -13,7 +13,7 @@ use reth_optimism_primitives::OpPrimitives;
 use std::{fmt, sync::Arc};
 
 use alloy_consensus::Header;
-use alloy_primitives::{ U256};
+use alloy_primitives::U256;
 use op_alloy_network::Optimism;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
@@ -75,8 +75,8 @@ where
     >,
 {
     /// Build a [`OpEthApi`] using [`OpEthApiBuilder`].
-    pub const fn builder(ctx: &EthApiBuilderCtx<N>) -> OpEthApiBuilder<'_, N> {
-        OpEthApiBuilder::new(ctx)
+    pub const fn builder() -> OpEthApiBuilder {
+        OpEthApiBuilder::new()
     }
 }
 
@@ -262,18 +262,16 @@ struct OpEthApiInner<N: RpcNodeCore> {
 
 /// A type that knows how to build a [`OpEthApi`].
 #[allow(missing_debug_implementations)]
-pub struct OpEthApiBuilder<'a, N: RpcNodeCore> {
-    /// Gateway to node's core components.
-    ctx: &'a EthApiBuilderCtx<N>,
+pub struct OpEthApiBuilder {
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
     sequencer_client: Option<SequencerClient>,
 }
 
-impl<'a, N: RpcNodeCore> OpEthApiBuilder<'a, N> {
+impl OpEthApiBuilder {
     /// Creates a [`OpEthApiBuilder`] instance from [`EthApiBuilderCtx`].
-    pub const fn new(ctx: &'a EthApiBuilderCtx<N>) -> Self {
-        Self { ctx, sequencer_client: None }
+    pub const fn new() -> Self {
+        Self { sequencer_client: None }
     }
 
     /// With a [`SequencerClient`].
@@ -283,42 +281,39 @@ impl<'a, N: RpcNodeCore> OpEthApiBuilder<'a, N> {
     }
 }
 
-impl<N> OpEthApiBuilder<'_, N>
-where
-    N: RpcNodeCore<
-        Provider: BlockReaderIdExt
-                      + ChainSpecProvider
-                      + CanonStateSubscriptions<Primitives = OpPrimitives>
-                      + Clone
-                      + 'static,
-    >,
-{
+impl OpEthApiBuilder {
     /// Builds an instance of [`OpEthApi`]
-    pub fn build(self) -> OpEthApi<N> {
+    pub fn build<N>(self, ctx: &EthApiBuilderCtx<N>) -> OpEthApi<N>
+    where
+        N: RpcNodeCore<
+            Provider: BlockReaderIdExt
+                          + ChainSpecProvider
+                          + CanonStateSubscriptions<Primitives = OpPrimitives>
+                          + Clone
+                          + 'static,
+        >,
+    {
         let blocking_task_pool =
             BlockingTaskPool::build().expect("failed to build blocking task pool");
 
         let eth_api = EthApiInner::new(
-            self.ctx.provider.clone(),
-            self.ctx.pool.clone(),
-            self.ctx.network.clone(),
-            self.ctx.cache.clone(),
-            self.ctx.new_gas_price_oracle(),
-            self.ctx.config.rpc_gas_cap,
-            self.ctx.config.rpc_max_simulate_blocks,
-            self.ctx.config.eth_proof_window,
+            ctx.provider.clone(),
+            ctx.pool.clone(),
+            ctx.network.clone(),
+            ctx.cache.clone(),
+            ctx.new_gas_price_oracle(),
+            ctx.config.rpc_gas_cap,
+            ctx.config.rpc_max_simulate_blocks,
+            ctx.config.eth_proof_window,
             blocking_task_pool,
-            self.ctx.new_fee_history_cache(),
-            self.ctx.evm_config.clone(),
-            self.ctx.executor.clone(),
-            self.ctx.config.proof_permits,
+            ctx.new_fee_history_cache(),
+            ctx.evm_config.clone(),
+            ctx.executor.clone(),
+            ctx.config.proof_permits,
         );
 
         OpEthApi {
-            inner: Arc::new(OpEthApiInner {
-                eth_api,
-                sequencer_client: self.sequencer_client,
-            }),
+            inner: Arc::new(OpEthApiInner { eth_api, sequencer_client: self.sequencer_client }),
         }
     }
 }

@@ -302,7 +302,7 @@ where
         let Self { sequencer_client, .. } = self;
 
         OpAddOns(RpcAddOns::new(
-            move |ctx| OpEthApi::builder(ctx).with_sequencer(sequencer_client).build(),
+            move |ctx| OpEthApi::<N>::builder().with_sequencer(sequencer_client).build(ctx),
             Default::default(),
         ))
     }
