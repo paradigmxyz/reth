@@ -384,10 +384,22 @@ where
                                 // <https://github.com/rust-lang/rust/issues/100013>
                                 let db = db.0;
 
+                                let tx_info = TransactionInfo {
+                                    block_number: Some(
+                                        env.block.number.try_into().unwrap_or_default(),
+                                    ),
+                                    base_fee: Some(
+                                        env.block.basefee.try_into().unwrap_or_default(),
+                                    ),
+                                    hash: None,
+                                    block_hash: None,
+                                    index: None,
+                                };
+
                                 let (res, _) =
                                     this.eth_api().inspect(&mut *db, env, &mut inspector)?;
                                 let frame = inspector
-                                    .try_into_mux_frame(&res, db)
+                                    .try_into_mux_frame(&res, db, tx_info)
                                     .map_err(Eth::Error::from_eth_err)?;
                                 Ok(frame.into())
                             })
@@ -658,6 +670,17 @@ where
     ) -> Result<(GethTrace, revm_primitives::EvmState), Eth::Error> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
 
+        let tx_info = TransactionInfo {
+            hash: transaction_context.as_ref().map(|c| c.tx_hash).unwrap_or_default(),
+            index: transaction_context
+                .as_ref()
+                .map(|c| c.tx_index.map(|i| i as u64))
+                .unwrap_or_default(),
+            block_hash: transaction_context.as_ref().map(|c| c.block_hash).unwrap_or_default(),
+            block_number: Some(env.block.number.try_into().unwrap_or_default()),
+            base_fee: Some(env.block.basefee.try_into().unwrap_or_default()),
+        };
+
         if let Some(tracer) = tracer {
             return match tracer {
                 GethDebugTracerType::BuiltInTracer(tracer) => match tracer {
@@ -723,7 +746,7 @@ where
 
                         let (res, _) = self.eth_api().inspect(&mut *db, env, &mut inspector)?;
                         let frame = inspector
-                            .try_into_mux_frame(&res, db)
+                            .try_into_mux_frame(&res, db, tx_info)
                             .map_err(Eth::Error::from_eth_err)?;
                         return Ok((frame.into(), res.state))
                     }
@@ -738,14 +761,6 @@ where
                         );
 
                         let (res, env) = self.eth_api().inspect(db, env, &mut inspector)?;
-
-                        let tx_info = TransactionInfo {
-                            hash: transaction_context.unwrap().tx_hash,
-                            index: transaction_context.unwrap().tx_index.map(|index| index as u64),
-                            block_hash: transaction_context.unwrap().block_hash,
-                            block_number: Some(env.block.number.try_into().unwrap_or_default()),
-                            base_fee: Some(env.block.basefee.try_into().unwrap_or_default()),
-                        };
                         let frame: FlatCallFrame = inspector
                             .with_transaction_gas_limit(env.tx.gas_limit)
                             .into_parity_builder()
