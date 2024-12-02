@@ -8,7 +8,7 @@ use alloy_rpc_types_txpool::{
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_primitives::TransactionSignedEcRecovered;
+use reth_primitives::RecoveredTx;
 use reth_rpc_api::TxPoolApiServer;
 use reth_rpc_types_compat::{transaction::from_recovered, TransactionCompat};
 use reth_transaction_pool::{AllPoolTransactions, PoolTransaction, TransactionPool};
@@ -44,7 +44,7 @@ where
             resp_builder: &RpcTxB,
         ) -> Result<(), RpcTxB::Error>
         where
-            Tx: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
+            Tx: PoolTransaction<Consensus: Into<RecoveredTx>>,
             RpcTxB: TransactionCompat,
         {
             content.entry(tx.sender()).or_default().insert(
@@ -96,12 +96,12 @@ where
         trace!(target: "rpc::eth", "Serving txpool_inspect");
 
         #[inline]
-        fn insert<T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>>(
+        fn insert<T: PoolTransaction<Consensus: Into<RecoveredTx>>>(
             tx: &T,
             inspect: &mut BTreeMap<Address, BTreeMap<String, TxpoolInspectSummary>>,
         ) {
             let entry = inspect.entry(tx.sender()).or_default();
-            let tx: TransactionSignedEcRecovered = tx.clone_into_consensus().into();
+            let tx: RecoveredTx = tx.clone_into_consensus().into();
             entry.insert(
                 tx.nonce().to_string(),
                 TxpoolInspectSummary {
