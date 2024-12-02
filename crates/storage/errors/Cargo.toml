@@ -29,5 +29,6 @@ std = [
 	"reth-primitives/std",
 	"alloy-eips/std",
 	"alloy-primitives/std",
-	"alloy-rlp/std"
+	"alloy-rlp/std",
+	"derive_more/std"
 ]

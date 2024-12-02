@@ -221,6 +221,30 @@ impl AuthRpcModule {
         self.module_mut().merge(other.into()).map(|_| true)
     }
 
+    /// Removes the method with the given name from the configured authenticated methods.
+    ///
+    /// Returns `true` if the method was found and removed, `false` otherwise.
+    pub fn remove_auth_method(&mut self, method_name: &'static str) -> bool {
+        self.module_mut().remove_method(method_name).is_some()
+    }
+
+    /// Removes the given methods from the configured authenticated methods.
+    pub fn remove_auth_methods(&mut self, methods: impl IntoIterator<Item = &'static str>) {
+        for name in methods {
+            self.remove_auth_method(name);
+        }
+    }
+
+    /// Replace the given [Methods] in the configured authenticated methods.
+    pub fn replace_auth_methods(
+        &mut self,
+        other: impl Into<Methods>,
+    ) -> Result<bool, RegisterMethodError> {
+        let other = other.into();
+        self.remove_auth_methods(other.method_names());
+        self.merge_auth_methods(other)
+    }
+
     /// Convenience function for starting a server
     pub async fn start_server(
         self,
