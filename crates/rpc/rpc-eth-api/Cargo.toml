@@ -29,8 +29,9 @@ reth-execution-types.workspace = true
 reth-rpc-eth-types.workspace = true
 reth-rpc-server-types.workspace = true
 reth-network-api.workspace = true
-reth-trie.workspace = true
 reth-node-api.workspace = true
+reth-trie.workspace = true
+reth-trie-common = { workspace = true, features = ["eip1186"] }
 
 # ethereum
 alloy-serde.workspace = true

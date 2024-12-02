@@ -25,7 +25,7 @@ use reth_blockchain_tree::{
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, MemoryOverlayStateProvider, NewCanonicalChain,
 };
-use reth_consensus::{Consensus, PostExecutionInput};
+use reth_consensus::{Consensus, FullConsensus, PostExecutionInput};
 use reth_engine_primitives::{
     BeaconEngineMessage, BeaconOnNewPayloadError, EngineApiMessageVersion, EngineTypes,
     EngineValidator, ForkchoiceStateTracker, OnForkChoiceUpdated,
@@ -49,7 +49,7 @@ use reth_stages_api::ControlFlow;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_common::proof::ProofNodes;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use revm_primitives::ResultAndState;
+use revm_primitives::EvmState;
 use root::{StateRootConfig, StateRootMessage, StateRootTask};
 use std::{
     cmp::Ordering,
@@ -475,7 +475,7 @@ where
 {
     provider: P,
     executor_provider: E,
-    consensus: Arc<dyn Consensus>,
+    consensus: Arc<dyn FullConsensus>,
     payload_validator: V,
     /// Keeps track of internals such as executed and buffered blocks.
     state: EngineApiTreeState,
@@ -559,7 +559,7 @@ where
     pub fn new(
         provider: P,
         executor_provider: E,
-        consensus: Arc<dyn Consensus>,
+        consensus: Arc<dyn FullConsensus>,
         payload_validator: V,
         outgoing: UnboundedSender<EngineApiEvent>,
         state: EngineApiTreeState,
@@ -608,7 +608,7 @@ where
     pub fn spawn_new(
         provider: P,
         executor_provider: E,
-        consensus: Arc<dyn Consensus>,
+        consensus: Arc<dyn FullConsensus>,
         payload_validator: V,
         persistence: PersistenceHandle,
         payload_builder: PayloadBuilderHandle<T>,
@@ -2217,9 +2217,8 @@ where
         let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
 
         let state_hook_tx = state_root_tx.clone();
-        let state_hook = move |result_and_state: &ResultAndState| {
-            let _ =
-                state_hook_tx.send(StateRootMessage::StateUpdate(result_and_state.state.clone()));
+        let state_hook = move |state: &EvmState| {
+            let _ = state_hook_tx.send(StateRootMessage::StateUpdate(state.clone()));
         };
 
         let output = self.metrics.executor.execute_metered(

@@ -282,7 +282,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     block
                         .transactions_with_sender()
                         .enumerate()
-                        .find(|(_, (signer, tx))| **signer == sender && tx.nonce() == nonce)
+                        .find(|(_, (signer, tx))| **signer == sender && (*tx).nonce() == nonce)
                         .map(|(index, (signer, tx))| {
                             let tx_info = TransactionInfo {
                                 hash: Some(tx.hash()),
