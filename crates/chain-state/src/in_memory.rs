@@ -12,8 +12,8 @@ use reth_chainspec::ChainInfo;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives::{
-    BlockWithSenders, EthPrimitives, HeaderExt, NodePrimitives, Receipts, SealedBlock,
-    SealedBlockFor, SealedBlockWithSenders, SealedHeader, TransactionMeta,
+    BlockWithSenders, EthPrimitives, NodePrimitives, Receipts, SealedBlock, SealedBlockFor,
+    SealedBlockWithSenders, SealedHeader, TransactionMeta,
 };
 use reth_primitives_traits::{Block, BlockBody as _, SignedTransaction};
 use reth_storage_api::StateProviderBox;

@@ -253,6 +253,8 @@ pub fn decode_holocene_1559_params(extra_data: Bytes) -> Result<(u32, u32), Deco
 }
 
 impl EthChainSpec for OpChainSpec {
+    type Header = Header;
+
     fn chain(&self) -> alloy_chains::Chain {
         self.inner.chain()
     }
@@ -281,7 +283,7 @@ impl EthChainSpec for OpChainSpec {
         Box::new(ChainSpec::display_hardforks(self))
     }
 
-    fn genesis_header(&self) -> &Header {
+    fn genesis_header(&self) -> &Self::Header {
         self.inner.genesis_header()
     }
 

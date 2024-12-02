@@ -70,7 +70,7 @@ impl From<DatabaseError> for InitDatabaseError {
 pub fn init_genesis<PF>(factory: &PF) -> Result<B256, InitDatabaseError>
 where
     PF: DatabaseProviderFactory + StaticFileProviderFactory + ChainSpecProvider + BlockHashReader,
-    PF::ProviderRW: StaticFileProviderFactory
+    PF::ProviderRW: StaticFileProviderFactory<Primitives = PF::Primitives>
         + StageCheckpointWriter
         + HistoryWriter
         + HeaderProvider
@@ -78,6 +78,7 @@ where
         + StateWriter
         + StateWriter
         + AsRef<PF::ProviderRW>,
+    PF::ChainSpec: EthChainSpec<Header = reth_primitives::Header>,
 {
     let chain = factory.chain_spec();
 
@@ -307,7 +308,7 @@ pub fn insert_genesis_header<Provider, Spec>(
 ) -> ProviderResult<()>
 where
     Provider: StaticFileProviderFactory + DBProvider<Tx: DbTxMut>,
-    Spec: EthChainSpec,
+    Spec: EthChainSpec<Header = reth_primitives::Header>,
 {
     let (header, block_hash) = (chain.genesis_header(), chain.genesis_hash());
     let static_file_provider = provider.static_file_provider();

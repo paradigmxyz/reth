@@ -10,7 +10,10 @@
 #![allow(clippy::useless_let_if_seq)]
 
 use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH};
-use alloy_eips::{eip4844::MAX_DATA_GAS_PER_BLOCK, eip7685::Requests, merge::BEACON_NONCE};
+use alloy_eips::{
+    eip4844::MAX_DATA_GAS_PER_BLOCK, eip7002::WITHDRAWAL_REQUEST_TYPE,
+    eip7251::CONSOLIDATION_REQUEST_TYPE, eip7685::Requests, merge::BEACON_NONCE,
+};
 use alloy_primitives::U256;
 use reth_basic_payload_builder::{
     commit_withdrawals, is_better_payload, BuildArguments, BuildOutcome, PayloadBuilder,
@@ -365,7 +368,27 @@ where
             )
             .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
 
-        Some(Requests::new(vec![deposit_requests, withdrawal_requests, consolidation_requests]))
+        let mut requests = Requests::default();
+
+        if !deposit_requests.is_empty() {
+            requests.push_request(core::iter::once(0).chain(deposit_requests).collect());
+        }
+
+        if !withdrawal_requests.is_empty() {
+            requests.push_request(
+                core::iter::once(WITHDRAWAL_REQUEST_TYPE).chain(withdrawal_requests).collect(),
+            );
+        }
+
+        if !consolidation_requests.is_empty() {
+            requests.push_request(
+                core::iter::once(CONSOLIDATION_REQUEST_TYPE)
+                    .chain(consolidation_requests)
+                    .collect(),
+            );
+        }
+
+        Some(requests)
     } else {
         None
     };
@@ -452,6 +475,7 @@ where
         blob_gas_used: blob_gas_used.map(Into::into),
         excess_blob_gas: excess_blob_gas.map(Into::into),
         requests_hash,
+        target_blobs_per_block: None,
     };
 
     let withdrawals = chain_spec

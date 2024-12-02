@@ -410,6 +410,7 @@ where
             blob_gas_used,
             excess_blob_gas,
             requests_hash: None,
+            target_blobs_per_block: None,
         };
 
         // seal the block

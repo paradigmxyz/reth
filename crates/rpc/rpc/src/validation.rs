@@ -1,11 +1,12 @@
 use alloy_consensus::{BlobTransactionValidationError, EnvKzgSettings, Transaction, TxReceipt};
-use alloy_eips::eip4844::kzg_to_versioned_hash;
+use alloy_eips::{eip4844::kzg_to_versioned_hash, eip7685::RequestsOrHash};
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequest, BuilderBlockValidationRequestV2,
     BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
 };
 use alloy_rpc_types_engine::{
     BlobsBundleV1, CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, PayloadError,
+    PraguePayloadFields,
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
@@ -386,7 +387,12 @@ where
                         versioned_hashes: self
                             .validate_blobs_bundle(request.request.blobs_bundle)?,
                     },
-                    request.request.execution_requests.into(),
+                    PraguePayloadFields {
+                        requests: RequestsOrHash::Requests(
+                            request.request.execution_requests.into(),
+                        ),
+                        target_blobs_per_block: request.request.target_blobs_per_block,
+                    },
                 ),
             )?
             .try_seal_with_senders()
