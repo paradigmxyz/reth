@@ -236,7 +236,7 @@ where
     BT: BlockchainTreeEngine
         + BlockReader<Block = BlockTy<N>, Header = HeaderTy<N>>
         + BlockIdReader
-        + CanonChainTracker
+        + CanonChainTracker<Header = HeaderTy<N>>
         + StageCheckpointReader
         + ChainSpecProvider<ChainSpec = N::ChainSpec>
         + 'static,
@@ -1806,7 +1806,7 @@ where
     BT: BlockchainTreeEngine
         + BlockReader<Block = BlockTy<N>, Header = HeaderTy<N>>
         + BlockIdReader
-        + CanonChainTracker
+        + CanonChainTracker<Header = HeaderTy<N>>
         + StageCheckpointReader
         + ChainSpecProvider<ChainSpec = N::ChainSpec>
         + Unpin

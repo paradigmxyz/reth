@@ -1,3 +1,4 @@
+use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
 use futures_util::StreamExt;
 use reth_config::config::EtlConfig;
@@ -8,11 +9,10 @@ use reth_db_api::{
     transaction::DbTxMut,
     DbTxUnwindExt,
 };
-use alloy_consensus::BlockHeader;
 use reth_etl::Collector;
 use reth_network_p2p::headers::{downloader::HeaderDownloader, error::HeadersDownloaderError};
 use reth_primitives::{NodePrimitives, SealedHeader, StaticFileSegment};
-use reth_primitives_traits::{serde_bincode_compat};
+use reth_primitives_traits::serde_bincode_compat;
 use reth_provider::{
     providers::StaticFileWriter, BlockHashReader, DBProvider, HeaderProvider, HeaderSyncGap,
     HeaderSyncGapProvider, StaticFileProviderFactory,
@@ -92,7 +92,10 @@ where
     /// database table.
     fn write_headers<P>(&mut self, provider: &P) -> Result<BlockNumber, StageError>
     where
-        P: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader = reth_primitives::Header>>,
+        P: DBProvider<Tx: DbTxMut>
+            + StaticFileProviderFactory<
+                Primitives: NodePrimitives<BlockHeader = reth_primitives::Header>,
+            >,
         Downloader: HeaderDownloader<Header = <P::Primitives as NodePrimitives>::BlockHeader>,
     {
         let total_headers = self.header_collector.len();

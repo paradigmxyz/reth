@@ -200,7 +200,8 @@ use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_primitives::{EthPrimitives, NodePrimitives};
 use reth_provider::{
-    AccountReader, BlockReader, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, EvmEnvProvider, FullRpcProvider, HeaderProvider, ReceiptProvider, StateProviderFactory
+    AccountReader, BlockReader, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
+    EvmEnvProvider, FullRpcProvider, HeaderProvider, ReceiptProvider, StateProviderFactory,
 };
 use reth_rpc::{
     AdminApi, DebugApi, EngineEthApi, EthBundle, NetApi, OtterscanApi, RPCApi, RethApi, TraceApi,
@@ -268,8 +269,11 @@ pub async fn launch<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi, B
     consensus: Arc<dyn FullConsensus>,
 ) -> Result<RpcServerHandle, RpcError>
 where
-    Provider: FullRpcProvider<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt, Header = reth_primitives::Header>
-        + AccountReader
+    Provider: FullRpcProvider<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+            Header = reth_primitives::Header,
+        > + AccountReader
         + ChangeSetReader,
     Pool: TransactionPool + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
@@ -743,7 +747,11 @@ where
     ) -> RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
     where
         EthApi: EthApiTypes + 'static,
-        Provider: BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt, Header = reth_primitives::Header>,
+        Provider: BlockReader<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+            Header = reth_primitives::Header,
+        >,
     {
         let Self {
             provider,
@@ -941,8 +949,11 @@ impl<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
     RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
 where
     Provider: StateProviderFactory
-        + BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt, Header = reth_primitives::Header>
-        + EvmEnvProvider
+        + BlockReader<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+            Header = reth_primitives::Header,
+        > + EvmEnvProvider
         + Clone
         + Unpin
         + 'static,

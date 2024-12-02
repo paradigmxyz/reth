@@ -146,7 +146,8 @@ fn recover_range<Provider, CURSOR>(
     senders_cursor: &mut CURSOR,
 ) -> Result<(), StageError>
 where
-    Provider: DBProvider + HeaderProvider<Header = reth_primitives::Header> + StaticFileProviderFactory,
+    Provider:
+        DBProvider + HeaderProvider<Header = reth_primitives::Header> + StaticFileProviderFactory,
     CURSOR: DbCursorRW<tables::TransactionSenders>,
 {
     debug!(target: "sync::stages::sender_recovery", ?tx_range, "Sending batch for processing");

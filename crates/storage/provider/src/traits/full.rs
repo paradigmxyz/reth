@@ -15,8 +15,12 @@ pub trait FullProvider<N: NodeTypesWithDB>:
     DatabaseProviderFactory<DB = N::DB>
     + NodePrimitivesProvider<Primitives = N::Primitives>
     + StaticFileProviderFactory
-    + BlockReaderIdExt<Transaction = TxTy<N>, Block = BlockTy<N>, Receipt = ReceiptTy<N>, Header = HeaderTy<N>>
-    + AccountReader
+    + BlockReaderIdExt<
+        Transaction = TxTy<N>,
+        Block = BlockTy<N>,
+        Receipt = ReceiptTy<N>,
+        Header = HeaderTy<N>,
+    > + AccountReader
     + StateProviderFactory
     + EvmEnvProvider
     + ChainSpecProvider<ChainSpec = N::ChainSpec>
@@ -34,8 +38,12 @@ impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
     T: DatabaseProviderFactory<DB = N::DB>
         + NodePrimitivesProvider<Primitives = N::Primitives>
         + StaticFileProviderFactory
-        + BlockReaderIdExt<Transaction = TxTy<N>, Block = BlockTy<N>, Receipt = ReceiptTy<N>, Header = HeaderTy<N>>
-        + AccountReader
+        + BlockReaderIdExt<
+            Transaction = TxTy<N>,
+            Block = BlockTy<N>,
+            Receipt = ReceiptTy<N>,
+            Header = HeaderTy<N>,
+        > + AccountReader
         + StateProviderFactory
         + EvmEnvProvider
         + ChainSpecProvider<ChainSpec = N::ChainSpec>

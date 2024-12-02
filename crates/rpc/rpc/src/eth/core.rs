@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_network::Ethereum;
 use alloy_primitives::U256;
@@ -14,7 +15,6 @@ use reth_rpc_eth_api::{
     node::RpcNodeCoreExt,
     EthApiTypes, RpcNodeCore,
 };
-use alloy_consensus::BlockHeader;
 use reth_rpc_eth_types::{
     EthApiBuilderCtx, EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle,
     PendingBlock,

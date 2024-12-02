@@ -17,9 +17,8 @@ use reth_evm::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    proofs::calculate_transaction_root, Block, BlockBody, BlockExt,
-    InvalidTransactionError, Receipt, SealedBlockWithSenders, SealedHeader,
-    TransactionSignedEcRecovered,
+    proofs::calculate_transaction_root, Block, BlockBody, BlockExt, InvalidTransactionError,
+    Receipt, SealedBlockWithSenders, SealedHeader, TransactionSignedEcRecovered,
 };
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderError,

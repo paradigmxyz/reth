@@ -13,10 +13,8 @@ use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
 };
-use reth_storage_api::CanonChainTracker;
-use std::time::Instant;
-use alloy_rpc_types_engine::ForkchoiceState;
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
+use alloy_rpc_types_engine::ForkchoiceState;
 use reth_blockchain_tree_api::{
     error::{CanonicalError, InsertBlockError},
     BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
@@ -36,12 +34,14 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
+use reth_storage_api::CanonChainTracker;
 use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
     collections::BTreeMap,
     ops::{RangeBounds, RangeInclusive},
     sync::Arc,
+    time::Instant,
 };
 
 use tracing::trace;
@@ -837,8 +837,9 @@ impl<N: ProviderNodeTypes> BlockchainTreeViewer for BlockchainProvider<N> {
     }
 }
 
-impl<N: TreeNodeTypes> CanonChainTracker for BlockchainProvider<N>
-{
+impl<N: TreeNodeTypes> CanonChainTracker for BlockchainProvider<N> {
+    type Header = HeaderTy<N>;
+
     fn on_forkchoice_update_received(&self, _update: &ForkchoiceState) {
         // update timestamp
         self.chain_info.on_forkchoice_update_received();

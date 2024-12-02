@@ -663,6 +663,39 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider2<N> {
     }
 }
 
+impl<N: ProviderNodeTypes> CanonChainTracker for BlockchainProvider2<N> {
+    type Header = HeaderTy<N>;
+
+    fn on_forkchoice_update_received(&self, _update: &ForkchoiceState) {
+        // update timestamp
+        self.canonical_in_memory_state.on_forkchoice_update_received();
+    }
+
+    fn last_received_update_timestamp(&self) -> Option<Instant> {
+        self.canonical_in_memory_state.last_received_update_timestamp()
+    }
+
+    fn on_transition_configuration_exchanged(&self) {
+        self.canonical_in_memory_state.on_transition_configuration_exchanged();
+    }
+
+    fn last_exchanged_transition_configuration_timestamp(&self) -> Option<Instant> {
+        self.canonical_in_memory_state.last_exchanged_transition_configuration_timestamp()
+    }
+
+    fn set_canonical_head(&self, header: SealedHeader<Self::Header>) {
+        self.canonical_in_memory_state.set_canonical_head(header);
+    }
+
+    fn set_safe(&self, header: SealedHeader<Self::Header>) {
+        self.canonical_in_memory_state.set_safe(header);
+    }
+
+    fn set_finalized(&self, header: SealedHeader<Self::Header>) {
+        self.canonical_in_memory_state.set_finalized(header);
+    }
+}
+
 impl<N: ProviderNodeTypes> BlockReaderIdExt for BlockchainProvider2<N>
 where
     Self: ReceiptProviderIdExt,

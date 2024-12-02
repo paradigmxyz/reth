@@ -9,13 +9,12 @@ use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
-use reth_node_api::NodePrimitives;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
 use reth_network_p2p::{
     bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader, BlockClient,
 };
-use reth_node_api::{BodyTy, HeaderTy};
+use reth_node_api::{BodyTy, HeaderTy, NodePrimitives};
 use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
 use reth_stages::{prelude::DefaultStages, stages::ExecutionStage, Pipeline, StageSet};
 use reth_static_file::StaticFileProducer;

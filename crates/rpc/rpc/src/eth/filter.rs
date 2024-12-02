@@ -1,11 +1,20 @@
 //! `eth_` `Filter` RPC handler implementation
 
+use std::{
+    collections::HashMap,
+    fmt,
+    iter::StepBy,
+    ops::RangeInclusive,
+    sync::Arc,
+    time::{Duration, Instant},
+};
+
+use alloy_consensus::BlockHeader;
 use alloy_primitives::TxHash;
 use alloy_rpc_types_eth::{
     BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
     PendingTransactionFilterKind,
 };
-use alloy_consensus::BlockHeader;
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_chainspec::ChainInfo;
