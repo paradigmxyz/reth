@@ -150,55 +150,39 @@ impl<C: Send + Sync, N: NodePrimitives> BlockReaderIdExt for NoopProvider<C, N> 
 impl<C: Send + Sync, N: NodePrimitives> BlockReader for NoopProvider<C, N> {
     type Block = N::Block;
 
-    fn find_block_by_hash(
-        &self,
-        hash: B256,
-        _source: BlockSource,
-    ) -> ProviderResult<Option<N::Block>> {
-        self.block(hash.into())
-    }
-
-    fn block(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<N::Block>> {
+    fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> ProviderResult<Option<Self::Block>> {
         Ok(None)
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlockFor<N::Block>>> {
+    fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
         Ok(None)
     }
 
-    fn pending_block_with_senders(
-        &self,
-    ) -> ProviderResult<Option<SealedBlockWithSenders<N::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<SealedBlockFor<Self::Block>>> {
         Ok(None)
     }
 
-    fn pending_block_and_receipts(
-        &self,
-    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Self::Receipt>)>> {
+    fn pending_block_with_senders(&self) -> ProviderResult<Option<SealedBlockWithSenders<Self::Block>>> {
         Ok(None)
     }
 
-    fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
+    fn pending_block_and_receipts(&self) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Self::Receipt>)>> {
         Ok(None)
     }
 
-    fn block_body_indices(&self, _num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
+    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
         Ok(None)
     }
 
-    fn block_with_senders(
-        &self,
-        id: BlockHashOrNumber,
-        transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<BlockWithSenders<Self::Block>>> {
+    fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
         Ok(None)
     }
 
-    fn sealed_block_with_senders(
-        &self,
-        id: BlockHashOrNumber,
-        transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<SealedBlockWithSenders<Self::Block>>> {
+    fn block_with_senders(&self, id: BlockHashOrNumber, transaction_kind: TransactionVariant) -> ProviderResult<Option<BlockWithSenders<Self::Block>>> {
+        Ok(None)
+    }
+
+    fn sealed_block_with_senders(&self, id: BlockHashOrNumber, transaction_kind: TransactionVariant) -> ProviderResult<Option<SealedBlockWithSenders<Self::Block>>> {
         Ok(None)
     }
 
@@ -206,17 +190,11 @@ impl<C: Send + Sync, N: NodePrimitives> BlockReader for NoopProvider<C, N> {
         Ok(vec![])
     }
 
-    fn block_with_senders_range(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<BlockWithSenders<Self::Block>>> {
+    fn block_with_senders_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<BlockWithSenders<Self::Block>>> {
         Ok(vec![])
     }
 
-    fn sealed_block_with_senders_range(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<SealedBlockWithSenders<Self::Block>>> {
+    fn sealed_block_with_senders_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<SealedBlockWithSenders<Self::Block>>> {
         Ok(vec![])
     }
 }
@@ -316,35 +294,33 @@ impl<C: Send + Sync, N: NodePrimitives> ReceiptProvider for NoopProvider<C, N> {
 impl<C: Send + Sync, N: NodePrimitives> ReceiptProviderIdExt for NoopProvider<C, N> {}
 
 impl<C: Send + Sync, N: NodePrimitives> HeaderProvider for NoopProvider<C, N> {
-    fn header(&self, _block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
+    type Header = N::BlockHeader;
+
+    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
+       Ok(None)
+    }
+
+    fn header_by_number(&self, num: u64) -> ProviderResult<Option<Self::Header>> {
         Ok(None)
     }
 
-    fn header_by_number(&self, _num: u64) -> ProviderResult<Option<Header>> {
+    fn header_td(&self, hash: &BlockHash) -> ProviderResult<Option<U256>> {
         Ok(None)
     }
 
-    fn header_td(&self, _hash: &BlockHash) -> ProviderResult<Option<U256>> {
+    fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
         Ok(None)
     }
 
-    fn header_td_by_number(&self, _number: BlockNumber) -> ProviderResult<Option<U256>> {
-        Ok(None)
-    }
-
-    fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
+    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Self::Header>> {
         Ok(vec![])
     }
 
-    fn sealed_header(&self, _number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
-        Ok(None)
+    fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
+       Ok(None)
     }
 
-    fn sealed_headers_while(
-        &self,
-        _range: impl RangeBounds<BlockNumber>,
-        _predicate: impl FnMut(&SealedHeader) -> bool,
-    ) -> ProviderResult<Vec<SealedHeader>> {
+    fn sealed_headers_while(&self, range: impl RangeBounds<BlockNumber>, predicate: impl FnMut(&SealedHeader<Self::Header>) -> bool) -> ProviderResult<Vec<SealedHeader<Self::Header>>> {
         Ok(vec![])
     }
 }
