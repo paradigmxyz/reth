@@ -119,7 +119,7 @@ pub trait LoadPendingBlock:
     }
 
     /// Returns the locally built pending block
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     fn local_pending_block(
         &self,
     ) -> impl Future<

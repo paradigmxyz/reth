@@ -16,6 +16,7 @@ pub use reth_rpc_api::DebugExecutionWitnessApiServer;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_tasks::TaskSpawner;
 use std::{fmt::Debug, sync::Arc};
+use tokio::sync::Semaphore;
 
 /// An extension to the `debug_` namespace of the RPC API.
 pub struct OpDebugWitnessApi<Provider, EvmConfig> {
@@ -30,7 +31,8 @@ impl<Provider, EvmConfig> OpDebugWitnessApi<Provider, EvmConfig> {
         task_spawner: Box<dyn TaskSpawner>,
     ) -> Self {
         let builder = OpPayloadBuilder::new(evm_config);
-        let inner = OpDebugWitnessApiInner { provider, builder, task_spawner };
+        let semaphore = Arc::new(Semaphore::new(3));
+        let inner = OpDebugWitnessApiInner { provider, builder, task_spawner, semaphore };
         Self { inner: Arc::new(inner) }
     }
 }
@@ -63,6 +65,8 @@ where
         parent_block_hash: B256,
         attributes: OpPayloadAttributes,
     ) -> RpcResult<ExecutionWitness> {
+        let _permit = self.inner.semaphore.acquire().await;
+
         let parent_header = self.parent_header(parent_block_hash).to_rpc_result()?;
         self.inner
             .builder
@@ -86,4 +90,5 @@ struct OpDebugWitnessApiInner<Provider, EvmConfig> {
     provider: Provider,
     builder: OpPayloadBuilder<EvmConfig>,
     task_spawner: Box<dyn TaskSpawner>,
+    semaphore: Arc<Semaphore>,
 }
