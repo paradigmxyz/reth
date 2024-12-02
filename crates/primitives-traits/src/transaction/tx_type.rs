@@ -1,10 +1,8 @@
 //! Abstraction of transaction envelope type ID.
 
-use core::fmt;
-
-use alloy_primitives::{U64, U8};
-
 use crate::{InMemorySize, MaybeArbitrary, MaybeCompact};
+use alloy_primitives::{U64, U8};
+use core::fmt;
 
 /// Helper trait that unifies all behaviour required by transaction type ID to support full node
 /// operations.
@@ -61,26 +59,25 @@ pub trait TxType:
     }
 }
 
-
 #[cfg(feature = "op")]
 impl TxType for op_alloy_consensus::OpTxType {
     fn is_legacy(&self) -> bool {
-        todo!()
+        matches!(self, Self::Legacy)
     }
 
     fn is_eip2930(&self) -> bool {
-        todo!()
+        matches!(self, Self::Eip2930)
     }
 
     fn is_eip1559(&self) -> bool {
-        todo!()
+        matches!(self, Self::Eip1559)
     }
 
     fn is_eip4844(&self) -> bool {
-        todo!()
+        false
     }
 
     fn is_eip7702(&self) -> bool {
-        todo!()
+        matches!(self, Self::Eip7702)
     }
 }
