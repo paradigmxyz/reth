@@ -1,16 +1,14 @@
-use std::collections::HashMap;
-
+use crate::BlockExecutionOutput;
 use alloy_eips::eip7685::Requests;
-use alloy_primitives::{Address, BlockNumber, Bloom, Log, B256, U256};
-use reth_primitives::{logs_bloom, Account, Bytecode, Receipts, StorageEntry};
-use reth_primitives_traits::{receipt::ReceiptExt, Receipt};
+use alloy_primitives::{logs_bloom, Address, BlockNumber, Bloom, Log, B256, U256};
+use reth_primitives::Receipts;
+use reth_primitives_traits::{receipt::ReceiptExt, Account, Bytecode, Receipt, StorageEntry};
 use reth_trie::HashedPostState;
 use revm::{
     db::{states::BundleState, BundleAccount},
     primitives::AccountInfo,
 };
-
-use crate::BlockExecutionOutput;
+use std::collections::HashMap;
 
 /// Represents a changed account
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -376,10 +374,12 @@ mod tests {
     use super::*;
     #[cfg(not(feature = "optimism"))]
     use alloy_primitives::bytes;
+    #[cfg(not(feature = "optimism"))]
+    use alloy_primitives::LogData;
     use alloy_primitives::{Address, B256};
     use reth_primitives::Receipts;
     #[cfg(not(feature = "optimism"))]
-    use reth_primitives::{LogData, TxType};
+    use reth_primitives::TxType;
 
     #[test]
     #[cfg(not(feature = "optimism"))]
