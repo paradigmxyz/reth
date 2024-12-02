@@ -216,10 +216,10 @@ where
         view: ConsistentDbView<Factory>,
         input: Arc<TrieInput>,
         update: EvmState,
-        fetched_proof_targets: &HashMap<B256, HashSet<B256>>,
+        fetched_proof_targets: &mut HashMap<B256, HashSet<B256>>,
         proof_sequence_number: u64,
         state_root_message_sender: Sender<StateRootMessage>,
-    ) -> HashMap<B256, HashSet<B256>> {
+    ) {
         let mut hashed_state_update = HashedPostState::default();
         for (address, account) in update {
             if account.is_touched() {
@@ -249,9 +249,11 @@ where
         }
 
         let proof_targets = get_proof_targets(&hashed_state_update, fetched_proof_targets);
+        for (address, slots) in &proof_targets {
+            fetched_proof_targets.entry(*address).or_default().extend(slots)
+        }
 
         // Dispatch proof gathering for this state update
-        let targets = proof_targets.clone();
         rayon::spawn(move || {
             let provider = match view.provider_ro() {
                 Ok(provider) => provider,
@@ -266,7 +268,7 @@ where
                 provider.tx_ref(),
                 // TODO(alexey): this clone can be expensive, we should avoid it
                 input.as_ref().clone(),
-                targets,
+                proof_targets,
             );
             match result {
                 Ok(proof) => {
@@ -281,8 +283,6 @@ where
                 }
             }
         });
-
-        proof_targets
     }
 
     /// Handler for new proof calculated, aggregates all the existing sequential proofs.
@@ -357,17 +357,14 @@ where
                             total_updates = updates_received,
                             "Received new state update"
                         );
-                        let targets = Self::on_state_update(
+                        Self::on_state_update(
                             self.config.consistent_view.clone(),
                             self.config.input.clone(),
                             update,
-                            &self.fetched_proof_targets,
+                            &mut self.fetched_proof_targets,
                             self.proof_sequencer.next_sequence(),
                             self.tx.clone(),
                         );
-                        for (address, slots) in targets {
-                            self.fetched_proof_targets.entry(address).or_default().extend(slots)
-                        }
                     }
                     StateRootMessage::ProofCalculated { proof, state_update, sequence_number } => {
                         proofs_processed += 1;
