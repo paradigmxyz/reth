@@ -556,6 +556,7 @@ where
 
 /// Updates the sparse trie with the given proofs and state, and returns the updated trie and the
 /// time it took.
+#[allow(clippy::too_many_arguments)]
 fn update_sparse_trie<Factory: DatabaseProviderFactory>(
     mut trie: Box<SparseStateTrie>,
     multiproof: MultiProof,
