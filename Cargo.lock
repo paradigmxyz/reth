@@ -2987,6 +2987,7 @@ dependencies = [
 name = "example-db-access"
 version = "0.0.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "alloy-rpc-types-eth",
  "eyre",
@@ -7202,6 +7203,7 @@ dependencies = [
 name = "reth-engine-local"
 version = "1.1.2"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "eyre",

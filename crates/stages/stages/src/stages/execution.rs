@@ -193,7 +193,10 @@ where
         unwind_to: Option<u64>,
     ) -> Result<(), StageError>
     where
-        Provider: StaticFileProviderFactory + DBProvider + BlockReader + HeaderProvider,
+        Provider: StaticFileProviderFactory
+            + DBProvider
+            + BlockReader
+            + HeaderProvider<Header = reth_primitives::Header>,
     {
         // If thre's any receipts pruning configured, receipts are written directly to database and
         // inconsistencies are expected.
@@ -265,8 +268,10 @@ impl<E, Provider> Stage<Provider> for ExecutionStage<E>
 where
     E: BlockExecutorProvider<Primitives: NodePrimitives<BlockHeader = alloy_consensus::Header>>,
     Provider: DBProvider
-        + BlockReader<Block = <E::Primitives as NodePrimitives>::Block>
-        + StaticFileProviderFactory
+        + BlockReader<
+            Block = <E::Primitives as NodePrimitives>::Block,
+            Header = <E::Primitives as NodePrimitives>::BlockHeader,
+        > + StaticFileProviderFactory
         + StatsReader
         + BlockHashReader
         + StateWriter<Receipt = <E::Primitives as NodePrimitives>::Receipt>

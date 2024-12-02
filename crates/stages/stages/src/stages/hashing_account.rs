@@ -63,8 +63,10 @@ impl AccountHashingStage {
         opts: SeedOpts,
     ) -> Result<Vec<(alloy_primitives::Address, reth_primitives::Account)>, StageError>
     where
-        N::Primitives:
-            reth_primitives_traits::FullNodePrimitives<BlockBody = reth_primitives::BlockBody>,
+        N::Primitives: reth_primitives_traits::FullNodePrimitives<
+            BlockBody = reth_primitives::BlockBody,
+            BlockHeader = reth_primitives::Header,
+        >,
     {
         use alloy_primitives::U256;
         use reth_db_api::models::AccountBeforeTx;

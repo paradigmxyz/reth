@@ -540,9 +540,13 @@ impl<N, P: Debug, E: Debug, T: EngineTypes + Debug, V: Debug> std::fmt::Debug
 
 impl<N, P, E, T, V> EngineApiTreeHandler<N, P, E, T, V>
 where
-    N: NodePrimitives<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>,
+    N: NodePrimitives<
+        Block = reth_primitives::Block,
+        BlockHeader = reth_primitives::Header,
+        Receipt = reth_primitives::Receipt,
+    >,
     P: DatabaseProviderFactory
-        + BlockReader<Block = reth_primitives::Block>
+        + BlockReader<Block = N::Block, Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader<Receipt = reth_primitives::Receipt>
         + Clone
@@ -1357,7 +1361,7 @@ where
             // update the tracked chain height, after backfill sync both the canonical height and
             // persisted height are the same
             self.state.tree_state.set_canonical_head(new_head.num_hash());
-            self.persistence_state.finish(new_head.hash(), new_head.number);
+            self.persistence_state.finish(new_head.hash(), new_head.number());
 
             // update the tracked canonical head
             self.canonical_in_memory_state.set_canonical_head(new_head);
@@ -1622,7 +1626,7 @@ where
 
         // the hash could belong to an unknown block or a persisted block
         if let Some(header) = self.provider.header(&hash)? {
-            debug!(target: "engine::tree", %hash, number = %header.number, "found canonical state for block in database");
+            debug!(target: "engine::tree", %hash, number = %header.number(), "found canonical state for block in database");
             // the block is known and persisted
             let historical = self.provider.state_by_block_hash(hash)?;
             return Ok(Some(historical))

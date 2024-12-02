@@ -1,5 +1,6 @@
 //! `eth_` `Filter` RPC handler implementation
 
+use alloy_consensus::BlockHeader;
 use alloy_primitives::TxHash;
 use alloy_rpc_types_eth::{
     BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
@@ -380,7 +381,7 @@ where
                     .header_by_hash_or_number(block_hash.into())?
                     .ok_or_else(|| ProviderError::HeaderNotFound(block_hash.into()))?;
 
-                let block_num_hash = BlockNumHash::new(header.number, block_hash);
+                let block_num_hash = BlockNumHash::new(header.number(), block_hash);
 
                 // we also need to ensure that the receipts are available and return an error if
                 // not, in case the block hash been reorged
@@ -402,7 +403,7 @@ where
                     block_num_hash,
                     &receipts,
                     false,
-                    header.timestamp,
+                    header.timestamp(),
                 )?;
 
                 Ok(all_logs)
@@ -483,20 +484,20 @@ where
 
             for (idx, header) in headers.iter().enumerate() {
                 // only if filter matches
-                if FilteredParams::matches_address(header.logs_bloom, &address_filter) &&
-                    FilteredParams::matches_topics(header.logs_bloom, &topics_filter)
+                if FilteredParams::matches_address(header.logs_bloom(), &address_filter) &&
+                    FilteredParams::matches_topics(header.logs_bloom(), &topics_filter)
                 {
                     // these are consecutive headers, so we can use the parent hash of the next
                     // block to get the current header's hash
                     let block_hash = match headers.get(idx + 1) {
-                        Some(parent) => parent.parent_hash,
+                        Some(parent) => parent.parent_hash(),
                         None => self
                             .provider
-                            .block_hash(header.number)?
-                            .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?,
+                            .block_hash(header.number())?
+                            .ok_or_else(|| ProviderError::HeaderNotFound(header.number().into()))?,
                     };
 
-                    let num_hash = BlockNumHash::new(header.number, block_hash);
+                    let num_hash = BlockNumHash::new(header.number(), block_hash);
                     if let Some((receipts, maybe_block)) =
                         self.receipts_and_maybe_block(&num_hash, chain_info.best_number).await?
                     {
@@ -509,7 +510,7 @@ where
                             num_hash,
                             &receipts,
                             false,
-                            header.timestamp,
+                            header.timestamp(),
                         )?;
 
                         // size check but only if range is multiple blocks, so we always return all
