@@ -1,6 +1,6 @@
 # Tracing targets
 
-Here instrumented functions are listed as well as events emitted in functions.
+This document highlights instrumented functions and tracing events emitted by them.
 
 ### Crates
 
@@ -531,3 +531,44 @@ Targets:
 
 51. **reth-tasks**
     [***TaskManager::do_graceful_shutdown*** fn emits ***debug*** events](crates/tasks/src/lib.rs#L220)   
+
+52. **reth-tokio-util**
+    [***EventSender::notify*** fn emits ***trace*** event](crates/tokio-util/src/event_sender.rs#L31)
+    [***EventStream::poll_next*** fn emits ***warn*** event](crates/tokio-util/src/event_stream.rs#L33)
+    [***DiskFileBlobStore::cleanup*** fn emits ***debug*** events](crates/transaction-pool/src/blobstore/disk.rs#L77)
+    [***DiskFileBlobStoreInner::create_blob_dir*** fn emits ***debug*** event](crates/transaction-pool/src/blobstore/disk.rs#L188)
+    [***DiskFileBlobStoreInner::delete_all*** fn emits ***debug*** event](crates/transaction-pool/src/blobstore/disk.rs#L195)
+    [***DiskFileBlobStoreInner::insert_many*** fn emits ***debug*** event](crates/transaction-pool/src/blobstore/disk.rs#L219)
+    [***DiskFileBlobStoreInner::read_many_raw*** fn emits ***debug*** event](crates/transaction-pool/src/blobstore/disk.rs#L341)
+    [***DiskFileBlobStoreInner::write_one_encoded*** fn emits ***trace*** event](crates/transaction-pool/src/blobstore/disk.rs#L360)
+    [***BestTransactions::next*** fn emits ***debug*** event](crates/transaction-pool/src/pool/best.rs#L177)
+
+53. **reth-transaction-pool**
+    [Instrumented fn ***Pool::set_block_info*** at ***trace*** level. It also emits ***trace*** event](crates/transaction-pool/src/lib.rs#L601)
+    [***PoolInner::get_pooled_transaction_elements*** fn emits ***debug*** event](crates/transaction-pool/src/pool/mod.rs#L323)
+    [***PoolInner::on_canonical_state_change*** fn emits ***trace*** event](crates/transaction-pool/src/pool/mod.rs#L393)
+    [***PoolInner::add_transaction*** fn emits ***debug*** events](crates/transaction-pool/src/pool/mod.rs#L437)
+    [***PoolInner::on_new_blob_sidecar*** fn emits ***debug*** events](crates/transaction-pool/src/pool/mod.rs#L600)
+    [***PoolInner::notify_on_new_state*** fn emits ***trace*** event](crates/transaction-pool/src/pool/mod.rs#L627)
+    [***PoolInner::insert_blob*** fn emits ***debug*** event](crates/transaction-pool/src/pool/mod.rs#L900)
+    [***PendingTransactionHashListener::send_all*** fn emits ***debug*** event](crates/transaction-pool/src/pool/mod.rs#L965)
+    [***TransactionListener::send_all*** fn emits ***debug*** event](crates/transaction-pool/src/pool/mod.rs#L1006)
+    [***TxPool::process_updates*** fn emits ***trace, debug*** events](crates/transaction-pool/src/pool/txpool.rs#L672)
+    [***TxPool::remove_from_subpool*** fn emits ***trace*** event](crates/transaction-pool/src/pool/txpool.rs#L797)
+    [***TxPool::prune_from_subpool*** fn emits ***trace*** event](crates/transaction-pool/src/pool/txpool.rs#L821)
+    [***TxPool::add_transaction_to_subpool*** fn emits ***trace*** event](crates/transaction-pool/src/pool/txpool.rs#L869)
+    [***TxPool::discard_worst*** fn emits ***trace*** events](crates/transaction-pool/src/pool/txpool.rs#L910)
+    [***maintain_transaction_pool*** fn emits ***trace, debug*** events](crates/transaction-pool/src/maintain.rs#L93)
+    [***load_and_reinsert_transactions*** fn emits ***info, debug*** events](crates/transaction-pool/src/maintain.rs#L552)
+    [***save_local_txs_backup*** fn emits ***info, trace, warn*** events](crates/transaction-pool/src/maintain.rs#L588)
+    [***backup_local_transactions_task*** fn emits ***error*** event](crates/transaction-pool/src/maintain.rs#L639)
+
+54. **reth-trie-db**
+    [***DatabaseStateRoot::incremental_root*** fn emits ***debug*** event](crates/trie/db/src/state.rs#L143)
+    [***DatabaseStateRoot::incremental_root_with_updates*** fn emits ***debug*** event](crates/trie/db/src/state.rs#L151)
+    [***DatabaseStateRoot::incremental_root_with_progress*** fn emits ***debug*** event](crates/trie/db/src/state.rs#L159)
+    [***ParallelProof::multiproof*** fn emits ***debug*** event](crates/trie/parallel/src/proof.rs#L59)
+    [***ParallelStateRoot::calculate*** fn emits ***trace, debug*** events](crates/trie/parallel/src/root.rs#L74)
+    [***RevealedSparseTrie::remove_leaf*** fn emits ***debug*** events](crates/trie/sparse/src/trie.rs#L312)
+    [***StateRoot::calculate*** fn emits ***trace*** events](crates/trie/trie/src/trie.rs#L151)
+    [***StorageRoot::calculate*** fn emits ***trace*** events](crates/trie/trie/src/trie.rs#L396)
