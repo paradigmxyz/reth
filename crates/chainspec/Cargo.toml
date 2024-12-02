@@ -49,7 +49,8 @@ std = [
 	"alloy-consensus/std",
 	"once_cell/std",
 	"alloy-rlp/std",
-	"reth-ethereum-forks/std"
+	"reth-ethereum-forks/std",
+	"derive_more/std"
 ]
 arbitrary = [
 	"alloy-chains/arbitrary",
