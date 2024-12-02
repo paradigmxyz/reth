@@ -3,6 +3,7 @@ use crate::{
     RevealedSparseTrie, SparseStateTrieError, SparseStateTrieResult, SparseTrie, SparseTrieError,
 };
 use alloy_primitives::{
+    hex,
     map::{HashMap, HashSet},
     Bytes, B256,
 };
@@ -13,10 +14,9 @@ use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
     MultiProof, Nibbles, TrieAccount, TrieNode, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-use std::iter::Peekable;
+use std::{fmt, iter::Peekable};
 
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
-#[derive(Debug)]
 pub struct SparseStateTrie<F: BlindedProviderFactory = DefaultBlindedProviderFactory> {
     /// Blinded node provider factory.
     provider_factory: F,
@@ -32,13 +32,25 @@ pub struct SparseStateTrie<F: BlindedProviderFactory = DefaultBlindedProviderFac
     account_rlp_buf: Vec<u8>,
 }
 
+impl<F: BlindedProviderFactory> fmt::Debug for SparseStateTrie<F> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SparseStateTrie")
+            .field("state", &self.state)
+            .field("storages", &self.storages)
+            .field("revealed", &self.revealed)
+            .field("retain_updates", &self.retain_updates)
+            .field("account_rlp_buf", &hex::encode(&self.account_rlp_buf))
+            .finish_non_exhaustive()
+    }
+}
+
 impl Default for SparseStateTrie {
     fn default() -> Self {
         Self {
+            provider_factory: Default::default(),
             state: Default::default(),
             storages: Default::default(),
             revealed: Default::default(),
-            provider_factory: Default::default(),
             retain_updates: false,
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
         }
@@ -53,6 +65,18 @@ impl SparseStateTrie {
 }
 
 impl<F: BlindedProviderFactory> SparseStateTrie<F> {
+    /// Create new [`SparseStateTrie`] with blinded node provider factory.
+    pub fn new(provider_factory: F) -> Self {
+        Self {
+            provider_factory,
+            state: Default::default(),
+            storages: Default::default(),
+            revealed: Default::default(),
+            retain_updates: false,
+            account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
+        }
+    }
+
     /// Set the retention of branch node updates and deletions.
     pub const fn with_updates(mut self, retain_updates: bool) -> Self {
         self.retain_updates = retain_updates;
