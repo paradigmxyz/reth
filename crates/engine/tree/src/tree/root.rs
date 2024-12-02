@@ -543,7 +543,7 @@ fn update_sparse_trie<Factory: DatabaseProviderFactory>(
             if value.is_zero() {
                 trace!(target: "engine::root::sparse", ?address, ?slot, "Removing storage slot");
 
-                trie.remove_storage_leaf(address, &slot_nibbles, |path| {
+                storage_trie.remove_leaf(&slot_nibbles, |path| {
                     // Right pad the target with 0s.
                     let mut padded_key = path.pack();
                     padded_key.resize(32, 0);
