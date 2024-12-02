@@ -59,9 +59,6 @@ pub enum ProviderOrBlock<'a, P: BlockReader> {
 
 /// Appends all matching logs of a block's receipts.
 /// If the log matches, look up the corresponding transaction hash.
-///
-/// Returns the latest block number that was processed successfully if the max logs per response
-/// was reached.
 #[allow(clippy::too_many_arguments)]
 pub fn append_matching_block_logs<P: BlockReader<Transaction: SignedTransaction>>(
     all_logs: &mut Vec<Log>,
@@ -71,15 +68,7 @@ pub fn append_matching_block_logs<P: BlockReader<Transaction: SignedTransaction>
     receipts: &[Receipt],
     removed: bool,
     block_timestamp: u64,
-    max_logs_per_response: Option<usize>,
 ) -> Result<Option<u64>, ProviderError> {
-    // Check if we have reached the max logs per response and return the last block if so
-    if let Some(max_logs) = max_logs_per_response {
-        if all_logs.len() > max_logs {
-            return Ok(Some(block_num_hash.number.saturating_sub(1)));
-        }
-    }
-
     // Tracks the index of a log in the entire block.
     let mut log_index: u64 = 0;
 

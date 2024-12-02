@@ -1,14 +1,5 @@
 //! `eth_` `Filter` RPC handler implementation
 
-use std::{
-    collections::HashMap,
-    fmt,
-    iter::StepBy,
-    ops::RangeInclusive,
-    sync::Arc,
-    time::{Duration, Instant},
-};
-
 use alloy_primitives::TxHash;
 use alloy_rpc_types_eth::{
     BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
@@ -30,6 +21,14 @@ use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
 use reth_rpc_types_compat::transaction::from_recovered;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
+use std::{
+    collections::HashMap,
+    fmt,
+    iter::StepBy,
+    ops::RangeInclusive,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::{
     sync::{mpsc::Receiver, Mutex},
     time::MissedTickBehavior,
@@ -404,7 +403,6 @@ where
                     &receipts,
                     false,
                     header.timestamp,
-                    None,
                 )?;
 
                 Ok(all_logs)
@@ -502,7 +500,7 @@ where
                     if let Some((receipts, maybe_block)) =
                         self.receipts_and_maybe_block(&num_hash, chain_info.best_number).await?
                     {
-                        let max_to_block_reached = append_matching_block_logs(
+                        append_matching_block_logs(
                             &mut all_logs,
                             maybe_block
                                 .map(|block| ProviderOrBlock::Block(block))
@@ -512,20 +510,17 @@ where
                             &receipts,
                             false,
                             header.timestamp,
-                            Some(self.max_logs_per_response),
                         )?;
 
                         // size check but only if range is multiple blocks, so we always return all
                         // logs of a single block
                         let is_multi_block_range = from_block != to_block;
-                        if is_multi_block_range {
-                            if let Some(max_to_block) = max_to_block_reached {
-                                return Err(EthFilterError::QueryExceedsMaxResults {
-                                    max_logs: self.max_logs_per_response,
-                                    from_block,
-                                    to_block: max_to_block,
-                                });
-                            }
+                        if is_multi_block_range && all_logs.len() > self.max_logs_per_response {
+                            return Err(EthFilterError::QueryExceedsMaxResults {
+                                max_logs: self.max_logs_per_response,
+                                from_block,
+                                to_block: num_hash.number.saturating_sub(1),
+                            });
                         }
                     }
                 }
