@@ -232,7 +232,7 @@ where
         let debug_ext = OpDebugWitnessApi::new(
             ctx.node.provider().clone(),
             ctx.node.evm_config().clone(),
-            Box::new(ctx.task_executor().clone()),
+            Box::new(ctx.node.task_executor().clone()),
         );
 
         self.0

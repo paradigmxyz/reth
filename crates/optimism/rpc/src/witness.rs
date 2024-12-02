@@ -68,10 +68,20 @@ where
         let _permit = self.inner.semaphore.acquire().await;
 
         let parent_header = self.parent_header(parent_block_hash).to_rpc_result()?;
+
+        let provider = self.inner.provider.clone();
+        let builder = self.inner.builder.clone();
+
+        // Spawn the CPU-intensive work on a blocking task
         self.inner
-            .builder
-            .payload_witness(&self.inner.provider, parent_header, attributes)
-            .map_err(|err| internal_rpc_err(err.to_string()))
+            .task_spawner
+            .spawn_blocking(move || {
+                builder
+                    .payload_witness(&provider, parent_header, attributes)
+                    .map_err(|err| internal_rpc_err(err.to_string()))
+            })
+            .await
+            .map_err(|err| internal_rpc_err(err.to_string()))?
     }
 }
 
