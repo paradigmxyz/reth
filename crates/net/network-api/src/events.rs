@@ -154,7 +154,7 @@ pub enum PeerRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
         /// The request for pooled transactions.
         request: GetPooledTransactions,
         /// The channel to send the response for pooled transactions.
-        response: oneshot::Sender<RequestResult<PooledTransactions>>,
+        response: oneshot::Sender<RequestResult<PooledTransactions<N::PooledTransaction>>>,
     },
     /// Requests `NodeData` from the peer.
     ///

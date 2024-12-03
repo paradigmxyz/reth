@@ -1,4 +1,7 @@
-use crate::{providers::StaticFileProvider, HashingWriter, ProviderFactory, TrieWriter};
+use crate::{
+    providers::{ProviderNodeTypes, StaticFileProvider},
+    HashingWriter, ProviderFactory, TrieWriter,
+};
 use alloy_primitives::B256;
 use reth_chainspec::{ChainSpec, MAINNET};
 use reth_db::{
@@ -6,7 +9,7 @@ use reth_db::{
     DatabaseEnv,
 };
 use reth_errors::ProviderResult;
-use reth_node_types::{NodeTypesWithDB, NodeTypesWithDBAdapter};
+use reth_node_types::NodeTypesWithDBAdapter;
 use reth_primitives::{Account, StorageEntry};
 use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;
@@ -22,10 +25,11 @@ pub use reth_chain_state::test_utils::TestCanonStateSubscriptions;
 
 /// Mock [`reth_node_types::NodeTypes`] for testing.
 pub type MockNodeTypes = reth_node_types::AnyNodeTypesWithEngine<
-    (),
+    reth_primitives::EthPrimitives,
     reth_ethereum_engine_primitives::EthEngineTypes,
     reth_chainspec::ChainSpec,
     reth_trie_db::MerklePatriciaTrie,
+    crate::EthStorage,
 >;
 
 /// Mock [`reth_node_types::NodeTypesWithDB`] for testing.
@@ -51,7 +55,7 @@ pub fn create_test_provider_factory_with_chain_spec(
 }
 
 /// Inserts the genesis alloc from the provided chain spec into the trie.
-pub fn insert_genesis<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
+pub fn insert_genesis<N: ProviderNodeTypes<ChainSpec = ChainSpec>>(
     provider_factory: &ProviderFactory<N>,
     chain_spec: Arc<N::ChainSpec>,
 ) -> ProviderResult<B256> {

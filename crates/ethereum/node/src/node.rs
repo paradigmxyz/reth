@@ -13,8 +13,7 @@ use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_evm_ethereum::execute::EthExecutionStrategyFactory;
 use reth_network::{NetworkHandle, PeersInfo};
 use reth_node_api::{
-    AddOnsContext, ConfigureEvm, EngineValidator, FullNodeComponents, NodePrimitives,
-    NodeTypesWithDB,
+    AddOnsContext, ConfigureEvm, EngineValidator, FullNodeComponents, NodeTypesWithDB, TxTy,
 };
 use reth_node_builder::{
     components::{
@@ -26,28 +25,17 @@ use reth_node_builder::{
     BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig, PayloadTypes,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::{Block, Receipt, TransactionSigned, TxType};
-use reth_provider::CanonStateSubscriptions;
+use reth_primitives::EthPrimitives;
+use reth_provider::{CanonStateSubscriptions, EthStorage};
 use reth_rpc::EthApi;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
-    blobstore::DiskFileBlobStore, EthTransactionPool, TransactionPool,
+    blobstore::DiskFileBlobStore, EthTransactionPool, PoolTransaction, TransactionPool,
     TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
 
 use crate::{EthEngineTypes, EthEvmConfig};
-
-/// Ethereum primitive types.
-#[derive(Debug, Default, Clone)]
-pub struct EthPrimitives;
-
-impl NodePrimitives for EthPrimitives {
-    type Block = Block;
-    type SignedTx = TransactionSigned;
-    type TxType = TxType;
-    type Receipt = Receipt;
-}
 
 /// Type configuration for a regular Ethereum node.
 #[derive(Debug, Default, Clone, Copy)]
@@ -65,7 +53,7 @@ impl EthereumNode {
         EthereumConsensusBuilder,
     >
     where
-        Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
+        Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
         <Node::Types as NodeTypesWithEngine>::Engine: PayloadTypes<
             BuiltPayload = EthBuiltPayload,
             PayloadAttributes = EthPayloadAttributes,
@@ -86,6 +74,7 @@ impl NodeTypes for EthereumNode {
     type Primitives = EthPrimitives;
     type ChainSpec = ChainSpec;
     type StateCommitment = MerklePatriciaTrie;
+    type Storage = EthStorage;
 }
 
 impl NodeTypesWithEngine for EthereumNode {
@@ -106,7 +95,13 @@ pub type EthereumAddOns<N> = RpcAddOns<
 
 impl<Types, N> Node<N> for EthereumNode
 where
-    Types: NodeTypesWithDB + NodeTypesWithEngine<Engine = EthEngineTypes, ChainSpec = ChainSpec>,
+    Types: NodeTypesWithDB
+        + NodeTypesWithEngine<
+            Engine = EthEngineTypes,
+            ChainSpec = ChainSpec,
+            Primitives = EthPrimitives,
+            Storage = EthStorage,
+        >,
     N: FullNodeTypes<Types = Types>,
 {
     type ComponentsBuilder = ComponentsBuilder<
@@ -138,7 +133,7 @@ pub struct EthereumExecutorBuilder;
 
 impl<Types, Node> ExecutorBuilder<Node> for EthereumExecutorBuilder
 where
-    Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
+    Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
 {
     type EVM = EthEvmConfig;
@@ -169,7 +164,7 @@ pub struct EthereumPoolBuilder {
 
 impl<Types, Node> PoolBuilder<Node> for EthereumPoolBuilder
 where
-    Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
+    Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
 {
     type Pool = EthTransactionPool<Node::Provider, DiskFileBlobStore>;
@@ -245,10 +240,12 @@ impl EthereumPayloadBuilder {
         pool: Pool,
     ) -> eyre::Result<PayloadBuilderHandle<Types::Engine>>
     where
-        Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
+        Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
         Node: FullNodeTypes<Types = Types>,
         Evm: ConfigureEvm<Header = Header>,
-        Pool: TransactionPool + Unpin + 'static,
+        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
+            + Unpin
+            + 'static,
         Types::Engine: PayloadTypes<
             BuiltPayload = EthBuiltPayload,
             PayloadAttributes = EthPayloadAttributes,
@@ -283,9 +280,11 @@ impl EthereumPayloadBuilder {
 
 impl<Types, Node, Pool> PayloadServiceBuilder<Node, Pool> for EthereumPayloadBuilder
 where
-    Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
+    Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
-    Pool: TransactionPool + Unpin + 'static,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
+        + Unpin
+        + 'static,
     Types::Engine: PayloadTypes<
         BuiltPayload = EthBuiltPayload,
         PayloadAttributes = EthPayloadAttributes,
@@ -309,8 +308,10 @@ pub struct EthereumNetworkBuilder {
 
 impl<Node, Pool> NetworkBuilder<Node, Pool> for EthereumNetworkBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
-    Pool: TransactionPool + Unpin + 'static,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
+        + Unpin
+        + 'static,
 {
     async fn build_network(
         self,
@@ -332,9 +333,9 @@ pub struct EthereumConsensusBuilder {
 
 impl<Node> ConsensusBuilder<Node> for EthereumConsensusBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
 {
-    type Consensus = Arc<dyn reth_consensus::Consensus>;
+    type Consensus = Arc<dyn reth_consensus::FullConsensus>;
 
     async fn build_consensus(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
         Ok(Arc::new(EthBeaconConsensus::new(ctx.chain_spec())))

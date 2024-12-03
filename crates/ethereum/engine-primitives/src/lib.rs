@@ -11,6 +11,7 @@
 mod payload;
 use std::sync::Arc;
 
+use alloy_rpc_types_engine::{ExecutionPayload, ExecutionPayloadSidecar, PayloadError};
 pub use alloy_rpc_types_engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
     ExecutionPayloadV1, PayloadAttributes as EthPayloadAttributes,
@@ -22,6 +23,8 @@ use reth_payload_primitives::{
     validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
     PayloadOrAttributes, PayloadTypes,
 };
+use reth_payload_validator::ExecutionPayloadValidator;
+use reth_primitives::{Block, SealedBlock};
 
 /// The types used in the default mainnet ethereum beacon consensus engine.
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
@@ -63,13 +66,19 @@ impl PayloadTypes for EthPayloadTypes {
 /// Validator for the ethereum engine API.
 #[derive(Debug, Clone)]
 pub struct EthereumEngineValidator {
-    chain_spec: Arc<ChainSpec>,
+    inner: ExecutionPayloadValidator<ChainSpec>,
 }
 
 impl EthereumEngineValidator {
     /// Instantiates a new validator.
     pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { chain_spec }
+        Self { inner: ExecutionPayloadValidator::new(chain_spec) }
+    }
+
+    /// Returns the chain spec used by the validator.
+    #[inline]
+    fn chain_spec(&self) -> &ChainSpec {
+        self.inner.chain_spec()
     }
 }
 
@@ -77,12 +86,14 @@ impl<Types> EngineValidator<Types> for EthereumEngineValidator
 where
     Types: EngineTypes<PayloadAttributes = EthPayloadAttributes>,
 {
+    type Block = Block;
+
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,
         payload_or_attrs: PayloadOrAttributes<'_, EthPayloadAttributes>,
     ) -> Result<(), EngineObjectValidationError> {
-        validate_version_specific_fields(&self.chain_spec, version, payload_or_attrs)
+        validate_version_specific_fields(self.chain_spec(), version, payload_or_attrs)
     }
 
     fn ensure_well_formed_attributes(
@@ -90,6 +101,14 @@ where
         version: EngineApiMessageVersion,
         attributes: &EthPayloadAttributes,
     ) -> Result<(), EngineObjectValidationError> {
-        validate_version_specific_fields(&self.chain_spec, version, attributes.into())
+        validate_version_specific_fields(self.chain_spec(), version, attributes.into())
+    }
+
+    fn ensure_well_formed_payload(
+        &self,
+        payload: ExecutionPayload,
+        sidecar: ExecutionPayloadSidecar,
+    ) -> Result<SealedBlock, PayloadError> {
+        self.inner.ensure_well_formed_payload(payload, sidecar)
     }
 }

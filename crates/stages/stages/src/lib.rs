@@ -37,7 +37,7 @@
 //! # let consensus: Arc<dyn Consensus> = Arc::new(TestConsensus::default());
 //! # let headers_downloader = ReverseHeadersDownloaderBuilder::default().build(
 //! #    Arc::new(TestHeadersClient::default()),
-//! #    consensus.clone()
+//! #    consensus.clone().as_header_validator()
 //! # );
 //! # let provider_factory = create_test_provider_factory();
 //! # let bodies_downloader = BodiesDownloaderBuilder::default().build(

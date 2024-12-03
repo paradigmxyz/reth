@@ -16,13 +16,13 @@ use futures::{
 use metrics::atomics::AtomicU64;
 use reth_chain_state::CanonStateNotification;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
-use reth_primitives::{Receipt, SealedBlock, TransactionSigned};
+use reth_primitives::{NodePrimitives, Receipt, SealedBlock, TransactionSigned};
+use reth_primitives_traits::{Block, BlockBody};
+use reth_rpc_server_types::constants::gas_oracle::MAX_HEADER_HISTORY;
 use reth_storage_api::BlockReaderIdExt;
 use revm_primitives::{calc_blob_gasprice, calc_excess_blob_gas};
 use serde::{Deserialize, Serialize};
 use tracing::trace;
-
-use reth_rpc_server_types::constants::gas_oracle::MAX_HEADER_HISTORY;
 
 use super::{EthApiError, EthStateCache};
 
@@ -205,13 +205,14 @@ struct FeeHistoryCacheInner {
 
 /// Awaits for new chain events and directly inserts them into the cache so they're available
 /// immediately before they need to be fetched from disk.
-pub async fn fee_history_cache_new_blocks_task<St, Provider>(
+pub async fn fee_history_cache_new_blocks_task<St, Provider, N>(
     fee_history_cache: FeeHistoryCache,
     mut events: St,
     provider: Provider,
 ) where
-    St: Stream<Item = CanonStateNotification> + Unpin + 'static,
+    St: Stream<Item = CanonStateNotification<N>> + Unpin + 'static,
     Provider: BlockReaderIdExt + ChainSpecProvider + 'static,
+    N: NodePrimitives<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>,
 {
     // We're listening for new blocks emitted when the node is in live sync.
     // If the node transitions to stage sync, we need to fetch the missing blocks
@@ -248,7 +249,7 @@ pub async fn fee_history_cache_new_blocks_task<St, Provider>(
                     break;
                 };
 
-                let committed = event .committed();
+                let committed = event.committed();
                 let (blocks, receipts): (Vec<_>, Vec<_>) = committed
                     .blocks_and_receipts()
                     .map(|(block, receipts)| {
@@ -365,7 +366,7 @@ impl FeeHistoryEntry {
             base_fee_per_gas: block.base_fee_per_gas.unwrap_or_default(),
             gas_used_ratio: block.gas_used as f64 / block.gas_limit as f64,
             base_fee_per_blob_gas: block.blob_fee(),
-            blob_gas_used_ratio: block.blob_gas_used() as f64 /
+            blob_gas_used_ratio: block.body().blob_gas_used() as f64 /
                 alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
             excess_blob_gas: block.excess_blob_gas,
             blob_gas_used: block.blob_gas_used,

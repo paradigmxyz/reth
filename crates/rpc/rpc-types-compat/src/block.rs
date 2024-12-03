@@ -7,7 +7,7 @@ use alloy_rlp::Encodable;
 use alloy_rpc_types_eth::{
     Block, BlockTransactions, BlockTransactionsKind, Header, TransactionInfo,
 };
-use reth_primitives::{Block as PrimitiveBlock, BlockWithSenders};
+use reth_primitives::{Block as PrimitiveBlock, BlockWithSenders, TransactionSigned};
 
 use crate::{transaction::from_recovered_with_block_context, TransactionCompat};
 
@@ -43,7 +43,7 @@ pub fn from_block_with_tx_hashes<T>(
     block_hash: Option<B256>,
 ) -> Block<T> {
     let block_hash = block_hash.unwrap_or_else(|| block.header.hash_slow());
-    let transactions = block.body.transactions().map(|tx| tx.hash()).collect();
+    let transactions = block.body.transactions.iter().map(|tx| tx.hash()).collect();
 
     from_block_with_transactions(
         block.length(),
@@ -87,7 +87,11 @@ pub fn from_block_full<T: TransactionCompat>(
                 index: Some(idx as u64),
             };
 
-            from_recovered_with_block_context::<T>(signed_tx_ec_recovered, tx_info, tx_resp_builder)
+            from_recovered_with_block_context::<TransactionSigned, T>(
+                signed_tx_ec_recovered,
+                tx_info,
+                tx_resp_builder,
+            )
         })
         .collect::<Result<Vec<_>, T::Error>>()?;
 

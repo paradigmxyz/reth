@@ -4,7 +4,7 @@ use crate::{
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
     trie_cursor::TrieCursorFactory,
     walker::TrieWalker,
-    HashBuilder, Nibbles,
+    HashBuilder, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use alloy_primitives::{
     keccak256,
@@ -16,6 +16,9 @@ use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
     proof::ProofRetainer, AccountProof, MultiProof, StorageMultiProof, TrieAccount,
 };
+
+mod blinded;
+pub use blinded::*;
 
 /// A struct for generating merkle proofs.
 ///
@@ -103,8 +106,11 @@ where
         let retainer = targets.keys().map(Nibbles::unpack).collect();
         let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
 
-        let mut storages = HashMap::default();
-        let mut account_rlp = Vec::with_capacity(128);
+        // Initialize all storage multiproofs as empty.
+        // Storage multiproofs for non empty tries will be overwritten if necessary.
+        let mut storages: HashMap<_, _> =
+            targets.keys().map(|key| (*key, StorageMultiProof::empty())).collect();
+        let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
         let mut account_node_iter = TrieNodeIter::new(walker, hashed_account_cursor);
         while let Some(account_node) = account_node_iter.try_next()? {
             match account_node {
@@ -112,19 +118,20 @@ where
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
                 TrieElement::Leaf(hashed_address, account) => {
+                    let proof_targets = targets.remove(&hashed_address);
+                    let leaf_is_proof_target = proof_targets.is_some();
                     let storage_prefix_set = self
                         .prefix_sets
                         .storage_prefix_sets
                         .remove(&hashed_address)
                         .unwrap_or_default();
-                    let proof_targets = targets.remove(&hashed_address).unwrap_or_default();
                     let storage_multiproof = StorageProof::new_hashed(
                         self.trie_cursor_factory.clone(),
                         self.hashed_cursor_factory.clone(),
                         hashed_address,
                     )
                     .with_prefix_set_mut(storage_prefix_set)
-                    .storage_multiproof(proof_targets)?;
+                    .storage_multiproof(proof_targets.unwrap_or_default())?;
 
                     // Encode account
                     account_rlp.clear();
@@ -132,7 +139,12 @@ where
                     account.encode(&mut account_rlp as &mut dyn BufMut);
 
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
-                    storages.insert(hashed_address, storage_multiproof);
+
+                    // We might be adding leaves that are not necessarily our proof targets.
+                    if leaf_is_proof_target {
+                        // Overwrite storage multiproof.
+                        storages.insert(hashed_address, storage_multiproof);
+                    }
                 }
             }
         }

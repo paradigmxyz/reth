@@ -7,9 +7,9 @@ use alloy_rpc_types_engine::ForkchoiceState;
 use futures::Stream;
 use reth_beacon_consensus::{BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress};
 use reth_engine_primitives::ForkchoiceStatus;
-use reth_network_api::{NetworkEvent, PeersInfo};
+use reth_network_api::PeersInfo;
 use reth_primitives_traits::{format_gas, format_gas_throughput};
-use reth_prune::PrunerEvent;
+use reth_prune_types::PrunerEvent;
 use reth_stages::{EntitiesCheckpoint, ExecOutput, PipelineEvent, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileProducerEvent;
 use std::{
@@ -211,12 +211,6 @@ impl NodeState {
         }
     }
 
-    fn handle_network_event(&self, _: NetworkEvent) {
-        // NOTE(onbjerg): This used to log established/disconnecting sessions, but this is already
-        // logged in the networking component. I kept this stub in case we want to catch other
-        // networking events later on.
-    }
-
     fn handle_consensus_engine_event(&mut self, event: BeaconConsensusEngineEvent) {
         match event {
             BeaconConsensusEngineEvent::ForkchoiceUpdated(state, status) => {
@@ -304,10 +298,14 @@ impl NodeState {
     fn handle_pruner_event(&self, event: PrunerEvent) {
         match event {
             PrunerEvent::Started { tip_block_number } => {
-                info!(tip_block_number, "Pruner started");
+                debug!(tip_block_number, "Pruner started");
             }
             PrunerEvent::Finished { tip_block_number, elapsed, stats } => {
-                info!(tip_block_number, ?elapsed, ?stats, "Pruner finished");
+                let stats = format!(
+                    "[{}]",
+                    stats.iter().map(|item| item.to_string()).collect::<Vec<_>>().join(", ")
+                );
+                debug!(tip_block_number, ?elapsed, pruned_segments = %stats, "Pruner finished");
             }
         }
     }
@@ -315,10 +313,10 @@ impl NodeState {
     fn handle_static_file_producer_event(&self, event: StaticFileProducerEvent) {
         match event {
             StaticFileProducerEvent::Started { targets } => {
-                info!(?targets, "Static File Producer started");
+                debug!(?targets, "Static File Producer started");
             }
             StaticFileProducerEvent::Finished { targets, elapsed } => {
-                info!(?targets, ?elapsed, "Static File Producer finished");
+                debug!(?targets, ?elapsed, "Static File Producer finished");
             }
         }
     }
@@ -354,8 +352,6 @@ struct CurrentStage {
 /// A node event.
 #[derive(Debug)]
 pub enum NodeEvent {
-    /// A network event.
-    Network(NetworkEvent),
     /// A sync pipeline event.
     Pipeline(PipelineEvent),
     /// A consensus engine event.
@@ -369,12 +365,6 @@ pub enum NodeEvent {
     /// Used to encapsulate various conditions or situations that do not
     /// naturally fit into the other more specific variants.
     Other(String),
-}
-
-impl From<NetworkEvent> for NodeEvent {
-    fn from(event: NetworkEvent) -> Self {
-        Self::Network(event)
-    }
 }
 
 impl From<PipelineEvent> for NodeEvent {
@@ -523,9 +513,6 @@ where
 
         while let Poll::Ready(Some(event)) = this.events.as_mut().poll_next(cx) {
             match event {
-                NodeEvent::Network(event) => {
-                    this.state.handle_network_event(event);
-                }
                 NodeEvent::Pipeline(event) => {
                     this.state.handle_pipeline_event(event);
                 }

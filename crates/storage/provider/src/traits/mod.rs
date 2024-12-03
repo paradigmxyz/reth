@@ -13,7 +13,7 @@ mod header_sync_gap;
 pub use header_sync_gap::{HeaderSyncGap, HeaderSyncGapProvider};
 
 mod state;
-pub use state::{StateChangeWriter, StateWriter};
+pub use state::StateWriter;
 
 pub use reth_chainspec::ChainSpecProvider;
 
@@ -25,6 +25,3 @@ pub use full::{FullProvider, FullRpcProvider};
 
 mod tree_viewer;
 pub use tree_viewer::TreeViewer;
-
-mod finalized_block;
-pub use finalized_block::{ChainStateBlockReader, ChainStateBlockWriter};

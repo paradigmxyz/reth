@@ -20,8 +20,9 @@
 //! # use reth_static_file::StaticFileProducer;
 //! # use reth_config::config::StageConfig;
 //! # use reth_evm::execute::BlockExecutorProvider;
+//! # use reth_primitives::EthPrimitives;
 //!
-//! # fn create(exec: impl BlockExecutorProvider) {
+//! # fn create(exec: impl BlockExecutorProvider<Primitives = EthPrimitives>) {
 //!
 //! let provider_factory = create_test_provider_factory();
 //! let static_file_producer =
@@ -76,7 +77,11 @@ use tokio::sync::watch;
 /// - [`PruneStage`] (execute)
 /// - [`FinishStage`]
 #[derive(Debug)]
-pub struct DefaultStages<Provider, H, B, EF> {
+pub struct DefaultStages<Provider, H, B, EF>
+where
+    H: HeaderDownloader,
+    B: BodyDownloader,
+{
     /// Configuration for the online stages
     online: OnlineStages<Provider, H, B>,
     /// Executor factory needs for execution stage
@@ -87,13 +92,17 @@ pub struct DefaultStages<Provider, H, B, EF> {
     prune_modes: PruneModes,
 }
 
-impl<Provider, H, B, E> DefaultStages<Provider, H, B, E> {
+impl<Provider, H, B, E> DefaultStages<Provider, H, B, E>
+where
+    H: HeaderDownloader,
+    B: BodyDownloader,
+{
     /// Create a new set of default stages with default values.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         provider: Provider,
         tip: watch::Receiver<B256>,
-        consensus: Arc<dyn Consensus>,
+        consensus: Arc<dyn Consensus<H::Header, B::Body>>,
         header_downloader: H,
         body_downloader: B,
         executor_factory: E,
@@ -122,6 +131,8 @@ impl<Provider, H, B, E> DefaultStages<Provider, H, B, E> {
 impl<P, H, B, E> DefaultStages<P, H, B, E>
 where
     E: BlockExecutorProvider,
+    H: HeaderDownloader,
+    B: BodyDownloader,
 {
     /// Appends the default offline stages and default finish stage to the given builder.
     pub fn add_offline_stages<Provider>(
@@ -164,13 +175,17 @@ where
 /// These stages *can* be run without network access if the specified downloaders are
 /// themselves offline.
 #[derive(Debug)]
-pub struct OnlineStages<Provider, H, B> {
+pub struct OnlineStages<Provider, H, B>
+where
+    H: HeaderDownloader,
+    B: BodyDownloader,
+{
     /// Sync gap provider for the headers stage.
     provider: Provider,
     /// The tip for the headers stage.
     tip: watch::Receiver<B256>,
     /// The consensus engine used to validate incoming data.
-    consensus: Arc<dyn Consensus>,
+    consensus: Arc<dyn Consensus<H::Header, B::Body>>,
     /// The block header downloader
     header_downloader: H,
     /// The block body downloader
@@ -179,12 +194,16 @@ pub struct OnlineStages<Provider, H, B> {
     stages_config: StageConfig,
 }
 
-impl<Provider, H, B> OnlineStages<Provider, H, B> {
+impl<Provider, H, B> OnlineStages<Provider, H, B>
+where
+    H: HeaderDownloader,
+    B: BodyDownloader,
+{
     /// Create a new set of online stages with default values.
     pub fn new(
         provider: Provider,
         tip: watch::Receiver<B256>,
-        consensus: Arc<dyn Consensus>,
+        consensus: Arc<dyn Consensus<H::Header, B::Body>>,
         header_downloader: H,
         body_downloader: B,
         stages_config: StageConfig,
@@ -196,7 +215,7 @@ impl<Provider, H, B> OnlineStages<Provider, H, B> {
 impl<P, H, B> OnlineStages<P, H, B>
 where
     P: HeaderSyncGapProvider + 'static,
-    H: HeaderDownloader + 'static,
+    H: HeaderDownloader<Header = alloy_consensus::Header> + 'static,
     B: BodyDownloader + 'static,
 {
     /// Create a new builder using the given headers stage.
@@ -229,7 +248,7 @@ where
                 provider,
                 header_downloader,
                 tip,
-                consensus.clone(),
+                consensus.clone().as_header_validator(),
                 stages_config.etl,
             ))
             .add_stage(bodies)
@@ -239,7 +258,7 @@ where
 impl<Provider, P, H, B> StageSet<Provider> for OnlineStages<P, H, B>
 where
     P: HeaderSyncGapProvider + 'static,
-    H: HeaderDownloader + 'static,
+    H: HeaderDownloader<Header = alloy_consensus::Header> + 'static,
     B: BodyDownloader + 'static,
     HeaderStage<P, H>: Stage<Provider>,
     BodyStage<B>: Stage<Provider>,
@@ -250,7 +269,7 @@ where
                 self.provider,
                 self.header_downloader,
                 self.tip,
-                self.consensus.clone(),
+                self.consensus.clone().as_header_validator(),
                 self.stages_config.etl.clone(),
             ))
             .add_stage(BodyStage::new(self.body_downloader))

@@ -1,7 +1,10 @@
 //! Session handles.
 
-use std::{io, net::SocketAddr, sync::Arc, time::Instant};
-
+use crate::{
+    message::PeerMessage,
+    session::{conn::EthRlpxConnection, Direction, SessionId},
+    PendingSessionHandshakeError,
+};
 use reth_ecies::ECIESError;
 use reth_eth_wire::{
     capability::CapabilityMessage, errors::EthStreamError, Capabilities, DisconnectReason,
@@ -10,15 +13,10 @@ use reth_eth_wire::{
 use reth_network_api::PeerInfo;
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::PeerKind;
+use std::{io, net::SocketAddr, sync::Arc, time::Instant};
 use tokio::sync::{
     mpsc::{self, error::SendError},
     oneshot,
-};
-
-use crate::{
-    message::PeerMessage,
-    session::{conn::EthRlpxConnection, Direction, SessionId},
-    PendingSessionHandshakeError,
 };
 
 /// A handler attached to a peer session that's not authenticated yet, pending Handshake and hello

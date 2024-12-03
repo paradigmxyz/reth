@@ -22,12 +22,12 @@ use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_errors::ProviderError;
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{
-    Account, Block, BlockWithSenders, Bytecode, Receipt, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
+    Account, Block, BlockWithSenders, Bytecode, EthPrimitives, Receipt, SealedBlock,
+    SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::{StateProofProvider, StorageRootProvider};
+use reth_storage_api::{NodePrimitivesProvider, StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
@@ -92,6 +92,8 @@ impl BlockNumReader for NoopProvider {
 }
 
 impl BlockReader for NoopProvider {
+    type Block = Block;
+
     fn find_block_by_hash(
         &self,
         hash: B256,
@@ -192,29 +194,31 @@ impl BlockIdReader for NoopProvider {
 }
 
 impl TransactionsProvider for NoopProvider {
+    type Transaction = TransactionSigned;
+
     fn transaction_id(&self, _tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         Ok(None)
     }
 
-    fn transaction_by_id(&self, _id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
+    fn transaction_by_id(&self, _id: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
         Ok(None)
     }
 
-    fn transaction_by_id_no_hash(
+    fn transaction_by_id_unhashed(
         &self,
         _id: TxNumber,
-    ) -> ProviderResult<Option<TransactionSignedNoHash>> {
+    ) -> ProviderResult<Option<Self::Transaction>> {
         Ok(None)
     }
 
-    fn transaction_by_hash(&self, _hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
+    fn transaction_by_hash(&self, _hash: TxHash) -> ProviderResult<Option<Self::Transaction>> {
         Ok(None)
     }
 
     fn transaction_by_hash_with_meta(
         &self,
         _hash: TxHash,
-    ) -> ProviderResult<Option<(TransactionSigned, TransactionMeta)>> {
+    ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
         Ok(None)
     }
 
@@ -225,21 +229,21 @@ impl TransactionsProvider for NoopProvider {
     fn transactions_by_block(
         &self,
         _block_id: BlockHashOrNumber,
-    ) -> ProviderResult<Option<Vec<TransactionSigned>>> {
+    ) -> ProviderResult<Option<Vec<Self::Transaction>>> {
         Ok(None)
     }
 
     fn transactions_by_block_range(
         &self,
         _range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<Vec<TransactionSigned>>> {
+    ) -> ProviderResult<Vec<Vec<Self::Transaction>>> {
         Ok(Vec::default())
     }
 
     fn transactions_by_tx_range(
         &self,
         _range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<reth_primitives::TransactionSignedNoHash>> {
+    ) -> ProviderResult<Vec<Self::Transaction>> {
         Ok(Vec::default())
     }
 
@@ -256,6 +260,7 @@ impl TransactionsProvider for NoopProvider {
 }
 
 impl ReceiptProvider for NoopProvider {
+    type Receipt = Receipt;
     fn receipt(&self, _id: TxNumber) -> ProviderResult<Option<Receipt>> {
         Ok(None)
     }
@@ -279,6 +284,8 @@ impl ReceiptProvider for NoopProvider {
 impl ReceiptProviderIdExt for NoopProvider {}
 
 impl HeaderProvider for NoopProvider {
+    type Header = Header;
+
     fn header(&self, _block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
         Ok(None)
     }
@@ -367,6 +374,15 @@ impl StorageRootProvider for NoopProvider {
         _hashed_storage: HashedStorage,
     ) -> ProviderResult<reth_trie::StorageProof> {
         Ok(reth_trie::StorageProof::new(slot))
+    }
+
+    fn storage_multiproof(
+        &self,
+        _address: Address,
+        _slots: &[B256],
+        _hashed_storage: HashedStorage,
+    ) -> ProviderResult<reth_trie::StorageMultiProof> {
+        Ok(reth_trie::StorageMultiProof::empty())
     }
 }
 
@@ -555,9 +571,11 @@ impl PruneCheckpointReader for NoopProvider {
     }
 }
 
-impl StaticFileProviderFactory for NoopProvider {
-    type Primitives = ();
+impl NodePrimitivesProvider for NoopProvider {
+    type Primitives = EthPrimitives;
+}
 
+impl StaticFileProviderFactory for NoopProvider {
     fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         StaticFileProvider::read_only(PathBuf::default(), false).unwrap()
     }
@@ -570,6 +588,8 @@ impl CanonStateSubscriptions for NoopProvider {
 }
 
 impl ForkChoiceSubscriptions for NoopProvider {
+    type Header = Header;
+
     fn subscribe_safe_block(&self) -> ForkChoiceNotifications {
         let (_, rx) = watch::channel(None);
         ForkChoiceNotifications(rx)

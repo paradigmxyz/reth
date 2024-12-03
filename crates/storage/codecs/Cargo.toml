@@ -67,7 +67,7 @@ alloy = [
     "dep:modular-bitfield",
     "dep:alloy-trie",
 ]
-optimism = ["alloy", "dep:op-alloy-consensus"]
+op = ["alloy", "dep:op-alloy-consensus"]
 test-utils = [
 	"std",
     "alloy",
@@ -81,7 +81,7 @@ serde = [
 	"alloy-primitives/serde",
 	"alloy-trie?/serde",
 	"bytes/serde",
-	"op-alloy-consensus?/serde"
+	"op-alloy-consensus?/serde",
 ]
 arbitrary = [
 	"alloy-consensus?/arbitrary",

@@ -17,12 +17,12 @@ use reth_trie::{
     proof::StorageProof,
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     walker::TrieWalker,
-    HashBuilder, MultiProof, Nibbles, TrieAccount, TrieInput,
+    HashBuilder, MultiProof, Nibbles, TrieAccount, TrieInput, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::proof::ProofRetainer;
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::sync::Arc;
-use tracing::debug;
+use tracing::{debug, error};
 
 #[cfg(feature = "metrics")]
 use crate::metrics::ParallelStateRootMetrics;
@@ -33,7 +33,7 @@ pub struct ParallelProof<Factory> {
     /// Consistent view of the database.
     view: ConsistentDbView<Factory>,
     /// Trie input.
-    input: TrieInput,
+    input: Arc<TrieInput>,
     /// Parallel state root metrics.
     #[cfg(feature = "metrics")]
     metrics: ParallelStateRootMetrics,
@@ -41,7 +41,7 @@ pub struct ParallelProof<Factory> {
 
 impl<Factory> ParallelProof<Factory> {
     /// Create new state proof generator.
-    pub fn new(view: ConsistentDbView<Factory>, input: TrieInput) -> Self {
+    pub fn new(view: ConsistentDbView<Factory>, input: Arc<TrieInput>) -> Self {
         Self {
             view,
             input,
@@ -62,8 +62,8 @@ where
     ) -> Result<MultiProof, ParallelStateRootError> {
         let mut tracker = ParallelTrieTracker::default();
 
-        let trie_nodes_sorted = Arc::new(self.input.nodes.into_sorted());
-        let hashed_state_sorted = Arc::new(self.input.state.into_sorted());
+        let trie_nodes_sorted = self.input.nodes.clone().into_sorted();
+        let hashed_state_sorted = self.input.state.clone().into_sorted();
 
         // Extend prefix sets with targets
         let mut prefix_sets = self.input.prefix_sets.clone();
@@ -126,7 +126,9 @@ where
                         ))
                     })
                 })();
-                let _ = tx.send(result);
+                if let Err(err) = tx.send(result) {
+                    error!(target: "trie::parallel", ?hashed_address, err_content = ?err.0,  "Failed to send proof result");
+                }
             });
             storage_proofs.insert(hashed_address, rx);
         }
@@ -153,7 +155,7 @@ where
         let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
 
         let mut storages = HashMap::default();
-        let mut account_rlp = Vec::with_capacity(128);
+        let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
         let mut account_node_iter = TrieNodeIter::new(
             walker,
             hashed_cursor_factory.hashed_account_cursor().map_err(ProviderError::Database)?,
@@ -201,7 +203,11 @@ where
                     account.encode(&mut account_rlp as &mut dyn BufMut);
 
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
-                    storages.insert(hashed_address, storage_multiproof);
+
+                    // We might be adding leaves that are not necessarily our proof targets.
+                    if targets.contains_key(&hashed_address) {
+                        storages.insert(hashed_address, storage_multiproof);
+                    }
                 }
             }
         }

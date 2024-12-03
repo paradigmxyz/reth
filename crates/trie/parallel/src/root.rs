@@ -4,6 +4,7 @@ use crate::{stats::ParallelTrieTracker, storage_root_targets::StorageRootTargets
 use alloy_primitives::B256;
 use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
+use reth_db::DatabaseError;
 use reth_execution_errors::StorageRootError;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, ProviderError,
@@ -14,7 +15,7 @@ use reth_trie::{
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdates,
     walker::TrieWalker,
-    HashBuilder, Nibbles, StorageRoot, TrieAccount, TrieInput,
+    HashBuilder, Nibbles, StorageRoot, TrieAccount, TrieInput, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::{collections::HashMap, sync::Arc};
@@ -149,7 +150,7 @@ where
         );
 
         let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
-        let mut account_rlp = Vec::with_capacity(128);
+        let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
         while let Some(node) = account_node_iter.try_next().map_err(ProviderError::Database)? {
             match node {
                 TrieElement::Branch(node) => {
@@ -193,11 +194,8 @@ where
 
         let root = hash_builder.root();
 
-        trie_updates.finalize(
-            account_node_iter.walker,
-            hash_builder,
-            prefix_sets.destroyed_accounts,
-        );
+        let removed_keys = account_node_iter.walker.take_removed_keys();
+        trie_updates.finalize(hash_builder, removed_keys, prefix_sets.destroyed_accounts);
 
         let stats = tracker.finish();
 
@@ -228,6 +226,9 @@ pub enum ParallelStateRootError {
     /// Provider error.
     #[error(transparent)]
     Provider(#[from] ProviderError),
+    /// Other unspecified error.
+    #[error("{_0}")]
+    Other(String),
 }
 
 impl From<ParallelStateRootError> for ProviderError {
@@ -237,6 +238,7 @@ impl From<ParallelStateRootError> for ProviderError {
             ParallelStateRootError::StorageRoot(StorageRootError::Database(error)) => {
                 Self::Database(error)
             }
+            ParallelStateRootError::Other(other) => Self::Database(DatabaseError::Other(other)),
         }
     }
 }

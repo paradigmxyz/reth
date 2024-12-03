@@ -11,13 +11,13 @@
 
 extern crate alloc;
 
-use alloc::{fmt::Debug, vec::Vec};
+use alloc::{fmt::Debug, sync::Arc, vec::Vec};
 use alloy_consensus::Header;
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256, U256};
 use reth_primitives::{
-    BlockBody, BlockWithSenders, GotExpected, GotExpectedBoxed, InvalidTransactionError, Receipt,
-    SealedBlock, SealedHeader,
+    BlockBody, BlockWithSenders, EthPrimitives, GotExpected, GotExpectedBoxed,
+    InvalidTransactionError, NodePrimitives, Receipt, SealedBlock, SealedHeader,
 };
 use reth_primitives_traits::constants::MINIMUM_GAS_LIMIT;
 
@@ -28,25 +28,67 @@ pub mod noop;
 /// test helpers for mocking consensus
 pub mod test_utils;
 
-/// Post execution input passed to [`Consensus::validate_block_post_execution`].
+/// Post execution input passed to [`FullConsensus::validate_block_post_execution`].
 #[derive(Debug)]
-pub struct PostExecutionInput<'a> {
+pub struct PostExecutionInput<'a, R = Receipt> {
     /// Receipts of the block.
-    pub receipts: &'a [Receipt],
+    pub receipts: &'a [R],
     /// EIP-7685 requests of the block.
     pub requests: &'a Requests,
 }
 
-impl<'a> PostExecutionInput<'a> {
+impl<'a, R> PostExecutionInput<'a, R> {
     /// Creates a new instance of `PostExecutionInput`.
-    pub const fn new(receipts: &'a [Receipt], requests: &'a Requests) -> Self {
+    pub const fn new(receipts: &'a [R], requests: &'a Requests) -> Self {
         Self { receipts, requests }
     }
 }
 
+/// [`Consensus`] implementation which knows full node primitives and is able to validation block's
+/// execution outcome.
+#[auto_impl::auto_impl(&, Arc)]
+pub trait FullConsensus<N: NodePrimitives = EthPrimitives>:
+    AsConsensus<N::BlockHeader, N::BlockBody>
+{
+    /// Validate a block considering world state, i.e. things that can not be checked before
+    /// execution.
+    ///
+    /// See the Yellow Paper sections 4.3.2 "Holistic Validity".
+    ///
+    /// Note: validating blocks does not include other validations of the Consensus
+    fn validate_block_post_execution(
+        &self,
+        block: &BlockWithSenders<N::Block>,
+        input: PostExecutionInput<'_, N::Receipt>,
+    ) -> Result<(), ConsensusError>;
+}
+
 /// Consensus is a protocol that chooses canonical chain.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait Consensus<H = Header, B = BlockBody>: Debug + Send + Sync {
+pub trait Consensus<H = Header, B = BlockBody>: AsHeaderValidator<H> {
+    /// Ensures that body field values match the header.
+    fn validate_body_against_header(
+        &self,
+        body: &B,
+        header: &SealedHeader<H>,
+    ) -> Result<(), ConsensusError>;
+
+    /// Validate a block disregarding world state, i.e. things that can be checked before sender
+    /// recovery and execution.
+    ///
+    /// See the Yellow Paper sections 4.3.2 "Holistic Validity", 4.3.4 "Block Header Validity", and
+    /// 11.1 "Ommer Validation".
+    ///
+    /// **This should not be called for the genesis block**.
+    ///
+    /// Note: validating blocks does not include other validations of the Consensus
+    fn validate_block_pre_execution(&self, block: &SealedBlock<H, B>)
+        -> Result<(), ConsensusError>;
+}
+
+/// HeaderValidator is a protocol that validates headers and their relationships.
+#[auto_impl::auto_impl(&, Arc)]
+pub trait HeaderValidator<H = Header>: Debug + Send + Sync {
     /// Validate if header is correct and follows consensus specification.
     ///
     /// This is called on standalone header to check if all hashes are correct.
@@ -60,7 +102,8 @@ pub trait Consensus<H = Header, B = BlockBody>: Debug + Send + Sync {
     ///
     /// **This should not be called for the genesis block**.
     ///
-    /// Note: Validating header against its parent does not include other Consensus validations.
+    /// Note: Validating header against its parent does not include other HeaderValidator
+    /// validations.
     fn validate_header_against_parent(
         &self,
         header: &SealedHeader<H>,
@@ -99,43 +142,46 @@ pub trait Consensus<H = Header, B = BlockBody>: Debug + Send + Sync {
     ///
     /// Some consensus engines may want to do additional checks here.
     ///
-    /// Note: validating headers with TD does not include other Consensus validation.
+    /// Note: validating headers with TD does not include other HeaderValidator validation.
     fn validate_header_with_total_difficulty(
         &self,
         header: &H,
         total_difficulty: U256,
     ) -> Result<(), ConsensusError>;
+}
 
-    /// Ensures that body field values match the header.
-    fn validate_body_against_header(
-        &self,
-        body: &B,
-        header: &SealedHeader<H>,
-    ) -> Result<(), ConsensusError>;
+/// Helper trait to cast `Arc<dyn Consensus>` to `Arc<dyn HeaderValidator>`
+pub trait AsHeaderValidator<H>: HeaderValidator<H> {
+    /// Converts the [`Arc`] of self to [`Arc`] of [`HeaderValidator`]
+    fn as_header_validator<'a>(self: Arc<Self>) -> Arc<dyn HeaderValidator<H> + 'a>
+    where
+        Self: 'a;
+}
 
-    /// Validate a block disregarding world state, i.e. things that can be checked before sender
-    /// recovery and execution.
-    ///
-    /// See the Yellow Paper sections 4.3.2 "Holistic Validity", 4.3.4 "Block Header Validity", and
-    /// 11.1 "Ommer Validation".
-    ///
-    /// **This should not be called for the genesis block**.
-    ///
-    /// Note: validating blocks does not include other validations of the Consensus
-    fn validate_block_pre_execution(&self, block: &SealedBlock<H, B>)
-        -> Result<(), ConsensusError>;
+impl<T: HeaderValidator<H>, H> AsHeaderValidator<H> for T {
+    fn as_header_validator<'a>(self: Arc<Self>) -> Arc<dyn HeaderValidator<H> + 'a>
+    where
+        Self: 'a,
+    {
+        self
+    }
+}
 
-    /// Validate a block considering world state, i.e. things that can not be checked before
-    /// execution.
-    ///
-    /// See the Yellow Paper sections 4.3.2 "Holistic Validity".
-    ///
-    /// Note: validating blocks does not include other validations of the Consensus
-    fn validate_block_post_execution(
-        &self,
-        block: &BlockWithSenders,
-        input: PostExecutionInput<'_>,
-    ) -> Result<(), ConsensusError>;
+/// Helper trait to cast `Arc<dyn FullConsensus>` to `Arc<dyn Consensus>`
+pub trait AsConsensus<H, B>: Consensus<H, B> {
+    /// Converts the [`Arc`] of self to [`Arc`] of [`HeaderValidator`]
+    fn as_consensus<'a>(self: Arc<Self>) -> Arc<dyn Consensus<H, B> + 'a>
+    where
+        Self: 'a;
+}
+
+impl<T: Consensus<H, B>, H, B> AsConsensus<H, B> for T {
+    fn as_consensus<'a>(self: Arc<Self>) -> Arc<dyn Consensus<H, B> + 'a>
+    where
+        Self: 'a,
+    {
+        self
+    }
 }
 
 /// Consensus Errors

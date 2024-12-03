@@ -17,6 +17,7 @@ reth-chainspec.workspace = true
 reth-blockchain-tree-api.workspace = true
 reth-execution-types.workspace = true
 reth-primitives = { workspace = true, features = ["reth-codec", "secp256k1"] }
+reth-primitives-traits = { workspace = true, features = ["reth-codec"] }
 reth-fs-util.workspace = true
 reth-errors.workspace = true
 reth-storage-errors.workspace = true
@@ -91,25 +92,28 @@ optimism = [
     "reth-primitives/optimism",
     "reth-execution-types/optimism",
     "reth-optimism-primitives",
-    "reth-codecs/optimism",
+    "reth-codecs/op",
     "reth-db/optimism",
     "reth-db-api/optimism",
     "revm/optimism",
+    "reth-optimism-primitives/op",
 ]
 serde = [
-    "reth-execution-types/serde",
-    "reth-trie-db/serde",
-    "reth-trie/serde",
-    "alloy-consensus/serde",
-    "alloy-eips/serde",
-    "alloy-primitives/serde",
-    "alloy-rpc-types-engine/serde",
     "dashmap/serde",
     "notify/serde",
     "parking_lot/serde",
     "rand/serde",
+    "alloy-primitives/serde",
+    "alloy-consensus/serde",
+    "alloy-eips/serde",
+    "alloy-rpc-types-engine/serde",
     "revm/serde",
     "reth-codecs/serde",
+    "reth-optimism-primitives?/serde",
+    "reth-primitives-traits/serde",
+    "reth-execution-types/serde",
+    "reth-trie-db/serde",
+    "reth-trie/serde",
 ]
 test-utils = [
     "reth-db/test-utils",
@@ -121,10 +125,12 @@ test-utils = [
     "reth-evm/test-utils",
     "reth-network-p2p/test-utils",
     "reth-primitives/test-utils",
+    "reth-primitives-traits/test-utils",
     "reth-codecs/test-utils",
     "reth-db-api/test-utils",
     "reth-trie-db/test-utils",
     "revm/test-utils",
     "reth-prune-types/test-utils",
     "reth-stages-types/test-utils",
+    "reth-optimism-primitives?/arbitrary",
 ]

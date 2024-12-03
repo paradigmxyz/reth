@@ -17,13 +17,14 @@ use reth::{
     cli::{config::PayloadBuilderConfig, Cli},
     payload::PayloadBuilderHandle,
     providers::CanonStateSubscriptions,
-    transaction_pool::TransactionPool,
+    transaction_pool::{PoolTransaction, TransactionPool},
 };
 use reth_basic_payload_builder::BasicPayloadJobGeneratorConfig;
 use reth_chainspec::ChainSpec;
 use reth_node_api::NodeTypesWithEngine;
 use reth_node_ethereum::{node::EthereumAddOns, EthEngineTypes, EthEvmConfig, EthereumNode};
 use reth_payload_builder::PayloadBuilderService;
+use reth_primitives::{EthPrimitives, TransactionSigned};
 
 pub mod generator;
 pub mod job;
@@ -34,8 +35,16 @@ pub struct CustomPayloadBuilder;
 
 impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for CustomPayloadBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypesWithEngine<Engine = EthEngineTypes, ChainSpec = ChainSpec>>,
-    Pool: TransactionPool + Unpin + 'static,
+    Node: FullNodeTypes<
+        Types: NodeTypesWithEngine<
+            Engine = EthEngineTypes,
+            ChainSpec = ChainSpec,
+            Primitives = EthPrimitives,
+        >,
+    >,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>
+        + Unpin
+        + 'static,
 {
     async fn spawn_payload_service(
         self,

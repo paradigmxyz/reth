@@ -35,7 +35,6 @@ where
             let block_hash = block.hash();
             let excess_blob_gas = block.excess_blob_gas;
             let timestamp = block.timestamp;
-            let block = block.unseal();
 
             let l1_block_info =
                 reth_optimism_evm::extract_l1_info(&block.body).map_err(OpEthApiError::from)?;
@@ -48,7 +47,7 @@ where
                 .enumerate()
                 .map(|(idx, (ref tx, receipt))| -> Result<_, _> {
                     let meta = TransactionMeta {
-                        tx_hash: tx.hash,
+                        tx_hash: tx.hash(),
                         index: idx as u64,
                         block_hash,
                         block_number,
@@ -58,7 +57,7 @@ where
                     };
 
                     Ok(OpReceiptBuilder::new(
-                        &self.inner.provider().chain_spec(),
+                        &self.inner.eth_api.provider().chain_spec(),
                         tx,
                         meta,
                         receipt,

@@ -1,5 +1,6 @@
 use super::queue::BodiesRequestQueue;
 use crate::{bodies::task::TaskDownloader, metrics::BodyDownloaderMetrics};
+use alloy_consensus::BlockHeader;
 use alloy_primitives::BlockNumber;
 use futures::Stream;
 use futures_util::StreamExt;
@@ -14,12 +15,13 @@ use reth_network_p2p::{
     error::{DownloadError, DownloadResult},
 };
 use reth_primitives::SealedHeader;
-use reth_primitives_traits::size::InMemorySize;
+use reth_primitives_traits::{size::InMemorySize, BlockHeader as _};
 use reth_storage_api::HeaderProvider;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
     cmp::Ordering,
     collections::BinaryHeap,
+    fmt::Debug,
     mem,
     ops::RangeInclusive,
     pin::Pin,
@@ -70,7 +72,7 @@ where
     Provider: HeaderProvider + Unpin + 'static,
 {
     /// Returns the next contiguous request.
-    fn next_headers_request(&self) -> DownloadResult<Option<Vec<SealedHeader>>> {
+    fn next_headers_request(&self) -> DownloadResult<Option<Vec<SealedHeader<Provider::Header>>>> {
         let start_at = match self.in_progress_queue.last_requested_block_number {
             Some(num) => num + 1,
             None => *self.download_range.start(),
@@ -95,7 +97,7 @@ where
         &self,
         range: RangeInclusive<BlockNumber>,
         max_non_empty: u64,
-    ) -> DownloadResult<Option<Vec<SealedHeader>>> {
+    ) -> DownloadResult<Option<Vec<SealedHeader<Provider::Header>>>> {
         if range.is_empty() || max_non_empty == 0 {
             return Ok(None)
         }
@@ -108,7 +110,7 @@ where
         let mut collected = 0;
         let mut non_empty_headers = 0;
         let headers = self.provider.sealed_headers_while(range.clone(), |header| {
-            let should_take = range.contains(&header.number) &&
+            let should_take = range.contains(&header.number()) &&
                 non_empty_headers < max_non_empty &&
                 collected < self.stream_batch_size;
 
@@ -298,8 +300,8 @@ where
 
 impl<B, Provider> BodyDownloader for BodiesDownloader<B, Provider>
 where
-    B: BodiesClient<Body: InMemorySize> + 'static,
-    Provider: HeaderProvider + Unpin + 'static,
+    B: BodiesClient<Body: Debug + InMemorySize> + 'static,
+    Provider: HeaderProvider<Header = alloy_consensus::Header> + Unpin + 'static,
 {
     type Body = B::Body;
 
@@ -349,7 +351,7 @@ where
 impl<B, Provider> Stream for BodiesDownloader<B, Provider>
 where
     B: BodiesClient<Body: InMemorySize> + 'static,
-    Provider: HeaderProvider + Unpin + 'static,
+    Provider: HeaderProvider<Header = alloy_consensus::Header> + Unpin + 'static,
 {
     type Item = BodyDownloaderResult<B::Body>;
 

@@ -3,7 +3,7 @@
 use alloc::vec::Vec;
 
 use alloy_eips::eip7685::Requests;
-use alloy_primitives::{map::HashSet, Address, BlockNumber};
+use alloy_primitives::{map::HashSet, Address, BlockNumber, Log};
 use reth_execution_errors::{BlockExecutionError, InternalBlockExecutionError};
 use reth_primitives::Receipts;
 use reth_primitives_traits::Receipt;
@@ -14,7 +14,7 @@ use revm::db::states::bundle_state::BundleRetention;
 ///  - recording receipts during execution of multiple blocks.
 ///  - pruning receipts according to the pruning configuration.
 ///  - batch range if known
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct BlockBatchRecord<T = reth_primitives::Receipt> {
     /// Pruning configuration.
     prune_modes: PruneModes,
@@ -41,6 +41,19 @@ pub struct BlockBatchRecord<T = reth_primitives::Receipt> {
     first_block: Option<BlockNumber>,
     /// The maximum known block.
     tip: Option<BlockNumber>,
+}
+
+impl<T> Default for BlockBatchRecord<T> {
+    fn default() -> Self {
+        Self {
+            prune_modes: Default::default(),
+            receipts: Default::default(),
+            requests: Default::default(),
+            pruning_address_filter: Default::default(),
+            first_block: Default::default(),
+            tip: Default::default(),
+        }
+    }
 }
 
 impl<T> BlockBatchRecord<T> {
@@ -83,10 +96,7 @@ impl<T> BlockBatchRecord<T> {
     }
 
     /// Returns all recorded receipts.
-    pub fn take_receipts(&mut self) -> Receipts<T>
-    where
-        T: Default,
-    {
+    pub fn take_receipts(&mut self) -> Receipts<T> {
         core::mem::take(&mut self.receipts)
     }
 
@@ -102,7 +112,7 @@ impl<T> BlockBatchRecord<T> {
 
     /// Returns the [`BundleRetention`] for the given block based on the configured prune modes.
     pub fn bundle_retention(&self, block_number: BlockNumber) -> BundleRetention {
-        if self.tip.map_or(true, |tip| {
+        if self.tip.is_none_or(|tip| {
             !self
                 .prune_modes
                 .account_history
@@ -121,7 +131,7 @@ impl<T> BlockBatchRecord<T> {
     /// Save receipts to the executor.
     pub fn save_receipts(&mut self, receipts: Vec<T>) -> Result<(), BlockExecutionError>
     where
-        T: Receipt,
+        T: Receipt<Log = Log>,
     {
         let mut receipts = receipts.into_iter().map(Some).collect();
         // Prune receipts if necessary.
@@ -134,7 +144,7 @@ impl<T> BlockBatchRecord<T> {
     /// Prune receipts according to the pruning configuration.
     fn prune_receipts(&mut self, receipts: &mut Vec<Option<T>>) -> Result<(), PruneSegmentError>
     where
-        T: Receipt,
+        T: Receipt<Log = Log>,
     {
         let (Some(first_block), Some(tip)) = (self.first_block, self.tip) else { return Ok(()) };
 

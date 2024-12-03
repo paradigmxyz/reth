@@ -1,10 +1,9 @@
 //! Errors for sparse trie.
 
-use alloy_primitives::{Bytes, B256};
-use reth_trie::Nibbles;
-use thiserror::Error;
-
 use crate::SparseNode;
+use alloy_primitives::{Bytes, B256};
+use reth_trie_common::Nibbles;
+use thiserror::Error;
 
 /// Result type with [`SparseStateTrieError`] as error.
 pub type SparseStateTrieResult<Ok> = Result<Ok, SparseStateTrieError>;
@@ -56,4 +55,7 @@ pub enum SparseTrieError {
     /// RLP error.
     #[error(transparent)]
     Rlp(#[from] alloy_rlp::Error),
+    /// Other.
+    #[error(transparent)]
+    Other(#[from] Box<dyn std::error::Error>),
 }

@@ -1,12 +1,13 @@
 use super::error::HeadersDownloaderResult;
 use crate::error::{DownloadError, DownloadResult};
 use alloy_consensus::BlockHeader;
-use alloy_eips::BlockHashOrNumber;
+use alloy_eips::{eip1898::BlockWithParent, BlockHashOrNumber};
 use alloy_primitives::B256;
 use futures::Stream;
-use reth_consensus::Consensus;
+use reth_consensus::HeaderValidator;
 use reth_primitives::SealedHeader;
-use reth_primitives_traits::BlockWithParent;
+use std::fmt::Debug;
+
 /// A downloader capable of fetching and yielding block headers.
 ///
 /// A downloader represents a distinct strategy for submitting requests to download block headers,
@@ -21,7 +22,7 @@ pub trait HeaderDownloader:
     + Unpin
 {
     /// The header type being downloaded.
-    type Header: Send + Sync + Unpin + 'static;
+    type Header: Debug + Send + Sync + Unpin + 'static;
 
     /// Updates the gap to sync which ranges from local head to the sync target
     ///
@@ -83,7 +84,7 @@ impl SyncTarget {
 ///
 /// Returns Ok(false) if the
 pub fn validate_header_download<H: BlockHeader>(
-    consensus: &dyn Consensus<H>,
+    consensus: &dyn HeaderValidator<H>,
     header: &SealedHeader<H>,
     parent: &SealedHeader<H>,
 ) -> DownloadResult<()> {

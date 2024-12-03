@@ -2,16 +2,15 @@
 //! and [`NewPooledTransactionHashes68`](reth_eth_wire::NewPooledTransactionHashes68)
 //! announcements. Validation and filtering of announcements is network dependent.
 
-use std::{fmt, fmt::Display, mem};
-
 use crate::metrics::{AnnouncedTxTypesMetrics, TxTypesCounter};
-use alloy_primitives::{Signature, TxHash};
+use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
 use derive_more::{Deref, DerefMut};
 use reth_eth_wire::{
     DedupPayload, Eth68TxMetadata, HandleMempoolData, PartiallyValidData, ValidAnnouncementData,
     MAX_MESSAGE_SIZE,
 };
 use reth_primitives::TxType;
+use std::{fmt, fmt::Display, mem};
 use tracing::trace;
 
 /// The size of a decoded signature in bytes.

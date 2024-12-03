@@ -4,7 +4,7 @@ use crate::{
     dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
     EthEvmConfig,
 };
-use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::Transaction as _;
 use alloy_eips::eip7685::Requests;
 use core::fmt::Display;
@@ -13,18 +13,19 @@ use reth_consensus::ConsensusError;
 use reth_ethereum_consensus::validate_block_post_execution;
 use reth_evm::{
     execute::{
-        BasicBlockExecutorProvider, BlockExecutionError, BlockExecutionStrategy,
-        BlockExecutionStrategyFactory, BlockValidationError, ExecuteOutput, ProviderError,
+        balance_increment_state, BasicBlockExecutorProvider, BlockExecutionError,
+        BlockExecutionStrategy, BlockExecutionStrategyFactory, BlockValidationError, ExecuteOutput,
+        ProviderError,
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, SystemCaller},
-    ConfigureEvm,
+    ConfigureEvm, TxEnvOverrides,
 };
-use reth_primitives::{BlockWithSenders, Receipt};
+use reth_primitives::{BlockWithSenders, EthPrimitives, Receipt};
 use reth_revm::db::State;
 use revm_primitives::{
     db::{Database, DatabaseCommit},
-    BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState, U256,
+    EnvWithHandlerCfg, ResultAndState, U256,
 };
 
 /// Factory for [`EthExecutionStrategy`].
@@ -60,6 +61,8 @@ where
     EvmConfig:
         Clone + Unpin + Sync + Send + 'static + ConfigureEvm<Header = alloy_consensus::Header>,
 {
+    type Primitives = EthPrimitives;
+
     type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
         EthExecutionStrategy<DB, EvmConfig>;
 
@@ -83,6 +86,8 @@ where
     chain_spec: Arc<ChainSpec>,
     /// How to create an EVM.
     evm_config: EvmConfig,
+    /// Optional overrides for the transactions environment.
+    tx_env_overrides: Option<Box<dyn TxEnvOverrides>>,
     /// Current state for block execution.
     state: State<DB>,
     /// Utility to call system smart contracts.
@@ -96,7 +101,7 @@ where
     /// Creates a new [`EthExecutionStrategy`]
     pub fn new(state: State<DB>, chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
         let system_caller = SystemCaller::new(evm_config.clone(), chain_spec.clone());
-        Self { state, chain_spec, evm_config, system_caller }
+        Self { state, chain_spec, evm_config, system_caller, tx_env_overrides: None }
     }
 }
 
@@ -115,20 +120,24 @@ where
         header: &alloy_consensus::Header,
         total_difficulty: U256,
     ) -> EnvWithHandlerCfg {
-        let mut cfg = CfgEnvWithHandlerCfg::new(Default::default(), Default::default());
-        let mut block_env = BlockEnv::default();
-        self.evm_config.fill_cfg_and_block_env(&mut cfg, &mut block_env, header, total_difficulty);
-
+        let (cfg, block_env) = self.evm_config.cfg_and_block_env(header, total_difficulty);
         EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default())
     }
 }
 
-impl<DB, EvmConfig> BlockExecutionStrategy<DB> for EthExecutionStrategy<DB, EvmConfig>
+impl<DB, EvmConfig> BlockExecutionStrategy for EthExecutionStrategy<DB, EvmConfig>
 where
     DB: Database<Error: Into<ProviderError> + Display>,
     EvmConfig: ConfigureEvm<Header = alloy_consensus::Header>,
 {
+    type DB = DB;
     type Error = BlockExecutionError;
+
+    type Primitives = EthPrimitives;
+
+    fn init(&mut self, tx_env_overrides: Box<dyn TxEnvOverrides>) {
+        self.tx_env_overrides = Some(tx_env_overrides);
+    }
 
     fn apply_pre_execution_changes(
         &mut self,
@@ -152,7 +161,7 @@ where
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<ExecuteOutput, Self::Error> {
+    ) -> Result<ExecuteOutput<Receipt>, Self::Error> {
         let env = self.evm_env_for_block(&block.header, total_difficulty);
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
 
@@ -172,6 +181,10 @@ where
 
             self.evm_config.fill_tx_env(evm.tx_mut(), transaction, *sender);
 
+            if let Some(tx_env_overrides) = &mut self.tx_env_overrides {
+                tx_env_overrides.apply(evm.tx_mut());
+            }
+
             // Execute transaction.
             let result_and_state = evm.transact().map_err(move |err| {
                 let new_err = err.map_db_err(|e| e.into());
@@ -181,7 +194,7 @@ where
                     error: Box::new(new_err),
                 }
             })?;
-            self.system_caller.on_state(&result_and_state);
+            self.system_caller.on_state(&result_and_state.state);
             let ResultAndState { result, state } = result_and_state;
             evm.db_mut().commit(state);
 
@@ -220,7 +233,12 @@ where
             let deposit_requests =
                 crate::eip6110::parse_deposits_from_receipts(&self.chain_spec, receipts)?;
 
-            let mut requests = Requests::new(vec![deposit_requests]);
+            let mut requests = Requests::default();
+
+            if !deposit_requests.is_empty() {
+                requests.push_request(core::iter::once(0).chain(deposit_requests).collect());
+            }
+
             requests.extend(self.system_caller.apply_post_execution_changes(&mut evm)?);
             requests
         } else {
@@ -246,8 +264,11 @@ where
         }
         // increment balances
         self.state
-            .increment_balances(balance_increments)
+            .increment_balances(balance_increments.clone())
             .map_err(|_| BlockValidationError::IncrementBalanceFailed)?;
+        // call state hook with changes due to balance increments.
+        let balance_state = balance_increment_state(&balance_increments, &mut self.state)?;
+        self.system_caller.on_state(&balance_state);
 
         Ok(requests)
     }
@@ -300,6 +321,7 @@ mod tests {
     use alloy_eips::{
         eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS},
+        eip4895::Withdrawal,
         eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
         eip7685::EMPTY_REQUESTS_HASH,
     };
@@ -309,14 +331,16 @@ mod tests {
         BasicBlockExecutorProvider, BatchExecutor, BlockExecutorProvider, Executor,
     };
     use reth_execution_types::BlockExecutionOutput;
-    use reth_primitives::{public_key_to_address, Account, Block, BlockBody, Transaction};
+    use reth_primitives::{
+        public_key_to_address, Account, Block, BlockBody, BlockExt, Transaction,
+    };
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, TransitionState,
     };
     use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
-    use revm_primitives::BLOCKHASH_SERVE_WINDOW;
+    use revm_primitives::{address, EvmState, BLOCKHASH_SERVE_WINDOW};
     use secp256k1::{Keypair, Secp256k1};
-    use std::collections::HashMap;
+    use std::{collections::HashMap, sync::mpsc};
 
     fn create_state_provider_with_beacon_root_contract() -> StateProviderTest {
         let mut db = StateProviderTest::default();
@@ -1113,9 +1137,9 @@ mod tests {
         let receipt = receipts.first().unwrap();
         assert!(receipt.success);
 
-        assert!(requests[0].is_empty(), "there should be no deposits");
-        assert!(!requests[1].is_empty(), "there should be a withdrawal");
-        assert!(requests[2].is_empty(), "there should be no consolidations");
+        // There should be exactly one entry with withdrawal requests
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0][0], 1);
     }
 
     #[test]
@@ -1199,6 +1223,69 @@ mod tests {
                     block_available_gas: 1_500_000,
                 }
             ),
+        }
+    }
+
+    #[test]
+    fn test_balance_increment_not_duplicated() {
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .shanghai_activated()
+                .with_fork(EthereumHardfork::Prague, ForkCondition::Timestamp(0))
+                .build(),
+        );
+
+        let withdrawal_recipient = address!("1000000000000000000000000000000000000000");
+
+        let mut db = StateProviderTest::default();
+        let initial_balance = 100;
+        db.insert_account(
+            withdrawal_recipient,
+            Account { balance: U256::from(initial_balance), nonce: 1, bytecode_hash: None },
+            None,
+            HashMap::default(),
+        );
+
+        let withdrawal =
+            Withdrawal { index: 0, validator_index: 0, address: withdrawal_recipient, amount: 1 };
+
+        let header = Header { timestamp: 1, number: 1, ..Header::default() };
+
+        let block = BlockWithSenders {
+            block: Block {
+                header,
+                body: BlockBody {
+                    transactions: vec![],
+                    ommers: vec![],
+                    withdrawals: Some(vec![withdrawal].into()),
+                },
+            },
+            senders: vec![],
+        };
+
+        let provider = executor_provider(chain_spec);
+        let executor = provider.executor(StateProviderDatabase::new(&db));
+
+        let (tx, rx) = mpsc::channel();
+        let tx_clone = tx.clone();
+
+        let _output = executor
+            .execute_with_state_hook((&block, U256::ZERO).into(), move |state: &EvmState| {
+                if let Some(account) = state.get(&withdrawal_recipient) {
+                    let _ = tx_clone.send(account.info.balance);
+                }
+            })
+            .expect("Block execution should succeed");
+
+        drop(tx);
+        let balance_changes: Vec<U256> = rx.try_iter().collect();
+
+        if let Some(final_balance) = balance_changes.last() {
+            let expected_final_balance = U256::from(initial_balance) + U256::from(1_000_000_000); // initial + 1 Gwei in Wei
+            assert_eq!(
+                *final_balance, expected_final_balance,
+                "Final balance should match expected value after withdrawal"
+            );
         }
     }
 }

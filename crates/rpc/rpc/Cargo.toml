@@ -15,6 +15,7 @@ workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-primitives = { workspace = true, features = ["secp256k1"] }
+reth-primitives-traits.workspace = true
 reth-rpc-api.workspace = true
 reth-rpc-eth-api.workspace = true
 reth-errors.workspace = true
@@ -82,7 +83,7 @@ parking_lot.workspace = true
 
 # misc
 tracing.workspace = true
-tracing-futures = "0.2"
+tracing-futures.workspace = true
 futures.workspace = true
 rand.workspace = true
 serde.workspace = true

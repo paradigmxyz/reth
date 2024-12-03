@@ -66,7 +66,7 @@ impl DatabaseEnvKind {
 }
 
 /// Arguments for database initialization.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct DatabaseArguments {
     /// Client version that accesses the database.
     client_version: ClientVersion,
@@ -97,6 +97,12 @@ pub struct DatabaseArguments {
     ///
     /// This flag affects only at environment opening but can't be changed after.
     exclusive: Option<bool>,
+}
+
+impl Default for DatabaseArguments {
+    fn default() -> Self {
+        Self::new(ClientVersion::default())
+    }
 }
 
 impl DatabaseArguments {
@@ -501,12 +507,11 @@ mod tests {
     use alloy_primitives::{Address, B256, U256};
     use reth_db_api::{
         cursor::{DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
-        models::{AccountBeforeTx, ShardedKey},
+        models::{AccountBeforeTx, IntegerList, ShardedKey},
         table::{Encode, Table},
     };
     use reth_libmdbx::Error;
-    use reth_primitives::{Account, StorageEntry};
-    use reth_primitives_traits::IntegerList;
+    use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
     use std::str::FromStr;
     use tempfile::TempDir;

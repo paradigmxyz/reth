@@ -113,7 +113,7 @@ impl RethRpcServerConfig for RpcServerArgs {
         EthStateCacheConfig {
             max_blocks: self.rpc_state_cache.max_blocks,
             max_receipts: self.rpc_state_cache.max_receipts,
-            max_envs: self.rpc_state_cache.max_envs,
+            max_headers: self.rpc_state_cache.max_headers,
             max_concurrent_db_requests: self.rpc_state_cache.max_concurrent_db_requests,
         }
     }

@@ -74,7 +74,7 @@ impl<Provider, Eth> TraceApi<Provider, Eth> {
 
 impl<Provider, Eth> TraceApi<Provider, Eth>
 where
-    Provider: BlockReader
+    Provider: BlockReader<Block = <Eth::Provider as BlockReader>::Block>
         + StateProviderFactory
         + EvmEnvProvider
         + ChainSpecProvider<ChainSpec: EthereumHardforks>
@@ -565,7 +565,7 @@ where
 #[async_trait]
 impl<Provider, Eth> TraceApiServer for TraceApi<Provider, Eth>
 where
-    Provider: BlockReader
+    Provider: BlockReader<Block = <Eth::Provider as BlockReader>::Block>
         + StateProviderFactory
         + EvmEnvProvider
         + ChainSpecProvider<ChainSpec: EthereumHardforks>

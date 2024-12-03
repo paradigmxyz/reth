@@ -1,24 +1,26 @@
 //! Utilities for end-to-end tests.
 
-use std::sync::Arc;
-
 use node::NodeTestContext;
-use reth::{
-    args::{DiscoveryArgs, NetworkArgs, RpcServerArgs},
-    builder::{NodeBuilder, NodeConfig, NodeHandle},
-    network::PeersHandleProvider,
-    rpc::server_types::RpcModuleSelection,
-    tasks::TaskManager,
-};
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_chainspec::EthChainSpec;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_engine_local::LocalPayloadAttributesBuilder;
+use reth_network_api::test_utils::PeersHandleProvider;
+use reth_node_api::EngineValidator;
 use reth_node_builder::{
-    components::NodeComponentsBuilder, rpc::RethRpcAddOns, EngineNodeLauncher,
-    FullNodeTypesAdapter, Node, NodeAdapter, NodeComponents, NodeTypesWithDBAdapter,
-    NodeTypesWithEngine, PayloadAttributesBuilder, PayloadTypes,
+    components::NodeComponentsBuilder,
+    rpc::{EngineValidatorAddOn, RethRpcAddOns},
+    EngineNodeLauncher, FullNodeTypesAdapter, Node, NodeAdapter, NodeBuilder, NodeComponents,
+    NodeConfig, NodeHandle, NodeTypesWithDBAdapter, NodeTypesWithEngine, PayloadAttributesBuilder,
+    PayloadTypes,
 };
-use reth_provider::providers::{BlockchainProvider, BlockchainProvider2};
+use reth_node_core::args::{DiscoveryArgs, NetworkArgs, RpcServerArgs};
+use reth_primitives::EthPrimitives;
+use reth_provider::providers::{
+    BlockchainProvider, BlockchainProvider2, NodeTypesForProvider, NodeTypesForTree,
+};
+use reth_rpc_server_types::RpcModuleSelection;
+use reth_tasks::TaskManager;
+use std::sync::Arc;
 use tracing::{span, Level};
 use wallet::Wallet;
 
@@ -51,9 +53,9 @@ pub async fn setup<N>(
     chain_spec: Arc<N::ChainSpec>,
     is_dev: bool,
     attributes_generator: impl Fn(u64) -> <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes + Copy + 'static,
-) -> eyre::Result<(Vec<NodeHelperType<N, N::AddOns>>, TaskManager, Wallet)>
+) -> eyre::Result<(Vec<NodeHelperType<N>>, TaskManager, Wallet)>
 where
-    N: Default + Node<TmpNodeAdapter<N>> + NodeTypesWithEngine<ChainSpec: EthereumHardforks>,
+    N: Default + Node<TmpNodeAdapter<N>> + NodeTypesForTree + NodeTypesWithEngine,
     N::ComponentsBuilder: NodeComponentsBuilder<
         TmpNodeAdapter<N>,
         Components: NodeComponents<TmpNodeAdapter<N>, Network: PeersHandleProvider>,
@@ -113,14 +115,15 @@ pub async fn setup_engine<N>(
     is_dev: bool,
     attributes_generator: impl Fn(u64) -> <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes + Copy + 'static,
 ) -> eyre::Result<(
-    Vec<NodeHelperType<N, N::AddOns, BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>>>,
+    Vec<NodeHelperType<N, BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>>>,
     TaskManager,
     Wallet,
 )>
 where
     N: Default
         + Node<TmpNodeAdapter<N, BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>>>
-        + NodeTypesWithEngine<ChainSpec: EthereumHardforks>,
+        + NodeTypesWithEngine<Primitives = EthPrimitives>
+        + NodeTypesForProvider,
     N::ComponentsBuilder: NodeComponentsBuilder<
         TmpNodeAdapter<N, BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>>,
         Components: NodeComponents<
@@ -128,7 +131,11 @@ where
             Network: PeersHandleProvider,
         >,
     >,
-    N::AddOns: RethRpcAddOns<Adapter<N, BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>>>,
+    N::AddOns: RethRpcAddOns<Adapter<N, BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>>>
+        + EngineValidatorAddOn<
+            Adapter<N, BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>>,
+            Validator: EngineValidator<N::Engine, Block = reth_primitives::Block>,
+        >,
     LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
         <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
     >,
@@ -176,6 +183,9 @@ where
 
         let mut node = NodeTestContext::new(node, attributes_generator).await?;
 
+        let genesis = node.block_hash(0);
+        node.engine_api.update_forkchoice(genesis, genesis).await?;
+
         // Connect each node in a chain.
         if let Some(previous_node) = nodes.last_mut() {
             previous_node.connect(&mut node).await;
@@ -196,7 +206,8 @@ where
 
 // Type aliases
 
-type TmpDB = Arc<TempDatabase<DatabaseEnv>>;
+/// Testing database
+pub type TmpDB = Arc<TempDatabase<DatabaseEnv>>;
 type TmpNodeAdapter<N, Provider = BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>> =
     FullNodeTypesAdapter<NodeTypesWithDBAdapter<N, TmpDB>, Provider>;
 
@@ -209,5 +220,5 @@ pub type Adapter<N, Provider = BlockchainProvider<NodeTypesWithDBAdapter<N, TmpD
 >;
 
 /// Type alias for a type of `NodeHelper`
-pub type NodeHelperType<N, AO, Provider = BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>> =
-    NodeTestContext<Adapter<N, Provider>, AO>;
+pub type NodeHelperType<N, Provider = BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>> =
+    NodeTestContext<Adapter<N, Provider>, <N as Node<TmpNodeAdapter<N, Provider>>>::AddOns>;

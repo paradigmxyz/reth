@@ -172,7 +172,7 @@ where
                     BundleItem::Tx { tx, can_revert } => {
                         let recovered_tx =
                             recover_raw_transaction(tx.clone()).map_err(EthApiError::from)?;
-                        let (tx, signer) = recovered_tx.into_components();
+                        let (tx, signer) = recovered_tx.to_components();
                         let tx = tx.into_transaction();
 
                         let refund_percent =

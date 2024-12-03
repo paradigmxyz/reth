@@ -18,7 +18,6 @@ reth-engine-tree.workspace = true
 reth-evm.workspace = true
 reth-network-p2p.workspace = true
 reth-payload-builder.workspace = true
-reth-payload-validator.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
 reth-stages-api.workspace = true

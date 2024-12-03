@@ -35,6 +35,7 @@ reth-tasks.workspace = true
 reth-tracing.workspace = true
 
 # alloy
+alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
 
@@ -78,5 +79,6 @@ serde = [
 	"alloy-primitives/serde",
 	"parking_lot/serde",
 	"rand/serde",
-	"secp256k1/serde"
+	"secp256k1/serde",
+	"reth-primitives-traits/serde",
 ]

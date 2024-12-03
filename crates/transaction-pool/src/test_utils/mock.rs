@@ -26,8 +26,9 @@ use rand::{
 };
 use reth_primitives::{
     transaction::TryFromRecoveredTransactionError, PooledTransactionsElementEcRecovered,
-    Transaction, TransactionSigned, TransactionSignedEcRecovered, TxType,
+    RecoveredTx, Transaction, TransactionSigned, TxType,
 };
+use reth_primitives_traits::InMemorySize;
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
 
 /// A transaction pool implementation using [`MockOrdering`] for transaction ordering.
@@ -58,6 +59,8 @@ macro_rules! set_value {
                 *$field = new_value;
             }
         }
+        // Ensure the tx cost is always correct after each mutation.
+        $this.update_cost();
     };
 }
 
@@ -68,7 +71,7 @@ macro_rules! get_value {
             MockTransaction::Legacy { $field, .. } |
             MockTransaction::Eip1559 { $field, .. } |
             MockTransaction::Eip4844 { $field, .. } |
-            MockTransaction::Eip2930 { $field, .. } => $field.clone(),
+            MockTransaction::Eip2930 { $field, .. } => $field,
         }
     };
 }
@@ -90,7 +93,7 @@ macro_rules! make_setters_getters {
             }
 
             /// Gets the value of the specified field.
-            pub fn [<get_ $name>](&self) -> $t {
+            pub const fn [<get_ $name>](&self) -> &$t {
                 get_value!(self => $name)
             }
         )*}
@@ -122,6 +125,8 @@ pub enum MockTransaction {
         input: Bytes,
         /// The size of the transaction, returned in the implementation of [`PoolTransaction`].
         size: usize,
+        /// The cost of the transaction, returned in the implementation of [`PoolTransaction`].
+        cost: U256,
     },
     /// EIP-2930 transaction type.
     Eip2930 {
@@ -147,6 +152,8 @@ pub enum MockTransaction {
         access_list: AccessList,
         /// The size of the transaction, returned in the implementation of [`PoolTransaction`].
         size: usize,
+        /// The cost of the transaction, returned in the implementation of [`PoolTransaction`].
+        cost: U256,
     },
     /// EIP-1559 transaction type.
     Eip1559 {
@@ -174,6 +181,8 @@ pub enum MockTransaction {
         input: Bytes,
         /// The size of the transaction, returned in the implementation of [`PoolTransaction`].
         size: usize,
+        /// The cost of the transaction, returned in the implementation of [`PoolTransaction`].
+        cost: U256,
     },
     /// EIP-4844 transaction type.
     Eip4844 {
@@ -205,6 +214,8 @@ pub enum MockTransaction {
         sidecar: BlobTransactionSidecar,
         /// The size of the transaction, returned in the implementation of [`PoolTransaction`].
         size: usize,
+        /// The cost of the transaction, returned in the implementation of [`PoolTransaction`].
+        cost: U256,
     },
 }
 
@@ -234,6 +245,7 @@ impl MockTransaction {
             value: Default::default(),
             input: Default::default(),
             size: Default::default(),
+            cost: U256::ZERO,
         }
     }
 
@@ -251,6 +263,7 @@ impl MockTransaction {
             gas_price: 0,
             access_list: Default::default(),
             size: Default::default(),
+            cost: U256::ZERO,
         }
     }
 
@@ -269,6 +282,7 @@ impl MockTransaction {
             input: Bytes::new(),
             access_list: Default::default(),
             size: Default::default(),
+            cost: U256::ZERO,
         }
     }
 
@@ -289,6 +303,7 @@ impl MockTransaction {
             access_list: Default::default(),
             sidecar: Default::default(),
             size: Default::default(),
+            cost: U256::ZERO,
         }
     }
 
@@ -559,20 +574,35 @@ impl MockTransaction {
     pub const fn is_eip2930(&self) -> bool {
         matches!(self, Self::Eip2930 { .. })
     }
+
+    fn update_cost(&mut self) {
+        match self {
+            Self::Legacy { cost, gas_limit, gas_price, value, .. } |
+            Self::Eip2930 { cost, gas_limit, gas_price, value, .. } => {
+                *cost = U256::from(*gas_limit) * U256::from(*gas_price) + *value
+            }
+            Self::Eip1559 { cost, gas_limit, max_fee_per_gas, value, .. } |
+            Self::Eip4844 { cost, gas_limit, max_fee_per_gas, value, .. } => {
+                *cost = U256::from(*gas_limit) * U256::from(*max_fee_per_gas) + *value
+            }
+        };
+    }
 }
 
 impl PoolTransaction for MockTransaction {
     type TryFromConsensusError = TryFromRecoveredTransactionError;
 
-    type Consensus = TransactionSignedEcRecovered;
+    type Consensus = TransactionSigned;
 
     type Pooled = PooledTransactionsElementEcRecovered;
 
-    fn try_from_consensus(tx: Self::Consensus) -> Result<Self, Self::TryFromConsensusError> {
+    fn try_from_consensus(
+        tx: RecoveredTx<Self::Consensus>,
+    ) -> Result<Self, Self::TryFromConsensusError> {
         tx.try_into()
     }
 
-    fn into_consensus(self) -> Self::Consensus {
+    fn into_consensus(self) -> RecoveredTx<Self::Consensus> {
         self.into()
     }
 
@@ -580,48 +610,39 @@ impl PoolTransaction for MockTransaction {
         pooled.into()
     }
 
+    fn try_consensus_into_pooled(
+        tx: RecoveredTx<Self::Consensus>,
+    ) -> Result<Self::Pooled, Self::TryFromConsensusError> {
+        Self::Pooled::try_from(tx).map_err(|_| TryFromRecoveredTransactionError::BlobSidecarMissing)
+    }
+
     fn hash(&self) -> &TxHash {
-        match self {
-            Self::Legacy { hash, .. } |
-            Self::Eip1559 { hash, .. } |
-            Self::Eip4844 { hash, .. } |
-            Self::Eip2930 { hash, .. } => hash,
-        }
+        self.get_hash()
     }
 
     fn sender(&self) -> Address {
-        match self {
-            Self::Legacy { sender, .. } |
-            Self::Eip1559 { sender, .. } |
-            Self::Eip4844 { sender, .. } |
-            Self::Eip2930 { sender, .. } => *sender,
-        }
+        *self.get_sender()
     }
 
     fn nonce(&self) -> u64 {
-        match self {
-            Self::Legacy { nonce, .. } |
-            Self::Eip1559 { nonce, .. } |
-            Self::Eip4844 { nonce, .. } |
-            Self::Eip2930 { nonce, .. } => *nonce,
-        }
+        *self.get_nonce()
     }
 
-    fn cost(&self) -> U256 {
+    // Having `get_cost` from `make_setters_getters` would be cleaner but we didn't
+    // want to also generate the error-prone cost setters. For now cost should be
+    // correct at construction and auto-updated per field update via `update_cost`,
+    // not to be manually set.
+    fn cost(&self) -> &U256 {
         match self {
-            Self::Legacy { gas_price, value, gas_limit, .. } |
-            Self::Eip2930 { gas_limit, gas_price, value, .. } => {
-                U256::from(*gas_limit) * U256::from(*gas_price) + *value
-            }
-            Self::Eip1559 { max_fee_per_gas, value, gas_limit, .. } |
-            Self::Eip4844 { max_fee_per_gas, value, gas_limit, .. } => {
-                U256::from(*gas_limit) * U256::from(*max_fee_per_gas) + *value
-            }
+            Self::Legacy { cost, .. } |
+            Self::Eip2930 { cost, .. } |
+            Self::Eip1559 { cost, .. } |
+            Self::Eip4844 { cost, .. } => cost,
         }
     }
 
     fn gas_limit(&self) -> u64 {
-        self.get_gas_limit()
+        *self.get_gas_limit()
     }
 
     fn max_fee_per_gas(&self) -> u128 {
@@ -700,24 +721,24 @@ impl PoolTransaction for MockTransaction {
         }
     }
 
+    /// Returns true if the transaction is a contract creation.
+    fn is_create(&self) -> bool {
+        match self {
+            Self::Legacy { to, .. } | Self::Eip1559 { to, .. } | Self::Eip2930 { to, .. } => {
+                to.is_create()
+            }
+            Self::Eip4844 { .. } => false,
+        }
+    }
+
     /// Returns the input data associated with the transaction.
     fn input(&self) -> &[u8] {
-        match self {
-            Self::Legacy { .. } => &[],
-            Self::Eip1559 { input, .. } |
-            Self::Eip4844 { input, .. } |
-            Self::Eip2930 { input, .. } => input,
-        }
+        self.get_input()
     }
 
     /// Returns the size of the transaction.
     fn size(&self) -> usize {
-        match self {
-            Self::Legacy { size, .. } |
-            Self::Eip1559 { size, .. } |
-            Self::Eip4844 { size, .. } |
-            Self::Eip2930 { size, .. } => *size,
-        }
+        *self.get_size()
     }
 
     /// Returns the transaction type as a byte identifier.
@@ -761,6 +782,14 @@ impl EthPoolTransaction for MockTransaction {
         }
     }
 
+    fn try_into_pooled_eip4844(self, sidecar: Arc<BlobTransactionSidecar>) -> Option<Self::Pooled> {
+        Self::Pooled::try_from_blob_transaction(
+            self.into_consensus(),
+            Arc::unwrap_or_clone(sidecar),
+        )
+        .ok()
+    }
+
     fn validate_blob(
         &self,
         _blob: &BlobTransactionSidecar,
@@ -777,10 +806,10 @@ impl EthPoolTransaction for MockTransaction {
     }
 }
 
-impl TryFrom<TransactionSignedEcRecovered> for MockTransaction {
+impl TryFrom<RecoveredTx> for MockTransaction {
     type Error = TryFromRecoveredTransactionError;
 
-    fn try_from(tx: TransactionSignedEcRecovered) -> Result<Self, Self::Error> {
+    fn try_from(tx: RecoveredTx) -> Result<Self, Self::Error> {
         let sender = tx.signer();
         let transaction = tx.into_signed();
         let hash = transaction.hash();
@@ -807,6 +836,7 @@ impl TryFrom<TransactionSignedEcRecovered> for MockTransaction {
                 value,
                 input,
                 size,
+                cost: U256::from(gas_limit) * U256::from(gas_price) + value,
             }),
             Transaction::Eip2930(TxEip2930 {
                 chain_id,
@@ -829,6 +859,7 @@ impl TryFrom<TransactionSignedEcRecovered> for MockTransaction {
                 input,
                 access_list,
                 size,
+                cost: U256::from(gas_limit) * U256::from(gas_price) + value,
             }),
             Transaction::Eip1559(TxEip1559 {
                 chain_id,
@@ -853,6 +884,7 @@ impl TryFrom<TransactionSignedEcRecovered> for MockTransaction {
                 input,
                 access_list,
                 size,
+                cost: U256::from(gas_limit) * U256::from(max_fee_per_gas) + value,
             }),
             Transaction::Eip4844(TxEip4844 {
                 chain_id,
@@ -881,6 +913,7 @@ impl TryFrom<TransactionSignedEcRecovered> for MockTransaction {
                 access_list,
                 sidecar: BlobTransactionSidecar::default(),
                 size,
+                cost: U256::from(gas_limit) * U256::from(max_fee_per_gas) + value,
             }),
             _ => unreachable!("Invalid transaction type"),
         }
@@ -895,13 +928,10 @@ impl From<PooledTransactionsElementEcRecovered> for MockTransaction {
     }
 }
 
-impl From<MockTransaction> for TransactionSignedEcRecovered {
+impl From<MockTransaction> for RecoveredTx {
     fn from(tx: MockTransaction) -> Self {
-        let signed_tx = TransactionSigned {
-            hash: *tx.hash(),
-            signature: Signature::test_signature(),
-            transaction: tx.clone().into(),
-        };
+        let signed_tx =
+            TransactionSigned::new(tx.clone().into(), Signature::test_signature(), *tx.hash());
 
         Self::from_signed_transaction(signed_tx, tx.sender())
     }
@@ -912,28 +942,24 @@ impl From<MockTransaction> for Transaction {
         match mock {
             MockTransaction::Legacy {
                 chain_id,
-                hash: _,
-                sender: _,
                 nonce,
                 gas_price,
                 gas_limit,
                 to,
                 value,
                 input,
-                size: _,
+                ..
             } => Self::Legacy(TxLegacy { chain_id, nonce, gas_price, gas_limit, to, value, input }),
             MockTransaction::Eip2930 {
                 chain_id,
-                hash: _,
-                sender: _,
                 nonce,
-                to,
-                gas_limit,
-                input,
-                value,
                 gas_price,
+                gas_limit,
+                to,
+                value,
                 access_list,
-                size: _,
+                input,
+                ..
             } => Self::Eip2930(TxEip2930 {
                 chain_id,
                 nonce,
@@ -946,17 +972,15 @@ impl From<MockTransaction> for Transaction {
             }),
             MockTransaction::Eip1559 {
                 chain_id,
-                hash: _,
-                sender: _,
                 nonce,
+                gas_limit,
                 max_fee_per_gas,
                 max_priority_fee_per_gas,
-                gas_limit,
                 to,
                 value,
                 access_list,
                 input,
-                size: _,
+                ..
             } => Self::Eip1559(TxEip1559 {
                 chain_id,
                 nonce,
@@ -970,19 +994,17 @@ impl From<MockTransaction> for Transaction {
             }),
             MockTransaction::Eip4844 {
                 chain_id,
-                hash: _,
-                sender: _,
                 nonce,
+                gas_limit,
                 max_fee_per_gas,
                 max_priority_fee_per_gas,
-                max_fee_per_blob_gas,
-                gas_limit,
                 to,
                 value,
                 access_list,
-                input,
                 sidecar,
-                size: _,
+                max_fee_per_blob_gas,
+                input,
+                ..
             } => Self::Eip4844(TxEip4844 {
                 chain_id,
                 nonce,
@@ -1006,109 +1028,12 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::Strategy;
         use proptest_arbitrary_interop::arb;
-        use reth_primitives_traits::size::InMemorySize;
 
-        arb::<(Transaction, Address, B256)>()
-            .prop_map(|(tx, sender, tx_hash)| match &tx {
-                Transaction::Legacy(TxLegacy {
-                    chain_id,
-                    nonce,
-                    gas_price,
-                    gas_limit,
-                    to,
-                    value,
-                    input,
-                }) => Self::Legacy {
-                    chain_id: *chain_id,
-                    sender,
-                    hash: tx_hash,
-                    nonce: *nonce,
-                    gas_price: *gas_price,
-                    gas_limit: { *gas_limit },
-                    to: *to,
-                    value: *value,
-                    input: input.clone(),
-                    size: tx.size(),
-                },
-
-                Transaction::Eip2930(TxEip2930 {
-                    chain_id,
-                    nonce,
-                    gas_price,
-                    gas_limit,
-                    to,
-                    value,
-                    access_list,
-                    input,
-                }) => Self::Eip2930 {
-                    chain_id: *chain_id,
-                    sender,
-                    hash: tx_hash,
-                    nonce: *nonce,
-                    gas_price: *gas_price,
-                    gas_limit: { *gas_limit },
-                    to: *to,
-                    value: *value,
-                    input: input.clone(),
-                    access_list: access_list.clone(),
-                    size: tx.size(),
-                },
-                Transaction::Eip1559(TxEip1559 {
-                    chain_id,
-                    nonce,
-                    gas_limit,
-                    max_fee_per_gas,
-                    max_priority_fee_per_gas,
-                    to,
-                    value,
-                    input,
-                    access_list,
-                }) => Self::Eip1559 {
-                    chain_id: *chain_id,
-                    sender,
-                    hash: tx_hash,
-                    nonce: *nonce,
-                    max_fee_per_gas: *max_fee_per_gas,
-                    max_priority_fee_per_gas: *max_priority_fee_per_gas,
-                    gas_limit: { *gas_limit },
-                    to: *to,
-                    value: *value,
-                    input: input.clone(),
-                    access_list: access_list.clone(),
-                    size: tx.size(),
-                },
-                Transaction::Eip4844(TxEip4844 {
-                    chain_id,
-                    nonce,
-                    gas_limit,
-                    max_fee_per_gas,
-                    max_priority_fee_per_gas,
-                    to,
-                    value,
-                    input,
-                    max_fee_per_blob_gas,
-                    access_list,
-                    blob_versioned_hashes: _,
-                }) => Self::Eip4844 {
-                    chain_id: *chain_id,
-                    sender,
-                    hash: tx_hash,
-                    nonce: *nonce,
-                    max_fee_per_gas: *max_fee_per_gas,
-                    max_priority_fee_per_gas: *max_priority_fee_per_gas,
-                    max_fee_per_blob_gas: *max_fee_per_blob_gas,
-                    gas_limit: { *gas_limit },
-                    to: *to,
-                    value: *value,
-                    input: input.clone(),
-                    access_list: access_list.clone(),
-                    // only generate a sidecar if it is a 4844 tx - also for the sake of
-                    // performance just use a default sidecar
-                    sidecar: BlobTransactionSidecar::default(),
-                    size: tx.size(),
-                },
-                #[allow(unreachable_patterns)]
-                _ => unimplemented!(),
+        arb::<(TransactionSigned, Address)>()
+            .prop_map(|(signed_transaction, signer)| {
+                RecoveredTx::from_signed_transaction(signed_transaction, signer)
+                    .try_into()
+                    .expect("Failed to create an Arbitrary MockTransaction via RecoveredTx")
             })
             .boxed()
     }
@@ -1127,8 +1052,8 @@ pub struct MockTransactionFactory {
 impl MockTransactionFactory {
     /// Generates a transaction ID for the given [`MockTransaction`].
     pub fn tx_id(&mut self, tx: &MockTransaction) -> TransactionId {
-        let sender = self.ids.sender_id_or_create(tx.get_sender());
-        TransactionId::new(sender, tx.get_nonce())
+        let sender = self.ids.sender_id_or_create(tx.sender());
+        TransactionId::new(sender, tx.nonce())
     }
 
     /// Validates a [`MockTransaction`] and returns a [`MockValidTx`].

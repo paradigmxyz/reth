@@ -1,9 +1,9 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    ChainSpecProvider, ChangeSetReader, DatabaseProvider, EvmEnvProvider, HeaderProvider,
-    ReceiptProviderIdExt, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
-    StateRootProvider, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    ChainSpecProvider, ChangeSetReader, DatabaseProvider, EthStorage, EvmEnvProvider,
+    HeaderProvider, ReceiptProviderIdExt, StateProvider, StateProviderBox, StateProviderFactory,
+    StateReader, StateRootProvider, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_consensus::{constants::EMPTY_ROOT_HASH, Header};
 use alloy_eips::{
@@ -23,18 +23,18 @@ use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::NodeTypes;
 use reth_primitives::{
-    Account, Block, BlockWithSenders, Bytecode, GotExpected, Receipt, SealedBlock,
+    Account, Block, BlockWithSenders, Bytecode, EthPrimitives, GotExpected, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash,
 };
+use reth_primitives_traits::SignedTransaction;
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     DatabaseProviderFactory, StageCheckpointReader, StateProofProvider, StorageRootProvider,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, StorageProof,
-    TrieInput,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
+    StorageMultiProof, StorageProof, TrieInput,
 };
 use reth_trie_db::MerklePatriciaTrie;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
@@ -158,9 +158,10 @@ impl MockEthProvider {
 pub struct MockNode;
 
 impl NodeTypes for MockNode {
-    type Primitives = ();
+    type Primitives = EthPrimitives;
     type ChainSpec = ChainSpec;
     type StateCommitment = MerklePatriciaTrie;
+    type Storage = EthStorage;
 }
 
 impl DatabaseProviderFactory for MockEthProvider {
@@ -178,6 +179,8 @@ impl DatabaseProviderFactory for MockEthProvider {
 }
 
 impl HeaderProvider for MockEthProvider {
+    type Header = Header;
+
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
         let lock = self.headers.lock();
         Ok(lock.get(block_hash).cloned())
@@ -243,6 +246,8 @@ impl ChainSpecProvider for MockEthProvider {
 }
 
 impl TransactionsProvider for MockEthProvider {
+    type Transaction = TransactionSigned;
+
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         let lock = self.blocks.lock();
         let tx_number = lock
@@ -254,7 +259,7 @@ impl TransactionsProvider for MockEthProvider {
         Ok(tx_number)
     }
 
-    fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
+    fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
         let lock = self.blocks.lock();
         let transaction =
             lock.values().flat_map(|block| &block.body.transactions).nth(id as usize).cloned();
@@ -262,16 +267,13 @@ impl TransactionsProvider for MockEthProvider {
         Ok(transaction)
     }
 
-    fn transaction_by_id_no_hash(
+    fn transaction_by_id_unhashed(
         &self,
         id: TxNumber,
-    ) -> ProviderResult<Option<TransactionSignedNoHash>> {
+    ) -> ProviderResult<Option<Self::Transaction>> {
         let lock = self.blocks.lock();
-        let transaction = lock
-            .values()
-            .flat_map(|block| &block.body.transactions)
-            .nth(id as usize)
-            .map(|tx| Into::<TransactionSignedNoHash>::into(tx.clone()));
+        let transaction =
+            lock.values().flat_map(|block| &block.body.transactions).nth(id as usize).cloned();
 
         Ok(transaction)
     }
@@ -285,7 +287,7 @@ impl TransactionsProvider for MockEthProvider {
     fn transaction_by_hash_with_meta(
         &self,
         hash: TxHash,
-    ) -> ProviderResult<Option<(TransactionSigned, TransactionMeta)>> {
+    ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
         let lock = self.blocks.lock();
         for (block_hash, block) in lock.iter() {
             for (index, tx) in block.body.transactions.iter().enumerate() {
@@ -321,14 +323,14 @@ impl TransactionsProvider for MockEthProvider {
     fn transactions_by_block(
         &self,
         id: BlockHashOrNumber,
-    ) -> ProviderResult<Option<Vec<TransactionSigned>>> {
+    ) -> ProviderResult<Option<Vec<Self::Transaction>>> {
         Ok(self.block(id)?.map(|b| b.body.transactions))
     }
 
     fn transactions_by_block_range(
         &self,
         range: impl RangeBounds<alloy_primitives::BlockNumber>,
-    ) -> ProviderResult<Vec<Vec<TransactionSigned>>> {
+    ) -> ProviderResult<Vec<Vec<Self::Transaction>>> {
         // init btreemap so we can return in order
         let mut map = BTreeMap::new();
         for (_, block) in self.blocks.lock().iter() {
@@ -343,14 +345,14 @@ impl TransactionsProvider for MockEthProvider {
     fn transactions_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<reth_primitives::TransactionSignedNoHash>> {
+    ) -> ProviderResult<Vec<Self::Transaction>> {
         let lock = self.blocks.lock();
         let transactions = lock
             .values()
             .flat_map(|block| &block.body.transactions)
             .enumerate()
             .filter(|&(tx_number, _)| range.contains(&(tx_number as TxNumber)))
-            .map(|(_, tx)| tx.clone().into())
+            .map(|(_, tx)| tx.clone())
             .collect();
 
         Ok(transactions)
@@ -379,6 +381,8 @@ impl TransactionsProvider for MockEthProvider {
 }
 
 impl ReceiptProvider for MockEthProvider {
+    type Receipt = Receipt;
+
     fn receipt(&self, _id: TxNumber) -> ProviderResult<Option<Receipt>> {
         Ok(None)
     }
@@ -471,6 +475,8 @@ impl BlockIdReader for MockEthProvider {
 }
 
 impl BlockReader for MockEthProvider {
+    type Block = Block;
+
     fn find_block_by_hash(
         &self,
         hash: B256,
@@ -637,6 +643,15 @@ impl StorageRootProvider for MockEthProvider {
         _hashed_storage: HashedStorage,
     ) -> ProviderResult<reth_trie::StorageProof> {
         Ok(StorageProof::new(slot))
+    }
+
+    fn storage_multiproof(
+        &self,
+        _address: Address,
+        _slots: &[B256],
+        _hashed_storage: HashedStorage,
+    ) -> ProviderResult<StorageMultiProof> {
+        Ok(StorageMultiProof::empty())
     }
 }
 
@@ -817,6 +832,8 @@ impl ChangeSetReader for MockEthProvider {
 }
 
 impl StateReader for MockEthProvider {
+    type Receipt = Receipt;
+
     fn get_state(&self, _block: BlockNumber) -> ProviderResult<Option<ExecutionOutcome>> {
         Ok(None)
     }

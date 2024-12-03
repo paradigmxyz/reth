@@ -10,21 +10,21 @@ use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
 use reth_evm::{
     execute::{
-        BasicBlockExecutorProvider, BlockExecutionError, BlockExecutionStrategy,
-        BlockExecutionStrategyFactory, BlockValidationError, ExecuteOutput, ProviderError,
+        balance_increment_state, BasicBlockExecutorProvider, BlockExecutionError,
+        BlockExecutionStrategy, BlockExecutionStrategyFactory, BlockValidationError, ExecuteOutput,
+        ProviderError,
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, SystemCaller},
-    ConfigureEvm,
+    ConfigureEvm, TxEnvOverrides,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::validate_block_post_execution;
 use reth_optimism_forks::OpHardfork;
+use reth_optimism_primitives::OpPrimitives;
 use reth_primitives::{BlockWithSenders, Receipt, TxType};
 use reth_revm::{Database, State};
-use revm_primitives::{
-    db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState, U256,
-};
+use revm_primitives::{db::DatabaseCommit, EnvWithHandlerCfg, ResultAndState, U256};
 use tracing::trace;
 
 /// Factory for [`OpExecutionStrategy`].
@@ -55,6 +55,7 @@ where
     EvmConfig:
         Clone + Unpin + Sync + Send + 'static + ConfigureEvm<Header = alloy_consensus::Header>,
 {
+    type Primitives = OpPrimitives;
     type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
         OpExecutionStrategy<DB, EvmConfig>;
 
@@ -78,6 +79,8 @@ where
     chain_spec: Arc<OpChainSpec>,
     /// How to create an EVM.
     evm_config: EvmConfig,
+    /// Optional overrides for the transactions environment.
+    tx_env_overrides: Option<Box<dyn TxEnvOverrides>>,
     /// Current state for block execution.
     state: State<DB>,
     /// Utility to call system smart contracts.
@@ -91,7 +94,7 @@ where
     /// Creates a new [`OpExecutionStrategy`]
     pub fn new(state: State<DB>, chain_spec: Arc<OpChainSpec>, evm_config: EvmConfig) -> Self {
         let system_caller = SystemCaller::new(evm_config.clone(), chain_spec.clone());
-        Self { state, chain_spec, evm_config, system_caller }
+        Self { state, chain_spec, evm_config, system_caller, tx_env_overrides: None }
     }
 }
 
@@ -104,20 +107,23 @@ where
     ///
     /// Caution: this does not initialize the tx environment.
     fn evm_env_for_block(&self, header: &Header, total_difficulty: U256) -> EnvWithHandlerCfg {
-        let mut cfg = CfgEnvWithHandlerCfg::new(Default::default(), Default::default());
-        let mut block_env = BlockEnv::default();
-        self.evm_config.fill_cfg_and_block_env(&mut cfg, &mut block_env, header, total_difficulty);
-
+        let (cfg, block_env) = self.evm_config.cfg_and_block_env(header, total_difficulty);
         EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default())
     }
 }
 
-impl<DB, EvmConfig> BlockExecutionStrategy<DB> for OpExecutionStrategy<DB, EvmConfig>
+impl<DB, EvmConfig> BlockExecutionStrategy for OpExecutionStrategy<DB, EvmConfig>
 where
     DB: Database<Error: Into<ProviderError> + Display>,
     EvmConfig: ConfigureEvm<Header = alloy_consensus::Header>,
 {
+    type DB = DB;
+    type Primitives = OpPrimitives;
     type Error = BlockExecutionError;
+
+    fn init(&mut self, tx_env_overrides: Box<dyn TxEnvOverrides>) {
+        self.tx_env_overrides = Some(tx_env_overrides);
+    }
 
     fn apply_pre_execution_changes(
         &mut self,
@@ -153,7 +159,7 @@ where
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<ExecuteOutput, Self::Error> {
+    ) -> Result<ExecuteOutput<Receipt>, Self::Error> {
         let env = self.evm_env_for_block(&block.header, total_difficulty);
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
 
@@ -197,6 +203,10 @@ where
 
             self.evm_config.fill_tx_env(evm.tx_mut(), transaction, *sender);
 
+            if let Some(tx_env_overrides) = &mut self.tx_env_overrides {
+                tx_env_overrides.apply(evm.tx_mut());
+            }
+
             // Execute transaction.
             let result_and_state = evm.transact().map_err(move |err| {
                 let new_err = err.map_db_err(|e| e.into());
@@ -212,7 +222,7 @@ where
                 ?transaction,
                 "Executed transaction"
             );
-            self.system_caller.on_state(&result_and_state);
+            self.system_caller.on_state(&result_and_state.state);
             let ResultAndState { result, state } = result_and_state;
             evm.db_mut().commit(state);
 
@@ -251,8 +261,11 @@ where
             post_block_balance_increments(&self.chain_spec.clone(), block, total_difficulty);
         // increment balances
         self.state
-            .increment_balances(balance_increments)
+            .increment_balances(balance_increments.clone())
             .map_err(|_| BlockValidationError::IncrementBalanceFailed)?;
+        // call state hook with changes due to balance increments.
+        let balance_state = balance_increment_state(&balance_increments, &mut self.state)?;
+        self.system_caller.on_state(&balance_state);
 
         Ok(Requests::default())
     }
@@ -367,7 +380,7 @@ mod tests {
 
         let chain_spec = Arc::new(OpChainSpecBuilder::base_mainnet().regolith_activated().build());
 
-        let tx = TransactionSigned::from_transaction_and_signature(
+        let tx = TransactionSigned::new_unhashed(
             Transaction::Eip1559(TxEip1559 {
                 chain_id: chain_spec.chain.id(),
                 nonce: 0,
@@ -378,7 +391,7 @@ mod tests {
             Signature::test_signature(),
         );
 
-        let tx_deposit = TransactionSigned::from_transaction_and_signature(
+        let tx_deposit = TransactionSigned::new_unhashed(
             Transaction::Deposit(op_alloy_consensus::TxDeposit {
                 from: addr,
                 to: addr.into(),
@@ -451,7 +464,7 @@ mod tests {
 
         let chain_spec = Arc::new(OpChainSpecBuilder::base_mainnet().canyon_activated().build());
 
-        let tx = TransactionSigned::from_transaction_and_signature(
+        let tx = TransactionSigned::new_unhashed(
             Transaction::Eip1559(TxEip1559 {
                 chain_id: chain_spec.chain.id(),
                 nonce: 0,
@@ -462,7 +475,7 @@ mod tests {
             Signature::test_signature(),
         );
 
-        let tx_deposit = TransactionSigned::from_transaction_and_signature(
+        let tx_deposit = TransactionSigned::new_unhashed(
             Transaction::Deposit(op_alloy_consensus::TxDeposit {
                 from: addr,
                 to: addr.into(),

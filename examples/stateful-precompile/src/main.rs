@@ -28,7 +28,7 @@ use reth_node_ethereum::{
     node::EthereumAddOns, BasicBlockExecutorProvider, EthEvmConfig, EthExecutionStrategyFactory,
     EthereumNode,
 };
-use reth_primitives::TransactionSigned;
+use reth_primitives::{EthPrimitives, TransactionSigned};
 use reth_tracing::{RethTracer, Tracer};
 use schnellru::{ByLength, LruMap};
 use std::{collections::HashMap, convert::Infallible, sync::Arc};
@@ -226,7 +226,7 @@ pub struct MyExecutorBuilder {
 
 impl<Node> ExecutorBuilder<Node> for MyExecutorBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
 {
     type EVM = MyEvmConfig;
     type Executor = BasicBlockExecutorProvider<EthExecutionStrategyFactory<Self::EVM>>;

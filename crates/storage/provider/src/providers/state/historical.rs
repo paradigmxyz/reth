@@ -15,13 +15,16 @@ use reth_db_api::{
     transaction::DbTx,
 };
 use reth_primitives::{Account, Bytecode};
-use reth_storage_api::{BlockNumReader, DBProvider, StateProofProvider, StorageRootProvider};
+use reth_storage_api::{
+    BlockNumReader, DBProvider, StateCommitmentProvider, StateProofProvider, StorageRootProvider,
+};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     proof::{Proof, StorageProof},
     updates::TrieUpdates,
     witness::TrieWitness,
-    AccountProof, HashedPostState, HashedStorage, MultiProof, StateRoot, StorageRoot, TrieInput,
+    AccountProof, HashedPostState, HashedStorage, MultiProof, StateRoot, StorageMultiProof,
+    StorageRoot, TrieInput,
 };
 use reth_trie_db::{
     DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot,
@@ -58,7 +61,9 @@ pub enum HistoryInfo {
     MaybeInPlainState,
 }
 
-impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, Provider> {
+impl<'b, Provider: DBProvider + BlockNumReader + StateCommitmentProvider>
+    HistoricalStateProviderRef<'b, Provider>
+{
     /// Create new `StateProvider` for historical block number
     pub fn new(provider: &'b Provider, block_number: BlockNumber) -> Self {
         Self { provider, block_number, lowest_available_blocks: Default::default() }
@@ -239,7 +244,7 @@ impl<Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'_, Provi
     }
 }
 
-impl<Provider: DBProvider + BlockNumReader> AccountReader
+impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> AccountReader
     for HistoricalStateProviderRef<'_, Provider>
 {
     /// Get basic account information.
@@ -280,7 +285,7 @@ impl<Provider: DBProvider + BlockNumReader + BlockHashReader> BlockHashReader
     }
 }
 
-impl<Provider: DBProvider + BlockNumReader> StateRootProvider
+impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StateRootProvider
     for HistoricalStateProviderRef<'_, Provider>
 {
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
@@ -316,7 +321,7 @@ impl<Provider: DBProvider + BlockNumReader> StateRootProvider
     }
 }
 
-impl<Provider: DBProvider + BlockNumReader> StorageRootProvider
+impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StorageRootProvider
     for HistoricalStateProviderRef<'_, Provider>
 {
     fn storage_root(
@@ -341,9 +346,21 @@ impl<Provider: DBProvider + BlockNumReader> StorageRootProvider
         StorageProof::overlay_storage_proof(self.tx(), address, slot, revert_storage)
             .map_err(Into::<ProviderError>::into)
     }
+
+    fn storage_multiproof(
+        &self,
+        address: Address,
+        slots: &[B256],
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<StorageMultiProof> {
+        let mut revert_storage = self.revert_storage(address)?;
+        revert_storage.extend(&hashed_storage);
+        StorageProof::overlay_storage_multiproof(self.tx(), address, slots, revert_storage)
+            .map_err(Into::<ProviderError>::into)
+    }
 }
 
-impl<Provider: DBProvider + BlockNumReader> StateProofProvider
+impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StateProofProvider
     for HistoricalStateProviderRef<'_, Provider>
 {
     /// Get account and storage proofs.
@@ -377,8 +394,8 @@ impl<Provider: DBProvider + BlockNumReader> StateProofProvider
     }
 }
 
-impl<Provider: DBProvider + BlockNumReader + BlockHashReader> StateProvider
-    for HistoricalStateProviderRef<'_, Provider>
+impl<Provider: DBProvider + BlockNumReader + BlockHashReader + StateCommitmentProvider>
+    StateProvider for HistoricalStateProviderRef<'_, Provider>
 {
     /// Get storage.
     fn storage(
@@ -428,7 +445,9 @@ pub struct HistoricalStateProvider<Provider> {
     lowest_available_blocks: LowestAvailableBlocks,
 }
 
-impl<Provider: DBProvider + BlockNumReader> HistoricalStateProvider<Provider> {
+impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider>
+    HistoricalStateProvider<Provider>
+{
     /// Create new `StateProvider` for historical block number
     pub fn new(provider: Provider, block_number: BlockNumber) -> Self {
         Self { provider, block_number, lowest_available_blocks: Default::default() }
@@ -464,7 +483,7 @@ impl<Provider: DBProvider + BlockNumReader> HistoricalStateProvider<Provider> {
 }
 
 // Delegates all provider impls to [HistoricalStateProviderRef]
-delegate_provider_impls!(HistoricalStateProvider<Provider> where [Provider: DBProvider + BlockNumReader + BlockHashReader]);
+delegate_provider_impls!(HistoricalStateProvider<Provider> where [Provider: DBProvider + BlockNumReader + BlockHashReader + StateCommitmentProvider]);
 
 /// Lowest blocks at which different parts of the state are available.
 /// They may be [Some] if pruning is enabled.
@@ -508,7 +527,10 @@ mod tests {
         transaction::{DbTx, DbTxMut},
     };
     use reth_primitives::{Account, StorageEntry};
-    use reth_storage_api::{BlockHashReader, BlockNumReader, DBProvider, DatabaseProviderFactory};
+    use reth_storage_api::{
+        BlockHashReader, BlockNumReader, DBProvider, DatabaseProviderFactory,
+        StateCommitmentProvider,
+    };
     use reth_storage_errors::provider::ProviderError;
 
     const ADDRESS: Address = address!("0000000000000000000000000000000000000001");
@@ -517,7 +539,9 @@ mod tests {
 
     const fn assert_state_provider<T: StateProvider>() {}
     #[allow(dead_code)]
-    const fn assert_historical_state_provider<T: DBProvider + BlockNumReader + BlockHashReader>() {
+    const fn assert_historical_state_provider<
+        T: DBProvider + BlockNumReader + BlockHashReader + StateCommitmentProvider,
+    >() {
         assert_state_provider::<HistoricalStateProvider<T>>();
     }
 

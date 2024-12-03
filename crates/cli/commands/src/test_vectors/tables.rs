@@ -72,7 +72,7 @@ pub fn generate_vectors(mut tables: Vec<String>) -> Result<()> {
         (HeaderNumbers, PER_TABLE, TABLE),
         (Headers<Header>, PER_TABLE, TABLE),
         (BlockBodyIndices, PER_TABLE, TABLE),
-        (BlockOmmers, 100, TABLE),
+        (BlockOmmers<Header>, 100, TABLE),
         (TransactionHashNumbers, PER_TABLE, TABLE),
         (Transactions<TransactionSignedNoHash>, 100, TABLE),
         (PlainStorageState, PER_TABLE, DUPSORT),
