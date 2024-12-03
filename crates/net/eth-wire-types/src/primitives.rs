@@ -21,6 +21,7 @@ pub trait NetworkPrimitives:
         + PartialEq
         + Eq
         + 'static;
+
     /// The block body type.
     type BlockBody: Encodable
         + Decodable
@@ -32,6 +33,7 @@ pub trait NetworkPrimitives:
         + PartialEq
         + Eq
         + 'static;
+
     /// Full block type.
     type Block: Block<Header = Self::BlockHeader, Body = Self::BlockBody>
         + Encodable
@@ -58,8 +60,10 @@ pub trait NetworkPrimitives:
         + PartialEq
         + Eq
         + 'static;
+
     /// The transaction type which peers return in `PooledTransactions` messages.
-    type PooledTransaction: Encodable
+    type PooledTransaction: TryFrom<Self::BroadcastedTransaction>
+        + Encodable
         + Decodable
         + Send
         + Sync
