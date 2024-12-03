@@ -30,7 +30,7 @@ use reth_payload_util::{PayloadTransactions, PayloadTransactionsChain, PayloadTr
 use reth_primitives::{RecoveredTx, SealedBlock, Transaction, TransactionSigned};
 use reth_provider::providers::BlockchainProvider2;
 use reth_tasks::TaskManager;
-use reth_transaction_pool::pool::BestPayloadTransactions;
+use reth_transaction_pool::{pool::BestPayloadTransactions, PoolTransaction};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -44,9 +44,11 @@ impl OpPayloadTransactions for CustomTxPriority {
         &self,
         pool: Pool,
         attr: reth_transaction_pool::BestTransactionsAttributes,
-    ) -> impl PayloadTransactions
+    ) -> impl PayloadTransactions<Transaction = TransactionSigned>
     where
-        Pool: reth_transaction_pool::TransactionPool,
+        Pool: reth_transaction_pool::TransactionPool<
+            Transaction: PoolTransaction<Consensus = TransactionSigned>,
+        >,
     {
         // Block composition:
         // 1. Best transactions from the pool (up to 250k gas)

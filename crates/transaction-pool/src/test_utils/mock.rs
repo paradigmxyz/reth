@@ -592,15 +592,17 @@ impl MockTransaction {
 impl PoolTransaction for MockTransaction {
     type TryFromConsensusError = TryFromRecoveredTransactionError;
 
-    type Consensus = RecoveredTx;
+    type Consensus = TransactionSigned;
 
     type Pooled = PooledTransactionsElementEcRecovered;
 
-    fn try_from_consensus(tx: Self::Consensus) -> Result<Self, Self::TryFromConsensusError> {
+    fn try_from_consensus(
+        tx: RecoveredTx<Self::Consensus>,
+    ) -> Result<Self, Self::TryFromConsensusError> {
         tx.try_into()
     }
 
-    fn into_consensus(self) -> Self::Consensus {
+    fn into_consensus(self) -> RecoveredTx<Self::Consensus> {
         self.into()
     }
 
@@ -609,7 +611,7 @@ impl PoolTransaction for MockTransaction {
     }
 
     fn try_consensus_into_pooled(
-        tx: Self::Consensus,
+        tx: RecoveredTx<Self::Consensus>,
     ) -> Result<Self::Pooled, Self::TryFromConsensusError> {
         Self::Pooled::try_from(tx).map_err(|_| TryFromRecoveredTransactionError::BlobSidecarMissing)
     }
