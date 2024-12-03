@@ -23,7 +23,7 @@ use reth_rpc_eth_types::logs_utils;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
 use reth_rpc_types_compat::transaction::from_recovered;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
-use reth_transaction_pool::{NewTransactionEvent, TransactionPool};
+use reth_transaction_pool::{NewTransactionEvent, PoolConsensusTx, TransactionPool};
 use serde::Serialize;
 use tokio_stream::{
     wrappers::{BroadcastStream, ReceiverStream},
@@ -95,7 +95,7 @@ where
         > + Clone
         + 'static,
     Network: NetworkInfo + Clone + 'static,
-    Eth: TransactionCompat + 'static,
+    Eth: TransactionCompat<PoolConsensusTx<Pool>> + 'static,
 {
     /// Handler for `eth_subscribe`
     async fn subscribe(
@@ -135,7 +135,7 @@ where
         > + Clone
         + 'static,
     Network: NetworkInfo + Clone + 'static,
-    Eth: TransactionCompat,
+    Eth: TransactionCompat<PoolConsensusTx<Pool>>,
 {
     match kind {
         SubscriptionKind::NewHeads => {
@@ -165,7 +165,7 @@ where
                         // full transaction objects requested
                         let stream = pubsub.full_pending_transaction_stream().filter_map(|tx| {
                             let tx_value = match from_recovered(
-                                tx.transaction.to_recovered_transaction(),
+                                tx.transaction.to_consensus(),
                                 &tx_resp_builder,
                             ) {
                                 Ok(tx) => {

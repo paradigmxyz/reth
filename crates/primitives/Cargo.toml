@@ -146,7 +146,7 @@ c-kzg = [
 ]
 optimism = [
 	"dep:op-alloy-consensus",
-	"reth-codecs?/optimism",
+	"reth-codecs?/op",
 	"revm-primitives/optimism",
 ]
 alloy-compat = [

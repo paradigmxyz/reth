@@ -9,9 +9,9 @@ cond_mod!(
 );
 
 
-#[cfg(all(feature = "test-utils", feature = "optimism"))]
+#[cfg(all(feature = "test-utils", feature = "op"))]
 pub mod optimism;
-#[cfg(all(not(feature = "test-utils"), feature = "optimism"))]
+#[cfg(all(not(feature = "test-utils"), feature = "op"))]
 mod optimism;
 
 #[cfg(test)]
@@ -41,7 +41,7 @@ mod tests {
         assert_eq!(TxEip7702::bitflag_encoded_bytes(), 4);
     }
 
-    #[cfg(feature = "optimism")]
+    #[cfg(feature = "op")]
     #[test]
     fn test_ensure_backwards_compatibility_optimism() {
         assert_eq!(crate::alloy::transaction::optimism::TxDeposit::bitflag_encoded_bytes(), 2);
@@ -89,11 +89,11 @@ mod tests {
         ));
     }
 
-    #[cfg(feature = "optimism")]
+    #[cfg(feature = "op")]
     #[test]
     fn test_decode_deposit() {
         test_decode::<op_alloy_consensus::TxDeposit>(&hex!(
             "8108ac8f15983d59b6ae4911a00ff7bfcd2e53d2950926f8c82c12afad02861c46fcb293e776204052725e1c08ff2e9ff602ca916357601fa972a14094891fe3598b718758f22c46f163c18bcaa6296ce87e5267ef3fd932112842fbbf79011548cdf067d93ce6098dfc0aaf5a94531e439f30d6dfd0c6"
-        )); 
+        ));
     }
 }

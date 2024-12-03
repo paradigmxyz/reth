@@ -375,7 +375,7 @@ reth-node-types = { path = "crates/node/types" }
 reth-optimism-chainspec = { path = "crates/optimism/chainspec" }
 reth-optimism-cli = { path = "crates/optimism/cli" }
 reth-optimism-consensus = { path = "crates/optimism/consensus" }
-reth-optimism-forks = { path = "crates/optimism/hardforks" }
+reth-optimism-forks = { path = "crates/optimism/hardforks", default-features = false }
 reth-optimism-payload-builder = { path = "crates/optimism/payload" }
 reth-optimism-primitives = { path = "crates/optimism/primitives" }
 reth-optimism-rpc = { path = "crates/optimism/rpc" }
@@ -503,7 +503,7 @@ modular-bitfield = "0.11.2"
 notify = { version = "6.1.1", default-features = false, features = [
     "macos_fsevent",
 ] }
-nybbles = "0.2.1"
+nybbles = { version = "0.2.1", default-features = false }
 once_cell = { version = "1.19", default-features = false, features = [
     "critical-section",
 ] }

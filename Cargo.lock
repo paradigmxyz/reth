@@ -8464,14 +8464,20 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
+ "alloy-rlp",
  "arbitrary",
  "bytes",
  "derive_more 1.0.0",
  "op-alloy-consensus",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "rand 0.8.5",
  "reth-codecs",
  "reth-primitives",
  "reth-primitives-traits",
+ "revm-primitives",
  "rstest",
+ "secp256k1",
  "serde",
 ]
 
@@ -9298,7 +9304,8 @@ dependencies = [
  "alloy-rlp",
  "derive_more 1.0.0",
  "reth-fs-util",
- "reth-primitives",
+ "reth-primitives-traits",
+ "reth-static-file-types",
 ]
 
 [[package]]
@@ -9423,6 +9430,7 @@ dependencies = [
  "reth-stages-types",
  "reth-storage-errors",
  "reth-trie-common",
+ "reth-trie-sparse",
  "revm",
  "serde_json",
  "tracing",

@@ -240,7 +240,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     RpcNodeCore::pool(self).get_transaction_by_sender_and_nonce(sender, nonce)
                 {
                     let transaction = tx.transaction.clone_into_consensus();
-                    return Ok(Some(from_recovered(transaction.into(), self.tx_resp_builder())?));
+                    return Ok(Some(from_recovered(transaction, self.tx_resp_builder())?));
                 }
             }
 
@@ -385,7 +385,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
 
             let pool_transaction =
                 <<Self as RpcNodeCore>::Pool as TransactionPool>::Transaction::try_from_consensus(
-                    transaction.into(),
+                    transaction,
                 )
                 .map_err(|_| EthApiError::TransactionConversionError)?;
 

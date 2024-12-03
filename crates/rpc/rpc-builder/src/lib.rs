@@ -26,7 +26,7 @@
 //!     RethRpcModule, RpcModuleBuilder, RpcServerConfig, ServerBuilder, TransportRpcModuleConfig,
 //! };
 //! use reth_tasks::TokioTaskExecutor;
-//! use reth_transaction_pool::TransactionPool;
+//! use reth_transaction_pool::{PoolTransaction, TransactionPool};
 //!
 //! pub async fn launch<Provider, Pool, Network, Events, EvmConfig, BlockExecutor, Consensus>(
 //!     provider: Provider,
@@ -44,7 +44,9 @@
 //!             Header = reth_primitives::Header,
 //!         > + AccountReader
 //!         + ChangeSetReader,
-//!     Pool: TransactionPool + Unpin + 'static,
+//!     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>
+//!         + Unpin
+//!         + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events:
 //!         CanonStateSubscriptions<Primitives = reth_primitives::EthPrimitives> + Clone + 'static,
@@ -95,7 +97,7 @@
 //! };
 //! use reth_rpc_layer::JwtSecret;
 //! use reth_tasks::TokioTaskExecutor;
-//! use reth_transaction_pool::TransactionPool;
+//! use reth_transaction_pool::{PoolTransaction, TransactionPool};
 //! use tokio::try_join;
 //!
 //! pub async fn launch<
@@ -125,7 +127,9 @@
 //!             Header = reth_primitives::Header,
 //!         > + AccountReader
 //!         + ChangeSetReader,
-//!     Pool: TransactionPool + Unpin + 'static,
+//!     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>
+//!         + Unpin
+//!         + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events:
 //!         CanonStateSubscriptions<Primitives = reth_primitives::EthPrimitives> + Clone + 'static,
@@ -277,7 +281,7 @@ where
             Header = reth_primitives::Header,
         > + AccountReader
         + ChangeSetReader,
-    Pool: TransactionPool + 'static,
+    Pool: TransactionPool<Transaction = <EthApi::Pool as TransactionPool>::Transaction> + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions<Primitives = EthPrimitives> + Clone + 'static,
@@ -674,6 +678,7 @@ where
             Receipt = <EthApi::Provider as ReceiptProvider>::Receipt,
             Header = <EthApi::Provider as HeaderProvider>::Header,
         >,
+        Pool: TransactionPool<Transaction = <EthApi::Pool as TransactionPool>::Transaction>,
     {
         let Self {
             provider,
@@ -793,6 +798,7 @@ where
             Receipt = <EthApi::Provider as ReceiptProvider>::Receipt,
             Header = <EthApi::Provider as HeaderProvider>::Header,
         >,
+        Pool: TransactionPool<Transaction = <EthApi::Pool as TransactionPool>::Transaction>,
     {
         let mut modules = TransportRpcModules::default();
 
@@ -1328,7 +1334,7 @@ where
             Header = <EthApi::Provider as HeaderProvider>::Header,
         > + AccountReader
         + ChangeSetReader,
-    Pool: TransactionPool + 'static,
+    Pool: TransactionPool<Transaction = <EthApi::Pool as TransactionPool>::Transaction> + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions<Primitives = EthPrimitives> + Clone + 'static,
