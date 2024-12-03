@@ -22,7 +22,7 @@ alloy-eips.workspace = true
 revm-primitives.workspace = true
 nybbles.workspace = true
 
-derive_more.workspace = true
+thiserror.workspace = true
 
 [features]
 default = ["std"]
@@ -32,6 +32,6 @@ std = [
 	"alloy-primitives/std",
 	"revm-primitives/std",
 	"alloy-rlp/std",
-	"derive_more/std",
+	"thiserror/std",
 	"nybbles/std"
 ]

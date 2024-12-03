@@ -7601,12 +7601,12 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
- "derive_more 1.0.0",
  "nybbles",
  "reth-consensus",
  "reth-prune-types",
  "reth-storage-errors",
  "revm-primitives",
+ "thiserror 2.0.3",
 ]
 
 [[package]]
