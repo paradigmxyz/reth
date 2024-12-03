@@ -1,7 +1,7 @@
 //! Abstraction over primitive types in network messages.
 
 use alloy_rlp::{Decodable, Encodable};
-use reth_primitives_traits::{Block, BlockHeader};
+use reth_primitives_traits::{Block, BlockHeader, SignedTransaction};
 use std::fmt::Debug;
 
 /// Abstraction over primitive types which might appear in network messages. See
@@ -62,17 +62,7 @@ pub trait NetworkPrimitives:
         + 'static;
 
     /// The transaction type which peers return in `PooledTransactions` messages.
-    type PooledTransaction: TryFrom<Self::BroadcastedTransaction>
-        + Encodable
-        + Decodable
-        + Send
-        + Sync
-        + Unpin
-        + Clone
-        + Debug
-        + PartialEq
-        + Eq
-        + 'static;
+    type PooledTransaction: SignedTransaction + TryFrom<Self::BroadcastedTransaction> + 'static;
 
     /// The transaction type which peers return in `GetReceipts` messages.
     type Receipt: Encodable
