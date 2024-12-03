@@ -10,7 +10,10 @@ use reth_trie::{
 };
 use reth_trie_db::DatabaseProof;
 use reth_trie_parallel::root::ParallelStateRootError;
-use reth_trie_sparse::{SparseStateTrie, SparseStateTrieResult, SparseTrieError};
+use reth_trie_sparse::{
+    errors::{SparseStateTrieResult, SparseTrieError},
+    SparseStateTrie,
+};
 use revm_primitives::{keccak256, EvmState, B256};
 use std::{
     collections::BTreeMap,

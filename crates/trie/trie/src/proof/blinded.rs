@@ -4,11 +4,9 @@ use alloy_primitives::{
     map::{HashMap, HashSet},
     Bytes, B256,
 };
+use reth_execution_errors::SparseTrieError;
 use reth_trie_common::{prefix_set::TriePrefixSetsMut, Nibbles};
-use reth_trie_sparse::{
-    blinded::{pad_path_to_key, BlindedProvider, BlindedProviderFactory},
-    SparseTrieError,
-};
+use reth_trie_sparse::blinded::{pad_path_to_key, BlindedProvider, BlindedProviderFactory};
 use std::sync::Arc;
 
 /// Factory for instantiating providers capable of retrieving blinded trie nodes via proofs.
