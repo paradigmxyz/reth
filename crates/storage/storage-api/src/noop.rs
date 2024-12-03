@@ -2,9 +2,9 @@
 
 use crate::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    BlockSource, ChangeSetReader, HeaderProvider, NodePrimitivesProvider, PruneCheckpointReader,
-    ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProofProvider,
-    StateProvider, StateRootProvider, StorageRootProvider, TransactionVariant,
+    BlockSource, ChangeSetReader, HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider,
+    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader,
+    StateProofProvider, StateProvider, StateRootProvider, StorageRootProvider, TransactionVariant,
     TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_eips::{
@@ -453,6 +453,12 @@ impl<C: Send + Sync, N: NodePrimitives> StateProofProvider for NoopProvider<C, N
         _target: HashedPostState,
     ) -> ProviderResult<HashMap<B256, Bytes>> {
         Ok(HashMap::default())
+    }
+}
+
+impl<C: Send + Sync, N: NodePrimitives> HashedPostStateProvider for NoopProvider<C, N> {
+    fn hashed_post_state(&self, _bundle_state: &revm::db::BundleState) -> HashedPostState {
+        HashedPostState::default()
     }
 }
 

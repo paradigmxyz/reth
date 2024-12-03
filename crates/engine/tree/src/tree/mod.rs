@@ -41,8 +41,8 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, ExecutionOutcome,
-    ProviderError, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
-    TransactionVariant,
+    HashedPostStateProvider, ProviderError, StateCommitmentProvider, StateProviderBox,
+    StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
@@ -552,6 +552,8 @@ where
         + BlockReader<Block = N::Block, Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader<Receipt = reth_primitives::Receipt>
+        + StateCommitmentProvider
+        + HashedPostStateProvider
         + Clone
         + 'static,
     <P as DatabaseProviderFactory>::Provider: BlockReader,
@@ -1568,7 +1570,7 @@ where
             .provider
             .get_state(block.number())?
             .ok_or_else(|| ProviderError::StateForNumberNotFound(block.number()))?;
-        let hashed_state = execution_output.hash_state_slow();
+        let hashed_state = self.provider.hashed_post_state(execution_output.state());
 
         Ok(Some(ExecutedBlock {
             block: Arc::new(block),
@@ -2242,7 +2244,7 @@ where
             return Err(err.into())
         }
 
-        let hashed_state = HashedPostState::from_bundle_state(&output.state.state);
+        let hashed_state = self.provider.hashed_post_state(&output.state);
 
         trace!(target: "engine::tree", block=?sealed_block.num_hash(), "Calculating block state root");
         let root_time = Instant::now();

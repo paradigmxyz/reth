@@ -36,7 +36,6 @@ use reth_transaction_pool::{
     error::InvalidPoolTransactionError, BestTransactionsAttributes, PoolTransaction,
     TransactionPool,
 };
-use reth_trie::HashedPostState;
 use revm::{db::states::bundle_state::BundleRetention, DatabaseCommit, State};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
@@ -427,7 +426,7 @@ pub trait LoadPendingBlock:
             block_number,
             Vec::new(),
         );
-        let hashed_state = HashedPostState::from_bundle_state(&execution_outcome.state().state);
+        let hashed_state = db.database.hashed_post_state(execution_outcome.state());
 
         let receipts_root = self.receipts_root(&block_env, &execution_outcome, block_number);
 

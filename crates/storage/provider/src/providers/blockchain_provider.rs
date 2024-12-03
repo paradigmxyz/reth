@@ -4,8 +4,8 @@ use crate::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BlockSource, CanonChainTracker, CanonStateNotifications, CanonStateSubscriptions,
     ChainSpecProvider, ChainStateBlockReader, ChangeSetReader, DatabaseProvider,
-    DatabaseProviderFactory, EvmEnvProvider, FullProvider, HeaderProvider, ProviderError,
-    ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
+    DatabaseProviderFactory, EvmEnvProvider, FullProvider, HashedPostStateProvider, HeaderProvider,
+    ProviderError, ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
     StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
@@ -34,9 +34,16 @@ use reth_primitives::{
 use reth_primitives_traits::BlockBody as _;
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::{DBProvider, NodePrimitivesProvider, StorageChangeSetReader};
+use reth_storage_api::{
+    DBProvider, NodePrimitivesProvider, StateCommitmentProvider, StorageChangeSetReader,
+};
 use reth_storage_errors::provider::ProviderResult;
-use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
+use reth_trie::HashedPostState;
+use reth_trie_db::StateCommitment;
+use revm::{
+    db::BundleState,
+    primitives::{BlockEnv, CfgEnvWithHandlerCfg},
+};
 use std::{
     ops::{Add, RangeBounds, RangeInclusive, Sub},
     sync::Arc,
@@ -169,6 +176,10 @@ impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider2<N> {
     fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
         self.database.database_provider_rw()
     }
+}
+
+impl<N: ProviderNodeTypes> StateCommitmentProvider for BlockchainProvider2<N> {
+    type StateCommitment = N::StateCommitment;
 }
 
 impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider2<N> {
@@ -660,6 +671,14 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider2<N> {
                 self.state_by_block_hash(hash)
             }
         }
+    }
+}
+
+impl<N: NodeTypesWithDB> HashedPostStateProvider for BlockchainProvider2<N> {
+    fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
+        HashedPostState::from_bundle_state::<<N::StateCommitment as StateCommitment>::KeyHasher>(
+            bundle_state.state(),
+        )
     }
 }
 
