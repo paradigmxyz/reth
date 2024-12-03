@@ -502,7 +502,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     where
         ChainSpec: EthChainSpec + Hardforks + 'static,
     {
-        self.build(NoopProvider::new(chain_spec))
+        self.build(NoopProvider::eth(chain_spec))
     }
 
     /// Sets the NAT resolver for external IP.
