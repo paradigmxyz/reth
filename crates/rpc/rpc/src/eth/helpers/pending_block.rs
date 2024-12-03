@@ -31,7 +31,7 @@ where
             Pool: TransactionPool<
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
             >,
-            Evm: ConfigureEvm<Header = Header>,
+            Evm: ConfigureEvm<Header = Header, Transaction = ProviderTx<Self::Provider>>,
         >,
 {
     #[inline]

@@ -19,7 +19,7 @@ use futures::Future;
 use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_node_api::BlockBody;
-use reth_primitives::TransactionSigned;
+use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockIdReader, ChainSpecProvider, HeaderProvider};
 use reth_revm::{
     database::StateProviderDatabase,
@@ -664,14 +664,15 @@ pub trait Call: LoadState<Evm: ConfigureEvm<Header = Header>> + SpawnBlocking {
     where
         DB: Database + DatabaseCommit,
         EthApiError: From<DB::Error>,
-        I: IntoIterator<Item = (&'a Address, &'a TransactionSigned)>,
+        I: IntoIterator<Item = (&'a Address, &'a <Self::Evm as ConfigureEvmEnv>::Transaction)>,
+        <Self::Evm as ConfigureEvmEnv>::Transaction: SignedTransaction,
     {
         let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default());
 
         let mut evm = self.evm_config().evm_with_env(db, env);
         let mut index = 0;
         for (sender, tx) in transactions {
-            if tx.hash() == target_tx_hash {
+            if *tx.tx_hash() == target_tx_hash {
                 // reached the target transaction
                 break
             }

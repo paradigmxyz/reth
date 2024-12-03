@@ -58,8 +58,15 @@ impl<EvmConfig> EthExecutionStrategyFactory<EvmConfig> {
 
 impl<EvmConfig> BlockExecutionStrategyFactory for EthExecutionStrategyFactory<EvmConfig>
 where
-    EvmConfig:
-        Clone + Unpin + Sync + Send + 'static + ConfigureEvm<Header = alloy_consensus::Header>,
+    EvmConfig: Clone
+        + Unpin
+        + Sync
+        + Send
+        + 'static
+        + ConfigureEvm<
+            Header = alloy_consensus::Header,
+            Transaction = reth_primitives::TransactionSigned,
+        >,
 {
     type Primitives = EthPrimitives;
 
@@ -128,7 +135,10 @@ where
 impl<DB, EvmConfig> BlockExecutionStrategy for EthExecutionStrategy<DB, EvmConfig>
 where
     DB: Database<Error: Into<ProviderError> + Display>,
-    EvmConfig: ConfigureEvm<Header = alloy_consensus::Header>,
+    EvmConfig: ConfigureEvm<
+        Header = alloy_consensus::Header,
+        Transaction = reth_primitives::TransactionSigned,
+    >,
 {
     type DB = DB;
     type Error = BlockExecutionError;
