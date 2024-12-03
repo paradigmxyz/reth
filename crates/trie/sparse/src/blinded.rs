@@ -28,7 +28,7 @@ pub trait BlindedProvider {
 }
 
 /// Default blinded node provider factory that creates [`DefaultBlindedProvider`].
-#[derive(PartialEq, Eq, Clone, Default, Debug)]
+#[derive(PartialEq, Eq, Clone, Default)]
 pub struct DefaultBlindedProviderFactory;
 
 impl BlindedProviderFactory for DefaultBlindedProviderFactory {
@@ -45,7 +45,7 @@ impl BlindedProviderFactory for DefaultBlindedProviderFactory {
 }
 
 /// Default blinded node provider that always returns `Ok(None)`.
-#[derive(PartialEq, Eq, Clone, Default, Debug)]
+#[derive(PartialEq, Eq, Clone, Default)]
 pub struct DefaultBlindedProvider;
 
 impl BlindedProvider for DefaultBlindedProvider {
