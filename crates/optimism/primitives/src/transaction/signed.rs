@@ -5,6 +5,8 @@ use core::{
     hash::{Hash, Hasher},
     mem,
 };
+#[cfg(feature = "std")]
+use std::sync::OnceLock;
 
 use alloy_consensus::{
     transaction::RlpEcdsaTx, SignableTransaction, Transaction, TxEip1559, TxEip2930, TxEip7702,
@@ -18,7 +20,9 @@ use alloy_primitives::{
     keccak256, Address, Bytes, PrimitiveSignature as Signature, TxHash, TxKind, Uint, B256, U256,
 };
 use alloy_rlp::Header;
-use derive_more::{AsRef, Constructor, Deref};
+use derive_more::{AsRef, Deref};
+#[cfg(not(feature = "std"))]
+use once_cell::sync::OnceCell as OnceLock;
 use op_alloy_consensus::{OpTypedTransaction, TxDeposit};
 #[cfg(any(test, feature = "reth-codec"))]
 use proptest as _;
@@ -34,10 +38,11 @@ use crate::{OpTransaction, OpTxType};
 /// Signed transaction.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, Eq, AsRef, Deref, Constructor)]
+#[derive(Debug, Clone, Eq, AsRef, Deref)]
 pub struct OpTransactionSigned {
     /// Transaction hash
-    pub hash: TxHash,
+    #[serde(skip)]
+    pub hash: OnceLock<TxHash>,
     /// The transaction signature values
     pub signature: Signature,
     /// Raw transaction info
@@ -47,11 +52,21 @@ pub struct OpTransactionSigned {
 }
 
 impl OpTransactionSigned {
+    /// Calculates hash of given transaction and signature and returns new instance.
+    pub fn new(transaction: OpTypedTransaction, signature: Signature) -> Self {
+        let signed_tx = Self::new_unhashed(transaction, signature);
+        if !matches!(signed_tx.tx_type(), OpTxType::Deposit) {
+            signed_tx.hash.get_or_init(|| signed_tx.recalculate_hash());
+        }
+
+        signed_tx
+    }
+
     /// Creates a new signed transaction from the given transaction and signature without the hash.
     ///
     /// Note: this only calculates the hash on the first [`TransactionSigned::hash`] call.
-    pub fn new_unhashed(transaction: OpTransaction, signature: Signature) -> Self {
-        Self { hash: Default::default(), signature, transaction }
+    pub fn new_unhashed(transaction: OpTypedTransaction, signature: Signature) -> Self {
+        Self { hash: Default::default(), signature, transaction: OpTransaction::new(transaction) }
     }
 }
 
@@ -59,7 +74,7 @@ impl SignedTransaction for OpTransactionSigned {
     type Type = OpTxType;
 
     fn tx_hash(&self) -> &TxHash {
-        &self.hash
+        self.hash.get_or_init(|| self.recalculate_hash())
     }
 
     fn signature(&self) -> &Signature {
@@ -282,30 +297,24 @@ impl Decodable2718 for OpTransactionSigned {
             op_alloy_consensus::OpTxType::Legacy => Err(Eip2718Error::UnexpectedType(0)),
             op_alloy_consensus::OpTxType::Eip2930 => {
                 let (tx, signature, hash) = TxEip2930::rlp_decode_signed(buf)?.into_parts();
-                Ok(Self {
-                    transaction: OpTransaction::new(OpTypedTransaction::Eip2930(tx)),
-                    signature,
-                    hash,
-                })
+                let signed_tx = Self::new_unhashed(OpTypedTransaction::Eip2930(tx), signature);
+                signed_tx.hash.get_or_init(|| hash);
+                Ok(signed_tx)
             }
             op_alloy_consensus::OpTxType::Eip1559 => {
                 let (tx, signature, hash) = TxEip1559::rlp_decode_signed(buf)?.into_parts();
-                Ok(Self {
-                    transaction: OpTransaction::new(OpTypedTransaction::Eip1559(tx)),
-                    signature,
-                    hash,
-                })
+                let signed_tx = Self::new_unhashed(OpTypedTransaction::Eip1559(tx), signature);
+                signed_tx.hash.get_or_init(|| hash);
+                Ok(signed_tx)
             }
             op_alloy_consensus::OpTxType::Eip7702 => {
                 let (tx, signature, hash) = TxEip7702::rlp_decode_signed(buf)?.into_parts();
-                Ok(Self {
-                    transaction: OpTransaction::new(OpTypedTransaction::Eip7702(tx)),
-                    signature,
-                    hash,
-                })
+                let signed_tx = Self::new_unhashed(OpTypedTransaction::Eip7702(tx), signature);
+                signed_tx.hash.get_or_init(|| hash);
+                Ok(signed_tx)
             }
             op_alloy_consensus::OpTxType::Deposit => Ok(Self::new_unhashed(
-                OpTransaction::new(OpTypedTransaction::Deposit(TxDeposit::rlp_decode(buf)?)),
+                OpTypedTransaction::Deposit(TxDeposit::rlp_decode(buf)?),
                 TxDeposit::signature(),
             )),
         }
@@ -314,7 +323,10 @@ impl Decodable2718 for OpTransactionSigned {
     fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
         let (transaction, hash, signature) =
             TransactionSigned::decode_rlp_legacy_transaction_tuple(buf)?;
-        Ok(Self::new(hash, signature, OpTransaction::new(OpTypedTransaction::Legacy(transaction))))
+        let signed_tx = Self::new_unhashed(OpTypedTransaction::Legacy(transaction), signature);
+        signed_tx.hash.get_or_init(|| hash);
+
+        Ok(signed_tx)
     }
 }
 
@@ -446,12 +458,7 @@ impl<'a> arbitrary::Arbitrary<'a> for OpTransactionSigned {
 
         let signature = if is_deposit(&transaction) { TxDeposit::signature() } else { signature };
 
-        let mut signed_tx = Self::new_unhashed(OpTransaction::new(transaction), signature);
-        if matches!(signed_tx.tx_type(), OpTxType::Deposit) {
-            signed_tx.hash = signed_tx.recalculate_hash()
-        }
-
-        Ok(signed_tx)
+        Ok(Self::new(transaction, signature))
     }
 }
 
