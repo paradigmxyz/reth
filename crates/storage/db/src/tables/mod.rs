@@ -100,8 +100,10 @@ pub trait TableViewer<R> {
 
 /// General trait for defining the set of tables
 /// Used to initialize database
-trait TableSet {
+pub trait TableSet {
+    /// Returns all the table names in the database.
     fn table_names(&self) -> Vec<&'static str>;
+    /// Returns `true` if the table at the given index is a `DUPSORT` table.
     fn is_dupsort(&self, idx: usize) -> bool;
 }
 
