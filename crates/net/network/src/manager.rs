@@ -398,7 +398,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
         &mut self,
         peer_id: PeerId,
         _capabilities: Arc<Capabilities>,
-        _message: CapabilityMessage,
+        _message: CapabilityMessage<N>,
     ) {
         trace!(target: "net", ?peer_id, "received unexpected message");
         self.swarm
