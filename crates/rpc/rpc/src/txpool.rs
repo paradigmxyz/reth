@@ -8,10 +8,11 @@ use alloy_rpc_types_txpool::{
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_primitives::RecoveredTx;
 use reth_rpc_api::TxPoolApiServer;
 use reth_rpc_types_compat::{transaction::from_recovered, TransactionCompat};
-use reth_transaction_pool::{AllPoolTransactions, PoolTransaction, TransactionPool};
+use reth_transaction_pool::{
+    AllPoolTransactions, PoolConsensusTx, PoolTransaction, TransactionPool,
+};
 use tracing::trace;
 
 /// `txpool` API implementation.
@@ -33,8 +34,8 @@ impl<Pool, Eth> TxPoolApi<Pool, Eth> {
 
 impl<Pool, Eth> TxPoolApi<Pool, Eth>
 where
-    Pool: TransactionPool + 'static,
-    Eth: TransactionCompat,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus: Transaction>> + 'static,
+    Eth: TransactionCompat<PoolConsensusTx<Pool>>,
 {
     fn content(&self) -> Result<TxpoolContent<Eth::Transaction>, Eth::Error> {
         #[inline]
@@ -44,12 +45,12 @@ where
             resp_builder: &RpcTxB,
         ) -> Result<(), RpcTxB::Error>
         where
-            Tx: PoolTransaction<Consensus: Into<RecoveredTx>>,
-            RpcTxB: TransactionCompat,
+            Tx: PoolTransaction,
+            RpcTxB: TransactionCompat<Tx::Consensus>,
         {
             content.entry(tx.sender()).or_default().insert(
                 tx.nonce().to_string(),
-                from_recovered(tx.clone_into_consensus().into(), resp_builder)?,
+                from_recovered(tx.clone_into_consensus(), resp_builder)?,
             );
 
             Ok(())
@@ -72,8 +73,8 @@ where
 #[async_trait]
 impl<Pool, Eth> TxPoolApiServer<Eth::Transaction> for TxPoolApi<Pool, Eth>
 where
-    Pool: TransactionPool + 'static,
-    Eth: TransactionCompat + 'static,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus: Transaction>> + 'static,
+    Eth: TransactionCompat<PoolConsensusTx<Pool>> + 'static,
 {
     /// Returns the number of transactions currently pending for inclusion in the next block(s), as
     /// well as the ones that are being scheduled for future execution only.
@@ -96,19 +97,19 @@ where
         trace!(target: "rpc::eth", "Serving txpool_inspect");
 
         #[inline]
-        fn insert<T: PoolTransaction<Consensus: Into<RecoveredTx>>>(
+        fn insert<T: PoolTransaction<Consensus: Transaction>>(
             tx: &T,
             inspect: &mut BTreeMap<Address, BTreeMap<String, TxpoolInspectSummary>>,
         ) {
             let entry = inspect.entry(tx.sender()).or_default();
-            let tx: RecoveredTx = tx.clone_into_consensus().into();
+            let tx = tx.clone_into_consensus();
             entry.insert(
                 tx.nonce().to_string(),
                 TxpoolInspectSummary {
                     to: tx.to(),
                     value: tx.value(),
                     gas: tx.gas_limit() as u128,
-                    gas_price: tx.transaction.max_fee_per_gas(),
+                    gas_price: tx.max_fee_per_gas(),
                 },
             );
         }

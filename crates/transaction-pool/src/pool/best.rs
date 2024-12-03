@@ -226,7 +226,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
 #[derive(Debug)]
 pub struct BestPayloadTransactions<T, I>
 where
-    T: PoolTransaction<Consensus: Into<RecoveredTx>>,
+    T: PoolTransaction,
     I: Iterator<Item = Arc<ValidPoolTransaction<T>>>,
 {
     invalid: HashSet<Address>,
@@ -235,7 +235,7 @@ where
 
 impl<T, I> BestPayloadTransactions<T, I>
 where
-    T: PoolTransaction<Consensus: Into<RecoveredTx>>,
+    T: PoolTransaction,
     I: Iterator<Item = Arc<ValidPoolTransaction<T>>>,
 {
     /// Create a new `BestPayloadTransactions` with the given iterator.
@@ -246,16 +246,18 @@ where
 
 impl<T, I> PayloadTransactions for BestPayloadTransactions<T, I>
 where
-    T: PoolTransaction<Consensus: Into<RecoveredTx>>,
+    T: PoolTransaction,
     I: Iterator<Item = Arc<ValidPoolTransaction<T>>>,
 {
-    fn next(&mut self, _ctx: ()) -> Option<RecoveredTx> {
+    type Transaction = T::Consensus;
+
+    fn next(&mut self, _ctx: ()) -> Option<RecoveredTx<Self::Transaction>> {
         loop {
             let tx = self.best.next()?;
             if self.invalid.contains(&tx.sender()) {
                 continue
             }
-            return Some(tx.to_recovered_transaction())
+            return Some(tx.to_consensus())
         }
     }
 

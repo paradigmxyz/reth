@@ -33,6 +33,7 @@ use reth_rpc_builder::{
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
+use reth_transaction_pool::TransactionPool;
 
 use crate::EthApiBuilderCtx;
 
@@ -405,6 +406,7 @@ where
     N: FullNodeComponents<
         Types: ProviderNodeTypes<Primitives = EthPrimitives>,
         PayloadBuilder: PayloadBuilder<PayloadType = <N::Types as NodeTypesWithEngine>::Engine>,
+        Pool: TransactionPool<Transaction = <EthApi::Pool as TransactionPool>::Transaction>,
     >,
     EthApi: EthApiTypes + FullEthApiServer + AddDevSigners + Unpin + 'static,
     EV: EngineValidatorBuilder<N>,
@@ -527,6 +529,7 @@ where
     N: FullNodeComponents<
         Types: ProviderNodeTypes<Primitives = EthPrimitives>,
         PayloadBuilder: PayloadBuilder<PayloadType = <N::Types as NodeTypesWithEngine>::Engine>,
+        Pool: TransactionPool<Transaction = <EthApi::Pool as TransactionPool>::Transaction>,
     >,
     EthApi: EthApiTypes + FullEthApiServer + AddDevSigners + Unpin + 'static,
     EV: EngineValidatorBuilder<N>,

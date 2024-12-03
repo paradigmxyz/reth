@@ -38,6 +38,9 @@ use tokio::sync::mpsc::Receiver;
 /// The `PeerId` type.
 pub type PeerId = alloy_primitives::B512;
 
+/// Helper type alias to access [`PoolTransaction::Consensus`] for a given [`TransactionPool`].
+pub type PoolConsensusTx<P> = <<P as TransactionPool>::Transaction as PoolTransaction>::Consensus;
+
 /// General purpose abstraction of a transaction-pool.
 ///
 /// This is intended to be used by API-consumers such as RPC that need inject new incoming,
@@ -577,17 +580,17 @@ pub struct AllPoolTransactions<T: PoolTransaction> {
 
 impl<T: PoolTransaction> AllPoolTransactions<T> {
     /// Returns an iterator over all pending [`RecoveredTx`] transactions.
-    pub fn pending_recovered(&self) -> impl Iterator<Item = T::Consensus> + '_ {
+    pub fn pending_recovered(&self) -> impl Iterator<Item = RecoveredTx<T::Consensus>> + '_ {
         self.pending.iter().map(|tx| tx.transaction.clone().into())
     }
 
     /// Returns an iterator over all queued [`RecoveredTx`] transactions.
-    pub fn queued_recovered(&self) -> impl Iterator<Item = T::Consensus> + '_ {
+    pub fn queued_recovered(&self) -> impl Iterator<Item = RecoveredTx<T::Consensus>> + '_ {
         self.queued.iter().map(|tx| tx.transaction.clone().into())
     }
 
     /// Returns an iterator over all transactions, both pending and queued.
-    pub fn all(&self) -> impl Iterator<Item = T::Consensus> + '_ {
+    pub fn all(&self) -> impl Iterator<Item = RecoveredTx<T::Consensus>> + '_ {
         self.pending.iter().chain(self.queued.iter()).map(|tx| tx.transaction.clone().into())
     }
 }
@@ -963,30 +966,39 @@ impl BestTransactionsAttributes {
 /// This distinction is necessary for the EIP-4844 blob transactions, which require an additional
 /// sidecar when they are gossiped around the network. It is expected that the `Consensus` format is
 /// a subset of the `Pooled` format.
-pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
+pub trait PoolTransaction:
+    fmt::Debug
+    + Send
+    + Sync
+    + Clone
+    + TryFrom<RecoveredTx<Self::Consensus>, Error = Self::TryFromConsensusError>
+    + Into<RecoveredTx<Self::Consensus>>
+{
     /// Associated error type for the `try_from_consensus` method.
     type TryFromConsensusError: fmt::Display;
 
     /// Associated type representing the raw consensus variant of the transaction.
-    type Consensus: From<Self> + TryInto<Self, Error = Self::TryFromConsensusError>;
+    type Consensus;
 
     /// Associated type representing the recovered pooled variant of the transaction.
     type Pooled: Encodable2718 + Into<Self>;
 
     /// Define a method to convert from the `Consensus` type to `Self`
-    fn try_from_consensus(tx: Self::Consensus) -> Result<Self, Self::TryFromConsensusError> {
+    fn try_from_consensus(
+        tx: RecoveredTx<Self::Consensus>,
+    ) -> Result<Self, Self::TryFromConsensusError> {
         tx.try_into()
     }
 
     /// Clone the transaction into a consensus variant.
     ///
     /// This method is preferred when the [`PoolTransaction`] already wraps the consensus variant.
-    fn clone_into_consensus(&self) -> Self::Consensus {
+    fn clone_into_consensus(&self) -> RecoveredTx<Self::Consensus> {
         self.clone().into_consensus()
     }
 
     /// Define a method to convert from the `Self` type to `Consensus`
-    fn into_consensus(self) -> Self::Consensus {
+    fn into_consensus(self) -> RecoveredTx<Self::Consensus> {
         self.into()
     }
 
@@ -1002,7 +1014,7 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
 
     /// Tries to convert the `Consensus` type into the `Pooled` type.
     fn try_consensus_into_pooled(
-        tx: Self::Consensus,
+        tx: RecoveredTx<Self::Consensus>,
     ) -> Result<Self::Pooled, Self::TryFromConsensusError>;
 
     /// Hash of the transaction.
@@ -1131,7 +1143,6 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
 /// Ethereum pool.
 pub trait EthPoolTransaction:
     PoolTransaction<
-    Consensus: From<RecoveredTx> + Into<RecoveredTx> + Into<TransactionSigned>,
     Pooled: From<PooledTransactionsElementEcRecovered>
                 + Into<PooledTransactionsElementEcRecovered>
                 + Into<PooledTransactionsElement>,
@@ -1242,16 +1253,16 @@ impl From<PooledTransactionsElementEcRecovered> for EthPooledTransaction {
 impl PoolTransaction for EthPooledTransaction {
     type TryFromConsensusError = TryFromRecoveredTransactionError;
 
-    type Consensus = RecoveredTx;
+    type Consensus = TransactionSigned;
 
     type Pooled = PooledTransactionsElementEcRecovered;
 
-    fn clone_into_consensus(&self) -> Self::Consensus {
+    fn clone_into_consensus(&self) -> RecoveredTx<Self::Consensus> {
         self.transaction().clone()
     }
 
     fn try_consensus_into_pooled(
-        tx: Self::Consensus,
+        tx: RecoveredTx<Self::Consensus>,
     ) -> Result<Self::Pooled, Self::TryFromConsensusError> {
         Self::Pooled::try_from(tx).map_err(|_| TryFromRecoveredTransactionError::BlobSidecarMissing)
     }

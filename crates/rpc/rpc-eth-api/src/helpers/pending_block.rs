@@ -22,7 +22,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderError,
-    ProviderReceipt, ReceiptProvider, StateProviderFactory,
+    ProviderReceipt, ProviderTx, ReceiptProvider, StateProviderFactory,
 };
 use reth_revm::{
     database::StateProviderDatabase,
@@ -33,7 +33,8 @@ use reth_revm::{
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
 use reth_transaction_pool::{
-    error::InvalidPoolTransactionError, BestTransactionsAttributes, TransactionPool,
+    error::InvalidPoolTransactionError, BestTransactionsAttributes, PoolTransaction,
+    TransactionPool,
 };
 use reth_trie::HashedPostState;
 use revm::{db::states::bundle_state::BundleRetention, DatabaseCommit, State};
@@ -48,13 +49,14 @@ pub trait LoadPendingBlock:
     EthApiTypes
     + RpcNodeCore<
         Provider: BlockReaderIdExt<
+            Transaction = reth_primitives::TransactionSigned,
             Block = reth_primitives::Block,
             Receipt = reth_primitives::Receipt,
             Header = reth_primitives::Header,
         > + EvmEnvProvider
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                       + StateProviderFactory,
-        Pool: TransactionPool,
+        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
         Evm: ConfigureEvm<Header = Header>,
     >
 {
@@ -319,7 +321,7 @@ pub trait LoadPendingBlock:
             }
 
             // convert tx to a signed transaction
-            let tx = pool_tx.to_recovered_transaction();
+            let tx = pool_tx.to_consensus();
 
             // There's only limited amount of blob space available per block, so we need to check if
             // the EIP-4844 can still fit in the block

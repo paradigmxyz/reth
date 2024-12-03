@@ -277,7 +277,7 @@ where
             Header = reth_primitives::Header,
         > + AccountReader
         + ChangeSetReader,
-    Pool: TransactionPool + 'static,
+    Pool: TransactionPool<Transaction = <EthApi::Pool as TransactionPool>::Transaction> + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions<Primitives = EthPrimitives> + Clone + 'static,
@@ -674,6 +674,7 @@ where
             Receipt = <EthApi::Provider as ReceiptProvider>::Receipt,
             Header = <EthApi::Provider as HeaderProvider>::Header,
         >,
+        Pool: TransactionPool<Transaction = <EthApi::Pool as TransactionPool>::Transaction>,
     {
         let Self {
             provider,
@@ -793,6 +794,7 @@ where
             Receipt = <EthApi::Provider as ReceiptProvider>::Receipt,
             Header = <EthApi::Provider as HeaderProvider>::Header,
         >,
+        Pool: TransactionPool<Transaction = <EthApi::Pool as TransactionPool>::Transaction>,
     {
         let mut modules = TransportRpcModules::default();
 
@@ -1328,7 +1330,7 @@ where
             Header = <EthApi::Provider as HeaderProvider>::Header,
         > + AccountReader
         + ChangeSetReader,
-    Pool: TransactionPool + 'static,
+    Pool: TransactionPool<Transaction = <EthApi::Pool as TransactionPool>::Transaction> + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions<Primitives = EthPrimitives> + Clone + 'static,
