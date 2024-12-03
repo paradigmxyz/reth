@@ -949,12 +949,13 @@ mod tests {
     use reth_errors::ProviderResult;
     use reth_primitives::{Account, Bytecode, EthPrimitives, Receipt};
     use reth_storage_api::{
-        AccountReader, BlockHashReader, HashedPostStateProvider, StateProofProvider, StateProvider,
-        StateRootProvider, StorageRootProvider,
+        AccountReader, BlockHashReader, HashedPostStateProvider, HashedStorageProvider,
+        StateProofProvider, StateProvider, StateRootProvider, StorageRootProvider,
     };
     use reth_trie::{
         AccountProof, HashedStorage, MultiProof, StorageMultiProof, StorageProof, TrieInput,
     };
+    use revm::db::BundleAccount;
 
     fn create_mock_state(
         test_block_builder: &mut TestBlockBuilder<EthPrimitives>,
@@ -1050,6 +1051,12 @@ mod tests {
     impl HashedPostStateProvider for MockStateProvider {
         fn hashed_post_state(&self, _bundle_state: &revm::db::BundleState) -> HashedPostState {
             HashedPostState::default()
+        }
+    }
+
+    impl HashedStorageProvider for MockStateProvider {
+        fn hashed_storage(&self, _account: &BundleAccount) -> HashedStorage {
+            HashedStorage::default()
         }
     }
 

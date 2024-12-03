@@ -6,8 +6,8 @@ use alloy_primitives::{
 };
 use reth_primitives::{Account, Bytecode};
 use reth_storage_api::{
-    AccountReader, BlockHashReader, HashedPostStateProvider, StateProofProvider, StateProvider,
-    StateRootProvider, StorageRootProvider,
+    AccountReader, BlockHashReader, HashedPostStateProvider, HashedStorageProvider,
+    StateProofProvider, StateProvider, StateRootProvider, StorageRootProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
@@ -153,6 +153,12 @@ impl StateProofProvider for StateProviderTest {
 impl HashedPostStateProvider for StateProviderTest {
     fn hashed_post_state(&self, bundle_state: &revm::db::BundleState) -> HashedPostState {
         HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
+    }
+}
+
+impl HashedStorageProvider for StateProviderTest {
+    fn hashed_storage(&self, account: &revm::db::BundleAccount) -> HashedStorage {
+        HashedStorage::from_bundle_account::<KeccakKeyHasher>(account)
     }
 }
 
