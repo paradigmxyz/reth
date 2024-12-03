@@ -1,10 +1,13 @@
 //! A signed Optimism transaction.
 
 use alloc::vec::Vec;
-use core::mem;
+use core::{
+    hash::{Hash, Hasher},
+    mem,
+};
 
 use alloy_consensus::{
-    transaction::RlpEcdsaTx, SignableTransaction, TxEip1559, TxEip2930, TxEip7702,
+    transaction::RlpEcdsaTx, SignableTransaction, Transaction, TxEip1559, TxEip2930, TxEip7702,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
@@ -23,7 +26,7 @@ use reth_primitives::{
     transaction::{recover_signer, recover_signer_unchecked},
     TransactionSigned,
 };
-use reth_primitives_traits::{InMemorySize, SignedTransaction};
+use reth_primitives_traits::{FillTxEnv, InMemorySize, SignedTransaction};
 use revm_primitives::{AuthorizationList, OptimismFields, TxEnv};
 
 use crate::{OpTransaction, OpTxType};
@@ -31,7 +34,7 @@ use crate::{OpTransaction, OpTxType};
 /// Signed transaction.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Constructor)]
+#[derive(Debug, Clone, Eq, AsRef, Deref, Constructor)]
 pub struct OpTransactionSigned {
     /// Transaction hash
     pub hash: TxHash,
@@ -103,7 +106,7 @@ impl SignedTransaction for OpTransactionSigned {
     }
 }
 
-impl reth_primitives_traits::FillTxEnv for OpTransactionSigned {
+impl FillTxEnv for OpTransactionSigned {
     fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address) {
         let envelope = self.encoded_2718();
 
@@ -315,7 +318,7 @@ impl Decodable2718 for OpTransactionSigned {
     }
 }
 
-impl alloy_consensus::Transaction for OpTransactionSigned {
+impl Transaction for OpTransactionSigned {
     fn chain_id(&self) -> Option<u64> {
         self.deref().chain_id()
     }
@@ -400,6 +403,21 @@ impl Default for OpTransactionSigned {
             signature: Signature::test_signature(),
             transaction: OpTransaction::new(OpTypedTransaction::Legacy(Default::default())),
         }
+    }
+}
+
+impl PartialEq for OpTransactionSigned {
+    fn eq(&self, other: &Self) -> bool {
+        self.signature == other.signature &&
+            self.transaction == other.transaction &&
+            self.tx_hash() == other.tx_hash()
+    }
+}
+
+impl Hash for OpTransactionSigned {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.signature.hash(state);
+        self.transaction.hash(state);
     }
 }
 
