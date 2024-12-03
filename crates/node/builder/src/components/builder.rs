@@ -10,9 +10,9 @@ use crate::{
 use alloy_consensus::Header;
 use reth_consensus::FullConsensus;
 use reth_evm::execute::BlockExecutorProvider;
-use reth_node_api::{NodeTypes, NodeTypesWithEngine};
+use reth_node_api::{NodeTypes, NodeTypesWithEngine, TxTy};
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_transaction_pool::TransactionPool;
+use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::{future::Future, marker::PhantomData};
 
 /// A generic, general purpose and customizable [`NodeComponentsBuilder`] implementation.
@@ -375,7 +375,9 @@ where
     Node: FullNodeTypes,
     F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
     Fut: Future<Output = eyre::Result<Components<Node, Pool, EVM, Executor, Cons>>> + Send,
-    Pool: TransactionPool + Unpin + 'static,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
+        + Unpin
+        + 'static,
     EVM: ConfigureEvm<Header = Header>,
     Executor: BlockExecutorProvider<Primitives = <Node::Types as NodeTypes>::Primitives>,
     Cons: FullConsensus<<Node::Types as NodeTypes>::Primitives> + Clone + Unpin + 'static,

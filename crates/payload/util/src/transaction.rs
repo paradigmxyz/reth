@@ -26,8 +26,10 @@ impl<T> PayloadTransactionsFixed<T> {
     }
 }
 
-impl PayloadTransactions for PayloadTransactionsFixed<RecoveredTx> {
-    fn next(&mut self, _ctx: ()) -> Option<RecoveredTx> {
+impl<T: Clone> PayloadTransactions for PayloadTransactionsFixed<RecoveredTx<T>> {
+    type Transaction = T;
+
+    fn next(&mut self, _ctx: ()) -> Option<RecoveredTx<T>> {
         (self.index < self.transactions.len()).then(|| {
             let tx = self.transactions[self.index].clone();
             self.index += 1;
@@ -87,20 +89,22 @@ impl<B: PayloadTransactions, A: PayloadTransactions> PayloadTransactionsChain<B,
     }
 }
 
-impl<B, A> PayloadTransactions for PayloadTransactionsChain<B, A>
+impl<A, B> PayloadTransactions for PayloadTransactionsChain<A, B>
 where
-    B: PayloadTransactions,
-    A: PayloadTransactions,
+    A: PayloadTransactions<Transaction: Transaction>,
+    B: PayloadTransactions<Transaction = A::Transaction>,
 {
-    fn next(&mut self, ctx: ()) -> Option<RecoveredTx> {
+    type Transaction = A::Transaction;
+
+    fn next(&mut self, ctx: ()) -> Option<RecoveredTx<Self::Transaction>> {
         while let Some(tx) = self.before.next(ctx) {
             if let Some(before_max_gas) = self.before_max_gas {
-                if self.before_gas + tx.transaction.gas_limit() <= before_max_gas {
-                    self.before_gas += tx.transaction.gas_limit();
+                if self.before_gas + tx.as_signed().gas_limit() <= before_max_gas {
+                    self.before_gas += tx.as_signed().gas_limit();
                     return Some(tx);
                 }
-                self.before.mark_invalid(tx.signer(), tx.transaction.nonce());
-                self.after.mark_invalid(tx.signer(), tx.transaction.nonce());
+                self.before.mark_invalid(tx.signer(), tx.as_signed().nonce());
+                self.after.mark_invalid(tx.signer(), tx.as_signed().nonce());
             } else {
                 return Some(tx);
             }
@@ -108,11 +112,11 @@ where
 
         while let Some(tx) = self.after.next(ctx) {
             if let Some(after_max_gas) = self.after_max_gas {
-                if self.after_gas + tx.transaction.gas_limit() <= after_max_gas {
-                    self.after_gas += tx.transaction.gas_limit();
+                if self.after_gas + tx.as_signed().gas_limit() <= after_max_gas {
+                    self.after_gas += tx.as_signed().gas_limit();
                     return Some(tx);
                 }
-                self.after.mark_invalid(tx.signer(), tx.transaction.nonce());
+                self.after.mark_invalid(tx.signer(), tx.as_signed().nonce());
             } else {
                 return Some(tx);
             }

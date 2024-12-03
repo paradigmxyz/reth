@@ -13,7 +13,7 @@ use reth_db::transaction::{DbTx, DbTxMut};
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, PeersInfo};
 use reth_node_api::{
-    AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, PayloadBuilder,
+    AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, PayloadBuilder, TxTy,
 };
 use reth_node_builder::{
     components::{
@@ -42,7 +42,7 @@ use reth_provider::{
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
-    blobstore::DiskFileBlobStore, CoinbaseTipOrdering, TransactionPool,
+    blobstore::DiskFileBlobStore, CoinbaseTipOrdering, PoolTransaction, TransactionPool,
     TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
@@ -465,7 +465,9 @@ where
                 Primitives = OpPrimitives,
             >,
         >,
-        Pool: TransactionPool + Unpin + 'static,
+        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
+            + Unpin
+            + 'static,
         Evm: ConfigureEvm<Header = Header>,
     {
         let payload_builder = reth_optimism_payload_builder::OpPayloadBuilder::new(evm_config)
@@ -505,7 +507,9 @@ where
             Primitives = OpPrimitives,
         >,
     >,
-    Pool: TransactionPool + Unpin + 'static,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
+        + Unpin
+        + 'static,
     Txs: OpPayloadTransactions,
 {
     async fn spawn_payload_service(
@@ -577,7 +581,9 @@ impl OpNetworkBuilder {
 impl<Node, Pool> NetworkBuilder<Node, Pool> for OpNetworkBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
-    Pool: TransactionPool + Unpin + 'static,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
+        + Unpin
+        + 'static,
 {
     async fn build_network(
         self,

@@ -9,7 +9,7 @@ use alloy_rpc_types_eth::{
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_chainspec::ChainInfo;
-use reth_primitives::{Receipt, RecoveredTx, SealedBlockWithSenders};
+use reth_primitives::{Receipt, SealedBlockWithSenders};
 use reth_provider::{BlockIdReader, BlockReader, ProviderError};
 use reth_rpc_eth_api::{
     EthApiTypes, EthFilterApiServer, FullEthApiTypes, RpcTransaction, TransactionCompat,
@@ -145,7 +145,7 @@ where
 impl<Provider, Pool, Eth> EthFilter<Provider, Pool, Eth>
 where
     Provider: BlockReader + BlockIdReader + 'static,
-    Pool: TransactionPool<Transaction: 'static> + 'static,
+    Pool: TransactionPool<Transaction = <Eth::Pool as TransactionPool>::Transaction> + 'static,
     Eth: FullEthApiTypes,
 {
     /// Returns all the filter changes for the given id, if any
@@ -245,7 +245,7 @@ impl<Provider, Pool, Eth> EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>>
     for EthFilter<Provider, Pool, Eth>
 where
     Provider: BlockReader + BlockIdReader + 'static,
-    Pool: TransactionPool + 'static,
+    Pool: TransactionPool<Transaction = <Eth::Pool as TransactionPool>::Transaction> + 'static,
     Eth: FullEthApiTypes + 'static,
 {
     /// Handler for `eth_newFilter`
@@ -611,7 +611,7 @@ struct FullTransactionsReceiver<T: PoolTransaction, TxCompat> {
 impl<T, TxCompat> FullTransactionsReceiver<T, TxCompat>
 where
     T: PoolTransaction + 'static,
-    TxCompat: TransactionCompat,
+    TxCompat: TransactionCompat<T::Consensus>,
 {
     /// Creates a new `FullTransactionsReceiver` encapsulating the provided transaction stream.
     fn new(stream: NewSubpoolTransactionStream<T>, tx_resp_builder: TxCompat) -> Self {
@@ -619,15 +619,12 @@ where
     }
 
     /// Returns all new pending transactions received since the last poll.
-    async fn drain(&self) -> FilterChanges<TxCompat::Transaction>
-    where
-        T: PoolTransaction<Consensus: Into<RecoveredTx>>,
-    {
+    async fn drain(&self) -> FilterChanges<TxCompat::Transaction> {
         let mut pending_txs = Vec::new();
         let mut prepared_stream = self.txs_stream.lock().await;
 
         while let Ok(tx) = prepared_stream.try_recv() {
-            match from_recovered(tx.transaction.to_recovered_transaction(), &self.tx_resp_builder) {
+            match from_recovered(tx.transaction.to_consensus(), &self.tx_resp_builder) {
                 Ok(tx) => pending_txs.push(tx),
                 Err(err) => {
                     error!(target: "rpc",
@@ -651,8 +648,8 @@ trait FullTransactionsFilter<T>: fmt::Debug + Send + Sync + Unpin + 'static {
 impl<T, TxCompat> FullTransactionsFilter<TxCompat::Transaction>
     for FullTransactionsReceiver<T, TxCompat>
 where
-    T: PoolTransaction<Consensus: Into<RecoveredTx>> + 'static,
-    TxCompat: TransactionCompat + 'static,
+    T: PoolTransaction + 'static,
+    TxCompat: TransactionCompat<T::Consensus> + 'static,
 {
     async fn drain(&self) -> FilterChanges<TxCompat::Transaction> {
         Self::drain(self).await
