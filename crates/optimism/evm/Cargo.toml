@@ -64,6 +64,7 @@ std = [
 	"alloy-primitives/std",
 	"revm-primitives/std",
 	"revm/std",
+	"reth-optimism-primitives/std",
 	"reth-ethereum-forks/std",
 	"derive_more/std",
 	"reth-optimism-forks/std"
@@ -73,5 +74,6 @@ optimism = [
 	"reth-execution-types/optimism",
 	"reth-optimism-consensus/optimism",
 	"revm/optimism",
-	"revm-primitives/optimism"
+	"revm-primitives/optimism",
+	"reth-optimism-primitives/op",
 ]

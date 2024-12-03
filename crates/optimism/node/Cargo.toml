@@ -41,7 +41,7 @@ reth-optimism-rpc.workspace = true
 reth-optimism-chainspec.workspace = true
 reth-optimism-consensus.workspace = true
 reth-optimism-forks.workspace = true
-reth-optimism-primitives.workspace = true
+reth-optimism-primitives = { workspace = true, features = ["serde"] }
 
 # revm with required optimism features
 revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
@@ -96,7 +96,8 @@ optimism = [
 	"reth-optimism-consensus/optimism",
 	"reth-db/optimism",
 	"reth-optimism-node/optimism",
-	"reth-node-core/optimism"
+	"reth-node-core/optimism",
+    "reth-optimism-primitives/op",
 ]
 asm-keccak = [
 	"reth-primitives/asm-keccak",

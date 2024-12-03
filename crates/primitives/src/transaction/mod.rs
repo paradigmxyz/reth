@@ -42,6 +42,11 @@ pub use sidecar::BlobTransaction;
 pub use signature::{recover_signer, recover_signer_unchecked};
 pub use tx_type::TxType;
 
+/// Handling transaction signature operations, including signature recovery,
+/// applying chain IDs, and EIP-2 validation.
+pub mod signature;
+pub mod util;
+
 pub(crate) mod access_list;
 mod compat;
 mod error;
@@ -49,12 +54,6 @@ mod meta;
 mod pooled;
 mod sidecar;
 mod tx_type;
-
-/// Handling transaction signature operations, including signature recovery,
-/// applying chain IDs, and EIP-2 validation.
-pub mod signature;
-
-pub(crate) mod util;
 
 #[cfg(any(test, feature = "reth-codec"))]
 pub use tx_type::{
@@ -1178,7 +1177,7 @@ impl TransactionSigned {
     ///
     /// Refer to the docs for [`Self::decode_rlp_legacy_transaction`] for details on the exact
     /// format expected.
-    pub(crate) fn decode_rlp_legacy_transaction_tuple(
+    pub fn decode_rlp_legacy_transaction_tuple(
         data: &mut &[u8],
     ) -> alloy_rlp::Result<(TxLegacy, TxHash, Signature)> {
         // keep this around, so we can use it to calculate the hash
