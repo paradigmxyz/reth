@@ -1,6 +1,6 @@
 use crate::{
     blinded::{BlindedProvider, BlindedProviderFactory, DefaultBlindedProviderFactory},
-    RevealedSparseTrie, SparseStateTrieError, SparseStateTrieResult, SparseTrie, SparseTrieError,
+    RevealedSparseTrie, SparseTrie,
 };
 use alloy_primitives::{
     hex,
@@ -8,6 +8,7 @@ use alloy_primitives::{
     Bytes, B256,
 };
 use alloy_rlp::{Decodable, Encodable};
+use reth_execution_errors::{SparseStateTrieError, SparseStateTrieResult, SparseTrieError};
 use reth_primitives_traits::Account;
 use reth_tracing::tracing::trace;
 use reth_trie_common::{

@@ -1,13 +1,11 @@
-use crate::{
-    blinded::{BlindedProvider, DefaultBlindedProvider},
-    SparseTrieError, SparseTrieResult,
-};
+use crate::blinded::{BlindedProvider, DefaultBlindedProvider};
 use alloy_primitives::{
     hex, keccak256,
     map::{HashMap, HashSet},
     B256,
 };
 use alloy_rlp::Decodable;
+use reth_execution_errors::{SparseTrieError, SparseTrieResult};
 use reth_tracing::tracing::trace;
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
