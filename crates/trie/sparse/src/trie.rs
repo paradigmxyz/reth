@@ -19,12 +19,21 @@ use std::{borrow::Cow, fmt};
 
 /// Inner representation of the sparse trie.
 /// Sparse trie is blind by default until nodes are revealed.
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq)]
 pub enum SparseTrie<P = DefaultBlindedProvider> {
     /// None of the trie nodes are known.
     Blind,
     /// The trie nodes have been revealed.
     Revealed(Box<RevealedSparseTrie<P>>),
+}
+
+impl<P> fmt::Debug for SparseTrie<P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Blind => write!(f, "Blind"),
+            Self::Revealed(revealed) => write!(f, "Revealed({revealed:?})"),
+        }
+    }
 }
 
 impl<P> Default for SparseTrie<P> {
@@ -164,7 +173,7 @@ impl<P> fmt::Debug for RevealedSparseTrie<P> {
             .field("prefix_set", &self.prefix_set)
             .field("updates", &self.updates)
             .field("rlp_buf", &hex::encode(&self.rlp_buf))
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
