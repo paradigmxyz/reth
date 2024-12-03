@@ -5,11 +5,17 @@ pub mod tx_type;
 
 use alloy_primitives::{bytes, Bytes, TxKind, Uint, B256};
 
-use alloy_consensus::{constants::EIP7702_TX_TYPE_ID, SignableTransaction, TxLegacy};
+#[cfg(any(test, feature = "reth-codec"))]
+use alloy_consensus::constants::EIP7702_TX_TYPE_ID;
+use alloy_consensus::{SignableTransaction, TxLegacy};
 use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization};
 use derive_more::{Constructor, Deref, From};
-use op_alloy_consensus::{OpTypedTransaction, DEPOSIT_TX_TYPE_ID};
+use op_alloy_consensus::OpTypedTransaction;
+#[cfg(any(test, feature = "reth-codec"))]
+use op_alloy_consensus::DEPOSIT_TX_TYPE_ID;
+#[cfg(any(test, feature = "reth-codec"))]
 use reth_codecs::Compact;
+#[cfg(any(test, feature = "reth-codec"))]
 use reth_primitives::transaction::{
     COMPACT_EXTENDED_IDENTIFIER_FLAG, COMPACT_IDENTIFIER_EIP1559, COMPACT_IDENTIFIER_EIP2930,
     COMPACT_IDENTIFIER_LEGACY,
@@ -42,6 +48,7 @@ impl Default for OpTransaction {
     }
 }
 
+#[cfg(any(test, feature = "reth-codec"))]
 impl Compact for OpTransaction {
     fn to_compact<B>(&self, out: &mut B) -> usize
     where

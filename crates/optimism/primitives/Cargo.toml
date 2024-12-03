@@ -29,7 +29,7 @@ secp256k1 = { workspace = true, optional = true }
 op-alloy-consensus.workspace = true
 
 # codec
-bytes.workspace = true
+bytes = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 
 # misc
@@ -45,9 +45,10 @@ proptest-arbitrary-interop.workspace = true
 reth-codecs = { workspace = true, features = ["test-utils", "op"] }
 rstest.workspace = true
 arbitrary.workspace = true
+proptest.workspace = true
 
 [features]
-default = ["std", "reth-codec"]
+default = ["std"]
 std = [
 	"reth-primitives-traits/std",
 	"reth-primitives/std",
@@ -56,7 +57,7 @@ std = [
 	"alloy-eips/std",
 	"alloy-primitives/std",
 	"serde?/std",
-	"bytes/std",
+	"bytes?/std",
 	"derive_more/std",
     "revm-primitives/std",
     "secp256k1?/std",
@@ -71,7 +72,8 @@ reth-codec = [
     "reth-primitives/reth-codec",
     "reth-primitives-traits/reth-codec",
     "reth-codecs?/op",
-    "reth-primitives/reth-codec"
+    "reth-primitives/reth-codec",
+    "dep:bytes",
 ]
 serde = [
     "dep:serde",
@@ -79,7 +81,7 @@ serde = [
     "alloy-primitives/serde",
     "alloy-consensus/serde",
     "alloy-eips/serde",
-    "bytes/serde",
+    "bytes?/serde",
     "reth-codecs?/serde",
     "op-alloy-consensus/serde",
     "rand?/serde",
