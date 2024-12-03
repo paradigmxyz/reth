@@ -62,6 +62,7 @@ where
             gas_limit,
             difficulty,
             base_fee,
+            ..
         } = bundle;
         if txs.is_empty() {
             return Err(EthApiError::InvalidParams(
@@ -81,7 +82,7 @@ where
             .map(recover_raw_transaction)
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
-            .map(|tx| tx.into_components())
+            .map(|tx| tx.to_components())
             .collect::<Vec<_>>();
 
         // Validate that the bundle does not contain more than MAX_BLOB_NUMBER_PER_BLOCK blob

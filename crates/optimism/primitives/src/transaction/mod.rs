@@ -1,14 +1,21 @@
 //! Wrapper of [`OpTypedTransaction`], that implements reth database encoding [`Compact`].
 
+pub mod signed;
 pub mod tx_type;
 
 use alloy_primitives::{bytes, Bytes, TxKind, Uint, B256};
 
-use alloy_consensus::{constants::EIP7702_TX_TYPE_ID, TxLegacy};
+#[cfg(any(test, feature = "reth-codec"))]
+use alloy_consensus::constants::EIP7702_TX_TYPE_ID;
+use alloy_consensus::{SignableTransaction, TxLegacy};
 use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization};
-use derive_more::{Deref, From};
-use op_alloy_consensus::{OpTypedTransaction, DEPOSIT_TX_TYPE_ID};
+use derive_more::{Constructor, Deref, From};
+use op_alloy_consensus::OpTypedTransaction;
+#[cfg(any(test, feature = "reth-codec"))]
+use op_alloy_consensus::DEPOSIT_TX_TYPE_ID;
+#[cfg(any(test, feature = "reth-codec"))]
 use reth_codecs::Compact;
+#[cfg(any(test, feature = "reth-codec"))]
 use reth_primitives::transaction::{
     COMPACT_EXTENDED_IDENTIFIER_FLAG, COMPACT_IDENTIFIER_EIP1559, COMPACT_IDENTIFIER_EIP2930,
     COMPACT_IDENTIFIER_LEGACY,
@@ -17,9 +24,23 @@ use reth_primitives_traits::InMemorySize;
 
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, PartialEq, Eq, Deref, Hash, From)]
+#[derive(Debug, Clone, PartialEq, Eq, Deref, Hash, From, Constructor)]
 /// Optimistic transaction.
 pub struct OpTransaction(OpTypedTransaction);
+
+impl OpTransaction {
+    /// This encodes the transaction _without_ the signature, and is only suitable for creating a
+    /// hash intended for signing.
+    pub fn encode_for_signing(&self, out: &mut dyn bytes::BufMut) {
+        match self.deref() {
+            OpTypedTransaction::Legacy(tx) => tx.encode_for_signing(out),
+            OpTypedTransaction::Eip2930(tx) => tx.encode_for_signing(out),
+            OpTypedTransaction::Eip1559(tx) => tx.encode_for_signing(out),
+            OpTypedTransaction::Eip7702(tx) => tx.encode_for_signing(out),
+            OpTypedTransaction::Deposit(_) => {}
+        }
+    }
+}
 
 impl Default for OpTransaction {
     fn default() -> Self {
@@ -27,6 +48,7 @@ impl Default for OpTransaction {
     }
 }
 
+#[cfg(any(test, feature = "reth-codec"))]
 impl Compact for OpTransaction {
     fn to_compact<B>(&self, out: &mut B) -> usize
     where

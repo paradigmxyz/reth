@@ -19,12 +19,21 @@ use std::{borrow::Cow, fmt};
 
 /// Inner representation of the sparse trie.
 /// Sparse trie is blind by default until nodes are revealed.
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq)]
 pub enum SparseTrie<P = DefaultBlindedProvider> {
     /// None of the trie nodes are known.
     Blind,
     /// The trie nodes have been revealed.
     Revealed(Box<RevealedSparseTrie<P>>),
+}
+
+impl<P> fmt::Debug for SparseTrie<P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Blind => write!(f, "Blind"),
+            Self::Revealed(revealed) => write!(f, "Revealed({revealed:?})"),
+        }
+    }
 }
 
 impl<P> Default for SparseTrie<P> {
@@ -172,7 +181,7 @@ impl<P> fmt::Debug for RevealedSparseTrie<P> {
             .field("prefix_set", &self.prefix_set)
             .field("updates", &self.updates)
             .field("rlp_buf", &hex::encode(&self.rlp_buf))
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -783,8 +792,8 @@ impl<P> RevealedSparseTrie<P> {
 
                     // Save a branch node update only if it's not a root node, and we need to
                     // persist updates.
-                    let store_in_db_trie_value = if let (false, Some(updates)) =
-                        (path.is_empty(), self.updates.as_mut())
+                    let store_in_db_trie_value = if let Some(updates) =
+                        self.updates.as_mut().filter(|_| !path.is_empty())
                     {
                         let mut tree_mask_values = tree_mask_values.into_iter().rev();
                         let mut hash_mask_values = hash_mask_values.into_iter().rev();
@@ -849,10 +858,14 @@ where
         fetch_node: &mut impl FnMut(Nibbles) -> Option<Bytes>,
     ) -> SparseTrieResult<()> {
         if self.values.remove(path).is_none() {
+            if let Some(SparseNode::Hash(hash)) = self.nodes.get(path) {
+                // Leaf is present in the trie, but it's blinded.
+                return Err(SparseTrieError::BlindedNode { path: path.clone(), hash: *hash })
+            }
+
             // Leaf is not present in the trie.
             return Ok(())
         }
-
         self.prefix_set.insert(path.clone());
 
         // If the path wasn't present in `values`, we still need to walk the trie and ensure that
@@ -1825,6 +1838,37 @@ mod tests {
         assert!(fetch_called);
         assert_matches!(result, Ok(()));
     }
+
+    #[test]
+    fn sparse_trie_remove_leaf_non_existent() {
+        let leaf = LeafNode::new(
+            Nibbles::default(),
+            alloy_rlp::encode_fixed_size(&U256::from(1)).to_vec(),
+        );
+        let branch = TrieNode::Branch(BranchNode::new(
+            vec![
+                RlpNode::word_rlp(&B256::repeat_byte(1)),
+                RlpNode::from_raw_rlp(&alloy_rlp::encode(leaf.clone())).unwrap(),
+            ],
+            TrieMask::new(0b11),
+        ));
+
+        let mut sparse = RevealedSparseTrie::from_root(branch.clone(), false).unwrap();
+
+        // Reveal a branch node and one of its children
+        //
+        // Branch (Mask = 11)
+        // ├── 0 -> Hash (Path = 0)
+        // └── 1 -> Leaf (Path = 1)
+        sparse.reveal_node(Nibbles::default(), branch).unwrap();
+        sparse.reveal_node(Nibbles::from_nibbles([0x1]), TrieNode::Leaf(leaf)).unwrap();
+
+        // Removing a non-existent leaf should be a noop
+        let sparse_old = sparse.clone();
+        assert_matches!(sparse.remove_leaf(&Nibbles::from_nibbles([0x2])), Ok(()));
+        assert_eq!(sparse, sparse_old);
+    }
+
     #[allow(clippy::type_complexity)]
     #[test]
     fn sparse_trie_fuzz() {

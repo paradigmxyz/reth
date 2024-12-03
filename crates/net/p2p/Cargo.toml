@@ -58,5 +58,6 @@ std = [
 	"alloy-primitives/std",
 	"reth-primitives-traits/std",
 	"alloy-consensus/std",
-	"derive_more/std"
+	"derive_more/std",
+	"reth-network-peers/std"
 ]
