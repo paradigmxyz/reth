@@ -823,8 +823,16 @@ where
 {
     /// Remove leaf node from the trie.
     pub fn remove_leaf(&mut self, path: &Nibbles) -> SparseTrieResult<()> {
+        if self.values.remove(path).is_none() {
+            if let Some(SparseNode::Hash(hash)) = self.nodes.get(path) {
+                // Leaf is present in the trie, but it's blinded.
+                return Err(SparseTrieError::BlindedNode { path: path.clone(), hash: *hash })
+            }
+
+            // Leaf is not present in the trie.
+            return Ok(())
+        }
         self.prefix_set.insert(path.clone());
-        self.values.remove(path);
 
         // If the path wasn't present in `values`, we still need to walk the trie and ensure that
         // there is no node at the path. When a leaf node is a blinded `Hash`, it will have an entry
@@ -1729,6 +1737,36 @@ mod tests {
             sparse.remove_leaf(&Nibbles::from_nibbles([0x0])),
             Err(SparseTrieError::BlindedNode { path, hash }) if path == Nibbles::from_nibbles([0x0]) && hash == B256::repeat_byte(1)
         );
+    }
+
+    #[test]
+    fn sparse_trie_remove_leaf_non_existent() {
+        let leaf = LeafNode::new(
+            Nibbles::default(),
+            alloy_rlp::encode_fixed_size(&U256::from(1)).to_vec(),
+        );
+        let branch = TrieNode::Branch(BranchNode::new(
+            vec![
+                RlpNode::word_rlp(&B256::repeat_byte(1)),
+                RlpNode::from_raw_rlp(&alloy_rlp::encode(leaf.clone())).unwrap(),
+            ],
+            TrieMask::new(0b11),
+        ));
+
+        let mut sparse = RevealedSparseTrie::from_root(branch.clone(), false).unwrap();
+
+        // Reveal a branch node and one of its children
+        //
+        // Branch (Mask = 11)
+        // ├── 0 -> Hash (Path = 0)
+        // └── 1 -> Leaf (Path = 1)
+        sparse.reveal_node(Nibbles::default(), branch).unwrap();
+        sparse.reveal_node(Nibbles::from_nibbles([0x1]), TrieNode::Leaf(leaf)).unwrap();
+
+        // Removing a non-existent leaf should be a noop
+        let sparse_old = sparse.clone();
+        assert_matches!(sparse.remove_leaf(&Nibbles::from_nibbles([0x2])), Ok(()));
+        assert_eq!(sparse, sparse_old);
     }
 
     #[allow(clippy::type_complexity)]
