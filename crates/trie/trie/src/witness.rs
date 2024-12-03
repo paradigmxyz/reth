@@ -203,7 +203,7 @@ struct WitnessBlindedProviderFactory<F> {
 }
 
 impl<F> WitnessBlindedProviderFactory<F> {
-    fn new(provider_factory: F, tx: mpsc::Sender<Bytes>) -> Self {
+    const fn new(provider_factory: F, tx: mpsc::Sender<Bytes>) -> Self {
         Self { provider_factory, tx }
     }
 }
@@ -237,7 +237,7 @@ struct WitnessBlindedProvider<P> {
 }
 
 impl<P> WitnessBlindedProvider<P> {
-    fn new(provider: P, tx: mpsc::Sender<Bytes>) -> Self {
+    const fn new(provider: P, tx: mpsc::Sender<Bytes>) -> Self {
         Self { provider, tx }
     }
 }

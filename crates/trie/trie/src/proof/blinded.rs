@@ -22,7 +22,7 @@ pub struct ProofBlindedProviderFactory<T, H> {
 
 impl<T, H> ProofBlindedProviderFactory<T, H> {
     /// Create new proof-based blinded provider factory.
-    pub fn new(
+    pub const fn new(
         trie_cursor_factory: T,
         hashed_cursor_factory: H,
         prefix_sets: Arc<TriePrefixSetsMut>,
@@ -70,7 +70,7 @@ pub struct ProofBlindedAccountProvider<T, H> {
 
 impl<T, H> ProofBlindedAccountProvider<T, H> {
     /// Create new proof-based blinded account node provider.
-    pub fn new(
+    pub const fn new(
         trie_cursor_factory: T,
         hashed_cursor_factory: H,
         prefix_sets: Arc<TriePrefixSetsMut>,
@@ -113,7 +113,7 @@ pub struct ProofBlindedStorageProvider<T, H> {
 
 impl<T, H> ProofBlindedStorageProvider<T, H> {
     /// Create new proof-based blinded storage node provider.
-    pub fn new(
+    pub const fn new(
         trie_cursor_factory: T,
         hashed_cursor_factory: H,
         prefix_sets: Arc<TriePrefixSetsMut>,
