@@ -98,7 +98,7 @@ impl<EvmConfig, Txs> OpPayloadBuilder<EvmConfig, Txs> {
 }
 impl<EvmConfig, Txs> OpPayloadBuilder<EvmConfig, Txs>
 where
-    EvmConfig: ConfigureEvm<Header = Header>,
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
     Txs: OpPayloadTransactions,
 {
     /// Constructs an Optimism payload from the transactions sent via the
@@ -155,7 +155,7 @@ where
 
 impl<EvmConfig, Txs> OpPayloadBuilder<EvmConfig, Txs>
 where
-    EvmConfig: ConfigureEvm<Header = Header>,
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
 {
     /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the targeted payload
     /// (that has the `parent` as its parent).
@@ -217,7 +217,7 @@ impl<Pool, Client, EvmConfig, Txs> PayloadBuilder<Pool, Client> for OpPayloadBui
 where
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
-    EvmConfig: ConfigureEvm<Header = Header>,
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
     Txs: OpPayloadTransactions,
 {
     type Attributes = OpPayloadBuilderAttributes;
@@ -294,7 +294,7 @@ where
         ctx: &OpPayloadBuilderCtx<EvmConfig>,
     ) -> Result<BuildOutcomeKind<ExecutedPayload>, PayloadBuilderError>
     where
-        EvmConfig: ConfigureEvm<Header = Header>,
+        EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
         DB: Database<Error = ProviderError>,
     {
         let Self { pool, best } = self;
@@ -339,7 +339,7 @@ where
         ctx: OpPayloadBuilderCtx<EvmConfig>,
     ) -> Result<BuildOutcomeKind<OpBuiltPayload>, PayloadBuilderError>
     where
-        EvmConfig: ConfigureEvm<Header = Header>,
+        EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
         DB: Database<Error = ProviderError> + AsRef<P>,
         P: StateRootProvider + HashedPostStateProvider,
     {
@@ -465,7 +465,7 @@ where
         ctx: &OpPayloadBuilderCtx<EvmConfig>,
     ) -> Result<ExecutionWitness, PayloadBuilderError>
     where
-        EvmConfig: ConfigureEvm<Header = Header>,
+        EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
         DB: Database<Error = ProviderError> + AsRef<P>,
         P: StateProofProvider,
     {
@@ -700,7 +700,7 @@ impl<EvmConfig> OpPayloadBuilderCtx<EvmConfig> {
 
 impl<EvmConfig> OpPayloadBuilderCtx<EvmConfig>
 where
-    EvmConfig: ConfigureEvm<Header = Header>,
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
 {
     /// apply eip-4788 pre block contract call
     pub fn apply_pre_beacon_root_contract_call<DB>(

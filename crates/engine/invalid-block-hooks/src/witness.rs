@@ -8,8 +8,8 @@ use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{
     state_change::post_block_balance_increments, system_calls::SystemCaller, ConfigureEvm,
 };
-use reth_primitives::{NodePrimitives, SealedBlockWithSenders, SealedHeader, TransactionSigned};
-use reth_primitives_traits::{HeaderTy, SignedTransaction};
+use reth_primitives::{NodePrimitives, SealedBlockWithSenders, SealedHeader};
+use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase, db::states::bundle_state::BundleRetention,
@@ -63,8 +63,8 @@ where
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) -> eyre::Result<()>
     where
-        N: NodePrimitives<SignedTx = TransactionSigned>,
-        EvmConfig: ConfigureEvm<Header = N::BlockHeader>,
+        N: NodePrimitives,
+        EvmConfig: ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>,
     {
         // TODO(alexey): unify with `DebugApi::debug_execution_witness`
 
@@ -298,13 +298,13 @@ where
 
 impl<P, EvmConfig, N> InvalidBlockHook<N> for InvalidBlockWitnessHook<P, EvmConfig>
 where
-    N: NodePrimitives<SignedTx = TransactionSigned>,
+    N: NodePrimitives,
     P: StateProviderFactory
         + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
         + Send
         + Sync
         + 'static,
-    EvmConfig: ConfigureEvm<Header = HeaderTy<N>>,
+    EvmConfig: ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>,
 {
     fn on_invalid_block(
         &self,

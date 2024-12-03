@@ -56,7 +56,7 @@ pub trait LoadPendingBlock:
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                       + StateProviderFactory,
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
-        Evm: ConfigureEvm<Header = Header>,
+        Evm: ConfigureEvm<Header = Header, Transaction = ProviderTx<Self::Provider>>,
     >
 {
     /// Returns a handle to the pending block.
