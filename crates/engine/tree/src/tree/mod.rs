@@ -378,7 +378,7 @@ impl<N: NodePrimitives> TreeState<N> {
         }
     }
 
-    /// Determines if the second block is a strict descendant of the first block.
+    /// Determines if the second block is a direct descendant of the first block.
     ///
     /// If the two blocks are the same, this returns `false`.
     fn is_descendant(&self, first: BlockNumHash, second: &Header) -> bool {
