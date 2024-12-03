@@ -2301,14 +2301,36 @@ where
             match state_root_handle.wait_for_result() {
                 Ok(state_root_task_result) => {
                     info!(target: "engine::tree", block=?sealed_block.num_hash(), state_root_task_result=?state_root_task_result.0,  regular_state_root_result = ?result.0);
-                    let diff = compare_trie_updates(&state_root_task_result.1, &result.1);
+                    let task_trie_updates = &state_root_task_result.1;
+                    let regular_trie_updates = &result.1;
+                    let diff = compare_trie_updates(task_trie_updates, regular_trie_updates);
                     if diff.has_differences() {
-                        info!(target: "engine::tree",
-                              block=?sealed_block.num_hash(),
-                              storage_tries_only_in_first= ?diff.storage_tries_only_in_first,
-                              storage_tries_only_in_second= ?diff.storage_tries_only_in_second,
-                              storage_tries_with_differences= ?diff.storage_tries_with_differences,
-                              "Found differences in TrieUpdates");
+                        for path in diff.account_nodes_with_different_values {
+                            let task_entry = task_trie_updates.account_nodes.get(&path);
+                            let regular_entry = regular_trie_updates.account_nodes.get(&path);
+                            if task_entry != regular_entry {
+                                debug!(target: "engine::tree", ?path, ?task_entry, ?regular_entry, "Difference in account node updates");
+                            }
+                        }
+                        for address in diff.storage_tries_with_differences.keys() {
+                            let task = task_trie_updates.storage_tries.get(address);
+                            let regular = regular_trie_updates.storage_tries.get(address);
+                            for path in task
+                                .map_or_else(HashSet::new, |tries| {
+                                    tries.storage_nodes.keys().collect()
+                                })
+                                .union(&regular.map_or_else(HashSet::new, |tries| {
+                                    tries.storage_nodes.keys().collect()
+                                }))
+                            {
+                                let task_entry = task.map(|tries| tries.storage_nodes.get(*path));
+                                let regular_entry =
+                                    regular.map(|tries| tries.storage_nodes.get(*path));
+                                if task_entry != regular_entry {
+                                    debug!(target: "engine::tree", ?address, ?path, ?task_entry, ?regular_entry, "Difference in storage trie updates");
+                                }
+                            }
+                        }
                     } else {
                         debug!(target: "engine::tree", block=?sealed_block.num_hash(), "TrieUpdates match exactly");
                     }
