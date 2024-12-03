@@ -79,50 +79,49 @@ pub trait LoadPendingBlock:
                     .receipts_by_block(pending.hash().into())
                     .map_err(Self::Error::from_eth_err)?
                 {
-                    Some((pending, receipts))
-                } else {
-                    None
+                    // Note: for the PENDING block we assume it is past the known merge block and
+                    // thus this will not fail when looking up the total
+                    // difficulty value for the blockenv.
+                    let (cfg, block_env) = self
+                        .provider()
+                        .env_with_header(block.header(), self.evm_config().clone())
+                        .map_err(Self::Error::from_eth_err)?;
+
+                    return Ok(PendingBlockEnv::new(
+                        cfg,
+                        block_env,
+                        PendingBlockEnvOrigin::ActualPending(block, receipts),
+                    ));
                 }
-            } else {
-                None
             }
         };
 
-        let (origin, cfg, block_env) = if let Some((block, receipts)) = maybe_actual_pending {
-            // Note: for the PENDING block we assume it is past the known merge block and thus this
-            // will not fail when looking up the total difficulty value for the
-            // blockenv.
-            let (cfg, block_env) = self
-                .provider()
-                .env_with_header(block.header(), self.evm_config().clone())
-                .map_err(Self::Error::from_eth_err)?;
+        // no pending block from the CL yet, so we use the latest block and modify the env
+        // values that we can
+        let latest = self
+            .provider()
+            .latest_header()
+            .map_err(Self::Error::from_eth_err)?
+            .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
 
-            (PendingBlockEnvOrigin::ActualPending(block, receipts), cfg, block_env)
-        } else {
-            // no pending block from the CL yet, so we use the latest block and modify the env
-            // values that we can
-            let latest = self
-                .provider()
-                .latest_header()
-                .map_err(Self::Error::from_eth_err)?
-                .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
+        let (cfg, block_env) = self
+            .evm_config()
+            .next_cfg_and_block_env(
+                &latest,
+                NextBlockEnvAttributes {
+                    timestamp: latest.timestamp() + 12,
+                    suggested_fee_recipient: latest.beneficiary(),
+                    prev_randao: B256::random(),
+                },
+            )
+            .map_err(RethError::other)
+            .map_err(Self::Error::from_eth_err)?;
 
-            let (cfg_env, block_env) = self
-                .evm_config()
-                .next_cfg_and_block_env(
-                    &latest,
-                    NextBlockEnvAttributes {
-                        timestamp: latest.timestamp() + 12,
-                        suggested_fee_recipient: latest.beneficiary(),
-                        prev_randao: B256::random(),
-                    },
-                )
-                .map_err(RethError::other)
-                .map_err(Self::Error::from_eth_err)?;
-            (PendingBlockEnvOrigin::DerivedFromLatest(latest.hash()), cfg_env, block_env)
-        };
-
-        Ok(PendingBlockEnv::new(cfg, block_env, origin))
+        Ok(PendingBlockEnv::new(
+            cfg,
+            block_env,
+            PendingBlockEnvOrigin::DerivedFromLatest(latest.hash()),
+        ))
     }
 
     /// Returns the locally built pending block
