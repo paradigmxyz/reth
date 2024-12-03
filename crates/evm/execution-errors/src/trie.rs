@@ -65,7 +65,7 @@ impl From<StateProofError> for ProviderError {
 /// Result type with [`SparseStateTrieError`] as error.
 pub type SparseStateTrieResult<Ok> = Result<Ok, SparseStateTrieError>;
 
-/// Error encountered in [`crate::SparseStateTrie`].
+/// Error encountered in `SparseStateTrie`.
 #[derive(Error, Debug)]
 pub enum SparseStateTrieError {
     /// Encountered invalid root node.
@@ -87,7 +87,7 @@ pub enum SparseStateTrieError {
 /// Result type with [`SparseTrieError`] as error.
 pub type SparseTrieResult<Ok> = Result<Ok, SparseTrieError>;
 
-/// Error encountered in [`crate::SparseTrie`].
+/// Error encountered in `SparseTrie`.
 #[derive(Error, Debug)]
 pub enum SparseTrieError {
     /// Sparse trie is still blind. Thrown on attempt to update it.
