@@ -210,8 +210,8 @@ use reth_provider::{
     EvmEnvProvider, FullRpcProvider, HeaderProvider, ReceiptProvider, StateProviderFactory,
 };
 use reth_rpc::{
-    AdminApi, DebugApi, EngineEthApi, EthBundle, NetApi, OtterscanApi, RPCApi, RethApi, TraceApi,
-    TxPoolApi, ValidationApi, ValidationApiConfig, Web3Api,
+    AdminApi, DebugApi, EngineEthApi, EthBundle, MinerApi, NetApi, OtterscanApi, RPCApi, RethApi,
+    TraceApi, TxPoolApi, ValidationApi, ValidationApiConfig, Web3Api,
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_api::{
@@ -1499,6 +1499,7 @@ where
                         )
                         .into_rpc()
                         .into(),
+                        RethRpcModule::Miner => MinerApi::default().into_rpc().into(),
                     })
                     .clone()
             })
