@@ -16,7 +16,7 @@ use reth_eth_wire::{
 use reth_ethereum_forks::{ForkFilter, Head};
 use reth_network_peers::{mainnet_nodes, pk2id, sepolia_nodes, PeerId, TrustedPeer};
 use reth_network_types::{PeersConfig, SessionsConfig};
-use reth_storage_api::{noop::NoopBlockReader, BlockNumReader, BlockReader, HeaderProvider};
+use reth_storage_api::{noop::NoopProvider, BlockNumReader, BlockReader, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use secp256k1::SECP256K1;
 use std::{collections::HashSet, net::SocketAddr, sync::Arc};
@@ -498,11 +498,11 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     pub fn build_with_noop_provider<ChainSpec>(
         self,
         chain_spec: Arc<ChainSpec>,
-    ) -> NetworkConfig<NoopBlockReader<ChainSpec>, N>
+    ) -> NetworkConfig<NoopProvider<ChainSpec>, N>
     where
         ChainSpec: EthChainSpec + Hardforks + 'static,
     {
-        self.build(NoopBlockReader::new(chain_spec))
+        self.build(NoopProvider::eth(chain_spec))
     }
 
     /// Sets the NAT resolver for external IP.

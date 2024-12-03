@@ -17,6 +17,9 @@ use reth_trie_common::{
     proof::ProofRetainer, AccountProof, MultiProof, StorageMultiProof, TrieAccount,
 };
 
+mod blinded;
+pub use blinded::*;
+
 /// A struct for generating merkle proofs.
 ///
 /// Proof generator adds the target address and slots to the prefix set, enables the proof retainer

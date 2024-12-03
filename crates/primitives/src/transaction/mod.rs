@@ -1130,23 +1130,6 @@ impl TransactionSigned {
         Some(RecoveredTx { signed_transaction: self, signer })
     }
 
-    /// Tries to recover signer and return [`RecoveredTx`] by cloning the type.
-    pub fn try_ecrecovered(&self) -> Option<RecoveredTx> {
-        let signer = self.recover_signer()?;
-        Some(RecoveredTx { signed_transaction: self.clone(), signer })
-    }
-
-    /// Tries to recover signer and return [`RecoveredTx`].
-    ///
-    /// Returns `Err(Self)` if the transaction's signature is invalid, see also
-    /// [`Self::recover_signer`].
-    pub fn try_into_ecrecovered(self) -> Result<RecoveredTx, Self> {
-        match self.recover_signer() {
-            None => Err(self),
-            Some(signer) => Ok(RecoveredTx { signed_transaction: self, signer }),
-        }
-    }
-
     /// Tries to recover signer and return [`RecoveredTx`]. _without ensuring that
     /// the signature has a low `s` value_ (EIP-2).
     ///
@@ -1641,6 +1624,11 @@ impl<T> RecoveredTx<T> {
         self.signer
     }
 
+    /// Reference to the signer of transaction recovered from signature
+    pub const fn signer_ref(&self) -> &Address {
+        &self.signer
+    }
+
     /// Returns a reference to [`TransactionSigned`]
     pub const fn as_signed(&self) -> &T {
         &self.signed_transaction
@@ -1707,6 +1695,23 @@ impl<T: Encodable2718> Encodable2718 for RecoveredTx<T> {
 
 /// Extension trait for [`SignedTransaction`] to convert it into [`RecoveredTx`].
 pub trait SignedTransactionIntoRecoveredExt: SignedTransaction {
+    /// Tries to recover signer and return [`RecoveredTx`] by cloning the type.
+    fn try_ecrecovered(&self) -> Option<RecoveredTx<Self>> {
+        let signer = self.recover_signer()?;
+        Some(RecoveredTx { signed_transaction: self.clone(), signer })
+    }
+
+    /// Tries to recover signer and return [`RecoveredTx`].
+    ///
+    /// Returns `Err(Self)` if the transaction's signature is invalid, see also
+    /// [`SignedTransaction::recover_signer`].
+    fn try_into_ecrecovered(self) -> Result<RecoveredTx<Self>, Self> {
+        match self.recover_signer() {
+            None => Err(self),
+            Some(signer) => Ok(RecoveredTx { signed_transaction: self, signer }),
+        }
+    }
+
     /// Consumes the type, recover signer and return [`RecoveredTx`] _without
     /// ensuring that the signature has a low `s` value_ (EIP-2).
     ///

@@ -7600,12 +7600,12 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
- "derive_more 1.0.0",
  "nybbles",
  "reth-consensus",
  "reth-prune-types",
  "reth-storage-errors",
  "revm-primitives",
+ "thiserror 2.0.3",
 ]
 
 [[package]]
@@ -7997,7 +7997,6 @@ dependencies = [
 name = "reth-node-api"
 version = "1.1.2"
 dependencies = [
- "alloy-consensus",
  "alloy-rpc-types-engine",
  "eyre",
  "reth-beacon-consensus",
@@ -9427,6 +9426,7 @@ dependencies = [
  "reth-stages-types",
  "reth-storage-errors",
  "reth-trie-common",
+ "reth-trie-sparse",
  "revm",
  "serde_json",
  "tracing",
@@ -9533,6 +9533,7 @@ dependencies = [
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.8.5",
+ "reth-execution-errors",
  "reth-primitives-traits",
  "reth-testing-utils",
  "reth-tracing",

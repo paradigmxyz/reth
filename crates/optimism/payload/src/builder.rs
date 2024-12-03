@@ -19,7 +19,8 @@ use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_payload_util::PayloadTransactions;
 use reth_primitives::{
-    proofs, Block, BlockBody, BlockExt, Receipt, SealedHeader, TransactionSigned, TxType,
+    proofs, transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody, BlockExt, Receipt,
+    SealedHeader, TransactionSigned, TxType,
 };
 use reth_provider::{
     HashedPostStateProvider, ProviderError, StateProofProvider, StateProviderFactory,
@@ -27,7 +28,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{
-    noop::NoopTransactionPool, BestTransactionsAttributes, TransactionPool,
+    noop::NoopTransactionPool, BestTransactionsAttributes, PoolTransaction, TransactionPool,
 };
 use revm::{
     db::{states::bundle_state::BundleRetention, State},
@@ -114,7 +115,7 @@ where
     ) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError>
     where
         Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
-        Pool: TransactionPool,
+        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     {
         let (initialized_cfg, initialized_block_env) = self
             .cfg_and_block_env(&args.config.attributes, &args.config.parent_header)
@@ -215,7 +216,7 @@ where
 impl<Pool, Client, EvmConfig, Txs> PayloadBuilder<Pool, Client> for OpPayloadBuilder<EvmConfig, Txs>
 where
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
-    Pool: TransactionPool,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     EvmConfig: ConfigureEvm<Header = Header>,
     Txs: OpPayloadTransactions,
 {
@@ -283,7 +284,7 @@ pub struct OpBuilder<Pool, Txs> {
 
 impl<Pool, Txs> OpBuilder<Pool, Txs>
 where
-    Pool: TransactionPool,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     Txs: OpPayloadTransactions,
 {
     /// Executes the payload and returns the outcome.
@@ -480,19 +481,23 @@ where
 pub trait OpPayloadTransactions: Clone + Send + Sync + Unpin + 'static {
     /// Returns an iterator that yields the transaction in the order they should get included in the
     /// new payload.
-    fn best_transactions<Pool: TransactionPool>(
+    fn best_transactions<
+        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
+    >(
         &self,
         pool: Pool,
         attr: BestTransactionsAttributes,
-    ) -> impl PayloadTransactions;
+    ) -> impl PayloadTransactions<Transaction = TransactionSigned>;
 }
 
 impl OpPayloadTransactions for () {
-    fn best_transactions<Pool: TransactionPool>(
+    fn best_transactions<
+        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
+    >(
         &self,
         pool: Pool,
         attr: BestTransactionsAttributes,
-    ) -> impl PayloadTransactions {
+    ) -> impl PayloadTransactions<Transaction = TransactionSigned> {
         BestPayloadTransactions::new(pool.best_transactions_with_attributes(attr))
     }
 }
@@ -831,11 +836,10 @@ where
         &self,
         info: &mut ExecutionInfo,
         db: &mut State<DB>,
-        mut best_txs: impl PayloadTransactions,
+        mut best_txs: impl PayloadTransactions<Transaction = TransactionSigned>,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
         DB: Database<Error = ProviderError>,
-        Pool: TransactionPool,
     {
         let block_gas_limit = self.block_gas_limit();
         let base_fee = self.base_fee();

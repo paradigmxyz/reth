@@ -31,12 +31,13 @@ use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_primitives::{
     proofs::{self},
     Block, BlockBody, BlockExt, EthereumHardforks, InvalidTransactionError, Receipt,
+    TransactionSigned,
 };
 use reth_provider::{ChainSpecProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{
     error::InvalidPoolTransactionError, noop::NoopTransactionPool, BestTransactions,
-    BestTransactionsAttributes, TransactionPool, ValidPoolTransaction,
+    BestTransactionsAttributes, PoolTransaction, TransactionPool, ValidPoolTransaction,
 };
 use revm::{
     db::{states::bundle_state::BundleRetention, State},
@@ -92,7 +93,7 @@ impl<EvmConfig, Pool, Client> PayloadBuilder<Pool, Client> for EthereumPayloadBu
 where
     EvmConfig: ConfigureEvm<Header = Header>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
-    Pool: TransactionPool,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
 {
     type Attributes = EthPayloadBuilderAttributes;
     type BuiltPayload = EthBuiltPayload;
@@ -156,7 +157,7 @@ pub fn default_ethereum_payload<EvmConfig, Pool, Client, F>(
 where
     EvmConfig: ConfigureEvm<Header = Header>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
-    Pool: TransactionPool,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
 {
     let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
@@ -243,7 +244,7 @@ where
         }
 
         // convert tx to a signed transaction
-        let tx = pool_tx.to_recovered_transaction();
+        let tx = pool_tx.to_consensus();
 
         // There's only limited amount of blob space available per block, so we need to check if
         // the EIP-4844 can still fit in the block

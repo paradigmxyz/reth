@@ -282,6 +282,11 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.transaction.sender()
     }
 
+    /// Returns a reference to the address of the sender
+    pub fn sender_ref(&self) -> &Address {
+        self.transaction.sender_ref()
+    }
+
     /// Returns the recipient of the transaction if it is not a CREATE transaction.
     pub fn to(&self) -> Option<Address> {
         self.transaction.to()
@@ -378,7 +383,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     /// Converts to this type into the consensus transaction of the pooled transaction.
     ///
     /// Note: this takes `&self` since indented usage is via `Arc<Self>`.
-    pub fn to_consensus(&self) -> T::Consensus {
+    pub fn to_consensus(&self) -> RecoveredTx<T::Consensus> {
         self.transaction.clone_into_consensus()
     }
 
@@ -432,15 +437,6 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         }
 
         false
-    }
-}
-
-impl<T: PoolTransaction<Consensus: Into<RecoveredTx>>> ValidPoolTransaction<T> {
-    /// Converts to this type into a [`RecoveredTx`].
-    ///
-    /// Note: this takes `&self` since indented usage is via `Arc<Self>`.
-    pub fn to_recovered_transaction(&self) -> RecoveredTx {
-        self.to_consensus().into()
     }
 }
 
