@@ -96,6 +96,7 @@ optimism = [
     "reth-db/optimism",
     "reth-db-api/optimism",
     "revm/optimism",
+    "reth-optimism-primitives/op",
 ]
 serde = [
     "dashmap/serde",

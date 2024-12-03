@@ -20,45 +20,60 @@ reth-codecs = { workspace = true, optional = true, features = ["op"] }
 # ethereum
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
+alloy-rlp.workspace = true
 alloy-eips.workspace = true
+revm-primitives.workspace = true
+secp256k1 = { workspace = true, optional = true }
 
 # op
 op-alloy-consensus.workspace = true
 
 # codec
-bytes.workspace = true
+bytes = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 
 # misc
-derive_more.workspace = true
+derive_more = { workspace = true, features = ["deref", "from", "into", "constructor"] }
+rand = { workspace = true, optional = true }
 
 # test
 arbitrary = { workspace = true, features = ["derive"], optional = true }
+proptest = { workspace = true, optional = true }
 
 [dev-dependencies]
+proptest-arbitrary-interop.workspace = true
 reth-codecs = { workspace = true, features = ["test-utils", "op"] }
 rstest.workspace = true
 arbitrary.workspace = true
+proptest.workspace = true
 
 [features]
-default = ["std", "reth-codec"]
+default = ["std"]
 std = [
 	"reth-primitives-traits/std",
 	"reth-primitives/std",
-	"reth-codecs/std",
+	"reth-codecs?/std",
 	"alloy-consensus/std",
 	"alloy-eips/std",
 	"alloy-primitives/std",
-	"serde/std",
-	"bytes/std",
-	"derive_more/std"
+	"serde?/std",
+	"bytes?/std",
+	"derive_more/std",
+    "revm-primitives/std",
+    "secp256k1?/std",
+    "alloy-rlp/std",
 ]
 reth-codec = [
     "dep:reth-codecs",
+    "std",
+    "rand",
+    "dep:proptest",
+    "dep:arbitrary",
     "reth-primitives/reth-codec",
     "reth-primitives-traits/reth-codec",
     "reth-codecs?/op",
-    "reth-primitives/reth-codec"
+    "reth-primitives/reth-codec",
+    "dep:bytes",
 ]
 serde = [
     "dep:serde",
@@ -66,12 +81,16 @@ serde = [
     "alloy-primitives/serde",
     "alloy-consensus/serde",
     "alloy-eips/serde",
-    "bytes/serde",
+    "bytes?/serde",
     "reth-codecs?/serde",
     "op-alloy-consensus/serde",
+    "rand?/serde",
+    "revm-primitives/serde",
+    "secp256k1?/serde",
 ]
 arbitrary = [
     "dep:arbitrary",
+    "dep:secp256k1",
     "reth-primitives-traits/arbitrary",
     "reth-primitives/arbitrary",
     "reth-codecs?/arbitrary",
@@ -79,4 +98,9 @@ arbitrary = [
     "alloy-consensus/arbitrary",
     "alloy-eips/arbitrary",
     "alloy-primitives/arbitrary",
+    "revm-primitives/arbitrary",
+    "rand",
+]
+op = [
+    "revm-primitives/optimism",
 ]
