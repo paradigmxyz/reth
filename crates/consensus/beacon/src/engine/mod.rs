@@ -21,7 +21,7 @@ use reth_network_p2p::{
     sync::{NetworkSyncUpdater, SyncState},
     EthBlockClient,
 };
-use reth_node_types::{Block, BlockTy, HeaderTy, NodeTypesWithEngine};
+use reth_node_types::{Block, BlockTy, HeaderTy, BodyTy, NodeTypesWithEngine};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
@@ -464,7 +464,7 @@ where
     fn on_head_already_canonical(
         &self,
         head: &BlockNumHash,
-        header: &SealedHeader,
+        header: &SealedHeader<HeaderTy<N>>,
         attrs: &mut Option<<N::Engine as PayloadTypes>::PayloadAttributes>,
     ) -> bool {
         // On Optimism, the proposers are allowed to reorg their own chain at will.
@@ -901,7 +901,7 @@ where
     ///
     /// This also updates the tracked safe and finalized blocks, and should be called before
     /// returning a VALID forkchoice update response
-    fn update_canon_chain(&self, head: SealedHeader, update: &ForkchoiceState) -> RethResult<()> {
+    fn update_canon_chain(&self, head: SealedHeader<HeaderTy<N>>, update: &ForkchoiceState) -> RethResult<()> {
         self.update_head(head)?;
         self.update_finalized_block(update.finalized_block_hash)?;
         self.update_safe_block(update.safe_block_hash)?;
@@ -915,7 +915,7 @@ where
     ///
     /// This should be called before returning a VALID forkchoice update response
     #[inline]
-    fn update_head(&self, head: SealedHeader) -> RethResult<()> {
+    fn update_head(&self, head: SealedHeader<HeaderTy<N>>) -> RethResult<()> {
         let mut head_block = Head {
             number: head.number,
             hash: head.hash(),
@@ -1092,7 +1092,7 @@ where
         &mut self,
         payload: ExecutionPayload,
         sidecar: ExecutionPayloadSidecar,
-    ) -> Result<Either<PayloadStatus, SealedBlock>, BeaconOnNewPayloadError> {
+    ) -> Result<Either<PayloadStatus, SealedBlock<HeaderTy<N>, BodyTy<N>>>, BeaconOnNewPayloadError> {
         self.metrics.new_payload_messages.increment(1);
 
         // Ensures that the given payload does not violate any consensus rules that concern the
@@ -1225,7 +1225,7 @@ where
     #[instrument(level = "trace", skip_all, target = "consensus::engine", ret)]
     fn try_buffer_payload(
         &mut self,
-        block: SealedBlock,
+        block: SealedBlock<HeaderTy<N>, BodyTy<N>>,
     ) -> Result<PayloadStatus, InsertBlockError> {
         self.blockchain.buffer_block_without_senders(block)?;
         Ok(PayloadStatus::from_status(PayloadStatusEnum::Syncing))
@@ -1237,7 +1237,7 @@ where
     #[instrument(level = "trace", skip_all, target = "consensus::engine", ret)]
     fn try_insert_new_payload(
         &mut self,
-        block: SealedBlock,
+        block: SealedBlock<HeaderTy<N>, BodyTy<N>>,
     ) -> Result<PayloadStatus, InsertBlockError> {
         debug_assert!(self.sync.is_pipeline_idle(), "pipeline must be idle");
 
