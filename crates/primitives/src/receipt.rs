@@ -105,7 +105,24 @@ impl Receipt {
         let logs = Decodable::decode(buf)?;
 
         Ok(ReceiptWithBloom {
-            receipt: Self { tx_type, success, cumulative_gas_used, logs },
+            receipt: Self {
+                tx_type,
+                success,
+                cumulative_gas_used,
+                logs,
+                #[cfg(feature = "optimism")]
+                deposit_nonce: if tx_type == TxType::Deposit {
+                    Some(Decodable::decode(buf)?)
+                } else {
+                    None
+                },
+                #[cfg(feature = "optimism")]
+                deposit_receipt_version: if tx_type == TxType::Deposit {
+                    Some(Decodable::decode(buf)?)
+                } else {
+                    None
+                },
+            },
             logs_bloom,
         })
     }
@@ -472,6 +489,7 @@ impl Encodable for ReceiptWithBloomEncoder<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_eips::eip2718::Encodable2718;
     use alloy_primitives::{address, b256, bytes, hex_literal::hex, Bytes};
     use reth_codecs::Compact;
 
