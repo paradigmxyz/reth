@@ -1005,51 +1005,9 @@ where
             let _ = response.send(Ok(resp));
         }
     }
-}
-
-impl<Pool> TransactionsManager<Pool>
-where
-    Pool: TransactionPool + 'static,
-    Pool::Transaction:
-        PoolTransaction<Consensus = TransactionSigned, Pooled: Into<PooledTransactionsElement>>,
-{
-    /// Handles dedicated transaction events related to the `eth` protocol.
-    fn on_network_tx_event(&mut self, event: NetworkTransactionEvent) {
-        match event {
-            NetworkTransactionEvent::IncomingTransactions { peer_id, msg } => {
-                // ensure we didn't receive any blob transactions as these are disallowed to be
-                // broadcasted in full
-
-                let has_blob_txs = msg.has_eip4844();
-
-                let non_blob_txs = msg
-                    .0
-                    .into_iter()
-                    .map(PooledTransactionsElement::try_from_broadcast)
-                    .filter_map(Result::ok)
-                    .collect();
-
-                self.import_transactions(peer_id, non_blob_txs, TransactionSource::Broadcast);
-
-                if has_blob_txs {
-                    debug!(target: "net::tx", ?peer_id, "received bad full blob transaction broadcast");
-                    self.report_peer_bad_transactions(peer_id);
-                }
-            }
-            NetworkTransactionEvent::IncomingPooledTransactionHashes { peer_id, msg } => {
-                self.on_new_pooled_transaction_hashes(peer_id, msg)
-            }
-            NetworkTransactionEvent::GetPooledTransactions { peer_id, request, response } => {
-                self.on_get_pooled_transactions(peer_id, request, response)
-            }
-            NetworkTransactionEvent::GetTransactionsHandle(response) => {
-                let _ = response.send(Some(self.handle()));
-            }
-        }
-    }
 
     /// Handles a command received from a detached [`TransactionsHandle`]
-    fn on_command(&mut self, cmd: TransactionsCommand) {
+    fn on_command(&mut self, cmd: TransactionsCommand<N>) {
         match cmd {
             TransactionsCommand::PropagateHash(hash) => {
                 self.on_new_pending_transactions(vec![hash])
@@ -1089,7 +1047,7 @@ where
     }
 
     /// Handles a received event related to common network events.
-    fn on_network_event(&mut self, event_result: NetworkEvent) {
+    fn on_network_event(&mut self, event_result: NetworkEvent<PeerRequest<N>>) {
         match event_result {
             NetworkEvent::SessionClosed { peer_id, .. } => {
                 // remove the peer
@@ -1139,6 +1097,48 @@ where
                 self.network.send_transactions_hashes(peer_id, msg);
             }
             _ => {}
+        }
+    }
+}
+
+impl<Pool> TransactionsManager<Pool>
+where
+    Pool: TransactionPool + 'static,
+    Pool::Transaction:
+        PoolTransaction<Consensus = TransactionSigned, Pooled: Into<PooledTransactionsElement>>,
+{
+    /// Handles dedicated transaction events related to the `eth` protocol.
+    fn on_network_tx_event(&mut self, event: NetworkTransactionEvent) {
+        match event {
+            NetworkTransactionEvent::IncomingTransactions { peer_id, msg } => {
+                // ensure we didn't receive any blob transactions as these are disallowed to be
+                // broadcasted in full
+
+                let has_blob_txs = msg.has_eip4844();
+
+                let non_blob_txs = msg
+                    .0
+                    .into_iter()
+                    .map(PooledTransactionsElement::try_from_broadcast)
+                    .filter_map(Result::ok)
+                    .collect();
+
+                self.import_transactions(peer_id, non_blob_txs, TransactionSource::Broadcast);
+
+                if has_blob_txs {
+                    debug!(target: "net::tx", ?peer_id, "received bad full blob transaction broadcast");
+                    self.report_peer_bad_transactions(peer_id);
+                }
+            }
+            NetworkTransactionEvent::IncomingPooledTransactionHashes { peer_id, msg } => {
+                self.on_new_pooled_transaction_hashes(peer_id, msg)
+            }
+            NetworkTransactionEvent::GetPooledTransactions { peer_id, request, response } => {
+                self.on_get_pooled_transactions(peer_id, request, response)
+            }
+            NetworkTransactionEvent::GetTransactionsHandle(response) => {
+                let _ = response.send(Some(self.handle()));
+            }
         }
     }
 
