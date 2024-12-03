@@ -1,8 +1,12 @@
 //! Helper function for calculating Merkle proofs and hashes.
 
 use crate::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef};
-use alloy_primitives::B256;
-use alloy_trie::root::ordered_trie_root_with_encoder;
+use crate::receipt::ReceiptEncoding;
+use alloc::{borrow::Borrow, vec::Vec};
+use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH};
+use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawal};
+use alloy_primitives::{keccak256, B256};
+use alloy_trie::root::{ordered_trie_root, ordered_trie_root_with_encoder};
 
 /// Calculate a transaction root.
 ///
@@ -19,7 +23,7 @@ pub use alloy_consensus::proofs::calculate_withdrawals_root;
 pub use alloy_consensus::proofs::calculate_ommers_root;
 
 /// Calculates the receipt root for a header.
-pub fn calculate_receipt_root(receipts: &[ReceiptWithBloom]) -> B256 {
+pub fn calculate_receipt_root(receipts: &[ReceiptWithBloom<Receipt>]) -> B256 {
     ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_inner(buf, false))
 }
 

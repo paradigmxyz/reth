@@ -61,7 +61,7 @@ impl Receipt {
 
     /// Calculates the bloom filter for the receipt and returns the [`ReceiptWithBloom`] container
     /// type.
-    pub fn with_bloom(self) -> ReceiptWithBloom {
+    pub fn with_bloom(self) -> ReceiptWithBloom<Receipt> {
         self.into()
     }
 
@@ -219,6 +219,21 @@ impl<'a> arbitrary::Arbitrary<'a> for Receipt {
             #[cfg(feature = "optimism")]
             deposit_receipt_version,
         })
+    }
+}
+
+pub trait ReceiptEncoding {
+    fn as_encoder(&self) -> ReceiptWithBloomEncoder<'_>;
+    fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool);
+}
+
+impl ReceiptEncoding for ReceiptWithBloom<Receipt> {
+    fn as_encoder(&self) -> ReceiptWithBloomEncoder<'_> {
+        ReceiptWithBloomEncoder { receipt: &self.receipt, bloom: &self.logs_bloom }
+    }
+
+    fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
+        self.as_encoder().encode_inner(out, with_header)
     }
 }
 
@@ -416,7 +431,7 @@ mod tests {
                 #[cfg(feature = "optimism")]
                 deposit_receipt_version: None,
             },
-            bloom: [0; 256].into(),
+            logs_bloom: [0; 256].into(),
         };
 
         receipt.encode(&mut data);
@@ -450,7 +465,7 @@ mod tests {
                 #[cfg(feature = "optimism")]
                 deposit_receipt_version: None,
             },
-            bloom: [0; 256].into(),
+            logs_bloom: [0; 256].into(),
         };
 
         let receipt = ReceiptWithBloom::decode(&mut &data[..]).unwrap();
@@ -472,7 +487,7 @@ mod tests {
                 deposit_nonce: Some(4012991),
                 deposit_receipt_version: None,
             },
-            bloom: [0; 256].into(),
+            logs_bloom: [0; 256].into(),
         };
 
         let receipt = ReceiptWithBloom::decode(&mut &data[..]).unwrap();
@@ -498,7 +513,7 @@ mod tests {
                 deposit_nonce: Some(4012991),
                 deposit_receipt_version: Some(1),
             },
-            bloom: [0; 256].into(),
+            logs_bloom: [0; 256].into(),
         };
 
         let receipt = ReceiptWithBloom::decode(&mut &data[..]).unwrap();
@@ -552,7 +567,7 @@ mod tests {
                 #[cfg(feature = "optimism")]
                 deposit_receipt_version: None,
             },
-            bloom: Bloom::default(),
+            logs_bloom: Bloom::default(),
         };
 
         let encoded = receipt.encoded_2718();
@@ -574,7 +589,7 @@ mod tests {
                 #[cfg(feature = "optimism")]
                 deposit_receipt_version: None,
             },
-            bloom: Bloom::default(),
+            logs_bloom: Bloom::default(),
         };
 
         let legacy_encoded = legacy_receipt.encoded_2718();
