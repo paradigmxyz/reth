@@ -2,7 +2,7 @@
 
 use crate::ConfigureEvm;
 use alloc::{boxed::Box, sync::Arc};
-use alloy_consensus::Header;
+use alloy_consensus::BlockHeader;
 use alloy_eips::{
     eip7002::WITHDRAWAL_REQUEST_TYPE, eip7251::CONSOLIDATION_REQUEST_TYPE, eip7685::Requests,
 };
@@ -10,7 +10,6 @@ use alloy_primitives::Bytes;
 use core::fmt::Display;
 use reth_chainspec::EthereumHardforks;
 use reth_execution_errors::BlockExecutionError;
-use reth_primitives::Block;
 use revm::{Database, DatabaseCommit, Evm};
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, EvmState, B256};
 
@@ -91,11 +90,11 @@ where
 
 impl<EvmConfig, Chainspec> SystemCaller<EvmConfig, Chainspec>
 where
-    EvmConfig: ConfigureEvm<Header = Header>,
+    EvmConfig: ConfigureEvm,
     Chainspec: EthereumHardforks,
 {
     /// Apply pre execution changes.
-    pub fn apply_pre_execution_changes<DB, Ext>(
+    pub fn apply_pre_execution_changes<DB, Ext, Block>(
         &mut self,
         block: &Block,
         evm: &mut Evm<'_, Ext, DB>,
@@ -103,17 +102,18 @@ where
     where
         DB: Database + DatabaseCommit,
         DB::Error: Display,
+        Block: reth_primitives_traits::Block<Header = EvmConfig::Header>,
     {
         self.apply_blockhashes_contract_call(
-            block.timestamp,
-            block.number,
-            block.parent_hash,
+            block.header().timestamp(),
+            block.header().number(),
+            block.header().parent_hash(),
             evm,
         )?;
         self.apply_beacon_root_contract_call(
-            block.timestamp,
-            block.number,
-            block.parent_beacon_block_root,
+            block.header().timestamp(),
+            block.header().number(),
+            block.header().parent_beacon_block_root(),
             evm,
         )?;
 

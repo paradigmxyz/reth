@@ -469,6 +469,7 @@ pub enum TreeAction {
 /// emitting events.
 pub struct EngineApiTreeHandler<N, P, E, T, V>
 where
+    N: NodePrimitives,
     T: EngineTypes,
 {
     provider: P,
@@ -507,7 +508,7 @@ where
     /// Metrics for the engine api.
     metrics: EngineApiMetrics,
     /// An invalid block hook.
-    invalid_block_hook: Box<dyn InvalidBlockHook>,
+    invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
     /// The engine API variant of this handler
     engine_kind: EngineApiKind,
     /// Captures the types the engine operates on
@@ -516,6 +517,8 @@ where
 
 impl<N, P: Debug, E: Debug, T: EngineTypes + Debug, V: Debug> std::fmt::Debug
     for EngineApiTreeHandler<N, P, E, T, V>
+where
+    N: NodePrimitives,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineApiTreeHandler")
@@ -597,7 +600,7 @@ where
     }
 
     /// Sets the invalid block hook.
-    fn set_invalid_block_hook(&mut self, invalid_block_hook: Box<dyn InvalidBlockHook>) {
+    fn set_invalid_block_hook(&mut self, invalid_block_hook: Box<dyn InvalidBlockHook<N>>) {
         self.invalid_block_hook = invalid_block_hook;
     }
 
@@ -616,7 +619,7 @@ where
         payload_builder: PayloadBuilderHandle<T>,
         canonical_in_memory_state: CanonicalInMemoryState,
         config: TreeConfig,
-        invalid_block_hook: Box<dyn InvalidBlockHook>,
+        invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
         kind: EngineApiKind,
     ) -> (Sender<FromEngine<EngineApiRequest<T>>>, UnboundedReceiver<EngineApiEvent>) {
         let best_block_number = provider.best_block_number().unwrap_or(0);
