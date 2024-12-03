@@ -2,8 +2,8 @@
 //! loads receipt data w.r.t. network.
 
 use futures::Future;
-use reth_primitives::{Receipt, TransactionMeta};
-use reth_provider::TransactionsProvider;
+use reth_primitives::TransactionMeta;
+use reth_provider::{ProviderReceipt, ProviderTx, ReceiptProvider, TransactionsProvider};
 
 use crate::{EthApiTypes, RpcNodeCoreExt, RpcReceipt};
 
@@ -11,13 +11,13 @@ use crate::{EthApiTypes, RpcNodeCoreExt, RpcReceipt};
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` receipts RPC methods.
 pub trait LoadReceipt:
-    EthApiTypes + RpcNodeCoreExt<Provider: TransactionsProvider> + Send + Sync
+    EthApiTypes + RpcNodeCoreExt<Provider: TransactionsProvider + ReceiptProvider> + Send + Sync
 {
     /// Helper method for `eth_getBlockReceipts` and `eth_getTransactionReceipt`.
     fn build_transaction_receipt(
         &self,
-        tx: <Self::Provider as TransactionsProvider>::Transaction,
+        tx: ProviderTx<Self::Provider>,
         meta: TransactionMeta,
-        receipt: Receipt,
+        receipt: ProviderReceipt<Self::Provider>,
     ) -> impl Future<Output = Result<RpcReceipt<Self::NetworkTypes>, Self::Error>> + Send;
 }

@@ -1,17 +1,16 @@
-use crate::{node::OpAddOns, OpBuiltPayload, OpNode as OtherOpNode, OpPayloadBuilderAttributes};
+use crate::{OpBuiltPayload, OpNode as OtherOpNode, OpPayloadBuilderAttributes};
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, B256};
-use reth::{rpc::types::engine::PayloadAttributes, tasks::TaskManager};
-use reth_e2e_test_utils::{
-    transaction::TransactionTestContext, wallet::Wallet, Adapter, NodeHelperType,
-};
+use alloy_rpc_types_engine::PayloadAttributes;
+use reth_e2e_test_utils::{transaction::TransactionTestContext, wallet::Wallet, NodeHelperType};
 use reth_optimism_chainspec::OpChainSpecBuilder;
 use reth_payload_builder::EthPayloadBuilderAttributes;
+use reth_tasks::TaskManager;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 /// Optimism Node Helper type
-pub(crate) type OpNode = NodeHelperType<OtherOpNode, OpAddOns<Adapter<OtherOpNode>>>;
+pub(crate) type OpNode = NodeHelperType<OtherOpNode>;
 
 /// Creates the initial setup with `num_nodes` of the node config, started and connected.
 pub async fn setup(num_nodes: usize) -> eyre::Result<(Vec<OpNode>, TaskManager, Wallet)> {
@@ -56,6 +55,8 @@ pub fn optimism_payload_attributes(timestamp: u64) -> OpPayloadBuilderAttributes
         suggested_fee_recipient: Address::ZERO,
         withdrawals: Some(vec![]),
         parent_beacon_block_root: Some(B256::ZERO),
+        target_blobs_per_block: None,
+        max_blobs_per_block: None,
     };
 
     OpPayloadBuilderAttributes {

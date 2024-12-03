@@ -14,7 +14,6 @@ use std::{fmt, sync::Arc};
 
 use alloy_consensus::Header;
 use alloy_primitives::U256;
-use derive_more::Deref;
 use op_alloy_network::Optimism;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
@@ -59,14 +58,10 @@ pub type EthApiNodeBackend<N> = EthApiInner<
 ///
 /// This type implements the [`FullEthApi`](reth_rpc_eth_api::helpers::FullEthApi) by implemented
 /// all the `Eth` helper traits and prerequisite traits.
-#[derive(Deref, Clone)]
+#[derive(Clone)]
 pub struct OpEthApi<N: RpcNodeCore> {
     /// Gateway to node's core components.
-    #[deref]
-    inner: Arc<EthApiNodeBackend<N>>,
-    /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
-    /// network.
-    sequencer_client: Option<SequencerClient>,
+    inner: Arc<OpEthApiInner<N>>,
 }
 
 impl<N> OpEthApi<N>
@@ -79,28 +74,9 @@ where
                       + 'static,
     >,
 {
-    /// Creates a new instance for given context.
-    pub fn new(ctx: &EthApiBuilderCtx<N>, sequencer_http: Option<String>) -> Self {
-        let blocking_task_pool =
-            BlockingTaskPool::build().expect("failed to build blocking task pool");
-
-        let inner = EthApiInner::new(
-            ctx.provider.clone(),
-            ctx.pool.clone(),
-            ctx.network.clone(),
-            ctx.cache.clone(),
-            ctx.new_gas_price_oracle(),
-            ctx.config.rpc_gas_cap,
-            ctx.config.rpc_max_simulate_blocks,
-            ctx.config.eth_proof_window,
-            blocking_task_pool,
-            ctx.new_fee_history_cache(),
-            ctx.evm_config.clone(),
-            ctx.executor.clone(),
-            ctx.config.proof_permits,
-        );
-
-        Self { inner: Arc::new(inner), sequencer_client: sequencer_http.map(SequencerClient::new) }
+    /// Build a [`OpEthApi`] using [`OpEthApiBuilder`].
+    pub const fn builder() -> OpEthApiBuilder {
+        OpEthApiBuilder::new()
     }
 }
 
@@ -130,17 +106,17 @@ where
 
     #[inline]
     fn pool(&self) -> &Self::Pool {
-        self.inner.pool()
+        self.inner.eth_api.pool()
     }
 
     #[inline]
     fn evm_config(&self) -> &Self::Evm {
-        self.inner.evm_config()
+        self.inner.eth_api.evm_config()
     }
 
     #[inline]
     fn network(&self) -> &Self::Network {
-        self.inner.network()
+        self.inner.eth_api.network()
     }
 
     #[inline]
@@ -150,7 +126,7 @@ where
 
     #[inline]
     fn provider(&self) -> &Self::Provider {
-        self.inner.provider()
+        self.inner.eth_api.provider()
     }
 }
 
@@ -160,7 +136,7 @@ where
 {
     #[inline]
     fn cache(&self) -> &EthStateCache {
-        self.inner.cache()
+        self.inner.eth_api.cache()
     }
 }
 
@@ -175,12 +151,12 @@ where
 {
     #[inline]
     fn starting_block(&self) -> U256 {
-        self.inner.starting_block()
+        self.inner.eth_api.starting_block()
     }
 
     #[inline]
     fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
-        self.inner.signers()
+        self.inner.eth_api.signers()
     }
 }
 
@@ -191,17 +167,17 @@ where
 {
     #[inline]
     fn io_task_spawner(&self) -> impl TaskSpawner {
-        self.inner.task_spawner()
+        self.inner.eth_api.task_spawner()
     }
 
     #[inline]
     fn tracing_task_pool(&self) -> &BlockingTaskPool {
-        self.inner.blocking_task_pool()
+        self.inner.eth_api.blocking_task_pool()
     }
 
     #[inline]
     fn tracing_task_guard(&self) -> &BlockingTaskGuard {
-        self.inner.blocking_task_guard()
+        self.inner.eth_api.blocking_task_guard()
     }
 }
 
@@ -217,12 +193,12 @@ where
 {
     #[inline]
     fn gas_oracle(&self) -> &GasPriceOracle<Self::Provider> {
-        self.inner.gas_oracle()
+        self.inner.eth_api.gas_oracle()
     }
 
     #[inline]
     fn fee_history_cache(&self) -> &FeeHistoryCache {
-        self.inner.fee_history_cache()
+        self.inner.eth_api.fee_history_cache()
     }
 }
 
@@ -241,7 +217,7 @@ where
 {
     #[inline]
     fn max_proof_window(&self) -> u64 {
-        self.inner.eth_proof_window()
+        self.inner.eth_api.eth_proof_window()
     }
 }
 
@@ -264,12 +240,80 @@ where
     N: RpcNodeCore,
 {
     fn with_dev_accounts(&self) {
-        *self.inner.signers().write() = DevSigner::random_signers(20)
+        *self.inner.eth_api.signers().write() = DevSigner::random_signers(20)
     }
 }
 
 impl<N: RpcNodeCore> fmt::Debug for OpEthApi<N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OpEthApi").finish_non_exhaustive()
+    }
+}
+
+/// Container type `OpEthApi`
+#[allow(missing_debug_implementations)]
+struct OpEthApiInner<N: RpcNodeCore> {
+    /// Gateway to node's core components.
+    eth_api: EthApiNodeBackend<N>,
+    /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
+    /// network.
+    sequencer_client: Option<SequencerClient>,
+}
+
+/// A type that knows how to build a [`OpEthApi`].
+#[derive(Debug, Default)]
+pub struct OpEthApiBuilder {
+    /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
+    /// network.
+    sequencer_client: Option<SequencerClient>,
+}
+
+impl OpEthApiBuilder {
+    /// Creates a [`OpEthApiBuilder`] instance from [`EthApiBuilderCtx`].
+    pub const fn new() -> Self {
+        Self { sequencer_client: None }
+    }
+
+    /// With a [`SequencerClient`].
+    pub fn with_sequencer(mut self, sequencer_client: Option<SequencerClient>) -> Self {
+        self.sequencer_client = sequencer_client;
+        self
+    }
+}
+
+impl OpEthApiBuilder {
+    /// Builds an instance of [`OpEthApi`]
+    pub fn build<N>(self, ctx: &EthApiBuilderCtx<N>) -> OpEthApi<N>
+    where
+        N: RpcNodeCore<
+            Provider: BlockReaderIdExt
+                          + ChainSpecProvider
+                          + CanonStateSubscriptions<Primitives = OpPrimitives>
+                          + Clone
+                          + 'static,
+        >,
+    {
+        let blocking_task_pool =
+            BlockingTaskPool::build().expect("failed to build blocking task pool");
+
+        let eth_api = EthApiInner::new(
+            ctx.provider.clone(),
+            ctx.pool.clone(),
+            ctx.network.clone(),
+            ctx.cache.clone(),
+            ctx.new_gas_price_oracle(),
+            ctx.config.rpc_gas_cap,
+            ctx.config.rpc_max_simulate_blocks,
+            ctx.config.eth_proof_window,
+            blocking_task_pool,
+            ctx.new_fee_history_cache(),
+            ctx.evm_config.clone(),
+            ctx.executor.clone(),
+            ctx.config.proof_permits,
+        );
+
+        OpEthApi {
+            inner: Arc::new(OpEthApiInner { eth_api, sequencer_client: self.sequencer_client }),
+        }
     }
 }

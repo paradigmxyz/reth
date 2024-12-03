@@ -18,8 +18,11 @@ impl<Provider, Pool, Network, EvmConfig> LoadPendingBlock
 where
     Self: SpawnBlocking
         + RpcNodeCore<
-            Provider: BlockReaderIdExt<Block = reth_primitives::Block>
-                          + EvmEnvProvider
+            Provider: BlockReaderIdExt<
+                Block = reth_primitives::Block,
+                Receipt = reth_primitives::Receipt,
+                Header = reth_primitives::Header,
+            > + EvmEnvProvider
                           + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                           + StateProviderFactory,
             Pool: TransactionPool,

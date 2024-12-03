@@ -59,7 +59,11 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     async fn build_network<
         N: ProviderNodeTypes<
             ChainSpec = C::ChainSpec,
-            Primitives: NodePrimitives<Block = reth_primitives::Block>,
+            Primitives: NodePrimitives<
+                Block = reth_primitives::Block,
+                Receipt = reth_primitives::Receipt,
+                BlockHeader = reth_primitives::Header,
+            >,
         >,
     >(
         &self,
@@ -163,7 +167,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             executor.execute_and_verify_one((&sealed_block.clone().unseal(), td).into())?;
             let execution_outcome = executor.finalize();
 
-            provider_rw.write_to_storage(
+            provider_rw.write_state(
                 execution_outcome,
                 OriginalValuesKnown::Yes,
                 StorageLocation::Database,

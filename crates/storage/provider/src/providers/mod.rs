@@ -1,6 +1,6 @@
 use crate::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    BlockSource, BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
+    BlockSource, BlockchainTreePendingStateProvider, CanonStateNotifications,
     CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
     DatabaseProviderFactory, EvmEnvProvider, FullExecutionDataProvider, HeaderProvider,
     NodePrimitivesProvider, ProviderError, PruneCheckpointReader, ReceiptProvider,
@@ -14,6 +14,7 @@ use alloy_eips::{
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
 };
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
+use alloy_rpc_types_engine::ForkchoiceState;
 use reth_blockchain_tree_api::{
     error::{CanonicalError, InsertBlockError},
     BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
@@ -24,13 +25,16 @@ use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_db::table::Value;
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
-use reth_node_types::{BlockTy, FullNodePrimitives, NodeTypes, NodeTypesWithDB, TxTy};
+use reth_node_types::{
+    BlockTy, FullNodePrimitives, HeaderTy, NodeTypes, NodeTypesWithDB, ReceiptTy, TxTy,
+};
 use reth_primitives::{
     Account, BlockWithSenders, EthPrimitives, Receipt, SealedBlock, SealedBlockFor,
     SealedBlockWithSenders, SealedHeader, TransactionMeta,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
+use reth_storage_api::CanonChainTracker;
 use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
@@ -61,7 +65,6 @@ mod bundle_state_provider;
 pub use bundle_state_provider::BundleStateProvider;
 
 mod consistent_view;
-use alloy_rpc_types_engine::ForkchoiceState;
 pub use consistent_view::{ConsistentDbView, ConsistentViewError};
 
 mod blockchain_provider;
@@ -77,11 +80,7 @@ where
     Self: NodeTypes<
         ChainSpec: EthereumHardforks,
         Storage: ChainStorage<Self::Primitives>,
-        Primitives: FullNodePrimitives<
-            SignedTx: Value,
-            BlockHeader = alloy_consensus::Header,
-            Receipt = reth_primitives::Receipt,
-        >,
+        Primitives: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
     >,
 {
 }
@@ -90,11 +89,7 @@ impl<T> NodeTypesForProvider for T where
     T: NodeTypes<
         ChainSpec: EthereumHardforks,
         Storage: ChainStorage<T::Primitives>,
-        Primitives: FullNodePrimitives<
-            SignedTx: Value,
-            BlockHeader = alloy_consensus::Header,
-            Receipt = reth_primitives::Receipt,
-        >,
+        Primitives: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
     >
 {
 }
@@ -151,7 +146,7 @@ impl<N: NodeTypesWithDB> BlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> BlockchainProvider<N> {
+impl<N: TreeNodeTypes> BlockchainProvider<N> {
     /// Create new provider instance that wraps the database and the blockchain tree, using the
     /// provided latest header to initialize the chain info tracker, alongside the finalized header
     /// if it exists.
@@ -261,7 +256,9 @@ impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider<N> {
+impl<N: TreeNodeTypes> HeaderProvider for BlockchainProvider<N> {
+    type Header = Header;
+
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
         self.database.header(block_hash)
     }
@@ -516,27 +513,32 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> ReceiptProvider for BlockchainProvider<N> {
-    fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
+    type Receipt = ReceiptTy<N>;
+
+    fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
         self.database.receipt(id)
     }
 
-    fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
+    fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Receipt>> {
         self.database.receipt_by_hash(hash)
     }
 
-    fn receipts_by_block(&self, block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>> {
+    fn receipts_by_block(
+        &self,
+        block: BlockHashOrNumber,
+    ) -> ProviderResult<Option<Vec<Self::Receipt>>> {
         self.database.receipts_by_block(block)
     }
 
     fn receipts_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<Receipt>> {
+    ) -> ProviderResult<Vec<Self::Receipt>> {
         self.database.receipts_by_tx_range(range)
     }
 }
 
-impl<N: ProviderNodeTypes> ReceiptProviderIdExt for BlockchainProvider<N> {
+impl<N: TreeNodeTypes> ReceiptProviderIdExt for BlockchainProvider<N> {
     fn receipts_by_block_id(&self, block: BlockId) -> ProviderResult<Option<Vec<Receipt>>> {
         match block {
             BlockId::Hash(rpc_block_hash) => {
@@ -588,7 +590,7 @@ impl<N: ProviderNodeTypes> StageCheckpointReader for BlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider<N> {
+impl<N: TreeNodeTypes> EvmEnvProvider for BlockchainProvider<N> {
     fn fill_env_at<EvmConfig>(
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,
@@ -661,7 +663,7 @@ impl<N: ProviderNodeTypes> ChainSpecProvider for BlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
+impl<N: TreeNodeTypes> StateProviderFactory for BlockchainProvider<N> {
     /// Storage provider for latest block
     fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", "Getting latest block state provider");
@@ -835,10 +837,9 @@ impl<N: ProviderNodeTypes> BlockchainTreeViewer for BlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> CanonChainTracker for BlockchainProvider<N>
-where
-    Self: BlockReader,
-{
+impl<N: TreeNodeTypes> CanonChainTracker for BlockchainProvider<N> {
+    type Header = HeaderTy<N>;
+
     fn on_forkchoice_update_received(&self, _update: &ForkchoiceState) {
         // update timestamp
         self.chain_info.on_forkchoice_update_received();
@@ -869,10 +870,7 @@ where
     }
 }
 
-impl<N: ProviderNodeTypes> BlockReaderIdExt for BlockchainProvider<N>
-where
-    Self: BlockReader + ReceiptProviderIdExt,
-{
+impl<N: TreeNodeTypes> BlockReaderIdExt for BlockchainProvider<N> {
     fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Block>> {
         match id {
             BlockId::Number(num) => self.block_by_number_or_tag(num),
@@ -891,7 +889,10 @@ where
         }
     }
 
-    fn header_by_number_or_tag(&self, id: BlockNumberOrTag) -> ProviderResult<Option<Header>> {
+    fn header_by_number_or_tag(
+        &self,
+        id: BlockNumberOrTag,
+    ) -> ProviderResult<Option<Self::Header>> {
         Ok(match id {
             BlockNumberOrTag::Latest => Some(self.chain_info.get_canonical_head().unseal()),
             BlockNumberOrTag::Finalized => {
@@ -907,7 +908,7 @@ where
     fn sealed_header_by_number_or_tag(
         &self,
         id: BlockNumberOrTag,
-    ) -> ProviderResult<Option<SealedHeader>> {
+    ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
         match id {
             BlockNumberOrTag::Latest => Ok(Some(self.chain_info.get_canonical_head())),
             BlockNumberOrTag::Finalized => Ok(self.chain_info.get_finalized_header()),
@@ -922,21 +923,24 @@ where
         }
     }
 
-    fn sealed_header_by_id(&self, id: BlockId) -> ProviderResult<Option<SealedHeader>> {
+    fn sealed_header_by_id(
+        &self,
+        id: BlockId,
+    ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
         Ok(match id {
             BlockId::Number(num) => self.sealed_header_by_number_or_tag(num)?,
             BlockId::Hash(hash) => self.header(&hash.block_hash)?.map(SealedHeader::seal),
         })
     }
 
-    fn header_by_id(&self, id: BlockId) -> ProviderResult<Option<Header>> {
+    fn header_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Header>> {
         Ok(match id {
             BlockId::Number(num) => self.header_by_number_or_tag(num)?,
             BlockId::Hash(hash) => self.header(&hash.block_hash)?,
         })
     }
 
-    fn ommers_by_id(&self, id: BlockId) -> ProviderResult<Option<Vec<Header>>> {
+    fn ommers_by_id(&self, id: BlockId) -> ProviderResult<Option<Vec<Self::Header>>> {
         match id {
             BlockId::Number(num) => self.ommers_by_number_or_tag(num),
             BlockId::Hash(hash) => {
@@ -963,7 +967,9 @@ impl<N: ProviderNodeTypes> CanonStateSubscriptions for BlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> ForkChoiceSubscriptions for BlockchainProvider<N> {
+impl<N: TreeNodeTypes> ForkChoiceSubscriptions for BlockchainProvider<N> {
+    type Header = HeaderTy<N>;
+
     fn subscribe_safe_block(&self) -> ForkChoiceNotifications {
         let receiver = self.chain_info.subscribe_safe_block();
         ForkChoiceNotifications(receiver)

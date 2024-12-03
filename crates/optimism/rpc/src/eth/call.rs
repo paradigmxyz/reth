@@ -33,12 +33,12 @@ where
 {
     #[inline]
     fn call_gas_limit(&self) -> u64 {
-        self.inner.gas_cap()
+        self.inner.eth_api.gas_cap()
     }
 
     #[inline]
     fn max_simulate_blocks(&self) -> u64 {
-        self.inner.max_simulate_blocks()
+        self.inner.eth_api.max_simulate_blocks()
     }
 
     fn create_txn_env(

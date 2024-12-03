@@ -41,10 +41,10 @@ pub trait Block:
     + MaybeArbitrary
 {
     /// Header part of the block.
-    type Header: BlockHeader + 'static;
+    type Header: BlockHeader;
 
     /// The block's body contains the transactions in the block.
-    type Body: BlockBody<OmmerHeader = Self::Header> + Send + Sync + Unpin + 'static;
+    type Body: BlockBody<OmmerHeader = Self::Header>;
 
     /// Create new block instance.
     fn new(header: Self::Header, body: Self::Body) -> Self;

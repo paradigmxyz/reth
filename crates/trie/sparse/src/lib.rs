@@ -8,3 +8,5 @@ pub use trie::*;
 
 mod errors;
 pub use errors::*;
+
+pub mod blinded;

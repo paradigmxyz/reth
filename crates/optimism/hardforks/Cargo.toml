@@ -30,10 +30,13 @@ default = ["std"]
 std = [
 	"alloy-primitives/std",
 	"once_cell/std",
-	"serde?/std"
+	"serde?/std",
+	"alloy-chains/std",
+	"reth-ethereum-forks/std"
 ]
 serde = [
 	"dep:serde",
 	"alloy-chains/serde",
-	"alloy-primitives/serde"
+	"alloy-primitives/serde",
+	"reth-ethereum-forks/serde"
 ]

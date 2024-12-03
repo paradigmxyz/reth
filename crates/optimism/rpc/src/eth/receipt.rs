@@ -11,7 +11,7 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_forks::OpHardforks;
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned, TxType};
-use reth_provider::{ChainSpecProvider, TransactionsProvider};
+use reth_provider::{ChainSpecProvider, ReceiptProvider, TransactionsProvider};
 use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError, RpcReceipt};
 use reth_rpc_eth_types::{receipt::build_receipt, EthApiError};
 
@@ -21,7 +21,8 @@ impl<N> LoadReceipt for OpEthApi<N>
 where
     Self: Send + Sync,
     N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>,
-    Self::Provider: TransactionsProvider<Transaction = TransactionSigned>,
+    Self::Provider:
+        TransactionsProvider<Transaction = TransactionSigned> + ReceiptProvider<Receipt = Receipt>,
 {
     async fn build_transaction_receipt(
         &self,
@@ -30,6 +31,8 @@ where
         receipt: Receipt,
     ) -> Result<RpcReceipt<Self::NetworkTypes>, Self::Error> {
         let (block, receipts) = self
+            .inner
+            .eth_api
             .cache()
             .get_block_and_receipts(meta.block_hash)
             .await
@@ -42,7 +45,7 @@ where
             reth_optimism_evm::extract_l1_info(&block.body).map_err(OpEthApiError::from)?;
 
         Ok(OpReceiptBuilder::new(
-            &self.inner.provider().chain_spec(),
+            &self.inner.eth_api.provider().chain_spec(),
             &tx,
             meta,
             &receipt,

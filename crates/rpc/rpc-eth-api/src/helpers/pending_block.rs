@@ -3,7 +3,7 @@
 
 use super::SpawnBlocking;
 use crate::{EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
-use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH};
+use alloy_consensus::{BlockHeader, Header, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{
     eip4844::MAX_DATA_GAS_PER_BLOCK, eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE,
 };
@@ -17,12 +17,12 @@ use reth_evm::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    proofs::calculate_transaction_root, Block, BlockBody, BlockExt, Receipt,
-    SealedBlockWithSenders, SealedHeader, TransactionSignedEcRecovered,
+    proofs::calculate_transaction_root, Block, BlockBody, BlockExt, InvalidTransactionError,
+    Receipt, RecoveredTx, SealedBlockWithSenders, SealedHeader,
 };
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderError,
-    ReceiptProvider, StateProviderFactory,
+    ProviderReceipt, ReceiptProvider, StateProviderFactory,
 };
 use reth_revm::{
     database::StateProviderDatabase,
@@ -32,7 +32,9 @@ use reth_revm::{
     },
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
-use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
+use reth_transaction_pool::{
+    error::InvalidPoolTransactionError, BestTransactionsAttributes, TransactionPool,
+};
 use revm::{db::states::bundle_state::BundleRetention, DatabaseCommit, State};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
@@ -44,8 +46,11 @@ use tracing::debug;
 pub trait LoadPendingBlock:
     EthApiTypes
     + RpcNodeCore<
-        Provider: BlockReaderIdExt<Block = reth_primitives::Block>
-                      + EvmEnvProvider
+        Provider: BlockReaderIdExt<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+            Header = reth_primitives::Header,
+        > + EvmEnvProvider
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                       + StateProviderFactory,
         Pool: TransactionPool,
@@ -83,7 +88,7 @@ pub trait LoadPendingBlock:
             let chain_spec = self.provider().chain_spec();
 
             latest_header.base_fee_per_gas = latest_header.next_block_base_fee(
-                chain_spec.base_fee_params_at_timestamp(latest_header.timestamp),
+                chain_spec.base_fee_params_at_timestamp(latest_header.timestamp()),
             );
 
             // update excess blob gas consumed above target
@@ -118,7 +123,10 @@ pub trait LoadPendingBlock:
         &self,
     ) -> impl Future<
         Output = Result<
-            Option<(SealedBlockWithSenders<<Self::Provider as BlockReader>::Block>, Vec<Receipt>)>,
+            Option<(
+                SealedBlockWithSenders<<Self::Provider as BlockReader>::Block>,
+                Vec<ProviderReceipt<Self::Provider>>,
+            )>,
             Self::Error,
         >,
     > + Send
@@ -185,7 +193,7 @@ pub trait LoadPendingBlock:
     /// Assembles a [`Receipt`] for a transaction, based on its [`ExecutionResult`].
     fn assemble_receipt(
         &self,
-        tx: &TransactionSignedEcRecovered,
+        tx: &RecoveredTx,
         result: ExecutionResult,
         cumulative_gas_used: u64,
     ) -> Receipt {
@@ -286,7 +294,13 @@ pub trait LoadPendingBlock:
                 // we can't fit this transaction into the block, so we need to mark it as invalid
                 // which also removes all dependent transaction from the iterator before we can
                 // continue
-                best_txs.mark_invalid(&pool_tx);
+                best_txs.mark_invalid(
+                    &pool_tx,
+                    InvalidPoolTransactionError::ExceedsGasLimit(
+                        pool_tx.gas_limit(),
+                        block_gas_limit,
+                    ),
+                );
                 continue
             }
 
@@ -294,7 +308,12 @@ pub trait LoadPendingBlock:
                 // we don't want to leak any state changes made by private transactions, so we mark
                 // them as invalid here which removes all dependent transactions from the iterator
                 // before we can continue
-                best_txs.mark_invalid(&pool_tx);
+                best_txs.mark_invalid(
+                    &pool_tx,
+                    InvalidPoolTransactionError::Consensus(
+                        InvalidTransactionError::TxTypeNotSupported,
+                    ),
+                );
                 continue
             }
 
@@ -310,7 +329,13 @@ pub trait LoadPendingBlock:
                     // invalid, which removes its dependent transactions from
                     // the iterator. This is similar to the gas limit condition
                     // for regular transactions above.
-                    best_txs.mark_invalid(&pool_tx);
+                    best_txs.mark_invalid(
+                        &pool_tx,
+                        InvalidPoolTransactionError::ExceedsGasLimit(
+                            tx_blob_gas,
+                            MAX_DATA_GAS_PER_BLOCK,
+                        ),
+                    );
                     continue
                 }
             }
@@ -334,7 +359,12 @@ pub trait LoadPendingBlock:
                             } else {
                                 // if the transaction is invalid, we can skip it and all of its
                                 // descendants
-                                best_txs.mark_invalid(&pool_tx);
+                                best_txs.mark_invalid(
+                                    &pool_tx,
+                                    InvalidPoolTransactionError::Consensus(
+                                        InvalidTransactionError::TxTypeNotSupported,
+                                    ),
+                                );
                             }
                             continue
                         }
@@ -437,6 +467,7 @@ pub trait LoadPendingBlock:
             extra_data: Default::default(),
             parent_beacon_block_root,
             requests_hash,
+            target_blobs_per_block: None,
         };
 
         // Convert Vec<Option<Receipt>> to Vec<Receipt>

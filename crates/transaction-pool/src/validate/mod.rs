@@ -9,7 +9,7 @@ use crate::{
 use alloy_eips::eip4844::BlobTransactionSidecar;
 use alloy_primitives::{Address, TxHash, B256, U256};
 use futures_util::future::Either;
-use reth_primitives::{SealedBlock, TransactionSignedEcRecovered};
+use reth_primitives::{RecoveredTx, SealedBlock};
 use std::{fmt, future::Future, time::Instant};
 
 mod constants;
@@ -375,6 +375,13 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.is_eip4844() != other.is_eip4844()
     }
 
+    /// Converts to this type into the consensus transaction of the pooled transaction.
+    ///
+    /// Note: this takes `&self` since indented usage is via `Arc<Self>`.
+    pub fn to_consensus(&self) -> T::Consensus {
+        self.transaction.clone_into_consensus()
+    }
+
     /// Determines whether a candidate transaction (`maybe_replacement`) is underpriced compared to
     /// an existing transaction in the pool.
     ///
@@ -428,12 +435,12 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     }
 }
 
-impl<T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>> ValidPoolTransaction<T> {
-    /// Converts to this type into a [`TransactionSignedEcRecovered`].
+impl<T: PoolTransaction<Consensus: Into<RecoveredTx>>> ValidPoolTransaction<T> {
+    /// Converts to this type into a [`RecoveredTx`].
     ///
     /// Note: this takes `&self` since indented usage is via `Arc<Self>`.
-    pub fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
-        self.transaction.clone().into_consensus().into()
+    pub fn to_recovered_transaction(&self) -> RecoveredTx {
+        self.to_consensus().into()
     }
 }
 

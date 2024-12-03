@@ -55,11 +55,14 @@ where
         let EthCallBundle {
             txs,
             block_number,
+            coinbase,
             state_block_number,
+            timeout: _,
             timestamp,
             gas_limit,
             difficulty,
             base_fee,
+            ..
         } = bundle;
         if txs.is_empty() {
             return Err(EthApiError::InvalidParams(
@@ -79,7 +82,7 @@ where
             .map(recover_raw_transaction)
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
-            .map(|tx| tx.into_components())
+            .map(|tx| tx.to_components())
             .collect::<Vec<_>>();
 
         // Validate that the bundle does not contain more than MAX_BLOB_NUMBER_PER_BLOCK blob
@@ -106,6 +109,10 @@ where
         // Note: the block number is considered the `parent` block: <https://github.com/flashbots/mev-geth/blob/fddf97beec5877483f879a77b7dea2e58a58d653/internal/ethapi/api.go#L2104>
         let (cfg, mut block_env, at) = self.eth_api().evm_env_at(block_id).await?;
 
+        if let Some(coinbase) = coinbase {
+            block_env.coinbase = coinbase;
+        }
+
         // need to adjust the timestamp for the next block
         if let Some(timestamp) = timestamp {
             block_env.timestamp = U256::from(timestamp);
@@ -117,8 +124,16 @@ where
             block_env.difficulty = U256::from(difficulty);
         }
 
+        // default to call gas limit unless user requests a smaller limit
+        block_env.gas_limit = U256::from(self.inner.eth_api.call_gas_limit());
         if let Some(gas_limit) = gas_limit {
-            block_env.gas_limit = U256::from(gas_limit);
+            let gas_limit = U256::from(gas_limit);
+            if gas_limit > block_env.gas_limit {
+                return Err(
+                    EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh).into()
+                )
+            }
+            block_env.gas_limit = gas_limit;
         }
 
         if let Some(base_fee) = base_fee {

@@ -6,17 +6,20 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+// The `optimism` feature must be enabled to use this crate.
+#![cfg(feature = "op")]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
 
 pub mod bedrock;
 pub mod transaction;
 
-use reth_primitives::EthPrimitives;
-pub use transaction::{tx_type::OpTxType, OpTransaction};
+pub use transaction::{signed::OpTransactionSigned, tx_type::OpTxType, OpTransaction};
 
 /// Optimism primitive types.
-pub type OpPrimitives = EthPrimitives;
+pub type OpPrimitives = reth_primitives::EthPrimitives;
 
 // TODO: once we are ready for separating primitive types, introduce a separate `NodePrimitives`
 // implementation used exclusively by legacy engine.

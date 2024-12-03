@@ -1,7 +1,9 @@
 use crate::segments::Segment;
 use alloy_primitives::BlockNumber;
-use reth_db::tables;
+use reth_codecs::Compact;
+use reth_db::{table::Value, tables};
 use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{providers::StaticFileWriter, DBProvider, StaticFileProviderFactory};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::ProviderResult;
@@ -11,7 +13,11 @@ use std::ops::RangeInclusive;
 #[derive(Debug, Default)]
 pub struct Headers;
 
-impl<Provider: StaticFileProviderFactory + DBProvider> Segment<Provider> for Headers {
+impl<Provider> Segment<Provider> for Headers
+where
+    Provider: StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Compact + Value>>
+        + DBProvider,
+{
     fn segment(&self) -> StaticFileSegment {
         StaticFileSegment::Headers
     }
@@ -25,7 +31,10 @@ impl<Provider: StaticFileProviderFactory + DBProvider> Segment<Provider> for Hea
         let mut static_file_writer =
             static_file_provider.get_writer(*block_range.start(), StaticFileSegment::Headers)?;
 
-        let mut headers_cursor = provider.tx_ref().cursor_read::<tables::Headers>()?;
+        let mut headers_cursor = provider
+            .tx_ref()
+            .cursor_read::<tables::Headers<<Provider::Primitives as NodePrimitives>::BlockHeader>>(
+            )?;
         let headers_walker = headers_cursor.walk_range(block_range.clone())?;
 
         let mut header_td_cursor =

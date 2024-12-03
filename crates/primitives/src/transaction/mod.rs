@@ -42,6 +42,11 @@ pub use sidecar::BlobTransaction;
 pub use signature::{recover_signer, recover_signer_unchecked};
 pub use tx_type::TxType;
 
+/// Handling transaction signature operations, including signature recovery,
+/// applying chain IDs, and EIP-2 validation.
+pub mod signature;
+pub mod util;
+
 pub(crate) mod access_list;
 mod compat;
 mod error;
@@ -49,12 +54,6 @@ mod meta;
 mod pooled;
 mod sidecar;
 mod tx_type;
-
-/// Handling transaction signature operations, including signature recovery,
-/// applying chain IDs, and EIP-2 validation.
-pub mod signature;
-
-pub(crate) mod util;
 
 #[cfg(any(test, feature = "reth-codec"))]
 pub use tx_type::{
@@ -308,7 +307,7 @@ impl Transaction {
                 set_code_tx.eip2718_encode(signature, out);
             }
             #[cfg(feature = "optimism")]
-            Self::Deposit(deposit_tx) => deposit_tx.eip2718_encode(out),
+            Self::Deposit(deposit_tx) => deposit_tx.encode_2718(out),
         }
     }
 
@@ -672,6 +671,18 @@ impl alloy_consensus::Transaction for Transaction {
             Self::Eip7702(tx) => tx.kind(),
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => tx.kind(),
+        }
+    }
+
+    fn is_create(&self) -> bool {
+        match self {
+            Self::Legacy(tx) => tx.is_create(),
+            Self::Eip2930(tx) => tx.is_create(),
+            Self::Eip1559(tx) => tx.is_create(),
+            Self::Eip4844(tx) => tx.is_create(),
+            Self::Eip7702(tx) => tx.is_create(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.is_create(),
         }
     }
 
@@ -1095,56 +1106,56 @@ impl TransactionSigned {
         }
     }
 
-    /// Returns the [`TransactionSignedEcRecovered`] transaction with the given sender.
+    /// Returns the [`RecoveredTx`] transaction with the given sender.
     #[inline]
-    pub const fn with_signer(self, signer: Address) -> TransactionSignedEcRecovered {
-        TransactionSignedEcRecovered::from_signed_transaction(self, signer)
+    pub const fn with_signer(self, signer: Address) -> RecoveredTx {
+        RecoveredTx::from_signed_transaction(self, signer)
     }
 
-    /// Consumes the type, recover signer and return [`TransactionSignedEcRecovered`]
+    /// Consumes the type, recover signer and return [`RecoveredTx`]
     ///
     /// Returns `None` if the transaction's signature is invalid, see also [`Self::recover_signer`].
-    pub fn into_ecrecovered(self) -> Option<TransactionSignedEcRecovered> {
+    pub fn into_ecrecovered(self) -> Option<RecoveredTx> {
         let signer = self.recover_signer()?;
-        Some(TransactionSignedEcRecovered { signed_transaction: self, signer })
+        Some(RecoveredTx { signed_transaction: self, signer })
     }
 
-    /// Consumes the type, recover signer and return [`TransactionSignedEcRecovered`] _without
+    /// Consumes the type, recover signer and return [`RecoveredTx`] _without
     /// ensuring that the signature has a low `s` value_ (EIP-2).
     ///
     /// Returns `None` if the transaction's signature is invalid, see also
     /// [`Self::recover_signer_unchecked`].
-    pub fn into_ecrecovered_unchecked(self) -> Option<TransactionSignedEcRecovered> {
+    pub fn into_ecrecovered_unchecked(self) -> Option<RecoveredTx> {
         let signer = self.recover_signer_unchecked()?;
-        Some(TransactionSignedEcRecovered { signed_transaction: self, signer })
+        Some(RecoveredTx { signed_transaction: self, signer })
     }
 
-    /// Tries to recover signer and return [`TransactionSignedEcRecovered`] by cloning the type.
-    pub fn try_ecrecovered(&self) -> Option<TransactionSignedEcRecovered> {
+    /// Tries to recover signer and return [`RecoveredTx`] by cloning the type.
+    pub fn try_ecrecovered(&self) -> Option<RecoveredTx> {
         let signer = self.recover_signer()?;
-        Some(TransactionSignedEcRecovered { signed_transaction: self.clone(), signer })
+        Some(RecoveredTx { signed_transaction: self.clone(), signer })
     }
 
-    /// Tries to recover signer and return [`TransactionSignedEcRecovered`].
+    /// Tries to recover signer and return [`RecoveredTx`].
     ///
     /// Returns `Err(Self)` if the transaction's signature is invalid, see also
     /// [`Self::recover_signer`].
-    pub fn try_into_ecrecovered(self) -> Result<TransactionSignedEcRecovered, Self> {
+    pub fn try_into_ecrecovered(self) -> Result<RecoveredTx, Self> {
         match self.recover_signer() {
             None => Err(self),
-            Some(signer) => Ok(TransactionSignedEcRecovered { signed_transaction: self, signer }),
+            Some(signer) => Ok(RecoveredTx { signed_transaction: self, signer }),
         }
     }
 
-    /// Tries to recover signer and return [`TransactionSignedEcRecovered`]. _without ensuring that
+    /// Tries to recover signer and return [`RecoveredTx`]. _without ensuring that
     /// the signature has a low `s` value_ (EIP-2).
     ///
     /// Returns `Err(Self)` if the transaction's signature is invalid, see also
     /// [`Self::recover_signer_unchecked`].
-    pub fn try_into_ecrecovered_unchecked(self) -> Result<TransactionSignedEcRecovered, Self> {
+    pub fn try_into_ecrecovered_unchecked(self) -> Result<RecoveredTx, Self> {
         match self.recover_signer_unchecked() {
             None => Err(self),
-            Some(signer) => Ok(TransactionSignedEcRecovered { signed_transaction: self, signer }),
+            Some(signer) => Ok(RecoveredTx { signed_transaction: self, signer }),
         }
     }
 
@@ -1166,7 +1177,7 @@ impl TransactionSigned {
     ///
     /// Refer to the docs for [`Self::decode_rlp_legacy_transaction`] for details on the exact
     /// format expected.
-    pub(crate) fn decode_rlp_legacy_transaction_tuple(
+    pub fn decode_rlp_legacy_transaction_tuple(
         data: &mut &[u8],
     ) -> alloy_rlp::Result<(TxLegacy, TxHash, Signature)> {
         // keep this around, so we can use it to calculate the hash
@@ -1245,14 +1256,15 @@ impl SignedTransaction for TransactionSigned {
         recover_signer(&self.signature, signature_hash)
     }
 
-    fn recover_signer_unchecked(&self) -> Option<Address> {
+    fn recover_signer_unchecked_with_buf(&self, buf: &mut Vec<u8>) -> Option<Address> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
         #[cfg(feature = "optimism")]
         if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
             return Some(from)
         }
-        let signature_hash = self.signature_hash();
+        self.encode_for_signing(buf);
+        let signature_hash = keccak256(buf);
         recover_signer_unchecked(&self.signature, signature_hash)
     }
 }
@@ -1391,6 +1403,10 @@ impl alloy_consensus::Transaction for TransactionSigned {
         self.deref().kind()
     }
 
+    fn is_create(&self) -> bool {
+        self.deref().is_create()
+    }
+
     fn value(&self) -> U256 {
         self.deref().value()
     }
@@ -1416,8 +1432,8 @@ impl alloy_consensus::Transaction for TransactionSigned {
     }
 }
 
-impl From<TransactionSignedEcRecovered> for TransactionSigned {
-    fn from(recovered: TransactionSignedEcRecovered) -> Self {
+impl From<RecoveredTx> for TransactionSigned {
+    fn from(recovered: RecoveredTx) -> Self {
         recovered.signed_transaction
     }
 }
@@ -1603,9 +1619,12 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
     }
 }
 
+/// Type alias kept for backward compatibility.
+pub type TransactionSignedEcRecovered<T = TransactionSigned> = RecoveredTx<T>;
+
 /// Signed transaction with recovered signer.
 #[derive(Debug, Clone, PartialEq, Hash, Eq, AsRef, Deref)]
-pub struct TransactionSignedEcRecovered<T = TransactionSigned> {
+pub struct RecoveredTx<T = TransactionSigned> {
     /// Signer of the transaction
     signer: Address,
     /// Signed transaction
@@ -1614,9 +1633,9 @@ pub struct TransactionSignedEcRecovered<T = TransactionSigned> {
     signed_transaction: T,
 }
 
-// === impl TransactionSignedEcRecovered ===
+// === impl RecoveredTx ===
 
-impl<T> TransactionSignedEcRecovered<T> {
+impl<T> RecoveredTx<T> {
     /// Signer of transaction recovered from signature
     pub const fn signer(&self) -> Address {
         self.signer
@@ -1637,7 +1656,7 @@ impl<T> TransactionSignedEcRecovered<T> {
         (self.signed_transaction, self.signer)
     }
 
-    /// Create [`TransactionSignedEcRecovered`] from [`TransactionSigned`] and [`Address`] of the
+    /// Create [`RecoveredTx`] from [`TransactionSigned`] and [`Address`] of the
     /// signer.
     #[inline]
     pub const fn from_signed_transaction(signed_transaction: T, signer: Address) -> Self {
@@ -1645,7 +1664,7 @@ impl<T> TransactionSignedEcRecovered<T> {
     }
 }
 
-impl<T: Encodable> Encodable for TransactionSignedEcRecovered<T> {
+impl<T: Encodable> Encodable for RecoveredTx<T> {
     /// This encodes the transaction _with_ the signature, and an rlp header.
     ///
     /// Refer to docs for [`TransactionSigned::encode`] for details on the exact format.
@@ -1658,7 +1677,7 @@ impl<T: Encodable> Encodable for TransactionSignedEcRecovered<T> {
     }
 }
 
-impl<T: SignedTransaction> Decodable for TransactionSignedEcRecovered<T> {
+impl<T: SignedTransaction> Decodable for RecoveredTx<T> {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let signed_transaction = T::decode(buf)?;
         let signer = signed_transaction
@@ -1668,20 +1687,38 @@ impl<T: SignedTransaction> Decodable for TransactionSignedEcRecovered<T> {
     }
 }
 
-/// Extension trait for [`SignedTransaction`] to convert it into [`TransactionSignedEcRecovered`].
+impl<T: Encodable2718> Encodable2718 for RecoveredTx<T> {
+    fn type_flag(&self) -> Option<u8> {
+        self.signed_transaction.type_flag()
+    }
+
+    fn encode_2718_len(&self) -> usize {
+        self.signed_transaction.encode_2718_len()
+    }
+
+    fn encode_2718(&self, out: &mut dyn alloy_rlp::BufMut) {
+        self.signed_transaction.encode_2718(out)
+    }
+
+    fn trie_hash(&self) -> B256 {
+        self.signed_transaction.trie_hash()
+    }
+}
+
+/// Extension trait for [`SignedTransaction`] to convert it into [`RecoveredTx`].
 pub trait SignedTransactionIntoRecoveredExt: SignedTransaction {
-    /// Consumes the type, recover signer and return [`TransactionSignedEcRecovered`] _without
+    /// Consumes the type, recover signer and return [`RecoveredTx`] _without
     /// ensuring that the signature has a low `s` value_ (EIP-2).
     ///
     /// Returns `None` if the transaction's signature is invalid.
-    fn into_ecrecovered_unchecked(self) -> Option<TransactionSignedEcRecovered<Self>> {
+    fn into_ecrecovered_unchecked(self) -> Option<RecoveredTx<Self>> {
         let signer = self.recover_signer_unchecked()?;
-        Some(TransactionSignedEcRecovered::from_signed_transaction(self, signer))
+        Some(RecoveredTx::from_signed_transaction(self, signer))
     }
 
-    /// Returns the [`TransactionSignedEcRecovered`] transaction with the given sender.
-    fn with_signer(self, signer: Address) -> TransactionSignedEcRecovered<Self> {
-        TransactionSignedEcRecovered::from_signed_transaction(self, signer)
+    /// Returns the [`RecoveredTx`] transaction with the given sender.
+    fn with_signer(self, signer: Address) -> RecoveredTx<Self> {
+        RecoveredTx::from_signed_transaction(self, signer)
     }
 }
 
@@ -1927,7 +1964,7 @@ where
 mod tests {
     use crate::{
         transaction::{TxEip1559, TxKind, TxLegacy},
-        Transaction, TransactionSigned, TransactionSignedEcRecovered,
+        RecoveredTx, Transaction, TransactionSigned,
     };
     use alloy_consensus::Transaction as _;
     use alloy_eips::eip2718::{Decodable2718, Encodable2718};
@@ -2188,8 +2225,7 @@ mod tests {
         let tx = TransactionSigned::decode(&mut &input[..]).unwrap();
         let recovered = tx.into_ecrecovered().unwrap();
 
-        let decoded =
-            TransactionSignedEcRecovered::decode(&mut &alloy_rlp::encode(&recovered)[..]).unwrap();
+        let decoded = RecoveredTx::decode(&mut &alloy_rlp::encode(&recovered)[..]).unwrap();
         assert_eq!(recovered, decoded)
     }
 

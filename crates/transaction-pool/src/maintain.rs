@@ -7,6 +7,7 @@ use crate::{
     traits::{CanonicalStateUpdate, TransactionPool, TransactionPoolExt},
     BlockInfo, PoolTransaction, PoolUpdateKind,
 };
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Address, BlockHash, BlockNumber};
 use futures_util::{
@@ -18,8 +19,7 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
 use reth_primitives::{
-    PooledTransactionsElementEcRecovered, SealedHeader, TransactionSigned,
-    TransactionSignedEcRecovered,
+    PooledTransactionsElementEcRecovered, RecoveredTx, SealedHeader, TransactionSigned,
 };
 use reth_primitives_traits::SignedTransaction;
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
@@ -110,11 +110,13 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
         let latest = SealedHeader::seal(latest);
         let chain_spec = client.chain_spec();
         let info = BlockInfo {
-            block_gas_limit: latest.gas_limit,
+            block_gas_limit: latest.gas_limit(),
             last_seen_block_hash: latest.hash(),
-            last_seen_block_number: latest.number,
+            last_seen_block_number: latest.number(),
             pending_basefee: latest
-                .next_block_base_fee(chain_spec.base_fee_params_at_timestamp(latest.timestamp + 12))
+                .next_block_base_fee(
+                    chain_spec.base_fee_params_at_timestamp(latest.timestamp() + 12),
+                )
                 .unwrap_or_default(),
             pending_blob_fee: latest.next_block_blob_fee(),
         };
@@ -461,7 +463,7 @@ impl FinalizedBlockTracker {
         let finalized = finalized_block?;
         self.last_finalized_block
             .replace(finalized)
-            .map_or(true, |last| last < finalized)
+            .is_none_or(|last| last < finalized)
             .then_some(finalized)
     }
 }
@@ -601,8 +603,7 @@ where
     let local_transactions = local_transactions
         .into_iter()
         .map(|tx| {
-            let recovered: TransactionSignedEcRecovered =
-                tx.transaction.clone().into_consensus().into();
+            let recovered: RecoveredTx = tx.transaction.clone_into_consensus().into();
             recovered.into_signed()
         })
         .collect::<Vec<_>>();

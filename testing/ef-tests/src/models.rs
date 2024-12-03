@@ -88,6 +88,8 @@ pub struct Header {
     pub parent_beacon_block_root: Option<B256>,
     /// Requests root.
     pub requests_hash: Option<B256>,
+    /// Target blobs per block.
+    pub target_blobs_per_block: Option<U256>,
 }
 
 impl From<Header> for SealedHeader {
@@ -114,6 +116,7 @@ impl From<Header> for SealedHeader {
             excess_blob_gas: value.excess_blob_gas.map(|v| v.to::<u64>()),
             parent_beacon_block_root: value.parent_beacon_block_root,
             requests_hash: value.requests_hash,
+            target_blobs_per_block: value.target_blobs_per_block.map(|v| v.to::<u64>()),
         };
         Self::new(header, value.hash)
     }
