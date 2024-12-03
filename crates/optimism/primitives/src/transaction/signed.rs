@@ -229,9 +229,9 @@ impl alloy_rlp::Decodable for OpTransactionSigned {
 
 impl Encodable2718 for OpTransactionSigned {
     fn type_flag(&self) -> Option<u8> {
-        match self.tx_type().deref() {
+        match self.tx_type() {
             op_alloy_consensus::OpTxType::Legacy => None,
-            tx_type => Some(*tx_type as u8),
+            tx_type => Some(tx_type as u8),
         }
     }
 
@@ -268,7 +268,7 @@ impl Encodable2718 for OpTransactionSigned {
                 dynamic_fee_tx.eip2718_encode(signature, out)
             }
             OpTypedTransaction::Eip7702(set_code_tx) => set_code_tx.eip2718_encode(signature, out),
-            OpTypedTransaction::Deposit(deposit_tx) => deposit_tx.eip2718_encode(out),
+            OpTypedTransaction::Deposit(deposit_tx) => deposit_tx.encode_2718(out),
         }
     }
 }
@@ -352,6 +352,10 @@ impl alloy_consensus::Transaction for OpTransactionSigned {
         self.deref().kind()
     }
 
+    fn is_create(&self) -> bool {
+        self.deref().is_create()
+    }
+
     fn value(&self) -> Uint<256, 4> {
         self.deref().value()
     }
@@ -425,7 +429,7 @@ impl<'a> arbitrary::Arbitrary<'a> for OpTransactionSigned {
         let signature = if is_deposit(&transaction) { TxDeposit::signature() } else { signature };
 
         let mut signed_tx = Self::new_unhashed(OpTransaction::new(transaction), signature);
-        if !signed_tx.tx_type().is_deposit() {
+        if matches!(signed_tx.tx_type(), OpTxType::Deposit) {
             signed_tx.hash = signed_tx.recalculate_hash()
         }
 
