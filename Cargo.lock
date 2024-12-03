@@ -9537,6 +9537,7 @@ dependencies = [
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.8.5",
+ "reth-execution-errors",
  "reth-primitives-traits",
  "reth-testing-utils",
  "reth-tracing",
