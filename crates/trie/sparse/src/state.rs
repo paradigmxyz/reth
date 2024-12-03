@@ -392,10 +392,7 @@ mod tests {
     use assert_matches::assert_matches;
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use reth_primitives_traits::Account;
-    use reth_trie::{
-        updates::StorageTrieUpdates, BranchNodeCompact, HashBuilder, TrieAccount, TrieMask,
-        EMPTY_ROOT_HASH,
-    };
+    use reth_trie::{updates::StorageTrieUpdates, HashBuilder, TrieAccount, EMPTY_ROOT_HASH};
     use reth_trie_common::proof::ProofRetainer;
 
     #[test]
@@ -541,49 +538,15 @@ mod tests {
         pretty_assertions::assert_eq!(
             sparse_updates,
             TrieUpdates {
-                account_nodes: HashMap::from_iter([
-                    (
-                        Nibbles::default(),
-                        BranchNodeCompact {
-                            state_mask: TrieMask::new(0b110),
-                            tree_mask: TrieMask::new(0b000),
-                            hash_mask: TrieMask::new(0b010),
-                            hashes: vec![b256!(
-                                "4c4ffbda3569fcf2c24ea2000b4cec86ef8b92cbf9ff415db43184c0f75a212e"
-                            )],
-                            root_hash: Some(b256!(
-                                "60944bd29458529c3065d19f63c6e3d5269596fd3b04ca2e7b318912dc89ca4c"
-                            ))
-                        },
-                    ),
-                ]),
-                storage_tries: HashMap::from_iter([
-                    (
-                        b256!("1000000000000000000000000000000000000000000000000000000000000000"),
-                        StorageTrieUpdates {
-                            is_deleted: false,
-                            storage_nodes: HashMap::from_iter([(
-                                Nibbles::default(),
-                                BranchNodeCompact {
-                                    state_mask: TrieMask::new(0b110),
-                                    tree_mask: TrieMask::new(0b000),
-                                    hash_mask: TrieMask::new(0b010),
-                                    hashes: vec![b256!("5bc8b4fdf51839c1e18b8d6a4bd3e2e52c9f641860f0e4d197b68c2679b0e436")],
-                                    root_hash: Some(b256!("c44abf1a9e1a92736ac479b20328e8d7998aa8838b6ef52620324c9ce85e3201"))
-                                }
-                            )]),
-                            removed_nodes: HashSet::default()
-                        }
-                    ),
-                    (
-                        b256!("1100000000000000000000000000000000000000000000000000000000000000"),
-                        StorageTrieUpdates {
-                            is_deleted: true,
-                            storage_nodes: HashMap::default(),
-                            removed_nodes: HashSet::default()
-                        }
-                    )
-                ]),
+                account_nodes: HashMap::default(),
+                storage_tries: HashMap::from_iter([(
+                    b256!("1100000000000000000000000000000000000000000000000000000000000000"),
+                    StorageTrieUpdates {
+                        is_deleted: true,
+                        storage_nodes: HashMap::default(),
+                        removed_nodes: HashSet::default()
+                    }
+                )]),
                 removed_nodes: HashSet::default()
             }
         );
