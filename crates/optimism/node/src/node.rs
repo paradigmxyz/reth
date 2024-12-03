@@ -34,7 +34,7 @@ use reth_optimism_rpc::{
     OpEthApi, SequencerClient,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::BlockBody;
+use reth_primitives::{BlockBody, TransactionSigned};
 use reth_provider::{
     providers::ChainStorage, BlockBodyReader, BlockBodyWriter, CanonStateSubscriptions,
     ChainSpecProvider, DBProvider, EthStorage, ProviderResult, ReadBodyInput,
@@ -468,7 +468,7 @@ where
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
             + Unpin
             + 'static,
-        Evm: ConfigureEvm<Header = Header>,
+        Evm: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
     {
         let payload_builder = reth_optimism_payload_builder::OpPayloadBuilder::new(evm_config)
             .with_transactions(self.best_transactions)

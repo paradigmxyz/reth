@@ -111,7 +111,7 @@ where
     S: Stream<Item = BeaconEngineMessage<Engine>>,
     Engine: EngineTypes,
     Provider: BlockReader<Block = reth_primitives::Block> + StateProviderFactory,
-    Evm: ConfigureEvm<Header = Header>,
+    Evm: ConfigureEvm<Header = Header, Transaction = reth_primitives::TransactionSigned>,
     Spec: EthereumHardforks,
 {
     type Item = S::Item;
@@ -258,7 +258,7 @@ fn create_reorg_head<Provider, Evm, Spec>(
 ) -> RethResult<(ExecutionPayload, ExecutionPayloadSidecar)>
 where
     Provider: BlockReader<Block = reth_primitives::Block> + StateProviderFactory,
-    Evm: ConfigureEvm<Header = Header>,
+    Evm: ConfigureEvm<Header = Header, Transaction = reth_primitives::TransactionSigned>,
     Spec: EthereumHardforks,
 {
     let chain_spec = payload_validator.chain_spec();

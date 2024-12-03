@@ -49,7 +49,7 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     type Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self::Types>>> + Unpin;
 
     /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
-    type Evm: ConfigureEvm<Header = HeaderTy<Self::Types>>;
+    type Evm: ConfigureEvm<Header = HeaderTy<Self::Types>, Transaction = TxTy<Self::Types>>;
 
     /// The type that knows how to execute blocks.
     type Executor: BlockExecutorProvider<Primitives = <Self::Types as NodeTypes>::Primitives>;

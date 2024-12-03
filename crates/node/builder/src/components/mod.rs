@@ -40,7 +40,7 @@ pub trait NodeComponents<T: FullNodeTypes>: Clone + Unpin + Send + Sync + 'stati
     type Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<T::Types>>> + Unpin;
 
     /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
-    type Evm: ConfigureEvm<Header = HeaderTy<T::Types>>;
+    type Evm: ConfigureEvm<Header = HeaderTy<T::Types>, Transaction = TxTy<T::Types>>;
 
     /// The type that knows how to execute blocks.
     type Executor: BlockExecutorProvider<Primitives = <T::Types as NodeTypes>::Primitives>;
@@ -99,7 +99,7 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
         + 'static,
-    EVM: ConfigureEvm<Header = HeaderTy<Node::Types>>,
+    EVM: ConfigureEvm<Header = HeaderTy<Node::Types>, Transaction = TxTy<Node::Types>>,
     Executor: BlockExecutorProvider<Primitives = <Node::Types as NodeTypes>::Primitives>,
     Cons: FullConsensus<<Node::Types as NodeTypes>::Primitives> + Clone + Unpin + 'static,
 {
@@ -139,7 +139,7 @@ impl<Node, Pool, EVM, Executor, Cons> Clone for Components<Node, Pool, EVM, Exec
 where
     Node: FullNodeTypes,
     Pool: TransactionPool,
-    EVM: ConfigureEvm<Header = HeaderTy<Node::Types>>,
+    EVM: ConfigureEvm<Header = HeaderTy<Node::Types>, Transaction = TxTy<Node::Types>>,
     Executor: BlockExecutorProvider,
     Cons: Clone,
 {

@@ -9034,6 +9034,7 @@ dependencies = [
  "reth-network-api",
  "reth-node-api",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-revm",
  "reth-rpc-eth-types",
