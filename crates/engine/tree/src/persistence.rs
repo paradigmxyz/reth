@@ -30,7 +30,10 @@ impl<T> PersistenceNodeTypes for T where T: ProviderNodeTypes<Primitives = EthPr
 /// This should be spawned in its own thread with [`std::thread::spawn`], since this performs
 /// blocking I/O operations in an endless loop.
 #[derive(Debug)]
-pub struct PersistenceService<N: ProviderNodeTypes> {
+pub struct PersistenceService<N>
+where
+    N: PersistenceNodeTypes,
+{
     /// The provider factory to use
     provider: ProviderFactory<N>,
     /// Incoming requests
@@ -43,7 +46,10 @@ pub struct PersistenceService<N: ProviderNodeTypes> {
     sync_metrics_tx: MetricEventsSender,
 }
 
-impl<N: ProviderNodeTypes> PersistenceService<N> {
+impl<N> PersistenceService<N>
+where
+    N: PersistenceNodeTypes,
+{
     /// Create a new persistence service
     pub fn new(
         provider: ProviderFactory<N>,
@@ -66,7 +72,10 @@ impl<N: ProviderNodeTypes> PersistenceService<N> {
     }
 }
 
-impl<N: PersistenceNodeTypes> PersistenceService<N> {
+impl<N> PersistenceService<N>
+where
+    N: PersistenceNodeTypes,
+{
     /// This is the main loop, that will listen to database events and perform the requested
     /// database actions
     pub fn run(mut self) -> Result<(), PersistenceError> {
