@@ -196,15 +196,15 @@ impl LocalTransactionConfig {
 
     /// Returns whether the local addresses vector contains the given address.
     #[inline]
-    pub fn contains_local_address(&self, address: Address) -> bool {
-        self.local_addresses.contains(&address)
+    pub fn contains_local_address(&self, address: &Address) -> bool {
+        self.local_addresses.contains(address)
     }
 
     /// Returns whether the particular transaction should be considered local.
     ///
     /// This always returns false if the local exemptions are disabled.
     #[inline]
-    pub fn is_local(&self, origin: TransactionOrigin, sender: Address) -> bool {
+    pub fn is_local(&self, origin: TransactionOrigin, sender: &Address) -> bool {
         if self.no_local_exemptions() {
             return false
         }
@@ -286,10 +286,10 @@ mod tests {
         let config = LocalTransactionConfig { local_addresses, ..Default::default() };
 
         // Should contain the inserted address
-        assert!(config.contains_local_address(address));
+        assert!(config.contains_local_address(&address));
 
         // Should not contain another random address
-        assert!(!config.contains_local_address(Address::new([2; 20])));
+        assert!(!config.contains_local_address(&Address::new([2; 20])));
     }
 
     #[test]
@@ -302,7 +302,7 @@ mod tests {
         };
 
         // Should return false as no exemptions is set to true
-        assert!(!config.is_local(TransactionOrigin::Local, address));
+        assert!(!config.is_local(TransactionOrigin::Local, &address));
     }
 
     #[test]
@@ -315,13 +315,13 @@ mod tests {
             LocalTransactionConfig { no_exemptions: false, local_addresses, ..Default::default() };
 
         // Should return true as the transaction origin is local
-        assert!(config.is_local(TransactionOrigin::Local, Address::new([2; 20])));
-        assert!(config.is_local(TransactionOrigin::Local, address));
+        assert!(config.is_local(TransactionOrigin::Local, &Address::new([2; 20])));
+        assert!(config.is_local(TransactionOrigin::Local, &address));
 
         // Should return true as the address is in the local_addresses set
-        assert!(config.is_local(TransactionOrigin::External, address));
+        assert!(config.is_local(TransactionOrigin::External, &address));
         // Should return false as the address is not in the local_addresses set
-        assert!(!config.is_local(TransactionOrigin::External, Address::new([2; 20])));
+        assert!(!config.is_local(TransactionOrigin::External, &Address::new([2; 20])));
     }
 
     #[test]

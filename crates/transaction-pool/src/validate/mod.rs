@@ -282,6 +282,11 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.transaction.sender()
     }
 
+    /// Returns a reference to the address of the sender
+    pub fn sender_ref(&self) -> &Address {
+        self.transaction.sender_ref()
+    }
+
     /// Returns the recipient of the transaction if it is not a CREATE transaction.
     pub fn to(&self) -> Option<Address> {
         self.transaction.to()

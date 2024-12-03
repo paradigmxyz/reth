@@ -1023,6 +1023,9 @@ pub trait PoolTransaction:
     /// The Sender of the transaction.
     fn sender(&self) -> Address;
 
+    /// Reference to the Sender of the transaction.
+    fn sender_ref(&self) -> &Address;
+
     /// Returns the nonce for this transaction.
     fn nonce(&self) -> u64;
 
@@ -1275,6 +1278,11 @@ impl PoolTransaction for EthPooledTransaction {
     /// Returns the Sender of the transaction.
     fn sender(&self) -> Address {
         self.transaction.signer()
+    }
+
+    /// Returns a reference to the Sender of the transaction.
+    fn sender_ref(&self) -> &Address {
+        self.transaction.signer_ref()
     }
 
     /// Returns the nonce for this transaction.
