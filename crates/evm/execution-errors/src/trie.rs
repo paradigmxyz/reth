@@ -1,6 +1,6 @@
 //! Errors when computing the state root.
 
-use alloc::string::ToString;
+use alloc::{boxed::Box, string::ToString};
 use alloy_primitives::{Bytes, B256};
 use nybbles::Nibbles;
 use reth_storage_errors::{db::DatabaseError, provider::ProviderError};
