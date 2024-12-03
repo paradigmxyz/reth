@@ -60,6 +60,7 @@ std = [
 	"derive_more/std",
     "revm-primitives/std",
     "secp256k1?/std",
+    "alloy-rlp/std",
 ]
 reth-codec = [
     "dep:reth-codecs",
