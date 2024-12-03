@@ -1,7 +1,6 @@
 //! Helper function for calculating Merkle proofs and hashes.
 
-use crate::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef};
-use crate::receipt::ReceiptEncoding;
+use crate::{Receipt, ReceiptEncoding, ReceiptWithBloom, ReceiptWithBloomRef};
 use alloc::{borrow::Borrow, vec::Vec};
 use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawal};

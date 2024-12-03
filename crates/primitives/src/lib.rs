@@ -40,9 +40,7 @@ pub use block::{
 };
 #[cfg(feature = "reth-codec")]
 pub use compression::*;
-pub use receipt::{
-    gas_spent_by_transactions, Receipt, ReceiptWithBloomRef, Receipts,
-};
+pub use receipt::{gas_spent_by_transactions, Receipt, ReceiptWithBloomRef, Receipts};
 pub use reth_primitives_traits::{
     logs_bloom, Account, Bytecode, GotExpected, GotExpectedBoxed, Header, HeaderError, Log,
     LogData, NodePrimitives, SealedHeader, StorageEntry,
@@ -94,4 +92,13 @@ impl reth_primitives_traits::NodePrimitives for EthPrimitives {
     type SignedTx = crate::TransactionSigned;
     type TxType = crate::TxType;
     type Receipt = crate::Receipt;
+}
+
+pub use receipt::ReceiptWithBloomEncoder;
+/// Trait for encoding receipts with bloom.
+pub trait ReceiptEncoding {
+    /// Returns a [`ReceiptWithBloomEncoder`] for the receipt.
+    fn as_encoder(&self) -> ReceiptWithBloomEncoder<'_>;
+    /// Encodes the receipt with bloom into the given buffer.
+    fn encode_inner(&self, out: &mut dyn bytes::BufMut, with_header: bool);
 }

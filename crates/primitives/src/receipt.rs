@@ -1,21 +1,21 @@
 use alloc::{vec, vec::Vec};
-use core::cmp::Ordering;
 use reth_primitives_traits::InMemorySize;
 
 use alloy_consensus::{
-    constants::{EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID}, Eip2718EncodableReceipt, Eip658Value, ReceiptWithBloom, RlpDecodableReceipt, RlpEncodableReceipt, TxReceipt, Typed2718
+    constants::{EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID},
+    Eip2718EncodableReceipt, Eip658Value, ReceiptWithBloom, RlpDecodableReceipt,
+    RlpEncodableReceipt, TxReceipt, Typed2718,
 };
-use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{Bloom, Log, B256};
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header, RlpDecodable, RlpEncodable};
-use bytes::{Buf, BufMut};
+use bytes::BufMut;
 use derive_more::{DerefMut, From, IntoIterator};
 use reth_primitives_traits::receipt::ReceiptExt;
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "reth-codec")]
 use crate::compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR};
-use crate::TxType;
+use crate::{ReceiptEncoding, TxType};
 
 /// Retrieves gas spent by transactions as a vector of tuples (transaction index, gas used).
 pub use reth_primitives_traits::receipt::gas_spent_by_transactions;
@@ -60,7 +60,7 @@ impl Receipt {
 
     /// Calculates the bloom filter for the receipt and returns the [`ReceiptWithBloom`] container
     /// type.
-    pub fn with_bloom(self) -> ReceiptWithBloom<Receipt> {
+    pub fn with_bloom(self) -> ReceiptWithBloom<Self> {
         self.into()
     }
 
@@ -70,20 +70,21 @@ impl Receipt {
         self.into()
     }
 
-     /// Returns length of RLP-encoded receipt fields with the given [`Bloom`] without an RLP header.
-     pub fn rlp_encoded_fields_length_with_bloom(&self, bloom: &Bloom) -> usize {
-         self.cumulative_gas_used.length()
-            + bloom.length()
-            + self.logs.length()
+    /// Returns length of RLP-encoded receipt fields with the given [`Bloom`] without an RLP header.
+    pub fn rlp_encoded_fields_length_with_bloom(&self, bloom: &Bloom) -> usize {
+        self.cumulative_gas_used.length() + bloom.length() + self.logs.length()
     }
 
-     /// RLP-encodes receipt fields with the given [`Bloom`] without an RLP header.
+    /// RLP-encodes receipt fields with the given [`Bloom`] without an RLP header.
     pub fn rlp_encode_fields_with_bloom(&self, bloom: &Bloom, out: &mut dyn BufMut) {
         self.success.encode(out);
         self.cumulative_gas_used.encode(out);
         bloom.encode(out);
         self.logs.encode(out);
+<<<<<<< HEAD
 
+=======
+>>>>>>> 706f670d3 (fix: make lint)
     }
 
     /// Returns RLP header for this receipt encoding with the given [`Bloom`].
@@ -103,13 +104,14 @@ impl Receipt {
         let logs_bloom = Decodable::decode(buf)?;
         let logs = Decodable::decode(buf)?;
 
-        Ok(ReceiptWithBloom { receipt: Self { tx_type, success, cumulative_gas_used, logs }, logs_bloom })
+        Ok(ReceiptWithBloom {
+            receipt: Self { tx_type, success, cumulative_gas_used, logs },
+            logs_bloom,
+        })
     }
-
 }
 
-
- impl RlpEncodableReceipt for Receipt {
+impl RlpEncodableReceipt for Receipt {
     fn rlp_encoded_length_with_bloom(&self, bloom: &Bloom) -> usize {
         self.rlp_header_with_bloom(bloom).length_with_payload()
     }
@@ -140,9 +142,9 @@ impl RlpDecodableReceipt for Receipt {
 }
 
 impl Typed2718 for Receipt {
-   fn ty(&self) -> u8 {
-    self.tx_type as u8
-   }
+    fn ty(&self) -> u8 {
+        self.tx_type as u8
+    }
 }
 
 impl Eip2718EncodableReceipt for Receipt {
@@ -266,7 +268,6 @@ impl<T> FromIterator<Vec<Option<T>>> for Receipts<T> {
     }
 }
 
-
 impl<T> Default for Receipts<T> {
     fn default() -> Self {
         Self { receipt_vec: Vec::new() }
@@ -305,11 +306,6 @@ impl<'a> arbitrary::Arbitrary<'a> for Receipt {
     }
 }
 
-pub trait ReceiptEncoding {
-    fn as_encoder(&self) -> ReceiptWithBloomEncoder<'_>;
-    fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool);
-}
-
 impl ReceiptEncoding for ReceiptWithBloom<Receipt> {
     fn as_encoder(&self) -> ReceiptWithBloomEncoder<'_> {
         ReceiptWithBloomEncoder { receipt: &self.receipt, bloom: &self.logs_bloom }
@@ -319,7 +315,6 @@ impl ReceiptEncoding for ReceiptWithBloom<Receipt> {
         self.as_encoder().encode_inner(out, with_header)
     }
 }
-
 
 /// [`Receipt`] reference type with calculated bloom filter.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -363,7 +358,9 @@ impl<'a> From<&'a Receipt> for ReceiptWithBloomRef<'a> {
     }
 }
 
-struct ReceiptWithBloomEncoder<'a> {
+/// Encoder for receipts with bloom.
+#[derive(Debug)]
+pub struct ReceiptWithBloomEncoder<'a> {
     bloom: &'a Bloom,
     receipt: &'a Receipt,
 }
