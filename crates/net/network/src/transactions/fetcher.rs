@@ -50,6 +50,7 @@ use reth_network_api::PeerRequest;
 use reth_network_p2p::error::{RequestError, RequestResult};
 use reth_network_peers::PeerId;
 use reth_primitives::PooledTransactionsElement;
+use reth_primitives_traits::SignedTransaction;
 use schnellru::ByLength;
 #[cfg(debug_assertions)]
 use smallvec::{smallvec, SmallVec};
@@ -895,16 +896,14 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             approx_capacity_get_pooled_transactions_req_eth66()
         }
     }
-}
 
-impl TransactionFetcher {
     /// Processes a resolved [`GetPooledTransactions`] request. Queues the outcome as a
     /// [`FetchEvent`], which will then be streamed by
     /// [`TransactionsManager`](super::TransactionsManager).
     pub fn on_resolved_get_pooled_transactions_request_fut(
         &mut self,
-        response: GetPooledTxResponse,
-    ) -> FetchEvent {
+        response: GetPooledTxResponse<N::PooledTransaction>,
+    ) -> FetchEvent<N::PooledTransaction> {
         // update peer activity, requests for buffered hashes can only be made to idle
         // fallback peers
         let GetPooledTxResponse { peer_id, mut requested_hashes, result } = response;
@@ -1026,8 +1025,8 @@ impl TransactionFetcher {
     }
 }
 
-impl Stream for TransactionFetcher {
-    type Item = FetchEvent;
+impl<N: NetworkPrimitives> Stream for TransactionFetcher<N> {
+    type Item = FetchEvent<N::PooledTransaction>;
 
     /// Advances all inflight requests and returns the next event.
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -1176,18 +1175,18 @@ impl<T> Future for GetPooledTxRequestFut<T> {
 
 /// Wrapper of unverified [`PooledTransactions`].
 #[derive(Debug, Constructor, Deref)]
-pub struct UnverifiedPooledTransactions {
-    txns: PooledTransactions,
+pub struct UnverifiedPooledTransactions<T> {
+    txns: PooledTransactions<T>,
 }
 
 /// [`PooledTransactions`] that have been successfully verified.
 #[derive(Debug, Constructor, Deref)]
-pub struct VerifiedPooledTransactions {
-    txns: PooledTransactions,
+pub struct VerifiedPooledTransactions<T> {
+    txns: PooledTransactions<T>,
 }
 
-impl DedupPayload for VerifiedPooledTransactions {
-    type Value = PooledTransactionsElement;
+impl<T: SignedTransaction> DedupPayload for VerifiedPooledTransactions<T> {
+    type Value = T;
 
     fn is_empty(&self) -> bool {
         self.txns.is_empty()
@@ -1199,26 +1198,30 @@ impl DedupPayload for VerifiedPooledTransactions {
 
     fn dedup(self) -> PartiallyValidData<Self::Value> {
         PartiallyValidData::from_raw_data(
-            self.txns.into_iter().map(|tx| (*tx.hash(), tx)).collect(),
+            self.txns.into_iter().map(|tx| (*tx.tx_hash(), tx)).collect(),
             None,
         )
     }
 }
 
 trait VerifyPooledTransactionsResponse {
+    type Transaction: SignedTransaction;
+
     fn verify(
         self,
         requested_hashes: &RequestTxHashes,
         peer_id: &PeerId,
-    ) -> (VerificationOutcome, VerifiedPooledTransactions);
+    ) -> (VerificationOutcome, VerifiedPooledTransactions<Self::Transaction>);
 }
 
-impl VerifyPooledTransactionsResponse for UnverifiedPooledTransactions {
+impl<T: SignedTransaction> VerifyPooledTransactionsResponse for UnverifiedPooledTransactions<T> {
+    type Transaction = T;
+
     fn verify(
         self,
         requested_hashes: &RequestTxHashes,
         _peer_id: &PeerId,
-    ) -> (VerificationOutcome, VerifiedPooledTransactions) {
+    ) -> (VerificationOutcome, VerifiedPooledTransactions<T>) {
         let mut verification_outcome = VerificationOutcome::Ok;
 
         let Self { mut txns } = self;
@@ -1229,11 +1232,11 @@ impl VerifyPooledTransactionsResponse for UnverifiedPooledTransactions {
         let mut tx_hashes_not_requested_count = 0;
 
         txns.0.retain(|tx| {
-            if !requested_hashes.contains(tx.hash()) {
+            if !requested_hashes.contains(tx.tx_hash()) {
                 verification_outcome = VerificationOutcome::ReportPeer;
 
                 #[cfg(debug_assertions)]
-                tx_hashes_not_requested.push(*tx.hash());
+                tx_hashes_not_requested.push(*tx.tx_hash());
                 #[cfg(not(debug_assertions))]
                 {
                     tx_hashes_not_requested_count += 1;

@@ -49,8 +49,7 @@ use reth_network_p2p::{
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
 use reth_primitives::{
-    transaction::SignedTransactionIntoRecoveredExt, PooledTransactionsElement, RecoveredTx,
-    TransactionSigned,
+    transaction::SignedTransactionIntoRecoveredExt, RecoveredTx, TransactionSigned,
 };
 use reth_primitives_traits::{SignedTransaction, TxType};
 use reth_tokio_util::EventStream;
@@ -1307,11 +1306,17 @@ where
 //
 // spawned in `NodeConfig::start_network`(reth_node_core::NodeConfig) and
 // `NetworkConfig::start_network`(reth_network::NetworkConfig)
-impl<Pool> Future for TransactionsManager<Pool>
+impl<Pool, N> Future for TransactionsManager<Pool, N>
 where
     Pool: TransactionPool + Unpin + 'static,
-    Pool::Transaction:
-        PoolTransaction<Consensus = TransactionSigned, Pooled: Into<PooledTransactionsElement>>,
+    N: NetworkPrimitives<
+        BroadcastedTransaction: SignedTransaction,
+        PooledTransaction: SignedTransaction,
+    >,
+    Pool::Transaction: PoolTransaction<
+        Consensus = N::BroadcastedTransaction,
+        Pooled: Into<N::PooledTransaction> + From<RecoveredTx<N::PooledTransaction>>,
+    >,
 {
     type Output = ();
 
