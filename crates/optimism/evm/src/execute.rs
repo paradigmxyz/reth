@@ -258,7 +258,7 @@ where
         _receipts: &[Receipt],
     ) -> Result<Requests, Self::Error> {
         let balance_increments =
-            post_block_balance_increments(&self.chain_spec.clone(), block, total_difficulty);
+            post_block_balance_increments(&self.chain_spec.clone(), &block.block, total_difficulty);
         // increment balances
         self.state
             .increment_balances(balance_increments.clone())
