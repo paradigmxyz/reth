@@ -3,12 +3,11 @@ use core::cmp::Ordering;
 use reth_primitives_traits::InMemorySize;
 
 use alloy_consensus::{
-    constants::{EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID},
-    Eip658Value, TxReceipt, ReceiptWithBloom
+    constants::{EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID}, Eip2718EncodableReceipt, Eip658Value, ReceiptWithBloom, RlpDecodableReceipt, RlpEncodableReceipt, TxReceipt, Typed2718
 };
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{Bloom, Log, B256};
-use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
+use alloy_rlp::{length_of_length, Decodable, Encodable, Header, RlpDecodable, RlpEncodable};
 use bytes::{Buf, BufMut};
 use derive_more::{DerefMut, From, IntoIterator};
 use reth_primitives_traits::receipt::ReceiptExt;
@@ -69,6 +68,90 @@ impl Receipt {
     /// container type.
     pub fn with_bloom_ref(&self) -> ReceiptWithBloomRef<'_> {
         self.into()
+    }
+
+     /// Returns length of RLP-encoded receipt fields with the given [`Bloom`] without an RLP header.
+     pub fn rlp_encoded_fields_length_with_bloom(&self, bloom: &Bloom) -> usize {
+         self.cumulative_gas_used.length()
+            + bloom.length()
+            + self.logs.length()
+    }
+
+     /// RLP-encodes receipt fields with the given [`Bloom`] without an RLP header.
+    pub fn rlp_encode_fields_with_bloom(&self, bloom: &Bloom, out: &mut dyn BufMut) {
+        self.success.encode(out);
+        self.cumulative_gas_used.encode(out);
+        bloom.encode(out);
+        self.logs.encode(out);
+
+    }
+
+    /// Returns RLP header for this receipt encoding with the given [`Bloom`].
+    pub fn rlp_header_with_bloom(&self, bloom: &Bloom) -> Header {
+        Header { list: true, payload_length: self.rlp_encoded_fields_length_with_bloom(bloom) }
+    }
+
+    /// RLP-decodes receipt's field with a [`Bloom`].
+    ///
+    /// Does not expect an RLP header.
+    pub fn rlp_decode_fields_with_bloom(
+        buf: &mut &[u8],
+    ) -> alloy_rlp::Result<ReceiptWithBloom<Self>> {
+        let tx_type = Decodable::decode(buf)?;
+        let success = Decodable::decode(buf)?;
+        let cumulative_gas_used = Decodable::decode(buf)?;
+        let logs_bloom = Decodable::decode(buf)?;
+        let logs = Decodable::decode(buf)?;
+
+        Ok(ReceiptWithBloom { receipt: Self { tx_type, success, cumulative_gas_used, logs }, logs_bloom })
+    }
+
+}
+
+
+ impl RlpEncodableReceipt for Receipt {
+    fn rlp_encoded_length_with_bloom(&self, bloom: &Bloom) -> usize {
+        self.rlp_header_with_bloom(bloom).length_with_payload()
+    }
+
+    fn rlp_encode_with_bloom(&self, bloom: &Bloom, out: &mut dyn BufMut) {
+        self.rlp_header_with_bloom(bloom).encode(out);
+        self.rlp_encode_fields_with_bloom(bloom, out);
+    }
+}
+
+impl RlpDecodableReceipt for Receipt {
+    fn rlp_decode_with_bloom(buf: &mut &[u8]) -> alloy_rlp::Result<ReceiptWithBloom<Self>> {
+        let header = Header::decode(buf)?;
+        if !header.list {
+            return Err(alloy_rlp::Error::UnexpectedString);
+        }
+
+        let remaining = buf.len();
+
+        let this = Self::rlp_decode_fields_with_bloom(buf)?;
+
+        if buf.len() + header.payload_length != remaining {
+            return Err(alloy_rlp::Error::UnexpectedLength);
+        }
+
+        Ok(this)
+    }
+}
+
+impl Typed2718 for Receipt {
+   fn ty(&self) -> u8 {
+    self.tx_type as u8
+   }
+}
+
+impl Eip2718EncodableReceipt for Receipt {
+    fn eip2718_encoded_length_with_bloom(&self, bloom: &Bloom) -> usize {
+        self.rlp_encoded_length_with_bloom(bloom)
+    }
+
+    fn eip2718_encode_with_bloom(&self, bloom: &Bloom, out: &mut dyn BufMut) {
+        self.rlp_encode_with_bloom(bloom, out);
     }
 }
 
