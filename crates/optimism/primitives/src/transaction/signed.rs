@@ -31,7 +31,8 @@ use crate::{OpTransaction, OpTxType};
 
 /// Signed transaction.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Serialize, Deserialize, Constructor)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Constructor)]
 pub struct OpTransactionSigned {
     /// Transaction hash
     pub hash: TxHash,
