@@ -55,3 +55,11 @@ impl BlindedProvider for DefaultBlindedProvider {
         Ok(None)
     }
 }
+
+/// Right pad the path with 0s and return as [`B256`].
+#[inline]
+pub fn pad_path_to_key(path: &Nibbles) -> B256 {
+    let mut padded = path.pack();
+    padded.resize(32, 0);
+    B256::from_slice(&padded)
+}

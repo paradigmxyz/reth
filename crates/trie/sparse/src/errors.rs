@@ -55,4 +55,7 @@ pub enum SparseTrieError {
     /// RLP error.
     #[error(transparent)]
     Rlp(#[from] alloy_rlp::Error),
+    /// Other.
+    #[error(transparent)]
+    Other(#[from] Box<dyn std::error::Error>),
 }
