@@ -7528,7 +7528,6 @@ dependencies = [
  "reth-provider",
  "reth-revm",
  "reth-transaction-pool",
- "reth-trie",
  "revm",
  "tracing",
 ]
@@ -8449,7 +8448,6 @@ dependencies = [
  "reth-revm",
  "reth-rpc-types-compat",
  "reth-transaction-pool",
- "reth-trie",
  "revm",
  "sha2 0.10.8",
  "thiserror 2.0.3",
@@ -8861,7 +8859,6 @@ dependencies = [
  "reth-tasks",
  "reth-testing-utils",
  "reth-transaction-pool",
- "reth-trie",
  "revm",
  "revm-inspectors",
  "revm-primitives",
@@ -9041,7 +9038,6 @@ dependencies = [
  "reth-rpc-types-compat",
  "reth-tasks",
  "reth-transaction-pool",
- "reth-trie",
  "reth-trie-common",
  "revm",
  "revm-inspectors",
@@ -9292,6 +9288,7 @@ dependencies = [
  "reth-storage-errors",
  "reth-trie",
  "reth-trie-db",
+ "revm",
 ]
 
 [[package]]

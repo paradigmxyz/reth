@@ -2,7 +2,7 @@
 use alloy_primitives::{keccak256, map::HashMap, Address, B256, U256};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
-use reth_trie::{HashedPostState, HashedStorage};
+use reth_trie::{HashedPostState, HashedStorage, KeccakKeyHasher};
 use revm::db::{states::BundleBuilder, BundleAccount};
 
 pub fn hash_post_state(c: &mut Criterion) {
@@ -19,7 +19,7 @@ pub fn hash_post_state(c: &mut Criterion) {
 
         // parallel
         group.bench_function(BenchmarkId::new("parallel hashing", size), |b| {
-            b.iter(|| HashedPostState::from_bundle_state(&state))
+            b.iter(|| HashedPostState::from_bundle_state::<KeccakKeyHasher>(&state))
         });
     }
 }
