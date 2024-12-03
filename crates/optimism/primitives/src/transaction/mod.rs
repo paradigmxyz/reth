@@ -23,8 +23,8 @@ use reth_primitives::transaction::{
 use reth_primitives_traits::InMemorySize;
 
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize, Constructor))]
-#[derive(Debug, Clone, PartialEq, Eq, Deref, Hash, From)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, Deref, Hash, From, Constructor)]
 /// Optimistic transaction.
 pub struct OpTransaction(OpTypedTransaction);
 
