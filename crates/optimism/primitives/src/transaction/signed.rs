@@ -25,7 +25,6 @@ use reth_primitives::{
 };
 use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use revm_primitives::{AuthorizationList, OptimismFields, TxEnv};
-use serde::{Deserialize, Serialize};
 
 use crate::{OpTransaction, OpTxType};
 
