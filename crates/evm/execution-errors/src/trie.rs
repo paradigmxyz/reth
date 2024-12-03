@@ -118,7 +118,7 @@ pub enum SparseTrieError {
 }
 
 /// Trie witness errors.
-#[derive(Error, PartialEq, Eq, Clone, Debug)]
+#[derive(Error, Debug)]
 pub enum TrieWitnessError {
     /// Error gather proofs.
     #[error(transparent)]
@@ -126,15 +126,12 @@ pub enum TrieWitnessError {
     /// RLP decoding error.
     #[error(transparent)]
     Rlp(#[from] alloy_rlp::Error),
+    /// Sparse state trie error.
+    #[error(transparent)]
+    Sparse(#[from] SparseStateTrieError),
     /// Missing account.
     #[error("missing account {_0}")]
     MissingAccount(B256),
-    /// Missing target node.
-    #[error("target node missing from proof {_0:?}")]
-    MissingTargetNode(Nibbles),
-    /// Unexpected empty root.
-    #[error("unexpected empty root: {_0:?}")]
-    UnexpectedEmptyRoot(Nibbles),
 }
 
 impl From<TrieWitnessError> for ProviderError {
