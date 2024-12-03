@@ -1,4 +1,4 @@
-use alloy_consensus::Header;
+use alloy_consensus::BlockHeader;
 use alloy_primitives::{keccak256, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use eyre::OptionExt;
@@ -8,8 +8,8 @@ use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{
     state_change::post_block_balance_increments, system_calls::SystemCaller, ConfigureEvm,
 };
-use reth_primitives::{Receipt, SealedBlockWithSenders, SealedHeader};
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives::{NodePrimitives, SealedBlockWithSenders, SealedHeader, TransactionSigned};
+use reth_primitives_traits::{HeaderTy, SignedTransaction};
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase, db::states::bundle_state::BundleRetention,
@@ -54,15 +54,18 @@ where
         + Send
         + Sync
         + 'static,
-    EvmConfig: ConfigureEvm<Header = Header>,
 {
-    fn on_invalid_block(
+    fn on_invalid_block<N>(
         &self,
-        parent_header: &SealedHeader,
-        block: &SealedBlockWithSenders,
-        output: &BlockExecutionOutput<Receipt>,
+        parent_header: &SealedHeader<N::BlockHeader>,
+        block: &SealedBlockWithSenders<N::Block>,
+        output: &BlockExecutionOutput<N::Receipt>,
         trie_updates: Option<(&TrieUpdates, B256)>,
-    ) -> eyre::Result<()> {
+    ) -> eyre::Result<()>
+    where
+        N: NodePrimitives<SignedTx = TransactionSigned>,
+        EvmConfig: ConfigureEvm<Header = N::BlockHeader>,
+    {
         // TODO(alexey): unify with `DebugApi::debug_execution_witness`
 
         // Setup database.
@@ -86,7 +89,7 @@ where
             SystemCaller::new(self.evm_config.clone(), self.provider.chain_spec());
 
         // Apply pre-block system contract calls.
-        system_caller.apply_pre_execution_changes(&block.clone().unseal(), &mut evm)?;
+        system_caller.apply_pre_execution_changes(&block.clone().unseal().block, &mut evm)?;
 
         // Re-execute all of the transactions in the block to load all touched accounts into
         // the cache DB.
@@ -106,7 +109,7 @@ where
         // NOTE: This is not mut because we are not doing the DAO irregular state change here
         let balance_increments = post_block_balance_increments(
             self.provider.chain_spec().as_ref(),
-            &block.block.clone().unseal(),
+            &block.clone().unseal().block,
             U256::MAX,
         );
 
@@ -163,24 +166,24 @@ where
             keys: state_preimages,
         };
         let re_executed_witness_path = self.save_file(
-            format!("{}_{}.witness.re_executed.json", block.number, block.hash()),
+            format!("{}_{}.witness.re_executed.json", block.number(), block.hash()),
             &response,
         )?;
         if let Some(healthy_node_client) = &self.healthy_node_client {
             // Compare the witness against the healthy node.
             let healthy_node_witness = futures::executor::block_on(async move {
-                DebugApiClient::debug_execution_witness(healthy_node_client, block.number.into())
+                DebugApiClient::debug_execution_witness(healthy_node_client, block.number().into())
                     .await
             })?;
 
             let healthy_path = self.save_file(
-                format!("{}_{}.witness.healthy.json", block.number, block.hash()),
+                format!("{}_{}.witness.healthy.json", block.number(), block.hash()),
                 &healthy_node_witness,
             )?;
 
             // If the witnesses are different, write the diff to the output directory.
             if response != healthy_node_witness {
-                let filename = format!("{}_{}.witness.diff", block.number, block.hash());
+                let filename = format!("{}_{}.witness.diff", block.number(), block.hash());
                 let diff_path = self.save_diff(filename, &response, &healthy_node_witness)?;
                 warn!(
                     target: "engine::invalid_block_hooks::witness",
@@ -210,15 +213,15 @@ where
 
         if bundle_state != output.state {
             let original_path = self.save_file(
-                format!("{}_{}.bundle_state.original.json", block.number, block.hash()),
+                format!("{}_{}.bundle_state.original.json", block.number(), block.hash()),
                 &output.state,
             )?;
             let re_executed_path = self.save_file(
-                format!("{}_{}.bundle_state.re_executed.json", block.number, block.hash()),
+                format!("{}_{}.bundle_state.re_executed.json", block.number(), block.hash()),
                 &bundle_state,
             )?;
 
-            let filename = format!("{}_{}.bundle_state.diff", block.number, block.hash());
+            let filename = format!("{}_{}.bundle_state.diff", block.number(), block.hash());
             let diff_path = self.save_diff(filename, &bundle_state, &output.state)?;
 
             warn!(
@@ -236,26 +239,27 @@ where
             state_provider.state_root_with_updates(hashed_state)?;
         if let Some((original_updates, original_root)) = trie_updates {
             if re_executed_root != original_root {
-                let filename = format!("{}_{}.state_root.diff", block.number, block.hash());
+                let filename = format!("{}_{}.state_root.diff", block.number(), block.hash());
                 let diff_path = self.save_diff(filename, &re_executed_root, &original_root)?;
                 warn!(target: "engine::invalid_block_hooks::witness", ?original_root, ?re_executed_root, diff_path = %diff_path.display(), "State root mismatch after re-execution");
             }
 
             // If the re-executed state root does not match the _header_ state root, also log that.
-            if re_executed_root != block.state_root {
-                let filename = format!("{}_{}.header_state_root.diff", block.number, block.hash());
-                let diff_path = self.save_diff(filename, &re_executed_root, &block.state_root)?;
-                warn!(target: "engine::invalid_block_hooks::witness", header_state_root=?block.state_root, ?re_executed_root, diff_path = %diff_path.display(), "Re-executed state root does not match block state root");
+            if re_executed_root != block.state_root() {
+                let filename =
+                    format!("{}_{}.header_state_root.diff", block.number(), block.hash());
+                let diff_path = self.save_diff(filename, &re_executed_root, &block.state_root())?;
+                warn!(target: "engine::invalid_block_hooks::witness", header_state_root=?block.state_root(), ?re_executed_root, diff_path = %diff_path.display(), "Re-executed state root does not match block state root");
             }
 
             if &trie_output != original_updates {
                 // Trie updates are too big to diff, so we just save the original and re-executed
                 let original_path = self.save_file(
-                    format!("{}_{}.trie_updates.original.json", block.number, block.hash()),
+                    format!("{}_{}.trie_updates.original.json", block.number(), block.hash()),
                     original_updates,
                 )?;
                 let re_executed_path = self.save_file(
-                    format!("{}_{}.trie_updates.re_executed.json", block.number, block.hash()),
+                    format!("{}_{}.trie_updates.re_executed.json", block.number(), block.hash()),
                     &trie_output,
                 )?;
                 warn!(
@@ -292,23 +296,24 @@ where
     }
 }
 
-impl<P, EvmConfig> InvalidBlockHook for InvalidBlockWitnessHook<P, EvmConfig>
+impl<P, EvmConfig, N> InvalidBlockHook<N> for InvalidBlockWitnessHook<P, EvmConfig>
 where
+    N: NodePrimitives<SignedTx = TransactionSigned>,
     P: StateProviderFactory
         + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
         + Send
         + Sync
         + 'static,
-    EvmConfig: ConfigureEvm<Header = Header>,
+    EvmConfig: ConfigureEvm<Header = HeaderTy<N>>,
 {
     fn on_invalid_block(
         &self,
-        parent_header: &SealedHeader,
-        block: &SealedBlockWithSenders,
-        output: &BlockExecutionOutput<Receipt>,
+        parent_header: &SealedHeader<N::BlockHeader>,
+        block: &SealedBlockWithSenders<N::Block>,
+        output: &BlockExecutionOutput<N::Receipt>,
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) {
-        if let Err(err) = self.on_invalid_block(parent_header, block, output, trie_updates) {
+        if let Err(err) = self.on_invalid_block::<N>(parent_header, block, output, trie_updates) {
             warn!(target: "engine::invalid_block_hooks::witness", %err, "Failed to invoke hook");
         }
     }
