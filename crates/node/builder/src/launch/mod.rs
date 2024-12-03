@@ -236,7 +236,7 @@ where
             let pipeline = crate::setup::build_networked_pipeline(
                 &ctx.toml_config().stages,
                 network_client.clone(),
-                ctx.consensus(),
+                consensus.clone(),
                 ctx.provider_factory().clone(),
                 ctx.task_executor(),
                 ctx.sync_metrics_tx(),

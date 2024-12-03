@@ -1,16 +1,17 @@
 use alloy_consensus::{BlobTransactionValidationError, EnvKzgSettings, Transaction, TxReceipt};
-use alloy_eips::eip4844::kzg_to_versioned_hash;
+use alloy_eips::{eip4844::kzg_to_versioned_hash, eip7685::RequestsOrHash};
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequest, BuilderBlockValidationRequestV2,
     BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
 };
 use alloy_rpc_types_engine::{
     BlobsBundleV1, CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, PayloadError,
+    PraguePayloadFields,
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
-use reth_consensus::{Consensus, PostExecutionInput};
+use reth_consensus::{Consensus, FullConsensus, PostExecutionInput};
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
 use reth_ethereum_consensus::GAS_LIMIT_BOUND_DIVISOR;
 use reth_evm::execute::{BlockExecutorProvider, Executor};
@@ -44,7 +45,7 @@ where
     /// Create a new instance of the [`ValidationApi`]
     pub fn new(
         provider: Provider,
-        consensus: Arc<dyn Consensus>,
+        consensus: Arc<dyn FullConsensus>,
         executor_provider: E,
         config: ValidationApiConfig,
         task_spawner: Box<dyn TaskSpawner>,
@@ -88,7 +89,7 @@ where
 
 impl<Provider, E> ValidationApi<Provider, E>
 where
-    Provider: BlockReaderIdExt
+    Provider: BlockReaderIdExt<Header = reth_primitives::Header>
         + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + StateProviderFactory
         + HeaderProvider
@@ -386,7 +387,12 @@ where
                         versioned_hashes: self
                             .validate_blobs_bundle(request.request.blobs_bundle)?,
                     },
-                    request.request.execution_requests.into(),
+                    PraguePayloadFields {
+                        requests: RequestsOrHash::Requests(
+                            request.request.execution_requests.into(),
+                        ),
+                        target_blobs_per_block: request.request.target_blobs_per_block,
+                    },
                 ),
             )?
             .try_seal_with_senders()
@@ -404,7 +410,7 @@ where
 #[async_trait]
 impl<Provider, E> BlockSubmissionValidationApiServer for ValidationApi<Provider, E>
 where
-    Provider: BlockReaderIdExt
+    Provider: BlockReaderIdExt<Header = reth_primitives::Header>
         + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + StateProviderFactory
         + HeaderProvider
@@ -475,7 +481,7 @@ pub struct ValidationApiInner<Provider: ChainSpecProvider, E> {
     /// The provider that can interact with the chain.
     provider: Provider,
     /// Consensus implementation.
-    consensus: Arc<dyn Consensus>,
+    consensus: Arc<dyn FullConsensus>,
     /// Execution payload validator.
     payload_validator: ExecutionPayloadValidator<Provider::ChainSpec>,
     /// Block executor factory.

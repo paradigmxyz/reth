@@ -8,7 +8,7 @@ use alloy_rlp::{
 use derive_more::{Constructor, Deref, DerefMut, From, IntoIterator};
 use reth_codecs_derive::{add_arbitrary_tests, generate_tests};
 use reth_primitives::TransactionSigned;
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{SignedTransaction, Transaction};
 use std::{
     collections::{HashMap, HashSet},
     mem,
@@ -94,7 +94,7 @@ pub struct Transactions<T = TransactionSigned>(
     pub Vec<T>,
 );
 
-impl Transactions {
+impl<T: SignedTransaction> Transactions<T> {
     /// Returns `true` if the list of transactions contains any blob transactions.
     pub fn has_eip4844(&self) -> bool {
         self.0.iter().any(|tx| tx.is_eip4844())

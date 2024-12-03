@@ -1,10 +1,9 @@
 //! Errors for sparse trie.
 
+use crate::SparseNode;
 use alloy_primitives::{Bytes, B256};
 use reth_trie_common::Nibbles;
 use thiserror::Error;
-
-use crate::SparseNode;
 
 /// Result type with [`SparseStateTrieError`] as error.
 pub type SparseStateTrieResult<Ok> = Result<Ok, SparseStateTrieError>;

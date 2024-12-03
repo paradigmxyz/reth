@@ -410,6 +410,7 @@ where
             blob_gas_used,
             excess_blob_gas,
             requests_hash: None,
+            target_blobs_per_block: None,
         };
 
         // seal the block
@@ -748,7 +749,7 @@ where
                 ))
             }
 
-            // Convert the transaction to a [TransactionSignedEcRecovered]. This is
+            // Convert the transaction to a [RecoveredTx]. This is
             // purely for the purposes of utilizing the `evm_config.tx_env`` function.
             // Deposit transactions do not have signatures, so if the tx is a deposit, this
             // will just pull in its `from` address.

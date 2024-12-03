@@ -41,6 +41,7 @@
 //!             Transaction = TransactionSigned,
 //!             Block = reth_primitives::Block,
 //!             Receipt = reth_primitives::Receipt,
+//!             Header = reth_primitives::Header,
 //!         > + AccountReader
 //!         + ChangeSetReader,
 //!     Pool: TransactionPool + Unpin + 'static,
@@ -49,7 +50,7 @@
 //!         CanonStateSubscriptions<Primitives = reth_primitives::EthPrimitives> + Clone + 'static,
 //!     EvmConfig: ConfigureEvm<Header = Header>,
 //!     BlockExecutor: BlockExecutorProvider<Primitives = Events::Primitives>,
-//!     Consensus: reth_consensus::Consensus + Clone + 'static,
+//!     Consensus: reth_consensus::FullConsensus + Clone + 'static,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -121,6 +122,7 @@
 //!             Transaction = TransactionSigned,
 //!             Block = reth_primitives::Block,
 //!             Receipt = reth_primitives::Receipt,
+//!             Header = reth_primitives::Header,
 //!         > + AccountReader
 //!         + ChangeSetReader,
 //!     Pool: TransactionPool + Unpin + 'static,
@@ -131,7 +133,7 @@
 //!     EngineT: EngineTypes,
 //!     EvmConfig: ConfigureEvm<Header = Header>,
 //!     BlockExecutor: BlockExecutorProvider<Primitives = Events::Primitives>,
-//!     Consensus: reth_consensus::Consensus + Clone + 'static,
+//!     Consensus: reth_consensus::FullConsensus + Clone + 'static,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -194,14 +196,14 @@ use jsonrpsee::{
     Methods, RpcModule,
 };
 use reth_chainspec::EthereumHardforks;
-use reth_consensus::Consensus;
+use reth_consensus::FullConsensus;
 use reth_engine_primitives::EngineTypes;
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_primitives::{EthPrimitives, NodePrimitives};
 use reth_provider::{
     AccountReader, BlockReader, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
-    EvmEnvProvider, FullRpcProvider, ReceiptProvider, StateProviderFactory,
+    EvmEnvProvider, FullRpcProvider, HeaderProvider, ReceiptProvider, StateProviderFactory,
 };
 use reth_rpc::{
     AdminApi, DebugApi, EngineEthApi, EthBundle, NetApi, OtterscanApi, RPCApi, RethApi, TraceApi,
@@ -266,11 +268,14 @@ pub async fn launch<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi, B
     evm_config: EvmConfig,
     eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi>,
     block_executor: BlockExecutor,
-    consensus: Arc<dyn Consensus>,
+    consensus: Arc<dyn FullConsensus>,
 ) -> Result<RpcServerHandle, RpcError>
 where
-    Provider: FullRpcProvider<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
-        + AccountReader
+    Provider: FullRpcProvider<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+            Header = reth_primitives::Header,
+        > + AccountReader
         + ChangeSetReader,
     Pool: TransactionPool + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
@@ -641,7 +646,7 @@ where
             Receipt = reth_primitives::Receipt,
         >,
     >,
-    Consensus: reth_consensus::Consensus + Clone + 'static,
+    Consensus: reth_consensus::FullConsensus + Clone + 'static,
 {
     /// Configures all [`RpcModule`]s specific to the given [`TransportRpcModuleConfig`] which can
     /// be used to start the transport server(s).
@@ -667,6 +672,7 @@ where
         Provider: BlockReader<
             Block = <EthApi::Provider as BlockReader>::Block,
             Receipt = <EthApi::Provider as ReceiptProvider>::Receipt,
+            Header = <EthApi::Provider as HeaderProvider>::Header,
         >,
     {
         let Self {
@@ -743,7 +749,11 @@ where
     ) -> RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
     where
         EthApi: EthApiTypes + 'static,
-        Provider: BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>,
+        Provider: BlockReader<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+            Header = reth_primitives::Header,
+        >,
     {
         let Self {
             provider,
@@ -781,6 +791,7 @@ where
         Provider: BlockReader<
             Block = <EthApi::Provider as BlockReader>::Block,
             Receipt = <EthApi::Provider as ReceiptProvider>::Receipt,
+            Header = <EthApi::Provider as HeaderProvider>::Header,
         >,
     {
         let mut modules = TransportRpcModules::default();
@@ -940,8 +951,11 @@ impl<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
     RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
 where
     Provider: StateProviderFactory
-        + BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
-        + EvmEnvProvider
+        + BlockReader<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+            Header = reth_primitives::Header,
+        > + EvmEnvProvider
         + Clone
         + Unpin
         + 'static,
@@ -1293,7 +1307,7 @@ where
     /// Instantiates `ValidationApi`
     pub fn validation_api(&self) -> ValidationApi<Provider, BlockExecutor>
     where
-        Consensus: reth_consensus::Consensus + Clone + 'static,
+        Consensus: reth_consensus::FullConsensus + Clone + 'static,
     {
         ValidationApi::new(
             self.provider.clone(),
@@ -1311,6 +1325,7 @@ where
     Provider: FullRpcProvider<
             Block = <EthApi::Provider as BlockReader>::Block,
             Receipt = <EthApi::Provider as ReceiptProvider>::Receipt,
+            Header = <EthApi::Provider as HeaderProvider>::Header,
         > + AccountReader
         + ChangeSetReader,
     Pool: TransactionPool + 'static,
@@ -1324,7 +1339,7 @@ where
             Receipt = reth_primitives::Receipt,
         >,
     >,
-    Consensus: reth_consensus::Consensus + Clone + 'static,
+    Consensus: reth_consensus::FullConsensus + Clone + 'static,
 {
     /// Configures the auth module that includes the
     ///   * `engine_` namespace

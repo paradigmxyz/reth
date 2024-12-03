@@ -61,7 +61,6 @@ serde_json.workspace = true
 # misc
 thiserror.workspace = true
 tracing.workspace = true
-derive_more = { workspace = true, features = ["constructor", "deref"] }
 
 [dev-dependencies]
 reth-optimism-chainspec.workspace = true

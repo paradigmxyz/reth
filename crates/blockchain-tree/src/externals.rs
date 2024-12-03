@@ -1,7 +1,7 @@
 //! Blockchain tree externals.
 
 use alloy_primitives::{BlockHash, BlockNumber};
-use reth_consensus::Consensus;
+use reth_consensus::FullConsensus;
 use reth_db::{static_file::BlockHashMask, tables};
 use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
 use reth_node_types::NodeTypesWithDB;
@@ -28,7 +28,7 @@ pub struct TreeExternals<N: NodeTypesWithDB, E> {
     /// The provider factory, used to commit the canonical chain, or unwind it.
     pub(crate) provider_factory: ProviderFactory<N>,
     /// The consensus engine.
-    pub(crate) consensus: Arc<dyn Consensus>,
+    pub(crate) consensus: Arc<dyn FullConsensus>,
     /// The executor factory to execute blocks with.
     pub(crate) executor_factory: E,
 }
@@ -37,7 +37,7 @@ impl<N: ProviderNodeTypes, E> TreeExternals<N, E> {
     /// Create new tree externals.
     pub fn new(
         provider_factory: ProviderFactory<N>,
-        consensus: Arc<dyn Consensus>,
+        consensus: Arc<dyn FullConsensus>,
         executor_factory: E,
     ) -> Self {
         Self { provider_factory, consensus, executor_factory }

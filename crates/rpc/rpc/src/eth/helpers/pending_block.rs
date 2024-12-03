@@ -21,6 +21,7 @@ where
             Provider: BlockReaderIdExt<
                 Block = reth_primitives::Block,
                 Receipt = reth_primitives::Receipt,
+                Header = reth_primitives::Header,
             > + EvmEnvProvider
                           + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                           + StateProviderFactory,
