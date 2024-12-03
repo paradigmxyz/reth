@@ -757,8 +757,8 @@ impl<P> RevealedSparseTrie<P> {
 
                     // Save a branch node update only if it's not a root node, and we need to
                     // persist updates.
-                    let store_in_db_trie_value = if let (false, Some(updates)) =
-                        (path.is_empty(), self.updates.as_mut())
+                    let store_in_db_trie_value = if let Some(updates) =
+                        self.updates.as_mut().filter(|_| !path.is_empty())
                     {
                         let mut tree_mask_values = tree_mask_values.into_iter().rev();
                         let mut hash_mask_values = hash_mask_values.into_iter().rev();
