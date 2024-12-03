@@ -7,7 +7,6 @@ use std::{
 
 use alloy_network::Network;
 use alloy_rpc_types_eth::Block;
-use reth_primitives::TransactionSigned;
 use reth_provider::{ProviderTx, ReceiptProvider, TransactionsProvider};
 use reth_rpc_types_compat::TransactionCompat;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
@@ -49,8 +48,7 @@ pub type RpcError<T> = <T as EthApiTypes>::Error;
 pub trait FullEthApiTypes
 where
     Self: RpcNodeCore<
-            Provider: TransactionsProvider<Transaction = TransactionSigned>
-                          + ReceiptProvider<Receipt = reth_primitives::Receipt>,
+            Provider: TransactionsProvider + ReceiptProvider,
             Pool: TransactionPool<
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
             >,
@@ -66,8 +64,7 @@ where
 
 impl<T> FullEthApiTypes for T where
     T: RpcNodeCore<
-            Provider: TransactionsProvider<Transaction = TransactionSigned>
-                          + ReceiptProvider<Receipt = reth_primitives::Receipt>,
+            Provider: TransactionsProvider + ReceiptProvider,
             Pool: TransactionPool<
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
             >,
