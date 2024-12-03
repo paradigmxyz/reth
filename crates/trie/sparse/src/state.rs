@@ -46,7 +46,7 @@ impl Default for SparseStateTrie {
     }
 }
 
-impl fmt::Debug for SparseStateTrie {
+impl<P: BlindedProviderFactory> fmt::Debug for SparseStateTrie<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SparseStateTrie")
             .field("state", &self.state)
