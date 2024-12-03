@@ -702,9 +702,8 @@ where
         BroadcastedTransaction: SignedTransaction,
         PooledTransaction: SignedTransaction,
     >,
-    <<Pool as TransactionPool>::Transaction as PoolTransaction>::Consensus:
-        Into<N::BroadcastedTransaction>,
-    <<Pool as TransactionPool>::Transaction as PoolTransaction>::Pooled: Into<N::PooledTransaction>,
+    Pool::Transaction:
+        PoolTransaction<Consensus = N::BroadcastedTransaction, Pooled: Into<N::PooledTransaction>>,
 {
     /// Invoked when transactions in the local mempool are considered __pending__.
     ///
@@ -1011,9 +1010,8 @@ where
 impl<Pool> TransactionsManager<Pool>
 where
     Pool: TransactionPool + 'static,
-    <<Pool as TransactionPool>::Transaction as PoolTransaction>::Consensus: Into<TransactionSigned>,
-    <<Pool as TransactionPool>::Transaction as PoolTransaction>::Pooled:
-        Into<PooledTransactionsElement>,
+    Pool::Transaction:
+        PoolTransaction<Consensus = TransactionSigned, Pooled: Into<PooledTransactionsElement>>,
 {
     /// Handles dedicated transaction events related to the `eth` protocol.
     fn on_network_tx_event(&mut self, event: NetworkTransactionEvent) {
@@ -1313,9 +1311,8 @@ where
 impl<Pool> Future for TransactionsManager<Pool>
 where
     Pool: TransactionPool + Unpin + 'static,
-    <<Pool as TransactionPool>::Transaction as PoolTransaction>::Consensus: Into<TransactionSigned>,
-    <<Pool as TransactionPool>::Transaction as PoolTransaction>::Pooled:
-        Into<PooledTransactionsElement>,
+    Pool::Transaction:
+        PoolTransaction<Consensus = TransactionSigned, Pooled: Into<PooledTransactionsElement>>,
 {
     type Output = ();
 
@@ -1503,11 +1500,11 @@ impl<T: SignedTransaction> PropagateTransaction<T> {
     /// Create a new instance from a pooled transaction
     fn new<P>(tx: Arc<ValidPoolTransaction<P>>) -> Self
     where
-        P: PoolTransaction<Consensus: Into<T>>,
+        P: PoolTransaction<Consensus = T>,
     {
         let size = tx.encoded_length();
-        let transaction = tx.transaction.clone_into_consensus().into();
-        let transaction = Arc::new(transaction);
+        let transaction = tx.transaction.clone_into_consensus();
+        let transaction = Arc::new(transaction.into_signed());
         Self { size, transaction }
     }
 

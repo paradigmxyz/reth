@@ -186,14 +186,20 @@ pub struct OpChainSpec {
 
 impl OpChainSpec {
     /// Read from parent to determine the base fee for the next block
+    ///
+    /// See also [Base fee computation](https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#base-fee-computation)
     pub fn next_block_base_fee(
         &self,
         parent: &Header,
         timestamp: u64,
     ) -> Result<U256, DecodeError> {
-        let is_holocene_activated = self
-            .inner
-            .is_fork_active_at_timestamp(reth_optimism_forks::OpHardfork::Holocene, timestamp);
+        // > if Holocene is active in parent_header.timestamp, then the parameters from
+        // > parent_header.extraData are used.
+        let is_holocene_activated = self.inner.is_fork_active_at_timestamp(
+            reth_optimism_forks::OpHardfork::Holocene,
+            parent.timestamp,
+        );
+
         // If we are in the Holocene, we need to use the base fee params
         // from the parent block's extra data.
         // Else, use the base fee params (default values) from chainspec

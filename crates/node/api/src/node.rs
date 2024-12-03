@@ -8,11 +8,11 @@ use reth_consensus::FullConsensus;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network_api::FullNetwork;
 use reth_node_core::node_config::NodeConfig;
-use reth_node_types::{NodeTypes, NodeTypesWithDB, NodeTypesWithEngine};
+use reth_node_types::{NodeTypes, NodeTypesWithDB, NodeTypesWithEngine, TxTy};
 use reth_payload_builder_primitives::PayloadBuilder;
 use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
-use reth_transaction_pool::TransactionPool;
+use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::{future::Future, marker::PhantomData};
 
 /// A helper trait that is downstream of the [`NodeTypesWithEngine`] trait and adds stateful
@@ -47,7 +47,7 @@ where
 /// Encapsulates all types and components of the node.
 pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     /// The transaction pool of the node.
-    type Pool: TransactionPool + Unpin;
+    type Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self::Types>>> + Unpin;
 
     /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
     type Evm: ConfigureEvm<Header = Header>;

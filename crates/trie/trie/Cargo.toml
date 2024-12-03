@@ -17,6 +17,7 @@ reth-execution-errors.workspace = true
 reth-primitives.workspace = true
 reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
+reth-trie-sparse.workspace = true
 reth-trie-common.workspace = true
 
 revm.workspace = true

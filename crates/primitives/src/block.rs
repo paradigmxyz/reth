@@ -1,6 +1,6 @@
 use crate::{
     traits::BlockExt, transaction::SignedTransactionIntoRecoveredExt, BlockBodyTxExt, GotExpected,
-    SealedHeader, TransactionSigned, TransactionSignedEcRecovered,
+    RecoveredTx, SealedHeader, TransactionSigned,
 };
 use alloc::vec::Vec;
 use alloy_consensus::Header;
@@ -206,11 +206,7 @@ impl<B: reth_primitives_traits::Block> BlockWithSenders<B> {
     #[inline]
     pub fn into_transactions_ecrecovered(
         self,
-    ) -> impl Iterator<
-        Item = TransactionSignedEcRecovered<
-            <B::Body as reth_primitives_traits::BlockBody>::Transaction,
-        >,
-    >
+    ) -> impl Iterator<Item = RecoveredTx<<B::Body as reth_primitives_traits::BlockBody>::Transaction>>
     where
         <B::Body as reth_primitives_traits::BlockBody>::Transaction: SignedTransaction,
     {
@@ -560,11 +556,7 @@ impl<B: reth_primitives_traits::Block> SealedBlockWithSenders<B> {
     #[inline]
     pub fn into_transactions_ecrecovered(
         self,
-    ) -> impl Iterator<
-        Item = TransactionSignedEcRecovered<
-            <B::Body as reth_primitives_traits::BlockBody>::Transaction,
-        >,
-    >
+    ) -> impl Iterator<Item = RecoveredTx<<B::Body as reth_primitives_traits::BlockBody>::Transaction>>
     where
         <B::Body as reth_primitives_traits::BlockBody>::Transaction: SignedTransaction,
     {

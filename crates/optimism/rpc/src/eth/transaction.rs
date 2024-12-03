@@ -6,7 +6,7 @@ use alloy_rpc_types_eth::TransactionInfo;
 use op_alloy_consensus::OpTxEnvelope;
 use op_alloy_rpc_types::Transaction;
 use reth_node_api::FullNodeComponents;
-use reth_primitives::{TransactionSigned, TransactionSignedEcRecovered};
+use reth_primitives::{RecoveredTx, TransactionSigned};
 use reth_provider::{BlockReaderIdExt, ReceiptProvider, TransactionsProvider};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
@@ -81,7 +81,7 @@ where
 
     fn fill(
         &self,
-        tx: TransactionSignedEcRecovered,
+        tx: RecoveredTx,
         tx_info: TransactionInfo,
     ) -> Result<Self::Transaction, Self::Error> {
         let from = tx.signer();
