@@ -205,7 +205,7 @@ where
                     .map(|receipt| receipt.with_bloom())
                     .collect::<Vec<_>>();
 
-                total_bytes += receipt.length();
+                total_bytes += receipt.len();
                 receipts.push(receipt);
 
                 if receipts.len() >= MAX_RECEIPTS_SERVE || total_bytes > SOFT_RESPONSE_LIMIT {
