@@ -121,14 +121,14 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     /// The error type that is returned by [`Self::next_cfg_and_block_env`].
     type Error: core::error::Error + Send + Sync;
 
-    /// Returns a [`TxEnv`] from a [`TransactionSigned`] and [`Address`].
+    /// Returns a [`TxEnv`] from a transaction and [`Address`].
     fn tx_env(&self, transaction: &Self::Transaction, signer: Address) -> TxEnv {
         let mut tx_env = TxEnv::default();
         self.fill_tx_env(&mut tx_env, transaction, signer);
         tx_env
     }
 
-    /// Fill transaction environment from a [`TransactionSigned`] and the given sender address.
+    /// Fill transaction environment from a transaction  and the given sender address.
     fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &Self::Transaction, sender: Address);
 
     /// Fill transaction environment with a system contract call.
