@@ -1462,7 +1462,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         transaction: ValidPoolTransaction<T>,
         on_chain_nonce: u64,
     ) -> Result<ValidPoolTransaction<T>, InsertErr<T>> {
-        if !self.local_transactions_config.is_local(transaction.origin, transaction.sender()) {
+        if !self.local_transactions_config.is_local(transaction.origin, transaction.sender_ref()) {
             let current_txs =
                 self.tx_counter.get(&transaction.sender_id()).copied().unwrap_or_default();
 

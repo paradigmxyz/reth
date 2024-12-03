@@ -1624,6 +1624,11 @@ impl<T> RecoveredTx<T> {
         self.signer
     }
 
+    /// Reference to the signer of transaction recovered from signature
+    pub const fn signer_ref(&self) -> &Address {
+        &self.signer
+    }
+
     /// Returns a reference to [`TransactionSigned`]
     pub const fn as_signed(&self) -> &T {
         &self.signed_transaction
