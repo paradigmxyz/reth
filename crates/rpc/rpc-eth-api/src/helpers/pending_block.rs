@@ -70,31 +70,29 @@ pub trait LoadPendingBlock:
     ///
     /// If no pending block is available, this will derive it from the `latest` block
     fn pending_block_env_and_cfg(&self) -> Result<PendingBlockEnv, Self::Error> {
-        let maybe_actual_pending = {
-            if let Some(pending) =
-                self.provider().pending_block_with_senders().map_err(Self::Error::from_eth_err)?
+        if let Some(block) =
+            self.provider().pending_block_with_senders().map_err(Self::Error::from_eth_err)?
+        {
+            if let Some(receipts) = self
+                .provider()
+                .receipts_by_block(block.hash().into())
+                .map_err(Self::Error::from_eth_err)?
             {
-                if let Some(receipts) = self
+                // Note: for the PENDING block we assume it is past the known merge block and
+                // thus this will not fail when looking up the total
+                // difficulty value for the blockenv.
+                let (cfg, block_env) = self
                     .provider()
-                    .receipts_by_block(pending.hash().into())
-                    .map_err(Self::Error::from_eth_err)?
-                {
-                    // Note: for the PENDING block we assume it is past the known merge block and
-                    // thus this will not fail when looking up the total
-                    // difficulty value for the blockenv.
-                    let (cfg, block_env) = self
-                        .provider()
-                        .env_with_header(block.header(), self.evm_config().clone())
-                        .map_err(Self::Error::from_eth_err)?;
+                    .env_with_header(block.header(), self.evm_config().clone())
+                    .map_err(Self::Error::from_eth_err)?;
 
-                    return Ok(PendingBlockEnv::new(
-                        cfg,
-                        block_env,
-                        PendingBlockEnvOrigin::ActualPending(block, receipts),
-                    ));
-                }
+                return Ok(PendingBlockEnv::new(
+                    cfg,
+                    block_env,
+                    PendingBlockEnvOrigin::ActualPending(block, receipts),
+                ));
             }
-        };
+        }
 
         // no pending block from the CL yet, so we use the latest block and modify the env
         // values that we can
