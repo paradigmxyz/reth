@@ -15,10 +15,10 @@ use crate::{
     HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter,
     KeyHasherProvider, LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown,
     ProviderError, PruneCheckpointReader, PruneCheckpointWriter, RevertsInit,
-    StageCheckpointReader, StateCommitmentProvider, StateProviderBox, StateWriter,
-    StaticFileProviderFactory, StatsReader, StorageLocation, StorageReader, StorageTrieWriter,
-    TransactionVariant, TransactionsProvider, TransactionsProviderExt, TrieWriter,
-    WithdrawalsProvider,
+    StageCheckpointReader, StateCommitmentProvider, StateProviderBox, StateRootProviderExt,
+    StateWriter, StaticFileProviderFactory, StatsReader, StorageLocation, StorageReader,
+    StorageTrieWriter, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
+    TrieWriter, WithdrawalsProvider,
 };
 use alloy_consensus::Header;
 use alloy_eips::{
@@ -67,9 +67,9 @@ use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
     updates::{StorageTrieUpdates, TrieUpdates},
-    HashedPostStateSorted, KeyHasher, Nibbles, StateRoot, StoredNibbles,
+    HashedPostStateSorted, KeyHasher, Nibbles, StoredNibbles,
 };
-use reth_trie_db::{DatabaseStateRoot, DatabaseStorageTrieCursor, StateCommitment};
+use reth_trie_db::{DatabaseStorageTrieCursor, StateCommitment};
 use revm::{
     db::states::{PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset},
     primitives::{BlockEnv, CfgEnvWithHandlerCfg},
@@ -318,10 +318,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             storage_prefix_sets,
             destroyed_accounts,
         };
-        let (new_state_root, trie_updates) = StateRoot::from_tx(&self.tx)
-            .with_prefix_sets(prefix_sets)
-            .root_with_updates()
-            .map_err(Into::<reth_db::DatabaseError>::into)?;
+        let (new_state_root, trie_updates) = LatestStateProviderRef::new(self)
+            .state_root_from_prefix_sets_with_updates(prefix_sets)?;
 
         let parent_number = range.start().saturating_sub(1);
         let parent_state_root = self
@@ -2590,10 +2588,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
                     .collect(),
                 destroyed_accounts,
             };
-            let (state_root, trie_updates) = StateRoot::from_tx(&self.tx)
-                .with_prefix_sets(prefix_sets)
-                .root_with_updates()
-                .map_err(Into::<reth_db::DatabaseError>::into)?;
+            let (state_root, trie_updates) = LatestStateProviderRef::new(self)
+                .state_root_from_prefix_sets_with_updates(prefix_sets)?;
             if state_root != expected_state_root {
                 return Err(ProviderError::StateRootMismatch(Box::new(RootMismatch {
                     root: GotExpected { got: state_root, expected: expected_state_root },

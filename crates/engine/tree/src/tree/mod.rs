@@ -2268,7 +2268,7 @@ where
             result
         } else {
             debug!(target: "engine::tree", block=?sealed_block.num_hash(), persistence_in_progress, "Failed to compute state root in parallel");
-            state_provider.state_root_with_updates(hashed_state.clone())?
+            state_provider.state_root_from_state_with_updates(hashed_state.clone())?
         };
 
         if state_root != block.state_root {

@@ -237,7 +237,7 @@ impl AppendableChain {
                 .map_err(ProviderError::from)?
             } else {
                 let hashed_state = provider.hashed_post_state(initial_execution_outcome.state());
-                let state_root = provider.state_root(hashed_state)?;
+                let state_root = provider.state_root_from_state(hashed_state)?;
                 (state_root, None)
             };
             if block.state_root != state_root {

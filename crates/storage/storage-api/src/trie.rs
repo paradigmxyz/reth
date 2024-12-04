@@ -1,11 +1,13 @@
 use alloy_primitives::{
     map::{HashMap, HashSet},
-    Address, Bytes, B256,
+    Address, BlockNumber, Bytes, B256,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
+    prefix_set::TriePrefixSets,
     updates::{StorageTrieUpdates, TrieUpdates},
-    AccountProof, HashedPostState, HashedStorage, MultiProof, StorageMultiProof, StorageProof,
+    AccountProof, HashedPostState, HashedPostStateSorted, HashedStorage,
+    IntermediateStateRootState, MultiProof, StateRootProgress, StorageMultiProof, StorageProof,
     TrieInput,
 };
 
@@ -19,7 +21,7 @@ pub trait StateRootProvider: Send + Sync {
     /// It is recommended to provide a different implementation from
     /// `state_root_with_updates` since it affects the memory usage during state root
     /// computation.
-    fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256>;
+    fn state_root_from_state(&self, hashed_state: HashedPostState) -> ProviderResult<B256>;
 
     /// Returns the state root of the `HashedPostState` on top of the current state but re-uses the
     /// intermediate nodes to speed up the computation. It's up to the caller to construct the
@@ -28,7 +30,7 @@ pub trait StateRootProvider: Send + Sync {
 
     /// Returns the state root of the `HashedPostState` on top of the current state with trie
     /// updates to be committed to the database.
-    fn state_root_with_updates(
+    fn state_root_from_state_with_updates(
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)>;
@@ -39,6 +41,40 @@ pub trait StateRootProvider: Send + Sync {
         &self,
         input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)>;
+}
+
+/// A trait that is used to compute the state root of the latest state stored in the database.
+pub trait StateRootProviderExt: Send + Sync {
+    /// Returns the state root of the current state.
+    fn state_root(&self) -> ProviderResult<B256>;
+
+    /// Returns the state root of the current state and trie updates.
+    fn state_root_with_updates(&self) -> ProviderResult<(B256, TrieUpdates)>;
+
+    /// Returns the state root with trie updates associated with the given block range.
+    fn incremental_state_root_with_updates(
+        &self,
+        range: std::ops::RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<(B256, TrieUpdates)>;
+
+    /// Returns the state root progress.
+    fn state_root_with_progress(
+        &self,
+        state: Option<IntermediateStateRootState>,
+    ) -> ProviderResult<StateRootProgress>;
+
+    /// Returns the state root of the current state with the provided prefix sets updated.
+    fn state_root_from_prefix_sets_with_updates(
+        &self,
+        prefix_set: TriePrefixSets,
+    ) -> ProviderResult<(B256, TrieUpdates)>;
+
+    /// Returns the state root of the [`HashedPostState`] on top of the current, the trie updates
+    /// and the sorted hashed post state ([`HashedPostStateSorted`]).
+    fn state_root_from_state_with_updates_and_sorted_state(
+        &self,
+        hashed_state: HashedPostState,
+    ) -> ProviderResult<(B256, TrieUpdates, HashedPostStateSorted)>;
 }
 
 /// A type that can compute the storage root for a given account.

@@ -83,25 +83,25 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> AccountReader for BundleStat
 impl<SP: StateProvider, EDP: ExecutionDataProvider> StateRootProvider
     for BundleStateProvider<SP, EDP>
 {
-    fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
+    fn state_root_from_state(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
         let mut state = self.hashed_post_state(bundle_state);
         state.extend(hashed_state);
-        self.state_provider.state_root(state)
+        self.state_provider.state_root_from_state(state)
     }
 
     fn state_root_from_nodes(&self, _input: TrieInput) -> ProviderResult<B256> {
         unimplemented!()
     }
 
-    fn state_root_with_updates(
+    fn state_root_from_state_with_updates(
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
         let mut state = self.hashed_post_state(bundle_state);
         state.extend(hashed_state);
-        self.state_provider.state_root_with_updates(state)
+        self.state_provider.state_root_from_state_with_updates(state)
     }
 
     fn state_root_from_nodes_with_updates(

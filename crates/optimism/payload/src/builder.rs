@@ -371,13 +371,15 @@ where
         let state_provider = state.database.as_ref();
         let hashed_state = state_provider.hashed_post_state(execution_outcome.state());
         let (state_root, trie_output) = {
-            state_provider.state_root_with_updates(hashed_state.clone()).inspect_err(|err| {
-                warn!(target: "payload_builder",
-                parent_header=%ctx.parent().hash(),
-                    %err,
-                    "failed to calculate state root for payload"
-                );
-            })?
+            state_provider.state_root_from_state_with_updates(hashed_state.clone()).inspect_err(
+                |err| {
+                    warn!(target: "payload_builder",
+                    parent_header=%ctx.parent().hash(),
+                        %err,
+                        "failed to calculate state root for payload"
+                    );
+                },
+            )?
         };
 
         // create the block header

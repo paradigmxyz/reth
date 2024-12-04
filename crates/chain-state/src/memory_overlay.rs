@@ -119,7 +119,7 @@ macro_rules! impl_state_provider {
         }
 
         impl $($tokens)* StateRootProvider for $type {
-            fn state_root(&self, state: HashedPostState) -> ProviderResult<B256> {
+            fn state_root_from_state(&self, state: HashedPostState) -> ProviderResult<B256> {
                 self.state_root_from_nodes(TrieInput::from_state(state))
             }
 
@@ -129,7 +129,7 @@ macro_rules! impl_state_provider {
                 self.historical.state_root_from_nodes(input)
             }
 
-            fn state_root_with_updates(
+            fn state_root_from_state_with_updates(
                 &self,
                 state: HashedPostState,
             ) -> ProviderResult<(B256, TrieUpdates)> {

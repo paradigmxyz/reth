@@ -24,8 +24,8 @@ use reth_trie::{
     proof::{Proof, StorageProof},
     updates::TrieUpdates,
     witness::TrieWitness,
-    AccountProof, HashedPostState, HashedStorage, KeyHasher, MultiProof, StateRoot,
-    StorageMultiProof, StorageRoot, TrieInput,
+    AccountProof, HashedPostState, HashedStorage, KeyHasher, MultiProof, StorageMultiProof,
+    StorageRoot, TrieInput,
 };
 use reth_trie_db::{
     DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot,
@@ -297,27 +297,38 @@ impl<Provider: DBProvider + BlockNumReader + BlockHashReader> BlockHashReader
 impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StateRootProvider
     for HistoricalStateProviderRef<'_, Provider>
 {
-    fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
+    fn state_root_from_state(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         let mut revert_state = self.revert_state()?;
         revert_state.extend(hashed_state);
-        StateRoot::overlay_root(self.tx(), revert_state)
-            .map_err(|err| ProviderError::Database(err.into()))
+        <Provider::StateCommitment as StateCommitment>::StateRoot::overlay_root(
+            self.tx(),
+            revert_state,
+        )
+        .map_err(|err| ProviderError::Database(err.into()))
     }
 
     fn state_root_from_nodes(&self, mut input: TrieInput) -> ProviderResult<B256> {
         input.prepend(self.revert_state()?);
-        StateRoot::overlay_root_from_nodes(self.tx(), input)
-            .map_err(|err| ProviderError::Database(err.into()))
+        <Provider::StateCommitment as StateCommitment>::StateRoot::overlay_root_from_nodes(
+            self.tx(),
+            input,
+        )
+        .map_err(|err| ProviderError::Database(err.into()))
     }
 
-    fn state_root_with_updates(
+    fn state_root_from_state_with_updates(
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let mut revert_state = self.revert_state()?;
         revert_state.extend(hashed_state);
-        StateRoot::overlay_root_with_updates(self.tx(), revert_state)
-            .map_err(|err| ProviderError::Database(err.into()))
+        let (root, updates, _state_sorted) =
+            <Provider::StateCommitment as StateCommitment>::StateRoot::overlay_root_with_updates(
+                self.tx(),
+                revert_state,
+            )
+            .map_err(|err| ProviderError::Database(err.into()))?;
+        Ok((root, updates))
     }
 
     fn state_root_from_nodes_with_updates(
@@ -325,7 +336,7 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StateRootP
         mut input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         input.prepend(self.revert_state()?);
-        StateRoot::overlay_root_from_nodes_with_updates(self.tx(), input)
+        <Provider::StateCommitment as StateCommitment>::StateRoot::overlay_root_from_nodes_with_updates(self.tx(), input)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 }

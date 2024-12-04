@@ -9,9 +9,10 @@ use reth_db_api::{
 use reth_execution_errors::StateRootError;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
-    updates::TrieUpdates, HashedPostState, HashedStorage, KeccakKeyHasher, KeyHasher, StateRoot,
-    StateRootProgress, TrieInput,
+    hashed_cursor::HashedPostStateCursorFactory, prefix_set::TriePrefixSets,
+    trie_cursor::InMemoryTrieCursorFactory, updates::TrieUpdates, HashedPostState,
+    HashedPostStateSorted, HashedStorage, IntermediateStateRootState, KeccakKeyHasher, KeyHasher,
+    StateRoot, StateRootProgress, TrieInput,
 };
 use std::{collections::HashMap, ops::RangeInclusive};
 use tracing::debug;
@@ -112,7 +113,7 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     fn overlay_root_with_updates(
         tx: &'a TX,
         post_state: HashedPostState,
-    ) -> Result<(B256, TrieUpdates), StateRootError>;
+    ) -> Result<(B256, TrieUpdates, HashedPostStateSorted), StateRootError>;
 
     /// Calculates the state root for provided [`HashedPostState`] using cached intermediate nodes.
     fn overlay_root_from_nodes(tx: &'a TX, input: TrieInput) -> Result<B256, StateRootError>;
@@ -123,6 +124,27 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
         tx: &'a TX,
         input: TrieInput,
     ) -> Result<(B256, TrieUpdates), StateRootError>;
+
+    /// Calculates the state root for the current state stored in the database.
+    fn root(tx: &'a TX) -> Result<B256, StateRootError>;
+
+    /// Calculates the state root for the current state stored in the database and returns
+    /// trie updates.
+    fn root_with_updates(tx: &'a TX) -> Result<(B256, TrieUpdates), StateRootError>;
+
+    /// Calculates the state root for the current state stored in the database updating the paths
+    /// associated with the provided prefix sets and returns the trie updates.
+    fn root_from_prefix_sets_with_updates(
+        tx: &'a TX,
+        prefix_sets: TriePrefixSets,
+    ) -> Result<(B256, TrieUpdates), StateRootError>;
+
+    /// Calculates the state root for the current state stored in the database and returns the
+    /// intermediate progress of the computation.
+    fn root_with_progress(
+        tx: &'a TX,
+        state: Option<IntermediateStateRootState>,
+    ) -> Result<StateRootProgress, StateRootError>;
 }
 
 /// Extends [`HashedPostState`] with operations specific for working with a database transaction.
@@ -185,15 +207,16 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
     fn overlay_root_with_updates(
         tx: &'a TX,
         post_state: HashedPostState,
-    ) -> Result<(B256, TrieUpdates), StateRootError> {
+    ) -> Result<(B256, TrieUpdates, HashedPostStateSorted), StateRootError> {
         let prefix_sets = post_state.construct_prefix_sets().freeze();
         let state_sorted = post_state.into_sorted();
-        StateRoot::new(
+        let (root, updates) = StateRoot::new(
             DatabaseTrieCursorFactory::new(tx),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
         )
         .with_prefix_sets(prefix_sets)
-        .root_with_updates()
+        .root_with_updates()?;
+        Ok((root, updates, state_sorted))
     }
 
     fn overlay_root_from_nodes(tx: &'a TX, input: TrieInput) -> Result<B256, StateRootError> {
@@ -219,6 +242,28 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
         )
         .with_prefix_sets(input.prefix_sets.freeze())
         .root_with_updates()
+    }
+
+    fn root(tx: &'a TX) -> Result<B256, StateRootError> {
+        Self::from_tx(tx).root()
+    }
+
+    fn root_with_updates(tx: &'a TX) -> Result<(B256, TrieUpdates), StateRootError> {
+        Self::from_tx(tx).root_with_updates()
+    }
+
+    fn root_from_prefix_sets_with_updates(
+        tx: &'a TX,
+        prefix_sets: TriePrefixSets,
+    ) -> Result<(B256, TrieUpdates), StateRootError> {
+        Self::from_tx(tx).with_prefix_sets(prefix_sets).root_with_updates()
+    }
+
+    fn root_with_progress(
+        tx: &'a TX,
+        state: Option<IntermediateStateRootState>,
+    ) -> Result<StateRootProgress, StateRootError> {
+        Self::from_tx(tx).with_intermediate_state(state).root_with_progress()
     }
 }
 

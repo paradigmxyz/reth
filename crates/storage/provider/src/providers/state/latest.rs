@@ -11,15 +11,15 @@ use reth_db_api::{cursor::DbDupCursorRO, transaction::DbTx};
 use reth_primitives::{Account, Bytecode};
 use reth_storage_api::{
     DBProvider, HashedStorageProvider, KeyHasherProvider, StateCommitmentProvider,
-    StateProofProvider, StorageRootProvider,
+    StateProofProvider, StateRootProviderExt, StorageRootProvider,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
     proof::{Proof, StorageProof},
     updates::TrieUpdates,
     witness::TrieWitness,
-    AccountProof, HashedPostState, HashedStorage, KeyHasher, MultiProof, StateRoot,
-    StorageMultiProof, StorageRoot, TrieInput,
+    AccountProof, HashedPostState, HashedStorage, KeyHasher, MultiProof, StorageMultiProof,
+    StorageRoot, TrieInput,
 };
 use reth_trie_db::{
     DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,
@@ -68,30 +68,99 @@ impl<Provider: BlockHashReader> BlockHashReader for LatestStateProviderRef<'_, P
 impl<Provider: DBProvider + StateCommitmentProvider> StateRootProvider
     for LatestStateProviderRef<'_, Provider>
 {
-    fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
-        StateRoot::overlay_root(self.tx(), hashed_state)
-            .map_err(|err| ProviderError::Database(err.into()))
+    fn state_root_from_state(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
+        <Provider::StateCommitment as StateCommitment>::StateRoot::overlay_root(
+            self.tx(),
+            hashed_state,
+        )
+        .map_err(|err| ProviderError::Database(err.into()))
     }
 
     fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256> {
-        StateRoot::overlay_root_from_nodes(self.tx(), input)
-            .map_err(|err| ProviderError::Database(err.into()))
+        <Provider::StateCommitment as StateCommitment>::StateRoot::overlay_root_from_nodes(
+            self.tx(),
+            input,
+        )
+        .map_err(|err| ProviderError::Database(err.into()))
     }
 
-    fn state_root_with_updates(
+    fn state_root_from_state_with_updates(
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        StateRoot::overlay_root_with_updates(self.tx(), hashed_state)
-            .map_err(|err| ProviderError::Database(err.into()))
+        let (root, updates, _state_sorted) =
+            <Provider::StateCommitment as StateCommitment>::StateRoot::overlay_root_with_updates(
+                self.tx(),
+                hashed_state,
+            )
+            .map_err(|err| ProviderError::Database(err.into()))?;
+        Ok((root, updates))
     }
 
     fn state_root_from_nodes_with_updates(
         &self,
         input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        StateRoot::overlay_root_from_nodes_with_updates(self.tx(), input)
+        <Provider::StateCommitment as StateCommitment>::StateRoot::overlay_root_from_nodes_with_updates(self.tx(), input)
             .map_err(|err| ProviderError::Database(err.into()))
+    }
+}
+
+impl<Provider: DBProvider + StateCommitmentProvider> StateRootProviderExt
+    for LatestStateProviderRef<'_, Provider>
+{
+    fn state_root(&self) -> ProviderResult<B256> {
+        <Provider::StateCommitment as StateCommitment>::StateRoot::root(self.tx())
+            .map_err(|err| ProviderError::Database(err.into()))
+    }
+
+    fn state_root_with_updates(&self) -> ProviderResult<(B256, TrieUpdates)> {
+        <Provider::StateCommitment as StateCommitment>::StateRoot::root_with_updates(self.tx())
+            .map_err(|err| ProviderError::Database(err.into()))
+    }
+
+    fn incremental_state_root_with_updates(
+        &self,
+        range: std::ops::RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        <Provider::StateCommitment as StateCommitment>::StateRoot::incremental_root_with_updates(
+            self.tx(),
+            range,
+        )
+        .map_err(|err| ProviderError::Database(err.into()))
+    }
+
+    fn state_root_from_prefix_sets_with_updates(
+        &self,
+        prefix_set: reth_trie::prefix_set::TriePrefixSets,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        <Provider::StateCommitment as StateCommitment>::StateRoot::root_from_prefix_sets_with_updates(
+            self.tx(),
+            prefix_set,
+        )
+        .map_err(|err| ProviderError::Database(err.into()))
+    }
+
+    fn state_root_with_progress(
+        &self,
+        state: Option<reth_trie::IntermediateStateRootState>,
+    ) -> ProviderResult<reth_trie::StateRootProgress> {
+        <Provider::StateCommitment as StateCommitment>::StateRoot::root_with_progress(
+            self.tx(),
+            state,
+        )
+        .map_err(|err| ProviderError::Database(err.into()))
+    }
+
+    fn state_root_from_state_with_updates_and_sorted_state(
+        &self,
+        hashed_state: HashedPostState,
+    ) -> ProviderResult<(B256, TrieUpdates, reth_trie::HashedPostStateSorted)> {
+        <Provider::StateCommitment as StateCommitment>::StateRoot::overlay_root_with_updates(
+            self.tx(),
+            hashed_state,
+        )
+        .map_err(|err| ProviderError::Database(err.into()))
     }
 }
 

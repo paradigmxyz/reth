@@ -393,13 +393,15 @@ where
     // calculate the state root
     let hashed_state = db.database.db.hashed_post_state(execution_outcome.state());
     let (state_root, trie_output) = {
-        db.database.inner().state_root_with_updates(hashed_state.clone()).inspect_err(|err| {
-            warn!(target: "payload_builder",
-                parent_hash=%parent_header.hash(),
-                %err,
-                "failed to calculate state root for payload"
-            );
-        })?
+        db.database.inner().state_root_from_state_with_updates(hashed_state.clone()).inspect_err(
+            |err| {
+                warn!(target: "payload_builder",
+                    parent_hash=%parent_header.hash(),
+                    %err,
+                    "failed to calculate state root for payload"
+                );
+            },
+        )?
     };
 
     // create the block header

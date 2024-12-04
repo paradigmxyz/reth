@@ -43,8 +43,6 @@ use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, BlobStore, EthPooledTransaction, PoolConfig, TransactionOrigin,
     TransactionPool, TransactionValidationTaskExecutor,
 };
-use reth_trie::StateRoot;
-use reth_trie_db::DatabaseStateRoot;
 use std::{path::PathBuf, str::FromStr, sync::Arc};
 use tracing::*;
 
@@ -273,10 +271,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 debug!(target: "reth::cli", ?execution_outcome, "Executed block");
 
                 let hashed_post_state = state_provider.hashed_post_state(execution_outcome.state());
-                let (state_root, trie_updates) = StateRoot::overlay_root_with_updates(
-                    provider_factory.provider()?.tx_ref(),
-                    hashed_post_state.clone(),
-                )?;
+                let (state_root, trie_updates) =
+                    state_provider.state_root_from_state_with_updates(hashed_post_state.clone())?;
 
                 if state_root != block_with_senders.state_root {
                     eyre::bail!(
