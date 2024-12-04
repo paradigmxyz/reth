@@ -110,6 +110,8 @@ where
         // Storage multiproofs for non empty tries will be overwritten if necessary.
         let mut storages: HashMap<_, _> =
             targets.keys().map(|key| (*key, StorageMultiProof::empty())).collect();
+        let mut branch_node_hash_masks = HashMap::default();
+
         let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
         let mut account_node_iter = TrieNodeIter::new(walker, hashed_account_cursor);
         let mut branch_node_hash_masks = HashMap::default();
@@ -247,6 +249,8 @@ where
 
         let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(self.hashed_address)?;
         let walker = TrieWalker::new(trie_cursor, self.prefix_set.freeze());
+
+        let mut branch_node_hash_masks = HashMap::default();
 
         let retainer = ProofRetainer::from_iter(target_nibbles);
         let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
