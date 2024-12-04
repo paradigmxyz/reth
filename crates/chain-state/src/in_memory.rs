@@ -950,10 +950,12 @@ mod tests {
     use reth_primitives::{Account, Bytecode, EthPrimitives, Receipt};
     use reth_storage_api::{
         AccountReader, BlockHashReader, HashedPostStateProvider, HashedStorageProvider,
-        StateProofProvider, StateProvider, StateRootProvider, StorageRootProvider,
+        KeyHasherProvider, StateProofProvider, StateProvider, StateRootProvider,
+        StorageRootProvider,
     };
     use reth_trie::{
-        AccountProof, HashedStorage, MultiProof, StorageMultiProof, StorageProof, TrieInput,
+        AccountProof, HashedStorage, KeccakKeyHasher, KeyHasher, MultiProof, StorageMultiProof,
+        StorageProof, TrieInput,
     };
     use revm::db::BundleAccount;
 
@@ -1057,6 +1059,12 @@ mod tests {
     impl HashedStorageProvider for MockStateProvider {
         fn hashed_storage(&self, _account: &BundleAccount) -> HashedStorage {
             HashedStorage::default()
+        }
+    }
+
+    impl KeyHasherProvider for MockStateProvider {
+        fn hash_key(&self, bytes: &[u8]) -> B256 {
+            KeccakKeyHasher::hash_key(bytes)
         }
     }
 

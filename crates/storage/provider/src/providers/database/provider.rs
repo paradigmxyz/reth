@@ -13,11 +13,12 @@ use crate::{
     BlockReader, BlockWriter, BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter,
     DBProvider, EvmEnvProvider, HashingWriter, HeaderProvider, HeaderSyncGap,
     HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter,
-    LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError,
-    PruneCheckpointReader, PruneCheckpointWriter, RevertsInit, StageCheckpointReader,
-    StateCommitmentProvider, StateProviderBox, StateWriter, StaticFileProviderFactory, StatsReader,
-    StorageLocation, StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
-    TransactionsProviderExt, TrieWriter, WithdrawalsProvider,
+    KeyHasherProvider, LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown,
+    ProviderError, PruneCheckpointReader, PruneCheckpointWriter, RevertsInit,
+    StageCheckpointReader, StateCommitmentProvider, StateProviderBox, StateWriter,
+    StaticFileProviderFactory, StatsReader, StorageLocation, StorageReader, StorageTrieWriter,
+    TransactionVariant, TransactionsProvider, TransactionsProviderExt, TrieWriter,
+    WithdrawalsProvider,
 };
 use alloy_consensus::Header;
 use alloy_eips::{
@@ -66,9 +67,9 @@ use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
     updates::{StorageTrieUpdates, TrieUpdates},
-    HashedPostStateSorted, Nibbles, StateRoot, StoredNibbles,
+    HashedPostStateSorted, KeyHasher, Nibbles, StateRoot, StoredNibbles,
 };
-use reth_trie_db::{DatabaseStateRoot, DatabaseStorageTrieCursor};
+use reth_trie_db::{DatabaseStateRoot, DatabaseStorageTrieCursor, StateCommitment};
 use revm::{
     db::states::{PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset},
     primitives::{BlockEnv, CfgEnvWithHandlerCfg},
@@ -418,6 +419,12 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
 
 impl<TX: DbTx + 'static, N: NodeTypes> StateCommitmentProvider for DatabaseProvider<TX, N> {
     type StateCommitment = N::StateCommitment;
+}
+
+impl<TX: DbTx + 'static, N: NodeTypes> KeyHasherProvider for DatabaseProvider<TX, N> {
+    fn hash_key(&self, bytes: &[u8]) -> B256 {
+        <<N::StateCommitment as StateCommitment>::KeyHasher as KeyHasher>::hash_key(bytes)
+    }
 }
 
 impl<Tx: DbTx + DbTxMut + 'static, N: NodeTypesForProvider + 'static> DatabaseProvider<Tx, N> {
@@ -2383,7 +2390,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         // changes are applied in the correct order.
         let hashed_accounts = changesets
             .into_iter()
-            .map(|(_, e)| (keccak256(e.address), e.info))
+            .map(|(_, e)| (self.hash_key(e.address.as_ref()), e.info))
             .collect::<Vec<_>>()
             .into_iter()
             .rev()
@@ -2419,8 +2426,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         changesets: impl IntoIterator<Item = (Address, Option<Account>)>,
     ) -> ProviderResult<BTreeMap<B256, Option<Account>>> {
         let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccounts>()?;
-        let hashed_accounts =
-            changesets.into_iter().map(|(ad, ac)| (keccak256(ad), ac)).collect::<BTreeMap<_, _>>();
+        let hashed_accounts = changesets
+            .into_iter()
+            .map(|(ad, ac)| (self.hash_key(ad.as_ref()), ac))
+            .collect::<BTreeMap<_, _>>();
         for (hashed_address, account) in &hashed_accounts {
             if let Some(account) = account {
                 hashed_accounts_cursor.upsert(*hashed_address, *account)?;
@@ -2439,7 +2448,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         let mut hashed_storages = changesets
             .into_iter()
             .map(|(BlockNumberAddress((_, address)), storage_entry)| {
-                (keccak256(address), keccak256(storage_entry.key), storage_entry.value)
+                (
+                    self.hash_key(address.as_ref()),
+                    self.hash_key(storage_entry.key.as_ref()),
+                    storage_entry.value,
+                )
             })
             .collect::<Vec<_>>();
         hashed_storages.sort_by_key(|(ha, hk, _)| (*ha, *hk));
@@ -2486,10 +2499,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         let hashed_storages =
             storages.into_iter().fold(BTreeMap::new(), |mut map, (address, storage)| {
                 let storage = storage.into_iter().fold(BTreeMap::new(), |mut map, entry| {
-                    map.insert(keccak256(entry.key), entry.value);
+                    map.insert(self.hash_key(entry.key.as_ref()), entry.value);
                     map
                 });
-                map.insert(keccak256(address), storage);
+                map.insert(self.hash_key(address.as_ref()), storage);
                 map
             });
 

@@ -1,7 +1,6 @@
 use super::ExecutedBlock;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{
-    keccak256,
     map::{HashMap, HashSet},
     Address, BlockNumber, Bytes, StorageKey, StorageValue, B256,
 };
@@ -9,7 +8,7 @@ use reth_errors::ProviderResult;
 use reth_primitives::{Account, Bytecode, NodePrimitives};
 use reth_storage_api::{
     AccountReader, BlockHashReader, HashedPostStateProvider, HashedStorageProvider,
-    StateProofProvider, StateProvider, StateRootProvider, StorageRootProvider,
+    KeyHasherProvider, StateProofProvider, StateProvider, StateRootProvider, StorageRootProvider,
 };
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
@@ -152,7 +151,7 @@ macro_rules! impl_state_provider {
             fn storage_root(&self, address: Address, storage: HashedStorage) -> ProviderResult<B256> {
                 let state = &self.trie_state().state;
                 let mut hashed_storage =
-                    state.storages.get(&keccak256(address)).cloned().unwrap_or_default();
+                    state.storages.get(&self.hash_key(address.as_ref())).cloned().unwrap_or_default();
                 hashed_storage.extend(&storage);
                 self.historical.storage_root(address, hashed_storage)
             }
@@ -166,7 +165,7 @@ macro_rules! impl_state_provider {
             ) -> ProviderResult<reth_trie::StorageProof> {
                 let state = &self.trie_state().state;
                 let mut hashed_storage =
-                    state.storages.get(&keccak256(address)).cloned().unwrap_or_default();
+                    state.storages.get(&self.hash_key(address.as_ref())).cloned().unwrap_or_default();
                 hashed_storage.extend(&storage);
                 self.historical.storage_proof(address, slot, hashed_storage)
             }
@@ -180,7 +179,7 @@ macro_rules! impl_state_provider {
             ) -> ProviderResult<StorageMultiProof> {
                 let state = &self.trie_state().state;
                 let mut hashed_storage =
-                    state.storages.get(&keccak256(address)).cloned().unwrap_or_default();
+                    state.storages.get(&self.hash_key(address.as_ref())).cloned().unwrap_or_default();
                 hashed_storage.extend(&storage);
                 self.historical.storage_multiproof(address, slots, hashed_storage)
             }
@@ -228,6 +227,12 @@ macro_rules! impl_state_provider {
         impl $($tokens)* HashedStorageProvider for $type {
             fn hashed_storage(&self, account: &BundleAccount) -> HashedStorage {
                 self.historical.hashed_storage(account)
+            }
+        }
+
+        impl $($tokens)* KeyHasherProvider for $type {
+            fn hash_key(&self, bytes: &[u8]) -> B256 {
+                self.historical.hash_key(bytes)
             }
         }
 

@@ -1,4 +1,4 @@
-use alloy_primitives::{bytes::BufMut, keccak256, B256};
+use alloy_primitives::{bytes::BufMut, B256};
 use itertools::Itertools;
 use reth_config::config::{EtlConfig, HashingConfig};
 use reth_db::tables;
@@ -10,12 +10,16 @@ use reth_db_api::{
 };
 use reth_etl::Collector;
 use reth_primitives::StorageEntry;
-use reth_provider::{DBProvider, HashingWriter, StatsReader, StorageReader};
+use reth_provider::{
+    DBProvider, HashingWriter, StateCommitmentProvider, StatsReader, StorageReader,
+};
 use reth_stages_api::{
     EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId,
     StorageHashingCheckpoint, UnwindInput, UnwindOutput,
 };
 use reth_storage_errors::provider::ProviderResult;
+use reth_trie::KeyHasher;
+use reth_trie_db::StateCommitment;
 use std::{
     fmt::Debug,
     sync::mpsc::{self, Receiver},
@@ -64,7 +68,11 @@ impl Default for StorageHashingStage {
 
 impl<Provider> Stage<Provider> for StorageHashingStage
 where
-    Provider: DBProvider<Tx: DbTxMut> + StorageReader + HashingWriter + StatsReader,
+    Provider: DBProvider<Tx: DbTxMut>
+        + StorageReader
+        + HashingWriter
+        + StatsReader
+        + StateCommitmentProvider,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -103,8 +111,13 @@ where
                 rayon::spawn(move || {
                     for (address, slot) in chunk {
                         let mut addr_key = Vec::with_capacity(64);
-                        addr_key.put_slice(keccak256(address).as_slice());
-                        addr_key.put_slice(keccak256(slot.key).as_slice());
+                        addr_key.put_slice(
+                            <<Provider::StateCommitment as StateCommitment>::KeyHasher as KeyHasher>::hash_key(
+                                address,
+                            )
+                            .as_slice(),
+                        );
+                        addr_key.put_slice(<<Provider::StateCommitment as StateCommitment>::KeyHasher as KeyHasher>::hash_key(slot.key).as_slice());
                         let _ = tx.send((addr_key, CompactU256::from(slot.value)));
                     }
                 });
@@ -212,7 +225,7 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
         TestStageDB, UnwindStageTestRunner,
     };
-    use alloy_primitives::{Address, U256};
+    use alloy_primitives::{keccak256, Address, U256};
     use assert_matches::assert_matches;
     use rand::Rng;
     use reth_db_api::{

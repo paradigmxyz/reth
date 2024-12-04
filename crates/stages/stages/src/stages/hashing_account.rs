@@ -1,4 +1,4 @@
-use alloy_primitives::{keccak256, B256};
+use alloy_primitives::B256;
 use itertools::Itertools;
 use reth_config::config::{EtlConfig, HashingConfig};
 use reth_db::{tables, RawKey, RawTable, RawValue};
@@ -8,12 +8,16 @@ use reth_db_api::{
 };
 use reth_etl::Collector;
 use reth_primitives::Account;
-use reth_provider::{AccountExtReader, DBProvider, HashingWriter, StatsReader};
+use reth_provider::{
+    AccountExtReader, DBProvider, HashingWriter, StateCommitmentProvider, StatsReader,
+};
 use reth_stages_api::{
     AccountHashingCheckpoint, EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint,
     StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_storage_errors::provider::ProviderResult;
+use reth_trie::KeyHasher;
+use reth_trie_db::StateCommitment;
 use std::{
     fmt::Debug,
     ops::{Range, RangeInclusive},
@@ -133,7 +137,11 @@ impl Default for AccountHashingStage {
 
 impl<Provider> Stage<Provider> for AccountHashingStage
 where
-    Provider: DBProvider<Tx: DbTxMut> + HashingWriter + AccountExtReader + StatsReader,
+    Provider: DBProvider<Tx: DbTxMut>
+        + HashingWriter
+        + AccountExtReader
+        + StatsReader
+        + StateCommitmentProvider,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -174,7 +182,14 @@ where
                 rayon::spawn(move || {
                     for (address, account) in chunk {
                         let address = address.key().unwrap();
-                        let _ = tx.send((RawKey::new(keccak256(address)), account));
+                        let _ = tx.send((
+                            RawKey::new(
+                                <<Provider::StateCommitment as StateCommitment>::KeyHasher as KeyHasher>::hash_key(
+                                    address,
+                                ),
+                            ),
+                            account,
+                        ));
                     }
                 });
 
@@ -301,7 +316,7 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
         UnwindStageTestRunner,
     };
-    use alloy_primitives::U256;
+    use alloy_primitives::{keccak256, U256};
     use assert_matches::assert_matches;
     use reth_primitives::Account;
     use reth_provider::providers::StaticFileWriter;

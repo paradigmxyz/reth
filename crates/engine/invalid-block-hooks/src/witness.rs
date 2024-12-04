@@ -1,5 +1,5 @@
 use alloy_consensus::Header;
-use alloy_primitives::{keccak256, B256, U256};
+use alloy_primitives::{B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use eyre::OptionExt;
 use pretty_assertions::Comparison;
@@ -69,9 +69,9 @@ where
         // Setup database.
         let provider = self.provider.state_by_block_hash(parent_header.hash())?;
         #[cfg(not(feature = "scroll"))]
-        let state = reth_revm::database::StateProviderDatabase::new(provider);
+        let state = reth_revm::database::StateProviderDatabase::new(&provider);
         #[cfg(feature = "scroll")]
-        let state = reth_scroll_storage::ScrollStateProviderDatabase::new(provider);
+        let state = reth_scroll_storage::ScrollStateProviderDatabase::new(&provider);
         let mut db = StateBuilder::new().with_database(state).with_bundle_update().build();
 
         // Setup environment for the execution.
@@ -129,7 +129,7 @@ where
         // referenced accounts + storage slots.
         let mut hashed_state = db.database.hashed_post_state(&bundle_state);
         for (address, account) in db.cache.accounts {
-            let hashed_address = keccak256(address);
+            let hashed_address = provider.hash_key(address.as_ref());
             #[cfg(feature = "scroll")]
             let hashed_account = account.account.as_ref().map(|a| {
                 Into::<reth_scroll_revm::AccountInfo>::into((
@@ -152,7 +152,7 @@ where
 
                 for (slot, value) in account.storage {
                     let slot = B256::from(slot);
-                    let hashed_slot = keccak256(slot);
+                    let hashed_slot = provider.hash_key(slot.as_ref());
                     storage.storage.insert(hashed_slot, value);
 
                     state_preimages.insert(hashed_slot, alloy_rlp::encode(slot).into());

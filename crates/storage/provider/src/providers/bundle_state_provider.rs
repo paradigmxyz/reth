@@ -7,7 +7,8 @@ use alloy_primitives::{
 };
 use reth_primitives::{Account, Bytecode};
 use reth_storage_api::{
-    HashedPostStateProvider, HashedStorageProvider, StateProofProvider, StorageRootProvider,
+    HashedPostStateProvider, HashedStorageProvider, KeyHasherProvider, StateProofProvider,
+    StorageRootProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
@@ -197,6 +198,14 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> HashedStorageProvider
 {
     fn hashed_storage(&self, account: &revm::db::BundleAccount) -> HashedStorage {
         self.state_provider.hashed_storage(account)
+    }
+}
+
+impl<SP: StateProvider, EDP: ExecutionDataProvider> KeyHasherProvider
+    for BundleStateProvider<SP, EDP>
+{
+    fn hash_key(&self, bytes: &[u8]) -> B256 {
+        self.state_provider.hash_key(bytes)
     }
 }
 
