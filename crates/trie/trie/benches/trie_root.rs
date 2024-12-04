@@ -3,7 +3,7 @@ use alloy_primitives::B256;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use proptest_arbitrary_interop::arb;
-use reth_primitives::{Receipt, ReceiptEncoding, ReceiptWithBloom};
+use reth_primitives::{Receipt, ReceiptWithBloom};
 use reth_trie::triehash::KeccakHasher;
 
 /// Benchmarks different implementations of the root calculation.
@@ -51,7 +51,7 @@ mod implementations {
     pub fn trie_hash_ordered_trie_root(receipts: &[ReceiptWithBloom<Receipt>]) -> B256 {
         triehash::ordered_trie_root::<KeccakHasher, _>(receipts.iter().map(|receipt| {
             let mut receipt_rlp = Vec::new();
-            receipt.encode_inner(&mut receipt_rlp, false);
+            receipt.receipt.encode_inner(&mut receipt_rlp, false, &receipt.logs_bloom);
             receipt_rlp
         }))
     }
@@ -69,7 +69,7 @@ mod implementations {
             index.encode(&mut index_buffer);
 
             value_buffer.clear();
-            receipts[index].encode_inner(&mut value_buffer, false);
+            receipts[index].receipt.encode_inner(&mut value_buffer, false, &receipts[index].logs_bloom);
 
             hb.add_leaf(Nibbles::unpack(&index_buffer), &value_buffer);
         }

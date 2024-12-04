@@ -7,7 +7,7 @@ use alloy_consensus::{
     RlpEncodableReceipt, TxReceipt, Typed2718,
 };
 use alloy_primitives::{Bloom, Log, B256};
-use alloy_rlp::{length_of_length, Decodable, Encodable, Header, RlpDecodable, RlpEncodable};
+use alloy_rlp::{ Decodable, Encodable, Header, RlpDecodable, RlpEncodable};
 use bytes::BufMut;
 use derive_more::{DerefMut, From, IntoIterator};
 use reth_primitives_traits::receipt::ReceiptExt;
@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "reth-codec")]
 use crate::compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR};
-use crate::{ReceiptEncoding, TxType};
+use crate::TxType;
 
 /// Retrieves gas spent by transactions as a vector of tuples (transaction index, gas used).
 pub use reth_primitives_traits::receipt::gas_spent_by_transactions;
@@ -168,7 +168,7 @@ impl Receipt {
     }
 
      /// Encode receipt with or without the header data.
-     fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool, bloom: &Bloom) {
+     pub fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool, bloom: &Bloom) {
         if matches!(self.tx_type, TxType::Legacy) {
             self.encode_fields(out, bloom);
             return
@@ -406,16 +406,6 @@ impl<'a> arbitrary::Arbitrary<'a> for Receipt {
     }
 }
 
-impl ReceiptEncoding for ReceiptWithBloom<Receipt> {
-    fn as_encoder(&self) -> ReceiptWithBloomEncoder<'_> {
-        ReceiptWithBloomEncoder { receipt: &self.receipt, bloom: &self.logs_bloom }
-    }
-
-    fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
-        self.as_encoder().encode_inner(out, with_header)
-    }
-}
-
 /// [`Receipt`] reference type with calculated bloom filter.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReceiptWithBloomRef<'a> {
@@ -433,21 +423,16 @@ impl<'a> ReceiptWithBloomRef<'a> {
 
     /// Encode receipt with or without the header data.
     pub fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
-        self.as_encoder().encode_inner(out, with_header)
-    }
-
-    #[inline]
-    const fn as_encoder(&self) -> ReceiptWithBloomEncoder<'_> {
-        ReceiptWithBloomEncoder { receipt: self.receipt, bloom: &self.bloom }
+        self.receipt.encode_inner(out, with_header, &self.bloom)
     }
 }
 
 impl Encodable for ReceiptWithBloomRef<'_> {
     fn encode(&self, out: &mut dyn BufMut) {
-        self.as_encoder().encode_inner(out, true)
+        self.encode_inner(out, true)
     }
     fn length(&self) -> usize {
-        self.as_encoder().length()
+        ReceiptWithBloom::new(self.receipt, self.bloom.clone()).length()
     }
 }
 

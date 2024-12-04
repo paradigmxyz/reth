@@ -93,12 +93,3 @@ impl reth_primitives_traits::NodePrimitives for EthPrimitives {
     type TxType = crate::TxType;
     type Receipt = crate::Receipt;
 }
-
-pub use receipt::ReceiptWithBloomEncoder;
-/// Trait for encoding receipts with bloom.
-pub trait ReceiptEncoding {
-    /// Returns a [`ReceiptWithBloomEncoder`] for the receipt.
-    fn as_encoder(&self) -> ReceiptWithBloomEncoder<'_>;
-    /// Encodes the receipt with bloom into the given buffer.
-    fn encode_inner(&self, out: &mut dyn bytes::BufMut, with_header: bool);
-}
