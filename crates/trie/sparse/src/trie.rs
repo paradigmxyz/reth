@@ -745,17 +745,17 @@ impl<P> RevealedSparseTrie<P> {
                             // Update the masks only if we need to retain trie updates
                             if self.updates.is_some() {
                                 // Set the trie mask
-                                if node_type.store_in_db_trie() {
+                                let tree_mask_value = if node_type.store_in_db_trie() {
                                     // A branch or an extension node explicitly set the
                                     // `store_in_db_trie` flag
-                                    tree_mask_values.push(true);
+                                    true
                                 } else {
                                     // Set the flag according to whether a child node was
-                                    // pre-calculated
-                                    // (`calculated = false`), meaning that it wasn't in the
-                                    // database
-                                    tree_mask_values.push(!calculated);
-                                }
+                                    // pre-calculated (`calculated = false`), meaning that it wasn't
+                                    // in the database
+                                    !calculated
+                                };
+                                tree_mask_values.push(tree_mask_value);
 
                                 // Set the hash mask. If a child node has a hash value AND is a
                                 // branch node, set the hash mask and save the hash.
@@ -763,15 +763,26 @@ impl<P> RevealedSparseTrie<P> {
                                     node_type.is_branch() ||
                                         (node_type.is_hash() &&
                                             self.branch_node_hash_masks
-                                                .get(child_path)
+                                                .get(&path)
                                                 .is_some_and(|mask| {
                                                     mask.is_bit_set(nibble as u8)
                                                 }))
                                 });
-                                hash_mask_values.push(hash.is_some());
+                                let hash_mask_value = hash.is_some();
+                                hash_mask_values.push(hash_mask_value);
                                 if let Some(hash) = hash {
                                     hashes.push(hash);
                                 }
+
+                                trace!(
+                                    target: "trie::sparse",
+                                    ?path,
+                                    ?child_path,
+                                    ?nibble,
+                                    ?tree_mask_value,
+                                    ?hash_mask_value,
+                                    "Updating branch node child masks"
+                                );
                             }
 
                             // Insert children in the resulting buffer in a normal order,
