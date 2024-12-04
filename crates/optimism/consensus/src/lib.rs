@@ -9,7 +9,7 @@
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
-use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH};
+use alloy_consensus::{BlockHeader, Header, EMPTY_OMMER_ROOT_HASH};
 use alloy_primitives::{B64, U256};
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::{
@@ -112,11 +112,30 @@ impl HeaderValidator for OpBeaconConsensus {
             validate_against_parent_timestamp(header.header(), parent.header())?;
         }
 
-        validate_against_parent_eip1559_base_fee(
-            header.header(),
-            parent.header(),
-            &self.chain_spec,
-        )?;
+        // EIP1559 base fee validation
+        // <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#base-fee-computation>
+        // > if Holocene is active in parent_header.timestamp, then the parameters from
+        // > parent_header.extraData are used.
+        if self.chain_spec.is_holocene_active_at_timestamp(parent.timestamp) {
+            let header_base_fee =
+                header.base_fee_per_gas().ok_or(ConsensusError::BaseFeeMissing)?;
+            let expected_base_fee = self
+                .chain_spec
+                .decode_holocene_base_fee(parent, header.timestamp)
+                .map_err(|_| ConsensusError::BaseFeeMissing)?;
+            if expected_base_fee != header_base_fee {
+                return Err(ConsensusError::BaseFeeDiff(GotExpected {
+                    expected: expected_base_fee,
+                    got: header_base_fee,
+                }))
+            }
+        } else {
+            validate_against_parent_eip1559_base_fee(
+                header.header(),
+                parent.header(),
+                &self.chain_spec,
+            )?;
+        }
 
         // ensure that the blob gas fields for this block
         if self.chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
