@@ -71,7 +71,7 @@ impl<EvmConfig> OpPayloadBuilder<EvmConfig> {
     }
 
     /// Configures the builder with the given [`OpBuilderConfig`].
-    pub fn with_builder_config(evm_config: EvmConfig, config: OpBuilderConfig) -> Self {
+    pub const fn with_builder_config(evm_config: EvmConfig, config: OpBuilderConfig) -> Self {
         Self { compute_pending_block: true, evm_config, config, best_transactions: () }
     }
 }
