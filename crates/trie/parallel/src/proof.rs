@@ -158,11 +158,10 @@ where
 
         // Create a hash builder to rebuild the root node since it is not available in the database.
         let retainer: ProofRetainer = targets.keys().map(Nibbles::unpack).collect();
-        let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
+        let mut hash_builder =
+            HashBuilder::default().with_proof_retainer(retainer).with_updates(true);
 
         let mut storages = HashMap::default();
-        let mut branch_node_hash_masks = HashMap::default();
-
         let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
         let mut account_node_iter = TrieNodeIter::new(
             walker,
@@ -173,7 +172,6 @@ where
         {
             match account_node {
                 TrieElement::Branch(node) => {
-                    branch_node_hash_masks.insert(node.key.clone(), node.hash_mask);
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
                 TrieElement::Leaf(hashed_address, account) => {
@@ -225,11 +223,11 @@ where
         #[cfg(feature = "metrics")]
         self.metrics.record_state_trie(tracker.finish());
 
-        Ok(MultiProof {
-            account_subtree: hash_builder.take_proof_nodes(),
-            storages,
-            branch_node_hash_masks,
-        })
+        let account_subtree = hash_builder.take_proof_nodes();
+        let branch_node_hash_masks =
+            hash_builder.split().1.into_iter().map(|(path, node)| (path, node.hash_mask)).collect();
+
+        Ok(MultiProof { account_subtree, branch_node_hash_masks, storages })
     }
 }
 

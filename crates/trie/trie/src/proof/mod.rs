@@ -104,21 +104,19 @@ where
 
         // Create a hash builder to rebuild the root node since it is not available in the database.
         let retainer = targets.keys().map(Nibbles::unpack).collect();
-        let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
+        let mut hash_builder =
+            HashBuilder::default().with_proof_retainer(retainer).with_updates(true);
 
         // Initialize all storage multiproofs as empty.
         // Storage multiproofs for non empty tries will be overwritten if necessary.
         let mut storages: HashMap<_, _> =
             targets.keys().map(|key| (*key, StorageMultiProof::empty())).collect();
-        let mut branch_node_hash_masks = HashMap::default();
 
         let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
         let mut account_node_iter = TrieNodeIter::new(walker, hashed_account_cursor);
-        let mut branch_node_hash_masks = HashMap::default();
         while let Some(account_node) = account_node_iter.try_next()? {
             match account_node {
                 TrieElement::Branch(node) => {
-                    branch_node_hash_masks.insert(node.key.clone(), node.hash_mask);
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
                 TrieElement::Leaf(hashed_address, account) => {
@@ -153,11 +151,11 @@ where
             }
         }
         let _ = hash_builder.root();
-        Ok(MultiProof {
-            account_subtree: hash_builder.take_proof_nodes(),
-            branch_node_hash_masks,
-            storages,
-        })
+        let account_subtree = hash_builder.take_proof_nodes();
+        let branch_node_hash_masks =
+            hash_builder.split().1.into_iter().map(|(path, node)| (path, node.hash_mask)).collect();
+
+        Ok(MultiProof { account_subtree, branch_node_hash_masks, storages })
     }
 }
 
@@ -250,16 +248,13 @@ where
         let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(self.hashed_address)?;
         let walker = TrieWalker::new(trie_cursor, self.prefix_set.freeze());
 
-        let mut branch_node_hash_masks = HashMap::default();
-
         let retainer = ProofRetainer::from_iter(target_nibbles);
-        let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
+        let mut hash_builder =
+            HashBuilder::default().with_proof_retainer(retainer).with_updates(true);
         let mut storage_node_iter = TrieNodeIter::new(walker, hashed_storage_cursor);
-        let mut branch_node_hash_masks = HashMap::default();
         while let Some(node) = storage_node_iter.try_next()? {
             match node {
                 TrieElement::Branch(node) => {
-                    branch_node_hash_masks.insert(node.key.clone(), node.hash_mask);
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
                 TrieElement::Leaf(hashed_slot, value) => {
@@ -272,10 +267,10 @@ where
         }
 
         let root = hash_builder.root();
-        Ok(StorageMultiProof {
-            root,
-            subtree: hash_builder.take_proof_nodes(),
-            branch_node_hash_masks,
-        })
+        let subtree = hash_builder.take_proof_nodes();
+        let branch_node_hash_masks =
+            hash_builder.split().1.into_iter().map(|(path, node)| (path, node.hash_mask)).collect();
+
+        Ok(StorageMultiProof { root, subtree, branch_node_hash_masks })
     }
 }
