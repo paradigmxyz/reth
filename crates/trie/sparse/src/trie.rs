@@ -768,7 +768,7 @@ impl<P> RevealedSparseTrie<P> {
                                     node_type.is_branch() ||
                                         (node_type.is_hash() &&
                                             self.branch_node_hash_masks
-                                                .get(child_path)
+                                                .get(&path)
                                                 .is_some_and(|mask| {
                                                     mask.is_bit_set(nibble as u8)
                                                 }))
