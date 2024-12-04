@@ -780,230 +780,6 @@ impl From<TypedTransaction> for Transaction {
     }
 }
 
-/// Signed transaction without its Hash. Used type for inserting into the DB.
-///
-/// This can by converted to [`TransactionSigned`] by calling [`TransactionSignedNoHash::hash`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Serialize, Deserialize)]
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
-pub struct TransactionSignedNoHash {
-    /// The transaction signature values
-    pub signature: Signature,
-    /// Raw transaction info
-    #[deref]
-    #[as_ref]
-    pub transaction: Transaction,
-}
-
-impl TransactionSignedNoHash {
-    /// Calculates the transaction hash. If used more than once, it's better to convert it to
-    /// [`TransactionSigned`] first.
-    pub fn hash(&self) -> B256 {
-        // pre-allocate buffer for the transaction
-        let mut buf = Vec::with_capacity(128 + self.transaction.input().len());
-        self.transaction.eip2718_encode(&self.signature, &mut buf);
-        keccak256(&buf)
-    }
-
-    /// Recover signer from signature and hash.
-    ///
-    /// Returns `None` if the transaction's signature is invalid, see also [`Self::recover_signer`].
-    pub fn recover_signer(&self) -> Option<Address> {
-        // Optimism's Deposit transaction does not have a signature. Directly return the
-        // `from` address.
-        #[cfg(feature = "optimism")]
-        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from)
-        }
-
-        let signature_hash = self.signature_hash();
-        recover_signer(&self.signature, signature_hash)
-    }
-
-    /// Recover signer from signature and hash _without ensuring that the signature has a low `s`
-    /// value_.
-    ///
-    /// Reuses a given buffer to avoid numerous reallocations when recovering batches. **Clears the
-    /// buffer before use.**
-    ///
-    /// Returns `None` if the transaction's signature is invalid, see also
-    /// [`recover_signer_unchecked`].
-    ///
-    /// # Optimism
-    ///
-    /// For optimism this will return [`Address::ZERO`] if the Signature is empty, this is because pre bedrock (on OP mainnet), relay messages to the L2 Cross Domain Messenger were sent as legacy transactions from the zero address with an empty signature, e.g.: <https://optimistic.etherscan.io/tx/0x1bb352ff9215efe5a4c102f45d730bae323c3288d2636672eb61543ddd47abad>
-    /// This makes it possible to import pre bedrock transactions via the sender recovery stage.
-    pub fn encode_and_recover_unchecked(&self, buffer: &mut Vec<u8>) -> Option<Address> {
-        buffer.clear();
-        self.transaction.encode_for_signing(buffer);
-
-        // Optimism's Deposit transaction does not have a signature. Directly return the
-        // `from` address.
-        #[cfg(feature = "optimism")]
-        {
-            if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-                return Some(from)
-            }
-
-            // pre bedrock system transactions were sent from the zero address as legacy
-            // transactions with an empty signature
-            //
-            // NOTE: this is very hacky and only relevant for op-mainnet pre bedrock
-            if self.is_legacy() && self.signature == TxDeposit::signature() {
-                return Some(Address::ZERO)
-            }
-        }
-
-        recover_signer_unchecked(&self.signature, keccak256(buffer))
-    }
-
-    /// Converts into a transaction type with its hash: [`TransactionSigned`].
-    ///
-    /// Note: This will recalculate the hash of the transaction.
-    #[inline]
-    pub fn with_hash(self) -> TransactionSigned {
-        let Self { signature, transaction } = self;
-        TransactionSigned::new_unhashed(transaction, signature)
-    }
-
-    /// Recovers a list of signers from a transaction list iterator
-    ///
-    /// Returns `None`, if some transaction's signature is invalid, see also
-    /// [`Self::recover_signer`].
-    pub fn recover_signers<'a, T>(txes: T, num_txes: usize) -> Option<Vec<Address>>
-    where
-        T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self> + Send,
-    {
-        if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
-            txes.into_iter().map(|tx| tx.recover_signer()).collect()
-        } else {
-            txes.into_par_iter().map(|tx| tx.recover_signer()).collect()
-        }
-    }
-}
-
-impl Default for TransactionSignedNoHash {
-    fn default() -> Self {
-        Self { signature: Signature::test_signature(), transaction: Default::default() }
-    }
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl<'a> arbitrary::Arbitrary<'a> for TransactionSignedNoHash {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let tx_signed = TransactionSigned::arbitrary(u)?;
-
-        Ok(Self { signature: tx_signed.signature, transaction: tx_signed.transaction })
-    }
-}
-
-#[cfg(any(test, feature = "reth-codec"))]
-impl reth_codecs::Compact for TransactionSignedNoHash {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
-        let start = buf.as_mut().len();
-
-        // Placeholder for bitflags.
-        // The first byte uses 4 bits as flags: IsCompressed[1bit], TxType[2bits], Signature[1bit]
-        buf.put_u8(0);
-
-        let sig_bit = self.signature.to_compact(buf) as u8;
-        let zstd_bit = self.transaction.input().len() >= 32;
-
-        let tx_bits = if zstd_bit {
-            let mut tmp = Vec::with_capacity(256);
-            if cfg!(feature = "std") {
-                crate::compression::TRANSACTION_COMPRESSOR.with(|compressor| {
-                    let mut compressor = compressor.borrow_mut();
-                    let tx_bits = self.transaction.to_compact(&mut tmp);
-                    buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
-                    tx_bits as u8
-                })
-            } else {
-                let mut compressor = crate::compression::create_tx_compressor();
-                let tx_bits = self.transaction.to_compact(&mut tmp);
-                buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
-                tx_bits as u8
-            }
-        } else {
-            self.transaction.to_compact(buf) as u8
-        };
-
-        // Replace bitflags with the actual values
-        buf.as_mut()[start] = sig_bit | (tx_bits << 1) | ((zstd_bit as u8) << 3);
-
-        buf.as_mut().len() - start
-    }
-
-    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
-        use bytes::Buf;
-
-        // The first byte uses 4 bits as flags: IsCompressed[1], TxType[2], Signature[1]
-        let bitflags = buf.get_u8() as usize;
-
-        let sig_bit = bitflags & 1;
-        let (signature, buf) = Signature::from_compact(buf, sig_bit);
-
-        let zstd_bit = bitflags >> 3;
-        let (transaction, buf) = if zstd_bit != 0 {
-            if cfg!(feature = "std") {
-                crate::compression::TRANSACTION_DECOMPRESSOR.with(|decompressor| {
-                    let mut decompressor = decompressor.borrow_mut();
-
-                    // TODO: enforce that zstd is only present at a "top" level type
-
-                    let transaction_type = (bitflags & 0b110) >> 1;
-                    let (transaction, _) =
-                        Transaction::from_compact(decompressor.decompress(buf), transaction_type);
-
-                    (transaction, buf)
-                })
-            } else {
-                let mut decompressor = crate::compression::create_tx_decompressor();
-                let transaction_type = (bitflags & 0b110) >> 1;
-                let (transaction, _) =
-                    Transaction::from_compact(decompressor.decompress(buf), transaction_type);
-
-                (transaction, buf)
-            }
-        } else {
-            let transaction_type = bitflags >> 1;
-            Transaction::from_compact(buf, transaction_type)
-        };
-
-        (Self { signature, transaction }, buf)
-    }
-}
-
-#[cfg(any(test, feature = "reth-codec"))]
-impl reth_codecs::Compact for TransactionSigned {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
-        let tx: TransactionSignedNoHash = self.clone().into();
-        tx.to_compact(buf)
-    }
-
-    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-        let (tx, buf) = TransactionSignedNoHash::from_compact(buf, len);
-        (tx.into(), buf)
-    }
-}
-
-impl From<TransactionSignedNoHash> for TransactionSigned {
-    fn from(tx: TransactionSignedNoHash) -> Self {
-        tx.with_hash()
-    }
-}
-
-impl From<TransactionSigned> for TransactionSignedNoHash {
-    fn from(tx: TransactionSigned) -> Self {
-        Self { signature: tx.signature, transaction: tx.transaction }
-    }
-}
-
 /// Signed transaction.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
 #[derive(Debug, Clone, Eq, AsRef, Deref, Serialize, Deserialize)]
@@ -1540,6 +1316,86 @@ impl Decodable2718 for TransactionSigned {
 
     fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
         Ok(Self::decode_rlp_legacy_transaction(buf)?)
+    }
+}
+
+#[cfg(any(test, feature = "reth-codec"))]
+impl reth_codecs::Compact for TransactionSigned {
+    fn to_compact<B>(&self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        let start = buf.as_mut().len();
+
+        // Placeholder for bitflags.
+        // The first byte uses 4 bits as flags: IsCompressed[1bit], TxType[2bits], Signature[1bit]
+        buf.put_u8(0);
+
+        let sig_bit = self.signature.to_compact(buf) as u8;
+        let zstd_bit = self.transaction.input().len() >= 32;
+
+        let tx_bits = if zstd_bit {
+            let mut tmp = Vec::with_capacity(256);
+            if cfg!(feature = "std") {
+                crate::compression::TRANSACTION_COMPRESSOR.with(|compressor| {
+                    let mut compressor = compressor.borrow_mut();
+                    let tx_bits = self.transaction.to_compact(&mut tmp);
+                    buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
+                    tx_bits as u8
+                })
+            } else {
+                let mut compressor = crate::compression::create_tx_compressor();
+                let tx_bits = self.transaction.to_compact(&mut tmp);
+                buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
+                tx_bits as u8
+            }
+        } else {
+            self.transaction.to_compact(buf) as u8
+        };
+
+        // Replace bitflags with the actual values
+        buf.as_mut()[start] = sig_bit | (tx_bits << 1) | ((zstd_bit as u8) << 3);
+
+        buf.as_mut().len() - start
+    }
+
+    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
+        use bytes::Buf;
+
+        // The first byte uses 4 bits as flags: IsCompressed[1], TxType[2], Signature[1]
+        let bitflags = buf.get_u8() as usize;
+
+        let sig_bit = bitflags & 1;
+        let (signature, buf) = Signature::from_compact(buf, sig_bit);
+
+        let zstd_bit = bitflags >> 3;
+        let (transaction, buf) = if zstd_bit != 0 {
+            if cfg!(feature = "std") {
+                crate::compression::TRANSACTION_DECOMPRESSOR.with(|decompressor| {
+                    let mut decompressor = decompressor.borrow_mut();
+
+                    // TODO: enforce that zstd is only present at a "top" level type
+
+                    let transaction_type = (bitflags & 0b110) >> 1;
+                    let (transaction, _) =
+                        Transaction::from_compact(decompressor.decompress(buf), transaction_type);
+
+                    (transaction, buf)
+                })
+            } else {
+                let mut decompressor = crate::compression::create_tx_decompressor();
+                let transaction_type = (bitflags & 0b110) >> 1;
+                let (transaction, _) =
+                    Transaction::from_compact(decompressor.decompress(buf), transaction_type);
+
+                (transaction, buf)
+            }
+        } else {
+            let transaction_type = bitflags >> 1;
+            Transaction::from_compact(buf, transaction_type)
+        };
+
+        (Self { signature, transaction, hash: Default::default() }, buf)
     }
 }
 
