@@ -1,7 +1,5 @@
 //! API related to listening for network events.
 
-use std::{fmt, net::SocketAddr, sync::Arc};
-
 use reth_eth_wire_types::{
     message::RequestPair, BlockBodies, BlockHeaders, Capabilities, DisconnectReason, EthMessage,
     EthNetworkPrimitives, EthVersion, GetBlockBodies, GetBlockHeaders, GetNodeData,
@@ -13,8 +11,42 @@ use reth_network_p2p::error::{RequestError, RequestResult};
 use reth_network_peers::PeerId;
 use reth_network_types::PeerAddr;
 use reth_tokio_util::EventStream;
+use std::{fmt, net::SocketAddr, pin::Pin, sync::Arc};
 use tokio::sync::{mpsc, oneshot};
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio_stream::{wrappers::UnboundedReceiverStream, Stream, StreamExt};
+
+/// A boxed stream of network peer events that provides a type-erased interface.
+pub struct PeerEventStream(Pin<Box<dyn Stream<Item = PeerEvent> + Send + Sync>>);
+
+impl fmt::Debug for PeerEventStream {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PeerEventStream").finish_non_exhaustive()
+    }
+}
+
+impl PeerEventStream {
+    /// Create a new stream [`PeerEventStream`] by converting the provided stream's items into peer
+    /// events [`PeerEvent`]
+    pub fn new<S, T>(stream: S) -> Self
+    where
+        S: Stream<Item = T> + Send + Sync + 'static,
+        T: Into<PeerEvent> + 'static,
+    {
+        let mapped_stream = stream.map(Into::into);
+        Self(Box::pin(mapped_stream))
+    }
+}
+
+impl Stream for PeerEventStream {
+    type Item = PeerEvent;
+
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.0.as_mut().poll_next(cx)
+    }
+}
 
 /// Represents information about an established peer session.
 #[derive(Debug, Clone)]
@@ -81,11 +113,20 @@ impl<R> Clone for NetworkEvent<R> {
     }
 }
 
+impl<R> From<NetworkEvent<R>> for PeerEvent {
+    fn from(event: NetworkEvent<R>) -> Self {
+        match event {
+            NetworkEvent::Peer(peer_event) => peer_event,
+            NetworkEvent::ActivePeerSession { info, .. } => Self::SessionEstablished(info),
+        }
+    }
+}
+
 /// Provides peer event subscription for the network.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait NetworkPeersEvents: Send + Sync {
-    /// Creates a new [`PeerEvent`] listener channel.
-    fn peer_events(&self) -> EventStream<PeerEvent>;
+    /// Creates a new peer event listener stream.
+    fn peer_events(&self) -> PeerEventStream;
 }
 
 /// Provides event subscription for the network.

@@ -1052,11 +1052,15 @@ where
     }
 
     /// Handles session establishment and peer transactions initialization.
-    fn handle_peer_session(&mut self, info: SessionInfo, messages: PeerRequestSender) {
+    fn handle_peer_session(
+        &mut self,
+        info: SessionInfo,
+        messages: PeerRequestSender<PeerRequest<N>>,
+    ) {
         let SessionInfo { peer_id, client_version, version, .. } = info;
 
         // Insert a new peer into the peerset.
-        let peer = PeerMetadata::new(
+        let peer = PeerMetadata::<N>::new(
             messages,
             version,
             client_version,

@@ -256,8 +256,6 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
 
         let (to_manager_tx, from_handle_rx) = mpsc::unbounded_channel();
 
-        let peers_sender: EventSender<PeerEvent> = Default::default();
-
         let event_sender: EventSender<NetworkEvent<PeerRequest<N>>> = Default::default();
 
         let handle = NetworkHandle::new(
@@ -272,7 +270,6 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             tx_gossip_disabled,
             discv4,
             discv5,
-            peers_sender,
             event_sender.clone(),
             nat,
         );
