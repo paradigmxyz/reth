@@ -58,10 +58,12 @@
 //! // The key that's used for encrypting sessions and to identify our node.
 //! let local_key = rng_secret_key();
 //!
-//! let config = NetworkConfig::builder(local_key).boot_nodes(mainnet_nodes()).build(client);
+//! let config = NetworkConfig::<_, EthNetworkPrimitives>::builder(local_key)
+//!     .boot_nodes(mainnet_nodes())
+//!     .build(client);
 //!
 //! // create the network instance
-//! let network = NetworkManager::<EthNetworkPrimitives>::new(config).await.unwrap();
+//! let network = NetworkManager::new(config).await.unwrap();
 //!
 //! // keep a handle to the network and spawn it
 //! let handle = network.handle().clone();
@@ -73,7 +75,9 @@
 //! ### Configure all components of the Network with the [`NetworkBuilder`]
 //!
 //! ```
-//! use reth_network::{config::rng_secret_key, NetworkConfig, NetworkManager};
+//! use reth_network::{
+//!     config::rng_secret_key, EthNetworkPrimitives, NetworkConfig, NetworkManager,
+//! };
 //! use reth_network_peers::mainnet_nodes;
 //! use reth_provider::test_utils::NoopProvider;
 //! use reth_transaction_pool::TransactionPool;
@@ -84,8 +88,9 @@
 //!     // The key that's used for encrypting sessions and to identify our node.
 //!     let local_key = rng_secret_key();
 //!
-//!     let config =
-//!         NetworkConfig::builder(local_key).boot_nodes(mainnet_nodes()).build(client.clone());
+//!     let config = NetworkConfig::<_, EthNetworkPrimitives>::builder(local_key)
+//!         .boot_nodes(mainnet_nodes())
+//!         .build(client.clone());
 //!     let transactions_manager_config = config.transactions_manager_config.clone();
 //!
 //!     // create the network instance
