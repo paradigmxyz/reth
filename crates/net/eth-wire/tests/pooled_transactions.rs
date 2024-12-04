@@ -3,7 +3,7 @@
 use alloy_eips::eip2718::Decodable2718;
 use alloy_primitives::hex;
 use alloy_rlp::{Decodable, Encodable};
-use reth_eth_wire::{EthVersion, PooledTransactions, ProtocolMessage};
+use reth_eth_wire::{EthNetworkPrimitives, EthVersion, PooledTransactions, ProtocolMessage};
 use reth_primitives::PooledTransactionsElement;
 use std::{fs, path::PathBuf};
 use test_fuzz::test_fuzz;
@@ -51,7 +51,7 @@ fn decode_request_pair_pooled_blob_transactions() {
         .join("testdata/request_pair_pooled_blob_transactions");
     let data = fs::read_to_string(network_data_path).expect("Unable to read file");
     let hex_data = hex::decode(data.trim()).unwrap();
-    let _txs: ProtocolMessage =
+    let _txs: ProtocolMessage<EthNetworkPrimitives> =
         ProtocolMessage::decode_message(EthVersion::Eth68, &mut &hex_data[..]).unwrap();
 }
 
