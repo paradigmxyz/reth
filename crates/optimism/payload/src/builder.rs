@@ -55,7 +55,7 @@ pub struct OpPayloadBuilder<EvmConfig, Txs = ()> {
     pub compute_pending_block: bool,
     /// The type responsible for creating the evm.
     pub evm_config: EvmConfig,
-    /// Setttings for the builder, e.g. DA settings.
+    /// Settings for the builder, e.g. DA settings.
     pub config: OpBuilderConfig,
     /// The type responsible for yielding the best transactions for the payload if mempool
     /// transactions are allowed.
@@ -66,12 +66,12 @@ impl<EvmConfig> OpPayloadBuilder<EvmConfig> {
     /// `OpPayloadBuilder` constructor.
     ///
     /// Configures the builder with the default settings.
-    pub const fn new(evm_config: EvmConfig) -> Self {
+    pub fn new(evm_config: EvmConfig) -> Self {
         Self::with_builder_config(evm_config, Default::default())
     }
 
     /// Configures the builder with the given [`OpBuilderConfig`].
-    pub const fn with_builder_config(evm_config: EvmConfig, config: OpBuilderConfig) -> Self {
+    pub fn with_builder_config(evm_config: EvmConfig, config: OpBuilderConfig) -> Self {
         Self { compute_pending_block: true, evm_config, config, best_transactions: () }
     }
 }
