@@ -33,7 +33,7 @@ Externally accessing a database in a read-only folder is not supported, **UNLESS
 
 If the error persists, ensure that you have the right `rx`  permissions on the `datadir` **and its parent** folders. Eg. the following command should succeed:
 
-```
+```bash,ignore
 stat /full/path/datadir
 ```
 
