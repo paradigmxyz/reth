@@ -542,19 +542,6 @@ tables! {
     }
 }
 
-/// Default table set for the database.
-#[derive(Debug, Clone)]
-pub struct DefaultTables {
-    /// The names of the tables in the set.
-    pub names: Vec<String>,
-}
-
-impl Default for DefaultTables {
-    fn default() -> Self {
-        Self { names: Tables::ALL.iter().map(|t| t.name().to_string()).collect() }
-    }
-}
-
 /// Keys for the `ChainState` table.
 #[derive(Ord, Clone, Eq, PartialOrd, PartialEq, Debug, Deserialize, Serialize, Hash)]
 pub enum ChainStateKey {
