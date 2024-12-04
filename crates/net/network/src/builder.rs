@@ -65,15 +65,13 @@ impl<Tx, Eth, N: NetworkPrimitives> NetworkBuilder<Tx, Eth, N> {
         let request_handler = EthRequestHandler::new(client, peers, rx);
         NetworkBuilder { network, request_handler, transactions }
     }
-}
 
-impl<Tx, Eth> NetworkBuilder<Tx, Eth> {
     /// Creates a new [`TransactionsManager`] and wires it to the network.
     pub fn transactions<Pool: TransactionPool>(
         self,
         pool: Pool,
         transactions_manager_config: TransactionsManagerConfig,
-    ) -> NetworkBuilder<TransactionsManager<Pool>, Eth> {
+    ) -> NetworkBuilder<TransactionsManager<Pool, N>, Eth, N> {
         let Self { mut network, request_handler, .. } = self;
         let (tx, rx) = mpsc::unbounded_channel();
         network.set_transactions(tx);

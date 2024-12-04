@@ -143,15 +143,16 @@ impl<N: NetworkPrimitives> Sink<EthMessage<N>> for EthRlpxConnection<N> {
 mod tests {
     use super::*;
 
-    const fn assert_eth_stream<St>()
+    const fn assert_eth_stream<N, St>()
     where
-        St: Stream<Item = Result<EthMessage, EthStreamError>> + Sink<EthMessage>,
+        N: NetworkPrimitives,
+        St: Stream<Item = Result<EthMessage<N>, EthStreamError>> + Sink<EthMessage<N>>,
     {
     }
 
     #[test]
     const fn test_eth_stream_variants() {
-        assert_eth_stream::<EthSatelliteConnection>();
-        assert_eth_stream::<EthRlpxConnection>();
+        assert_eth_stream::<EthNetworkPrimitives, EthSatelliteConnection<EthNetworkPrimitives>>();
+        assert_eth_stream::<EthNetworkPrimitives, EthRlpxConnection<EthNetworkPrimitives>>();
     }
 }

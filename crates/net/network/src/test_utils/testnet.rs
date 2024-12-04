@@ -11,7 +11,9 @@ use crate::{
 use futures::{FutureExt, StreamExt};
 use pin_project::pin_project;
 use reth_chainspec::{Hardforks, MAINNET};
-use reth_eth_wire::{protocol::Protocol, DisconnectReason, HelloMessageWithProtocols};
+use reth_eth_wire::{
+    protocol::Protocol, DisconnectReason, EthNetworkPrimitives, HelloMessageWithProtocols,
+};
 use reth_network_api::{
     events::{PeerEvent, SessionInfo},
     test_utils::{PeersHandle, PeersHandleProvider},
@@ -140,7 +142,7 @@ where
     }
 
     /// Returns all handles to the networks
-    pub fn handles(&self) -> impl Iterator<Item = NetworkHandle> + '_ {
+    pub fn handles(&self) -> impl Iterator<Item = NetworkHandle<EthNetworkPrimitives>> + '_ {
         self.peers.iter().map(|p| p.handle())
     }
 
@@ -346,11 +348,11 @@ impl<C, Pool> TestnetHandle<C, Pool> {
 #[derive(Debug)]
 pub struct Peer<C, Pool = TestPool> {
     #[pin]
-    network: NetworkManager,
+    network: NetworkManager<EthNetworkPrimitives>,
     #[pin]
-    request_handler: Option<EthRequestHandler<C>>,
+    request_handler: Option<EthRequestHandler<C, EthNetworkPrimitives>>,
     #[pin]
-    transactions_manager: Option<TransactionsManager<Pool>>,
+    transactions_manager: Option<TransactionsManager<Pool, EthNetworkPrimitives>>,
     pool: Option<Pool>,
     client: C,
     secret_key: SecretKey,
@@ -393,12 +395,12 @@ where
     }
 
     /// Returns mutable access to the network.
-    pub fn network_mut(&mut self) -> &mut NetworkManager {
+    pub fn network_mut(&mut self) -> &mut NetworkManager<EthNetworkPrimitives> {
         &mut self.network
     }
 
     /// Returns the [`NetworkHandle`] of this peer.
-    pub fn handle(&self) -> NetworkHandle {
+    pub fn handle(&self) -> NetworkHandle<EthNetworkPrimitives> {
         self.network.handle().clone()
     }
 
@@ -506,8 +508,8 @@ pub struct PeerConfig<C = NoopProvider> {
 /// A handle to a peer in the [`Testnet`].
 #[derive(Debug)]
 pub struct PeerHandle<Pool> {
-    network: NetworkHandle,
-    transactions: Option<TransactionsHandle>,
+    network: NetworkHandle<EthNetworkPrimitives>,
+    transactions: Option<TransactionsHandle<EthNetworkPrimitives>>,
     pool: Option<Pool>,
 }
 
@@ -545,7 +547,7 @@ impl<Pool> PeerHandle<Pool> {
     }
 
     /// Returns the [`NetworkHandle`] of this peer.
-    pub const fn network(&self) -> &NetworkHandle {
+    pub const fn network(&self) -> &NetworkHandle<EthNetworkPrimitives> {
         &self.network
     }
 }

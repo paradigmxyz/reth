@@ -282,14 +282,14 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     metrics: TransactionsManagerMetrics,
 }
 
-impl<Pool: TransactionPool> TransactionsManager<Pool> {
+impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
     /// Sets up a new instance.
     ///
     /// Note: This expects an existing [`NetworkManager`](crate::NetworkManager) instance.
     pub fn new(
-        network: NetworkHandle,
+        network: NetworkHandle<N>,
         pool: Pool,
-        from_network: mpsc::UnboundedReceiver<NetworkTransactionEvent>,
+        from_network: mpsc::UnboundedReceiver<NetworkTransactionEvent<N>>,
         transactions_manager_config: TransactionsManagerConfig,
     ) -> Self {
         let network_events = network.event_listener();
@@ -332,9 +332,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
             metrics,
         }
     }
-}
 
-impl<Pool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
     /// Returns a new handle that can send commands to this type.
     pub fn handle(&self) -> TransactionsHandle<N> {
         TransactionsHandle { manager_tx: self.command_tx.clone() }
@@ -1928,7 +1926,9 @@ mod tests {
     use tests::fetcher::TxFetchMetadata;
     use tracing::error;
 
-    async fn new_tx_manager() -> (TransactionsManager<TestPool>, NetworkManager) {
+    async fn new_tx_manager(
+    ) -> (TransactionsManager<TestPool, EthNetworkPrimitives>, NetworkManager<EthNetworkPrimitives>)
+    {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
         let client = NoopProvider::default();
 
@@ -1959,7 +1959,7 @@ mod tests {
     pub(super) fn new_mock_session(
         peer_id: PeerId,
         version: EthVersion,
-    ) -> (PeerMetadata, mpsc::Receiver<PeerRequest>) {
+    ) -> (PeerMetadata<EthNetworkPrimitives>, mpsc::Receiver<PeerRequest>) {
         let (to_mock_session_tx, to_mock_session_rx) = mpsc::channel(1);
 
         (
@@ -1991,7 +1991,7 @@ mod tests {
 
         let client = NoopProvider::default();
         let pool = testing_pool();
-        let config = NetworkConfigBuilder::new(secret_key)
+        let config = NetworkConfigBuilder::<EthNetworkPrimitives>::new(secret_key)
             .disable_discovery()
             .listener_port(0)
             .build(client);
