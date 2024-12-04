@@ -24,8 +24,8 @@ use reth_primitives::{
 use reth_provider::{
     BlockExecutionWriter, BlockNumReader, BlockWriter, CanonStateNotification,
     CanonStateNotificationSender, CanonStateNotifications, ChainSpecProvider, ChainSplit,
-    ChainSplitTarget, DBProvider, DisplayBlocksChain, HeaderProvider, ProviderError,
-    StaticFileProviderFactory, StorageLocation,
+    ChainSplitTarget, DBProvider, DisplayBlocksChain, HashedPostStateProvider, HeaderProvider,
+    ProviderError, StaticFileProviderFactory, StorageLocation,
 };
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
@@ -1215,7 +1215,7 @@ where
         recorder: &mut MakeCanonicalDurationsRecorder,
     ) -> Result<(), CanonicalError> {
         let (blocks, state, chain_trie_updates) = chain.into_inner();
-        let hashed_state = state.hash_state_slow();
+        let hashed_state = self.externals.provider_factory.hashed_post_state(state.state());
         let prefix_sets = hashed_state.construct_prefix_sets().freeze();
         let hashed_state_sorted = hashed_state.into_sorted();
 
@@ -1390,7 +1390,7 @@ mod tests {
     use reth_node_types::FullNodePrimitives;
     use reth_primitives::{
         proofs::{calculate_receipt_root, calculate_transaction_root},
-        Account, BlockBody, Transaction, TransactionSigned, TransactionSignedEcRecovered,
+        Account, BlockBody, RecoveredTx, Transaction, TransactionSigned,
     };
     use reth_provider::{
         providers::ProviderNodeTypes,
@@ -1424,7 +1424,12 @@ mod tests {
     }
 
     fn setup_genesis<
-        N: ProviderNodeTypes<Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>>,
+        N: ProviderNodeTypes<
+            Primitives: FullNodePrimitives<
+                BlockBody = reth_primitives::BlockBody,
+                BlockHeader = reth_primitives::Header,
+            >,
+        >,
     >(
         factory: &ProviderFactory<N>,
         mut genesis: SealedBlock,
@@ -1569,7 +1574,7 @@ mod tests {
         }
 
         let single_tx_cost = U256::from(INITIAL_BASE_FEE * MIN_TRANSACTION_GAS);
-        let mock_tx = |nonce: u64| -> TransactionSignedEcRecovered {
+        let mock_tx = |nonce: u64| -> RecoveredTx {
             TransactionSigned::new_unhashed(
                 Transaction::Eip1559(TxEip1559 {
                     chain_id: chain_spec.chain.id(),
@@ -1586,7 +1591,7 @@ mod tests {
 
         let mock_block = |number: u64,
                           parent: Option<B256>,
-                          body: Vec<TransactionSignedEcRecovered>,
+                          body: Vec<RecoveredTx>,
                           num_of_signer_txs: u64|
          -> SealedBlockWithSenders {
             let signed_body =
@@ -1880,7 +1885,12 @@ mod tests {
         );
 
         let provider = tree.externals.provider_factory.provider().unwrap();
-        let prefix_sets = exec5.hash_state_slow().construct_prefix_sets().freeze();
+        let prefix_sets = tree
+            .externals
+            .provider_factory
+            .hashed_post_state(exec5.state())
+            .construct_prefix_sets()
+            .freeze();
         let state_root =
             StateRoot::from_tx(provider.tx_ref()).with_prefix_sets(prefix_sets).root().unwrap();
         assert_eq!(state_root, block5.state_root);

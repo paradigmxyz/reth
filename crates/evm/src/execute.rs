@@ -12,7 +12,10 @@ pub use reth_storage_errors::provider::ProviderError;
 use crate::{system_calls::OnStateHook, TxEnvOverrides};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_eips::eip7685::Requests;
-use alloy_primitives::BlockNumber;
+use alloy_primitives::{
+    map::{DefaultHashBuilder, HashMap},
+    Address, BlockNumber,
+};
 use core::fmt::Display;
 use reth_consensus::ConsensusError;
 use reth_primitives::{BlockWithSenders, NodePrimitives, Receipt};
@@ -22,7 +25,7 @@ use revm::{
     db::{states::bundle_state::BundleRetention, BundleState},
     State,
 };
-use revm_primitives::{db::Database, U256};
+use revm_primitives::{db::Database, Account, AccountStatus, EvmState, U256};
 
 /// A general purpose executor trait that executes an input (e.g. block) and produces an output
 /// (e.g. state changes and receipts).
@@ -499,6 +502,42 @@ where
     }
 }
 
+/// Creates an `EvmState` from a map of balance increments and the current state
+/// to load accounts from. No balance increment is done in the function.
+/// Zero balance increments are ignored and won't create state entries.
+pub fn balance_increment_state<DB>(
+    balance_increments: &HashMap<Address, u128, DefaultHashBuilder>,
+    state: &mut State<DB>,
+) -> Result<EvmState, BlockExecutionError>
+where
+    DB: Database,
+{
+    let mut load_account = |address: &Address| -> Result<(Address, Account), BlockExecutionError> {
+        let cache_account = state.load_cache_account(*address).map_err(|_| {
+            BlockExecutionError::msg("could not load account for balance increment")
+        })?;
+
+        let account = cache_account.account.as_ref().ok_or_else(|| {
+            BlockExecutionError::msg("could not load account for balance increment")
+        })?;
+
+        Ok((
+            *address,
+            Account {
+                info: account.info.clone(),
+                storage: Default::default(),
+                status: AccountStatus::Touched,
+            },
+        ))
+    };
+
+    balance_increments
+        .iter()
+        .filter(|(_, &balance)| balance != 0)
+        .map(|(addr, _)| load_account(addr))
+        .collect::<Result<EvmState, _>>()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -507,7 +546,7 @@ mod tests {
     use reth_chainspec::{ChainSpec, MAINNET};
     use reth_primitives::EthPrimitives;
     use revm::db::{CacheDB, EmptyDBTyped};
-    use revm_primitives::{bytes, TxEnv};
+    use revm_primitives::{address, bytes, AccountInfo, TxEnv, KECCAK_EMPTY};
     use std::sync::Arc;
 
     #[derive(Clone, Default)]
@@ -759,5 +798,91 @@ mod tests {
         }));
         let result = executor.execute(BlockExecutionInput::new(&Default::default(), U256::ZERO));
         assert!(result.is_ok());
+    }
+
+    fn setup_state_with_account(
+        addr: Address,
+        balance: u128,
+        nonce: u64,
+    ) -> State<CacheDB<EmptyDBTyped<BlockExecutionError>>> {
+        let db = CacheDB::<EmptyDBTyped<BlockExecutionError>>::default();
+        let mut state = State::builder().with_database(db).with_bundle_update().build();
+
+        let account_info = AccountInfo {
+            balance: U256::from(balance),
+            nonce,
+            code_hash: KECCAK_EMPTY,
+            code: None,
+        };
+        state.insert_account(addr, account_info);
+        state
+    }
+
+    #[test]
+    fn test_balance_increment_state_zero() {
+        let addr = address!("1000000000000000000000000000000000000000");
+        let mut state = setup_state_with_account(addr, 100, 1);
+
+        let mut increments = HashMap::<Address, u128, DefaultHashBuilder>::default();
+        increments.insert(addr, 0);
+
+        let result = balance_increment_state(&increments, &mut state).unwrap();
+        assert!(result.is_empty(), "Zero increments should be ignored");
+    }
+
+    #[test]
+    fn test_balance_increment_state_empty_increments_map() {
+        let mut state = State::builder()
+            .with_database(CacheDB::<EmptyDBTyped<BlockExecutionError>>::default())
+            .with_bundle_update()
+            .build();
+
+        let increments = HashMap::<Address, u128, DefaultHashBuilder>::default();
+        let result = balance_increment_state(&increments, &mut state).unwrap();
+        assert!(result.is_empty(), "Empty increments map should return empty state");
+    }
+
+    #[test]
+    fn test_balance_increment_state_multiple_valid_increments() {
+        let addr1 = address!("1000000000000000000000000000000000000000");
+        let addr2 = address!("2000000000000000000000000000000000000000");
+
+        let mut state = setup_state_with_account(addr1, 100, 1);
+
+        let account2 =
+            AccountInfo { balance: U256::from(200), nonce: 1, code_hash: KECCAK_EMPTY, code: None };
+        state.insert_account(addr2, account2);
+
+        let mut increments = HashMap::<Address, u128, DefaultHashBuilder>::default();
+        increments.insert(addr1, 50);
+        increments.insert(addr2, 100);
+
+        let result = balance_increment_state(&increments, &mut state).unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result.get(&addr1).unwrap().info.balance, U256::from(100));
+        assert_eq!(result.get(&addr2).unwrap().info.balance, U256::from(200));
+    }
+
+    #[test]
+    fn test_balance_increment_state_mixed_zero_and_nonzero_increments() {
+        let addr1 = address!("1000000000000000000000000000000000000000");
+        let addr2 = address!("2000000000000000000000000000000000000000");
+
+        let mut state = setup_state_with_account(addr1, 100, 1);
+
+        let account2 =
+            AccountInfo { balance: U256::from(200), nonce: 1, code_hash: KECCAK_EMPTY, code: None };
+        state.insert_account(addr2, account2);
+
+        let mut increments = HashMap::<Address, u128, DefaultHashBuilder>::default();
+        increments.insert(addr1, 0);
+        increments.insert(addr2, 100);
+
+        let result = balance_increment_state(&increments, &mut state).unwrap();
+
+        assert_eq!(result.len(), 1, "Only non-zero increments should be included");
+        assert!(!result.contains_key(&addr1), "Zero increment account should not be included");
+        assert_eq!(result.get(&addr2).unwrap().info.balance, U256::from(200));
     }
 }

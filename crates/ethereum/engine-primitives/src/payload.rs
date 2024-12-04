@@ -332,6 +332,8 @@ mod tests {
             .unwrap(),
             withdrawals: None,
             parent_beacon_block_root: None,
+            target_blobs_per_block: None,
+            max_blobs_per_block: None,
         };
 
         // Verify that the generated payload ID matches the expected value
@@ -369,6 +371,8 @@ mod tests {
                 },
             ]),
             parent_beacon_block_root: None,
+            target_blobs_per_block: None,
+            max_blobs_per_block: None,
         };
 
         // Verify that the generated payload ID matches the expected value
@@ -401,6 +405,8 @@ mod tests {
                 )
                 .unwrap(),
             ),
+            target_blobs_per_block: None,
+            max_blobs_per_block: None,
         };
 
         // Verify that the generated payload ID matches the expected value

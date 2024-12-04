@@ -7,8 +7,10 @@ use crate::{
     traits::{CanonicalStateUpdate, TransactionPool, TransactionPoolExt},
     BlockInfo, PoolTransaction, PoolUpdateKind,
 };
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Address, BlockHash, BlockNumber};
+use alloy_rlp::Encodable;
 use futures_util::{
     future::{BoxFuture, Fuse, FusedFuture},
     FutureExt, Stream, StreamExt,
@@ -18,8 +20,8 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
 use reth_primitives::{
-    PooledTransactionsElementEcRecovered, SealedHeader, TransactionSigned,
-    TransactionSignedEcRecovered,
+    transaction::SignedTransactionIntoRecoveredExt, PooledTransactionsElementEcRecovered,
+    SealedHeader, TransactionSigned,
 };
 use reth_primitives_traits::SignedTransaction;
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
@@ -78,7 +80,7 @@ pub fn maintain_transaction_pool_future<Client, P, St, Tasks>(
 ) -> BoxFuture<'static, ()>
 where
     Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + Send + 'static,
-    P: TransactionPoolExt + 'static,
+    P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = TransactionSigned>> + 'static,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
 {
@@ -99,7 +101,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
     config: MaintainPoolConfig,
 ) where
     Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + Send + 'static,
-    P: TransactionPoolExt + 'static,
+    P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = TransactionSigned>> + 'static,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
 {
@@ -110,11 +112,13 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
         let latest = SealedHeader::seal(latest);
         let chain_spec = client.chain_spec();
         let info = BlockInfo {
-            block_gas_limit: latest.gas_limit,
+            block_gas_limit: latest.gas_limit(),
             last_seen_block_hash: latest.hash(),
-            last_seen_block_number: latest.number,
+            last_seen_block_number: latest.number(),
             pending_basefee: latest
-                .next_block_base_fee(chain_spec.base_fee_params_at_timestamp(latest.timestamp + 12))
+                .next_block_base_fee(
+                    chain_spec.base_fee_params_at_timestamp(latest.timestamp() + 12),
+                )
                 .unwrap_or_default(),
             pending_blob_fee: latest.next_block_blob_fee(),
         };
@@ -340,7 +344,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                                     <P as TransactionPool>::Transaction::from_pooled(tx.into())
                                 })
                         } else {
-                            <P as TransactionPool>::Transaction::try_from_consensus(tx.into()).ok()
+                            <P as TransactionPool>::Transaction::try_from_consensus(tx).ok()
                         }
                     })
                     .collect::<Vec<_>>();
@@ -557,7 +561,7 @@ async fn load_and_reinsert_transactions<P>(
     file_path: &Path,
 ) -> Result<(), TransactionsBackupError>
 where
-    P: TransactionPool,
+    P: TransactionPool<Transaction: PoolTransaction<Consensus: SignedTransaction>>,
 {
     if !file_path.exists() {
         return Ok(())
@@ -570,14 +574,15 @@ where
         return Ok(())
     }
 
-    let txs_signed: Vec<TransactionSigned> = alloy_rlp::Decodable::decode(&mut data.as_slice())?;
+    let txs_signed: Vec<<P::Transaction as PoolTransaction>::Consensus> =
+        alloy_rlp::Decodable::decode(&mut data.as_slice())?;
 
     let pool_transactions = txs_signed
         .into_iter()
         .filter_map(|tx| tx.try_ecrecovered())
         .filter_map(|tx| {
             // Filter out errors
-            <P::Transaction as PoolTransaction>::try_from_consensus(tx.into()).ok()
+            <P::Transaction as PoolTransaction>::try_from_consensus(tx).ok()
         })
         .collect();
 
@@ -590,7 +595,7 @@ where
 
 fn save_local_txs_backup<P>(pool: P, file_path: &Path)
 where
-    P: TransactionPool,
+    P: TransactionPool<Transaction: PoolTransaction<Consensus: Encodable>>,
 {
     let local_transactions = pool.get_local_transactions();
     if local_transactions.is_empty() {
@@ -600,11 +605,7 @@ where
 
     let local_transactions = local_transactions
         .into_iter()
-        .map(|tx| {
-            let recovered: TransactionSignedEcRecovered =
-                tx.transaction.clone_into_consensus().into();
-            recovered.into_signed()
-        })
+        .map(|tx| tx.transaction.clone_into_consensus().into_signed())
         .collect::<Vec<_>>();
 
     let num_txs = local_transactions.len();
@@ -644,7 +645,7 @@ pub async fn backup_local_transactions_task<P>(
     pool: P,
     config: LocalTransactionBackupConfig,
 ) where
-    P: TransactionPool + Clone,
+    P: TransactionPool<Transaction: PoolTransaction<Consensus: SignedTransaction>> + Clone,
 {
     let Some(transactions_path) = config.transactions_path else {
         // nothing to do

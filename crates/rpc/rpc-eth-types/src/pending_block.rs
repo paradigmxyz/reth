@@ -8,7 +8,7 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::B256;
 use derive_more::Constructor;
-use reth_primitives::{Receipt, SealedBlockWithSenders, SealedHeader};
+use reth_primitives::{Receipt, SealedBlockWithSenders};
 use reth_primitives_traits::Block;
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 
@@ -25,28 +25,28 @@ pub struct PendingBlockEnv {
 
 /// The origin for a configured [`PendingBlockEnv`]
 #[derive(Clone, Debug)]
-pub enum PendingBlockEnvOrigin<B: Block = reth_primitives::Block> {
+pub enum PendingBlockEnvOrigin<B: Block = reth_primitives::Block, R = Receipt> {
     /// The pending block as received from the CL.
-    ActualPending(SealedBlockWithSenders<B>),
+    ActualPending(SealedBlockWithSenders<B>, Vec<R>),
     /// The _modified_ header of the latest block.
     ///
     /// This derives the pending state based on the latest header by modifying:
     ///  - the timestamp
     ///  - the block number
     ///  - fees
-    DerivedFromLatest(SealedHeader<B::Header>),
+    DerivedFromLatest(B256),
 }
 
-impl<B: Block> PendingBlockEnvOrigin<B> {
+impl<B: Block, R> PendingBlockEnvOrigin<B, R> {
     /// Returns true if the origin is the actual pending block as received from the CL.
     pub const fn is_actual_pending(&self) -> bool {
-        matches!(self, Self::ActualPending(_))
+        matches!(self, Self::ActualPending(_, _))
     }
 
     /// Consumes the type and returns the actual pending block.
     pub fn into_actual_pending(self) -> Option<SealedBlockWithSenders<B>> {
         match self {
-            Self::ActualPending(block) => Some(block),
+            Self::ActualPending(block, _) => Some(block),
             _ => None,
         }
     }
@@ -57,8 +57,8 @@ impl<B: Block> PendingBlockEnvOrigin<B> {
     /// identify the block by its hash (latest block).
     pub fn state_block_id(&self) -> BlockId {
         match self {
-            Self::ActualPending(_) => BlockNumberOrTag::Pending.into(),
-            Self::DerivedFromLatest(header) => BlockId::Hash(header.hash().into()),
+            Self::ActualPending(_, _) => BlockNumberOrTag::Pending.into(),
+            Self::DerivedFromLatest(hash) => BlockId::Hash((*hash).into()),
         }
     }
 
@@ -69,16 +69,8 @@ impl<B: Block> PendingBlockEnvOrigin<B> {
     /// header.
     pub fn build_target_hash(&self) -> B256 {
         match self {
-            Self::ActualPending(block) => block.header().parent_hash(),
-            Self::DerivedFromLatest(header) => header.hash(),
-        }
-    }
-
-    /// Returns the header this pending block is based on.
-    pub fn header(&self) -> &SealedHeader<B::Header> {
-        match self {
-            Self::ActualPending(block) => &block.header,
-            Self::DerivedFromLatest(header) => header,
+            Self::ActualPending(block, _) => block.header().parent_hash(),
+            Self::DerivedFromLatest(hash) => *hash,
         }
     }
 }

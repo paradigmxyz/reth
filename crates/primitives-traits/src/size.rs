@@ -46,6 +46,13 @@ macro_rules! impl_in_mem_size {
 
 impl_in_mem_size!(Header, TxLegacy, TxEip2930, TxEip1559, TxEip7702, TxEip4844);
 
+#[cfg(feature = "op")]
+impl InMemorySize for op_alloy_consensus::OpTxType {
+    fn size(&self) -> usize {
+        1
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

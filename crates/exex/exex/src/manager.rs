@@ -246,7 +246,7 @@ pub struct ExExManager<P, N: NodePrimitives> {
     /// Write-Ahead Log for the [`ExExNotification`]s.
     wal: Wal<N>,
     /// A stream of finalized headers.
-    finalized_header_stream: ForkChoiceStream<SealedHeader>,
+    finalized_header_stream: ForkChoiceStream<SealedHeader<N::BlockHeader>>,
 
     /// A handle to the `ExEx` manager.
     handle: ExExManagerHandle<N>,
@@ -270,7 +270,7 @@ where
         handles: Vec<ExExHandle<N>>,
         max_capacity: usize,
         wal: Wal<N>,
-        finalized_header_stream: ForkChoiceStream<SealedHeader>,
+        finalized_header_stream: ForkChoiceStream<SealedHeader<N::BlockHeader>>,
     ) -> Self {
         let num_exexs = handles.len();
 
@@ -355,7 +355,7 @@ where
     ///
     /// This function checks if all ExExes are on the canonical chain and finalizes the WAL if
     /// necessary.
-    fn finalize_wal(&self, finalized_header: SealedHeader) -> eyre::Result<()> {
+    fn finalize_wal(&self, finalized_header: SealedHeader<N::BlockHeader>) -> eyre::Result<()> {
         debug!(target: "exex::manager", header = ?finalized_header.num_hash(), "Received finalized header");
 
         // Check if all ExExes are on the canonical chain

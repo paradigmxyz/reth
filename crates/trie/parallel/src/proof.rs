@@ -9,6 +9,7 @@ use reth_db::DatabaseError;
 use reth_execution_errors::StorageRootError;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, ProviderError,
+    StateCommitmentProvider,
 };
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
@@ -53,7 +54,12 @@ impl<Factory> ParallelProof<Factory> {
 
 impl<Factory> ParallelProof<Factory>
 where
-    Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + Send + Sync + 'static,
+    Factory: DatabaseProviderFactory<Provider: BlockReader>
+        + StateCommitmentProvider
+        + Clone
+        + Send
+        + Sync
+        + 'static,
 {
     /// Generate a state multiproof according to specified targets.
     pub fn multiproof(
@@ -203,7 +209,11 @@ where
                     account.encode(&mut account_rlp as &mut dyn BufMut);
 
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
-                    storages.insert(hashed_address, storage_multiproof);
+
+                    // We might be adding leaves that are not necessarily our proof targets.
+                    if targets.contains_key(&hashed_address) {
+                        storages.insert(hashed_address, storage_multiproof);
+                    }
                 }
             }
         }

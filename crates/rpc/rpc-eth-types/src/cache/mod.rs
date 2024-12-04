@@ -96,8 +96,11 @@ impl EthStateCache {
     pub fn spawn<Provider>(provider: Provider, config: EthStateCacheConfig) -> Self
     where
         Provider: StateProviderFactory
-            + BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
-            + Clone
+            + BlockReader<
+                Block = reth_primitives::Block,
+                Receipt = reth_primitives::Receipt,
+                Header = reth_primitives::Header,
+            > + Clone
             + Unpin
             + 'static,
     {
@@ -115,8 +118,11 @@ impl EthStateCache {
     ) -> Self
     where
         Provider: StateProviderFactory
-            + BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
-            + Clone
+            + BlockReader<
+                Block = reth_primitives::Block,
+                Receipt = reth_primitives::Receipt,
+                Header = reth_primitives::Header,
+            > + Clone
             + Unpin
             + 'static,
         Tasks: TaskSpawner + Clone + 'static,
@@ -331,8 +337,11 @@ where
 impl<Provider, Tasks> Future for EthStateCacheService<Provider, Tasks>
 where
     Provider: StateProviderFactory
-        + BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
-        + Clone
+        + BlockReader<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+            Header = reth_primitives::Header,
+        > + Clone
         + Unpin
         + 'static,
     Tasks: TaskSpawner + Clone + 'static,

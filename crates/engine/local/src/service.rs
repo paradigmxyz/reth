@@ -72,7 +72,7 @@ where
         payload_builder: PayloadBuilderHandle<N::Engine>,
         payload_validator: V,
         tree_config: TreeConfig,
-        invalid_block_hook: Box<dyn InvalidBlockHook>,
+        invalid_block_hook: Box<dyn InvalidBlockHook<N::Primitives>>,
         sync_metrics_tx: MetricEventsSender,
         to_engine: UnboundedSender<BeaconEngineMessage<N::Engine>>,
         from_engine: EngineMessageStream<N::Engine>,

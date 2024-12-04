@@ -15,6 +15,7 @@ workspace = true
 [dependencies]
 # reth
 reth-primitives-traits.workspace = true
+reth-execution-errors.workspace = true
 reth-trie-common.workspace = true
 reth-tracing.workspace = true
 
@@ -28,9 +29,9 @@ thiserror.workspace = true
 
 [dev-dependencies]
 reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
-reth-testing-utils.workspace = true
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
+reth-testing-utils.workspace = true
 
 arbitrary.workspace = true
 assert_matches.workspace = true

@@ -1,11 +1,12 @@
 use alloy_consensus::{BlobTransactionValidationError, EnvKzgSettings, Transaction, TxReceipt};
-use alloy_eips::eip4844::kzg_to_versioned_hash;
+use alloy_eips::{eip4844::kzg_to_versioned_hash, eip7685::RequestsOrHash};
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequest, BuilderBlockValidationRequestV2,
     BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
 };
 use alloy_rpc_types_engine::{
     BlobsBundleV1, CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, PayloadError,
+    PraguePayloadFields,
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
@@ -24,7 +25,6 @@ use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
 use reth_rpc_api::BlockSubmissionValidationApiServer;
 use reth_rpc_server_types::result::internal_rpc_err;
 use reth_tasks::TaskSpawner;
-use reth_trie::HashedPostState;
 use revm_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, sync::Arc};
@@ -88,7 +88,7 @@ where
 
 impl<Provider, E> ValidationApi<Provider, E>
 where
-    Provider: BlockReaderIdExt
+    Provider: BlockReaderIdExt<Header = reth_primitives::Header>
         + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + StateProviderFactory
         + HeaderProvider
@@ -185,7 +185,7 @@ where
         self.ensure_payment(&block, &output, &message)?;
 
         let state_root =
-            state_provider.state_root(HashedPostState::from_bundle_state(&output.state.state))?;
+            state_provider.state_root(state_provider.hashed_post_state(&output.state))?;
 
         if state_root != block.state_root {
             return Err(ConsensusError::BodyStateRootDiff(
@@ -386,7 +386,12 @@ where
                         versioned_hashes: self
                             .validate_blobs_bundle(request.request.blobs_bundle)?,
                     },
-                    request.request.execution_requests.into(),
+                    PraguePayloadFields {
+                        requests: RequestsOrHash::Requests(
+                            request.request.execution_requests.into(),
+                        ),
+                        target_blobs_per_block: request.request.target_blobs_per_block,
+                    },
                 ),
             )?
             .try_seal_with_senders()
@@ -404,7 +409,7 @@ where
 #[async_trait]
 impl<Provider, E> BlockSubmissionValidationApiServer for ValidationApi<Provider, E>
 where
-    Provider: BlockReaderIdExt
+    Provider: BlockReaderIdExt<Header = reth_primitives::Header>
         + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + StateProviderFactory
         + HeaderProvider
