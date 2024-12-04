@@ -737,6 +737,7 @@ impl<P> RevealedSparseTrie<P> {
                     let mut hash_mask_values = Vec::new();
                     let mut hashes = Vec::new();
                     for (i, child_path) in buffers.branch_child_buf.iter().enumerate() {
+                        let nibble = buffers.branch_child_buf.len() - i - 1;
                         if buffers.rlp_node_stack.last().is_some_and(|e| &e.0 == child_path) {
                             let (_, child, calculated, node_type) =
                                 buffers.rlp_node_stack.pop().unwrap();
@@ -758,7 +759,15 @@ impl<P> RevealedSparseTrie<P> {
 
                                 // Set the hash mask. If a child node has a hash value AND is a
                                 // branch node, set the hash mask and save the hash.
-                                let hash = child.as_hash().filter(|_| node_type.is_branch());
+                                let hash = child.as_hash().filter(|_| {
+                                    node_type.is_branch() ||
+                                        (node_type.is_hash() &&
+                                            self.branch_node_hash_masks
+                                                .get(child_path)
+                                                .is_some_and(|mask| {
+                                                    mask.is_bit_set(nibble as u8)
+                                                }))
+                                });
                                 hash_mask_values.push(hash.is_some());
                                 if let Some(hash) = hash {
                                     hashes.push(hash);
@@ -767,8 +776,7 @@ impl<P> RevealedSparseTrie<P> {
 
                             // Insert children in the resulting buffer in a normal order,
                             // because initially we iterated in reverse.
-                            buffers.branch_value_stack_buf
-                                [buffers.branch_child_buf.len() - i - 1] = child;
+                            buffers.branch_value_stack_buf[nibble] = child;
                             added_children = true;
                         } else {
                             debug_assert!(!added_children);
@@ -1054,6 +1062,10 @@ enum SparseNodeType {
 }
 
 impl SparseNodeType {
+    const fn is_hash(&self) -> bool {
+        matches!(self, Self::Hash)
+    }
+
     const fn is_branch(&self) -> bool {
         matches!(self, Self::Branch { .. })
     }
