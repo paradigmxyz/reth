@@ -2,7 +2,34 @@
 
 use std::sync::{atomic::AtomicU64, Arc};
 
+/// Settings for the OP builder.
+#[derive(Debug, Clone, Default)]
+pub struct OpBuilderConfig {
+    /// Data availability configuration for the OP builder.
+    pub da_config: OpDAConfig,
+}
+
+impl OpBuilderConfig {
+    /// Creates a new OP builder configuration with the given data availability configuration.
+    pub const fn new(da_config: OpDAConfig) -> Self {
+        Self { da_config }
+    }
+
+    /// Returns the Data Availability configuration for the OP builder, if it has configured
+    /// constraints.
+    pub fn constrained_da_config(&self) -> Option<&OpDAConfig> {
+        if self.da_config.is_empty() {
+            None
+        } else {
+            Some(&self.da_config)
+        }
+    }
+}
+
 /// Contains the Data Availability configuration for the OP builder.
+///
+/// This type is shareable and can be used to update the DA configuration for the OP payload
+/// builder.
 #[derive(Debug, Clone, Default)]
 pub struct OpDAConfig {
     inner: Arc<OpDAConfigInner>,
@@ -14,6 +41,11 @@ impl OpDAConfig {
         let this = Self::default();
         this.set_max_da_size(max_da_tx_size, max_da_block_size);
         this
+    }
+
+    /// Returns whether the configuration is empty.
+    pub fn is_empty(&self) -> bool {
+        self.max_da_tx_size().is_none() && self.max_da_block_size().is_none()
     }
 
     /// Returns the max allowed data availability size per transactions, if any.
@@ -83,5 +115,11 @@ mod tests {
         da.set_max_da_size(0, 0);
         assert_eq!(da.max_da_tx_size(), None);
         assert_eq!(da.max_da_block_size(), None);
+    }
+
+    #[test]
+    fn test_da_constrained() {
+        let config = OpBuilderConfig::default();
+        assert!(config.constrained_da_config().is_none());
     }
 }
