@@ -3,9 +3,8 @@ use crate::{
     trie_cursor::{CursorSubNode, TrieCursor},
     BranchNodeCompact, Nibbles,
 };
-use alloy_primitives::B256;
+use alloy_primitives::{map::HashSet, B256};
 use reth_storage_errors::db::DatabaseError;
-use std::collections::HashSet;
 
 #[cfg(feature = "metrics")]
 use crate::metrics::WalkerMetrics;
@@ -146,11 +145,12 @@ impl<C: TrieCursor> TrieWalker<C> {
     }
 
     /// Advances the walker to the next trie node and updates the skip node flag.
+    /// The new key can then be obtained via `key()`.
     ///
     /// # Returns
     ///
-    /// * `Result<Option<Nibbles>, Error>` - The next key in the trie or an error.
-    pub fn advance(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+    /// * `Result<(), Error>` - Unit on success or an error.
+    pub fn advance(&mut self) -> Result<(), DatabaseError> {
         if let Some(last) = self.stack.last() {
             if !self.can_skip_current_node && self.children_are_in_trie() {
                 // If we can't skip the current node and the children are in the trie,
@@ -168,8 +168,7 @@ impl<C: TrieCursor> TrieWalker<C> {
             self.update_skip_node();
         }
 
-        // Return the current key.
-        Ok(self.key().cloned())
+        Ok(())
     }
 
     /// Retrieves the current root node from the DB, seeking either the exact node or the next one.

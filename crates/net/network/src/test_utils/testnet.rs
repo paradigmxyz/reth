@@ -17,6 +17,7 @@ use reth_network_api::{
     NetworkEvent, NetworkEventListenerProvider, NetworkInfo, Peers,
 };
 use reth_network_peers::PeerId;
+use reth_primitives::TransactionSigned;
 use reth_provider::{test_utils::NoopProvider, ChainSpecProvider};
 use reth_storage_api::{BlockReader, BlockReaderIdExt, HeaderProvider, StateProviderFactory};
 use reth_tasks::TokioTaskExecutor;
@@ -24,7 +25,7 @@ use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore,
     test_utils::{TestPool, TestPoolBuilder},
-    EthTransactionPool, TransactionPool, TransactionValidationTaskExecutor,
+    EthTransactionPool, PoolTransaction, TransactionPool, TransactionValidationTaskExecutor,
 };
 use secp256k1::SecretKey;
 use std::{
@@ -194,8 +195,17 @@ where
 
 impl<C, Pool> Testnet<C, Pool>
 where
-    C: BlockReader<Block = reth_primitives::Block> + HeaderProvider + Clone + Unpin + 'static,
-    Pool: TransactionPool + Unpin + 'static,
+    C: BlockReader<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+            Header = reth_primitives::Header,
+        > + HeaderProvider
+        + Clone
+        + Unpin
+        + 'static,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>
+        + Unpin
+        + 'static,
 {
     /// Spawns the testnet to a separate task
     pub fn spawn(self) -> TestnetHandle<C, Pool> {
@@ -253,8 +263,16 @@ impl<C, Pool> fmt::Debug for Testnet<C, Pool> {
 
 impl<C, Pool> Future for Testnet<C, Pool>
 where
-    C: BlockReader<Block = reth_primitives::Block> + HeaderProvider + Unpin + 'static,
-    Pool: TransactionPool + Unpin + 'static,
+    C: BlockReader<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+            Header = reth_primitives::Header,
+        > + HeaderProvider
+        + Unpin
+        + 'static,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>
+        + Unpin
+        + 'static,
 {
     type Output = ();
 
@@ -448,8 +466,16 @@ where
 
 impl<C, Pool> Future for Peer<C, Pool>
 where
-    C: BlockReader<Block = reth_primitives::Block> + HeaderProvider + Unpin + 'static,
-    Pool: TransactionPool + Unpin + 'static,
+    C: BlockReader<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+            Header = reth_primitives::Header,
+        > + HeaderProvider
+        + Unpin
+        + 'static,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>
+        + Unpin
+        + 'static,
 {
     type Output = ();
 

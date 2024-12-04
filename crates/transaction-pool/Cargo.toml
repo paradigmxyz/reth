@@ -52,7 +52,6 @@ bitflags.workspace = true
 auto_impl.workspace = true
 smallvec.workspace = true
 
-
 # testing
 rand = { workspace = true, optional = true }
 paste = { workspace = true, optional = true }

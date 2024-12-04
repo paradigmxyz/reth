@@ -8,21 +8,21 @@ use reth_codecs::Compact;
 use reth_primitives_traits::{Block, BlockBody};
 use tracing::*;
 
-use alloy_primitives::TxNumber;
 use reth_db::{tables, transaction::DbTx};
 use reth_db_api::{cursor::DbCursorRO, transaction::DbTxMut};
 use reth_network_p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
 use reth_primitives::StaticFileSegment;
 use reth_provider::{
-    providers::{StaticFileProvider, StaticFileWriter},
-    BlockReader, BlockWriter, DBProvider, ProviderError, StaticFileProviderFactory, StatsReader,
-    StorageLocation,
+    providers::StaticFileWriter, BlockReader, BlockWriter, DBProvider, ProviderError,
+    StaticFileProviderFactory, StatsReader, StorageLocation,
 };
 use reth_stages_api::{
     EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId,
     UnwindInput, UnwindOutput,
 };
 use reth_storage_errors::provider::ProviderResult;
+
+use super::missing_static_data_error;
 
 /// The body stage downloads block bodies.
 ///
@@ -75,7 +75,9 @@ impl<D: BodyDownloader> BodyStage<D> {
         unwind_block: Option<u64>,
     ) -> Result<(), StageError>
     where
-        Provider: DBProvider<Tx: DbTxMut> + BlockReader + StaticFileProviderFactory,
+        Provider: DBProvider<Tx: DbTxMut>
+            + BlockReader<Header = reth_primitives::Header>
+            + StaticFileProviderFactory,
     {
         // Get id for the next tx_num of zero if there are no transactions.
         let next_tx_num = provider
@@ -128,6 +130,7 @@ impl<D: BodyDownloader> BodyStage<D> {
                             next_static_file_tx_num.saturating_sub(1),
                             &static_file_provider,
                             provider,
+                            StaticFileSegment::Transactions,
                         )?)
                     }
                 } else {
@@ -135,6 +138,7 @@ impl<D: BodyDownloader> BodyStage<D> {
                         next_static_file_tx_num.saturating_sub(1),
                         &static_file_provider,
                         provider,
+                        StaticFileSegment::Transactions,
                     )?)
                 }
             }
@@ -150,7 +154,7 @@ where
     Provider: DBProvider<Tx: DbTxMut>
         + StaticFileProviderFactory
         + StatsReader
-        + BlockReader
+        + BlockReader<Header = reth_primitives::Header>
         + BlockWriter<Block: Block<Body = D::Body>>,
     D: BodyDownloader<Body: BlockBody<Transaction: Compact>>,
 {
@@ -240,42 +244,6 @@ where
                 .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
         })
     }
-}
-
-/// Called when database is ahead of static files. Attempts to find the first block we are missing
-/// transactions for.
-fn missing_static_data_error<Provider>(
-    last_tx_num: TxNumber,
-    static_file_provider: &StaticFileProvider<Provider::Primitives>,
-    provider: &Provider,
-) -> Result<StageError, ProviderError>
-where
-    Provider: BlockReader + StaticFileProviderFactory,
-{
-    let mut last_block = static_file_provider
-        .get_highest_static_file_block(StaticFileSegment::Transactions)
-        .unwrap_or_default();
-
-    // To be extra safe, we make sure that the last tx num matches the last block from its indices.
-    // If not, get it.
-    loop {
-        if let Some(indices) = provider.block_body_indices(last_block)? {
-            if indices.last_tx_num() <= last_tx_num {
-                break
-            }
-        }
-        if last_block == 0 {
-            break
-        }
-        last_block -= 1;
-    }
-
-    let missing_block = Box::new(provider.sealed_header(last_block + 1)?.unwrap_or_default());
-
-    Ok(StageError::MissingStaticFileData {
-        block: missing_block,
-        segment: StaticFileSegment::Transactions,
-    })
 }
 
 // TODO(alexey): ideally, we want to measure Bodies stage progress in bytes, but it's hard to know

@@ -37,7 +37,7 @@ use reth_provider::{
     BlockReader, ChainSpecProvider, FullProvider,
 };
 use reth_tasks::TaskExecutor;
-use reth_transaction_pool::{PoolConfig, TransactionPool};
+use reth_transaction_pool::{PoolConfig, PoolTransaction, TransactionPool};
 use revm_primitives::EnvKzgSettings;
 use secp256k1::SecretKey;
 use std::sync::Arc;
@@ -650,8 +650,15 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     /// connected to that network.
     pub fn start_network<Pool>(&self, builder: NetworkBuilder<(), ()>, pool: Pool) -> NetworkHandle
     where
-        Pool: TransactionPool + Unpin + 'static,
-        Node::Provider: BlockReader<Block = reth_primitives::Block>,
+        Pool: TransactionPool<
+                Transaction: PoolTransaction<Consensus = reth_primitives::TransactionSigned>,
+            > + Unpin
+            + 'static,
+        Node::Provider: BlockReader<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+            Header = reth_primitives::Header,
+        >,
     {
         self.start_network_with(builder, pool, Default::default())
     }
@@ -669,8 +676,15 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         tx_config: TransactionsManagerConfig,
     ) -> NetworkHandle
     where
-        Pool: TransactionPool + Unpin + 'static,
-        Node::Provider: BlockReader<Block = reth_primitives::Block>,
+        Pool: TransactionPool<
+                Transaction: PoolTransaction<Consensus = reth_primitives::TransactionSigned>,
+            > + Unpin
+            + 'static,
+        Node::Provider: BlockReader<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+            Header = reth_primitives::Header,
+        >,
     {
         let (handle, network, txpool, eth) = builder
             .transactions(pool, tx_config)

@@ -61,7 +61,11 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     async fn build_network<
         N: ProviderNodeTypes<
             ChainSpec = C::ChainSpec,
-            Primitives: NodePrimitives<Block = reth_primitives::Block>,
+            Primitives: NodePrimitives<
+                Block = reth_primitives::Block,
+                Receipt = reth_primitives::Receipt,
+                BlockHeader = reth_primitives::Header,
+            >,
         >,
     >(
         &self,
@@ -180,7 +184,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 .try_seal_with_senders()
                 .map_err(|_| BlockValidationError::SenderRecoveryError)?,
         )?;
-        provider_rw.write_to_storage(
+        provider_rw.write_state(
             execution_outcome,
             OriginalValuesKnown::No,
             StorageLocation::Database,

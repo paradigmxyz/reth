@@ -19,7 +19,8 @@ use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_payload_util::PayloadTransactions;
 use reth_primitives::{
-    proofs, Block, BlockBody, BlockExt, Receipt, SealedHeader, TransactionSigned, TxType,
+    proofs, transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody, BlockExt, Receipt,
+    SealedHeader, TransactionSigned, TxType,
 };
 use reth_provider::{
     HashedPostStateProvider, ProviderError, StateProofProvider, StateProviderFactory,
@@ -27,7 +28,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{
-    noop::NoopTransactionPool, BestTransactionsAttributes, TransactionPool,
+    noop::NoopTransactionPool, BestTransactionsAttributes, PoolTransaction, TransactionPool,
 };
 use revm::{
     db::{states::bundle_state::BundleRetention, State},
@@ -97,7 +98,7 @@ impl<EvmConfig, Txs> OpPayloadBuilder<EvmConfig, Txs> {
 }
 impl<EvmConfig, Txs> OpPayloadBuilder<EvmConfig, Txs>
 where
-    EvmConfig: ConfigureEvm<Header = Header>,
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
     Txs: OpPayloadTransactions,
 {
     /// Constructs an Optimism payload from the transactions sent via the
@@ -114,7 +115,7 @@ where
     ) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError>
     where
         Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
-        Pool: TransactionPool,
+        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     {
         let (initialized_cfg, initialized_block_env) = self
             .cfg_and_block_env(&args.config.attributes, &args.config.parent_header)
@@ -154,7 +155,7 @@ where
 
 impl<EvmConfig, Txs> OpPayloadBuilder<EvmConfig, Txs>
 where
-    EvmConfig: ConfigureEvm<Header = Header>,
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
 {
     /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the targeted payload
     /// (that has the `parent` as its parent).
@@ -215,8 +216,8 @@ where
 impl<Pool, Client, EvmConfig, Txs> PayloadBuilder<Pool, Client> for OpPayloadBuilder<EvmConfig, Txs>
 where
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
-    Pool: TransactionPool,
-    EvmConfig: ConfigureEvm<Header = Header>,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
     Txs: OpPayloadTransactions,
 {
     type Attributes = OpPayloadBuilderAttributes;
@@ -283,7 +284,7 @@ pub struct OpBuilder<Pool, Txs> {
 
 impl<Pool, Txs> OpBuilder<Pool, Txs>
 where
-    Pool: TransactionPool,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     Txs: OpPayloadTransactions,
 {
     /// Executes the payload and returns the outcome.
@@ -293,7 +294,7 @@ where
         ctx: &OpPayloadBuilderCtx<EvmConfig>,
     ) -> Result<BuildOutcomeKind<ExecutedPayload>, PayloadBuilderError>
     where
-        EvmConfig: ConfigureEvm<Header = Header>,
+        EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
         DB: Database<Error = ProviderError>,
     {
         let Self { pool, best } = self;
@@ -338,7 +339,7 @@ where
         ctx: OpPayloadBuilderCtx<EvmConfig>,
     ) -> Result<BuildOutcomeKind<OpBuiltPayload>, PayloadBuilderError>
     where
-        EvmConfig: ConfigureEvm<Header = Header>,
+        EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
         DB: Database<Error = ProviderError> + AsRef<P>,
         P: StateRootProvider + HashedPostStateProvider,
     {
@@ -411,6 +412,7 @@ where
             blob_gas_used,
             excess_blob_gas,
             requests_hash: None,
+            target_blobs_per_block: None,
         };
 
         // seal the block
@@ -463,7 +465,7 @@ where
         ctx: &OpPayloadBuilderCtx<EvmConfig>,
     ) -> Result<ExecutionWitness, PayloadBuilderError>
     where
-        EvmConfig: ConfigureEvm<Header = Header>,
+        EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
         DB: Database<Error = ProviderError> + AsRef<P>,
         P: StateProofProvider,
     {
@@ -479,19 +481,23 @@ where
 pub trait OpPayloadTransactions: Clone + Send + Sync + Unpin + 'static {
     /// Returns an iterator that yields the transaction in the order they should get included in the
     /// new payload.
-    fn best_transactions<Pool: TransactionPool>(
+    fn best_transactions<
+        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
+    >(
         &self,
         pool: Pool,
         attr: BestTransactionsAttributes,
-    ) -> impl PayloadTransactions;
+    ) -> impl PayloadTransactions<Transaction = TransactionSigned>;
 }
 
 impl OpPayloadTransactions for () {
-    fn best_transactions<Pool: TransactionPool>(
+    fn best_transactions<
+        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
+    >(
         &self,
         pool: Pool,
         attr: BestTransactionsAttributes,
-    ) -> impl PayloadTransactions {
+    ) -> impl PayloadTransactions<Transaction = TransactionSigned> {
         BestPayloadTransactions::new(pool.best_transactions_with_attributes(attr))
     }
 }
@@ -694,7 +700,7 @@ impl<EvmConfig> OpPayloadBuilderCtx<EvmConfig> {
 
 impl<EvmConfig> OpPayloadBuilderCtx<EvmConfig>
 where
-    EvmConfig: ConfigureEvm<Header = Header>,
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
 {
     /// apply eip-4788 pre block contract call
     pub fn apply_pre_beacon_root_contract_call<DB>(
@@ -749,7 +755,7 @@ where
                 ))
             }
 
-            // Convert the transaction to a [TransactionSignedEcRecovered]. This is
+            // Convert the transaction to a [RecoveredTx]. This is
             // purely for the purposes of utilizing the `evm_config.tx_env`` function.
             // Deposit transactions do not have signatures, so if the tx is a deposit, this
             // will just pull in its `from` address.
@@ -830,11 +836,10 @@ where
         &self,
         info: &mut ExecutionInfo,
         db: &mut State<DB>,
-        mut best_txs: impl PayloadTransactions,
+        mut best_txs: impl PayloadTransactions<Transaction = TransactionSigned>,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
         DB: Database<Error = ProviderError>,
-        Pool: TransactionPool,
     {
         let block_gas_limit = self.block_gas_limit();
         let base_fee = self.base_fee();

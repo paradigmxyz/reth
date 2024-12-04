@@ -57,7 +57,7 @@ where
                     };
 
                     Ok(OpReceiptBuilder::new(
-                        &self.inner.provider().chain_spec(),
+                        &self.inner.eth_api.provider().chain_spec(),
                         tx,
                         meta,
                         receipt,

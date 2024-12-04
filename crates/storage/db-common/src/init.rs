@@ -1,5 +1,6 @@
 //! Reth genesis initialization utility functions.
 
+use alloy_consensus::BlockHeader;
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{Address, B256, U256};
 use reth_chainspec::EthChainSpec;
@@ -8,13 +9,15 @@ use reth_config::config::EtlConfig;
 use reth_db::tables;
 use reth_db_api::{transaction::DbTxMut, DatabaseError};
 use reth_etl::Collector;
-use reth_primitives::{Account, Bytecode, GotExpected, Receipts, StaticFileSegment, StorageEntry};
+use reth_primitives::{
+    Account, Bytecode, GotExpected, NodePrimitives, Receipts, StaticFileSegment, StorageEntry,
+};
 use reth_provider::{
     errors::provider::ProviderResult, providers::StaticFileWriter, writer::UnifiedStorageWriter,
     BlockHashReader, BlockNumReader, BundleStateInit, ChainSpecProvider, DBProvider,
     DatabaseProviderFactory, ExecutionOutcome, HashingWriter, HeaderProvider, HistoryWriter,
-    OriginalValuesKnown, ProviderError, RevertsInit, StageCheckpointWriter, StateChangeWriter,
-    StateWriter, StaticFileProviderFactory, StorageLocation, TrieWriter,
+    OriginalValuesKnown, ProviderError, RevertsInit, StageCheckpointWriter, StateWriter,
+    StaticFileProviderFactory, StorageLocation, TrieWriter,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
@@ -69,15 +72,19 @@ impl From<DatabaseError> for InitDatabaseError {
 /// Write the genesis block if it has not already been written
 pub fn init_genesis<PF>(factory: &PF) -> Result<B256, InitDatabaseError>
 where
-    PF: DatabaseProviderFactory + StaticFileProviderFactory + ChainSpecProvider + BlockHashReader,
-    PF::ProviderRW: StaticFileProviderFactory
+    PF: DatabaseProviderFactory
+        + StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Compact>>
+        + ChainSpecProvider
+        + BlockHashReader,
+    PF::ProviderRW: StaticFileProviderFactory<Primitives = PF::Primitives>
         + StageCheckpointWriter
         + HistoryWriter
         + HeaderProvider
         + HashingWriter
-        + StateChangeWriter
+        + StateWriter
         + StateWriter
         + AsRef<PF::ProviderRW>,
+    PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
 {
     let chain = factory.chain_spec();
 
@@ -146,7 +153,6 @@ pub fn insert_genesis_state<'a, 'b, Provider>(
 where
     Provider: StaticFileProviderFactory
         + DBProvider<Tx: DbTxMut>
-        + StateChangeWriter
         + HeaderProvider
         + StateWriter
         + AsRef<Provider>,
@@ -163,7 +169,6 @@ pub fn insert_state<'a, 'b, Provider>(
 where
     Provider: StaticFileProviderFactory
         + DBProvider<Tx: DbTxMut>
-        + StateChangeWriter
         + HeaderProvider
         + StateWriter
         + AsRef<Provider>,
@@ -233,11 +238,7 @@ where
         Vec::new(),
     );
 
-    provider.write_to_storage(
-        execution_outcome,
-        OriginalValuesKnown::Yes,
-        StorageLocation::Database,
-    )?;
+    provider.write_state(execution_outcome, OriginalValuesKnown::Yes, StorageLocation::Database)?;
 
     trace!(target: "reth::cli", "Inserted state");
 
@@ -312,15 +313,16 @@ pub fn insert_genesis_header<Provider, Spec>(
     chain: &Spec,
 ) -> ProviderResult<()>
 where
-    Provider: StaticFileProviderFactory + DBProvider<Tx: DbTxMut>,
-    Spec: EthChainSpec,
+    Provider: StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Compact>>
+        + DBProvider<Tx: DbTxMut>,
+    Spec: EthChainSpec<Header = <Provider::Primitives as NodePrimitives>::BlockHeader>,
 {
     let (header, block_hash) = (chain.genesis_header(), chain.genesis_hash());
     let static_file_provider = provider.static_file_provider();
 
     match static_file_provider.block_hash(0) {
         Ok(None) | Err(ProviderError::MissingStaticFileBlock(StaticFileSegment::Headers, 0)) => {
-            let (difficulty, hash) = (header.difficulty, block_hash);
+            let (difficulty, hash) = (header.difficulty(), block_hash);
             let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
             writer.append_header(header, difficulty, &hash)?;
         }
@@ -355,7 +357,6 @@ where
         + HistoryWriter
         + HeaderProvider
         + HashingWriter
-        + StateChangeWriter
         + TrieWriter
         + StateWriter
         + AsRef<Provider>,
@@ -365,7 +366,7 @@ where
     let expected_state_root = provider_rw
         .header_by_number(block)?
         .ok_or_else(|| ProviderError::HeaderNotFound(block.into()))?
-        .state_root;
+        .state_root();
 
     // first line can be state root
     let dump_state_root = parse_state_root(&mut reader)?;
@@ -478,7 +479,6 @@ where
         + HashingWriter
         + HistoryWriter
         + StateWriter
-        + StateChangeWriter
         + AsRef<Provider>,
 {
     let accounts_len = collector.len();
@@ -609,12 +609,11 @@ mod tests {
     use reth_db::DatabaseEnv;
     use reth_db_api::{
         cursor::DbCursorRO,
-        models::{storage_sharded_key::StorageShardedKey, ShardedKey},
+        models::{storage_sharded_key::StorageShardedKey, IntegerList, ShardedKey},
         table::{Table, TableRow},
         transaction::DbTx,
         Database,
     };
-    use reth_primitives_traits::IntegerList;
     use reth_provider::{
         test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
         ProviderFactory,

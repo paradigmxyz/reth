@@ -62,6 +62,7 @@ where
         Primitives: FullNodePrimitives<
             Block = reth_primitives::Block,
             BlockBody = reth_primitives::BlockBody,
+            Receipt = reth_primitives::Receipt,
         >,
     >,
 {
@@ -171,6 +172,7 @@ where
         Primitives: FullNodePrimitives<
             Block = reth_primitives::Block,
             BlockBody = reth_primitives::BlockBody,
+            Receipt = reth_primitives::Receipt,
         >,
     >,
 {
@@ -194,7 +196,8 @@ pub(crate) fn blocks_and_execution_outcome<N>(
 ) -> eyre::Result<(Vec<SealedBlockWithSenders>, ExecutionOutcome)>
 where
     N: ProviderNodeTypes,
-    N::Primitives: FullNodePrimitives<Block = reth_primitives::Block>,
+    N::Primitives:
+        FullNodePrimitives<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>,
 {
     let (block1, block2) = blocks(chain_spec.clone(), key_pair)?;
 

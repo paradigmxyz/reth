@@ -26,6 +26,5 @@ reth-node-types.workspace = true
 reth-node-core.workspace = true
 
 alloy-rpc-types-engine.workspace = true
-alloy-consensus.workspace = true
 
 eyre.workspace = true

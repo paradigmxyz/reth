@@ -95,7 +95,7 @@ impl<N: NodeTypesWithDB, E> BlockchainTree<N, E> {
 impl<N, E> BlockchainTree<N, E>
 where
     N: TreeNodeTypes,
-    E: BlockExecutorProvider,
+    E: BlockExecutorProvider<Primitives = N::Primitives>,
 {
     /// Builds the blockchain tree for the node.
     ///
@@ -1390,7 +1390,7 @@ mod tests {
     use reth_node_types::FullNodePrimitives;
     use reth_primitives::{
         proofs::{calculate_receipt_root, calculate_transaction_root},
-        Account, BlockBody, Transaction, TransactionSigned, TransactionSignedEcRecovered,
+        Account, BlockBody, RecoveredTx, Transaction, TransactionSigned,
     };
     use reth_provider::{
         providers::ProviderNodeTypes,
@@ -1424,7 +1424,12 @@ mod tests {
     }
 
     fn setup_genesis<
-        N: ProviderNodeTypes<Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>>,
+        N: ProviderNodeTypes<
+            Primitives: FullNodePrimitives<
+                BlockBody = reth_primitives::BlockBody,
+                BlockHeader = reth_primitives::Header,
+            >,
+        >,
     >(
         factory: &ProviderFactory<N>,
         mut genesis: SealedBlock,
@@ -1569,7 +1574,7 @@ mod tests {
         }
 
         let single_tx_cost = U256::from(INITIAL_BASE_FEE * MIN_TRANSACTION_GAS);
-        let mock_tx = |nonce: u64| -> TransactionSignedEcRecovered {
+        let mock_tx = |nonce: u64| -> RecoveredTx {
             TransactionSigned::new_unhashed(
                 Transaction::Eip1559(TxEip1559 {
                     chain_id: chain_spec.chain.id(),
@@ -1586,7 +1591,7 @@ mod tests {
 
         let mock_block = |number: u64,
                           parent: Option<B256>,
-                          body: Vec<TransactionSignedEcRecovered>,
+                          body: Vec<RecoveredTx>,
                           num_of_signer_txs: u64|
          -> SealedBlockWithSenders {
             let signed_body =

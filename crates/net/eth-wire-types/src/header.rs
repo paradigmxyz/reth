@@ -142,7 +142,8 @@ mod tests {
             blob_gas_used: None,
             excess_blob_gas: None,
             parent_beacon_block_root: None,
-            requests_hash: None
+            requests_hash: None,
+            target_blobs_per_block: None,
         };
         assert_eq!(header.hash_slow(), expected_hash);
     }
@@ -256,6 +257,7 @@ mod tests {
             excess_blob_gas: Some(0),
             parent_beacon_block_root: None,
             requests_hash: None,
+            target_blobs_per_block: None,
         };
 
         let header = Header::decode(&mut data.as_slice()).unwrap();
@@ -296,6 +298,7 @@ mod tests {
             blob_gas_used: Some(0),
             excess_blob_gas: Some(0x1600000),
             requests_hash: None,
+            target_blobs_per_block: None,
         };
 
         let header = Header::decode(&mut data.as_slice()).unwrap();

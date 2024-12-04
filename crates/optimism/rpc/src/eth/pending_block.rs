@@ -7,9 +7,9 @@ use alloy_primitives::{BlockNumber, B256};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
-use reth_primitives::{Receipt, SealedBlockWithSenders};
+use reth_primitives::{Receipt, SealedBlockWithSenders, TransactionSigned};
 use reth_provider::{
-    BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ExecutionOutcome,
+    BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ExecutionOutcome, ProviderTx,
     ReceiptProvider, StateProviderFactory,
 };
 use reth_rpc_eth_api::{
@@ -17,24 +17,28 @@ use reth_rpc_eth_api::{
     FromEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
-use reth_transaction_pool::TransactionPool;
+use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use revm::primitives::BlockEnv;
 
 impl<N> LoadPendingBlock for OpEthApi<N>
 where
     Self: SpawnBlocking,
     N: RpcNodeCore<
-        Provider: BlockReaderIdExt<Block = reth_primitives::Block>
-                      + EvmEnvProvider
+        Provider: BlockReaderIdExt<
+            Transaction = reth_primitives::TransactionSigned,
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+            Header = reth_primitives::Header,
+        > + EvmEnvProvider
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                       + StateProviderFactory,
-        Pool: TransactionPool,
-        Evm: ConfigureEvm<Header = Header>,
+        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<N::Provider>>>,
+        Evm: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
     >,
 {
     #[inline]
     fn pending_block(&self) -> &tokio::sync::Mutex<Option<PendingBlock>> {
-        self.inner.pending_block()
+        self.inner.eth_api.pending_block()
     }
 
     /// Returns the locally built pending block

@@ -20,8 +20,9 @@
 //! # use reth_static_file::StaticFileProducer;
 //! # use reth_config::config::StageConfig;
 //! # use reth_evm::execute::BlockExecutorProvider;
+//! # use reth_primitives::EthPrimitives;
 //!
-//! # fn create(exec: impl BlockExecutorProvider) {
+//! # fn create(exec: impl BlockExecutorProvider<Primitives = EthPrimitives>) {
 //!
 //! let provider_factory = create_test_provider_factory();
 //! let static_file_producer =

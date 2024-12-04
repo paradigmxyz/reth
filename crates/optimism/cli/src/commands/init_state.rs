@@ -11,7 +11,7 @@ use reth_provider::{
     BlockNumReader, ChainSpecProvider, DatabaseProviderFactory, StaticFileProviderFactory,
     StaticFileWriter,
 };
-use std::{fs::File, io::BufReader};
+use std::io::BufReader;
 use tracing::info;
 
 /// Initializes the database with the genesis block.
@@ -70,7 +70,7 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> InitStateCommandOp<C> {
 
         info!(target: "reth::cli", "Initiating state dump");
 
-        let reader = BufReader::new(File::open(self.init_state.state)?);
+        let reader = BufReader::new(reth_fs_util::open(self.init_state.state)?);
         let hash = init_from_state_dump(reader, &provider_rw, config.stages.etl)?;
 
         provider_rw.commit()?;

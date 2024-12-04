@@ -1,10 +1,8 @@
 //! Abstraction of transaction envelope type ID.
 
-use core::fmt;
-
-use alloy_primitives::{U64, U8};
-
 use crate::{InMemorySize, MaybeArbitrary, MaybeCompact};
+use alloy_primitives::{U64, U8};
+use core::fmt;
 
 /// Helper trait that unifies all behaviour required by transaction type ID to support full node
 /// operations.
@@ -58,5 +56,28 @@ pub trait TxType:
     fn is_broadcastable_in_full(&self) -> bool {
         // EIP-4844 transactions are not broadcastable in full, only hashes are allowed.
         !self.is_eip4844()
+    }
+}
+
+#[cfg(feature = "op")]
+impl TxType for op_alloy_consensus::OpTxType {
+    fn is_legacy(&self) -> bool {
+        matches!(self, Self::Legacy)
+    }
+
+    fn is_eip2930(&self) -> bool {
+        matches!(self, Self::Eip2930)
+    }
+
+    fn is_eip1559(&self) -> bool {
+        matches!(self, Self::Eip1559)
+    }
+
+    fn is_eip4844(&self) -> bool {
+        false
+    }
+
+    fn is_eip7702(&self) -> bool {
+        matches!(self, Self::Eip7702)
     }
 }
