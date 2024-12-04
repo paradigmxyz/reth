@@ -808,8 +808,7 @@ dependencies = [
 [[package]]
 name = "alloy-trie"
 version = "0.7.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6b2e366c0debf0af77766c23694a3f863b02633050e71e096e257ffbd395e50"
+source = "git+https://github.com/alloy-rs/trie?branch=alexey/decoded-proof-retainer#b476def066e863836e5005ee3a2e48f4ad9c907c"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",

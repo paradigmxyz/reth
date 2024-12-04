@@ -16,13 +16,57 @@ use alloy_trie::{
 use itertools::Itertools;
 use reth_primitives_traits::Account;
 
+#[derive(Clone, Default, Debug, PartialEq, Eq)]
+pub struct DecodedMultiProof {
+    /// State trie multiproof for requested accounts.
+    pub account_subtree: ProofNodes<TrieNode>,
+    /// Storage trie multiproofs.
+    pub storages: HashMap<B256, DecodedStorageMultiProof>,
+}
+
+impl DecodedMultiProof {
+    pub fn extend(&mut self, other: Self) {
+        self.account_subtree.extend_from(other.account_subtree);
+
+        for (hashed_address, storage) in other.storages {
+            match self.storages.entry(hashed_address) {
+                hash_map::Entry::Occupied(mut entry) => {
+                    debug_assert_eq!(entry.get().root, storage.root);
+                    entry.get_mut().subtree.extend_from(storage.subtree);
+                }
+                hash_map::Entry::Vacant(entry) => {
+                    entry.insert(storage);
+                }
+            }
+        }
+    }
+}
+
+/// The merkle multiproof of storage trie.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DecodedStorageMultiProof {
+    /// Storage trie root.
+    pub root: B256,
+    /// Storage multiproof for requested slots.
+    pub subtree: ProofNodes<TrieNode>,
+}
+
+impl DecodedStorageMultiProof {
+    pub fn empty() -> Self {
+        Self {
+            root: EMPTY_ROOT_HASH,
+            subtree: ProofNodes::from_iter([(Nibbles::default(), TrieNode::EmptyRoot)]),
+        }
+    }
+}
+
 /// The state multiproof of target accounts and multiproofs of their storage tries.
 /// Multiproof is effectively a state subtrie that only contains the nodes
 /// in the paths of target accounts.
 #[derive(Clone, Default, Debug, PartialEq, Eq)]
 pub struct MultiProof {
     /// State trie multiproof for requested accounts.
-    pub account_subtree: ProofNodes,
+    pub account_subtree: ProofNodes<Bytes>,
     /// Storage trie multiproofs.
     pub storages: HashMap<B256, StorageMultiProof>,
 }
@@ -128,7 +172,7 @@ pub struct StorageMultiProof {
     /// Storage trie root.
     pub root: B256,
     /// Storage multiproof for requested slots.
-    pub subtree: ProofNodes,
+    pub subtree: ProofNodes<Bytes>,
 }
 
 impl StorageMultiProof {

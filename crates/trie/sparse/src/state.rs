@@ -12,7 +12,7 @@ use reth_primitives_traits::Account;
 use reth_tracing::tracing::trace;
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
-    MultiProof, Nibbles, TrieAccount, TrieNode, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    DecodedMultiProof, Nibbles, TrieAccount, TrieNode, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use std::{fmt, iter::Peekable};
 
@@ -106,7 +106,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     pub fn reveal_account(
         &mut self,
         account: B256,
-        proof: impl IntoIterator<Item = (Nibbles, Bytes)>,
+        proof: impl IntoIterator<Item = (Nibbles, TrieNode)>,
     ) -> SparseStateTrieResult<()> {
         if self.is_account_revealed(&account) {
             return Ok(());
@@ -124,8 +124,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         )?;
 
         // Reveal the remaining proof nodes.
-        for (path, bytes) in proof {
-            let node = TrieNode::decode(&mut &bytes[..])?;
+        for (path, node) in proof {
             trie.reveal_node(path, node)?;
         }
 
@@ -141,7 +140,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         &mut self,
         account: B256,
         slot: B256,
-        proof: impl IntoIterator<Item = (Nibbles, Bytes)>,
+        proof: impl IntoIterator<Item = (Nibbles, TrieNode)>,
     ) -> SparseStateTrieResult<()> {
         if self.is_storage_slot_revealed(&account, &slot) {
             return Ok(());
@@ -159,8 +158,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         )?;
 
         // Reveal the remaining proof nodes.
-        for (path, bytes) in proof {
-            let node = TrieNode::decode(&mut &bytes[..])?;
+        for (path, node) in proof {
             trie.reveal_node(path, node)?;
         }
 
@@ -175,7 +173,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     pub fn reveal_multiproof(
         &mut self,
         targets: HashMap<B256, HashSet<B256>>,
-        multiproof: MultiProof,
+        multiproof: DecodedMultiProof,
     ) -> SparseStateTrieResult<()> {
         let account_subtree = multiproof.account_subtree.into_nodes_sorted();
         let mut account_nodes = account_subtree.into_iter().peekable();
@@ -189,8 +187,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
             )?;
 
             // Reveal the remaining proof nodes.
-            for (path, bytes) in account_nodes {
-                let node = TrieNode::decode(&mut &bytes[..])?;
+            for (path, node) in account_nodes {
                 trace!(target: "trie::sparse", ?path, ?node, "Revealing account node");
                 trie.reveal_node(path, node)?;
             }
@@ -209,8 +206,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                 )?;
 
                 // Reveal the remaining proof nodes.
-                for (path, bytes) in storage_nodes {
-                    let node = TrieNode::decode(&mut &bytes[..])?;
+                for (path, node) in storage_nodes {
                     trace!(target: "trie::sparse", ?account, ?path, ?node, "Revealing storage node");
                     trie.reveal_node(path, node)?;
                 }
@@ -225,7 +221,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     }
 
     /// Validates the root node of the proof and returns it if it exists and is valid.
-    fn validate_root_node<I: Iterator<Item = (Nibbles, Bytes)>>(
+    fn validate_root_node<I: Iterator<Item = (Nibbles, TrieNode)>>(
         &self,
         proof: &mut Peekable<I>,
     ) -> SparseStateTrieResult<Option<TrieNode>> {
@@ -237,13 +233,12 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
             return Err(SparseStateTrieError::InvalidRootNode { path, node })
         }
 
-        // Decode root node and perform sanity check.
-        let root_node = TrieNode::decode(&mut &node[..])?;
-        if matches!(root_node, TrieNode::EmptyRoot) && proof.peek().is_some() {
+        // Perform sanity check.
+        if matches!(node, TrieNode::EmptyRoot) && proof.peek().is_some() {
             return Err(SparseStateTrieError::InvalidRootNode { path, node })
         }
 
-        Ok(Some(root_node))
+        Ok(Some(node))
     }
 
     /// Update the account leaf node.

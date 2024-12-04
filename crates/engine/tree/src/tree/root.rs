@@ -10,7 +10,7 @@ use reth_trie::{
     proof::{Proof, StorageProof},
     trie_cursor::InMemoryTrieCursorFactory,
     updates::{TrieUpdates, TrieUpdatesSorted},
-    HashedPostState, HashedPostStateSorted, HashedStorage, MultiProof, Nibbles, TrieInput,
+    DecodedMultiProof, HashedPostState, HashedPostStateSorted, HashedStorage, Nibbles, TrieInput,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseProof, DatabaseTrieCursorFactory};
 use reth_trie_parallel::root::ParallelStateRootError;
@@ -68,7 +68,7 @@ pub(crate) enum StateRootMessage {
     /// Proof calculation completed for a specific state update
     ProofCalculated {
         /// The calculated proof
-        proof: MultiProof,
+        proof: DecodedMultiProof,
         /// The state update that was used to calculate the proof
         state_update: HashedPostState,
         /// The index of this proof in the sequence of state updates
@@ -91,7 +91,7 @@ pub(crate) struct ProofSequencer {
     /// The next sequence number expected to be delivered.
     next_to_deliver: u64,
     /// Buffer for out-of-order proofs and corresponding state updates
-    pending_proofs: BTreeMap<u64, (MultiProof, HashedPostState)>,
+    pending_proofs: BTreeMap<u64, (DecodedMultiProof, HashedPostState)>,
 }
 
 impl ProofSequencer {
@@ -112,9 +112,9 @@ impl ProofSequencer {
     pub(crate) fn add_proof(
         &mut self,
         sequence: u64,
-        proof: MultiProof,
+        proof: DecodedMultiProof,
         state_update: HashedPostState,
-    ) -> Vec<(MultiProof, HashedPostState)> {
+    ) -> Vec<(DecodedMultiProof, HashedPostState)> {
         if sequence >= self.next_to_deliver {
             self.pending_proofs.insert(sequence, (proof, state_update));
         }
@@ -270,7 +270,7 @@ where
             };
 
             // TODO: replace with parallel proof
-            let result = Proof::overlay_multiproof(
+            let result = Proof::overlay_decoded_multiproof(
                 provider.tx_ref(),
                 // TODO(alexey): this clone can be expensive, we should avoid it
                 input.as_ref().clone(),
@@ -295,9 +295,9 @@ where
     fn on_proof(
         &mut self,
         sequence_number: u64,
-        proof: MultiProof,
+        proof: DecodedMultiProof,
         state_update: HashedPostState,
-    ) -> Option<(MultiProof, HashedPostState)> {
+    ) -> Option<(DecodedMultiProof, HashedPostState)> {
         let ready_proofs = self.proof_sequencer.add_proof(sequence_number, proof, state_update);
 
         if ready_proofs.is_empty() {
@@ -313,7 +313,7 @@ where
     }
 
     /// Spawns root calculation with the current state and proofs.
-    fn spawn_root_calculation(&mut self, state: HashedPostState, multiproof: MultiProof) {
+    fn spawn_root_calculation(&mut self, state: HashedPostState, multiproof: DecodedMultiProof) {
         let Some(trie) = self.sparse_trie.take() else { return };
 
         trace!(
@@ -365,7 +365,7 @@ where
 
     fn run(mut self) -> StateRootResult {
         let mut current_state_update = HashedPostState::default();
-        let mut current_multiproof = MultiProof::default();
+        let mut current_multiproof = DecodedMultiProof::default();
         let mut updates_received = 0;
         let mut proofs_processed = 0;
         let mut roots_calculated = 0;
@@ -554,7 +554,7 @@ fn get_proof_targets(
 /// time it took.
 fn update_sparse_trie<Factory: DatabaseProviderFactory>(
     mut trie: Box<SparseStateTrie>,
-    multiproof: MultiProof,
+    multiproof: DecodedMultiProof,
     targets: HashMap<B256, HashSet<B256>>,
     state: HashedPostState,
     provider: Factory::Provider,

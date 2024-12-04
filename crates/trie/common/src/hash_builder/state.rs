@@ -44,6 +44,7 @@ impl From<HashBuilderState> for HashBuilder {
             stored_in_database: state.stored_in_database,
             updated_branch_nodes: None,
             proof_retainer: None,
+            decoded_proof_retainer: None,
             rlp_buf: Vec::with_capacity(32),
         }
     }
