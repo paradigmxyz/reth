@@ -3067,6 +3067,7 @@ dependencies = [
  "reth-chainspec",
  "reth-discv4",
  "reth-network",
+ "reth-network-api",
  "reth-primitives",
  "reth-tracing",
  "secp256k1",
@@ -9560,9 +9561,9 @@ dependencies = [
 
 [[package]]
 name = "revm-inspectors"
-version = "0.12.0"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41bbeb6004cc4ed48d27756f0479011df91a6f5642a3abab9309eda5ce67c4ad"
+checksum = "0b7f5f8a2deafb3c76f357bbf9e71b73bddb915c4994bbbe3208fbfbe8fc7f8e"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",

@@ -40,6 +40,7 @@ use reth_eth_wire::{
 };
 use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
 use reth_network_api::{
+    events::{PeerEvent, SessionInfo},
     NetworkEvent, NetworkEventListenerProvider, PeerRequest, PeerRequestSender, Peers,
 };
 use reth_network_p2p::{
@@ -1050,55 +1051,81 @@ where
         }
     }
 
+    /// Handles session establishment and peer transactions initialization.
+    fn handle_peer_session(
+        &mut self,
+        info: SessionInfo,
+        messages: PeerRequestSender<PeerRequest<N>>,
+    ) {
+        let SessionInfo { peer_id, client_version, version, .. } = info;
+
+        // Insert a new peer into the peerset.
+        let peer = PeerMetadata::<N>::new(
+            messages,
+            version,
+            client_version,
+            self.config.max_transactions_seen_by_peer_history,
+        );
+        let peer = match self.peers.entry(peer_id) {
+            Entry::Occupied(mut entry) => {
+                entry.insert(peer);
+                entry.into_mut()
+            }
+            Entry::Vacant(entry) => entry.insert(peer),
+        };
+
+        // Send a `NewPooledTransactionHashes` to the peer with up to
+        // `SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE`
+        // transactions in the pool.
+        if self.network.is_initially_syncing() || self.network.tx_gossip_disabled() {
+            trace!(target: "net::tx", ?peer_id, "Skipping transaction broadcast: node syncing or gossip disabled");
+            return
+        }
+
+        // Get transactions to broadcast
+        let pooled_txs = self.pool.pooled_transactions_max(
+            SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE,
+        );
+        if pooled_txs.is_empty() {
+            trace!(target: "net::tx", ?peer_id, "No transactions in the pool to broadcast");
+            return;
+        }
+
+        // Build and send transaction hashes message
+        let mut msg_builder = PooledTransactionsHashesBuilder::new(version);
+        for pooled_tx in pooled_txs {
+            peer.seen_transactions.insert(*pooled_tx.hash());
+            msg_builder.push_pooled(pooled_tx);
+        }
+
+        debug!(target: "net::tx", ?peer_id, tx_count = msg_builder.is_empty(), "Broadcasting transaction hashes");
+        let msg = msg_builder.build();
+        self.network.send_transactions_hashes(peer_id, msg);
+    }
+
     /// Handles a received event related to common network events.
     fn on_network_event(&mut self, event_result: NetworkEvent<PeerRequest<N>>) {
         match event_result {
-            NetworkEvent::SessionClosed { peer_id, .. } => {
+            NetworkEvent::Peer(PeerEvent::SessionClosed { peer_id, .. }) => {
                 // remove the peer
                 self.peers.remove(&peer_id);
                 self.transaction_fetcher.remove_peer(&peer_id);
             }
-            NetworkEvent::SessionEstablished {
-                peer_id, client_version, messages, version, ..
-            } => {
-                // Insert a new peer into the peerset.
-                let peer = PeerMetadata::new(
-                    messages,
-                    version,
-                    client_version,
-                    self.config.max_transactions_seen_by_peer_history,
-                );
-                let peer = match self.peers.entry(peer_id) {
-                    Entry::Occupied(mut entry) => {
-                        entry.insert(peer);
-                        entry.into_mut()
+            NetworkEvent::ActivePeerSession { info, messages } => {
+                // process active peer session and broadcast available transaction from the pool
+                self.handle_peer_session(info, messages);
+            }
+            NetworkEvent::Peer(PeerEvent::SessionEstablished(info)) => {
+                let peer_id = info.peer_id;
+                // get messages from existing peer
+                let messages = match self.peers.get(&peer_id) {
+                    Some(p) => p.request_tx.clone(),
+                    None => {
+                        debug!(target: "net::tx", ?peer_id, "No peer request sender found");
+                        return;
                     }
-                    Entry::Vacant(entry) => entry.insert(peer),
                 };
-
-                // Send a `NewPooledTransactionHashes` to the peer with up to
-                // `SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE`
-                // transactions in the pool.
-                if self.network.is_initially_syncing() || self.network.tx_gossip_disabled() {
-                    return
-                }
-
-                let pooled_txs = self.pool.pooled_transactions_max(
-                    SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE,
-                );
-                if pooled_txs.is_empty() {
-                    // do not send a message if there are no transactions in the pool
-                    return
-                }
-
-                let mut msg_builder = PooledTransactionsHashesBuilder::new(version);
-                for pooled_tx in pooled_txs {
-                    peer.seen_transactions.insert(*pooled_tx.hash());
-                    msg_builder.push_pooled(pooled_tx);
-                }
-
-                let msg = msg_builder.build();
-                self.network.send_transactions_hashes(peer_id, msg);
+                self.handle_peer_session(info, messages);
             }
             _ => {}
         }
@@ -1987,27 +2014,12 @@ mod tests {
         let mut established = listener0.take(2);
         while let Some(ev) = established.next().await {
             match ev {
-                NetworkEvent::SessionEstablished {
-                    peer_id,
-                    remote_addr,
-                    client_version,
-                    capabilities,
-                    messages,
-                    status,
-                    version,
-                } => {
+                NetworkEvent::Peer(PeerEvent::SessionEstablished(info)) => {
                     // to insert a new peer in transactions peerset
-                    transactions.on_network_event(NetworkEvent::SessionEstablished {
-                        peer_id,
-                        remote_addr,
-                        client_version,
-                        capabilities,
-                        messages,
-                        status,
-                        version,
-                    })
+                    transactions
+                        .on_network_event(NetworkEvent::Peer(PeerEvent::SessionEstablished(info)))
                 }
-                NetworkEvent::PeerAdded(_peer_id) => continue,
+                NetworkEvent::Peer(PeerEvent::PeerAdded(_peer_id)) => continue,
                 ev => {
                     error!("unexpected event {ev:?}")
                 }
@@ -2073,28 +2085,13 @@ mod tests {
         let mut established = listener0.take(2);
         while let Some(ev) = established.next().await {
             match ev {
-                NetworkEvent::SessionEstablished {
-                    peer_id,
-                    remote_addr,
-                    client_version,
-                    capabilities,
-                    messages,
-                    status,
-                    version,
-                } => {
+                NetworkEvent::ActivePeerSession { .. } |
+                NetworkEvent::Peer(PeerEvent::SessionEstablished(_)) => {
                     // to insert a new peer in transactions peerset
-                    transactions.on_network_event(NetworkEvent::SessionEstablished {
-                        peer_id,
-                        remote_addr,
-                        client_version,
-                        capabilities,
-                        messages,
-                        status,
-                        version,
-                    })
+                    transactions.on_network_event(ev);
                 }
-                NetworkEvent::PeerAdded(_peer_id) => continue,
-                ev => {
+                NetworkEvent::Peer(PeerEvent::PeerAdded(_peer_id)) => continue,
+                _ => {
                     error!("unexpected event {ev:?}")
                 }
             }
@@ -2157,27 +2154,12 @@ mod tests {
         let mut established = listener0.take(2);
         while let Some(ev) = established.next().await {
             match ev {
-                NetworkEvent::SessionEstablished {
-                    peer_id,
-                    remote_addr,
-                    client_version,
-                    capabilities,
-                    messages,
-                    status,
-                    version,
-                } => {
+                NetworkEvent::ActivePeerSession { .. } |
+                NetworkEvent::Peer(PeerEvent::SessionEstablished(_)) => {
                     // to insert a new peer in transactions peerset
-                    transactions.on_network_event(NetworkEvent::SessionEstablished {
-                        peer_id,
-                        remote_addr,
-                        client_version,
-                        capabilities,
-                        messages,
-                        status,
-                        version,
-                    })
+                    transactions.on_network_event(ev);
                 }
-                NetworkEvent::PeerAdded(_peer_id) => continue,
+                NetworkEvent::Peer(PeerEvent::PeerAdded(_peer_id)) => continue,
                 ev => {
                     error!("unexpected event {ev:?}")
                 }
@@ -2248,24 +2230,11 @@ mod tests {
         let mut established = listener0.take(2);
         while let Some(ev) = established.next().await {
             match ev {
-                NetworkEvent::SessionEstablished {
-                    peer_id,
-                    remote_addr,
-                    client_version,
-                    capabilities,
-                    messages,
-                    status,
-                    version,
-                } => transactions.on_network_event(NetworkEvent::SessionEstablished {
-                    peer_id,
-                    remote_addr,
-                    client_version,
-                    capabilities,
-                    messages,
-                    status,
-                    version,
-                }),
-                NetworkEvent::PeerAdded(_peer_id) => continue,
+                NetworkEvent::ActivePeerSession { .. } |
+                NetworkEvent::Peer(PeerEvent::SessionEstablished(_)) => {
+                    transactions.on_network_event(ev);
+                }
+                NetworkEvent::Peer(PeerEvent::PeerAdded(_peer_id)) => continue,
                 ev => {
                     error!("unexpected event {ev:?}")
                 }
@@ -2495,17 +2464,18 @@ mod tests {
         network.handle().update_sync_state(SyncState::Idle);
 
         // mock a peer
-        let (tx, _rx) = mpsc::channel(1);
-        tx_manager.on_network_event(NetworkEvent::SessionEstablished {
+        let (tx, _rx) = mpsc::channel::<PeerRequest>(1);
+        let session_info = SessionInfo {
             peer_id,
             remote_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
             client_version: Arc::from(""),
             capabilities: Arc::new(vec![].into()),
-            messages: PeerRequestSender::new(peer_id, tx),
             status: Arc::new(Default::default()),
             version: EthVersion::Eth68,
-        });
-
+        };
+        let messages: PeerRequestSender<PeerRequest> = PeerRequestSender::new(peer_id, tx);
+        tx_manager
+            .on_network_event(NetworkEvent::ActivePeerSession { info: session_info, messages });
         let mut propagate = vec![];
         let mut factory = MockTransactionFactory::default();
         let eip1559_tx = Arc::new(factory.create_eip1559());

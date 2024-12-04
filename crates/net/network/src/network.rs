@@ -4,6 +4,7 @@ use crate::{
 };
 use alloy_primitives::B256;
 use enr::Enr;
+use futures::StreamExt;
 use parking_lot::Mutex;
 use reth_discv4::{Discv4, NatResolver};
 use reth_discv5::Discv5;
@@ -13,6 +14,7 @@ use reth_eth_wire::{
 };
 use reth_ethereum_forks::Head;
 use reth_network_api::{
+    events::{NetworkPeersEvents, PeerEvent, PeerEventStream},
     test_utils::{PeersHandle, PeersHandleProvider},
     BlockDownloaderProvider, DiscoveryEvent, NetworkError, NetworkEvent,
     NetworkEventListenerProvider, NetworkInfo, NetworkStatus, PeerInfo, PeerRequest, Peers,
@@ -191,6 +193,17 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
 }
 
 // === API Implementations ===
+
+impl<N: NetworkPrimitives> NetworkPeersEvents for NetworkHandle<N> {
+    /// Returns an event stream of peer-specific network events.
+    fn peer_events(&self) -> PeerEventStream {
+        let peer_events = self.inner.event_sender.new_listener().map(|event| match event {
+            NetworkEvent::Peer(peer_event) => peer_event,
+            NetworkEvent::ActivePeerSession { info, .. } => PeerEvent::SessionEstablished(info),
+        });
+        PeerEventStream::new(peer_events)
+    }
+}
 
 impl NetworkEventListenerProvider for NetworkHandle<EthNetworkPrimitives> {
     fn event_listener(&self) -> EventStream<NetworkEvent<PeerRequest<EthNetworkPrimitives>>> {

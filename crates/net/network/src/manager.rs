@@ -44,7 +44,9 @@ use reth_eth_wire::{
 use reth_fs_util::{self as fs, FsPathError};
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
 use reth_network_api::{
-    test_utils::PeersHandle, EthProtocolInfo, NetworkEvent, NetworkStatus, PeerInfo, PeerRequest,
+    events::{PeerEvent, SessionInfo},
+    test_utils::PeersHandle,
+    EthProtocolInfo, NetworkEvent, NetworkStatus, PeerInfo, PeerRequest,
 };
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::ReputationChangeKind;
@@ -712,24 +714,26 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
 
                 self.update_active_connection_metrics();
 
-                self.event_sender.notify(NetworkEvent::SessionEstablished {
+                let session_info = SessionInfo {
                     peer_id,
                     remote_addr,
                     client_version,
                     capabilities,
-                    version,
                     status,
-                    messages,
-                });
+                    version,
+                };
+
+                self.event_sender
+                    .notify(NetworkEvent::ActivePeerSession { info: session_info, messages });
             }
             SwarmEvent::PeerAdded(peer_id) => {
                 trace!(target: "net", ?peer_id, "Peer added");
-                self.event_sender.notify(NetworkEvent::PeerAdded(peer_id));
+                self.event_sender.notify(NetworkEvent::Peer(PeerEvent::PeerAdded(peer_id)));
                 self.metrics.tracked_peers.set(self.swarm.state().peers().num_known_peers() as f64);
             }
             SwarmEvent::PeerRemoved(peer_id) => {
                 trace!(target: "net", ?peer_id, "Peer dropped");
-                self.event_sender.notify(NetworkEvent::PeerRemoved(peer_id));
+                self.event_sender.notify(NetworkEvent::Peer(PeerEvent::PeerRemoved(peer_id)));
                 self.metrics.tracked_peers.set(self.swarm.state().peers().num_known_peers() as f64);
             }
             SwarmEvent::SessionClosed { peer_id, remote_addr, error } => {
@@ -772,7 +776,8 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                             .saturating_sub(1)
                             as f64,
                     );
-                self.event_sender.notify(NetworkEvent::SessionClosed { peer_id, reason });
+                self.event_sender
+                    .notify(NetworkEvent::Peer(PeerEvent::SessionClosed { peer_id, reason }));
             }
             SwarmEvent::IncomingPendingSessionClosed { remote_addr, error } => {
                 trace!(

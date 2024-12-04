@@ -13,6 +13,7 @@ use pin_project::pin_project;
 use reth_chainspec::{Hardforks, MAINNET};
 use reth_eth_wire::{protocol::Protocol, DisconnectReason, HelloMessageWithProtocols};
 use reth_network_api::{
+    events::{PeerEvent, SessionInfo},
     test_utils::{PeersHandle, PeersHandleProvider},
     NetworkEvent, NetworkEventListenerProvider, NetworkInfo, Peers,
 };
@@ -641,7 +642,9 @@ impl NetworkEventStream {
     pub async fn next_session_closed(&mut self) -> Option<(PeerId, Option<DisconnectReason>)> {
         while let Some(ev) = self.inner.next().await {
             match ev {
-                NetworkEvent::SessionClosed { peer_id, reason } => return Some((peer_id, reason)),
+                NetworkEvent::Peer(PeerEvent::SessionClosed { peer_id, reason }) => {
+                    return Some((peer_id, reason))
+                }
                 _ => continue,
             }
         }
@@ -652,7 +655,10 @@ impl NetworkEventStream {
     pub async fn next_session_established(&mut self) -> Option<PeerId> {
         while let Some(ev) = self.inner.next().await {
             match ev {
-                NetworkEvent::SessionEstablished { peer_id, .. } => return Some(peer_id),
+                NetworkEvent::ActivePeerSession { info, .. } |
+                NetworkEvent::Peer(PeerEvent::SessionEstablished(info)) => {
+                    return Some(info.peer_id)
+                }
                 _ => continue,
             }
         }
@@ -667,7 +673,7 @@ impl NetworkEventStream {
         let mut peers = Vec::with_capacity(num);
         while let Some(ev) = self.inner.next().await {
             match ev {
-                NetworkEvent::SessionEstablished { peer_id, .. } => {
+                NetworkEvent::ActivePeerSession { info: SessionInfo { peer_id, .. }, .. } => {
                     peers.push(peer_id);
                     num -= 1;
                     if num == 0 {
@@ -680,18 +686,24 @@ impl NetworkEventStream {
         peers
     }
 
-    /// Ensures that the first two events are a [`NetworkEvent::PeerAdded`] and
-    /// [`NetworkEvent::SessionEstablished`], returning the [`PeerId`] of the established
+    /// Ensures that the first two events are a [`NetworkEvent::Peer(PeerEvent::PeerAdded`] and
+    /// [`NetworkEvent::ActivePeerSession`], returning the [`PeerId`] of the established
     /// session.
     pub async fn peer_added_and_established(&mut self) -> Option<PeerId> {
         let peer_id = match self.inner.next().await {
-            Some(NetworkEvent::PeerAdded(peer_id)) => peer_id,
+            Some(NetworkEvent::Peer(PeerEvent::PeerAdded(peer_id))) => peer_id,
             _ => return None,
         };
 
         match self.inner.next().await {
-            Some(NetworkEvent::SessionEstablished { peer_id: peer_id2, .. }) => {
-                debug_assert_eq!(peer_id, peer_id2, "PeerAdded peer_id {peer_id} does not match SessionEstablished peer_id {peer_id2}");
+            Some(NetworkEvent::ActivePeerSession {
+                info: SessionInfo { peer_id: peer_id2, .. },
+                ..
+            }) => {
+                debug_assert_eq!(
+                    peer_id, peer_id2,
+                    "PeerAdded peer_id {peer_id} does not match SessionEstablished peer_id {peer_id2}"
+                );
                 Some(peer_id)
             }
             _ => None,
