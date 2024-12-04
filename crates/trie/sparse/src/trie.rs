@@ -59,9 +59,10 @@ impl SparseTrie {
     pub fn reveal_root(
         &mut self,
         root: TrieNode,
+        hash_mask: Option<TrieMask>,
         retain_updates: bool,
     ) -> SparseTrieResult<&mut RevealedSparseTrie> {
-        self.reveal_root_with_provider(Default::default(), root, retain_updates)
+        self.reveal_root_with_provider(Default::default(), root, hash_mask, retain_updates)
     }
 }
 
@@ -89,12 +90,14 @@ impl<P> SparseTrie<P> {
         &mut self,
         provider: P,
         root: TrieNode,
+        hash_mask: Option<TrieMask>,
         retain_updates: bool,
     ) -> SparseTrieResult<&mut RevealedSparseTrie<P>> {
         if self.is_blind() {
             *self = Self::Revealed(Box::new(RevealedSparseTrie::from_provider_and_root(
                 provider,
                 root,
+                hash_mask,
                 retain_updates,
             )?))
         }
@@ -153,6 +156,8 @@ pub struct RevealedSparseTrie<P = DefaultBlindedProvider> {
     provider: P,
     /// All trie nodes.
     nodes: HashMap<Nibbles, SparseNode>,
+    /// All branch node hash masks.
+    branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
     /// All leaf values.
     values: HashMap<Nibbles, Vec<u8>>,
     /// Prefix set.
@@ -167,6 +172,7 @@ impl<P> fmt::Debug for RevealedSparseTrie<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RevealedSparseTrie")
             .field("nodes", &self.nodes)
+            .field("branch_hash_masks", &self.branch_node_hash_masks)
             .field("values", &self.values)
             .field("prefix_set", &self.prefix_set)
             .field("updates", &self.updates)
@@ -180,6 +186,7 @@ impl Default for RevealedSparseTrie {
         Self {
             provider: Default::default(),
             nodes: HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]),
+            branch_node_hash_masks: HashMap::default(),
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
             updates: None,
@@ -190,17 +197,22 @@ impl Default for RevealedSparseTrie {
 
 impl RevealedSparseTrie {
     /// Create new revealed sparse trie from the given root node.
-    pub fn from_root(node: TrieNode, retain_updates: bool) -> SparseTrieResult<Self> {
+    pub fn from_root(
+        node: TrieNode,
+        hash_mask: Option<TrieMask>,
+        retain_updates: bool,
+    ) -> SparseTrieResult<Self> {
         let mut this = Self {
             provider: Default::default(),
             nodes: HashMap::default(),
+            branch_node_hash_masks: HashMap::default(),
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
             rlp_buf: Vec::new(),
             updates: None,
         }
         .with_updates(retain_updates);
-        this.reveal_node(Nibbles::default(), node)?;
+        this.reveal_node(Nibbles::default(), node, hash_mask)?;
         Ok(this)
     }
 }
@@ -210,18 +222,20 @@ impl<P> RevealedSparseTrie<P> {
     pub fn from_provider_and_root(
         provider: P,
         node: TrieNode,
+        hash_mask: Option<TrieMask>,
         retain_updates: bool,
     ) -> SparseTrieResult<Self> {
         let mut this = Self {
             provider,
             nodes: HashMap::default(),
+            branch_node_hash_masks: HashMap::default(),
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
             rlp_buf: Vec::new(),
             updates: None,
         }
         .with_updates(retain_updates);
-        this.reveal_node(Nibbles::default(), node)?;
+        this.reveal_node(Nibbles::default(), node, hash_mask)?;
         Ok(this)
     }
 
@@ -230,6 +244,7 @@ impl<P> RevealedSparseTrie<P> {
         RevealedSparseTrie {
             provider,
             nodes: self.nodes,
+            branch_node_hash_masks: self.branch_node_hash_masks,
             values: self.values,
             prefix_set: self.prefix_set,
             updates: self.updates,
@@ -261,7 +276,16 @@ impl<P> RevealedSparseTrie<P> {
     }
 
     /// Reveal the trie node only if it was not known already.
-    pub fn reveal_node(&mut self, path: Nibbles, node: TrieNode) -> SparseTrieResult<()> {
+    pub fn reveal_node(
+        &mut self,
+        path: Nibbles,
+        node: TrieNode,
+        hash_mask: Option<TrieMask>,
+    ) -> SparseTrieResult<()> {
+        if let Some(hash_mask) = hash_mask {
+            self.branch_node_hash_masks.insert(path.clone(), hash_mask);
+        }
+
         match node {
             TrieNode::EmptyRoot => {
                 debug_assert!(path.is_empty());
@@ -345,7 +369,7 @@ impl<P> RevealedSparseTrie<P> {
             return Ok(())
         }
 
-        self.reveal_node(path, TrieNode::decode(&mut &child[..])?)
+        self.reveal_node(path, TrieNode::decode(&mut &child[..])?, None)
     }
 
     /// Update the leaf node with provided value.
@@ -933,7 +957,8 @@ where
                             if let Some(node) = self.provider.blinded_node(child_path.clone())? {
                                 let decoded = TrieNode::decode(&mut &node[..])?;
                                 trace!(target: "trie::sparse", ?child_path, ?decoded, "Revealing remaining blinded branch child");
-                                self.reveal_node(child_path.clone(), decoded)?;
+                                // TODO: fetch hash mask
+                                self.reveal_node(child_path.clone(), decoded, None)?;
                             }
                         }
 
@@ -1215,7 +1240,7 @@ mod tests {
         state: impl IntoIterator<Item = (Nibbles, Account)> + Clone,
         destroyed_accounts: HashSet<B256>,
         proof_targets: impl IntoIterator<Item = Nibbles>,
-    ) -> (B256, TrieUpdates, ProofNodes) {
+    ) -> (B256, TrieUpdates, ProofNodes, HashMap<Nibbles, TrieMask>) {
         let mut account_rlp = Vec::new();
 
         let mut hash_builder = HashBuilder::default()
@@ -1255,12 +1280,15 @@ mod tests {
         }
         let root = hash_builder.root();
         let proof_nodes = hash_builder.take_proof_nodes();
+        let (hash_builder, updates) = hash_builder.split();
+        let branch_node_hash_masks =
+            updates.into_iter().map(|(path, node)| (path, node.hash_mask)).collect();
 
         let mut trie_updates = TrieUpdates::default();
         let removed_keys = node_iter.walker.take_removed_keys();
         trie_updates.finalize(hash_builder, removed_keys, destroyed_accounts);
 
-        (root, trie_updates, proof_nodes)
+        (root, trie_updates, proof_nodes, branch_node_hash_masks)
     }
 
     /// Assert that the sparse trie nodes and the proof nodes from the hash builder are equal.
@@ -1744,8 +1772,8 @@ mod tests {
         // Branch (Mask = 11)
         // ├── 0 -> Hash (Path = 0)
         // └── 1 -> Leaf (Path = 1)
-        sparse.reveal_node(Nibbles::default(), branch).unwrap();
-        sparse.reveal_node(Nibbles::from_nibbles([0x1]), TrieNode::Leaf(leaf)).unwrap();
+        sparse.reveal_node(Nibbles::default(), branch, Some(TrieMask::new(0b01))).unwrap();
+        sparse.reveal_node(Nibbles::from_nibbles([0x1]), TrieNode::Leaf(leaf), None).unwrap();
 
         // Removing a blinded leaf should result in an error
         assert_matches!(
@@ -1775,8 +1803,8 @@ mod tests {
         // Branch (Mask = 11)
         // ├── 0 -> Hash (Path = 0)
         // └── 1 -> Leaf (Path = 1)
-        sparse.reveal_node(Nibbles::default(), branch).unwrap();
-        sparse.reveal_node(Nibbles::from_nibbles([0x1]), TrieNode::Leaf(leaf)).unwrap();
+        sparse.reveal_node(Nibbles::default(), branch, Some(TrieMask::new(0b01))).unwrap();
+        sparse.reveal_node(Nibbles::from_nibbles([0x1]), TrieNode::Leaf(leaf), None).unwrap();
 
         // Removing a non-existent leaf should be a noop
         let sparse_old = sparse.clone();
@@ -2200,7 +2228,7 @@ mod tests {
             account_rlp
         };
 
-        let (hash_builder_root, hash_builder_updates, _) = run_hash_builder(
+        let (hash_builder_root, hash_builder_updates, _, _) = run_hash_builder(
             [(key1(), value()), (key2(), value())],
             Default::default(),
             [Nibbles::default()],

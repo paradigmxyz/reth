@@ -4,6 +4,7 @@ use crate::{
     BranchNodeCompact, Nibbles,
 };
 use alloy_primitives::{map::HashSet, B256};
+use alloy_trie::TrieMask;
 use reth_storage_errors::db::DatabaseError;
 
 #[cfg(feature = "metrics")]
@@ -93,6 +94,11 @@ impl<C> TrieWalker<C> {
     /// Indicates whether the children of the current node are present in the trie.
     pub fn children_are_in_trie(&self) -> bool {
         self.stack.last().is_some_and(|n| n.tree_flag())
+    }
+
+    /// Returns the hash mask of the current node.
+    pub fn hash_mask(&self) -> TrieMask {
+        self.stack.last().map(|n| n.hash_mask()).unwrap_or_default()
     }
 
     /// Returns the next unprocessed key in the trie.

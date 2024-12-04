@@ -158,8 +158,7 @@ where
 
         // Create a hash builder to rebuild the root node since it is not available in the database.
         let retainer: ProofRetainer = targets.keys().map(Nibbles::unpack).collect();
-        let mut hash_builder =
-            HashBuilder::default().with_proof_retainer(retainer).with_updates(true);
+        let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
 
         let mut storages = HashMap::default();
         let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
@@ -227,7 +226,7 @@ where
         let branch_node_hash_masks =
             hash_builder.split().1.into_iter().map(|(path, node)| (path, node.hash_mask)).collect();
 
-        Ok(MultiProof { account_subtree, branch_node_hash_masks, storages })
+        Ok(MultiProof { account_subtree, storages, branch_node_hash_masks })
     }
 }
 
