@@ -127,13 +127,13 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
             // Reveal the remaining proof nodes.
             for (path, bytes) in account_nodes {
                 let node = TrieNode::decode(&mut &bytes[..])?;
-                trace!(target: "trie::sparse", ?path, ?node, "Revealing account node");
-
                 let hash_mask = if let TrieNode::Branch(_) = node {
                     multiproof.branch_node_hash_masks.get(&path).copied()
                 } else {
                     None
                 };
+
+                trace!(target: "trie::sparse", ?path, ?node, ?hash_mask, "Revealing account node");
                 trie.reveal_node(path, node, hash_mask)?;
             }
         }
@@ -156,12 +156,13 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                 // Reveal the remaining proof nodes.
                 for (path, bytes) in nodes {
                     let node = TrieNode::decode(&mut &bytes[..])?;
-                    trace!(target: "trie::sparse", ?account, ?path, ?node, "Revealing storage node");
                     let hash_mask = if let TrieNode::Branch(_) = node {
                         storage_subtree.branch_node_hash_masks.get(&path).copied()
                     } else {
                         None
                     };
+
+                    trace!(target: "trie::sparse", ?account, ?path, ?node, ?hash_mask, "Revealing storage node");
                     trie.reveal_node(path, node, hash_mask)?;
                 }
             }
@@ -360,7 +361,7 @@ mod tests {
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use reth_primitives_traits::Account;
     use reth_trie::{updates::StorageTrieUpdates, HashBuilder, TrieAccount, EMPTY_ROOT_HASH};
-    use reth_trie_common::{proof::ProofRetainer, BranchNode, StorageMultiProof};
+    use reth_trie_common::{proof::ProofRetainer, StorageMultiProof};
 
     #[test]
     fn validate_root_node_first_node_not_root() {
