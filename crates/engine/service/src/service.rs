@@ -19,6 +19,7 @@ use reth_evm::execute::BlockExecutorProvider;
 use reth_network_p2p::EthBlockClient;
 use reth_node_types::{BlockTy, NodeTypesWithEngine};
 use reth_payload_builder::PayloadBuilderHandle;
+use reth_primitives::EthPrimitives;
 use reth_provider::{providers::BlockchainProvider2, ProviderFactory};
 use reth_prune::PrunerWithFactory;
 use reth_stages_api::{MetricEventsSender, Pipeline};
@@ -90,7 +91,7 @@ where
         let downloader = BasicBlockDownloader::new(client, consensus.clone().as_consensus());
 
         let persistence_handle =
-            PersistenceHandle::spawn_service(provider, pruner, sync_metrics_tx);
+            PersistenceHandle::<EthPrimitives>::spawn_service(provider, pruner, sync_metrics_tx);
 
         let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
 
