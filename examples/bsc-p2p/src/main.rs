@@ -17,7 +17,10 @@ use reth_discv4::Discv4ConfigBuilder;
 use reth_network::{
     EthNetworkPrimitives, NetworkConfig, NetworkEvent, NetworkEventListenerProvider, NetworkManager,
 };
-use reth_network_api::PeersInfo;
+use reth_network_api::{
+    events::{PeerEvent, SessionInfo},
+    PeersInfo,
+};
 use reth_primitives::{ForkHash, ForkId};
 use reth_tracing::{
     tracing::info, tracing_subscriber::filter::LevelFilter, LayerInfo, LogFormat, RethTracer,
@@ -78,10 +81,11 @@ async fn main() {
         // For the sake of the example we only print the session established event
         // with the chain specific details
         match evt {
-            NetworkEvent::SessionEstablished { status, client_version, peer_id, .. } => {
+            NetworkEvent::ActivePeerSession { info, .. } => {
+                let SessionInfo { status, client_version, peer_id, .. } = info;
                 info!(peers=%net_handle.num_connected_peers() , %peer_id, chain = %status.chain, ?client_version, "Session established with a new peer.");
             }
-            NetworkEvent::SessionClosed { peer_id, reason } => {
+            NetworkEvent::Peer(PeerEvent::SessionClosed { peer_id, reason }) => {
                 info!(peers=%net_handle.num_connected_peers() , %peer_id, ?reason, "Session closed.");
             }
 
