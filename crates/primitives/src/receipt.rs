@@ -205,7 +205,7 @@ impl Receipt {
 
 impl RlpEncodableReceipt for Receipt {
     fn rlp_encoded_length_with_bloom(&self, bloom: &Bloom) -> usize {
-        ReceiptWithBloom::new(self, bloom.clone()).length()
+        ReceiptWithBloom::new(self, *bloom).length()
     }
 
     fn rlp_encode_with_bloom(&self, bloom: &Bloom, out: &mut dyn BufMut) {
@@ -428,7 +428,7 @@ impl Encodable for ReceiptWithBloomRef<'_> {
         self.encode_inner(out, true)
     }
     fn length(&self) -> usize {
-        ReceiptWithBloom::new(self.receipt, self.bloom.clone()).length()
+        ReceiptWithBloom::new(self.receipt, self.bloom).length()
     }
 }
 
