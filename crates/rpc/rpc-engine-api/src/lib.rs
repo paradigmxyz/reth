@@ -15,9 +15,6 @@ mod engine_api;
 /// Engine API capabilities.
 pub mod capabilities;
 
-/// The Engine API message type.
-mod message;
-
 /// Engine API error.
 mod error;
 
@@ -26,7 +23,6 @@ mod metrics;
 
 pub use engine_api::{EngineApi, EngineApiSender};
 pub use error::*;
-pub use message::EngineApiMessageVersion;
 
 // re-export server trait for convenience
 pub use reth_rpc_api::EngineApiServer;

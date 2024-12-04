@@ -94,7 +94,7 @@ impl<N: NetworkPrimitives> NetworkConfig<(), N> {
     }
 
     /// Convenience method for creating the corresponding builder type with a random secret key.
-    pub fn builder_with_rng_secret_key() -> NetworkConfigBuilder {
+    pub fn builder_with_rng_secret_key() -> NetworkConfigBuilder<N> {
         NetworkConfigBuilder::with_rng_secret_key()
     }
 }

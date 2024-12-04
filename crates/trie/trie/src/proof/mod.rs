@@ -104,7 +104,8 @@ where
 
         // Create a hash builder to rebuild the root node since it is not available in the database.
         let retainer = targets.keys().map(Nibbles::unpack).collect();
-        let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
+        let mut hash_builder =
+            HashBuilder::default().with_proof_retainer(retainer).with_updates(true);
 
         // Initialize all storage multiproofs as empty.
         // Storage multiproofs for non empty tries will be overwritten if necessary.
@@ -149,7 +150,11 @@ where
             }
         }
         let _ = hash_builder.root();
-        Ok(MultiProof { account_subtree: hash_builder.take_proof_nodes(), storages })
+        let account_subtree = hash_builder.take_proof_nodes();
+        let branch_node_hash_masks =
+            hash_builder.split().1.into_iter().map(|(path, node)| (path, node.hash_mask)).collect();
+
+        Ok(MultiProof { account_subtree, branch_node_hash_masks, storages })
     }
 }
 
@@ -243,7 +248,8 @@ where
         let walker = TrieWalker::new(trie_cursor, self.prefix_set.freeze());
 
         let retainer = ProofRetainer::from_iter(target_nibbles);
-        let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
+        let mut hash_builder =
+            HashBuilder::default().with_proof_retainer(retainer).with_updates(true);
         let mut storage_node_iter = TrieNodeIter::new(walker, hashed_storage_cursor);
         while let Some(node) = storage_node_iter.try_next()? {
             match node {
@@ -260,6 +266,10 @@ where
         }
 
         let root = hash_builder.root();
-        Ok(StorageMultiProof { root, subtree: hash_builder.take_proof_nodes() })
+        let subtree = hash_builder.take_proof_nodes();
+        let branch_node_hash_masks =
+            hash_builder.split().1.into_iter().map(|(path, node)| (path, node.hash_mask)).collect();
+
+        Ok(StorageMultiProof { root, subtree, branch_node_hash_masks })
     }
 }

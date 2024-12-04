@@ -8,13 +8,14 @@ use alloy_primitives::{
 use reth_errors::ProviderResult;
 use reth_primitives::{Account, Bytecode, NodePrimitives};
 use reth_storage_api::{
-    AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
-    StorageRootProvider,
+    AccountReader, BlockHashReader, HashedPostStateProvider, StateProofProvider, StateProvider,
+    StateRootProvider, StorageRootProvider,
 };
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     StorageMultiProof, TrieInput,
 };
+use revm::db::BundleState;
 use std::sync::OnceLock;
 
 /// A state provider that stores references to in-memory blocks along with their state as well as a
@@ -215,6 +216,12 @@ macro_rules! impl_state_provider {
                 let MemoryOverlayTrieState { nodes, state } = self.trie_state().clone();
                 input.prepend_cached(nodes, state);
                 self.historical.witness(input, target)
+            }
+        }
+
+        impl $($tokens)* HashedPostStateProvider for $type {
+            fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
+                self.historical.hashed_post_state(bundle_state)
             }
         }
 

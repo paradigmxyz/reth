@@ -41,14 +41,14 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, ExecutionOutcome,
-    ProviderError, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
-    TransactionVariant,
+    HashedPostStateProvider, ProviderError, StateCommitmentProvider, StateProviderBox,
+    StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_trie::{
     updates::{StorageTrieUpdates, TrieUpdates},
-    HashedPostState, Nibbles, TrieInput,
+    Nibbles, TrieInput,
 };
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::EvmState;
@@ -473,6 +473,7 @@ pub enum TreeAction {
 /// emitting events.
 pub struct EngineApiTreeHandler<N, P, E, T, V>
 where
+    N: NodePrimitives,
     T: EngineTypes,
 {
     provider: P,
@@ -511,7 +512,7 @@ where
     /// Metrics for the engine api.
     metrics: EngineApiMetrics,
     /// An invalid block hook.
-    invalid_block_hook: Box<dyn InvalidBlockHook>,
+    invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
     /// The engine API variant of this handler
     engine_kind: EngineApiKind,
     /// Captures the types the engine operates on
@@ -520,6 +521,8 @@ where
 
 impl<N, P: Debug, E: Debug, T: EngineTypes + Debug, V: Debug> std::fmt::Debug
     for EngineApiTreeHandler<N, P, E, T, V>
+where
+    N: NodePrimitives,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineApiTreeHandler")
@@ -553,6 +556,8 @@ where
         + BlockReader<Block = N::Block, Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader<Receipt = reth_primitives::Receipt>
+        + StateCommitmentProvider
+        + HashedPostStateProvider
         + Clone
         + 'static,
     <P as DatabaseProviderFactory>::Provider: BlockReader,
@@ -601,7 +606,7 @@ where
     }
 
     /// Sets the invalid block hook.
-    fn set_invalid_block_hook(&mut self, invalid_block_hook: Box<dyn InvalidBlockHook>) {
+    fn set_invalid_block_hook(&mut self, invalid_block_hook: Box<dyn InvalidBlockHook<N>>) {
         self.invalid_block_hook = invalid_block_hook;
     }
 
@@ -620,7 +625,7 @@ where
         payload_builder: PayloadBuilderHandle<T>,
         canonical_in_memory_state: CanonicalInMemoryState,
         config: TreeConfig,
-        invalid_block_hook: Box<dyn InvalidBlockHook>,
+        invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
         kind: EngineApiKind,
     ) -> (Sender<FromEngine<EngineApiRequest<T>>>, UnboundedReceiver<EngineApiEvent>) {
         let best_block_number = provider.best_block_number().unwrap_or(0);
@@ -1569,7 +1574,7 @@ where
             .provider
             .get_state(block.number())?
             .ok_or_else(|| ProviderError::StateForNumberNotFound(block.number()))?;
-        let hashed_state = execution_output.hash_state_slow();
+        let hashed_state = self.provider.hashed_post_state(execution_output.state());
 
         Ok(Some(ExecutedBlock {
             block: Arc::new(block),
@@ -2255,7 +2260,7 @@ where
             return Err(err.into())
         }
 
-        let hashed_state = HashedPostState::from_bundle_state(&output.state.state);
+        let hashed_state = self.provider.hashed_post_state(&output.state);
 
         trace!(target: "engine::tree", block=?sealed_block.num_hash(), "Calculating block state root");
         let root_time = Instant::now();

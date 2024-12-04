@@ -24,35 +24,50 @@ pub struct NetworkBuilder<Tx, Eth, N: NetworkPrimitives = EthNetworkPrimitives> 
 
 // === impl NetworkBuilder ===
 
-impl<Tx, Eth> NetworkBuilder<Tx, Eth> {
+impl<Tx, Eth, N: NetworkPrimitives> NetworkBuilder<Tx, Eth, N> {
     /// Consumes the type and returns all fields.
-    pub fn split(self) -> (NetworkManager, Tx, Eth) {
+    pub fn split(self) -> (NetworkManager<N>, Tx, Eth) {
         let Self { network, transactions, request_handler } = self;
         (network, transactions, request_handler)
     }
 
     /// Returns the network manager.
-    pub const fn network(&self) -> &NetworkManager {
+    pub const fn network(&self) -> &NetworkManager<N> {
         &self.network
     }
 
     /// Returns the mutable network manager.
-    pub fn network_mut(&mut self) -> &mut NetworkManager {
+    pub fn network_mut(&mut self) -> &mut NetworkManager<N> {
         &mut self.network
     }
 
     /// Returns the handle to the network.
-    pub fn handle(&self) -> NetworkHandle {
+    pub fn handle(&self) -> NetworkHandle<N> {
         self.network.handle().clone()
     }
 
     /// Consumes the type and returns all fields and also return a [`NetworkHandle`].
-    pub fn split_with_handle(self) -> (NetworkHandle, NetworkManager, Tx, Eth) {
+    pub fn split_with_handle(self) -> (NetworkHandle<N>, NetworkManager<N>, Tx, Eth) {
         let Self { network, transactions, request_handler } = self;
         let handle = network.handle().clone();
         (handle, network, transactions, request_handler)
     }
 
+    /// Creates a new [`EthRequestHandler`] and wires it to the network.
+    pub fn request_handler<Client>(
+        self,
+        client: Client,
+    ) -> NetworkBuilder<Tx, EthRequestHandler<Client, N>, N> {
+        let Self { mut network, transactions, .. } = self;
+        let (tx, rx) = mpsc::channel(ETH_REQUEST_CHANNEL_CAPACITY);
+        network.set_eth_request_handler(tx);
+        let peers = network.handle().peers_handle().clone();
+        let request_handler = EthRequestHandler::new(client, peers, rx);
+        NetworkBuilder { network, request_handler, transactions }
+    }
+}
+
+impl<Tx, Eth> NetworkBuilder<Tx, Eth> {
     /// Creates a new [`TransactionsManager`] and wires it to the network.
     pub fn transactions<Pool: TransactionPool>(
         self,
@@ -64,19 +79,6 @@ impl<Tx, Eth> NetworkBuilder<Tx, Eth> {
         network.set_transactions(tx);
         let handle = network.handle().clone();
         let transactions = TransactionsManager::new(handle, pool, rx, transactions_manager_config);
-        NetworkBuilder { network, request_handler, transactions }
-    }
-
-    /// Creates a new [`EthRequestHandler`] and wires it to the network.
-    pub fn request_handler<Client>(
-        self,
-        client: Client,
-    ) -> NetworkBuilder<Tx, EthRequestHandler<Client>> {
-        let Self { mut network, transactions, .. } = self;
-        let (tx, rx) = mpsc::channel(ETH_REQUEST_CHANNEL_CAPACITY);
-        network.set_eth_request_handler(tx);
-        let peers = network.handle().peers_handle().clone();
-        let request_handler = EthRequestHandler::new(client, peers, rx);
         NetworkBuilder { network, request_handler, transactions }
     }
 }

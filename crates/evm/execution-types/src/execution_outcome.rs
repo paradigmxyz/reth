@@ -3,7 +3,7 @@ use alloy_eips::eip7685::Requests;
 use alloy_primitives::{logs_bloom, Address, BlockNumber, Bloom, Log, B256, U256};
 use reth_primitives::Receipts;
 use reth_primitives_traits::{receipt::ReceiptExt, Account, Bytecode, Receipt, StorageEntry};
-use reth_trie::HashedPostState;
+use reth_trie::{HashedPostState, KeyHasher};
 use revm::{
     db::{states::BundleState, BundleAccount},
     primitives::AccountInfo,
@@ -147,7 +147,7 @@ impl<T> ExecutionOutcome<T> {
 
     /// Get account if account is known.
     pub fn account(&self, address: &Address) -> Option<Option<Account>> {
-        self.bundle.account(address).map(|a| a.info.clone().map(Into::into))
+        self.bundle.account(address).map(|a| a.info.as_ref().map(Into::into))
     }
 
     /// Get storage if value is known.
@@ -164,8 +164,8 @@ impl<T> ExecutionOutcome<T> {
 
     /// Returns [`HashedPostState`] for this execution outcome.
     /// See [`HashedPostState::from_bundle_state`] for more info.
-    pub fn hash_state_slow(&self) -> HashedPostState {
-        HashedPostState::from_bundle_state(&self.bundle.state)
+    pub fn hash_state_slow<KH: KeyHasher>(&self) -> HashedPostState {
+        HashedPostState::from_bundle_state::<KH>(&self.bundle.state)
     }
 
     /// Transform block number to the index of block.

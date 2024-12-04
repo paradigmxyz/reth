@@ -31,7 +31,7 @@ use reth_db_api::{
     },
     table::{Decode, DupSort, Encode, Table},
 };
-use reth_primitives::{Receipt, StorageEntry, TransactionSignedNoHash};
+use reth_primitives::{Receipt, StorageEntry, TransactionSigned};
 use reth_primitives_traits::{Account, Bytecode};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
@@ -348,7 +348,7 @@ tables! {
     }
 
     /// Canonical only Stores the transaction body for canonical transactions.
-    table Transactions<T = TransactionSignedNoHash> {
+    table Transactions<T = TransactionSigned> {
         type Key = TxNumber;
         type Value = T;
     }

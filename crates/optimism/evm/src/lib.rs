@@ -57,6 +57,7 @@ impl OpEvmConfig {
 
 impl ConfigureEvmEnv for OpEvmConfig {
     type Header = Header;
+    type Transaction = TransactionSigned;
     type Error = DecodeError;
 
     fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {

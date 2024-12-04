@@ -7,7 +7,7 @@ use alloy_primitives::{BlockNumber, B256};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
-use reth_primitives::{Receipt, SealedBlockWithSenders};
+use reth_primitives::{Receipt, SealedBlockWithSenders, TransactionSigned};
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ExecutionOutcome, ProviderTx,
     ReceiptProvider, StateProviderFactory,
@@ -33,7 +33,7 @@ where
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                       + StateProviderFactory,
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<N::Provider>>>,
-        Evm: ConfigureEvm<Header = Header>,
+        Evm: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
     >,
 {
     #[inline]
