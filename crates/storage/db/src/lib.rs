@@ -221,7 +221,8 @@ mod tests {
         init_db,
         mdbx::DatabaseArguments,
         open_db, tables,
-        version::{db_version_file_path, DatabaseVersionError}, Tables,
+        version::{db_version_file_path, DatabaseVersionError},
+        Tables,
     };
     use assert_matches::assert_matches;
     use reth_db_api::{
@@ -290,8 +291,8 @@ mod tests {
         // Client version is recorded
         let first_version = ClientVersion { version: String::from("v1"), ..Default::default() };
         {
-            let db = init_db::<_, Tables>(&path, DatabaseArguments::new(first_version.clone()))
-                .unwrap();
+            let db =
+                init_db::<_, Tables>(&path, DatabaseArguments::new(first_version.clone())).unwrap();
             let tx = db.tx().unwrap();
             let mut cursor = tx.cursor_read::<tables::VersionHistory>().unwrap();
             assert_eq!(
@@ -307,8 +308,8 @@ mod tests {
 
         // Same client version is not duplicated.
         {
-            let db = init_db::<_, Tables>(&path, DatabaseArguments::new(first_version.clone()))
-                .unwrap();
+            let db =
+                init_db::<_, Tables>(&path, DatabaseArguments::new(first_version.clone())).unwrap();
             let tx = db.tx().unwrap();
             let mut cursor = tx.cursor_read::<tables::VersionHistory>().unwrap();
             assert_eq!(

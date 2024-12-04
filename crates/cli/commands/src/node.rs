@@ -183,7 +183,9 @@ impl<
         let db_path = data_dir.db();
 
         tracing::info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let database = Arc::new(init_db::<_, Tables>(db_path.clone(), self.db.database_args())?.with_metrics());
+        let database = Arc::new(
+            init_db::<_, Tables>(db_path.clone(), self.db.database_args())?.with_metrics(),
+        );
 
         if with_unused_ports {
             node_config = node_config.with_unused_ports();

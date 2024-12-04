@@ -264,7 +264,7 @@ macro_rules! tables {
         }
 
         impl TableSet for Tables {
-            type TableIter = std::iter::Map<std::slice::Iter<'static, Tables>, 
+            type TableIter = std::iter::Map<std::slice::Iter<'static, Tables>,
                 fn(&Tables) -> Box<dyn TableMetadata>>;
 
             fn tables() -> Self::TableIter {
