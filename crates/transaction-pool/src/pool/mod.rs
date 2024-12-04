@@ -278,7 +278,7 @@ where
     }
 
     /// Returns a read lock to the pool's data.
-    pub(crate) fn get_pool_data(&self) -> RwLockReadGuard<'_, TxPool<T>> {
+    pub fn get_pool_data(&self) -> RwLockReadGuard<'_, TxPool<T>> {
         self.pool.read()
     }
 
@@ -881,17 +881,17 @@ where
     }
 
     /// Number of transactions in the entire pool
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.get_pool_data().len()
     }
 
     /// Whether the pool is empty
-    pub(crate) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.get_pool_data().is_empty()
     }
 
     /// Returns whether or not the pool is over its configured size and transaction count limits.
-    pub(crate) fn is_exceeded(&self) -> bool {
+    pub fn is_exceeded(&self) -> bool {
         self.pool.read().is_exceeded()
     }
 
@@ -899,7 +899,7 @@ where
     ///
     /// If some of the transactions are blob transactions, they are also removed from the blob
     /// store.
-    pub(crate) fn discard_worst(&self) -> HashSet<TxHash> {
+    pub fn discard_worst(&self) -> HashSet<TxHash> {
         let discarded = self.pool.write().discard_worst();
 
         // delete any blobs associated with discarded blob transactions
