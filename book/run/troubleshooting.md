@@ -31,7 +31,7 @@ Example: `db-access --path /var/lib/docker/volumes/named_volume/_data/eth/db`
 
 Externally acessing a database in a read-only folder is not supported, **UNLESS** there's no `mdbx.lck` present, and it's called with `exclusive` on calling `open_db_read_only`. Meaning that there's no node syncing concurrently.
 
-If the error persists, ensure that you have the right `xo`  permissions on the `datadir` **and its parent** folders. Eg. the following command should succeed:
+If the error persists, ensure that you have the right `rx`  permissions on the `datadir` **and its parent** folders. Eg. the following command should succeed:
 
 ```
 stat /full/path/$DATADIR
