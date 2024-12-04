@@ -741,7 +741,6 @@ impl<P> RevealedSparseTrie<P> {
                     let mut hash_mask_values = Vec::new();
                     let mut hashes = Vec::new();
                     for (i, child_path) in buffers.branch_child_buf.iter().enumerate() {
-                        let nibble = buffers.branch_child_buf.len() - i - 1;
                         if buffers.rlp_node_stack.last().is_some_and(|e| &e.0 == child_path) {
                             let (_, child, calculated, node_type) =
                                 buffers.rlp_node_stack.pop().unwrap();
@@ -755,9 +754,8 @@ impl<P> RevealedSparseTrie<P> {
                                     true
                                 } else {
                                     // Set the flag according to whether a child node was
-                                    // pre-calculated
-                                    // (`calculated = false`), meaning that it wasn't in the
-                                    // database
+                                    // pre-calculated (`calculated = false`), meaning that it wasn't
+                                    // in the database
                                     !calculated
                                 };
                                 tree_mask_values.push(tree_mask_value);
@@ -770,7 +768,7 @@ impl<P> RevealedSparseTrie<P> {
                                             self.branch_node_hash_masks
                                                 .get(&path)
                                                 .is_some_and(|mask| {
-                                                    mask.is_bit_set(nibble as u8)
+                                                    mask.is_bit_set(child_path.last().unwrap())
                                                 }))
                                 });
                                 let hash_mask_value = hash.is_some();
@@ -779,12 +777,20 @@ impl<P> RevealedSparseTrie<P> {
                                     hashes.push(hash);
                                 }
 
-                                trace!(target: "trie::sparse", ?child_path, ?nibble, ?tree_mask_value, ?hash_mask_value, "Updating branch node child masks");
+                                trace!(
+                                    target: "trie::sparse",
+                                    ?path,
+                                    ?child_path,
+                                    ?tree_mask_value,
+                                    ?hash_mask_value,
+                                    "Updating branch node child masks"
+                                );
                             }
 
                             // Insert children in the resulting buffer in a normal order,
                             // because initially we iterated in reverse.
-                            buffers.branch_value_stack_buf[nibble] = child;
+                            buffers.branch_value_stack_buf
+                                [buffers.branch_child_buf.len() - i - 1] = child;
                             added_children = true;
                         } else {
                             debug_assert!(!added_children);

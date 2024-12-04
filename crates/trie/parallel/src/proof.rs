@@ -246,7 +246,7 @@ where
             HashMap::default()
         };
 
-        Ok(MultiProof { account_subtree, storages, branch_node_hash_masks })
+        Ok(MultiProof { account_subtree, branch_node_hash_masks, storages })
     }
 }
 
