@@ -8,17 +8,18 @@ use alloy_eips::{
     eip4844::MAX_DATA_GAS_PER_BLOCK, eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE,
 };
 use alloy_primitives::{BlockNumber, B256, U256};
-use alloy_rpc_types_eth::BlockNumberOrTag;
+use alloy_rpc_types_eth::{BlockNumberOrTag, Withdrawals};
 use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_errors::RethError;
 use reth_evm::{
     state_change::post_block_withdrawals_balance_increments, system_calls::SystemCaller,
-    ConfigureEvm, ConfigureEvmEnv,
+    ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes,
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
     proofs::calculate_transaction_root, Block, BlockBody, BlockExt, InvalidTransactionError,
-    Receipt, RecoveredTx, SealedBlockWithSenders, SealedHeader,
+    Receipt, RecoveredTx, SealedBlockWithSenders,
 };
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderError,
@@ -27,7 +28,7 @@ use reth_provider::{
 use reth_revm::{
     database::StateProviderDatabase,
     primitives::{
-        BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, EVMError, Env, ExecutionResult, InvalidTransaction,
+        BlockEnv, CfgEnvWithHandlerCfg, EVMError, Env, ExecutionResult, InvalidTransaction,
         ResultAndState, SpecId,
     },
 };
@@ -68,55 +69,56 @@ pub trait LoadPendingBlock:
     ///
     /// If no pending block is available, this will derive it from the `latest` block
     fn pending_block_env_and_cfg(&self) -> Result<PendingBlockEnv, Self::Error> {
-        let origin: PendingBlockEnvOrigin = if let Some(pending) =
+        if let Some(block) =
             self.provider().pending_block_with_senders().map_err(Self::Error::from_eth_err)?
         {
-            PendingBlockEnvOrigin::ActualPending(pending)
-        } else {
-            // no pending block from the CL yet, so we use the latest block and modify the env
-            // values that we can
-            let latest = self
+            if let Some(receipts) = self
                 .provider()
-                .latest_header()
+                .receipts_by_block(block.hash().into())
                 .map_err(Self::Error::from_eth_err)?
-                .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
+            {
+                // Note: for the PENDING block we assume it is past the known merge block and
+                // thus this will not fail when looking up the total
+                // difficulty value for the blockenv.
+                let (cfg, block_env) = self
+                    .provider()
+                    .env_with_header(block.header(), self.evm_config().clone())
+                    .map_err(Self::Error::from_eth_err)?;
 
-            let (mut latest_header, block_hash) = latest.split();
-            // child block
-            latest_header.number += 1;
-            // assumed child block is in the next slot: 12s
-            latest_header.timestamp += 12;
-            // base fee of the child block
-            let chain_spec = self.provider().chain_spec();
+                return Ok(PendingBlockEnv::new(
+                    cfg,
+                    block_env,
+                    PendingBlockEnvOrigin::ActualPending(block, receipts),
+                ));
+            }
+        }
 
-            latest_header.base_fee_per_gas = latest_header.next_block_base_fee(
-                chain_spec.base_fee_params_at_timestamp(latest_header.timestamp()),
-            );
+        // no pending block from the CL yet, so we use the latest block and modify the env
+        // values that we can
+        let latest = self
+            .provider()
+            .latest_header()
+            .map_err(Self::Error::from_eth_err)?
+            .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
 
-            // update excess blob gas consumed above target
-            latest_header.excess_blob_gas = latest_header.next_block_excess_blob_gas();
-
-            // we're reusing the same block hash because we need this to lookup the block's state
-            let latest = SealedHeader::new(latest_header, block_hash);
-
-            PendingBlockEnvOrigin::DerivedFromLatest(latest)
-        };
-
-        let mut cfg = CfgEnvWithHandlerCfg::new_with_spec_id(CfgEnv::default(), SpecId::LATEST);
-
-        let mut block_env = BlockEnv::default();
-        // Note: for the PENDING block we assume it is past the known merge block and thus this will
-        // not fail when looking up the total difficulty value for the blockenv.
-        self.provider()
-            .fill_env_with_header(
-                &mut cfg,
-                &mut block_env,
-                origin.header(),
-                self.evm_config().clone(),
+        let (cfg, block_env) = self
+            .evm_config()
+            .next_cfg_and_block_env(
+                &latest,
+                NextBlockEnvAttributes {
+                    timestamp: latest.timestamp() + 12,
+                    suggested_fee_recipient: latest.beneficiary(),
+                    prev_randao: B256::random(),
+                },
             )
+            .map_err(RethError::other)
             .map_err(Self::Error::from_eth_err)?;
 
-        Ok(PendingBlockEnv::new(cfg, block_env, origin))
+        Ok(PendingBlockEnv::new(
+            cfg,
+            block_env,
+            PendingBlockEnvOrigin::DerivedFromLatest(latest.hash()),
+        ))
     }
 
     /// Returns the locally built pending block
@@ -137,18 +139,12 @@ pub trait LoadPendingBlock:
     {
         async move {
             let pending = self.pending_block_env_and_cfg()?;
-            if pending.origin.is_actual_pending() {
-                if let Some(block) = pending.origin.clone().into_actual_pending() {
-                    // we have the real pending block, so we should also have its receipts
-                    if let Some(receipts) = self
-                        .provider()
-                        .receipts_by_block(block.hash().into())
-                        .map_err(Self::Error::from_eth_err)?
-                    {
-                        return Ok(Some((block, receipts)))
-                    }
+            let parent_hash = match pending.origin {
+                PendingBlockEnvOrigin::ActualPending(block, receipts) => {
+                    return Ok(Some((block, receipts)));
                 }
-            }
+                PendingBlockEnvOrigin::DerivedFromLatest(parent_hash) => parent_hash,
+            };
 
             // we couldn't find the real pending block, so we need to build it ourselves
             let mut lock = self.pending_block().lock().await;
@@ -159,7 +155,7 @@ pub trait LoadPendingBlock:
             if let Some(pending_block) = lock.as_ref() {
                 // this is guaranteed to be the `latest` header
                 if pending.block_env.number.to::<u64>() == pending_block.block.number &&
-                    pending.origin.header().hash() == pending_block.block.parent_hash &&
+                    parent_hash == pending_block.block.parent_hash &&
                     now <= pending_block.expires_at
                 {
                     return Ok(Some((pending_block.block.clone(), pending_block.receipts.clone())));
@@ -170,7 +166,7 @@ pub trait LoadPendingBlock:
             let (sealed_block, receipts) = match self
                 .spawn_blocking_io(move |this| {
                     // we rebuild the block
-                    this.build_block(pending)
+                    this.build_block(pending.cfg, pending.block_env, parent_hash)
                 })
                 .await
             {
@@ -229,14 +225,13 @@ pub trait LoadPendingBlock:
     /// block contract call using the parent beacon block root received from the CL.
     fn build_block(
         &self,
-        env: PendingBlockEnv,
+        cfg: CfgEnvWithHandlerCfg,
+        block_env: BlockEnv,
+        parent_hash: B256,
     ) -> Result<(SealedBlockWithSenders, Vec<Receipt>), Self::Error>
     where
         EthApiError: From<ProviderError>,
     {
-        let PendingBlockEnv { cfg, block_env, origin } = env;
-
-        let parent_hash = origin.build_target_hash();
         let state_provider = self
             .provider()
             .history_by_block_hash(parent_hash)
@@ -258,34 +253,16 @@ pub trait LoadPendingBlock:
                 block_env.get_blob_gasprice().map(|gasprice| gasprice as u64),
             ));
 
-        let (withdrawals, withdrawals_root) = match origin {
-            PendingBlockEnvOrigin::ActualPending(ref block) => {
-                (block.body.withdrawals.clone(), block.withdrawals_root)
-            }
-            PendingBlockEnvOrigin::DerivedFromLatest(_) => (None, None),
-        };
+        let withdrawals: Option<Withdrawals> = None;
+        let withdrawals_root = None;
 
         let chain_spec = self.provider().chain_spec();
 
         let mut system_caller = SystemCaller::new(self.evm_config().clone(), chain_spec.clone());
 
-        let parent_beacon_block_root = if origin.is_actual_pending() {
-            // apply eip-4788 pre block contract call if we got the block from the CL with the real
-            // parent beacon block root
-            system_caller
-                .pre_block_beacon_root_contract_call(
-                    &mut db,
-                    &cfg,
-                    &block_env,
-                    origin.header().parent_beacon_block_root,
-                )
-                .map_err(|err| EthApiError::Internal(err.into()))?;
-            origin.header().parent_beacon_block_root
-        } else {
-            None
-        };
+        let parent_beacon_block_root = None;
         system_caller
-            .pre_block_blockhashes_contract_call(&mut db, &cfg, &block_env, origin.header().hash())
+            .pre_block_blockhashes_contract_call(&mut db, &cfg, &block_env, parent_hash)
             .map_err(|err| EthApiError::Internal(err.into()))?;
 
         let mut receipts = Vec::new();
