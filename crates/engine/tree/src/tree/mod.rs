@@ -2351,13 +2351,15 @@ where
                     } else {
                         debug!(target: "engine::tree", block=?sealed_block.num_hash(), "TrieUpdates match exactly");
                     }
+
+                    (task_state_root, task_trie_updates)
                 }
                 (Err(e), _) => {
-                    info!(target: "engine::tree", error=?e, "on state root task wait_for_result")
+                    info!(target: "engine::tree", error=?e, "on state root task wait_for_result");
+
+                    (regular_state_root, regular_trie_updates)
                 }
             }
-
-            (regular_state_root, regular_trie_updates)
         } else {
             debug!(target: "engine::tree", block=?sealed_block.num_hash(), persistence_in_progress, "Failed to compute state root in parallel");
             state_provider.state_root_with_updates(hashed_state.clone())?
