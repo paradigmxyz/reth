@@ -225,7 +225,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         let (db_service_tx, db_service_rx) = std::sync::mpsc::channel();
 
         // construct persistence handle
-        let persistence_handle = PersistenceHandle::<N::Primitives>::new(db_service_tx);
+        let persistence_handle = PersistenceHandle::new(db_service_tx);
 
         // spawn the persistence service
         let db_service =
