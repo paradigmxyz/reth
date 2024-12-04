@@ -394,7 +394,7 @@ mod tests {
         let proof = [(Nibbles::default(), Bytes::from(rlp))];
         assert_matches!(
             sparse.validate_root_node(&mut proof.into_iter().peekable(), &HashMap::default()),
-            Err(SparseStateTrieError::InvalidRootNode { .. })
+            Err(SparseStateTrieError::MissingBranchNodeHashMask { .. })
         );
     }
 
@@ -471,8 +471,8 @@ mod tests {
                 slot_path_1.clone(),
                 slot_path_2.clone(),
             ]));
-        storage_hash_builder.add_leaf(slot_path_1.clone(), &alloy_rlp::encode_fixed_size(&value_1));
-        storage_hash_builder.add_leaf(slot_path_2.clone(), &alloy_rlp::encode_fixed_size(&value_2));
+        storage_hash_builder.add_leaf(slot_path_1, &alloy_rlp::encode_fixed_size(&value_1));
+        storage_hash_builder.add_leaf(slot_path_2, &alloy_rlp::encode_fixed_size(&value_2));
 
         let storage_root = storage_hash_builder.root();
         let storage_proof_nodes = storage_hash_builder.take_proof_nodes();
@@ -502,37 +502,39 @@ mod tests {
         let proof_nodes = hash_builder.take_proof_nodes();
 
         let mut sparse = SparseStateTrie::default().with_updates(true);
-        sparse.reveal_multiproof(
-            HashMap::from_iter([
-                (address_1, HashSet::from_iter([slot_1, slot_2])),
-                (address_2, HashSet::from_iter([slot_1, slot_2])),
-            ]),
-            MultiProof {
-                account_subtree: proof_nodes,
-                branch_node_hash_masks: HashMap::from_iter([(
-                    Nibbles::from_nibbles([0x1]),
-                    TrieMask::new(0b00),
-                )]),
-                storages: HashMap::from_iter([
-                    (
-                        address_1,
-                        StorageMultiProof {
-                            root,
-                            subtree: storage_proof_nodes.clone(),
-                            branch_node_hash_masks: storage_branch_node_hash_masks.clone(),
-                        },
-                    ),
-                    (
-                        address_2,
-                        StorageMultiProof {
-                            root,
-                            subtree: storage_proof_nodes,
-                            branch_node_hash_masks: storage_branch_node_hash_masks,
-                        },
-                    ),
+        sparse
+            .reveal_multiproof(
+                HashMap::from_iter([
+                    (address_1, HashSet::from_iter([slot_1, slot_2])),
+                    (address_2, HashSet::from_iter([slot_1, slot_2])),
                 ]),
-            },
-        );
+                MultiProof {
+                    account_subtree: proof_nodes,
+                    branch_node_hash_masks: HashMap::from_iter([(
+                        Nibbles::from_nibbles([0x1]),
+                        TrieMask::new(0b00),
+                    )]),
+                    storages: HashMap::from_iter([
+                        (
+                            address_1,
+                            StorageMultiProof {
+                                root,
+                                subtree: storage_proof_nodes.clone(),
+                                branch_node_hash_masks: storage_branch_node_hash_masks.clone(),
+                            },
+                        ),
+                        (
+                            address_2,
+                            StorageMultiProof {
+                                root,
+                                subtree: storage_proof_nodes,
+                                branch_node_hash_masks: storage_branch_node_hash_masks,
+                            },
+                        ),
+                    ]),
+                },
+            )
+            .unwrap();
 
         assert_eq!(sparse.root(), Some(root));
 
