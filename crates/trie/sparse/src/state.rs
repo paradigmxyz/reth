@@ -124,13 +124,13 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
             // Reveal the remaining proof nodes.
             for (path, bytes) in account_nodes {
                 let node = TrieNode::decode(&mut &bytes[..])?;
-                trace!(target: "trie::sparse", ?path, ?node, "Revealing account node");
-
                 let hash_mask = if let TrieNode::Branch(_) = node {
                     multiproof.branch_node_hash_masks.get(&path).copied()
                 } else {
                     None
                 };
+
+                trace!(target: "trie::sparse", ?path, ?node, ?hash_mask, "Revealing account node");
                 trie.reveal_node(path, node, hash_mask)?;
             }
         }
@@ -151,12 +151,13 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                 // Reveal the remaining proof nodes.
                 for (path, bytes) in nodes {
                     let node = TrieNode::decode(&mut &bytes[..])?;
-                    trace!(target: "trie::sparse", ?account, ?path, ?node, "Revealing storage node");
                     let hash_mask = if let TrieNode::Branch(_) = node {
                         storage_subtree.branch_node_hash_masks.get(&path).copied()
                     } else {
                         None
                     };
+
+                    trace!(target: "trie::sparse", ?account, ?path, ?node, ?hash_mask, "Revealing storage node");
                     trie.reveal_node(path, node, hash_mask)?;
                 }
             }
