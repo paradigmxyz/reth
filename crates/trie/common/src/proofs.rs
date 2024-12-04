@@ -110,11 +110,15 @@ impl MultiProof {
     pub fn extend(&mut self, other: Self) {
         self.account_subtree.extend_from(other.account_subtree);
 
+        self.branch_node_hash_masks.extend(other.branch_node_hash_masks);
+
         for (hashed_address, storage) in other.storages {
             match self.storages.entry(hashed_address) {
                 hash_map::Entry::Occupied(mut entry) => {
                     debug_assert_eq!(entry.get().root, storage.root);
-                    entry.get_mut().subtree.extend_from(storage.subtree);
+                    let entry = entry.get_mut();
+                    entry.subtree.extend_from(storage.subtree);
+                    entry.branch_node_hash_masks.extend(storage.branch_node_hash_masks);
                 }
                 hash_map::Entry::Vacant(entry) => {
                     entry.insert(storage);
