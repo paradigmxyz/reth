@@ -2323,9 +2323,18 @@ where
                                     tries.storage_nodes.keys().collect()
                                 }))
                             {
-                                let task_entry = task.map(|tries| tries.storage_nodes.get(*path));
-                                let regular_entry =
-                                    regular.map(|tries| tries.storage_nodes.get(*path));
+                                let mut task_entry = task
+                                    .map(|tries| tries.storage_nodes.get(*path).cloned())
+                                    .clone();
+                                let regular_entry = regular
+                                    .map(|tries| tries.storage_nodes.get(*path).cloned())
+                                    .clone();
+                                // Ignore tree mask differences for now
+                                if let Some((Some(task_entry), Some(regular_entry))) =
+                                    task_entry.as_mut().zip(regular_entry.as_ref())
+                                {
+                                    task_entry.tree_mask = regular_entry.tree_mask;
+                                }
                                 if task_entry != regular_entry {
                                     debug!(target: "engine::tree", ?address, ?path, ?task_entry, ?regular_entry, "Difference in storage trie updates");
                                 }
