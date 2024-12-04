@@ -11,7 +11,13 @@ use reth_network_p2p::error::{RequestError, RequestResult};
 use reth_network_peers::PeerId;
 use reth_network_types::PeerAddr;
 use reth_tokio_util::EventStream;
-use std::{fmt, net::SocketAddr, pin::Pin, sync::Arc};
+use std::{
+    fmt,
+    net::SocketAddr,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{wrappers::UnboundedReceiverStream, Stream, StreamExt};
 
@@ -40,10 +46,7 @@ impl PeerEventStream {
 impl Stream for PeerEventStream {
     type Item = PeerEvent;
 
-    fn poll_next(
-        mut self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.0.as_mut().poll_next(cx)
     }
 }
