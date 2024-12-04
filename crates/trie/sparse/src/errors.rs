@@ -2,7 +2,7 @@
 
 use crate::SparseNode;
 use alloy_primitives::{Bytes, B256};
-use reth_trie_common::{Nibbles, TrieNode};
+use reth_trie_common::Nibbles;
 use thiserror::Error;
 
 /// Result type with [`SparseStateTrieError`] as error.
@@ -17,7 +17,7 @@ pub enum SparseStateTrieError {
         /// Path to first proof node.
         path: Nibbles,
         /// Encoded first proof node.
-        node: TrieNode,
+        node: Bytes,
     },
     /// Sparse trie error.
     #[error(transparent)]
