@@ -102,5 +102,6 @@ arbitrary = [
     "rand",
 ]
 optimism = [
-    "revm-primitives/optimism",
+	"revm-primitives/optimism",
+	"reth-primitives/optimism"
 ]
