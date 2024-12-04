@@ -97,7 +97,7 @@ optimism = [
 	"reth-db/optimism",
 	"reth-optimism-node/optimism",
 	"reth-node-core/optimism",
-    "reth-optimism-primitives/op",
+    "reth-optimism-primitives/optimism",
 ]
 asm-keccak = [
 	"reth-primitives/asm-keccak",
