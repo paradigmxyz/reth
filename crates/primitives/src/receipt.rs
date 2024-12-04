@@ -107,17 +107,10 @@ impl Receipt {
                 cumulative_gas_used,
                 logs,
                 #[cfg(feature = "optimism")]
-                deposit_nonce: if tx_type == TxType::Deposit {
-                    Some(Decodable::decode(buf)?)
-                } else {
-                    None
-                },
+                deposit_nonce: (tx_type == TxType::Deposit).then(|| Decodable::decode(buf)?),
                 #[cfg(feature = "optimism")]
-                deposit_receipt_version: if tx_type == TxType::Deposit {
-                    Some(Decodable::decode(buf)?)
-                } else {
-                    None
-                },
+                deposit_receipt_version: (tx_type == TxType::Deposit)
+                    .then(|| Decodable::decode(buf)?),
             },
             logs_bloom,
         })
@@ -153,14 +146,10 @@ impl Receipt {
         bloom.encode(out);
         self.logs.encode(out);
         #[cfg(feature = "optimism")]
-        if self.tx_type == TxType::Deposit {
-            if let Some(deposit_nonce) = self.deposit_nonce {
-                deposit_nonce.encode(out)
-            }
-            if let Some(deposit_receipt_version) = self.deposit_receipt_version {
-                deposit_receipt_version.encode(out)
-            }
-        }
+        (self.tx_type == TxType::Deposit).then(|| {
+            self.deposit_nonce.map(|nonce| nonce.encode(out));
+            self.deposit_receipt_version.map(|version| version.encode(out));
+        });
     }
 
     /// Encode receipt with or without the header data.

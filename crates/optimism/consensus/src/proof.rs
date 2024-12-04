@@ -8,7 +8,7 @@ use reth_primitives::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef};
 
 /// Calculates the receipt root for a header.
 pub(crate) fn calculate_receipt_root_optimism(
-    receipts: &[ReceiptWithBloom],
+    receipts: &[ReceiptWithBloom<Receipt>],
     chain_spec: &ChainSpec,
     timestamp: u64,
 ) -> B256 {
@@ -30,11 +30,11 @@ pub(crate) fn calculate_receipt_root_optimism(
             .collect::<Vec<_>>();
 
         return ordered_trie_root_with_encoder(receipts.as_slice(), |r, buf| {
-            r.encode_inner(buf, false)
+            r.receipt.encode(buf, false, &r.logs_bloom)
         })
     }
 
-    ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_inner(buf, false))
+    ordered_trie_root_with_encoder(receipts, |r, buf| r.receipt.encode(buf, false, &r.logs_bloom))
 }
 
 /// Calculates the receipt root for a header for the reference type of [Receipt].
