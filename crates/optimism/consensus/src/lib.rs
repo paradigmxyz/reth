@@ -19,13 +19,17 @@ use reth_consensus_common::validation::{
     validate_against_parent_4844, validate_against_parent_eip1559_base_fee,
     validate_against_parent_hash_number, validate_against_parent_timestamp,
     validate_body_against_header, validate_cancun_gas, validate_header_base_fee,
-    validate_header_extradata, validate_header_gas, validate_shanghai_withdrawals,
+    validate_header_extradata, validate_header_gas,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::OpPrimitives;
 use reth_primitives::{BlockBody, BlockWithSenders, GotExpected, SealedBlock, SealedHeader};
 use std::{sync::Arc, time::SystemTime};
+use tracing::debug;
+
+pub mod error;
+pub use error::OpConsensusError;
 
 mod proof;
 pub use proof::calculate_receipt_root_no_memo_optimism;
@@ -83,8 +87,15 @@ impl Consensus for OpBeaconConsensus {
         }
 
         // EIP-4895: Beacon chain push withdrawals as operations
-        if self.chain_spec.is_shanghai_active_at_timestamp(block.timestamp) {
-            validate_shanghai_withdrawals(block)?;
+        if self.chain_spec.is_shanghai_active_at_timestamp(block.timestamp) &&
+            block.body.withdrawals.as_ref().is_some_and(|withdrawals| !withdrawals.is_empty())
+        {
+            debug!(target: "op::consensus",
+                block_number=block.number,
+                err=%OpConsensusError::WithdrawalsNonEmpty,
+                "block failed validation",
+            );
+            return Err(ConsensusError::Other)
         }
 
         if self.chain_spec.is_cancun_active_at_timestamp(block.timestamp) {

@@ -4,7 +4,7 @@ use std::{fmt::Display, sync::Arc};
 
 use alloy_consensus::{Header, Transaction, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{eip4895::Withdrawals, merge::BEACON_NONCE};
-use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_primitives::{address, Address, Bytes, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_engine::PayloadId;
 use reth_basic_payload_builder::*;
@@ -24,7 +24,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     HashedPostStateProvider, ProviderError, StateProofProvider, StateProviderFactory,
-    StateRootProvider,
+    StateRootProvider, StorageRootProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{
@@ -48,6 +48,10 @@ use op_alloy_consensus::DepositTransaction;
 use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_revm::witness::ExecutionWitnessRecord;
 use reth_transaction_pool::pool::BestPayloadTransactions;
+
+/// The L2 contract `L2ToL1MessagePasser`, stores commitments to withdrawal transactions.
+pub const ADDRESS_PREDEPLOY_L2_TO_L1_MESSAGE_PASSER: Address =
+    address!("4200000000000000000000000000000000000016");
 
 /// Optimism's payload builder
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -288,14 +292,15 @@ where
     Txs: OpPayloadTransactions,
 {
     /// Executes the payload and returns the outcome.
-    pub fn execute<EvmConfig, DB>(
+    pub fn execute<EvmConfig, DB, P>(
         self,
         state: &mut State<DB>,
         ctx: &OpPayloadBuilderCtx<EvmConfig>,
     ) -> Result<BuildOutcomeKind<ExecutedPayload>, PayloadBuilderError>
     where
         EvmConfig: ConfigureEvm<Header = Header>,
-        DB: Database<Error = ProviderError>,
+        DB: Database<Error = ProviderError> + AsRef<P>,
+        P: StorageRootProvider,
     {
         let Self { pool, best } = self;
         debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
@@ -323,13 +328,21 @@ where
             }
         }
 
-        let withdrawals_root = ctx.commit_withdrawals(state)?;
+        debug_assert!(ctx.attributes().payload_attributes.withdrawals.is_empty());
 
         // merge all transitions into bundle state, this would apply the withdrawal balance changes
         // and 4788 contract call
         state.merge_transitions(BundleRetention::Reverts);
 
-        Ok(BuildOutcomeKind::Better { payload: ExecutedPayload { info, withdrawals_root } })
+        let storage_root_msg_passer = state
+            .database
+            .as_ref()
+            .storage_root(ADDRESS_PREDEPLOY_L2_TO_L1_MESSAGE_PASSER, Default::default())?;
+
+        // withdrawals root field in block header is used for storage root of L2 predeploy
+        let payload = ExecutedPayload { info, withdrawals_root: Some(storage_root_msg_passer) };
+
+        Ok(BuildOutcomeKind::Better { payload })
     }
 
     /// Builds the payload on top of the state.
@@ -341,7 +354,7 @@ where
     where
         EvmConfig: ConfigureEvm<Header = Header>,
         DB: Database<Error = ProviderError> + AsRef<P>,
-        P: StateRootProvider + HashedPostStateProvider,
+        P: StateRootProvider + HashedPostStateProvider + StorageRootProvider,
     {
         let ExecutedPayload { info, withdrawals_root } = match self.execute(&mut state, &ctx)? {
             BuildOutcomeKind::Better { payload } | BuildOutcomeKind::Freeze(payload) => payload,
@@ -467,7 +480,7 @@ where
     where
         EvmConfig: ConfigureEvm<Header = Header>,
         DB: Database<Error = ProviderError> + AsRef<P>,
-        P: StateProofProvider,
+        P: StateProofProvider + StorageRootProvider,
     {
         let _ = self.execute(state, ctx)?;
         let ExecutionWitnessRecord { hashed_state, codes, keys } =
