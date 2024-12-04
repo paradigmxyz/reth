@@ -6,6 +6,7 @@ use reth_network_api::{
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_tokio_util::EventStream;
 use reth_tracing::tracing::info;
+
 /// Helper for network operations
 #[derive(Debug)]
 pub struct NetworkTestContext<Network> {

@@ -88,7 +88,6 @@ pub enum PeerEvent {
 }
 
 /// (Non-exhaustive) Network events representing peer lifecycle events and session requests.
-/// sessions
 #[derive(Debug)]
 pub enum NetworkEvent<R = PeerRequest> {
     /// Basic peer lifecycle event.
