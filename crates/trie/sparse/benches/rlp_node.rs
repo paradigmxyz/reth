@@ -31,7 +31,7 @@ pub fn update_rlp_node_level(c: &mut Criterion) {
                 .update_leaf(Nibbles::unpack(key), alloy_rlp::encode_fixed_size(value).to_vec())
                 .unwrap();
         }
-        sparse.root(&mut |_| unreachable!());
+        sparse.root();
 
         for updated_leaves in [0.1, 1.0] {
             for key in state
@@ -60,7 +60,7 @@ pub fn update_rlp_node_level(c: &mut Criterion) {
                             let mut cloned = sparse.clone();
                             for _ in 0..iters {
                                 let start = Instant::now();
-                                cloned.update_rlp_node_level(depth, &mut |_| unreachable!());
+                                cloned.update_rlp_node_level(depth);
                                 elapsed += start.elapsed();
                                 cloned = sparse.clone();
                             }

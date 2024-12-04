@@ -118,17 +118,13 @@ impl<P> SparseTrie<P> {
     }
 
     /// Calculates and returns the trie root if the trie has been revealed.
-    pub fn root(&mut self, fetch_node: &mut impl FnMut(Nibbles) -> Option<Bytes>) -> Option<B256> {
-        Some(self.as_revealed_mut()?.root(fetch_node))
+    pub fn root(&mut self) -> Option<B256> {
+        Some(self.as_revealed_mut()?.root())
     }
 
     /// Calculates the hashes of the nodes below the provided level.
-    pub fn calculate_below_level(
-        &mut self,
-        level: usize,
-        fetch_node: &mut impl FnMut(Nibbles) -> Option<Bytes>,
-    ) {
-        self.as_revealed_mut().unwrap().update_rlp_node_level(level, fetch_node);
+    pub fn calculate_below_level(&mut self, level: usize) {
+        self.as_revealed_mut().unwrap().update_rlp_node_level(level);
     }
 }
 
@@ -141,7 +137,7 @@ where
     pub fn remove_leaf(
         &mut self,
         path: &Nibbles,
-        fetch_node: &mut impl FnMut(Nibbles) -> Option<Bytes>,
+        fetch_node: impl FnMut(Nibbles) -> Option<Bytes>,
     ) -> SparseTrieResult<()> {
         let revealed = self.as_revealed_mut().ok_or(SparseTrieError::Blind)?;
         revealed.remove_leaf(path, fetch_node)?;
@@ -552,10 +548,10 @@ impl<P> RevealedSparseTrie<P> {
 
     /// Return the root of the sparse trie.
     /// Updates all remaining dirty nodes before calculating the root.
-    pub fn root(&mut self, fetch_node: &mut impl FnMut(Nibbles) -> Option<Bytes>) -> B256 {
+    pub fn root(&mut self) -> B256 {
         // take the current prefix set.
         let mut prefix_set = std::mem::take(&mut self.prefix_set).freeze();
-        let rlp_node = self.rlp_node_allocate(Nibbles::default(), &mut prefix_set, fetch_node);
+        let rlp_node = self.rlp_node_allocate(Nibbles::default(), &mut prefix_set);
         if let Some(root_hash) = rlp_node.as_hash() {
             root_hash
         } else {
@@ -565,18 +561,14 @@ impl<P> RevealedSparseTrie<P> {
 
     /// Update hashes of the nodes that are located at a level deeper than or equal to the provided
     /// depth. Root node has a level of 0.
-    pub fn update_rlp_node_level(
-        &mut self,
-        depth: usize,
-        fetch_node: &mut impl FnMut(Nibbles) -> Option<Bytes>,
-    ) {
+    pub fn update_rlp_node_level(&mut self, depth: usize) {
         let mut prefix_set = self.prefix_set.clone().freeze();
         let mut buffers = RlpNodeBuffers::default();
 
         let targets = self.get_changed_nodes_at_depth(&mut prefix_set, depth);
         for target in targets {
             buffers.path_stack.push((target, Some(true)));
-            self.rlp_node(&mut prefix_set, &mut buffers, fetch_node);
+            self.rlp_node(&mut prefix_set, &mut buffers);
         }
     }
 
@@ -632,22 +624,12 @@ impl<P> RevealedSparseTrie<P> {
         targets
     }
 
-    fn rlp_node_allocate(
-        &mut self,
-        path: Nibbles,
-        prefix_set: &mut PrefixSet,
-        fetch_node: &mut impl FnMut(Nibbles) -> Option<Bytes>,
-    ) -> RlpNode {
+    fn rlp_node_allocate(&mut self, path: Nibbles, prefix_set: &mut PrefixSet) -> RlpNode {
         let mut buffers = RlpNodeBuffers::new_with_path(path);
-        self.rlp_node(prefix_set, &mut buffers, fetch_node)
+        self.rlp_node(prefix_set, &mut buffers)
     }
 
-    fn rlp_node(
-        &mut self,
-        prefix_set: &mut PrefixSet,
-        buffers: &mut RlpNodeBuffers,
-        fetch_node: &mut impl FnMut(Nibbles) -> Option<Bytes>,
-    ) -> RlpNode {
+    fn rlp_node(&mut self, prefix_set: &mut PrefixSet, buffers: &mut RlpNodeBuffers) -> RlpNode {
         'main: while let Some((path, mut is_in_prefix_set)) = buffers.path_stack.pop() {
             // Check if the path is in the prefix set.
             // First, check the cached value. If it's `None`, then check the prefix set, and update
@@ -758,11 +740,7 @@ impl<P> RevealedSparseTrie<P> {
 
                                 // Set the hash mask. If a child node has a hash value AND is a
                                 // branch node, set the hash mask and save the hash.
-                                let hash = child.as_hash().filter(|_| {
-                                    let node = fetch_node(child_path.clone())
-                                        .map(|bytes| TrieNode::decode(&mut &bytes[..]).unwrap());
-                                    node.is_some_and(|node| matches!(node, TrieNode::Branch(_)))
-                                });
+                                let hash = child.as_hash().filter(|_| node_type.is_branch());
                                 hash_mask_values.push(hash.is_some());
                                 if let Some(hash) = hash {
                                     hashes.push(hash);
@@ -855,7 +833,7 @@ where
     pub fn remove_leaf(
         &mut self,
         path: &Nibbles,
-        fetch_node: &mut impl FnMut(Nibbles) -> Option<Bytes>,
+        mut fetch_node: impl FnMut(Nibbles) -> Option<Bytes>,
     ) -> SparseTrieResult<()> {
         if self.values.remove(path).is_none() {
             if let Some(SparseNode::Hash(hash)) = self.nodes.get(path) {
@@ -1595,7 +1573,7 @@ mod tests {
         );
 
         sparse
-            .remove_leaf(&Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), &mut |_| unreachable!())
+            .remove_leaf(&Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), |_| unreachable!())
             .unwrap();
 
         // Extension (Key = 5)
@@ -1648,7 +1626,7 @@ mod tests {
         );
 
         sparse
-            .remove_leaf(&Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), &mut |_| unreachable!())
+            .remove_leaf(&Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), |_| unreachable!())
             .unwrap();
 
         // Extension (Key = 5)
@@ -1686,7 +1664,7 @@ mod tests {
         );
 
         sparse
-            .remove_leaf(&Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), &mut |_| unreachable!())
+            .remove_leaf(&Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), |_| unreachable!())
             .unwrap();
 
         // Extension (Key = 5)
@@ -1721,7 +1699,7 @@ mod tests {
         );
 
         sparse
-            .remove_leaf(&Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), &mut |_| unreachable!())
+            .remove_leaf(&Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), |_| unreachable!())
             .unwrap();
 
         // Extension (Key = 5)
@@ -1745,7 +1723,7 @@ mod tests {
         );
 
         sparse
-            .remove_leaf(&Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), &mut |_| unreachable!())
+            .remove_leaf(&Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), |_| unreachable!())
             .unwrap();
 
         // Leaf (Key = 53302)
@@ -1758,7 +1736,7 @@ mod tests {
         );
 
         sparse
-            .remove_leaf(&Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]), &mut |_| unreachable!())
+            .remove_leaf(&Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]), |_| unreachable!())
             .unwrap();
 
         // Empty
@@ -1794,7 +1772,7 @@ mod tests {
 
         // Removing a blinded leaf should result in an error
         assert_matches!(
-            sparse.remove_leaf(&Nibbles::from_nibbles([0x0]), &mut |_| unreachable!()),
+            sparse.remove_leaf(&Nibbles::from_nibbles([0x0]), |_| unreachable!()),
             Err(SparseTrieError::BlindedNode { path, hash }) if path == Nibbles::from_nibbles([0x0]) && hash == B256::repeat_byte(1)
         );
     }
@@ -1829,7 +1807,7 @@ mod tests {
 
         // Removing a blinded leaf should result in an error
         let mut fetch_called = false;
-        let result = sparse.remove_leaf(&Nibbles::from_nibbles([0x1]), &mut |_| {
+        let result = sparse.remove_leaf(&Nibbles::from_nibbles([0x1]), |_| {
             fetch_called = true;
             let mut buf = Vec::new();
             blinded_leaf.encode(&mut buf);
@@ -1920,7 +1898,7 @@ mod tests {
                     // that the sparse trie root still matches the hash builder root
                     for key in keys_to_delete {
                         state.remove(&key).unwrap();
-                        sparse.remove_leaf(&key, &mut |_| unreachable!()).unwrap();
+                        sparse.remove_leaf(&key, |_| unreachable!()).unwrap();
                     }
 
                     // We need to clone the sparse trie, so that all updated branch nodes are
@@ -2115,7 +2093,7 @@ mod tests {
         );
 
         // Remove the leaf for the first key
-        sparse.remove_leaf(&key1(), &mut |_| unreachable!()).unwrap();
+        sparse.remove_leaf(&key1(), |_| unreachable!()).unwrap();
 
         // Check that the branch node was turned into an extension node
         assert_eq!(
