@@ -130,17 +130,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                 trace!(target: "trie::sparse", ?path, ?node, "Revealing account node");
 
                 let hash_mask = if let TrieNode::Branch(_) = node {
-                    let Some(hash_mask) = multiproof.branch_node_hash_masks.get(&path) else {
-                        trace!(
-                            target: "trie::sparse",
-                            ?path,
-                            ?node,
-                            hash_masks = ?multiproof.branch_node_hash_masks,
-                            "Missing branch node hash mask for account"
-                        );
-                        return Err(SparseStateTrieError::MissingBranchNodeHashMask { path });
-                    };
-                    Some(*hash_mask)
+                    multiproof.branch_node_hash_masks.get(&path).copied()
                 } else {
                     None
                 };
@@ -168,19 +158,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                     let node = TrieNode::decode(&mut &bytes[..])?;
                     trace!(target: "trie::sparse", ?account, ?path, ?node, "Revealing storage node");
                     let hash_mask = if let TrieNode::Branch(_) = node {
-                        let Some(hash_mask) = storage_subtree.branch_node_hash_masks.get(&path)
-                        else {
-                            trace!(
-                                target: "trie::sparse",
-                                ?account,
-                                ?path,
-                                ?node,
-                                hash_masks = ?storage_subtree.branch_node_hash_masks,
-                                "Missing branch node hash mask for storage"
-                            );
-                            return Err(SparseStateTrieError::MissingBranchNodeHashMask { path });
-                        };
-                        Some(*hash_mask)
+                        storage_subtree.branch_node_hash_masks.get(&path).copied()
                     } else {
                         None
                     };
@@ -217,10 +195,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         }
 
         let hash_mask = if matches!(root_node, TrieNode::Branch(_)) {
-            let Some(hash_mask) = branch_node_hash_masks.get(&path) else {
-                return Err(SparseStateTrieError::MissingBranchNodeHashMask { path })
-            };
-            Some(*hash_mask)
+            branch_node_hash_masks.get(&path).copied()
         } else {
             None
         };
@@ -407,19 +382,6 @@ mod tests {
         assert_matches!(
             sparse.validate_root_node(&mut proof.into_iter().peekable(), &HashMap::default()),
             Err(SparseStateTrieError::InvalidRootNode { .. })
-        );
-    }
-
-    #[test]
-    fn validate_root_node_no_hash_mask() {
-        let sparse = SparseStateTrie::default();
-
-        let mut rlp = Vec::new();
-        BranchNode::default().encode(&mut rlp);
-        let proof = [(Nibbles::default(), Bytes::from(rlp))];
-        assert_matches!(
-            sparse.validate_root_node(&mut proof.into_iter().peekable(), &HashMap::default()),
-            Err(SparseStateTrieError::MissingBranchNodeHashMask { .. })
         );
     }
 

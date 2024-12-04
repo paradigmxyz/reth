@@ -76,12 +76,6 @@ pub enum SparseStateTrieError {
         /// Encoded first proof node.
         node: Bytes,
     },
-    /// Missing branch node hash mask at `path`.
-    #[error("missing branch node hash mask at {path:?}")]
-    MissingBranchNodeHashMask {
-        /// Path to branch node.
-        path: Nibbles,
-    },
     /// Sparse trie error.
     #[error(transparent)]
     Sparse(#[from] SparseTrieError),
