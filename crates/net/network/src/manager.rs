@@ -292,7 +292,9 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     /// components of the network
     ///
     /// ```
-    /// use reth_network::{config::rng_secret_key, NetworkConfig, NetworkManager};
+    /// use reth_network::{
+    ///     config::rng_secret_key, EthNetworkPrimitives, NetworkConfig, NetworkManager,
+    /// };
     /// use reth_network_peers::mainnet_nodes;
     /// use reth_provider::test_utils::NoopProvider;
     /// use reth_transaction_pool::TransactionPool;
@@ -303,8 +305,9 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     ///     // The key that's used for encrypting sessions and to identify our node.
     ///     let local_key = rng_secret_key();
     ///
-    ///     let config =
-    ///         NetworkConfig::builder(local_key).boot_nodes(mainnet_nodes()).build(client.clone());
+    ///     let config = NetworkConfig::<_, EthNetworkPrimitives>::builder(local_key)
+    ///         .boot_nodes(mainnet_nodes())
+    ///         .build(client.clone());
     ///     let transactions_manager_config = config.transactions_manager_config.clone();
     ///
     ///     // create the network instance
