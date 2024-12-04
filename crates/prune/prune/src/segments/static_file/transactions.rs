@@ -3,7 +3,8 @@ use crate::{
     segments::{PruneInput, Segment},
     PrunerError,
 };
-use reth_db::{tables, transaction::DbTxMut};
+use reth_db::{table::Value, tables, transaction::DbTxMut};
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::StaticFileProvider, BlockReader, DBProvider, StaticFileProviderFactory,
     TransactionsProvider,
@@ -27,8 +28,10 @@ impl<N> Transactions<N> {
 
 impl<Provider> Segment<Provider> for Transactions<Provider::Primitives>
 where
-    Provider:
-        DBProvider<Tx: DbTxMut> + TransactionsProvider + BlockReader + StaticFileProviderFactory,
+    Provider: DBProvider<Tx: DbTxMut>
+        + TransactionsProvider
+        + BlockReader
+        + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value>>,
 {
     fn segment(&self) -> PruneSegment {
         PruneSegment::Transactions
@@ -56,7 +59,9 @@ where
         let mut limiter = input.limiter;
 
         let mut last_pruned_transaction = *tx_range.end();
-        let (pruned, done) = provider.tx_ref().prune_table_with_range::<tables::Transactions>(
+        let (pruned, done) = provider.tx_ref().prune_table_with_range::<tables::Transactions<
+            <Provider::Primitives as NodePrimitives>::SignedTx,
+        >>(
             tx_range,
             &mut limiter,
             |_| false,

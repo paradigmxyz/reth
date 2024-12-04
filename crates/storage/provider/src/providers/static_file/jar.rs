@@ -6,7 +6,6 @@ use crate::{
     to_range, BlockHashReader, BlockNumReader, HeaderProvider, ReceiptProvider,
     TransactionsProvider,
 };
-use alloy_consensus::Header;
 use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use reth_chainspec::ChainInfo;
@@ -15,7 +14,7 @@ use reth_db::{
         BlockHashMask, HeaderMask, HeaderWithHashMask, ReceiptMask, StaticFileCursor,
         TDWithHashMask, TotalDifficultyMask, TransactionMask,
     },
-    table::Decompress,
+    table::{Decompress, Value},
 };
 use reth_node_types::NodePrimitives;
 use reth_primitives::{transaction::recover_signers, SealedHeader, TransactionMeta};
@@ -90,17 +89,19 @@ impl<'a, N: NodePrimitives> StaticFileJarProvider<'a, N> {
     }
 }
 
-impl<N: NodePrimitives> HeaderProvider for StaticFileJarProvider<'_, N> {
-    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
+impl<N: NodePrimitives<BlockHeader: Value>> HeaderProvider for StaticFileJarProvider<'_, N> {
+    type Header = N::BlockHeader;
+
+    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
         Ok(self
             .cursor()?
-            .get_two::<HeaderWithHashMask<Header>>(block_hash.into())?
+            .get_two::<HeaderWithHashMask<Self::Header>>(block_hash.into())?
             .filter(|(_, hash)| hash == block_hash)
             .map(|(header, _)| header))
     }
 
-    fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Header>> {
-        self.cursor()?.get_one::<HeaderMask<Header>>(num.into())
+    fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::Header>> {
+        self.cursor()?.get_one::<HeaderMask<Self::Header>>(num.into())
     }
 
     fn header_td(&self, block_hash: &BlockHash) -> ProviderResult<Option<U256>> {
@@ -115,14 +116,17 @@ impl<N: NodePrimitives> HeaderProvider for StaticFileJarProvider<'_, N> {
         Ok(self.cursor()?.get_one::<TotalDifficultyMask>(num.into())?.map(Into::into))
     }
 
-    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
+    fn headers_range(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<Self::Header>> {
         let range = to_range(range);
 
         let mut cursor = self.cursor()?;
         let mut headers = Vec::with_capacity((range.end - range.start) as usize);
 
         for num in range {
-            if let Some(header) = cursor.get_one::<HeaderMask<Header>>(num.into())? {
+            if let Some(header) = cursor.get_one::<HeaderMask<Self::Header>>(num.into())? {
                 headers.push(header);
             }
         }
@@ -130,18 +134,21 @@ impl<N: NodePrimitives> HeaderProvider for StaticFileJarProvider<'_, N> {
         Ok(headers)
     }
 
-    fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
+    fn sealed_header(
+        &self,
+        number: BlockNumber,
+    ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
         Ok(self
             .cursor()?
-            .get_two::<HeaderWithHashMask<Header>>(number.into())?
+            .get_two::<HeaderWithHashMask<Self::Header>>(number.into())?
             .map(|(header, hash)| SealedHeader::new(header, hash)))
     }
 
     fn sealed_headers_while(
         &self,
         range: impl RangeBounds<BlockNumber>,
-        mut predicate: impl FnMut(&SealedHeader) -> bool,
-    ) -> ProviderResult<Vec<SealedHeader>> {
+        mut predicate: impl FnMut(&SealedHeader<Self::Header>) -> bool,
+    ) -> ProviderResult<Vec<SealedHeader<Self::Header>>> {
         let range = to_range(range);
 
         let mut cursor = self.cursor()?;
@@ -149,7 +156,7 @@ impl<N: NodePrimitives> HeaderProvider for StaticFileJarProvider<'_, N> {
 
         for number in range {
             if let Some((header, hash)) =
-                cursor.get_two::<HeaderWithHashMask<Header>>(number.into())?
+                cursor.get_two::<HeaderWithHashMask<Self::Header>>(number.into())?
             {
                 let sealed = SealedHeader::new(header, hash);
                 if !predicate(&sealed) {

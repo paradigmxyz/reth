@@ -14,7 +14,7 @@ pub fn build_receipt<T>(
     meta: TransactionMeta,
     receipt: &Receipt,
     all_receipts: &[Receipt],
-    build_envelope: impl FnOnce(ReceiptWithBloom<Log>) -> T,
+    build_envelope: impl FnOnce(ReceiptWithBloom<alloy_consensus::Receipt<Log>>) -> T,
 ) -> EthResult<TransactionReceipt<T>> {
     // Note: we assume this transaction is valid, because it's mined (or part of pending block)
     // and we don't need to check for pre EIP-2

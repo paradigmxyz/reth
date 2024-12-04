@@ -31,9 +31,10 @@ where
         Primitives: NodePrimitives<
             Block = reth_primitives::Block,
             Receipt = reth_primitives::Receipt,
+            BlockHeader = reth_primitives::Header,
         >,
     >,
-    E: BlockExecutorProvider,
+    E: BlockExecutorProvider<Primitives = N::Primitives>,
 {
     let (output_db, tip_block_number) = setup(from, to, &output_datadir.db(), db_tool)?;
 
@@ -143,6 +144,7 @@ fn unwind_and_copy<
         Primitives: NodePrimitives<
             Block = reth_primitives::Block,
             Receipt = reth_primitives::Receipt,
+            BlockHeader = reth_primitives::Header,
         >,
     >,
 >(
@@ -186,9 +188,10 @@ where
         Primitives: NodePrimitives<
             Block = reth_primitives::Block,
             Receipt = reth_primitives::Receipt,
+            BlockHeader = reth_primitives::Header,
         >,
     >,
-    E: BlockExecutorProvider,
+    E: BlockExecutorProvider<Primitives = N::Primitives>,
 {
     info!(target: "reth::cli", "Executing stage. [dry-run]");
 

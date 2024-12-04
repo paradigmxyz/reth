@@ -73,6 +73,8 @@ impl Receipt {
 }
 
 impl TxReceipt for Receipt {
+    type Log = Log;
+
     fn status_or_post_state(&self) -> Eip658Value {
         self.success.into()
     }

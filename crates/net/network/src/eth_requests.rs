@@ -4,7 +4,7 @@ use crate::{
     budget::DEFAULT_BUDGET_TRY_DRAIN_DOWNLOADERS, metered_poll_nested_stream_with_budget,
     metrics::EthRequestHandlerMetrics,
 };
-use alloy_consensus::Header;
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
 use alloy_rlp::Encodable;
 use futures::StreamExt;
@@ -83,7 +83,7 @@ where
     C: BlockReader + HeaderProvider + ReceiptProvider<Receipt = reth_primitives::Receipt>,
 {
     /// Returns the list of requested headers
-    fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<Header> {
+    fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<C::Header> {
         let GetBlockHeaders { start_block, limit, skip, direction } = request;
 
         let mut headers = Vec::new();
@@ -105,7 +105,7 @@ where
             if let Some(header) = self.client.header_by_hash_or_number(block).unwrap_or_default() {
                 match direction {
                     HeadersDirection::Rising => {
-                        if let Some(next) = (header.number + 1).checked_add(skip) {
+                        if let Some(next) = (header.number() + 1).checked_add(skip) {
                             block = next.into()
                         } else {
                             break
@@ -116,14 +116,14 @@ where
                             // prevent under flows for block.number == 0 and `block.number - skip <
                             // 0`
                             if let Some(next) =
-                                header.number.checked_sub(1).and_then(|num| num.checked_sub(skip))
+                                header.number().checked_sub(1).and_then(|num| num.checked_sub(skip))
                             {
                                 block = next.into()
                             } else {
                                 break
                             }
                         } else {
-                            block = header.parent_hash.into()
+                            block = header.parent_hash().into()
                         }
                     }
                 }
@@ -146,7 +146,7 @@ where
         &self,
         _peer_id: PeerId,
         request: GetBlockHeaders,
-        response: oneshot::Sender<RequestResult<BlockHeaders<Header>>>,
+        response: oneshot::Sender<RequestResult<BlockHeaders<C::Header>>>,
     ) {
         self.metrics.eth_headers_requests_received_total.increment(1);
         let headers = self.get_headers_response(request);
@@ -225,7 +225,7 @@ where
 impl<C> Future for EthRequestHandler<C>
 where
     C: BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
-        + HeaderProvider
+        + HeaderProvider<Header = reth_primitives::Header>
         + Unpin,
 {
     type Output = ();

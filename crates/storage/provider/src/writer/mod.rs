@@ -234,7 +234,7 @@ mod tests {
     };
     use reth_execution_types::ExecutionOutcome;
     use reth_primitives::{Account, Receipt, Receipts, StorageEntry};
-    use reth_storage_api::DatabaseProviderFactory;
+    use reth_storage_api::{DatabaseProviderFactory, HashedPostStateProvider};
     use reth_trie::{
         test_utils::{state_root, storage_root_prehashed},
         HashedPostState, HashedStorage, StateRoot, StorageRoot,
@@ -1118,13 +1118,7 @@ mod tests {
             assert_eq!(
                 StateRoot::overlay_root(
                     tx,
-                    ExecutionOutcome::<Receipt>::new(
-                        state.bundle_state.clone(),
-                        Receipts::default(),
-                        0,
-                        Vec::new()
-                    )
-                    .hash_state_slow(),
+                    provider_factory.hashed_post_state(&state.bundle_state)
                 )
                 .unwrap(),
                 state_root(expected.clone().into_iter().map(|(address, (account, storage))| (

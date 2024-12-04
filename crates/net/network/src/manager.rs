@@ -403,7 +403,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
         &mut self,
         peer_id: PeerId,
         _capabilities: Arc<Capabilities>,
-        _message: CapabilityMessage,
+        _message: CapabilityMessage<N>,
     ) {
         trace!(target: "net", ?peer_id, "received unexpected message");
         self.swarm
@@ -648,6 +648,9 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                 } else {
                     let _ = tx.send(None);
                 }
+            }
+            NetworkHandleMessage::EthMessage { peer_id, message } => {
+                self.swarm.sessions_mut().send_message(&peer_id, message)
             }
         }
     }

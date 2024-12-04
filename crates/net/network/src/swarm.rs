@@ -350,7 +350,7 @@ pub(crate) enum SwarmEvent<N: NetworkPrimitives = EthNetworkPrimitives> {
         /// Announced capabilities of the remote peer.
         capabilities: Arc<Capabilities>,
         /// Message received from the peer.
-        message: CapabilityMessage,
+        message: CapabilityMessage<N>,
     },
     /// Received a bad message from the peer.
     BadMessage {

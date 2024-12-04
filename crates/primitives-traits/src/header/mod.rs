@@ -1,5 +1,5 @@
 mod sealed;
-pub use sealed::{BlockWithParent, Header, SealedHeader};
+pub use sealed::{Header, SealedHeader};
 
 mod error;
 pub use error::HeaderError;

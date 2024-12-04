@@ -21,6 +21,7 @@ mod engine;
 mod ganache;
 mod hardhat;
 mod mev;
+mod miner;
 mod net;
 mod otterscan;
 mod reth;
@@ -40,6 +41,7 @@ pub mod servers {
         debug::{DebugApiServer, DebugExecutionWitnessApiServer},
         engine::{EngineApiServer, EngineEthApiServer},
         mev::{MevFullApiServer, MevSimApiServer},
+        miner::MinerApiServer,
         net::NetApiServer,
         otterscan::OtterscanServer,
         reth::RethApiServer,
@@ -70,6 +72,7 @@ pub mod clients {
         ganache::GanacheApiClient,
         hardhat::HardhatApiClient,
         mev::{MevFullApiClient, MevSimApiClient},
+        miner::MinerApiClient,
         net::NetApiClient,
         otterscan::OtterscanClient,
         reth::RethApiClient,

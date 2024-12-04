@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use alloy_consensus::Header;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
@@ -13,7 +12,8 @@ use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_evm_ethereum::execute::EthExecutionStrategyFactory;
 use reth_network::{NetworkHandle, PeersInfo};
 use reth_node_api::{
-    AddOnsContext, ConfigureEvm, EngineValidator, FullNodeComponents, NodeTypesWithDB,
+    AddOnsContext, ConfigureEvm, EngineValidator, FullNodeComponents, HeaderTy, NodeTypesWithDB,
+    TxTy,
 };
 use reth_node_builder::{
     components::{
@@ -30,7 +30,7 @@ use reth_provider::{CanonStateSubscriptions, EthStorage};
 use reth_rpc::EthApi;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
-    blobstore::DiskFileBlobStore, EthTransactionPool, TransactionPool,
+    blobstore::DiskFileBlobStore, EthTransactionPool, PoolTransaction, TransactionPool,
     TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
@@ -133,7 +133,7 @@ pub struct EthereumExecutorBuilder;
 
 impl<Types, Node> ExecutorBuilder<Node> for EthereumExecutorBuilder
 where
-    Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
+    Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
 {
     type EVM = EthEvmConfig;
@@ -242,8 +242,10 @@ impl EthereumPayloadBuilder {
     where
         Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
         Node: FullNodeTypes<Types = Types>,
-        Evm: ConfigureEvm<Header = Header>,
-        Pool: TransactionPool + Unpin + 'static,
+        Evm: ConfigureEvm<Header = HeaderTy<Types>, Transaction = TxTy<Node::Types>>,
+        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
+            + Unpin
+            + 'static,
         Types::Engine: PayloadTypes<
             BuiltPayload = EthBuiltPayload,
             PayloadAttributes = EthPayloadAttributes,
@@ -280,7 +282,9 @@ impl<Types, Node, Pool> PayloadServiceBuilder<Node, Pool> for EthereumPayloadBui
 where
     Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
-    Pool: TransactionPool + Unpin + 'static,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
+        + Unpin
+        + 'static,
     Types::Engine: PayloadTypes<
         BuiltPayload = EthBuiltPayload,
         PayloadAttributes = EthPayloadAttributes,
@@ -305,7 +309,9 @@ pub struct EthereumNetworkBuilder {
 impl<Node, Pool> NetworkBuilder<Node, Pool> for EthereumNetworkBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
-    Pool: TransactionPool + Unpin + 'static,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
+        + Unpin
+        + 'static,
 {
     async fn build_network(
         self,
@@ -327,9 +333,9 @@ pub struct EthereumConsensusBuilder {
 
 impl<Node> ConsensusBuilder<Node> for EthereumConsensusBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
 {
-    type Consensus = Arc<dyn reth_consensus::Consensus>;
+    type Consensus = Arc<dyn reth_consensus::FullConsensus>;
 
     async fn build_consensus(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
         Ok(Arc::new(EthBeaconConsensus::new(ctx.chain_spec())))

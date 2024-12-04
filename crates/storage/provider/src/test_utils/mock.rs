@@ -29,7 +29,8 @@ use reth_primitives::{
 use reth_primitives_traits::SignedTransaction;
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    DatabaseProviderFactory, StageCheckpointReader, StateProofProvider, StorageRootProvider,
+    DatabaseProviderFactory, HashedPostStateProvider, StageCheckpointReader,
+    StateCommitmentProvider, StateProofProvider, StorageRootProvider,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
@@ -164,6 +165,10 @@ impl NodeTypes for MockNode {
     type Storage = EthStorage;
 }
 
+impl StateCommitmentProvider for MockEthProvider {
+    type StateCommitment = <MockNode as NodeTypes>::StateCommitment;
+}
+
 impl DatabaseProviderFactory for MockEthProvider {
     type DB = DatabaseMock;
     type Provider = DatabaseProvider<TxMock, MockNode>;
@@ -179,6 +184,8 @@ impl DatabaseProviderFactory for MockEthProvider {
 }
 
 impl HeaderProvider for MockEthProvider {
+    type Header = Header;
+
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
         let lock = self.headers.lock();
         Ok(lock.get(block_hash).cloned())
@@ -677,6 +684,12 @@ impl StateProofProvider for MockEthProvider {
         _target: HashedPostState,
     ) -> ProviderResult<HashMap<B256, Bytes>> {
         Ok(HashMap::default())
+    }
+}
+
+impl HashedPostStateProvider for MockEthProvider {
+    fn hashed_post_state(&self, _state: &revm::db::BundleState) -> HashedPostState {
+        HashedPostState::default()
     }
 }
 

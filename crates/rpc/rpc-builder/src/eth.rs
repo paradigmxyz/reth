@@ -29,8 +29,11 @@ pub struct EthHandlers<Provider, Pool, Network, Events, EthApi: EthApiTypes> {
 impl<Provider, Pool, Network, Events, EthApi> EthHandlers<Provider, Pool, Network, Events, EthApi>
 where
     Provider: StateProviderFactory
-        + BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
-        + EvmEnvProvider
+        + BlockReader<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+            Header = reth_primitives::Header,
+        > + EvmEnvProvider
         + Clone
         + Unpin
         + 'static,
@@ -65,12 +68,7 @@ where
         EvmConfig: ConfigureEvm<Header = Header>,
         Tasks: TaskSpawner + Clone + 'static,
     {
-        let cache = EthStateCache::spawn_with(
-            provider.clone(),
-            config.cache,
-            executor.clone(),
-            evm_config.clone(),
-        );
+        let cache = EthStateCache::spawn_with(provider.clone(), config.cache, executor.clone());
 
         let new_canonical_blocks = events.canonical_state_stream();
         let c = cache.clone();

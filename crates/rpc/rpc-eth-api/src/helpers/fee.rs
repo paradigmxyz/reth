@@ -163,11 +163,11 @@ pub trait EthFees: LoadFee {
 
 
                 for header in &headers {
-                    base_fee_per_gas.push(header.base_fee_per_gas.unwrap_or_default() as u128);
-                    gas_used_ratio.push(header.gas_used as f64 / header.gas_limit as f64);
+                    base_fee_per_gas.push(header.base_fee_per_gas().unwrap_or_default() as u128);
+                    gas_used_ratio.push(header.gas_used() as f64 / header.gas_limit() as f64);
                     base_fee_per_blob_gas.push(header.blob_fee().unwrap_or_default());
                     blob_gas_used_ratio.push(
-                        header.blob_gas_used.unwrap_or_default() as f64
+                        header.blob_gas_used().unwrap_or_default() as f64
                             / alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
                     );
 
@@ -181,8 +181,8 @@ pub trait EthFees: LoadFee {
                         rewards.push(
                             calculate_reward_percentiles_for_block(
                                 percentiles,
-                                header.gas_used,
-                                header.base_fee_per_gas.unwrap_or_default(),
+                                header.gas_used(),
+                                header.base_fee_per_gas().unwrap_or_default(),
                                 &block.body.transactions,
                                 &receipts,
                             )
@@ -198,14 +198,10 @@ pub trait EthFees: LoadFee {
                 // The unwrap is safe since we checked earlier that we got at least 1 header.
                 let last_header = headers.last().expect("is present");
                 base_fee_per_gas.push(
+                    last_header.next_block_base_fee(
                     self.provider()
                         .chain_spec()
-                        .base_fee_params_at_timestamp(last_header.timestamp)
-                        .next_block_base_fee(
-                            last_header.gas_used ,
-                            last_header.gas_limit,
-                            last_header.base_fee_per_gas.unwrap_or_default() ,
-                        ) as u128,
+                        .base_fee_params_at_timestamp(last_header.timestamp())).unwrap_or_default() as u128
                 );
 
                 // Same goes for the `base_fee_per_blob_gas`:

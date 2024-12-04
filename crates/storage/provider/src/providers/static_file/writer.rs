@@ -2,7 +2,7 @@ use super::{
     manager::StaticFileProviderInner, metrics::StaticFileProviderMetrics, StaticFileProvider,
 };
 use crate::providers::static_file::metrics::StaticFileProviderOperation;
-use alloy_consensus::Header;
+use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockHash, BlockNumber, TxNumber, U256};
 use parking_lot::{lock_api::RwLockWriteGuard, RawRwLock, RwLock};
 use reth_codecs::Compact;
@@ -526,16 +526,19 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// Returns the current [`BlockNumber`] as seen in the static file.
     pub fn append_header(
         &mut self,
-        header: &Header,
+        header: &N::BlockHeader,
         total_difficulty: U256,
         hash: &BlockHash,
-    ) -> ProviderResult<()> {
+    ) -> ProviderResult<()>
+    where
+        N::BlockHeader: Compact,
+    {
         let start = Instant::now();
         self.ensure_no_queued_prune()?;
 
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Headers);
 
-        self.increment_block(header.number)?;
+        self.increment_block(header.number())?;
 
         self.append_column(header)?;
         self.append_column(CompactU256::from(total_difficulty))?;

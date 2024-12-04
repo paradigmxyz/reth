@@ -3,8 +3,8 @@ use crate::{
     BlockWithSenders, SealedBlock,
 };
 use alloc::vec::Vec;
-use alloy_eips::{eip2718::Encodable2718, BlockNumHash};
-use reth_primitives_traits::{Block, BlockBody, BlockHeader, SealedHeader, SignedTransaction};
+use alloy_eips::eip2718::Encodable2718;
+use reth_primitives_traits::{Block, BlockBody, SealedHeader, SignedTransaction};
 use revm_primitives::{Address, B256};
 
 /// Extension trait for [`reth_primitives_traits::Block`] implementations
@@ -121,17 +121,3 @@ pub trait BlockBodyTxExt: BlockBody {
 }
 
 impl<T: BlockBody> BlockBodyTxExt for T {}
-
-/// Extension trait for [`BlockHeader`] adding useful helper methods.
-pub trait HeaderExt: BlockHeader {
-    /// TODO: remove once <https://github.com/alloy-rs/alloy/pull/1687> is released
-    ///
-    /// Returns the parent block's number and hash
-    ///
-    /// Note: for the genesis block the parent number is 0 and the parent hash is the zero hash.
-    fn parent_num_hash(&self) -> BlockNumHash {
-        BlockNumHash::new(self.number().saturating_sub(1), self.parent_hash())
-    }
-}
-
-impl<T: BlockHeader> HeaderExt for T {}

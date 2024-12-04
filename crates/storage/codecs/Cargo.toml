@@ -67,7 +67,7 @@ alloy = [
     "dep:modular-bitfield",
     "dep:alloy-trie",
 ]
-optimism = ["alloy", "dep:op-alloy-consensus"]
+op = ["alloy", "dep:op-alloy-consensus"]
 test-utils = [
 	"std",
     "alloy",

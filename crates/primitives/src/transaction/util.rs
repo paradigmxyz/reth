@@ -1,7 +1,10 @@
+//! Utility functions for signature.
+
 use alloy_primitives::{Address, PrimitiveSignature as Signature};
 
+/// Secp256k1 utility functions.
 #[cfg(feature = "secp256k1")]
-pub(crate) mod secp256k1 {
+pub mod secp256k1 {
     pub use super::impl_secp256k1::*;
 }
 

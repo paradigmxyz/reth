@@ -54,8 +54,7 @@ fn main() {
                     if let Some(recipient) = tx.to() {
                         if args.is_match(&recipient) {
                             // convert the pool transaction
-                            let call_request =
-                                transaction_to_call_request(tx.to_recovered_transaction());
+                            let call_request = transaction_to_call_request(tx.to_consensus());
 
                             let result = eth_api
                                 .spawn_with_call_at(

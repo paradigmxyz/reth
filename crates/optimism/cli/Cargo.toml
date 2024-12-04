@@ -95,6 +95,7 @@ optimism = [
 	"reth-execution-types/optimism",
 	"reth-db/optimism",
 	"reth-db-api/optimism",
+    "reth-optimism-primitives/op",
 	"reth-downloaders/optimism"
 ]
 asm-keccak = [
