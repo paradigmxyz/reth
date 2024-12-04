@@ -1,6 +1,5 @@
 use crate::{BranchNodeCompact, Nibbles, StoredSubNode, CHILD_INDEX_RANGE};
 use alloy_primitives::B256;
-use alloy_trie::TrieMask;
 
 /// Cursor for iterating over a subtrie.
 #[derive(Clone)]
@@ -86,12 +85,6 @@ impl CursorSubNode {
         self.node
             .as_ref()
             .is_none_or(|node| self.nibble < 0 || node.tree_mask.is_bit_set(self.nibble as u8))
-    }
-
-    /// Returns the hash mask of the current node.
-    #[inline]
-    pub fn hash_mask(&self) -> TrieMask {
-        self.node.as_ref().map(|node| node.hash_mask).unwrap_or_default()
     }
 
     /// Returns `true` if the current nibble has a root hash.
