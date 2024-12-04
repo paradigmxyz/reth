@@ -153,11 +153,11 @@ impl Receipt {
         bloom.encode(out);
         self.logs.encode(out);
         #[cfg(feature = "optimism")]
-        if self.receipt.tx_type == TxType::Deposit {
-            if let Some(deposit_nonce) = self.receipt.deposit_nonce {
+        if self.tx_type == TxType::Deposit {
+            if let Some(deposit_nonce) = self.deposit_nonce {
                 deposit_nonce.encode(out)
             }
-            if let Some(deposit_receipt_version) = self.receipt.deposit_receipt_version {
+            if let Some(deposit_receipt_version) = self.deposit_receipt_version {
                 deposit_receipt_version.encode(out)
             }
         }
