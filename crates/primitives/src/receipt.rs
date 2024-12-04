@@ -7,7 +7,7 @@ use alloy_consensus::{
     RlpEncodableReceipt, TxReceipt, Typed2718,
 };
 use alloy_primitives::{Bloom, Log, B256};
-use alloy_rlp::{ Decodable, Encodable, Header, RlpDecodable, RlpEncodable};
+use alloy_rlp::{Decodable, Encodable, Header, RlpDecodable, RlpEncodable};
 use bytes::BufMut;
 use derive_more::{DerefMut, From, IntoIterator};
 use reth_primitives_traits::receipt::ReceiptExt;
@@ -81,10 +81,6 @@ impl Receipt {
         self.cumulative_gas_used.encode(out);
         bloom.encode(out);
         self.logs.encode(out);
-<<<<<<< HEAD
-
-=======
->>>>>>> 706f670d3 (fix: make lint)
     }
 
     /// Returns RLP header for this receipt encoding with the given [`Bloom`].
@@ -149,8 +145,8 @@ impl Receipt {
         rlp_head
     }
 
-     /// Encodes the receipt data.
-     fn encode_fields(&self, out: &mut dyn BufMut, bloom: &Bloom) {
+    /// Encodes the receipt data.
+    fn encode_fields(&self, out: &mut dyn BufMut, bloom: &Bloom) {
         self.receipt_rlp_header(bloom).encode(out);
         self.success.encode(out);
         self.cumulative_gas_used.encode(out);
@@ -167,8 +163,8 @@ impl Receipt {
         }
     }
 
-     /// Encode receipt with or without the header data.
-     pub fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool, bloom: &Bloom) {
+    /// Encode receipt with or without the header data.
+    pub fn encode(&self, out: &mut dyn BufMut, with_header: bool, bloom: &Bloom) {
         if matches!(self.tx_type, TxType::Legacy) {
             self.encode_fields(out, bloom);
             return
@@ -213,7 +209,7 @@ impl RlpEncodableReceipt for Receipt {
     }
 
     fn rlp_encode_with_bloom(&self, bloom: &Bloom, out: &mut dyn BufMut) {
-        self.encode_inner(out, true, bloom)
+        self.encode(out, true, bloom)
     }
 }
 
@@ -244,8 +240,8 @@ impl Typed2718 for Receipt {
 
 impl Eip2718EncodableReceipt for Receipt {
     fn eip2718_encoded_length_with_bloom(&self, bloom: &Bloom) -> usize {
-        let encoder = ReceiptWithBloom { receipt: self, logs_bloom: bloom.clone() };
-        let mut payload_len = encoder.length();
+        let receipt_with_bloom = ReceiptWithBloom::new(self, *bloom);
+        let mut payload_len = receipt_with_bloom.length();
         if !matches!(self.tx_type, TxType::Legacy) {
             payload_len += 1; // account for type prefix
         }
@@ -253,7 +249,7 @@ impl Eip2718EncodableReceipt for Receipt {
     }
 
     fn eip2718_encode_with_bloom(&self, bloom: &Bloom, out: &mut dyn BufMut) {
-        self.encode_inner(out, false, bloom)
+        self.encode(out, false, bloom)
     }
 }
 
@@ -423,7 +419,7 @@ impl<'a> ReceiptWithBloomRef<'a> {
 
     /// Encode receipt with or without the header data.
     pub fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
-        self.receipt.encode_inner(out, with_header, &self.bloom)
+        self.receipt.encode(out, with_header, &self.bloom)
     }
 }
 
@@ -442,7 +438,6 @@ impl<'a> From<&'a Receipt> for ReceiptWithBloomRef<'a> {
         ReceiptWithBloomRef { receipt, bloom }
     }
 }
-
 
 #[cfg(test)]
 mod tests {

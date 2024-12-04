@@ -23,7 +23,9 @@ pub use alloy_consensus::proofs::calculate_ommers_root;
 
 /// Calculates the receipt root for a header.
 pub fn calculate_receipt_root(receipts: &[ReceiptWithBloom<Receipt>]) -> B256 {
-    ordered_trie_root_with_encoder(receipts, |r, buf| r.receipt.encode_inner(buf, false, &r.logs_bloom))
+    ordered_trie_root_with_encoder(receipts, |r, buf| {
+        r.receipt.encode(buf, false, &r.logs_bloom)
+    })
 }
 
 /// Calculates the receipt root for a header.

@@ -49,9 +49,9 @@ mod implementations {
     use reth_trie_common::{HashBuilder, Nibbles};
 
     pub fn trie_hash_ordered_trie_root(receipts: &[ReceiptWithBloom<Receipt>]) -> B256 {
-        triehash::ordered_trie_root::<KeccakHasher, _>(receipts.iter().map(|receipt| {
+        triehash::ordered_trie_root::<KeccakHasher, _>(receipts.iter().map(|receipt_with_bloom| {
             let mut receipt_rlp = Vec::new();
-            receipt.receipt.encode_inner(&mut receipt_rlp, false, &receipt.logs_bloom);
+            receipt_with_bloom.receipt.encode(&mut receipt_rlp, false, &receipt_with_bloom.logs_bloom);
             receipt_rlp
         }))
     }
@@ -69,7 +69,11 @@ mod implementations {
             index.encode(&mut index_buffer);
 
             value_buffer.clear();
-            receipts[index].receipt.encode_inner(&mut value_buffer, false, &receipts[index].logs_bloom);
+            receipts[index].receipt.encode(
+                &mut value_buffer,
+                false,
+                &receipts[index].logs_bloom,
+            );
 
             hb.add_leaf(Nibbles::unpack(&index_buffer), &value_buffer);
         }
