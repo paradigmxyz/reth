@@ -13,7 +13,7 @@ pub struct ExExContext<Node: FullNodeComponents> {
     /// The current head of the blockchain at launch.
     pub head: Head,
     /// The config of the node
-    pub config: NodeConfig<<Node::Types as NodeTypes>::ChainSpec>,
+    pub config: NodeConfig<<Node::Types as NodeTypes>::ChainSpec, Node::TableSet>,
     /// The loaded node config
     pub reth_config: reth_config::Config,
     /// Channel used to send [`ExExEvent`]s to the rest of the node.
@@ -62,7 +62,7 @@ where
     Node::Types: NodeTypes<Primitives: NodePrimitives>,
 {
     /// Returns dynamic version of the context
-    pub fn into_dyn(self) -> ExExContextDyn<<Node::Types as NodeTypes>::Primitives> {
+    pub fn into_dyn(self) -> ExExContextDyn<<Node::Types as NodeTypes>::Primitives, Node::TableSet> {
         ExExContextDyn::from(self)
     }
 }

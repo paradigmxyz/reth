@@ -122,7 +122,7 @@ pub struct FullNode<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> {
     /// Task executor for the node.
     pub task_executor: TaskExecutor,
     /// The initial node config.
-    pub config: NodeConfig<<Node::Types as NodeTypes>::ChainSpec>,
+    pub config: NodeConfig<<Node::Types as NodeTypes>::ChainSpec, Node::TableSet>,
     /// The data dir of the node.
     pub data_dir: ChainPath<DataDirPath>,
     /// The handle to launched add-ons

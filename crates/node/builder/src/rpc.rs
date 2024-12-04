@@ -249,7 +249,7 @@ pub struct RpcContext<'a, Node: FullNodeComponents, EthApi: EthApiTypes> {
     pub(crate) node: Node,
 
     /// Gives access to the node configuration.
-    pub(crate) config: &'a NodeConfig<<Node::Types as NodeTypes>::ChainSpec>,
+    pub(crate) config: &'a NodeConfig<<Node::Types as NodeTypes>::ChainSpec, Node::TableSet>,
 
     /// A Helper type the holds instances of the configured modules.
     ///

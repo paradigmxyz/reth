@@ -5,6 +5,7 @@ use alloy_consensus::Header;
 use alloy_rpc_types_engine::JwtSecret;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_consensus::FullConsensus;
+use reth_db::TableSet;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network_api::FullNetwork;
 use reth_node_core::node_config::NodeConfig;
@@ -64,6 +65,9 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     /// Builds new blocks.
     type PayloadBuilder: PayloadBuilder + Clone;
 
+    /// The table set of the node.
+    type TableSet: TableSet;
+
     /// Returns the transaction pool of the node.
     fn pool(&self) -> &Self::Pool;
 
@@ -95,7 +99,7 @@ pub struct AddOnsContext<'a, N: FullNodeComponents> {
     /// Node with all configured components.
     pub node: N,
     /// Node configuration.
-    pub config: &'a NodeConfig<<N::Types as NodeTypes>::ChainSpec>,
+    pub config: &'a NodeConfig<<N::Types as NodeTypes>::ChainSpec, N::TableSet>,
     /// Handle to the beacon consensus engine.
     pub beacon_engine_handle:
         BeaconConsensusEngineHandle<<N::Types as NodeTypesWithEngine>::Engine>,
@@ -118,7 +122,11 @@ pub trait NodeAddOns<N: FullNodeComponents>: Send {
 impl<N: FullNodeComponents> NodeAddOns<N> for () {
     type Handle = ();
 
-    async fn launch_add_ons(self, _components: AddOnsContext<'_, N>) -> eyre::Result<Self::Handle> {
+    async fn launch_add_ons(self, _components: AddOnsContext<'_, N>) -> eyre::Result<Self::Handle> 
+    where
+        Self: Send,
+        N: Send,
+    {
         Ok(())
     }
 }

@@ -12,6 +12,7 @@ use crate::{
     rpc::{RethRpcAddOns, RethRpcServerHandles, RpcContext},
     AddOns, FullNode,
 };
+use reth_db::TableSet;
 use reth_exex::ExExContext;
 use reth_node_api::{
     FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes, NodeTypesWithDB, PayloadBuilder,
@@ -21,24 +22,24 @@ use reth_tasks::TaskExecutor;
 use std::{fmt, future::Future};
 
 /// A node builder that also has the configured types.
-pub struct NodeBuilderWithTypes<T: FullNodeTypes> {
+pub struct NodeBuilderWithTypes<T: FullNodeTypes, TS: TableSet> {
     /// All settings for how the node should be configured.
-    config: NodeConfig<<T::Types as NodeTypes>::ChainSpec>,
+    config: NodeConfig<<T::Types as NodeTypes>::ChainSpec, TS>,
     /// The configured database for the node.
     adapter: NodeTypesAdapter<T>,
 }
 
-impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
+impl<T: FullNodeTypes, TS: TableSet> NodeBuilderWithTypes<T, TS> {
     /// Creates a new instance of the node builder with the given configuration and types.
     pub const fn new(
-        config: NodeConfig<<T::Types as NodeTypes>::ChainSpec>,
+        config: NodeConfig<<T::Types as NodeTypes>::ChainSpec, TS>,
         database: <T::Types as NodeTypesWithDB>::DB,
     ) -> Self {
         Self { config, adapter: NodeTypesAdapter::new(database) }
     }
 
     /// Advances the state of the node builder to the next state where all components are configured
-    pub fn with_components<CB>(self, components_builder: CB) -> NodeBuilderWithComponents<T, CB, ()>
+    pub fn with_components<CB>(self, components_builder: CB) -> NodeBuilderWithComponents<T, CB, (), TS>
     where
         CB: NodeComponentsBuilder<T>,
     {
@@ -149,9 +150,10 @@ pub struct NodeBuilderWithComponents<
     T: FullNodeTypes,
     CB: NodeComponentsBuilder<T>,
     AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
+    TS: TableSet,
 > {
     /// All settings for how the node should be configured.
-    pub config: NodeConfig<<T::Types as NodeTypes>::ChainSpec>,
+    pub config: NodeConfig<<T::Types as NodeTypes>::ChainSpec, TS>,
     /// Adapter for the underlying node types and database
     pub adapter: NodeTypesAdapter<T>,
     /// container for type specific components

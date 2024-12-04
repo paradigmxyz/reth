@@ -987,9 +987,9 @@ impl<L, R> Attached<L, R> {
 /// Helper container type to bundle the initial [`NodeConfig`] and the loaded settings from the
 /// reth.toml config
 #[derive(Debug, Clone)]
-pub struct WithConfigs<ChainSpec> {
+pub struct WithConfigs<ChainSpec, TS: TableSet> {
     /// The configured, usually derived from the CLI.
-    pub config: NodeConfig<ChainSpec>,
+    pub config: NodeConfig<ChainSpec, TS>,
     /// The loaded reth.toml config.
     pub toml_config: reth_config::Config,
 }

@@ -14,6 +14,7 @@ use alloy_primitives::{BlockNumber, B256};
 use eyre::eyre;
 use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
 use reth_config::config::PruneConfig;
+use reth_db::TableSet;
 use reth_ethereum_forks::Head;
 use reth_network_p2p::headers::client::HeadersClient;
 use reth_primitives_traits::SealedHeader;
@@ -77,7 +78,7 @@ use tracing::*;
 /// }
 /// ```
 #[derive(Debug)]
-pub struct NodeConfig<ChainSpec> {
+pub struct NodeConfig<ChainSpec, TS: TableSet> {
     /// All data directory related arguments
     pub datadir: DatadirArgs,
 
@@ -133,9 +134,12 @@ pub struct NodeConfig<ChainSpec> {
 
     /// All pruning related arguments
     pub pruning: PruningArgs,
+
+    /// The table set to use for the database.
+    pub table_set: TS::TableIter,
 }
 
-impl NodeConfig<ChainSpec> {
+impl<TS: TableSet> NodeConfig<ChainSpec, TS> {
     /// Creates a testing [`NodeConfig`], causing the database to be launched ephemerally.
     pub fn test() -> Self {
         Self::default()
@@ -144,9 +148,9 @@ impl NodeConfig<ChainSpec> {
     }
 }
 
-impl<ChainSpec> NodeConfig<ChainSpec> {
+impl<ChainSpec, TS: TableSet> NodeConfig<ChainSpec, TS> {
     /// Creates a new config with given chain spec, setting all fields to default values.
-    pub fn new(chain: Arc<ChainSpec>) -> Self {
+    pub fn new(chain: Arc<ChainSpec>, tables: TS::TableIter) -> Self {
         Self {
             config: None,
             chain,
@@ -161,6 +165,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             dev: DevArgs::default(),
             pruning: PruningArgs::default(),
             datadir: DatadirArgs::default(),
+            table_set: tables,
         }
     }
 
@@ -258,6 +263,12 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     /// Set the pruning args for the node
     pub fn with_pruning(mut self, pruning: PruningArgs) -> Self {
         self.pruning = pruning;
+        self
+    }
+
+    /// Set the table set for the node
+    pub fn with_table_set(mut self, tables: TS::TableIter) -> Self {
+        self.table_set = tables;
         self
     }
 
@@ -430,7 +441,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     }
 
     /// Modifies the [`ChainSpec`] generic of the config using the provided closure.
-    pub fn map_chainspec<F, C>(self, f: F) -> NodeConfig<C>
+    pub fn map_chainspec<F, C>(self, f: F) -> NodeConfig<C, TS>
     where
         F: FnOnce(Arc<ChainSpec>) -> C,
     {
@@ -449,17 +460,18 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             db: self.db,
             dev: self.dev,
             pruning: self.pruning,
+            table_set: self.table_set,
         }
     }
 }
 
-impl Default for NodeConfig<ChainSpec> {
+impl<TS: TableSet> Default for NodeConfig<ChainSpec, TS> {
     fn default() -> Self {
-        Self::new(MAINNET.clone())
+        Self::new(MAINNET.clone(), TS::tables())
     }
 }
 
-impl<ChainSpec> Clone for NodeConfig<ChainSpec> {
+impl<ChainSpec, TS: TableSet> Clone for NodeConfig<ChainSpec, TS> {
     fn clone(&self) -> Self {
         Self {
             chain: self.chain.clone(),
@@ -475,6 +487,7 @@ impl<ChainSpec> Clone for NodeConfig<ChainSpec> {
             dev: self.dev,
             pruning: self.pruning.clone(),
             datadir: self.datadir.clone(),
+            table_set: TS::tables(),
         }
     }
 }

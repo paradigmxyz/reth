@@ -13,6 +13,7 @@ use futures::Future;
 use reth_blockchain_tree::externals::NodeTypesForTree;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli_util::get_secret_key;
+use reth_db::TableSet;
 use reth_db_api::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
@@ -152,16 +153,16 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<
 /// configured by the builder itself during launch. This might change in the future.
 ///
 /// [builder]: https://doc.rust-lang.org/1.0.0/style/ownership/builders.html
-pub struct NodeBuilder<DB, ChainSpec> {
+pub struct NodeBuilder<DB, ChainSpec, TS: TableSet> {
     /// All settings for how the node should be configured.
-    config: NodeConfig<ChainSpec>,
+    config: NodeConfig<ChainSpec, TS>,
     /// The configured database for the node.
     database: DB,
 }
 
-impl<ChainSpec> NodeBuilder<(), ChainSpec> {
+impl<ChainSpec, TS: TableSet> NodeBuilder<(), ChainSpec, TS> {
     /// Create a new [`NodeBuilder`].
-    pub const fn new(config: NodeConfig<ChainSpec>) -> Self {
+    pub const fn new(config: NodeConfig<ChainSpec, TS>) -> Self {
         Self { config, database: () }
     }
 
@@ -186,21 +187,21 @@ impl<ChainSpec> NodeBuilder<(), ChainSpec> {
     }
 }
 
-impl<DB, ChainSpec> NodeBuilder<DB, ChainSpec> {
+impl<DB, ChainSpec, TS: TableSet> NodeBuilder<DB, ChainSpec, TS> {
     /// Returns a reference to the node builder's config.
-    pub const fn config(&self) -> &NodeConfig<ChainSpec> {
+    pub const fn config(&self) -> &NodeConfig<ChainSpec, TS> {
         &self.config
     }
 
     /// Returns a mutable reference to the node builder's config.
-    pub fn config_mut(&mut self) -> &mut NodeConfig<ChainSpec> {
+    pub fn config_mut(&mut self) -> &mut NodeConfig<ChainSpec, TS> {
         &mut self.config
     }
 }
 
-impl<DB, ChainSpec: EthChainSpec> NodeBuilder<DB, ChainSpec> {
+impl<DB, ChainSpec: EthChainSpec, TS: TableSet> NodeBuilder<DB, ChainSpec, TS> {
     /// Configures the underlying database that the node will use.
-    pub fn with_database<D>(self, database: D) -> NodeBuilder<D, ChainSpec> {
+    pub fn with_database<D>(self, database: D) -> NodeBuilder<D, ChainSpec, TS> {
         NodeBuilder { config: self.config, database }
     }
 
@@ -217,7 +218,7 @@ impl<DB, ChainSpec: EthChainSpec> NodeBuilder<DB, ChainSpec> {
         mut self,
         task_executor: TaskExecutor,
     ) -> WithLaunchContext<
-        NodeBuilder<Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>, ChainSpec>,
+        NodeBuilder<Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>, ChainSpec, TS>,
     > {
         let path = reth_node_core::dirs::MaybePlatformPath::<DataDirPath>::from(
             reth_db::test_utils::tempdir_path(),
@@ -236,13 +237,13 @@ impl<DB, ChainSpec: EthChainSpec> NodeBuilder<DB, ChainSpec> {
     }
 }
 
-impl<DB, ChainSpec> NodeBuilder<DB, ChainSpec>
+impl<DB, ChainSpec, TS: TableSet> NodeBuilder<DB, ChainSpec, TS>
 where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
     ChainSpec: EthChainSpec + EthereumHardforks,
 {
     /// Configures the types of the node.
-    pub fn with_types<T>(self) -> NodeBuilderWithTypes<RethFullAdapter<DB, T>>
+    pub fn with_types<T>(self) -> NodeBuilderWithTypes<RethFullAdapter<DB, T>, TS>
     where
         T: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesForTree,
     {
@@ -252,7 +253,7 @@ where
     /// Configures the types of the node and the provider type that will be used by the node.
     pub fn with_types_and_provider<T, P>(
         self,
-    ) -> NodeBuilderWithTypes<FullNodeTypesAdapter<NodeTypesWithDBAdapter<T, DB>, P>>
+    ) -> NodeBuilderWithTypes<FullNodeTypesAdapter<NodeTypesWithDBAdapter<T, DB>, P>, TS>
     where
         T: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesForProvider,
         P: FullProvider<NodeTypesWithDBAdapter<T, DB>>,
@@ -570,7 +571,7 @@ where
 }
 
 /// Captures the necessary context for building the components of the node.
-pub struct BuilderContext<Node: FullNodeTypes> {
+pub struct BuilderContext<Node: FullNodeTypes, TS: TableSet> {
     /// The current head of the blockchain at launch.
     pub(crate) head: Head,
     /// The configured provider to interact with the blockchain.
@@ -578,16 +579,16 @@ pub struct BuilderContext<Node: FullNodeTypes> {
     /// The executor of the node.
     pub(crate) executor: TaskExecutor,
     /// Config container
-    pub(crate) config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec>,
+    pub(crate) config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec, TS>,
 }
 
-impl<Node: FullNodeTypes> BuilderContext<Node> {
+impl<Node: FullNodeTypes, TS: TableSet> BuilderContext<Node, TS> {
     /// Create a new instance of [`BuilderContext`]
     pub const fn new(
         head: Head,
         provider: Node::Provider,
         executor: TaskExecutor,
-        config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec>,
+        config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec, TS>,
     ) -> Self {
         Self { head, provider, executor, config_container }
     }
@@ -603,7 +604,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     }
 
     /// Returns the config of the node.
-    pub const fn config(&self) -> &NodeConfig<<Node::Types as NodeTypes>::ChainSpec> {
+    pub const fn config(&self) -> &NodeConfig<<Node::Types as NodeTypes>::ChainSpec, TS> {
         &self.config_container.config
     }
 

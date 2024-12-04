@@ -3,9 +3,9 @@
 use crate::{
     lockfile::StorageLock,
     metrics::DatabaseEnvMetrics,
-    tables::{self, TableType, Tables},
+    tables::{self, Tables},
     utils::default_page_size,
-    DatabaseError,
+    DatabaseError, TableSet,
 };
 use eyre::Context;
 use metrics::{gauge, Label};
@@ -445,13 +445,13 @@ impl DatabaseEnv {
     }
 
     /// Creates all the defined tables, if necessary.
-    pub fn create_tables(&self) -> Result<(), DatabaseError> {
+    pub fn create_tables<T: TableSet>(&self) -> Result<(), DatabaseError> {
         let tx = self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?;
 
-        for table in Tables::ALL {
-            let flags = match table.table_type() {
-                TableType::Table => DatabaseFlags::default(),
-                TableType::DupSort => DatabaseFlags::DUP_SORT,
+        for table in T::tables() {
+            let flags = match table.is_dupsort() {
+                true => DatabaseFlags::DUP_SORT,
+                false => DatabaseFlags::default(),
             };
 
             tx.create_db(Some(table.name()), flags)
@@ -528,7 +528,7 @@ mod tests {
     fn create_test_db_with_path(kind: DatabaseEnvKind, path: &Path) -> DatabaseEnv {
         let env = DatabaseEnv::open(path, kind, DatabaseArguments::new(ClientVersion::default()))
             .expect(ERROR_DB_CREATION);
-        env.create_tables().expect(ERROR_TABLE_CREATION);
+        env.create_tables::<Tables>().expect(ERROR_TABLE_CREATION);
         env
     }
 

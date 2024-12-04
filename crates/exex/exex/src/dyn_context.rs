@@ -4,6 +4,7 @@
 use std::fmt::Debug;
 
 use reth_chainspec::{EthChainSpec, Head};
+use reth_db::{TableSet, Tables};
 use reth_node_api::{FullNodeComponents, HeaderTy, NodePrimitives, NodeTypes};
 use reth_node_core::node_config::NodeConfig;
 use reth_primitives::EthPrimitives;
@@ -14,11 +15,11 @@ use crate::{ExExContext, ExExEvent, ExExNotificationsStream};
 
 // TODO(0xurb) - add `node` after abstractions
 /// Captures the context that an `ExEx` has access to.
-pub struct ExExContextDyn<N: NodePrimitives = EthPrimitives> {
+pub struct ExExContextDyn<N: NodePrimitives = EthPrimitives, TS: TableSet = Tables> {
     /// The current head of the blockchain at launch.
     pub head: Head,
     /// The config of the node
-    pub config: NodeConfig<Box<dyn EthChainSpec<Header = N::BlockHeader> + 'static>>,
+    pub config: NodeConfig<Box<dyn EthChainSpec<Header = N::BlockHeader> + 'static>, TS>,
     /// The loaded node config
     pub reth_config: reth_config::Config,
     /// Channel used to send [`ExExEvent`]s to the rest of the node.
@@ -50,11 +51,12 @@ impl<N: NodePrimitives> Debug for ExExContextDyn<N> {
     }
 }
 
-impl<Node> From<ExExContext<Node>> for ExExContextDyn<<Node::Types as NodeTypes>::Primitives>
+impl<Node, TS> From<ExExContext<Node>> for ExExContextDyn<<Node::Types as NodeTypes>::Primitives, TS>
 where
-    Node: FullNodeComponents<Types: NodeTypes<Primitives: NodePrimitives>>,
+    Node: FullNodeComponents<Types: NodeTypes<Primitives: NodePrimitives>, TableSet = TS>,
     Node::Provider: Debug + BlockReader,
     Node::Executor: Debug,
+    TS: TableSet,
 {
     fn from(ctx: ExExContext<Node>) -> Self {
         let config = ctx.config.map_chainspec(|chainspec| {

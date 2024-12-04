@@ -177,6 +177,7 @@ impl<
             db,
             dev,
             pruning,
+            table_set,
         };
 
         let data_dir = node_config.datadir();

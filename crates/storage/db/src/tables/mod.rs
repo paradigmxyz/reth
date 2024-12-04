@@ -29,7 +29,7 @@ use reth_db_api::{
         AccountBeforeTx, ClientVersion, CompactU256, IntegerList, ShardedKey,
         StoredBlockBodyIndices, StoredBlockWithdrawals,
     },
-    table::{Decode, DupSort, Encode, Table},
+    table::{Decode, DupSort, Encode, Table, TableMetadata},
 };
 use reth_primitives::{Receipt, StorageEntry, TransactionSignedNoHash};
 use reth_primitives_traits::{Account, Bytecode};
@@ -100,11 +100,12 @@ pub trait TableViewer<R> {
 
 /// General trait for defining the set of tables
 /// Used to initialize database
-pub trait TableSet {
-    /// Returns all the table names in the database.
-    fn table_names(&self) -> Vec<&'static str>;
-    /// Returns `true` if the table at the given index is a `DUPSORT` table.
-    fn is_dupsort(&self, idx: usize) -> bool;
+pub trait TableSet: fmt::Debug {
+    /// The iterator type for the tables.
+    type TableIter: Iterator<Item = Box<dyn TableMetadata>> + Send + Sync + fmt::Debug;
+
+    /// Returns an iterator over the tables.
+    fn tables() -> Self::TableIter;
 }
 
 /// Defines all the tables in the database.
@@ -252,15 +253,26 @@ macro_rules! tables {
             }
         }
 
-        impl TableSet for Tables {
-            fn table_names(&self) -> Vec<&'static str> {
-                //vec![$(table_names::$name,)*]
-                Self::ALL.iter().map(|t| t.name()).collect()
+        impl TableMetadata for Tables {
+            fn name(&self) -> &'static str {
+                self.name()
             }
 
-            fn is_dupsort(&self, idx: usize) -> bool {
-                let table: Self = self.table_names()[idx].parse().expect("should be valid table name");
-                table.is_dupsort()
+            fn is_dupsort(&self) -> bool {
+                self.is_dupsort()
+            }
+        }
+
+        impl TableSet for Tables {
+            type TableIter = std::iter::Map<
+                std::iter::Copied<std::slice::Iter<'static, Tables>>,
+                fn(Tables) -> Box<dyn TableMetadata>,
+            >;
+
+            fn tables() -> Self::TableIter {
+                Self::ALL.iter().copied().map(|table| {
+                    Box::new(table) as Box<dyn TableMetadata>
+                })
             }
         }
 
@@ -527,6 +539,19 @@ tables! {
     table ChainState {
         type Key = ChainStateKey;
         type Value = BlockNumber;
+    }
+}
+
+/// Default table set for the database.
+#[derive(Debug, Clone)]
+pub struct DefaultTables {
+    /// The names of the tables in the set.
+    pub names: Vec<String>,
+}
+
+impl Default for DefaultTables {
+    fn default() -> Self {
+        Self { names: Tables::ALL.iter().map(|t| t.name().to_string()).collect() }
     }
 }
 
