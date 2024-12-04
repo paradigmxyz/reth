@@ -2,7 +2,41 @@
 
 This page tries to answer how to deal with the most popular issues.
 
+- [Troubleshooting](#troubleshooting)
+  - [Database](#database)
+    - [Docker](#docker)
+    - [Error code 13](#error-code-13)
+    - [Slow database inserts and updates](#slow-database-inserts-and-updates)
+      - [Compact the database](#compact-the-database)
+      - [Re-sync from scratch](#re-sync-from-scratch)
+    - [Database write error](#database-write-error)
+    - [Concurrent database access error (using containers/Docker)](#concurrent-database-access-error-using-containersdocker)
+  - [Hardware Performance Testing](#hardware-performance-testing)
+    - [Disk Speed Testing with IOzone](#disk-speed-testing-with-iozone)
+
+
 ## Database
+
+### Docker 
+
+Externally accessing a `datadir` inside a named docker volume will usually come with folder/file ownership/permissions issues.
+
+**It is not recommended** to use the path to the named volume as it will trigger an error code 13.
+
+Example: `db-access --path /var/lib/docker/volumes/named_volume/_data/eth/db`
+
+### Error code 13 
+
+`the environment opened in read-only code: 13`
+
+Externally acessing a database in a read-only folder is not supported, **UNLESS** there's no `mdbx.lck` present, and it's called with `exclusive` on calling `open_db_read_only`. Meaning that there's no node syncing concurrently.
+
+If the error persists, ensure that you have the right `xo`  permissions on the `datadir` **and its parent** folders. Eg. the following command should succeed:
+
+```
+stat /full/path/$DATADIR
+```
+
 
 ### Slow database inserts and updates
 
