@@ -2,10 +2,10 @@
 
 use crate::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    BlockSource, ChangeSetReader, HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider,
-    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader,
-    StateProofProvider, StateProvider, StateRootProvider, StorageRootProvider, TransactionVariant,
-    TransactionsProvider, WithdrawalsProvider,
+    BlockSource, ChangeSetReader, HashedPostStateProvider, HashedStorageProvider, HeaderProvider,
+    NodePrimitivesProvider, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
+    StageCheckpointReader, StateProofProvider, StateProvider, StateRootProvider,
+    StorageRootProvider, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
@@ -27,6 +27,7 @@ use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
 };
+use revm::db::BundleAccount;
 use std::{
     marker::PhantomData,
     ops::{RangeBounds, RangeInclusive},
@@ -459,6 +460,12 @@ impl<C: Send + Sync, N: NodePrimitives> StateProofProvider for NoopProvider<C, N
 impl<C: Send + Sync, N: NodePrimitives> HashedPostStateProvider for NoopProvider<C, N> {
     fn hashed_post_state(&self, _bundle_state: &revm::db::BundleState) -> HashedPostState {
         HashedPostState::default()
+    }
+}
+
+impl<C: Send + Sync, N: NodePrimitives> HashedStorageProvider for NoopProvider<C, N> {
+    fn hashed_storage(&self, _account: &BundleAccount) -> HashedStorage {
+        HashedStorage::default()
     }
 }
 

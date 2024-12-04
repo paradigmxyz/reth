@@ -3,7 +3,6 @@ use crate::{
     Nibbles,
 };
 use alloy_primitives::{
-    keccak256,
     map::{hash_map, HashMap, HashSet},
     Address, B256, U256,
 };
