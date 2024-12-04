@@ -29,7 +29,7 @@ use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives::{
     Account, Block, BlockWithSenders, EthPrimitives, NodePrimitives, Receipt, SealedBlock,
     SealedBlockFor, SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta,
-    TransactionSigned, TransactionSignedNoHash,
+    TransactionSigned,
 };
 use reth_primitives_traits::BlockBody as _;
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
@@ -850,9 +850,7 @@ mod tests {
     use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
     use reth_errors::ProviderError;
     use reth_execution_types::{Chain, ExecutionOutcome};
-    use reth_primitives::{
-        BlockExt, Receipt, SealedBlock, StaticFileSegment, TransactionSignedNoHash,
-    };
+    use reth_primitives::{BlockExt, Receipt, SealedBlock, StaticFileSegment};
     use reth_primitives_traits::{BlockBody as _, SignedTransaction};
     use reth_storage_api::{
         BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
