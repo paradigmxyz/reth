@@ -1,6 +1,5 @@
 use crate::{hashed_cursor::HashedCursor, trie_cursor::TrieCursor, walker::TrieWalker, Nibbles};
 use alloy_primitives::B256;
-use alloy_trie::TrieMask;
 use reth_storage_errors::db::DatabaseError;
 
 /// Represents a branch node in the trie.
@@ -12,19 +11,12 @@ pub struct TrieBranchNode {
     pub value: B256,
     /// Indicates whether children are in the trie.
     pub children_are_in_trie: bool,
-    /// The hash mask of the branch node.
-    pub hash_mask: TrieMask,
 }
 
 impl TrieBranchNode {
     /// Creates a new `TrieBranchNode`.
-    pub const fn new(
-        key: Nibbles,
-        value: B256,
-        children_are_in_trie: bool,
-        hash_mask: TrieMask,
-    ) -> Self {
-        Self { key, value, children_are_in_trie, hash_mask }
+    pub const fn new(key: Nibbles, value: B256, children_are_in_trie: bool) -> Self {
+        Self { key, value, children_are_in_trie }
     }
 }
 
@@ -105,7 +97,6 @@ where
                             key.clone(),
                             self.walker.hash().unwrap(),
                             self.walker.children_are_in_trie(),
-                            self.walker.hash_mask(),
                         ))))
                     }
                 }
