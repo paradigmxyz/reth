@@ -133,11 +133,11 @@ impl Receipt {
         rlp_head.payload_length += self.logs.length();
 
         #[cfg(feature = "optimism")]
-        if self.receipt.tx_type == TxType::Deposit {
-            if let Some(deposit_nonce) = self.receipt.deposit_nonce {
+        if self.tx_type == TxType::Deposit {
+            if let Some(deposit_nonce) = self.deposit_nonce {
                 rlp_head.payload_length += deposit_nonce.length();
             }
-            if let Some(deposit_receipt_version) = self.receipt.deposit_receipt_version {
+            if let Some(deposit_receipt_version) = self.deposit_receipt_version {
                 rlp_head.payload_length += deposit_receipt_version.length();
             }
         }
