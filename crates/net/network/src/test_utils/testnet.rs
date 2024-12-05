@@ -20,7 +20,7 @@ use reth_network_api::{
     NetworkEvent, NetworkEventListenerProvider, NetworkInfo, Peers,
 };
 use reth_network_peers::PeerId;
-use reth_primitives::TransactionSigned;
+use reth_primitives::{PooledTransactionsElement, TransactionSigned};
 use reth_provider::{test_utils::NoopProvider, ChainSpecProvider};
 use reth_storage_api::{BlockReader, BlockReaderIdExt, HeaderProvider, StateProviderFactory};
 use reth_tasks::TokioTaskExecutor;
@@ -206,8 +206,12 @@ where
         + Clone
         + Unpin
         + 'static,
-    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>
-        + Unpin
+    Pool: TransactionPool<
+            Transaction: PoolTransaction<
+                Consensus = TransactionSigned,
+                Pooled = PooledTransactionsElement,
+            >,
+        > + Unpin
         + 'static,
 {
     /// Spawns the testnet to a separate task
@@ -273,8 +277,12 @@ where
         > + HeaderProvider
         + Unpin
         + 'static,
-    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>
-        + Unpin
+    Pool: TransactionPool<
+            Transaction: PoolTransaction<
+                Consensus = TransactionSigned,
+                Pooled = PooledTransactionsElement,
+            >,
+        > + Unpin
         + 'static,
 {
     type Output = ();
@@ -476,8 +484,12 @@ where
         > + HeaderProvider
         + Unpin
         + 'static,
-    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>
-        + Unpin
+    Pool: TransactionPool<
+            Transaction: PoolTransaction<
+                Consensus = TransactionSigned,
+                Pooled = PooledTransactionsElement,
+            >,
+        > + Unpin
         + 'static,
 {
     type Output = ();

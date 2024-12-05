@@ -651,7 +651,10 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     pub fn start_network<Pool>(&self, builder: NetworkBuilder<(), ()>, pool: Pool) -> NetworkHandle
     where
         Pool: TransactionPool<
-                Transaction: PoolTransaction<Consensus = reth_primitives::TransactionSigned>,
+                Transaction: PoolTransaction<
+                    Consensus = reth_primitives::TransactionSigned,
+                    Pooled = reth_primitives::PooledTransactionsElement,
+                >,
             > + Unpin
             + 'static,
         Node::Provider: BlockReader<
@@ -677,7 +680,10 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     ) -> NetworkHandle
     where
         Pool: TransactionPool<
-                Transaction: PoolTransaction<Consensus = reth_primitives::TransactionSigned>,
+                Transaction: PoolTransaction<
+                    Consensus = reth_primitives::TransactionSigned,
+                    Pooled = reth_primitives::PooledTransactionsElement,
+                >,
             > + Unpin
             + 'static,
         Node::Provider: BlockReader<
