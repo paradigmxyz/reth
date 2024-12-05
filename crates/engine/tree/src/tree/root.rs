@@ -84,6 +84,8 @@ pub(crate) enum StateRootMessage {
         /// Time taken to calculate the root
         elapsed: Duration,
     },
+    /// Signals state update stream end.
+    FinishedStateUpdates,
 }
 
 /// Handle to track proof calculation ordering
@@ -149,6 +151,19 @@ impl ProofSequencer {
     /// Returns true if we still have pending proofs
     pub(crate) fn has_pending(&self) -> bool {
         !self.pending_proofs.is_empty()
+    }
+}
+
+/// A wrapper for the sender that signals completion when dropped
+#[allow(dead_code)]
+pub(crate) struct StateHookSender {
+    pub(crate) tx: Sender<StateRootMessage>,
+}
+
+impl Drop for StateHookSender {
+    fn drop(&mut self) {
+        // Send completion signal when the sender is dropped
+        let _ = self.tx.send(StateRootMessage::FinishedStateUpdates);
     }
 }
 
@@ -354,6 +369,7 @@ where
         let mut updates_received = 0;
         let mut proofs_processed = 0;
         let mut roots_calculated = 0;
+        let mut updates_finished = false;
 
         loop {
             match self.rx.recv() {
@@ -374,6 +390,9 @@ where
                             self.proof_sequencer.next_sequence(),
                             self.tx.clone(),
                         );
+                    }
+                    StateRootMessage::FinishedStateUpdates => {
+                        updates_finished = true;
                     }
                     StateRootMessage::ProofCalculated { proof, state_update, sequence_number } => {
                         proofs_processed += 1;
@@ -434,7 +453,7 @@ where
                                 std::mem::take(&mut current_state_update),
                                 std::mem::take(&mut current_multiproof),
                             );
-                        } else if all_proofs_received && no_pending {
+                        } else if all_proofs_received && no_pending && updates_finished {
                             debug!(
                                 target: "engine::root",
                                 total_updates = updates_received,
