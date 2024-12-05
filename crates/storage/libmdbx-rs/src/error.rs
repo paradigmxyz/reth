@@ -97,7 +97,7 @@ pub enum Error {
     #[error("invalid parameter specified")]
     DecodeError,
     /// The environment opened in read-only.
-    #[error("the environment opened in read-only")]
+    #[error("the environment opened in read-only, check <https://reth.rs/run/troubleshooting.html> for more")]
     Access,
     /// Database is too large for the current system.
     #[error("database is too large for the current system")]
