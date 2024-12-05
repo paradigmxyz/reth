@@ -26,10 +26,11 @@ use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner, TokioTaskExecutor,
 };
-use reth_tokio_util::{EventSender, EventStream};
-use tokio::sync::Mutex;
+use tokio::sync::{broadcast, Mutex};
 
 use crate::eth::EthTxBuilder;
+
+const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
 
 /// `Eth` API implementation.
 ///
@@ -273,7 +274,7 @@ pub struct EthApiInner<Provider: BlockReader, Pool, Network, EvmConfig> {
     blocking_task_guard: BlockingTaskGuard,
 
     /// Transaction broadcast channel
-    raw_tx_sender: EventSender<Bytes>,
+    raw_tx_sender: broadcast::Sender<Bytes>,
 }
 
 impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, EvmConfig>
@@ -308,7 +309,7 @@ where
                 .unwrap_or_default(),
         );
 
-        let raw_tx_sender = EventSender::default();
+        let (raw_tx_sender, _) = broadcast::channel(DEFAULT_BROADCAST_CAPACITY);
 
         Self {
             provider,
@@ -432,16 +433,18 @@ where
         &self.blocking_task_guard
     }
 
-    /// Returns [`EventStream`] of new raw transactions.
+    /// Returns [`broadcast::Receiver`] of new raw transactions.
     #[inline]
-    pub fn subscribe_to_raw_transactions(&self) -> EventStream<Bytes> {
-        self.raw_tx_sender.new_listener()
+    pub fn subscribe_to_raw_transactions(&self) -> broadcast::Receiver<Bytes> {
+        self.raw_tx_sender.subscribe()
     }
 
-    /// Broadcasts raw transaction to all subscribers.
+    /// Broadcasts raw transaction if there are active subscribers.
     #[inline]
     pub fn broadcast_raw_transaction(&self, raw_tx: Bytes) {
-        self.raw_tx_sender.notify(raw_tx)
+        if self.raw_tx_sender.receiver_count() > 0 {
+            let _ = self.raw_tx_sender.send(raw_tx);
+        }
     }
 }
 

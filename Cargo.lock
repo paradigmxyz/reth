@@ -8896,7 +8896,6 @@ dependencies = [
  "reth-rpc-types-compat",
  "reth-tasks",
  "reth-testing-utils",
- "reth-tokio-util",
  "reth-transaction-pool",
  "revm",
  "revm-inspectors",
