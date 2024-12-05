@@ -18,6 +18,7 @@ use reth_trie_sparse::{
 use revm_primitives::{keccak256, EvmState, B256};
 use std::{
     collections::BTreeMap,
+    ops::Deref,
     sync::{
         mpsc::{self, Receiver, Sender},
         Arc,
@@ -156,14 +157,20 @@ impl ProofSequencer {
 
 /// A wrapper for the sender that signals completion when dropped
 #[allow(dead_code)]
-pub(crate) struct StateHookSender {
-    pub(crate) tx: Sender<StateRootMessage>,
+pub(crate) struct StateHookSender(Sender<StateRootMessage>);
+
+impl Deref for StateHookSender {
+    type Target = Sender<StateRootMessage>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 impl Drop for StateHookSender {
     fn drop(&mut self) {
         // Send completion signal when the sender is dropped
-        let _ = self.tx.send(StateRootMessage::FinishedStateUpdates);
+        let _ = self.0.send(StateRootMessage::FinishedStateUpdates);
     }
 }
 
