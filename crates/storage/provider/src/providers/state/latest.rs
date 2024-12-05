@@ -1,6 +1,6 @@
 use crate::{
     providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
-    StateProvider, StateRootProvider,
+    HashedPostStateProvider, StateProvider, StateRootProvider,
 };
 use alloy_primitives::{
     map::{HashMap, HashSet},
@@ -22,7 +22,7 @@ use reth_trie::{
 };
 use reth_trie_db::{
     DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,
-    DatabaseTrieWitness,
+    DatabaseTrieWitness, StateCommitment,
 };
 
 /// State provider over latest state that takes tx reference.
@@ -157,6 +157,16 @@ impl<Provider: DBProvider + StateCommitmentProvider> StateProofProvider
     }
 }
 
+impl<Provider: DBProvider + StateCommitmentProvider> HashedPostStateProvider
+    for LatestStateProviderRef<'_, Provider>
+{
+    fn hashed_post_state(&self, bundle_state: &revm::db::BundleState) -> HashedPostState {
+        HashedPostState::from_bundle_state::<
+            <Provider::StateCommitment as StateCommitment>::KeyHasher,
+        >(bundle_state.state())
+    }
+}
+
 impl<Provider: DBProvider + BlockHashReader + StateCommitmentProvider> StateProvider
     for LatestStateProviderRef<'_, Provider>
 {
@@ -181,11 +191,17 @@ impl<Provider: DBProvider + BlockHashReader + StateCommitmentProvider> StateProv
     }
 }
 
+impl<Provider: StateCommitmentProvider> StateCommitmentProvider
+    for LatestStateProviderRef<'_, Provider>
+{
+    type StateCommitment = Provider::StateCommitment;
+}
+
 /// State provider for the latest state.
 #[derive(Debug)]
 pub struct LatestStateProvider<Provider>(Provider);
 
-impl<Provider: DBProvider> LatestStateProvider<Provider> {
+impl<Provider: DBProvider + StateCommitmentProvider> LatestStateProvider<Provider> {
     /// Create new state provider
     pub const fn new(db: Provider) -> Self {
         Self(db)
@@ -196,6 +212,10 @@ impl<Provider: DBProvider> LatestStateProvider<Provider> {
     const fn as_ref(&self) -> LatestStateProviderRef<'_, Provider> {
         LatestStateProviderRef::new(&self.0)
     }
+}
+
+impl<Provider: StateCommitmentProvider> StateCommitmentProvider for LatestStateProvider<Provider> {
+    type StateCommitment = Provider::StateCommitment;
 }
 
 // Delegates all provider impls to [LatestStateProviderRef]

@@ -11,7 +11,7 @@ use alloy_rlp::{encode_fixed_size, Decodable, EMPTY_STRING_CODE};
 use alloy_trie::{
     nodes::TrieNode,
     proof::{verify_proof, ProofNodes, ProofVerificationError},
-    EMPTY_ROOT_HASH,
+    TrieMask, EMPTY_ROOT_HASH,
 };
 use itertools::Itertools;
 use reth_primitives_traits::Account;
@@ -23,6 +23,8 @@ use reth_primitives_traits::Account;
 pub struct MultiProof {
     /// State trie multiproof for requested accounts.
     pub account_subtree: ProofNodes,
+    /// The hash masks of the branch nodes in the account proof.
+    pub branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
     /// Storage trie multiproofs.
     pub storages: HashMap<B256, StorageMultiProof>,
 }
@@ -108,11 +110,15 @@ impl MultiProof {
     pub fn extend(&mut self, other: Self) {
         self.account_subtree.extend_from(other.account_subtree);
 
+        self.branch_node_hash_masks.extend(other.branch_node_hash_masks);
+
         for (hashed_address, storage) in other.storages {
             match self.storages.entry(hashed_address) {
                 hash_map::Entry::Occupied(mut entry) => {
                     debug_assert_eq!(entry.get().root, storage.root);
-                    entry.get_mut().subtree.extend_from(storage.subtree);
+                    let entry = entry.get_mut();
+                    entry.subtree.extend_from(storage.subtree);
+                    entry.branch_node_hash_masks.extend(storage.branch_node_hash_masks);
                 }
                 hash_map::Entry::Vacant(entry) => {
                     entry.insert(storage);
@@ -129,6 +135,8 @@ pub struct StorageMultiProof {
     pub root: B256,
     /// Storage multiproof for requested slots.
     pub subtree: ProofNodes,
+    /// The hash masks of the branch nodes in the storage proof.
+    pub branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
 }
 
 impl StorageMultiProof {
@@ -140,6 +148,7 @@ impl StorageMultiProof {
                 Nibbles::default(),
                 Bytes::from([EMPTY_STRING_CODE]),
             )]),
+            branch_node_hash_masks: HashMap::default(),
         }
     }
 
@@ -380,14 +389,28 @@ mod tests {
             Nibbles::from_nibbles(vec![0]),
             alloy_rlp::encode_fixed_size(&U256::from(42)).to_vec().into(),
         );
-        proof1.storages.insert(addr, StorageMultiProof { root, subtree: subtree1 });
+        proof1.storages.insert(
+            addr,
+            StorageMultiProof {
+                root,
+                subtree: subtree1,
+                branch_node_hash_masks: HashMap::default(),
+            },
+        );
 
         let mut subtree2 = ProofNodes::default();
         subtree2.insert(
             Nibbles::from_nibbles(vec![1]),
             alloy_rlp::encode_fixed_size(&U256::from(43)).to_vec().into(),
         );
-        proof2.storages.insert(addr, StorageMultiProof { root, subtree: subtree2 });
+        proof2.storages.insert(
+            addr,
+            StorageMultiProof {
+                root,
+                subtree: subtree2,
+                branch_node_hash_masks: HashMap::default(),
+            },
+        );
 
         proof1.extend(proof2);
 

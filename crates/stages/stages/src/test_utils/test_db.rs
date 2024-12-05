@@ -267,7 +267,7 @@ impl TestStageDB {
                     if let Some(txs_writer) = &mut txs_writer {
                         txs_writer.append_transaction(next_tx_num, body_tx)?;
                     } else {
-                        tx.put::<tables::Transactions>(next_tx_num, body_tx.clone().into())?
+                        tx.put::<tables::Transactions>(next_tx_num, body_tx.clone())?
                     }
                     next_tx_num += 1;
                     Ok::<(), ProviderError>(())

@@ -6,9 +6,9 @@ crates_to_check=(
     reth-codecs-derive
     reth-ethereum-forks
     reth-primitives-traits
+    reth-optimism-forks
     # reth-evm
     # reth-primitives
-    # reth-optimism-forks
     # reth-optimism-chainspec
 )
 

@@ -269,6 +269,8 @@ pub enum RethRpcModule {
     Ots,
     /// `flashbots_` module
     Flashbots,
+    /// `miner_` module
+    Miner,
 }
 
 // === impl RethRpcModule ===

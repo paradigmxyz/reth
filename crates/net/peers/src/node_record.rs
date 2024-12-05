@@ -1,15 +1,18 @@
 //! Commonly used `NodeRecord` type for peers.
 
-use std::{
+use crate::PeerId;
+use alloc::{
+    format,
+    string::{String, ToString},
+};
+use alloy_rlp::{RlpDecodable, RlpEncodable};
+use core::{
     fmt,
     fmt::Write,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     num::ParseIntError,
     str::FromStr,
 };
-
-use crate::PeerId;
-use alloy_rlp::{RlpDecodable, RlpEncodable};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 
 #[cfg(feature = "secp256k1")]

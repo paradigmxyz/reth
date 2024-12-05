@@ -9,7 +9,10 @@ use alloy_network::Ethereum;
 use alloy_primitives::U256;
 use derive_more::Deref;
 use reth_primitives::NodePrimitives;
-use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider};
+use reth_provider::{
+    BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ProviderBlock,
+    ProviderReceipt,
+};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},
     node::RpcNodeCoreExt,
@@ -37,7 +40,7 @@ use crate::eth::EthTxBuilder;
 /// This way [`EthApi`] is not limited to [`jsonrpsee`] and can be used standalone or in other
 /// network handlers (for example ipc).
 #[derive(Deref)]
-pub struct EthApi<Provider, Pool, Network, EvmConfig> {
+pub struct EthApi<Provider: BlockReader, Pool, Network, EvmConfig> {
     /// All nested fields bundled together.
     #[deref]
     pub(super) inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
@@ -45,7 +48,10 @@ pub struct EthApi<Provider, Pool, Network, EvmConfig> {
     pub tx_resp_builder: EthTxBuilder,
 }
 
-impl<Provider, Pool, Network, EvmConfig> Clone for EthApi<Provider, Pool, Network, EvmConfig> {
+impl<Provider, Pool, Network, EvmConfig> Clone for EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Provider: BlockReader,
+{
     fn clone(&self) -> Self {
         Self { inner: self.inner.clone(), tx_resp_builder: EthTxBuilder }
     }
@@ -61,7 +67,7 @@ where
         provider: Provider,
         pool: Pool,
         network: Network,
-        eth_cache: EthStateCache,
+        eth_cache: EthStateCache<Provider::Block, Provider::Receipt>,
         gas_oracle: GasPriceOracle<Provider>,
         gas_cap: impl Into<GasCap>,
         max_simulate_blocks: u64,
@@ -106,8 +112,8 @@ where
         Tasks: TaskSpawner + Clone + 'static,
         Events: CanonStateSubscriptions<
             Primitives: NodePrimitives<
-                Block = reth_primitives::Block,
-                Receipt = reth_primitives::Receipt,
+                Block = ProviderBlock<Provider>,
+                Receipt = ProviderReceipt<Provider>,
             >,
         >,
     {
@@ -137,6 +143,7 @@ where
 impl<Provider, Pool, Network, EvmConfig> EthApiTypes for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Self: Send + Sync,
+    Provider: BlockReader,
 {
     type Error = EthApiError;
     type NetworkTypes = Ethereum;
@@ -149,7 +156,7 @@ where
 
 impl<Provider, Pool, Network, EvmConfig> RpcNodeCore for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Provider: Send + Sync + Clone + Unpin,
+    Provider: BlockReader + Send + Sync + Clone + Unpin,
     Pool: Send + Sync + Clone + Unpin,
     Network: Send + Sync + Clone,
     EvmConfig: Send + Sync + Clone + Unpin,
@@ -184,16 +191,21 @@ where
 impl<Provider, Pool, Network, EvmConfig> RpcNodeCoreExt
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: RpcNodeCore,
+    Provider: BlockReader + Send + Sync + Clone + Unpin,
+    Pool: Send + Sync + Clone + Unpin,
+    Network: Send + Sync + Clone,
+    EvmConfig: Send + Sync + Clone + Unpin,
 {
     #[inline]
-    fn cache(&self) -> &EthStateCache {
+    fn cache(&self) -> &EthStateCache<ProviderBlock<Provider>, ProviderReceipt<Provider>> {
         self.inner.cache()
     }
 }
 
 impl<Provider, Pool, Network, EvmConfig> std::fmt::Debug
     for EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Provider: BlockReader,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EthApi").finish_non_exhaustive()
@@ -204,6 +216,7 @@ impl<Provider, Pool, Network, EvmConfig> SpawnBlocking
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Self: Clone + Send + Sync + 'static,
+    Provider: BlockReader,
 {
     #[inline]
     fn io_task_spawner(&self) -> impl TaskSpawner {
@@ -223,7 +236,7 @@ where
 
 /// Container type `EthApi`
 #[allow(missing_debug_implementations)]
-pub struct EthApiInner<Provider, Pool, Network, EvmConfig> {
+pub struct EthApiInner<Provider: BlockReader, Pool, Network, EvmConfig> {
     /// The transaction pool.
     pool: Pool,
     /// The provider that can interact with the chain.
@@ -233,7 +246,7 @@ pub struct EthApiInner<Provider, Pool, Network, EvmConfig> {
     /// All configured Signers
     signers: parking_lot::RwLock<Vec<Box<dyn EthSigner>>>,
     /// The async cache frontend for eth related data
-    eth_cache: EthStateCache,
+    eth_cache: EthStateCache<Provider::Block, Provider::Receipt>,
     /// The async gas oracle frontend for gas price suggestions
     gas_oracle: GasPriceOracle<Provider>,
     /// Maximum gas limit for `eth_call` and call tracing RPC methods.
@@ -269,7 +282,7 @@ where
         provider: Provider,
         pool: Pool,
         network: Network,
-        eth_cache: EthStateCache,
+        eth_cache: EthStateCache<Provider::Block, Provider::Receipt>,
         gas_oracle: GasPriceOracle<Provider>,
         gas_cap: impl Into<GasCap>,
         max_simulate_blocks: u64,
@@ -312,7 +325,10 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, EvmConfig> {
+impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, EvmConfig>
+where
+    Provider: BlockReader,
+{
     /// Returns a handle to data on disk.
     #[inline]
     pub const fn provider(&self) -> &Provider {
@@ -321,7 +337,7 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
 
     /// Returns a handle to data in memory.
     #[inline]
-    pub const fn cache(&self) -> &EthStateCache {
+    pub const fn cache(&self) -> &EthStateCache<Provider::Block, Provider::Receipt> {
         &self.eth_cache
     }
 
@@ -455,8 +471,7 @@ mod tests {
     ) -> EthApi<P, TestPool, NoopNetwork, EthEvmConfig> {
         let evm_config = EthEvmConfig::new(provider.chain_spec());
         let cache = EthStateCache::spawn(provider.clone(), Default::default());
-        let fee_history_cache =
-            FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default());
+        let fee_history_cache = FeeHistoryCache::new(FeeHistoryCacheConfig::default());
 
         let gas_cap = provider.chain_spec().max_gas_limit();
         EthApi::new(

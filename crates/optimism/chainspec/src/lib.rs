@@ -21,7 +21,7 @@ use alloc::{boxed::Box, vec, vec::Vec};
 use alloy_chains::Chain;
 use alloy_consensus::Header;
 use alloy_genesis::Genesis;
-use alloy_primitives::{Bytes, B256, U256};
+use alloy_primitives::{B256, U256};
 pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
 use derive_more::{Constructor, Deref, Display, From, Into};
@@ -185,6 +185,28 @@ pub struct OpChainSpec {
 }
 
 impl OpChainSpec {
+    /// Extracts the Holcene 1599 parameters from the encoded extradata from the parent header.
+    ///
+    /// Caution: Caller must ensure that holocene is active in the parent header.
+    ///
+    /// See also [Base fee computation](https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#base-fee-computation)
+    pub fn decode_holocene_base_fee(
+        &self,
+        parent: &Header,
+        timestamp: u64,
+    ) -> Result<u64, DecodeError> {
+        let (denominator, elasticity) = decode_holocene_1559_params(&parent.extra_data)?;
+        let base_fee = if elasticity == 0 && denominator == 0 {
+            parent
+                .next_block_base_fee(self.base_fee_params_at_timestamp(timestamp))
+                .unwrap_or_default()
+        } else {
+            let base_fee_params = BaseFeeParams::new(denominator as u128, elasticity as u128);
+            parent.next_block_base_fee(base_fee_params).unwrap_or_default()
+        };
+        Ok(base_fee)
+    }
+
     /// Read from parent to determine the base fee for the next block
     ///
     /// See also [Base fee computation](https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#base-fee-computation)
@@ -204,16 +226,7 @@ impl OpChainSpec {
         // from the parent block's extra data.
         // Else, use the base fee params (default values) from chainspec
         if is_holocene_activated {
-            let (denominator, elasticity) = decode_holocene_1559_params(parent.extra_data.clone())?;
-            if elasticity == 0 && denominator == 0 {
-                return Ok(U256::from(
-                    parent
-                        .next_block_base_fee(self.base_fee_params_at_timestamp(timestamp))
-                        .unwrap_or_default(),
-                ));
-            }
-            let base_fee_params = BaseFeeParams::new(denominator as u128, elasticity as u128);
-            Ok(U256::from(parent.next_block_base_fee(base_fee_params).unwrap_or_default()))
+            Ok(U256::from(self.decode_holocene_base_fee(parent, timestamp)?))
         } else {
             Ok(U256::from(
                 parent
@@ -247,7 +260,7 @@ impl core::error::Error for DecodeError {
 
 /// Extracts the Holcene 1599 parameters from the encoded form:
 /// <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#eip1559params-encoding>
-pub fn decode_holocene_1559_params(extra_data: Bytes) -> Result<(u32, u32), DecodeError> {
+pub fn decode_holocene_1559_params(extra_data: &[u8]) -> Result<(u32, u32), DecodeError> {
     if extra_data.len() < 9 {
         return Err(DecodeError::InsufficientData);
     }
@@ -492,7 +505,7 @@ mod tests {
     use std::sync::Arc;
 
     use alloy_genesis::{ChainConfig, Genesis};
-    use alloy_primitives::b256;
+    use alloy_primitives::{b256, Bytes};
     use reth_chainspec::{test_fork_ids, BaseFeeParams, BaseFeeParamsKind};
     use reth_ethereum_forks::{EthereumHardfork, ForkCondition, ForkHash, ForkId, Head};
     use reth_optimism_forks::{OpHardfork, OpHardforks};

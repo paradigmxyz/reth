@@ -57,6 +57,9 @@ macro_rules! delegate_provider_impls {
                 fn multiproof(&self, input: reth_trie::TrieInput, targets: alloy_primitives::map::HashMap<alloy_primitives::B256, alloy_primitives::map::HashSet<alloy_primitives::B256>>) -> reth_storage_errors::provider::ProviderResult<reth_trie::MultiProof>;
                 fn witness(&self, input: reth_trie::TrieInput, target: reth_trie::HashedPostState) -> reth_storage_errors::provider::ProviderResult<alloy_primitives::map::HashMap<alloy_primitives::B256, alloy_primitives::Bytes>>;
             }
+            HashedPostStateProvider $(where [$($generics)*])? {
+                fn hashed_post_state(&self, bundle_state: &revm::db::BundleState) -> reth_trie::HashedPostState;
+            }
         );
     }
 }

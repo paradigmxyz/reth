@@ -298,14 +298,14 @@ impl NodeState {
     fn handle_pruner_event(&self, event: PrunerEvent) {
         match event {
             PrunerEvent::Started { tip_block_number } => {
-                info!(tip_block_number, "Pruner started");
+                debug!(tip_block_number, "Pruner started");
             }
             PrunerEvent::Finished { tip_block_number, elapsed, stats } => {
                 let stats = format!(
                     "[{}]",
                     stats.iter().map(|item| item.to_string()).collect::<Vec<_>>().join(", ")
                 );
-                info!(tip_block_number, ?elapsed, %stats, "Pruner finished");
+                debug!(tip_block_number, ?elapsed, pruned_segments = %stats, "Pruner finished");
             }
         }
     }
@@ -313,10 +313,10 @@ impl NodeState {
     fn handle_static_file_producer_event(&self, event: StaticFileProducerEvent) {
         match event {
             StaticFileProducerEvent::Started { targets } => {
-                info!(?targets, "Static File Producer started");
+                debug!(?targets, "Static File Producer started");
             }
             StaticFileProducerEvent::Finished { targets, elapsed } => {
-                info!(?targets, ?elapsed, "Static File Producer finished");
+                debug!(?targets, ?elapsed, "Static File Producer finished");
             }
         }
     }

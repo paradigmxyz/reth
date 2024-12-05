@@ -1,14 +1,14 @@
 //! Async caching support for eth RPC
 
 use super::{EthStateCacheConfig, MultiConsumerLruCache};
-use alloy_consensus::Header;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::B256;
 use futures::{future::Either, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::Chain;
-use reth_primitives::{Receipt, SealedBlockWithSenders, TransactionSigned};
+use reth_primitives::{NodePrimitives, SealedBlockWithSenders};
+use reth_primitives_traits::{Block, BlockBody};
 use reth_storage_api::{BlockReader, StateProviderFactory, TransactionVariant};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use schnellru::{ByLength, Limiter};
@@ -30,41 +30,49 @@ pub mod metrics;
 pub mod multi_consumer;
 
 /// The type that can send the response to a requested [`SealedBlockWithSenders`]
-type BlockTransactionsResponseSender =
-    oneshot::Sender<ProviderResult<Option<Vec<TransactionSigned>>>>;
+type BlockTransactionsResponseSender<T> = oneshot::Sender<ProviderResult<Option<Vec<T>>>>;
 
 /// The type that can send the response to a requested [`SealedBlockWithSenders`]
-type BlockWithSendersResponseSender =
-    oneshot::Sender<ProviderResult<Option<Arc<SealedBlockWithSenders>>>>;
+type BlockWithSendersResponseSender<B> =
+    oneshot::Sender<ProviderResult<Option<Arc<SealedBlockWithSenders<B>>>>>;
 
 /// The type that can send the response to the requested receipts of a block.
-type ReceiptsResponseSender = oneshot::Sender<ProviderResult<Option<Arc<Vec<Receipt>>>>>;
+type ReceiptsResponseSender<R> = oneshot::Sender<ProviderResult<Option<Arc<Vec<R>>>>>;
 
 /// The type that can send the response to a requested header
-type HeaderResponseSender = oneshot::Sender<ProviderResult<Header>>;
+type HeaderResponseSender<H> = oneshot::Sender<ProviderResult<H>>;
 
-type BlockLruCache<L> = MultiConsumerLruCache<
+type BlockLruCache<B, L> = MultiConsumerLruCache<
     B256,
-    Arc<SealedBlockWithSenders>,
+    Arc<SealedBlockWithSenders<B>>,
     L,
-    Either<BlockWithSendersResponseSender, BlockTransactionsResponseSender>,
+    Either<
+        BlockWithSendersResponseSender<B>,
+        BlockTransactionsResponseSender<<<B as Block>::Body as BlockBody>::Transaction>,
+    >,
 >;
 
-type ReceiptsLruCache<L> =
-    MultiConsumerLruCache<B256, Arc<Vec<Receipt>>, L, ReceiptsResponseSender>;
+type ReceiptsLruCache<R, L> =
+    MultiConsumerLruCache<B256, Arc<Vec<R>>, L, ReceiptsResponseSender<R>>;
 
-type HeaderLruCache<L> = MultiConsumerLruCache<B256, Header, L, HeaderResponseSender>;
+type HeaderLruCache<H, L> = MultiConsumerLruCache<B256, H, L, HeaderResponseSender<H>>;
 
 /// Provides async access to cached eth data
 ///
 /// This is the frontend for the async caching service which manages cached data on a different
 /// task.
-#[derive(Debug, Clone)]
-pub struct EthStateCache {
-    to_service: UnboundedSender<CacheAction>,
+#[derive(Debug)]
+pub struct EthStateCache<B: Block, R> {
+    to_service: UnboundedSender<CacheAction<B, R>>,
 }
 
-impl EthStateCache {
+impl<B: Block, R> Clone for EthStateCache<B, R> {
+    fn clone(&self) -> Self {
+        Self { to_service: self.to_service.clone() }
+    }
+}
+
+impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
     /// Creates and returns both [`EthStateCache`] frontend and the memory bound service.
     fn create<Provider, Tasks>(
         provider: Provider,
@@ -73,7 +81,10 @@ impl EthStateCache {
         max_receipts: u32,
         max_headers: u32,
         max_concurrent_db_operations: usize,
-    ) -> (Self, EthStateCacheService<Provider, Tasks>) {
+    ) -> (Self, EthStateCacheService<Provider, Tasks>)
+    where
+        Provider: BlockReader<Block = B, Receipt = R>,
+    {
         let (to_service, rx) = unbounded_channel();
         let service = EthStateCacheService {
             provider,
@@ -95,14 +106,8 @@ impl EthStateCache {
     /// See also [`Self::spawn_with`]
     pub fn spawn<Provider>(provider: Provider, config: EthStateCacheConfig) -> Self
     where
-        Provider: StateProviderFactory
-            + BlockReader<
-                Block = reth_primitives::Block,
-                Receipt = reth_primitives::Receipt,
-                Header = reth_primitives::Header,
-            > + Clone
-            + Unpin
-            + 'static,
+        Provider:
+            StateProviderFactory + BlockReader<Block = B, Receipt = R> + Clone + Unpin + 'static,
     {
         Self::spawn_with(provider, config, TokioTaskExecutor::default())
     }
@@ -117,14 +122,8 @@ impl EthStateCache {
         executor: Tasks,
     ) -> Self
     where
-        Provider: StateProviderFactory
-            + BlockReader<
-                Block = reth_primitives::Block,
-                Receipt = reth_primitives::Receipt,
-                Header = reth_primitives::Header,
-            > + Clone
-            + Unpin
-            + 'static,
+        Provider:
+            StateProviderFactory + BlockReader<Block = B, Receipt = R> + Clone + Unpin + 'static,
         Tasks: TaskSpawner + Clone + 'static,
     {
         let EthStateCacheConfig {
@@ -151,19 +150,16 @@ impl EthStateCache {
     pub async fn get_sealed_block_with_senders(
         &self,
         block_hash: B256,
-    ) -> ProviderResult<Option<Arc<SealedBlockWithSenders>>> {
+    ) -> ProviderResult<Option<Arc<SealedBlockWithSenders<B>>>> {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetBlockWithSenders { block_hash, response_tx });
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
     }
 
-    /// Requests the [Receipt] for the block hash
+    /// Requests the receipts for the block hash
     ///
     /// Returns `None` if the block was not found.
-    pub async fn get_receipts(
-        &self,
-        block_hash: B256,
-    ) -> ProviderResult<Option<Arc<Vec<Receipt>>>> {
+    pub async fn get_receipts(&self, block_hash: B256) -> ProviderResult<Option<Arc<Vec<R>>>> {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetReceipts { block_hash, response_tx });
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
@@ -173,7 +169,7 @@ impl EthStateCache {
     pub async fn get_block_and_receipts(
         &self,
         block_hash: B256,
-    ) -> ProviderResult<Option<(Arc<SealedBlockWithSenders>, Arc<Vec<Receipt>>)>> {
+    ) -> ProviderResult<Option<(Arc<SealedBlockWithSenders<B>>, Arc<Vec<R>>)>> {
         let block = self.get_sealed_block_with_senders(block_hash);
         let receipts = self.get_receipts(block_hash);
 
@@ -185,7 +181,7 @@ impl EthStateCache {
     /// Requests the header for the given hash.
     ///
     /// Returns an error if the header is not found.
-    pub async fn get_header(&self, block_hash: B256) -> ProviderResult<Header> {
+    pub async fn get_header(&self, block_hash: B256) -> ProviderResult<B::Header> {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetHeader { block_hash, response_tx });
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
@@ -216,25 +212,26 @@ pub(crate) struct EthStateCacheService<
     LimitReceipts = ByLength,
     LimitHeaders = ByLength,
 > where
-    LimitBlocks: Limiter<B256, Arc<SealedBlockWithSenders>>,
-    LimitReceipts: Limiter<B256, Arc<Vec<Receipt>>>,
-    LimitHeaders: Limiter<B256, Header>,
+    Provider: BlockReader,
+    LimitBlocks: Limiter<B256, Arc<SealedBlockWithSenders<Provider::Block>>>,
+    LimitReceipts: Limiter<B256, Arc<Vec<Provider::Receipt>>>,
+    LimitHeaders: Limiter<B256, Provider::Header>,
 {
     /// The type used to lookup data from disk
     provider: Provider,
     /// The LRU cache for full blocks grouped by their hash.
-    full_block_cache: BlockLruCache<LimitBlocks>,
+    full_block_cache: BlockLruCache<Provider::Block, LimitBlocks>,
     /// The LRU cache for full blocks grouped by their hash.
-    receipts_cache: ReceiptsLruCache<LimitReceipts>,
+    receipts_cache: ReceiptsLruCache<Provider::Receipt, LimitReceipts>,
     /// The LRU cache for headers.
     ///
     /// Headers are cached because they are required to populate the environment for execution
     /// (evm).
-    headers_cache: HeaderLruCache<LimitHeaders>,
+    headers_cache: HeaderLruCache<Provider::Header, LimitHeaders>,
     /// Sender half of the action channel.
-    action_tx: UnboundedSender<CacheAction>,
+    action_tx: UnboundedSender<CacheAction<Provider::Block, Provider::Receipt>>,
     /// Receiver half of the action channel.
-    action_rx: UnboundedReceiverStream<CacheAction>,
+    action_rx: UnboundedReceiverStream<CacheAction<Provider::Block, Provider::Receipt>>,
     /// The type that's used to spawn tasks that do the actual work
     action_task_spawner: Tasks,
     /// Rate limiter
@@ -249,7 +246,7 @@ where
     fn on_new_block(
         &mut self,
         block_hash: B256,
-        res: ProviderResult<Option<Arc<SealedBlockWithSenders>>>,
+        res: ProviderResult<Option<Arc<SealedBlockWithSenders<Provider::Block>>>>,
     ) {
         if let Some(queued) = self.full_block_cache.remove(&block_hash) {
             // send the response to queued senders
@@ -260,7 +257,7 @@ where
                     }
                     Either::Right(transaction_tx) => {
                         let _ = transaction_tx.send(res.clone().map(|maybe_block| {
-                            maybe_block.map(|block| block.block.body.transactions.clone())
+                            maybe_block.map(|block| block.block.body.transactions().to_vec())
                         }));
                     }
                 }
@@ -276,7 +273,7 @@ where
     fn on_new_receipts(
         &mut self,
         block_hash: B256,
-        res: ProviderResult<Option<Arc<Vec<Receipt>>>>,
+        res: ProviderResult<Option<Arc<Vec<Provider::Receipt>>>>,
     ) {
         if let Some(queued) = self.receipts_cache.remove(&block_hash) {
             // send the response to queued senders
@@ -294,7 +291,7 @@ where
     fn on_reorg_block(
         &mut self,
         block_hash: B256,
-        res: ProviderResult<Option<SealedBlockWithSenders>>,
+        res: ProviderResult<Option<SealedBlockWithSenders<Provider::Block>>>,
     ) {
         let res = res.map(|b| b.map(Arc::new));
         if let Some(queued) = self.full_block_cache.remove(&block_hash) {
@@ -306,7 +303,7 @@ where
                     }
                     Either::Right(transaction_tx) => {
                         let _ = transaction_tx.send(res.clone().map(|maybe_block| {
-                            maybe_block.map(|block| block.block.body.transactions.clone())
+                            maybe_block.map(|block| block.block.body.transactions().to_vec())
                         }));
                     }
                 }
@@ -317,7 +314,7 @@ where
     fn on_reorg_receipts(
         &mut self,
         block_hash: B256,
-        res: ProviderResult<Option<Arc<Vec<Receipt>>>>,
+        res: ProviderResult<Option<Arc<Vec<Provider::Receipt>>>>,
     ) {
         if let Some(queued) = self.receipts_cache.remove(&block_hash) {
             // send the response to queued senders
@@ -336,14 +333,7 @@ where
 
 impl<Provider, Tasks> Future for EthStateCacheService<Provider, Tasks>
 where
-    Provider: StateProviderFactory
-        + BlockReader<
-            Block = reth_primitives::Block,
-            Receipt = reth_primitives::Receipt,
-            Header = reth_primitives::Header,
-        > + Clone
-        + Unpin
-        + 'static,
+    Provider: StateProviderFactory + BlockReader + Clone + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
 {
     type Output = ();
@@ -504,52 +494,55 @@ where
 }
 
 /// All message variants sent through the channel
-enum CacheAction {
+enum CacheAction<B: Block, R> {
     GetBlockWithSenders {
         block_hash: B256,
-        response_tx: BlockWithSendersResponseSender,
+        response_tx: BlockWithSendersResponseSender<B>,
     },
     GetHeader {
         block_hash: B256,
-        response_tx: HeaderResponseSender,
+        response_tx: HeaderResponseSender<B::Header>,
     },
     GetReceipts {
         block_hash: B256,
-        response_tx: ReceiptsResponseSender,
+        response_tx: ReceiptsResponseSender<R>,
     },
     BlockWithSendersResult {
         block_hash: B256,
-        res: ProviderResult<Option<Arc<SealedBlockWithSenders>>>,
+        res: ProviderResult<Option<Arc<SealedBlockWithSenders<B>>>>,
     },
     ReceiptsResult {
         block_hash: B256,
-        res: ProviderResult<Option<Arc<Vec<Receipt>>>>,
+        res: ProviderResult<Option<Arc<Vec<R>>>>,
     },
     HeaderResult {
         block_hash: B256,
-        res: Box<ProviderResult<Header>>,
+        res: Box<ProviderResult<B::Header>>,
     },
     CacheNewCanonicalChain {
-        chain_change: ChainChange,
+        chain_change: ChainChange<B, R>,
     },
     RemoveReorgedChain {
-        chain_change: ChainChange,
+        chain_change: ChainChange<B, R>,
     },
 }
 
-struct BlockReceipts {
+struct BlockReceipts<R> {
     block_hash: B256,
-    receipts: Vec<Option<Receipt>>,
+    receipts: Vec<Option<R>>,
 }
 
 /// A change of the canonical chain
-struct ChainChange {
-    blocks: Vec<SealedBlockWithSenders>,
-    receipts: Vec<BlockReceipts>,
+struct ChainChange<B: Block, R> {
+    blocks: Vec<SealedBlockWithSenders<B>>,
+    receipts: Vec<BlockReceipts<R>>,
 }
 
-impl ChainChange {
-    fn new(chain: Arc<Chain>) -> Self {
+impl<B: Block, R: Clone> ChainChange<B, R> {
+    fn new<N>(chain: Arc<Chain<N>>) -> Self
+    where
+        N: NodePrimitives<Block = B, Receipt = R>,
+    {
         let (blocks, receipts): (Vec<_>, Vec<_>) = chain
             .blocks_and_receipts()
             .map(|(block, receipts)| {
@@ -566,9 +559,11 @@ impl ChainChange {
 /// immediately before they need to be fetched from disk.
 ///
 /// Reorged blocks are removed from the cache.
-pub async fn cache_new_blocks_task<St>(eth_state_cache: EthStateCache, mut events: St)
-where
-    St: Stream<Item = CanonStateNotification> + Unpin + 'static,
+pub async fn cache_new_blocks_task<St, N: NodePrimitives>(
+    eth_state_cache: EthStateCache<N::Block, N::Receipt>,
+    mut events: St,
+) where
+    St: Stream<Item = CanonStateNotification<N>> + Unpin + 'static,
 {
     while let Some(event) = events.next().await {
         if let Some(reverted) = event.reverted() {

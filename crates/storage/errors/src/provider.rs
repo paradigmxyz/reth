@@ -3,7 +3,8 @@ use alloc::{boxed::Box, string::String};
 use alloy_eips::{BlockHashOrNumber, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxNumber, B256};
 use derive_more::Display;
-use reth_primitives::{GotExpected, StaticFileSegment};
+use reth_primitives_traits::GotExpected;
+use reth_static_file_types::StaticFileSegment;
 
 /// Provider result type.
 pub type ProviderResult<Ok> = Result<Ok, ProviderError>;
@@ -165,7 +166,6 @@ impl core::error::Error for ProviderError {
     fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         match self {
             Self::Database(source) => core::error::Error::source(source),
-            Self::Rlp(source) => core::error::Error::source(source),
             Self::StorageLockError(source) => core::error::Error::source(source),
             Self::UnifiedStorageWriterError(source) => core::error::Error::source(source),
             _ => Option::None,

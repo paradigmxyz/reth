@@ -50,7 +50,8 @@ std = [
 	"once_cell/std",
 	"alloy-rlp/std",
 	"reth-ethereum-forks/std",
-	"derive_more/std"
+	"derive_more/std",
+	"reth-network-peers/std"
 ]
 arbitrary = [
 	"alloy-chains/arbitrary",

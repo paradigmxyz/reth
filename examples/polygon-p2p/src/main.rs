@@ -15,6 +15,7 @@ use reth_network::{
     config::NetworkMode, EthNetworkPrimitives, NetworkConfig, NetworkEvent,
     NetworkEventListenerProvider, NetworkManager,
 };
+use reth_network_api::events::SessionInfo;
 use reth_tracing::{
     tracing::info, tracing_subscriber::filter::LevelFilter, LayerInfo, LogFormat, RethTracer,
     Tracer,
@@ -71,7 +72,8 @@ async fn main() {
     while let Some(evt) = events.next().await {
         // For the sake of the example we only print the session established event
         // with the chain specific details
-        if let NetworkEvent::SessionEstablished { status, client_version, .. } = evt {
+        if let NetworkEvent::ActivePeerSession { info, .. } = evt {
+            let SessionInfo { status, client_version, .. } = info;
             let chain = status.chain;
             info!(?chain, ?client_version, "Session established with a new peer.");
         }
