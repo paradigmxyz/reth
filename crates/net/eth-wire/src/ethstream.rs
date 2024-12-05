@@ -257,13 +257,11 @@ where
 
     /// Sends a raw capability message directly over the stream
     pub fn start_send_raw(&mut self, msg: RawCapabilityMessage) -> Result<(), EthStreamError> {
-        let mut bytes = BytesMut::new();
-
+        let mut bytes = Vec::new();
         msg.id.encode(&mut bytes);
-
         bytes.extend_from_slice(&msg.payload);
 
-        self.inner.start_send_unpin(bytes.freeze())?;
+        self.inner.start_send_unpin(bytes.into())?;
         Ok(())
     }
 }
