@@ -576,7 +576,8 @@ impl<B: Block, R: Clone> ChainChange<B, R> {
 ///
 /// Updates [`EthStateCache`] in two scenario :
 /// 1. On reorgs: sets `EthStateCache::latest_chain_change` to None and removes reorged blocks
-/// 2. On new canonical blocks: updates `EthStateCache::latest_chain_change` and caches the new blocks
+/// 2. On new canonical blocks: updates `EthStateCache::latest_chain_change` and caches the new
+///    blocks
 ///
 /// Reorged blocks are removed from the cache.
 pub async fn cache_new_blocks_task<St, N: NodePrimitives>(
