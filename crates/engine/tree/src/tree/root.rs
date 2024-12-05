@@ -273,7 +273,12 @@ where
         }
 
         // Dispatch proof gathering for this state update
-        trace!(target: "engine::root", ?proof_targets, "Spawning proof task");
+        trace!(
+            target: "engine::root",
+            sequence = proof_sequence_number,
+            ?proof_targets,
+            "Spawning proof task"
+        );
         rayon::spawn(move || {
             let provider = match view.provider_ro() {
                 Ok(provider) => provider,
@@ -412,10 +417,9 @@ where
                             target: "engine::root",
                             sequence = sequence_number,
                             total_proofs = proofs_processed,
-                            "Processing calculated proof"
+                            ?proof,
+                            "Proof calculated"
                         );
-
-                        trace!(target: "engine::root", ?proof, "Proof calculated");
 
                         if let Some((combined_proof, combined_state_update)) =
                             self.on_proof(sequence_number, proof, state_update)
