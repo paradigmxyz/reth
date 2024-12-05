@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
-use alloy_rpc_types_eth::{Block, Header, Index};
+use alloy_rpc_types_eth::{Block, BlockNumberOrTag, Header, Index};
 use futures::Future;
 use reth_node_api::BlockBody;
 use reth_primitives::{SealedBlockFor, SealedBlockWithSenders};
@@ -99,21 +99,31 @@ pub trait EthBlocks: LoadBlock {
                     .map(|block| block.body.transactions().len()))
             }
 
-            let block_hash = match self
-                .provider()
-                .block_hash_for_id(block_id)
-                .map_err(Self::Error::from_eth_err)?
-            {
-                Some(block_hash) => block_hash,
-                None => return Ok(None),
-            };
+            match block_id {
+                BlockId::Number(BlockNumberOrTag::Latest) => Ok(self
+                    .cache()
+                    .latest_block_with_senders()
+                    .await
+                    .map_err(Self::Error::from_eth_err)?
+                    .map(|b| b.body.transactions.len())),
+                _ => {
+                    let block_hash = match self
+                        .provider()
+                        .block_hash_for_id(block_id)
+                        .map_err(Self::Error::from_eth_err)?
+                    {
+                        Some(block_hash) => block_hash,
+                        None => return Ok(None),
+                    };
 
-            Ok(self
-                .cache()
-                .get_sealed_block_with_senders(block_hash)
-                .await
-                .map_err(Self::Error::from_eth_err)?
-                .map(|b| b.body.transactions.len()))
+                    Ok(self
+                        .cache()
+                        .get_sealed_block_with_senders(block_hash)
+                        .await
+                        .map_err(Self::Error::from_eth_err)?
+                        .map(|b| b.body.transactions.len()))
+                }
+            }
         }
     }
 
@@ -239,19 +249,29 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
                 };
             }
 
-            let block_hash = match self
-                .provider()
-                .block_hash_for_id(block_id)
-                .map_err(Self::Error::from_eth_err)?
-            {
-                Some(block_hash) => block_hash,
-                None => return Ok(None),
-            };
+            let block = match block_id {
+                BlockId::Number(BlockNumberOrTag::Latest) => self
+                    .cache()
+                    .latest_block_with_senders()
+                    .await
+                    .map_err(Self::Error::from_eth_err)?,
+                _ => {
+                    let block_hash = match self
+                        .provider()
+                        .block_hash_for_id(block_id)
+                        .map_err(Self::Error::from_eth_err)?
+                    {
+                        Some(block_hash) => block_hash,
+                        None => return Ok(None),
+                    };
 
-            self.cache()
-                .get_sealed_block_with_senders(block_hash)
-                .await
-                .map_err(Self::Error::from_eth_err)
+                    self.cache()
+                        .get_sealed_block_with_senders(block_hash)
+                        .await
+                        .map_err(Self::Error::from_eth_err)?
+                }
+            };
+            Ok(block)
         }
     }
 }
