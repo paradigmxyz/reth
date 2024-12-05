@@ -472,6 +472,7 @@ alloy-transport-ws = { version = "0.7.2", default-features = false }
 # op
 op-alloy-rpc-types = "0.7.3"
 op-alloy-rpc-types-engine = "0.7.3"
+op-alloy-rpc-jsonrpsee = "0.7.3"
 op-alloy-network = "0.7.3"
 op-alloy-consensus = "0.7.3"
 
