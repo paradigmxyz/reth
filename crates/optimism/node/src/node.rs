@@ -206,7 +206,7 @@ where
 
 impl NodeTypes for OpNode {
     type Primitives = OpPrimitives;
-    type Primitives = EthNetworkPrimitives;
+    type NetworkPrimitives = EthNetworkPrimitives;
     type ChainSpec = OpChainSpec;
     type StateCommitment = MerklePatriciaTrie;
     type Storage = OpStorage;
