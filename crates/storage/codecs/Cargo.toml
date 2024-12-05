@@ -48,6 +48,7 @@ serde_json.workspace = true
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
+rstest.workspace = true
 
 [features]
 default = ["std", "alloy"]
