@@ -10,7 +10,7 @@ use alloy_rpc_types_mev::{
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
-use reth_primitives::TransactionSigned;
+use reth_primitives::{PooledTransactionsElement, TransactionSigned};
 use reth_provider::{ChainSpecProvider, HeaderProvider};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::MevSimApiServer;
@@ -171,7 +171,8 @@ where
                 match &body[idx] {
                     BundleItem::Tx { tx, can_revert } => {
                         let recovered_tx =
-                            recover_raw_transaction(tx.clone()).map_err(EthApiError::from)?;
+                            recover_raw_transaction::<PooledTransactionsElement>(tx.clone())
+                                .map_err(EthApiError::from)?;
                         let (tx, signer) = recovered_tx.to_components();
                         let tx = tx.into_transaction();
 

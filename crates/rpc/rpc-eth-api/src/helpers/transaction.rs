@@ -344,7 +344,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         async move {
             let recovered = recover_raw_transaction(tx)?;
             let pool_transaction =
-                <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered.into());
+                <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
 
             // submit the transaction to the pool with a `Local` origin
             let hash = self
