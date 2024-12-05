@@ -191,6 +191,8 @@ where
                         trie_updates.insert_storage_updates(hashed_address, updates);
                     }
 
+                    trace!(target: "trie::parallel_state_root", ?hashed_address, ?storage_root, "Calculated storage root");
+
                     account_rlp.clear();
                     let account = TrieAccount::from((account, storage_root));
                     account.encode(&mut account_rlp as &mut dyn BufMut);

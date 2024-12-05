@@ -286,19 +286,21 @@ where
     ) -> SparseStateTrieResult<()> {
         let nibbles = Nibbles::unpack(address);
         let storage_root = if let Some(storage_trie) = self.storages.get_mut(&address) {
-            trace!(target: "trie::sparse", ?address, "Calculating storage root to update account");
-            storage_trie.root().ok_or(SparseTrieError::Blind)?
+            let storage_root = storage_trie.root().ok_or(SparseTrieError::Blind)?;
+            trace!(target: "trie::sparse", ?address, ?storage_root, "Calculated storage root to update account");
+            storage_root
         } else if self.revealed.contains_key(&address) {
-            trace!(target: "trie::sparse", ?address, "Retrieving storage root from account leaf to update account");
             let state = self.state.as_revealed_mut().ok_or(SparseTrieError::Blind)?;
             // The account was revealed, either...
-            if let Some(value) = state.get_leaf_value(&nibbles) {
+            let storage_root = if let Some(value) = state.get_leaf_value(&nibbles) {
                 // ..it exists and we should take it's current storage root or...
                 TrieAccount::decode(&mut &value[..])?.storage_root
             } else {
                 // ...the account is newly created and the storage trie is empty.
                 EMPTY_ROOT_HASH
-            }
+            };
+            trace!(target: "trie::sparse", ?address, ?storage_root, "Retrieved storage root from account leaf to update account");
+            storage_root
         } else {
             return Err(SparseTrieError::Blind.into())
         };
