@@ -13,7 +13,9 @@ use alloy_rpc_types_trace::{
     tracerequest::TraceCallRequest,
 };
 use async_trait::async_trait;
+use reth_provider::HeaderProvider;
 use jsonrpsee::core::RpcResult;
+use reth_provider::BlockNumReader;
 use reth_chainspec::EthereumHardforks;
 use reth_consensus_common::calc::{
     base_block_reward, base_block_reward_pre_merge, block_reward, ommer_reward,
@@ -23,7 +25,7 @@ use reth_primitives_traits::{BlockBody, BlockHeader};
 use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::TraceApiServer;
-use reth_rpc_eth_api::{helpers::TraceExt, FromEthApiError};
+use reth_rpc_eth_api::{helpers::TraceExt, FromEthApiError, RpcNodeCore};
 use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
@@ -41,21 +43,16 @@ use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 /// `trace` API implementation.
 ///
 /// This type provides the functionality for handling `trace` related requests.
-pub struct TraceApi<Provider, Eth> {
-    inner: Arc<TraceApiInner<Provider, Eth>>,
+pub struct TraceApi<Eth> {
+    inner: Arc<TraceApiInner<Eth>>,
 }
 
 // === impl TraceApi ===
 
-impl<Provider, Eth> TraceApi<Provider, Eth> {
-    /// The provider that can interact with the chain.
-    pub fn provider(&self) -> &Provider {
-        &self.inner.provider
-    }
-
+impl<Eth> TraceApi<Eth> {
     /// Create a new instance of the [`TraceApi`]
-    pub fn new(provider: Provider, eth_api: Eth, blocking_task_guard: BlockingTaskGuard) -> Self {
-        let inner = Arc::new(TraceApiInner { provider, eth_api, blocking_task_guard });
+    pub fn new(eth_api: Eth, blocking_task_guard: BlockingTaskGuard) -> Self {
+        let inner = Arc::new(TraceApiInner { eth_api, blocking_task_guard });
         Self { inner }
     }
 
@@ -72,15 +69,17 @@ impl<Provider, Eth> TraceApi<Provider, Eth> {
     }
 }
 
+impl<Eth: RpcNodeCore> TraceApi<Eth> {
+    /// Access the underlying provider.
+    pub fn provider(&self) -> &Eth::Provider {
+        self.inner.eth_api.provider()
+    }
+}
+
 // === impl TraceApi ===
 
-impl<Provider, Eth> TraceApi<Provider, Eth>
+impl<Eth> TraceApi<Eth>
 where
-    Provider: BlockReader<Block = <Eth::Provider as BlockReader>::Block>
-        + StateProviderFactory
-        + EvmEnvProvider
-        + ChainSpecProvider<ChainSpec: EthereumHardforks>
-        + 'static,
     Eth: TraceExt + 'static,
 {
     /// Executes the given call and returns a number of possible traces for it.
@@ -576,13 +575,8 @@ where
 }
 
 #[async_trait]
-impl<Provider, Eth> TraceApiServer for TraceApi<Provider, Eth>
+impl<Eth> TraceApiServer for TraceApi<Eth>
 where
-    Provider: BlockReader<Block = <Eth::Provider as BlockReader>::Block>
-        + StateProviderFactory
-        + EvmEnvProvider
-        + ChainSpecProvider<ChainSpec: EthereumHardforks>
-        + 'static,
     Eth: TraceExt + 'static,
 {
     /// Executes the given call and returns a number of possible traces for it.
@@ -704,20 +698,18 @@ where
     }
 }
 
-impl<Provider, Eth> std::fmt::Debug for TraceApi<Provider, Eth> {
+impl<Eth> std::fmt::Debug for TraceApi<Eth> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TraceApi").finish_non_exhaustive()
     }
 }
-impl<Provider, Eth> Clone for TraceApi<Provider, Eth> {
+impl<Eth> Clone for TraceApi<Eth> {
     fn clone(&self) -> Self {
         Self { inner: Arc::clone(&self.inner) }
     }
 }
 
-struct TraceApiInner<Provider, Eth> {
-    /// The provider that can interact with the chain.
-    provider: Provider,
+struct TraceApiInner<Eth> {
     /// Access to commonly used code of the `eth` namespace
     eth_api: Eth,
     // restrict the number of concurrent calls to `trace_*`

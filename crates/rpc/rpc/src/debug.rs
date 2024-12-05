@@ -15,6 +15,8 @@ use alloy_rpc_types_trace::geth::{
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthereumHardforks;
+use reth_provider::ReceiptProviderIdExt;
+use reth_provider::BlockIdReader;
 use reth_evm::{
     execute::{BlockExecutorProvider, Executor},
     ConfigureEvmEnv,
@@ -47,22 +49,20 @@ use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 /// `debug` API implementation.
 ///
 /// This type provides the functionality for handling `debug` related requests.
-pub struct DebugApi<Provider, Eth, BlockExecutor> {
-    inner: Arc<DebugApiInner<Provider, Eth, BlockExecutor>>,
+pub struct DebugApi<Eth, BlockExecutor> {
+    inner: Arc<DebugApiInner<Eth, BlockExecutor>>,
 }
 
 // === impl DebugApi ===
 
-impl<Provider, Eth, BlockExecutor> DebugApi<Provider, Eth, BlockExecutor> {
+impl<Eth, BlockExecutor> DebugApi<Eth, BlockExecutor> {
     /// Create a new instance of the [`DebugApi`]
     pub fn new(
-        provider: Provider,
         eth: Eth,
         blocking_task_guard: BlockingTaskGuard,
         block_executor: BlockExecutor,
     ) -> Self {
-        let inner =
-            Arc::new(DebugApiInner { provider, eth_api: eth, blocking_task_guard, block_executor });
+        let inner = Arc::new(DebugApiInner { eth_api: eth, blocking_task_guard, block_executor });
         Self { inner }
     }
 
@@ -72,15 +72,17 @@ impl<Provider, Eth, BlockExecutor> DebugApi<Provider, Eth, BlockExecutor> {
     }
 }
 
+impl<Eth: RpcNodeCore, BlockExecutor> DebugApi<Eth, BlockExecutor> {
+    /// Access the underlying provider.
+    pub fn provider(&self) -> &Eth::Provider {
+        self.inner.eth_api.provider()
+    }
+}
+
 // === impl DebugApi ===
 
-impl<Provider, Eth, BlockExecutor> DebugApi<Provider, Eth, BlockExecutor>
+impl<Eth, BlockExecutor> DebugApi<Eth, BlockExecutor>
 where
-    Provider: BlockReaderIdExt
-        + HeaderProvider
-        + ChainSpecProvider<ChainSpec: EthereumHardforks>
-        + StateProviderFactory
-        + 'static,
     Eth: EthApiTypes + TraceExt + 'static,
     BlockExecutor:
         BlockExecutorProvider<Primitives: NodePrimitives<Block = ProviderBlock<Eth::Provider>>>,
@@ -165,8 +167,7 @@ where
 
         // Depending on EIP-2 we need to recover the transactions differently
         let senders = if self
-            .inner
-            .provider
+            .provider()
             .chain_spec()
             .is_homestead_active_at_block(block.header().number())
         {
@@ -209,8 +210,7 @@ where
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
         let block_hash = self
-            .inner
-            .provider
+            .provider()
             .block_hash_for_id(block_id)
             .map_err(Eth::Error::from_eth_err)?
             .ok_or(EthApiError::HeaderNotFound(block_id))?;
@@ -813,13 +813,8 @@ where
 }
 
 #[async_trait]
-impl<Provider, Eth, BlockExecutor> DebugApiServer for DebugApi<Provider, Eth, BlockExecutor>
+impl<Eth, BlockExecutor> DebugApiServer for DebugApi<Eth, BlockExecutor>
 where
-    Provider: BlockReaderIdExt<Block: Encodable, Receipt = reth_primitives::Receipt>
-        + HeaderProvider
-        + ChainSpecProvider<ChainSpec: EthereumHardforks>
-        + StateProviderFactory
-        + 'static,
     Eth: EthApiSpec + EthTransactions + TraceExt + 'static,
     BlockExecutor: BlockExecutorProvider<
         Primitives: NodePrimitives<Block = <<Eth as RpcNodeCore>::Provider as BlockReader>::Block>,
@@ -828,15 +823,16 @@ where
     /// Handler for `debug_getRawHeader`
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {
         let header = match block_id {
-            BlockId::Hash(hash) => self.inner.provider.header(&hash.into()).to_rpc_result()?,
+            BlockId::Hash(hash) => self.provider().header(&hash.into()).to_rpc_result()?,
             BlockId::Number(number_or_tag) => {
                 let number = self
-                    .inner
-                    .provider
+                    .provider()
                     .convert_block_number(number_or_tag)
                     .to_rpc_result()?
-                    .ok_or_else(|| internal_rpc_err("Pending block not supported".to_string()))?;
-                self.inner.provider.header_by_number(number).to_rpc_result()?
+                    .ok_or_else(|| {
+                    internal_rpc_err("Pending block not supported".to_string())
+                })?;
+                self.provider().header_by_number(number).to_rpc_result()?
             }
         };
 
@@ -851,8 +847,7 @@ where
     /// Handler for `debug_getRawBlock`
     async fn raw_block(&self, block_id: BlockId) -> RpcResult<Bytes> {
         let block = self
-            .inner
-            .provider
+            .provider()
             .block_by_id(block_id)
             .to_rpc_result()?
             .ok_or(EthApiError::HeaderNotFound(block_id))?;
@@ -874,8 +869,7 @@ where
     /// Returns the bytes of the transaction for the given hash.
     async fn raw_transactions(&self, block_id: BlockId) -> RpcResult<Vec<Bytes>> {
         let block = self
-            .inner
-            .provider
+            .provider()
             .block_with_senders_by_id(block_id, TransactionVariant::NoHash)
             .to_rpc_result()?
             .unwrap_or_default();
@@ -885,8 +879,7 @@ where
     /// Handler for `debug_getRawReceipts`
     async fn raw_receipts(&self, block_id: BlockId) -> RpcResult<Vec<Bytes>> {
         Ok(self
-            .inner
-            .provider
+            .provider()
             .receipts_by_block_id(block_id)
             .to_rpc_result()?
             .unwrap_or_default()
@@ -1201,21 +1194,19 @@ where
     }
 }
 
-impl<Provider, Eth, BlockExecutor> std::fmt::Debug for DebugApi<Provider, Eth, BlockExecutor> {
+impl<Eth, BlockExecutor> std::fmt::Debug for DebugApi<Eth, BlockExecutor> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DebugApi").finish_non_exhaustive()
     }
 }
 
-impl<Provider, Eth, BlockExecutor> Clone for DebugApi<Provider, Eth, BlockExecutor> {
+impl<Eth, BlockExecutor> Clone for DebugApi<Eth, BlockExecutor> {
     fn clone(&self) -> Self {
         Self { inner: Arc::clone(&self.inner) }
     }
 }
 
-struct DebugApiInner<Provider, Eth, BlockExecutor> {
-    /// The provider that can interact with the chain.
-    provider: Provider,
+struct DebugApiInner<Eth, BlockExecutor> {
     /// The implementation of `eth` API
     eth_api: Eth,
     // restrict the number of concurrent calls to blocking calls

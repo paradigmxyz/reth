@@ -1215,7 +1215,6 @@ where
     pub fn register_trace(&mut self) -> &mut Self
     where
         EthApi: TraceExt,
-        Provider: BlockReader<Block = <EthApi::Provider as BlockReader>::Block>,
     {
         let trace_api = self.trace_api();
         self.modules.insert(RethRpcModule::Trace, trace_api.into_rpc().into());
@@ -1276,12 +1275,11 @@ where
     /// # Panics
     ///
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
-    pub fn trace_api(&self) -> TraceApi<Provider, EthApi>
+    pub fn trace_api(&self) -> TraceApi<EthApi>
     where
         EthApi: TraceExt,
     {
         TraceApi::new(
-            self.provider.clone(),
             self.eth_api().clone(),
             self.blocking_pool_guard.clone(),
         )
@@ -1305,14 +1303,13 @@ where
     /// # Panics
     ///
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
-    pub fn debug_api(&self) -> DebugApi<Provider, EthApi, BlockExecutor>
+    pub fn debug_api(&self) -> DebugApi<EthApi, BlockExecutor>
     where
         EthApi: EthApiSpec + EthTransactions + TraceExt,
         BlockExecutor:
             BlockExecutorProvider<Primitives: NodePrimitives<Block = reth_primitives::Block>>,
     {
         DebugApi::new(
-            self.provider.clone(),
             self.eth_api().clone(),
             self.blocking_pool_guard.clone(),
             self.block_executor.clone(),
@@ -1468,7 +1465,6 @@ where
                                 .into()
                         }
                         RethRpcModule::Debug => DebugApi::new(
-                            self.provider.clone(),
                             eth_api.clone(),
                             self.blocking_pool_guard.clone(),
                             self.block_executor.clone(),
@@ -1496,7 +1492,6 @@ where
                             NetApi::new(self.network.clone(), eth_api.clone()).into_rpc().into()
                         }
                         RethRpcModule::Trace => TraceApi::new(
-                            self.provider.clone(),
                             eth_api.clone(),
                             self.blocking_pool_guard.clone(),
                         )
