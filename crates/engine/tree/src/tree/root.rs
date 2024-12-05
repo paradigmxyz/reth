@@ -242,7 +242,8 @@ where
 
             if account.is_touched() {
                 let destroyed = account.is_selfdestructed();
-                let info = if account.is_empty() { None } else { Some(account.info.into()) };
+                let info =
+                    if account.is_empty() || destroyed { None } else { Some(account.info.into()) };
                 hashed_state_update.accounts.insert(hashed_address, info);
 
                 let mut changed_storage_iter = account
