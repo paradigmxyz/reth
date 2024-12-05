@@ -2317,34 +2317,46 @@ where
                     );
                     let diff = compare_trie_updates(&task_trie_updates, &regular_trie_updates);
                     if diff.has_differences() {
-                        for address in diff.storage_tries_with_differences.keys() {
-                            let task = task_trie_updates.storage_tries.get(address);
-                            let regular = regular_trie_updates.storage_tries.get(address);
-                            for path in task
-                                .map_or_else(HashSet::new, |tries| {
-                                    tries.storage_nodes.keys().collect()
-                                })
-                                .union(&regular.map_or_else(HashSet::new, |tries| {
-                                    tries.storage_nodes.keys().collect()
-                                }))
-                            {
-                                let mut task_entry = task
-                                    .map(|tries| tries.storage_nodes.get(*path).cloned())
-                                    .clone();
-                                let regular_entry = regular
-                                    .map(|tries| tries.storage_nodes.get(*path).cloned())
-                                    .clone();
-                                // Ignore tree mask differences for now
-                                if let Some((Some(task_entry), Some(regular_entry))) =
-                                    task_entry.as_mut().zip(regular_entry.as_ref())
-                                {
-                                    task_entry.tree_mask = regular_entry.tree_mask;
-                                }
-                                if task_entry != regular_entry {
-                                    debug!(target: "engine::tree", ?address, ?path, ?task_entry, ?regular_entry, "Difference in storage trie updates");
-                                }
+                        for address in &diff.account_nodes_with_different_values {
+                            let mut task = task_trie_updates.account_nodes.get(address).cloned();
+                            let regular = regular_trie_updates.account_nodes.get(address).cloned();
+                            if let (Some(task), Some(regular)) = (task.as_mut(), regular.as_ref()) {
+                                task.tree_mask = regular.tree_mask;
+                            }
+                            if task != regular {
+                                debug!(target: "engine::tree", ?address, ?task, ?regular, "Difference in account trie updates");
                             }
                         }
+
+                        // for address in diff.storage_tries_with_differences.keys() {
+                        //     let task = task_trie_updates.storage_tries.get(address);
+                        //     let regular = regular_trie_updates.storage_tries.get(address);
+                        //     for path in task
+                        //         .map_or_else(HashSet::new, |tries| {
+                        //             tries.storage_nodes.keys().collect()
+                        //         })
+                        //         .union(&regular.map_or_else(HashSet::new, |tries| {
+                        //             tries.storage_nodes.keys().collect()
+                        //         }))
+                        //     {
+                        //         let mut task_entry = task
+                        //             .map(|tries| tries.storage_nodes.get(*path).cloned())
+                        //             .clone();
+                        //         let regular_entry = regular
+                        //             .map(|tries| tries.storage_nodes.get(*path).cloned())
+                        //             .clone();
+                        //         // Ignore tree mask differences for now
+                        //         if let Some((Some(task_entry), Some(regular_entry))) =
+                        //             task_entry.as_mut().zip(regular_entry.as_ref())
+                        //         {
+                        //             task_entry.tree_mask = regular_entry.tree_mask;
+                        //         }
+                        //         if task_entry != regular_entry {
+                        //             debug!(target: "engine::tree", ?address, ?path, ?task_entry,
+                        // ?regular_entry, "Difference in storage trie updates");
+                        //         }
+                        //     }
+                        // }
                         // info!(
                         //     target: "engine::tree",
                         //     block=?sealed_block.num_hash(),
