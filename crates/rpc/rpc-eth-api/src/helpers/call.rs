@@ -20,7 +20,9 @@ use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_node_api::BlockBody;
 use reth_primitives_traits::SignedTransaction;
-use reth_provider::{BlockIdReader, ChainSpecProvider, HeaderProvider, ProviderHeader};
+use reth_provider::{
+    BlockIdReader, BlockReader, ChainSpecProvider, HeaderProvider, ProviderHeader,
+};
 use reth_revm::{
     database::StateProviderDatabase,
     db::CacheDB,
@@ -70,7 +72,12 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock {
         block: Option<BlockId>,
     ) -> impl Future<Output = SimulatedBlocksResult<Self::NetworkTypes, Self::Error>> + Send
     where
-        Self: LoadBlock + FullEthApiTypes,
+        Self: LoadBlock<
+                Provider: BlockReader<
+                    Header = alloy_consensus::Header,
+                    Transaction = reth_primitives::TransactionSigned,
+                >,
+            > + FullEthApiTypes,
     {
         async move {
             if payload.block_state_calls.len() > self.max_simulate_blocks() as usize {

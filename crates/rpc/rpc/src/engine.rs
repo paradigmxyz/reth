@@ -9,7 +9,7 @@ use jsonrpsee::core::RpcResult as Result;
 use reth_rpc_api::{EngineEthApiServer, EthApiServer, EthFilterApiServer};
 /// Re-export for convenience
 pub use reth_rpc_engine_api::EngineApi;
-use reth_rpc_eth_api::{FullEthApiTypes, RpcBlock, RpcReceipt, RpcTransaction};
+use reth_rpc_eth_api::{FullEthApiTypes, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction};
 use tracing_futures::Instrument;
 
 macro_rules! engine_span {
@@ -41,6 +41,7 @@ where
             RpcTransaction<Eth::NetworkTypes>,
             RpcBlock<Eth::NetworkTypes>,
             RpcReceipt<Eth::NetworkTypes>,
+            RpcHeader<Eth::NetworkTypes>,
         > + FullEthApiTypes,
     EthFilter: EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>>,
 {

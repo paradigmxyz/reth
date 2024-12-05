@@ -1,4 +1,4 @@
-use alloy_consensus::Header;
+use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::BlockId;
 use alloy_primitives::{map::HashSet, Bytes, B256, U256};
 use alloy_rpc_types_eth::{
@@ -19,13 +19,15 @@ use reth_consensus_common::calc::{
     base_block_reward, base_block_reward_pre_merge, block_reward, ommer_reward,
 };
 use reth_evm::ConfigureEvmEnv;
-use reth_primitives::PooledTransactionsElement;
+use reth_primitives::{PooledTransactionsElement, RecoveredTx};
+use reth_primitives_traits::BlockBody;
 use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_eth_api::{helpers::TraceExt, FromEthApiError};
 use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction};
 use reth_tasks::pool::BlockingTaskGuard;
+use reth_transaction_pool::{PoolConsensusTx, PoolPooledTx};
 use revm::{
     db::{CacheDB, DatabaseCommit},
     primitives::EnvWithHandlerCfg,
@@ -116,8 +118,8 @@ where
         trace_types: HashSet<TraceType>,
         block_id: Option<BlockId>,
     ) -> Result<TraceResults, Eth::Error> {
-        let tx = recover_raw_transaction::<PooledTransactionsElement>(tx)?
-            .into_ecrecovered_transaction();
+        let tx: RecoveredTx<PoolConsensusTx<Eth::Pool>> =
+            recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(tx)?.into();
 
         let (cfg, block, at) = self.eth_api().evm_env_at(block_id.unwrap_or_default()).await?;
 
@@ -313,10 +315,12 @@ where
 
         // add reward traces for all blocks
         for block in &blocks {
-            if let Some(base_block_reward) = self.calculate_base_block_reward(&block.header)? {
+            if let Some(base_block_reward) =
+                self.calculate_base_block_reward(*&block.header.header())?
+            {
                 all_traces.extend(
                     self.extract_reward_traces(
-                        &block.header,
+                        &block.header.header(),
                         &block.body.ommers,
                         base_block_reward,
                     )
@@ -393,10 +397,12 @@ where
             maybe_traces.map(|traces| traces.into_iter().flatten().collect::<Vec<_>>());
 
         if let (Some(block), Some(traces)) = (maybe_block, maybe_traces.as_mut()) {
-            if let Some(base_block_reward) = self.calculate_base_block_reward(&block.header)? {
+            if let Some(base_block_reward) =
+                self.calculate_base_block_reward(&block.header.header())?
+            {
                 traces.extend(self.extract_reward_traces(
-                    &block.header,
-                    &block.body.ommers,
+                    &block.block.header(),
+                    &block.body.ommers(),
                     base_block_reward,
                 ));
             }
@@ -490,7 +496,7 @@ where
 
         Ok(Some(BlockOpcodeGas {
             block_hash: block.hash(),
-            block_number: block.header.number,
+            block_number: block.header.number(),
             transactions,
         }))
     }
@@ -500,25 +506,28 @@ where
     /// - if Paris hardfork is activated, no block rewards are given
     /// - if Paris hardfork is not activated, calculate block rewards with block number only
     /// - if Paris hardfork is unknown, calculate block rewards with block number and ttd
-    fn calculate_base_block_reward(&self, header: &Header) -> Result<Option<u128>, Eth::Error> {
+    fn calculate_base_block_reward<H: BlockHeader>(
+        &self,
+        header: &H,
+    ) -> Result<Option<u128>, Eth::Error> {
         let chain_spec = self.provider().chain_spec();
-        let is_paris_activated = chain_spec.is_paris_active_at_block(header.number);
+        let is_paris_activated = chain_spec.is_paris_active_at_block(header.number());
 
         Ok(match is_paris_activated {
             Some(true) => None,
-            Some(false) => Some(base_block_reward_pre_merge(&chain_spec, header.number)),
+            Some(false) => Some(base_block_reward_pre_merge(&chain_spec, header.number())),
             None => {
                 // if Paris hardfork is unknown, we need to fetch the total difficulty at the
                 // block's height and check if it is pre-merge to calculate the base block reward
                 if let Some(header_td) = self
                     .provider()
-                    .header_td_by_number(header.number)
+                    .header_td_by_number(header.number())
                     .map_err(Eth::Error::from_eth_err)?
                 {
                     base_block_reward(
                         chain_spec.as_ref(),
-                        header.number,
-                        header.difficulty,
+                        header.number(),
+                        header.difficulty(),
                         header_td,
                     )
                 } else {
@@ -531,10 +540,10 @@ where
     /// Extracts the reward traces for the given block:
     ///  - block reward
     ///  - uncle rewards
-    fn extract_reward_traces(
+    fn extract_reward_traces<H: BlockHeader>(
         &self,
-        header: &Header,
-        ommers: &[Header],
+        header: &H,
+        ommers: &[H],
         base_block_reward: u128,
     ) -> Vec<LocalizedTransactionTrace> {
         let mut traces = Vec::with_capacity(ommers.len() + 1);

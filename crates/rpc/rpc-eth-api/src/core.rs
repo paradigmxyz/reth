@@ -13,13 +13,13 @@ use alloy_rpc_types_eth::{
 };
 use alloy_serde::JsonStorageKey;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use reth_provider::{BlockReader, ProviderHeader};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use tracing::trace;
-use reth_provider::ProviderHeader;
 
 use crate::{
     helpers::{EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthApi},
-    RpcBlock, RpcReceipt, RpcTransaction, RpcHeader
+    RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
 };
 
 /// Helper trait, unifies functionality that must be supported to implement all RPC methods for
@@ -372,7 +372,12 @@ impl<T>
         RpcHeader<T::NetworkTypes>,
     > for T
 where
-    T: FullEthApi,
+    T: FullEthApi<
+        Provider: BlockReader<
+            Header = alloy_consensus::Header,
+            Transaction = reth_primitives::TransactionSigned,
+        >,
+    >,
     jsonrpsee_types::error::ErrorObject<'static>: From<T::Error>,
 {
     /// Handler for: `eth_protocolVersion`
@@ -611,13 +616,19 @@ where
     }
 
     /// Handler for: `eth_getHeaderByNumber`
-    async fn header_by_number(&self, block_number: BlockNumberOrTag) -> RpcResult<Option<Header<ProviderHeader<T::Provider>>>> {
+    async fn header_by_number(
+        &self,
+        block_number: BlockNumberOrTag,
+    ) -> RpcResult<Option<Header<ProviderHeader<T::Provider>>>> {
         trace!(target: "rpc::eth", ?block_number, "Serving eth_getHeaderByNumber");
         Ok(EthBlocks::rpc_block_header(self, block_number.into()).await?)
     }
 
     /// Handler for: `eth_getHeaderByHash`
-    async fn header_by_hash(&self, hash: B256) -> RpcResult<Option<Header<ProviderHeader<T::Provider>>>> {
+    async fn header_by_hash(
+        &self,
+        hash: B256,
+    ) -> RpcResult<Option<Header<ProviderHeader<T::Provider>>>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getHeaderByHash");
         Ok(EthBlocks::rpc_block_header(self, hash.into()).await?)
     }

@@ -34,6 +34,7 @@ reth-node-api.workspace = true
 reth-trie-common = { workspace = true, features = ["eip1186"] }
 
 # ethereum
+alloy-rlp.workspace = true
 alloy-serde.workspace = true
 alloy-eips.workspace = true
 alloy-dyn-abi = { workspace = true, features = ["eip712"] }

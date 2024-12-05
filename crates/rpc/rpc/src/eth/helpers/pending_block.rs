@@ -1,11 +1,12 @@
 //! Support for building a pending block with transactions from local view of mempool.
 
 use alloy_consensus::Header;
+use alloy_network::primitives::HeaderResponse;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_provider::{
-    BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderTx,
-    StateProviderFactory,
+    BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderBlock,
+    ProviderReceipt, ProviderTx, StateProviderFactory,
 };
 use reth_rpc_eth_api::{
     helpers::{LoadPendingBlock, SpawnBlocking},
@@ -19,8 +20,9 @@ use crate::EthApi;
 impl<Provider, Pool, Network, EvmConfig> LoadPendingBlock
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: SpawnBlocking
-        + RpcNodeCore<
+    Self: SpawnBlocking<
+            NetworkTypes: alloy_network::Network<HeaderResponse = alloy_rpc_types_eth::Header>,
+        > + RpcNodeCore<
             Provider: BlockReaderIdExt<
                 Transaction = reth_primitives::TransactionSigned,
                 Block = reth_primitives::Block,
@@ -34,10 +36,14 @@ where
             >,
             Evm: ConfigureEvm<Header = Header, Transaction = ProviderTx<Self::Provider>>,
         >,
-    Provider: BlockReader,
+    Provider: BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>,
 {
     #[inline]
-    fn pending_block(&self) -> &tokio::sync::Mutex<Option<PendingBlock>> {
+    fn pending_block(
+        &self,
+    ) -> &tokio::sync::Mutex<
+        Option<PendingBlock<ProviderBlock<Self::Provider>, ProviderReceipt<Self::Provider>>>,
+    > {
         self.inner.pending_block()
     }
 

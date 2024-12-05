@@ -4,7 +4,7 @@ pub mod body;
 pub mod header;
 
 use alloc::fmt;
-use alloy_rlp::Encodable;
+use alloy_rlp::{Decodable, Encodable};
 
 use crate::{
     BlockBody, BlockHeader, FullBlockBody, FullBlockHeader, InMemorySize, MaybeArbitrary,
@@ -41,6 +41,7 @@ pub trait Block:
     + MaybeSerde
     + MaybeArbitrary
     + Encodable
+    + Decodable
 {
     /// Header part of the block.
     type Header: BlockHeader;

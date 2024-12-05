@@ -35,14 +35,14 @@ pub struct DevSigner {
 #[allow(dead_code)]
 impl DevSigner {
     /// Generates a random dev signer which satisfies [`EthSigner`] trait
-    pub fn random() -> Box<dyn EthSigner> {
+    pub fn random<T: Decodable2718>() -> Box<dyn EthSigner<T>> {
         let mut signers = Self::random_signers(1);
         signers.pop().expect("expect to generate at least one signer")
     }
 
     /// Generates provided number of random dev signers
     /// which satisfy [`EthSigner`] trait
-    pub fn random_signers(num: u32) -> Vec<Box<dyn EthSigner + 'static>> {
+    pub fn random_signers<T: Decodable2718>(num: u32) -> Vec<Box<dyn EthSigner<T> + 'static>> {
         let mut signers = Vec::with_capacity(num as usize);
         for _ in 0..num {
             let sk = PrivateKeySigner::random_with(&mut rand::thread_rng());
@@ -51,7 +51,7 @@ impl DevSigner {
             let addresses = vec![address];
 
             let accounts = HashMap::from([(address, sk)]);
-            signers.push(Box::new(Self { addresses, accounts }) as Box<dyn EthSigner>);
+            signers.push(Box::new(Self { addresses, accounts }) as Box<dyn EthSigner<T>>);
         }
         signers
     }
@@ -67,7 +67,7 @@ impl DevSigner {
 }
 
 #[async_trait::async_trait]
-impl EthSigner for DevSigner {
+impl<T: Decodable2718> EthSigner<T> for DevSigner {
     fn accounts(&self) -> Vec<Address> {
         self.addresses.clone()
     }
@@ -83,11 +83,7 @@ impl EthSigner for DevSigner {
         self.sign_hash(hash, address)
     }
 
-    async fn sign_transaction(
-        &self,
-        request: TransactionRequest,
-        address: &Address,
-    ) -> Result<TransactionSigned> {
+    async fn sign_transaction(&self, request: TransactionRequest, address: &Address) -> Result<T> {
         // create local signer wallet from signing key
         let signer = self.accounts.get(address).ok_or(SignError::NoAccount)?.clone();
         let wallet = EthereumWallet::from(signer);
@@ -98,7 +94,7 @@ impl EthSigner for DevSigner {
 
         // decode transaction into signed transaction type
         let encoded = txn_envelope.encoded_2718();
-        let txn_signed = TransactionSigned::decode_2718(&mut encoded.as_ref())
+        let txn_signed = T::decode_2718(&mut encoded.as_ref())
             .map_err(|_| SignError::InvalidTransactionRequest)?;
 
         Ok(txn_signed)

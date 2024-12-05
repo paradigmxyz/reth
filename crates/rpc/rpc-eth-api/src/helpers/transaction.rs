@@ -61,7 +61,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     /// Returns a handle for signing data.
     ///
     /// Singer access in default (L1) trait method implementations.
-    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>>;
+    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>>>>>;
 
     /// Returns the transaction by hash.
     ///
@@ -415,7 +415,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         &self,
         from: &Address,
         txn: TransactionRequest,
-    ) -> impl Future<Output = Result<TransactionSigned, Self::Error>> + Send {
+    ) -> impl Future<Output = Result<ProviderTx<Self::Provider>, Self::Error>> + Send {
         async move {
             self.find_signer(from)?
                 .sign_transaction(txn, from)
@@ -471,7 +471,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     fn find_signer(
         &self,
         account: &Address,
-    ) -> Result<Box<(dyn EthSigner + 'static)>, Self::Error> {
+    ) -> Result<Box<(dyn EthSigner<ProviderTx<Self::Provider>> + 'static)>, Self::Error> {
         self.signers()
             .read()
             .iter()

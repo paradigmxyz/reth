@@ -2,7 +2,7 @@
 //! RPC methods.
 use super::{EthApiSpec, LoadPendingBlock, SpawnBlocking};
 use crate::{EthApiTypes, FromEthApiError, RpcNodeCore, RpcNodeCoreExt};
-use alloy_consensus::{constants::KECCAK_EMPTY, Header};
+use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader, Header};
 use alloy_eips::BlockId;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{Account, EIP1186AccountProofResponse};
@@ -11,7 +11,6 @@ use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
 use reth_evm::ConfigureEvmEnv;
-use alloy_consensus::BlockHeader;
 use reth_provider::{
     BlockIdReader, BlockNumReader, ChainSpecProvider, EvmEnvProvider as _, ProviderHeader,
     StateProvider, StateProviderBox, StateProviderFactory,

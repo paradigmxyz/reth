@@ -43,6 +43,9 @@ pub type PeerId = alloy_primitives::B512;
 /// Helper type alias to access [`PoolTransaction::Consensus`] for a given [`TransactionPool`].
 pub type PoolConsensusTx<P> = <<P as TransactionPool>::Transaction as PoolTransaction>::Consensus;
 
+/// Helper type alias to access [`PoolTransaction::Pooled`] for a given [`TransactionPool`].
+pub type PoolPooledTx<P> = <<P as TransactionPool>::Transaction as PoolTransaction>::Pooled;
+
 /// General purpose abstraction of a transaction-pool.
 ///
 /// This is intended to be used by API-consumers such as RPC that need inject new incoming,
@@ -967,7 +970,7 @@ pub trait PoolTransaction:
     type Consensus;
 
     /// Associated type representing the recovered pooled variant of the transaction.
-    type Pooled: SignedTransaction;
+    type Pooled: SignedTransaction + Into<Self::Consensus>;
 
     /// Define a method to convert from the `Consensus` type to `Self`
     fn try_from_consensus(

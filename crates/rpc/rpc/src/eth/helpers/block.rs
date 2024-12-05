@@ -1,7 +1,9 @@
 //! Contains RPC handler implementations specific to blocks.
 
+use alloy_consensus::BlockHeader;
 use alloy_rpc_types_eth::{BlockId, TransactionReceipt};
 use reth_primitives::TransactionMeta;
+use reth_primitives_traits::BlockBody;
 use reth_provider::{BlockReader, HeaderProvider};
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
@@ -16,7 +18,7 @@ where
     Self: LoadBlock<
         Error = EthApiError,
         NetworkTypes: alloy_network::Network<ReceiptResponse = TransactionReceipt>,
-        Provider: HeaderProvider,
+        Provider: BlockReader<Receipt = reth_primitives::Receipt>,
     >,
     Provider: BlockReader,
 {
@@ -28,15 +30,15 @@ where
         Self: LoadReceipt,
     {
         if let Some((block, receipts)) = self.load_block_and_receipts(block_id).await? {
-            let block_number = block.number;
-            let base_fee = block.base_fee_per_gas;
+            let block_number = block.number();
+            let base_fee = block.base_fee_per_gas();
             let block_hash = block.hash();
-            let excess_blob_gas = block.excess_blob_gas;
-            let timestamp = block.timestamp;
+            let excess_blob_gas = block.excess_blob_gas();
+            let timestamp = block.timestamp();
 
             return block
                 .body
-                .transactions
+                .transactions()
                 .into_iter()
                 .zip(receipts.iter())
                 .enumerate()

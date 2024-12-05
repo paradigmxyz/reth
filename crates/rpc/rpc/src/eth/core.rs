@@ -244,7 +244,7 @@ pub struct EthApiInner<Provider: BlockReader, Pool, Network, EvmConfig> {
     /// An interface to interact with the network
     network: Network,
     /// All configured Signers
-    signers: parking_lot::RwLock<Vec<Box<dyn EthSigner>>>,
+    signers: parking_lot::RwLock<Vec<Box<dyn EthSigner<Provider::Transaction>>>>,
     /// The async cache frontend for eth related data
     eth_cache: EthStateCache<Provider::Block, Provider::Receipt>,
     /// The async gas oracle frontend for gas price suggestions
@@ -343,7 +343,9 @@ where
 
     /// Returns a handle to the pending block.
     #[inline]
-    pub const fn pending_block(&self) -> &Mutex<Option<PendingBlock>> {
+    pub const fn pending_block(
+        &self,
+    ) -> &Mutex<Option<PendingBlock<Provider::Block, Provider::Receipt>>> {
         &self.pending_block
     }
 
@@ -397,7 +399,9 @@ where
 
     /// Returns a handle to the signers.
     #[inline]
-    pub const fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
+    pub const fn signers(
+        &self,
+    ) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<Provider::Transaction>>>> {
         &self.signers
     }
 

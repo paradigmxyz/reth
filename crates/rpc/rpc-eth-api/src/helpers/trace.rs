@@ -3,16 +3,14 @@
 use std::{fmt::Display, sync::Arc};
 
 use crate::{FromEvmError, RpcNodeCore};
-use alloy_consensus::Header;
+use alloy_consensus::{BlockHeader, Header};
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::{BlockId, TransactionInfo};
 use futures::Future;
 use reth_chainspec::ChainSpecProvider;
-use alloy_consensus::BlockHeader;
 use reth_evm::{system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{SealedBlockWithSenders, TransactionSigned};
-use reth_primitives_traits::SignedTransaction;
-use reth_primitives_traits::BlockBody;
+use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_provider::{BlockReader, HeaderProvider, ProviderBlock, ProviderHeader, ProviderTx};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_eth_types::{

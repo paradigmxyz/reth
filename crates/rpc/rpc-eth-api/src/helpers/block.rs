@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
-use alloy_rpc_types_eth::{Block, Header, Index};
+use alloy_primitives::Sealable;
+use alloy_rlp::Encodable;
+use alloy_rpc_types_eth::{Block, BlockTransactions, Header, Index};
 use futures::Future;
 use reth_node_api::BlockBody;
 use reth_primitives::{SealedBlockFor, SealedBlockWithSenders};
@@ -12,6 +14,7 @@ use reth_provider::{
     BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider, ProviderHeader, ProviderReceipt,
 };
 use reth_rpc_types_compat::block::from_block;
+use revm_primitives::U256;
 
 use crate::{
     node::RpcNodeCoreExt, EthApiTypes, FromEthApiError, FullEthApiTypes, RpcBlock, RpcNodeCore,
@@ -201,7 +204,16 @@ pub trait EthBlocks: LoadBlock {
             }
             .unwrap_or_default();
 
-            Ok(uncles.into_iter().nth(index.into()).map(Block::uncle_from_header))
+            Ok(uncles.into_iter().nth(index.into()).map(|header| {
+                let block = alloy_consensus::Block::<alloy_consensus::TxEnvelope, _>::uncle(header);
+                let size = U256::from(block.length());
+                Block {
+                    uncles: vec![],
+                    header: Header::from_consensus(block.header.seal_slow(), None, Some(size)),
+                    transactions: BlockTransactions::Uncle,
+                    withdrawals: None,
+                }
+            }))
         }
     }
 }
