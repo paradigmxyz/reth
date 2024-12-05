@@ -222,7 +222,6 @@ mod tests {
         mdbx::DatabaseArguments,
         open_db, tables,
         version::{db_version_file_path, DatabaseVersionError},
-        Tables,
     };
     use assert_matches::assert_matches;
     use reth_db_api::{
