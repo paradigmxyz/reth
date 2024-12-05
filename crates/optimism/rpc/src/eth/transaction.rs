@@ -52,6 +52,11 @@ where
 
         Ok(hash)
     }
+
+    #[inline]
+    fn broadcast_raw_transaction(&self, raw_tx: Bytes) {
+        self.inner.eth_api.broadcast_raw_transaction(raw_tx)
+    }
 }
 
 impl<N> LoadTransaction for OpEthApi<N>
