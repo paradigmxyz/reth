@@ -2,6 +2,7 @@
 
 #![allow(dead_code)]
 
+use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
 use reth_db::{tables, DatabaseEnv};
 use reth_db_api::{database::Database, transaction::DbTxMut};

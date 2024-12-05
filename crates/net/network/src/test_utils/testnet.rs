@@ -11,8 +11,11 @@ use crate::{
 use futures::{FutureExt, StreamExt};
 use pin_project::pin_project;
 use reth_chainspec::{Hardforks, MAINNET};
-use reth_eth_wire::{protocol::Protocol, DisconnectReason, HelloMessageWithProtocols};
+use reth_eth_wire::{
+    protocol::Protocol, DisconnectReason, EthNetworkPrimitives, HelloMessageWithProtocols,
+};
 use reth_network_api::{
+    events::{PeerEvent, SessionInfo},
     test_utils::{PeersHandle, PeersHandleProvider},
     NetworkEvent, NetworkEventListenerProvider, NetworkInfo, Peers,
 };
@@ -139,7 +142,7 @@ where
     }
 
     /// Returns all handles to the networks
-    pub fn handles(&self) -> impl Iterator<Item = NetworkHandle> + '_ {
+    pub fn handles(&self) -> impl Iterator<Item = NetworkHandle<EthNetworkPrimitives>> + '_ {
         self.peers.iter().map(|p| p.handle())
     }
 
@@ -345,11 +348,11 @@ impl<C, Pool> TestnetHandle<C, Pool> {
 #[derive(Debug)]
 pub struct Peer<C, Pool = TestPool> {
     #[pin]
-    network: NetworkManager,
+    network: NetworkManager<EthNetworkPrimitives>,
     #[pin]
-    request_handler: Option<EthRequestHandler<C>>,
+    request_handler: Option<EthRequestHandler<C, EthNetworkPrimitives>>,
     #[pin]
-    transactions_manager: Option<TransactionsManager<Pool>>,
+    transactions_manager: Option<TransactionsManager<Pool, EthNetworkPrimitives>>,
     pool: Option<Pool>,
     client: C,
     secret_key: SecretKey,
@@ -392,12 +395,12 @@ where
     }
 
     /// Returns mutable access to the network.
-    pub fn network_mut(&mut self) -> &mut NetworkManager {
+    pub fn network_mut(&mut self) -> &mut NetworkManager<EthNetworkPrimitives> {
         &mut self.network
     }
 
     /// Returns the [`NetworkHandle`] of this peer.
-    pub fn handle(&self) -> NetworkHandle {
+    pub fn handle(&self) -> NetworkHandle<EthNetworkPrimitives> {
         self.network.handle().clone()
     }
 
@@ -505,8 +508,8 @@ pub struct PeerConfig<C = NoopProvider> {
 /// A handle to a peer in the [`Testnet`].
 #[derive(Debug)]
 pub struct PeerHandle<Pool> {
-    network: NetworkHandle,
-    transactions: Option<TransactionsHandle>,
+    network: NetworkHandle<EthNetworkPrimitives>,
+    transactions: Option<TransactionsHandle<EthNetworkPrimitives>>,
     pool: Option<Pool>,
 }
 
@@ -544,7 +547,7 @@ impl<Pool> PeerHandle<Pool> {
     }
 
     /// Returns the [`NetworkHandle`] of this peer.
-    pub const fn network(&self) -> &NetworkHandle {
+    pub const fn network(&self) -> &NetworkHandle<EthNetworkPrimitives> {
         &self.network
     }
 }
@@ -641,7 +644,9 @@ impl NetworkEventStream {
     pub async fn next_session_closed(&mut self) -> Option<(PeerId, Option<DisconnectReason>)> {
         while let Some(ev) = self.inner.next().await {
             match ev {
-                NetworkEvent::SessionClosed { peer_id, reason } => return Some((peer_id, reason)),
+                NetworkEvent::Peer(PeerEvent::SessionClosed { peer_id, reason }) => {
+                    return Some((peer_id, reason))
+                }
                 _ => continue,
             }
         }
@@ -652,7 +657,10 @@ impl NetworkEventStream {
     pub async fn next_session_established(&mut self) -> Option<PeerId> {
         while let Some(ev) = self.inner.next().await {
             match ev {
-                NetworkEvent::SessionEstablished { peer_id, .. } => return Some(peer_id),
+                NetworkEvent::ActivePeerSession { info, .. } |
+                NetworkEvent::Peer(PeerEvent::SessionEstablished(info)) => {
+                    return Some(info.peer_id)
+                }
                 _ => continue,
             }
         }
@@ -667,7 +675,7 @@ impl NetworkEventStream {
         let mut peers = Vec::with_capacity(num);
         while let Some(ev) = self.inner.next().await {
             match ev {
-                NetworkEvent::SessionEstablished { peer_id, .. } => {
+                NetworkEvent::ActivePeerSession { info: SessionInfo { peer_id, .. }, .. } => {
                     peers.push(peer_id);
                     num -= 1;
                     if num == 0 {
@@ -680,18 +688,24 @@ impl NetworkEventStream {
         peers
     }
 
-    /// Ensures that the first two events are a [`NetworkEvent::PeerAdded`] and
-    /// [`NetworkEvent::SessionEstablished`], returning the [`PeerId`] of the established
+    /// Ensures that the first two events are a [`NetworkEvent::Peer(PeerEvent::PeerAdded`] and
+    /// [`NetworkEvent::ActivePeerSession`], returning the [`PeerId`] of the established
     /// session.
     pub async fn peer_added_and_established(&mut self) -> Option<PeerId> {
         let peer_id = match self.inner.next().await {
-            Some(NetworkEvent::PeerAdded(peer_id)) => peer_id,
+            Some(NetworkEvent::Peer(PeerEvent::PeerAdded(peer_id))) => peer_id,
             _ => return None,
         };
 
         match self.inner.next().await {
-            Some(NetworkEvent::SessionEstablished { peer_id: peer_id2, .. }) => {
-                debug_assert_eq!(peer_id, peer_id2, "PeerAdded peer_id {peer_id} does not match SessionEstablished peer_id {peer_id2}");
+            Some(NetworkEvent::ActivePeerSession {
+                info: SessionInfo { peer_id: peer_id2, .. },
+                ..
+            }) => {
+                debug_assert_eq!(
+                    peer_id, peer_id2,
+                    "PeerAdded peer_id {peer_id} does not match SessionEstablished peer_id {peer_id2}"
+                );
                 Some(peer_id)
             }
             _ => None,
