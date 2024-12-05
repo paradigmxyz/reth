@@ -104,6 +104,7 @@ where
                 // database. Since `factory.block_hash` will only query the static files, we need to
                 // make sure that our database has been written to, and throw error if it's empty.
                 if factory.get_stage_checkpoint(StageId::Headers)?.is_none() {
+                    error!(target: "reth::storage", "Genesis header found on static files, but database is uninitialized.");
                     return Err(InitStorageError::UninitializedDatabase)
                 }
 
