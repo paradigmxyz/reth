@@ -508,11 +508,14 @@ fn get_proof_targets(
     state_update: &HashedPostState,
     fetched_proof_targets: &HashMap<B256, HashSet<B256>>,
 ) -> HashMap<B256, HashSet<B256>> {
+    trace!(target: "engine::root", ?fetched_proof_targets, "Get proof targets");
+
     let mut targets = HashMap::default();
 
     // first collect all new accounts (not previously fetched)
     for &hashed_address in state_update.accounts.keys() {
         if !fetched_proof_targets.contains_key(&hashed_address) {
+            trace!(target: "engine::root", ?hashed_address, "Adding account to proof targets");
             targets.insert(hashed_address, HashSet::default());
         }
     }
@@ -527,6 +530,7 @@ fn get_proof_targets(
             .peekable();
 
         if changed_slots.peek().is_some() {
+            trace!(target: "engine::root", ?hashed_address, ?changed_slots, "Adding storage slots to proof targets");
             targets.entry(*hashed_address).or_default().extend(changed_slots);
         }
     }
