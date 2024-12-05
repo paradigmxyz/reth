@@ -889,6 +889,7 @@ where
         mut fetch_node: impl FnMut(Nibbles) -> Option<Bytes>,
     ) -> SparseTrieResult<()> {
         if self.values.remove(path).is_none() {
+            trace!(target: "trie::sparse", ?path, "No leaf value is found to remove");
             if let Some(SparseNode::Hash(hash)) = self.nodes.get(path) {
                 // Leaf is present in the trie, but it's blinded.
                 return Err(SparseTrieError::BlindedNode { path: path.clone(), hash: *hash })
