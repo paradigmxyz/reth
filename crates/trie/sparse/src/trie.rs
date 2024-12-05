@@ -708,9 +708,8 @@ impl<P> RevealedSparseTrie<P> {
                         .resize(buffers.branch_child_buf.len(), Default::default());
                     let mut added_children = false;
 
-                    // TODO(alexey): set the `TrieMask` bits directly
-                    let mut tree_mask_values = Vec::new();
-                    let mut hash_mask_values = Vec::new();
+                    let mut tree_mask = TrieMask::default();
+                    let mut hash_mask = TrieMask::default();
                     let mut hashes = Vec::new();
                     for (i, child_path) in buffers.branch_child_buf.iter().enumerate() {
                         if buffers.rlp_node_stack.last().is_some_and(|e| &e.0 == child_path) {
@@ -720,23 +719,16 @@ impl<P> RevealedSparseTrie<P> {
                             // Update the masks only if we need to retain trie updates
                             if self.updates.is_some() {
                                 // Set the trie mask
-                                if node_type.store_in_db_trie() {
-                                    // A branch or an extension node explicitly set the
-                                    // `store_in_db_trie` flag
-                                    tree_mask_values.push(true);
-                                } else {
-                                    // Set the flag according to whether a child node was
-                                    // pre-calculated
-                                    // (`calculated = false`), meaning that it wasn't in the
-                                    // database
-                                    tree_mask_values.push(!calculated);
+                                if node_type.store_in_db_trie() || !calculated {
+                                    tree_mask.set_bit(i as u8);
                                 }
 
                                 // Set the hash mask. If a child node has a hash value AND is a
                                 // branch node, set the hash mask and save the hash.
-                                let hash = child.as_hash().filter(|_| node_type.is_branch());
-                                hash_mask_values.push(hash.is_some());
-                                if let Some(hash) = hash {
+                                if let Some(hash) =
+                                    child.as_hash().filter(|_| node_type.is_branch())
+                                {
+                                    hash_mask.set_bit(i as u8);
                                     hashes.push(hash);
                                 }
                             }
@@ -767,21 +759,6 @@ impl<P> RevealedSparseTrie<P> {
                     let store_in_db_trie_value = if let Some(updates) =
                         self.updates.as_mut().filter(|_| !path.is_empty())
                     {
-                        let mut tree_mask_values = tree_mask_values.into_iter().rev();
-                        let mut hash_mask_values = hash_mask_values.into_iter().rev();
-                        let mut tree_mask = TrieMask::default();
-                        let mut hash_mask = TrieMask::default();
-                        for (i, child) in branch_node_ref.children() {
-                            if child.is_some() {
-                                if hash_mask_values.next().unwrap() {
-                                    hash_mask.set_bit(i);
-                                }
-                                if tree_mask_values.next().unwrap() {
-                                    tree_mask.set_bit(i);
-                                }
-                            }
-                        }
-
                         // Store in DB trie if there are either any children that are stored in the
                         // DB trie, or any children represent hashed values
                         let store_in_db_trie = !tree_mask.is_empty() || !hash_mask.is_empty();
