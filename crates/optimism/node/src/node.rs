@@ -253,8 +253,11 @@ where
     ) -> eyre::Result<Self::Handle> {
         let Self { rpc_add_ons, da_config } = self;
         // install additional OP specific rpc methods
-        let debug_ext =
-            OpDebugWitnessApi::new(ctx.node.provider().clone(), ctx.node.evm_config().clone());
+        let debug_ext = OpDebugWitnessApi::new(
+            ctx.node.provider().clone(),
+            ctx.node.evm_config().clone(),
+            Box::new(ctx.node.task_executor().clone()),
+        );
         let miner_ext = OpMinerExtApi::new(da_config);
 
         rpc_add_ons
