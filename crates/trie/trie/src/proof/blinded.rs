@@ -20,7 +20,7 @@ pub struct ProofBlindedProviderFactory<T, H> {
     hashed_cursor_factory: H,
     /// A set of prefix sets that have changes.
     prefix_sets: Arc<TriePrefixSetsMut>,
-    /// Flag indicating whether to include branch node hash masks in the proof.
+    /// Flag indicating whether to include branch node hash masks in the response.
     with_branch_node_hash_masks: bool,
 }
 
@@ -30,14 +30,19 @@ impl<T, H> ProofBlindedProviderFactory<T, H> {
         trie_cursor_factory: T,
         hashed_cursor_factory: H,
         prefix_sets: Arc<TriePrefixSetsMut>,
-        with_branch_node_hash_masks: bool,
     ) -> Self {
         Self {
             trie_cursor_factory,
             hashed_cursor_factory,
             prefix_sets,
-            with_branch_node_hash_masks,
+            with_branch_node_hash_masks: false,
         }
+    }
+
+    /// Set the flag indicating whether to include branch node hash masks in the response.
+    pub const fn with_branch_node_hash_masks(mut self, with_branch_node_hash_masks: bool) -> Self {
+        self.with_branch_node_hash_masks = with_branch_node_hash_masks;
+        self
     }
 }
 
@@ -78,7 +83,7 @@ pub struct ProofBlindedAccountProvider<T, H> {
     hashed_cursor_factory: H,
     /// A set of prefix sets that have changes.
     prefix_sets: Arc<TriePrefixSetsMut>,
-    /// Flag indicating whether to include branch node hash masks in the proof.
+    /// Flag indicating whether to include branch node hash masks in the response.
     with_branch_node_hash_masks: bool,
 }
 
@@ -88,14 +93,19 @@ impl<T, H> ProofBlindedAccountProvider<T, H> {
         trie_cursor_factory: T,
         hashed_cursor_factory: H,
         prefix_sets: Arc<TriePrefixSetsMut>,
-        with_branch_node_hash_masks: bool,
     ) -> Self {
         Self {
             trie_cursor_factory,
             hashed_cursor_factory,
             prefix_sets,
-            with_branch_node_hash_masks,
+            with_branch_node_hash_masks: false,
         }
+    }
+
+    /// Set the flag indicating whether to include branch node hash masks in the response.
+    pub const fn with_branch_node_hash_masks(mut self, with_branch_node_hash_masks: bool) -> Self {
+        self.with_branch_node_hash_masks = with_branch_node_hash_masks;
+        self
     }
 }
 
@@ -131,7 +141,7 @@ pub struct ProofBlindedStorageProvider<T, H> {
     hashed_cursor_factory: H,
     /// A set of prefix sets that have changes.
     prefix_sets: Arc<TriePrefixSetsMut>,
-    /// Flag indicating whether to include branch node hash masks in the proof.
+    /// Flag indicating whether to include branch node hash masks in the response.
     with_branch_node_hash_masks: bool,
     /// Target account.
     account: B256,
@@ -143,16 +153,21 @@ impl<T, H> ProofBlindedStorageProvider<T, H> {
         trie_cursor_factory: T,
         hashed_cursor_factory: H,
         prefix_sets: Arc<TriePrefixSetsMut>,
-        with_branch_node_hash_masks: bool,
         account: B256,
     ) -> Self {
         Self {
             trie_cursor_factory,
             hashed_cursor_factory,
             prefix_sets,
-            with_branch_node_hash_masks,
+            with_branch_node_hash_masks: false,
             account,
         }
+    }
+
+    /// Set the flag indicating whether to include branch node hash masks in the response.
+    pub const fn with_branch_node_hash_masks(mut self, with_branch_node_hash_masks: bool) -> Self {
+        self.with_branch_node_hash_masks = with_branch_node_hash_masks;
+        self
     }
 }
 

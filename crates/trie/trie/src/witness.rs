@@ -114,7 +114,6 @@ where
             self.trie_cursor_factory,
             self.hashed_cursor_factory,
             Arc::new(self.prefix_sets),
-            false,
         );
         let mut sparse_trie =
             SparseStateTrie::new(WitnessBlindedProviderFactory::new(proof_provider_factory, tx));
