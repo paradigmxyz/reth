@@ -51,12 +51,12 @@ pub enum InitStorageError {
     UninitializedDatabase,
     /// An existing genesis block was found in the database, and its hash did not match the hash of
     /// the chainspec.
-    #[error("genesis hash in the storage does not match the specified chainspec: chainspec is {chainspec_hash}, database is {database_hash}")]
+    #[error("genesis hash in the storage does not match the specified chainspec: chainspec is {chainspec_hash}, database is {storage_hash}")]
     GenesisHashMismatch {
         /// Expected genesis hash.
         chainspec_hash: B256,
         /// Actual genesis hash.
-        database_hash: B256,
+        storage_hash: B256,
     },
     /// Provider error.
     #[error(transparent)]
@@ -113,7 +113,7 @@ where
 
             return Err(InitStorageError::GenesisHashMismatch {
                 chainspec_hash: hash,
-                database_hash: block_hash,
+                storage_hash: block_hash,
             })
         }
         Err(e) => {
@@ -685,7 +685,7 @@ mod tests {
             genesis_hash.unwrap_err(),
             InitStorageError::GenesisHashMismatch {
                 chainspec_hash: MAINNET_GENESIS_HASH,
-                database_hash: SEPOLIA_GENESIS_HASH
+                storage_hash: SEPOLIA_GENESIS_HASH
             }
         )
     }
