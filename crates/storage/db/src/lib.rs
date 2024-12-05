@@ -324,8 +324,7 @@ mod tests {
         std::thread::sleep(Duration::from_secs(1));
         let second_version = ClientVersion { version: String::from("v2"), ..Default::default() };
         {
-            let db = init_db(&path, DatabaseArguments::new(second_version.clone()))
-                .unwrap();
+            let db = init_db(&path, DatabaseArguments::new(second_version.clone())).unwrap();
             let tx = db.tx().unwrap();
             let mut cursor = tx.cursor_read::<tables::VersionHistory>().unwrap();
             assert_eq!(

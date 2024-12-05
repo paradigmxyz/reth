@@ -30,10 +30,7 @@ pub fn create_db<P: AsRef<Path>>(path: P, args: DatabaseArguments) -> eyre::Resu
 
 /// Opens up an existing database or creates a new one at the specified path. Creates tables if
 /// necessary. Read/Write mode.
-pub fn init_db<P: AsRef<Path>>(
-    path: P,
-    args: DatabaseArguments,
-) -> eyre::Result<DatabaseEnv> {
+pub fn init_db<P: AsRef<Path>>(path: P, args: DatabaseArguments) -> eyre::Result<DatabaseEnv> {
     let client_version = args.client_version().clone();
     let db = create_db(path, args)?;
     db.create_tables()?;
