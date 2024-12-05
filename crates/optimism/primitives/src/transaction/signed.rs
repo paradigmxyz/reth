@@ -1,13 +1,7 @@
 //! A signed Optimism transaction.
 
+use crate::{OpTransaction, OpTxType};
 use alloc::vec::Vec;
-use core::{
-    hash::{Hash, Hasher},
-    mem,
-};
-#[cfg(feature = "std")]
-use std::sync::OnceLock;
-
 use alloy_consensus::{
     transaction::RlpEcdsaTx, SignableTransaction, Transaction, TxEip1559, TxEip2930, TxEip7702,
 };
@@ -20,6 +14,10 @@ use alloy_primitives::{
     keccak256, Address, Bytes, PrimitiveSignature as Signature, TxHash, TxKind, Uint, B256, U256,
 };
 use alloy_rlp::Header;
+use core::{
+    hash::{Hash, Hasher},
+    mem,
+};
 use derive_more::{AsRef, Deref};
 #[cfg(not(feature = "std"))]
 use once_cell::sync::OnceCell as OnceLock;
@@ -32,8 +30,8 @@ use reth_primitives::{
 };
 use reth_primitives_traits::{FillTxEnv, InMemorySize, SignedTransaction};
 use revm_primitives::{AuthorizationList, OptimismFields, TxEnv};
-
-use crate::{OpTransaction, OpTxType};
+#[cfg(feature = "std")]
+use std::sync::OnceLock;
 
 /// Signed transaction.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
@@ -105,10 +103,6 @@ impl SignedTransaction for OpTransactionSigned {
         recover_signer_unchecked(signature, signature_hash)
     }
 
-    fn recalculate_hash(&self) -> B256 {
-        keccak256(self.encoded_2718())
-    }
-
     fn recover_signer_unchecked_with_buf(&self, buf: &mut Vec<u8>) -> Option<Address> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
@@ -118,6 +112,10 @@ impl SignedTransaction for OpTransactionSigned {
         self.encode_for_signing(buf);
         let signature_hash = keccak256(buf);
         recover_signer_unchecked(&self.signature, signature_hash)
+    }
+
+    fn recalculate_hash(&self) -> B256 {
+        keccak256(self.encoded_2718())
     }
 }
 

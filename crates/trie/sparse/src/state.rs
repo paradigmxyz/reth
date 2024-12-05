@@ -36,10 +36,10 @@ pub struct SparseStateTrie<F: BlindedProviderFactory = DefaultBlindedProviderFac
 impl Default for SparseStateTrie {
     fn default() -> Self {
         Self {
+            provider_factory: Default::default(),
             state: Default::default(),
             storages: Default::default(),
             revealed: Default::default(),
-            provider_factory: Default::default(),
             retain_updates: false,
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
         }

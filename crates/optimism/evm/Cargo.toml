@@ -75,5 +75,5 @@ optimism = [
 	"reth-optimism-consensus/optimism",
 	"revm/optimism",
 	"revm-primitives/optimism",
-	"reth-optimism-primitives/op",
+	"reth-optimism-primitives/optimism",
 ]

@@ -1,4 +1,5 @@
 use crate::metrics::{BodyDownloaderMetrics, ResponseMetrics};
+use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
 use futures::{Future, FutureExt};
 use reth_consensus::Consensus;
