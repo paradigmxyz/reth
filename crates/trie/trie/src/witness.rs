@@ -16,7 +16,7 @@ use reth_execution_errors::{
 };
 use reth_trie_common::Nibbles;
 use reth_trie_sparse::{
-    blinded::{BlindedProvider, BlindedProviderFactory},
+    blinded::{BlindedNode, BlindedProvider, BlindedProviderFactory},
     SparseStateTrie,
 };
 use std::sync::{mpsc, Arc};
@@ -114,6 +114,7 @@ where
             self.trie_cursor_factory,
             self.hashed_cursor_factory,
             Arc::new(self.prefix_sets),
+            false,
         );
         let mut sparse_trie =
             SparseStateTrie::new(WitnessBlindedProviderFactory::new(proof_provider_factory, tx));
@@ -248,9 +249,9 @@ where
 {
     type Error = P::Error;
 
-    fn blinded_node(&mut self, path: Nibbles) -> Result<Option<Bytes>, Self::Error> {
+    fn blinded_node(&mut self, path: Nibbles) -> Result<Option<BlindedNode>, Self::Error> {
         let maybe_node = self.provider.blinded_node(path)?;
-        if let Some(node) = &maybe_node {
+        if let Some(BlindedNode { node, .. }) = &maybe_node {
             self.tx.send(node.clone()).map_err(|error| SparseTrieError::Other(Box::new(error)))?;
         }
         Ok(maybe_node)

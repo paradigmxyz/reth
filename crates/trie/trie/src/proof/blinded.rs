@@ -2,11 +2,13 @@ use super::{Proof, StorageProof};
 use crate::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
 use alloy_primitives::{
     map::{HashMap, HashSet},
-    Bytes, B256,
+    B256,
 };
 use reth_execution_errors::SparseTrieError;
 use reth_trie_common::{prefix_set::TriePrefixSetsMut, Nibbles};
-use reth_trie_sparse::blinded::{pad_path_to_key, BlindedProvider, BlindedProviderFactory};
+use reth_trie_sparse::blinded::{
+    pad_path_to_key, BlindedNode, BlindedProvider, BlindedProviderFactory,
+};
 use std::sync::Arc;
 
 /// Factory for instantiating providers capable of retrieving blinded trie nodes via proofs.
@@ -18,6 +20,8 @@ pub struct ProofBlindedProviderFactory<T, H> {
     hashed_cursor_factory: H,
     /// A set of prefix sets that have changes.
     prefix_sets: Arc<TriePrefixSetsMut>,
+    /// Flag indicating whether to include branch node hash masks in the proof.
+    with_branch_node_hash_masks: bool,
 }
 
 impl<T, H> ProofBlindedProviderFactory<T, H> {
@@ -26,8 +30,14 @@ impl<T, H> ProofBlindedProviderFactory<T, H> {
         trie_cursor_factory: T,
         hashed_cursor_factory: H,
         prefix_sets: Arc<TriePrefixSetsMut>,
+        with_branch_node_hash_masks: bool,
     ) -> Self {
-        Self { trie_cursor_factory, hashed_cursor_factory, prefix_sets }
+        Self {
+            trie_cursor_factory,
+            hashed_cursor_factory,
+            prefix_sets,
+            with_branch_node_hash_masks,
+        }
     }
 }
 
@@ -44,6 +54,7 @@ where
             trie_cursor_factory: self.trie_cursor_factory.clone(),
             hashed_cursor_factory: self.hashed_cursor_factory.clone(),
             prefix_sets: self.prefix_sets.clone(),
+            with_branch_node_hash_masks: self.with_branch_node_hash_masks,
         }
     }
 
@@ -52,6 +63,7 @@ where
             trie_cursor_factory: self.trie_cursor_factory.clone(),
             hashed_cursor_factory: self.hashed_cursor_factory.clone(),
             prefix_sets: self.prefix_sets.clone(),
+            with_branch_node_hash_masks: self.with_branch_node_hash_masks,
             account,
         }
     }
@@ -66,6 +78,8 @@ pub struct ProofBlindedAccountProvider<T, H> {
     hashed_cursor_factory: H,
     /// A set of prefix sets that have changes.
     prefix_sets: Arc<TriePrefixSetsMut>,
+    /// Flag indicating whether to include branch node hash masks in the proof.
+    with_branch_node_hash_masks: bool,
 }
 
 impl<T, H> ProofBlindedAccountProvider<T, H> {
@@ -74,8 +88,14 @@ impl<T, H> ProofBlindedAccountProvider<T, H> {
         trie_cursor_factory: T,
         hashed_cursor_factory: H,
         prefix_sets: Arc<TriePrefixSetsMut>,
+        with_branch_node_hash_masks: bool,
     ) -> Self {
-        Self { trie_cursor_factory, hashed_cursor_factory, prefix_sets }
+        Self {
+            trie_cursor_factory,
+            hashed_cursor_factory,
+            prefix_sets,
+            with_branch_node_hash_masks,
+        }
     }
 }
 
@@ -86,15 +106,19 @@ where
 {
     type Error = SparseTrieError;
 
-    fn blinded_node(&mut self, path: Nibbles) -> Result<Option<Bytes>, Self::Error> {
+    fn blinded_node(&mut self, path: Nibbles) -> Result<Option<BlindedNode>, Self::Error> {
         let targets = HashMap::from_iter([(pad_path_to_key(&path), HashSet::default())]);
         let proof =
             Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
                 .with_prefix_sets_mut(self.prefix_sets.as_ref().clone())
+                .with_branch_node_hash_masks(self.with_branch_node_hash_masks)
                 .multiproof(targets)
                 .map_err(|error| SparseTrieError::Other(Box::new(error)))?;
 
-        Ok(proof.account_subtree.into_inner().remove(&path))
+        let node = proof.account_subtree.into_inner().remove(&path);
+        let hash_mask = proof.branch_node_hash_masks.get(&path).copied();
+
+        Ok(node.map(|node| BlindedNode { node, hash_mask }))
     }
 }
 
@@ -107,6 +131,8 @@ pub struct ProofBlindedStorageProvider<T, H> {
     hashed_cursor_factory: H,
     /// A set of prefix sets that have changes.
     prefix_sets: Arc<TriePrefixSetsMut>,
+    /// Flag indicating whether to include branch node hash masks in the proof.
+    with_branch_node_hash_masks: bool,
     /// Target account.
     account: B256,
 }
@@ -117,9 +143,16 @@ impl<T, H> ProofBlindedStorageProvider<T, H> {
         trie_cursor_factory: T,
         hashed_cursor_factory: H,
         prefix_sets: Arc<TriePrefixSetsMut>,
+        with_branch_node_hash_masks: bool,
         account: B256,
     ) -> Self {
-        Self { trie_cursor_factory, hashed_cursor_factory, prefix_sets, account }
+        Self {
+            trie_cursor_factory,
+            hashed_cursor_factory,
+            prefix_sets,
+            with_branch_node_hash_masks,
+            account,
+        }
     }
 }
 
@@ -130,7 +163,7 @@ where
 {
     type Error = SparseTrieError;
 
-    fn blinded_node(&mut self, path: Nibbles) -> Result<Option<Bytes>, Self::Error> {
+    fn blinded_node(&mut self, path: Nibbles) -> Result<Option<BlindedNode>, Self::Error> {
         let targets = HashSet::from_iter([pad_path_to_key(&path)]);
         let storage_prefix_set =
             self.prefix_sets.storage_prefix_sets.get(&self.account).cloned().unwrap_or_default();
@@ -140,9 +173,13 @@ where
             self.account,
         )
         .with_prefix_set_mut(storage_prefix_set)
+        .with_branch_node_hash_masks(self.with_branch_node_hash_masks)
         .storage_multiproof(targets)
         .map_err(|error| SparseTrieError::Other(Box::new(error)))?;
 
-        Ok(proof.subtree.into_inner().remove(&path))
+        let node = proof.subtree.into_inner().remove(&path);
+        let hash_mask = proof.branch_node_hash_masks.get(&path).copied();
+
+        Ok(node.map(|node| BlindedNode { node, hash_mask }))
     }
 }

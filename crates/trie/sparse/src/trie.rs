@@ -1,4 +1,4 @@
-use crate::blinded::{BlindedProvider, DefaultBlindedProvider};
+use crate::blinded::{BlindedNode, BlindedProvider, DefaultBlindedProvider};
 use alloy_primitives::{
     hex, keccak256,
     map::{HashMap, HashSet},
@@ -973,11 +973,12 @@ where
 
                         if self.nodes.get(&child_path).unwrap().is_hash() {
                             trace!(target: "trie::sparse", ?child_path, "Retrieving remaining blinded branch child");
-                            if let Some(node) = self.provider.blinded_node(child_path.clone())? {
+                            if let Some(BlindedNode { node, hash_mask }) =
+                                self.provider.blinded_node(child_path.clone())?
+                            {
                                 let decoded = TrieNode::decode(&mut &node[..])?;
                                 trace!(target: "trie::sparse", ?child_path, ?decoded, "Revealing remaining blinded branch child");
-                                // TODO: fetch hash mask
-                                self.reveal_node(child_path.clone(), decoded, None)?;
+                                self.reveal_node(child_path.clone(), decoded, hash_mask)?;
                             }
                         }
 
