@@ -61,15 +61,10 @@ type HeaderLruCache<H, L> = MultiConsumerLruCache<B256, H, L, HeaderResponseSend
 ///
 /// This is the frontend for the async caching service which manages cached data on a different
 /// task.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EthStateCache<B: Block, R> {
     to_service: UnboundedSender<CacheAction<B, R>>,
-}
-
-impl<B: Block, R> Clone for EthStateCache<B, R> {
-    fn clone(&self) -> Self {
-        Self { to_service: self.to_service.clone() }
-    }
+    latest_chain_change: Option<ChainChange<B, R>>,
 }
 
 impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
@@ -95,8 +90,9 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
             action_rx: UnboundedReceiverStream::new(rx),
             action_task_spawner,
             rate_limiter: Arc::new(Semaphore::new(max_concurrent_db_operations)),
+            latest_chain_change: None,
         };
-        let cache = Self { to_service };
+        let cache = Self { to_service, latest_chain_change: None };
         (cache, service)
     }
 
@@ -186,6 +182,21 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
         let _ = self.to_service.send(CacheAction::GetHeader { block_hash, response_tx });
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
     }
+
+    /// Returns the most recent canonical block from the cache, if available.
+    /// Used to efficiently handle latest block requests and avoid race conditions during chain
+    /// reorgs. 
+    /// Returns None if no canonical chain is tracked or during reorgs.
+    pub async fn latest_block_with_senders(
+        &self,
+    ) -> ProviderResult<Option<Arc<SealedBlockWithSenders<B>>>> {
+        if let Some(chain_change) = &self.latest_chain_change {
+            if let Some(latest_block) = chain_change.blocks.last() {
+                return self.get_sealed_block_with_senders(latest_block.hash()).await;
+            }
+        }
+        Ok(None)
+    }
 }
 
 /// A task than manages caches for data required by the `eth` rpc implementation.
@@ -236,6 +247,8 @@ pub(crate) struct EthStateCacheService<
     action_task_spawner: Tasks,
     /// Rate limiter
     rate_limiter: Arc<Semaphore>,
+    /// Tracks latest canonical chain state for cache consistency
+    latest_chain_change: Option<ChainChange<Provider::Block, Provider::Receipt>>,
 }
 
 impl<Provider, Tasks> EthStateCacheService<Provider, Tasks>
@@ -458,7 +471,8 @@ where
                             }
                         }
                         CacheAction::CacheNewCanonicalChain { chain_change } => {
-                            for block in chain_change.blocks {
+                            this.latest_chain_change = Some(chain_change.clone());
+                            for block in chain_change.clone().blocks {
                                 this.on_new_block(block.hash(), Ok(Some(Arc::new(block))));
                             }
 
@@ -527,12 +541,14 @@ enum CacheAction<B: Block, R> {
     },
 }
 
+#[derive(Clone, Debug)]
 struct BlockReceipts<R> {
     block_hash: B256,
     receipts: Vec<Option<R>>,
 }
 
 /// A change of the canonical chain
+#[derive(Debug, Clone)]
 struct ChainChange<B: Block, R> {
     blocks: Vec<SealedBlockWithSenders<B>>,
     receipts: Vec<BlockReceipts<R>>,
@@ -558,9 +574,13 @@ impl<B: Block, R: Clone> ChainChange<B, R> {
 /// Awaits for new chain events and directly inserts them into the cache so they're available
 /// immediately before they need to be fetched from disk.
 ///
+/// Updates [`EthStateCache`] in two scenario :
+/// 1. On reorgs: sets [`latest_chain_change`] to None and removes reorged blocks
+/// 2. On new canonical blocks: updates [`latest_chain_change`] and caches the new blocks
+///
 /// Reorged blocks are removed from the cache.
 pub async fn cache_new_blocks_task<St, N: NodePrimitives>(
-    eth_state_cache: EthStateCache<N::Block, N::Receipt>,
+    mut eth_state_cache: EthStateCache<N::Block, N::Receipt>,
     mut events: St,
 ) where
     St: Stream<Item = CanonStateNotification<N>> + Unpin + 'static,
@@ -568,13 +588,13 @@ pub async fn cache_new_blocks_task<St, N: NodePrimitives>(
     while let Some(event) = events.next().await {
         if let Some(reverted) = event.reverted() {
             let chain_change = ChainChange::new(reverted);
-
+            eth_state_cache.latest_chain_change = None;
             let _ =
                 eth_state_cache.to_service.send(CacheAction::RemoveReorgedChain { chain_change });
         }
 
         let chain_change = ChainChange::new(event.committed());
-
+        eth_state_cache.latest_chain_change = Some(chain_change.clone());
         let _ =
             eth_state_cache.to_service.send(CacheAction::CacheNewCanonicalChain { chain_change });
     }
