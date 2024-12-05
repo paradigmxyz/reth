@@ -2221,7 +2221,7 @@ where
 
         // TODO: create StateRootTask with the receiving end of a channel and
         // pass the sending end of the channel to the state hook.
-        let noop_state_hook = |_state: &EvmState| {};
+        let noop_state_hook = |_state: &EvmState, _is_final: bool| {};
         let output = self.metrics.executor.execute_metered(
             executor,
             (&block, U256::MAX).into(),

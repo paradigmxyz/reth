@@ -67,7 +67,12 @@ pub(crate) struct StateRootConfig<Factory> {
 #[allow(dead_code)]
 pub(crate) enum StateRootMessage {
     /// New state update from transaction execution
-    StateUpdate(EvmState),
+    StateUpdate {
+        /// The state changes
+        state: EvmState,
+        /// Whether this is from final post-execution changes
+        is_final: bool,
+    },
     /// Proof calculation completed for a specific state update
     ProofCalculated {
         /// The calculated proof
@@ -354,22 +359,24 @@ where
         let mut updates_received = 0;
         let mut proofs_processed = 0;
         let mut roots_calculated = 0;
+        let mut updates_finished = false;
 
         loop {
             match self.rx.recv() {
                 Ok(message) => match message {
-                    StateRootMessage::StateUpdate(update) => {
+                    StateRootMessage::StateUpdate { state, is_final } => {
                         updates_received += 1;
+                        updates_finished = is_final;
                         trace!(
                             target: "engine::root",
-                            len = update.len(),
+                            len = state.len(),
                             total_updates = updates_received,
                             "Received new state update"
                         );
                         Self::on_state_update(
                             self.config.consistent_view.clone(),
                             self.config.input.clone(),
-                            update,
+                            state,
                             &mut self.fetched_proof_targets,
                             self.proof_sequencer.next_sequence(),
                             self.tx.clone(),
@@ -434,7 +441,7 @@ where
                                 std::mem::take(&mut current_state_update),
                                 std::mem::take(&mut current_multiproof),
                             );
-                        } else if all_proofs_received && no_pending {
+                        } else if all_proofs_received && no_pending && updates_finished {
                             debug!(
                                 target: "engine::root",
                                 total_updates = updates_received,
@@ -710,8 +717,9 @@ mod tests {
         let task = StateRootTask::new(config, tx.clone(), rx);
         let handle = task.spawn();
 
-        for update in state_updates {
-            tx.send(StateRootMessage::StateUpdate(update)).expect("failed to send state");
+        for state in state_updates {
+            tx.send(StateRootMessage::StateUpdate { state, is_final: false })
+                .expect("failed to send state");
         }
         drop(tx);
 
