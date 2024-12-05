@@ -405,8 +405,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         let price_bump = price_bumps.price_bump(self.tx_type());
 
         // Check if the max fee per gas is underpriced.
-        if maybe_replacement.max_fee_per_gas() < self.max_fee_per_gas() * (100 + price_bump) / 100
-        {
+        if maybe_replacement.max_fee_per_gas() < self.max_fee_per_gas() * (100 + price_bump) / 100 {
             return true
         }
 
