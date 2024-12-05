@@ -237,10 +237,10 @@ where
     ) {
         let mut hashed_state_update = HashedPostState::default();
         for (address, account) in update {
-            if account.is_touched() {
-                let hashed_address = keccak256(address);
-                trace!(target: "engine::root", ?address, ?hashed_address, "Adding account to state update");
+            let hashed_address = keccak256(address);
+            trace!(target: "engine::root", ?address, ?hashed_address, info = ?account.info, status = ?account.status, "Adding account to state update");
 
+            if account.is_touched() {
                 let destroyed = account.is_selfdestructed();
                 let info = if account.is_empty() { None } else { Some(account.info.into()) };
                 hashed_state_update.accounts.insert(hashed_address, info);
