@@ -88,7 +88,6 @@ where
     Pool: TransactionPool + 'static,
     Events: CanonStateSubscriptions<
             Primitives: NodePrimitives<
-                SignedTx: Encodable2718,
                 BlockHeader = reth_primitives::Header,
                 Receipt = reth_primitives::Receipt,
             >,

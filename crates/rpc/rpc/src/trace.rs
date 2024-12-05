@@ -13,9 +13,7 @@ use alloy_rpc_types_trace::{
     tracerequest::TraceCallRequest,
 };
 use async_trait::async_trait;
-use reth_provider::HeaderProvider;
 use jsonrpsee::core::RpcResult;
-use reth_provider::BlockNumReader;
 use reth_chainspec::EthereumHardforks;
 use reth_consensus_common::calc::{
     base_block_reward, base_block_reward_pre_merge, block_reward, ommer_reward,

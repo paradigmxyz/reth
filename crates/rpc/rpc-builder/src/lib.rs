@@ -285,7 +285,7 @@ where
     Pool: TransactionPool<Transaction = <EthApi::Pool as TransactionPool>::Transaction> + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    Events: CanonStateSubscriptions<Primitives = EthPrimitives> + Clone + 'static,
+    Events: CanonStateSubscriptions<Primitives = BlockExecutor::Primitives> + Clone + 'static,
     EvmConfig: ConfigureEvm<Header = alloy_consensus::Header>,
     EthApi: FullEthApiServer<
         Provider: BlockReader<
@@ -298,6 +298,7 @@ where
         Primitives: NodePrimitives<
             Block = reth_primitives::Block,
             Receipt = reth_primitives::Receipt,
+            BlockHeader = reth_primitives::Header,
         >,
     >,
 {
@@ -649,12 +650,13 @@ where
     Pool: TransactionPool + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    Events: CanonStateSubscriptions<Primitives = EthPrimitives> + Clone + 'static,
+    Events: CanonStateSubscriptions<Primitives = BlockExecutor::Primitives> + Clone + 'static,
     EvmConfig: ConfigureEvm<Header = Header>,
     BlockExecutor: BlockExecutorProvider<
         Primitives: NodePrimitives<
             Block = reth_primitives::Block,
             Receipt = reth_primitives::Receipt,
+            BlockHeader = reth_primitives::Header,
         >,
     >,
     Consensus: reth_consensus::FullConsensus + Clone + 'static,
@@ -687,11 +689,9 @@ where
             >,
         >,
         Provider: BlockReader<
-            Block = <EthApi::Provider as BlockReader>::Block,
-            Receipt = <EthApi::Provider as ReceiptProvider>::Receipt,
-            Header = <EthApi::Provider as HeaderProvider>::Header,
+            Block = <Events::Primitives as NodePrimitives>::Block,
+            Receipt = <Events::Primitives as NodePrimitives>::Receipt,
         >,
-        Pool: TransactionPool<Transaction = <EthApi::Pool as TransactionPool>::Transaction>,
     {
         let Self {
             provider,
@@ -977,16 +977,15 @@ impl<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
 where
     Provider: StateProviderFactory
         + BlockReader<
-            Block = reth_primitives::Block,
-            Receipt = reth_primitives::Receipt,
-            Header = reth_primitives::Header,
+            Block = <Events::Primitives as NodePrimitives>::Block,
+            Receipt = <Events::Primitives as NodePrimitives>::Receipt,
         > + EvmEnvProvider
         + Clone
         + Unpin
         + 'static,
     Pool: Send + Sync + Clone + 'static,
     Network: Clone + 'static,
-    Events: CanonStateSubscriptions<Primitives = EthPrimitives> + Clone + 'static,
+    Events: CanonStateSubscriptions + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     EthApi: EthApiTypes + 'static,
     BlockExecutor: BlockExecutorProvider,
@@ -1279,10 +1278,7 @@ where
     where
         EthApi: TraceExt,
     {
-        TraceApi::new(
-            self.eth_api().clone(),
-            self.blocking_pool_guard.clone(),
-        )
+        TraceApi::new(self.eth_api().clone(), self.blocking_pool_guard.clone())
     }
 
     /// Instantiates [`EthBundle`] Api
@@ -1352,26 +1348,16 @@ where
 impl<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
     RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
 where
-    Provider: FullRpcProvider<
-            Block = <EthApi::Provider as BlockReader>::Block,
-            Receipt = <EthApi::Provider as ReceiptProvider>::Receipt,
-            Header = <EthApi::Provider as HeaderProvider>::Header,
-        > + AccountReader
-        + ChangeSetReader,
-    Pool: TransactionPool<Transaction = <EthApi::Pool as TransactionPool>::Transaction> + 'static,
+    Provider: FullRpcProvider + AccountReader + ChangeSetReader,
+    Pool: TransactionPool + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    Events: CanonStateSubscriptions<Primitives = EthPrimitives> + Clone + 'static,
-    EthApi: FullEthApiServer<
-        Provider: BlockReader<
-            Block = reth_primitives::Block,
-            Receipt = reth_primitives::Receipt,
-            Header = reth_primitives::Header,
-        >,
-    >,
+    Events: CanonStateSubscriptions<Primitives = BlockExecutor::Primitives> + Clone + 'static,
+    EthApi: FullEthApiServer,
     BlockExecutor: BlockExecutorProvider<
         Primitives: NodePrimitives<
             Block = reth_primitives::Block,
+            BlockHeader = reth_primitives::Header,
             Receipt = reth_primitives::Receipt,
         >,
     >,
@@ -1491,12 +1477,11 @@ where
                         RethRpcModule::Net => {
                             NetApi::new(self.network.clone(), eth_api.clone()).into_rpc().into()
                         }
-                        RethRpcModule::Trace => TraceApi::new(
-                            eth_api.clone(),
-                            self.blocking_pool_guard.clone(),
-                        )
-                        .into_rpc()
-                        .into(),
+                        RethRpcModule::Trace => {
+                            TraceApi::new(eth_api.clone(), self.blocking_pool_guard.clone())
+                                .into_rpc()
+                                .into()
+                        }
                         RethRpcModule::Web3 => Web3Api::new(self.network.clone()).into_rpc().into(),
                         RethRpcModule::Txpool => TxPoolApi::new(
                             self.pool.clone(),
@@ -1519,7 +1504,7 @@ where
                                 .into()
                         }
                         RethRpcModule::Flashbots => ValidationApi::new(
-                            self.provider.clone(),
+                            eth_api.provider().clone(),
                             Arc::new(self.consensus.clone()),
                             self.block_executor.clone(),
                             self.config.flashbots.clone(),

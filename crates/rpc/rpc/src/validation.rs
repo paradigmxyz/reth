@@ -18,7 +18,7 @@ use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{Block, GotExpected, NodePrimitives, SealedBlockWithSenders, SealedHeader};
 use reth_provider::{
-    AccountReader, BlockExecutionInput, BlockExecutionOutput, BlockReaderIdExt, HeaderProvider,
+    BlockExecutionInput, BlockExecutionOutput, BlockReaderIdExt, HeaderProvider,
     StateProviderFactory, WithdrawalsProvider,
 };
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
@@ -92,7 +92,6 @@ where
         + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + StateProviderFactory
         + HeaderProvider
-        + AccountReader
         + WithdrawalsProvider
         + 'static,
     E: BlockExecutorProvider<
@@ -413,7 +412,6 @@ where
         + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + StateProviderFactory
         + HeaderProvider
-        + AccountReader
         + WithdrawalsProvider
         + Clone
         + 'static,
