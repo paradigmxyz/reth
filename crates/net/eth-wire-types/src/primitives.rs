@@ -1,6 +1,6 @@
 //! Abstraction over primitive types in network messages.
 
-use reth_primitives_traits::node::NetworkPrimitives;
+use reth_primitives_traits::NetworkPrimitives;
 use std::fmt::Debug;
 
 /// Primitive types used by Ethereum network.
