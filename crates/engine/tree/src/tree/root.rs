@@ -736,7 +736,7 @@ mod tests {
         let task = StateRootTask::new(config, tx.clone(), rx);
         let handle = task.spawn();
 
-        let state_hook_sender = StateHookSender(tx.clone());
+        let state_hook_sender = StateHookSender(tx);
         for update in state_updates {
             state_hook_sender
                 .send(StateRootMessage::StateUpdate(update))
