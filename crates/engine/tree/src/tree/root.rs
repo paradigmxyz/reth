@@ -159,6 +159,7 @@ impl ProofSequencer {
 #[allow(dead_code)]
 pub(crate) struct StateHookSender(Sender<StateRootMessage>);
 
+#[allow(dead_code)]
 impl StateHookSender {
     pub(crate) const fn new(inner: Sender<StateRootMessage>) -> Self {
         Self(inner)
