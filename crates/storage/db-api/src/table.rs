@@ -109,16 +109,6 @@ pub trait TableMetadata: Send + Sync + Debug + 'static {
     fn is_dupsort(&self) -> bool;
 }
 
-impl<T: Table> TableMetadata for T {
-    fn name(&self) -> &'static str {
-        T::NAME
-    }
-
-    fn is_dupsort(&self) -> bool {
-        T::DUPSORT
-    }
-}
-
 /// Tuple with `T::Key` and `T::Value`.
 pub type TableRow<T> = (<T as Table>::Key, <T as Table>::Value);
 
