@@ -1,9 +1,11 @@
 use super::*;
+use syn::Attribute;
 
 /// Generates the flag fieldset struct that is going to be used to store the length of fields and
 /// their potential presence.
 pub(crate) fn generate_flag_struct(
     ident: &Ident,
+    attrs: &[Attribute],
     has_lifetime: bool,
     fields: &FieldList,
     is_zstd: bool,
@@ -12,6 +14,8 @@ pub(crate) fn generate_flag_struct(
 
     let flags_ident = format_ident!("{ident}Flags");
     let mod_flags_ident = format_ident!("{ident}_flags");
+
+    let reth_codecs = parse_reth_codecs_path(attrs).unwrap();
 
     let mut field_flags = vec![];
 
@@ -88,8 +92,9 @@ pub(crate) fn generate_flag_struct(
         pub use #mod_flags_ident::#flags_ident;
         #[allow(non_snake_case)]
         mod #mod_flags_ident {
-            use bytes::Buf;
-            use modular_bitfield::prelude::*;
+            use #reth_codecs::__private::Buf;
+            use #reth_codecs::__private::modular_bitfield;
+            use #reth_codecs::__private::modular_bitfield::prelude::*;
 
             #[doc = #docs]
             #[bitfield]
