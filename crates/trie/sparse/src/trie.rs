@@ -976,7 +976,9 @@ where
                             if let Some(node) = self.provider.blinded_node(child_path.clone())? {
                                 let decoded = TrieNode::decode(&mut &node[..])?;
                                 trace!(target: "trie::sparse", ?child_path, ?decoded, "Revealing remaining blinded branch child");
-                                // TODO: fetch hash mask
+                                // We'll never have to update the revealed branch node, only remove
+                                // or do nothing, so we can safely ignore the hash mask here and
+                                // pass `None`.
                                 self.reveal_node(child_path.clone(), decoded, None)?;
                             }
                         }
