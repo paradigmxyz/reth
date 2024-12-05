@@ -2235,6 +2235,11 @@ where
             StateRootTask::new(state_root_config, state_root_tx.clone(), state_root_rx);
         let state_root_handle = state_root_task.spawn();
         let state_hook = move |state: &EvmState| {
+            trace!(
+                target: "engine::tree",
+                len = state.len(),
+                "Sending new state update"
+            );
             let _ = state_root_tx.send(StateRootMessage::StateUpdate(state.clone()));
         };
 
