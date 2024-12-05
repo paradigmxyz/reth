@@ -1,9 +1,10 @@
 //! Support for maintaining the blob pool.
 
+use alloy_consensus::Typed2718;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{BlockNumber, B256};
 use reth_execution_types::ChainBlocks;
-use reth_primitives_traits::{Block, BlockBody, SignedTransaction, TxType};
+use reth_primitives_traits::{Block, BlockBody, SignedTransaction};
 use std::collections::BTreeMap;
 
 /// The type that is used to track canonical blob transactions.
