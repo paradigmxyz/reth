@@ -1147,7 +1147,7 @@ pub trait EthPoolTransaction: PoolTransaction {
         sidecar: Arc<BlobTransactionSidecar>,
     ) -> Option<RecoveredTx<Self::Pooled>>;
 
-    /// Tries to covert the `Consensus` type with a blob sidecar into the `Pooled` type.
+    /// Tries to convert the `Consensus` type with a blob sidecar into the `Pooled` type.
     ///
     /// Returns `None` if passed transaction is not a blob transaction.
     fn try_from_eip4844(
