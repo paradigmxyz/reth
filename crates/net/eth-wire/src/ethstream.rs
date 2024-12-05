@@ -1,4 +1,5 @@
 use crate::{
+    capability::RawCapabilityMessage,
     errors::{EthHandshakeError, EthStreamError},
     message::{EthBroadcastMessage, ProtocolBroadcastMessage},
     p2pstream::HANDSHAKE_TIMEOUT,
@@ -6,6 +7,7 @@ use crate::{
     Status,
 };
 use alloy_primitives::bytes::{Bytes, BytesMut};
+use alloy_rlp::Encodable;
 use futures::{ready, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use reth_eth_wire_types::NetworkPrimitives;
@@ -252,6 +254,16 @@ where
 
         Ok(())
     }
+
+    /// Sends a raw capability message directly over the stream
+    pub fn start_send_raw(&mut self, msg: RawCapabilityMessage) -> Result<(), EthStreamError> {
+        let mut bytes = Vec::new();
+        msg.id.encode(&mut bytes);
+        bytes.extend_from_slice(&msg.payload);
+
+        self.inner.start_send_unpin(bytes.into())?;
+        Ok(())
+    }
 }
 
 impl<S, E, N> Stream for EthStream<S, N>
@@ -361,13 +373,15 @@ mod tests {
     use crate::{
         broadcast::BlockHashNumber,
         errors::{EthHandshakeError, EthStreamError},
+        ethstream::RawCapabilityMessage,
         hello::DEFAULT_TCP_PORT,
         p2pstream::UnauthedP2PStream,
         EthMessage, EthStream, EthVersion, HelloMessageWithProtocols, PassthroughCodec,
         ProtocolVersion, Status,
     };
     use alloy_chains::NamedChain;
-    use alloy_primitives::{B256, U256};
+    use alloy_primitives::{bytes::Bytes, B256, U256};
+    use alloy_rlp::Decodable;
     use futures::{SinkExt, StreamExt};
     use reth_ecies::stream::ECIESStream;
     use reth_eth_wire_types::EthNetworkPrimitives;
@@ -742,5 +756,40 @@ mod tests {
         assert!(
             matches!(handshake_result, Err(e) if e.to_string() == EthStreamError::StreamTimeout.to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn can_write_and_read_raw_capability() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+
+        let test_msg = RawCapabilityMessage { id: 0x1234, payload: Bytes::from(vec![1, 2, 3, 4]) };
+
+        let test_msg_clone = test_msg.clone();
+        let handle = tokio::spawn(async move {
+            let (incoming, _) = listener.accept().await.unwrap();
+            let stream = PassthroughCodec::default().framed(incoming);
+            let mut stream = EthStream::<_, EthNetworkPrimitives>::new(EthVersion::Eth67, stream);
+
+            let bytes = stream.inner_mut().next().await.unwrap().unwrap();
+
+            // Create a cursor to track position while decoding
+            let mut id_bytes = &bytes[..];
+            let decoded_id = <usize as Decodable>::decode(&mut id_bytes).unwrap();
+            assert_eq!(decoded_id, test_msg_clone.id);
+
+            // Get remaining bytes after ID decoding
+            let remaining = id_bytes;
+            assert_eq!(remaining, &test_msg_clone.payload[..]);
+        });
+
+        let outgoing = TcpStream::connect(local_addr).await.unwrap();
+        let sink = PassthroughCodec::default().framed(outgoing);
+        let mut client_stream = EthStream::<_, EthNetworkPrimitives>::new(EthVersion::Eth67, sink);
+
+        client_stream.start_send_raw(test_msg).unwrap();
+        client_stream.inner_mut().flush().await.unwrap();
+
+        handle.await.unwrap();
     }
 }
