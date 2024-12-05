@@ -49,9 +49,7 @@ use reth_network_p2p::{
 };
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
-use reth_primitives::{
-    transaction::SignedTransactionIntoRecoveredExt, RecoveredTx, TransactionSigned,
-};
+use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, TransactionSigned};
 use reth_primitives_traits::{SignedTransaction, TxType};
 use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
@@ -703,10 +701,8 @@ where
         BroadcastedTransaction: SignedTransaction,
         PooledTransaction: SignedTransaction,
     >,
-    Pool::Transaction: PoolTransaction<
-        Consensus = N::BroadcastedTransaction,
-        Pooled: Into<N::PooledTransaction> + From<RecoveredTx<N::PooledTransaction>>,
-    >,
+    Pool::Transaction:
+        PoolTransaction<Consensus = N::BroadcastedTransaction, Pooled = N::PooledTransaction>,
 {
     /// Invoked when transactions in the local mempool are considered __pending__.
     ///
@@ -991,13 +987,12 @@ where
                 let _ = response.send(Ok(PooledTransactions::default()));
                 return
             }
-            let transactions = self.pool.get_pooled_transactions_as::<N::PooledTransaction>(
+            let transactions = self.pool.get_pooled_transaction_elements(
                 request.0,
                 GetPooledTransactionLimit::ResponseSizeSoftLimit(
                     self.transaction_fetcher.info.soft_limit_byte_size_pooled_transactions_response,
                 ),
             );
-
             trace!(target: "net::tx::propagation", sent_txs=?transactions.iter().map(|tx| tx.tx_hash()), "Sending requested transactions to peer");
 
             // we sent a response at which point we assume that the peer is aware of the
@@ -1247,7 +1242,7 @@ where
                         } else {
                             // this is a new transaction that should be imported into the pool
 
-                            let pool_transaction = Pool::Transaction::from_pooled(tx.into());
+                            let pool_transaction = Pool::Transaction::from_pooled(tx);
                             new_txs.push(pool_transaction);
 
                             entry.insert(HashSet::from([peer_id]));
@@ -1338,10 +1333,8 @@ where
         BroadcastedTransaction: SignedTransaction,
         PooledTransaction: SignedTransaction,
     >,
-    Pool::Transaction: PoolTransaction<
-        Consensus = N::BroadcastedTransaction,
-        Pooled: Into<N::PooledTransaction> + From<RecoveredTx<N::PooledTransaction>>,
-    >,
+    Pool::Transaction:
+        PoolTransaction<Consensus = N::BroadcastedTransaction, Pooled = N::PooledTransaction>,
 {
     type Output = ();
 

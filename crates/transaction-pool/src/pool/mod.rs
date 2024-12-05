@@ -88,6 +88,7 @@ use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 
 use alloy_eips::eip4844::BlobTransactionSidecar;
+use reth_primitives::RecoveredTx;
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -312,7 +313,7 @@ where
     fn to_pooled_transaction(
         &self,
         transaction: Arc<ValidPoolTransaction<T::Transaction>>,
-    ) -> Option<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>
+    ) -> Option<RecoveredTx<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>>
     where
         <V as TransactionValidator>::Transaction: EthPoolTransaction,
     {
@@ -343,19 +344,6 @@ where
     where
         <V as TransactionValidator>::Transaction: EthPoolTransaction,
     {
-        self.get_pooled_transactions_as(tx_hashes, limit)
-    }
-
-    /// Returns pooled transactions for the given transaction hashes as the requested type.
-    pub fn get_pooled_transactions_as<P>(
-        &self,
-        tx_hashes: Vec<TxHash>,
-        limit: GetPooledTransactionLimit,
-    ) -> Vec<P>
-    where
-        <V as TransactionValidator>::Transaction: EthPoolTransaction,
-        <<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled: Into<P>,
-    {
         let transactions = self.get_all(tx_hashes);
         let mut elements = Vec::with_capacity(transactions.len());
         let mut size = 0;
@@ -366,7 +354,7 @@ where
             };
 
             size += encoded_len;
-            elements.push(pooled.into());
+            elements.push(pooled.into_signed());
 
             if limit.exceeds(size) {
                 break
@@ -380,7 +368,7 @@ where
     pub fn get_pooled_transaction_element(
         &self,
         tx_hash: TxHash,
-    ) -> Option<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>
+    ) -> Option<RecoveredTx<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>>
     where
         <V as TransactionValidator>::Transaction: EthPoolTransaction,
     {

@@ -19,6 +19,7 @@ use reth_consensus_common::calc::{
     base_block_reward, base_block_reward_pre_merge, block_reward, ommer_reward,
 };
 use reth_evm::ConfigureEvmEnv;
+use reth_primitives::PooledTransactionsElement;
 use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::TraceApiServer;
@@ -115,7 +116,8 @@ where
         trace_types: HashSet<TraceType>,
         block_id: Option<BlockId>,
     ) -> Result<TraceResults, Eth::Error> {
-        let tx = recover_raw_transaction(tx)?.into_ecrecovered_transaction();
+        let tx = recover_raw_transaction::<PooledTransactionsElement>(tx)?
+            .into_ecrecovered_transaction();
 
         let (cfg, block, at) = self.eth_api().evm_env_at(block_id.unwrap_or_default()).await?;
 
