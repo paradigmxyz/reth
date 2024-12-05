@@ -204,7 +204,7 @@ use reth_consensus::FullConsensus;
 use reth_engine_primitives::EngineTypes;
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
-use reth_primitives::{EthPrimitives, NodePrimitives};
+use reth_primitives::NodePrimitives;
 use reth_provider::{
     AccountReader, BlockReader, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
     EvmEnvProvider, FullRpcProvider, HeaderProvider, ProviderBlock, ProviderHeader,
@@ -815,7 +815,6 @@ where
         Provider: BlockReader<
             Block = <EthApi::Provider as BlockReader>::Block,
             Receipt = <EthApi::Provider as ReceiptProvider>::Receipt,
-            Header = <EthApi::Provider as HeaderProvider>::Header,
         >,
         Pool: TransactionPool<Transaction = <EthApi::Pool as TransactionPool>::Transaction>,
     {
@@ -963,7 +962,7 @@ pub struct RpcRegistryInner<
     /// Holds the configuration for the RPC modules
     config: RpcModuleConfig,
     /// Holds a all `eth_` namespace handlers
-    eth: EthHandlers<Provider, Pool, Network, Events, EthApi>,
+    eth: EthHandlers<Provider, Events, EthApi>,
     /// to put trace calls behind semaphore
     blocking_pool_guard: BlockingTaskGuard,
     /// Contains the [Methods] of a module
@@ -1056,7 +1055,7 @@ where
     }
 
     /// Returns a reference to the installed [`EthHandlers`].
-    pub const fn eth_handlers(&self) -> &EthHandlers<Provider, Pool, Network, Events, EthApi> {
+    pub const fn eth_handlers(&self) -> &EthHandlers<Provider, Events, EthApi> {
         &self.eth
     }
 
@@ -1484,7 +1483,7 @@ where
                         }
                         RethRpcModule::Web3 => Web3Api::new(self.network.clone()).into_rpc().into(),
                         RethRpcModule::Txpool => TxPoolApi::new(
-                            self.pool.clone(),
+                            self.eth.api.pool().clone(),
                             self.eth.api.tx_resp_builder().clone(),
                         )
                         .into_rpc()

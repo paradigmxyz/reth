@@ -15,7 +15,7 @@ pub type DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, Eth
 
 /// Handlers for core, filter and pubsub `eth` namespace APIs.
 #[derive(Debug, Clone)]
-pub struct EthHandlers<Provider: BlockReader, Pool, Network, Events, EthApi: EthApiTypes> {
+pub struct EthHandlers<Provider: BlockReader, Events, EthApi: EthApiTypes> {
     /// Main `eth_` request handler
     pub api: EthApi,
     /// The async caching layer used by the eth handlers
@@ -23,10 +23,10 @@ pub struct EthHandlers<Provider: BlockReader, Pool, Network, Events, EthApi: Eth
     /// Polling based filter handler available on all transports
     pub filter: EthFilter<EthApi>,
     /// Handler for subscriptions only available for transports that support it (ws, ipc)
-    pub pubsub: EthPubSub<Provider, Pool, Events, Network, EthApi::TransactionCompat>,
+    pub pubsub: EthPubSub<EthApi, Events>,
 }
 
-impl<Provider, Pool, Network, Events, EthApi> EthHandlers<Provider, Pool, Network, Events, EthApi>
+impl<Provider, Events, EthApi> EthHandlers<Provider, Events, EthApi>
 where
     Provider: StateProviderFactory
         + BlockReader<
@@ -36,8 +36,6 @@ where
         + Clone
         + Unpin
         + 'static,
-    Pool: Send + Sync + Clone + 'static,
-    Network: Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
     EthApi: EthApiTypes + 'static,
 {
@@ -45,7 +43,7 @@ where
     ///
     /// This will spawn all necessary tasks for the handlers.
     #[allow(clippy::too_many_arguments)]
-    pub fn bootstrap<EvmConfig, Tasks>(
+    pub fn bootstrap<EvmConfig, Tasks, Pool, Network>(
         provider: Provider,
         pool: Pool,
         network: Network,
@@ -95,12 +93,9 @@ where
             EthFilter::new(api.clone(), ctx.config.filter_config(), Box::new(ctx.executor.clone()));
 
         let pubsub = EthPubSub::with_spawner(
-            ctx.provider.clone(),
-            ctx.pool.clone(),
+            api.clone(),
             ctx.events.clone(),
-            ctx.network.clone(),
             Box::new(ctx.executor.clone()),
-            api.tx_resp_builder().clone(),
         );
 
         Self { api, cache: ctx.cache, filter, pubsub }
