@@ -8,7 +8,7 @@ use alloy_consensus::Header;
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{Address, Bytes, Log, B256, U256};
 use reth_codecs::{add_arbitrary_tests, Compact};
-use reth_primitives::{Receipt, StorageEntry, TransactionSigned, TransactionSignedNoHash, TxType};
+use reth_primitives::{Receipt, StorageEntry, TransactionSigned, TxType};
 use reth_primitives_traits::{Account, Bytecode};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
@@ -226,7 +226,6 @@ impl_compression_for_compact!(
     StoredBlockWithdrawals,
     Bytecode,
     AccountBeforeTx,
-    TransactionSignedNoHash,
     TransactionSigned,
     CompactU256,
     StageCheckpoint,

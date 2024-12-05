@@ -3,6 +3,7 @@
 use alloy_primitives::map::{HashMap, HashSet};
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
+    StateCommitmentProvider,
 };
 use reth_trie::{
     proof::Proof, updates::TrieUpdates, HashedPostState, HashedStorage, MultiProof, Nibbles,
@@ -10,7 +11,10 @@ use reth_trie::{
 };
 use reth_trie_db::DatabaseProof;
 use reth_trie_parallel::root::ParallelStateRootError;
-use reth_trie_sparse::{SparseStateTrie, SparseStateTrieResult, SparseTrieError};
+use reth_trie_sparse::{
+    errors::{SparseStateTrieResult, SparseTrieError},
+    SparseStateTrie,
+};
 use revm_primitives::{keccak256, EvmState, B256};
 use std::{
     collections::BTreeMap,
@@ -176,7 +180,12 @@ pub(crate) struct StateRootTask<Factory> {
 #[allow(dead_code)]
 impl<Factory> StateRootTask<Factory>
 where
-    Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + Send + Sync + 'static,
+    Factory: DatabaseProviderFactory<Provider: BlockReader>
+        + StateCommitmentProvider
+        + Clone
+        + Send
+        + Sync
+        + 'static,
 {
     /// Creates a new state root task with the unified message channel
     pub(crate) fn new(

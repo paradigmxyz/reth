@@ -1,23 +1,25 @@
 use crate::{
     hashed_cursor::{HashedCursor, HashedCursorFactory},
     prefix_set::TriePrefixSetsMut,
-    proof::{Proof, StorageProof},
+    proof::{Proof, ProofBlindedProviderFactory},
     trie_cursor::TrieCursorFactory,
-    HashedPostState, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    HashedPostState,
 };
-use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::{
     keccak256,
-    map::{HashMap, HashSet},
+    map::{Entry, HashMap, HashSet},
     Bytes, B256,
 };
-use alloy_rlp::{BufMut, Decodable, Encodable};
-use itertools::{Either, Itertools};
-use reth_execution_errors::{StateProofError, TrieWitnessError};
-use reth_trie_common::{
-    BranchNode, HashBuilder, Nibbles, StorageMultiProof, TrieAccount, TrieNode, CHILD_INDEX_RANGE,
+use itertools::Itertools;
+use reth_execution_errors::{
+    SparseStateTrieError, SparseTrieError, StateProofError, TrieWitnessError,
 };
-use std::collections::BTreeMap;
+use reth_trie_common::Nibbles;
+use reth_trie_sparse::{
+    blinded::{BlindedProvider, BlindedProviderFactory},
+    SparseStateTrie,
+};
+use std::sync::{mpsc, Arc};
 
 /// State transition witness for the trie.
 #[derive(Debug)]
@@ -90,107 +92,74 @@ where
         }
 
         let proof_targets = self.get_proof_targets(&state)?;
-        let mut account_multiproof =
+        let multiproof =
             Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
                 .with_prefix_sets_mut(self.prefix_sets.clone())
                 .multiproof(proof_targets.clone())?;
 
-        // Attempt to compute state root from proofs and gather additional
-        // information for the witness.
-        let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
-        let mut account_trie_nodes = BTreeMap::default();
-        for (hashed_address, hashed_slots) in proof_targets {
-            let storage_multiproof = account_multiproof
-                .storages
-                .remove(&hashed_address)
-                .unwrap_or_else(StorageMultiProof::empty);
+        // Record all nodes from multiproof in the witness
+        for account_node in multiproof.account_subtree.values() {
+            if let Entry::Vacant(entry) = self.witness.entry(keccak256(account_node.as_ref())) {
+                entry.insert(account_node.clone());
+            }
+        }
+        for storage_node in multiproof.storages.values().flat_map(|s| s.subtree.values()) {
+            if let Entry::Vacant(entry) = self.witness.entry(keccak256(storage_node.as_ref())) {
+                entry.insert(storage_node.clone());
+            }
+        }
 
-            // Gather and record account trie nodes.
-            let account = state
-                .accounts
-                .get(&hashed_address)
-                .ok_or(TrieWitnessError::MissingAccount(hashed_address))?;
-            let value =
-                (account.is_some() || storage_multiproof.root != EMPTY_ROOT_HASH).then(|| {
-                    account_rlp.clear();
-                    TrieAccount::from((account.unwrap_or_default(), storage_multiproof.root))
-                        .encode(&mut account_rlp as &mut dyn BufMut);
-                    account_rlp.clone()
-                });
-            let key = Nibbles::unpack(hashed_address);
-            account_trie_nodes.extend(target_nodes(
-                key.clone(),
-                value,
-                Some(&mut self.witness),
-                account_multiproof
-                    .account_subtree
-                    .matching_nodes_iter(&key)
-                    .sorted_by(|a, b| a.0.cmp(b.0)),
-            )?);
+        let (tx, rx) = mpsc::channel();
+        let proof_provider_factory = ProofBlindedProviderFactory::new(
+            self.trie_cursor_factory,
+            self.hashed_cursor_factory,
+            Arc::new(self.prefix_sets),
+        );
+        let mut sparse_trie =
+            SparseStateTrie::new(WitnessBlindedProviderFactory::new(proof_provider_factory, tx));
+        sparse_trie.reveal_multiproof(proof_targets.clone(), multiproof)?;
 
-            // Gather and record storage trie nodes for this account.
-            let mut storage_trie_nodes = BTreeMap::default();
+        // Attempt to update state trie to gather additional information for the witness.
+        for (hashed_address, hashed_slots) in
+            proof_targets.into_iter().sorted_unstable_by_key(|(ha, _)| *ha)
+        {
+            // Update storage trie first.
             let storage = state.storages.get(&hashed_address);
-            for hashed_slot in hashed_slots {
-                let slot_nibbles = Nibbles::unpack(hashed_slot);
-                let slot_value = storage
+            let storage_trie = sparse_trie
+                .storage_trie_mut(&hashed_address)
+                .ok_or(SparseStateTrieError::Sparse(SparseTrieError::Blind))?;
+            for hashed_slot in hashed_slots.into_iter().sorted_unstable() {
+                let storage_nibbles = Nibbles::unpack(hashed_slot);
+                let maybe_leaf_value = storage
                     .and_then(|s| s.storage.get(&hashed_slot))
                     .filter(|v| !v.is_zero())
                     .map(|v| alloy_rlp::encode_fixed_size(v).to_vec());
-                storage_trie_nodes.extend(target_nodes(
-                    slot_nibbles.clone(),
-                    slot_value,
-                    Some(&mut self.witness),
-                    storage_multiproof
-                        .subtree
-                        .matching_nodes_iter(&slot_nibbles)
-                        .sorted_by(|a, b| a.0.cmp(b.0)),
-                )?);
+
+                if let Some(value) = maybe_leaf_value {
+                    storage_trie
+                        .update_leaf(storage_nibbles, value)
+                        .map_err(SparseStateTrieError::Sparse)?;
+                } else {
+                    storage_trie
+                        .remove_leaf(&storage_nibbles)
+                        .map_err(SparseStateTrieError::Sparse)?;
+                }
             }
 
-            next_root_from_proofs(storage_trie_nodes, |key: Nibbles| {
-                // Right pad the target with 0s.
-                let mut padded_key = key.pack();
-                padded_key.resize(32, 0);
-                let target_key = B256::from_slice(&padded_key);
-                let storage_prefix_set = self
-                    .prefix_sets
-                    .storage_prefix_sets
-                    .get(&hashed_address)
-                    .cloned()
-                    .unwrap_or_default();
-                let proof = StorageProof::new_hashed(
-                    self.trie_cursor_factory.clone(),
-                    self.hashed_cursor_factory.clone(),
-                    hashed_address,
-                )
-                .with_prefix_set_mut(storage_prefix_set)
-                .storage_multiproof(HashSet::from_iter([target_key]))?;
+            // Calculate storage root after updates.
+            storage_trie.root();
 
-                // The subtree only contains the proof for a single target.
-                let node =
-                    proof.subtree.get(&key).ok_or(TrieWitnessError::MissingTargetNode(key))?;
-                self.witness.insert(keccak256(node.as_ref()), node.clone()); // record in witness
-                Ok(node.clone())
-            })?;
+            let account = state
+                .accounts
+                .get(&hashed_address)
+                .ok_or(TrieWitnessError::MissingAccount(hashed_address))?
+                .unwrap_or_default();
+            sparse_trie.update_account(hashed_address, account)?;
+
+            while let Ok(node) = rx.try_recv() {
+                self.witness.insert(keccak256(&node), node);
+            }
         }
-
-        next_root_from_proofs(account_trie_nodes, |key: Nibbles| {
-            // Right pad the target with 0s.
-            let mut padded_key = key.pack();
-            padded_key.resize(32, 0);
-            let targets = HashMap::from_iter([(B256::from_slice(&padded_key), HashSet::default())]);
-            let proof =
-                Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
-                    .with_prefix_sets_mut(self.prefix_sets.clone())
-                    .multiproof(targets)?;
-
-            // The subtree only contains the proof for a single target.
-            let node =
-                proof.account_subtree.get(&key).ok_or(TrieWitnessError::MissingTargetNode(key))?;
-            self.witness.insert(keccak256(node.as_ref()), node.clone()); // record in witness
-            Ok(node.clone())
-        })?;
 
         Ok(self.witness)
     }
@@ -225,141 +194,65 @@ where
     }
 }
 
-/// Decodes and unrolls all nodes from the proof. Returns only sibling nodes
-/// in the path of the target and the final leaf node with updated value.
-pub fn target_nodes<'b>(
-    key: Nibbles,
-    value: Option<Vec<u8>>,
-    mut witness: Option<&mut HashMap<B256, Bytes>>,
-    proof: impl IntoIterator<Item = (&'b Nibbles, &'b Bytes)>,
-) -> Result<BTreeMap<Nibbles, Either<B256, Vec<u8>>>, TrieWitnessError> {
-    let mut trie_nodes = BTreeMap::default();
-    let mut proof_iter = proof.into_iter().enumerate().peekable();
-    while let Some((idx, (path, encoded))) = proof_iter.next() {
-        // Record the node in witness.
-        if let Some(witness) = witness.as_mut() {
-            witness.insert(keccak256(encoded.as_ref()), encoded.clone());
-        }
-
-        let mut next_path = path.clone();
-        match TrieNode::decode(&mut &encoded[..])? {
-            TrieNode::Branch(branch) => {
-                next_path.push(key[path.len()]);
-                let children = branch_node_children(path.clone(), &branch);
-                for (child_path, value) in children {
-                    if !key.starts_with(&child_path) {
-                        let value = if value.len() < B256::len_bytes() {
-                            Either::Right(value.to_vec())
-                        } else {
-                            Either::Left(B256::from_slice(&value[1..]))
-                        };
-                        trie_nodes.insert(child_path, value);
-                    }
-                }
-            }
-            TrieNode::Extension(extension) => {
-                next_path.extend_from_slice(&extension.key);
-            }
-            TrieNode::Leaf(leaf) => {
-                next_path.extend_from_slice(&leaf.key);
-                if next_path != key {
-                    trie_nodes
-                        .insert(next_path.clone(), Either::Right(leaf.value.as_slice().to_vec()));
-                }
-            }
-            TrieNode::EmptyRoot => {
-                if idx != 0 || proof_iter.peek().is_some() {
-                    return Err(TrieWitnessError::UnexpectedEmptyRoot(next_path))
-                }
-            }
-        };
-    }
-
-    if let Some(value) = value {
-        trie_nodes.insert(key, Either::Right(value));
-    }
-
-    Ok(trie_nodes)
+#[derive(Debug)]
+struct WitnessBlindedProviderFactory<F> {
+    /// Blinded node provider factory.
+    provider_factory: F,
+    /// Sender for forwarding fetched blinded node.
+    tx: mpsc::Sender<Bytes>,
 }
 
-/// Computes the next root hash of a trie by processing a set of trie nodes and
-/// their provided values.
-pub fn next_root_from_proofs(
-    trie_nodes: BTreeMap<Nibbles, Either<B256, Vec<u8>>>,
-    mut trie_node_provider: impl FnMut(Nibbles) -> Result<Bytes, TrieWitnessError>,
-) -> Result<B256, TrieWitnessError> {
-    // Ignore branch child hashes in the path of leaves or lower child hashes.
-    let mut keys = trie_nodes.keys().peekable();
-    let mut ignored = HashSet::<Nibbles>::default();
-    while let Some(key) = keys.next() {
-        if keys.peek().is_some_and(|next| next.starts_with(key)) {
-            ignored.insert(key.clone());
-        }
+impl<F> WitnessBlindedProviderFactory<F> {
+    const fn new(provider_factory: F, tx: mpsc::Sender<Bytes>) -> Self {
+        Self { provider_factory, tx }
     }
-
-    let mut hash_builder = HashBuilder::default();
-    let mut trie_nodes = trie_nodes.into_iter().filter(|e| !ignored.contains(&e.0)).peekable();
-    while let Some((path, value)) = trie_nodes.next() {
-        match value {
-            Either::Left(branch_hash) => {
-                let parent_branch_path = path.slice(..path.len() - 1);
-                if hash_builder.key.starts_with(&parent_branch_path) ||
-                    trie_nodes.peek().is_some_and(|next| next.0.starts_with(&parent_branch_path))
-                {
-                    hash_builder.add_branch(path, branch_hash, false);
-                } else {
-                    // Parent is a branch node that needs to be turned into an extension node.
-                    let mut path = path.clone();
-                    loop {
-                        let node = trie_node_provider(path.clone())?;
-                        match TrieNode::decode(&mut &node[..])? {
-                            TrieNode::Branch(branch) => {
-                                let children = branch_node_children(path, &branch);
-                                for (child_path, value) in children {
-                                    if value.len() < B256::len_bytes() {
-                                        hash_builder.add_leaf(child_path, value);
-                                    } else {
-                                        let hash = B256::from_slice(&value[1..]);
-                                        hash_builder.add_branch(child_path, hash, false);
-                                    }
-                                }
-                                break
-                            }
-                            TrieNode::Leaf(leaf) => {
-                                let mut child_path = path;
-                                child_path.extend_from_slice(&leaf.key);
-                                hash_builder.add_leaf(child_path, &leaf.value);
-                                break
-                            }
-                            TrieNode::Extension(ext) => {
-                                path.extend_from_slice(&ext.key);
-                            }
-                            TrieNode::EmptyRoot => {
-                                return Err(TrieWitnessError::UnexpectedEmptyRoot(path))
-                            }
-                        }
-                    }
-                }
-            }
-            Either::Right(leaf_value) => {
-                hash_builder.add_leaf(path, &leaf_value);
-            }
-        }
-    }
-    Ok(hash_builder.root())
 }
 
-/// Returned branch node children with keys in order.
-fn branch_node_children(prefix: Nibbles, node: &BranchNode) -> Vec<(Nibbles, &[u8])> {
-    let mut children = Vec::with_capacity(node.state_mask.count_ones() as usize);
-    let mut stack_ptr = node.as_ref().first_child_index();
-    for index in CHILD_INDEX_RANGE {
-        if node.state_mask.is_bit_set(index) {
-            let mut child_path = prefix.clone();
-            child_path.push(index);
-            children.push((child_path, &node.stack[stack_ptr][..]));
-            stack_ptr += 1;
-        }
+impl<F> BlindedProviderFactory for WitnessBlindedProviderFactory<F>
+where
+    F: BlindedProviderFactory,
+    F::AccountNodeProvider: BlindedProvider<Error = SparseTrieError>,
+    F::StorageNodeProvider: BlindedProvider<Error = SparseTrieError>,
+{
+    type AccountNodeProvider = WitnessBlindedProvider<F::AccountNodeProvider>;
+    type StorageNodeProvider = WitnessBlindedProvider<F::StorageNodeProvider>;
+
+    fn account_node_provider(&self) -> Self::AccountNodeProvider {
+        let provider = self.provider_factory.account_node_provider();
+        WitnessBlindedProvider::new(provider, self.tx.clone())
     }
-    children
+
+    fn storage_node_provider(&self, account: B256) -> Self::StorageNodeProvider {
+        let provider = self.provider_factory.storage_node_provider(account);
+        WitnessBlindedProvider::new(provider, self.tx.clone())
+    }
+}
+
+#[derive(Debug)]
+struct WitnessBlindedProvider<P> {
+    /// Proof-based blinded.
+    provider: P,
+    /// Sender for forwarding fetched blinded node.
+    tx: mpsc::Sender<Bytes>,
+}
+
+impl<P> WitnessBlindedProvider<P> {
+    const fn new(provider: P, tx: mpsc::Sender<Bytes>) -> Self {
+        Self { provider, tx }
+    }
+}
+
+impl<P> BlindedProvider for WitnessBlindedProvider<P>
+where
+    P: BlindedProvider<Error = SparseTrieError>,
+{
+    type Error = P::Error;
+
+    fn blinded_node(&mut self, path: Nibbles) -> Result<Option<Bytes>, Self::Error> {
+        let maybe_node = self.provider.blinded_node(path)?;
+        if let Some(node) = &maybe_node {
+            self.tx.send(node.clone()).map_err(|error| SparseTrieError::Other(Box::new(error)))?;
+        }
+        Ok(maybe_node)
+    }
 }

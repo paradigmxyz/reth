@@ -1,7 +1,7 @@
 //! Errors when computing the state root.
 
-use alloc::string::ToString;
-use alloy_primitives::B256;
+use alloc::{boxed::Box, string::ToString};
+use alloy_primitives::{Bytes, B256};
 use nybbles::Nibbles;
 use reth_storage_errors::{db::DatabaseError, provider::ProviderError};
 use thiserror::Error;
@@ -62,8 +62,63 @@ impl From<StateProofError> for ProviderError {
     }
 }
 
+/// Result type with [`SparseStateTrieError`] as error.
+pub type SparseStateTrieResult<Ok> = Result<Ok, SparseStateTrieError>;
+
+/// Error encountered in `SparseStateTrie`.
+#[derive(Error, Debug)]
+pub enum SparseStateTrieError {
+    /// Encountered invalid root node.
+    #[error("invalid root node at {path:?}: {node:?}")]
+    InvalidRootNode {
+        /// Path to first proof node.
+        path: Nibbles,
+        /// Encoded first proof node.
+        node: Bytes,
+    },
+    /// Sparse trie error.
+    #[error(transparent)]
+    Sparse(#[from] SparseTrieError),
+    /// RLP error.
+    #[error(transparent)]
+    Rlp(#[from] alloy_rlp::Error),
+}
+
+/// Result type with [`SparseTrieError`] as error.
+pub type SparseTrieResult<Ok> = Result<Ok, SparseTrieError>;
+
+/// Error encountered in `SparseTrie`.
+#[derive(Error, Debug)]
+pub enum SparseTrieError {
+    /// Sparse trie is still blind. Thrown on attempt to update it.
+    #[error("sparse trie is blind")]
+    Blind,
+    /// Encountered blinded node on update.
+    #[error("attempted to update blind node at {path:?}: {hash}")]
+    BlindedNode {
+        /// Blind node path.
+        path: Nibbles,
+        /// Node hash
+        hash: B256,
+    },
+    /// Encountered unexpected node at path when revealing.
+    #[error("encountered an invalid node at path {path:?} when revealing: {node:?}")]
+    Reveal {
+        /// Path to the node.
+        path: Nibbles,
+        /// Node that was at the path when revealing.
+        node: Box<dyn core::fmt::Debug>,
+    },
+    /// RLP error.
+    #[error(transparent)]
+    Rlp(#[from] alloy_rlp::Error),
+    /// Other.
+    #[error(transparent)]
+    Other(#[from] Box<dyn core::error::Error>),
+}
+
 /// Trie witness errors.
-#[derive(Error, PartialEq, Eq, Clone, Debug)]
+#[derive(Error, Debug)]
 pub enum TrieWitnessError {
     /// Error gather proofs.
     #[error(transparent)]
@@ -71,15 +126,12 @@ pub enum TrieWitnessError {
     /// RLP decoding error.
     #[error(transparent)]
     Rlp(#[from] alloy_rlp::Error),
+    /// Sparse state trie error.
+    #[error(transparent)]
+    Sparse(#[from] SparseStateTrieError),
     /// Missing account.
     #[error("missing account {_0}")]
     MissingAccount(B256),
-    /// Missing target node.
-    #[error("target node missing from proof {_0:?}")]
-    MissingTargetNode(Nibbles),
-    /// Unexpected empty root.
-    #[error("unexpected empty root: {_0:?}")]
-    UnexpectedEmptyRoot(Nibbles),
 }
 
 impl From<TrieWitnessError> for ProviderError {

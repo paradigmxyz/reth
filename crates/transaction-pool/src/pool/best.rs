@@ -77,7 +77,8 @@ impl<T: TransactionOrdering> Iterator for BestTransactionsWithFees<T> {
 /// be executed on the current state, but only yields transactions that are ready to be executed
 /// now. While it contains all gapless transactions of a sender, it _always_ only returns the
 /// transaction with the current on chain nonce.
-pub(crate) struct BestTransactions<T: TransactionOrdering> {
+#[derive(Debug)]
+pub struct BestTransactions<T: TransactionOrdering> {
     /// Contains a copy of _all_ transactions of the pending pool at the point in time this
     /// iterator was created.
     pub(crate) all: BTreeMap<TransactionId, PendingTransaction<T>>,

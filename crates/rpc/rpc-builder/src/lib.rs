@@ -50,7 +50,7 @@
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events:
 //!         CanonStateSubscriptions<Primitives = reth_primitives::EthPrimitives> + Clone + 'static,
-//!     EvmConfig: ConfigureEvm<Header = Header>,
+//!     EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
 //!     BlockExecutor: BlockExecutorProvider<Primitives = Events::Primitives>,
 //!     Consensus: reth_consensus::FullConsensus + Clone + 'static,
 //! {
@@ -135,7 +135,7 @@
 //!         CanonStateSubscriptions<Primitives = reth_primitives::EthPrimitives> + Clone + 'static,
 //!     EngineApi: EngineApiServer<EngineT>,
 //!     EngineT: EngineTypes,
-//!     EvmConfig: ConfigureEvm<Header = Header>,
+//!     EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
 //!     BlockExecutor: BlockExecutorProvider<Primitives = Events::Primitives>,
 //!     Consensus: reth_consensus::FullConsensus + Clone + 'static,
 //! {
@@ -210,8 +210,8 @@ use reth_provider::{
     EvmEnvProvider, FullRpcProvider, HeaderProvider, ReceiptProvider, StateProviderFactory,
 };
 use reth_rpc::{
-    AdminApi, DebugApi, EngineEthApi, EthBundle, NetApi, OtterscanApi, RPCApi, RethApi, TraceApi,
-    TxPoolApi, ValidationApi, ValidationApiConfig, Web3Api,
+    AdminApi, DebugApi, EngineEthApi, EthBundle, MinerApi, NetApi, OtterscanApi, RPCApi, RethApi,
+    TraceApi, TxPoolApi, ValidationApi, ValidationApiConfig, Web3Api,
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_api::{
@@ -1499,6 +1499,7 @@ where
                         )
                         .into_rpc()
                         .into(),
+                        RethRpcModule::Miner => MinerApi::default().into_rpc().into(),
                     })
                     .clone()
             })

@@ -624,6 +624,10 @@ impl PoolTransaction for MockTransaction {
         *self.get_sender()
     }
 
+    fn sender_ref(&self) -> &Address {
+        self.get_sender()
+    }
+
     fn nonce(&self) -> u64 {
         *self.get_nonce()
     }

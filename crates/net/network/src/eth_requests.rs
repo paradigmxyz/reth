@@ -78,8 +78,9 @@ impl<C, N: NetworkPrimitives> EthRequestHandler<C, N> {
     }
 }
 
-impl<C> EthRequestHandler<C>
+impl<C, N> EthRequestHandler<C, N>
 where
+    N: NetworkPrimitives,
     C: BlockReader + HeaderProvider + ReceiptProvider<Receipt = reth_primitives::Receipt>,
 {
     /// Returns the list of requested headers
@@ -222,10 +223,11 @@ where
 /// An endless future.
 ///
 /// This should be spawned or used as part of `tokio::select!`.
-impl<C> Future for EthRequestHandler<C>
+impl<C, N> Future for EthRequestHandler<C, N>
 where
-    C: BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
-        + HeaderProvider<Header = reth_primitives::Header>
+    N: NetworkPrimitives,
+    C: BlockReader<Block = N::Block, Receipt = reth_primitives::Receipt>
+        + HeaderProvider<Header = N::BlockHeader>
         + Unpin,
 {
     type Output = ();
