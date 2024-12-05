@@ -1,9 +1,9 @@
 //! Abstraction of transaction envelope type ID.
 
 use crate::{InMemorySize, MaybeArbitrary, MaybeCompact};
+use alloy_consensus::Typed2718;
 use alloy_primitives::{U64, U8};
 use core::fmt;
-use alloy_consensus::Typed2718;
 
 /// Helper trait that unifies all behaviour required by transaction type ID to support full node
 /// operations.
@@ -35,7 +35,6 @@ pub trait TxType:
     + InMemorySize
     + MaybeArbitrary
 {
-
     /// Returns whether this transaction type can be __broadcasted__ as full transaction over the
     /// network.
     ///
