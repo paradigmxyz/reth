@@ -391,6 +391,8 @@ mod tests {
     }
 
     impl HeaderProvider for Provider {
+        type Header = Header;
+
         fn is_known(&self, _block_hash: &BlockHash) -> ProviderResult<bool> {
             Ok(self.is_known)
         }
@@ -495,7 +497,8 @@ mod tests {
             blob_gas_used: None,
             excess_blob_gas: None,
             parent_beacon_block_root: None,
-            requests_hash: None
+            requests_hash: None,
+            target_blobs_per_block: None,
         };
         // size: 0x9b5
 

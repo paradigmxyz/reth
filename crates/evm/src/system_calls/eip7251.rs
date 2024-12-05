@@ -1,7 +1,6 @@
 //! [EIP-7251](https://eips.ethereum.org/EIPS/eip-7251) system call implementation.
 use crate::ConfigureEvm;
 use alloc::{boxed::Box, format};
-use alloy_consensus::Header;
 use alloy_eips::eip7251::CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS;
 use alloy_primitives::Bytes;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
@@ -22,7 +21,7 @@ pub(crate) fn transact_consolidation_requests_contract_call<EvmConfig, EXT, DB>(
 where
     DB: Database,
     DB::Error: core::fmt::Display,
-    EvmConfig: ConfigureEvm<Header = Header>,
+    EvmConfig: ConfigureEvm,
 {
     // get previous env
     let previous_env = Box::new(evm.context.env().clone());

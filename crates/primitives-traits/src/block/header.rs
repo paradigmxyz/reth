@@ -30,27 +30,9 @@ pub trait BlockHeader:
     + MaybeSerde
     + MaybeArbitrary
     + MaybeSerdeBincodeCompat
+    + AsRef<Self>
     + 'static
 {
 }
 
-impl<T> BlockHeader for T where
-    T: Send
-        + Sync
-        + Unpin
-        + Clone
-        + Default
-        + fmt::Debug
-        + PartialEq
-        + Eq
-        + alloy_rlp::Encodable
-        + alloy_rlp::Decodable
-        + alloy_consensus::BlockHeader
-        + Sealable
-        + InMemorySize
-        + MaybeSerde
-        + MaybeArbitrary
-        + MaybeSerdeBincodeCompat
-        + 'static
-{
-}
+impl BlockHeader for alloy_consensus::Header {}

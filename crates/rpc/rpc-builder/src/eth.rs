@@ -15,11 +15,11 @@ pub type DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, Eth
 
 /// Handlers for core, filter and pubsub `eth` namespace APIs.
 #[derive(Debug, Clone)]
-pub struct EthHandlers<Provider, Pool, Network, Events, EthApi: EthApiTypes> {
+pub struct EthHandlers<Provider: BlockReader, Pool, Network, Events, EthApi: EthApiTypes> {
     /// Main `eth_` request handler
     pub api: EthApi,
     /// The async caching layer used by the eth handlers
-    pub cache: EthStateCache,
+    pub cache: EthStateCache<Provider::Block, Provider::Receipt>,
     /// Polling based filter handler available on all transports
     pub filter: EthFilter<Provider, Pool, EthApi>,
     /// Handler for subscriptions only available for transports that support it (ws, ipc)
@@ -29,8 +29,11 @@ pub struct EthHandlers<Provider, Pool, Network, Events, EthApi: EthApiTypes> {
 impl<Provider, Pool, Network, Events, EthApi> EthHandlers<Provider, Pool, Network, Events, EthApi>
 where
     Provider: StateProviderFactory
-        + BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>
-        + EvmEnvProvider
+        + BlockReader<
+            Block = reth_primitives::Block,
+            Receipt = reth_primitives::Receipt,
+            Header = reth_primitives::Header,
+        > + EvmEnvProvider
         + Clone
         + Unpin
         + 'static,
@@ -65,12 +68,7 @@ where
         EvmConfig: ConfigureEvm<Header = Header>,
         Tasks: TaskSpawner + Clone + 'static,
     {
-        let cache = EthStateCache::spawn_with(
-            provider.clone(),
-            config.cache,
-            executor.clone(),
-            evm_config.clone(),
-        );
+        let cache = EthStateCache::spawn_with(provider.clone(), config.cache, executor.clone());
 
         let new_canonical_blocks = events.canonical_state_stream();
         let c = cache.clone();

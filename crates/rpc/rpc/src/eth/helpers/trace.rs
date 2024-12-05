@@ -7,7 +7,9 @@ use reth_rpc_eth_api::helpers::{LoadState, Trace};
 
 use crate::EthApi;
 
-impl<Provider, Pool, Network, EvmConfig> Trace for EthApi<Provider, Pool, Network, EvmConfig> where
-    Self: LoadState<Provider: BlockReader, Evm: ConfigureEvm<Header = Header>>
+impl<Provider, Pool, Network, EvmConfig> Trace for EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Self: LoadState<Provider: BlockReader, Evm: ConfigureEvm<Header = Header>>,
+    Provider: BlockReader,
 {
 }

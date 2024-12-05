@@ -8,6 +8,7 @@ use reth_db::DatabaseError;
 use reth_execution_errors::StorageRootError;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, ProviderError,
+    StateCommitmentProvider,
 };
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
@@ -58,7 +59,12 @@ impl<Factory> ParallelStateRoot<Factory> {
 
 impl<Factory> ParallelStateRoot<Factory>
 where
-    Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + Send + Sync + 'static,
+    Factory: DatabaseProviderFactory<Provider: BlockReader>
+        + StateCommitmentProvider
+        + Clone
+        + Send
+        + Sync
+        + 'static,
 {
     /// Calculate incremental state root in parallel.
     pub fn incremental_root(self) -> Result<B256, ParallelStateRootError> {
@@ -115,10 +121,10 @@ where
                         trie_cursor_factory,
                         hashed_state,
                         hashed_address,
+                        prefix_set,
                         #[cfg(feature = "metrics")]
                         metrics,
                     )
-                    .with_prefix_set(prefix_set)
                     .calculate(retain_updates)?)
                 })();
                 let _ = tx.send(result);
@@ -173,6 +179,7 @@ where
                                 trie_cursor_factory.clone(),
                                 hashed_cursor_factory.clone(),
                                 hashed_address,
+                                Default::default(),
                                 #[cfg(feature = "metrics")]
                                 self.metrics.storage_trie.clone(),
                             )

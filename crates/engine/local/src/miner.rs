@@ -1,5 +1,6 @@
 //! Contains the implementation of the mining mode for the local engine.
 
+use alloy_consensus::BlockHeader;
 use alloy_primitives::{TxHash, B256};
 use alloy_rpc_types_engine::{CancunPayloadFields, ExecutionPayloadSidecar, ForkchoiceState};
 use eyre::OptionExt;
@@ -114,7 +115,7 @@ where
             to_engine,
             mode,
             payload_builder,
-            last_timestamp: latest_header.timestamp,
+            last_timestamp: latest_header.timestamp(),
             last_block_hashes: vec![latest_header.hash()],
         };
 
