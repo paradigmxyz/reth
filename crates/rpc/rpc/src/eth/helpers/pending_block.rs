@@ -4,7 +4,8 @@ use alloy_consensus::Header;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderTx, StateProviderFactory,
+    BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderTx,
+    StateProviderFactory,
 };
 use reth_rpc_eth_api::{
     helpers::{LoadPendingBlock, SpawnBlocking},
@@ -33,6 +34,7 @@ where
             >,
             Evm: ConfigureEvm<Header = Header, Transaction = ProviderTx<Self::Provider>>,
         >,
+    Provider: BlockReader,
 {
     #[inline]
     fn pending_block(&self) -> &tokio::sync::Mutex<Option<PendingBlock>> {

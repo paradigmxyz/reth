@@ -8,12 +8,13 @@ use alloy_network::TransactionBuilder;
 use alloy_primitives::{Address, Bytes, TxHash, B256};
 use alloy_rpc_types_eth::{transaction::TransactionRequest, BlockNumberOrTag, TransactionInfo};
 use futures::Future;
+use reth_node_api::BlockBody;
 use reth_primitives::{
     transaction::SignedTransactionIntoRecoveredExt, SealedBlockWithSenders, TransactionMeta,
     TransactionSigned,
 };
 use reth_provider::{
-    BlockNumReader, BlockReaderIdExt, ProviderReceipt, ProviderTx, ReceiptProvider,
+    BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
     TransactionsProvider,
 };
 use reth_rpc_eth_types::{
@@ -79,15 +80,17 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     /// Get all transactions in the block with the given hash.
     ///
     /// Returns `None` if block does not exist.
+    #[expect(clippy::type_complexity)]
     fn transactions_by_block(
         &self,
         block: B256,
-    ) -> impl Future<Output = Result<Option<Vec<TransactionSigned>>, Self::Error>> + Send {
+    ) -> impl Future<Output = Result<Option<Vec<ProviderTx<Self::Provider>>>, Self::Error>> + Send
+    {
         async move {
             self.cache()
                 .get_sealed_block_with_senders(block)
                 .await
-                .map(|b| b.map(|b| b.body.transactions.clone()))
+                .map(|b| b.map(|b| b.body.transactions().to_vec()))
                 .map_err(Self::Error::from_eth_err)
         }
     }
@@ -568,7 +571,10 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
         hash: B256,
     ) -> impl Future<
         Output = Result<
-            Option<(TransactionSource<ProviderTx<Self::Provider>>, Arc<SealedBlockWithSenders>)>,
+            Option<(
+                TransactionSource<ProviderTx<Self::Provider>>,
+                Arc<SealedBlockWithSenders<ProviderBlock<Self::Provider>>>,
+            )>,
             Self::Error,
         >,
     > + Send {
