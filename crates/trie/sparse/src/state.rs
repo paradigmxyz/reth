@@ -103,6 +103,9 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     }
 
     /// Reveal unknown trie paths from provided leaf path and its proof for the account.
+    ///
+    /// Panics if trie updates retention is enabled.
+    ///
     /// NOTE: This method does not extensively validate the proof.
     pub fn reveal_account(
         &mut self,
@@ -140,6 +143,9 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     }
 
     /// Reveal unknown trie paths from provided leaf path and its proof for the storage slot.
+    ///
+    /// Panics if trie updates retention is enabled.
+    ///
     /// NOTE: This method does not extensively validate the proof.
     pub fn reveal_storage_slot(
         &mut self,
