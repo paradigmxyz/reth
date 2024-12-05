@@ -16,6 +16,7 @@ reth-chainspec.workspace = true
 reth-ethereum-forks.workspace = true
 reth-evm.workspace = true
 reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 reth-revm.workspace = true
 reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
@@ -63,6 +64,7 @@ std = [
 	"alloy-genesis/std",
 	"alloy-primitives/std",
 	"revm-primitives/std",
+    "reth-primitives-traits/std",
 	"revm/std",
 	"reth-optimism-primitives/std",
 	"reth-ethereum-forks/std",

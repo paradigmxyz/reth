@@ -1,13 +1,13 @@
 //! An implementation of the eth gas price oracle, used for providing gas price estimates based on
 //! previous blocks.
 
-use alloy_consensus::{constants::GWEI_TO_WEI, BlockHeader};
+use alloy_consensus::{constants::GWEI_TO_WEI, BlockHeader, Transaction};
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types_eth::BlockId;
 use derive_more::{Deref, DerefMut, From, Into};
 use itertools::Itertools;
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_rpc_server_types::{
     constants,
     constants::gas_oracle::{
@@ -15,7 +15,7 @@ use reth_rpc_server_types::{
         DEFAULT_MAX_GAS_PRICE, MAX_HEADER_HISTORY, SAMPLE_NUMBER,
     },
 };
-use reth_storage_api::BlockReaderIdExt;
+use reth_storage_api::{BlockReader, BlockReaderIdExt};
 use schnellru::{ByLength, LruMap};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Formatter};
@@ -70,11 +70,14 @@ impl Default for GasPriceOracleConfig {
 
 /// Calculates a gas price depending on recent blocks.
 #[derive(Debug)]
-pub struct GasPriceOracle<Provider> {
+pub struct GasPriceOracle<Provider>
+where
+    Provider: BlockReader,
+{
     /// The type used to subscribe to block events and get block info
     provider: Provider,
     /// The cache for blocks
-    cache: EthStateCache,
+    cache: EthStateCache<Provider::Block, Provider::Receipt>,
     /// The config for the oracle
     oracle_config: GasPriceOracleConfig,
     /// The price under which the sample will be ignored.
@@ -92,7 +95,7 @@ where
     pub fn new(
         provider: Provider,
         mut oracle_config: GasPriceOracleConfig,
-        cache: EthStateCache,
+        cache: EthStateCache<Provider::Block, Provider::Receipt>,
     ) -> Self {
         // sanitize the percentile to be less than 100
         if oracle_config.percentile > 100 {
@@ -220,43 +223,44 @@ where
             None => return Ok(None),
         };
 
-        let base_fee_per_gas = block.base_fee_per_gas;
-        let parent_hash = block.parent_hash;
+        let base_fee_per_gas = block.base_fee_per_gas();
+        let parent_hash = block.parent_hash();
 
         // sort the functions by ascending effective tip first
-        let sorted_transactions = block
-            .body
-            .transactions
-            .iter()
-            .sorted_by_cached_key(|tx| tx.effective_tip_per_gas(base_fee_per_gas));
+        let sorted_transactions = block.body.transactions().iter().sorted_by_cached_key(|tx| {
+            if let Some(base_fee) = base_fee_per_gas {
+                (*tx).effective_tip_per_gas(base_fee)
+            } else {
+                Some((*tx).priority_fee_or_price())
+            }
+        });
 
         let mut prices = Vec::with_capacity(limit);
 
         for tx in sorted_transactions {
-            let mut effective_gas_tip = None;
+            let effective_tip = if let Some(base_fee) = base_fee_per_gas {
+                tx.effective_tip_per_gas(base_fee)
+            } else {
+                Some(tx.priority_fee_or_price())
+            };
+
             // ignore transactions with a tip under the configured threshold
             if let Some(ignore_under) = self.ignore_price {
-                let tip = tx.effective_tip_per_gas(base_fee_per_gas);
-                effective_gas_tip = Some(tip);
-                if tip < Some(ignore_under) {
+                if effective_tip < Some(ignore_under) {
                     continue
                 }
             }
 
             // check if the sender was the coinbase, if so, ignore
             if let Some(sender) = tx.recover_signer() {
-                if sender == block.beneficiary {
+                if sender == block.beneficiary() {
                     continue
                 }
             }
 
             // a `None` effective_gas_tip represents a transaction where the max_fee_per_gas is
             // less than the base fee which would be invalid
-            let effective_gas_tip = effective_gas_tip
-                .unwrap_or_else(|| tx.effective_tip_per_gas(base_fee_per_gas))
-                .ok_or(RpcInvalidTransactionError::FeeCapTooLow)?;
-
-            prices.push(U256::from(effective_gas_tip));
+            prices.push(U256::from(effective_tip.ok_or(RpcInvalidTransactionError::FeeCapTooLow)?));
 
             // we have enough entries
             if prices.len() >= limit {
