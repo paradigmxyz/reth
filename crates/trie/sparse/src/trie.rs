@@ -747,6 +747,13 @@ impl<P> RevealedSparseTrie<P> {
                     buffers
                         .branch_value_stack_buf
                         .resize(buffers.branch_child_buf.len(), Default::default());
+                    trace!(
+                        target: "trie::sparse",
+                        ?path,
+                        ?state_mask,
+                        children = ?buffers.branch_child_buf,
+                        "Calculated branch node children"
+                    );
                     let mut added_children = false;
 
                     // TODO(alexey): set the `TrieMask` bits directly
