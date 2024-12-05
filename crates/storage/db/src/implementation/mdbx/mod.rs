@@ -445,7 +445,12 @@ impl DatabaseEnv {
     }
 
     /// Creates all the defined tables, if necessary.
-    pub fn create_tables<TS: TableSet>(&self) -> Result<(), DatabaseError> {
+    pub fn create_tables(&self) -> Result<(), DatabaseError> {
+        self.create_default_tables::<Tables>()
+    }
+
+    /// Creates all the default tables, if necessary.
+    pub fn create_default_tables<TS: TableSet>(&self) -> Result<(), DatabaseError> {
         let tx = self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?;
 
         for table in TS::tables() {
@@ -528,7 +533,7 @@ mod tests {
     fn create_test_db_with_path(kind: DatabaseEnvKind, path: &Path) -> DatabaseEnv {
         let env = DatabaseEnv::open(path, kind, DatabaseArguments::new(ClientVersion::default()))
             .expect(ERROR_DB_CREATION);
-        env.create_tables::<Tables>().expect(ERROR_TABLE_CREATION);
+        env.create_tables().expect(ERROR_TABLE_CREATION);
         env
     }
 

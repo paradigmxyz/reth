@@ -14,7 +14,7 @@ use alloy_eips::{
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use core::fmt;
 use reth_chainspec::{ChainInfo, EthereumHardforks};
-use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv, Tables};
+use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
 use reth_evm::ConfigureEvmEnv;
@@ -135,7 +135,7 @@ impl<N: NodeTypesWithDB<DB = Arc<DatabaseEnv>>> ProviderFactory<N> {
         static_file_provider: StaticFileProvider<N::Primitives>,
     ) -> RethResult<Self> {
         Ok(Self {
-            db: Arc::new(init_db::<_, Tables>(path, args).map_err(RethError::msg)?),
+            db: Arc::new(init_db(path, args).map_err(RethError::msg)?),
             chain_spec,
             static_file_provider,
             prune_modes: PruneModes::none(),

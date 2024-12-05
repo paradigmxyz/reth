@@ -5,7 +5,7 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::parse_socket_address;
-use reth_db::{init_db, DatabaseEnv, Tables};
+use reth_db::{init_db, DatabaseEnv};
 use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
@@ -184,7 +184,7 @@ impl<
 
         tracing::info!(target: "reth::cli", path = ?db_path, "Opening database");
         let database = Arc::new(
-            init_db::<_, Tables>(db_path.clone(), self.db.database_args())?.with_metrics(),
+            init_db(db_path.clone(), self.db.database_args())?.with_metrics(),
         );
 
         if with_unused_ports {
