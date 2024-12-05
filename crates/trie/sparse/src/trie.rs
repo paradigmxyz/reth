@@ -756,8 +756,9 @@ impl<P> RevealedSparseTrie<P> {
                                 };
                                 tree_mask_values.push(tree_mask_value);
 
-                                // Set the hash mask. If a child node has a hash value AND is a
-                                // branch node, set the hash mask and save the hash.
+                                // Set the hash mask. If a child node is a revealed branch node OR
+                                // is a blinded node that has its hash mask bit set according to the
+                                // database, set the hash mask bit and save the hash.
                                 let hash = child.as_hash().filter(|_| {
                                     node_type.is_branch() ||
                                         (node_type.is_hash() &&
