@@ -36,7 +36,7 @@ use reth::{
         BuilderContext, FullNodeTypes, Node, NodeAdapter, NodeBuilder, NodeComponentsBuilder,
         PayloadBuilderConfig,
     },
-    network::NetworkHandle,
+    network::{EthNetworkPrimitives, NetworkHandle},
     payload::ExecutionPayloadValidator,
     primitives::{Block, EthPrimitives, SealedBlockFor, TransactionSigned},
     providers::{CanonStateSubscriptions, EthStorage, StateProviderFactory},
@@ -263,6 +263,7 @@ struct MyCustomNode;
 /// Configure the node types
 impl NodeTypes for MyCustomNode {
     type Primitives = EthPrimitives;
+    type NetworkPrimitives = EthNetworkPrimitives;
     type ChainSpec = ChainSpec;
     type StateCommitment = MerklePatriciaTrie;
     type Storage = EthStorage;

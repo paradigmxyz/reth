@@ -10,9 +10,8 @@ use alloy_primitives::bytes::{Bytes, BytesMut};
 use alloy_rlp::Encodable;
 use futures::{ready, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
-use reth_eth_wire_types::NetworkPrimitives;
 use reth_ethereum_forks::ForkFilter;
-use reth_primitives_traits::GotExpected;
+use reth_primitives_traits::{GotExpected, NetworkPrimitives};
 use std::{
     pin::Pin,
     task::{Context, Poll},

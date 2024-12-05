@@ -10,7 +10,7 @@ use reth_ethereum_engine_primitives::{
 };
 use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_evm_ethereum::execute::EthExecutionStrategyFactory;
-use reth_network::{NetworkHandle, PeersInfo};
+use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{
     AddOnsContext, ConfigureEvm, EngineValidator, FullNodeComponents, HeaderTy, NodeTypesWithDB,
     TxTy,
@@ -72,6 +72,7 @@ impl EthereumNode {
 
 impl NodeTypes for EthereumNode {
     type Primitives = EthPrimitives;
+    type NetworkPrimitives = EthNetworkPrimitives;
     type ChainSpec = ChainSpec;
     type StateCommitment = MerklePatriciaTrie;
     type Storage = EthStorage;
@@ -100,6 +101,7 @@ where
             Engine = EthEngineTypes,
             ChainSpec = ChainSpec,
             Primitives = EthPrimitives,
+            NetworkPrimitives = EthNetworkPrimitives,
             Storage = EthStorage,
         >,
     N: FullNodeTypes<Types = Types>,

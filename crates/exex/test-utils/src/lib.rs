@@ -28,7 +28,7 @@ use reth_db_common::init::init_genesis;
 use reth_evm::test_utils::MockExecutorProvider;
 use reth_execution_types::Chain;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification, ExExNotifications, Wal};
-use reth_network::{config::SecretKey, NetworkConfigBuilder, NetworkManager};
+use reth_network::{config::SecretKey, EthNetworkPrimitives, NetworkConfigBuilder, NetworkManager};
 use reth_node_api::{
     FullNodeTypes, FullNodeTypesAdapter, NodePrimitives, NodeTypes, NodeTypesWithDBAdapter,
     NodeTypesWithEngine,
@@ -120,6 +120,7 @@ pub struct TestNode;
 
 impl NodeTypes for TestNode {
     type Primitives = EthPrimitives;
+    type NetworkPrimitives = EthNetworkPrimitives;
     type ChainSpec = ChainSpec;
     type StateCommitment = reth_trie_db::MerklePatriciaTrie;
     type Storage = EthStorage;

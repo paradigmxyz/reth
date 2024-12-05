@@ -19,6 +19,7 @@ use parking_lot::Mutex;
 use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_db::mock::{DatabaseMock, TxMock};
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
+use reth_eth_wire_types::EthNetworkPrimitives;
 use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::NodeTypes;
@@ -160,6 +161,7 @@ pub struct MockNode;
 
 impl NodeTypes for MockNode {
     type Primitives = EthPrimitives;
+    type NetworkPrimitives = EthNetworkPrimitives;
     type ChainSpec = ChainSpec;
     type StateCommitment = MerklePatriciaTrie;
     type Storage = EthStorage;

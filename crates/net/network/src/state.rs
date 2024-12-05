@@ -12,14 +12,13 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
 use rand::seq::SliceRandom;
 use reth_eth_wire::{
-    BlockHashNumber, Capabilities, DisconnectReason, EthNetworkPrimitives, NetworkPrimitives,
-    NewBlockHashes, Status,
+    BlockHashNumber, Capabilities, DisconnectReason, EthNetworkPrimitives, NewBlockHashes, Status,
 };
 use reth_ethereum_forks::ForkId;
 use reth_network_api::{DiscoveredEvent, DiscoveryEvent, PeerRequest, PeerRequestSender};
 use reth_network_peers::PeerId;
 use reth_network_types::{PeerAddr, PeerKind};
-use reth_primitives_traits::Block;
+use reth_primitives_traits::{Block, NetworkPrimitives};
 use std::{
     collections::{HashMap, VecDeque},
     fmt,

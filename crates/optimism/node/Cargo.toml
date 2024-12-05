@@ -15,6 +15,7 @@ workspace = true
 reth-chainspec.workspace = true
 reth-db.workspace = true
 reth-engine-local.workspace = true
+reth-eth-wire-types.workspace = true
 reth-primitives.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-util.workspace = true

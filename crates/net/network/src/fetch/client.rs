@@ -3,7 +3,7 @@
 use crate::{fetch::DownloadRequest, flattened_response::FlattenedResponse};
 use alloy_primitives::B256;
 use futures::{future, future::Either};
-use reth_eth_wire::{EthNetworkPrimitives, NetworkPrimitives};
+use reth_eth_wire::EthNetworkPrimitives;
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::{
     bodies::client::{BodiesClient, BodiesFut},
@@ -14,6 +14,7 @@ use reth_network_p2p::{
 };
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
+use reth_primitives_traits::NetworkPrimitives;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
