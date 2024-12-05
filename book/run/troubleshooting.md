@@ -21,9 +21,7 @@ This page tries to answer how to deal with the most popular issues.
 
 Externally accessing a `datadir` inside a named docker volume will usually come with folder/file ownership/permissions issues.
 
-**It is not recommended** to use the path to the named volume as it will trigger an error code 13.
-
-Example: `db-access --path /var/lib/docker/volumes/named_volume/_data/eth/db`
+**It is not recommended** to use the path to the named volume as it will trigger an error code 13. `RETH_DB_PATH: /var/lib/docker/volumes/named_volume/_data/eth/db cargo r --examples db-access --path ` is **DISCOURAGED** and a mounted volume with the right permissions should be used instead.
 
 ### Error code 13 
 
