@@ -1,3 +1,4 @@
+use super::OpNodeCore;
 use crate::{OpEthApi, OpEthApiError};
 use alloy_consensus::Header;
 use alloy_primitives::{Bytes, TxKind, U256};
@@ -5,7 +6,7 @@ use alloy_rpc_types_eth::transaction::TransactionRequest;
 use reth_evm::ConfigureEvm;
 use reth_rpc_eth_api::{
     helpers::{estimate::EstimateCall, Call, EthCall, LoadPendingBlock, LoadState, SpawnBlocking},
-    FromEthApiError, IntoEthApiError, RpcNodeCore,
+    FromEthApiError, IntoEthApiError,
 };
 use reth_rpc_eth_types::{revm_utils::CallFees, RpcInvalidTransactionError};
 use revm::primitives::{BlockEnv, OptimismFields, TxEnv};
@@ -13,7 +14,7 @@ use revm::primitives::{BlockEnv, OptimismFields, TxEnv};
 impl<N> EthCall for OpEthApi<N>
 where
     Self: EstimateCall + LoadPendingBlock,
-    N: RpcNodeCore,
+    N: OpNodeCore,
 {
 }
 
@@ -21,7 +22,7 @@ impl<N> EstimateCall for OpEthApi<N>
 where
     Self: Call,
     Self::Error: From<OpEthApiError>,
-    N: RpcNodeCore,
+    N: OpNodeCore,
 {
 }
 
@@ -29,7 +30,7 @@ impl<N> Call for OpEthApi<N>
 where
     Self: LoadState<Evm: ConfigureEvm<Header = Header>> + SpawnBlocking,
     Self::Error: From<OpEthApiError>,
-    N: RpcNodeCore,
+    N: OpNodeCore,
 {
     #[inline]
     fn call_gas_limit(&self) -> u64 {

@@ -925,7 +925,7 @@ impl RpcModuleConfigBuilder {
 /// A Helper type the holds instances of the configured modules.
 #[derive(Debug, Clone)]
 pub struct RpcRegistryInner<
-    Provider,
+    Provider: BlockReader,
     Pool,
     Network,
     Tasks,
@@ -1029,6 +1029,7 @@ where
 impl<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
     RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
 where
+    Provider: BlockReader,
     EthApi: EthApiTypes,
 {
     /// Returns a reference to the installed [`EthApi`](reth_rpc::eth::EthApi).
@@ -1045,7 +1046,7 @@ where
     ///
     /// This will spawn exactly one [`EthStateCache`] service if this is the first time the cache is
     /// requested.
-    pub const fn eth_cache(&self) -> &EthStateCache {
+    pub const fn eth_cache(&self) -> &EthStateCache<Provider::Block, Provider::Receipt> {
         &self.eth.cache
     }
 
@@ -1089,7 +1090,7 @@ impl<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
 where
     Network: NetworkInfo + Clone + 'static,
     EthApi: EthApiTypes,
-    Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
+    Provider: BlockReader + ChainSpecProvider<ChainSpec: EthereumHardforks>,
     BlockExecutor: BlockExecutorProvider,
 {
     /// Instantiates `AdminApi`

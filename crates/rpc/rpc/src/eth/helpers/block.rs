@@ -2,10 +2,10 @@
 
 use alloy_rpc_types_eth::{BlockId, TransactionReceipt};
 use reth_primitives::TransactionMeta;
-use reth_provider::{BlockReaderIdExt, HeaderProvider};
+use reth_provider::{BlockReader, HeaderProvider};
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
-    RpcReceipt,
+    RpcNodeCoreExt, RpcReceipt,
 };
 use reth_rpc_eth_types::{EthApiError, EthReceiptBuilder};
 
@@ -18,6 +18,7 @@ where
         NetworkTypes: alloy_network::Network<ReceiptResponse = TransactionReceipt>,
         Provider: HeaderProvider,
     >,
+    Provider: BlockReader,
 {
     async fn block_receipts(
         &self,
@@ -62,7 +63,7 @@ where
 
 impl<Provider, Pool, Network, EvmConfig> LoadBlock for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: LoadPendingBlock + SpawnBlocking,
-    Provider: BlockReaderIdExt,
+    Self: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt,
+    Provider: BlockReader,
 {
 }
