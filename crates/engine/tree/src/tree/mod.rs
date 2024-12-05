@@ -2351,8 +2351,11 @@ where
                     } else {
                         debug!(target: "engine::tree", block=?sealed_block.num_hash(), "TrieUpdates match exactly");
                     }
-
-                    (task_state_root, task_trie_updates)
+                    if task_state_root == regular_state_root {
+                        (task_state_root, task_trie_updates)
+                    } else {
+                        (task_state_root, regular_trie_updates)
+                    }
                 }
                 (Err(e), _) => {
                     info!(target: "engine::tree", error=?e, "on state root task wait_for_result");
