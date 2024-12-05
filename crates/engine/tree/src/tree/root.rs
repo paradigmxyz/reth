@@ -736,10 +736,13 @@ mod tests {
         let task = StateRootTask::new(config, tx.clone(), rx);
         let handle = task.spawn();
 
+        let state_hook_sender = StateHookSender(tx.clone());
         for update in state_updates {
-            tx.send(StateRootMessage::StateUpdate(update)).expect("failed to send state");
+            state_hook_sender
+                .send(StateRootMessage::StateUpdate(update))
+                .expect("failed to send state");
         }
-        drop(tx);
+        drop(state_hook_sender);
 
         let (root_from_task, _) = handle.wait_for_result().expect("task failed");
         let root_from_base = state_root(accumulated_state);
