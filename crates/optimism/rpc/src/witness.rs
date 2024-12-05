@@ -3,8 +3,7 @@
 use alloy_consensus::Header;
 use alloy_primitives::B256;
 use alloy_rpc_types_debug::ExecutionWitness;
-use async_trait::async_trait;
-use jsonrpsee_core::RpcResult;
+use jsonrpsee_core::{async_trait, RpcResult};
 use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_chainspec::ChainSpecProvider;
 use reth_evm::ConfigureEvm;
@@ -16,7 +15,7 @@ pub use reth_rpc_api::DebugExecutionWitnessApiServer;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_tasks::TaskSpawner;
 use std::{fmt::Debug, sync::Arc};
-use tokio::sync::Semaphore;
+use tokio::sync::{oneshot, Semaphore};
 
 /// An extension to the `debug_` namespace of the RPC API.
 pub struct OpDebugWitnessApi<Provider, EvmConfig> {
@@ -50,13 +49,14 @@ where
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl<Provider, EvmConfig> DebugExecutionWitnessApiServer<OpPayloadAttributes>
     for OpDebugWitnessApi<Provider, EvmConfig>
 where
     Provider: BlockReaderIdExt<Header = reth_primitives::Header>
         + StateProviderFactory
         + ChainSpecProvider<ChainSpec = OpChainSpec>
+        + Clone
         + 'static,
     EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned> + 'static,
 {
@@ -69,19 +69,17 @@ where
 
         let parent_header = self.parent_header(parent_block_hash).to_rpc_result()?;
 
-        let provider = self.inner.provider.clone();
-        let builder = self.inner.builder.clone();
+        let (tx, rx) = oneshot::channel();
+        let this = self.clone();
+        self.inner.task_spawner.spawn_blocking(Box::pin(async move {
+            let res =
+                this.inner.builder.payload_witness(&this.inner.provider, parent_header, attributes);
+            let _ = tx.send(res);
+        }));
 
-        // Spawn the CPU-intensive work on a blocking task
-        self.inner
-            .task_spawner
-            .spawn_blocking(move || {
-                builder
-                    .payload_witness(&provider, parent_header, attributes)
-                    .map_err(|err| internal_rpc_err(err.to_string()))
-            })
-            .await
+        rx.await
             .map_err(|err| internal_rpc_err(err.to_string()))?
+            .map_err(|err| internal_rpc_err(err.to_string()))
     }
 }
 
