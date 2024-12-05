@@ -348,7 +348,6 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         })
     }
 }
-
 impl<F> SparseStateTrie<F>
 where
     F: BlindedProviderFactory,
