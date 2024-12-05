@@ -3,6 +3,7 @@
 use alloy_primitives::map::{HashMap, HashSet};
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
+    StateCommitmentProvider,
 };
 use reth_trie::{
     proof::Proof, updates::TrieUpdates, HashedPostState, HashedStorage, MultiProof, Nibbles,
@@ -10,7 +11,10 @@ use reth_trie::{
 };
 use reth_trie_db::DatabaseProof;
 use reth_trie_parallel::root::ParallelStateRootError;
-use reth_trie_sparse::{SparseStateTrie, SparseStateTrieResult, SparseTrieError};
+use reth_trie_sparse::{
+    errors::{SparseStateTrieResult, SparseTrieError},
+    SparseStateTrie,
+};
 use revm_primitives::{keccak256, EvmState, B256};
 use std::{
     collections::BTreeMap,
@@ -176,7 +180,12 @@ pub(crate) struct StateRootTask<Factory> {
 #[allow(dead_code)]
 impl<Factory> StateRootTask<Factory>
 where
-    Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + Send + Sync + 'static,
+    Factory: DatabaseProviderFactory<Provider: BlockReader>
+        + StateCommitmentProvider
+        + Clone
+        + Send
+        + Sync
+        + 'static,
 {
     /// Creates a new state root task with the unified message channel
     pub(crate) fn new(
@@ -216,10 +225,10 @@ where
         view: ConsistentDbView<Factory>,
         input: Arc<TrieInput>,
         update: EvmState,
-        fetched_proof_targets: &HashMap<B256, HashSet<B256>>,
+        fetched_proof_targets: &mut HashMap<B256, HashSet<B256>>,
         proof_sequence_number: u64,
         state_root_message_sender: Sender<StateRootMessage>,
-    ) -> HashMap<B256, HashSet<B256>> {
+    ) {
         let mut hashed_state_update = HashedPostState::default();
         for (address, account) in update {
             if account.is_touched() {
@@ -249,9 +258,11 @@ where
         }
 
         let proof_targets = get_proof_targets(&hashed_state_update, fetched_proof_targets);
+        for (address, slots) in &proof_targets {
+            fetched_proof_targets.entry(*address).or_default().extend(slots)
+        }
 
         // Dispatch proof gathering for this state update
-        let targets = proof_targets.clone();
         rayon::spawn(move || {
             let provider = match view.provider_ro() {
                 Ok(provider) => provider,
@@ -266,7 +277,7 @@ where
                 provider.tx_ref(),
                 // TODO(alexey): this clone can be expensive, we should avoid it
                 input.as_ref().clone(),
-                targets,
+                proof_targets,
             );
             match result {
                 Ok(proof) => {
@@ -281,8 +292,6 @@ where
                 }
             }
         });
-
-        proof_targets
     }
 
     /// Handler for new proof calculated, aggregates all the existing sequential proofs.
@@ -357,17 +366,14 @@ where
                             total_updates = updates_received,
                             "Received new state update"
                         );
-                        let targets = Self::on_state_update(
+                        Self::on_state_update(
                             self.config.consistent_view.clone(),
                             self.config.input.clone(),
                             update,
-                            &self.fetched_proof_targets,
+                            &mut self.fetched_proof_targets,
                             self.proof_sequencer.next_sequence(),
                             self.tx.clone(),
                         );
-                        for (address, slots) in targets {
-                            self.fetched_proof_targets.entry(address).or_default().extend(slots)
-                        }
                     }
                     StateRootMessage::ProofCalculated { proof, state_update, sequence_number } => {
                         proofs_processed += 1;

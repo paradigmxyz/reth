@@ -39,7 +39,7 @@ use reth_primitives::{
     },
     transaction::recover_signers,
     BlockWithSenders, Receipt, SealedBlockFor, SealedBlockWithSenders, SealedHeader,
-    StaticFileSegment, TransactionMeta, TransactionSignedNoHash,
+    StaticFileSegment, TransactionMeta, TransactionSigned,
 };
 use reth_primitives_traits::SignedTransaction;
 use reth_stages_types::{PipelineTarget, StageId};
@@ -1706,7 +1706,7 @@ impl<N: NodePrimitives> StatsReader for StaticFileProvider<N> {
                 .get_highest_static_file_tx(StaticFileSegment::Receipts)
                 .map(|receipts| receipts + 1)
                 .unwrap_or_default() as usize),
-            tables::Transactions::<TransactionSignedNoHash>::NAME => Ok(self
+            tables::Transactions::<TransactionSigned>::NAME => Ok(self
                 .get_highest_static_file_tx(StaticFileSegment::Transactions)
                 .map(|txs| txs + 1)
                 .unwrap_or_default()

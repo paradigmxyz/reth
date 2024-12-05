@@ -24,8 +24,8 @@ use reth_primitives::{
 use reth_provider::{
     BlockExecutionWriter, BlockNumReader, BlockWriter, CanonStateNotification,
     CanonStateNotificationSender, CanonStateNotifications, ChainSpecProvider, ChainSplit,
-    ChainSplitTarget, DBProvider, DisplayBlocksChain, HeaderProvider, ProviderError,
-    StaticFileProviderFactory, StorageLocation,
+    ChainSplitTarget, DBProvider, DisplayBlocksChain, HashedPostStateProvider, HeaderProvider,
+    ProviderError, StaticFileProviderFactory, StorageLocation,
 };
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
@@ -1215,7 +1215,7 @@ where
         recorder: &mut MakeCanonicalDurationsRecorder,
     ) -> Result<(), CanonicalError> {
         let (blocks, state, chain_trie_updates) = chain.into_inner();
-        let hashed_state = state.hash_state_slow();
+        let hashed_state = self.externals.provider_factory.hashed_post_state(state.state());
         let prefix_sets = hashed_state.construct_prefix_sets().freeze();
         let hashed_state_sorted = hashed_state.into_sorted();
 
@@ -1885,7 +1885,12 @@ mod tests {
         );
 
         let provider = tree.externals.provider_factory.provider().unwrap();
-        let prefix_sets = exec5.hash_state_slow().construct_prefix_sets().freeze();
+        let prefix_sets = tree
+            .externals
+            .provider_factory
+            .hashed_post_state(exec5.state())
+            .construct_prefix_sets()
+            .freeze();
         let state_root =
             StateRoot::from_tx(provider.tx_ref()).with_prefix_sets(prefix_sets).root().unwrap();
         assert_eq!(state_root, block5.state_root);

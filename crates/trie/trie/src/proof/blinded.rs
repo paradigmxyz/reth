@@ -4,11 +4,9 @@ use alloy_primitives::{
     map::{HashMap, HashSet},
     Bytes, B256,
 };
+use reth_execution_errors::SparseTrieError;
 use reth_trie_common::{prefix_set::TriePrefixSetsMut, Nibbles};
-use reth_trie_sparse::{
-    blinded::{pad_path_to_key, BlindedProvider, BlindedProviderFactory},
-    SparseTrieError,
-};
+use reth_trie_sparse::blinded::{pad_path_to_key, BlindedProvider, BlindedProviderFactory};
 use std::sync::Arc;
 
 /// Factory for instantiating providers capable of retrieving blinded trie nodes via proofs.
@@ -20,6 +18,17 @@ pub struct ProofBlindedProviderFactory<T, H> {
     hashed_cursor_factory: H,
     /// A set of prefix sets that have changes.
     prefix_sets: Arc<TriePrefixSetsMut>,
+}
+
+impl<T, H> ProofBlindedProviderFactory<T, H> {
+    /// Create new proof-based blinded provider factory.
+    pub const fn new(
+        trie_cursor_factory: T,
+        hashed_cursor_factory: H,
+        prefix_sets: Arc<TriePrefixSetsMut>,
+    ) -> Self {
+        Self { trie_cursor_factory, hashed_cursor_factory, prefix_sets }
+    }
 }
 
 impl<T, H> BlindedProviderFactory for ProofBlindedProviderFactory<T, H>
@@ -59,6 +68,17 @@ pub struct ProofBlindedAccountProvider<T, H> {
     prefix_sets: Arc<TriePrefixSetsMut>,
 }
 
+impl<T, H> ProofBlindedAccountProvider<T, H> {
+    /// Create new proof-based blinded account node provider.
+    pub const fn new(
+        trie_cursor_factory: T,
+        hashed_cursor_factory: H,
+        prefix_sets: Arc<TriePrefixSetsMut>,
+    ) -> Self {
+        Self { trie_cursor_factory, hashed_cursor_factory, prefix_sets }
+    }
+}
+
 impl<T, H> BlindedProvider for ProofBlindedAccountProvider<T, H>
 where
     T: TrieCursorFactory + Clone,
@@ -89,6 +109,18 @@ pub struct ProofBlindedStorageProvider<T, H> {
     prefix_sets: Arc<TriePrefixSetsMut>,
     /// Target account.
     account: B256,
+}
+
+impl<T, H> ProofBlindedStorageProvider<T, H> {
+    /// Create new proof-based blinded storage node provider.
+    pub const fn new(
+        trie_cursor_factory: T,
+        hashed_cursor_factory: H,
+        prefix_sets: Arc<TriePrefixSetsMut>,
+        account: B256,
+    ) -> Self {
+        Self { trie_cursor_factory, hashed_cursor_factory, prefix_sets, account }
+    }
 }
 
 impl<T, H> BlindedProvider for ProofBlindedStorageProvider<T, H>

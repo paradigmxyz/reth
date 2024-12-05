@@ -359,10 +359,7 @@ mod tests {
                                 transaction.hash(),
                                 next_tx_num,
                             )?;
-                            tx.put::<tables::Transactions>(
-                                next_tx_num,
-                                transaction.clone().into(),
-                            )?;
+                            tx.put::<tables::Transactions>(next_tx_num, transaction.clone())?;
 
                             let (addr, _) =
                                 accounts.get_mut(rng.gen::<usize>() % n_accounts as usize).unwrap();

@@ -15,7 +15,7 @@ use reth_network_p2p::{
     error::{DownloadError, DownloadResult},
 };
 use reth_primitives::SealedHeader;
-use reth_primitives_traits::{size::InMemorySize, BlockHeader as _};
+use reth_primitives_traits::size::InMemorySize;
 use reth_storage_api::HeaderProvider;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{

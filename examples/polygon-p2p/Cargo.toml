@@ -16,6 +16,7 @@ secp256k1 = { workspace = true, features = [
 tokio.workspace = true
 reth-network.workspace = true
 reth-chainspec.workspace = true
+reth-network-api.workspace = true
 reth-primitives.workspace = true
 serde_json.workspace = true
 reth-tracing.workspace = true

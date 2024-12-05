@@ -839,7 +839,7 @@ mod tests {
             f: F,
         ) -> Pin<Box<dyn Future<Output = ()> + Send>>
         where
-            F: FnOnce(EthStream<P2PStream<ECIESStream<TcpStream>>>) -> O + Send + 'static,
+            F: FnOnce(EthStream<P2PStream<ECIESStream<TcpStream>>, N>) -> O + Send + 'static,
             O: Future<Output = ()> + Send + Sync,
         {
             let status = self.status;
