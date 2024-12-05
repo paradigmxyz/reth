@@ -160,6 +160,8 @@ pub struct RevealedSparseTrie<P = DefaultBlindedProvider> {
     provider: P,
     /// All trie nodes.
     nodes: HashMap<Nibbles, SparseNode>,
+    /// All revealed trie nodes.
+    revealed_nodes: HashSet<Nibbles>,
     /// All branch node hash masks.
     branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
     /// All leaf values.
@@ -176,7 +178,8 @@ impl<P> fmt::Debug for RevealedSparseTrie<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RevealedSparseTrie")
             .field("nodes", &self.nodes)
-            .field("branch_hash_masks", &self.branch_node_hash_masks)
+            .field("revealed_nodes", &self.revealed_nodes)
+            .field("branch_node_hash_masks", &self.branch_node_hash_masks)
             .field("values", &self.values)
             .field("prefix_set", &self.prefix_set)
             .field("updates", &self.updates)
@@ -190,6 +193,7 @@ impl Default for RevealedSparseTrie {
         Self {
             provider: Default::default(),
             nodes: HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]),
+            revealed_nodes: HashSet::default(),
             branch_node_hash_masks: HashMap::default(),
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
@@ -209,6 +213,7 @@ impl RevealedSparseTrie {
         let mut this = Self {
             provider: Default::default(),
             nodes: HashMap::default(),
+            revealed_nodes: HashSet::default(),
             branch_node_hash_masks: HashMap::default(),
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
@@ -232,6 +237,7 @@ impl<P> RevealedSparseTrie<P> {
         let mut this = Self {
             provider,
             nodes: HashMap::default(),
+            revealed_nodes: HashSet::default(),
             branch_node_hash_masks: HashMap::default(),
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
@@ -248,6 +254,7 @@ impl<P> RevealedSparseTrie<P> {
         RevealedSparseTrie {
             provider,
             nodes: self.nodes,
+            revealed_nodes: self.revealed_nodes,
             branch_node_hash_masks: self.branch_node_hash_masks,
             values: self.values,
             prefix_set: self.prefix_set,
@@ -286,6 +293,10 @@ impl<P> RevealedSparseTrie<P> {
         node: TrieNode,
         hash_mask: Option<TrieMask>,
     ) -> SparseTrieResult<()> {
+        if self.revealed_nodes.contains(&path) {
+            return Ok(());
+        }
+
         if let Some(hash_mask) = hash_mask {
             self.branch_node_hash_masks.insert(path.clone(), hash_mask);
         }
@@ -293,7 +304,7 @@ impl<P> RevealedSparseTrie<P> {
         match node {
             TrieNode::EmptyRoot => {
                 debug_assert!(path.is_empty());
-                self.nodes.insert(path, SparseNode::Empty);
+                self.nodes.insert(path.clone(), SparseNode::Empty);
             }
             TrieNode::Branch(branch) => {
                 let mut stack_ptr = branch.as_ref().first_child_index();
@@ -309,7 +320,7 @@ impl<P> RevealedSparseTrie<P> {
                 match self.nodes.get(&path) {
                     // Blinded and non-existent nodes can be replaced.
                     Some(SparseNode::Hash(_)) | None => {
-                        self.nodes.insert(path, SparseNode::new_branch(branch.state_mask));
+                        self.nodes.insert(path.clone(), SparseNode::new_branch(branch.state_mask));
                     }
                     // Branch node already exists, or an extension node was placed where a
                     // branch node was before.
@@ -325,7 +336,7 @@ impl<P> RevealedSparseTrie<P> {
                     let mut child_path = path.clone();
                     child_path.extend_from_slice_unchecked(&ext.key);
                     self.reveal_node_or_hash(child_path, &ext.child)?;
-                    self.nodes.insert(path, SparseNode::new_ext(ext.key));
+                    self.nodes.insert(path.clone(), SparseNode::new_ext(ext.key));
                 }
                 // Extension node already exists, or an extension node was placed where a branch
                 // node was before.
@@ -340,7 +351,7 @@ impl<P> RevealedSparseTrie<P> {
                     let mut full = path.clone();
                     full.extend_from_slice_unchecked(&leaf.key);
                     self.values.insert(full, leaf.value);
-                    self.nodes.insert(path, SparseNode::new_leaf(leaf.key));
+                    self.nodes.insert(path.clone(), SparseNode::new_leaf(leaf.key));
                 }
                 // Left node already exists.
                 Some(SparseNode::Leaf { .. }) => {}
@@ -352,6 +363,8 @@ impl<P> RevealedSparseTrie<P> {
                 ) => return Err(SparseTrieError::Reveal { path, node: Box::new(node.clone()) }),
             },
         }
+
+        self.revealed_nodes.insert(path);
 
         Ok(())
     }
