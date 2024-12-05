@@ -3,6 +3,7 @@
 use futures::{Sink, Stream};
 use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{
+    capability::RawCapabilityMessage,
     errors::EthStreamError,
     message::EthBroadcastMessage,
     multiplex::{ProtocolProxy, RlpxSatelliteStream},
@@ -82,6 +83,14 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
         match self {
             Self::EthOnly(conn) => conn.start_send_broadcast(item),
             Self::Satellite(conn) => conn.primary_mut().start_send_broadcast(item),
+        }
+    }
+
+    /// Sends a raw capability message over the connection
+    pub fn start_send_raw(&mut self, msg: RawCapabilityMessage) -> Result<(), EthStreamError> {
+        match self {
+            Self::EthOnly(conn) => conn.start_send_raw(msg),
+            Self::Satellite(conn) => conn.primary_mut().start_send_raw(msg),
         }
     }
 }
