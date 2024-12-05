@@ -340,7 +340,7 @@ where
         &self,
         tx_hashes: Vec<TxHash>,
         limit: GetPooledTransactionLimit,
-    ) -> Vec<RecoveredTx<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>>
+    ) -> Vec<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>
     where
         <V as TransactionValidator>::Transaction: EthPoolTransaction,
     {
@@ -354,7 +354,7 @@ where
             };
 
             size += encoded_len;
-            elements.push(pooled);
+            elements.push(pooled.into_signed());
 
             if limit.exceeds(size) {
                 break

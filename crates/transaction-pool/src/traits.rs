@@ -236,7 +236,7 @@ pub trait TransactionPool: Send + Sync + Clone {
         &self,
         tx_hashes: Vec<TxHash>,
         limit: GetPooledTransactionLimit,
-    ) -> Vec<RecoveredTx<<Self::Transaction as PoolTransaction>::Pooled>>;
+    ) -> Vec<<Self::Transaction as PoolTransaction>::Pooled>;
 
     /// Returns the pooled transaction variant for the given transaction hash.
     ///

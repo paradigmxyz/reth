@@ -987,20 +987,12 @@ where
                 let _ = response.send(Ok(PooledTransactions::default()));
                 return
             }
-            let transactions = self
-                .pool
-                .get_pooled_transaction_elements(
-                    request.0,
-                    GetPooledTransactionLimit::ResponseSizeSoftLimit(
-                        self.transaction_fetcher
-                            .info
-                            .soft_limit_byte_size_pooled_transactions_response,
-                    ),
-                )
-                .into_iter()
-                .map(|tx| tx.into_signed())
-                .collect::<Vec<_>>();
-
+            let transactions = self.pool.get_pooled_transaction_elements(
+                request.0,
+                GetPooledTransactionLimit::ResponseSizeSoftLimit(
+                    self.transaction_fetcher.info.soft_limit_byte_size_pooled_transactions_response,
+                ),
+            );
             trace!(target: "net::tx::propagation", sent_txs=?transactions.iter().map(|tx| tx.tx_hash()), "Sending requested transactions to peer");
 
             // we sent a response at which point we assume that the peer is aware of the

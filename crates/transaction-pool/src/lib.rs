@@ -416,8 +416,7 @@ where
         &self,
         tx_hashes: Vec<TxHash>,
         limit: GetPooledTransactionLimit,
-    ) -> Vec<RecoveredTx<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>>
-    {
+    ) -> Vec<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled> {
         self.pool.get_pooled_transaction_elements(tx_hashes, limit)
     }
 
