@@ -156,7 +156,7 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
     }
 
-    /// Requests the [Receipt] for the block hash
+    /// Requests the receipts for the block hash
     ///
     /// Returns `None` if the block was not found.
     pub async fn get_receipts(&self, block_hash: B256) -> ProviderResult<Option<Arc<Vec<R>>>> {
