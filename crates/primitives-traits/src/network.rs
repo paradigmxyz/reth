@@ -2,8 +2,8 @@ use crate::{Block, BlockHeader, SignedTransaction};
 use alloy_rlp::{Decodable, Encodable};
 use core::fmt;
 
-/// Abstraction over primitive types which might appear in network messages. See
-/// [`crate::EthMessage`] for more context.
+/// Abstraction over primitive types which might appear in network messages. See `EthMessage` for
+/// more context.
 pub trait NetworkPrimitives:
     Send + Sync + Unpin + Clone + fmt::Debug + PartialEq + Eq + 'static
 {
