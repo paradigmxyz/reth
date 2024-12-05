@@ -160,7 +160,7 @@ impl ProofSequencer {
 pub(crate) struct StateHookSender(Sender<StateRootMessage>);
 
 impl StateHookSender {
-    pub(crate) fn new(inner: Sender<StateRootMessage>) -> Self {
+    pub(crate) const fn new(inner: Sender<StateRootMessage>) -> Self {
         Self(inner)
     }
 }
