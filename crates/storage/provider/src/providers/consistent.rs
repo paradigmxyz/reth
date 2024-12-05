@@ -24,7 +24,7 @@ use reth_primitives::{
     Account, BlockWithSenders, SealedBlockFor, SealedBlockWithSenders, SealedHeader, StorageEntry,
     TransactionMeta,
 };
-use reth_primitives_traits::{Block, BlockBody};
+use reth_primitives_traits::BlockBody;
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{

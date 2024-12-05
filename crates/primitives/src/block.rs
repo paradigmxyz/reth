@@ -997,7 +997,6 @@ mod tests {
     const fn _traits() {
         const fn assert_block<T: reth_primitives_traits::Block>() {}
         assert_block::<Block>();
-        assert_block::<SealedBlock>();
     }
 
     /// Check parsing according to EIP-1898.

@@ -10,7 +10,6 @@ use alloy_primitives::{eip191_hash_message, Address, PrimitiveSignature as Signa
 use alloy_rpc_types_eth::TransactionRequest;
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
-use reth_primitives::TransactionSigned;
 use reth_provider::BlockReader;
 use reth_rpc_eth_api::helpers::{signer::Result, AddDevSigners, EthSigner};
 use reth_rpc_eth_types::SignError;
@@ -111,6 +110,7 @@ mod tests {
     use alloy_consensus::Transaction;
     use alloy_primitives::{Bytes, U256};
     use alloy_rpc_types_eth::TransactionInput;
+    use reth_primitives::TransactionSigned;
     use revm_primitives::TxKind;
 
     use super::*;
@@ -193,7 +193,9 @@ mod tests {
         let data: TypedData = serde_json::from_str(eip_712_example).unwrap();
         let signer = build_signer();
         let from = *signer.addresses.first().unwrap();
-        let sig = signer.sign_typed_data(from, &data).unwrap();
+        let sig =
+            EthSigner::<reth_primitives::TransactionSigned>::sign_typed_data(&signer, from, &data)
+                .unwrap();
         let expected = Signature::new(
             U256::from_str_radix(
                 "5318aee9942b84885761bb20e768372b76e7ee454fc4d39b59ce07338d15a06c",
@@ -215,7 +217,9 @@ mod tests {
         let message = b"Test message";
         let signer = build_signer();
         let from = *signer.addresses.first().unwrap();
-        let sig = signer.sign(from, message).await.unwrap();
+        let sig = EthSigner::<reth_primitives::TransactionSigned>::sign(&signer, from, message)
+            .await
+            .unwrap();
         let expected = Signature::new(
             U256::from_str_radix(
                 "54313da7432e4058b8d22491b2e7dbb19c7186c35c24155bec0820a8a2bfe0c1",
@@ -251,7 +255,8 @@ mod tests {
             nonce: Some(0u64),
             ..Default::default()
         };
-        let txn_signed = signer.sign_transaction(request, &from).await;
+        let txn_signed: std::result::Result<TransactionSigned, SignError> =
+            signer.sign_transaction(request, &from).await;
         assert!(txn_signed.is_ok());
 
         assert_eq!(Bytes::from(message.to_vec()), txn_signed.unwrap().input().0);

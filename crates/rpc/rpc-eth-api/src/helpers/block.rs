@@ -38,6 +38,7 @@ pub type BlockAndReceiptsResult<Eth> = Result<
 /// `eth_` namespace.
 pub trait EthBlocks: LoadBlock {
     /// Returns the block header for the given block id.
+    #[expect(clippy::type_complexity)]
     fn rpc_block_header(
         &self,
         block_id: BlockId,
@@ -176,6 +177,7 @@ pub trait EthBlocks: LoadBlock {
     /// Returns uncle headers of given block.
     ///
     /// Returns an empty vec if there are none.
+    #[expect(clippy::type_complexity)]
     fn ommers(
         &self,
         block_id: BlockId,

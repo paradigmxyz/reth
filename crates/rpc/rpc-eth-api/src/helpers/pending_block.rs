@@ -3,13 +3,11 @@
 
 use super::SpawnBlocking;
 use crate::{EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
-use alloy_consensus::{BlockHeader, Header, Transaction, EMPTY_OMMER_ROOT_HASH};
-use alloy_eips::{
-    eip4844::MAX_DATA_GAS_PER_BLOCK, eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE,
-};
-use alloy_network::{primitives::HeaderResponse, Network};
-use alloy_primitives::{BlockNumber, B256, U256};
-use alloy_rpc_types_eth::{BlockNumberOrTag, Withdrawals};
+use alloy_consensus::{BlockHeader, Transaction};
+use alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK;
+use alloy_network::Network;
+use alloy_primitives::B256;
+use alloy_rpc_types_eth::BlockNumberOrTag;
 use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
@@ -18,10 +16,7 @@ use reth_evm::{
     ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes,
 };
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{
-    proofs::calculate_transaction_root, Block, BlockBody, BlockExt, InvalidTransactionError,
-    Receipt, RecoveredTx, SealedBlockWithSenders,
-};
+use reth_primitives::{BlockExt, InvalidTransactionError, RecoveredTx, SealedBlockWithSenders};
 use reth_primitives_traits::receipt::ReceiptExt;
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderBlock, ProviderError,
@@ -31,7 +26,7 @@ use reth_revm::{
     database::StateProviderDatabase,
     primitives::{
         BlockEnv, CfgEnvWithHandlerCfg, EVMError, Env, ExecutionResult, InvalidTransaction,
-        ResultAndState, SpecId,
+        ResultAndState,
     },
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
@@ -67,6 +62,7 @@ pub trait LoadPendingBlock:
     /// Returns a handle to the pending block.
     ///
     /// Data access in default (L1) trait method implementations.
+    #[expect(clippy::type_complexity)]
     fn pending_block(
         &self,
     ) -> &Mutex<Option<PendingBlock<ProviderBlock<Self::Provider>, ProviderReceipt<Self::Provider>>>>;
@@ -74,6 +70,7 @@ pub trait LoadPendingBlock:
     /// Configures the [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the pending block
     ///
     /// If no pending block is available, this will derive it from the `latest` block
+    #[expect(clippy::type_complexity)]
     fn pending_block_env_and_cfg(
         &self,
     ) -> Result<
@@ -222,6 +219,7 @@ pub trait LoadPendingBlock:
     ///
     /// After Cancun, if the origin is the actual pending block, the block includes the EIP-4788 pre
     /// block contract call using the parent beacon block root received from the CL.
+    #[expect(clippy::type_complexity)]
     fn build_block(
         &self,
         cfg: CfgEnvWithHandlerCfg,
@@ -405,22 +403,8 @@ pub trait LoadPendingBlock:
             );
         let hashed_state = db.database.hashed_post_state(execution_outcome.state());
 
-        let logs_bloom =
-            execution_outcome.block_logs_bloom(block_number).expect("Block is present");
-
         // calculate the state root
         let state_root = db.database.state_root(hashed_state).map_err(Self::Error::from_eth_err)?;
-
-        // create the block header
-        let transactions_root = calculate_transaction_root(&executed_txs);
-
-        // check if cancun is activated to set eip4844 header fields correctly
-        let blob_gas_used =
-            (cfg.handler_cfg.spec_id >= SpecId::CANCUN).then_some(sum_blob_gas_used);
-
-        let requests_hash = chain_spec
-            .is_prague_active_at_timestamp(block_env.timestamp.to::<u64>())
-            .then_some(EMPTY_REQUESTS_HASH);
 
         // Convert Vec<Option<Receipt>> to Vec<Receipt>
         let receipts: Vec<_> = receipts.into_iter().flatten().collect();

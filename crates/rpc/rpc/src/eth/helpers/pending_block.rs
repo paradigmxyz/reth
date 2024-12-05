@@ -1,7 +1,6 @@
 //! Support for building a pending block with transactions from local view of mempool.
 
 use alloy_consensus::Header;
-use alloy_network::primitives::HeaderResponse;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_provider::{
@@ -49,19 +48,19 @@ where
 
     fn assemble_block(
         &self,
-        parent_hash: revm_primitives::B256,
-        state_root: revm_primitives::B256,
-        transactions: Vec<ProviderTx<Self::Provider>>,
-        receipts: &[reth_provider::ProviderReceipt<Self::Provider>],
+        _parent_hash: revm_primitives::B256,
+        _state_root: revm_primitives::B256,
+        _transactions: Vec<ProviderTx<Self::Provider>>,
+        _receipts: &[reth_provider::ProviderReceipt<Self::Provider>],
     ) -> reth_provider::ProviderBlock<Self::Provider> {
         todo!()
     }
 
     fn assemble_receipt(
         &self,
-        tx: &reth_primitives::RecoveredTx<ProviderTx<Self::Provider>>,
-        result: revm_primitives::ExecutionResult,
-        cumulative_gas_used: u64,
+        _tx: &reth_primitives::RecoveredTx<ProviderTx<Self::Provider>>,
+        _result: revm_primitives::ExecutionResult,
+        _cumulative_gas_used: u64,
     ) -> reth_provider::ProviderReceipt<Self::Provider> {
         todo!()
     }

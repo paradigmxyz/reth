@@ -11,7 +11,6 @@ use alloy_rpc_types_mev::{
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
-use reth_primitives::{PooledTransactionsElement, TransactionSigned};
 use reth_provider::{ChainSpecProvider, HeaderProvider, ProviderTx};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::MevSimApiServer;

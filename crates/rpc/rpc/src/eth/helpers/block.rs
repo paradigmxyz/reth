@@ -4,7 +4,7 @@ use alloy_consensus::BlockHeader;
 use alloy_rpc_types_eth::{BlockId, TransactionReceipt};
 use reth_primitives::TransactionMeta;
 use reth_primitives_traits::{BlockBody, SignedTransaction};
-use reth_provider::{BlockReader, HeaderProvider};
+use reth_provider::BlockReader;
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
     RpcNodeCoreExt, RpcReceipt,
@@ -42,7 +42,7 @@ where
             return block
                 .body
                 .transactions()
-                .into_iter()
+                .iter()
                 .zip(receipts.iter())
                 .enumerate()
                 .map(|(idx, (tx, receipt))| {
@@ -55,7 +55,7 @@ where
                         excess_blob_gas,
                         timestamp,
                     };
-                    EthReceiptBuilder::new(&tx, meta, receipt, &receipts)
+                    EthReceiptBuilder::new(tx, meta, receipt, &receipts)
                         .map(|builder| builder.build())
                 })
                 .collect::<Result<Vec<_>, Self::Error>>()

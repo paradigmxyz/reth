@@ -11,7 +11,6 @@ use futures::Future;
 use reth_node_api::BlockBody;
 use reth_primitives::{
     transaction::SignedTransactionIntoRecoveredExt, SealedBlockWithSenders, TransactionMeta,
-    TransactionSigned,
 };
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{
@@ -61,6 +60,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     /// Returns a handle for signing data.
     ///
     /// Singer access in default (L1) trait method implementations.
+    #[expect(clippy::type_complexity)]
     fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>>>>>;
 
     /// Returns the transaction by hash.
@@ -468,6 +468,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     }
 
     /// Returns the signer for the given account, if found in configured signers.
+    #[expect(clippy::type_complexity)]
     fn find_signer(
         &self,
         account: &Address,

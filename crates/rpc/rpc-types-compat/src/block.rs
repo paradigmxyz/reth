@@ -3,14 +3,10 @@
 use alloy_consensus::{BlockHeader, Sealable, Sealed};
 use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::{B256, U256};
-use alloy_rlp::Encodable;
 use alloy_rpc_types_eth::{
     Block, BlockTransactions, BlockTransactionsKind, Header, TransactionInfo,
 };
-use reth_primitives::{
-    transaction::SignedTransactionIntoRecoveredExt, Block as PrimitiveBlock, BlockWithSenders,
-    TransactionSigned,
-};
+use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, BlockWithSenders};
 use reth_primitives_traits::{Block as BlockTrait, BlockBody, SignedTransaction};
 
 use crate::{transaction::from_recovered_with_block_context, TransactionCompat};
@@ -19,6 +15,7 @@ use crate::{transaction::from_recovered_with_block_context, TransactionCompat};
 /// [`BlockTransactionsKind`]
 ///
 /// If a `block_hash` is provided, then this is used, otherwise the block hash is computed.
+#[expect(clippy::type_complexity)]
 pub fn from_block<T, B>(
     block: BlockWithSenders<B>,
     total_difficulty: U256,
@@ -70,8 +67,9 @@ where
 ///
 /// This will populate the `transactions` field with the _full_
 /// [`TransactionCompat::Transaction`] objects: [`BlockTransactions::Full`]
+#[expect(clippy::type_complexity)]
 pub fn from_block_full<T, B>(
-    mut block: BlockWithSenders<B>,
+    block: BlockWithSenders<B>,
     total_difficulty: U256,
     block_hash: Option<B256>,
     tx_resp_builder: &T,
@@ -137,7 +135,7 @@ fn from_block_with_transactions<T, B: BlockTrait>(
     let uncles = block
         .body()
         .ommers()
-        .map(|o| o.into_iter().map(|h| h.hash_slow()).collect())
+        .map(|o| o.iter().map(|h| h.hash_slow()).collect())
         .unwrap_or_default();
     let (header, _) = block.split();
     let header = Header::from_consensus(

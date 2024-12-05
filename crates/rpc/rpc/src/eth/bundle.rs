@@ -6,9 +6,9 @@ use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTra
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
-use reth_primitives::{PooledTransactionsElement, Transaction};
+use reth_primitives::PooledTransactionsElement;
 use reth_primitives_traits::SignedTransaction;
-use reth_provider::{ChainSpecProvider, HeaderProvider, ProviderTx};
+use reth_provider::{ChainSpecProvider, HeaderProvider};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_eth_api::{
     helpers::{Call, EthTransactions, LoadPendingBlock},
@@ -22,7 +22,7 @@ use revm::{
     primitives::{ResultAndState, TxEnv},
 };
 use revm_primitives::{EnvKzgSettings, EnvWithHandlerCfg, SpecId, MAX_BLOB_GAS_PER_BLOCK};
-use std::{ops::Deref, sync::Arc};
+use std::sync::Arc;
 
 /// `Eth` bundle implementation.
 pub struct EthBundle<Eth> {
@@ -206,8 +206,7 @@ where
                     let tx: PoolConsensusTx<Eth::Pool> = tx.into();
 
                     hasher.update(*tx.tx_hash());
-                    let gas_price = tx
-                        .effective_gas_price(basefee);
+                    let gas_price = tx.effective_gas_price(basefee);
                     eth_api.evm_config().fill_tx_env(evm.tx_mut(), &tx, signer);
                     let ResultAndState { result, state } =
                         evm.transact().map_err(Eth::Error::from_evm_err)?;

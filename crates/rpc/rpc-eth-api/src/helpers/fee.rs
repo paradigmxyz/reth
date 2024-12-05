@@ -184,7 +184,7 @@ pub trait EthFees: LoadFee {
                                 percentiles,
                                 header.gas_used(),
                                 header.base_fee_per_gas().unwrap_or_default(),
-                                &block.body.transactions(),
+                                block.body.transactions(),
                                 &receipts,
                             )
                             .unwrap_or_default(),

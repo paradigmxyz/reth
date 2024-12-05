@@ -6,9 +6,7 @@ use futures::Future;
 use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_errors::{RethError, RethResult};
 use reth_network_api::NetworkInfo;
-use reth_provider::{
-    BlockNumReader, ChainSpecProvider, ProviderTx, StageCheckpointReader, TransactionsProvider,
-};
+use reth_provider::{BlockNumReader, ChainSpecProvider, StageCheckpointReader};
 
 use crate::{helpers::EthSigner, RpcNodeCore};
 

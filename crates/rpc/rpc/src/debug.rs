@@ -19,7 +19,7 @@ use reth_evm::{
     execute::{BlockExecutorProvider, Executor},
     ConfigureEvmEnv,
 };
-use reth_primitives::{Block, BlockExt, NodePrimitives, SealedBlockWithSenders};
+use reth_primitives::{BlockExt, NodePrimitives, SealedBlockWithSenders};
 use reth_primitives_traits::{Block as _, BlockBody, SignedTransaction};
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider, ProviderBlock,
@@ -522,7 +522,7 @@ where
         let mut replay_block_txs = true;
 
         // if a transaction index is provided, we need to replay the transactions until the index
-        let num_txs = transaction_index.index().unwrap_or(block.body.transactions().len());
+        let num_txs = transaction_index.index().unwrap_or_else(|| block.body.transactions().len());
         // but if all transactions are to be replayed, we can use the state at the block itself
         // this works with the exception of the PENDING block, because its state might not exist if
         // built locally
