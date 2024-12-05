@@ -10,7 +10,7 @@ use reth_trie_sparse::blinded::{pad_path_to_key, BlindedProvider, BlindedProvide
 use std::sync::Arc;
 
 /// Factory for instantiating providers capable of retrieving blinded trie nodes via proofs.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ProofBlindedProviderFactory<T, H> {
     /// The cursor factory for traversing trie nodes.
     trie_cursor_factory: T,

@@ -115,14 +115,18 @@ where
             self.hashed_cursor_factory,
             Arc::new(self.prefix_sets),
         );
-        let mut sparse_trie =
-            SparseStateTrie::new(WitnessBlindedProviderFactory::new(proof_provider_factory, tx));
+        let mut sparse_trie = SparseStateTrie::new(WitnessBlindedProviderFactory::new(
+            proof_provider_factory.clone(),
+            tx,
+        ));
         sparse_trie.reveal_multiproof(proof_targets.clone(), multiproof)?;
 
         // Attempt to update state trie to gather additional information for the witness.
         for (hashed_address, hashed_slots) in
             proof_targets.into_iter().sorted_unstable_by_key(|(ha, _)| *ha)
         {
+            let mut proof_provider = proof_provider_factory.storage_node_provider(hashed_address);
+
             // Update storage trie first.
             let storage = state.storages.get(&hashed_address);
             let storage_trie = sparse_trie
@@ -141,7 +145,9 @@ where
                         .map_err(SparseStateTrieError::Sparse)?;
                 } else {
                     storage_trie
-                        .remove_leaf(&storage_nibbles, |_| unreachable!())
+                        .remove_leaf(&storage_nibbles, |path| {
+                            proof_provider.blinded_node(path).unwrap()
+                        })
                         .map_err(SparseStateTrieError::Sparse)?;
                 }
             }
@@ -154,7 +160,9 @@ where
                 .get(&hashed_address)
                 .ok_or(TrieWitnessError::MissingAccount(hashed_address))?
                 .unwrap_or_default();
-            sparse_trie.update_account(hashed_address, account, |_| unreachable!())?;
+            sparse_trie.update_account(hashed_address, account, |path| {
+                proof_provider_factory.account_node_provider().blinded_node(path).unwrap()
+            })?;
 
             while let Ok(node) = rx.try_recv() {
                 self.witness.insert(keccak256(&node), node);
