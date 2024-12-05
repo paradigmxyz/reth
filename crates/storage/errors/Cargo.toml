@@ -12,8 +12,9 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 reth-fs-util.workspace = true
+reth-static-file-types.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
@@ -26,9 +27,9 @@ derive_more.workspace = true
 [features]
 default = ["std"]
 std = [
-	"reth-primitives/std",
 	"alloy-eips/std",
 	"alloy-primitives/std",
 	"alloy-rlp/std",
-	"derive_more/std"
+	"derive_more/std",
+	"reth-primitives-traits/std"
 ]

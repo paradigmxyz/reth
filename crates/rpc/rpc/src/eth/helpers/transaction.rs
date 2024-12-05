@@ -1,9 +1,9 @@
 //! Contains RPC handler implementations specific to transactions
 
-use reth_provider::{BlockReaderIdExt, TransactionsProvider};
+use reth_provider::{BlockReader, BlockReaderIdExt, TransactionsProvider};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
-    FullEthApiTypes, RpcNodeCore,
+    FullEthApiTypes, RpcNodeCoreExt,
 };
 use reth_transaction_pool::TransactionPool;
 
@@ -13,6 +13,7 @@ impl<Provider, Pool, Network, EvmConfig> EthTransactions
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Self: LoadTransaction<Provider: BlockReaderIdExt>,
+    Provider: BlockReader,
 {
     #[inline]
     fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
@@ -25,7 +26,8 @@ impl<Provider, Pool, Network, EvmConfig> LoadTransaction
 where
     Self: SpawnBlocking
         + FullEthApiTypes
-        + RpcNodeCore<Provider: TransactionsProvider, Pool: TransactionPool>,
+        + RpcNodeCoreExt<Provider: TransactionsProvider, Pool: TransactionPool>,
+    Provider: BlockReader,
 {
 }
 
@@ -58,8 +60,7 @@ mod tests {
 
         let evm_config = EthEvmConfig::new(noop_provider.chain_spec());
         let cache = EthStateCache::spawn(noop_provider, Default::default());
-        let fee_history_cache =
-            FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default());
+        let fee_history_cache = FeeHistoryCache::new(FeeHistoryCacheConfig::default());
         let eth_api = EthApi::new(
             noop_provider,
             pool.clone(),

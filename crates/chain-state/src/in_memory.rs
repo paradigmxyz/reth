@@ -949,8 +949,8 @@ mod tests {
     use reth_errors::ProviderResult;
     use reth_primitives::{Account, Bytecode, EthPrimitives, Receipt};
     use reth_storage_api::{
-        AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
-        StorageRootProvider,
+        AccountReader, BlockHashReader, HashedPostStateProvider, StateProofProvider, StateProvider,
+        StateRootProvider, StorageRootProvider,
     };
     use reth_trie::{
         AccountProof, HashedStorage, MultiProof, StorageMultiProof, StorageProof, TrieInput,
@@ -1044,6 +1044,12 @@ mod tests {
             _input: TrieInput,
         ) -> ProviderResult<(B256, TrieUpdates)> {
             Ok((B256::random(), TrieUpdates::default()))
+        }
+    }
+
+    impl HashedPostStateProvider for MockStateProvider {
+        fn hashed_post_state(&self, _bundle_state: &revm::db::BundleState) -> HashedPostState {
+            HashedPostState::default()
         }
     }
 

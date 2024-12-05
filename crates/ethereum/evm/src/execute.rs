@@ -58,8 +58,15 @@ impl<EvmConfig> EthExecutionStrategyFactory<EvmConfig> {
 
 impl<EvmConfig> BlockExecutionStrategyFactory for EthExecutionStrategyFactory<EvmConfig>
 where
-    EvmConfig:
-        Clone + Unpin + Sync + Send + 'static + ConfigureEvm<Header = alloy_consensus::Header>,
+    EvmConfig: Clone
+        + Unpin
+        + Sync
+        + Send
+        + 'static
+        + ConfigureEvm<
+            Header = alloy_consensus::Header,
+            Transaction = reth_primitives::TransactionSigned,
+        >,
 {
     type Primitives = EthPrimitives;
 
@@ -128,7 +135,10 @@ where
 impl<DB, EvmConfig> BlockExecutionStrategy for EthExecutionStrategy<DB, EvmConfig>
 where
     DB: Database<Error: Into<ProviderError> + Display>,
-    EvmConfig: ConfigureEvm<Header = alloy_consensus::Header>,
+    EvmConfig: ConfigureEvm<
+        Header = alloy_consensus::Header,
+        Transaction = reth_primitives::TransactionSigned,
+    >,
 {
     type DB = DB;
     type Error = BlockExecutionError;
@@ -152,7 +162,7 @@ where
         let env = self.evm_env_for_block(&block.header, total_difficulty);
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
 
-        self.system_caller.apply_pre_execution_changes(block, &mut evm)?;
+        self.system_caller.apply_pre_execution_changes(&block.block, &mut evm)?;
 
         Ok(())
     }
@@ -247,7 +257,7 @@ where
         drop(evm);
 
         let mut balance_increments =
-            post_block_balance_increments(&self.chain_spec, block, total_difficulty);
+            post_block_balance_increments(&self.chain_spec, &block.block, total_difficulty);
 
         // Irregular state change at Ethereum DAO hardfork
         if self.chain_spec.fork(EthereumHardfork::Dao).transitions_at_block(block.number) {

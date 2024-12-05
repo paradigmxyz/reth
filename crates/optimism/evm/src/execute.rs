@@ -22,7 +22,7 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::validate_block_post_execution;
 use reth_optimism_forks::OpHardfork;
 use reth_optimism_primitives::OpPrimitives;
-use reth_primitives::{BlockWithSenders, Receipt, TxType};
+use reth_primitives::{BlockWithSenders, Receipt, TransactionSigned, TxType};
 use reth_revm::{Database, State};
 use revm_primitives::{db::DatabaseCommit, EnvWithHandlerCfg, ResultAndState, U256};
 use tracing::trace;
@@ -52,8 +52,12 @@ impl<EvmConfig> OpExecutionStrategyFactory<EvmConfig> {
 
 impl<EvmConfig> BlockExecutionStrategyFactory for OpExecutionStrategyFactory<EvmConfig>
 where
-    EvmConfig:
-        Clone + Unpin + Sync + Send + 'static + ConfigureEvm<Header = alloy_consensus::Header>,
+    EvmConfig: Clone
+        + Unpin
+        + Sync
+        + Send
+        + 'static
+        + ConfigureEvm<Header = alloy_consensus::Header, Transaction = TransactionSigned>,
 {
     type Primitives = OpPrimitives;
     type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
@@ -115,7 +119,7 @@ where
 impl<DB, EvmConfig> BlockExecutionStrategy for OpExecutionStrategy<DB, EvmConfig>
 where
     DB: Database<Error: Into<ProviderError> + Display>,
-    EvmConfig: ConfigureEvm<Header = alloy_consensus::Header>,
+    EvmConfig: ConfigureEvm<Header = alloy_consensus::Header, Transaction = TransactionSigned>,
 {
     type DB = DB;
     type Primitives = OpPrimitives;
@@ -258,7 +262,7 @@ where
         _receipts: &[Receipt],
     ) -> Result<Requests, Self::Error> {
         let balance_increments =
-            post_block_balance_increments(&self.chain_spec.clone(), block, total_difficulty);
+            post_block_balance_increments(&self.chain_spec.clone(), &block.block, total_difficulty);
         // increment balances
         self.state
             .increment_balances(balance_increments.clone())

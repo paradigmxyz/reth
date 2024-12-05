@@ -11,7 +11,7 @@ use proptest_arbitrary_interop::arb;
 use reth_db::tables;
 use reth_db_api::table::{DupSort, Table, TableRow};
 use reth_fs_util as fs;
-use reth_primitives::TransactionSignedNoHash;
+use reth_primitives::TransactionSigned;
 use std::collections::HashSet;
 use tracing::error;
 
@@ -74,7 +74,7 @@ pub fn generate_vectors(mut tables: Vec<String>) -> Result<()> {
         (BlockBodyIndices, PER_TABLE, TABLE),
         (BlockOmmers<Header>, 100, TABLE),
         (TransactionHashNumbers, PER_TABLE, TABLE),
-        (Transactions<TransactionSignedNoHash>, 100, TABLE),
+        (Transactions<TransactionSigned>, 100, TABLE),
         (PlainStorageState, PER_TABLE, DUPSORT),
         (PlainAccountState, PER_TABLE, TABLE)
     ]);

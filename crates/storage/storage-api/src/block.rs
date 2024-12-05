@@ -40,6 +40,9 @@ impl BlockSource {
     }
 }
 
+/// A helper type alias to access [`BlockReader::Block`].
+pub type ProviderBlock<P> = <P as BlockReader>::Block;
+
 /// Api trait for fetching `Block` related data.
 ///
 /// If not requested otherwise, implementers of this trait should prioritize fetching blocks from

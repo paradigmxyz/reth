@@ -1,14 +1,18 @@
 use crate::BlockIdReader;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{TxHash, TxNumber};
+use reth_primitives_traits::Receipt;
 use reth_storage_errors::provider::ProviderResult;
 use std::ops::RangeBounds;
+
+/// A helper type alias to access [`ReceiptProvider::Receipt`].
+pub type ProviderReceipt<P> = <P as ReceiptProvider>::Receipt;
 
 /// Client trait for fetching receipt data.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait ReceiptProvider: Send + Sync {
     /// The receipt type.
-    type Receipt: Send + Sync;
+    type Receipt: Receipt;
 
     /// Get receipt by transaction number
     ///

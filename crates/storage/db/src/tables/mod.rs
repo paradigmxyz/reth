@@ -31,7 +31,7 @@ use reth_db_api::{
     },
     table::{Decode, DupSort, Encode, Table},
 };
-use reth_primitives::{Receipt, StorageEntry, TransactionSignedNoHash};
+use reth_primitives::{Receipt, StorageEntry, TransactionSigned};
 use reth_primitives_traits::{Account, Bytecode};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
@@ -96,6 +96,15 @@ pub trait TableViewer<R> {
     fn view_dupsort<T: DupSort>(&self) -> Result<R, Self::Error> {
         self.view::<T>()
     }
+}
+
+/// General trait for defining the set of tables
+/// Used to initialize database
+pub trait TableSet {
+    /// Returns all the table names in the database.
+    fn table_names(&self) -> Vec<&'static str>;
+    /// Returns `true` if the table at the given index is a `DUPSORT` table.
+    fn is_dupsort(&self, idx: usize) -> bool;
 }
 
 /// Defines all the tables in the database.
@@ -243,6 +252,18 @@ macro_rules! tables {
             }
         }
 
+        impl TableSet for Tables {
+            fn table_names(&self) -> Vec<&'static str> {
+                //vec![$(table_names::$name,)*]
+                Self::ALL.iter().map(|t| t.name()).collect()
+            }
+
+            fn is_dupsort(&self, idx: usize) -> bool {
+                let table: Self = self.table_names()[idx].parse().expect("should be valid table name");
+                table.is_dupsort()
+            }
+        }
+
         // Need constants to match on in the `FromStr` implementation.
         #[allow(non_upper_case_globals)]
         mod table_names {
@@ -327,7 +348,7 @@ tables! {
     }
 
     /// Canonical only Stores the transaction body for canonical transactions.
-    table Transactions<T = TransactionSignedNoHash> {
+    table Transactions<T = TransactionSigned> {
         type Key = TxNumber;
         type Value = T;
     }

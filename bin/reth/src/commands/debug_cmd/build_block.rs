@@ -263,7 +263,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 let block_with_senders =
                     SealedBlockWithSenders::<BlockTy<N>>::new(block.clone(), senders).unwrap();
 
-                let db = StateProviderDatabase::new(blockchain_db.latest()?);
+                let state_provider = blockchain_db.latest()?;
+                let db = StateProviderDatabase::new(&state_provider);
                 let executor =
                     EthExecutorProvider::ethereum(provider_factory.chain_spec()).executor(db);
 
@@ -273,7 +274,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     ExecutionOutcome::from((block_execution_output, block.number));
                 debug!(target: "reth::cli", ?execution_outcome, "Executed block");
 
-                let hashed_post_state = execution_outcome.hash_state_slow();
+                let hashed_post_state = state_provider.hashed_post_state(execution_outcome.state());
                 let (state_root, trie_updates) = StateRoot::overlay_root_with_updates(
                     provider_factory.provider()?.tx_ref(),
                     hashed_post_state.clone(),

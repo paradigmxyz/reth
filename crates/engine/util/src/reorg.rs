@@ -18,7 +18,10 @@ use reth_evm::{
     ConfigureEvm,
 };
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{proofs, Block, BlockBody, BlockExt, Receipt, Receipts};
+use reth_primitives::{
+    proofs, transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody, BlockExt, Receipt,
+    Receipts,
+};
 use reth_provider::{BlockReader, ExecutionOutcome, ProviderError, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
@@ -26,7 +29,6 @@ use reth_revm::{
     DatabaseCommit,
 };
 use reth_rpc_types_compat::engine::payload::block_to_payload;
-use reth_trie::HashedPostState;
 use revm_primitives::{calc_excess_blob_gas, EVMError, EnvWithHandlerCfg};
 use std::{
     collections::VecDeque,
@@ -108,7 +110,7 @@ where
     S: Stream<Item = BeaconEngineMessage<Engine>>,
     Engine: EngineTypes,
     Provider: BlockReader<Block = reth_primitives::Block> + StateProviderFactory,
-    Evm: ConfigureEvm<Header = Header>,
+    Evm: ConfigureEvm<Header = Header, Transaction = reth_primitives::TransactionSigned>,
     Spec: EthereumHardforks,
 {
     type Item = S::Item;
@@ -255,7 +257,7 @@ fn create_reorg_head<Provider, Evm, Spec>(
 ) -> RethResult<(ExecutionPayload, ExecutionPayloadSidecar)>
 where
     Provider: BlockReader<Block = reth_primitives::Block> + StateProviderFactory,
-    Evm: ConfigureEvm<Header = Header>,
+    Evm: ConfigureEvm<Header = Header, Transaction = reth_primitives::TransactionSigned>,
     Spec: EthereumHardforks,
 {
     let chain_spec = payload_validator.chain_spec();
@@ -379,7 +381,7 @@ where
         reorg_target.number,
         Default::default(),
     );
-    let hashed_state = HashedPostState::from_bundle_state(&outcome.state().state);
+    let hashed_state = state_provider.hashed_post_state(outcome.state());
 
     let (blob_gas_used, excess_blob_gas) =
         if chain_spec.is_cancun_active_at_timestamp(reorg_target.timestamp) {

@@ -9,8 +9,8 @@ use alloy_rpc_types_eth::{
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_chainspec::ChainInfo;
-use reth_primitives::{Receipt, SealedBlockWithSenders, TransactionSignedEcRecovered};
-use reth_provider::{BlockIdReader, BlockReader, ProviderError};
+use reth_primitives::SealedBlockWithSenders;
+use reth_provider::{BlockIdReader, BlockReader, ProviderBlock, ProviderError, ProviderReceipt};
 use reth_rpc_eth_api::{
     EthApiTypes, EthFilterApiServer, FullEthApiTypes, RpcTransaction, TransactionCompat,
 };
@@ -40,7 +40,7 @@ use tracing::{error, trace};
 const MAX_HEADERS_RANGE: u64 = 1_000; // with ~530bytes per header this is ~500kb
 
 /// `Eth` filter RPC implementation.
-pub struct EthFilter<Provider, Pool, Eth: EthApiTypes> {
+pub struct EthFilter<Provider: BlockReader, Pool, Eth: EthApiTypes> {
     /// All nested fields bundled together
     inner: Arc<EthFilterInner<Provider, Pool, RpcTransaction<Eth::NetworkTypes>>>,
     /// Assembles response data w.r.t. network.
@@ -50,6 +50,7 @@ pub struct EthFilter<Provider, Pool, Eth: EthApiTypes> {
 impl<Provider, Pool, Eth> Clone for EthFilter<Provider, Pool, Eth>
 where
     Eth: EthApiTypes,
+    Provider: BlockReader,
 {
     fn clone(&self) -> Self {
         Self { inner: self.inner.clone(), tx_resp_builder: self.tx_resp_builder.clone() }
@@ -58,7 +59,7 @@ where
 
 impl<Provider, Pool, Eth> EthFilter<Provider, Pool, Eth>
 where
-    Provider: Send + Sync + 'static,
+    Provider: BlockReader + Send + Sync + 'static,
     Pool: Send + Sync + 'static,
     Eth: EthApiTypes + 'static,
 {
@@ -73,7 +74,7 @@ where
     pub fn new(
         provider: Provider,
         pool: Pool,
-        eth_cache: EthStateCache,
+        eth_cache: EthStateCache<Provider::Block, Provider::Receipt>,
         config: EthFilterConfig,
         task_spawner: Box<dyn TaskSpawner>,
         tx_resp_builder: Eth::TransactionCompat,
@@ -145,7 +146,7 @@ where
 impl<Provider, Pool, Eth> EthFilter<Provider, Pool, Eth>
 where
     Provider: BlockReader + BlockIdReader + 'static,
-    Pool: TransactionPool<Transaction: 'static> + 'static,
+    Pool: TransactionPool<Transaction = <Eth::Pool as TransactionPool>::Transaction> + 'static,
     Eth: FullEthApiTypes,
 {
     /// Returns all the filter changes for the given id, if any
@@ -245,7 +246,7 @@ impl<Provider, Pool, Eth> EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>>
     for EthFilter<Provider, Pool, Eth>
 where
     Provider: BlockReader + BlockIdReader + 'static,
-    Pool: TransactionPool + 'static,
+    Pool: TransactionPool<Transaction = <Eth::Pool as TransactionPool>::Transaction> + 'static,
     Eth: FullEthApiTypes + 'static,
 {
     /// Handler for `eth_newFilter`
@@ -334,6 +335,7 @@ where
 impl<Provider, Pool, Eth> std::fmt::Debug for EthFilter<Provider, Pool, Eth>
 where
     Eth: EthApiTypes,
+    Provider: BlockReader,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EthFilter").finish_non_exhaustive()
@@ -342,7 +344,7 @@ where
 
 /// Container type `EthFilter`
 #[derive(Debug)]
-struct EthFilterInner<Provider, Pool, Tx> {
+struct EthFilterInner<Provider: BlockReader, Pool, Tx> {
     /// The transaction pool.
     pool: Pool,
     /// The provider that can interact with the chain.
@@ -356,7 +358,7 @@ struct EthFilterInner<Provider, Pool, Tx> {
     /// Maximum number of logs that can be returned in a response
     max_logs_per_response: usize,
     /// The async cache frontend for eth related data
-    eth_cache: EthStateCache,
+    eth_cache: EthStateCache<Provider::Block, Provider::Receipt>,
     /// maximum number of headers to read at once for range filter
     max_headers_range: u64,
     /// The type that can spawn tasks.
@@ -536,8 +538,13 @@ where
         &self,
         block_num_hash: &BlockNumHash,
         best_number: u64,
-    ) -> Result<Option<(Arc<Vec<Receipt>>, Option<Arc<SealedBlockWithSenders>>)>, EthFilterError>
-    {
+    ) -> Result<
+        Option<(
+            Arc<Vec<ProviderReceipt<Provider>>>,
+            Option<Arc<SealedBlockWithSenders<ProviderBlock<Provider>>>>,
+        )>,
+        EthFilterError,
+    > {
         // The last 4 blocks are most likely cached, so we can just fetch them
         let cached_range = best_number.saturating_sub(4)..=best_number;
         let receipts_block = if cached_range.contains(&block_num_hash.number) {
@@ -611,7 +618,7 @@ struct FullTransactionsReceiver<T: PoolTransaction, TxCompat> {
 impl<T, TxCompat> FullTransactionsReceiver<T, TxCompat>
 where
     T: PoolTransaction + 'static,
-    TxCompat: TransactionCompat,
+    TxCompat: TransactionCompat<T::Consensus>,
 {
     /// Creates a new `FullTransactionsReceiver` encapsulating the provided transaction stream.
     fn new(stream: NewSubpoolTransactionStream<T>, tx_resp_builder: TxCompat) -> Self {
@@ -619,15 +626,12 @@ where
     }
 
     /// Returns all new pending transactions received since the last poll.
-    async fn drain(&self) -> FilterChanges<TxCompat::Transaction>
-    where
-        T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
-    {
+    async fn drain(&self) -> FilterChanges<TxCompat::Transaction> {
         let mut pending_txs = Vec::new();
         let mut prepared_stream = self.txs_stream.lock().await;
 
         while let Ok(tx) = prepared_stream.try_recv() {
-            match from_recovered(tx.transaction.to_recovered_transaction(), &self.tx_resp_builder) {
+            match from_recovered(tx.transaction.to_consensus(), &self.tx_resp_builder) {
                 Ok(tx) => pending_txs.push(tx),
                 Err(err) => {
                     error!(target: "rpc",
@@ -651,8 +655,8 @@ trait FullTransactionsFilter<T>: fmt::Debug + Send + Sync + Unpin + 'static {
 impl<T, TxCompat> FullTransactionsFilter<TxCompat::Transaction>
     for FullTransactionsReceiver<T, TxCompat>
 where
-    T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>> + 'static,
-    TxCompat: TransactionCompat + 'static,
+    T: PoolTransaction + 'static,
+    TxCompat: TransactionCompat<T::Consensus> + 'static,
 {
     async fn drain(&self) -> FilterChanges<TxCompat::Transaction> {
         Self::drain(self).await
