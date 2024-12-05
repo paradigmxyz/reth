@@ -2,11 +2,12 @@
 
 use super::{Call, LoadPendingBlock};
 use crate::{AsEthApiError, FromEthApiError, IntoEthApiError};
+use alloy_consensus::Header;
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::{state::StateOverride, transaction::TransactionRequest, BlockId};
 use futures::Future;
 use reth_chainspec::{EthChainSpec, MIN_TRANSACTION_GAS};
-use reth_provider::{ChainSpecProvider, StateProvider};
+use reth_provider::{ChainSpecProvider, HeaderProvider, StateProvider};
 use reth_revm::{
     database::StateProviderDatabase,
     db::CacheDB,

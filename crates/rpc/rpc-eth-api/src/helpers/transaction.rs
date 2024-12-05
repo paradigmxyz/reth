@@ -13,6 +13,7 @@ use reth_primitives::{
     transaction::SignedTransactionIntoRecoveredExt, SealedBlockWithSenders, TransactionMeta,
     TransactionSigned,
 };
+use reth_primitives_traits::SignedTransaction;
 use reth_provider::{
     BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
     TransactionsProvider,
@@ -213,7 +214,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 let base_fee_per_gas = block.base_fee_per_gas();
                 if let Some((signer, tx)) = block.transactions_with_sender().nth(index) {
                     let tx_info = TransactionInfo {
-                        hash: Some(tx.hash()),
+                        hash: Some(*tx.tx_hash()),
                         block_hash: Some(block_hash),
                         block_number: Some(block_number),
                         base_fee: base_fee_per_gas.map(u128::from),
@@ -294,7 +295,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                         .find(|(_, (signer, tx))| **signer == sender && (*tx).nonce() == nonce)
                         .map(|(index, (signer, tx))| {
                             let tx_info = TransactionInfo {
-                                hash: Some(tx.hash()),
+                                hash: Some(*tx.tx_hash()),
                                 block_hash: Some(block_hash),
                                 block_number: Some(block_number),
                                 base_fee: base_fee_per_gas.map(u128::from),

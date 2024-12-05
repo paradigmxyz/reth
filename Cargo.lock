@@ -9171,6 +9171,7 @@ dependencies = [
  "alloy-rpc-types-eth",
  "jsonrpsee-types",
  "reth-primitives",
+ "reth-primitives-traits",
  "serde",
  "serde_json",
 ]

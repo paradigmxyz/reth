@@ -40,4 +40,23 @@ where
     fn pending_block(&self) -> &tokio::sync::Mutex<Option<PendingBlock>> {
         self.inner.pending_block()
     }
+
+    fn assemble_block(
+        &self,
+        parent_hash: revm_primitives::B256,
+        state_root: revm_primitives::B256,
+        transactions: Vec<ProviderTx<Self::Provider>>,
+        receipts: &[reth_provider::ProviderReceipt<Self::Provider>],
+    ) -> reth_provider::ProviderBlock<Self::Provider> {
+        todo!()
+    }
+
+    fn assemble_receipt(
+        &self,
+        tx: &reth_primitives::RecoveredTx<ProviderTx<Self::Provider>>,
+        result: revm_primitives::ExecutionResult,
+        cumulative_gas_used: u64,
+    ) -> reth_provider::ProviderReceipt<Self::Provider> {
+        todo!()
+    }
 }

@@ -9,7 +9,7 @@ use futures::Future;
 use reth_node_api::BlockBody;
 use reth_primitives::{SealedBlockFor, SealedBlockWithSenders};
 use reth_provider::{
-    BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider, ProviderReceipt,
+    BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider, ProviderHeader, ProviderReceipt,
 };
 use reth_rpc_types_compat::block::from_block;
 
@@ -38,7 +38,7 @@ pub trait EthBlocks: LoadBlock {
     fn rpc_block_header(
         &self,
         block_id: BlockId,
-    ) -> impl Future<Output = Result<Option<Header>, Self::Error>> + Send
+    ) -> impl Future<Output = Result<Option<Header<ProviderHeader<Self::Provider>>>, Self::Error>> + Send
     where
         Self: FullEthApiTypes,
     {
@@ -113,7 +113,7 @@ pub trait EthBlocks: LoadBlock {
                 .get_sealed_block_with_senders(block_hash)
                 .await
                 .map_err(Self::Error::from_eth_err)?
-                .map(|b| b.body.transactions.len()))
+                .map(|b| b.body.transactions().len()))
         }
     }
 
@@ -176,7 +176,7 @@ pub trait EthBlocks: LoadBlock {
     fn ommers(
         &self,
         block_id: BlockId,
-    ) -> Result<Option<Vec<alloy_consensus::Header>>, Self::Error> {
+    ) -> Result<Option<Vec<ProviderHeader<Self::Provider>>>, Self::Error> {
         self.provider().ommers_by_id(block_id).map_err(Self::Error::from_eth_err)
     }
 
@@ -195,7 +195,7 @@ pub trait EthBlocks: LoadBlock {
                 self.provider()
                     .pending_block()
                     .map_err(Self::Error::from_eth_err)?
-                    .map(|block| block.body.ommers)
+                    .and_then(|block| block.body.ommers().map(|o| o.to_vec()))
             } else {
                 self.provider().ommers_by_id(block_id).map_err(Self::Error::from_eth_err)?
             }

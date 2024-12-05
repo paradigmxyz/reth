@@ -260,7 +260,7 @@ pub struct EthApiInner<Provider: BlockReader, Pool, Network, EvmConfig> {
     /// The type that can spawn tasks which would otherwise block.
     task_spawner: Box<dyn TaskSpawner>,
     /// Cached pending block if any
-    pending_block: Mutex<Option<PendingBlock>>,
+    pending_block: Mutex<Option<PendingBlock<Provider::Block, Provider::Receipt>>>,
     /// A pool dedicated to CPU heavy blocking tasks.
     blocking_task_pool: BlockingTaskPool,
     /// Cache for block fees history
