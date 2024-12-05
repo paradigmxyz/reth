@@ -6,7 +6,7 @@ use std::sync::Arc;
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_network::Ethereum;
-use alloy_primitives::U256;
+use alloy_primitives::{Bytes, U256};
 use derive_more::Deref;
 use reth_primitives::NodePrimitives;
 use reth_provider::{
@@ -26,6 +26,7 @@ use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner, TokioTaskExecutor,
 };
+use reth_tokio_util::{EventSender, EventStream};
 use tokio::sync::Mutex;
 
 use crate::eth::EthTxBuilder;
@@ -270,6 +271,9 @@ pub struct EthApiInner<Provider: BlockReader, Pool, Network, EvmConfig> {
 
     /// Guard for getproof calls
     blocking_task_guard: BlockingTaskGuard,
+
+    /// Transaction broadcast channel
+    raw_tx_sender: EventSender<Bytes>,
 }
 
 impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, EvmConfig>
@@ -304,6 +308,8 @@ where
                 .unwrap_or_default(),
         );
 
+        let raw_tx_sender = EventSender::default();
+
         Self {
             provider,
             pool,
@@ -321,6 +327,7 @@ where
             fee_history_cache,
             evm_config,
             blocking_task_guard: BlockingTaskGuard::new(proof_permits),
+            raw_tx_sender,
         }
     }
 }
@@ -423,6 +430,18 @@ where
     #[inline]
     pub const fn blocking_task_guard(&self) -> &BlockingTaskGuard {
         &self.blocking_task_guard
+    }
+
+    /// Returns [`EventStream`] of new raw transactions.
+    #[inline]
+    pub fn subscribe_to_raw_transactions(&self) -> EventStream<Bytes> {
+        self.raw_tx_sender.new_listener()
+    }
+
+    /// Broadcasts raw transaction to all subscribers.
+    #[inline]
+    pub fn broadcast_raw_transaction(&self, raw_tx: Bytes) {
+        self.raw_tx_sender.notify(raw_tx)
     }
 }
 

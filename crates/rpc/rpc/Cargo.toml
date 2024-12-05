@@ -36,6 +36,7 @@ reth-rpc-server-types.workspace = true
 reth-network-types.workspace = true
 reth-consensus.workspace = true
 reth-payload-validator.workspace = true
+reth-tokio-util.workspace = true
 
 # ethereum
 alloy-consensus.workspace = true

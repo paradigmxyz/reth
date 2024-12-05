@@ -1,13 +1,13 @@
 //! Contains RPC handler implementations specific to transactions
 
+use crate::EthApi;
+use alloy_primitives::Bytes;
 use reth_provider::{BlockReader, BlockReaderIdExt, TransactionsProvider};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
     FullEthApiTypes, RpcNodeCoreExt,
 };
 use reth_transaction_pool::TransactionPool;
-
-use crate::EthApi;
 
 impl<Provider, Pool, Network, EvmConfig> EthTransactions
     for EthApi<Provider, Pool, Network, EvmConfig>
@@ -18,6 +18,11 @@ where
     #[inline]
     fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
         self.inner.signers()
+    }
+
+    #[inline]
+    fn broadcast_raw_transaction(&self, raw_tx: Bytes) {
+        self.inner.broadcast_raw_transaction(raw_tx)
     }
 }
 

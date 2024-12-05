@@ -62,6 +62,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     /// Singer access in default (L1) trait method implementations.
     fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>>;
 
+    /// Broadcasts raw transaction to subscribed observers. Used internally by
+    /// `send_raw_transaction` to emit transactions as they are processed.
+    fn broadcast_raw_transaction(&self, raw_tx: Bytes);
+
     /// Returns the transaction by hash.
     ///
     /// Checks the pool and state.
@@ -342,7 +346,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         tx: Bytes,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
         async move {
-            let recovered = recover_raw_transaction(tx)?;
+            let recovered = recover_raw_transaction(tx.clone())?;
             let pool_transaction =
                 <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered.into());
 
@@ -352,6 +356,9 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 .add_transaction(TransactionOrigin::Local, pool_transaction)
                 .await
                 .map_err(Self::Error::from_eth_err)?;
+
+            // broadcast raw transaction to subscribers if there is any.
+            self.broadcast_raw_transaction(tx);
 
             Ok(hash)
         }
