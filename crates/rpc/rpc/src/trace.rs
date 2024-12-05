@@ -1,4 +1,4 @@
-use alloy_consensus::{BlockHeader, Header};
+use alloy_consensus::BlockHeader as _;
 use alloy_eips::BlockId;
 use alloy_primitives::{map::HashSet, Bytes, B256, U256};
 use alloy_rpc_types_eth::{
@@ -19,15 +19,15 @@ use reth_consensus_common::calc::{
     base_block_reward, base_block_reward_pre_merge, block_reward, ommer_reward,
 };
 use reth_evm::ConfigureEvmEnv;
-use reth_primitives::{PooledTransactionsElement, RecoveredTx};
-use reth_primitives_traits::BlockBody;
+use reth_primitives::{Header, PooledTransactionsElement, RecoveredTx};
+use reth_primitives_traits::{BlockBody, BlockHeader};
 use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_eth_api::{helpers::TraceExt, FromEthApiError};
 use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction};
 use reth_tasks::pool::BlockingTaskGuard;
-use reth_transaction_pool::{PoolConsensusTx, PoolPooledTx};
+use reth_transaction_pool::{PoolConsensusTx, PoolPooledTx, PoolTransaction, TransactionPool};
 use revm::{
     db::{CacheDB, DatabaseCommit},
     primitives::EnvWithHandlerCfg,
@@ -118,8 +118,8 @@ where
         trace_types: HashSet<TraceType>,
         block_id: Option<BlockId>,
     ) -> Result<TraceResults, Eth::Error> {
-        let tx: RecoveredTx<PoolConsensusTx<Eth::Pool>> =
-            recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(tx)?.into();
+        let tx = recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(tx)?
+            .map_transaction(<Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus);
 
         let (cfg, block, at) = self.eth_api().evm_env_at(block_id.unwrap_or_default()).await?;
 
@@ -320,8 +320,8 @@ where
             {
                 all_traces.extend(
                     self.extract_reward_traces(
-                        &block.header.header(),
-                        &block.body.ommers,
+                        block.header.header(),
+                        block.body.ommers(),
                         base_block_reward,
                     )
                     .into_iter()
@@ -398,11 +398,11 @@ where
 
         if let (Some(block), Some(traces)) = (maybe_block, maybe_traces.as_mut()) {
             if let Some(base_block_reward) =
-                self.calculate_base_block_reward(&block.header.header())?
+                self.calculate_base_block_reward(block.header.header())?
             {
                 traces.extend(self.extract_reward_traces(
-                    &block.block.header(),
-                    &block.body.ommers(),
+                    block.block.header(),
+                    block.body.ommers(),
                     base_block_reward,
                 ));
             }
@@ -543,27 +543,30 @@ where
     fn extract_reward_traces<H: BlockHeader>(
         &self,
         header: &H,
-        ommers: &[H],
+        ommers: Option<&[H]>,
         base_block_reward: u128,
     ) -> Vec<LocalizedTransactionTrace> {
-        let mut traces = Vec::with_capacity(ommers.len() + 1);
+        let ommers_cnt = ommers.map(|o| o.len()).unwrap_or_default();
+        let mut traces = Vec::with_capacity(ommers_cnt + 1);
 
-        let block_reward = block_reward(base_block_reward, ommers.len());
+        let block_reward = block_reward(base_block_reward, ommers_cnt);
         traces.push(reward_trace(
             header,
             RewardAction {
-                author: header.beneficiary,
+                author: header.beneficiary(),
                 reward_type: RewardType::Block,
                 value: U256::from(block_reward),
             },
         ));
 
+        let Some(ommers) = ommers else { return traces };
+
         for uncle in ommers {
-            let uncle_reward = ommer_reward(base_block_reward, header.number, uncle.number);
+            let uncle_reward = ommer_reward(base_block_reward, header.number(), uncle.number());
             traces.push(reward_trace(
                 header,
                 RewardAction {
-                    author: uncle.beneficiary,
+                    author: uncle.beneficiary(),
                     reward_type: RewardType::Uncle,
                     value: U256::from(uncle_reward),
                 },
@@ -724,10 +727,10 @@ struct TraceApiInner<Provider, Eth> {
 
 /// Helper to construct a [`LocalizedTransactionTrace`] that describes a reward to the block
 /// beneficiary.
-fn reward_trace(header: &Header, reward: RewardAction) -> LocalizedTransactionTrace {
+fn reward_trace<H: BlockHeader>(header: &H, reward: RewardAction) -> LocalizedTransactionTrace {
     LocalizedTransactionTrace {
         block_hash: Some(header.hash_slow()),
-        block_number: Some(header.number),
+        block_number: Some(header.number()),
         transaction_hash: None,
         transaction_position: None,
         trace: TransactionTrace {

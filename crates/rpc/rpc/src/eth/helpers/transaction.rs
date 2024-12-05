@@ -13,7 +13,7 @@ impl<Provider, Pool, Network, EvmConfig> EthTransactions
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Self: LoadTransaction<Provider: BlockReaderIdExt>,
-    Provider: BlockReader,
+    Provider: BlockReader<Transaction = ProviderTx<Self::Provider>>,
 {
     #[inline]
     fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>>>>> {

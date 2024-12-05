@@ -967,10 +967,10 @@ pub trait PoolTransaction:
     type TryFromConsensusError: fmt::Display;
 
     /// Associated type representing the raw consensus variant of the transaction.
-    type Consensus;
+    type Consensus: From<Self::Pooled>;
 
     /// Associated type representing the recovered pooled variant of the transaction.
-    type Pooled: SignedTransaction + Into<Self::Consensus>;
+    type Pooled: SignedTransaction;
 
     /// Define a method to convert from the `Consensus` type to `Self`
     fn try_from_consensus(
@@ -1005,6 +1005,11 @@ pub trait PoolTransaction:
     fn try_consensus_into_pooled(
         tx: RecoveredTx<Self::Consensus>,
     ) -> Result<RecoveredTx<Self::Pooled>, Self::TryFromConsensusError>;
+
+    /// Converts the `Pooled` type into the `Consensus` type.
+    fn pooled_into_consensus(tx: Self::Pooled) -> Self::Consensus {
+        tx.into()
+    }
 
     /// Hash of the transaction.
     fn hash(&self) -> &TxHash;

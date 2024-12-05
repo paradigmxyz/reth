@@ -3,7 +3,7 @@
 use alloy_consensus::BlockHeader;
 use alloy_rpc_types_eth::{BlockId, TransactionReceipt};
 use reth_primitives::TransactionMeta;
-use reth_primitives_traits::BlockBody;
+use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_provider::{BlockReader, HeaderProvider};
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
@@ -18,7 +18,10 @@ where
     Self: LoadBlock<
         Error = EthApiError,
         NetworkTypes: alloy_network::Network<ReceiptResponse = TransactionReceipt>,
-        Provider: BlockReader<Receipt = reth_primitives::Receipt>,
+        Provider: BlockReader<
+            Transaction = reth_primitives::TransactionSigned,
+            Receipt = reth_primitives::Receipt,
+        >,
     >,
     Provider: BlockReader,
 {
@@ -44,7 +47,7 @@ where
                 .enumerate()
                 .map(|(idx, (tx, receipt))| {
                     let meta = TransactionMeta {
-                        tx_hash: tx.hash(),
+                        tx_hash: *tx.tx_hash(),
                         index: idx as u64,
                         block_hash,
                         block_number,

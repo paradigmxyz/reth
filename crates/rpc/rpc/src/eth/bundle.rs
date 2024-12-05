@@ -7,7 +7,8 @@ use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{PooledTransactionsElement, Transaction};
-use reth_provider::{ChainSpecProvider, HeaderProvider};
+use reth_primitives_traits::SignedTransaction;
+use reth_provider::{ChainSpecProvider, HeaderProvider, ProviderTx};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_eth_api::{
     helpers::{Call, EthTransactions, LoadPendingBlock},
@@ -15,6 +16,7 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError, RpcInvalidTransactionError};
 use reth_tasks::pool::BlockingTaskGuard;
+use reth_transaction_pool::{PoolConsensusTx, PoolPooledTx, PoolTransaction, TransactionPool};
 use revm::{
     db::{CacheDB, DatabaseCommit, DatabaseRef},
     primitives::{ResultAndState, TxEnv},
@@ -42,7 +44,16 @@ impl<Eth> EthBundle<Eth> {
 
 impl<Eth> EthBundle<Eth>
 where
-    Eth: EthTransactions + LoadPendingBlock + Call + 'static,
+    Eth: EthTransactions<
+            Pool: TransactionPool<
+                Transaction: PoolTransaction<
+                    Consensus: From<PooledTransactionsElement>,
+                    Pooled = PooledTransactionsElement,
+                >,
+            >,
+        > + LoadPendingBlock
+        + Call
+        + 'static,
 {
     /// Simulates a bundle of transactions at the top of a given block number with the state of
     /// another (or the same) block. This can be used to simulate future blocks with the current
@@ -79,7 +90,7 @@ where
 
         let transactions = txs
             .into_iter()
-            .map(recover_raw_transaction::<PooledTransactionsElement>)
+            .map(recover_raw_transaction::<PoolPooledTx<Eth::Pool>>)
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
             .map(|tx| tx.to_components())
@@ -192,12 +203,11 @@ where
                         })?;
                     }
 
-                    let tx = tx.into_transaction();
+                    let tx: PoolConsensusTx<Eth::Pool> = tx.into();
 
-                    hasher.update(tx.hash());
-                    let gas_price = Transaction::effective_tip_per_gas(tx.deref(), basefee)
-                        .ok_or_else(|| RpcInvalidTransactionError::FeeCapTooLow)
-                        .map_err(Eth::Error::from_eth_err)?;
+                    hasher.update(*tx.tx_hash());
+                    let gas_price = tx
+                        .effective_gas_price(basefee);
                     eth_api.evm_config().fill_tx_env(evm.tx_mut(), &tx, signer);
                     let ResultAndState { result, state } =
                         evm.transact().map_err(Eth::Error::from_evm_err)?;
@@ -235,7 +245,7 @@ where
                         gas_price: U256::from(gas_price),
                         gas_used,
                         to_address: tx.to(),
-                        tx_hash: tx.hash(),
+                        tx_hash: *tx.tx_hash(),
                         value,
                         revert,
                     };

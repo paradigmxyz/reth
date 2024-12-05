@@ -206,8 +206,7 @@ use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_primitives::{EthPrimitives, NodePrimitives};
 use reth_provider::{
-    AccountReader, BlockReader, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
-    EvmEnvProvider, FullRpcProvider, HeaderProvider, ReceiptProvider, StateProviderFactory,
+    AccountReader, BlockReader, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, EvmEnvProvider, FullRpcProvider, HeaderProvider, ProviderBlock, ProviderHeader, ProviderReceipt, ReceiptProvider, StateProviderFactory
 };
 use reth_rpc::{
     AdminApi, DebugApi, EngineEthApi, EthBundle, MinerApi, NetApi, OtterscanApi, RPCApi, RethApi,
@@ -215,8 +214,7 @@ use reth_rpc::{
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_api::{
-    helpers::{Call, EthApiSpec, EthTransactions, LoadPendingBlock, TraceExt},
-    EthApiServer, EthApiTypes, FullEthApiServer, RpcBlock, RpcReceipt, RpcTransaction,
+    helpers::{Call, EthApiSpec, EthTransactions, LoadPendingBlock, TraceExt}, EthApiServer, EthApiTypes, FullEthApiServer, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction
 };
 use reth_rpc_eth_types::{EthConfig, EthStateCache, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, CompressionLayer, JwtAuthValidator, JwtSecret};
@@ -276,9 +274,9 @@ pub async fn launch<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi, B
 ) -> Result<RpcServerHandle, RpcError>
 where
     Provider: FullRpcProvider<
-            Block = reth_primitives::Block,
-            Receipt = reth_primitives::Receipt,
-            Header = reth_primitives::Header,
+            Block = ProviderBlock<EthApi::Provider>,
+            Receipt = ProviderReceipt<EthApi::Provider>,
+            Header = ProviderHeader<EthApi::Provider>,
         > + AccountReader
         + ChangeSetReader,
     Pool: TransactionPool<Transaction = <EthApi::Pool as TransactionPool>::Transaction> + 'static,
@@ -1134,6 +1132,7 @@ where
             RpcTransaction<EthApi::NetworkTypes>,
             RpcBlock<EthApi::NetworkTypes>,
             RpcReceipt<EthApi::NetworkTypes>,
+            RpcHeader<EthApi::NetworkTypes>,
         > + EthApiTypes,
     BlockExecutor:
         BlockExecutorProvider<Primitives: NodePrimitives<Block = reth_primitives::Block>>,
@@ -1173,7 +1172,7 @@ where
         EthApi: EthApiSpec + EthTransactions + TraceExt,
         Provider: BlockReader<
             Block = <EthApi::Provider as BlockReader>::Block,
-            Receipt = reth_primitives::Receipt,
+            Receipt = <EthApi::Provier as ReceiptProvider>::Receipt,
         >,
     {
         let debug_api = self.debug_api();
