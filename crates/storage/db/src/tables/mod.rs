@@ -101,11 +101,8 @@ pub trait TableViewer<R> {
 /// General trait for defining the set of tables
 /// Used to initialize database
 pub trait TableSet {
-    /// The iterator type for the tables.
-    type TableIter: Iterator<Item = Box<dyn TableMetadata>>;
-
-    /// Returns an iterator over the tables.
-    fn tables() -> Self::TableIter;
+    /// Returns an iterator over the tables
+    fn tables() -> Box<dyn Iterator<Item = Box<dyn TableMetadata>>>;
 }
 
 /// Defines all the tables in the database.
@@ -264,12 +261,8 @@ macro_rules! tables {
         }
 
         impl TableSet for Tables {
-            type TableIter = std::iter::Map<std::slice::Iter<'static, Tables>,
-                fn(&Tables) -> Box<dyn TableMetadata>>;
-
-            fn tables() -> Self::TableIter {
-                Self::ALL.iter()
-                    .map(|&table| Box::new(table) as Box<dyn TableMetadata>)
+            fn tables() -> Box<dyn Iterator<Item = Box<dyn TableMetadata>>> {
+                Box::new(Self::ALL.iter().map(|table| Box::new(*table) as Box<dyn TableMetadata>))
             }
         }
 
