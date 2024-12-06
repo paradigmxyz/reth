@@ -70,7 +70,7 @@ impl Receipt {
     }
 
     /// Returns length of RLP-encoded receipt fields with the given [`Bloom`] without an RLP header.
-    pub fn rlp_encoded_fields_length_with_bloom(&self, bloom: &Bloom) -> usize {
+    pub fn rlp_encoded_fields_length(&self, bloom: &Bloom) -> usize {
         let len = self.success.length() +
             self.cumulative_gas_used.length() +
             bloom.length() +
@@ -94,20 +94,7 @@ impl Receipt {
     }
 
     /// RLP-encodes receipt fields with the given [`Bloom`] without an RLP header.
-    pub fn rlp_encode_fields_with_bloom(&self, bloom: &Bloom, out: &mut dyn BufMut) {
-        self.success.encode(out);
-        self.cumulative_gas_used.encode(out);
-        bloom.encode(out);
-        self.logs.encode(out);
-    }
-
-    /// Returns RLP header for inner encoding.
-    pub fn rlp_header_inner(&self, bloom: &Bloom) -> Header {
-        Header { list: true, payload_length: self.rlp_encoded_fields_length_with_bloom(bloom) }
-    }
-
-    /// Encodes the receipt data.
-    pub fn rlp_encode_fields(&self, out: &mut dyn BufMut, bloom: &Bloom) {
+    pub fn rlp_encode_fields(&self, bloom: &Bloom, out: &mut dyn BufMut) {
         self.success.encode(out);
         self.cumulative_gas_used.encode(out);
         bloom.encode(out);
@@ -122,6 +109,11 @@ impl Receipt {
                 version.encode(out);
             }
         }
+    }
+
+    /// Returns RLP header for inner encoding.
+    pub fn rlp_header_inner(&self, bloom: &Bloom) -> Header {
+        Header { list: true, payload_length: self.rlp_encoded_fields_length(bloom) }
     }
 
     fn decode_receipt_with_bloom(
@@ -193,7 +185,7 @@ impl Eip2718EncodableReceipt for Receipt {
             out.put_u8(self.tx_type as u8);
         }
         self.rlp_header_inner(bloom).encode(out);
-        self.rlp_encode_fields(out, bloom);
+        self.rlp_encode_fields(bloom, out);
     }
 }
 
