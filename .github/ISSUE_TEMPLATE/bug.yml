@@ -67,7 +67,7 @@ body:
       description: Were you running it in a container?
       multiple: true
       options:
-        - None
+        - Not running in a container
         - Docker
         - Kubernetes
         - LXC/LXD
