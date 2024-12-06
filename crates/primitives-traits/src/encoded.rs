@@ -1,3 +1,4 @@
+use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::Bytes;
 
 /// Generic wrapper with encoded Bytes, such as transaction data.
@@ -17,8 +18,8 @@ impl<T> WithEncoded<T> {
     }
 
     /// Get the encoded bytes
-    pub fn encoded_bytes(&self) -> Bytes {
-        self.0.clone()
+    pub const fn encoded_bytes(&self) -> &Bytes {
+        &self.0
     }
 
     /// Get the underlying value
@@ -44,6 +45,13 @@ impl<T> WithEncoded<T> {
     /// Maps the inner value to a new value using the given function.
     pub fn map<U, F: FnOnce(T) -> U>(self, op: F) -> WithEncoded<U> {
         WithEncoded(self.0, op(self.1))
+    }
+}
+
+impl<T: Encodable2718> WithEncoded<T> {
+    /// Wraps the value with the [`Encodable2718::encoded_2718`] bytes.
+    pub fn from_2718_encodable(value: T) -> Self {
+        Self(value.encoded_2718().into(), value)
     }
 }
 

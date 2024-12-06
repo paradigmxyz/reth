@@ -93,6 +93,10 @@ mod tests {
             f(cs).build()
         }
         assert_eq!(
+            revm_spec_by_timestamp_after_bedrock(&op_cs(|cs| cs.holocene_activated()), 0),
+            revm_primitives::HOLOCENE
+        );
+        assert_eq!(
             revm_spec_by_timestamp_after_bedrock(&op_cs(|cs| cs.granite_activated()), 0),
             revm_primitives::GRANITE
         );
@@ -125,6 +129,10 @@ mod tests {
             let cs = ChainSpecBuilder::mainnet().chain(reth_chainspec::Chain::from_id(10)).into();
             f(cs).build()
         }
+        assert_eq!(
+            revm_spec(&op_cs(|cs| cs.holocene_activated()), &Head::default()),
+            revm_primitives::HOLOCENE
+        );
         assert_eq!(
             revm_spec(&op_cs(|cs| cs.granite_activated()), &Head::default()),
             revm_primitives::GRANITE

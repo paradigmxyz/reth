@@ -10,7 +10,10 @@
 #![allow(clippy::useless_let_if_seq)]
 
 use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH};
-use alloy_eips::{eip4844::MAX_DATA_GAS_PER_BLOCK, eip7685::Requests, merge::BEACON_NONCE};
+use alloy_eips::{
+    eip4844::MAX_DATA_GAS_PER_BLOCK, eip7002::WITHDRAWAL_REQUEST_TYPE,
+    eip7251::CONSOLIDATION_REQUEST_TYPE, eip7685::Requests, merge::BEACON_NONCE,
+};
 use alloy_primitives::U256;
 use reth_basic_payload_builder::{
     commit_withdrawals, is_better_payload, BuildArguments, BuildOutcome, PayloadBuilder,
@@ -27,15 +30,15 @@ use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_primitives::{
     proofs::{self},
-    Block, BlockBody, EthereumHardforks, Receipt,
+    Block, BlockBody, BlockExt, EthereumHardforks, InvalidTransactionError, Receipt,
+    TransactionSigned,
 };
 use reth_provider::{ChainSpecProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{
-    noop::NoopTransactionPool, BestTransactions, BestTransactionsAttributes, TransactionPool,
-    ValidPoolTransaction,
+    error::InvalidPoolTransactionError, noop::NoopTransactionPool, BestTransactions,
+    BestTransactionsAttributes, PoolTransaction, TransactionPool, ValidPoolTransaction,
 };
-use reth_trie::HashedPostState;
 use revm::{
     db::{states::bundle_state::BundleRetention, State},
     primitives::{
@@ -88,9 +91,9 @@ where
 // Default implementation of [PayloadBuilder] for unit type
 impl<EvmConfig, Pool, Client> PayloadBuilder<Pool, Client> for EthereumPayloadBuilder<EvmConfig>
 where
-    EvmConfig: ConfigureEvm<Header = Header>,
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
-    Pool: TransactionPool,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
 {
     type Attributes = EthPayloadBuilderAttributes;
     type BuiltPayload = EthBuiltPayload;
@@ -152,9 +155,9 @@ pub fn default_ethereum_payload<EvmConfig, Pool, Client, F>(
     best_txs: F,
 ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
 where
-    EvmConfig: ConfigureEvm<Header = Header>,
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
-    Pool: TransactionPool,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
 {
     let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
@@ -228,7 +231,10 @@ where
             // we can't fit this transaction into the block, so we need to mark it as invalid
             // which also removes all dependent transaction from the iterator before we can
             // continue
-            best_txs.mark_invalid(&pool_tx);
+            best_txs.mark_invalid(
+                &pool_tx,
+                InvalidPoolTransactionError::ExceedsGasLimit(pool_tx.gas_limit(), block_gas_limit),
+            );
             continue
         }
 
@@ -238,7 +244,7 @@ where
         }
 
         // convert tx to a signed transaction
-        let tx = pool_tx.to_recovered_transaction();
+        let tx = pool_tx.to_consensus();
 
         // There's only limited amount of blob space available per block, so we need to check if
         // the EIP-4844 can still fit in the block
@@ -250,7 +256,13 @@ where
                 // the iterator. This is similar to the gas limit condition
                 // for regular transactions above.
                 trace!(target: "payload_builder", tx=?tx.hash, ?sum_blob_gas_used, ?tx_blob_gas, "skipping blob transaction because it would exceed the max data gas per block");
-                best_txs.mark_invalid(&pool_tx);
+                best_txs.mark_invalid(
+                    &pool_tx,
+                    InvalidPoolTransactionError::ExceedsGasLimit(
+                        tx_blob_gas,
+                        MAX_DATA_GAS_PER_BLOCK,
+                    ),
+                );
                 continue
             }
         }
@@ -270,7 +282,12 @@ where
                             // if the transaction is invalid, we can skip it and all of its
                             // descendants
                             trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
-                            best_txs.mark_invalid(&pool_tx);
+                            best_txs.mark_invalid(
+                                &pool_tx,
+                                InvalidPoolTransactionError::Consensus(
+                                    InvalidTransactionError::TxTypeNotSupported,
+                                ),
+                            );
                         }
 
                         continue
@@ -351,7 +368,27 @@ where
             )
             .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
 
-        Some(Requests::new(vec![deposit_requests, withdrawal_requests, consolidation_requests]))
+        let mut requests = Requests::default();
+
+        if !deposit_requests.is_empty() {
+            requests.push_request(core::iter::once(0).chain(deposit_requests).collect());
+        }
+
+        if !withdrawal_requests.is_empty() {
+            requests.push_request(
+                core::iter::once(WITHDRAWAL_REQUEST_TYPE).chain(withdrawal_requests).collect(),
+            );
+        }
+
+        if !consolidation_requests.is_empty() {
+            requests.push_request(
+                core::iter::once(CONSOLIDATION_REQUEST_TYPE)
+                    .chain(consolidation_requests)
+                    .collect(),
+            );
+        }
+
+        Some(requests)
     } else {
         None
     };
@@ -375,7 +412,7 @@ where
     let logs_bloom = execution_outcome.block_logs_bloom(block_number).expect("Number is in range");
 
     // calculate the state root
-    let hashed_state = HashedPostState::from_bundle_state(&execution_outcome.state().state);
+    let hashed_state = db.database.db.hashed_post_state(execution_outcome.state());
     let (state_root, trie_output) = {
         db.database.inner().state_root_with_updates(hashed_state.clone()).inspect_err(|err| {
             warn!(target: "payload_builder",
@@ -438,16 +475,17 @@ where
         blob_gas_used: blob_gas_used.map(Into::into),
         excess_blob_gas: excess_blob_gas.map(Into::into),
         requests_hash,
+        target_blobs_per_block: None,
     };
+
+    let withdrawals = chain_spec
+        .is_shanghai_active_at_timestamp(attributes.timestamp)
+        .then(|| attributes.withdrawals.clone());
 
     // seal the block
     let block = Block {
         header,
-        body: BlockBody {
-            transactions: executed_txs,
-            ommers: vec![],
-            withdrawals: Some(attributes.withdrawals.clone()),
-        },
+        body: BlockBody { transactions: executed_txs, ommers: vec![], withdrawals },
     };
 
     let sealed_block = Arc::new(block.seal_slow());

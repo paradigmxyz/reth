@@ -5,7 +5,7 @@ use alloy_primitives::U64;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadId, TransitionConfiguration};
 use jsonrpsee::core::client::{ClientT, SubscriptionClientT};
 use reth_ethereum_engine_primitives::EthEngineTypes;
-use reth_primitives::Block;
+use reth_primitives::{Block, BlockExt};
 use reth_rpc_api::clients::EngineApiClient;
 use reth_rpc_layer::JwtSecret;
 use reth_rpc_types_compat::engine::payload::{

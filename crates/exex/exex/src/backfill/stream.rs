@@ -11,7 +11,8 @@ use futures::{
     StreamExt,
 };
 use reth_evm::execute::{BlockExecutionError, BlockExecutionOutput, BlockExecutorProvider};
-use reth_primitives::{BlockWithSenders, Receipt};
+use reth_node_api::NodePrimitives;
+use reth_primitives::{BlockWithSenders, EthPrimitives};
 use reth_provider::{BlockReader, Chain, HeaderProvider, StateProviderFactory};
 use reth_prune_types::PruneModes;
 use reth_stages_api::ExecutionStageThresholds;
@@ -38,8 +39,11 @@ struct BackfillTaskOutput<T> {
 /// Ordered queue of [`JoinHandle`]s that yield [`BackfillTaskOutput`]s.
 type BackfillTasks<T> = FuturesOrdered<JoinHandle<BackfillTaskOutput<T>>>;
 
-type SingleBlockStreamItem = (BlockWithSenders, BlockExecutionOutput<Receipt>);
-type BatchBlockStreamItem = Chain;
+type SingleBlockStreamItem<N = EthPrimitives> = (
+    BlockWithSenders<<N as NodePrimitives>::Block>,
+    BlockExecutionOutput<<N as NodePrimitives>::Receipt>,
+);
+type BatchBlockStreamItem<N = EthPrimitives> = Chain<N>;
 
 /// Stream for processing backfill jobs asynchronously.
 ///
@@ -73,10 +77,19 @@ where
         self
     }
 
-    /// Spawns a new task calling the [`BackfillTaskIterator::next`] method and pushes it to the
-    /// [`BackfillTasks`] queue.
-    fn push_task(&mut self, mut job: BackfillTaskIterator<T>) {
+    /// Spawns a new task calling the [`BackfillTaskIterator::next`] method and pushes it to the end
+    /// of the [`BackfillTasks`] queue.
+    fn push_back(&mut self, mut job: BackfillTaskIterator<T>) {
         self.tasks.push_back(tokio::task::spawn_blocking(move || BackfillTaskOutput {
+            result: job.next(),
+            job,
+        }));
+    }
+
+    /// Spawns a new task calling the [`BackfillTaskIterator::next`] method and pushes it to the
+    /// front of the  [`BackfillTasks`] queue.
+    fn push_front(&mut self, mut job: BackfillTaskIterator<T>) {
+        self.tasks.push_front(tokio::task::spawn_blocking(move || BackfillTaskOutput {
             result: job.next(),
             job,
         }));
@@ -89,8 +102,9 @@ where
 
             if let BackfillTaskOutput { result: Some(job_result), job } = task_result {
                 // If the task returned a non-empty result, a new task advancing the job is created
-                // and pushed to the front of the queue.
-                self.push_task(job);
+                // and pushed to the __front__ of the queue, so that the next item of this returned
+                // next.
+                self.push_front(job);
 
                 return Poll::Ready(Some(job_result))
             };
@@ -100,12 +114,12 @@ where
     }
 }
 
-impl<E, P> Stream for StreamBackfillJob<E, P, SingleBlockStreamItem>
+impl<E, P> Stream for StreamBackfillJob<E, P, SingleBlockStreamItem<E::Primitives>>
 where
-    E: BlockExecutorProvider + Clone + Send + 'static,
+    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>> + Clone + Send + 'static,
     P: HeaderProvider + BlockReader + StateProviderFactory + Clone + Send + Unpin + 'static,
 {
-    type Item = BackfillJobResult<SingleBlockStreamItem>;
+    type Item = BackfillJobResult<SingleBlockStreamItem<E::Primitives>>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -126,19 +140,19 @@ where
                 range: block_number..=block_number,
                 stream_parallelism: this.parallelism,
             }) as BackfillTaskIterator<_>;
-            this.push_task(job);
+            this.push_back(job);
         }
 
         this.poll_next_task(cx)
     }
 }
 
-impl<E, P> Stream for StreamBackfillJob<E, P, BatchBlockStreamItem>
+impl<E, P> Stream for StreamBackfillJob<E, P, BatchBlockStreamItem<E::Primitives>>
 where
-    E: BlockExecutorProvider + Clone + Send + 'static,
+    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>> + Clone + Send + 'static,
     P: HeaderProvider + BlockReader + StateProviderFactory + Clone + Send + Unpin + 'static,
 {
-    type Item = BackfillJobResult<BatchBlockStreamItem>;
+    type Item = BackfillJobResult<BatchBlockStreamItem<E::Primitives>>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -166,7 +180,7 @@ where
                 range,
                 stream_parallelism: this.parallelism,
             }) as BackfillTaskIterator<_>;
-            this.push_task(job);
+            this.push_back(job);
         }
 
         this.poll_next_task(cx)
@@ -188,7 +202,10 @@ impl<E, P> From<SingleBlockBackfillJob<E, P>> for StreamBackfillJob<E, P, Single
     }
 }
 
-impl<E, P> From<BackfillJob<E, P>> for StreamBackfillJob<E, P, BatchBlockStreamItem> {
+impl<E, P> From<BackfillJob<E, P>> for StreamBackfillJob<E, P, BatchBlockStreamItem<E::Primitives>>
+where
+    E: BlockExecutorProvider,
+{
     fn from(job: BackfillJob<E, P>) -> Self {
         let batch_size = job.thresholds.max_blocks.map_or(DEFAULT_BATCH_SIZE, |max| max as usize);
         Self {

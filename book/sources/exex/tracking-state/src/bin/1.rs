@@ -5,7 +5,7 @@ use std::{
 };
 
 use futures_util::{FutureExt, TryStreamExt};
-use reth::api::FullNodeComponents;
+use reth::{api::FullNodeComponents, builder::NodeTypes, primitives::EthPrimitives};
 use reth_exex::{ExExContext, ExExEvent, ExExNotification};
 use reth_node_ethereum::EthereumNode;
 use reth_tracing::tracing::info;
@@ -14,7 +14,9 @@ struct MyExEx<Node: FullNodeComponents> {
     ctx: ExExContext<Node>,
 }
 
-impl<Node: FullNodeComponents> Future for MyExEx<Node> {
+impl<Node: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>> Future
+    for MyExEx<Node>
+{
     type Output = eyre::Result<()>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {

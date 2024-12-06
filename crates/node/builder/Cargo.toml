@@ -45,7 +45,7 @@ reth-payload-validator.workspace = true
 reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
-reth-rpc = { workspace = true, features = ["js-tracer"] }
+reth-rpc.workspace = true
 reth-rpc-api.workspace = true
 reth-rpc-builder.workspace = true
 reth-rpc-engine-api.workspace = true
@@ -96,6 +96,7 @@ tempfile.workspace = true
 
 [features]
 default = []
+js-tracer = ["reth-rpc/js-tracer"]
 test-utils = [
     "reth-db/test-utils",
     "reth-blockchain-tree/test-utils",

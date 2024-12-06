@@ -4,12 +4,14 @@ use std::{
     time::{Duration, Instant},
 };
 
+use alloy_consensus::BlockHeader;
 use alloy_primitives::BlockNumber;
 use reth_evm::execute::{
     BatchExecutor, BlockExecutionError, BlockExecutionOutput, BlockExecutorProvider, Executor,
 };
-use reth_primitives::{Block, BlockWithSenders, Receipt};
-use reth_primitives_traits::format_gas_throughput;
+use reth_node_api::{Block as _, BlockBody as _, NodePrimitives};
+use reth_primitives::{BlockExt, BlockWithSenders, Receipt};
+use reth_primitives_traits::{format_gas_throughput, SignedTransaction};
 use reth_provider::{
     BlockReader, Chain, HeaderProvider, ProviderError, StateProviderFactory, TransactionVariant,
 };
@@ -23,7 +25,8 @@ pub(super) type BackfillJobResult<T> = Result<T, BlockExecutionError>;
 /// Backfill job started for a specific range.
 ///
 /// It implements [`Iterator`] that executes blocks in batches according to the provided thresholds
-/// and yields [`Chain`]
+/// and yields [`Chain`]. In other words, this iterator can yield multiple items for the given range
+/// depending on the configured thresholds.
 #[derive(Debug)]
 pub struct BackfillJob<E, P> {
     pub(crate) executor: E,
@@ -36,10 +39,10 @@ pub struct BackfillJob<E, P> {
 
 impl<E, P> Iterator for BackfillJob<E, P>
 where
-    E: BlockExecutorProvider,
-    P: HeaderProvider + BlockReader + StateProviderFactory,
+    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>>,
+    P: HeaderProvider + BlockReader<Transaction: SignedTransaction> + StateProviderFactory,
 {
-    type Item = BackfillJobResult<Chain>;
+    type Item = BackfillJobResult<Chain<E::Primitives>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.range.is_empty() {
@@ -52,8 +55,8 @@ where
 
 impl<E, P> BackfillJob<E, P>
 where
-    E: BlockExecutorProvider,
-    P: BlockReader + HeaderProvider + StateProviderFactory,
+    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>>,
+    P: BlockReader<Transaction: SignedTransaction> + HeaderProvider + StateProviderFactory,
 {
     /// Converts the backfill job into a single block backfill job.
     pub fn into_single_blocks(self) -> SingleBlockBackfillJob<E, P> {
@@ -61,11 +64,11 @@ where
     }
 
     /// Converts the backfill job into a stream.
-    pub fn into_stream(self) -> StreamBackfillJob<E, P, Chain> {
+    pub fn into_stream(self) -> StreamBackfillJob<E, P, Chain<E::Primitives>> {
         self.into()
     }
 
-    fn execute_range(&mut self) -> BackfillJobResult<Chain> {
+    fn execute_range(&mut self) -> BackfillJobResult<Chain<E::Primitives>> {
         debug!(
             target: "exex::backfill",
             range = ?self.range,
@@ -100,10 +103,10 @@ where
 
             fetch_block_duration += fetch_block_start.elapsed();
 
-            cumulative_gas += block.gas_used;
+            cumulative_gas += block.gas_used();
 
             // Configure the executor to use the current state.
-            trace!(target: "exex::backfill", number = block_number, txs = block.body.transactions.len(), "Executing block");
+            trace!(target: "exex::backfill", number = block_number, txs = block.body.transactions().len(), "Executing block");
 
             // Execute the block
             let execute_start = Instant::now();
@@ -111,8 +114,7 @@ where
             // Unseal the block for execution
             let (block, senders) = block.into_components();
             let (unsealed_header, hash) = block.header.split();
-            let block =
-                Block { header: unsealed_header, body: block.body }.with_senders_unchecked(senders);
+            let block = P::Block::new(unsealed_header, block.body).with_senders_unchecked(senders);
 
             executor.execute_and_verify_one((&block, td).into())?;
             execution_duration += execute_start.elapsed();
@@ -134,7 +136,7 @@ where
             }
         }
 
-        let last_block_number = blocks.last().expect("blocks should not be empty").number;
+        let last_block_number = blocks.last().expect("blocks should not be empty").number();
         debug!(
             target: "exex::backfill",
             range = ?*self.range.start()..=last_block_number,
@@ -164,10 +166,13 @@ pub struct SingleBlockBackfillJob<E, P> {
 
 impl<E, P> Iterator for SingleBlockBackfillJob<E, P>
 where
-    E: BlockExecutorProvider,
+    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>>,
     P: HeaderProvider + BlockReader + StateProviderFactory,
 {
-    type Item = BackfillJobResult<(BlockWithSenders, BlockExecutionOutput<Receipt>)>;
+    type Item = BackfillJobResult<(
+        BlockWithSenders<P::Block>,
+        BlockExecutionOutput<<E::Primitives as NodePrimitives>::Receipt>,
+    )>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.range.next().map(|block_number| self.execute_block(block_number))
@@ -176,7 +181,7 @@ where
 
 impl<E, P> SingleBlockBackfillJob<E, P>
 where
-    E: BlockExecutorProvider,
+    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>>,
     P: HeaderProvider + BlockReader + StateProviderFactory,
 {
     /// Converts the single block backfill job into a stream.
@@ -186,10 +191,14 @@ where
         self.into()
     }
 
+    #[expect(clippy::type_complexity)]
     pub(crate) fn execute_block(
         &self,
         block_number: u64,
-    ) -> BackfillJobResult<(BlockWithSenders, BlockExecutionOutput<Receipt>)> {
+    ) -> BackfillJobResult<(
+        BlockWithSenders<P::Block>,
+        BlockExecutionOutput<<E::Primitives as NodePrimitives>::Receipt>,
+    )> {
         let td = self
             .provider
             .header_td_by_number(block_number)?
@@ -206,7 +215,7 @@ where
             self.provider.history_by_block_number(block_number.saturating_sub(1))?,
         ));
 
-        trace!(target: "exex::backfill", number = block_number, txs = block_with_senders.block.body.transactions.len(), "Executing block");
+        trace!(target: "exex::backfill", number = block_number, txs = block_with_senders.block.body().transactions().len(), "Executing block");
 
         let block_execution_output = executor.execute((&block_with_senders, td).into())?;
 

@@ -31,7 +31,7 @@ pub trait NodeTypes: Send + Sync + Unpin + 'static {
     /// The node's primitive types, defining basic operations and structures.
     type Primitives: NodePrimitives;
     /// The type used for configuration of the EVM.
-    type ChainSpec: EthChainSpec;
+    type ChainSpec: EthChainSpec<Header = <Self::Primitives as NodePrimitives>::BlockHeader>;
     /// The type used to perform state commitment operations.
     type StateCommitment: StateCommitment;
     /// The type responsible for writing chain primitives to storage.
@@ -151,7 +151,7 @@ impl<P, C, SC, S> AnyNodeTypes<P, C, SC, S> {
 impl<P, C, SC, S> NodeTypes for AnyNodeTypes<P, C, SC, S>
 where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
-    C: EthChainSpec + 'static,
+    C: EthChainSpec<Header = P::BlockHeader> + 'static,
     SC: StateCommitment,
     S: Default + Send + Sync + Unpin + Debug + 'static,
 {
@@ -212,7 +212,7 @@ impl<P, E, C, SC, S> NodeTypes for AnyNodeTypesWithEngine<P, E, C, SC, S>
 where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
     E: EngineTypes + Send + Sync + Unpin,
-    C: EthChainSpec + 'static,
+    C: EthChainSpec<Header = P::BlockHeader> + 'static,
     SC: StateCommitment,
     S: Default + Send + Sync + Unpin + Debug + 'static,
 {
@@ -226,12 +226,15 @@ impl<P, E, C, SC, S> NodeTypesWithEngine for AnyNodeTypesWithEngine<P, E, C, SC,
 where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
     E: EngineTypes + Send + Sync + Unpin,
-    C: EthChainSpec + 'static,
+    C: EthChainSpec<Header = P::BlockHeader> + 'static,
     SC: StateCommitment,
     S: Default + Send + Sync + Unpin + Debug + 'static,
 {
     type Engine = E;
 }
+
+/// Helper adapter type for accessing [`NodePrimitives::Block`] on [`NodeTypes`].
+pub type BlockTy<N> = <<N as NodeTypes>::Primitives as NodePrimitives>::Block;
 
 /// Helper adapter type for accessing [`NodePrimitives::BlockHeader`] on [`NodeTypes`].
 pub type HeaderTy<N> = <<N as NodeTypes>::Primitives as NodePrimitives>::BlockHeader;
@@ -241,3 +244,6 @@ pub type BodyTy<N> = <<N as NodeTypes>::Primitives as NodePrimitives>::BlockBody
 
 /// Helper adapter type for accessing [`NodePrimitives::SignedTx`] on [`NodeTypes`].
 pub type TxTy<N> = <<N as NodeTypes>::Primitives as NodePrimitives>::SignedTx;
+
+/// Helper adapter type for accessing [`NodePrimitives::Receipt`] on [`NodeTypes`].
+pub type ReceiptTy<N> = <<N as NodeTypes>::Primitives as NodePrimitives>::Receipt;

@@ -44,7 +44,7 @@ where
                 .ok_or(ProviderError::BlockBodyIndicesNotFound(block))?;
 
             let mut transactions_cursor = provider.tx_ref().cursor_read::<tables::Transactions<
-                <<Provider as StaticFileProviderFactory>::Primitives as NodePrimitives>::SignedTx,
+                <Provider::Primitives as NodePrimitives>::SignedTx,
             >>()?;
             let transactions_walker =
                 transactions_cursor.walk_range(block_body_indices.tx_num_range())?;

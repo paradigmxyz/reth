@@ -103,7 +103,12 @@ std = [
 	"revm-primitives/std",
 	"secp256k1?/std",
 	"serde/std",
-	"alloy-trie/std"
+	"alloy-trie/std",
+	"serde_with?/std",
+	"alloy-rlp/std",
+	"reth-ethereum-forks/std",
+	"bytes/std",
+	"derive_more/std"
 ]
 reth-codec = [
 	"dep:reth-codecs",
@@ -141,7 +146,7 @@ c-kzg = [
 ]
 optimism = [
 	"dep:op-alloy-consensus",
-	"reth-codecs?/optimism",
+	"reth-codecs?/op",
 	"revm-primitives/optimism",
 ]
 alloy-compat = [
@@ -158,11 +163,12 @@ test-utils = [
 	"arbitrary",
 ]
 serde-bincode-compat = [
+	"serde_with",
+	"alloy-eips/serde-bincode-compat",
 	"alloy-consensus/serde-bincode-compat",
 	"op-alloy-consensus?/serde-bincode-compat",
 	"reth-primitives-traits/serde-bincode-compat",
-	"serde_with",
-	"alloy-eips/serde-bincode-compat",
+	"reth-trie-common/serde-bincode-compat",
 ]
 
 [[bench]]

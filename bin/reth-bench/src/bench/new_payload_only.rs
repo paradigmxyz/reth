@@ -16,7 +16,7 @@ use clap::Parser;
 use csv::Writer;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
-use reth_primitives::Block;
+use reth_primitives::{Block, BlockExt};
 use reth_rpc_types_compat::engine::payload::block_to_payload;
 use std::time::Instant;
 use tracing::{debug, info};
@@ -60,10 +60,10 @@ impl Command {
 
         while let Some(block) = receiver.recv().await {
             // just put gas used here
-            let gas_used = block.header.gas_used;
+            let gas_used = block.gas_used;
 
             let versioned_hashes: Vec<B256> =
-                block.blob_versioned_hashes().into_iter().copied().collect();
+                block.body.blob_versioned_hashes().into_iter().copied().collect();
             let parent_beacon_block_root = block.parent_beacon_block_root;
             let payload = block_to_payload(block);
 

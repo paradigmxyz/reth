@@ -146,7 +146,7 @@ pub fn calculate_root_from_leaves_repeated(c: &mut Criterion) {
                                 hb.root();
 
                                 if storage_updates.peek().is_some() {
-                                    trie_updates.finalize(node_iter.walker, hb);
+                                    trie_updates.finalize(hb, node_iter.walker.take_removed_keys());
                                 }
                             }
                         },

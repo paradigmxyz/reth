@@ -39,6 +39,11 @@ pub mod txtype;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
+// Used by generated code and doc tests. Not public API.
+#[doc(hidden)]
+#[path = "private.rs"]
+pub mod __private;
+
 /// Trait that implements the `Compact` codec.
 ///
 /// When deriving the trait for custom structs, be aware of certain limitations/recommendations:

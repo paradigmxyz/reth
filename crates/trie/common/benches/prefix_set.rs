@@ -7,7 +7,7 @@ use proptest::{
     strategy::ValueTree,
     test_runner::{basic_result_cache, TestRunner},
 };
-use reth_trie::{
+use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
     Nibbles,
 };

@@ -6,24 +6,24 @@ use alloy_rpc_types_eth::TransactionInfo;
 use op_alloy_consensus::OpTxEnvelope;
 use op_alloy_rpc_types::Transaction;
 use reth_node_api::FullNodeComponents;
-use reth_primitives::{TransactionSigned, TransactionSignedEcRecovered};
+use reth_primitives::{RecoveredTx, TransactionSigned};
 use reth_provider::{BlockReaderIdExt, ReceiptProvider, TransactionsProvider};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
-    FromEthApiError, FullEthApiTypes, RpcNodeCore, TransactionCompat,
+    FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt, TransactionCompat,
 };
 use reth_rpc_eth_types::utils::recover_raw_transaction;
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
-use crate::{OpEthApi, OpEthApiError, SequencerClient};
+use crate::{eth::OpNodeCore, OpEthApi, OpEthApiError, SequencerClient};
 
 impl<N> EthTransactions for OpEthApi<N>
 where
     Self: LoadTransaction<Provider: BlockReaderIdExt>,
-    N: RpcNodeCore,
+    N: OpNodeCore,
 {
     fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
-        self.inner.signers()
+        self.inner.eth_api.signers()
     }
 
     /// Decodes and recovers the transaction and submits it to the pool.
@@ -31,8 +31,7 @@ where
     /// Returns the hash of the transaction.
     async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error> {
         let recovered = recover_raw_transaction(tx.clone())?;
-        let pool_transaction =
-            <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered.into());
+        let pool_transaction = <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
 
         // On optimism, transactions are forwarded directly to the sequencer to be included in
         // blocks that it builds.
@@ -56,32 +55,32 @@ where
 
 impl<N> LoadTransaction for OpEthApi<N>
 where
-    Self: SpawnBlocking + FullEthApiTypes,
-    N: RpcNodeCore<Provider: TransactionsProvider, Pool: TransactionPool>,
+    Self: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt,
+    N: OpNodeCore<Provider: TransactionsProvider, Pool: TransactionPool>,
     Self::Pool: TransactionPool,
 {
 }
 
 impl<N> OpEthApi<N>
 where
-    N: RpcNodeCore,
+    N: OpNodeCore,
 {
     /// Returns the [`SequencerClient`] if one is set.
     pub fn raw_tx_forwarder(&self) -> Option<SequencerClient> {
-        self.sequencer_client.clone()
+        self.inner.sequencer_client.clone()
     }
 }
 
 impl<N> TransactionCompat for OpEthApi<N>
 where
-    N: FullNodeComponents,
+    N: FullNodeComponents<Provider: ReceiptProvider<Receipt = reth_primitives::Receipt>>,
 {
     type Transaction = Transaction;
     type Error = OpEthApiError;
 
     fn fill(
         &self,
-        tx: TransactionSignedEcRecovered,
+        tx: RecoveredTx,
         tx_info: TransactionInfo,
     ) -> Result<Self::Transaction, Self::Error> {
         let from = tx.signer();
@@ -106,6 +105,7 @@ where
             }
             reth_primitives::Transaction::Deposit(tx) => {
                 self.inner
+                    .eth_api
                     .provider()
                     .receipt_by_hash(hash)
                     .map_err(Self::Error::from_eth_err)?

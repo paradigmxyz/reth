@@ -1,7 +1,7 @@
 use alloy_primitives::U256;
 use reth_chainspec::EthereumHardforks;
 use reth_network_api::NetworkInfo;
-use reth_provider::{BlockNumReader, ChainSpecProvider, StageCheckpointReader};
+use reth_provider::{BlockNumReader, BlockReader, ChainSpecProvider, StageCheckpointReader};
 use reth_rpc_eth_api::{helpers::EthApiSpec, RpcNodeCore};
 
 use crate::EthApi;
@@ -14,6 +14,7 @@ where
                       + StageCheckpointReader,
         Network: NetworkInfo,
     >,
+    Provider: BlockReader,
 {
     fn starting_block(&self) -> U256 {
         self.inner.starting_block()

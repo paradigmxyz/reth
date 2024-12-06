@@ -1,6 +1,6 @@
 //! Curates the input coming from the fuzzer for certain types.
 
-use reth_primitives_traits::IntegerList;
+use reth_db_api::models::IntegerList;
 use serde::{Deserialize, Serialize};
 
 /// Makes sure that the list provided by the fuzzer is not empty and pre-sorted
