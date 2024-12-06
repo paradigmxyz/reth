@@ -20,6 +20,7 @@ use reth_evm::execute::BlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
 use reth_network::BlockDownloaderProvider;
 use reth_network_p2p::HeadersClient;
+use reth_node_api::HeaderTy;
 use reth_node_core::{
     args::{NetworkArgs, StageEnum},
     version::{
@@ -190,7 +191,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                         .get_header(BlockHashOrNumber::Number(self.to))
                         .await?
                         .into_data()
-                        .ok_or(StageError::MissingSyncGap)?;
+                        .ok_or(StageError::<HeaderTy<N>>::MissingSyncGap)?;
                     let (_, rx) = watch::channel(tip.hash_slow());
 
                     (
