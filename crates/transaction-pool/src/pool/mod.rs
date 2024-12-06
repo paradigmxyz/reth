@@ -89,12 +89,8 @@ use reth_execution_types::ChangedAccount;
 
 use alloy_eips::eip4844::BlobTransactionSidecar;
 use reth_primitives::RecoveredTx;
-use std::{
-    collections::{HashMap, HashSet},
-    fmt,
-    sync::Arc,
-    time::Instant,
-};
+use rustc_hash::FxHashMap;
+use std::{collections::HashSet, fmt, sync::Arc, time::Instant};
 use tokio::sync::mpsc;
 use tracing::{debug, trace, warn};
 mod events;
@@ -216,7 +212,7 @@ where
     fn changed_senders(
         &self,
         accs: impl Iterator<Item = ChangedAccount>,
-    ) -> HashMap<SenderId, SenderInfo> {
+    ) -> FxHashMap<SenderId, SenderInfo> {
         let mut identifiers = self.identifiers.write();
         accs.into_iter()
             .map(|acc| {
