@@ -15,7 +15,7 @@ use reth_consensus::{
     Consensus, ConsensusError, FullConsensus, HeaderValidator, PostExecutionInput,
 };
 use reth_consensus_common::validation::{
-    validate_4844_header_standalone, validate_against_parent_4844,
+    validate_4844_header_standalone, validate_against_parent_blob_fields,
     validate_against_parent_eip1559_base_fee, validate_against_parent_hash_number,
     validate_against_parent_timestamp, validate_block_pre_execution, validate_body_against_header,
     validate_header_base_fee, validate_header_extradata, validate_header_gas,
@@ -162,8 +162,16 @@ impl<ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug> HeaderVa
             if header.requests_hash.is_none() {
                 return Err(ConsensusError::RequestsHashMissing)
             }
-        } else if header.requests_hash.is_some() {
-            return Err(ConsensusError::RequestsHashUnexpected)
+            if header.target_blobs_per_block.is_some() {
+                return Err(ConsensusError::TargetBlobsPerBlockMissing)
+            }
+        } else {
+            if header.requests_hash.is_some() {
+                return Err(ConsensusError::RequestsHashUnexpected)
+            }
+            if header.target_blobs_per_block.is_some() {
+                return Err(ConsensusError::TargetBlobsPerBlockUnexpected)
+            }
         }
 
         Ok(())
@@ -189,9 +197,7 @@ impl<ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug> HeaderVa
         )?;
 
         // ensure that the blob gas fields for this block
-        if self.chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
-            validate_against_parent_4844(header.header(), parent.header())?;
-        }
+        validate_against_parent_blob_fields(header.header(), parent.header(), &self.chain_spec)?;
 
         Ok(())
     }

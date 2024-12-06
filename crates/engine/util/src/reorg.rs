@@ -387,10 +387,7 @@ where
         if chain_spec.is_cancun_active_at_timestamp(reorg_target.timestamp) {
             (
                 Some(sum_blob_gas_used),
-                Some(calc_excess_blob_gas(
-                    reorg_target_parent.excess_blob_gas.unwrap_or_default(),
-                    reorg_target_parent.blob_gas_used.unwrap_or_default(),
-                )),
+                Some(reorg_target_parent.next_block_excess_blob_gas().unwrap_or_default()),
             )
         } else {
             (None, None)

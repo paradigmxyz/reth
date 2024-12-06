@@ -315,6 +315,10 @@ pub enum ConsensusError {
     #[display("missing requests hash")]
     RequestsHashMissing,
 
+    /// Error when target blobs per block is missing.
+    #[display("missing target blobs per block")]
+    TargetBlobsPerBlockMissing,
+
     /// Error when an unexpected withdrawals root is encountered.
     #[display("unexpected withdrawals root")]
     WithdrawalsRootUnexpected,
@@ -322,6 +326,10 @@ pub enum ConsensusError {
     /// Error when an unexpected requests hash is encountered.
     #[display("unexpected requests hash")]
     RequestsHashUnexpected,
+
+    /// Error when an unexpected target blobs per block is encountered.
+    #[display("unexpected target blobs per block")]
+    TargetBlobsPerBlockUnexpected,
 
     /// Error when withdrawals are missing.
     #[display("missing withdrawals")]

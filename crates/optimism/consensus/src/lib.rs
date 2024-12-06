@@ -16,7 +16,7 @@ use reth_consensus::{
     Consensus, ConsensusError, FullConsensus, HeaderValidator, PostExecutionInput,
 };
 use reth_consensus_common::validation::{
-    validate_against_parent_4844, validate_against_parent_eip1559_base_fee,
+    validate_against_parent_blob_fields, validate_against_parent_eip1559_base_fee,
     validate_against_parent_hash_number, validate_against_parent_timestamp,
     validate_body_against_header, validate_cancun_gas, validate_header_base_fee,
     validate_header_extradata, validate_header_gas, validate_shanghai_withdrawals,
@@ -139,7 +139,7 @@ impl HeaderValidator for OpBeaconConsensus {
 
         // ensure that the blob gas fields for this block
         if self.chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
-            validate_against_parent_4844(header.header(), parent.header())?;
+            validate_against_parent_blob_fields(header.header(), parent.header())?;
         }
 
         Ok(())
