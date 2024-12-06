@@ -4,7 +4,7 @@ use reth_primitives_traits::{BlockHeader, InMemorySize};
 
 /// The block response
 #[derive(PartialEq, Eq, Debug, Clone)]
-pub enum BlockResponse<H = alloy_consensus::Header, B = BlockBody> {
+pub enum BlockResponse<H, B = BlockBody> {
     /// Full block response (with transactions or ommers)
     Full(SealedBlock<H, B>),
     /// The empty block response

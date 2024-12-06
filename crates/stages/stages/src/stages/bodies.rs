@@ -153,7 +153,7 @@ where
         + StatsReader
         + BlockReader<Header = reth_primitives::Header>
         + BlockWriter<Block: Block<Body = D::Body>>,
-    D: BodyDownloader<Body: BlockBody<Transaction: Compact>>,
+    D: BodyDownloader<Header = alloy_consensus::Header, Body: BlockBody<Transaction: Compact>>,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -764,6 +764,7 @@ mod tests {
         }
 
         impl BodyDownloader for TestBodyDownloader {
+            type Header = Header;
             type Body = BlockBody;
 
             fn set_download_range(
@@ -786,7 +787,7 @@ mod tests {
         }
 
         impl Stream for TestBodyDownloader {
-            type Item = BodyDownloaderResult<BlockBody>;
+            type Item = BodyDownloaderResult<Header, BlockBody>;
             fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
                 let this = self.get_mut();
 

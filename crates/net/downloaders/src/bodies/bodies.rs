@@ -35,11 +35,11 @@ use tracing::info;
 /// All blocks in a batch are fetched at the same time.
 #[must_use = "Stream does nothing unless polled"]
 #[derive(Debug)]
-pub struct BodiesDownloader<B: BodiesClient, Provider> {
+pub struct BodiesDownloader<B: BodiesClient, Provider: HeaderProvider> {
     /// The bodies client
     client: Arc<B>,
     /// The consensus client
-    consensus: Arc<dyn Consensus<alloy_consensus::Header, B::Body>>,
+    consensus: Arc<dyn Consensus<Provider::Header, B::Body>>,
     /// The database handle
     provider: Provider,
     /// The maximum number of non-empty blocks per one request
@@ -292,12 +292,17 @@ where
     Self: BodyDownloader + 'static,
 {
     /// Spawns the downloader task via [`tokio::task::spawn`]
-    pub fn into_task(self) -> TaskDownloader<<Self as BodyDownloader>::Body> {
+    pub fn into_task(
+        self,
+    ) -> TaskDownloader<<Self as BodyDownloader>::Header, <Self as BodyDownloader>::Body> {
         self.into_task_with(&TokioTaskExecutor::default())
     }
 
     /// Convert the downloader into a [`TaskDownloader`] by spawning it via the given spawner.
-    pub fn into_task_with<S>(self, spawner: &S) -> TaskDownloader<<Self as BodyDownloader>::Body>
+    pub fn into_task_with<S>(
+        self,
+        spawner: &S,
+    ) -> TaskDownloader<<Self as BodyDownloader>::Header, <Self as BodyDownloader>::Body>
     where
         S: TaskSpawner,
     {
@@ -310,6 +315,7 @@ where
     B: BodiesClient<Body: Debug + InMemorySize> + 'static,
     Provider: HeaderProvider<Header = alloy_consensus::Header> + Unpin + 'static,
 {
+    type Header = Provider::Header;
     type Body = B::Body;
 
     /// Set a new download range (exclusive).
@@ -360,7 +366,7 @@ where
     B: BodiesClient<Body: InMemorySize> + 'static,
     Provider: HeaderProvider<Header = alloy_consensus::Header> + Unpin + 'static,
 {
-    type Item = BodyDownloaderResult<B::Body>;
+    type Item = BodyDownloaderResult<Provider::Header, B::Body>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -573,7 +579,7 @@ impl BodiesDownloaderBuilder {
     pub fn build<B, Provider>(
         self,
         client: B,
-        consensus: Arc<dyn Consensus<alloy_consensus::Header, B::Body>>,
+        consensus: Arc<dyn Consensus<Provider::Header, B::Body>>,
         provider: Provider,
     ) -> BodiesDownloader<B, Provider>
     where

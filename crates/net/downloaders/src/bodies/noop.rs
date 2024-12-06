@@ -1,3 +1,4 @@
+use alloy_consensus::Header;
 use alloy_primitives::BlockNumber;
 use futures::Stream;
 use reth_network_p2p::{
@@ -13,6 +14,7 @@ use std::ops::RangeInclusive;
 pub struct NoopBodiesDownloader;
 
 impl BodyDownloader for NoopBodiesDownloader {
+    type Header = Header;
     type Body = BlockBody;
 
     fn set_download_range(&mut self, _: RangeInclusive<BlockNumber>) -> DownloadResult<()> {
@@ -21,7 +23,7 @@ impl BodyDownloader for NoopBodiesDownloader {
 }
 
 impl Stream for NoopBodiesDownloader {
-    type Item = Result<Vec<BlockResponse<alloy_consensus::Header, BlockBody>>, DownloadError>;
+    type Item = Result<Vec<BlockResponse<Header, BlockBody>>, DownloadError>;
 
     fn poll_next(
         self: std::pin::Pin<&mut Self>,
