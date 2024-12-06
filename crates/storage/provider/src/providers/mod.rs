@@ -591,19 +591,6 @@ impl<N: ProviderNodeTypes> StageCheckpointReader for BlockchainProvider<N> {
 }
 
 impl<N: TreeNodeTypes> EvmEnvProvider for BlockchainProvider<N> {
-    fn fill_env_at<EvmConfig>(
-        &self,
-        cfg: &mut CfgEnvWithHandlerCfg,
-        block_env: &mut BlockEnv,
-        at: BlockHashOrNumber,
-        evm_config: EvmConfig,
-    ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = Header>,
-    {
-        self.database.provider()?.fill_env_at(cfg, block_env, at, evm_config)
-    }
-
     fn fill_env_with_header<EvmConfig>(
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,
