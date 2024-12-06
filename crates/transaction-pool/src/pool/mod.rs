@@ -295,7 +295,7 @@ where
 
     /// Returns _all_ transactions in the pool.
     pub fn pooled_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        self.get_pool_data().all().transactions_iter().filter(|tx| tx.propagate).collect()
+        self.get_pool_data().all().transactions_iter().filter(|tx| tx.propagate).cloned().collect()
     }
 
     /// Returns only the first `max` transactions in the pool.
@@ -303,7 +303,13 @@ where
         &self,
         max: usize,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        self.get_pool_data().all().transactions_iter().filter(|tx| tx.propagate).take(max).collect()
+        self.get_pool_data()
+            .all()
+            .transactions_iter()
+            .filter(|tx| tx.propagate)
+            .take(max)
+            .cloned()
+            .collect()
     }
 
     /// Converts the internally tracked transaction to the pooled format.
@@ -857,7 +863,12 @@ where
         &self,
         origin: TransactionOrigin,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        self.get_pool_data().all().transactions_iter().filter(|tx| tx.origin == origin).collect()
+        self.get_pool_data()
+            .all()
+            .transactions_iter()
+            .filter(|tx| tx.origin == origin)
+            .cloned()
+            .collect()
     }
 
     /// Returns all pending transactions filted by [`TransactionOrigin`]
