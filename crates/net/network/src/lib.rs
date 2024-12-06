@@ -50,7 +50,7 @@
 //!     config::rng_secret_key, EthNetworkPrimitives, NetworkConfig, NetworkManager,
 //! };
 //! use reth_network_peers::mainnet_nodes;
-//! use reth_provider::test_utils::NoopProvider;
+//! use reth_storage_api::noop::NoopProvider;
 //!
 //! // This block provider implementation is used for testing purposes.
 //! let client = NoopProvider::default();
@@ -79,7 +79,7 @@
 //!     config::rng_secret_key, EthNetworkPrimitives, NetworkConfig, NetworkManager,
 //! };
 //! use reth_network_peers::mainnet_nodes;
-//! use reth_provider::test_utils::NoopProvider;
+//! use reth_storage_api::noop::NoopProvider;
 //! use reth_transaction_pool::TransactionPool;
 //! async fn launch<Pool: TransactionPool>(pool: Pool) {
 //!     // This block provider implementation is used for testing purposes.

@@ -1905,7 +1905,7 @@ mod tests {
         error::{RequestError, RequestResult},
         sync::{NetworkSyncUpdater, SyncState},
     };
-    use reth_provider::test_utils::NoopProvider;
+    use reth_storage_api::noop::NoopProvider;
     use reth_transaction_pool::test_utils::{
         testing_pool, MockTransaction, MockTransactionFactory, TestPool,
     };
