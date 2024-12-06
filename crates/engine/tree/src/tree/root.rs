@@ -601,44 +601,47 @@ fn update_sparse_trie<Factory: DatabaseProviderFactory>(
         if storage.wiped {
             trace!(target: "engine::root::sparse", ?address, "Wiping storage");
             storage_trie.wipe();
-        }
+        } else {
+            for (slot, value) in storage.storage {
+                let slot_nibbles = Nibbles::unpack(slot);
+                if value.is_zero() {
+                    trace!(target: "engine::root::sparse", ?address, ?slot, "Removing storage slot");
 
-        for (slot, value) in storage.storage {
-            let slot_nibbles = Nibbles::unpack(slot);
-            if value.is_zero() {
-                trace!(target: "engine::root::sparse", ?address, ?slot, "Removing storage slot");
+                    storage_trie.remove_leaf(&slot_nibbles, |path| {
+                        // Right pad the target with 0s.
+                        let mut padded_key = path.pack();
+                        padded_key.resize(32, 0);
+                        let mut targets = HashSet::with_hasher(DefaultHashBuilder::default());
+                        targets.insert(B256::from_slice(&padded_key));
 
-                storage_trie.remove_leaf(&slot_nibbles, |path| {
-                    // Right pad the target with 0s.
-                    let mut padded_key = path.pack();
-                    padded_key.resize(32, 0);
-                    let mut targets = HashSet::with_hasher(DefaultHashBuilder::default());
-                    targets.insert(B256::from_slice(&padded_key));
+                        let storage_prefix_set = prefix_sets
+                            .storage_prefix_sets
+                            .get(&address)
+                            .cloned()
+                            .unwrap_or_default();
+                        let proof = StorageProof::new_hashed(
+                            InMemoryTrieCursorFactory::new(
+                                DatabaseTrieCursorFactory::new(provider.tx_ref()),
+                                &input_nodes_sorted,
+                            ),
+                            HashedPostStateCursorFactory::new(
+                                DatabaseHashedCursorFactory::new(provider.tx_ref()),
+                                &input_state_sorted,
+                            ),
+                            address,
+                        )
+                        .with_prefix_set_mut(storage_prefix_set)
+                        .storage_multiproof(targets)
+                        .unwrap();
 
-                    let storage_prefix_set =
-                        prefix_sets.storage_prefix_sets.get(&address).cloned().unwrap_or_default();
-                    let proof = StorageProof::new_hashed(
-                        InMemoryTrieCursorFactory::new(
-                            DatabaseTrieCursorFactory::new(provider.tx_ref()),
-                            &input_nodes_sorted,
-                        ),
-                        HashedPostStateCursorFactory::new(
-                            DatabaseHashedCursorFactory::new(provider.tx_ref()),
-                            &input_state_sorted,
-                        ),
-                        address,
-                    )
-                    .with_prefix_set_mut(storage_prefix_set)
-                    .storage_multiproof(targets)
-                    .unwrap();
-
-                    // The subtree only contains the proof for a single target.
-                    proof.subtree.get(&path).cloned()
-                })?;
-            } else {
-                trace!(target: "engine::root::sparse", ?address, ?slot, "Updating storage slot");
-                storage_trie
-                    .update_leaf(slot_nibbles, alloy_rlp::encode_fixed_size(&value).to_vec())?;
+                        // The subtree only contains the proof for a single target.
+                        proof.subtree.get(&path).cloned()
+                    })?;
+                } else {
+                    trace!(target: "engine::root::sparse", ?address, ?slot, "Updating storage slot");
+                    storage_trie
+                        .update_leaf(slot_nibbles, alloy_rlp::encode_fixed_size(&value).to_vec())?;
+                }
             }
         }
 
