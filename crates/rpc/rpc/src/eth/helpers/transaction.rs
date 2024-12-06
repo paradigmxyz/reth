@@ -1,13 +1,16 @@
 //! Contains RPC handler implementations specific to transactions
 
 use crate::EthApi;
-use alloy_primitives::Bytes;
-use reth_provider::{BlockReader, BlockReaderIdExt, ProviderTx, TransactionsProvider};
+use alloy_primitives::{Bytes, B256};
+use reth_provider::{
+    BlockReader, BlockReaderIdExt, ProviderTx, TransactionsProvider,
+};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
-    FullEthApiTypes, RpcNodeCoreExt,
+    FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt,
 };
-use reth_transaction_pool::TransactionPool;
+use reth_rpc_eth_types::utils::recover_raw_transaction;
+use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
 impl<Provider, Pool, Network, EvmConfig> EthTransactions
     for EthApi<Provider, Pool, Network, EvmConfig>
@@ -20,9 +23,24 @@ where
         self.inner.signers()
     }
 
-    #[inline]
-    fn broadcast_raw_transaction(&self, raw_tx: Bytes) {
-        self.inner.broadcast_raw_transaction(raw_tx)
+    /// Decodes and recovers the transaction and submits it to the pool.
+    ///
+    /// Returns the hash of the transaction.
+    async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error> {
+        let recovered = recover_raw_transaction(tx.clone())?;
+        let pool_transaction = <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
+
+        // submit the transaction to the pool with a `Local` origin
+        let hash = self
+            .pool()
+            .add_transaction(TransactionOrigin::Local, pool_transaction)
+            .await
+            .map_err(Self::Error::from_eth_err)?;
+
+        // broadcast raw transaction to subscribers if there is any.
+        self.broadcast_raw_transaction(tx);
+
+        Ok(hash)
     }
 }
 
