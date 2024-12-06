@@ -88,7 +88,7 @@ pub trait EthBlocks: LoadBlock {
                     .provider()
                     .pending_block()
                     .map_err(Self::Error::from_eth_err)?
-                    .map(|block| block.body.transactions().len()))
+                    .map(|block| block.body.transactions().len()));
             }
 
             match block_id {
@@ -165,7 +165,7 @@ pub trait EthBlocks: LoadBlock {
                     .get_block_and_receipts(block_hash)
                     .await
                     .map_err(Self::Error::from_eth_err)
-                    .map(|b| b.map(|(b, r)| (b.block.clone(), r)))
+                    .map(|b| b.map(|(b, r)| (b.block.clone(), r)));
             }
 
             Ok(None)
@@ -252,11 +252,30 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
             }
 
             let block = match block_id {
-                BlockId::Number(BlockNumberOrTag::Latest) => self
-                    .cache()
-                    .latest_block_with_senders()
-                    .await
-                    .map_err(Self::Error::from_eth_err)?,
+                BlockId::Number(BlockNumberOrTag::Latest) => {
+                    if let Some(block) = self
+                        .cache()
+                        .latest_block_with_senders()
+                        .await
+                        .map_err(Self::Error::from_eth_err)?
+                    {
+                        Some(block)
+                    } else {
+                        // Fallback to traditional lookup if latest isn't cached
+                        match self
+                            .provider()
+                            .block_hash_for_id(block_id)
+                            .map_err(Self::Error::from_eth_err)?
+                        {
+                            Some(block_hash) => self
+                                .cache()
+                                .get_sealed_block_with_senders(block_hash)
+                                .await
+                                .map_err(Self::Error::from_eth_err)?,
+                            None => None,
+                        }
+                    }
+                }
                 _ => {
                     let block_hash = match self
                         .provider()
