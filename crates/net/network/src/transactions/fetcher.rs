@@ -278,7 +278,6 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             + IntoIterator<Item = (TxHash, Option<(u8, usize)>)>,
     ) -> RequestTxHashes {
         let mut acc_size_response = 0;
-        let hashes_from_announcement_len = hashes_from_announcement.len();
 
         let mut hashes_from_announcement_iter = hashes_from_announcement.into_iter();
 
@@ -292,7 +291,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             acc_size_response = size;
         }
 
-        let mut surplus_hashes = RequestTxHashes::with_capacity(hashes_from_announcement_len - 1);
+        let mut surplus_hashes = RequestTxHashes::default();
 
         // folds size based on expected response size  and adds selected hashes to the request
         // list and the other hashes to the surplus list
@@ -326,8 +325,6 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         }
 
         surplus_hashes.extend(hashes_from_announcement_iter.map(|(hash, _metadata)| hash));
-        surplus_hashes.shrink_to_fit();
-        hashes_to_request.shrink_to_fit();
 
         surplus_hashes
     }
@@ -432,8 +429,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         peers: &HashMap<PeerId, PeerMetadata<N>>,
         has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
     ) {
-        let init_capacity_req = approx_capacity_get_pooled_transactions_req_eth68(&self.info);
-        let mut hashes_to_request = RequestTxHashes::with_capacity(init_capacity_req);
+        let mut hashes_to_request = RequestTxHashes::default();
         let is_session_active = |peer_id: &PeerId| peers.contains_key(peer_id);
 
         let mut search_durations = TxFetcherSearchDurations::default();
@@ -481,9 +477,6 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             },
             search_durations.fill_request
         );
-
-        // free unused memory
-        hashes_to_request.shrink_to_fit();
 
         self.update_pending_fetch_cache_search_metrics(search_durations);
 

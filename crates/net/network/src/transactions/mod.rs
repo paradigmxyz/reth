@@ -640,16 +640,8 @@ where
             return
         }
 
-        // load message version before announcement data type is destructed in packing
-        let msg_version = valid_announcement_data.msg_version();
-        //
-        // demand recommended soft limit on response, however the peer may enforce an arbitrary
-        // limit on the response (2MB)
-        //
-        // request buffer is shrunk via call to pack request!
-        let init_capacity_req =
-            self.transaction_fetcher.approx_capacity_get_pooled_transactions_req(msg_version);
-        let mut hashes_to_request = RequestTxHashes::with_capacity(init_capacity_req);
+        let mut hashes_to_request =
+            RequestTxHashes::with_capacity(valid_announcement_data.len() / 4);
         let surplus_hashes =
             self.transaction_fetcher.pack_request(&mut hashes_to_request, valid_announcement_data);
 
@@ -657,7 +649,6 @@ where
             trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 surplus_hashes=?*surplus_hashes,
-                %msg_version,
                 %client,
                 "some hashes in announcement from peer didn't fit in `GetPooledTransactions` request, buffering surplus hashes"
             );
@@ -668,7 +659,6 @@ where
         trace!(target: "net::tx",
             peer_id=format!("{peer_id:#}"),
             hashes=?*hashes_to_request,
-            %msg_version,
             %client,
             "sending hashes in `GetPooledTransactions` request to peer's session"
         );
