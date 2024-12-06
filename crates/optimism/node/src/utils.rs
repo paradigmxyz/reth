@@ -1,7 +1,9 @@
 use crate::{OpBuiltPayload, OpNode as OtherOpNode, OpPayloadBuilderAttributes};
+use alloy_eips::eip4844;
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, B256};
 use alloy_rpc_types_engine::PayloadAttributes;
+use reth_chainspec::EthereumHardforks;
 use reth_e2e_test_utils::{transaction::TransactionTestContext, wallet::Wallet, NodeHelperType};
 use reth_optimism_chainspec::OpChainSpecBuilder;
 use reth_payload_builder::EthPayloadBuilderAttributes;
@@ -48,15 +50,22 @@ pub async fn advance_chain(
 }
 
 /// Helper function to create a new eth payload attributes
-pub fn optimism_payload_attributes(timestamp: u64) -> OpPayloadBuilderAttributes {
+pub fn optimism_payload_attributes(
+    chain_spec: impl EthereumHardforks,
+    timestamp: u64,
+) -> OpPayloadBuilderAttributes {
     let attributes = PayloadAttributes {
         timestamp,
         prev_randao: B256::ZERO,
         suggested_fee_recipient: Address::ZERO,
         withdrawals: Some(vec![]),
         parent_beacon_block_root: Some(B256::ZERO),
-        target_blobs_per_block: None,
-        max_blobs_per_block: None,
+        target_blobs_per_block: chain_spec
+            .is_prague_active_at_timestamp(timestamp)
+            .then_some(eip4844::TARGET_BLOBS_PER_BLOCK),
+        max_blobs_per_block: chain_spec
+            .is_prague_active_at_timestamp(timestamp)
+            .then_some(eip4844::MAX_BLOBS_PER_BLOCK as u64),
     };
 
     OpPayloadBuilderAttributes {

@@ -120,6 +120,13 @@ where
             Self::Right(r) => r.withdrawals(),
         }
     }
+
+    fn target_blobs_per_block(&self) -> Option<u64> {
+        match self {
+            Self::Left(l) => l.target_blobs_per_block(),
+            Self::Right(r) => r.target_blobs_per_block(),
+        }
+    }
 }
 
 /// this structure enables the chaining of multiple `PayloadBuilder` implementations,

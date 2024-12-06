@@ -1,4 +1,4 @@
-use alloy_eips::{BlockId, BlockNumberOrTag};
+use alloy_eips::{eip4844, BlockId, BlockNumberOrTag};
 use alloy_primitives::{bytes, Address, B256};
 use alloy_provider::{
     network::{
@@ -10,6 +10,7 @@ use alloy_rpc_types_engine::PayloadAttributes;
 use alloy_rpc_types_eth::TransactionRequest;
 use alloy_signer::SignerSync;
 use rand::{seq::SliceRandom, Rng};
+use reth_chainspec::EthereumHardforks;
 use reth_e2e_test_utils::{wallet::Wallet, NodeHelperType, TmpDB};
 use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_ethereum::EthereumNode;
@@ -19,15 +20,22 @@ use reth_provider::FullProvider;
 use revm::primitives::{AccessListItem, Authorization};
 
 /// Helper function to create a new eth payload attributes
-pub(crate) fn eth_payload_attributes(timestamp: u64) -> EthPayloadBuilderAttributes {
+pub(crate) fn eth_payload_attributes(
+    chain_spec: impl EthereumHardforks,
+    timestamp: u64,
+) -> EthPayloadBuilderAttributes {
     let attributes = PayloadAttributes {
         timestamp,
         prev_randao: B256::ZERO,
         suggested_fee_recipient: Address::ZERO,
         withdrawals: Some(vec![]),
         parent_beacon_block_root: Some(B256::ZERO),
-        target_blobs_per_block: None,
-        max_blobs_per_block: None,
+        target_blobs_per_block: chain_spec
+            .is_prague_active_at_timestamp(timestamp)
+            .then_some(eip4844::TARGET_BLOBS_PER_BLOCK),
+        max_blobs_per_block: chain_spec
+            .is_prague_active_at_timestamp(timestamp)
+            .then_some(eip4844::MAX_BLOBS_PER_BLOCK as u64),
     };
     EthPayloadBuilderAttributes::new(B256::ZERO, attributes)
 }

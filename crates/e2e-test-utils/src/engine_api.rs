@@ -1,5 +1,5 @@
 use crate::traits::PayloadEnvelopeExt;
-use alloy_primitives::B256;
+use alloy_primitives::{B256, U256};
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatusEnum};
 use jsonrpsee::{
     core::client::ClientT,
@@ -67,6 +67,7 @@ impl<E: EngineTypes, ChainSpec: EthereumHardforks> EngineApiTestContext<E, Chain
                 versioned_hashes,
                 payload_builder_attributes.parent_beacon_block_root().unwrap(),
                 requests,
+                U256::from(payload_builder_attributes.target_blobs_per_block().unwrap()),
             )
             .await?
         } else {

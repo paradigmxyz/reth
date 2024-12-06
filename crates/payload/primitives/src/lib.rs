@@ -96,27 +96,14 @@ pub fn validate_payload_timestamp(
     }
 
     let is_prague = chain_spec.is_prague_active_at_timestamp(timestamp);
-    if version == EngineApiMessageVersion::V4 && !is_prague {
-        // From the Engine API spec:
-        // <https://github.com/ethereum/execution-apis/blob/7907424db935b93c2fe6a3c0faab943adebe8557/src/engine/prague.md#specification-1>
-        //
-        // For `engine_getPayloadV4`:
-        //
-        // 1. Client software **MUST** return `-38005: Unsupported fork` error if the `timestamp` of
-        //    the built payload does not fall within the time frame of the Prague fork.
-        //
-        // For `engine_forkchoiceUpdatedV4`:
-        //
-        // 2. Client software **MUST** return `-38005: Unsupported fork` error if the
-        //    `payloadAttributes` is set and the `payloadAttributes.timestamp` does not fall within
-        //    the time frame of the Prague fork.
-        //
-        // For `engine_newPayloadV4`:
-        //
-        // 2. Client software **MUST** return `-38005: Unsupported fork` error if the `timestamp` of
-        //    the payload does not fall within the time frame of the Prague fork.
+    if version < EngineApiMessageVersion::V4 && is_prague {
         return Err(EngineObjectValidationError::UnsupportedFork)
     }
+
+    if version >= EngineApiMessageVersion::V4 && !is_prague {
+        return Err(EngineObjectValidationError::UnsupportedFork)
+    }
+
     Ok(())
 }
 
@@ -132,24 +119,20 @@ pub fn validate_withdrawals_presence<T: EthereumHardforks>(
 ) -> Result<(), EngineObjectValidationError> {
     let is_shanghai_active = chain_spec.is_shanghai_active_at_timestamp(timestamp);
 
-    match version {
-        EngineApiMessageVersion::V1 => {
-            if has_withdrawals {
-                return Err(message_validation_kind
-                    .to_error(VersionSpecificValidationError::WithdrawalsNotSupportedInV1))
-            }
-        }
-        EngineApiMessageVersion::V2 | EngineApiMessageVersion::V3 | EngineApiMessageVersion::V4 => {
-            if is_shanghai_active && !has_withdrawals {
-                return Err(message_validation_kind
-                    .to_error(VersionSpecificValidationError::NoWithdrawalsPostShanghai))
-            }
-            if !is_shanghai_active && has_withdrawals {
-                return Err(message_validation_kind
-                    .to_error(VersionSpecificValidationError::HasWithdrawalsPreShanghai))
-            }
-        }
-    };
+    if has_withdrawals && version < EngineApiMessageVersion::V2 {
+        return Err(message_validation_kind
+            .to_error(VersionSpecificValidationError::WithdrawalsNotSupportedInV1))
+    }
+
+    if !is_shanghai_active && has_withdrawals {
+        return Err(message_validation_kind
+            .to_error(VersionSpecificValidationError::HasWithdrawalsPreShanghai))
+    }
+
+    if is_shanghai_active && !has_withdrawals {
+        return Err(message_validation_kind
+            .to_error(VersionSpecificValidationError::NoWithdrawalsPostShanghai))
+    }
 
     Ok(())
 }
@@ -232,21 +215,15 @@ pub fn validate_parent_beacon_block_root_presence<T: EthereumHardforks>(
     //        failure.
     //     4. If any of the above checks fails, the `forkchoiceState` update **MUST NOT** be rolled
     //        back.
-    match version {
-        EngineApiMessageVersion::V1 | EngineApiMessageVersion::V2 => {
-            if has_parent_beacon_block_root {
-                return Err(validation_kind.to_error(
-                    VersionSpecificValidationError::ParentBeaconBlockRootNotSupportedBeforeV3,
-                ))
-            }
-        }
-        EngineApiMessageVersion::V3 | EngineApiMessageVersion::V4 => {
-            if !has_parent_beacon_block_root {
-                return Err(validation_kind
-                    .to_error(VersionSpecificValidationError::NoParentBeaconBlockRootPostCancun))
-            }
-        }
-    };
+    if has_parent_beacon_block_root && version < EngineApiMessageVersion::V3 {
+        return Err(validation_kind
+            .to_error(VersionSpecificValidationError::ParentBeaconBlockRootNotSupportedBeforeV3))
+    }
+
+    if !has_parent_beacon_block_root && version >= EngineApiMessageVersion::V3 {
+        return Err(validation_kind
+            .to_error(VersionSpecificValidationError::NoParentBeaconBlockRootPostCancun))
+    }
 
     // For `engine_forkchoiceUpdatedV3`:
     //
@@ -259,6 +236,25 @@ pub fn validate_parent_beacon_block_root_presence<T: EthereumHardforks>(
     // 2. Client software **MUST** return `-38005: Unsupported fork` error if the `timestamp` of the
     //    payload does not fall within the time frame of the Cancun fork.
     validate_payload_timestamp(chain_spec, version, timestamp)?;
+
+    Ok(())
+}
+
+/// Validates that `targetBlobsPerBlock` field is only present for post-V4 requests.
+pub fn validate_eip7742_fields_presence(
+    version: EngineApiMessageVersion,
+    validation_kind: MessageValidationKind,
+    has_target_blobs_per_block: bool,
+) -> Result<(), EngineObjectValidationError> {
+    if has_target_blobs_per_block && version < EngineApiMessageVersion::V4 {
+        return Err(validation_kind
+            .to_error(VersionSpecificValidationError::TargetBlobsPerBlockNotSupportedBeforeV4))
+    }
+
+    if version >= EngineApiMessageVersion::V4 && has_target_blobs_per_block {
+        return Err(validation_kind
+            .to_error(VersionSpecificValidationError::NoTargetBlobsPerBlockPostPrague))
+    }
 
     Ok(())
 }
@@ -318,6 +314,11 @@ where
         payload_or_attrs.message_validation_kind(),
         payload_or_attrs.timestamp(),
         payload_or_attrs.parent_beacon_block_root().is_some(),
+    )?;
+    validate_eip7742_fields_presence(
+        version,
+        payload_or_attrs.message_validation_kind(),
+        payload_or_attrs.target_blobs_per_block().is_some(),
     )
 }
 

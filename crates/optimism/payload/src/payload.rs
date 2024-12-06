@@ -89,6 +89,8 @@ impl PayloadBuilderAttributes for OpPayloadBuilderAttributes {
             prev_randao: attributes.payload_attributes.prev_randao,
             withdrawals: attributes.payload_attributes.withdrawals.unwrap_or_default().into(),
             parent_beacon_block_root: attributes.payload_attributes.parent_beacon_block_root,
+            target_blobs_per_block: attributes.payload_attributes.target_blobs_per_block,
+            max_blobs_per_block: attributes.payload_attributes.max_blobs_per_block,
         };
 
         Ok(Self {
@@ -126,6 +128,10 @@ impl PayloadBuilderAttributes for OpPayloadBuilderAttributes {
 
     fn withdrawals(&self) -> &Withdrawals {
         &self.payload_attributes.withdrawals
+    }
+
+    fn target_blobs_per_block(&self) -> Option<u64> {
+        self.payload_attributes.target_blobs_per_block
     }
 }
 

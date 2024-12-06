@@ -271,6 +271,7 @@ pub fn try_into_block(
 
     base_payload.header.parent_beacon_block_root = sidecar.parent_beacon_block_root();
     base_payload.header.requests_hash = sidecar.requests_hash();
+    base_payload.header.target_blobs_per_block = sidecar.target_blobs_per_block();
 
     Ok(base_payload)
 }

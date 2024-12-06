@@ -11,8 +11,11 @@
 
 use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{
-    eip4844::MAX_DATA_GAS_PER_BLOCK, eip7002::WITHDRAWAL_REQUEST_TYPE,
-    eip7251::CONSOLIDATION_REQUEST_TYPE, eip7685::Requests, merge::BEACON_NONCE,
+    eip4844::{self},
+    eip7002::WITHDRAWAL_REQUEST_TYPE,
+    eip7251::CONSOLIDATION_REQUEST_TYPE,
+    eip7685::Requests,
+    merge::BEACON_NONCE,
 };
 use alloy_primitives::U256;
 use reth_basic_payload_builder::{
@@ -173,6 +176,9 @@ where
     let mut cumulative_gas_used = 0;
     let mut sum_blob_gas_used = 0;
     let block_gas_limit: u64 = initialized_block_env.gas_limit.to::<u64>();
+    let blob_gas_limit =
+        attributes.max_blobs_per_block.unwrap_or(eip4844::MAX_BLOBS_PER_BLOCK as u64) *
+            eip4844::DATA_GAS_PER_BLOB;
     let base_fee = initialized_block_env.basefee.to::<u64>();
 
     let mut executed_txs = Vec::new();
@@ -250,7 +256,7 @@ where
         // the EIP-4844 can still fit in the block
         if let Some(blob_tx) = tx.transaction.as_eip4844() {
             let tx_blob_gas = blob_tx.blob_gas();
-            if sum_blob_gas_used + tx_blob_gas > MAX_DATA_GAS_PER_BLOCK {
+            if sum_blob_gas_used + tx_blob_gas > blob_gas_limit {
                 // we can't fit this _blob_ transaction into the block, so we mark it as
                 // invalid, which removes its dependent transactions from
                 // the iterator. This is similar to the gas limit condition
@@ -258,10 +264,7 @@ where
                 trace!(target: "payload_builder", tx=?tx.hash, ?sum_blob_gas_used, ?tx_blob_gas, "skipping blob transaction because it would exceed the max data gas per block");
                 best_txs.mark_invalid(
                     &pool_tx,
-                    InvalidPoolTransactionError::ExceedsGasLimit(
-                        tx_blob_gas,
-                        MAX_DATA_GAS_PER_BLOCK,
-                    ),
+                    InvalidPoolTransactionError::ExceedsGasLimit(tx_blob_gas, blob_gas_limit),
                 );
                 continue
             }
@@ -309,7 +312,7 @@ where
             sum_blob_gas_used += tx_blob_gas;
 
             // if we've reached the max data gas per block, we can skip blob txs entirely
-            if sum_blob_gas_used == MAX_DATA_GAS_PER_BLOCK {
+            if sum_blob_gas_used == blob_gas_limit {
                 best_txs.skip_blobs();
             }
         }
@@ -475,7 +478,7 @@ where
         blob_gas_used: blob_gas_used.map(Into::into),
         excess_blob_gas: excess_blob_gas.map(Into::into),
         requests_hash,
-        target_blobs_per_block: None,
+        target_blobs_per_block: attributes.target_blobs_per_block,
     };
 
     let withdrawals = chain_spec

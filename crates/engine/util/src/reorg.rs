@@ -421,8 +421,8 @@ where
             blob_gas_used: blob_gas_used.map(Into::into),
             excess_blob_gas: excess_blob_gas.map(Into::into),
             state_root: state_provider.state_root(hashed_state)?,
-            requests_hash: None,          // TODO(prague)
-            target_blobs_per_block: None, // TODO(prague)
+            requests_hash: None, // TODO(prague)
+            target_blobs_per_block: reorg_target.header.target_blobs_per_block,
         },
         body: BlockBody {
             transactions,
