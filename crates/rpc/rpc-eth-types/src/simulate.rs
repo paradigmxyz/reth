@@ -217,7 +217,7 @@ pub fn build_block<T: TransactionCompat<Error: FromEthApiError>>(
                 logs: call.logs.iter().map(|log| &log.inner).cloned().collect(),
                 ..Default::default()
             }
-            .into(),
+            .with_bloom(),
         );
 
         calls.push(call);
