@@ -105,9 +105,14 @@ impl<P> SparseTrie<P> {
     }
 
     /// Update the leaf node.
-    pub fn update_leaf(&mut self, path: Nibbles, value: Vec<u8>) -> SparseTrieResult<()> {
+    pub fn update_leaf(
+        &mut self,
+        path: Nibbles,
+        value: Vec<u8>,
+        fetch_node: impl FnMut(Nibbles) -> Option<Bytes>,
+    ) -> SparseTrieResult<()> {
         let revealed = self.as_revealed_mut().ok_or(SparseTrieError::Blind)?;
-        revealed.update_leaf(path, value)?;
+        revealed.update_leaf(path, value, fetch_node)?;
         Ok(())
     }
 
@@ -390,7 +395,12 @@ impl<P> RevealedSparseTrie<P> {
     }
 
     /// Update the leaf node with provided value.
-    pub fn update_leaf(&mut self, path: Nibbles, value: Vec<u8>) -> SparseTrieResult<()> {
+    pub fn update_leaf(
+        &mut self,
+        path: Nibbles,
+        value: Vec<u8>,
+        mut fetch_node: impl FnMut(Nibbles) -> Option<Bytes>,
+    ) -> SparseTrieResult<()> {
         self.prefix_set.insert(path.clone());
         let existing = self.values.insert(path.clone(), value);
         if existing.is_some() {
@@ -446,6 +456,18 @@ impl<P> RevealedSparseTrie<P> {
                         let common = current.common_prefix_length(&path);
 
                         *key = current.slice(current.len() - key.len()..common);
+
+                        if self.nodes.get(&current).unwrap().is_hash() {
+                            // if let Some(node) = self.provider.blinded_node(child_path.clone())? {
+                            if let Some(node) = fetch_node(current.clone()) {
+                                let decoded = TrieNode::decode(&mut &node[..])?;
+                                trace!(target: "trie::sparse", ?current, ?decoded, "Revealing extension node child");
+                                // We'll never have to update the revealed child node, only remove
+                                // or do nothing, so we can safely ignore the hash mask here and
+                                // pass `None`.
+                                self.reveal_node(current.clone(), decoded, None)?;
+                            }
+                        }
 
                         // create state mask for new branch node
                         // NOTE: this might overwrite the current extension node
@@ -1005,7 +1027,6 @@ where
                         trace!(target: "trie::sparse", ?removed_path, ?child_path, ?child, "Branch node has only one child");
 
                         if self.nodes.get(&child_path).unwrap().is_hash() {
-                            trace!(target: "trie::sparse", ?child_path, "Retrieving remaining blinded branch child");
                             // if let Some(node) = self.provider.blinded_node(child_path.clone())? {
                             if let Some(node) = fetch_node(child_path.clone()) {
                                 let decoded = TrieNode::decode(&mut &node[..])?;

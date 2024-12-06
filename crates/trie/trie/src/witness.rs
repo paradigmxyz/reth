@@ -141,7 +141,9 @@ where
 
                 if let Some(value) = maybe_leaf_value {
                     storage_trie
-                        .update_leaf(storage_nibbles, value)
+                        .update_leaf(storage_nibbles, value, |path| {
+                            proof_provider.blinded_node(path).unwrap()
+                        })
                         .map_err(SparseStateTrieError::Sparse)?;
                 } else {
                     storage_trie

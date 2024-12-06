@@ -278,8 +278,9 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         &mut self,
         path: Nibbles,
         value: Vec<u8>,
+        fetch_node: impl FnMut(Nibbles) -> Option<Bytes>,
     ) -> SparseStateTrieResult<()> {
-        self.state.update_leaf(path, value)?;
+        self.state.update_leaf(path, value, fetch_node)?;
         Ok(())
     }
 
@@ -289,9 +290,10 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         address: B256,
         slot: Nibbles,
         value: Vec<u8>,
+        fetch_node: impl FnMut(Nibbles) -> Option<Bytes>,
     ) -> SparseStateTrieResult<()> {
         if let Some(storage_trie) = self.storages.get_mut(&address) {
-            Ok(storage_trie.update_leaf(slot, value)?)
+            Ok(storage_trie.update_leaf(slot, value, fetch_node)?)
         } else {
             Err(SparseStateTrieError::Sparse(SparseTrieError::Blind))
         }
@@ -393,7 +395,7 @@ where
             trace!(target: "trie::sparse", ?address, "Updating account");
             self.account_rlp_buf.clear();
             TrieAccount::from((account, storage_root)).encode(&mut self.account_rlp_buf);
-            self.update_account_leaf(nibbles, self.account_rlp_buf.clone())
+            self.update_account_leaf(nibbles, self.account_rlp_buf.clone(), fetch_node)
         }
     }
 
