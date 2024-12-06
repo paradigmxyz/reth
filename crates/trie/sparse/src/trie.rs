@@ -780,13 +780,11 @@ impl<P> RevealedSparseTrie<P> {
                                 };
                                 tree_mask_values.push(tree_mask_value);
 
-                                // Set the hash mask. If a child node is a revealed branch node OR a
-                                // revealed extension node OR a blinded node that has its hash mask
-                                // bit set according to the database, set the hash mask bit and save
-                                // the hash.
+                                // Set the hash mask. If a child node is a revealed branch node OR
+                                // is a blinded node that has its hash mask bit set according to the
+                                // database, set the hash mask bit and save the hash.
                                 let hash = child.as_hash().filter(|_| {
                                     node_type.is_branch() ||
-                                        node_type.is_extension() ||
                                         (node_type.is_hash() &&
                                             self.branch_node_hash_masks
                                                 .get(&path)
@@ -1109,10 +1107,6 @@ enum SparseNodeType {
 impl SparseNodeType {
     const fn is_hash(&self) -> bool {
         matches!(self, Self::Hash)
-    }
-
-    const fn is_extension(&self) -> bool {
-        matches!(self, Self::Extension { .. })
     }
 
     const fn is_branch(&self) -> bool {
