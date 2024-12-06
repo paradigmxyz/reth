@@ -177,7 +177,7 @@ impl Receipt {
 impl Eip2718EncodableReceipt for Receipt {
     fn eip2718_encoded_length_with_bloom(&self, bloom: &Bloom) -> usize {
         self.rlp_header_inner(bloom).length_with_payload() +
-            matches!(self.tx_type, TxType::Legacy) as usize // account for type prefix
+            !matches!(self.tx_type, TxType::Legacy) as usize // account for type prefix
     }
 
     fn eip2718_encode_with_bloom(&self, bloom: &Bloom, out: &mut dyn BufMut) {
