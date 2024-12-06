@@ -196,7 +196,7 @@ pub trait LoadPendingBlock:
         }
     }
 
-    /// Assembles a [`Receipt`] for a transaction, based on its [`ExecutionResult`].
+    /// Assembles a receipt for a transaction, based on its [`ExecutionResult`].
     fn assemble_receipt(
         &self,
         tx: &RecoveredTx<ProviderTx<Self::Provider>>,
