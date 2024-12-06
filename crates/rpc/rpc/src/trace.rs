@@ -117,7 +117,7 @@ where
         trace_types: HashSet<TraceType>,
         block_id: Option<BlockId>,
     ) -> Result<TraceResults, Eth::Error> {
-        let tx = recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(tx)?
+        let tx = recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(&tx)?
             .map_transaction(<Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus);
 
         let (cfg, block, at) = self.eth_api().evm_env_at(block_id.unwrap_or_default()).await?;
