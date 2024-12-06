@@ -433,7 +433,7 @@ where
         &self.blocking_task_guard
     }
 
-    /// Returns [`broadcast::Receiver`] of new raw transactions.
+    /// Returns [`broadcast::Receiver`] of new raw transactions
     #[inline]
     pub fn subscribe_to_raw_transactions(&self) -> broadcast::Receiver<Bytes> {
         self.raw_tx_sender.subscribe()
