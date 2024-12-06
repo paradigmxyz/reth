@@ -219,9 +219,12 @@ impl Account {
     ///
     /// In case of a mismatch, `Err(Error::Assertion)` is returned.
     pub fn assert_db(&self, address: Address, tx: &impl DbTx) -> Result<(), Error> {
-        let account = tx.get::<tables::PlainAccountState>(address)?.ok_or_else(|| {
-            Error::Assertion(format!("Expected account ({address}) is missing from DB: {self:?}"))
-        })?;
+        let account =
+            tx.get_by_encoded_key::<tables::PlainAccountState>(&address)?.ok_or_else(|| {
+                Error::Assertion(format!(
+                    "Expected account ({address}) is missing from DB: {self:?}"
+                ))
+            })?;
 
         assert_equal(self.balance, account.balance, "Balance does not match")?;
         assert_equal(self.nonce.to(), account.nonce, "Nonce does not match")?;
