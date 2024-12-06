@@ -1,22 +1,23 @@
 //! Commonly used code snippets
 
-use alloy_primitives::Bytes;
+use super::{EthApiError, EthResult};
 use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, RecoveredTx};
 use reth_primitives_traits::SignedTransaction;
 use std::future::Future;
 
-use super::{EthApiError, EthResult};
-
 /// Recovers a [`SignedTransaction`] from an enveloped encoded byte stream.
 ///
+/// This is a helper function that returns the appropriate RPC-specific error if the input data is
+/// malformed.
+///
 /// See [`alloy_eips::eip2718::Decodable2718::decode_2718`]
-pub fn recover_raw_transaction<T: SignedTransaction>(data: Bytes) -> EthResult<RecoveredTx<T>> {
+pub fn recover_raw_transaction<T: SignedTransaction>(mut data: &[u8]) -> EthResult<RecoveredTx<T>> {
     if data.is_empty() {
         return Err(EthApiError::EmptyRawTransactionData)
     }
 
-    let transaction = T::decode_2718(&mut data.as_ref())
-        .map_err(|_| EthApiError::FailedToDecodeSignedTransaction)?;
+    let transaction =
+        T::decode_2718(&mut data).map_err(|_| EthApiError::FailedToDecodeSignedTransaction)?;
 
     transaction.try_into_ecrecovered().or(Err(EthApiError::InvalidTransactionSignature))
 }

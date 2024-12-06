@@ -90,7 +90,7 @@ where
 
         let transactions = txs
             .into_iter()
-            .map(recover_raw_transaction::<PoolPooledTx<Eth::Pool>>)
+            .map(|tx| recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(&tx))
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
             .map(|tx| tx.to_components())
