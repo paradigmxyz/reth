@@ -159,6 +159,13 @@ impl ProofSequencer {
 #[allow(dead_code)]
 pub(crate) struct StateHookSender(Sender<StateRootMessage>);
 
+#[allow(dead_code)]
+impl StateHookSender {
+    pub(crate) const fn new(inner: Sender<StateRootMessage>) -> Self {
+        Self(inner)
+    }
+}
+
 impl Deref for StateHookSender {
     type Target = Sender<StateRootMessage>;
 
@@ -736,7 +743,7 @@ mod tests {
         let task = StateRootTask::new(config, tx.clone(), rx);
         let handle = task.spawn();
 
-        let state_hook_sender = StateHookSender(tx);
+        let state_hook_sender = StateHookSender::new(tx);
         for update in state_updates {
             state_hook_sender
                 .send(StateRootMessage::StateUpdate(update))
