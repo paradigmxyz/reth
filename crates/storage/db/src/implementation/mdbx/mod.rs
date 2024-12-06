@@ -444,13 +444,13 @@ impl DatabaseEnv {
         self
     }
 
-    /// Creates all the defined tables, if necessary.
+    /// Creates all the tables defined in [`Tables`], if necessary.
     pub fn create_tables(&self) -> Result<(), DatabaseError> {
-        self.create_default_tables::<Tables>()
+        self.create_tables_for::<Tables>()
     }
 
-    /// Creates all the default tables, if necessary.
-    pub fn create_default_tables<TS: TableSet>(&self) -> Result<(), DatabaseError> {
+    /// Creates all the tables defined in the given [`TableSet`], if necessary.
+    pub fn create_tables_for<TS: TableSet>(&self) -> Result<(), DatabaseError> {
         let tx = self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?;
 
         for table in TS::tables() {
