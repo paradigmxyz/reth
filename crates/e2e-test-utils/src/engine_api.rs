@@ -41,6 +41,14 @@ impl<E: EngineTypes, ChainSpec: EthereumHardforks> EngineApiTestContext<E, Chain
         Ok(self.engine_api_client.request("engine_getPayloadV3", (payload_id,)).await?)
     }
 
+    /// Retrieves a v3 payload from the engine api as serde value
+    pub async fn get_payload_v4_value(
+        &self,
+        payload_id: PayloadId,
+    ) -> eyre::Result<serde_json::Value> {
+        Ok(self.engine_api_client.request("engine_getPayloadV4", (payload_id,)).await?)
+    }
+
     /// Submits a payload to the engine api
     pub async fn submit_payload(
         &self,

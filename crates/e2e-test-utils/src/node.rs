@@ -136,7 +136,11 @@ where
         // wait for the payload builder to have finished building
         self.payload.wait_for_built_payload(eth_attr.payload_id()).await;
         // trigger resolve payload via engine api
-        self.engine_api.get_payload_v3_value(eth_attr.payload_id()).await?;
+        if self.inner.chain_spec().is_prague_active_at_timestamp(eth_attr.timestamp()) {
+            self.engine_api.get_payload_v4_value(eth_attr.payload_id()).await?;
+        } else {
+            self.engine_api.get_payload_v3_value(eth_attr.payload_id()).await?;
+        }
         // ensure we're also receiving the built payload as event
         Ok((self.payload.expect_built_payload().await?, eth_attr))
     }

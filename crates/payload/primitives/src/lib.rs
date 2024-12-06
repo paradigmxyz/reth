@@ -251,7 +251,7 @@ pub fn validate_eip7742_fields_presence(
             .to_error(VersionSpecificValidationError::TargetBlobsPerBlockNotSupportedBeforeV4))
     }
 
-    if version >= EngineApiMessageVersion::V4 && has_target_blobs_per_block {
+    if version >= EngineApiMessageVersion::V4 && !has_target_blobs_per_block {
         return Err(validation_kind
             .to_error(VersionSpecificValidationError::NoTargetBlobsPerBlockPostPrague))
     }
