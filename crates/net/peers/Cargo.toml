@@ -41,7 +41,8 @@ std = [
 	"alloy-rlp/std",
 	"secp256k1?/std",
 	"serde_with/std",
-	"thiserror/std"
+	"thiserror/std",
+	"url/std"
 ]
 secp256k1 = ["dep:secp256k1", "enr/secp256k1"]
 net = ["dep:tokio", "tokio?/net"]
