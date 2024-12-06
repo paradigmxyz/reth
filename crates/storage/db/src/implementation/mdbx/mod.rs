@@ -454,10 +454,8 @@ impl DatabaseEnv {
         let tx = self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?;
 
         for table in TS::tables() {
-            let flags = match table.is_dupsort() {
-                true => DatabaseFlags::DUP_SORT,
-                false => DatabaseFlags::default(),
-            };
+            let flags =
+                if table.is_dupsort() { DatabaseFlags::DUP_SORT } else { DatabaseFlags::default() };
 
             tx.create_db(Some(table.name()), flags)
                 .map_err(|e| DatabaseError::CreateTable(e.into()))?;

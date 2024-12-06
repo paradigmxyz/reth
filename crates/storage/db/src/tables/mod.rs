@@ -29,7 +29,7 @@ use reth_db_api::{
         AccountBeforeTx, ClientVersion, CompactU256, IntegerList, ShardedKey,
         StoredBlockBodyIndices, StoredBlockWithdrawals,
     },
-    table::{Decode, DupSort, Encode, Table, TableMetadata},
+    table::{Decode, DupSort, Encode, Table, TableInfo},
 };
 use reth_primitives::{Receipt, StorageEntry, TransactionSigned};
 use reth_primitives_traits::{Account, Bytecode};
@@ -102,7 +102,7 @@ pub trait TableViewer<R> {
 /// Used to initialize database
 pub trait TableSet {
     /// Returns an iterator over the tables
-    fn tables() -> Box<dyn Iterator<Item = Box<dyn TableMetadata>>>;
+    fn tables() -> Box<dyn Iterator<Item = Box<dyn TableInfo>>>;
 }
 
 /// Defines all the tables in the database.
@@ -250,7 +250,7 @@ macro_rules! tables {
             }
         }
 
-        impl TableMetadata for Tables {
+        impl TableInfo for Tables {
             fn name(&self) -> &'static str {
                 self.name()
             }
@@ -261,8 +261,8 @@ macro_rules! tables {
         }
 
         impl TableSet for Tables {
-            fn tables() -> Box<dyn Iterator<Item = Box<dyn TableMetadata>>> {
-                Box::new(Self::ALL.iter().map(|table| Box::new(*table) as Box<dyn TableMetadata>))
+            fn tables() -> Box<dyn Iterator<Item = Box<dyn TableInfo>>> {
+                Box::new(Self::ALL.iter().map(|table| Box::new(*table) as Box<dyn TableInfo>))
             }
         }
 

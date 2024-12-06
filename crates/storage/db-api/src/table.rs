@@ -101,7 +101,7 @@ pub trait Table: Send + Sync + Debug + 'static {
 }
 
 /// Trait that provides object-safe access to the table's metadata.
-pub trait TableMetadata: Send + Sync + Debug + 'static {
+pub trait TableInfo: Send + Sync + Debug + 'static {
     /// The table's name.
     fn name(&self) -> &'static str;
 
