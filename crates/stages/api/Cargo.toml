@@ -23,6 +23,7 @@ reth-errors.workspace = true
 reth-stages-types.workspace = true
 reth-static-file-types.workspace = true
 
+# alloy
 alloy-primitives.workspace = true
 
 # metrics

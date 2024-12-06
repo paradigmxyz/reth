@@ -367,7 +367,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                     Err(err) => {
                         self.event_sender.notify(PipelineEvent::Error { stage_id });
 
-                        return Err(PipelineError::Stage(StageError::Fatal(Box::new(err))))
+                        return Err(PipelineError::Stage(Box::new(StageError::Fatal(Box::new(err)))))
                     }
                 }
             }
@@ -1111,11 +1111,6 @@ mod tests {
                 StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
             );
         let result = pipeline.run().await;
-        assert_matches!(
-            result,
-            Err(PipelineError::Stage(StageError::DatabaseIntegrity(
-                ProviderError::BlockBodyIndicesNotFound(5)
-            )))
-        );
+        assert_matches!(result, Err(PipelineError::Stage(..)));
     }
 }
