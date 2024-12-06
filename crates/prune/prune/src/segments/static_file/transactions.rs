@@ -1,7 +1,7 @@
 use crate::{
     db_ext::DbTxPruneExt,
     segments::{PruneInput, Segment},
-    PrunerError,
+    PruneLimiter, PrunerError,
 };
 use reth_db::{table::Value, tables, transaction::DbTxMut};
 use reth_primitives_traits::NodePrimitives;
@@ -10,7 +10,7 @@ use reth_provider::{
     TransactionsProvider,
 };
 use reth_prune_types::{
-    PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
+    PruneMode, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
 };
 use reth_static_file_types::StaticFileSegment;
 use tracing::trace;
@@ -76,7 +76,7 @@ where
             // so we could finish pruning its transactions on the next run.
             .checked_sub(if done { 0 } else { 1 });
 
-        let progress = PruneProgress::new(done, &limiter);
+        let progress = PruneLimiter::progress(&limiter, done);
 
         Ok(SegmentOutput {
             progress,
@@ -91,7 +91,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::segments::{PruneInput, Segment};
+    use crate::segments::{PruneInput, PruneLimiter, Segment};
     use alloy_primitives::{BlockNumber, TxNumber, B256};
     use assert_matches::assert_matches;
     use itertools::{
@@ -104,8 +104,8 @@ mod tests {
         StaticFileProviderFactory,
     };
     use reth_prune_types::{
-        PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress,
-        PruneSegment, SegmentOutput,
+        PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
+        SegmentOutput,
     };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
