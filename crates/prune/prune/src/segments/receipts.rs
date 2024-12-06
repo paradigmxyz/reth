@@ -5,7 +5,7 @@
 //! - [`crate::segments::static_file::Receipts`] is responsible for pruning receipts on an archive
 //!   node after static file producer has finished
 
-use crate::{db_ext::DbTxPruneExt, segments::PruneInput, PruneLimiter, PrunerError};
+use crate::{db_ext::DbTxPruneExt, segments::PruneInput, PrunerError};
 use reth_db::{table::Value, tables, transaction::DbTxMut};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
@@ -54,7 +54,7 @@ where
         // so we could finish pruning its receipts on the next run.
         .checked_sub(if done { 0 } else { 1 });
 
-    let progress = PruneLimiter::progress(&limiter, done);
+    let progress = limiter.progress(done);
 
     Ok(SegmentOutput {
         progress,

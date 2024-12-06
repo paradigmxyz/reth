@@ -1,7 +1,7 @@
 use crate::{
     db_ext::DbTxPruneExt,
     segments::{user::history::prune_history_indices, PruneInput, Segment, SegmentOutput},
-    PruneLimiter, PrunerError,
+    PrunerError,
 };
 use itertools::Itertools;
 use reth_db::{tables, transaction::DbTxMut};
@@ -62,7 +62,7 @@ where
         };
         if limiter.is_limit_reached() {
             return Ok(SegmentOutput::not_done(
-                PruneLimiter::interrupt_reason(&limiter),
+                limiter.interrupt_reason(),
                 input.previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
             ))
         }
@@ -115,7 +115,7 @@ where
         )?;
         trace!(target: "pruner", ?outcomes, %done, "Pruned storage history (indices)");
 
-        let progress = PruneLimiter::progress(&limiter, done);
+        let progress = limiter.progress(done);
 
         Ok(SegmentOutput {
             progress,

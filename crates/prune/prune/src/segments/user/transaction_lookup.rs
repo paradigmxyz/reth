@@ -1,7 +1,7 @@
 use crate::{
     db_ext::DbTxPruneExt,
     segments::{PruneInput, Segment, SegmentOutput},
-    PruneLimiter, PrunerError,
+    PrunerError,
 };
 use alloy_eips::eip2718::Encodable2718;
 use rayon::prelude::*;
@@ -94,7 +94,7 @@ where
             // run.
             .checked_sub(if done { 0 } else { 1 });
 
-        let progress = PruneLimiter::progress(&limiter, done);
+        let progress = limiter.progress(done);
 
         Ok(SegmentOutput {
             progress,

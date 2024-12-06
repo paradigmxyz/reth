@@ -1,7 +1,7 @@
 use crate::{
     db_ext::DbTxPruneExt,
     segments::{PruneInput, Segment},
-    PruneLimiter, PrunerError,
+    PrunerError,
 };
 use alloy_consensus::TxReceipt;
 use reth_db::{table::Value, tables, transaction::DbTxMut};
@@ -219,7 +219,7 @@ where
             },
         )?;
 
-        let progress = PruneLimiter::progress(&limiter, done);
+        let progress = limiter.progress(done);
 
         Ok(SegmentOutput { progress, pruned, checkpoint: None })
     }

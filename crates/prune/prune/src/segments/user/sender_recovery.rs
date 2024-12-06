@@ -1,7 +1,7 @@
 use crate::{
     db_ext::DbTxPruneExt,
     segments::{PruneInput, Segment},
-    PruneLimiter, PrunerError,
+    PrunerError,
 };
 use reth_db::{tables, transaction::DbTxMut};
 use reth_provider::{BlockReader, DBProvider, TransactionsProvider};
@@ -67,7 +67,7 @@ where
             // previous, so we could finish pruning its transaction senders on the next run.
             .checked_sub(if done { 0 } else { 1 });
 
-        let progress = PruneLimiter::progress(&limiter, done);
+        let progress = limiter.progress(done);
 
         Ok(SegmentOutput {
             progress,
