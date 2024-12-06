@@ -42,7 +42,7 @@
 //! ### Configure and launch a standalone network
 //!
 //! The [`NetworkConfig`] is used to configure the network.
-//! It requires an instance of [`BlockReader`](reth_provider::BlockReader).
+//! It requires an instance of [`BlockReader`](reth_storage_api::BlockReader).
 //!
 //! ```
 //! # async fn launch() {
