@@ -11,11 +11,8 @@
 
 use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{
-    eip4844::{self},
-    eip7002::WITHDRAWAL_REQUEST_TYPE,
-    eip7251::CONSOLIDATION_REQUEST_TYPE,
-    eip7685::Requests,
-    merge::BEACON_NONCE,
+    eip4844, eip7002::WITHDRAWAL_REQUEST_TYPE, eip7251::CONSOLIDATION_REQUEST_TYPE,
+    eip7685::Requests, eip7742, merge::BEACON_NONCE,
 };
 use alloy_primitives::U256;
 use reth_basic_payload_builder::{
@@ -45,8 +42,8 @@ use reth_transaction_pool::{
 use revm::{
     db::{states::bundle_state::BundleRetention, State},
     primitives::{
-        calc_excess_blob_gas, BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg,
-        InvalidTransaction, ResultAndState, TxEnv,
+        BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, InvalidTransaction,
+        ResultAndState, TxEnv,
     },
     DatabaseCommit,
 };
@@ -443,14 +440,21 @@ where
             )
             .map_err(PayloadBuilderError::other)?;
 
-        excess_blob_gas = if chain_spec.is_cancun_active_at_timestamp(parent_header.timestamp) {
-            let parent_excess_blob_gas = parent_header.excess_blob_gas.unwrap_or_default();
-            let parent_blob_gas_used = parent_header.blob_gas_used.unwrap_or_default();
-            Some(calc_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used))
+        excess_blob_gas = if chain_spec.is_prague_active_at_timestamp(parent_header.timestamp) {
+            Some(eip7742::calc_excess_blob_gas(
+                parent_header.excess_blob_gas.unwrap_or_default(),
+                parent_header.blob_gas_used.unwrap_or_default(),
+                parent_header.target_blobs_per_block.unwrap_or_default(),
+            ))
+        } else if chain_spec.is_cancun_active_at_timestamp(parent_header.timestamp) {
+            Some(eip4844::calc_excess_blob_gas(
+                parent_header.excess_blob_gas.unwrap_or_default(),
+                parent_header.blob_gas_used.unwrap_or_default(),
+            ))
         } else {
             // for the first post-fork block, both parent.blob_gas_used and
             // parent.excess_blob_gas are evaluated as 0
-            Some(calc_excess_blob_gas(0, 0))
+            Some(eip4844::calc_excess_blob_gas(0, 0))
         };
 
         blob_gas_used = Some(sum_blob_gas_used);
