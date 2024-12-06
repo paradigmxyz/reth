@@ -16,7 +16,7 @@ use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader};
 use reth_provider::{
     providers::ProviderNodeTypes, BlockchainTreePendingStateProvider, CanonStateNotifications,
-    CanonStateSubscriptions, FullExecutionDataProvider, ProviderError,
+    CanonStateSubscriptions, FullExecutionDataProvider, NodePrimitivesProvider, ProviderError,
 };
 use reth_storage_errors::provider::ProviderResult;
 use std::{collections::BTreeMap, sync::Arc};
@@ -39,7 +39,7 @@ impl<N: NodeTypesWithDB, E> ShareableBlockchainTree<N, E> {
 impl<N, E> BlockchainTreeEngine for ShareableBlockchainTree<N, E>
 where
     N: TreeNodeTypes,
-    E: BlockExecutorProvider,
+    E: BlockExecutorProvider<Primitives = N::Primitives>,
 {
     fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError> {
         let mut tree = self.tree.write();
@@ -110,7 +110,7 @@ where
 impl<N, E> BlockchainTreeViewer for ShareableBlockchainTree<N, E>
 where
     N: TreeNodeTypes,
-    E: BlockExecutorProvider,
+    E: BlockExecutorProvider<Primitives = N::Primitives>,
 {
     fn header_by_hash(&self, hash: BlockHash) -> Option<SealedHeader> {
         trace!(target: "blockchain_tree", ?hash, "Returning header by hash");
@@ -173,7 +173,7 @@ where
 impl<N, E> BlockchainTreePendingStateProvider for ShareableBlockchainTree<N, E>
 where
     N: TreeNodeTypes,
-    E: BlockExecutorProvider,
+    E: BlockExecutorProvider<Primitives = N::Primitives>,
 {
     fn find_pending_state_provider(
         &self,
@@ -185,9 +185,17 @@ where
     }
 }
 
-impl<N, E> CanonStateSubscriptions for ShareableBlockchainTree<N, E>
+impl<N, E> NodePrimitivesProvider for ShareableBlockchainTree<N, E>
 where
     N: ProviderNodeTypes,
+    E: Send + Sync,
+{
+    type Primitives = N::Primitives;
+}
+
+impl<N, E> CanonStateSubscriptions for ShareableBlockchainTree<N, E>
+where
+    N: TreeNodeTypes,
     E: Send + Sync,
 {
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {

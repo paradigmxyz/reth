@@ -1,10 +1,11 @@
+use alloy_consensus::BlockHeader;
 use alloy_primitives::{Address, B256};
 use alloy_rpc_types_eth::{Filter, FilteredParams};
 use reth_chainspec::ChainSpecBuilder;
 use reth_db::{open_db_read_only, DatabaseEnv};
 use reth_node_ethereum::EthereumNode;
 use reth_node_types::NodeTypesWithDBAdapter;
-use reth_primitives::{SealedHeader, TransactionSigned};
+use reth_primitives::{BlockExt, SealedHeader, TransactionSigned};
 use reth_provider::{
     providers::StaticFileProvider, AccountReader, BlockReader, BlockSource, HeaderProvider,
     ProviderFactory, ReceiptProvider, StateProvider, TransactionsProvider,
@@ -119,7 +120,10 @@ fn txs_provider_example<T: TransactionsProvider<Transaction = TransactionSigned>
 }
 
 /// The `BlockReader` allows querying the headers-related tables.
-fn block_provider_example<T: BlockReader>(provider: T, number: u64) -> eyre::Result<()> {
+fn block_provider_example<T: BlockReader<Block = reth_primitives::Block>>(
+    provider: T,
+    number: u64,
+) -> eyre::Result<()> {
     // Can query a block by number
     let block = provider.block(number.into())?.ok_or(eyre::eyre!("block num not found"))?;
     assert_eq!(block.number, number);
@@ -163,7 +167,9 @@ fn block_provider_example<T: BlockReader>(provider: T, number: u64) -> eyre::Res
 
 /// The `ReceiptProvider` allows querying the receipts tables.
 fn receipts_provider_example<
-    T: ReceiptProvider + TransactionsProvider<Transaction = TransactionSigned> + HeaderProvider,
+    T: ReceiptProvider<Receipt = reth_primitives::Receipt>
+        + TransactionsProvider<Transaction = TransactionSigned>
+        + HeaderProvider,
 >(
     provider: T,
 ) -> eyre::Result<()> {
@@ -188,7 +194,7 @@ fn receipts_provider_example<
     // receipts and do something with the data
     // 1. get the bloom from the header
     let header = provider.header_by_number(header_num)?.unwrap();
-    let bloom = header.logs_bloom;
+    let bloom = header.logs_bloom();
 
     // 2. Construct the address/topics filters
     // For a hypothetical address, we'll want to filter down for a specific indexed topic (e.g.

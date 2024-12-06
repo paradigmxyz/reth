@@ -1,12 +1,11 @@
 use super::error::HeadersDownloaderResult;
 use crate::error::{DownloadError, DownloadResult};
 use alloy_consensus::BlockHeader;
-use alloy_eips::BlockHashOrNumber;
+use alloy_eips::{eip1898::BlockWithParent, BlockHashOrNumber};
 use alloy_primitives::B256;
 use futures::Stream;
 use reth_consensus::HeaderValidator;
 use reth_primitives::SealedHeader;
-use reth_primitives_traits::BlockWithParent;
 use std::fmt::Debug;
 
 /// A downloader capable of fetching and yielding block headers.

@@ -9,10 +9,10 @@ use reth_primitives::TransactionMeta;
 use reth_provider::HeaderProvider;
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
-    RpcNodeCore, RpcReceipt,
+    RpcReceipt,
 };
 
-use crate::{OpEthApi, OpEthApiError, OpReceiptBuilder};
+use crate::{eth::OpNodeCore, OpEthApi, OpEthApiError, OpReceiptBuilder};
 
 impl<N> EthBlocks for OpEthApi<N>
 where
@@ -20,7 +20,7 @@ where
         Error = OpEthApiError,
         NetworkTypes: Network<ReceiptResponse = OpTransactionReceipt>,
     >,
-    N: RpcNodeCore<Provider: ChainSpecProvider<ChainSpec = OpChainSpec> + HeaderProvider>,
+    N: OpNodeCore<Provider: ChainSpecProvider<ChainSpec = OpChainSpec> + HeaderProvider>,
 {
     async fn block_receipts(
         &self,
@@ -35,7 +35,6 @@ where
             let block_hash = block.hash();
             let excess_blob_gas = block.excess_blob_gas;
             let timestamp = block.timestamp;
-            let block = block.unseal();
 
             let l1_block_info =
                 reth_optimism_evm::extract_l1_info(&block.body).map_err(OpEthApiError::from)?;
@@ -58,7 +57,7 @@ where
                     };
 
                     Ok(OpReceiptBuilder::new(
-                        &self.inner.provider().chain_spec(),
+                        &self.inner.eth_api.provider().chain_spec(),
                         tx,
                         meta,
                         receipt,
@@ -78,6 +77,6 @@ where
 impl<N> LoadBlock for OpEthApi<N>
 where
     Self: LoadPendingBlock + SpawnBlocking,
-    N: RpcNodeCore,
+    N: OpNodeCore,
 {
 }

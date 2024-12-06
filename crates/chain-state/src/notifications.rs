@@ -1,9 +1,10 @@
 //! Canonical chain state notification trait and types.
 
-use auto_impl::auto_impl;
+use alloy_eips::eip2718::Encodable2718;
 use derive_more::{Deref, DerefMut};
 use reth_execution_types::{BlockReceipts, Chain};
 use reth_primitives::{NodePrimitives, SealedBlockWithSenders, SealedHeader};
+use reth_storage_api::NodePrimitivesProvider;
 use std::{
     pin::Pin,
     sync::Arc,
@@ -25,18 +26,27 @@ pub type CanonStateNotificationSender<N = reth_primitives::EthPrimitives> =
     broadcast::Sender<CanonStateNotification<N>>;
 
 /// A type that allows to register chain related event subscriptions.
-#[auto_impl(&, Arc)]
-pub trait CanonStateSubscriptions: Send + Sync {
+pub trait CanonStateSubscriptions: NodePrimitivesProvider + Send + Sync {
     /// Get notified when a new canonical chain was imported.
     ///
     /// A canonical chain be one or more blocks, a reorg or a revert.
-    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications;
+    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<Self::Primitives>;
 
     /// Convenience method to get a stream of [`CanonStateNotification`].
-    fn canonical_state_stream(&self) -> CanonStateNotificationStream {
+    fn canonical_state_stream(&self) -> CanonStateNotificationStream<Self::Primitives> {
         CanonStateNotificationStream {
             st: BroadcastStream::new(self.subscribe_to_canonical_state()),
         }
+    }
+}
+
+impl<T: CanonStateSubscriptions> CanonStateSubscriptions for &T {
+    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<Self::Primitives> {
+        (*self).subscribe_to_canonical_state()
+    }
+
+    fn canonical_state_stream(&self) -> CanonStateNotificationStream<Self::Primitives> {
+        (*self).canonical_state_stream()
     }
 }
 
@@ -113,7 +123,7 @@ impl<N: NodePrimitives> CanonStateNotification<N> {
     ///
     /// Returns the new tip for [`Self::Reorg`] and [`Self::Commit`] variants which commit at least
     /// 1 new block.
-    pub fn tip(&self) -> &SealedBlockWithSenders {
+    pub fn tip(&self) -> &SealedBlockWithSenders<N::Block> {
         match self {
             Self::Commit { new } | Self::Reorg { new, .. } => new.tip(),
         }
@@ -124,7 +134,10 @@ impl<N: NodePrimitives> CanonStateNotification<N> {
     ///
     /// The boolean in the tuple (2nd element) denotes whether the receipt was from the reverted
     /// chain segment.
-    pub fn block_receipts(&self) -> Vec<(BlockReceipts<N::Receipt>, bool)> {
+    pub fn block_receipts(&self) -> Vec<(BlockReceipts<N::Receipt>, bool)>
+    where
+        N::SignedTx: Encodable2718,
+    {
         let mut receipts = Vec::new();
 
         // get old receipts
@@ -142,24 +155,29 @@ impl<N: NodePrimitives> CanonStateNotification<N> {
 
 /// Wrapper around a broadcast receiver that receives fork choice notifications.
 #[derive(Debug, Deref, DerefMut)]
-pub struct ForkChoiceNotifications(pub watch::Receiver<Option<SealedHeader>>);
+pub struct ForkChoiceNotifications<T = alloy_consensus::Header>(
+    pub watch::Receiver<Option<SealedHeader<T>>>,
+);
 
 /// A trait that allows to register to fork choice related events
 /// and get notified when a new fork choice is available.
 pub trait ForkChoiceSubscriptions: Send + Sync {
+    /// Block Header type.
+    type Header: Clone + Send + Sync + 'static;
+
     /// Get notified when a new safe block of the chain is selected.
-    fn subscribe_safe_block(&self) -> ForkChoiceNotifications;
+    fn subscribe_safe_block(&self) -> ForkChoiceNotifications<Self::Header>;
 
     /// Get notified when a new finalized block of the chain is selected.
-    fn subscribe_finalized_block(&self) -> ForkChoiceNotifications;
+    fn subscribe_finalized_block(&self) -> ForkChoiceNotifications<Self::Header>;
 
     /// Convenience method to get a stream of the new safe blocks of the chain.
-    fn safe_block_stream(&self) -> ForkChoiceStream<SealedHeader> {
+    fn safe_block_stream(&self) -> ForkChoiceStream<SealedHeader<Self::Header>> {
         ForkChoiceStream::new(self.subscribe_safe_block().0)
     }
 
     /// Convenience method to get a stream of the new finalized blocks of the chain.
-    fn finalized_block_stream(&self) -> ForkChoiceStream<SealedHeader> {
+    fn finalized_block_stream(&self) -> ForkChoiceStream<SealedHeader<Self::Header>> {
         ForkChoiceStream::new(self.subscribe_finalized_block().0)
     }
 }

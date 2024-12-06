@@ -1,26 +1,31 @@
 //! Traits for execution.
 
+use alloy_consensus::BlockHeader;
 // Re-export execution types
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
 };
 pub use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
+use reth_primitives_traits::Block as _;
 pub use reth_storage_errors::provider::ProviderError;
 
 use crate::{system_calls::OnStateHook, TxEnvOverrides};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_eips::eip7685::Requests;
-use alloy_primitives::BlockNumber;
-use core::{fmt::Display, marker::PhantomData};
+use alloy_primitives::{
+    map::{DefaultHashBuilder, HashMap},
+    Address, BlockNumber,
+};
+use core::fmt::Display;
 use reth_consensus::ConsensusError;
-use reth_primitives::{BlockWithSenders, Receipt};
+use reth_primitives::{BlockWithSenders, NodePrimitives, Receipt};
 use reth_prune_types::PruneModes;
 use reth_revm::batch::BlockBatchRecord;
 use revm::{
     db::{states::bundle_state::BundleRetention, BundleState},
     State,
 };
-use revm_primitives::{db::Database, U256};
+use revm_primitives::{db::Database, Account, AccountStatus, EvmState, U256};
 
 /// A general purpose executor trait that executes an input (e.g. block) and produces an output
 /// (e.g. state changes and receipts).
@@ -130,6 +135,9 @@ pub trait BatchExecutor<DB> {
 
 /// A type that can create a new executor for block execution.
 pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
+    /// Receipt type.
+    type Primitives: NodePrimitives;
+
     /// An executor that can execute a single block given a database.
     ///
     /// # Verification
@@ -143,16 +151,22 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     /// the returned state.
     type Executor<DB: Database<Error: Into<ProviderError> + Display>>: for<'a> Executor<
         DB,
-        Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
-        Output = BlockExecutionOutput<Receipt>,
+        Input<'a> = BlockExecutionInput<
+            'a,
+            BlockWithSenders<<Self::Primitives as NodePrimitives>::Block>,
+        >,
+        Output = BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>,
         Error = BlockExecutionError,
     >;
 
     /// An executor that can execute a batch of blocks given a database.
     type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>>: for<'a> BatchExecutor<
         DB,
-        Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
-        Output = ExecutionOutcome,
+        Input<'a> = BlockExecutionInput<
+            'a,
+            BlockWithSenders<<Self::Primitives as NodePrimitives>::Block>,
+        >,
+        Output = ExecutionOutcome<<Self::Primitives as NodePrimitives>::Receipt>,
         Error = BlockExecutionError,
     >;
 
@@ -174,18 +188,21 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
 
 /// Helper type for the output of executing a block.
 #[derive(Debug, Clone)]
-pub struct ExecuteOutput {
+pub struct ExecuteOutput<R = Receipt> {
     /// Receipts obtained after executing a block.
-    pub receipts: Vec<Receipt>,
+    pub receipts: Vec<R>,
     /// Cumulative gas used in the block execution.
     pub gas_used: u64,
 }
 
 /// Defines the strategy for executing a single block.
-pub trait BlockExecutionStrategy<DB>
-where
-    DB: Database,
-{
+pub trait BlockExecutionStrategy {
+    /// Database this strategy operates on.
+    type DB: Database;
+
+    /// Primitive types used by the strategy.
+    type Primitives: NodePrimitives;
+
     /// The error type returned by this strategy's methods.
     type Error: From<ProviderError> + core::error::Error;
 
@@ -195,30 +212,30 @@ where
     /// Applies any necessary changes before executing the block's transactions.
     fn apply_pre_execution_changes(
         &mut self,
-        block: &BlockWithSenders,
+        block: &BlockWithSenders<<Self::Primitives as NodePrimitives>::Block>,
         total_difficulty: U256,
     ) -> Result<(), Self::Error>;
 
     /// Executes all transactions in the block.
     fn execute_transactions(
         &mut self,
-        block: &BlockWithSenders,
+        block: &BlockWithSenders<<Self::Primitives as NodePrimitives>::Block>,
         total_difficulty: U256,
-    ) -> Result<ExecuteOutput, Self::Error>;
+    ) -> Result<ExecuteOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>;
 
     /// Applies any necessary changes after executing the block's transactions.
     fn apply_post_execution_changes(
         &mut self,
-        block: &BlockWithSenders,
+        block: &BlockWithSenders<<Self::Primitives as NodePrimitives>::Block>,
         total_difficulty: U256,
-        receipts: &[Receipt],
+        receipts: &[<Self::Primitives as NodePrimitives>::Receipt],
     ) -> Result<Requests, Self::Error>;
 
     /// Returns a reference to the current state.
-    fn state_ref(&self) -> &State<DB>;
+    fn state_ref(&self) -> &State<Self::DB>;
 
     /// Returns a mutable reference to the current state.
-    fn state_mut(&mut self) -> &mut State<DB>;
+    fn state_mut(&mut self) -> &mut State<Self::DB>;
 
     /// Sets a hook to be called after each state change during execution.
     fn with_state_hook(&mut self, _hook: Option<Box<dyn OnStateHook>>) {}
@@ -232,8 +249,8 @@ where
     /// Validate a block with regard to execution results.
     fn validate_block_post_execution(
         &self,
-        _block: &BlockWithSenders,
-        _receipts: &[Receipt],
+        _block: &BlockWithSenders<<Self::Primitives as NodePrimitives>::Block>,
+        _receipts: &[<Self::Primitives as NodePrimitives>::Receipt],
         _requests: &Requests,
     ) -> Result<(), ConsensusError> {
         Ok(())
@@ -242,9 +259,13 @@ where
 
 /// A strategy factory that can create block execution strategies.
 pub trait BlockExecutionStrategyFactory: Send + Sync + Clone + Unpin + 'static {
+    /// Primitive types used by the strategy.
+    type Primitives: NodePrimitives;
+
     /// Associated strategy type.
     type Strategy<DB: Database<Error: Into<ProviderError> + Display>>: BlockExecutionStrategy<
-        DB,
+        DB = DB,
+        Primitives = Self::Primitives,
         Error = BlockExecutionError,
     >;
 
@@ -280,11 +301,13 @@ impl<F> BlockExecutorProvider for BasicBlockExecutorProvider<F>
 where
     F: BlockExecutionStrategyFactory,
 {
+    type Primitives = F::Primitives;
+
     type Executor<DB: Database<Error: Into<ProviderError> + Display>> =
-        BasicBlockExecutor<F::Strategy<DB>, DB>;
+        BasicBlockExecutor<F::Strategy<DB>>;
 
     type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> =
-        BasicBatchExecutor<F::Strategy<DB>, DB>;
+        BasicBatchExecutor<F::Strategy<DB>>;
 
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
@@ -307,34 +330,26 @@ where
 /// A generic block executor that uses a [`BlockExecutionStrategy`] to
 /// execute blocks.
 #[allow(missing_debug_implementations, dead_code)]
-pub struct BasicBlockExecutor<S, DB>
-where
-    S: BlockExecutionStrategy<DB>,
-    DB: Database,
-{
+pub struct BasicBlockExecutor<S> {
     /// Block execution strategy.
     pub(crate) strategy: S,
-    _phantom: PhantomData<DB>,
 }
 
-impl<S, DB> BasicBlockExecutor<S, DB>
-where
-    S: BlockExecutionStrategy<DB>,
-    DB: Database,
-{
+impl<S> BasicBlockExecutor<S> {
     /// Creates a new `BasicBlockExecutor` with the given strategy.
     pub const fn new(strategy: S) -> Self {
-        Self { strategy, _phantom: PhantomData }
+        Self { strategy }
     }
 }
 
-impl<S, DB> Executor<DB> for BasicBlockExecutor<S, DB>
+impl<S, DB> Executor<DB> for BasicBlockExecutor<S>
 where
-    S: BlockExecutionStrategy<DB>,
+    S: BlockExecutionStrategy<DB = DB>,
     DB: Database<Error: Into<ProviderError> + Display>,
 {
-    type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-    type Output = BlockExecutionOutput<Receipt>;
+    type Input<'a> =
+        BlockExecutionInput<'a, BlockWithSenders<<S::Primitives as NodePrimitives>::Block>>;
+    type Output = BlockExecutionOutput<<S::Primitives as NodePrimitives>::Receipt>;
     type Error = S::Error;
 
     fn init(&mut self, env_overrides: Box<dyn TxEnvOverrides>) {
@@ -404,43 +419,44 @@ where
 /// A generic batch executor that uses a [`BlockExecutionStrategy`] to
 /// execute batches.
 #[allow(missing_debug_implementations)]
-pub struct BasicBatchExecutor<S, DB>
+pub struct BasicBatchExecutor<S>
 where
-    S: BlockExecutionStrategy<DB>,
-    DB: Database,
+    S: BlockExecutionStrategy,
 {
     /// Batch execution strategy.
     pub(crate) strategy: S,
     /// Keeps track of batch execution receipts and requests.
-    pub(crate) batch_record: BlockBatchRecord,
-    _phantom: PhantomData<DB>,
+    pub(crate) batch_record: BlockBatchRecord<<S::Primitives as NodePrimitives>::Receipt>,
 }
 
-impl<S, DB> BasicBatchExecutor<S, DB>
+impl<S> BasicBatchExecutor<S>
 where
-    S: BlockExecutionStrategy<DB>,
-    DB: Database,
+    S: BlockExecutionStrategy,
 {
     /// Creates a new `BasicBatchExecutor` with the given strategy.
-    pub const fn new(strategy: S, batch_record: BlockBatchRecord) -> Self {
-        Self { strategy, batch_record, _phantom: PhantomData }
+    pub const fn new(
+        strategy: S,
+        batch_record: BlockBatchRecord<<S::Primitives as NodePrimitives>::Receipt>,
+    ) -> Self {
+        Self { strategy, batch_record }
     }
 }
 
-impl<S, DB> BatchExecutor<DB> for BasicBatchExecutor<S, DB>
+impl<S, DB> BatchExecutor<DB> for BasicBatchExecutor<S>
 where
-    S: BlockExecutionStrategy<DB, Error = BlockExecutionError>,
+    S: BlockExecutionStrategy<DB = DB, Error = BlockExecutionError>,
     DB: Database<Error: Into<ProviderError> + Display>,
 {
-    type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-    type Output = ExecutionOutcome;
+    type Input<'a> =
+        BlockExecutionInput<'a, BlockWithSenders<<S::Primitives as NodePrimitives>::Block>>;
+    type Output = ExecutionOutcome<<S::Primitives as NodePrimitives>::Receipt>;
     type Error = BlockExecutionError;
 
     fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
 
         if self.batch_record.first_block().is_none() {
-            self.batch_record.set_first_block(block.number);
+            self.batch_record.set_first_block(block.header().number());
         }
 
         self.strategy.apply_pre_execution_changes(block, total_difficulty)?;
@@ -452,7 +468,7 @@ where
         self.strategy.validate_block_post_execution(block, &receipts, &requests)?;
 
         // prepare the state according to the prune mode
-        let retention = self.batch_record.bundle_retention(block.number);
+        let retention = self.batch_record.bundle_retention(block.header().number());
         self.strategy.state_mut().merge_transitions(retention);
 
         // store receipts in the set
@@ -486,19 +502,58 @@ where
     }
 }
 
+/// Creates an `EvmState` from a map of balance increments and the current state
+/// to load accounts from. No balance increment is done in the function.
+/// Zero balance increments are ignored and won't create state entries.
+pub fn balance_increment_state<DB>(
+    balance_increments: &HashMap<Address, u128, DefaultHashBuilder>,
+    state: &mut State<DB>,
+) -> Result<EvmState, BlockExecutionError>
+where
+    DB: Database,
+{
+    let mut load_account = |address: &Address| -> Result<(Address, Account), BlockExecutionError> {
+        let cache_account = state.load_cache_account(*address).map_err(|_| {
+            BlockExecutionError::msg("could not load account for balance increment")
+        })?;
+
+        let account = cache_account.account.as_ref().ok_or_else(|| {
+            BlockExecutionError::msg("could not load account for balance increment")
+        })?;
+
+        Ok((
+            *address,
+            Account {
+                info: account.info.clone(),
+                storage: Default::default(),
+                status: AccountStatus::Touched,
+            },
+        ))
+    };
+
+    balance_increments
+        .iter()
+        .filter(|(_, &balance)| balance != 0)
+        .map(|(addr, _)| load_account(addr))
+        .collect::<Result<EvmState, _>>()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloy_primitives::U256;
+    use core::marker::PhantomData;
     use reth_chainspec::{ChainSpec, MAINNET};
+    use reth_primitives::EthPrimitives;
     use revm::db::{CacheDB, EmptyDBTyped};
-    use revm_primitives::{bytes, TxEnv};
+    use revm_primitives::{address, bytes, AccountInfo, TxEnv, KECCAK_EMPTY};
     use std::sync::Arc;
 
     #[derive(Clone, Default)]
     struct TestExecutorProvider;
 
     impl BlockExecutorProvider for TestExecutorProvider {
+        type Primitives = EthPrimitives;
         type Executor<DB: Database<Error: Into<ProviderError> + Display>> = TestExecutor<DB>;
         type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> = TestExecutor<DB>;
 
@@ -583,19 +638,20 @@ mod tests {
         _chain_spec: Arc<ChainSpec>,
         _evm_config: EvmConfig,
         state: State<DB>,
-        execute_transactions_result: ExecuteOutput,
+        execute_transactions_result: ExecuteOutput<Receipt>,
         apply_post_execution_changes_result: Requests,
         finish_result: BundleState,
     }
 
     #[derive(Clone)]
     struct TestExecutorStrategyFactory {
-        execute_transactions_result: ExecuteOutput,
+        execute_transactions_result: ExecuteOutput<Receipt>,
         apply_post_execution_changes_result: Requests,
         finish_result: BundleState,
     }
 
     impl BlockExecutionStrategyFactory for TestExecutorStrategyFactory {
+        type Primitives = EthPrimitives;
         type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
             TestExecutorStrategy<DB, TestEvmConfig>;
 
@@ -622,10 +678,12 @@ mod tests {
         }
     }
 
-    impl<DB> BlockExecutionStrategy<DB> for TestExecutorStrategy<DB, TestEvmConfig>
+    impl<DB> BlockExecutionStrategy for TestExecutorStrategy<DB, TestEvmConfig>
     where
         DB: Database,
     {
+        type DB = DB;
+        type Primitives = EthPrimitives;
         type Error = BlockExecutionError;
 
         fn apply_pre_execution_changes(
@@ -640,7 +698,7 @@ mod tests {
             &mut self,
             _block: &BlockWithSenders,
             _total_difficulty: U256,
-        ) -> Result<ExecuteOutput, Self::Error> {
+        ) -> Result<ExecuteOutput<Receipt>, Self::Error> {
             Ok(self.execute_transactions_result.clone())
         }
 
@@ -692,8 +750,10 @@ mod tests {
     fn test_strategy() {
         let expected_gas_used = 10;
         let expected_receipts = vec![Receipt::default()];
-        let expected_execute_transactions_result =
-            ExecuteOutput { receipts: expected_receipts.clone(), gas_used: expected_gas_used };
+        let expected_execute_transactions_result = ExecuteOutput::<Receipt> {
+            receipts: expected_receipts.clone(),
+            gas_used: expected_gas_used,
+        };
         let expected_apply_post_execution_changes_result = Requests::new(vec![bytes!("deadbeef")]);
         let expected_finish_result = BundleState::default();
 
@@ -738,5 +798,91 @@ mod tests {
         }));
         let result = executor.execute(BlockExecutionInput::new(&Default::default(), U256::ZERO));
         assert!(result.is_ok());
+    }
+
+    fn setup_state_with_account(
+        addr: Address,
+        balance: u128,
+        nonce: u64,
+    ) -> State<CacheDB<EmptyDBTyped<BlockExecutionError>>> {
+        let db = CacheDB::<EmptyDBTyped<BlockExecutionError>>::default();
+        let mut state = State::builder().with_database(db).with_bundle_update().build();
+
+        let account_info = AccountInfo {
+            balance: U256::from(balance),
+            nonce,
+            code_hash: KECCAK_EMPTY,
+            code: None,
+        };
+        state.insert_account(addr, account_info);
+        state
+    }
+
+    #[test]
+    fn test_balance_increment_state_zero() {
+        let addr = address!("1000000000000000000000000000000000000000");
+        let mut state = setup_state_with_account(addr, 100, 1);
+
+        let mut increments = HashMap::<Address, u128, DefaultHashBuilder>::default();
+        increments.insert(addr, 0);
+
+        let result = balance_increment_state(&increments, &mut state).unwrap();
+        assert!(result.is_empty(), "Zero increments should be ignored");
+    }
+
+    #[test]
+    fn test_balance_increment_state_empty_increments_map() {
+        let mut state = State::builder()
+            .with_database(CacheDB::<EmptyDBTyped<BlockExecutionError>>::default())
+            .with_bundle_update()
+            .build();
+
+        let increments = HashMap::<Address, u128, DefaultHashBuilder>::default();
+        let result = balance_increment_state(&increments, &mut state).unwrap();
+        assert!(result.is_empty(), "Empty increments map should return empty state");
+    }
+
+    #[test]
+    fn test_balance_increment_state_multiple_valid_increments() {
+        let addr1 = address!("1000000000000000000000000000000000000000");
+        let addr2 = address!("2000000000000000000000000000000000000000");
+
+        let mut state = setup_state_with_account(addr1, 100, 1);
+
+        let account2 =
+            AccountInfo { balance: U256::from(200), nonce: 1, code_hash: KECCAK_EMPTY, code: None };
+        state.insert_account(addr2, account2);
+
+        let mut increments = HashMap::<Address, u128, DefaultHashBuilder>::default();
+        increments.insert(addr1, 50);
+        increments.insert(addr2, 100);
+
+        let result = balance_increment_state(&increments, &mut state).unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result.get(&addr1).unwrap().info.balance, U256::from(100));
+        assert_eq!(result.get(&addr2).unwrap().info.balance, U256::from(200));
+    }
+
+    #[test]
+    fn test_balance_increment_state_mixed_zero_and_nonzero_increments() {
+        let addr1 = address!("1000000000000000000000000000000000000000");
+        let addr2 = address!("2000000000000000000000000000000000000000");
+
+        let mut state = setup_state_with_account(addr1, 100, 1);
+
+        let account2 =
+            AccountInfo { balance: U256::from(200), nonce: 1, code_hash: KECCAK_EMPTY, code: None };
+        state.insert_account(addr2, account2);
+
+        let mut increments = HashMap::<Address, u128, DefaultHashBuilder>::default();
+        increments.insert(addr1, 0);
+        increments.insert(addr2, 100);
+
+        let result = balance_increment_state(&increments, &mut state).unwrap();
+
+        assert_eq!(result.len(), 1, "Only non-zero increments should be included");
+        assert!(!result.contains_key(&addr1), "Zero increment account should not be included");
+        assert_eq!(result.get(&addr2).unwrap().info.balance, U256::from(200));
     }
 }

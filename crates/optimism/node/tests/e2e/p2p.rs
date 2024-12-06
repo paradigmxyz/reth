@@ -1,6 +1,5 @@
 use alloy_rpc_types_engine::PayloadStatusEnum;
 use futures::StreamExt;
-use reth::blockchain_tree::error::BlockchainTreeError;
 use reth_optimism_node::utils::{advance_chain, setup};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -90,10 +89,10 @@ async fn can_sync() -> eyre::Result<()> {
             canonical_payload_chain[tip_index - reorg_depth + 1].0.clone(),
             canonical_payload_chain[tip_index - reorg_depth + 1].1.clone(),
             PayloadStatusEnum::Invalid {
-                validation_error: BlockchainTreeError::PendingBlockIsFinalized {
-                    last_finalized: (tip - reorg_depth) as u64 + 1,
-                }
-                .to_string(),
+                validation_error: format!(
+                    "block number is lower than the last finalized block number {}",
+                    (tip - reorg_depth) as u64 + 1
+                ),
             },
         )
         .await;

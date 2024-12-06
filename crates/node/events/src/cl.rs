@@ -1,5 +1,6 @@
 //! Events related to Consensus Layer health.
 
+use alloy_consensus::Header;
 use futures::Stream;
 use reth_storage_api::CanonChainTracker;
 use std::{
@@ -20,9 +21,9 @@ const NO_TRANSITION_CONFIG_EXCHANGED_PERIOD: Duration = Duration::from_secs(120)
 const NO_FORKCHOICE_UPDATE_RECEIVED_PERIOD: Duration = Duration::from_secs(120);
 
 /// A Stream of [`ConsensusLayerHealthEvent`].
-pub struct ConsensusLayerHealthEvents {
+pub struct ConsensusLayerHealthEvents<H = Header> {
     interval: Interval,
-    canon_chain: Box<dyn CanonChainTracker>,
+    canon_chain: Box<dyn CanonChainTracker<Header = H>>,
 }
 
 impl fmt::Debug for ConsensusLayerHealthEvents {
@@ -31,9 +32,9 @@ impl fmt::Debug for ConsensusLayerHealthEvents {
     }
 }
 
-impl ConsensusLayerHealthEvents {
+impl<H> ConsensusLayerHealthEvents<H> {
     /// Creates a new [`ConsensusLayerHealthEvents`] with the given canonical chain tracker.
-    pub fn new(canon_chain: Box<dyn CanonChainTracker>) -> Self {
+    pub fn new(canon_chain: Box<dyn CanonChainTracker<Header = H>>) -> Self {
         // Skip the first tick to prevent the false `ConsensusLayerHealthEvent::NeverSeen` event.
         let interval = tokio::time::interval_at(Instant::now() + CHECK_INTERVAL, CHECK_INTERVAL);
         Self { interval, canon_chain }

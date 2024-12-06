@@ -18,7 +18,10 @@ use reth_evm::{
     ConfigureEvm,
 };
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{proofs, Block, BlockBody, Receipt, Receipts};
+use reth_primitives::{
+    proofs, transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody, BlockExt, Receipt,
+    Receipts,
+};
 use reth_provider::{BlockReader, ExecutionOutcome, ProviderError, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
@@ -26,10 +29,7 @@ use reth_revm::{
     DatabaseCommit,
 };
 use reth_rpc_types_compat::engine::payload::block_to_payload;
-use reth_trie::HashedPostState;
-use revm_primitives::{
-    calc_excess_blob_gas, BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg,
-};
+use revm_primitives::{calc_excess_blob_gas, EVMError, EnvWithHandlerCfg};
 use std::{
     collections::VecDeque,
     future::Future,
@@ -109,8 +109,8 @@ impl<S, Engine, Provider, Evm, Spec> Stream for EngineReorg<S, Engine, Provider,
 where
     S: Stream<Item = BeaconEngineMessage<Engine>>,
     Engine: EngineTypes,
-    Provider: BlockReader + StateProviderFactory,
-    Evm: ConfigureEvm<Header = Header>,
+    Provider: BlockReader<Block = reth_primitives::Block> + StateProviderFactory,
+    Evm: ConfigureEvm<Header = Header, Transaction = reth_primitives::TransactionSigned>,
     Spec: EthereumHardforks,
 {
     type Item = S::Item;
@@ -256,8 +256,8 @@ fn create_reorg_head<Provider, Evm, Spec>(
     next_sidecar: ExecutionPayloadSidecar,
 ) -> RethResult<(ExecutionPayload, ExecutionPayloadSidecar)>
 where
-    Provider: BlockReader + StateProviderFactory,
-    Evm: ConfigureEvm<Header = Header>,
+    Provider: BlockReader<Block = reth_primitives::Block> + StateProviderFactory,
+    Evm: ConfigureEvm<Header = Header, Transaction = reth_primitives::TransactionSigned>,
     Spec: EthereumHardforks,
 {
     let chain_spec = payload_validator.chain_spec();
@@ -298,9 +298,7 @@ where
         .build();
 
     // Configure environments
-    let mut cfg = CfgEnvWithHandlerCfg::new(Default::default(), Default::default());
-    let mut block_env = BlockEnv::default();
-    evm_config.fill_cfg_and_block_env(&mut cfg, &mut block_env, &reorg_target.header, U256::MAX);
+    let (cfg, block_env) = evm_config.cfg_and_block_env(&reorg_target.header, U256::MAX);
     let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default());
     let mut evm = evm_config.evm_with_env(&mut state, env);
 
@@ -383,7 +381,7 @@ where
         reorg_target.number,
         Default::default(),
     );
-    let hashed_state = HashedPostState::from_bundle_state(&outcome.state().state);
+    let hashed_state = state_provider.hashed_post_state(outcome.state());
 
     let (blob_gas_used, excess_blob_gas) =
         if chain_spec.is_cancun_active_at_timestamp(reorg_target.timestamp) {
@@ -419,11 +417,12 @@ where
             transactions_root: proofs::calculate_transaction_root(&transactions),
             receipts_root: outcome.receipts_root_slow(reorg_target.header.number).unwrap(),
             logs_bloom: outcome.block_logs_bloom(reorg_target.header.number).unwrap(),
-            requests_hash: None, // TODO(prague)
             gas_used: cumulative_gas_used,
             blob_gas_used: blob_gas_used.map(Into::into),
             excess_blob_gas: excess_blob_gas.map(Into::into),
             state_root: state_provider.state_root(hashed_state)?,
+            requests_hash: None,          // TODO(prague)
+            target_blobs_per_block: None, // TODO(prague)
         },
         body: BlockBody {
             transactions,

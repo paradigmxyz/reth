@@ -9,6 +9,7 @@ use reth_db::DatabaseError;
 use reth_execution_errors::StorageRootError;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, ProviderError,
+    StateCommitmentProvider,
 };
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
@@ -33,7 +34,9 @@ pub struct ParallelProof<Factory> {
     /// Consistent view of the database.
     view: ConsistentDbView<Factory>,
     /// Trie input.
-    input: TrieInput,
+    input: Arc<TrieInput>,
+    /// Flag indicating whether to include branch node hash masks in the proof.
+    collect_branch_node_hash_masks: bool,
     /// Parallel state root metrics.
     #[cfg(feature = "metrics")]
     metrics: ParallelStateRootMetrics,
@@ -41,19 +44,31 @@ pub struct ParallelProof<Factory> {
 
 impl<Factory> ParallelProof<Factory> {
     /// Create new state proof generator.
-    pub fn new(view: ConsistentDbView<Factory>, input: TrieInput) -> Self {
+    pub fn new(view: ConsistentDbView<Factory>, input: Arc<TrieInput>) -> Self {
         Self {
             view,
             input,
+            collect_branch_node_hash_masks: false,
             #[cfg(feature = "metrics")]
             metrics: ParallelStateRootMetrics::default(),
         }
+    }
+
+    /// Set the flag indicating whether to include branch node hash masks in the proof.
+    pub const fn with_branch_node_hash_masks(mut self, branch_node_hash_masks: bool) -> Self {
+        self.collect_branch_node_hash_masks = branch_node_hash_masks;
+        self
     }
 }
 
 impl<Factory> ParallelProof<Factory>
 where
-    Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + Send + Sync + 'static,
+    Factory: DatabaseProviderFactory<Provider: BlockReader>
+        + StateCommitmentProvider
+        + Clone
+        + Send
+        + Sync
+        + 'static,
 {
     /// Generate a state multiproof according to specified targets.
     pub fn multiproof(
@@ -62,8 +77,8 @@ where
     ) -> Result<MultiProof, ParallelStateRootError> {
         let mut tracker = ParallelTrieTracker::default();
 
-        let trie_nodes_sorted = Arc::new(self.input.nodes.into_sorted());
-        let hashed_state_sorted = Arc::new(self.input.state.into_sorted());
+        let trie_nodes_sorted = self.input.nodes.clone().into_sorted();
+        let hashed_state_sorted = self.input.state.clone().into_sorted();
 
         // Extend prefix sets with targets
         let mut prefix_sets = self.input.prefix_sets.clone();
@@ -119,6 +134,7 @@ where
                         hashed_address,
                     )
                     .with_prefix_set_mut(PrefixSetMut::from(prefix_set.iter().cloned()))
+                    .with_branch_node_hash_masks(self.collect_branch_node_hash_masks)
                     .storage_multiproof(target_slots)
                     .map_err(|e| {
                         ParallelStateRootError::StorageRoot(StorageRootError::Database(
@@ -152,7 +168,9 @@ where
 
         // Create a hash builder to rebuild the root node since it is not available in the database.
         let retainer: ProofRetainer = targets.keys().map(Nibbles::unpack).collect();
-        let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
+        let mut hash_builder = HashBuilder::default()
+            .with_proof_retainer(retainer)
+            .with_updates(self.collect_branch_node_hash_masks);
 
         let mut storages = HashMap::default();
         let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
@@ -203,7 +221,11 @@ where
                     account.encode(&mut account_rlp as &mut dyn BufMut);
 
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
-                    storages.insert(hashed_address, storage_multiproof);
+
+                    // We might be adding leaves that are not necessarily our proof targets.
+                    if targets.contains_key(&hashed_address) {
+                        storages.insert(hashed_address, storage_multiproof);
+                    }
                 }
             }
         }
@@ -212,7 +234,19 @@ where
         #[cfg(feature = "metrics")]
         self.metrics.record_state_trie(tracker.finish());
 
-        Ok(MultiProof { account_subtree: hash_builder.take_proof_nodes(), storages })
+        let account_subtree = hash_builder.take_proof_nodes();
+        let branch_node_hash_masks = if self.collect_branch_node_hash_masks {
+            hash_builder
+                .updated_branch_nodes
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(path, node)| (path, node.hash_mask))
+                .collect()
+        } else {
+            HashMap::default()
+        };
+
+        Ok(MultiProof { account_subtree, branch_node_hash_masks, storages })
     }
 }
 

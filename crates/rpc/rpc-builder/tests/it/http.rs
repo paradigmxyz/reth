@@ -259,7 +259,7 @@ where
         Some(block_number.into()),
     )
     .await
-    .unwrap();
+    .unwrap_err();
     EthApiClient::<Transaction, Block, Receipt>::estimate_gas(
         client,
         call_request.clone(),
@@ -267,7 +267,7 @@ where
         None,
     )
     .await
-    .unwrap();
+    .unwrap_err();
     EthApiClient::<Transaction, Block, Receipt>::call(
         client,
         call_request.clone(),
@@ -276,7 +276,7 @@ where
         None,
     )
     .await
-    .unwrap();
+    .unwrap_err();
     EthApiClient::<Transaction, Block, Receipt>::syncing(client).await.unwrap();
     EthApiClient::<Transaction, Block, Receipt>::send_transaction(
         client,
@@ -368,13 +368,15 @@ where
         .unwrap_err();
     TraceApiClient::trace_call_many(client, vec![], Some(BlockNumberOrTag::Latest.into()))
         .await
-        .unwrap();
+        .unwrap_err();
     TraceApiClient::replay_transaction(client, B256::default(), HashSet::default())
         .await
         .err()
         .unwrap();
-    TraceApiClient::trace_block(client, block_id).await.unwrap();
-    TraceApiClient::replay_block_transactions(client, block_id, HashSet::default()).await.unwrap();
+    TraceApiClient::trace_block(client, block_id).await.unwrap_err();
+    TraceApiClient::replay_block_transactions(client, block_id, HashSet::default())
+        .await
+        .unwrap_err();
 
     TraceApiClient::trace_filter(client, trace_filter).await.unwrap();
 }

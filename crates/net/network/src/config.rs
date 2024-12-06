@@ -16,7 +16,7 @@ use reth_eth_wire::{
 use reth_ethereum_forks::{ForkFilter, Head};
 use reth_network_peers::{mainnet_nodes, pk2id, sepolia_nodes, PeerId, TrustedPeer};
 use reth_network_types::{PeersConfig, SessionsConfig};
-use reth_storage_api::{noop::NoopBlockReader, BlockNumReader, BlockReader, HeaderProvider};
+use reth_storage_api::{noop::NoopProvider, BlockNumReader, BlockReader, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use secp256k1::SECP256K1;
 use std::{collections::HashSet, net::SocketAddr, sync::Arc};
@@ -94,7 +94,7 @@ impl<N: NetworkPrimitives> NetworkConfig<(), N> {
     }
 
     /// Convenience method for creating the corresponding builder type with a random secret key.
-    pub fn builder_with_rng_secret_key() -> NetworkConfigBuilder {
+    pub fn builder_with_rng_secret_key() -> NetworkConfigBuilder<N> {
         NetworkConfigBuilder::with_rng_secret_key()
     }
 }
@@ -145,12 +145,17 @@ where
     }
 }
 
-impl<C> NetworkConfig<C>
+impl<C, N> NetworkConfig<C, N>
 where
-    C: BlockReader + HeaderProvider + Clone + Unpin + 'static,
+    N: NetworkPrimitives,
+    C: BlockReader<Block = N::Block, Receipt = reth_primitives::Receipt, Header = N::BlockHeader>
+        + HeaderProvider
+        + Clone
+        + Unpin
+        + 'static,
 {
     /// Starts the networking stack given a [`NetworkConfig`] and returns a handle to the network.
-    pub async fn start_network(self) -> Result<NetworkHandle, NetworkError> {
+    pub async fn start_network(self) -> Result<NetworkHandle<N>, NetworkError> {
         let client = self.client.clone();
         let (handle, network, _txpool, eth) = NetworkManager::builder::<C>(self)
             .await?
@@ -491,11 +496,11 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     pub fn build_with_noop_provider<ChainSpec>(
         self,
         chain_spec: Arc<ChainSpec>,
-    ) -> NetworkConfig<NoopBlockReader<ChainSpec>, N>
+    ) -> NetworkConfig<NoopProvider<ChainSpec>, N>
     where
         ChainSpec: EthChainSpec + Hardforks + 'static,
     {
-        self.build(NoopBlockReader::new(chain_spec))
+        self.build(NoopProvider::eth(chain_spec))
     }
 
     /// Sets the NAT resolver for external IP.

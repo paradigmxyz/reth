@@ -5,7 +5,6 @@ use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, Header, EMPTY_OMMER_RO
 use alloy_eips::{
     eip2718::{Decodable2718, Encodable2718},
     eip4895::Withdrawals,
-    eip7685::Requests,
 };
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types_engine::{
@@ -15,7 +14,7 @@ use alloy_rpc_types_engine::{
 };
 use reth_primitives::{
     proofs::{self},
-    Block, BlockBody, SealedBlock, TransactionSigned,
+    Block, BlockBody, BlockExt, SealedBlock, TransactionSigned,
 };
 
 /// Converts [`ExecutionPayloadV1`] to [`Block`]
@@ -77,6 +76,7 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
         ommers_hash: EMPTY_OMMER_ROOT_HASH,
         difficulty: Default::default(),
         nonce: Default::default(),
+        target_blobs_per_block: None,
     };
 
     Ok(Block { header, body: BlockBody { transactions, ..Default::default() } })
@@ -124,7 +124,7 @@ pub fn block_to_payload(value: SealedBlock) -> ExecutionPayload {
 
 /// Converts [`SealedBlock`] to [`ExecutionPayloadV1`]
 pub fn block_to_payload_v1(value: SealedBlock) -> ExecutionPayloadV1 {
-    let transactions = value.raw_transactions();
+    let transactions = value.encoded_2718_transactions();
     ExecutionPayloadV1 {
         parent_hash: value.parent_hash,
         fee_recipient: value.beneficiary,
@@ -145,7 +145,7 @@ pub fn block_to_payload_v1(value: SealedBlock) -> ExecutionPayloadV1 {
 
 /// Converts [`SealedBlock`] to [`ExecutionPayloadV2`]
 pub fn block_to_payload_v2(value: SealedBlock) -> ExecutionPayloadV2 {
-    let transactions = value.raw_transactions();
+    let transactions = value.encoded_2718_transactions();
 
     ExecutionPayloadV2 {
         payload_inner: ExecutionPayloadV1 {
@@ -170,7 +170,7 @@ pub fn block_to_payload_v2(value: SealedBlock) -> ExecutionPayloadV2 {
 
 /// Converts [`SealedBlock`] to [`ExecutionPayloadV3`], and returns the parent beacon block root.
 pub fn block_to_payload_v3(value: SealedBlock) -> ExecutionPayloadV3 {
-    let transactions = value.raw_transactions();
+    let transactions = value.encoded_2718_transactions();
     ExecutionPayloadV3 {
         blob_gas_used: value.blob_gas_used.unwrap_or_default(),
         excess_blob_gas: value.excess_blob_gas.unwrap_or_default(),
@@ -270,7 +270,7 @@ pub fn try_into_block(
     };
 
     base_payload.header.parent_beacon_block_root = sidecar.parent_beacon_block_root();
-    base_payload.header.requests_hash = sidecar.requests().map(Requests::requests_hash);
+    base_payload.header.requests_hash = sidecar.requests_hash();
 
     Ok(base_payload)
 }
@@ -334,7 +334,7 @@ pub fn convert_to_payload_body_v1(value: Block) -> ExecutionPayloadBodyV1 {
 
 /// Transforms a [`SealedBlock`] into a [`ExecutionPayloadV1`]
 pub fn execution_payload_from_sealed_block(value: SealedBlock) -> ExecutionPayloadV1 {
-    let transactions = value.raw_transactions();
+    let transactions = value.encoded_2718_transactions();
     ExecutionPayloadV1 {
         parent_hash: value.parent_hash,
         fee_recipient: value.beneficiary,
@@ -363,6 +363,7 @@ mod tests {
         CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ExecutionPayloadV1,
         ExecutionPayloadV2, ExecutionPayloadV3,
     };
+    use reth_primitives::BlockExt;
 
     #[test]
     fn roundtrip_payload_to_block() {
