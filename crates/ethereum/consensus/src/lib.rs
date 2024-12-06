@@ -162,7 +162,7 @@ impl<ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug> HeaderVa
             if header.requests_hash.is_none() {
                 return Err(ConsensusError::RequestsHashMissing)
             }
-            if header.target_blobs_per_block.is_some() {
+            if header.target_blobs_per_block.is_none() {
                 return Err(ConsensusError::TargetBlobsPerBlockMissing)
             }
         } else {
