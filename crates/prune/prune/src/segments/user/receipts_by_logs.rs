@@ -10,8 +10,8 @@ use reth_provider::{
     BlockReader, DBProvider, NodePrimitivesProvider, PruneCheckpointWriter, TransactionsProvider,
 };
 use reth_prune_types::{
-    PruneCheckpoint, PruneMode, PruneProgress, PrunePurpose, PruneSegment, ReceiptsLogPruneConfig,
-    SegmentOutput, MINIMUM_PRUNING_DISTANCE,
+    PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, ReceiptsLogPruneConfig, SegmentOutput,
+    MINIMUM_PRUNING_DISTANCE,
 };
 use tracing::{instrument, trace};
 #[derive(Debug)]
@@ -219,7 +219,7 @@ where
             },
         )?;
 
-        let progress = PruneProgress::new(done, &limiter);
+        let progress = limiter.progress(done);
 
         Ok(SegmentOutput { progress, pruned, checkpoint: None })
     }
@@ -227,14 +227,14 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::segments::{PruneInput, ReceiptsByLogs, Segment};
+    use crate::segments::{PruneInput, PruneLimiter, ReceiptsByLogs, Segment};
     use alloy_primitives::B256;
     use assert_matches::assert_matches;
     use reth_db::tables;
     use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
     use reth_primitives_traits::InMemorySize;
     use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader, TransactionsProvider};
-    use reth_prune_types::{PruneLimiter, PruneMode, PruneSegment, ReceiptsLogPruneConfig};
+    use reth_prune_types::{PruneMode, PruneSegment, ReceiptsLogPruneConfig};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{
         self, random_block_range, random_eoa_account, random_log, random_receipt, BlockRangeParams,

@@ -12,9 +12,7 @@ use reth_provider::{
     errors::provider::ProviderResult, BlockReader, DBProvider, NodePrimitivesProvider,
     PruneCheckpointWriter, TransactionsProvider,
 };
-use reth_prune_types::{
-    PruneCheckpoint, PruneProgress, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
-};
+use reth_prune_types::{PruneCheckpoint, PruneSegment, SegmentOutput, SegmentOutputCheckpoint};
 use tracing::trace;
 
 pub(crate) fn prune<Provider>(
@@ -56,7 +54,7 @@ where
         // so we could finish pruning its receipts on the next run.
         .checked_sub(if done { 0 } else { 1 });
 
-    let progress = PruneProgress::new(done, &limiter);
+    let progress = limiter.progress(done);
 
     Ok(SegmentOutput {
         progress,
@@ -83,7 +81,7 @@ pub(crate) fn save_checkpoint(
 
 #[cfg(test)]
 mod tests {
-    use crate::segments::{PruneInput, SegmentOutput};
+    use crate::segments::{PruneInput, PruneLimiter, SegmentOutput};
     use alloy_primitives::{BlockNumber, TxNumber, B256};
     use assert_matches::assert_matches;
     use itertools::{
@@ -93,7 +91,7 @@ mod tests {
     use reth_db::tables;
     use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader};
     use reth_prune_types::{
-        PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress, PruneSegment,
+        PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
     };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{
