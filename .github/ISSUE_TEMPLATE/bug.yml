@@ -60,6 +60,18 @@ body:
         - Mac (Apple Silicon)
         - Windows (x86)
         - Windows (ARM)
+  - type: dropdown
+    id: container_type
+    attributes:
+      label: Container Type
+      description: Were you running it in a container?
+      multiple: true
+      options:
+        - None
+        - Docker
+        - Kubernetes
+        - LXC/LXD
+        - Other
     validations:
       required: true
   - type: textarea

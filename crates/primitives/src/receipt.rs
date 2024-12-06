@@ -4,7 +4,7 @@ use reth_primitives_traits::InMemorySize;
 
 use alloy_consensus::{
     constants::{EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID},
-    Eip658Value, TxReceipt,
+    Eip658Value, TxReceipt, Typed2718,
 };
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{Bloom, Log, B256};
@@ -73,6 +73,8 @@ impl Receipt {
 }
 
 impl TxReceipt for Receipt {
+    type Log = Log;
+
     fn status_or_post_state(&self) -> Eip658Value {
         self.success.into()
     }
@@ -94,11 +96,13 @@ impl TxReceipt for Receipt {
     }
 }
 
-impl reth_primitives_traits::Receipt for Receipt {
-    fn tx_type(&self) -> u8 {
+impl Typed2718 for Receipt {
+    fn ty(&self) -> u8 {
         self.tx_type as u8
     }
 }
+
+impl reth_primitives_traits::Receipt for Receipt {}
 
 impl ReceiptExt for Receipt {
     fn receipts_root(_receipts: &[&Self]) -> B256 {
@@ -131,7 +135,6 @@ impl InMemorySize for Receipt {
     Debug,
     PartialEq,
     Eq,
-    Default,
     Serialize,
     Deserialize,
     From,
@@ -184,6 +187,12 @@ impl From<Receipt> for ReceiptWithBloom {
     fn from(receipt: Receipt) -> Self {
         let bloom = receipt.bloom_slow();
         Self { receipt, bloom }
+    }
+}
+
+impl<T> Default for Receipts<T> {
+    fn default() -> Self {
+        Self { receipt_vec: Vec::new() }
     }
 }
 

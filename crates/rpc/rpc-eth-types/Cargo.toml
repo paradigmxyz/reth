@@ -15,7 +15,6 @@ workspace = true
 reth-chainspec.workspace = true
 reth-chain-state.workspace = true
 reth-errors.workspace = true
-reth-evm.workspace = true
 reth-execution-types.workspace = true
 reth-metrics.workspace = true
 reth-primitives = { workspace = true, features = ["secp256k1"] }
@@ -29,6 +28,7 @@ reth-transaction-pool.workspace = true
 reth-trie.workspace = true
 
 # ethereum
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-sol-types.workspace = true
@@ -36,7 +36,6 @@ alloy-rpc-types-eth.workspace = true
 revm.workspace = true
 revm-inspectors.workspace = true
 revm-primitives = { workspace = true, features = ["dev"] }
-alloy-eips.workspace = true
 
 # rpc
 jsonrpsee-core.workspace = true

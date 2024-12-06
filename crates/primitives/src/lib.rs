@@ -35,7 +35,9 @@ pub use reth_static_file_types as static_file;
 pub mod transaction;
 #[cfg(any(test, feature = "arbitrary"))]
 pub use block::{generate_valid_header, valid_header_strategy};
-pub use block::{Block, BlockBody, BlockWithSenders, SealedBlock, SealedBlockWithSenders};
+pub use block::{
+    Block, BlockBody, BlockWithSenders, SealedBlock, SealedBlockFor, SealedBlockWithSenders,
+};
 #[cfg(feature = "reth-codec")]
 pub use compression::*;
 pub use receipt::{
@@ -50,8 +52,8 @@ pub use static_file::StaticFileSegment;
 pub use transaction::{
     util::secp256k1::{public_key_to_address, recover_signer_unchecked, sign_message},
     BlobTransaction, InvalidTransactionError, PooledTransactionsElement,
-    PooledTransactionsElementEcRecovered, Transaction, TransactionMeta, TransactionSigned,
-    TransactionSignedEcRecovered, TransactionSignedNoHash, TxType,
+    PooledTransactionsElementEcRecovered, RecoveredTx, Transaction, TransactionMeta,
+    TransactionSigned, TransactionSignedEcRecovered, TxType,
 };
 
 // Re-exports
@@ -80,6 +82,7 @@ pub mod serde_bincode_compat {
 
 /// Temp helper struct for integrating [`NodePrimitives`].
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
 pub struct EthPrimitives;
 
 impl reth_primitives_traits::NodePrimitives for EthPrimitives {

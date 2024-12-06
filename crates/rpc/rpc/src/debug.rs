@@ -18,16 +18,17 @@ use reth_evm::{
     execute::{BlockExecutorProvider, Executor},
     ConfigureEvmEnv,
 };
-use reth_primitives::{Block, BlockExt, SealedBlockWithSenders};
+use reth_primitives::{Block, BlockExt, NodePrimitives, SealedBlockWithSenders};
+use reth_primitives_traits::SignedTransaction;
 use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProofProvider, StateProviderFactory,
-    TransactionVariant,
+    BlockReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProofProvider,
+    StateProviderFactory, TransactionVariant,
 };
 use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{
     helpers::{EthApiSpec, EthTransactions, TraceExt},
-    EthApiTypes, FromEthApiError,
+    EthApiTypes, FromEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
@@ -80,7 +81,9 @@ where
         + StateProviderFactory
         + 'static,
     Eth: EthApiTypes + TraceExt + 'static,
-    BlockExecutor: BlockExecutorProvider,
+    BlockExecutor: BlockExecutorProvider<
+        Primitives: NodePrimitives<Block = <<Eth as RpcNodeCore>::Provider as BlockReader>::Block>,
+    >,
 {
     /// Acquires a permit to execute a tracing call.
     async fn acquire_trace_permit(&self) -> Result<OwnedSemaphorePermit, AcquireError> {
@@ -381,10 +384,22 @@ where
                                 // <https://github.com/rust-lang/rust/issues/100013>
                                 let db = db.0;
 
+                                let tx_info = TransactionInfo {
+                                    block_number: Some(
+                                        env.block.number.try_into().unwrap_or_default(),
+                                    ),
+                                    base_fee: Some(
+                                        env.block.basefee.try_into().unwrap_or_default(),
+                                    ),
+                                    hash: None,
+                                    block_hash: None,
+                                    index: None,
+                                };
+
                                 let (res, _) =
                                     this.eth_api().inspect(&mut *db, env, &mut inspector)?;
                                 let frame = inspector
-                                    .try_into_mux_frame(&res, db)
+                                    .try_into_mux_frame(&res, db, tx_info)
                                     .map_err(Eth::Error::from_eth_err)?;
                                 Ok(frame.into())
                             })
@@ -655,6 +670,17 @@ where
     ) -> Result<(GethTrace, revm_primitives::EvmState), Eth::Error> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
 
+        let tx_info = TransactionInfo {
+            hash: transaction_context.as_ref().map(|c| c.tx_hash).unwrap_or_default(),
+            index: transaction_context
+                .as_ref()
+                .map(|c| c.tx_index.map(|i| i as u64))
+                .unwrap_or_default(),
+            block_hash: transaction_context.as_ref().map(|c| c.block_hash).unwrap_or_default(),
+            block_number: Some(env.block.number.try_into().unwrap_or_default()),
+            base_fee: Some(env.block.basefee.try_into().unwrap_or_default()),
+        };
+
         if let Some(tracer) = tracer {
             return match tracer {
                 GethDebugTracerType::BuiltInTracer(tracer) => match tracer {
@@ -720,7 +746,7 @@ where
 
                         let (res, _) = self.eth_api().inspect(&mut *db, env, &mut inspector)?;
                         let frame = inspector
-                            .try_into_mux_frame(&res, db)
+                            .try_into_mux_frame(&res, db, tx_info)
                             .map_err(Eth::Error::from_eth_err)?;
                         return Ok((frame.into(), res.state))
                     }
@@ -735,14 +761,6 @@ where
                         );
 
                         let (res, env) = self.eth_api().inspect(db, env, &mut inspector)?;
-
-                        let tx_info = TransactionInfo {
-                            hash: transaction_context.unwrap().tx_hash,
-                            index: transaction_context.unwrap().tx_index.map(|index| index as u64),
-                            block_hash: transaction_context.unwrap().block_hash,
-                            block_number: Some(env.block.number.try_into().unwrap_or_default()),
-                            base_fee: Some(env.block.basefee.try_into().unwrap_or_default()),
-                        };
                         let frame: FlatCallFrame = inspector
                             .with_transaction_gas_limit(env.tx.gas_limit)
                             .into_parity_builder()
@@ -793,13 +811,15 @@ where
 #[async_trait]
 impl<Provider, Eth, BlockExecutor> DebugApiServer for DebugApi<Provider, Eth, BlockExecutor>
 where
-    Provider: BlockReaderIdExt
+    Provider: BlockReaderIdExt<Block: Encodable, Receipt = reth_primitives::Receipt>
         + HeaderProvider
         + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + StateProviderFactory
         + 'static,
     Eth: EthApiSpec + EthTransactions + TraceExt + 'static,
-    BlockExecutor: BlockExecutorProvider,
+    BlockExecutor: BlockExecutorProvider<
+        Primitives: NodePrimitives<Block = <<Eth as RpcNodeCore>::Provider as BlockReader>::Block>,
+    >,
 {
     /// Handler for `debug_getRawHeader`
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {

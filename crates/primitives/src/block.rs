@@ -1,6 +1,6 @@
 use crate::{
     traits::BlockExt, transaction::SignedTransactionIntoRecoveredExt, BlockBodyTxExt, GotExpected,
-    SealedHeader, TransactionSigned, TransactionSignedEcRecovered,
+    RecoveredTx, SealedHeader, TransactionSigned,
 };
 use alloc::vec::Vec;
 use alloy_consensus::Header;
@@ -10,7 +10,7 @@ use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
 pub use reth_primitives_traits::test_utils::{generate_valid_header, valid_header_strategy};
-use reth_primitives_traits::{BlockBody as _, InMemorySize, SignedTransaction};
+use reth_primitives_traits::{BlockBody as _, InMemorySize, SignedTransaction, Transaction};
 use serde::{Deserialize, Serialize};
 
 /// Ethereum full block.
@@ -206,11 +206,7 @@ impl<B: reth_primitives_traits::Block> BlockWithSenders<B> {
     #[inline]
     pub fn into_transactions_ecrecovered(
         self,
-    ) -> impl Iterator<
-        Item = TransactionSignedEcRecovered<
-            <B::Body as reth_primitives_traits::BlockBody>::Transaction,
-        >,
-    >
+    ) -> impl Iterator<Item = RecoveredTx<<B::Body as reth_primitives_traits::BlockBody>::Transaction>>
     where
         <B::Body as reth_primitives_traits::BlockBody>::Transaction: SignedTransaction,
     {
@@ -267,20 +263,10 @@ impl<H, B> SealedBlock<H, B> {
 }
 
 impl SealedBlock {
-    /// Unseal the block
-    pub fn unseal(self) -> Block {
-        Block { header: self.header.unseal(), body: self.body }
-    }
-
     /// Returns an iterator over all blob transactions of the block
     #[inline]
     pub fn blob_transactions_iter(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
         self.body.blob_transactions_iter()
-    }
-
-    /// Calculates the total gas used by blob transactions in the sealed block.
-    pub fn blob_gas_used(&self) -> u64 {
-        self.blob_transactions().iter().filter_map(|tx| tx.blob_gas_used()).sum()
     }
 
     /// Returns whether or not the block contains any blob transactions.
@@ -391,6 +377,14 @@ where
         Ok(SealedBlockWithSenders { block: self, senders })
     }
 
+    /// Unseal the block
+    pub fn unseal<Block>(self) -> Block
+    where
+        Block: reth_primitives_traits::Block<Header = H, Body = B>,
+    {
+        Block::new(self.header.unseal(), self.body)
+    }
+
     /// Ensures that the transaction root in the block header is valid.
     ///
     /// The transaction root is the Keccak 256-bit hash of the root node of the trie structure
@@ -419,13 +413,14 @@ where
         Ok(())
     }
 
-    /// Returns a vector of transactions RLP encoded with
-    /// [`alloy_eips::eip2718::Encodable2718::encoded_2718`].
-    pub fn raw_transactions(&self) -> Vec<Bytes>
-    where
-        B::Transaction: Encodable2718,
-    {
-        self.body.transactions().iter().map(|tx| tx.encoded_2718().into()).collect()
+    /// Returns a vector of encoded 2718 transactions.
+    ///
+    /// This is also known as `raw transactions`.
+    ///
+    /// See also [`Encodable2718`].
+    #[doc(alias = "raw_transactions")]
+    pub fn encoded_2718_transactions(&self) -> Vec<Bytes> {
+        self.body.encoded_2718_transactions()
     }
 }
 
@@ -454,9 +449,8 @@ where
 
 impl<H, B> reth_primitives_traits::Block for SealedBlock<H, B>
 where
-    H: reth_primitives_traits::BlockHeader + 'static,
-    B: reth_primitives_traits::BlockBody + 'static,
-    Self: Serialize + for<'a> Deserialize<'a>,
+    H: reth_primitives_traits::BlockHeader,
+    B: reth_primitives_traits::BlockBody<OmmerHeader = H>,
 {
     type Header = H;
     type Body = B;
@@ -489,6 +483,11 @@ where
     }
 }
 
+/// A helepr trait to construct [`SealedBlock`] from a [`reth_primitives_traits::Block`].
+pub type SealedBlockFor<B> = SealedBlock<
+    <B as reth_primitives_traits::Block>::Header,
+    <B as reth_primitives_traits::Block>::Body,
+>;
 /// Sealed block with senders recovered from transactions.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Deref, DerefMut)]
 pub struct SealedBlockWithSenders<B: reth_primitives_traits::Block = Block> {
@@ -557,11 +556,7 @@ impl<B: reth_primitives_traits::Block> SealedBlockWithSenders<B> {
     #[inline]
     pub fn into_transactions_ecrecovered(
         self,
-    ) -> impl Iterator<
-        Item = TransactionSignedEcRecovered<
-            <B::Body as reth_primitives_traits::BlockBody>::Transaction,
-        >,
-    >
+    ) -> impl Iterator<Item = RecoveredTx<<B::Body as reth_primitives_traits::BlockBody>::Transaction>>
     where
         <B::Body as reth_primitives_traits::BlockBody>::Transaction: SignedTransaction,
     {
@@ -598,9 +593,9 @@ impl<'a> arbitrary::Arbitrary<'a> for SealedBlockWithSenders {
     Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, RlpEncodable, RlpDecodable,
 )]
 #[rlp(trailing)]
-pub struct BlockBody {
+pub struct BlockBody<T = TransactionSigned> {
     /// Transactions in the block
-    pub transactions: Vec<TransactionSigned>,
+    pub transactions: Vec<T>,
     /// Uncle headers for the given block
     pub ommers: Vec<Header>,
     /// Withdrawals in the block.
@@ -611,41 +606,6 @@ impl BlockBody {
     /// Create a [`Block`] from the body and its header.
     pub const fn into_block(self, header: Header) -> Block {
         Block { header, body: self }
-    }
-
-    /// Calculate the ommers root for the block body.
-    pub fn calculate_ommers_root(&self) -> B256 {
-        crate::proofs::calculate_ommers_root(&self.ommers)
-    }
-
-    /// Calculate the withdrawals root for the block body, if withdrawals exist. If there are no
-    /// withdrawals, this will return `None`.
-    pub fn calculate_withdrawals_root(&self) -> Option<B256> {
-        self.withdrawals.as_ref().map(|w| crate::proofs::calculate_withdrawals_root(w))
-    }
-
-    /// Returns whether or not the block body contains any blob transactions.
-    #[inline]
-    pub fn has_blob_transactions(&self) -> bool {
-        self.transactions.iter().any(|tx| tx.is_eip4844())
-    }
-
-    /// Returns whether or not the block body contains any EIP-7702 transactions.
-    #[inline]
-    pub fn has_eip7702_transactions(&self) -> bool {
-        self.transactions.iter().any(|tx| tx.is_eip7702())
-    }
-
-    /// Returns an iterator over all blob transactions of the block
-    #[inline]
-    pub fn blob_transactions_iter(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
-        self.transactions.iter().filter(|tx| tx.is_eip4844())
-    }
-
-    /// Returns only the blob transactions, if any, from the block body.
-    #[inline]
-    pub fn blob_transactions(&self) -> Vec<&TransactionSigned> {
-        self.blob_transactions_iter().collect()
     }
 
     /// Returns an iterator over all blob versioned hashes from the block body.
@@ -661,20 +621,53 @@ impl BlockBody {
     pub fn blob_versioned_hashes(&self) -> Vec<&B256> {
         self.blob_versioned_hashes_iter().collect()
     }
+}
 
-    /// Returns an iterator over all transactions.
-    #[inline]
-    pub fn transactions(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
-        self.transactions.iter()
+impl<T> BlockBody<T> {
+    /// Calculate the ommers root for the block body.
+    pub fn calculate_ommers_root(&self) -> B256 {
+        crate::proofs::calculate_ommers_root(&self.ommers)
+    }
+
+    /// Calculate the withdrawals root for the block body, if withdrawals exist. If there are no
+    /// withdrawals, this will return `None`.
+    pub fn calculate_withdrawals_root(&self) -> Option<B256> {
+        self.withdrawals.as_ref().map(|w| crate::proofs::calculate_withdrawals_root(w))
     }
 }
 
-impl InMemorySize for BlockBody {
+impl<T: Transaction> BlockBody<T> {
+    /// Returns whether or not the block body contains any blob transactions.
+    #[inline]
+    pub fn has_blob_transactions(&self) -> bool {
+        self.transactions.iter().any(|tx| tx.is_eip4844())
+    }
+
+    /// Returns whether or not the block body contains any EIP-7702 transactions.
+    #[inline]
+    pub fn has_eip7702_transactions(&self) -> bool {
+        self.transactions.iter().any(|tx| tx.is_eip7702())
+    }
+
+    /// Returns an iterator over all blob transactions of the block
+    #[inline]
+    pub fn blob_transactions_iter(&self) -> impl Iterator<Item = &T> + '_ {
+        self.transactions.iter().filter(|tx| tx.is_eip4844())
+    }
+
+    /// Returns only the blob transactions, if any, from the block body.
+    #[inline]
+    pub fn blob_transactions(&self) -> Vec<&T> {
+        self.blob_transactions_iter().collect()
+    }
+}
+
+impl<T: InMemorySize> InMemorySize for BlockBody<T> {
     /// Calculates a heuristic for the in-memory size of the [`BlockBody`].
     #[inline]
     fn size(&self) -> usize {
-        self.transactions.iter().map(TransactionSigned::size).sum::<usize>() +
-            self.transactions.capacity() * core::mem::size_of::<TransactionSigned>() +
+        self.transactions.iter().map(T::size).sum::<usize>() +
+            self.transactions.capacity() * core::mem::size_of::<T>() +
             self.ommers.iter().map(Header::size).sum::<usize>() +
             self.ommers.capacity() * core::mem::size_of::<Header>() +
             self.withdrawals
@@ -685,6 +678,7 @@ impl InMemorySize for BlockBody {
 
 impl reth_primitives_traits::BlockBody for BlockBody {
     type Transaction = TransactionSigned;
+    type OmmerHeader = Header;
 
     fn transactions(&self) -> &[Self::Transaction] {
         &self.transactions
@@ -692,6 +686,14 @@ impl reth_primitives_traits::BlockBody for BlockBody {
 
     fn into_transactions(self) -> Vec<Self::Transaction> {
         self.transactions
+    }
+
+    fn withdrawals(&self) -> Option<&Withdrawals> {
+        self.withdrawals.as_ref()
+    }
+
+    fn ommers(&self) -> Option<&[Self::OmmerHeader]> {
+        Some(&self.ommers)
     }
 }
 
@@ -733,7 +735,7 @@ pub(super) mod serde_bincode_compat {
     use alloy_consensus::serde_bincode_compat::Header;
     use alloy_eips::eip4895::Withdrawals;
     use alloy_primitives::Address;
-    use reth_primitives_traits::serde_bincode_compat::SealedHeader;
+    use reth_primitives_traits::serde_bincode_compat::{SealedHeader, SerdeBincodeCompat};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -799,6 +801,10 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
+    impl SerdeBincodeCompat for super::BlockBody {
+        type BincodeRepr<'a> = BlockBody<'a>;
+    }
+
     /// Bincode-compatible [`super::SealedBlock`] serde implementation.
     ///
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
@@ -815,19 +821,34 @@ pub(super) mod serde_bincode_compat {
     /// }
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
-    pub struct SealedBlock<'a> {
-        header: SealedHeader<'a>,
-        body: BlockBody<'a>,
+    pub struct SealedBlock<'a, H = super::Header, B = super::BlockBody>
+    where
+        H: SerdeBincodeCompat,
+        B: SerdeBincodeCompat,
+    {
+        header: SealedHeader<'a, H>,
+        body: B::BincodeRepr<'a>,
     }
 
-    impl<'a> From<&'a super::SealedBlock> for SealedBlock<'a> {
-        fn from(value: &'a super::SealedBlock) -> Self {
-            Self { header: SealedHeader::from(&value.header), body: BlockBody::from(&value.body) }
+    impl<'a, H, B> From<&'a super::SealedBlock<H, B>> for SealedBlock<'a, H, B>
+    where
+        H: SerdeBincodeCompat,
+        B: SerdeBincodeCompat,
+    {
+        fn from(value: &'a super::SealedBlock<H, B>) -> Self {
+            Self {
+                header: SealedHeader::from(&value.header),
+                body: B::BincodeRepr::from(&value.body),
+            }
         }
     }
 
-    impl<'a> From<SealedBlock<'a>> for super::SealedBlock {
-        fn from(value: SealedBlock<'a>) -> Self {
+    impl<'a, H, B> From<SealedBlock<'a, H, B>> for super::SealedBlock<H, B>
+    where
+        H: SerdeBincodeCompat,
+        B: SerdeBincodeCompat,
+    {
+        fn from(value: SealedBlock<'a, H, B>) -> Self {
             Self { header: value.header.into(), body: value.body.into() }
         }
     }
@@ -866,19 +887,28 @@ pub(super) mod serde_bincode_compat {
     /// }
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
-    pub struct SealedBlockWithSenders<'a> {
-        block: SealedBlock<'a>,
+    pub struct SealedBlockWithSenders<'a, B = super::Block>
+    where
+        B: reth_primitives_traits::Block,
+    {
+        block: SealedBlock<'a, B::Header, B::Body>,
         senders: Cow<'a, Vec<Address>>,
     }
 
-    impl<'a> From<&'a super::SealedBlockWithSenders> for SealedBlockWithSenders<'a> {
-        fn from(value: &'a super::SealedBlockWithSenders) -> Self {
+    impl<'a, B> From<&'a super::SealedBlockWithSenders<B>> for SealedBlockWithSenders<'a, B>
+    where
+        B: reth_primitives_traits::Block,
+    {
+        fn from(value: &'a super::SealedBlockWithSenders<B>) -> Self {
             Self { block: SealedBlock::from(&value.block), senders: Cow::Borrowed(&value.senders) }
         }
     }
 
-    impl<'a> From<SealedBlockWithSenders<'a>> for super::SealedBlockWithSenders {
-        fn from(value: SealedBlockWithSenders<'a>) -> Self {
+    impl<'a, B> From<SealedBlockWithSenders<'a, B>> for super::SealedBlockWithSenders<B>
+    where
+        B: reth_primitives_traits::Block,
+    {
+        fn from(value: SealedBlockWithSenders<'a, B>) -> Self {
             Self { block: value.block.into(), senders: value.senders.into_owned() }
         }
     }
@@ -1169,14 +1199,14 @@ mod tests {
     fn test_default_seal() {
         let block: SealedBlock = SealedBlock::default();
         let sealed = block.hash();
-        let block = block.unseal();
+        let block: Block = block.unseal();
         let block = block.seal_slow();
         assert_eq!(sealed, block.hash());
     }
 
     #[test]
     fn empty_block_rlp() {
-        let body = BlockBody::default();
+        let body: BlockBody<TransactionSigned> = BlockBody::default();
         let mut buf = Vec::new();
         body.encode(&mut buf);
         let decoded = BlockBody::decode(&mut buf.as_slice()).unwrap();

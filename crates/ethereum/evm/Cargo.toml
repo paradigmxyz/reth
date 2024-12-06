@@ -50,5 +50,6 @@ std = [
 	"alloy-genesis/std",
 	"alloy-primitives/std",
 	"revm-primitives/std",
-	"secp256k1/std"
+	"secp256k1/std",
+	"reth-ethereum-forks/std"
 ]

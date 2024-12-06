@@ -1,7 +1,9 @@
 use alloy_primitives::BlockNumber;
 use reth_db_api::models::StoredBlockBodyIndices;
 use reth_execution_types::{Chain, ExecutionOutcome};
+use reth_node_types::NodePrimitives;
 use reth_primitives::SealedBlockWithSenders;
+use reth_storage_api::NodePrimitivesProvider;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{updates::TrieUpdates, HashedPostStateSorted};
 
@@ -28,33 +30,64 @@ impl StorageLocation {
     }
 }
 
-/// BlockExecution Writer
-#[auto_impl::auto_impl(&, Arc, Box)]
-pub trait BlockExecutionWriter: BlockWriter + Send + Sync {
+/// `BlockExecution` Writer
+pub trait BlockExecutionWriter:
+    NodePrimitivesProvider<Primitives: NodePrimitives<Block = Self::Block>> + BlockWriter + Send + Sync
+{
     /// Take all of the blocks above the provided number and their execution result
     ///
     /// The passed block number will stay in the database.
+    ///
+    /// Accepts [`StorageLocation`] specifying from where should transactions and receipts be
+    /// removed.
     fn take_block_and_execution_above(
         &self,
         block: BlockNumber,
-        remove_transactions_from: StorageLocation,
-    ) -> ProviderResult<Chain>;
+        remove_from: StorageLocation,
+    ) -> ProviderResult<Chain<Self::Primitives>>;
 
     /// Remove all of the blocks above the provided number and their execution result
     ///
     /// The passed block number will stay in the database.
+    ///
+    /// Accepts [`StorageLocation`] specifying from where should transactions and receipts be
+    /// removed.
     fn remove_block_and_execution_above(
         &self,
         block: BlockNumber,
-        remove_transactions_from: StorageLocation,
+        remove_from: StorageLocation,
     ) -> ProviderResult<()>;
+}
+
+impl<T: BlockExecutionWriter> BlockExecutionWriter for &T {
+    fn take_block_and_execution_above(
+        &self,
+        block: BlockNumber,
+        remove_from: StorageLocation,
+    ) -> ProviderResult<Chain<Self::Primitives>> {
+        (*self).take_block_and_execution_above(block, remove_from)
+    }
+
+    fn remove_block_and_execution_above(
+        &self,
+        block: BlockNumber,
+        remove_from: StorageLocation,
+    ) -> ProviderResult<()> {
+        (*self).remove_block_and_execution_above(block, remove_from)
+    }
 }
 
 /// This just receives state, or [`ExecutionOutcome`], from the provider
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait StateReader: Send + Sync {
+    /// Receipt type in [`ExecutionOutcome`].
+    type Receipt: Send + Sync;
+
     /// Get the [`ExecutionOutcome`] for the given block
-    fn get_state(&self, block: BlockNumber) -> ProviderResult<Option<ExecutionOutcome>>;
+    fn get_state(
+        &self,
+        block: BlockNumber,
+    ) -> ProviderResult<Option<ExecutionOutcome<Self::Receipt>>>;
 }
 
 /// Block Writer
@@ -62,16 +95,21 @@ pub trait StateReader: Send + Sync {
 pub trait BlockWriter: Send + Sync {
     /// The body this writer can write.
     type Block: reth_primitives_traits::Block;
+    /// The receipt type for [`ExecutionOutcome`].
+    type Receipt: Send + Sync;
 
     /// Insert full block and make it canonical. Parent tx num and transition id is taken from
     /// parent block in database.
     ///
     /// Return [StoredBlockBodyIndices] that contains indices of the first and last transactions and
     /// transition in the block.
+    ///
+    /// Accepts [`StorageLocation`] value which specifies where transactions and headers should be
+    /// written.
     fn insert_block(
         &self,
         block: SealedBlockWithSenders<Self::Block>,
-        write_transactions_to: StorageLocation,
+        write_to: StorageLocation,
     ) -> ProviderResult<StoredBlockBodyIndices>;
 
     /// Appends a batch of block bodies extending the canonical chain. This is invoked during
@@ -118,7 +156,7 @@ pub trait BlockWriter: Send + Sync {
     fn append_blocks_with_state(
         &self,
         blocks: Vec<SealedBlockWithSenders<Self::Block>>,
-        execution_outcome: ExecutionOutcome,
+        execution_outcome: ExecutionOutcome<Self::Receipt>,
         hashed_state: HashedPostStateSorted,
         trie_updates: TrieUpdates,
     ) -> ProviderResult<()>;

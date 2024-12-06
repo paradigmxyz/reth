@@ -12,6 +12,7 @@
 
 pub mod error;
 pub mod eth;
+pub mod miner;
 pub mod sequencer;
 pub mod witness;
 

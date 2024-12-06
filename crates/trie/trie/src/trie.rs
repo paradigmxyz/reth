@@ -202,15 +202,13 @@ where
                         self.trie_cursor_factory.clone(),
                         self.hashed_cursor_factory.clone(),
                         hashed_address,
-                        #[cfg(feature = "metrics")]
-                        self.metrics.storage_trie.clone(),
-                    )
-                    .with_prefix_set(
                         self.prefix_sets
                             .storage_prefix_sets
                             .get(&hashed_address)
                             .cloned()
                             .unwrap_or_default(),
+                        #[cfg(feature = "metrics")]
+                        self.metrics.storage_trie.clone(),
                     );
 
                     let storage_root = if retain_updates {
@@ -258,11 +256,8 @@ where
 
         let root = hash_builder.root();
 
-        trie_updates.finalize(
-            account_node_iter.walker,
-            hash_builder,
-            self.prefix_sets.destroyed_accounts,
-        );
+        let removed_keys = account_node_iter.walker.take_removed_keys();
+        trie_updates.finalize(hash_builder, removed_keys, self.prefix_sets.destroyed_accounts);
 
         let stats = tracker.finish();
 
@@ -304,29 +299,32 @@ impl<T, H> StorageRoot<T, H> {
         trie_cursor_factory: T,
         hashed_cursor_factory: H,
         address: Address,
+        prefix_set: PrefixSet,
         #[cfg(feature = "metrics")] metrics: TrieRootMetrics,
     ) -> Self {
         Self::new_hashed(
             trie_cursor_factory,
             hashed_cursor_factory,
             keccak256(address),
+            prefix_set,
             #[cfg(feature = "metrics")]
             metrics,
         )
     }
 
     /// Creates a new storage root calculator given a hashed address.
-    pub fn new_hashed(
+    pub const fn new_hashed(
         trie_cursor_factory: T,
         hashed_cursor_factory: H,
         hashed_address: B256,
+        prefix_set: PrefixSet,
         #[cfg(feature = "metrics")] metrics: TrieRootMetrics,
     ) -> Self {
         Self {
             trie_cursor_factory,
             hashed_cursor_factory,
             hashed_address,
-            prefix_set: PrefixSet::default(),
+            prefix_set,
             #[cfg(feature = "metrics")]
             metrics,
         }
@@ -434,7 +432,8 @@ where
         let root = hash_builder.root();
 
         let mut trie_updates = StorageTrieUpdates::default();
-        trie_updates.finalize(storage_node_iter.walker, hash_builder);
+        let removed_keys = storage_node_iter.walker.take_removed_keys();
+        trie_updates.finalize(hash_builder, removed_keys);
 
         let stats = tracker.finish();
 

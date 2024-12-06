@@ -15,6 +15,7 @@ workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-primitives = { workspace = true, features = ["secp256k1"] }
+reth-primitives-traits.workspace = true
 reth-rpc-api.workspace = true
 reth-rpc-eth-api.workspace = true
 reth-errors.workspace = true
@@ -33,7 +34,6 @@ reth-evm.workspace = true
 reth-rpc-eth-types.workspace = true
 reth-rpc-server-types.workspace = true
 reth-network-types.workspace = true
-reth-trie.workspace = true
 reth-consensus.workspace = true
 reth-payload-validator.workspace = true
 

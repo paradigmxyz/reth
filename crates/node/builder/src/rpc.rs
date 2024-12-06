@@ -18,6 +18,7 @@ use reth_node_core::{
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_payload_builder::PayloadStore;
+use reth_primitives::EthPrimitives;
 use reth_provider::providers::ProviderNodeTypes;
 use reth_rpc::{
     eth::{EthApiTypes, FullEthApiServer},
@@ -32,6 +33,7 @@ use reth_rpc_builder::{
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
+use reth_transaction_pool::TransactionPool;
 
 use crate::EthApiBuilderCtx;
 
@@ -402,8 +404,9 @@ where
 impl<N, EthApi, EV> RpcAddOns<N, EthApi, EV>
 where
     N: FullNodeComponents<
-        Types: ProviderNodeTypes,
+        Types: ProviderNodeTypes<Primitives = EthPrimitives>,
         PayloadBuilder: PayloadBuilder<PayloadType = <N::Types as NodeTypesWithEngine>::Engine>,
+        Pool: TransactionPool<Transaction = <EthApi::Pool as TransactionPool>::Transaction>,
     >,
     EthApi: EthApiTypes + FullEthApiServer + AddDevSigners + Unpin + 'static,
     EV: EngineValidatorBuilder<N>,
@@ -416,7 +419,7 @@ where
         ext: F,
     ) -> eyre::Result<RpcHandle<N, EthApi>>
     where
-        F: FnOnce(&mut TransportRpcModules) -> eyre::Result<()>,
+        F: FnOnce(&mut TransportRpcModules, &mut AuthRpcModule) -> eyre::Result<()>,
     {
         let Self { eth_api_builder, engine_validator_builder, hooks, _pd: _ } = self;
 
@@ -474,7 +477,7 @@ where
 
         let RpcHooks { on_rpc_started, extend_rpc_modules } = hooks;
 
-        ext(ctx.modules)?;
+        ext(ctx.modules, ctx.auth_module)?;
         extend_rpc_modules.extend_rpc_modules(ctx)?;
 
         let server_config = config.rpc.rpc_server_config();
@@ -524,8 +527,9 @@ where
 impl<N, EthApi, EV> NodeAddOns<N> for RpcAddOns<N, EthApi, EV>
 where
     N: FullNodeComponents<
-        Types: ProviderNodeTypes,
+        Types: ProviderNodeTypes<Primitives = EthPrimitives>,
         PayloadBuilder: PayloadBuilder<PayloadType = <N::Types as NodeTypesWithEngine>::Engine>,
+        Pool: TransactionPool<Transaction = <EthApi::Pool as TransactionPool>::Transaction>,
     >,
     EthApi: EthApiTypes + FullEthApiServer + AddDevSigners + Unpin + 'static,
     EV: EngineValidatorBuilder<N>,
@@ -533,7 +537,7 @@ where
     type Handle = RpcHandle<N, EthApi>;
 
     async fn launch_add_ons(self, ctx: AddOnsContext<'_, N>) -> eyre::Result<Self::Handle> {
-        self.launch_add_ons_with(ctx, |_| Ok(())).await
+        self.launch_add_ons_with(ctx, |_, _| Ok(())).await
     }
 }
 
@@ -566,19 +570,43 @@ pub trait EthApiBuilder<N: FullNodeComponents>: 'static {
     fn build(ctx: &EthApiBuilderCtx<N>) -> Self;
 }
 
-impl<N: FullNodeComponents> EthApiBuilder<N> for EthApi<N::Provider, N::Pool, N::Network, N::Evm> {
+impl<N: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>> EthApiBuilder<N>
+    for EthApi<N::Provider, N::Pool, N::Network, N::Evm>
+{
     fn build(ctx: &EthApiBuilderCtx<N>) -> Self {
         Self::with_spawner(ctx)
     }
 }
 
+/// Helper trait that provides the validator for the engine API
+pub trait EngineValidatorAddOn<Node: FullNodeComponents>: Send {
+    /// The Validator type to use for the engine API.
+    type Validator: EngineValidator<<Node::Types as NodeTypesWithEngine>::Engine>;
+
+    /// Creates the engine validator for an engine API based node.
+    fn engine_validator(
+        &self,
+        ctx: &AddOnsContext<'_, Node>,
+    ) -> impl Future<Output = eyre::Result<Self::Validator>>;
+}
+
+impl<N, EthApi, EV> EngineValidatorAddOn<N> for RpcAddOns<N, EthApi, EV>
+where
+    N: FullNodeComponents,
+    EthApi: EthApiTypes,
+    EV: EngineValidatorBuilder<N>,
+{
+    type Validator = EV::Validator;
+
+    async fn engine_validator(&self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::Validator> {
+        self.engine_validator_builder.clone().build(ctx).await
+    }
+}
+
 /// A type that knows how to build the engine validator.
-pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send {
+pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone {
     /// The consensus implementation to build.
-    type Validator: EngineValidator<<Node::Types as NodeTypesWithEngine>::Engine>
-        + Clone
-        + Unpin
-        + 'static;
+    type Validator: EngineValidator<<Node::Types as NodeTypesWithEngine>::Engine>;
 
     /// Creates the engine validator.
     fn build(
@@ -592,7 +620,7 @@ where
     Node: FullNodeComponents,
     Validator:
         EngineValidator<<Node::Types as NodeTypesWithEngine>::Engine> + Clone + Unpin + 'static,
-    F: FnOnce(&AddOnsContext<'_, Node>) -> Fut + Send,
+    F: FnOnce(&AddOnsContext<'_, Node>) -> Fut + Send + Sync + Clone,
     Fut: Future<Output = eyre::Result<Validator>> + Send,
 {
     type Validator = Validator;

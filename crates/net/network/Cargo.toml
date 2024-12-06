@@ -123,6 +123,7 @@ serde = [
 	"smallvec/serde",
 	"url/serde",
 	"reth-primitives-traits/serde",
+	"reth-ethereum-forks/serde"
 ]
 test-utils = [
 	"dep:reth-provider",

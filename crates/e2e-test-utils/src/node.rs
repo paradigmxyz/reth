@@ -1,29 +1,28 @@
-use std::{marker::PhantomData, pin::Pin};
-
-use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
-use alloy_rpc_types_eth::BlockNumberOrTag;
-use eyre::Ok;
-use futures_util::Future;
-use reth::{
-    api::{BuiltPayload, EngineTypes, FullNodeComponents, PayloadBuilderAttributes},
-    builder::FullNode,
-    network::PeersHandleProvider,
-    providers::{BlockReader, BlockReaderIdExt, CanonStateSubscriptions, StageCheckpointReader},
-    rpc::{
-        api::eth::helpers::{EthApiSpec, EthTransactions, TraceExt},
-        types::engine::PayloadStatusEnum,
-    },
-};
-use reth_chainspec::EthereumHardforks;
-use reth_node_builder::{rpc::RethRpcAddOns, NodeTypes, NodeTypesWithEngine};
-use reth_stages_types::StageId;
-use tokio_stream::StreamExt;
-use url::Url;
-
 use crate::{
     engine_api::EngineApiTestContext, network::NetworkTestContext, payload::PayloadTestContext,
     rpc::RpcTestContext, traits::PayloadEnvelopeExt,
 };
+use alloy_consensus::BlockHeader;
+use alloy_eips::BlockId;
+use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
+use alloy_rpc_types_engine::PayloadStatusEnum;
+use alloy_rpc_types_eth::BlockNumberOrTag;
+use eyre::Ok;
+use futures_util::Future;
+use reth_chainspec::EthereumHardforks;
+use reth_network_api::test_utils::PeersHandleProvider;
+use reth_node_api::{Block, EngineTypes, FullNodeComponents};
+use reth_node_builder::{rpc::RethRpcAddOns, FullNode, NodeTypes, NodeTypesWithEngine};
+use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
+use reth_primitives::EthPrimitives;
+use reth_provider::{
+    BlockReader, BlockReaderIdExt, CanonStateSubscriptions, StageCheckpointReader,
+};
+use reth_rpc_eth_api::helpers::{EthApiSpec, EthTransactions, TraceExt};
+use reth_stages_types::StageId;
+use std::{marker::PhantomData, pin::Pin};
+use tokio_stream::StreamExt;
+use url::Url;
 
 /// An helper struct to handle node actions
 #[allow(missing_debug_implementations)]
@@ -51,7 +50,11 @@ impl<Node, Engine, AddOns> NodeTestContext<Node, AddOns>
 where
     Engine: EngineTypes,
     Node: FullNodeComponents,
-    Node::Types: NodeTypesWithEngine<ChainSpec: EthereumHardforks, Engine = Engine>,
+    Node::Types: NodeTypesWithEngine<
+        ChainSpec: EthereumHardforks,
+        Engine = Engine,
+        Primitives = EthPrimitives,
+    >,
     Node::Network: PeersHandleProvider,
     AddOns: RethRpcAddOns<Node>,
 {
@@ -132,8 +135,8 @@ where
         Ok((self.payload.expect_built_payload().await?, eth_attr))
     }
 
-    /// Advances the node forward one block
-    pub async fn advance_block(
+    /// Triggers payload building job and submits it to the engine.
+    pub async fn build_and_submit_payload(
         &mut self,
     ) -> eyre::Result<(Engine::BuiltPayload, Engine::PayloadBuilderAttributes)>
     where
@@ -144,13 +147,27 @@ where
     {
         let (payload, eth_attr) = self.new_payload().await?;
 
-        let block_hash = self
-            .engine_api
+        self.engine_api
             .submit_payload(payload.clone(), eth_attr.clone(), PayloadStatusEnum::Valid)
             .await?;
 
+        Ok((payload, eth_attr))
+    }
+
+    /// Advances the node forward one block
+    pub async fn advance_block(
+        &mut self,
+    ) -> eyre::Result<(Engine::BuiltPayload, Engine::PayloadBuilderAttributes)>
+    where
+        <Engine as EngineTypes>::ExecutionPayloadEnvelopeV3:
+            From<Engine::BuiltPayload> + PayloadEnvelopeExt,
+        <Engine as EngineTypes>::ExecutionPayloadEnvelopeV4:
+            From<Engine::BuiltPayload> + PayloadEnvelopeExt,
+    {
+        let (payload, eth_attr) = self.build_and_submit_payload().await?;
+
         // trigger forkchoice update via engine api to commit the block to the blockchain
-        self.engine_api.update_forkchoice(block_hash, block_hash).await?;
+        self.engine_api.update_forkchoice(payload.block().hash(), payload.block().hash()).await?;
 
         Ok((payload, eth_attr))
     }
@@ -178,7 +195,7 @@ where
 
             if check {
                 if let Some(latest_block) = self.inner.provider.block_by_number(number)? {
-                    assert_eq!(latest_block.hash_slow(), expected_block_hash);
+                    assert_eq!(latest_block.header().hash_slow(), expected_block_hash);
                     break
                 }
                 assert!(
@@ -225,14 +242,49 @@ where
             if let Some(latest_block) =
                 self.inner.provider.block_by_number_or_tag(BlockNumberOrTag::Latest)?
             {
-                if latest_block.number == block_number {
+                if latest_block.header().number() == block_number {
                     // make sure the block hash we submitted via FCU engine api is the new latest
                     // block using an RPC call
-                    assert_eq!(latest_block.hash_slow(), block_hash);
+                    assert_eq!(latest_block.header().hash_slow(), block_hash);
                     break
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Gets block hash by number.
+    pub fn block_hash(&self, number: u64) -> BlockHash {
+        self.inner
+            .provider
+            .sealed_header_by_number_or_tag(BlockNumberOrTag::Number(number))
+            .unwrap()
+            .unwrap()
+            .hash()
+    }
+
+    /// Sends FCU and waits for the node to sync to the given block.
+    pub async fn sync_to(&self, block: BlockHash) -> eyre::Result<()> {
+        self.engine_api.update_forkchoice(block, block).await?;
+
+        let start = std::time::Instant::now();
+
+        while self
+            .inner
+            .provider
+            .sealed_header_by_id(BlockId::Number(BlockNumberOrTag::Latest))?
+            .is_none_or(|h| h.hash() != block)
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+            assert!(start.elapsed() <= std::time::Duration::from_secs(10), "timed out");
+        }
+
+        // Hack to make sure that all components have time to process canonical state update.
+        // Otherwise, this might result in e.g "nonce too low" errors when advancing chain further,
+        // making tests flaky.
+        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+
         Ok(())
     }
 

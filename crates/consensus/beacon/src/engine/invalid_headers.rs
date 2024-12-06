@@ -6,7 +6,7 @@ use reth_metrics::{
 };
 use reth_primitives::SealedHeader;
 use schnellru::{ByLength, LruMap};
-use std::sync::Arc;
+use std::{fmt::Debug, sync::Arc};
 use tracing::warn;
 
 /// The max hit counter for invalid headers in the cache before it is forcefully evicted.
@@ -17,20 +17,20 @@ const INVALID_HEADER_HIT_EVICTION_THRESHOLD: u8 = 128;
 
 /// Keeps track of invalid headers.
 #[derive(Debug)]
-pub struct InvalidHeaderCache {
+pub struct InvalidHeaderCache<H = Header> {
     /// This maps a header hash to a reference to its invalid ancestor.
-    headers: LruMap<B256, HeaderEntry>,
+    headers: LruMap<B256, HeaderEntry<H>>,
     /// Metrics for the cache.
     metrics: InvalidHeaderCacheMetrics,
 }
 
-impl InvalidHeaderCache {
+impl<H: Debug> InvalidHeaderCache<H> {
     /// Invalid header cache constructor.
     pub fn new(max_length: u32) -> Self {
         Self { headers: LruMap::new(ByLength::new(max_length)), metrics: Default::default() }
     }
 
-    fn insert_entry(&mut self, hash: B256, header: Arc<Header>) {
+    fn insert_entry(&mut self, hash: B256, header: Arc<H>) {
         self.headers.insert(hash, HeaderEntry { header, hit_count: 0 });
     }
 
@@ -38,7 +38,7 @@ impl InvalidHeaderCache {
     ///
     /// If this is called, the hit count for the entry is incremented.
     /// If the hit count exceeds the threshold, the entry is evicted and `None` is returned.
-    pub fn get(&mut self, hash: &B256) -> Option<Arc<Header>> {
+    pub fn get(&mut self, hash: &B256) -> Option<Arc<H>> {
         {
             let entry = self.headers.get(hash)?;
             entry.hit_count += 1;
@@ -53,11 +53,7 @@ impl InvalidHeaderCache {
     }
 
     /// Inserts an invalid block into the cache, with a given invalid ancestor.
-    pub fn insert_with_invalid_ancestor(
-        &mut self,
-        header_hash: B256,
-        invalid_ancestor: Arc<Header>,
-    ) {
+    pub fn insert_with_invalid_ancestor(&mut self, header_hash: B256, invalid_ancestor: Arc<H>) {
         if self.get(&header_hash).is_none() {
             warn!(target: "consensus::engine", hash=?header_hash, ?invalid_ancestor, "Bad block with existing invalid ancestor");
             self.insert_entry(header_hash, invalid_ancestor);
@@ -69,7 +65,7 @@ impl InvalidHeaderCache {
     }
 
     /// Inserts an invalid ancestor into the map.
-    pub fn insert(&mut self, invalid_ancestor: SealedHeader) {
+    pub fn insert(&mut self, invalid_ancestor: SealedHeader<H>) {
         if self.get(&invalid_ancestor.hash()).is_none() {
             let hash = invalid_ancestor.hash();
             let header = invalid_ancestor.unseal();
@@ -83,11 +79,11 @@ impl InvalidHeaderCache {
     }
 }
 
-struct HeaderEntry {
+struct HeaderEntry<H> {
     /// Keeps track how many times this header has been hit.
     hit_count: u8,
     /// The actually header entry
-    header: Arc<Header>,
+    header: Arc<H>,
 }
 
 /// Metrics for the invalid headers cache.

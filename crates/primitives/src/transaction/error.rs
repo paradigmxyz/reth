@@ -76,7 +76,7 @@ pub enum TransactionConversionError {
 }
 
 /// Represents error variants than can happen when trying to convert a
-/// [`TransactionSignedEcRecovered`](crate::TransactionSignedEcRecovered) transaction.
+/// [`RecoveredTx`](crate::RecoveredTx) transaction.
 #[derive(Debug, Clone, Eq, PartialEq, derive_more::Display)]
 pub enum TryFromRecoveredTransactionError {
     /// Thrown if the transaction type is unsupported.
