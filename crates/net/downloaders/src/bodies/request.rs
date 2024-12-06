@@ -38,30 +38,31 @@ use std::{
 /// All errors regarding the response cause the peer to get penalized, meaning that adversaries
 /// that try to give us bodies that do not match the requested order are going to be penalized
 /// and eventually disconnected.
-pub(crate) struct BodiesRequestFuture<B: BodiesClient> {
+pub(crate) struct BodiesRequestFuture<H, B: BodiesClient> {
     client: Arc<B>,
-    consensus: Arc<dyn Consensus<alloy_consensus::Header, B::Body>>,
+    consensus: Arc<dyn Consensus<H, B::Body>>,
     metrics: BodyDownloaderMetrics,
     /// Metrics for individual responses. This can be used to observe how the size (in bytes) of
     /// responses change while bodies are being downloaded.
     response_metrics: ResponseMetrics,
     // Headers to download. The collection is shrunk as responses are buffered.
-    pending_headers: VecDeque<SealedHeader>,
+    pending_headers: VecDeque<SealedHeader<H>>,
     /// Internal buffer for all blocks
-    buffer: Vec<BlockResponse<alloy_consensus::Header, B::Body>>,
+    buffer: Vec<BlockResponse<H, B::Body>>,
     fut: Option<B::Output>,
     /// Tracks how many bodies we requested in the last request.
     last_request_len: Option<usize>,
 }
 
-impl<B> BodiesRequestFuture<B>
+impl<H, B> BodiesRequestFuture<H, B>
 where
     B: BodiesClient + 'static,
+    H: BlockHeader,
 {
     /// Returns an empty future. Use [`BodiesRequestFuture::with_headers`] to set the request.
     pub(crate) fn new(
         client: Arc<B>,
-        consensus: Arc<dyn Consensus<alloy_consensus::Header, B::Body>>,
+        consensus: Arc<dyn Consensus<H, B::Body>>,
         metrics: BodyDownloaderMetrics,
     ) -> Self {
         Self {
@@ -76,7 +77,7 @@ where
         }
     }
 
-    pub(crate) fn with_headers(mut self, headers: Vec<SealedHeader>) -> Self {
+    pub(crate) fn with_headers(mut self, headers: Vec<SealedHeader<H>>) -> Self {
         self.buffer.reserve_exact(headers.len());
         self.pending_headers = VecDeque::from(headers);
         // Submit the request only if there are any headers to download.
@@ -192,7 +193,7 @@ where
                 if let Err(error) = self.consensus.validate_block_pre_execution(&block) {
                     // Body is invalid, put the header back and return an error
                     let hash = block.hash();
-                    let number = block.number;
+                    let number = block.number();
                     self.pending_headers.push_front(block.header);
                     return Err(DownloadError::BodyValidation {
                         hash,
@@ -213,11 +214,12 @@ where
     }
 }
 
-impl<B> Future for BodiesRequestFuture<B>
+impl<H, B> Future for BodiesRequestFuture<H, B>
 where
+    H: BlockHeader + Unpin + Send + Sync + 'static,
     B: BodiesClient<Body: InMemorySize> + 'static,
 {
-    type Output = DownloadResult<Vec<BlockResponse<alloy_consensus::Header, B::Body>>>;
+    type Output = DownloadResult<Vec<BlockResponse<H, B::Body>>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
