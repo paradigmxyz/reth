@@ -460,7 +460,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// Updates the transactions for the changed senders.
     pub(crate) fn update_accounts(
         &mut self,
-        changed_senders: HashMap<SenderId, SenderInfo>,
+        changed_senders: FxHashMap<SenderId, SenderInfo>,
     ) -> UpdateOutcome<T::Transaction> {
         // track changed accounts
         self.sender_info.extend(changed_senders.clone());
@@ -481,7 +481,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         &mut self,
         block_info: BlockInfo,
         mined_transactions: Vec<TxHash>,
-        changed_senders: HashMap<SenderId, SenderInfo>,
+        changed_senders: FxHashMap<SenderId, SenderInfo>,
         update_kind: PoolUpdateKind,
     ) -> OnNewCanonicalStateOutcome<T::Transaction> {
         // update block info
@@ -1180,7 +1180,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// that got transaction included in the block.
     pub(crate) fn update(
         &mut self,
-        changed_accounts: HashMap<SenderId, SenderInfo>,
+        changed_accounts: FxHashMap<SenderId, SenderInfo>,
     ) -> Vec<PoolUpdate> {
         // pre-allocate a few updates
         let mut updates = Vec::with_capacity(64);
