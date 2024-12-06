@@ -10,7 +10,8 @@ use reth_db::tables;
 use reth_db_api::{cursor::DbDupCursorRO, transaction::DbTx};
 use reth_primitives::{Account, Bytecode};
 use reth_storage_api::{
-    DBProvider, StateCommitmentProvider, StateProofProvider, StorageRootProvider,
+    DBProvider, HashedStorageProvider, StateCommitmentProvider, StateProofProvider,
+    StorageRootProvider,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
@@ -164,6 +165,16 @@ impl<Provider: DBProvider + StateCommitmentProvider> HashedPostStateProvider
         HashedPostState::from_bundle_state::<
             <Provider::StateCommitment as StateCommitment>::KeyHasher,
         >(bundle_state.state())
+    }
+}
+
+impl<Provider: StateCommitmentProvider + Send + Sync> HashedStorageProvider
+    for LatestStateProviderRef<'_, Provider>
+{
+    fn hashed_storage<'a>(&self, account: &revm::db::BundleAccount) -> HashedStorage {
+        HashedStorage::from_bundle_account::<
+            <Provider::StateCommitment as StateCommitment>::KeyHasher,
+        >(account)
     }
 }
 

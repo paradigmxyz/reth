@@ -16,7 +16,8 @@ use reth_db_api::{
 };
 use reth_primitives::{Account, Bytecode};
 use reth_storage_api::{
-    BlockNumReader, DBProvider, StateCommitmentProvider, StateProofProvider, StorageRootProvider,
+    BlockNumReader, DBProvider, HashedStorageProvider, StateCommitmentProvider, StateProofProvider,
+    StorageRootProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
@@ -155,7 +156,13 @@ impl<'b, Provider: DBProvider + BlockNumReader + StateCommitmentProvider>
             );
         }
 
-        Ok(HashedStorage::from_reverts(self.tx(), address, self.block_number)?)
+        Ok(
+            HashedStorage::from_reverts::<<Provider::StateCommitment as StateCommitment>::KeyHasher>(
+                self.tx(),
+                address,
+                self.block_number,
+            )?,
+        )
     }
 
     fn history_info<T, K>(
@@ -403,6 +410,16 @@ impl<Provider: StateCommitmentProvider> HashedPostStateProvider
         HashedPostState::from_bundle_state::<
             <Provider::StateCommitment as StateCommitment>::KeyHasher,
         >(bundle_state.state())
+    }
+}
+
+impl<Provider: StateCommitmentProvider + Send + Sync> HashedStorageProvider
+    for HistoricalStateProviderRef<'_, Provider>
+{
+    fn hashed_storage(&self, account: &revm::db::BundleAccount) -> HashedStorage {
+        HashedStorage::from_bundle_account::<
+            <Provider::StateCommitment as StateCommitment>::KeyHasher,
+        >(account)
     }
 }
 
