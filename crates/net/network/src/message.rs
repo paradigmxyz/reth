@@ -150,7 +150,7 @@ pub enum PeerResponseResult<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Represents a result containing node data or an error.
     NodeData(RequestResult<Vec<Bytes>>),
     /// Represents a result containing receipts or an error.
-    Receipts(RequestResult<Vec<Vec<ReceiptWithBloom>>>),
+    Receipts(RequestResult<Vec<Vec<ReceiptWithBloom<reth_primitives::Receipt>>>>),
 }
 
 // === impl PeerResponseResult ===

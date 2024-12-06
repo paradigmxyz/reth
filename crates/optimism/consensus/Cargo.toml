@@ -26,6 +26,7 @@ reth-optimism-chainspec.workspace = true
 reth-optimism-primitives = { workspace = true, features = ["serde"] }
 
 # ethereum
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-trie.workspace = true
