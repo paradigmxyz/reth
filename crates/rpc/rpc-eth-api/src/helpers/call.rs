@@ -6,7 +6,7 @@ use crate::{
     helpers::estimate::EstimateCall, FromEthApiError, FromEvmError, FullEthApiTypes,
     IntoEthApiError, RpcBlock, RpcNodeCore,
 };
-use alloy_consensus::{BlockHeader, Header};
+use alloy_consensus::BlockHeader;
 use alloy_eips::{eip1559::calc_next_block_base_fee, eip2930::AccessListResult};
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
 use alloy_rpc_types_eth::{
@@ -20,7 +20,9 @@ use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_node_api::BlockBody;
 use reth_primitives_traits::SignedTransaction;
-use reth_provider::{BlockIdReader, ChainSpecProvider, HeaderProvider};
+use reth_provider::{
+    BlockIdReader, BlockReader, ChainSpecProvider, HeaderProvider, ProviderHeader,
+};
 use reth_revm::{
     database::StateProviderDatabase,
     db::CacheDB,
@@ -70,7 +72,12 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock {
         block: Option<BlockId>,
     ) -> impl Future<Output = SimulatedBlocksResult<Self::NetworkTypes, Self::Error>> + Send
     where
-        Self: LoadBlock + FullEthApiTypes,
+        Self: LoadBlock<
+                Provider: BlockReader<
+                    Header = alloy_consensus::Header,
+                    Transaction = reth_primitives::TransactionSigned,
+                >,
+            > + FullEthApiTypes,
     {
         async move {
             if payload.block_state_calls.len() > self.max_simulate_blocks() as usize {
@@ -456,7 +463,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock {
 }
 
 /// Executes code on state.
-pub trait Call: LoadState<Evm: ConfigureEvm<Header = Header>> + SpawnBlocking {
+pub trait Call:
+    LoadState<Evm: ConfigureEvm<Header = ProviderHeader<Self::Provider>>> + SpawnBlocking
+{
     /// Returns default gas limit to use for `eth_call` and tracing RPC methods.
     ///
     /// Data access in default trait method implementations.
@@ -616,7 +625,7 @@ pub trait Call: LoadState<Evm: ConfigureEvm<Header = Header>> + SpawnBlocking {
 
             // we need to get the state of the parent block because we're essentially replaying the
             // block the transaction is included in
-            let parent_block = block.parent_hash;
+            let parent_block = block.parent_hash();
 
             let this = self.clone();
             self.spawn_with_state_at_block(parent_block.into(), move |state| {
@@ -629,7 +638,7 @@ pub trait Call: LoadState<Evm: ConfigureEvm<Header = Header>> + SpawnBlocking {
                     cfg.clone(),
                     block_env.clone(),
                     block_txs,
-                    tx.hash(),
+                    *tx.tx_hash(),
                 )?;
 
                 let env = EnvWithHandlerCfg::new_with_cfg_env(

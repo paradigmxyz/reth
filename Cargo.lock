@@ -9052,6 +9052,7 @@ dependencies = [
  "alloy-json-rpc",
  "alloy-network",
  "alloy-primitives",
+ "alloy-rlp",
  "alloy-rpc-types-eth",
  "alloy-rpc-types-mev",
  "alloy-serde",
@@ -9171,6 +9172,7 @@ dependencies = [
  "alloy-rpc-types-eth",
  "jsonrpsee-types",
  "reth-primitives",
+ "reth-primitives-traits",
  "serde",
  "serde_json",
 ]

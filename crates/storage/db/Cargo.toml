@@ -129,3 +129,8 @@ harness = false
 name = "iai"
 required-features = ["test-utils"]
 harness = false
+
+[[bench]]
+name = "get"
+required-features = ["test-utils"]
+harness = false

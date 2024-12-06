@@ -35,7 +35,7 @@ use reth_optimism_rpc::{
     OpEthApi, SequencerClient,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::{BlockBody, TransactionSigned};
+use reth_primitives::{BlockBody, PooledTransactionsElement, TransactionSigned};
 use reth_provider::{
     providers::ChainStorage, BlockBodyReader, BlockBodyWriter, CanonStateSubscriptions,
     ChainSpecProvider, DBProvider, EthStorage, ProviderResult, ReadBodyInput,
@@ -253,8 +253,11 @@ where
     ) -> eyre::Result<Self::Handle> {
         let Self { rpc_add_ons, da_config } = self;
         // install additional OP specific rpc methods
-        let debug_ext =
-            OpDebugWitnessApi::new(ctx.node.provider().clone(), ctx.node.evm_config().clone());
+        let debug_ext = OpDebugWitnessApi::new(
+            ctx.node.provider().clone(),
+            ctx.node.evm_config().clone(),
+            Box::new(ctx.node.task_executor().clone()),
+        );
         let miner_ext = OpMinerExtApi::new(da_config);
 
         rpc_add_ons
@@ -630,8 +633,12 @@ impl OpNetworkBuilder {
 impl<Node, Pool> NetworkBuilder<Node, Pool> for OpNetworkBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
-    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
-        + Unpin
+    Pool: TransactionPool<
+            Transaction: PoolTransaction<
+                Consensus = TxTy<Node::Types>,
+                Pooled = PooledTransactionsElement,
+            >,
+        > + Unpin
         + 'static,
 {
     async fn build_network(

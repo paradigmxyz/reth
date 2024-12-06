@@ -14,13 +14,13 @@ use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 
 /// Configured [`BlockEnv`] and [`CfgEnvWithHandlerCfg`] for a pending block.
 #[derive(Debug, Clone, Constructor)]
-pub struct PendingBlockEnv {
+pub struct PendingBlockEnv<B: Block = reth_primitives::Block, R = Receipt> {
     /// Configured [`CfgEnvWithHandlerCfg`] for the pending block.
     pub cfg: CfgEnvWithHandlerCfg,
     /// Configured [`BlockEnv`] for the pending block.
     pub block_env: BlockEnv,
     /// Origin block for the config
-    pub origin: PendingBlockEnvOrigin,
+    pub origin: PendingBlockEnvOrigin<B, R>,
 }
 
 /// The origin for a configured [`PendingBlockEnv`]
@@ -77,11 +77,11 @@ impl<B: Block, R> PendingBlockEnvOrigin<B, R> {
 
 /// Locally built pending block for `pending` tag.
 #[derive(Debug, Constructor)]
-pub struct PendingBlock {
+pub struct PendingBlock<B: Block, R> {
     /// Timestamp when the pending block is considered outdated.
     pub expires_at: Instant,
     /// The locally built pending block.
-    pub block: SealedBlockWithSenders,
+    pub block: SealedBlockWithSenders<B>,
     /// The receipts for the pending block
-    pub receipts: Vec<Receipt>,
+    pub receipts: Vec<R>,
 }
