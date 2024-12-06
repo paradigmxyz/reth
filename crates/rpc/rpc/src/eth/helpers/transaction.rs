@@ -2,9 +2,7 @@
 
 use crate::EthApi;
 use alloy_primitives::{Bytes, B256};
-use reth_provider::{
-    BlockReader, BlockReaderIdExt, ProviderTx, TransactionsProvider,
-};
+use reth_provider::{BlockReader, BlockReaderIdExt, ProviderTx, TransactionsProvider};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
     FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt,
