@@ -54,7 +54,13 @@ where
         self.inner.clear();
         self.last_requested_block_number.take();
     }
+}
 
+impl<H, B> BodiesRequestQueue<H, B>
+where
+    H: BlockHeader,
+    B: BodiesClient + 'static,
+{
     /// Add new request to the queue.
     /// Expects a sorted list of headers.
     pub(crate) fn push_new_request(
@@ -71,6 +77,7 @@ where
                 None => last.number(),
             })
             .or(self.last_requested_block_number);
+
         // Create request and push into the queue.
         self.inner.push(
             BodiesRequestFuture::new(client, consensus, self.metrics.clone()).with_headers(request),

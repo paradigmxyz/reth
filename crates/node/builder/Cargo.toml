@@ -61,7 +61,6 @@ reth-transaction-pool.workspace = true
 ## ethereum
 alloy-primitives.workspace = true
 alloy-rpc-types = { workspace = true, features = ["engine"] }
-alloy-consensus.workspace = true
 revm-primitives.workspace = true
 
 ## async
