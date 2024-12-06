@@ -8,8 +8,7 @@ use reth_db::{tables, transaction::DbTxMut};
 use reth_db_api::models::ShardedKey;
 use reth_provider::DBProvider;
 use reth_prune_types::{
-    PruneInterruptReason, PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput,
-    SegmentOutputCheckpoint,
+    PruneMode, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
 };
 use rustc_hash::FxHashMap;
 use tracing::{instrument, trace};
@@ -65,7 +64,7 @@ where
         };
         if limiter.is_limit_reached() {
             return Ok(SegmentOutput::not_done(
-                PruneInterruptReason::new(&limiter),
+                limiter.interrupt_reason(),
                 input.previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
             ))
         }
@@ -113,7 +112,7 @@ where
         )?;
         trace!(target: "pruner", ?outcomes, %done, "Pruned account history (indices)");
 
-        let progress = PruneProgress::new(done, &limiter);
+        let progress = limiter.progress(done);
 
         Ok(SegmentOutput {
             progress,
@@ -130,14 +129,14 @@ where
 mod tests {
     use crate::segments::{
         user::account_history::ACCOUNT_HISTORY_TABLES_TO_PRUNE, AccountHistory, PruneInput,
-        Segment, SegmentOutput,
+        PruneLimiter, Segment, SegmentOutput,
     };
     use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
     use reth_db::{tables, BlockNumberList};
     use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader};
     use reth_prune_types::{
-        PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress, PruneSegment,
+        PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
     };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{
