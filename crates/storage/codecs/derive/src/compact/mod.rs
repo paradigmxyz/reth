@@ -235,7 +235,7 @@ mod tests {
         let mut output = quote! {};
         let DeriveInput { ident, data, attrs, .. } = parse2(f_struct).unwrap();
         let fields = get_fields(&data);
-        output.extend(generate_flag_struct(&ident, &attrs,false, &fields, false));
+        output.extend(generate_flag_struct(&ident, &attrs, false, &fields, false));
         output.extend(generate_from_to(&ident, &attrs, false, &fields, false));
 
         // Expected output in a TokenStream format. Commas matter!

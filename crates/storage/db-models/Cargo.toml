@@ -21,6 +21,7 @@ alloy-primitives.workspace = true
 alloy-eips.workspace = true
 
 # codecs
+modular-bitfield.workspace = true
 serde = { workspace = true, default-features = false }
 
 # misc
