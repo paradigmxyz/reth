@@ -198,7 +198,7 @@ where
                     // Verify that the given blob data, commitments, and proofs are all valid for
                     // this transaction.
                     if let PooledTransactionsElement::BlobTransaction(ref tx) = tx {
-                        tx.validate(EnvKzgSettings::Default.get()).map_err(|e| {
+                        tx.tx().validate_blob(EnvKzgSettings::Default.get()).map_err(|e| {
                             Eth::Error::from_eth_err(EthApiError::InvalidParams(e.to_string()))
                         })?;
                     }
