@@ -217,7 +217,7 @@ impl RlpDecodableReceipt for Receipt {
         let header_buf = &mut &**buf;
         let header = Header::decode(header_buf)?;
 
-        if !header.list {
+        if header.list {
             return Self::decode_receipt_with_bloom(buf, TxType::Legacy);
         }
 
