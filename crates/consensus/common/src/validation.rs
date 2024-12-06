@@ -2,15 +2,15 @@
 
 use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, BlockHeader};
 use alloy_eips::{
-    calc_next_block_base_fee,
+    calc_next_block_base_fee, eip4844,
     eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
+    eip7742,
 };
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::ConsensusError;
 use reth_primitives::{
     BlockBody, BlockBodyTxExt, EthereumHardfork, GotExpected, SealedBlock, SealedHeader,
 };
-use revm_primitives::calc_excess_blob_gas;
 
 /// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
 #[inline]
@@ -299,10 +299,15 @@ pub fn validate_against_parent_timestamp<H: BlockHeader>(
 /// ensures that the `blob_gas_used` and `excess_blob_gas` fields exist in the child header, and
 /// that the `excess_blob_gas` field matches the expected `excess_blob_gas` calculated from the
 /// parent header fields.
-pub fn validate_against_parent_4844<H: BlockHeader>(
+pub fn validate_against_parent_blob_fields<H: BlockHeader>(
     header: &H,
     parent: &H,
+    chain_spec: impl EthereumHardforks,
 ) -> Result<(), ConsensusError> {
+    if !chain_spec.is_cancun_active_at_timestamp(header.timestamp()) {
+        return Ok(())
+    }
+
     // From [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#header-extension):
     //
     // > For the first post-fork block, both parent.blob_gas_used and parent.excess_blob_gas
@@ -317,8 +322,18 @@ pub fn validate_against_parent_4844<H: BlockHeader>(
     }
     let excess_blob_gas = header.excess_blob_gas().ok_or(ConsensusError::ExcessBlobGasMissing)?;
 
-    let expected_excess_blob_gas =
-        calc_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used);
+    let expected_excess_blob_gas = if chain_spec.is_prague_active_at_timestamp(parent.timestamp()) {
+        let parent_target_blobs_per_block =
+            parent.target_blobs_per_block().ok_or(ConsensusError::TargetBlobsPerBlockMissing)?;
+        eip7742::calc_excess_blob_gas(
+            parent_excess_blob_gas,
+            parent_blob_gas_used,
+            parent_target_blobs_per_block,
+        )
+    } else {
+        eip4844::calc_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used)
+    };
+
     if expected_excess_blob_gas != excess_blob_gas {
         return Err(ConsensusError::ExcessBlobGasDiff {
             diff: GotExpected { got: excess_blob_gas, expected: expected_excess_blob_gas },

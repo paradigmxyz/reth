@@ -6898,7 +6898,6 @@ dependencies = [
  "reth-primitives",
  "reth-primitives-traits",
  "reth-storage-api",
- "revm-primitives",
 ]
 
 [[package]]
@@ -7241,6 +7240,7 @@ name = "reth-engine-local"
 version = "1.1.2"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "eyre",

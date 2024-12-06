@@ -67,6 +67,9 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
 
     /// Returns the withdrawals for the running payload job.
     fn withdrawals(&self) -> &Withdrawals;
+
+    /// Returns the target blobs per block for the running payload job.
+    fn target_blobs_per_block(&self) -> Option<u64>;
 }
 
 /// The execution payload attribute type the CL node emits via the engine API.
@@ -84,6 +87,12 @@ pub trait PayloadAttributes:
 
     /// Return the parent beacon block root for the payload attributes.
     fn parent_beacon_block_root(&self) -> Option<B256>;
+
+    /// Return the target blobs count for this block.
+    fn target_blobs_per_block(&self) -> Option<u64>;
+
+    /// Return the maximum blobs count for this block.
+    fn max_blobs_per_block(&self) -> Option<u64>;
 }
 
 impl PayloadAttributes for EthPayloadAttributes {
@@ -97,6 +106,14 @@ impl PayloadAttributes for EthPayloadAttributes {
 
     fn parent_beacon_block_root(&self) -> Option<B256> {
         self.parent_beacon_block_root
+    }
+
+    fn target_blobs_per_block(&self) -> Option<u64> {
+        self.target_blobs_per_block
+    }
+
+    fn max_blobs_per_block(&self) -> Option<u64> {
+        self.max_blobs_per_block
     }
 }
 
@@ -112,6 +129,14 @@ impl PayloadAttributes for op_alloy_rpc_types_engine::OpPayloadAttributes {
 
     fn parent_beacon_block_root(&self) -> Option<B256> {
         self.payload_attributes.parent_beacon_block_root
+    }
+
+    fn target_blobs_per_block(&self) -> Option<u64> {
+        self.payload_attributes.target_blobs_per_block
+    }
+
+    fn max_blobs_per_block(&self) -> Option<u64> {
+        self.payload_attributes.max_blobs_per_block
     }
 }
 

@@ -6,7 +6,7 @@ use alloy_eips::{
     eip4844::BlobAndProofV1,
     eip7685::{Requests, RequestsOrHash},
 };
-use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
+use alloy_primitives::{BlockHash, BlockNumber, B256, U256, U64};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionPayload, ExecutionPayloadBodiesV1,
     ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3,
@@ -146,9 +146,10 @@ where
         payload: ExecutionPayloadV1,
     ) -> EngineApiResult<PayloadStatus> {
         let payload = ExecutionPayload::from(payload);
+        let sidecar = ExecutionPayloadSidecar::none();
         let payload_or_attrs =
             PayloadOrAttributes::<'_, EngineT::PayloadAttributes>::from_execution_payload(
-                &payload, None,
+                &payload, &sidecar,
             );
         self.inner
             .validator
@@ -182,9 +183,10 @@ where
         payload: ExecutionPayloadInputV2,
     ) -> EngineApiResult<PayloadStatus> {
         let payload = convert_payload_input_v2_to_payload(payload);
+        let sidecar = ExecutionPayloadSidecar::none();
         let payload_or_attrs =
             PayloadOrAttributes::<'_, EngineT::PayloadAttributes>::from_execution_payload(
-                &payload, None,
+                &payload, &sidecar,
             );
         self.inner
             .validator
@@ -219,10 +221,13 @@ where
         parent_beacon_block_root: B256,
     ) -> EngineApiResult<PayloadStatus> {
         let payload = ExecutionPayload::from(payload);
+        let sidecar = ExecutionPayloadSidecar::v3(CancunPayloadFields {
+            versioned_hashes,
+            parent_beacon_block_root,
+        });
         let payload_or_attrs =
             PayloadOrAttributes::<'_, EngineT::PayloadAttributes>::from_execution_payload(
-                &payload,
-                Some(parent_beacon_block_root),
+                &payload, &sidecar,
             );
         self.inner
             .validator
@@ -231,13 +236,7 @@ where
         Ok(self
             .inner
             .beacon_consensus
-            .new_payload(
-                payload,
-                ExecutionPayloadSidecar::v3(CancunPayloadFields {
-                    versioned_hashes,
-                    parent_beacon_block_root,
-                }),
-            )
+            .new_payload(payload, sidecar)
             .await
             .inspect(|_| self.inner.on_new_payload_response())?)
     }
@@ -266,12 +265,19 @@ where
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
         execution_requests: Requests,
+        target_blobs_per_block: u64,
     ) -> EngineApiResult<PayloadStatus> {
         let payload = ExecutionPayload::from(payload);
+        let sidecar = ExecutionPayloadSidecar::v4(
+            CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
+            PraguePayloadFields {
+                requests: RequestsOrHash::Requests(execution_requests),
+                target_blobs_per_block,
+            },
+        );
         let payload_or_attrs =
             PayloadOrAttributes::<'_, EngineT::PayloadAttributes>::from_execution_payload(
-                &payload,
-                Some(parent_beacon_block_root),
+                &payload, &sidecar,
             );
         self.inner
             .validator
@@ -280,17 +286,7 @@ where
         Ok(self
             .inner
             .beacon_consensus
-            .new_payload(
-                payload,
-                ExecutionPayloadSidecar::v4(
-                    CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
-                    PraguePayloadFields {
-                        requests: RequestsOrHash::Requests(execution_requests),
-                        // TODO: add as an argument and handle in `try_into_block`
-                        target_blobs_per_block: 0,
-                    },
-                ),
-            )
+            .new_payload(payload, sidecar)
             .await
             .inspect(|_| self.inner.on_new_payload_response())?)
     }
@@ -302,6 +298,7 @@ where
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
         execution_requests: Requests,
+        target_blobs_per_block: u64,
     ) -> RpcResult<PayloadStatus> {
         let start = Instant::now();
         let gas_used = payload.payload_inner.payload_inner.gas_used;
@@ -311,6 +308,7 @@ where
             versioned_hashes,
             parent_beacon_block_root,
             execution_requests,
+            target_blobs_per_block,
         )
         .await;
         let elapsed = start.elapsed();
@@ -357,6 +355,19 @@ where
         payload_attrs: Option<EngineT::PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         self.validate_and_execute_forkchoice(EngineApiMessageVersion::V3, state, payload_attrs)
+            .await
+    }
+
+    /// Sends a message to the beacon consensus engine to update the fork choice _with_ withdrawals
+    /// and EIP-7742 fields, but only _after_ prague.
+    ///
+    /// See also  <https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_forkchoiceupdatedv4>
+    pub async fn fork_choice_updated_v4(
+        &self,
+        state: ForkchoiceState,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
+    ) -> EngineApiResult<ForkchoiceUpdated> {
+        self.validate_and_execute_forkchoice(EngineApiMessageVersion::V4, state, payload_attrs)
             .await
     }
 
@@ -680,9 +691,10 @@ where
     /// * If the version is [`EngineApiMessageVersion::V2`], then the payload attributes will be
     ///   validated according to the Shanghai rules, as well as the validity changes from cancun:
     ///   <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/cancun.md#update-the-methods-of-previous-forks>
-    ///
-    /// * If the version above [`EngineApiMessageVersion::V3`], then the payload attributes will be
+    /// * If the version is [`EngineApiMessageVersion::V3`], then the payload attributes will be
     ///   validated according to the Cancun rules.
+    /// * If the version is [`EngineApiMessageVersion::V4`], then the payload attributes will be
+    ///   validated according to the Prague rules.
     async fn validate_and_execute_forkchoice(
         &self,
         version: EngineApiMessageVersion,
@@ -793,6 +805,7 @@ where
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
         execution_requests: Requests,
+        target_blobs_per_block: U256,
     ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV4");
         Ok(self
@@ -801,6 +814,7 @@ where
                 versioned_hashes,
                 parent_beacon_block_root,
                 execution_requests,
+                target_blobs_per_block.to(),
             )
             .await?)
     }
@@ -837,7 +851,7 @@ where
         Ok(res?)
     }
 
-    /// Handler for `engine_forkchoiceUpdatedV2`
+    /// Handler for `engine_forkchoiceUpdatedV3`
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3>
     async fn fork_choice_updated_v3(
@@ -849,6 +863,22 @@ where
         let start = Instant::now();
         let res = Self::fork_choice_updated_v3(self, fork_choice_state, payload_attributes).await;
         self.inner.metrics.latency.fork_choice_updated_v3.record(start.elapsed());
+        self.inner.metrics.fcu_response.update_response_metrics(&res);
+        Ok(res?)
+    }
+
+    /// Handler for `engine_forkchoiceUpdatedV4`
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_forkchoiceupdatedv4>
+    async fn fork_choice_updated_v4(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<EngineT::PayloadAttributes>,
+    ) -> RpcResult<ForkchoiceUpdated> {
+        trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV4");
+        let start = Instant::now();
+        let res = Self::fork_choice_updated_v4(self, fork_choice_state, payload_attributes).await;
+        self.inner.metrics.latency.fork_choice_updated_v4.record(start.elapsed());
         self.inner.metrics.fcu_response.update_response_metrics(&res);
         Ok(res?)
     }

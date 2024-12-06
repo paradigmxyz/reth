@@ -1,5 +1,5 @@
 use crate::traits::PayloadEnvelopeExt;
-use alloy_primitives::B256;
+use alloy_primitives::{B256, U256};
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatusEnum};
 use jsonrpsee::{
     core::client::ClientT,
@@ -41,6 +41,14 @@ impl<E: EngineTypes, ChainSpec: EthereumHardforks> EngineApiTestContext<E, Chain
         Ok(self.engine_api_client.request("engine_getPayloadV3", (payload_id,)).await?)
     }
 
+    /// Retrieves a v3 payload from the engine api as serde value
+    pub async fn get_payload_v4_value(
+        &self,
+        payload_id: PayloadId,
+    ) -> eyre::Result<serde_json::Value> {
+        Ok(self.engine_api_client.request("engine_getPayloadV4", (payload_id,)).await?)
+    }
+
     /// Submits a payload to the engine api
     pub async fn submit_payload(
         &self,
@@ -67,6 +75,7 @@ impl<E: EngineTypes, ChainSpec: EthereumHardforks> EngineApiTestContext<E, Chain
                 versioned_hashes,
                 payload_builder_attributes.parent_beacon_block_root().unwrap(),
                 requests,
+                U256::from(payload_builder_attributes.target_blobs_per_block().unwrap()),
             )
             .await?
         } else {

@@ -7,7 +7,7 @@ use std::{
 };
 
 use alloy_consensus::{BlockHeader, Transaction, TxReceipt};
-use alloy_eips::eip1559::calc_next_block_base_fee;
+use alloy_eips::{eip1559::calc_next_block_base_fee, eip4844, eip7742};
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::TxGasAndReward;
 use futures::{
@@ -21,7 +21,7 @@ use reth_primitives::{NodePrimitives, SealedBlock};
 use reth_primitives_traits::BlockBody;
 use reth_rpc_server_types::constants::gas_oracle::MAX_HEADER_HISTORY;
 use reth_storage_api::BlockReaderIdExt;
-use revm_primitives::{calc_blob_gasprice, calc_excess_blob_gas};
+use revm_primitives::calc_blob_gasprice;
 use serde::{Deserialize, Serialize};
 use tracing::trace;
 
@@ -358,6 +358,8 @@ pub struct FeeHistoryEntry {
     pub rewards: Vec<u128>,
     /// The timestamp of the block.
     pub timestamp: u64,
+    /// EIP-7742 target blobs per block.
+    pub target_blobs_per_block: Option<u64>,
 }
 
 impl FeeHistoryEntry {
@@ -378,6 +380,7 @@ impl FeeHistoryEntry {
             gas_limit: block.gas_limit(),
             rewards: Vec::new(),
             timestamp: block.timestamp(),
+            target_blobs_per_block: block.target_blobs_per_block(),
         }
     }
 
@@ -404,6 +407,14 @@ impl FeeHistoryEntry {
     ///
     /// Returns a `None` if no excess blob gas is set, no EIP-4844 support
     pub fn next_block_excess_blob_gas(&self) -> Option<u64> {
-        Some(calc_excess_blob_gas(self.excess_blob_gas?, self.blob_gas_used?))
+        if let Some(target_blobs_per_block) = self.target_blobs_per_block {
+            Some(eip7742::calc_excess_blob_gas(
+                self.excess_blob_gas?,
+                self.blob_gas_used?,
+                target_blobs_per_block,
+            ))
+        } else {
+            Some(eip4844::calc_excess_blob_gas(self.excess_blob_gas?, self.blob_gas_used?))
+        }
     }
 }

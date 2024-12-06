@@ -105,6 +105,14 @@ pub enum VersionSpecificValidationError {
     /// root after Cancun
     #[error("no parent beacon block root post-cancun")]
     NoParentBeaconBlockRootPostCancun,
+    /// Thrown if the pre-V4 `PayloadAttributes` or `ExecutionPayload` contains a target blobs per
+    /// block field
+    #[error("target blobs per block not supported before V4")]
+    TargetBlobsPerBlockNotSupportedBeforeV4,
+    /// Thrown if the `PayloadAttributes` or `ExecutionPayload` contains no target blobs per block
+    /// field after Cancun
+    #[error("no target blobs per block post-Prague")]
+    NoTargetBlobsPerBlockPostPrague,
 }
 
 impl EngineObjectValidationError {

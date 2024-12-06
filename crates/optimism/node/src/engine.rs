@@ -12,7 +12,8 @@ use reth_node_api::{
         EngineObjectValidationError, MessageValidationKind, PayloadOrAttributes, PayloadTypes,
         VersionSpecificValidationError,
     },
-    validate_version_specific_fields, EngineTypes, EngineValidator,
+    validate_eip7742_fields_presence, validate_version_specific_fields, EngineTypes,
+    EngineValidator,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
@@ -101,6 +102,11 @@ where
             payload_or_attrs.message_validation_kind(),
             payload_or_attrs.timestamp(),
             payload_or_attrs.parent_beacon_block_root().is_some(),
+        )?;
+        validate_eip7742_fields_presence(
+            version,
+            payload_or_attrs.message_validation_kind(),
+            payload_or_attrs.target_blobs_per_block().is_some(),
         )
     }
 

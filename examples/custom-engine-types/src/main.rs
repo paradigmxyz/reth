@@ -104,6 +104,14 @@ impl PayloadAttributes for CustomPayloadAttributes {
     fn parent_beacon_block_root(&self) -> Option<B256> {
         self.inner.parent_beacon_block_root()
     }
+
+    fn target_blobs_per_block(&self) -> Option<u64> {
+        self.inner.target_blobs_per_block()
+    }
+
+    fn max_blobs_per_block(&self) -> Option<u64> {
+        self.inner.max_blobs_per_block()
+    }
 }
 
 /// New type around the payload builder attributes type
@@ -148,6 +156,10 @@ impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
 
     fn withdrawals(&self) -> &Withdrawals {
         &self.0.withdrawals
+    }
+
+    fn target_blobs_per_block(&self) -> Option<u64> {
+        self.0.target_blobs_per_block
     }
 }
 
