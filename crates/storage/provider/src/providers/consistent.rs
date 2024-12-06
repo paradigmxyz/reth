@@ -1231,21 +1231,6 @@ impl<N: ProviderNodeTypes> StageCheckpointReader for ConsistentProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> EvmEnvProvider<HeaderTy<N>> for ConsistentProvider<N> {
-    fn fill_env_at<EvmConfig>(
-        &self,
-        cfg: &mut CfgEnvWithHandlerCfg,
-        block_env: &mut BlockEnv,
-        at: BlockHashOrNumber,
-        evm_config: EvmConfig,
-    ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
-    {
-        let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
-        let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
-        self.fill_env_with_header(cfg, block_env, &header, evm_config)
-    }
-
     fn fill_env_with_header<EvmConfig>(
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,

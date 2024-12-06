@@ -30,7 +30,6 @@ reth-ecies.workspace = true
 reth-tasks.workspace = true
 reth-transaction-pool.workspace = true
 reth-storage-api.workspace = true
-reth-provider = { workspace = true, optional = true }
 reth-tokio-util.workspace = true
 reth-consensus.workspace = true
 reth-network-peers = { workspace = true, features = ["net"] }
@@ -90,7 +89,7 @@ reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 
 # alloy deps for testing against nodes
 alloy-node-bindings.workspace = true
-alloy-provider= { workspace = true, features = ["admin-api"] }
+alloy-provider = { workspace = true, features = ["admin-api"] }
 alloy-consensus.workspace = true
 
 # misc
@@ -112,7 +111,6 @@ serde = [
 	"reth-network-types/serde",
 	"reth-dns-discovery/serde",
 	"reth-eth-wire/serde",
-	"reth-provider?/serde",
 	"reth-eth-wire-types/serde",
 	"alloy-consensus/serde",
 	"alloy-eips/serde",
@@ -123,11 +121,10 @@ serde = [
 	"smallvec/serde",
 	"url/serde",
 	"reth-primitives-traits/serde",
-	"reth-ethereum-forks/serde"
+	"reth-ethereum-forks/serde",
+	"reth-provider/serde"
 ]
 test-utils = [
-	"dep:reth-provider",
-	"reth-provider?/test-utils",
 	"dep:tempfile",
 	"reth-transaction-pool/test-utils",
 	"reth-network-types/test-utils",
@@ -137,7 +134,8 @@ test-utils = [
 	"reth-network/test-utils",
 	"reth-network-p2p/test-utils",
 	"reth-primitives/test-utils",
-    "reth-primitives-traits/test-utils",
+	"reth-primitives-traits/test-utils",
+	"reth-provider/test-utils"
 ]
 
 [[bench]]

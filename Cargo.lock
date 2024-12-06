@@ -7569,6 +7569,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-ethereum-primitives"
+version = "1.1.2"
+
+[[package]]
 name = "reth-etl"
 version = "1.1.2"
 dependencies = [
@@ -8347,6 +8351,7 @@ name = "reth-optimism-consensus"
 version = "1.1.2"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
  "alloy-trie",
  "reth-chainspec",
@@ -9451,6 +9456,7 @@ name = "reth-trie"
 version = "1.1.2"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-trie",

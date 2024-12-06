@@ -13,18 +13,6 @@ use revm::primitives::{BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId};
 /// usually stored on disk.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait EvmEnvProvider<H = Header>: Send + Sync {
-    /// Fills the [`CfgEnvWithHandlerCfg`] and [BlockEnv] fields with values specific to the given
-    /// [BlockHashOrNumber].
-    fn fill_env_at<EvmConfig>(
-        &self,
-        cfg: &mut CfgEnvWithHandlerCfg,
-        block_env: &mut BlockEnv,
-        at: BlockHashOrNumber,
-        evm_config: EvmConfig,
-    ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = H>;
-
     /// Fills the default [`CfgEnvWithHandlerCfg`] and [BlockEnv] fields with values specific to the
     /// given block header.
     fn env_with_header<EvmConfig>(

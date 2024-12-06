@@ -339,7 +339,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             Ok(None)
         }
     }
-
+  
     /// Signs transaction with a matching signer, if any and submits the transaction to the pool.
     /// Returns the hash of the signed transaction.
     fn send_transaction(

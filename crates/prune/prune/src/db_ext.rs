@@ -1,12 +1,12 @@
 use std::{fmt::Debug, ops::RangeBounds};
 
+use crate::PruneLimiter;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, RangeWalker},
     table::{Table, TableRow},
     transaction::DbTxMut,
     DatabaseError,
 };
-use reth_prune_types::PruneLimiter;
 use tracing::debug;
 
 pub(crate) trait DbTxPruneExt: DbTxMut {
