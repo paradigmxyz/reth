@@ -265,7 +265,7 @@ where
                 trace!(target: "engine::root", ?address, ?hashed_address, "Adding account to state update");
 
                 let destroyed = account.is_selfdestructed();
-                let info = if account.is_empty() { None } else { Some(account.info.into()) };
+                let info = if destroyed { None } else { Some(account.info.into()) };
                 hashed_state_update.accounts.insert(hashed_address, info);
 
                 let mut changed_storage_iter = account
