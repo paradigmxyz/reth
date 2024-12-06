@@ -1,11 +1,7 @@
-use core::cmp::Ordering;
-
 use alloc::{vec, vec::Vec};
-use bytes::Buf;
 use reth_primitives_traits::InMemorySize;
 
 use alloy_consensus::{
-    constants::{EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID},
     Eip2718EncodableReceipt, Eip658Value, ReceiptWithBloom, RlpDecodableReceipt,
     RlpEncodableReceipt, TxReceipt, Typed2718,
 };
@@ -69,16 +65,32 @@ impl Receipt {
 
     /// Calculates the bloom filter for the receipt and returns the [`ReceiptWithBloomRef`]
     /// container type.
-    pub fn with_bloom_ref(&self) -> ReceiptWithBloomRef<'_> {
+    pub fn with_bloom_ref(&self) -> ReceiptWithBloom<&Self> {
         self.into()
     }
 
     /// Returns length of RLP-encoded receipt fields with the given [`Bloom`] without an RLP header.
     pub fn rlp_encoded_fields_length_with_bloom(&self, bloom: &Bloom) -> usize {
-        self.success.length() +
+        let len = self.success.length() +
             self.cumulative_gas_used.length() +
             bloom.length() +
-            self.logs.length()
+            self.logs.length();
+
+        #[cfg(feature = "optimism")]
+        if self.tx_type == TxType::Deposit {
+            let mut len = len;
+
+            if let Some(deposit_nonce) = self.deposit_nonce {
+                len += deposit_nonce.length();
+            }
+            if let Some(deposit_receipt_version) = self.deposit_receipt_version {
+                len += deposit_receipt_version.length();
+            }
+
+            return len
+        }
+
+        len
     }
 
     /// RLP-encodes receipt fields with the given [`Bloom`] without an RLP header.
@@ -89,9 +101,27 @@ impl Receipt {
         self.logs.encode(out);
     }
 
-    /// Returns RLP header for this receipt encoding with the given [`Bloom`].
-    pub fn rlp_header_with_bloom(&self, bloom: &Bloom) -> Header {
+    /// Returns RLP header for inner encoding.
+    pub fn rlp_header_inner(&self, bloom: &Bloom) -> Header {
         Header { list: true, payload_length: self.rlp_encoded_fields_length_with_bloom(bloom) }
+    }
+
+    /// Encodes the receipt data.
+    pub fn rlp_encode_fields(&self, out: &mut dyn BufMut, bloom: &Bloom) {
+        self.success.encode(out);
+        self.cumulative_gas_used.encode(out);
+        bloom.encode(out);
+        self.logs.encode(out);
+
+        #[cfg(feature = "optimism")]
+        if self.tx_type == TxType::Deposit {
+            if let Some(nonce) = self.deposit_nonce {
+                nonce.encode(out);
+            }
+            if let Some(version) = self.deposit_receipt_version {
+                version.encode(out);
+            }
+        }
     }
 
     fn decode_receipt_with_bloom(
@@ -105,19 +135,18 @@ impl Receipt {
         }
         let started_len = b.len();
 
-        let success = alloy_rlp::Decodable::decode(b)?;
-        let cumulative_gas_used = alloy_rlp::Decodable::decode(b)?;
+        let success = Decodable::decode(b)?;
+        let cumulative_gas_used = Decodable::decode(b)?;
         let bloom = Decodable::decode(b)?;
-        let logs = alloy_rlp::Decodable::decode(b)?;
+        let logs = Decodable::decode(b)?;
 
         let receipt = match tx_type {
             #[cfg(feature = "optimism")]
             TxType::Deposit => {
                 let remaining = |b: &[u8]| rlp_head.payload_length - (started_len - b.len()) > 0;
-                let deposit_nonce =
-                    remaining(b).then(|| alloy_rlp::Decodable::decode(b)).transpose()?;
+                let deposit_nonce = remaining(b).then(|| Decodable::decode(b)).transpose()?;
                 let deposit_receipt_version =
-                    remaining(b).then(|| alloy_rlp::Decodable::decode(b)).transpose()?;
+                    remaining(b).then(|| Decodable::decode(b)).transpose()?;
 
                 Self {
                     tx_type,
@@ -151,156 +180,6 @@ impl Receipt {
         *buf = *b;
         Ok(this)
     }
-
-    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<ReceiptWithBloom<Self>> {
-        // a receipt is either encoded as a string (non legacy) or a list (legacy).
-        // We should not consume the buffer if we are decoding a legacy receipt, so let's
-        // check if the first byte is between 0x80 and 0xbf.
-        let rlp_type = *buf
-            .first()
-            .ok_or(alloy_rlp::Error::Custom("cannot decode a receipt from empty bytes"))?;
-
-        match rlp_type.cmp(&alloy_rlp::EMPTY_LIST_CODE) {
-            Ordering::Less => {
-                // strip out the string header
-                let _header = alloy_rlp::Header::decode(buf)?;
-                let receipt_type = *buf.first().ok_or(alloy_rlp::Error::Custom(
-                    "typed receipt cannot be decoded from an empty slice",
-                ))?;
-                match receipt_type {
-                    EIP2930_TX_TYPE_ID => {
-                        buf.advance(1);
-                        Self::decode_receipt_with_bloom(buf, TxType::Eip2930)
-                    }
-                    EIP1559_TX_TYPE_ID => {
-                        buf.advance(1);
-                        Self::decode_receipt_with_bloom(buf, TxType::Eip1559)
-                    }
-                    EIP4844_TX_TYPE_ID => {
-                        buf.advance(1);
-                        Self::decode_receipt_with_bloom(buf, TxType::Eip4844)
-                    }
-                    EIP7702_TX_TYPE_ID => {
-                        buf.advance(1);
-                        Self::decode_receipt_with_bloom(buf, TxType::Eip7702)
-                    }
-                    #[cfg(feature = "optimism")]
-                    op_alloy_consensus::DEPOSIT_TX_TYPE_ID => {
-                        buf.advance(1);
-                        Self::decode_receipt(buf, TxType::Deposit)
-                    }
-                    _ => Err(alloy_rlp::Error::Custom("invalid receipt type")),
-                }
-            }
-            Ordering::Equal => {
-                Err(alloy_rlp::Error::Custom("an empty list is not a valid receipt encoding"))
-            }
-            Ordering::Greater => Self::decode_receipt_with_bloom(buf, TxType::Legacy),
-        }
-    }
-
-    /// Returns the rlp header for the receipt payload.
-    fn receipt_rlp_header(&self, bloom: &Bloom) -> alloy_rlp::Header {
-        let mut rlp_head = self.rlp_header_with_bloom(bloom);
-
-        #[cfg(feature = "optimism")]
-        if self.tx_type == TxType::Deposit {
-            if let Some(deposit_nonce) = self.deposit_nonce {
-                rlp_head.payload_length += deposit_nonce.length();
-            }
-            if let Some(deposit_receipt_version) = self.deposit_receipt_version {
-                rlp_head.payload_length += deposit_receipt_version.length();
-            }
-        }
-
-        rlp_head
-    }
-
-    /// Encodes the receipt data.
-    fn encode_fields(&self, out: &mut dyn BufMut, bloom: &Bloom) {
-        self.receipt_rlp_header(bloom).encode(out);
-        self.success.encode(out);
-        self.cumulative_gas_used.encode(out);
-        bloom.encode(out);
-        self.logs.encode(out);
-        #[cfg(feature = "optimism")]
-        if self.tx_type == TxType::Deposit {
-            if let Some(nonce) = self.deposit_nonce {
-                nonce.encode(out);
-            }
-            if let Some(version) = self.deposit_receipt_version {
-                version.encode(out);
-            }
-        }
-    }
-
-    /// Encode receipt with or without the header data.
-    pub fn encode(&self, out: &mut dyn BufMut, with_header: bool, bloom: &Bloom) {
-        if matches!(self.tx_type, TxType::Legacy) {
-            self.encode_fields(out, bloom);
-            return
-        }
-
-        let mut payload = Vec::new();
-        self.encode_fields(&mut payload, bloom);
-
-        if with_header {
-            let payload_length = payload.len() + 1;
-            let header = alloy_rlp::Header { list: false, payload_length };
-            header.encode(out);
-        }
-
-        match self.tx_type {
-            TxType::Legacy => unreachable!("legacy already handled"),
-
-            TxType::Eip2930 => {
-                out.put_u8(EIP2930_TX_TYPE_ID);
-            }
-            TxType::Eip1559 => {
-                out.put_u8(EIP1559_TX_TYPE_ID);
-            }
-            TxType::Eip4844 => {
-                out.put_u8(EIP4844_TX_TYPE_ID);
-            }
-            TxType::Eip7702 => {
-                out.put_u8(EIP7702_TX_TYPE_ID);
-            }
-            #[cfg(feature = "optimism")]
-            TxType::Deposit => {
-                out.put_u8(op_alloy_consensus::DEPOSIT_TX_TYPE_ID);
-            }
-        }
-        out.put_slice(payload.as_ref());
-    }
-}
-
-impl RlpEncodableReceipt for Receipt {
-    fn rlp_encoded_length_with_bloom(&self, bloom: &Bloom) -> usize {
-        self.rlp_header_with_bloom(bloom).payload_length
-    }
-
-    fn rlp_encode_with_bloom(&self, bloom: &Bloom, out: &mut dyn BufMut) {
-        self.encode(out, true, bloom)
-    }
-}
-
-impl RlpDecodableReceipt for Receipt {
-    fn rlp_decode_with_bloom(buf: &mut &[u8]) -> alloy_rlp::Result<ReceiptWithBloom<Self>> {
-        let header = Header::decode(buf)?;
-        if !header.list {
-            return Err(alloy_rlp::Error::UnexpectedString);
-        }
-
-        let remaining = buf.len();
-
-        let this = Self::decode(buf)?;
-
-        if buf.len() + header.payload_length != remaining {
-            return Err(alloy_rlp::Error::UnexpectedLength);
-        }
-
-        Ok(this)
-    }
 }
 
 impl Typed2718 for Receipt {
@@ -311,16 +190,62 @@ impl Typed2718 for Receipt {
 
 impl Eip2718EncodableReceipt for Receipt {
     fn eip2718_encoded_length_with_bloom(&self, bloom: &Bloom) -> usize {
-        let receipt_with_bloom = ReceiptWithBloom::new(self, *bloom);
-        let mut payload_len = receipt_with_bloom.length();
-        if !matches!(self.tx_type, TxType::Legacy) {
-            payload_len += 1; // account for type prefix
-        }
-        payload_len
+        self.rlp_header_inner(bloom).length_with_payload() +
+            matches!(self.tx_type, TxType::Legacy) as usize // account for type prefix
     }
 
     fn eip2718_encode_with_bloom(&self, bloom: &Bloom, out: &mut dyn BufMut) {
-        self.encode(out, false, bloom)
+        if !matches!(self.tx_type, TxType::Legacy) {
+            out.put_u8(self.tx_type as u8);
+        }
+        self.rlp_header_inner(bloom).encode(out);
+        self.rlp_encode_fields(out, bloom);
+    }
+}
+
+impl RlpEncodableReceipt for Receipt {
+    fn rlp_encoded_length_with_bloom(&self, bloom: &Bloom) -> usize {
+        let mut len = self.eip2718_encoded_length_with_bloom(bloom);
+        if !matches!(self.tx_type, TxType::Legacy) {
+            len += Header {
+                list: false,
+                payload_length: self.eip2718_encoded_length_with_bloom(bloom),
+            }
+            .length();
+        }
+
+        len
+    }
+
+    fn rlp_encode_with_bloom(&self, bloom: &Bloom, out: &mut dyn BufMut) {
+        if !matches!(self.tx_type, TxType::Legacy) {
+            Header { list: false, payload_length: self.eip2718_encoded_length_with_bloom(bloom) }
+                .encode(out);
+        }
+        self.eip2718_encode_with_bloom(bloom, out);
+    }
+}
+
+impl RlpDecodableReceipt for Receipt {
+    fn rlp_decode_with_bloom(buf: &mut &[u8]) -> alloy_rlp::Result<ReceiptWithBloom<Self>> {
+        let header_buf = &mut &**buf;
+        let header = Header::decode(header_buf)?;
+
+        if !header.list {
+            return Self::decode_receipt_with_bloom(buf, TxType::Legacy);
+        }
+
+        *buf = *header_buf;
+
+        let remaining = buf.len();
+        let tx_type = TxType::decode(buf)?;
+        let this = Self::decode_receipt_with_bloom(buf, tx_type)?;
+
+        if buf.len() + header.payload_length != remaining {
+            return Err(alloy_rlp::Error::UnexpectedLength);
+        }
+
+        Ok(this)
     }
 }
 
@@ -473,43 +398,6 @@ impl<'a> arbitrary::Arbitrary<'a> for Receipt {
     }
 }
 
-/// [`Receipt`] reference type with calculated bloom filter.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ReceiptWithBloomRef<'a> {
-    /// Bloom filter build from logs.
-    pub bloom: Bloom,
-    /// Main receipt body
-    pub receipt: &'a Receipt,
-}
-
-impl<'a> ReceiptWithBloomRef<'a> {
-    /// Create new [`ReceiptWithBloomRef`]
-    pub const fn new(receipt: &'a Receipt, bloom: Bloom) -> Self {
-        Self { receipt, bloom }
-    }
-
-    /// Encode receipt with or without the header data.
-    pub fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
-        self.receipt.encode(out, with_header, &self.bloom)
-    }
-}
-
-impl Encodable for ReceiptWithBloomRef<'_> {
-    fn encode(&self, out: &mut dyn BufMut) {
-        self.encode_inner(out, true)
-    }
-    fn length(&self) -> usize {
-        ReceiptWithBloom::new(self.receipt, self.bloom).length()
-    }
-}
-
-impl<'a> From<&'a Receipt> for ReceiptWithBloomRef<'a> {
-    fn from(receipt: &'a Receipt) -> Self {
-        let bloom = receipt.bloom_slow();
-        ReceiptWithBloomRef { receipt, bloom }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -616,7 +504,7 @@ mod tests {
         assert_eq!(receipt, expected);
 
         let mut buf = Vec::with_capacity(data.len());
-        receipt.receipt.encode(&mut buf, false, &receipt.logs_bloom);
+        receipt.encode_2718(&mut buf);
         assert_eq!(buf, &data[..]);
     }
 
@@ -642,7 +530,7 @@ mod tests {
         assert_eq!(receipt, expected);
 
         let mut buf = Vec::with_capacity(data.len());
-        expected.receipt.encode(&mut buf, false, &expected.logs_bloom);
+        expected.encode_2718(&mut buf);
         assert_eq!(buf, &data[..]);
     }
 
