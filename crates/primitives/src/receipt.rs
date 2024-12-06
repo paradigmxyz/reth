@@ -182,12 +182,6 @@ impl Receipt {
     }
 }
 
-impl Typed2718 for Receipt {
-    fn ty(&self) -> u8 {
-        self.tx_type as u8
-    }
-}
-
 impl Eip2718EncodableReceipt for Receipt {
     fn eip2718_encoded_length_with_bloom(&self, bloom: &Bloom) -> usize {
         self.rlp_header_inner(bloom).length_with_payload() +
