@@ -49,11 +49,11 @@ use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_trie::{
     updates::{StorageTrieUpdates, TrieUpdates},
-    HashedPostState, Nibbles, TrieInput,
+    Nibbles, TrieInput,
 };
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::EvmState;
-use root::{StateRootConfig, StateRootMessage, StateRootTask};
+use root::{StateHookSender, StateRootConfig, StateRootMessage, StateRootTask};
 use std::{
     cmp::Ordering,
     collections::{btree_map, hash_map, BTreeMap, VecDeque},
@@ -2239,8 +2239,9 @@ where
         let state_root_task =
             StateRootTask::new(state_root_config, state_root_tx.clone(), state_root_rx);
         let state_root_handle = state_root_task.spawn();
+        let state_hook_sender = StateHookSender::new(state_root_tx);
         let state_hook = move |state: &EvmState| {
-            let _ = state_root_tx.send(StateRootMessage::StateUpdate(state.clone()));
+            let _ = state_hook_sender.send(StateRootMessage::StateUpdate(state.clone()));
         };
 
         let output = self.metrics.executor.execute_metered(
