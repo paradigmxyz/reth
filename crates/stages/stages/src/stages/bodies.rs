@@ -56,7 +56,7 @@ pub struct BodyStage<D: BodyDownloader> {
     /// The body downloader.
     downloader: D,
     /// Block response buffer.
-    buffer: Option<Vec<BlockResponse<D::Body>>>,
+    buffer: Option<Vec<BlockResponse<alloy_consensus::Header, D::Body>>>,
 }
 
 impl<D: BodyDownloader> BodyStage<D> {

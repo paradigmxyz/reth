@@ -67,7 +67,7 @@ impl<H: alloy_consensus::BlockHeader> SealedHeader<H> {
     }
 }
 
-impl InMemorySize for SealedHeader {
+impl<H: InMemorySize> InMemorySize for SealedHeader<H> {
     /// Calculates a heuristic for the in-memory size of the [`SealedHeader`].
     #[inline]
     fn size(&self) -> usize {

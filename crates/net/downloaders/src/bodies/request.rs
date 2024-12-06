@@ -48,7 +48,7 @@ pub(crate) struct BodiesRequestFuture<B: BodiesClient> {
     // Headers to download. The collection is shrunk as responses are buffered.
     pending_headers: VecDeque<SealedHeader>,
     /// Internal buffer for all blocks
-    buffer: Vec<BlockResponse<B::Body>>,
+    buffer: Vec<BlockResponse<alloy_consensus::Header, B::Body>>,
     fut: Option<B::Output>,
     /// Tracks how many bodies we requested in the last request.
     last_request_len: Option<usize>,
@@ -217,7 +217,7 @@ impl<B> Future for BodiesRequestFuture<B>
 where
     B: BodiesClient<Body: InMemorySize> + 'static,
 {
-    type Output = DownloadResult<Vec<BlockResponse<B::Body>>>;
+    type Output = DownloadResult<Vec<BlockResponse<alloy_consensus::Header, B::Body>>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
