@@ -1,7 +1,5 @@
 //! Connection tests
 
-use std::{net::SocketAddr, time::Duration};
-
 use alloy_node_bindings::Geth;
 use alloy_primitives::map::HashSet;
 use alloy_provider::{ext::AdminApi, ProviderBuilder};
@@ -24,9 +22,10 @@ use reth_network_p2p::{
     sync::{NetworkSyncUpdater, SyncState},
 };
 use reth_network_peers::{mainnet_nodes, NodeRecord, TrustedPeer};
-use reth_provider::test_utils::NoopProvider;
+use reth_storage_api::noop::NoopProvider;
 use reth_transaction_pool::test_utils::testing_pool;
 use secp256k1::SecretKey;
+use std::{net::SocketAddr, time::Duration};
 use tokio::task;
 use url::Host;
 
@@ -99,7 +98,7 @@ async fn test_already_connected() {
     let p1 = PeerConfig::default();
 
     // initialize two peers with the same identifier
-    let p2 = PeerConfig::with_secret_key(client, secret_key);
+    let p2 = PeerConfig::with_secret_key(client.clone(), secret_key);
     let p3 = PeerConfig::with_secret_key(client, secret_key);
 
     net.extend_peer_with_config(vec![p1, p2, p3]).await.unwrap();
@@ -143,7 +142,7 @@ async fn test_get_peer() {
     let client = NoopProvider::default();
 
     let p1 = PeerConfig::default();
-    let p2 = PeerConfig::with_secret_key(client, secret_key);
+    let p2 = PeerConfig::with_secret_key(client.clone(), secret_key);
     let p3 = PeerConfig::with_secret_key(client, secret_key_1);
     net.extend_peer_with_config(vec![p1, p2, p3]).await.unwrap();
 
@@ -176,7 +175,7 @@ async fn test_get_peer_by_id() {
     let secret_key_1 = SecretKey::new(&mut rand::thread_rng());
     let client = NoopProvider::default();
     let p1 = PeerConfig::default();
-    let p2 = PeerConfig::with_secret_key(client, secret_key);
+    let p2 = PeerConfig::with_secret_key(client.clone(), secret_key);
     let p3 = PeerConfig::with_secret_key(client, secret_key_1);
 
     net.extend_peer_with_config(vec![p1, p2, p3]).await.unwrap();
@@ -234,7 +233,7 @@ async fn test_connect_with_builder() {
     let client = NoopProvider::default();
     let config = NetworkConfigBuilder::<EthNetworkPrimitives>::new(secret_key)
         .discovery(discv4)
-        .build(client);
+        .build(client.clone());
     let (handle, network, _, requests) = NetworkManager::new(config)
         .await
         .unwrap()
@@ -272,7 +271,7 @@ async fn test_connect_to_trusted_peer() {
     let client = NoopProvider::default();
     let config = NetworkConfigBuilder::<EthNetworkPrimitives>::new(secret_key)
         .discovery(discv4)
-        .build(client);
+        .build(client.clone());
     let transactions_manager_config = config.transactions_manager_config.clone();
     let (handle, network, transactions, requests) = NetworkManager::new(config)
         .await

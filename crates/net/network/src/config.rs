@@ -642,7 +642,7 @@ mod tests {
     use reth_chainspec::{Chain, MAINNET};
     use reth_dns_discovery::tree::LinkEntry;
     use reth_primitives::ForkHash;
-    use reth_provider::test_utils::NoopProvider;
+    use reth_storage_api::noop::NoopProvider;
     use std::sync::Arc;
 
     fn builder() -> NetworkConfigBuilder {

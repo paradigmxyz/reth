@@ -10,7 +10,7 @@ use reth_network_api::{
     events::{PeerEvent, SessionInfo},
     NetworkInfo, Peers,
 };
-use reth_provider::test_utils::NoopProvider;
+use reth_storage_api::noop::NoopProvider;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_session_established_with_highest_version() {
