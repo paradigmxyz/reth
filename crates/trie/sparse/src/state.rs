@@ -102,6 +102,87 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         self.storages.get_mut(account).and_then(|e| e.as_revealed_mut())
     }
 
+    /// Reveal unknown trie paths from provided leaf path and its proof for the account.
+    ///
+    /// Panics if trie updates retention is enabled.
+    ///
+    /// NOTE: This method does not extensively validate the proof.
+    pub fn reveal_account(
+        &mut self,
+        account: B256,
+        proof: impl IntoIterator<Item = (Nibbles, Bytes)>,
+    ) -> SparseStateTrieResult<()> {
+        assert!(!self.retain_updates);
+
+        if self.is_account_revealed(&account) {
+            return Ok(());
+        }
+
+        let mut proof = proof.into_iter().peekable();
+
+        let Some(root_node) = self.validate_root_node(&mut proof)? else { return Ok(()) };
+
+        // Reveal root node if it wasn't already.
+        let trie = self.state.reveal_root_with_provider(
+            self.provider_factory.account_node_provider(),
+            root_node,
+            None,
+            self.retain_updates,
+        )?;
+
+        // Reveal the remaining proof nodes.
+        for (path, bytes) in proof {
+            let node = TrieNode::decode(&mut &bytes[..])?;
+            trie.reveal_node(path, node, None)?;
+        }
+
+        // Mark leaf path as revealed.
+        self.revealed.entry(account).or_default();
+
+        Ok(())
+    }
+
+    /// Reveal unknown trie paths from provided leaf path and its proof for the storage slot.
+    ///
+    /// Panics if trie updates retention is enabled.
+    ///
+    /// NOTE: This method does not extensively validate the proof.
+    pub fn reveal_storage_slot(
+        &mut self,
+        account: B256,
+        slot: B256,
+        proof: impl IntoIterator<Item = (Nibbles, Bytes)>,
+    ) -> SparseStateTrieResult<()> {
+        assert!(!self.retain_updates);
+
+        if self.is_storage_slot_revealed(&account, &slot) {
+            return Ok(());
+        }
+
+        let mut proof = proof.into_iter().peekable();
+
+        let Some(root_node) = self.validate_root_node(&mut proof)? else { return Ok(()) };
+
+        // Reveal root node if it wasn't already.
+        let trie = self.storages.entry(account).or_default().reveal_root_with_provider(
+            self.provider_factory.storage_node_provider(account),
+            root_node,
+            None,
+            self.retain_updates,
+        )?;
+
+        // Reveal the remaining proof nodes.
+        for (path, bytes) in proof {
+            let node = TrieNode::decode(&mut &bytes[..])?;
+            trie.reveal_node(path, node, None)?;
+        }
+
+        // Mark leaf path as revealed.
+        self.revealed.entry(account).or_default().insert(slot);
+
+        Ok(())
+    }
+
     /// Reveal unknown trie paths from multiproof and the list of included accounts and slots.
     /// NOTE: This method does not extensively validate the proof.
     pub fn reveal_multiproof(
@@ -387,9 +468,7 @@ mod tests {
         let mut sparse = SparseStateTrie::default();
         assert_eq!(sparse.state, SparseTrie::Blind);
 
-        let targets = HashMap::from_iter([(root, HashSet::default())]);
-        let multiproof = MultiProof { account_subtree: proofs, ..Default::default() };
-        sparse.reveal_multiproof(targets, multiproof).unwrap();
+        sparse.reveal_account(Default::default(), proofs.into_inner()).unwrap();
         assert_eq!(sparse.state, SparseTrie::revealed_empty());
     }
 
@@ -404,20 +483,9 @@ mod tests {
         let mut sparse = SparseStateTrie::default();
         assert!(sparse.storages.is_empty());
 
-        let targets =
-            HashMap::from_iter([(B256::default(), HashSet::from_iter([B256::default()]))]);
-        let multiproof = MultiProof {
-            storages: HashMap::from_iter([(
-                B256::default(),
-                StorageMultiProof {
-                    root,
-                    subtree: proofs,
-                    branch_node_hash_masks: HashMap::default(),
-                },
-            )]),
-            ..Default::default()
-        };
-        sparse.reveal_multiproof(targets, multiproof).unwrap();
+        sparse
+            .reveal_storage_slot(Default::default(), Default::default(), proofs.into_inner())
+            .unwrap();
         assert_eq!(
             sparse.storages,
             HashMap::from_iter([(Default::default(), SparseTrie::revealed_empty())])
