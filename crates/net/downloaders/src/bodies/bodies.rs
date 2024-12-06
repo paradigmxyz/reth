@@ -61,7 +61,7 @@ pub struct BodiesDownloader<B: BodiesClient, Provider> {
     /// Buffered responses
     buffered_responses: BinaryHeap<OrderedBodiesResponse<B::Body>>,
     /// Queued body responses that can be returned for insertion into the database.
-    queued_bodies: Vec<BlockResponse<B::Body>>,
+    queued_bodies: Vec<BlockResponse<alloy_consensus::Header, B::Body>>,
     /// The bodies downloader metrics.
     metrics: BodyDownloaderMetrics,
 }
@@ -193,7 +193,7 @@ where
     }
 
     /// Queues bodies and sets the latest queued block number
-    fn queue_bodies(&mut self, bodies: Vec<BlockResponse<B::Body>>) {
+    fn queue_bodies(&mut self, bodies: Vec<BlockResponse<alloy_consensus::Header, B::Body>>) {
         self.latest_queued_block_number = Some(bodies.last().expect("is not empty").block_number());
         self.queued_bodies.extend(bodies);
         self.metrics.queued_blocks.set(self.queued_bodies.len() as f64);
@@ -210,7 +210,10 @@ where
     }
 
     /// Adds a new response to the internal buffer
-    fn buffer_bodies_response(&mut self, response: Vec<BlockResponse<B::Body>>) {
+    fn buffer_bodies_response(
+        &mut self,
+        response: Vec<BlockResponse<alloy_consensus::Header, B::Body>>,
+    ) {
         // take into account capacity
         let size = response.iter().map(BlockResponse::size).sum::<usize>() +
             response.capacity() * mem::size_of::<BlockResponse<B::Body>>();
@@ -227,7 +230,9 @@ where
     }
 
     /// Returns a response if it's first block number matches the next expected.
-    fn try_next_buffered(&mut self) -> Option<Vec<BlockResponse<B::Body>>> {
+    fn try_next_buffered(
+        &mut self,
+    ) -> Option<Vec<BlockResponse<alloy_consensus::Header, B::Body>>> {
         if let Some(next) = self.buffered_responses.peek() {
             let expected = self.next_expected_block_number();
             let next_block_range = next.block_range();
@@ -253,7 +258,9 @@ where
 
     /// Returns the next batch of block bodies that can be returned if we have enough buffered
     /// bodies
-    fn try_split_next_batch(&mut self) -> Option<Vec<BlockResponse<B::Body>>> {
+    fn try_split_next_batch(
+        &mut self,
+    ) -> Option<Vec<BlockResponse<alloy_consensus::Header, B::Body>>> {
         if self.queued_bodies.len() >= self.stream_batch_size {
             let next_batch = self.queued_bodies.drain(..self.stream_batch_size).collect::<Vec<_>>();
             self.queued_bodies.shrink_to_fit();
@@ -436,7 +443,7 @@ where
 
 #[derive(Debug)]
 struct OrderedBodiesResponse<B> {
-    resp: Vec<BlockResponse<B>>,
+    resp: Vec<BlockResponse<alloy_consensus::Header, B>>,
     /// The total size of the response in bytes
     size: usize,
 }
