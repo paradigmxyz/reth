@@ -1095,11 +1095,11 @@ impl<T: PoolTransaction> AllTransactions<T> {
         self.by_hash.keys().copied()
     }
 
-    /// Returns an iterator over all _unique_ hashes in the pool
+    /// Returns an iterator over all transactions in the pool
     pub(crate) fn transactions_iter(
         &self,
-    ) -> impl Iterator<Item = Arc<ValidPoolTransaction<T>>> + '_ {
-        self.by_hash.values().cloned()
+    ) -> impl Iterator<Item = &Arc<ValidPoolTransaction<T>>> + '_ {
+        self.by_hash.values()
     }
 
     /// Returns if the transaction for the given hash is already included in this pool
