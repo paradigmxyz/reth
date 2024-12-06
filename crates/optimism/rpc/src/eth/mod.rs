@@ -13,7 +13,6 @@ use reth_optimism_primitives::OpPrimitives;
 
 use std::{fmt, sync::Arc};
 
-use alloy_consensus::Header;
 use alloy_primitives::U256;
 use op_alloy_network::Optimism;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
@@ -22,8 +21,8 @@ use reth_network_api::NetworkInfo;
 use reth_node_builder::EthApiBuilderCtx;
 use reth_provider::{
     BlockNumReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
-    EvmEnvProvider, NodePrimitivesProvider, ProviderBlock, ProviderReceipt, StageCheckpointReader,
-    StateProviderFactory,
+    EvmEnvProvider, NodePrimitivesProvider, ProviderBlock, ProviderHeader, ProviderReceipt,
+    ProviderTx, StageCheckpointReader, StateProviderFactory,
 };
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
@@ -155,13 +154,15 @@ where
         Network: NetworkInfo,
     >,
 {
+    type Transaction = ProviderTx<Self::Provider>;
+
     #[inline]
     fn starting_block(&self) -> U256 {
         self.inner.eth_api.starting_block()
     }
 
     #[inline]
-    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
+    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>>>>> {
         self.inner.eth_api.signers()
     }
 }
@@ -236,7 +237,13 @@ where
 
 impl<N> Trace for OpEthApi<N>
 where
-    Self: RpcNodeCore<Provider: BlockReader> + LoadState<Evm: ConfigureEvm<Header = Header>>,
+    Self: RpcNodeCore<Provider: BlockReader>
+        + LoadState<
+            Evm: ConfigureEvm<
+                Header = ProviderHeader<Self::Provider>,
+                Transaction = ProviderTx<Self::Provider>,
+            >,
+        >,
     N: OpNodeCore,
 {
 }

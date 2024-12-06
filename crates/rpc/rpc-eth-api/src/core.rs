@@ -8,12 +8,12 @@ use alloy_rpc_types_eth::{
     simulate::{SimulatePayload, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
     transaction::TransactionRequest,
-    BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Header,
-    Index, StateContext, SyncStatus, Work,
+    BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Index,
+    StateContext, SyncStatus, Work,
 };
 use alloy_serde::JsonStorageKey;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_provider::{BlockReader, ProviderHeader};
+use reth_provider::BlockReader;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use tracing::trace;
 
@@ -619,16 +619,13 @@ where
     async fn header_by_number(
         &self,
         block_number: BlockNumberOrTag,
-    ) -> RpcResult<Option<Header<ProviderHeader<T::Provider>>>> {
+    ) -> RpcResult<Option<RpcHeader<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?block_number, "Serving eth_getHeaderByNumber");
         Ok(EthBlocks::rpc_block_header(self, block_number.into()).await?)
     }
 
     /// Handler for: `eth_getHeaderByHash`
-    async fn header_by_hash(
-        &self,
-        hash: B256,
-    ) -> RpcResult<Option<Header<ProviderHeader<T::Provider>>>> {
+    async fn header_by_hash(&self, hash: B256) -> RpcResult<Option<RpcHeader<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getHeaderByHash");
         Ok(EthBlocks::rpc_block_header(self, hash.into()).await?)
     }

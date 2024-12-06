@@ -207,8 +207,10 @@ pub trait LoadPendingBlock:
     /// Assembles a pending block.
     fn assemble_block(
         &self,
-        parent_hash: B256,
-        state_root: B256,
+        cfg: CfgEnvWithHandlerCfg,
+        block_env: BlockEnv,
+        parent_hash: revm_primitives::B256,
+        state_root: revm_primitives::B256,
         transactions: Vec<ProviderTx<Self::Provider>>,
         receipts: &[ProviderReceipt<Self::Provider>],
     ) -> ProviderBlock<Self::Provider>;
@@ -408,7 +410,8 @@ pub trait LoadPendingBlock:
 
         // Convert Vec<Option<Receipt>> to Vec<Receipt>
         let receipts: Vec<_> = receipts.into_iter().flatten().collect();
-        let block = self.assemble_block(parent_hash, state_root, executed_txs, &receipts);
+        let block =
+            self.assemble_block(cfg, block_env, parent_hash, state_root, executed_txs, &receipts);
 
         Ok((SealedBlockWithSenders { block: block.seal_slow(), senders }, receipts))
     }
