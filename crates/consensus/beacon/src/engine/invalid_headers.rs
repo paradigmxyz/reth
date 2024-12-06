@@ -82,7 +82,7 @@ impl<H: Debug> InvalidHeaderCache<H> {
 struct HeaderEntry<H> {
     /// Keeps track how many times this header has been hit.
     hit_count: u8,
-    /// The actually header entry
+    /// The actual header entry
     header: Arc<H>,
 }
 

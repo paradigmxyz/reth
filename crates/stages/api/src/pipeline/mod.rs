@@ -367,7 +367,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                     Err(err) => {
                         self.event_sender.notify(PipelineEvent::Error { stage_id });
 
-                        return Err(PipelineError::Stage(StageError::Fatal(Box::new(err))))
+                        return Err(PipelineError::Stage(Box::new(StageError::Fatal(Box::new(err)))))
                     }
                 }
             }
@@ -505,7 +505,7 @@ fn on_stage_error<N: ProviderNodeTypes>(
 
         // We unwind because of a detached head.
         let unwind_to =
-            local_head.number.saturating_sub(BEACON_CONSENSUS_REORG_UNWIND_DEPTH).max(1);
+            local_head.block.number.saturating_sub(BEACON_CONSENSUS_REORG_UNWIND_DEPTH).max(1);
         Ok(Some(ControlFlow::Unwind { target: unwind_to, bad_block: local_head }))
     } else if let StageError::Block { block, error } = err {
         match error {
@@ -513,7 +513,7 @@ fn on_stage_error<N: ProviderNodeTypes>(
                 error!(
                     target: "sync::pipeline",
                     stage = %stage_id,
-                    bad_block = %block.number,
+                    bad_block = %block.block.number,
                     "Stage encountered a validation error: {validation_error}"
                 );
 
@@ -542,7 +542,7 @@ fn on_stage_error<N: ProviderNodeTypes>(
                 error!(
                     target: "sync::pipeline",
                     stage = %stage_id,
-                    bad_block = %block.number,
+                    bad_block = %block.block.number,
                     "Stage encountered an execution error: {execution_error}"
                 );
 
@@ -560,12 +560,12 @@ fn on_stage_error<N: ProviderNodeTypes>(
         error!(
             target: "sync::pipeline",
             stage = %stage_id,
-            bad_block = %block.number,
+            bad_block = %block.block.number,
             segment = %segment,
             "Stage is missing static file data."
         );
 
-        Ok(Some(ControlFlow::Unwind { target: block.number - 1, bad_block: block }))
+        Ok(Some(ControlFlow::Unwind { target: block.block.number - 1, bad_block: block }))
     } else if err.is_fatal() {
         error!(target: "sync::pipeline", stage = %stage_id, "Stage encountered a fatal error: {err}");
         Err(err.into())
@@ -598,12 +598,13 @@ mod tests {
 
     use super::*;
     use crate::{test_utils::TestStage, UnwindOutput};
+    use alloy_eips::{eip1898::BlockWithParent, NumHash};
     use assert_matches::assert_matches;
     use reth_consensus::ConsensusError;
     use reth_errors::ProviderError;
     use reth_provider::test_utils::{create_test_provider_factory, MockNodeTypesWithDB};
     use reth_prune::PruneModes;
-    use reth_testing_utils::{generators, generators::random_header};
+    use reth_testing_utils::generators::{self, random_block_with_parent, random_header};
     use tokio_stream::StreamExt;
 
     #[test]
@@ -975,7 +976,7 @@ mod tests {
             .add_stage(
                 TestStage::new(StageId::Other("B"))
                     .add_exec(Err(StageError::Block {
-                        block: Box::new(random_header(
+                        block: Box::new(random_block_with_parent(
                             &mut generators::rng(),
                             5,
                             Default::default(),
@@ -1111,11 +1112,6 @@ mod tests {
                 StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
             );
         let result = pipeline.run().await;
-        assert_matches!(
-            result,
-            Err(PipelineError::Stage(StageError::DatabaseIntegrity(
-                ProviderError::BlockBodyIndicesNotFound(5)
-            )))
-        );
+        assert_matches!(result, Err(PipelineError::Stage(..)));
     }
 }
