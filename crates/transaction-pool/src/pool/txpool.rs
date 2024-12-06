@@ -2322,7 +2322,9 @@ mod tests {
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
         let mut pool = AllTransactions::default();
-        let tx = MockTransaction::eip1559().inc_price().inc_limit();
+        let mut tx = MockTransaction::eip1559().inc_price().inc_limit();
+        tx.set_priority_fee(100);
+        tx.set_max_fee(100);
         let valid_tx = f.validated(tx.clone());
         let InsertOk { updates, replaced_tx, move_to, state, .. } =
             pool.insert_tx(valid_tx.clone(), on_chain_balance, on_chain_nonce).unwrap();
@@ -2448,20 +2450,20 @@ mod tests {
         let first = f.validated(tx.clone());
         let _ = pool.insert_tx(first.clone(), on_chain_balance, on_chain_nonce).unwrap();
         let mut replacement = f.validated(tx.rng_hash().inc_price());
+
         // a price bump of 9% is not enough for a default min price bump of 10%
         replacement.transaction.set_priority_fee(109);
         replacement.transaction.set_max_fee(109);
         let err =
             pool.insert_tx(replacement.clone(), on_chain_balance, on_chain_nonce).unwrap_err();
         assert!(matches!(err, InsertErr::Underpriced { .. }));
-
         // ensure first tx is not removed
         assert!(pool.contains(first.hash()));
         assert_eq!(pool.len(), 1);
 
-        // price bump of 10% is also not enough because the bump should be strictly greater than 10%
+        // should also fail if the bump in max fee is not enough
         replacement.transaction.set_priority_fee(110);
-        replacement.transaction.set_max_fee(110);
+        replacement.transaction.set_max_fee(109);
         let err =
             pool.insert_tx(replacement.clone(), on_chain_balance, on_chain_nonce).unwrap_err();
         assert!(matches!(err, InsertErr::Underpriced { .. }));
@@ -2469,7 +2471,7 @@ mod tests {
         assert_eq!(pool.len(), 1);
 
         // should also fail if the bump in priority fee is not enough
-        replacement.transaction.set_priority_fee(111);
+        replacement.transaction.set_priority_fee(109);
         replacement.transaction.set_max_fee(110);
         let err = pool.insert_tx(replacement, on_chain_balance, on_chain_nonce).unwrap_err();
         assert!(matches!(err, InsertErr::Underpriced { .. }));

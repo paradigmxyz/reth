@@ -447,31 +447,6 @@ where
     }
 }
 
-impl<H, B> reth_primitives_traits::Block for SealedBlock<H, B>
-where
-    H: reth_primitives_traits::BlockHeader,
-    B: reth_primitives_traits::BlockBody<OmmerHeader = H>,
-{
-    type Header = H;
-    type Body = B;
-
-    fn new(header: Self::Header, body: Self::Body) -> Self {
-        Self { header: SealedHeader::seal(header), body }
-    }
-
-    fn header(&self) -> &Self::Header {
-        self.header.header()
-    }
-
-    fn body(&self) -> &Self::Body {
-        &self.body
-    }
-
-    fn split(self) -> (Self::Header, Self::Body) {
-        (self.header.unseal(), self.body)
-    }
-}
-
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a, H, B> arbitrary::Arbitrary<'a> for SealedBlock<H, B>
 where
@@ -1022,7 +997,6 @@ mod tests {
     const fn _traits() {
         const fn assert_block<T: reth_primitives_traits::Block>() {}
         assert_block::<Block>();
-        assert_block::<SealedBlock>();
     }
 
     /// Check parsing according to EIP-1898.

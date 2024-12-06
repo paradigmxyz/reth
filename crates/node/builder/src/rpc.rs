@@ -19,7 +19,7 @@ use reth_node_core::{
 };
 use reth_payload_builder::PayloadStore;
 use reth_primitives::EthPrimitives;
-use reth_provider::providers::ProviderNodeTypes;
+use reth_provider::{providers::ProviderNodeTypes, BlockReader};
 use reth_rpc::{
     eth::{EthApiTypes, FullEthApiServer},
     EthApi,
@@ -408,7 +408,16 @@ where
         PayloadBuilder: PayloadBuilder<PayloadType = <N::Types as NodeTypesWithEngine>::Engine>,
         Pool: TransactionPool<Transaction = <EthApi::Pool as TransactionPool>::Transaction>,
     >,
-    EthApi: EthApiTypes + FullEthApiServer + AddDevSigners + Unpin + 'static,
+    EthApi: EthApiTypes
+        + FullEthApiServer<
+            Provider: BlockReader<
+                Block = reth_primitives::Block,
+                Receipt = reth_primitives::Receipt,
+                Header = reth_primitives::Header,
+            >,
+        > + AddDevSigners
+        + Unpin
+        + 'static,
     EV: EngineValidatorBuilder<N>,
 {
     /// Launches the RPC servers with the given context and an additional hook for extending
@@ -531,7 +540,16 @@ where
         PayloadBuilder: PayloadBuilder<PayloadType = <N::Types as NodeTypesWithEngine>::Engine>,
         Pool: TransactionPool<Transaction = <EthApi::Pool as TransactionPool>::Transaction>,
     >,
-    EthApi: EthApiTypes + FullEthApiServer + AddDevSigners + Unpin + 'static,
+    EthApi: EthApiTypes
+        + FullEthApiServer<
+            Provider: BlockReader<
+                Block = reth_primitives::Block,
+                Receipt = reth_primitives::Receipt,
+                Header = reth_primitives::Header,
+            >,
+        > + AddDevSigners
+        + Unpin
+        + 'static,
     EV: EngineValidatorBuilder<N>,
 {
     type Handle = RpcHandle<N, EthApi>;

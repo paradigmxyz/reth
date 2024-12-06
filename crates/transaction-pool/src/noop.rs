@@ -22,6 +22,7 @@ use alloy_eips::{
 };
 use alloy_primitives::{Address, TxHash, B256, U256};
 use reth_eth_wire_types::HandleMempoolData;
+use reth_primitives::RecoveredTx;
 use std::{collections::HashSet, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
 
@@ -139,21 +140,10 @@ impl TransactionPool for NoopTransactionPool {
         vec![]
     }
 
-    fn get_pooled_transactions_as<T>(
-        &self,
-        _tx_hashes: Vec<TxHash>,
-        _limit: GetPooledTransactionLimit,
-    ) -> Vec<T>
-    where
-        <Self::Transaction as PoolTransaction>::Pooled: Into<T>,
-    {
-        vec![]
-    }
-
     fn get_pooled_transaction_element(
         &self,
         _tx_hash: TxHash,
-    ) -> Option<<Self::Transaction as PoolTransaction>::Pooled> {
+    ) -> Option<RecoveredTx<<Self::Transaction as PoolTransaction>::Pooled>> {
         None
     }
 

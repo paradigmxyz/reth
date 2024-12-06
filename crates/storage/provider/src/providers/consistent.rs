@@ -24,7 +24,7 @@ use reth_primitives::{
     Account, BlockWithSenders, SealedBlockFor, SealedBlockWithSenders, SealedHeader, StorageEntry,
     TransactionMeta,
 };
-use reth_primitives_traits::{Block, BlockBody};
+use reth_primitives_traits::BlockBody;
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
@@ -1036,7 +1036,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block(
             id,
             |provider| provider.transactions_by_block(id),
-            |block_state| Ok(Some(block_state.block_ref().block().body().transactions().to_vec())),
+            |block_state| Ok(Some(block_state.block_ref().block().body.transactions().to_vec())),
         )
     }
 
@@ -1047,7 +1047,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
             |db_provider, range, _| db_provider.transactions_by_block_range(range),
-            |block_state, _| Some(block_state.block_ref().block().body().transactions().to_vec()),
+            |block_state, _| Some(block_state.block_ref().block().body.transactions().to_vec()),
             |_| true,
         )
     }

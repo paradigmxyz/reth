@@ -1,4 +1,4 @@
-use alloy_consensus::{Header, TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
+use alloy_consensus::{Header, TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy, TxType};
 use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
 
 /// Trait for calculating a heuristic for the in-memory size of a struct.
@@ -28,7 +28,7 @@ macro_rules! impl_in_mem_size_size_of {
     };
 }
 
-impl_in_mem_size_size_of!(Signature, TxHash);
+impl_in_mem_size_size_of!(Signature, TxHash, TxType);
 
 /// Implement `InMemorySize` for a type with a native `size` method.
 macro_rules! impl_in_mem_size {
@@ -47,11 +47,7 @@ macro_rules! impl_in_mem_size {
 impl_in_mem_size!(Header, TxLegacy, TxEip2930, TxEip1559, TxEip7702, TxEip4844);
 
 #[cfg(feature = "op")]
-impl InMemorySize for op_alloy_consensus::OpTxType {
-    fn size(&self) -> usize {
-        1
-    }
-}
+impl_in_mem_size_size_of!(op_alloy_consensus::OpTxType);
 
 #[cfg(test)]
 mod tests {

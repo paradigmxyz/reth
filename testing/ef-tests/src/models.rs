@@ -168,10 +168,15 @@ impl State {
             };
             tx.put::<tables::PlainAccountState>(address, reth_account)?;
             tx.put::<tables::HashedAccounts>(hashed_address, reth_account)?;
+
             if let Some(code_hash) = code_hash {
                 tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(account.code.clone()))?;
             }
-            account.storage.iter().filter(|(_, v)| !v.is_zero()).try_for_each(|(k, v)| {
+
+            for (k, v) in &account.storage {
+                if v.is_zero() {
+                    continue
+                }
                 let storage_key = B256::from_slice(&k.to_be_bytes::<32>());
                 tx.put::<tables::PlainStorageState>(
                     address,
@@ -180,10 +185,9 @@ impl State {
                 tx.put::<tables::HashedStorages>(
                     hashed_address,
                     StorageEntry { key: keccak256(storage_key), value: *v },
-                )
-            })?;
+                )?;
+            }
         }
-
         Ok(())
     }
 }
