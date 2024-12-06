@@ -63,7 +63,7 @@ impl Receipt {
         self.into()
     }
 
-    /// Calculates the bloom filter for the receipt and returns the [`ReceiptWithBloomRef`]
+    /// Calculates the bloom filter for the receipt and returns the [`ReceiptWithBloom`]
     /// container type.
     pub fn with_bloom_ref(&self) -> ReceiptWithBloom<&Self> {
         self.into()
