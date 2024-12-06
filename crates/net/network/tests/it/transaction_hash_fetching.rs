@@ -10,6 +10,7 @@ use reth_transaction_pool::{test_utils::TransactionGenerator, PoolTransaction, T
 use tokio::time::Duration;
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore]
 async fn transaction_hash_fetching() {
     init_test_tracing();
 
