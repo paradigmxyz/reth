@@ -249,10 +249,12 @@ where
                     })
                     .peekable();
                 if destroyed || changed_storage_iter.peek().is_some() {
-                    hashed_state_update.storages.insert(
-                        hashed_address,
-                        HashedStorage::from_iter(destroyed, changed_storage_iter),
-                    );
+                    let hashed_storage = if destroyed {
+                        HashedStorage::new(destroyed)
+                    } else {
+                        HashedStorage::from_iter(false, changed_storage_iter)
+                    };
+                    hashed_state_update.storages.insert(hashed_address, hashed_storage);
                 }
             }
         }
