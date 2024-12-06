@@ -29,7 +29,7 @@ use reth_revm::{
     DatabaseCommit,
 };
 use reth_rpc_types_compat::engine::payload::block_to_payload;
-use revm_primitives::{calc_excess_blob_gas, EVMError, EnvWithHandlerCfg};
+use revm_primitives::{EVMError, EnvWithHandlerCfg};
 use std::{
     collections::VecDeque,
     future::Future,

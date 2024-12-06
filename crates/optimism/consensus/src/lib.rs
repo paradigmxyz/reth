@@ -138,7 +138,7 @@ impl HeaderValidator for OpBeaconConsensus {
         }
 
         // ensure that the blob gas fields for this block
-        validate_against_parent_blob_fields(header.header(), parent.header())?;
+        validate_against_parent_blob_fields(header.header(), parent.header(), &self.chain_spec)?;
 
 
         Ok(())
