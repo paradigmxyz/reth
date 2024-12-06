@@ -1,5 +1,6 @@
 //! `Eth` Sim bundle implementation and helpers.
 
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::BlockId;
@@ -10,8 +11,7 @@ use alloy_rpc_types_mev::{
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
-use reth_primitives::{PooledTransactionsElement, TransactionSigned};
-use reth_provider::{ChainSpecProvider, HeaderProvider};
+use reth_provider::{ChainSpecProvider, HeaderProvider, ProviderTx};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::MevSimApiServer;
 use reth_rpc_eth_api::{
@@ -20,6 +20,7 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_tasks::pool::BlockingTaskGuard;
+use reth_transaction_pool::{PoolConsensusTx, PoolPooledTx, PoolTransaction, TransactionPool};
 use revm::{
     db::CacheDB,
     primitives::{Address, EnvWithHandlerCfg, ResultAndState, SpecId, TxEnv},
@@ -45,9 +46,9 @@ const SBUNDLE_PAYOUT_MAX_COST: u64 = 30_000;
 
 /// A flattened representation of a bundle item containing transaction and associated metadata.
 #[derive(Clone, Debug)]
-pub struct FlattenedBundleItem {
+pub struct FlattenedBundleItem<T> {
     /// The signed transaction
-    pub tx: TransactionSigned,
+    pub tx: T,
     /// The address that signed the transaction
     pub signer: Address,
     /// Whether the transaction is allowed to revert
@@ -93,7 +94,7 @@ where
     fn parse_and_flatten_bundle(
         &self,
         request: &SendBundleRequest,
-    ) -> Result<Vec<FlattenedBundleItem>, EthApiError> {
+    ) -> Result<Vec<FlattenedBundleItem<ProviderTx<Eth::Provider>>>, EthApiError> {
         let mut items = Vec::new();
 
         // Stack for processing bundles
@@ -171,10 +172,11 @@ where
                 match &body[idx] {
                     BundleItem::Tx { tx, can_revert } => {
                         let recovered_tx =
-                            recover_raw_transaction::<PooledTransactionsElement>(tx.clone())
+                            recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(tx.clone())
                                 .map_err(EthApiError::from)?;
                         let (tx, signer) = recovered_tx.to_components();
-                        let tx = tx.into_transaction();
+                        let tx: PoolConsensusTx<Eth::Pool> =
+                            <Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus(tx);
 
                         let refund_percent =
                             validity.as_ref().and_then(|v| v.refund.as_ref()).and_then(|refunds| {

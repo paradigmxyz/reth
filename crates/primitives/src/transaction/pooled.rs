@@ -654,6 +654,18 @@ impl TryFrom<TransactionSigned> for PooledTransactionsElement {
     }
 }
 
+impl From<PooledTransactionsElement> for TransactionSigned {
+    fn from(element: PooledTransactionsElement) -> Self {
+        match element {
+            PooledTransactionsElement::Legacy(tx) => tx.into(),
+            PooledTransactionsElement::Eip2930(tx) => tx.into(),
+            PooledTransactionsElement::Eip1559(tx) => tx.into(),
+            PooledTransactionsElement::Eip7702(tx) => tx.into(),
+            PooledTransactionsElement::BlobTransaction(blob_tx) => blob_tx.into_parts().0,
+        }
+    }
+}
+
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for PooledTransactionsElement {
     /// Generates an arbitrary `PooledTransactionsElement`.

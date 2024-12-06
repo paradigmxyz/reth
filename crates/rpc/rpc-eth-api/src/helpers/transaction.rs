@@ -11,8 +11,8 @@ use futures::Future;
 use reth_node_api::BlockBody;
 use reth_primitives::{
     transaction::SignedTransactionIntoRecoveredExt, SealedBlockWithSenders, TransactionMeta,
-    TransactionSigned,
 };
+use reth_primitives_traits::SignedTransaction;
 use reth_provider::{
     BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
     TransactionsProvider,
@@ -60,7 +60,8 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     /// Returns a handle for signing data.
     ///
     /// Singer access in default (L1) trait method implementations.
-    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>>;
+    #[expect(clippy::type_complexity)]
+    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>>>>>;
 
     /// Returns the transaction by hash.
     ///
@@ -213,7 +214,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 let base_fee_per_gas = block.base_fee_per_gas();
                 if let Some((signer, tx)) = block.transactions_with_sender().nth(index) {
                     let tx_info = TransactionInfo {
-                        hash: Some(tx.hash()),
+                        hash: Some(*tx.tx_hash()),
                         block_hash: Some(block_hash),
                         block_number: Some(block_number),
                         base_fee: base_fee_per_gas.map(u128::from),
@@ -294,7 +295,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                         .find(|(_, (signer, tx))| **signer == sender && (*tx).nonce() == nonce)
                         .map(|(index, (signer, tx))| {
                             let tx_info = TransactionInfo {
-                                hash: Some(tx.hash()),
+                                hash: Some(*tx.tx_hash()),
                                 block_hash: Some(block_hash),
                                 block_number: Some(block_number),
                                 base_fee: base_fee_per_gas.map(u128::from),
@@ -414,7 +415,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         &self,
         from: &Address,
         txn: TransactionRequest,
-    ) -> impl Future<Output = Result<TransactionSigned, Self::Error>> + Send {
+    ) -> impl Future<Output = Result<ProviderTx<Self::Provider>, Self::Error>> + Send {
         async move {
             self.find_signer(from)?
                 .sign_transaction(txn, from)
@@ -467,10 +468,11 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     }
 
     /// Returns the signer for the given account, if found in configured signers.
+    #[expect(clippy::type_complexity)]
     fn find_signer(
         &self,
         account: &Address,
-    ) -> Result<Box<(dyn EthSigner + 'static)>, Self::Error> {
+    ) -> Result<Box<(dyn EthSigner<ProviderTx<Self::Provider>> + 'static)>, Self::Error> {
         self.signers()
             .read()
             .iter()

@@ -3,7 +3,7 @@
 use crate::EthApi;
 use alloy_consensus::Header;
 use reth_evm::ConfigureEvm;
-use reth_provider::BlockReader;
+use reth_provider::{BlockReader, ProviderHeader};
 use reth_rpc_eth_api::helpers::{
     estimate::EstimateCall, Call, EthCall, LoadPendingBlock, LoadState, SpawnBlocking,
 };
@@ -17,7 +17,7 @@ where
 
 impl<Provider, Pool, Network, EvmConfig> Call for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: LoadState<Evm: ConfigureEvm<Header = Header>> + SpawnBlocking,
+    Self: LoadState<Evm: ConfigureEvm<Header = ProviderHeader<Self::Provider>>> + SpawnBlocking,
     EvmConfig: ConfigureEvm<Header = Header>,
     Provider: BlockReader,
 {

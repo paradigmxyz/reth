@@ -1,3 +1,4 @@
+use alloy_consensus::BlockHeader;
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rlp::{Decodable, Encodable};
@@ -18,11 +19,11 @@ use reth_evm::{
     execute::{BlockExecutorProvider, Executor},
     ConfigureEvmEnv,
 };
-use reth_primitives::{Block, BlockExt, NodePrimitives, SealedBlockWithSenders};
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives::{BlockExt, NodePrimitives, SealedBlockWithSenders};
+use reth_primitives_traits::{Block as _, BlockBody, SignedTransaction};
 use reth_provider::{
-    BlockReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProofProvider,
-    StateProviderFactory, TransactionVariant,
+    BlockReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider, ProviderBlock,
+    StateProofProvider, StateProviderFactory, TransactionVariant,
 };
 use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord};
 use reth_rpc_api::DebugApiServer;
@@ -81,9 +82,8 @@ where
         + StateProviderFactory
         + 'static,
     Eth: EthApiTypes + TraceExt + 'static,
-    BlockExecutor: BlockExecutorProvider<
-        Primitives: NodePrimitives<Block = <<Eth as RpcNodeCore>::Provider as BlockReader>::Block>,
-    >,
+    BlockExecutor:
+        BlockExecutorProvider<Primitives: NodePrimitives<Block = ProviderBlock<Eth::Provider>>>,
 {
     /// Acquires a permit to execute a tracing call.
     async fn acquire_trace_permit(&self) -> Result<OwnedSemaphorePermit, AcquireError> {
@@ -93,7 +93,7 @@ where
     /// Trace the entire block asynchronously
     async fn trace_block(
         &self,
-        block: Arc<SealedBlockWithSenders>,
+        block: Arc<SealedBlockWithSenders<ProviderBlock<Eth::Provider>>>,
         cfg: CfgEnvWithHandlerCfg,
         block_env: BlockEnv,
         opts: GethDebugTracingOptions,
@@ -101,8 +101,8 @@ where
         // replay all transactions of the block
         let this = self.clone();
         self.eth_api()
-            .spawn_with_state_at_block(block.parent_hash.into(), move |state| {
-                let mut results = Vec::with_capacity(block.body.transactions.len());
+            .spawn_with_state_at_block(block.parent_hash().into(), move |state| {
+                let mut results = Vec::with_capacity(block.body.transactions().len());
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
                 this.eth_api().apply_pre_execution_changes(&block, &mut db, &cfg, &block_env)?;
@@ -110,7 +110,7 @@ where
                 let mut transactions = block.transactions_with_sender().enumerate().peekable();
                 let mut inspector = None;
                 while let Some((index, (signer, tx))) = transactions.next() {
-                    let tx_hash = tx.hash();
+                    let tx_hash = *tx.tx_hash();
 
                     let env = EnvWithHandlerCfg {
                         env: Env::boxed(
@@ -157,18 +157,22 @@ where
         rlp_block: Bytes,
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
-        let block = Block::decode(&mut rlp_block.as_ref())
+        let block: ProviderBlock<Eth::Provider> = Decodable::decode(&mut rlp_block.as_ref())
             .map_err(BlockError::RlpDecodeRawBlock)
             .map_err(Eth::Error::from_eth_err)?;
 
-        let (cfg, block_env) = self.eth_api().evm_env_for_raw_block(&block.header).await?;
+        let (cfg, block_env) = self.eth_api().evm_env_for_raw_block(block.header()).await?;
 
         // Depending on EIP-2 we need to recover the transactions differently
-        let senders = if self.inner.provider.chain_spec().is_homestead_active_at_block(block.number)
+        let senders = if self
+            .inner
+            .provider
+            .chain_spec()
+            .is_homestead_active_at_block(block.header().number())
         {
             block
-                .body
-                .transactions
+                .body()
+                .transactions()
                 .iter()
                 .map(|tx| {
                     tx.recover_signer()
@@ -178,8 +182,8 @@ where
                 .collect::<Result<Vec<_>, Eth::Error>>()?
         } else {
             block
-                .body
-                .transactions
+                .body()
+                .transactions()
                 .iter()
                 .map(|tx| {
                     tx.recover_signer_unchecked()
@@ -237,7 +241,7 @@ where
 
         // we need to get the state of the parent block because we're essentially replaying the
         // block the transaction is included in
-        let state_at: BlockId = block.parent_hash.into();
+        let state_at: BlockId = block.parent_hash().into();
         let block_hash = block.hash();
 
         let this = self.clone();
@@ -258,7 +262,7 @@ where
                     cfg.clone(),
                     block_env.clone(),
                     block_txs,
-                    tx.hash(),
+                    *tx.tx_hash(),
                 )?;
 
                 let env = EnvWithHandlerCfg {
@@ -277,7 +281,7 @@ where
                     Some(TransactionContext {
                         block_hash: Some(block_hash),
                         tx_index: Some(index),
-                        tx_hash: Some(tx.hash()),
+                        tx_hash: Some(*tx.tx_hash()),
                     }),
                     &mut None,
                 )
@@ -514,15 +518,15 @@ where
 
         // we're essentially replaying the transactions in the block here, hence we need the state
         // that points to the beginning of the block, which is the state at the parent block
-        let mut at = block.parent_hash;
+        let mut at = block.parent_hash();
         let mut replay_block_txs = true;
 
         // if a transaction index is provided, we need to replay the transactions until the index
-        let num_txs = transaction_index.index().unwrap_or(block.body.transactions.len());
+        let num_txs = transaction_index.index().unwrap_or_else(|| block.body.transactions().len());
         // but if all transactions are to be replayed, we can use the state at the block itself
         // this works with the exception of the PENDING block, because its state might not exist if
         // built locally
-        if !target_block.is_pending() && num_txs == block.body.transactions.len() {
+        if !target_block.is_pending() && num_txs == block.body.transactions().len() {
             at = block.hash();
             replay_block_txs = false;
         }
@@ -622,7 +626,7 @@ where
             .ok_or(EthApiError::HeaderNotFound(block_id.into()))?;
 
         self.eth_api()
-            .spawn_with_state_at_block(block.parent_hash.into(), move |state_provider| {
+            .spawn_with_state_at_block(block.parent_hash().into(), move |state_provider| {
                 let db = StateProviderDatabase::new(&state_provider);
                 let block_executor = this.inner.block_executor.executor(db);
 
@@ -630,7 +634,7 @@ where
 
                 let _ = block_executor
                     .execute_with_state_closure(
-                        (&(*block).clone().unseal(), block.difficulty).into(),
+                        (&(*block).clone().unseal(), block.difficulty()).into(),
                         |statedb: &State<_>| {
                             witness_record.record_executed_state(statedb);
                         },
