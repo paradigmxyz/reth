@@ -141,6 +141,11 @@ test-utils = [
 ]
 
 [[bench]]
-name = "bench"
+name = "broadcast"
+required-features = ["test-utils"]
+harness = false
+
+[[bench]]
+name = "tx_manager_hash_fetching"
 required-features = ["test-utils"]
 harness = false
