@@ -1,6 +1,6 @@
 //! Contains RPC handler implementations specific to transactions
 
-use reth_provider::{BlockReader, BlockReaderIdExt, TransactionsProvider};
+use reth_provider::{BlockReader, BlockReaderIdExt, ProviderTx, TransactionsProvider};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
     FullEthApiTypes, RpcNodeCoreExt,
@@ -13,10 +13,10 @@ impl<Provider, Pool, Network, EvmConfig> EthTransactions
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Self: LoadTransaction<Provider: BlockReaderIdExt>,
-    Provider: BlockReader,
+    Provider: BlockReader<Transaction = ProviderTx<Self::Provider>>,
 {
     #[inline]
-    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
+    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>>>>> {
         self.inner.signers()
     }
 }

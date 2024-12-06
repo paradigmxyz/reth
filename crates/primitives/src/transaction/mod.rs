@@ -1506,6 +1506,11 @@ impl<T> RecoveredTx<T> {
     pub const fn from_signed_transaction(signed_transaction: T, signer: Address) -> Self {
         Self { signed_transaction, signer }
     }
+
+    /// Applies the given closure to the inner transactions.
+    pub fn map_transaction<Tx>(self, f: impl FnOnce(T) -> Tx) -> RecoveredTx<Tx> {
+        RecoveredTx::from_signed_transaction(f(self.signed_transaction), self.signer)
+    }
 }
 
 impl<T: Encodable> Encodable for RecoveredTx<T> {

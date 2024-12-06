@@ -2,7 +2,7 @@
 //! RPC methods.
 use super::{EthApiSpec, LoadPendingBlock, SpawnBlocking};
 use crate::{EthApiTypes, FromEthApiError, RpcNodeCore, RpcNodeCoreExt};
-use alloy_consensus::{constants::KECCAK_EMPTY, Header};
+use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader};
 use alloy_eips::BlockId;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{Account, EIP1186AccountProofResponse};
@@ -12,8 +12,8 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
 use reth_evm::ConfigureEvmEnv;
 use reth_provider::{
-    BlockIdReader, BlockNumReader, ChainSpecProvider, EvmEnvProvider as _, StateProvider,
-    StateProviderBox, StateProviderFactory,
+    BlockIdReader, BlockNumReader, ChainSpecProvider, EvmEnvProvider as _, ProviderHeader,
+    StateProvider, StateProviderBox, StateProviderFactory,
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlockEnv, RpcInvalidTransactionError};
 use reth_transaction_pool::TransactionPool;
@@ -247,14 +247,14 @@ pub trait LoadState:
     /// This is used for tracing raw blocks
     fn evm_env_for_raw_block(
         &self,
-        header: &Header,
+        header: &ProviderHeader<Self::Provider>,
     ) -> impl Future<Output = Result<(CfgEnvWithHandlerCfg, BlockEnv), Self::Error>> + Send
     where
         Self: LoadPendingBlock + SpawnBlocking,
     {
         async move {
             // get the parent config first
-            let (cfg, mut block_env, _) = self.evm_env_at(header.parent_hash.into()).await?;
+            let (cfg, mut block_env, _) = self.evm_env_at(header.parent_hash().into()).await?;
 
             let after_merge = cfg.handler_cfg.spec_id >= SpecId::MERGE;
             self.evm_config().fill_block_env(&mut block_env, header, after_merge);

@@ -927,6 +927,7 @@ where
                         alloy_rpc_types::Transaction,
                         alloy_rpc_types::Block,
                         alloy_rpc_types::Receipt,
+                        alloy_rpc_types::Header,
                     >::chain_id(&client)
                     .await
                 })?
