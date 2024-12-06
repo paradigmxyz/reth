@@ -489,12 +489,15 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.all_transactions.set_block_info(block_info);
 
         // Remove all transaction that were included in the block
+        let mut removed_txs_count = 0;
         for tx_hash in &mined_transactions {
             if self.prune_transaction_by_hash(tx_hash).is_some() {
-                // Update removed transactions metric
-                self.metrics.removed_transactions.increment(1);
+                removed_txs_count += 1;
             }
         }
+
+        // Update removed transactions metric
+        self.metrics.removed_transactions.increment(removed_txs_count);
 
         let UpdateOutcome { promoted, discarded } = self.update_accounts(changed_senders);
 
