@@ -7569,6 +7569,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-ethereum-primitives"
+version = "1.1.2"
+
+[[package]]
 name = "reth-etl"
 version = "1.1.2"
 dependencies = [
