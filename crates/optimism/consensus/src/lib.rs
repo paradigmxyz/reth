@@ -138,9 +138,8 @@ impl HeaderValidator for OpBeaconConsensus {
         }
 
         // ensure that the blob gas fields for this block
-        if self.chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
-            validate_against_parent_blob_fields(header.header(), parent.header())?;
-        }
+        validate_against_parent_blob_fields(header.header(), parent.header())?;
+
 
         Ok(())
     }
