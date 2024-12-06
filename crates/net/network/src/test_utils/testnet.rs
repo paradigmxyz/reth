@@ -10,7 +10,7 @@ use crate::{
 };
 use futures::{FutureExt, StreamExt};
 use pin_project::pin_project;
-use reth_chainspec::{Hardforks, MAINNET};
+use reth_chainspec::{ChainSpecProvider, Hardforks, MAINNET};
 use reth_eth_wire::{
     protocol::Protocol, DisconnectReason, EthNetworkPrimitives, HelloMessageWithProtocols,
 };
@@ -21,8 +21,9 @@ use reth_network_api::{
 };
 use reth_network_peers::PeerId;
 use reth_primitives::{PooledTransactionsElement, TransactionSigned};
-use reth_provider::{test_utils::NoopProvider, ChainSpecProvider};
-use reth_storage_api::{BlockReader, BlockReaderIdExt, HeaderProvider, StateProviderFactory};
+use reth_storage_api::{
+    noop::NoopProvider, BlockReader, BlockReaderIdExt, HeaderProvider, StateProviderFactory,
+};
 use reth_tasks::TokioTaskExecutor;
 use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
