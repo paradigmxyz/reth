@@ -181,46 +181,36 @@ impl Drop for StateHookSender {
     }
 }
 
-/// Extension trait for `HashedPostState` to provide conversion functionality
-trait HashedPostStateExt {
-    /// Convert an `EvmState` into a `HashedPostState`
-    fn from_evm_state(update: EvmState) -> HashedPostState;
-}
+fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
+    let mut hashed_state = HashedPostState::default();
 
-impl HashedPostStateExt for HashedPostState {
-    fn from_evm_state(update: EvmState) -> Self {
-        let mut hashed_state = Self::default();
+    for (address, account) in update {
+        if account.is_touched() {
+            let hashed_address = keccak256(address);
+            trace!(target: "engine::root", ?address, ?hashed_address, "Adding account to state update");
 
-        for (address, account) in update {
-            if account.is_touched() {
-                let hashed_address = keccak256(address);
-                trace!(target: "engine::root", ?address, ?hashed_address, "Adding account to state update");
+            let destroyed = account.is_selfdestructed();
+            let info = if destroyed { None } else { Some(account.info.into()) };
+            hashed_state.accounts.insert(hashed_address, info);
 
-                let destroyed = account.is_selfdestructed();
-                let info = if destroyed { None } else { Some(account.info.into()) };
-                hashed_state.accounts.insert(hashed_address, info);
+            let mut changed_storage_iter = account
+                .storage
+                .into_iter()
+                .filter_map(|(slot, value)| {
+                    value.is_changed().then(|| (keccak256(B256::from(slot)), value.present_value))
+                })
+                .peekable();
 
-                let mut changed_storage_iter = account
-                    .storage
-                    .into_iter()
-                    .filter_map(|(slot, value)| {
-                        value
-                            .is_changed()
-                            .then(|| (keccak256(B256::from(slot)), value.present_value))
-                    })
-                    .peekable();
-
-                if destroyed || changed_storage_iter.peek().is_some() {
-                    hashed_state.storages.insert(
-                        hashed_address,
-                        HashedStorage::from_iter(destroyed, changed_storage_iter),
-                    );
-                }
+            if destroyed || changed_storage_iter.peek().is_some() {
+                hashed_state.storages.insert(
+                    hashed_address,
+                    HashedStorage::from_iter(destroyed, changed_storage_iter),
+                );
             }
         }
-
-        hashed_state
     }
+
+    hashed_state
 }
 
 /// Standalone task that receives a transaction state stream and updates relevant
@@ -300,7 +290,7 @@ where
         proof_sequence_number: u64,
         state_root_message_sender: Sender<StateRootMessage>,
     ) {
-        let hashed_state_update = HashedPostState::from_evm_state(update);
+        let hashed_state_update = evm_state_to_hashed_post_state(update);
 
         let proof_targets = get_proof_targets(&hashed_state_update, fetched_proof_targets);
         for (address, slots) in &proof_targets {
@@ -712,7 +702,7 @@ mod tests {
         }
 
         for update in &state_updates {
-            hashed_state.extend(HashedPostState::from_evm_state(update.clone()));
+            hashed_state.extend(evm_state_to_hashed_post_state(update.clone()));
 
             for (address, account) in update {
                 let storage: HashMap<B256, U256> = account
