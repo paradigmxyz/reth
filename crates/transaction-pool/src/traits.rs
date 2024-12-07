@@ -1267,7 +1267,8 @@ impl PoolTransaction for EthPooledTransaction {
         tx: RecoveredTx<Self::Consensus>,
     ) -> Result<RecoveredTx<Self::Pooled>, Self::TryFromConsensusError> {
         let (tx, signer) = tx.to_components();
-        let pooled = PooledTransactionsElement::try_from_broadcast(tx)
+        let pooled = tx
+            .try_into_pooled()
             .map_err(|_| TryFromRecoveredTransactionError::BlobSidecarMissing)?;
         Ok(RecoveredTx::from_signed_transaction(pooled, signer))
     }
