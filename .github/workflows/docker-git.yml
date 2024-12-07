@@ -9,11 +9,7 @@ on:
 
 env:
   REPO_NAME: ${{ github.repository_owner }}/reth
-  IMAGE_NAME: ${{ github.repository_owner }}/reth
-  OP_IMAGE_NAME: ${{ github.repository_owner }}/op-reth
   CARGO_TERM_COLOR: always
-  DOCKER_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/reth
-  OP_DOCKER_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/op-reth
   DOCKER_USERNAME: ${{ github.actor }}
   GIT_SHA: ${{ github.sha }}
 
@@ -24,12 +20,26 @@ jobs:
     permissions:
       packages: write
       contents: read
+    strategy:
+      matrix:
+        image-name:
+          - reth
+          - op-reth
+        include:
+          - image-name: reth
+            docker_image_name: ghcr.io/${{ github.repository_owner }}/reth
+            make_target: docker-build-push-git-sha
+          - image-name: op-reth
+            docker_image_name: ghcr.io/${{ github.repository_owner }}/op-reth
+            make_target: op-docker-build-push-git-sha
+
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+          key: ${{ matrix.image-name }}
       - uses: taiki-e/install-action@cross
       - name: Log in to Docker
         run: |
@@ -38,7 +48,6 @@ jobs:
         run: |
           docker run --privileged --rm tonistiigi/binfmt --install arm64,amd64
           docker buildx create --use --name cross-builder
-      - name: Build and push the git-sha-tagged reth image
-        run: make PROFILE=maxperf GIT_SHA=$GIT_SHA docker-build-push-git-sha
-      - name: Build and push the git-sha-tagged op-reth image
-        run: make IMAGE_NAME=$OP_IMAGE_NAME DOCKER_IMAGE_NAME=$OP_DOCKER_IMAGE_NAME GIT_SHA=$GIT_SHA PROFILE=maxperf op-docker-build-push-git-sha
+      - name: Build and push the git-sha-tagged ${{ matrix.image-name }} image
+        run: |
+          CI=true make IMAGE_NAME=${{ matrix.image-name }} DOCKER_IMAGE_NAME=${{ matrix.docker_image_name }} GIT_SHA=$GIT_SHA PROFILE=maxperf ${{ matrix.make_target }}
