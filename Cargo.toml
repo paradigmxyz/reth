@@ -432,7 +432,7 @@ revm-primitives = { version = "14.0.0", default-features = false }
 alloy-chains = { version = "0.1.32", default-features = false }
 alloy-dyn-abi = "0.8.11"
 alloy-primitives = { version = "0.8.11", default-features = false }
-alloy-rlp = { version = "0.3.4", default-features = false }
+alloy-rlp = { version = "0.3.10", default-features = false }
 alloy-sol-types = "0.8.11"
 alloy-trie = { version = "0.7", default-features = false }
 
