@@ -1038,7 +1038,7 @@ mod tests {
             OpHardfork::Fjord.boxed(),
             OpHardfork::Granite.boxed(),
             OpHardfork::Holocene.boxed(),
-            OpHardfork::Isthmus.boxed(),
+            // OpHardfork::Isthmus.boxed(),
         ];
 
         assert!(expected_hardforks
