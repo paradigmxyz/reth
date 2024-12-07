@@ -18,7 +18,9 @@ use reth_primitives::{
     SealedBlockWithSenders, SealedHeader, Transaction, TransactionSigned,
 };
 use reth_storage_api::NodePrimitivesProvider;
-use reth_trie::{root::state_root_unhashed, updates::TrieUpdates, HashedPostState};
+use reth_trie::{
+    root::state_root_unhashed, updates::TrieUpdates, AccountWithStorageRoot, HashedPostState,
+};
 use revm::{db::BundleState, primitives::AccountInfo};
 use std::{
     collections::HashMap,
@@ -147,12 +149,13 @@ impl TestBlockBuilder {
             beneficiary: Address::random(),
             state_root: state_root_unhashed(HashMap::from([(
                 self.signer,
-                (
+                AccountWithStorageRoot(
                     AccountInfo {
                         balance: initial_signer_balance - signer_balance_decrease,
                         nonce: num_txs,
                         ..Default::default()
-                    },
+                    }
+                    .into(),
                     EMPTY_ROOT_HASH,
                 ),
             )])),

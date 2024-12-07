@@ -1,9 +1,12 @@
+#[cfg(feature = "metrics")]
+use crate::metrics::ParallelStateRootMetrics;
 use crate::{root::ParallelStateRootError, stats::ParallelTrieTracker, StorageRootTargets};
 use alloy_primitives::{
     map::{HashMap, HashSet},
     B256,
 };
 use alloy_rlp::{BufMut, Encodable};
+use alloy_trie::TrieAccount;
 use itertools::Itertools;
 use reth_db::DatabaseError;
 use reth_execution_errors::StorageRootError;
@@ -18,15 +21,12 @@ use reth_trie::{
     proof::StorageProof,
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     walker::TrieWalker,
-    HashBuilder, MultiProof, Nibbles, TrieAccount, TrieInput, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    HashBuilder, MultiProof, Nibbles, TrieInput, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-use reth_trie_common::proof::ProofRetainer;
+use reth_trie_common::{proof::ProofRetainer, AccountWithStorageRoot};
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::sync::Arc;
 use tracing::{debug, error};
-
-#[cfg(feature = "metrics")]
-use crate::metrics::ParallelStateRootMetrics;
 
 /// TODO:
 #[derive(Debug)]
@@ -217,7 +217,8 @@ where
 
                     // Encode account
                     account_rlp.clear();
-                    let account = TrieAccount::from((account, storage_multiproof.root));
+                    let account =
+                        TrieAccount::from(AccountWithStorageRoot(account, storage_multiproof.root));
                     account.encode(&mut account_rlp as &mut dyn BufMut);
 
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);

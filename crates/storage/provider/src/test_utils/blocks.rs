@@ -15,7 +15,10 @@ use reth_primitives::{
     Account, BlockBody, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, Transaction,
     TransactionSigned, TxType,
 };
-use reth_trie::root::{state_root_unhashed, storage_root_unhashed};
+use reth_trie::{
+    root::{state_root_unhashed, storage_root_unhashed},
+    AccountWithStorageRoot,
+};
 use revm::{db::BundleState, primitives::AccountInfo};
 use std::{str::FromStr, sync::LazyLock};
 
@@ -168,19 +171,14 @@ fn bundle_state_root(execution_outcome: &ExecutionOutcome) -> B256 {
     state_root_unhashed(execution_outcome.bundle_accounts_iter().filter_map(
         |(address, account)| {
             account.info.as_ref().map(|info| {
-                (
-                    address,
-                    (
-                        Into::<Account>::into(info),
-                        storage_root_unhashed(
-                            account
-                                .storage
-                                .iter()
-                                .filter(|(_, value)| !value.present_value.is_zero())
-                                .map(|(slot, value)| ((*slot).into(), value.present_value)),
-                        ),
-                    ),
-                )
+                let storage_root = storage_root_unhashed(
+                    account
+                        .storage
+                        .iter()
+                        .filter(|(_, value)| !value.present_value.is_zero())
+                        .map(|(slot, value)| ((*slot).into(), value.present_value)),
+                );
+                (address, AccountWithStorageRoot(Into::<Account>::into(info), storage_root))
             })
         },
     ))

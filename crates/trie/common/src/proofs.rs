@@ -1,6 +1,6 @@
 //! Merkle trie proofs.
 
-use crate::{Nibbles, TrieAccount};
+use crate::{account::AccountWithStorageRoot, Nibbles};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
     keccak256,
@@ -11,7 +11,7 @@ use alloy_rlp::{encode_fixed_size, Decodable, EMPTY_STRING_CODE};
 use alloy_trie::{
     nodes::TrieNode,
     proof::{verify_proof, ProofNodes, ProofVerificationError},
-    TrieMask, EMPTY_ROOT_HASH,
+    TrieAccount, TrieMask, EMPTY_ROOT_HASH,
 };
 use itertools::Itertools;
 use reth_primitives_traits::Account;
@@ -255,7 +255,7 @@ impl AccountProof {
         let expected = if self.info.is_none() && self.storage_root == EMPTY_ROOT_HASH {
             None
         } else {
-            Some(alloy_rlp::encode(TrieAccount::from((
+            Some(alloy_rlp::encode(TrieAccount::from(AccountWithStorageRoot(
                 self.info.unwrap_or_default(),
                 self.storage_root,
             ))))

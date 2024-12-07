@@ -954,9 +954,8 @@ mod tests {
     use alloy_chains::Chain;
     use alloy_genesis::{ChainConfig, GenesisAccount};
     use alloy_primitives::{b256, hex};
-    use alloy_trie::EMPTY_ROOT_HASH;
+    use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
     use reth_ethereum_forks::{ForkCondition, ForkHash, ForkId, Head};
-    use reth_trie_common::TrieAccount;
 
     use super::*;
 
