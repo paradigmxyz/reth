@@ -17,8 +17,10 @@ use jsonrpsee::{
 };
 use reth_network_api::NetworkInfo;
 use reth_primitives::NodePrimitives;
-use reth_provider::{BlockReader, CanonStateSubscriptions, EvmEnvProvider};
-use reth_rpc_eth_api::{pubsub::EthPubSubApiServer, TransactionCompat};
+use reth_provider::{BlockNumReader, CanonStateSubscriptions};
+use reth_rpc_eth_api::{
+    pubsub::EthPubSubApiServer, EthApiTypes, RpcNodeCore, RpcTransaction, TransactionCompat,
+};
 use reth_rpc_eth_types::logs_utils;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
 use reth_rpc_types_compat::transaction::from_recovered;
@@ -35,67 +37,47 @@ use tracing::error;
 ///
 /// This handles `eth_subscribe` RPC calls.
 #[derive(Clone)]
-pub struct EthPubSub<Provider, Pool, Events, Network, Eth> {
+pub struct EthPubSub<Eth, Events> {
     /// All nested fields bundled together.
-    inner: Arc<EthPubSubInner<Provider, Pool, Events, Network>>,
+    inner: Arc<EthPubSubInner<Eth, Events>>,
     /// The type that's used to spawn subscription tasks.
     subscription_task_spawner: Box<dyn TaskSpawner>,
-    tx_resp_builder: Eth,
 }
 
 // === impl EthPubSub ===
 
-impl<Provider, Pool, Events, Network, Eth> EthPubSub<Provider, Pool, Events, Network, Eth> {
+impl<Eth, Events> EthPubSub<Eth, Events> {
     /// Creates a new, shareable instance.
     ///
     /// Subscription tasks are spawned via [`tokio::task::spawn`]
-    pub fn new(
-        provider: Provider,
-        pool: Pool,
-        chain_events: Events,
-        network: Network,
-        tx_resp_builder: Eth,
-    ) -> Self {
-        Self::with_spawner(
-            provider,
-            pool,
-            chain_events,
-            network,
-            Box::<TokioTaskExecutor>::default(),
-            tx_resp_builder,
-        )
+    pub fn new(eth_api: Eth, chain_events: Events) -> Self {
+        Self::with_spawner(eth_api, chain_events, Box::<TokioTaskExecutor>::default())
     }
 
     /// Creates a new, shareable instance.
     pub fn with_spawner(
-        provider: Provider,
-        pool: Pool,
+        eth_api: Eth,
         chain_events: Events,
-        network: Network,
         subscription_task_spawner: Box<dyn TaskSpawner>,
-        tx_resp_builder: Eth,
     ) -> Self {
-        let inner = EthPubSubInner { provider, pool, chain_events, network };
-        Self { inner: Arc::new(inner), subscription_task_spawner, tx_resp_builder }
+        let inner = EthPubSubInner { eth_api, chain_events };
+        Self { inner: Arc::new(inner), subscription_task_spawner }
     }
 }
 
 #[async_trait::async_trait]
-impl<Provider, Pool, Events, Network, Eth> EthPubSubApiServer<Eth::Transaction>
-    for EthPubSub<Provider, Pool, Events, Network, Eth>
+impl<Eth, Events> EthPubSubApiServer<RpcTransaction<Eth::NetworkTypes>> for EthPubSub<Eth, Events>
 where
-    Provider: BlockReader + EvmEnvProvider + Clone + 'static,
-    Pool: TransactionPool + 'static,
     Events: CanonStateSubscriptions<
             Primitives: NodePrimitives<
-                SignedTx: Encodable2718,
                 BlockHeader = reth_primitives::Header,
                 Receipt = reth_primitives::Receipt,
             >,
         > + Clone
         + 'static,
-    Network: NetworkInfo + Clone + 'static,
-    Eth: TransactionCompat<PoolConsensusTx<Pool>> + 'static,
+    Eth: RpcNodeCore<Provider: BlockNumReader, Pool: TransactionPool, Network: NetworkInfo>
+        + EthApiTypes<TransactionCompat: TransactionCompat<PoolConsensusTx<Eth::Pool>>>
+        + 'static,
 {
     /// Handler for `eth_subscribe`
     async fn subscribe(
@@ -106,9 +88,8 @@ where
     ) -> jsonrpsee::core::SubscriptionResult {
         let sink = pending.accept().await?;
         let pubsub = self.inner.clone();
-        let resp_builder = self.tx_resp_builder.clone();
         self.subscription_task_spawner.spawn(Box::pin(async move {
-            let _ = handle_accepted(pubsub, sink, kind, params, resp_builder).await;
+            let _ = handle_accepted(pubsub, sink, kind, params).await;
         }));
 
         Ok(())
@@ -116,16 +97,13 @@ where
 }
 
 /// The actual handler for an accepted [`EthPubSub::subscribe`] call.
-async fn handle_accepted<Provider, Pool, Events, Network, Eth>(
-    pubsub: Arc<EthPubSubInner<Provider, Pool, Events, Network>>,
+async fn handle_accepted<Eth, Events>(
+    pubsub: Arc<EthPubSubInner<Eth, Events>>,
     accepted_sink: SubscriptionSink,
     kind: SubscriptionKind,
     params: Option<Params>,
-    tx_resp_builder: Eth,
 ) -> Result<(), ErrorObject<'static>>
 where
-    Provider: BlockReader + EvmEnvProvider + Clone + 'static,
-    Pool: TransactionPool + 'static,
     Events: CanonStateSubscriptions<
             Primitives: NodePrimitives<
                 SignedTx: Encodable2718,
@@ -134,8 +112,8 @@ where
             >,
         > + Clone
         + 'static,
-    Network: NetworkInfo + Clone + 'static,
-    Eth: TransactionCompat<PoolConsensusTx<Pool>>,
+    Eth: RpcNodeCore<Provider: BlockNumReader, Pool: TransactionPool, Network: NetworkInfo>
+        + EthApiTypes<TransactionCompat: TransactionCompat<PoolConsensusTx<Eth::Pool>>>,
 {
     match kind {
         SubscriptionKind::NewHeads => {
@@ -166,7 +144,7 @@ where
                         let stream = pubsub.full_pending_transaction_stream().filter_map(|tx| {
                             let tx_value = match from_recovered(
                                 tx.transaction.to_consensus(),
-                                &tx_resp_builder,
+                                pubsub.eth_api.tx_resp_builder(),
                             ) {
                                 Ok(tx) => {
                                     Some(EthSubscriptionResult::FullTransaction(Box::new(tx)))
@@ -204,7 +182,7 @@ where
             let mut canon_state =
                 BroadcastStream::new(pubsub.chain_events.subscribe_to_canonical_state());
             // get current sync status
-            let mut initial_sync_status = pubsub.network.is_syncing();
+            let mut initial_sync_status = pubsub.eth_api.network().is_syncing();
             let current_sub_res = pubsub.sync_status(initial_sync_status);
 
             // send the current status immediately
@@ -215,7 +193,7 @@ where
             }
 
             while canon_state.next().await.is_some() {
-                let current_syncing = pubsub.network.is_syncing();
+                let current_syncing = pubsub.eth_api.network().is_syncing();
                 // Only send a new response if the sync status has changed
                 if current_syncing != initial_sync_status {
                     // Update the sync status on each new block
@@ -285,9 +263,7 @@ where
     }
 }
 
-impl<Provider, Pool, Events, Network, Eth> std::fmt::Debug
-    for EthPubSub<Provider, Pool, Events, Network, Eth>
-{
+impl<Eth, Events> std::fmt::Debug for EthPubSub<Eth, Events> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EthPubSub").finish_non_exhaustive()
     }
@@ -295,28 +271,28 @@ impl<Provider, Pool, Events, Network, Eth> std::fmt::Debug
 
 /// Container type `EthPubSub`
 #[derive(Clone)]
-struct EthPubSubInner<Provider, Pool, Events, Network> {
-    /// The transaction pool.
-    pool: Pool,
-    /// The provider that can interact with the chain.
-    provider: Provider,
+struct EthPubSubInner<EthApi, Events> {
+    /// The `eth` API.
+    eth_api: EthApi,
     /// A type that allows to create new event subscriptions.
     chain_events: Events,
-    /// The network.
-    network: Network,
 }
 
 // == impl EthPubSubInner ===
 
-impl<Provider, Pool, Events, Network> EthPubSubInner<Provider, Pool, Events, Network>
+impl<Eth, Events> EthPubSubInner<Eth, Events>
 where
-    Provider: BlockReader + 'static,
+    Eth: RpcNodeCore<Provider: BlockNumReader>,
 {
     /// Returns the current sync status for the `syncing` subscription
     fn sync_status(&self, is_syncing: bool) -> EthSubscriptionResult {
         if is_syncing {
-            let current_block =
-                self.provider.chain_info().map(|info| info.best_number).unwrap_or_default();
+            let current_block = self
+                .eth_api
+                .provider()
+                .chain_info()
+                .map(|info| info.best_number)
+                .unwrap_or_default();
             EthSubscriptionResult::SyncState(PubSubSyncStatus::Detailed(SyncStatusMetadata {
                 syncing: true,
                 starting_block: 0,
@@ -329,35 +305,31 @@ where
     }
 }
 
-impl<Provider, Pool, Events, Network> EthPubSubInner<Provider, Pool, Events, Network>
+impl<Eth, Events> EthPubSubInner<Eth, Events>
 where
-    Pool: TransactionPool + 'static,
+    Eth: RpcNodeCore<Pool: TransactionPool>,
 {
     /// Returns a stream that yields all transaction hashes emitted by the txpool.
     fn pending_transaction_hashes_stream(&self) -> impl Stream<Item = TxHash> {
-        ReceiverStream::new(self.pool.pending_transactions_listener())
+        ReceiverStream::new(self.eth_api.pool().pending_transactions_listener())
     }
 
     /// Returns a stream that yields all transactions emitted by the txpool.
     fn full_pending_transaction_stream(
         &self,
-    ) -> impl Stream<Item = NewTransactionEvent<<Pool as TransactionPool>::Transaction>> {
-        self.pool.new_pending_pool_transactions_listener()
+    ) -> impl Stream<Item = NewTransactionEvent<<Eth::Pool as TransactionPool>::Transaction>> {
+        self.eth_api.pool().new_pending_pool_transactions_listener()
     }
 }
 
-impl<Provider, Pool, Events, Network> EthPubSubInner<Provider, Pool, Events, Network>
+impl<Eth, Events> EthPubSubInner<Eth, Events>
 where
-    Provider: BlockReader + EvmEnvProvider + 'static,
     Events: CanonStateSubscriptions<
-            Primitives: NodePrimitives<
-                SignedTx: Encodable2718,
-                BlockHeader = reth_primitives::Header,
-                Receipt = reth_primitives::Receipt,
-            >,
-        > + 'static,
-    Network: NetworkInfo + 'static,
-    Pool: 'static,
+        Primitives: NodePrimitives<
+            BlockHeader = reth_primitives::Header,
+            Receipt = reth_primitives::Receipt,
+        >,
+    >,
 {
     /// Returns a stream that yields all new RPC blocks.
     fn new_headers_stream(&self) -> impl Stream<Item = Header> {
