@@ -10,10 +10,10 @@ use reth_network_p2p::bodies::response::BlockResponse;
 use reth_primitives::{Block, BlockBody, SealedBlock, SealedHeader};
 use std::collections::HashMap;
 
-pub(crate) fn zip_blocks<'a>(
-    headers: impl Iterator<Item = &'a SealedHeader>,
-    bodies: &mut HashMap<B256, BlockBody>,
-) -> Vec<BlockResponse> {
+pub(crate) fn zip_blocks<'a, H: Clone + BlockHeader + 'a, B>(
+    headers: impl Iterator<Item = &'a SealedHeader<H>>,
+    bodies: &mut HashMap<B256, B>,
+) -> Vec<BlockResponse<H, B>> {
     headers
         .into_iter()
         .map(|header| {
