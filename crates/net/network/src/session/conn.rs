@@ -7,8 +7,9 @@ use reth_eth_wire::{
     errors::EthStreamError,
     message::EthBroadcastMessage,
     multiplex::{ProtocolProxy, RlpxSatelliteStream},
-    EthMessage, EthNetworkPrimitives, EthStream, EthVersion, NetworkPrimitives, P2PStream,
+    EthMessage, EthNetworkPrimitives, EthStream, EthVersion, P2PStream,
 };
+use reth_primitives_traits::NetworkPrimitives;
 use std::{
     pin::Pin,
     task::{Context, Poll},

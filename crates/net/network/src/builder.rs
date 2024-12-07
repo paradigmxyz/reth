@@ -5,8 +5,9 @@ use crate::{
     transactions::{TransactionsManager, TransactionsManagerConfig},
     NetworkHandle, NetworkManager,
 };
-use reth_eth_wire::{EthNetworkPrimitives, NetworkPrimitives};
+use reth_eth_wire::EthNetworkPrimitives;
 use reth_network_api::test_utils::PeersHandleProvider;
+use reth_primitives_traits::NetworkPrimitives;
 use reth_transaction_pool::TransactionPool;
 use tokio::sync::mpsc;
 

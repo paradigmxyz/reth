@@ -11,9 +11,10 @@ use super::{
     GetNodeData, GetPooledTransactions, GetReceipts, NewBlock, NewPooledTransactionHashes66,
     NewPooledTransactionHashes68, NodeData, PooledTransactions, Receipts, Status, Transactions,
 };
-use crate::{EthNetworkPrimitives, EthVersion, NetworkPrimitives, SharedTransactions};
+use crate::{EthNetworkPrimitives, EthVersion, SharedTransactions};
 use alloy_primitives::bytes::{Buf, BufMut};
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
+use reth_primitives_traits::NetworkPrimitives;
 use std::{fmt::Debug, sync::Arc};
 
 /// [`MAX_MESSAGE_SIZE`] is the maximum cap on the size of a protocol message.

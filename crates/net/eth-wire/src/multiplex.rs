@@ -24,8 +24,8 @@ use crate::{
 };
 use bytes::{Bytes, BytesMut};
 use futures::{Sink, SinkExt, Stream, StreamExt, TryStream, TryStreamExt};
-use reth_eth_wire_types::NetworkPrimitives;
 use reth_ethereum_forks::ForkFilter;
+use reth_primitives_traits::NetworkPrimitives;
 use tokio::sync::{mpsc, mpsc::UnboundedSender};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 

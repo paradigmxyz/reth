@@ -3,13 +3,13 @@
 use reth_eth_wire_types::{
     message::RequestPair, BlockBodies, BlockHeaders, Capabilities, DisconnectReason, EthMessage,
     EthNetworkPrimitives, EthVersion, GetBlockBodies, GetBlockHeaders, GetNodeData,
-    GetPooledTransactions, GetReceipts, NetworkPrimitives, NodeData, PooledTransactions, Receipts,
-    Status,
+    GetPooledTransactions, GetReceipts, NodeData, PooledTransactions, Receipts, Status,
 };
 use reth_ethereum_forks::ForkId;
 use reth_network_p2p::error::{RequestError, RequestResult};
 use reth_network_peers::PeerId;
 use reth_network_types::PeerAddr;
+use reth_primitives_traits::NetworkPrimitives;
 use reth_tokio_util::EventStream;
 use std::{
     fmt,

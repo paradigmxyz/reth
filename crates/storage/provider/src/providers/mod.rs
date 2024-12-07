@@ -26,7 +26,8 @@ use reth_db::table::Value;
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_node_types::{
-    BlockTy, FullNodePrimitives, HeaderTy, NodeTypes, NodeTypesWithDB, ReceiptTy, TxTy,
+    BlockTy, FullNodePrimitives, HeaderTy, NetworkPrimitives, NodeTypes, NodeTypesWithDB,
+    ReceiptTy, TxTy,
 };
 use reth_primitives::{
     Account, BlockWithSenders, EthPrimitives, Receipt, SealedBlock, SealedBlockFor,
@@ -81,6 +82,7 @@ where
         ChainSpec: EthereumHardforks,
         Storage: ChainStorage<Self::Primitives>,
         Primitives: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
+        NetworkPrimitives: NetworkPrimitives,
     >,
 {
 }
@@ -90,6 +92,7 @@ impl<T> NodeTypesForProvider for T where
         ChainSpec: EthereumHardforks,
         Storage: ChainStorage<T::Primitives>,
         Primitives: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
+        NetworkPrimitives: NetworkPrimitives,
     >
 {
 }
@@ -100,6 +103,7 @@ where
     Self: NodeTypesForProvider + NodeTypesWithDB,
 {
 }
+
 impl<T> ProviderNodeTypes for T where T: NodeTypesForProvider + NodeTypesWithDB {}
 
 /// A helper trait with requirements for [`NodeTypesForProvider`] to be used within legacy

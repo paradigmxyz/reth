@@ -68,6 +68,8 @@ where
 {
     type Primitives = <N::Types as NodeTypes>::Primitives;
 
+    type NetworkPrimitives = <N::Types as NodeTypes>::NetworkPrimitives;
+
     type ChainSpec = <N::Types as NodeTypes>::ChainSpec;
 
     type StateCommitment = <N::Types as NodeTypes>::StateCommitment;

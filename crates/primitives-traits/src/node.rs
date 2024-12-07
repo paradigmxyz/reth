@@ -21,6 +21,7 @@ pub trait NodePrimitives:
     /// A receipt.
     type Receipt: Receipt;
 }
+
 /// Helper trait that sets trait bounds on [`NodePrimitives`].
 pub trait FullNodePrimitives
 where
