@@ -22,3 +22,5 @@ pub mod provider;
 
 /// Writer error
 pub mod writer;
+
+pub use provider::ProviderError;

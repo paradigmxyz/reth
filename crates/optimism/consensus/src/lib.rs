@@ -9,6 +9,8 @@
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
+use core::fmt;
+
 use alloy_consensus::{BlockHeader, Header, EMPTY_OMMER_ROOT_HASH};
 use alloy_primitives::{B64, U256};
 use reth_chainspec::EthereumHardforks;
@@ -23,8 +25,9 @@ use reth_consensus_common::validation::{
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_primitives::OpPrimitives;
+use reth_optimism_primitives::{predeploys::ADDRESS_L2_TO_L1_MESSAGE_PASSER, OpPrimitives};
 use reth_primitives::{BlockBody, BlockWithSenders, GotExpected, SealedBlock, SealedHeader};
+use reth_storage_api::{StateProviderFactory, StorageRootProvider};
 use std::{sync::Arc, time::SystemTime};
 use tracing::debug;
 
@@ -41,19 +44,23 @@ pub use validation::validate_block_post_execution;
 ///
 /// Provides basic checks as outlined in the execution specs.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OpBeaconConsensus {
+pub struct OpBeaconConsensus<P> {
     /// Configuration
     chain_spec: Arc<OpChainSpec>,
+    provider: P,
 }
 
-impl OpBeaconConsensus {
+impl<P> OpBeaconConsensus<P> {
     /// Create a new instance of [`OpBeaconConsensus`]
-    pub const fn new(chain_spec: Arc<OpChainSpec>) -> Self {
-        Self { chain_spec }
+    pub const fn new(chain_spec: Arc<OpChainSpec>, provider: P) -> Self {
+        Self { chain_spec, provider }
     }
 }
 
-impl FullConsensus<OpPrimitives> for OpBeaconConsensus {
+impl<P> FullConsensus<OpPrimitives> for OpBeaconConsensus<P>
+where
+    P: StateProviderFactory + fmt::Debug,
+{
     fn validate_block_post_execution(
         &self,
         block: &BlockWithSenders,
@@ -63,7 +70,10 @@ impl FullConsensus<OpPrimitives> for OpBeaconConsensus {
     }
 }
 
-impl Consensus for OpBeaconConsensus {
+impl<P> Consensus for OpBeaconConsensus<P>
+where
+    P: StateProviderFactory + fmt::Debug,
+{
     fn validate_body_against_header(
         &self,
         body: &BlockBody,
@@ -102,11 +112,52 @@ impl Consensus for OpBeaconConsensus {
             validate_cancun_gas(block)?;
         }
 
+        if self.chain_spec.is_isthmus_active_at_timestamp(block.timestamp) {
+            let storage_root_msg_passer = self
+                .provider
+                .latest()
+                .map_err(|err| {
+                    debug!(target: "op::consensus",
+                        block_number=block.number,
+                        err=%OpConsensusError::LoadStorageRootFailed(err),
+                        "failed to load latest state",
+                    );
+
+                    ConsensusError::Other
+                })?
+                .storage_root(ADDRESS_L2_TO_L1_MESSAGE_PASSER, Default::default())
+                .map_err(|err| {
+                    debug!(target: "op::consensus",
+                        block_number=block.number,
+                        err=%OpConsensusError::LoadStorageRootFailed(err),
+                        "failed to load storage root for L2toL1MessagePasser pre-deploy",
+                    );
+
+                    ConsensusError::Other
+                })?;
+
+            if block.withdrawals_root.is_none_or(|root| root != storage_root_msg_passer) {
+                debug!(target: "op::consensus",
+                    block_number=block.number,
+                    err=%OpConsensusError::StorageRootMismatch {
+                        got: block.withdrawals_root,
+                        expected: storage_root_msg_passer
+                    },
+                    "block failed validation",
+                );
+
+                return Err(ConsensusError::Other)
+            }
+        }
+
         Ok(())
     }
 }
 
-impl HeaderValidator for OpBeaconConsensus {
+impl<P> HeaderValidator for OpBeaconConsensus<P>
+where
+    P: Send + Sync + fmt::Debug,
+{
     fn validate_header(&self, header: &SealedHeader) -> Result<(), ConsensusError> {
         validate_header_gas(header.header())?;
         validate_header_base_fee(header.header(), &self.chain_spec)

@@ -7,7 +7,7 @@ use crate::{
 };
 use alloy_consensus::{Header, Transaction, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{eip4895::Withdrawals, merge::BEACON_NONCE};
-use alloy_primitives::{address, Address, Bytes, B256, U256};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_engine::PayloadId;
 use op_alloy_consensus::DepositTransaction;
@@ -20,6 +20,7 @@ use reth_execution_types::ExecutionOutcome;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_forks::OpHardforks;
+use reth_optimism_primitives::ADDRESS_L2_TO_L1_MESSAGE_PASSER;
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_payload_util::PayloadTransactions;
@@ -46,10 +47,6 @@ use revm::{
 };
 use std::{fmt::Display, sync::Arc};
 use tracing::{debug, trace, warn};
-
-/// The L2 contract `L2ToL1MessagePasser`, stores commitments to withdrawal transactions.
-pub const ADDRESS_PREDEPLOY_L2_TO_L1_MESSAGE_PASSER: Address =
-    address!("4200000000000000000000000000000000000016");
 
 /// Optimism's payload builder
 #[derive(Debug, Clone)]
@@ -344,7 +341,7 @@ where
         let storage_root_msg_passer = state
             .database
             .as_ref()
-            .storage_root(ADDRESS_PREDEPLOY_L2_TO_L1_MESSAGE_PASSER, Default::default())?;
+            .storage_root(ADDRESS_L2_TO_L1_MESSAGE_PASSER, Default::default())?;
 
         // withdrawals root field in block header is used for storage root of L2 predeploy
         let payload = ExecutedPayload { info, withdrawals_root: Some(storage_root_msg_passer) };

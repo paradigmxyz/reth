@@ -8363,6 +8363,7 @@ dependencies = [
  "reth-optimism-primitives",
  "reth-primitives",
  "reth-storage-api",
+ "reth-storage-errors",
  "reth-trie-common",
  "tracing",
 ]
@@ -8483,6 +8484,7 @@ dependencies = [
  "reth-optimism-consensus",
  "reth-optimism-evm",
  "reth-optimism-forks",
+ "reth-optimism-primitives",
  "reth-payload-builder",
  "reth-payload-builder-primitives",
  "reth-payload-primitives",
