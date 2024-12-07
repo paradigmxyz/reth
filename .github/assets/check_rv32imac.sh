@@ -8,6 +8,7 @@ crates_to_check=(
     reth-ethereum-primitives
     reth-primitives-traits
     reth-optimism-forks
+    reth-network-peers
     # reth-evm
     # reth-primitives
     # reth-optimism-chainspec
