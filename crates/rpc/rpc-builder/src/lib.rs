@@ -299,7 +299,6 @@ where
     >,
     BlockExecutor: BlockExecutorProvider<
         Primitives: NodePrimitives<
-            Block = reth_primitives::Block,
             BlockHeader = reth_primitives::Header,
             BlockBody = reth_primitives::BlockBody,
         >,
@@ -664,7 +663,6 @@ where
     >,
     BlockExecutor: BlockExecutorProvider<
         Primitives: NodePrimitives<
-            Block = reth_primitives::Block,
             BlockHeader = reth_primitives::Header,
             BlockBody = reth_primitives::BlockBody,
         >,
@@ -1350,7 +1348,6 @@ where
     >,
     BlockExecutor: BlockExecutorProvider<
         Primitives: NodePrimitives<
-            Block = reth_primitives::Block,
             BlockHeader = reth_primitives::Header,
             BlockBody = reth_primitives::BlockBody,
         >,
