@@ -208,7 +208,7 @@ use reth_primitives::NodePrimitives;
 use reth_provider::{
     AccountReader, BlockReader, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
     EvmEnvProvider, FullRpcProvider, ProviderBlock, ProviderHeader, ProviderReceipt,
-    ReceiptProvider, StateProviderFactory,
+    StateProviderFactory,
 };
 use reth_rpc::{
     AdminApi, DebugApi, EngineEthApi, EthBundle, MinerApi, NetApi, OtterscanApi, RPCApi, RethApi,
@@ -286,18 +286,19 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions<Primitives = BlockExecutor::Primitives> + Clone + 'static,
-    EvmConfig: ConfigureEvm<Header = alloy_consensus::Header>,
+    EvmConfig: ConfigureEvm<
+        Header = <BlockExecutor::Primitives as NodePrimitives>::BlockHeader,
+        Transaction = <BlockExecutor::Primitives as NodePrimitives>::SignedTx,
+    >,
     EthApi: FullEthApiServer<
         Provider: BlockReader<
-            Block = reth_primitives::Block,
-            Receipt = reth_primitives::Receipt,
-            Header = reth_primitives::Header,
+            Block = <BlockExecutor::Primitives as NodePrimitives>::Block,
+            Receipt = <BlockExecutor::Primitives as NodePrimitives>::Receipt,
+            Header = <BlockExecutor::Primitives as NodePrimitives>::BlockHeader,
         >,
     >,
     BlockExecutor: BlockExecutorProvider<
         Primitives: NodePrimitives<
-            Block = reth_primitives::Block,
-            Receipt = reth_primitives::Receipt,
             BlockHeader = reth_primitives::Header,
             BlockBody = reth_primitives::BlockBody,
         >,
@@ -647,16 +648,21 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig, BlockExecutor, Consensus
 impl<Provider, Pool, Network, Tasks, Events, EvmConfig, BlockExecutor, Consensus>
     RpcModuleBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig, BlockExecutor, Consensus>
 where
-    Provider: FullRpcProvider + AccountReader + ChangeSetReader,
+    Provider: FullRpcProvider<
+            Block = <Events::Primitives as NodePrimitives>::Block,
+            Receipt = <Events::Primitives as NodePrimitives>::Receipt,
+        > + AccountReader
+        + ChangeSetReader,
     Pool: TransactionPool + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions<Primitives = BlockExecutor::Primitives> + Clone + 'static,
-    EvmConfig: ConfigureEvm<Header = Header>,
+    EvmConfig: ConfigureEvm<
+        Header = <BlockExecutor::Primitives as NodePrimitives>::BlockHeader,
+        Transaction = <BlockExecutor::Primitives as NodePrimitives>::SignedTx,
+    >,
     BlockExecutor: BlockExecutorProvider<
         Primitives: NodePrimitives<
-            Block = reth_primitives::Block,
-            Receipt = reth_primitives::Receipt,
             BlockHeader = reth_primitives::Header,
             BlockBody = reth_primitives::BlockBody,
         >,
@@ -685,14 +691,10 @@ where
         EngineApi: EngineApiServer<EngineT>,
         EthApi: FullEthApiServer<
             Provider: BlockReader<
-                Block = reth_primitives::Block,
-                Receipt = reth_primitives::Receipt,
-                Header = reth_primitives::Header,
+                Block = <Events::Primitives as NodePrimitives>::Block,
+                Receipt = <Events::Primitives as NodePrimitives>::Receipt,
+                Header = <Events::Primitives as NodePrimitives>::BlockHeader,
             >,
-        >,
-        Provider: BlockReader<
-            Block = <Events::Primitives as NodePrimitives>::Block,
-            Receipt = <Events::Primitives as NodePrimitives>::Receipt,
         >,
     {
         let Self {
@@ -741,13 +743,16 @@ where
     /// use reth_evm::ConfigureEvm;
     /// use reth_evm_ethereum::execute::EthExecutorProvider;
     /// use reth_network_api::noop::NoopNetwork;
+    /// use reth_primitives::TransactionSigned;
     /// use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
     /// use reth_rpc::EthApi;
     /// use reth_rpc_builder::RpcModuleBuilder;
     /// use reth_tasks::TokioTaskExecutor;
     /// use reth_transaction_pool::noop::NoopTransactionPool;
     ///
-    /// fn init<Evm: ConfigureEvm<Header = Header> + 'static>(evm: Evm) {
+    /// fn init<Evm: ConfigureEvm<Header = Header, Transaction = TransactionSigned> + 'static>(
+    ///     evm: Evm,
+    /// ) {
     ///     let mut registry = RpcModuleBuilder::default()
     ///         .with_provider(NoopProvider::default())
     ///         .with_pool(NoopTransactionPool::default())
@@ -769,11 +774,6 @@ where
     ) -> RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
     where
         EthApi: EthApiTypes + 'static,
-        Provider: BlockReader<
-            Block = reth_primitives::Block,
-            Receipt = reth_primitives::Receipt,
-            Header = reth_primitives::Header,
-        >,
     {
         let Self {
             provider,
@@ -809,14 +809,10 @@ where
     where
         EthApi: FullEthApiServer<
             Provider: BlockReader<
-                Block = reth_primitives::Block,
-                Receipt = reth_primitives::Receipt,
-                Header = reth_primitives::Header,
+                Receipt = <Events::Primitives as NodePrimitives>::Receipt,
+                Block = <Events::Primitives as NodePrimitives>::Block,
+                Header = <Events::Primitives as NodePrimitives>::BlockHeader,
             >,
-        >,
-        Provider: BlockReader<
-            Block = <EthApi::Provider as BlockReader>::Block,
-            Receipt = <EthApi::Provider as ReceiptProvider>::Receipt,
         >,
         Pool: TransactionPool<Transaction = <EthApi::Pool as TransactionPool>::Transaction>,
     {
@@ -1155,8 +1151,7 @@ where
             RpcReceipt<EthApi::NetworkTypes>,
             RpcHeader<EthApi::NetworkTypes>,
         > + EthApiTypes,
-    BlockExecutor:
-        BlockExecutorProvider<Primitives: NodePrimitives<Block = reth_primitives::Block>>,
+    BlockExecutor: BlockExecutorProvider,
 {
     /// Register Eth Namespace
     ///
@@ -1190,17 +1185,8 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn register_debug(&mut self) -> &mut Self
     where
-        EthApi: EthApiSpec
-            + EthTransactions<
-                Provider: BlockReader<
-                    Block = reth_primitives::Block,
-                    Receipt = reth_primitives::Receipt,
-                >,
-            > + TraceExt,
-        Provider: BlockReader<
-            Block = <EthApi::Provider as BlockReader>::Block,
-            Receipt = <EthApi::Provider as ReceiptProvider>::Receipt,
-        >,
+        EthApi: EthApiSpec + EthTransactions + TraceExt,
+        BlockExecutor::Primitives: NodePrimitives<Block = ProviderBlock<EthApi::Provider>>,
     {
         let debug_api = self.debug_api();
         self.modules.insert(RethRpcModule::Debug, debug_api.into_rpc().into());
@@ -1303,8 +1289,7 @@ where
     pub fn debug_api(&self) -> DebugApi<EthApi, BlockExecutor>
     where
         EthApi: EthApiSpec + EthTransactions + TraceExt,
-        BlockExecutor:
-            BlockExecutorProvider<Primitives: NodePrimitives<Block = reth_primitives::Block>>,
+        BlockExecutor::Primitives: NodePrimitives<Block = ProviderBlock<EthApi::Provider>>,
     {
         DebugApi::new(
             self.eth_api().clone(),
@@ -1363,10 +1348,8 @@ where
     >,
     BlockExecutor: BlockExecutorProvider<
         Primitives: NodePrimitives<
-            Block = reth_primitives::Block,
             BlockHeader = reth_primitives::Header,
             BlockBody = reth_primitives::BlockBody,
-            Receipt = reth_primitives::Receipt,
         >,
     >,
     Consensus: reth_consensus::FullConsensus<BlockExecutor::Primitives> + Clone + 'static,
