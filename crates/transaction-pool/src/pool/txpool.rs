@@ -462,10 +462,12 @@ impl<T: TransactionOrdering> TxPool<T> {
         &mut self,
         changed_senders: FxHashMap<SenderId, SenderInfo>,
     ) -> UpdateOutcome<T::Transaction> {
-        // track changed accounts
-        self.sender_info.extend(changed_senders.clone());
         // Apply the state changes to the total set of transactions which triggers sub-pool updates.
-        let updates = self.all_transactions.update(changed_senders);
+        let updates = self.all_transactions.update(&changed_senders);
+
+        // track changed accounts
+        self.sender_info.extend(changed_senders);
+
         // Process the sub-pool updates
         let update = self.process_updates(updates);
         // update the metrics after the update
@@ -1183,7 +1185,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// that got transaction included in the block.
     pub(crate) fn update(
         &mut self,
-        changed_accounts: FxHashMap<SenderId, SenderInfo>,
+        changed_accounts: &FxHashMap<SenderId, SenderInfo>,
     ) -> Vec<PoolUpdate> {
         // pre-allocate a few updates
         let mut updates = Vec::with_capacity(64);
@@ -1240,7 +1242,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                     }
                 }
 
-                changed_balance = Some(info.balance);
+                changed_balance = Some(&info.balance);
             }
 
             // If there's a nonce gap, we can shortcircuit, because there's nothing to update yet.
@@ -1291,7 +1293,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
                 // If the account changed in the block, check the balance.
                 if let Some(changed_balance) = changed_balance {
-                    if cumulative_cost > changed_balance {
+                    if &cumulative_cost > changed_balance {
                         // sender lacks sufficient funds to pay for this transaction
                         tx.state.remove(TxState::ENOUGH_BALANCE);
                     } else {
