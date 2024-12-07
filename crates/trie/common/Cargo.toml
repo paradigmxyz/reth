@@ -19,8 +19,6 @@ alloy-trie.workspace = true
 alloy-consensus.workspace = true
 reth-primitives-traits.workspace = true
 reth-codecs.workspace = true
-revm-primitives.workspace = true
-alloy-genesis.workspace = true
 alloy-rpc-types-eth = { workspace = true, optional = true }
 alloy-serde = { workspace = true, optional = true }
 
@@ -40,6 +38,8 @@ plain_hasher = { version = "0.2", optional = true }
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 
 [dev-dependencies]
+revm-primitives.workspace = true
+alloy-genesis.workspace = true
 reth-primitives-traits = { workspace = true, features = ["serde"] }
 alloy-primitives = { workspace = true, features = ["getrandom"] }
 alloy-trie = { workspace = true, features = ["arbitrary", "serde"] }

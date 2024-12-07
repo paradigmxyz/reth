@@ -421,7 +421,7 @@ mod tests {
     use assert_matches::assert_matches;
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use reth_primitives_traits::Account;
-    use reth_trie::{updates::StorageTrieUpdates, HashBuilder, TrieAccount, EMPTY_ROOT_HASH};
+    use reth_trie::{updates::StorageTrieUpdates, HashBuilder, EMPTY_ROOT_HASH};
     use reth_trie_common::{proof::ProofRetainer, StorageMultiProof, TrieMask};
 
     #[test]
@@ -520,11 +520,12 @@ mod tests {
         let address_1 = b256!("1000000000000000000000000000000000000000000000000000000000000000");
         let address_path_1 = Nibbles::unpack(address_1);
         let account_1 = Account::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap();
-        let mut trie_account_1 = TrieAccount::from((account_1, storage_root));
+        let mut trie_account_1 = TrieAccount::from(AccountWithStorageRoot(account_1, storage_root));
         let address_2 = b256!("1100000000000000000000000000000000000000000000000000000000000000");
         let address_path_2 = Nibbles::unpack(address_2);
         let account_2 = Account::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap();
-        let mut trie_account_2 = TrieAccount::from((account_2, EMPTY_ROOT_HASH));
+        let mut trie_account_2 =
+            TrieAccount::from(AccountWithStorageRoot(account_2, EMPTY_ROOT_HASH));
 
         let mut hash_builder =
             HashBuilder::default().with_proof_retainer(ProofRetainer::from_iter([
@@ -577,7 +578,7 @@ mod tests {
         let address_3 = b256!("2000000000000000000000000000000000000000000000000000000000000000");
         let address_path_3 = Nibbles::unpack(address_3);
         let account_3 = Account { nonce: account_1.nonce + 1, ..account_1 };
-        let trie_account_3 = TrieAccount::from((account_3, EMPTY_ROOT_HASH));
+        let trie_account_3 = TrieAccount::from(AccountWithStorageRoot(account_3, EMPTY_ROOT_HASH));
 
         sparse.update_account_leaf(address_path_3, alloy_rlp::encode(trie_account_3)).unwrap();
 

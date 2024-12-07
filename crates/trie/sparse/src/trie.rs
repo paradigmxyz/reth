@@ -1222,6 +1222,7 @@ mod tests {
     use super::*;
     use alloy_primitives::{map::HashSet, U256};
     use alloy_rlp::Encodable;
+    use alloy_trie::TrieAccount;
     use assert_matches::assert_matches;
     use itertools::Itertools;
     use prop::sample::SizeRange;
@@ -1235,7 +1236,7 @@ mod tests {
         trie_cursor::noop::NoopAccountTrieCursor,
         updates::TrieUpdates,
         walker::TrieWalker,
-        BranchNode, ExtensionNode, HashedPostState, LeafNode, TrieAccount,
+        AccountWithStorageRoot, BranchNode, ExtensionNode, HashedPostState, LeafNode,
     };
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
@@ -1295,7 +1296,8 @@ mod tests {
                     hash_builder.add_branch(branch.key, branch.value, branch.children_are_in_trie);
                 }
                 TrieElement::Leaf(key, account) => {
-                    let account = TrieAccount::from((account, EMPTY_ROOT_HASH));
+                    let account =
+                        TrieAccount::from(AccountWithStorageRoot(account, EMPTY_ROOT_HASH));
                     account.encode(&mut account_rlp);
 
                     hash_builder.add_leaf(Nibbles::unpack(key), &account_rlp);
@@ -1375,7 +1377,8 @@ mod tests {
         let value = || Account::default();
         let value_encoded = || {
             let mut account_rlp = Vec::new();
-            TrieAccount::from((value(), EMPTY_ROOT_HASH)).encode(&mut account_rlp);
+            TrieAccount::from(AccountWithStorageRoot(value(), EMPTY_ROOT_HASH))
+                .encode(&mut account_rlp);
             account_rlp
         };
 
@@ -1400,7 +1403,8 @@ mod tests {
         let value = || Account::default();
         let value_encoded = || {
             let mut account_rlp = Vec::new();
-            TrieAccount::from((value(), EMPTY_ROOT_HASH)).encode(&mut account_rlp);
+            TrieAccount::from(AccountWithStorageRoot(value(), EMPTY_ROOT_HASH))
+                .encode(&mut account_rlp);
             account_rlp
         };
 
@@ -1429,7 +1433,8 @@ mod tests {
         let value = || Account::default();
         let value_encoded = || {
             let mut account_rlp = Vec::new();
-            TrieAccount::from((value(), EMPTY_ROOT_HASH)).encode(&mut account_rlp);
+            TrieAccount::from(AccountWithStorageRoot(value(), EMPTY_ROOT_HASH))
+                .encode(&mut account_rlp);
             account_rlp
         };
 
@@ -1466,7 +1471,8 @@ mod tests {
         let value = || Account::default();
         let value_encoded = || {
             let mut account_rlp = Vec::new();
-            TrieAccount::from((value(), EMPTY_ROOT_HASH)).encode(&mut account_rlp);
+            TrieAccount::from(AccountWithStorageRoot(value(), EMPTY_ROOT_HASH))
+                .encode(&mut account_rlp);
             account_rlp
         };
 
@@ -1498,13 +1504,15 @@ mod tests {
         let old_value = Account { nonce: 1, ..Default::default() };
         let old_value_encoded = {
             let mut account_rlp = Vec::new();
-            TrieAccount::from((old_value, EMPTY_ROOT_HASH)).encode(&mut account_rlp);
+            TrieAccount::from(AccountWithStorageRoot(old_value, EMPTY_ROOT_HASH))
+                .encode(&mut account_rlp);
             account_rlp
         };
         let new_value = Account { nonce: 2, ..Default::default() };
         let new_value_encoded = {
             let mut account_rlp = Vec::new();
-            TrieAccount::from((new_value, EMPTY_ROOT_HASH)).encode(&mut account_rlp);
+            TrieAccount::from(AccountWithStorageRoot(new_value, EMPTY_ROOT_HASH))
+                .encode(&mut account_rlp);
             account_rlp
         };
 
@@ -1866,7 +1874,8 @@ mod tests {
                 for (update, keys_to_delete) in updates {
                     // Insert state updates into the sparse trie and calculate the root
                     for (key, account) in update.clone() {
-                        let account = TrieAccount::from((account, EMPTY_ROOT_HASH));
+                        let account =
+                            TrieAccount::from(AccountWithStorageRoot(account, EMPTY_ROOT_HASH));
                         let mut account_rlp = Vec::new();
                         account.encode(&mut account_rlp);
                         sparse.update_leaf(key, account_rlp).unwrap();
@@ -1987,7 +1996,8 @@ mod tests {
         let value = || Account::default();
         let value_encoded = || {
             let mut account_rlp = Vec::new();
-            TrieAccount::from((value(), EMPTY_ROOT_HASH)).encode(&mut account_rlp);
+            TrieAccount::from(AccountWithStorageRoot(value(), EMPTY_ROOT_HASH))
+                .encode(&mut account_rlp);
             account_rlp
         };
 
@@ -2143,7 +2153,8 @@ mod tests {
         let value = || Account::default();
         let value_encoded = || {
             let mut account_rlp = Vec::new();
-            TrieAccount::from((value(), EMPTY_ROOT_HASH)).encode(&mut account_rlp);
+            TrieAccount::from(AccountWithStorageRoot(value(), EMPTY_ROOT_HASH))
+                .encode(&mut account_rlp);
             account_rlp
         };
 
@@ -2270,7 +2281,8 @@ mod tests {
         let value = || Account { bytecode_hash: Some(B256::repeat_byte(1)), ..Default::default() };
         let value_encoded = || {
             let mut account_rlp = Vec::new();
-            TrieAccount::from((value(), EMPTY_ROOT_HASH)).encode(&mut account_rlp);
+            TrieAccount::from(AccountWithStorageRoot(value(), EMPTY_ROOT_HASH))
+                .encode(&mut account_rlp);
             account_rlp
         };
 
