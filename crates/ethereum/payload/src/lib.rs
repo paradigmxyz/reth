@@ -91,7 +91,7 @@ where
 // Default implementation of [PayloadBuilder] for unit type
 impl<EvmConfig, Pool, Client> PayloadBuilder<Pool, Client> for EthereumPayloadBuilder<EvmConfig>
 where
-    EvmConfig: ConfigureEvm<Header = Header>,
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
 {
@@ -155,7 +155,7 @@ pub fn default_ethereum_payload<EvmConfig, Pool, Client, F>(
     best_txs: F,
 ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
 where
-    EvmConfig: ConfigureEvm<Header = Header>,
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,

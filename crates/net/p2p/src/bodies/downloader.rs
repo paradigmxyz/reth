@@ -5,7 +5,7 @@ use futures::Stream;
 use std::{fmt::Debug, ops::RangeInclusive};
 
 /// Body downloader return type.
-pub type BodyDownloaderResult<B> = DownloadResult<Vec<BlockResponse<B>>>;
+pub type BodyDownloaderResult<B> = DownloadResult<Vec<BlockResponse<alloy_consensus::Header, B>>>;
 
 /// A downloader capable of fetching and yielding block bodies from block headers.
 ///

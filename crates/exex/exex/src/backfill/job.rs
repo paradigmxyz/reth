@@ -25,7 +25,8 @@ pub(super) type BackfillJobResult<T> = Result<T, BlockExecutionError>;
 /// Backfill job started for a specific range.
 ///
 /// It implements [`Iterator`] that executes blocks in batches according to the provided thresholds
-/// and yields [`Chain`]
+/// and yields [`Chain`]. In other words, this iterator can yield multiple items for the given range
+/// depending on the configured thresholds.
 #[derive(Debug)]
 pub struct BackfillJob<E, P> {
     pub(crate) executor: E,

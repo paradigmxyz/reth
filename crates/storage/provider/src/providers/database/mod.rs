@@ -590,19 +590,6 @@ impl<N: ProviderNodeTypes> StageCheckpointReader for ProviderFactory<N> {
 }
 
 impl<N: ProviderNodeTypes> EvmEnvProvider<HeaderTy<N>> for ProviderFactory<N> {
-    fn fill_env_at<EvmConfig>(
-        &self,
-        cfg: &mut CfgEnvWithHandlerCfg,
-        block_env: &mut BlockEnv,
-        at: BlockHashOrNumber,
-        evm_config: EvmConfig,
-    ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
-    {
-        self.provider()?.fill_env_at(cfg, block_env, at, evm_config)
-    }
-
     fn fill_env_with_header<EvmConfig>(
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,

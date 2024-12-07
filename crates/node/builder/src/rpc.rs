@@ -19,7 +19,7 @@ use reth_node_core::{
 };
 use reth_payload_builder::PayloadStore;
 use reth_primitives::EthPrimitives;
-use reth_provider::providers::ProviderNodeTypes;
+use reth_provider::{providers::ProviderNodeTypes, BlockReader};
 use reth_rpc::{
     eth::{EthApiTypes, FullEthApiServer},
     EthApi,
@@ -408,7 +408,16 @@ where
         PayloadBuilder: PayloadBuilder<PayloadType = <N::Types as NodeTypesWithEngine>::Engine>,
         Pool: TransactionPool<Transaction = <EthApi::Pool as TransactionPool>::Transaction>,
     >,
-    EthApi: EthApiTypes + FullEthApiServer + AddDevSigners + Unpin + 'static,
+    EthApi: EthApiTypes
+        + FullEthApiServer<
+            Provider: BlockReader<
+                Block = reth_primitives::Block,
+                Receipt = reth_primitives::Receipt,
+                Header = reth_primitives::Header,
+            >,
+        > + AddDevSigners
+        + Unpin
+        + 'static,
     EV: EngineValidatorBuilder<N>,
 {
     /// Launches the RPC servers with the given context and an additional hook for extending
@@ -419,7 +428,7 @@ where
         ext: F,
     ) -> eyre::Result<RpcHandle<N, EthApi>>
     where
-        F: FnOnce(&mut TransportRpcModules) -> eyre::Result<()>,
+        F: FnOnce(&mut TransportRpcModules, &mut AuthRpcModule) -> eyre::Result<()>,
     {
         let Self { eth_api_builder, engine_validator_builder, hooks, _pd: _ } = self;
 
@@ -477,7 +486,7 @@ where
 
         let RpcHooks { on_rpc_started, extend_rpc_modules } = hooks;
 
-        ext(ctx.modules)?;
+        ext(ctx.modules, ctx.auth_module)?;
         extend_rpc_modules.extend_rpc_modules(ctx)?;
 
         let server_config = config.rpc.rpc_server_config();
@@ -531,13 +540,22 @@ where
         PayloadBuilder: PayloadBuilder<PayloadType = <N::Types as NodeTypesWithEngine>::Engine>,
         Pool: TransactionPool<Transaction = <EthApi::Pool as TransactionPool>::Transaction>,
     >,
-    EthApi: EthApiTypes + FullEthApiServer + AddDevSigners + Unpin + 'static,
+    EthApi: EthApiTypes
+        + FullEthApiServer<
+            Provider: BlockReader<
+                Block = reth_primitives::Block,
+                Receipt = reth_primitives::Receipt,
+                Header = reth_primitives::Header,
+            >,
+        > + AddDevSigners
+        + Unpin
+        + 'static,
     EV: EngineValidatorBuilder<N>,
 {
     type Handle = RpcHandle<N, EthApi>;
 
     async fn launch_add_ons(self, ctx: AddOnsContext<'_, N>) -> eyre::Result<Self::Handle> {
-        self.launch_add_ons_with(ctx, |_| Ok(())).await
+        self.launch_add_ons_with(ctx, |_, _| Ok(())).await
     }
 }
 

@@ -1,12 +1,17 @@
 //! Optimism payload builder implementation.
 
-use std::{fmt::Display, sync::Arc};
-
+use crate::{
+    config::OpBuilderConfig,
+    error::OpPayloadBuilderError,
+    payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
+};
 use alloy_consensus::{Header, Transaction, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{eip4895::Withdrawals, merge::BEACON_NONCE};
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_engine::PayloadId;
+use op_alloy_consensus::DepositTransaction;
+use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
@@ -26,9 +31,10 @@ use reth_provider::{
     HashedPostStateProvider, ProviderError, StateProofProvider, StateProviderFactory,
     StateRootProvider,
 };
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord};
 use reth_transaction_pool::{
-    noop::NoopTransactionPool, BestTransactionsAttributes, PoolTransaction, TransactionPool,
+    noop::NoopTransactionPool, pool::BestPayloadTransactions, BestTransactionsAttributes,
+    PoolTransaction, TransactionPool,
 };
 use revm::{
     db::{states::bundle_state::BundleRetention, State},
@@ -38,25 +44,19 @@ use revm::{
     },
     Database, DatabaseCommit,
 };
+use std::{fmt::Display, sync::Arc};
 use tracing::{debug, trace, warn};
 
-use crate::{
-    error::OpPayloadBuilderError,
-    payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
-};
-use op_alloy_consensus::DepositTransaction;
-use op_alloy_rpc_types_engine::OpPayloadAttributes;
-use reth_revm::witness::ExecutionWitnessRecord;
-use reth_transaction_pool::pool::BestPayloadTransactions;
-
 /// Optimism's payload builder
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct OpPayloadBuilder<EvmConfig, Txs = ()> {
     /// The rollup's compute pending block configuration option.
     // TODO(clabby): Implement this feature.
     pub compute_pending_block: bool,
     /// The type responsible for creating the evm.
     pub evm_config: EvmConfig,
+    /// Settings for the builder, e.g. DA settings.
+    pub config: OpBuilderConfig,
     /// The type responsible for yielding the best transactions for the payload if mempool
     /// transactions are allowed.
     pub best_transactions: Txs,
@@ -64,8 +64,15 @@ pub struct OpPayloadBuilder<EvmConfig, Txs = ()> {
 
 impl<EvmConfig> OpPayloadBuilder<EvmConfig> {
     /// `OpPayloadBuilder` constructor.
-    pub const fn new(evm_config: EvmConfig) -> Self {
-        Self { compute_pending_block: true, evm_config, best_transactions: () }
+    ///
+    /// Configures the builder with the default settings.
+    pub fn new(evm_config: EvmConfig) -> Self {
+        Self::with_builder_config(evm_config, Default::default())
+    }
+
+    /// Configures the builder with the given [`OpBuilderConfig`].
+    pub const fn with_builder_config(evm_config: EvmConfig, config: OpBuilderConfig) -> Self {
+        Self { compute_pending_block: true, evm_config, config, best_transactions: () }
     }
 }
 
@@ -82,8 +89,8 @@ impl<EvmConfig, Txs> OpPayloadBuilder<EvmConfig, Txs> {
         self,
         best_transactions: T,
     ) -> OpPayloadBuilder<EvmConfig, T> {
-        let Self { compute_pending_block, evm_config, .. } = self;
-        OpPayloadBuilder { compute_pending_block, evm_config, best_transactions }
+        let Self { compute_pending_block, evm_config, config, .. } = self;
+        OpPayloadBuilder { compute_pending_block, evm_config, best_transactions, config }
     }
 
     /// Enables the rollup's compute pending block configuration option.
@@ -98,7 +105,7 @@ impl<EvmConfig, Txs> OpPayloadBuilder<EvmConfig, Txs> {
 }
 impl<EvmConfig, Txs> OpPayloadBuilder<EvmConfig, Txs>
 where
-    EvmConfig: ConfigureEvm<Header = Header>,
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
     Txs: OpPayloadTransactions,
 {
     /// Constructs an Optimism payload from the transactions sent via the
@@ -155,7 +162,7 @@ where
 
 impl<EvmConfig, Txs> OpPayloadBuilder<EvmConfig, Txs>
 where
-    EvmConfig: ConfigureEvm<Header = Header>,
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
 {
     /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the targeted payload
     /// (that has the `parent` as its parent).
@@ -217,7 +224,7 @@ impl<Pool, Client, EvmConfig, Txs> PayloadBuilder<Pool, Client> for OpPayloadBui
 where
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
-    EvmConfig: ConfigureEvm<Header = Header>,
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
     Txs: OpPayloadTransactions,
 {
     type Attributes = OpPayloadBuilderAttributes;
@@ -294,7 +301,7 @@ where
         ctx: &OpPayloadBuilderCtx<EvmConfig>,
     ) -> Result<BuildOutcomeKind<ExecutedPayload>, PayloadBuilderError>
     where
-        EvmConfig: ConfigureEvm<Header = Header>,
+        EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
         DB: Database<Error = ProviderError>,
     {
         let Self { pool, best } = self;
@@ -339,7 +346,7 @@ where
         ctx: OpPayloadBuilderCtx<EvmConfig>,
     ) -> Result<BuildOutcomeKind<OpBuiltPayload>, PayloadBuilderError>
     where
-        EvmConfig: ConfigureEvm<Header = Header>,
+        EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
         DB: Database<Error = ProviderError> + AsRef<P>,
         P: StateRootProvider + HashedPostStateProvider,
     {
@@ -465,7 +472,7 @@ where
         ctx: &OpPayloadBuilderCtx<EvmConfig>,
     ) -> Result<ExecutionWitness, PayloadBuilderError>
     where
-        EvmConfig: ConfigureEvm<Header = Header>,
+        EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
         DB: Database<Error = ProviderError> + AsRef<P>,
         P: StateProofProvider,
     {
@@ -700,7 +707,7 @@ impl<EvmConfig> OpPayloadBuilderCtx<EvmConfig> {
 
 impl<EvmConfig> OpPayloadBuilderCtx<EvmConfig>
 where
-    EvmConfig: ConfigureEvm<Header = Header>,
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
 {
     /// apply eip-4788 pre block contract call
     pub fn apply_pre_beacon_root_contract_call<DB>(

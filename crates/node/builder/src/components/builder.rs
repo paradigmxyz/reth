@@ -377,7 +377,7 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
         + 'static,
-    EVM: ConfigureEvm<Header = HeaderTy<Node::Types>>,
+    EVM: ConfigureEvm<Header = HeaderTy<Node::Types>, Transaction = TxTy<Node::Types>>,
     Executor: BlockExecutorProvider<Primitives = <Node::Types as NodeTypes>::Primitives>,
     Cons: FullConsensus<<Node::Types as NodeTypes>::Primitives> + Clone + Unpin + 'static,
 {

@@ -460,7 +460,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// Updates the transactions for the changed senders.
     pub(crate) fn update_accounts(
         &mut self,
-        changed_senders: HashMap<SenderId, SenderInfo>,
+        changed_senders: FxHashMap<SenderId, SenderInfo>,
     ) -> UpdateOutcome<T::Transaction> {
         // track changed accounts
         self.sender_info.extend(changed_senders.clone());
@@ -481,7 +481,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         &mut self,
         block_info: BlockInfo,
         mined_transactions: Vec<TxHash>,
-        changed_senders: HashMap<SenderId, SenderInfo>,
+        changed_senders: FxHashMap<SenderId, SenderInfo>,
         update_kind: PoolUpdateKind,
     ) -> OnNewCanonicalStateOutcome<T::Transaction> {
         // update block info
@@ -489,12 +489,15 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.all_transactions.set_block_info(block_info);
 
         // Remove all transaction that were included in the block
+        let mut removed_txs_count = 0;
         for tx_hash in &mined_transactions {
             if self.prune_transaction_by_hash(tx_hash).is_some() {
-                // Update removed transactions metric
-                self.metrics.removed_transactions.increment(1);
+                removed_txs_count += 1;
             }
         }
+
+        // Update removed transactions metric
+        self.metrics.removed_transactions.increment(removed_txs_count);
 
         let UpdateOutcome { promoted, discarded } = self.update_accounts(changed_senders);
 
@@ -1095,11 +1098,11 @@ impl<T: PoolTransaction> AllTransactions<T> {
         self.by_hash.keys().copied()
     }
 
-    /// Returns an iterator over all _unique_ hashes in the pool
+    /// Returns an iterator over all transactions in the pool
     pub(crate) fn transactions_iter(
         &self,
-    ) -> impl Iterator<Item = Arc<ValidPoolTransaction<T>>> + '_ {
-        self.by_hash.values().cloned()
+    ) -> impl Iterator<Item = &Arc<ValidPoolTransaction<T>>> + '_ {
+        self.by_hash.values()
     }
 
     /// Returns if the transaction for the given hash is already included in this pool
@@ -1180,7 +1183,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// that got transaction included in the block.
     pub(crate) fn update(
         &mut self,
-        changed_accounts: HashMap<SenderId, SenderInfo>,
+        changed_accounts: FxHashMap<SenderId, SenderInfo>,
     ) -> Vec<PoolUpdate> {
         // pre-allocate a few updates
         let mut updates = Vec::with_capacity(64);
@@ -2322,7 +2325,9 @@ mod tests {
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
         let mut pool = AllTransactions::default();
-        let tx = MockTransaction::eip1559().inc_price().inc_limit();
+        let mut tx = MockTransaction::eip1559().inc_price().inc_limit();
+        tx.set_priority_fee(100);
+        tx.set_max_fee(100);
         let valid_tx = f.validated(tx.clone());
         let InsertOk { updates, replaced_tx, move_to, state, .. } =
             pool.insert_tx(valid_tx.clone(), on_chain_balance, on_chain_nonce).unwrap();
@@ -2448,20 +2453,20 @@ mod tests {
         let first = f.validated(tx.clone());
         let _ = pool.insert_tx(first.clone(), on_chain_balance, on_chain_nonce).unwrap();
         let mut replacement = f.validated(tx.rng_hash().inc_price());
+
         // a price bump of 9% is not enough for a default min price bump of 10%
         replacement.transaction.set_priority_fee(109);
         replacement.transaction.set_max_fee(109);
         let err =
             pool.insert_tx(replacement.clone(), on_chain_balance, on_chain_nonce).unwrap_err();
         assert!(matches!(err, InsertErr::Underpriced { .. }));
-
         // ensure first tx is not removed
         assert!(pool.contains(first.hash()));
         assert_eq!(pool.len(), 1);
 
-        // price bump of 10% is also not enough because the bump should be strictly greater than 10%
+        // should also fail if the bump in max fee is not enough
         replacement.transaction.set_priority_fee(110);
-        replacement.transaction.set_max_fee(110);
+        replacement.transaction.set_max_fee(109);
         let err =
             pool.insert_tx(replacement.clone(), on_chain_balance, on_chain_nonce).unwrap_err();
         assert!(matches!(err, InsertErr::Underpriced { .. }));
@@ -2469,7 +2474,7 @@ mod tests {
         assert_eq!(pool.len(), 1);
 
         // should also fail if the bump in priority fee is not enough
-        replacement.transaction.set_priority_fee(111);
+        replacement.transaction.set_priority_fee(109);
         replacement.transaction.set_max_fee(110);
         let err = pool.insert_tx(replacement, on_chain_balance, on_chain_nonce).unwrap_err();
         assert!(matches!(err, InsertErr::Underpriced { .. }));

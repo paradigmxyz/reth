@@ -25,8 +25,9 @@ use rand::{
     prelude::Distribution,
 };
 use reth_primitives::{
-    transaction::TryFromRecoveredTransactionError, PooledTransactionsElementEcRecovered,
-    RecoveredTx, Transaction, TransactionSigned, TxType,
+    transaction::{SignedTransactionIntoRecoveredExt, TryFromRecoveredTransactionError},
+    PooledTransactionsElement, PooledTransactionsElementEcRecovered, RecoveredTx, Transaction,
+    TransactionSigned, TxType,
 };
 use reth_primitives_traits::InMemorySize;
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
@@ -594,7 +595,7 @@ impl PoolTransaction for MockTransaction {
 
     type Consensus = TransactionSigned;
 
-    type Pooled = PooledTransactionsElementEcRecovered;
+    type Pooled = PooledTransactionsElement;
 
     fn try_from_consensus(
         tx: RecoveredTx<Self::Consensus>,
@@ -606,14 +607,17 @@ impl PoolTransaction for MockTransaction {
         self.into()
     }
 
-    fn from_pooled(pooled: Self::Pooled) -> Self {
+    fn from_pooled(pooled: RecoveredTx<Self::Pooled>) -> Self {
         pooled.into()
     }
 
     fn try_consensus_into_pooled(
         tx: RecoveredTx<Self::Consensus>,
-    ) -> Result<Self::Pooled, Self::TryFromConsensusError> {
-        Self::Pooled::try_from(tx).map_err(|_| TryFromRecoveredTransactionError::BlobSidecarMissing)
+    ) -> Result<RecoveredTx<Self::Pooled>, Self::TryFromConsensusError> {
+        let (tx, signer) = tx.to_components();
+        Self::Pooled::try_from(tx)
+            .map(|tx| tx.with_signer(signer))
+            .map_err(|_| TryFromRecoveredTransactionError::BlobSidecarMissing)
     }
 
     fn hash(&self) -> &TxHash {
@@ -786,12 +790,25 @@ impl EthPoolTransaction for MockTransaction {
         }
     }
 
-    fn try_into_pooled_eip4844(self, sidecar: Arc<BlobTransactionSidecar>) -> Option<Self::Pooled> {
-        Self::Pooled::try_from_blob_transaction(
-            self.into_consensus(),
-            Arc::unwrap_or_clone(sidecar),
-        )
-        .ok()
+    fn try_into_pooled_eip4844(
+        self,
+        sidecar: Arc<BlobTransactionSidecar>,
+    ) -> Option<RecoveredTx<Self::Pooled>> {
+        let (tx, signer) = self.into_consensus().to_components();
+        Self::Pooled::try_from_blob_transaction(tx, Arc::unwrap_or_clone(sidecar))
+            .map(|tx| tx.with_signer(signer))
+            .ok()
+    }
+
+    fn try_from_eip4844(
+        tx: RecoveredTx<Self::Consensus>,
+        sidecar: BlobTransactionSidecar,
+    ) -> Option<Self> {
+        let (tx, signer) = tx.to_components();
+        Self::Pooled::try_from_blob_transaction(tx, sidecar)
+            .map(|tx| tx.with_signer(signer))
+            .ok()
+            .map(Self::from_pooled)
     }
 
     fn validate_blob(

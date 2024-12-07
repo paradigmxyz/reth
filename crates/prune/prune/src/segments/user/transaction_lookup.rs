@@ -7,9 +7,7 @@ use alloy_eips::eip2718::Encodable2718;
 use rayon::prelude::*;
 use reth_db::{tables, transaction::DbTxMut};
 use reth_provider::{BlockReader, DBProvider};
-use reth_prune_types::{
-    PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutputCheckpoint,
-};
+use reth_prune_types::{PruneMode, PrunePurpose, PruneSegment, SegmentOutputCheckpoint};
 use tracing::{instrument, trace};
 
 #[derive(Debug)]
@@ -96,7 +94,7 @@ where
             // run.
             .checked_sub(if done { 0 } else { 1 });
 
-        let progress = PruneProgress::new(done, &limiter);
+        let progress = limiter.progress(done);
 
         Ok(SegmentOutput {
             progress,
@@ -111,7 +109,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::segments::{PruneInput, Segment, SegmentOutput, TransactionLookup};
+    use crate::segments::{PruneInput, PruneLimiter, Segment, SegmentOutput, TransactionLookup};
     use alloy_primitives::{BlockNumber, TxNumber, B256};
     use assert_matches::assert_matches;
     use itertools::{
@@ -121,7 +119,7 @@ mod tests {
     use reth_db::tables;
     use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader};
     use reth_prune_types::{
-        PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress, PruneSegment,
+        PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
     };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};

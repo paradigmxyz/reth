@@ -5,7 +5,8 @@ cond_mod!(
     eip2930,
     eip4844,
     eip7702,
-    legacy
+    legacy,
+    txtype
 );
 
 

@@ -88,7 +88,7 @@ where
             if chain_spec.is_optimism() { EngineApiKind::OpStack } else { EngineApiKind::Ethereum };
 
         let persistence_handle =
-            PersistenceHandle::spawn_service(provider, pruner, sync_metrics_tx);
+            PersistenceHandle::<N::Primitives>::spawn_service(provider, pruner, sync_metrics_tx);
         let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
 
         let (to_tree_tx, from_tree) = EngineApiTreeHandler::<N::Primitives, _, _, _, _>::spawn_new(

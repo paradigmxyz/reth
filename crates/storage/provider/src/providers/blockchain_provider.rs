@@ -29,7 +29,7 @@ use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives::{
     Account, Block, BlockWithSenders, EthPrimitives, NodePrimitives, Receipt, SealedBlock,
     SealedBlockFor, SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta,
-    TransactionSigned, TransactionSignedNoHash,
+    TransactionSigned,
 };
 use reth_primitives_traits::BlockBody as _;
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
@@ -493,19 +493,6 @@ impl<N: ProviderNodeTypes> StageCheckpointReader for BlockchainProvider2<N> {
 }
 
 impl<N: ProviderNodeTypes> EvmEnvProvider<HeaderTy<N>> for BlockchainProvider2<N> {
-    fn fill_env_at<EvmConfig>(
-        &self,
-        cfg: &mut CfgEnvWithHandlerCfg,
-        block_env: &mut BlockEnv,
-        at: BlockHashOrNumber,
-        evm_config: EvmConfig,
-    ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
-    {
-        self.consistent_provider()?.fill_env_at(cfg, block_env, at, evm_config)
-    }
-
     fn fill_env_with_header<EvmConfig>(
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,
@@ -850,9 +837,7 @@ mod tests {
     use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
     use reth_errors::ProviderError;
     use reth_execution_types::{Chain, ExecutionOutcome};
-    use reth_primitives::{
-        BlockExt, Receipt, SealedBlock, StaticFileSegment, TransactionSignedNoHash,
-    };
+    use reth_primitives::{BlockExt, Receipt, SealedBlock, StaticFileSegment};
     use reth_primitives_traits::{BlockBody as _, SignedTransaction};
     use reth_storage_api::{
         BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
