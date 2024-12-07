@@ -636,7 +636,7 @@ where
             return Err(EngineApiError::TerminalTD {
                 execution: merge_terminal_td,
                 consensus: terminal_total_difficulty,
-            })
+            });
         }
 
         self.inner.beacon_consensus.transition_configuration_exchanged();
@@ -646,7 +646,7 @@ where
             return Ok(TransitionConfiguration {
                 terminal_total_difficulty: merge_terminal_td,
                 ..Default::default()
-            })
+            });
         }
 
         // Attempt to look up terminal block hash
@@ -714,9 +714,9 @@ where
                 // TODO: decide if we want this branch - the FCU INVALID response might be more
                 // useful than the payload attributes INVALID response
                 if fcu_res.is_invalid() {
-                    return Ok(fcu_res)
+                    return Ok(fcu_res);
                 }
-                return Err(err.into())
+                return Err(err.into());
             }
         }
 
@@ -805,6 +805,55 @@ where
             .await?)
     }
 
+    /// Handler for `engine_newPayloadWithWitnessV1`
+    /// Caution: This should not accept the `withdrawals` field
+    async fn new_payload_with_witness_v1(
+        &self,
+        payload: ExecutionPayloadV1,
+    ) -> RpcResult<PayloadStatus> {
+        trace!(target: "rpc::engine", "Serving engine_newPayloadWithWitnessV1");
+        Ok(self.new_payload_v1_metered(payload).await?)
+    }
+
+    /// Handler for `engine_newPayloadWithWitnessV2`
+    async fn new_payload_with_witness_v2(
+        &self,
+        payload: ExecutionPayloadInputV2,
+    ) -> RpcResult<PayloadStatus> {
+        trace!(target: "rpc::engine", "Serving engine_newPayloadWithWitnessV2");
+        Ok(self.new_payload_v2_metered(payload).await?)
+    }
+
+    /// Handler for `engine_newPayloadWithWitnessV3`
+    async fn new_payload_with_witness_v3(
+        &self,
+        payload: ExecutionPayloadV3,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+    ) -> RpcResult<PayloadStatus> {
+        trace!(target: "rpc::engine", "Serving engine_newPayloadWithWitnessV3");
+        Ok(self.new_payload_v3_metered(payload, versioned_hashes, parent_beacon_block_root).await?)
+    }
+
+    /// Handler for `engine_newPayloadWithWitnessV4`
+    async fn new_payload_with_witness_v4(
+        &self,
+        payload: ExecutionPayloadV3,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+        execution_requests: Requests,
+    ) -> RpcResult<PayloadStatus> {
+        trace!(target: "rpc::engine", "Serving engine_newPayloadWithWitnessV4");
+        Ok(self
+            .new_payload_v4_metered(
+                payload,
+                versioned_hashes,
+                parent_beacon_block_root,
+                execution_requests,
+            )
+            .await?)
+    }
+
     /// Handler for `engine_forkchoiceUpdatedV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_forkchoiceupdatedv1>
     ///
@@ -846,6 +895,50 @@ where
         payload_attributes: Option<EngineT::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV3");
+        let start = Instant::now();
+        let res = Self::fork_choice_updated_v3(self, fork_choice_state, payload_attributes).await;
+        self.inner.metrics.latency.fork_choice_updated_v3.record(start.elapsed());
+        self.inner.metrics.fcu_response.update_response_metrics(&res);
+        Ok(res?)
+    }
+
+    /// Handler for `engine_forkchoiceUpdatedWithWitnessV1`
+    ///
+    /// Caution: This should not accept the `withdrawals` field
+    async fn fork_choice_updated_with_witness_v1(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<EngineT::PayloadAttributes>,
+    ) -> RpcResult<ForkchoiceUpdated> {
+        trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedWithWitnessV1");
+        let start = Instant::now();
+        let res = Self::fork_choice_updated_v1(self, fork_choice_state, payload_attributes).await;
+        self.inner.metrics.latency.fork_choice_updated_v1.record(start.elapsed());
+        self.inner.metrics.fcu_response.update_response_metrics(&res);
+        Ok(res?)
+    }
+
+    /// Handler for `engine_forkchoiceUpdatedWithWitnessV2`
+    async fn fork_choice_updated_with_witness_v2(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<EngineT::PayloadAttributes>,
+    ) -> RpcResult<ForkchoiceUpdated> {
+        trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedWithWitnessV2");
+        let start = Instant::now();
+        let res = Self::fork_choice_updated_v2(self, fork_choice_state, payload_attributes).await;
+        self.inner.metrics.latency.fork_choice_updated_v2.record(start.elapsed());
+        self.inner.metrics.fcu_response.update_response_metrics(&res);
+        Ok(res?)
+    }
+
+    /// Handler for `engine_forkchoiceUpdatedWithWitnessV3`
+    async fn fork_choice_updated_with_witness_v3(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<EngineT::PayloadAttributes>,
+    ) -> RpcResult<ForkchoiceUpdated> {
+        trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedWithWitnessV3");
         let start = Instant::now();
         let res = Self::fork_choice_updated_v3(self, fork_choice_state, payload_attributes).await;
         self.inner.metrics.latency.fork_choice_updated_v3.record(start.elapsed());
@@ -1014,7 +1107,7 @@ where
     ) -> RpcResult<Vec<Option<BlobAndProofV1>>> {
         trace!(target: "rpc::engine", "Serving engine_getBlobsV1");
         if versioned_hashes.len() > MAX_BLOB_LIMIT {
-            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() }.into())
+            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() }.into());
         }
 
         Ok(self
@@ -1022,6 +1115,55 @@ where
             .tx_pool
             .get_blobs_for_versioned_hashes(&versioned_hashes)
             .map_err(|err| EngineApiError::Internal(Box::new(err)))?)
+    }
+
+    /// Handler for `engine_executeStatelessPayloadV1`
+    /// Caution: This should not accept the `withdrawals` field
+    async fn execute_stateless_payload_v1(
+        &self,
+        payload: ExecutionPayloadV1,
+    ) -> RpcResult<PayloadStatus> {
+        trace!(target: "rpc::engine", "Serving engine_executeStatelessPayloadV1");
+        Ok(self.new_payload_v1_metered(payload).await?)
+    }
+
+    /// Handler for `engine_executeStatelessPayloadV2`
+    async fn execute_stateless_payload_v2(
+        &self,
+        payload: ExecutionPayloadInputV2,
+    ) -> RpcResult<PayloadStatus> {
+        trace!(target: "rpc::engine", "Serving engine_executeStatelessPayloadV2");
+        Ok(self.new_payload_v2_metered(payload).await?)
+    }
+
+    /// Handler for `engine_executeStatelessPayloadV3`
+    async fn execute_stateless_payload_v3(
+        &self,
+        payload: ExecutionPayloadV3,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+    ) -> RpcResult<PayloadStatus> {
+        trace!(target: "rpc::engine", "Serving engine_executeStatelessPayloadV3");
+        Ok(self.new_payload_v3_metered(payload, versioned_hashes, parent_beacon_block_root).await?)
+    }
+
+    /// Handler for `engine_executeStatelessPayloadV4`
+    async fn execute_stateless_payload_v4(
+        &self,
+        payload: ExecutionPayloadV3,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+        execution_requests: Requests,
+    ) -> RpcResult<PayloadStatus> {
+        trace!(target: "rpc::engine", "Serving engine_executeStatelessPayloadV4");
+        Ok(self
+            .new_payload_v4_metered(
+                payload,
+                versioned_hashes,
+                parent_beacon_block_root,
+                execution_requests,
+            )
+            .await?)
     }
 }
 
