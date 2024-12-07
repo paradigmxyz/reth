@@ -57,7 +57,7 @@ serde_with.workspace = true
 
 [features]
 eip1186 = [
-    "dep:alloy-rpc-types-eth",
+    "alloy-rpc-types-eth/serde",
     "dep:alloy-serde",
 ]
 serde = [
@@ -88,7 +88,7 @@ test-utils = [
 arbitrary = [
 	"alloy-trie/arbitrary",
 	"dep:arbitrary",
-	"alloy-serde/arbitrary",
+    "alloy-serde?/arbitrary",
 	"reth-primitives-traits/arbitrary",
 	"alloy-consensus/arbitrary",
 	"alloy-primitives/arbitrary",
