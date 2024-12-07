@@ -64,6 +64,7 @@ use alloy_primitives::B512;
 use core::str::FromStr;
 
 // Re-export PeerId for ease of use.
+#[cfg(feature = "secp256k1")]
 pub use enr::Enr;
 
 /// Alias for a peer identifier
@@ -115,8 +116,8 @@ pub fn id2pk(id: PeerId) -> Result<secp256k1::PublicKey, secp256k1::Error> {
 pub enum AnyNode {
     /// An "enode:" peer with full ip
     NodeRecord(NodeRecord),
-    #[cfg(feature = "secp256k1")]
     /// An "enr:" peer
+    #[cfg(feature = "secp256k1")]
     Enr(Enr<secp256k1::SecretKey>),
     /// An incomplete "enode" with only a peer id
     PeerId(PeerId),

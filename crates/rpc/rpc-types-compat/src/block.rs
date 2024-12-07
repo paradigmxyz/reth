@@ -1,13 +1,13 @@
 //! Compatibility functions for rpc `Block` type.
 
-use alloy_consensus::Sealed;
+use alloy_consensus::{BlockHeader, Sealable, Sealed};
 use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::{B256, U256};
-use alloy_rlp::Encodable;
 use alloy_rpc_types_eth::{
     Block, BlockTransactions, BlockTransactionsKind, Header, TransactionInfo,
 };
-use reth_primitives::{Block as PrimitiveBlock, BlockWithSenders, TransactionSigned};
+use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, BlockWithSenders};
+use reth_primitives_traits::{Block as BlockTrait, BlockBody, SignedTransaction};
 
 use crate::{transaction::from_recovered_with_block_context, TransactionCompat};
 
@@ -15,19 +15,24 @@ use crate::{transaction::from_recovered_with_block_context, TransactionCompat};
 /// [`BlockTransactionsKind`]
 ///
 /// If a `block_hash` is provided, then this is used, otherwise the block hash is computed.
-pub fn from_block<T: TransactionCompat>(
-    block: BlockWithSenders,
+#[expect(clippy::type_complexity)]
+pub fn from_block<T, B>(
+    block: BlockWithSenders<B>,
     total_difficulty: U256,
     kind: BlockTransactionsKind,
     block_hash: Option<B256>,
     tx_resp_builder: &T,
-) -> Result<Block<T::Transaction>, T::Error> {
+) -> Result<Block<T::Transaction, Header<B::Header>>, T::Error>
+where
+    T: TransactionCompat<<<B as BlockTrait>::Body as BlockBody>::Transaction>,
+    B: BlockTrait,
+{
     match kind {
         BlockTransactionsKind::Hashes => {
-            Ok(from_block_with_tx_hashes::<T::Transaction>(block, total_difficulty, block_hash))
+            Ok(from_block_with_tx_hashes::<T::Transaction, B>(block, total_difficulty, block_hash))
         }
         BlockTransactionsKind::Full => {
-            from_block_full::<T>(block, total_difficulty, block_hash, tx_resp_builder)
+            from_block_full::<T, B>(block, total_difficulty, block_hash, tx_resp_builder)
         }
     }
 }
@@ -37,13 +42,16 @@ pub fn from_block<T: TransactionCompat>(
 ///
 /// This will populate the `transactions` field with only the hashes of the transactions in the
 /// block: [`BlockTransactions::Hashes`]
-pub fn from_block_with_tx_hashes<T>(
-    block: BlockWithSenders,
+pub fn from_block_with_tx_hashes<T, B>(
+    block: BlockWithSenders<B>,
     total_difficulty: U256,
     block_hash: Option<B256>,
-) -> Block<T> {
-    let block_hash = block_hash.unwrap_or_else(|| block.header.hash_slow());
-    let transactions = block.body.transactions.iter().map(|tx| tx.hash()).collect();
+) -> Block<T, Header<B::Header>>
+where
+    B: BlockTrait,
+{
+    let block_hash = block_hash.unwrap_or_else(|| block.header().hash_slow());
+    let transactions = block.body().transactions().iter().map(|tx| *tx.tx_hash()).collect();
 
     from_block_with_transactions(
         block.length(),
@@ -59,25 +67,30 @@ pub fn from_block_with_tx_hashes<T>(
 ///
 /// This will populate the `transactions` field with the _full_
 /// [`TransactionCompat::Transaction`] objects: [`BlockTransactions::Full`]
-pub fn from_block_full<T: TransactionCompat>(
-    mut block: BlockWithSenders,
+#[expect(clippy::type_complexity)]
+pub fn from_block_full<T, B>(
+    block: BlockWithSenders<B>,
     total_difficulty: U256,
     block_hash: Option<B256>,
     tx_resp_builder: &T,
-) -> Result<Block<T::Transaction>, T::Error> {
-    let block_hash = block_hash.unwrap_or_else(|| block.block.header.hash_slow());
-    let block_number = block.block.number;
-    let base_fee_per_gas = block.block.base_fee_per_gas;
+) -> Result<Block<T::Transaction, Header<B::Header>>, T::Error>
+where
+    T: TransactionCompat<<<B as BlockTrait>::Body as BlockBody>::Transaction>,
+    B: BlockTrait,
+{
+    let block_hash = block_hash.unwrap_or_else(|| block.block.header().hash_slow());
+    let block_number = block.block.header().number();
+    let base_fee_per_gas = block.block.header().base_fee_per_gas();
 
     // NOTE: we can safely remove the body here because not needed to finalize the `Block` in
     // `from_block_with_transactions`, however we need to compute the length before
     let block_length = block.block.length();
-    let transactions = std::mem::take(&mut block.block.body.transactions);
+    let transactions = block.block.body().transactions().to_vec();
     let transactions_with_senders = transactions.into_iter().zip(block.senders);
     let transactions = transactions_with_senders
         .enumerate()
         .map(|(idx, (tx, sender))| {
-            let tx_hash = tx.hash();
+            let tx_hash = *tx.tx_hash();
             let signed_tx_ec_recovered = tx.with_signer(sender);
             let tx_info = TransactionInfo {
                 hash: Some(tx_hash),
@@ -87,7 +100,7 @@ pub fn from_block_full<T: TransactionCompat>(
                 index: Some(idx as u64),
             };
 
-            from_recovered_with_block_context::<TransactionSigned, T>(
+            from_recovered_with_block_context::<_, T>(
                 signed_tx_ec_recovered,
                 tx_info,
                 tx_resp_builder,
@@ -105,23 +118,28 @@ pub fn from_block_full<T: TransactionCompat>(
 }
 
 #[inline]
-fn from_block_with_transactions<T>(
+fn from_block_with_transactions<T, B: BlockTrait>(
     block_length: usize,
     block_hash: B256,
-    block: PrimitiveBlock,
+    block: B,
     total_difficulty: U256,
     transactions: BlockTransactions<T>,
-) -> Block<T> {
+) -> Block<T, Header<B::Header>> {
     let withdrawals = block
-        .header
-        .withdrawals_root
+        .header()
+        .withdrawals_root()
         .is_some()
-        .then(|| block.body.withdrawals.map(Withdrawals::into_inner).map(Into::into))
+        .then(|| block.body().withdrawals().cloned().map(Withdrawals::into_inner).map(Into::into))
         .flatten();
 
-    let uncles = block.body.ommers.into_iter().map(|h| h.hash_slow()).collect();
+    let uncles = block
+        .body()
+        .ommers()
+        .map(|o| o.iter().map(|h| h.hash_slow()).collect())
+        .unwrap_or_default();
+    let (header, _) = block.split();
     let header = Header::from_consensus(
-        Sealed::new_unchecked(block.header, block_hash),
+        Sealed::new_unchecked(header, block_hash),
         Some(total_difficulty),
         Some(U256::from(block_length)),
     );

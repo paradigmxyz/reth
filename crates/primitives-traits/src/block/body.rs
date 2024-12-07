@@ -7,7 +7,7 @@ use crate::{
 use alloc::{fmt, vec::Vec};
 use alloy_consensus::Transaction;
 use alloy_eips::{eip2718::Encodable2718, eip4844::DATA_GAS_PER_BLOB, eip4895::Withdrawals};
-use alloy_primitives::Bytes;
+use alloy_primitives::{Bytes, B256};
 
 /// Helper trait that unifies all behaviour required by transaction to support full node operations.
 pub trait FullBlockBody: BlockBody<Transaction: FullSignedTx> {}
@@ -43,6 +43,11 @@ pub trait BlockBody:
 
     /// Consume the block body and return a [`Vec`] of transactions.
     fn into_transactions(self) -> Vec<Self::Transaction>;
+
+    /// Calculate the transaction root for the block body.
+    fn calculate_tx_root(&self) -> B256 {
+        alloy_consensus::proofs::calculate_transaction_root(self.transactions())
+    }
 
     /// Returns block withdrawals if any.
     fn withdrawals(&self) -> Option<&Withdrawals>;

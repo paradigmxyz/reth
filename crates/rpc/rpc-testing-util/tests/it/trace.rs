@@ -1,7 +1,7 @@
 //! Integration tests for the trace API.
 
 use alloy_primitives::map::HashSet;
-use alloy_rpc_types_eth::{Block, Transaction};
+use alloy_rpc_types_eth::{Block, Header, Transaction};
 use alloy_rpc_types_trace::{
     filter::TraceFilter, parity::TraceType, tracerequest::TraceCallRequest,
 };
@@ -113,7 +113,7 @@ async fn debug_trace_block_entire_chain() {
 
     let client = HttpClientBuilder::default().build(url).unwrap();
     let current_block: u64 =
-        <HttpClient as EthApiClient<Transaction, Block, Receipt>>::block_number(&client)
+        <HttpClient as EthApiClient<Transaction, Block, Receipt, Header>>::block_number(&client)
             .await
             .unwrap()
             .try_into()

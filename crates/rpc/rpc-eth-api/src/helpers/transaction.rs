@@ -8,9 +8,13 @@ use alloy_network::TransactionBuilder;
 use alloy_primitives::{Address, Bytes, TxHash, B256};
 use alloy_rpc_types_eth::{transaction::TransactionRequest, BlockNumberOrTag, TransactionInfo};
 use futures::Future;
-use reth_primitives::{SealedBlockWithSenders, TransactionMeta, TransactionSigned};
+use reth_node_api::BlockBody;
+use reth_primitives::{
+    transaction::SignedTransactionIntoRecoveredExt, SealedBlockWithSenders, TransactionMeta,
+};
+use reth_primitives_traits::SignedTransaction;
 use reth_provider::{
-    BlockNumReader, BlockReaderIdExt, ProviderReceipt, ProviderTx, ReceiptProvider,
+    BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
     TransactionsProvider,
 };
 use reth_rpc_eth_types::{
@@ -56,7 +60,8 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     /// Returns a handle for signing data.
     ///
     /// Singer access in default (L1) trait method implementations.
-    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>>;
+    #[expect(clippy::type_complexity)]
+    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>>>>>;
 
     /// Returns the transaction by hash.
     ///
@@ -76,15 +81,17 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     /// Get all transactions in the block with the given hash.
     ///
     /// Returns `None` if block does not exist.
+    #[expect(clippy::type_complexity)]
     fn transactions_by_block(
         &self,
         block: B256,
-    ) -> impl Future<Output = Result<Option<Vec<TransactionSigned>>, Self::Error>> + Send {
+    ) -> impl Future<Output = Result<Option<Vec<ProviderTx<Self::Provider>>>, Self::Error>> + Send
+    {
         async move {
             self.cache()
                 .get_sealed_block_with_senders(block)
                 .await
-                .map(|b| b.map(|b| b.body.transactions.clone()))
+                .map(|b| b.map(|b| b.body.transactions().to_vec()))
                 .map_err(Self::Error::from_eth_err)
         }
     }
@@ -120,10 +127,13 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     }
 
     /// Returns the _historical_ transaction and the block it was mined in
+    #[expect(clippy::type_complexity)]
     fn historical_transaction_by_hash_at(
         &self,
         hash: B256,
-    ) -> impl Future<Output = Result<Option<(TransactionSource, B256)>, Self::Error>> + Send {
+    ) -> impl Future<
+        Output = Result<Option<(TransactionSource<ProviderTx<Self::Provider>>, B256)>, Self::Error>,
+    > + Send {
         async move {
             match self.transaction_by_hash_at(hash).await? {
                 None => Ok(None),
@@ -204,7 +214,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 let base_fee_per_gas = block.base_fee_per_gas();
                 if let Some((signer, tx)) = block.transactions_with_sender().nth(index) {
                     let tx_info = TransactionInfo {
-                        hash: Some(tx.hash()),
+                        hash: Some(*tx.tx_hash()),
                         block_hash: Some(block_hash),
                         block_number: Some(block_number),
                         base_fee: base_fee_per_gas.map(u128::from),
@@ -285,7 +295,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                         .find(|(_, (signer, tx))| **signer == sender && (*tx).nonce() == nonce)
                         .map(|(index, (signer, tx))| {
                             let tx_info = TransactionInfo {
-                                hash: Some(tx.hash()),
+                                hash: Some(*tx.tx_hash()),
                                 block_hash: Some(block_hash),
                                 block_number: Some(block_number),
                                 base_fee: base_fee_per_gas.map(u128::from),
@@ -333,9 +343,9 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         tx: Bytes,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
         async move {
-            let recovered = recover_raw_transaction(tx)?;
+            let recovered = recover_raw_transaction(&tx)?;
             let pool_transaction =
-                <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered.into());
+                <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
 
             // submit the transaction to the pool with a `Local` origin
             let hash = self
@@ -405,7 +415,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         &self,
         from: &Address,
         txn: TransactionRequest,
-    ) -> impl Future<Output = Result<TransactionSigned, Self::Error>> + Send {
+    ) -> impl Future<Output = Result<ProviderTx<Self::Provider>, Self::Error>> + Send {
         async move {
             self.find_signer(from)?
                 .sign_transaction(txn, from)
@@ -458,10 +468,11 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     }
 
     /// Returns the signer for the given account, if found in configured signers.
+    #[expect(clippy::type_complexity)]
     fn find_signer(
         &self,
         account: &Address,
-    ) -> Result<Box<(dyn EthSigner + 'static)>, Self::Error> {
+    ) -> Result<Box<(dyn EthSigner<ProviderTx<Self::Provider>> + 'static)>, Self::Error> {
         self.signers()
             .read()
             .iter()
@@ -475,11 +486,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` transactions RPC
 /// methods.
-pub trait LoadTransaction:
-    SpawnBlocking
-    + FullEthApiTypes
-    + RpcNodeCoreExt<Provider: TransactionsProvider, Pool: TransactionPool>
-{
+pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
     /// Returns the transaction by hash.
     ///
     /// Checks the pool and state.
@@ -539,11 +546,16 @@ pub trait LoadTransaction:
     /// Returns the transaction by including its corresponding [`BlockId`].
     ///
     /// Note: this supports pending transactions
+    #[expect(clippy::type_complexity)]
     fn transaction_by_hash_at(
         &self,
         transaction_hash: B256,
-    ) -> impl Future<Output = Result<Option<(TransactionSource, BlockId)>, Self::Error>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            Option<(TransactionSource<ProviderTx<Self::Provider>>, BlockId)>,
+            Self::Error,
+        >,
+    > + Send {
         async move {
             Ok(self.transaction_by_hash(transaction_hash).await?.map(|tx| match tx {
                 tx @ TransactionSource::Pool(_) => (tx, BlockId::pending()),
@@ -555,11 +567,18 @@ pub trait LoadTransaction:
     }
 
     /// Fetches the transaction and the transaction's block
+    #[expect(clippy::type_complexity)]
     fn transaction_and_block(
         &self,
         hash: B256,
     ) -> impl Future<
-        Output = Result<Option<(TransactionSource, Arc<SealedBlockWithSenders>)>, Self::Error>,
+        Output = Result<
+            Option<(
+                TransactionSource<ProviderTx<Self::Provider>>,
+                Arc<SealedBlockWithSenders<ProviderBlock<Self::Provider>>>,
+            )>,
+            Self::Error,
+        >,
     > + Send {
         async move {
             let (transaction, at) = match self.transaction_by_hash_at(hash).await? {

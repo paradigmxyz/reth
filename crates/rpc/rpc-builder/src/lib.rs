@@ -50,7 +50,7 @@
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events:
 //!         CanonStateSubscriptions<Primitives = reth_primitives::EthPrimitives> + Clone + 'static,
-//!     EvmConfig: ConfigureEvm<Header = Header>,
+//!     EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
 //!     BlockExecutor: BlockExecutorProvider<Primitives = Events::Primitives>,
 //!     Consensus: reth_consensus::FullConsensus + Clone + 'static,
 //! {
@@ -135,7 +135,7 @@
 //!         CanonStateSubscriptions<Primitives = reth_primitives::EthPrimitives> + Clone + 'static,
 //!     EngineApi: EngineApiServer<EngineT>,
 //!     EngineT: EngineTypes,
-//!     EvmConfig: ConfigureEvm<Header = Header>,
+//!     EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
 //!     BlockExecutor: BlockExecutorProvider<Primitives = Events::Primitives>,
 //!     Consensus: reth_consensus::FullConsensus + Clone + 'static,
 //! {
@@ -204,10 +204,11 @@ use reth_consensus::FullConsensus;
 use reth_engine_primitives::EngineTypes;
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
-use reth_primitives::{EthPrimitives, NodePrimitives};
+use reth_primitives::NodePrimitives;
 use reth_provider::{
     AccountReader, BlockReader, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
-    EvmEnvProvider, FullRpcProvider, HeaderProvider, ReceiptProvider, StateProviderFactory,
+    EvmEnvProvider, FullRpcProvider, ProviderBlock, ProviderHeader, ProviderReceipt,
+    StateProviderFactory,
 };
 use reth_rpc::{
     AdminApi, DebugApi, EngineEthApi, EthBundle, MinerApi, NetApi, OtterscanApi, RPCApi, RethApi,
@@ -216,7 +217,7 @@ use reth_rpc::{
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_api::{
     helpers::{Call, EthApiSpec, EthTransactions, LoadPendingBlock, TraceExt},
-    EthApiServer, EthApiTypes, FullEthApiServer, RpcBlock, RpcReceipt, RpcTransaction,
+    EthApiServer, EthApiTypes, FullEthApiServer, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
 };
 use reth_rpc_eth_types::{EthConfig, EthStateCache, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, CompressionLayer, JwtAuthValidator, JwtSecret};
@@ -272,25 +273,34 @@ pub async fn launch<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi, B
     evm_config: EvmConfig,
     eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi>,
     block_executor: BlockExecutor,
-    consensus: Arc<dyn FullConsensus>,
+    consensus: Arc<dyn FullConsensus<BlockExecutor::Primitives>>,
 ) -> Result<RpcServerHandle, RpcError>
 where
     Provider: FullRpcProvider<
-            Block = reth_primitives::Block,
-            Receipt = reth_primitives::Receipt,
-            Header = reth_primitives::Header,
+            Block = ProviderBlock<EthApi::Provider>,
+            Receipt = ProviderReceipt<EthApi::Provider>,
+            Header = ProviderHeader<EthApi::Provider>,
         > + AccountReader
         + ChangeSetReader,
     Pool: TransactionPool<Transaction = <EthApi::Pool as TransactionPool>::Transaction> + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    Events: CanonStateSubscriptions<Primitives = EthPrimitives> + Clone + 'static,
-    EvmConfig: ConfigureEvm<Header = alloy_consensus::Header>,
-    EthApi: FullEthApiServer,
+    Events: CanonStateSubscriptions<Primitives = BlockExecutor::Primitives> + Clone + 'static,
+    EvmConfig: ConfigureEvm<
+        Header = <BlockExecutor::Primitives as NodePrimitives>::BlockHeader,
+        Transaction = <BlockExecutor::Primitives as NodePrimitives>::SignedTx,
+    >,
+    EthApi: FullEthApiServer<
+        Provider: BlockReader<
+            Block = <BlockExecutor::Primitives as NodePrimitives>::Block,
+            Receipt = <BlockExecutor::Primitives as NodePrimitives>::Receipt,
+            Header = <BlockExecutor::Primitives as NodePrimitives>::BlockHeader,
+        >,
+    >,
     BlockExecutor: BlockExecutorProvider<
         Primitives: NodePrimitives<
-            Block = reth_primitives::Block,
-            Receipt = reth_primitives::Receipt,
+            BlockHeader = reth_primitives::Header,
+            BlockBody = reth_primitives::BlockBody,
         >,
     >,
 {
@@ -638,19 +648,26 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig, BlockExecutor, Consensus
 impl<Provider, Pool, Network, Tasks, Events, EvmConfig, BlockExecutor, Consensus>
     RpcModuleBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig, BlockExecutor, Consensus>
 where
-    Provider: FullRpcProvider + AccountReader + ChangeSetReader,
+    Provider: FullRpcProvider<
+            Block = <Events::Primitives as NodePrimitives>::Block,
+            Receipt = <Events::Primitives as NodePrimitives>::Receipt,
+        > + AccountReader
+        + ChangeSetReader,
     Pool: TransactionPool + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    Events: CanonStateSubscriptions<Primitives = EthPrimitives> + Clone + 'static,
-    EvmConfig: ConfigureEvm<Header = Header>,
+    Events: CanonStateSubscriptions<Primitives = BlockExecutor::Primitives> + Clone + 'static,
+    EvmConfig: ConfigureEvm<
+        Header = <BlockExecutor::Primitives as NodePrimitives>::BlockHeader,
+        Transaction = <BlockExecutor::Primitives as NodePrimitives>::SignedTx,
+    >,
     BlockExecutor: BlockExecutorProvider<
         Primitives: NodePrimitives<
-            Block = reth_primitives::Block,
-            Receipt = reth_primitives::Receipt,
+            BlockHeader = reth_primitives::Header,
+            BlockBody = reth_primitives::BlockBody,
         >,
     >,
-    Consensus: reth_consensus::FullConsensus + Clone + 'static,
+    Consensus: reth_consensus::FullConsensus<BlockExecutor::Primitives> + Clone + 'static,
 {
     /// Configures all [`RpcModule`]s specific to the given [`TransportRpcModuleConfig`] which can
     /// be used to start the transport server(s).
@@ -672,13 +689,13 @@ where
     where
         EngineT: EngineTypes,
         EngineApi: EngineApiServer<EngineT>,
-        EthApi: FullEthApiServer,
-        Provider: BlockReader<
-            Block = <EthApi::Provider as BlockReader>::Block,
-            Receipt = <EthApi::Provider as ReceiptProvider>::Receipt,
-            Header = <EthApi::Provider as HeaderProvider>::Header,
+        EthApi: FullEthApiServer<
+            Provider: BlockReader<
+                Block = <Events::Primitives as NodePrimitives>::Block,
+                Receipt = <Events::Primitives as NodePrimitives>::Receipt,
+                Header = <Events::Primitives as NodePrimitives>::BlockHeader,
+            >,
         >,
-        Pool: TransactionPool<Transaction = <EthApi::Pool as TransactionPool>::Transaction>,
     {
         let Self {
             provider,
@@ -726,13 +743,16 @@ where
     /// use reth_evm::ConfigureEvm;
     /// use reth_evm_ethereum::execute::EthExecutorProvider;
     /// use reth_network_api::noop::NoopNetwork;
+    /// use reth_primitives::TransactionSigned;
     /// use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
     /// use reth_rpc::EthApi;
     /// use reth_rpc_builder::RpcModuleBuilder;
     /// use reth_tasks::TokioTaskExecutor;
     /// use reth_transaction_pool::noop::NoopTransactionPool;
     ///
-    /// fn init<Evm: ConfigureEvm<Header = Header> + 'static>(evm: Evm) {
+    /// fn init<Evm: ConfigureEvm<Header = Header, Transaction = TransactionSigned> + 'static>(
+    ///     evm: Evm,
+    /// ) {
     ///     let mut registry = RpcModuleBuilder::default()
     ///         .with_provider(NoopProvider::default())
     ///         .with_pool(NoopTransactionPool::default())
@@ -754,11 +774,6 @@ where
     ) -> RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
     where
         EthApi: EthApiTypes + 'static,
-        Provider: BlockReader<
-            Block = reth_primitives::Block,
-            Receipt = reth_primitives::Receipt,
-            Header = reth_primitives::Header,
-        >,
     {
         let Self {
             provider,
@@ -792,11 +807,12 @@ where
         eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi>,
     ) -> TransportRpcModules<()>
     where
-        EthApi: FullEthApiServer,
-        Provider: BlockReader<
-            Block = <EthApi::Provider as BlockReader>::Block,
-            Receipt = <EthApi::Provider as ReceiptProvider>::Receipt,
-            Header = <EthApi::Provider as HeaderProvider>::Header,
+        EthApi: FullEthApiServer<
+            Provider: BlockReader<
+                Receipt = <Events::Primitives as NodePrimitives>::Receipt,
+                Block = <Events::Primitives as NodePrimitives>::Block,
+                Header = <Events::Primitives as NodePrimitives>::BlockHeader,
+            >,
         >,
         Pool: TransactionPool<Transaction = <EthApi::Pool as TransactionPool>::Transaction>,
     {
@@ -925,7 +941,7 @@ impl RpcModuleConfigBuilder {
 /// A Helper type the holds instances of the configured modules.
 #[derive(Debug, Clone)]
 pub struct RpcRegistryInner<
-    Provider,
+    Provider: BlockReader,
     Pool,
     Network,
     Tasks,
@@ -944,7 +960,7 @@ pub struct RpcRegistryInner<
     /// Holds the configuration for the RPC modules
     config: RpcModuleConfig,
     /// Holds a all `eth_` namespace handlers
-    eth: EthHandlers<Provider, Pool, Network, Events, EthApi>,
+    eth: EthHandlers<Provider, Events, EthApi>,
     /// to put trace calls behind semaphore
     blocking_pool_guard: BlockingTaskGuard,
     /// Contains the [Methods] of a module
@@ -958,16 +974,15 @@ impl<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
 where
     Provider: StateProviderFactory
         + BlockReader<
-            Block = reth_primitives::Block,
-            Receipt = reth_primitives::Receipt,
-            Header = reth_primitives::Header,
+            Block = <Events::Primitives as NodePrimitives>::Block,
+            Receipt = <Events::Primitives as NodePrimitives>::Receipt,
         > + EvmEnvProvider
         + Clone
         + Unpin
         + 'static,
     Pool: Send + Sync + Clone + 'static,
     Network: Clone + 'static,
-    Events: CanonStateSubscriptions<Primitives = EthPrimitives> + Clone + 'static,
+    Events: CanonStateSubscriptions + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     EthApi: EthApiTypes + 'static,
     BlockExecutor: BlockExecutorProvider,
@@ -1029,6 +1044,7 @@ where
 impl<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
     RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
 where
+    Provider: BlockReader,
     EthApi: EthApiTypes,
 {
     /// Returns a reference to the installed [`EthApi`](reth_rpc::eth::EthApi).
@@ -1037,7 +1053,7 @@ where
     }
 
     /// Returns a reference to the installed [`EthHandlers`].
-    pub const fn eth_handlers(&self) -> &EthHandlers<Provider, Pool, Network, Events, EthApi> {
+    pub const fn eth_handlers(&self) -> &EthHandlers<Provider, Events, EthApi> {
         &self.eth
     }
 
@@ -1045,7 +1061,7 @@ where
     ///
     /// This will spawn exactly one [`EthStateCache`] service if this is the first time the cache is
     /// requested.
-    pub const fn eth_cache(&self) -> &EthStateCache {
+    pub const fn eth_cache(&self) -> &EthStateCache<Provider::Block, Provider::Receipt> {
         &self.eth.cache
     }
 
@@ -1089,7 +1105,7 @@ impl<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
 where
     Network: NetworkInfo + Clone + 'static,
     EthApi: EthApiTypes,
-    Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
+    Provider: BlockReader + ChainSpecProvider<ChainSpec: EthereumHardforks>,
     BlockExecutor: BlockExecutorProvider,
 {
     /// Instantiates `AdminApi`
@@ -1133,9 +1149,9 @@ where
             RpcTransaction<EthApi::NetworkTypes>,
             RpcBlock<EthApi::NetworkTypes>,
             RpcReceipt<EthApi::NetworkTypes>,
+            RpcHeader<EthApi::NetworkTypes>,
         > + EthApiTypes,
-    BlockExecutor:
-        BlockExecutorProvider<Primitives: NodePrimitives<Block = reth_primitives::Block>>,
+    BlockExecutor: BlockExecutorProvider,
 {
     /// Register Eth Namespace
     ///
@@ -1170,10 +1186,7 @@ where
     pub fn register_debug(&mut self) -> &mut Self
     where
         EthApi: EthApiSpec + EthTransactions + TraceExt,
-        Provider: BlockReader<
-            Block = <EthApi::Provider as BlockReader>::Block,
-            Receipt = reth_primitives::Receipt,
-        >,
+        BlockExecutor::Primitives: NodePrimitives<Block = ProviderBlock<EthApi::Provider>>,
     {
         let debug_api = self.debug_api();
         self.modules.insert(RethRpcModule::Debug, debug_api.into_rpc().into());
@@ -1188,7 +1201,6 @@ where
     pub fn register_trace(&mut self) -> &mut Self
     where
         EthApi: TraceExt,
-        Provider: BlockReader<Block = <EthApi::Provider as BlockReader>::Block>,
     {
         let trace_api = self.trace_api();
         self.modules.insert(RethRpcModule::Trace, trace_api.into_rpc().into());
@@ -1249,15 +1261,11 @@ where
     /// # Panics
     ///
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
-    pub fn trace_api(&self) -> TraceApi<Provider, EthApi>
+    pub fn trace_api(&self) -> TraceApi<EthApi>
     where
         EthApi: TraceExt,
     {
-        TraceApi::new(
-            self.provider.clone(),
-            self.eth_api().clone(),
-            self.blocking_pool_guard.clone(),
-        )
+        TraceApi::new(self.eth_api().clone(), self.blocking_pool_guard.clone())
     }
 
     /// Instantiates [`EthBundle`] Api
@@ -1278,14 +1286,12 @@ where
     /// # Panics
     ///
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
-    pub fn debug_api(&self) -> DebugApi<Provider, EthApi, BlockExecutor>
+    pub fn debug_api(&self) -> DebugApi<EthApi, BlockExecutor>
     where
         EthApi: EthApiSpec + EthTransactions + TraceExt,
-        BlockExecutor:
-            BlockExecutorProvider<Primitives: NodePrimitives<Block = reth_primitives::Block>>,
+        BlockExecutor::Primitives: NodePrimitives<Block = ProviderBlock<EthApi::Provider>>,
     {
         DebugApi::new(
-            self.provider.clone(),
             self.eth_api().clone(),
             self.blocking_pool_guard.clone(),
             self.block_executor.clone(),
@@ -1313,7 +1319,7 @@ where
     /// Instantiates `ValidationApi`
     pub fn validation_api(&self) -> ValidationApi<Provider, BlockExecutor>
     where
-        Consensus: reth_consensus::FullConsensus + Clone + 'static,
+        Consensus: reth_consensus::FullConsensus<BlockExecutor::Primitives> + Clone + 'static,
     {
         ValidationApi::new(
             self.provider.clone(),
@@ -1328,24 +1334,25 @@ where
 impl<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
     RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
 where
-    Provider: FullRpcProvider<
-            Block = <EthApi::Provider as BlockReader>::Block,
-            Receipt = <EthApi::Provider as ReceiptProvider>::Receipt,
-            Header = <EthApi::Provider as HeaderProvider>::Header,
-        > + AccountReader
-        + ChangeSetReader,
-    Pool: TransactionPool<Transaction = <EthApi::Pool as TransactionPool>::Transaction> + 'static,
+    Provider: FullRpcProvider + AccountReader + ChangeSetReader,
+    Pool: TransactionPool + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    Events: CanonStateSubscriptions<Primitives = EthPrimitives> + Clone + 'static,
-    EthApi: FullEthApiServer,
-    BlockExecutor: BlockExecutorProvider<
-        Primitives: NodePrimitives<
-            Block = reth_primitives::Block,
-            Receipt = reth_primitives::Receipt,
+    Events: CanonStateSubscriptions<Primitives = BlockExecutor::Primitives> + Clone + 'static,
+    EthApi: FullEthApiServer<
+        Provider: BlockReader<
+            Block = <BlockExecutor::Primitives as NodePrimitives>::Block,
+            Receipt = <BlockExecutor::Primitives as NodePrimitives>::Receipt,
+            Header = <BlockExecutor::Primitives as NodePrimitives>::BlockHeader,
         >,
     >,
-    Consensus: reth_consensus::FullConsensus + Clone + 'static,
+    BlockExecutor: BlockExecutorProvider<
+        Primitives: NodePrimitives<
+            BlockHeader = reth_primitives::Header,
+            BlockBody = reth_primitives::BlockBody,
+        >,
+    >,
+    Consensus: reth_consensus::FullConsensus<BlockExecutor::Primitives> + Clone + 'static,
 {
     /// Configures the auth module that includes the
     ///   * `engine_` namespace
@@ -1435,7 +1442,6 @@ where
                                 .into()
                         }
                         RethRpcModule::Debug => DebugApi::new(
-                            self.provider.clone(),
                             eth_api.clone(),
                             self.blocking_pool_guard.clone(),
                             self.block_executor.clone(),
@@ -1462,16 +1468,14 @@ where
                         RethRpcModule::Net => {
                             NetApi::new(self.network.clone(), eth_api.clone()).into_rpc().into()
                         }
-                        RethRpcModule::Trace => TraceApi::new(
-                            self.provider.clone(),
-                            eth_api.clone(),
-                            self.blocking_pool_guard.clone(),
-                        )
-                        .into_rpc()
-                        .into(),
+                        RethRpcModule::Trace => {
+                            TraceApi::new(eth_api.clone(), self.blocking_pool_guard.clone())
+                                .into_rpc()
+                                .into()
+                        }
                         RethRpcModule::Web3 => Web3Api::new(self.network.clone()).into_rpc().into(),
                         RethRpcModule::Txpool => TxPoolApi::new(
-                            self.pool.clone(),
+                            self.eth.api.pool().clone(),
                             self.eth.api.tx_resp_builder().clone(),
                         )
                         .into_rpc()
@@ -1491,7 +1495,7 @@ where
                                 .into()
                         }
                         RethRpcModule::Flashbots => ValidationApi::new(
-                            self.provider.clone(),
+                            eth_api.provider().clone(),
                             Arc::new(self.consensus.clone()),
                             self.block_executor.clone(),
                             self.config.flashbots.clone(),

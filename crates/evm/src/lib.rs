@@ -20,7 +20,6 @@ extern crate alloc;
 use crate::builder::RethEvmBuilder;
 use alloy_consensus::BlockHeader as _;
 use alloy_primitives::{Address, Bytes, B256, U256};
-use reth_primitives::TransactionSigned;
 use reth_primitives_traits::BlockHeader;
 use revm::{Database, Evm, GetInspector};
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, SpecId, TxEnv};
@@ -116,18 +115,21 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     /// The header type used by the EVM.
     type Header: BlockHeader;
 
+    /// The transaction type.
+    type Transaction;
+
     /// The error type that is returned by [`Self::next_cfg_and_block_env`].
     type Error: core::error::Error + Send + Sync;
 
-    /// Returns a [`TxEnv`] from a [`TransactionSigned`] and [`Address`].
-    fn tx_env(&self, transaction: &TransactionSigned, signer: Address) -> TxEnv {
+    /// Returns a [`TxEnv`] from a transaction and [`Address`].
+    fn tx_env(&self, transaction: &Self::Transaction, signer: Address) -> TxEnv {
         let mut tx_env = TxEnv::default();
         self.fill_tx_env(&mut tx_env, transaction, signer);
         tx_env
     }
 
-    /// Fill transaction environment from a [`TransactionSigned`] and the given sender address.
-    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address);
+    /// Fill transaction environment from a transaction  and the given sender address.
+    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &Self::Transaction, sender: Address);
 
     /// Fill transaction environment with a system contract call.
     fn fill_tx_env_system_contract_call(

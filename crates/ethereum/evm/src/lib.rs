@@ -62,6 +62,7 @@ impl EthEvmConfig {
 
 impl ConfigureEvmEnv for EthEvmConfig {
     type Header = Header;
+    type Transaction = TransactionSigned;
     type Error = Infallible;
 
     fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {

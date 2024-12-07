@@ -4,7 +4,7 @@ use crate::{
     blobstore::{BlobStoreCanonTracker, BlobStoreUpdates},
     error::PoolError,
     metrics::MaintainPoolMetrics,
-    traits::{CanonicalStateUpdate, TransactionPool, TransactionPoolExt},
+    traits::{CanonicalStateUpdate, EthPoolTransaction, TransactionPool, TransactionPoolExt},
     BlockInfo, PoolTransaction, PoolUpdateKind,
 };
 use alloy_consensus::BlockHeader;
@@ -20,8 +20,7 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
 use reth_primitives::{
-    transaction::SignedTransactionIntoRecoveredExt, PooledTransactionsElementEcRecovered,
-    SealedHeader, TransactionSigned,
+    transaction::SignedTransactionIntoRecoveredExt, SealedHeader, TransactionSigned,
 };
 use reth_primitives_traits::SignedTransaction;
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
@@ -335,13 +334,9 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                                 .flatten()
                                 .map(Arc::unwrap_or_clone)
                                 .and_then(|sidecar| {
-                                    PooledTransactionsElementEcRecovered::try_from_blob_transaction(
+                                    <P as TransactionPool>::Transaction::try_from_eip4844(
                                         tx, sidecar,
                                     )
-                                    .ok()
-                                })
-                                .map(|tx| {
-                                    <P as TransactionPool>::Transaction::from_pooled(tx.into())
                                 })
                         } else {
                             <P as TransactionPool>::Transaction::try_from_consensus(tx).ok()

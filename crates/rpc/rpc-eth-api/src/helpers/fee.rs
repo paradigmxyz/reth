@@ -5,6 +5,7 @@ use alloy_primitives::U256;
 use alloy_rpc_types_eth::{BlockNumberOrTag, FeeHistory};
 use futures::Future;
 use reth_chainspec::EthChainSpec;
+use reth_primitives_traits::BlockBody;
 use reth_provider::{BlockIdReader, ChainSpecProvider, HeaderProvider};
 use reth_rpc_eth_types::{
     fee_history::calculate_reward_percentiles_for_block, EthApiError, FeeHistoryCache,
@@ -183,7 +184,7 @@ pub trait EthFees: LoadFee {
                                 percentiles,
                                 header.gas_used(),
                                 header.base_fee_per_gas().unwrap_or_default(),
-                                &block.body.transactions,
+                                block.body.transactions(),
                                 &receipts,
                             )
                             .unwrap_or_default(),

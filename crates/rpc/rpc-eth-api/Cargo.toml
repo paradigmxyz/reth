@@ -16,6 +16,7 @@ workspace = true
 revm.workspace = true
 revm-inspectors.workspace = true
 revm-primitives = { workspace = true, features = ["dev"] }
+reth-primitives-traits.workspace = true
 reth-errors.workspace = true
 reth-evm.workspace = true
 reth-primitives.workspace = true
@@ -33,6 +34,7 @@ reth-node-api.workspace = true
 reth-trie-common = { workspace = true, features = ["eip1186"] }
 
 # ethereum
+alloy-rlp.workspace = true
 alloy-serde.workspace = true
 alloy-eips.workspace = true
 alloy-dyn-abi = { workspace = true, features = ["eip712"] }

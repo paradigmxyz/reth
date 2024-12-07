@@ -357,7 +357,7 @@ mod tests {
 
         let reth_account_a = account_a.into();
         let reth_account_b = account_b.into();
-        let reth_account_b_changed = account_b_changed.clone().into();
+        let reth_account_b_changed = (&account_b_changed).into();
 
         // Check plain state
         assert_eq!(

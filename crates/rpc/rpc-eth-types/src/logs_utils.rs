@@ -2,32 +2,34 @@
 //!
 //! Log parsing for building filter.
 
+use alloy_consensus::TxReceipt;
 use alloy_eips::{eip2718::Encodable2718, BlockNumHash};
 use alloy_primitives::TxHash;
 use alloy_rpc_types_eth::{FilteredParams, Log};
 use reth_chainspec::ChainInfo;
 use reth_errors::ProviderError;
-use reth_primitives::{Receipt, SealedBlockWithSenders};
-use reth_primitives_traits::SignedTransaction;
-use reth_storage_api::BlockReader;
+use reth_primitives::SealedBlockWithSenders;
+use reth_primitives_traits::{BlockBody, SignedTransaction};
+use reth_storage_api::{BlockReader, ProviderBlock};
 use std::sync::Arc;
 
 /// Returns all matching of a block's receipts when the transaction hashes are known.
-pub fn matching_block_logs_with_tx_hashes<'a, I>(
+pub fn matching_block_logs_with_tx_hashes<'a, I, R>(
     filter: &FilteredParams,
     block_num_hash: BlockNumHash,
     tx_hashes_and_receipts: I,
     removed: bool,
 ) -> Vec<Log>
 where
-    I: IntoIterator<Item = (TxHash, &'a Receipt)>,
+    I: IntoIterator<Item = (TxHash, &'a R)>,
+    R: TxReceipt<Log = alloy_primitives::Log> + 'a,
 {
     let mut all_logs = Vec::new();
     // Tracks the index of a log in the entire block.
     let mut log_index: u64 = 0;
     // Iterate over transaction hashes and receipts and append matching logs.
     for (receipt_idx, (tx_hash, receipt)) in tx_hashes_and_receipts.into_iter().enumerate() {
-        for log in &receipt.logs {
+        for log in receipt.logs() {
             if log_matches_filter(block_num_hash, log, filter) {
                 let log = Log {
                     inner: log.clone(),
@@ -54,20 +56,23 @@ pub enum ProviderOrBlock<'a, P: BlockReader> {
     /// Provider
     Provider(&'a P),
     /// [`SealedBlockWithSenders`]
-    Block(Arc<SealedBlockWithSenders>),
+    Block(Arc<SealedBlockWithSenders<ProviderBlock<P>>>),
 }
 
 /// Appends all matching logs of a block's receipts.
 /// If the log matches, look up the corresponding transaction hash.
-pub fn append_matching_block_logs<P: BlockReader<Transaction: SignedTransaction>>(
+pub fn append_matching_block_logs<P>(
     all_logs: &mut Vec<Log>,
     provider_or_block: ProviderOrBlock<'_, P>,
     filter: &FilteredParams,
     block_num_hash: BlockNumHash,
-    receipts: &[Receipt],
+    receipts: &[P::Receipt],
     removed: bool,
     block_timestamp: u64,
-) -> Result<(), ProviderError> {
+) -> Result<(), ProviderError>
+where
+    P: BlockReader<Transaction: SignedTransaction>,
+{
     // Tracks the index of a log in the entire block.
     let mut log_index: u64 = 0;
 
@@ -81,13 +86,13 @@ pub fn append_matching_block_logs<P: BlockReader<Transaction: SignedTransaction>
         // The transaction hash of the current receipt.
         let mut transaction_hash = None;
 
-        for log in &receipt.logs {
+        for log in receipt.logs() {
             if log_matches_filter(block_num_hash, log, filter) {
                 // if this is the first match in the receipt's logs, look up the transaction hash
                 if transaction_hash.is_none() {
                     transaction_hash = match &provider_or_block {
                         ProviderOrBlock::Block(block) => {
-                            block.body.transactions.get(receipt_idx).map(|t| t.hash())
+                            block.body.transactions().get(receipt_idx).map(|t| t.trie_hash())
                         }
                         ProviderOrBlock::Provider(provider) => {
                             let first_tx_num = match loaded_first_tx_num {

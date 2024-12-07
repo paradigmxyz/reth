@@ -4,6 +4,7 @@ use alloy_primitives::{Bytes, B256};
 use reth_chainspec::EthereumHardforks;
 use reth_node_api::{FullNodeComponents, NodePrimitives};
 use reth_node_builder::{rpc::RpcRegistry, NodeTypes};
+use reth_provider::BlockReader;
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{
     helpers::{EthApiSpec, EthTransactions, TraceExt},
@@ -26,7 +27,9 @@ where
             >,
         >,
     >,
-    EthApi: EthApiSpec + EthTransactions + TraceExt,
+    EthApi: EthApiSpec<Provider: BlockReader<Block = reth_primitives::Block>>
+        + EthTransactions
+        + TraceExt,
 {
     /// Injects a raw transaction into the node tx pool via RPC server
     pub async fn inject_tx(&self, raw_tx: Bytes) -> Result<B256, EthApi::Error> {

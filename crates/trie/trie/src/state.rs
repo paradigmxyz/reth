@@ -34,7 +34,7 @@ impl HashedPostState {
             .into_par_iter()
             .map(|(address, account)| {
                 let hashed_address = KH::hash_key(address);
-                let hashed_account = account.info.clone().map(Into::into);
+                let hashed_account = account.info.as_ref().map(Into::into);
                 let hashed_storage = HashedStorage::from_plain_storage(
                     account.status,
                     account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
@@ -61,7 +61,7 @@ impl HashedPostState {
             .into_par_iter()
             .map(|(address, account)| {
                 let hashed_address = KH::hash_key(address);
-                let hashed_account = account.account.as_ref().map(|a| a.info.clone().into());
+                let hashed_account = account.account.as_ref().map(|a| (&a.info).into());
                 let hashed_storage = HashedStorage::from_plain_storage(
                     account.status,
                     account.account.as_ref().map(|a| a.storage.iter()).into_iter().flatten(),

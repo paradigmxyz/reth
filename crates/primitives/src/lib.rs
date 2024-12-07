@@ -40,9 +40,7 @@ pub use block::{
 };
 #[cfg(feature = "reth-codec")]
 pub use compression::*;
-pub use receipt::{
-    gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,
-};
+pub use receipt::{gas_spent_by_transactions, Receipt, Receipts};
 pub use reth_primitives_traits::{
     logs_bloom, Account, Bytecode, GotExpected, GotExpectedBoxed, Header, HeaderError, Log,
     LogData, NodePrimitives, SealedHeader, StorageEntry,
@@ -53,8 +51,10 @@ pub use transaction::{
     util::secp256k1::{public_key_to_address, recover_signer_unchecked, sign_message},
     BlobTransaction, InvalidTransactionError, PooledTransactionsElement,
     PooledTransactionsElementEcRecovered, RecoveredTx, Transaction, TransactionMeta,
-    TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxType,
+    TransactionSigned, TransactionSignedEcRecovered, TxType,
 };
+
+pub use alloy_consensus::ReceiptWithBloom;
 
 // Re-exports
 pub use reth_ethereum_forks::*;

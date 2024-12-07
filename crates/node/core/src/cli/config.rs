@@ -1,7 +1,7 @@
 //! Config traits for various node components.
 
 use alloy_primitives::Bytes;
-use reth_network::protocol::IntoRlpxSubProtocol;
+use reth_network::{protocol::IntoRlpxSubProtocol, NetworkPrimitives};
 use reth_transaction_pool::PoolConfig;
 use std::{borrow::Cow, time::Duration};
 
@@ -49,7 +49,7 @@ pub trait RethNetworkConfig {
     // TODO add more network config methods here
 }
 
-impl RethNetworkConfig for reth_network::NetworkManager {
+impl<N: NetworkPrimitives> RethNetworkConfig for reth_network::NetworkManager<N> {
     fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
         Self::add_rlpx_sub_protocol(self, protocol);
     }

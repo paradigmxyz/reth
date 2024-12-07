@@ -7,9 +7,8 @@ use alloy_eips::{
 };
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::ConsensusError;
-use reth_primitives::{
-    BlockBody, BlockBodyTxExt, EthereumHardfork, GotExpected, SealedBlock, SealedHeader,
-};
+use reth_primitives::{BlockBody, EthereumHardfork, GotExpected, SealedBlock, SealedHeader};
+use reth_primitives_traits::BlockBody as _;
 use revm_primitives::calc_excess_blob_gas;
 
 /// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.

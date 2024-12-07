@@ -2,14 +2,14 @@
 
 use crate::{
     segments::{PruneInput, Segment},
-    Metrics, PrunerError, PrunerEvent,
+    Metrics, PruneLimiter, PrunerError, PrunerEvent,
 };
 use alloy_primitives::BlockNumber;
 use reth_exex_types::FinishedExExHeight;
 use reth_provider::{
     DBProvider, DatabaseProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
 };
-use reth_prune_types::{PruneLimiter, PruneProgress, PrunedSegmentInfo, PrunerOutput};
+use reth_prune_types::{PruneProgress, PrunedSegmentInfo, PrunerOutput};
 use reth_tokio_util::{EventSender, EventStream};
 use std::time::{Duration, Instant};
 use tokio::sync::watch;

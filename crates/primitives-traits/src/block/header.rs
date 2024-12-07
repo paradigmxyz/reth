@@ -33,12 +33,6 @@ pub trait BlockHeader:
     + AsRef<Self>
     + 'static
 {
-    /// Returns whether this header corresponds to an empty block.
-    fn is_empty(&self) -> bool;
 }
 
-impl BlockHeader for alloy_consensus::Header {
-    fn is_empty(&self) -> bool {
-        self.is_empty()
-    }
-}
+impl BlockHeader for alloy_consensus::Header {}

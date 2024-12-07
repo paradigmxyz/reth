@@ -29,9 +29,9 @@ use reth_db_api::{
         AccountBeforeTx, ClientVersion, CompactU256, IntegerList, ShardedKey,
         StoredBlockBodyIndices, StoredBlockWithdrawals,
     },
-    table::{Decode, DupSort, Encode, Table},
+    table::{Decode, DupSort, Encode, Table, TableInfo},
 };
-use reth_primitives::{Receipt, StorageEntry, TransactionSignedNoHash};
+use reth_primitives::{Receipt, StorageEntry, TransactionSigned};
 use reth_primitives_traits::{Account, Bytecode};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
@@ -101,10 +101,8 @@ pub trait TableViewer<R> {
 /// General trait for defining the set of tables
 /// Used to initialize database
 pub trait TableSet {
-    /// Returns all the table names in the database.
-    fn table_names(&self) -> Vec<&'static str>;
-    /// Returns `true` if the table at the given index is a `DUPSORT` table.
-    fn is_dupsort(&self, idx: usize) -> bool;
+    /// Returns an iterator over the tables
+    fn tables() -> Box<dyn Iterator<Item = Box<dyn TableInfo>>>;
 }
 
 /// Defines all the tables in the database.
@@ -252,15 +250,19 @@ macro_rules! tables {
             }
         }
 
-        impl TableSet for Tables {
-            fn table_names(&self) -> Vec<&'static str> {
-                //vec![$(table_names::$name,)*]
-                Self::ALL.iter().map(|t| t.name()).collect()
+        impl TableInfo for Tables {
+            fn name(&self) -> &'static str {
+                self.name()
             }
 
-            fn is_dupsort(&self, idx: usize) -> bool {
-                let table: Self = self.table_names()[idx].parse().expect("should be valid table name");
-                table.is_dupsort()
+            fn is_dupsort(&self) -> bool {
+                self.is_dupsort()
+            }
+        }
+
+        impl TableSet for Tables {
+            fn tables() -> Box<dyn Iterator<Item = Box<dyn TableInfo>>> {
+                Box::new(Self::ALL.iter().map(|table| Box::new(*table) as Box<dyn TableInfo>))
             }
         }
 
@@ -348,7 +350,7 @@ tables! {
     }
 
     /// Canonical only Stores the transaction body for canonical transactions.
-    table Transactions<T = TransactionSignedNoHash> {
+    table Transactions<T = TransactionSigned> {
         type Key = TxNumber;
         type Value = T;
     }

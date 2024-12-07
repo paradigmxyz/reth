@@ -12,23 +12,33 @@ description = "Commonly used types for stages usage in reth."
 workspace = true
 
 [dependencies]
-reth-codecs.workspace = true
+reth-codecs = { workspace = true, optional = true }
 reth-trie-common.workspace = true
 alloy-primitives.workspace = true
 
-modular-bitfield.workspace = true
-bytes.workspace = true
 serde.workspace = true
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 
+bytes = { workspace = true, optional = true }
+modular-bitfield = { workspace = true, optional = true }
+
 [dev-dependencies]
+reth-codecs.workspace = true
+alloy-primitives = { workspace = true, features = ["arbitrary", "rand"] }
 arbitrary = { workspace = true, features = ["derive"] }
+modular-bitfield.workspace = true
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 test-fuzz.workspace = true
 rand.workspace = true
+bytes.workspace = true
 
 [features]
+reth-codec = [
+	"dep:reth-codecs",
+	"dep:bytes",
+	"dep:modular-bitfield",
+]
 test-utils = [
 	"dep:arbitrary",
 	"reth-codecs/test-utils",
