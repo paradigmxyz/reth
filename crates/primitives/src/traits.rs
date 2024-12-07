@@ -3,7 +3,6 @@ use crate::{
     BlockWithSenders, SealedBlock,
 };
 use alloc::vec::Vec;
-use alloy_eips::eip2718::Encodable2718;
 use reth_primitives_traits::{Block, BlockBody, SealedHeader, SignedTransaction};
 use revm_primitives::{Address, B256};
 
@@ -91,14 +90,6 @@ impl<T: Block> BlockExt for T {}
 
 /// Extension trait for [`BlockBody`] adding helper methods operating with transactions.
 pub trait BlockBodyTxExt: BlockBody {
-    /// Calculate the transaction root for the block body.
-    fn calculate_tx_root(&self) -> B256
-    where
-        Self::Transaction: Encodable2718,
-    {
-        crate::proofs::calculate_transaction_root(self.transactions())
-    }
-
     /// Recover signer addresses for all transactions in the block body.
     fn recover_signers(&self) -> Option<Vec<Address>>
     where
