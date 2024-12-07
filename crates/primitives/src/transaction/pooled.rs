@@ -7,11 +7,7 @@ use super::{
 };
 use crate::{BlobTransaction, RecoveredTx, Transaction, TransactionSigned, TxType};
 use alloc::vec::Vec;
-use alloy_consensus::{
-    constants::EIP4844_TX_TYPE_ID,
-    transaction::{TxEip1559, TxEip2930, TxEip4844, TxLegacy},
-    SignableTransaction, Signed, TxEip4844WithSidecar,
-};
+use alloy_consensus::{constants::EIP4844_TX_TYPE_ID, transaction::{TxEip1559, TxEip2930, TxEip4844, TxLegacy}, SignableTransaction, Signed, TxEip4844WithSidecar, Typed2718};
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Result, Encodable2718},
     eip2930::AccessList,
@@ -597,6 +593,12 @@ impl SignedTransaction for PooledTransactionsElement {
         self.encode_for_signing(buf);
         let signature_hash = keccak256(buf);
         recover_signer_unchecked(self.signature(), signature_hash)
+    }
+}
+
+impl Typed2718 for PooledTransactionsElement  {
+    fn ty(&self) -> u8 {
+        alloy_consensus::Transaction::ty(self)
     }
 }
 
