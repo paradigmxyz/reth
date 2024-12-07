@@ -207,8 +207,8 @@ use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_primitives::NodePrimitives;
 use reth_provider::{
     AccountReader, BlockReader, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
-    EvmEnvProvider, FullRpcProvider, HeaderProvider, ProviderBlock, ProviderHeader,
-    ProviderReceipt, ReceiptProvider, StateProviderFactory,
+    EvmEnvProvider, FullRpcProvider, ProviderBlock, ProviderHeader, ProviderReceipt,
+    ReceiptProvider, StateProviderFactory,
 };
 use reth_rpc::{
     AdminApi, DebugApi, EngineEthApi, EthBundle, MinerApi, NetApi, OtterscanApi, RPCApi, RethApi,
@@ -273,7 +273,7 @@ pub async fn launch<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi, B
     evm_config: EvmConfig,
     eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi>,
     block_executor: BlockExecutor,
-    consensus: Arc<dyn FullConsensus>,
+    consensus: Arc<dyn FullConsensus<BlockExecutor::Primitives>>,
 ) -> Result<RpcServerHandle, RpcError>
 where
     Provider: FullRpcProvider<
@@ -299,6 +299,7 @@ where
             Block = reth_primitives::Block,
             Receipt = reth_primitives::Receipt,
             BlockHeader = reth_primitives::Header,
+            BlockBody = reth_primitives::BlockBody,
         >,
     >,
 {
@@ -657,9 +658,10 @@ where
             Block = reth_primitives::Block,
             Receipt = reth_primitives::Receipt,
             BlockHeader = reth_primitives::Header,
+            BlockBody = reth_primitives::BlockBody,
         >,
     >,
-    Consensus: reth_consensus::FullConsensus + Clone + 'static,
+    Consensus: reth_consensus::FullConsensus<BlockExecutor::Primitives> + Clone + 'static,
 {
     /// Configures all [`RpcModule`]s specific to the given [`TransportRpcModuleConfig`] which can
     /// be used to start the transport server(s).
@@ -1332,7 +1334,7 @@ where
     /// Instantiates `ValidationApi`
     pub fn validation_api(&self) -> ValidationApi<Provider, BlockExecutor>
     where
-        Consensus: reth_consensus::FullConsensus + Clone + 'static,
+        Consensus: reth_consensus::FullConsensus<BlockExecutor::Primitives> + Clone + 'static,
     {
         ValidationApi::new(
             self.provider.clone(),
@@ -1352,15 +1354,22 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions<Primitives = BlockExecutor::Primitives> + Clone + 'static,
-    EthApi: FullEthApiServer,
+    EthApi: FullEthApiServer<
+        Provider: BlockReader<
+            Block = <BlockExecutor::Primitives as NodePrimitives>::Block,
+            Receipt = <BlockExecutor::Primitives as NodePrimitives>::Receipt,
+            Header = <BlockExecutor::Primitives as NodePrimitives>::BlockHeader,
+        >,
+    >,
     BlockExecutor: BlockExecutorProvider<
         Primitives: NodePrimitives<
             Block = reth_primitives::Block,
             BlockHeader = reth_primitives::Header,
+            BlockBody = reth_primitives::BlockBody,
             Receipt = reth_primitives::Receipt,
         >,
     >,
-    Consensus: reth_consensus::FullConsensus + Clone + 'static,
+    Consensus: reth_consensus::FullConsensus<BlockExecutor::Primitives> + Clone + 'static,
 {
     /// Configures the auth module that includes the
     ///   * `engine_` namespace

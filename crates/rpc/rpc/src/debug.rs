@@ -15,22 +15,20 @@ use alloy_rpc_types_trace::geth::{
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthereumHardforks;
-use reth_provider::ReceiptProviderIdExt;
-use reth_provider::BlockIdReader;
 use reth_evm::{
     execute::{BlockExecutorProvider, Executor},
     ConfigureEvmEnv,
 };
-use reth_primitives::{BlockExt, NodePrimitives, SealedBlockWithSenders};
+use reth_primitives::{BlockExt, NodePrimitives, ReceiptWithBloom, SealedBlockWithSenders};
 use reth_primitives_traits::{Block as _, BlockBody, SignedTransaction};
 use reth_provider::{
-    BlockReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider, ProviderBlock,
-    StateProofProvider, StateProviderFactory, TransactionVariant,
+    BlockIdReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider, ProviderBlock,
+    ReceiptProviderIdExt, StateProofProvider, TransactionVariant,
 };
 use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{
-    helpers::{EthApiSpec, EthTransactions, TraceExt},
+    helpers::{EthTransactions, TraceExt},
     EthApiTypes, FromEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
@@ -166,33 +164,30 @@ where
         let (cfg, block_env) = self.eth_api().evm_env_for_raw_block(block.header()).await?;
 
         // Depending on EIP-2 we need to recover the transactions differently
-        let senders = if self
-            .provider()
-            .chain_spec()
-            .is_homestead_active_at_block(block.header().number())
-        {
-            block
-                .body()
-                .transactions()
-                .iter()
-                .map(|tx| {
-                    tx.recover_signer()
-                        .ok_or(EthApiError::InvalidTransactionSignature)
-                        .map_err(Eth::Error::from_eth_err)
-                })
-                .collect::<Result<Vec<_>, Eth::Error>>()?
-        } else {
-            block
-                .body()
-                .transactions()
-                .iter()
-                .map(|tx| {
-                    tx.recover_signer_unchecked()
-                        .ok_or(EthApiError::InvalidTransactionSignature)
-                        .map_err(Eth::Error::from_eth_err)
-                })
-                .collect::<Result<Vec<_>, Eth::Error>>()?
-        };
+        let senders =
+            if self.provider().chain_spec().is_homestead_active_at_block(block.header().number()) {
+                block
+                    .body()
+                    .transactions()
+                    .iter()
+                    .map(|tx| {
+                        tx.recover_signer()
+                            .ok_or(EthApiError::InvalidTransactionSignature)
+                            .map_err(Eth::Error::from_eth_err)
+                    })
+                    .collect::<Result<Vec<_>, Eth::Error>>()?
+            } else {
+                block
+                    .body()
+                    .transactions()
+                    .iter()
+                    .map(|tx| {
+                        tx.recover_signer_unchecked()
+                            .ok_or(EthApiError::InvalidTransactionSignature)
+                            .map_err(Eth::Error::from_eth_err)
+                    })
+                    .collect::<Result<Vec<_>, Eth::Error>>()?
+            };
 
         self.trace_block(
             Arc::new(block.with_senders_unchecked(senders).seal_slow()),
@@ -815,10 +810,9 @@ where
 #[async_trait]
 impl<Eth, BlockExecutor> DebugApiServer for DebugApi<Eth, BlockExecutor>
 where
-    Eth: EthApiSpec + EthTransactions + TraceExt + 'static,
-    BlockExecutor: BlockExecutorProvider<
-        Primitives: NodePrimitives<Block = <<Eth as RpcNodeCore>::Provider as BlockReader>::Block>,
-    >,
+    Eth: EthApiTypes + EthTransactions + TraceExt + 'static,
+    BlockExecutor:
+        BlockExecutorProvider<Primitives: NodePrimitives<Block = ProviderBlock<Eth::Provider>>>,
 {
     /// Handler for `debug_getRawHeader`
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {
@@ -884,7 +878,7 @@ where
             .to_rpc_result()?
             .unwrap_or_default()
             .into_iter()
-            .map(|receipt| receipt.with_bloom().encoded_2718().into())
+            .map(|receipt| ReceiptWithBloom::from(receipt).encoded_2718().into())
             .collect())
     }
 

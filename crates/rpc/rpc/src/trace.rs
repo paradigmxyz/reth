@@ -20,7 +20,7 @@ use reth_consensus_common::calc::{
 };
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives_traits::{BlockBody, BlockHeader};
-use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
+use reth_provider::{BlockNumReader, BlockReader, ChainSpecProvider, HeaderProvider};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_eth_api::{helpers::TraceExt, FromEthApiError, RpcNodeCore};
