@@ -8,12 +8,14 @@ use alloy_primitives::{
     Bytes, B256,
 };
 use alloy_rlp::{Decodable, Encodable};
+use alloy_trie::TrieAccount;
 use reth_execution_errors::{SparseStateTrieError, SparseStateTrieResult, SparseTrieError};
 use reth_primitives_traits::Account;
 use reth_tracing::tracing::trace;
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
-    MultiProof, Nibbles, TrieAccount, TrieNode, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    AccountWithStorageRoot, MultiProof, Nibbles, TrieNode, EMPTY_ROOT_HASH,
+    TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use std::{fmt, iter::Peekable};
 
@@ -384,7 +386,8 @@ where
         } else {
             trace!(target: "trie::sparse", ?address, "Updating account");
             self.account_rlp_buf.clear();
-            TrieAccount::from((account, storage_root)).encode(&mut self.account_rlp_buf);
+            TrieAccount::from(AccountWithStorageRoot(account, storage_root))
+                .encode(&mut self.account_rlp_buf);
             self.update_account_leaf(nibbles, self.account_rlp_buf.clone())
         }
     }

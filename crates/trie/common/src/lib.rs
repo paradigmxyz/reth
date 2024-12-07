@@ -16,8 +16,7 @@ mod constants;
 pub use constants::*;
 
 mod account;
-pub use account::TrieAccount;
-
+pub use account::*;
 mod key;
 pub use key::{KeccakKeyHasher, KeyHasher};
 

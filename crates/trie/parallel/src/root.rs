@@ -3,6 +3,7 @@ use crate::metrics::ParallelStateRootMetrics;
 use crate::{stats::ParallelTrieTracker, storage_root_targets::StorageRootTargets};
 use alloy_primitives::B256;
 use alloy_rlp::{BufMut, Encodable};
+use alloy_trie::TrieAccount;
 use itertools::Itertools;
 use reth_db::DatabaseError;
 use reth_execution_errors::StorageRootError;
@@ -16,8 +17,9 @@ use reth_trie::{
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdates,
     walker::TrieWalker,
-    HashBuilder, Nibbles, StorageRoot, TrieAccount, TrieInput, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    HashBuilder, Nibbles, StorageRoot, TrieInput, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
+use reth_trie_common::AccountWithStorageRoot;
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
@@ -192,7 +194,7 @@ where
                     }
 
                     account_rlp.clear();
-                    let account = TrieAccount::from((account, storage_root));
+                    let account = TrieAccount::from(AccountWithStorageRoot(account, storage_root));
                     account.encode(&mut account_rlp as &mut dyn BufMut);
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
                 }

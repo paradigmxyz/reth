@@ -22,6 +22,7 @@ reth-tracing.workspace = true
 # alloy
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
+alloy-trie.workspace = true
 
 # misc
 smallvec = { workspace = true, features = ["const_new"] }
