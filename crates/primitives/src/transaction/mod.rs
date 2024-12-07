@@ -846,6 +846,34 @@ impl TransactionSigned {
         &self.transaction
     }
 
+    /// Tries to convert a [`TransactionSigned`] into a [`PooledTransactionsElement`].
+    ///
+    /// This function used as a helper to convert from a decoded p2p broadcast message to
+    /// [`PooledTransactionsElement`]. Since [`BlobTransaction`] is disallowed to be broadcasted on
+    /// p2p, return an err if `tx` is [`Transaction::Eip4844`].
+    pub fn try_into_pooled(self) -> Result<PooledTransactionsElement, Self> {
+        let hash = self.hash();
+        match self {
+            Self { transaction: Transaction::Legacy(tx), signature, .. } => {
+                Ok(PooledTransactionsElement::Legacy(Signed::new_unchecked(tx, signature, hash)))
+            }
+            Self { transaction: Transaction::Eip2930(tx), signature, .. } => {
+                Ok(PooledTransactionsElement::Eip2930(Signed::new_unchecked(tx, signature, hash)))
+            }
+            Self { transaction: Transaction::Eip1559(tx), signature, .. } => {
+                Ok(PooledTransactionsElement::Eip1559(Signed::new_unchecked(tx, signature, hash)))
+            }
+            Self { transaction: Transaction::Eip7702(tx), signature, .. } => {
+                Ok(PooledTransactionsElement::Eip7702(Signed::new_unchecked(tx, signature, hash)))
+            }
+            // Not supported because missing blob sidecar
+            tx @ Self { transaction: Transaction::Eip4844(_), .. } => Err(tx),
+            #[cfg(feature = "optimism")]
+            // Not supported because deposit transactions are never pooled
+            tx @ Self { transaction: Transaction::Deposit(_), .. } => Err(tx),
+        }
+    }
+
     /// Transaction hash. Used to identify transaction.
     pub fn hash(&self) -> TxHash {
         *self.tx_hash()
