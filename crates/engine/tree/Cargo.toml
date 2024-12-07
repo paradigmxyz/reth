@@ -93,6 +93,10 @@ rand.workspace = true
 name = "channel_perf"
 harness = false
 
+[[bench]]
+name = "state_root_task"
+harness = false
+
 [features]
 test-utils = [
     "reth-blockchain-tree/test-utils",
