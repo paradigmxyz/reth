@@ -2,13 +2,9 @@
 
 use std::sync::Arc;
 
-use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::TxHash;
 use alloy_rpc_types_eth::{
-    pubsub::{
-        Params, PubSubSyncStatus, SubscriptionKind, SubscriptionResult as EthSubscriptionResult,
-        SyncStatusMetadata,
-    },
+    pubsub::{Params, PubSubSyncStatus, SubscriptionKind, SyncStatusMetadata},
     FilteredParams, Header, Log,
 };
 use futures::StreamExt;
@@ -68,13 +64,7 @@ impl<Eth, Events> EthPubSub<Eth, Events> {
 #[async_trait::async_trait]
 impl<Eth, Events> EthPubSubApiServer<RpcTransaction<Eth::NetworkTypes>> for EthPubSub<Eth, Events>
 where
-    Events: CanonStateSubscriptions<
-            Primitives: NodePrimitives<
-                BlockHeader = reth_primitives::Header,
-                Receipt = reth_primitives::Receipt,
-            >,
-        > + Clone
-        + 'static,
+    Events: CanonStateSubscriptions + 'static,
     Eth: RpcNodeCore<Provider: BlockNumReader, Pool: TransactionPool, Network: NetworkInfo>
         + EthApiTypes<TransactionCompat: TransactionCompat<PoolConsensusTx<Eth::Pool>>>
         + 'static,
@@ -104,23 +94,13 @@ async fn handle_accepted<Eth, Events>(
     params: Option<Params>,
 ) -> Result<(), ErrorObject<'static>>
 where
-    Events: CanonStateSubscriptions<
-            Primitives: NodePrimitives<
-                SignedTx: Encodable2718,
-                BlockHeader = reth_primitives::Header,
-                Receipt = reth_primitives::Receipt,
-            >,
-        > + Clone
-        + 'static,
+    Events: CanonStateSubscriptions + 'static,
     Eth: RpcNodeCore<Provider: BlockNumReader, Pool: TransactionPool, Network: NetworkInfo>
         + EthApiTypes<TransactionCompat: TransactionCompat<PoolConsensusTx<Eth::Pool>>>,
 {
     match kind {
         SubscriptionKind::NewHeads => {
-            let stream = pubsub
-                .new_headers_stream()
-                .map(|header| EthSubscriptionResult::<()>::Header(Box::new(header.into())));
-            pipe_from_stream(accepted_sink, stream).await
+            pipe_from_stream(accepted_sink, pubsub.new_headers_stream()).await
         }
         SubscriptionKind::Logs => {
             // if no params are provided, used default filter params
@@ -131,10 +111,7 @@ where
                 }
                 _ => FilteredParams::default(),
             };
-            let stream = pubsub
-                .log_stream(filter)
-                .map(|log| EthSubscriptionResult::<()>::Log(Box::new(log)));
-            pipe_from_stream(accepted_sink, stream).await
+            pipe_from_stream(accepted_sink, pubsub.log_stream(filter)).await
         }
         SubscriptionKind::NewPendingTransactions => {
             if let Some(params) = params {
@@ -146,9 +123,7 @@ where
                                 tx.transaction.to_consensus(),
                                 pubsub.eth_api.tx_resp_builder(),
                             ) {
-                                Ok(tx) => {
-                                    Some(EthSubscriptionResult::FullTransaction(Box::new(tx)))
-                                }
+                                Ok(tx) => Some(tx),
                                 Err(err) => {
                                     error!(target = "rpc",
                                         %err,
@@ -172,10 +147,7 @@ where
                 }
             }
 
-            let stream = pubsub
-                .pending_transaction_hashes_stream()
-                .map(EthSubscriptionResult::<()>::TransactionHash);
-            pipe_from_stream(accepted_sink, stream).await
+            pipe_from_stream(accepted_sink, pubsub.pending_transaction_hashes_stream()).await
         }
         SubscriptionKind::Syncing => {
             // get new block subscription
@@ -285,7 +257,7 @@ where
     Eth: RpcNodeCore<Provider: BlockNumReader>,
 {
     /// Returns the current sync status for the `syncing` subscription
-    fn sync_status(&self, is_syncing: bool) -> EthSubscriptionResult {
+    fn sync_status(&self, is_syncing: bool) -> PubSubSyncStatus {
         if is_syncing {
             let current_block = self
                 .eth_api
@@ -293,14 +265,14 @@ where
                 .chain_info()
                 .map(|info| info.best_number)
                 .unwrap_or_default();
-            EthSubscriptionResult::SyncState(PubSubSyncStatus::Detailed(SyncStatusMetadata {
+            PubSubSyncStatus::Detailed(SyncStatusMetadata {
                 syncing: true,
                 starting_block: 0,
                 current_block,
                 highest_block: Some(current_block),
-            }))
+            })
         } else {
-            EthSubscriptionResult::SyncState(PubSubSyncStatus::Simple(false))
+            PubSubSyncStatus::Simple(false)
         }
     }
 }
@@ -324,15 +296,12 @@ where
 
 impl<Eth, Events> EthPubSubInner<Eth, Events>
 where
-    Events: CanonStateSubscriptions<
-        Primitives: NodePrimitives<
-            BlockHeader = reth_primitives::Header,
-            Receipt = reth_primitives::Receipt,
-        >,
-    >,
+    Events: CanonStateSubscriptions,
 {
     /// Returns a stream that yields all new RPC blocks.
-    fn new_headers_stream(&self) -> impl Stream<Item = Header> {
+    fn new_headers_stream(
+        &self,
+    ) -> impl Stream<Item = Header<<Events::Primitives as NodePrimitives>::BlockHeader>> {
         self.chain_events.canonical_state_stream().flat_map(|new_chain| {
             let headers = new_chain.committed().headers().collect::<Vec<_>>();
             futures::stream::iter(
