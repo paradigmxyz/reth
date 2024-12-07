@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 
-use alloy_consensus::EMPTY_ROOT_HASH;
+use alloy_consensus::{TrieAccount, EMPTY_ROOT_HASH};
 use alloy_primitives::{hex_literal::hex, keccak256, map::HashMap, Address, B256, U256};
 use alloy_rlp::Encodable;
 use proptest::{prelude::ProptestConfig, proptest};
@@ -21,8 +21,9 @@ use reth_trie::{
     triehash::KeccakHasher,
     updates::StorageTrieUpdates,
     BranchNodeCompact, HashBuilder, IntermediateStateRootState, Nibbles, StateRoot,
-    StateRootProgress, StorageRoot, TrieAccount, TrieMask,
+    StateRootProgress, StorageRoot, TrieMask,
 };
+use reth_trie_common::AccountWithStorageRoot;
 use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot};
 use std::{collections::BTreeMap, ops::Mul, str::FromStr, sync::Arc};
 
@@ -284,7 +285,8 @@ fn test_state_root_with_state(state: State) {
 }
 
 fn encode_account(account: Account, storage_root: Option<B256>) -> Vec<u8> {
-    let account = TrieAccount::from((account, storage_root.unwrap_or(EMPTY_ROOT_HASH)));
+    let account =
+        TrieAccount::from(AccountWithStorageRoot(account, storage_root.unwrap_or(EMPTY_ROOT_HASH)));
     let mut account_rlp = Vec::with_capacity(account.length());
     account.encode(&mut account_rlp);
     account_rlp
