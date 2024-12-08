@@ -150,7 +150,7 @@ impl From<std::io::Error> for StageError {
 pub enum PipelineError {
     /// The pipeline encountered an irrecoverable error in one of the stages.
     #[error(transparent)]
-    Stage(#[from] StageError),
+    Stage(Box<dyn core::error::Error + Send + Sync>),
     /// The pipeline encountered a database error.
     #[error(transparent)]
     Database(#[from] DatabaseError),
@@ -166,4 +166,10 @@ pub enum PipelineError {
     /// The pipeline encountered an unwind when `fail_on_unwind` was set to `true`.
     #[error("unexpected unwind")]
     UnexpectedUnwind,
+}
+
+impl From<StageError> for PipelineError {
+    fn from(value: StageError) -> Self {
+        Self::Stage(Box::new(value))
+    }
 }
