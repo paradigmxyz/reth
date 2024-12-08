@@ -273,30 +273,6 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         Ok(Some(root_node))
     }
 
-    /// Update the account leaf node.
-    pub fn update_account_leaf(
-        &mut self,
-        path: Nibbles,
-        value: Vec<u8>,
-    ) -> SparseStateTrieResult<()> {
-        self.state.update_leaf(path, value)?;
-        Ok(())
-    }
-
-    /// Update the leaf node of a storage trie at the provided address.
-    pub fn update_storage_leaf(
-        &mut self,
-        address: B256,
-        slot: Nibbles,
-        value: Vec<u8>,
-    ) -> SparseStateTrieResult<()> {
-        if let Some(storage_trie) = self.storages.get_mut(&address) {
-            Ok(storage_trie.update_leaf(slot, value)?)
-        } else {
-            Err(SparseStateTrieError::Sparse(SparseTrieError::Blind))
-        }
-    }
-
     /// Wipe the storage trie at the provided address.
     pub fn wipe_storage(&mut self, address: B256) -> SparseStateTrieResult<()> {
         if let Some(trie) = self.storages.get_mut(&address) {
@@ -354,6 +330,30 @@ where
     SparseTrieError: From<<F::AccountNodeProvider as BlindedProvider>::Error>
         + From<<F::StorageNodeProvider as BlindedProvider>::Error>,
 {
+    /// Update the account leaf node.
+    pub fn update_account_leaf(
+        &mut self,
+        path: Nibbles,
+        value: Vec<u8>,
+    ) -> SparseStateTrieResult<()> {
+        self.state.update_leaf(path, value)?;
+        Ok(())
+    }
+
+    /// Update the leaf node of a storage trie at the provided address.
+    pub fn update_storage_leaf(
+        &mut self,
+        address: B256,
+        slot: Nibbles,
+        value: Vec<u8>,
+    ) -> SparseStateTrieResult<()> {
+        if let Some(storage_trie) = self.storages.get_mut(&address) {
+            Ok(storage_trie.update_leaf(slot, value)?)
+        } else {
+            Err(SparseStateTrieError::Sparse(SparseTrieError::Blind))
+        }
+    }
+
     /// Update or remove trie account based on new account info. This method will either recompute
     /// the storage root based on update storage trie or look it up from existing leaf value.
     ///
