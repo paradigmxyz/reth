@@ -51,10 +51,10 @@ where
     /// In-flight full block _range_ requests in progress.
     inflight_block_range_requests: Vec<FetchFullBlockRangeFuture<Client>>,
     /// Sender for engine events.
-    event_sender: EventSender<BeaconConsensusEngineEvent>,
+    event_sender: EventSender<BeaconConsensusEngineEvent<N::Primitives>>,
     /// Buffered blocks from downloads - this is a min-heap of blocks, using the block number for
     /// ordering. This means the blocks will be popped from the heap with ascending block numbers.
-    range_buffered_blocks: BinaryHeap<Reverse<OrderedSealedBlock>>,
+    range_buffered_blocks: BinaryHeap<Reverse<OrderedSealedBlock<reth_node_types::HeaderTy<N>, reth_node_types::BodyTy<N>>>>,
     /// Max block after which the consensus engine would terminate the sync. Used for debugging
     /// purposes.
     max_block: Option<BlockNumber>,
@@ -65,7 +65,7 @@ where
 impl<N, Client> EngineSyncController<N, Client>
 where
     N: ProviderNodeTypes,
-    Client: EthBlockClient + 'static,
+    Client: EthBlockClient<reth_node_types::HeaderTy<N>, reth_node_types::BodyTy<N>> + 'static,
 {
     /// Create a new instance
     pub(crate) fn new(
@@ -74,7 +74,7 @@ where
         pipeline_task_spawner: Box<dyn TaskSpawner>,
         max_block: Option<BlockNumber>,
         chain_spec: Arc<N::ChainSpec>,
-        event_sender: EventSender<BeaconConsensusEngineEvent>,
+        event_sender: EventSender<BeaconConsensusEngineEvent<N::Primitives>>,
     ) -> Self {
         Self {
             full_block_client: FullBlockClient::new(
@@ -234,7 +234,7 @@ where
     /// Advances the pipeline state.
     ///
     /// This checks for the result in the channel, or returns pending if the pipeline is idle.
-    fn poll_pipeline(&mut self, cx: &mut Context<'_>) -> Poll<EngineSyncEvent> {
+    fn poll_pipeline(&mut self, cx: &mut Context<'_>) -> Poll<EngineSyncEvent<N::Primitives>> {
         let res = match self.pipeline_state {
             PipelineState::Idle(_) => return Poll::Pending,
             PipelineState::Running(ref mut fut) => {
@@ -259,7 +259,7 @@ where
 
     /// This will spawn the pipeline if it is idle and a target is set or if the pipeline is set to
     /// run continuously.
-    fn try_spawn_pipeline(&mut self) -> Option<EngineSyncEvent> {
+    fn try_spawn_pipeline(&mut self) -> Option<EngineSyncEvent<N::Primitives>> {
         match &mut self.pipeline_state {
             PipelineState::Idle(pipeline) => {
                 let target = self.pending_pipeline_target.take()?;
@@ -286,7 +286,7 @@ where
     }
 
     /// Advances the sync process.
-    pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<EngineSyncEvent> {
+    pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<EngineSyncEvent<N::Primitives>> {
         // try to spawn a pipeline if a target is set
         if let Some(event) = self.try_spawn_pipeline() {
             return Poll::Ready(event)
@@ -317,8 +317,8 @@ where
             let mut request = self.inflight_block_range_requests.swap_remove(idx);
             if let Poll::Ready(blocks) = request.poll_unpin(cx) {
                 trace!(target: "consensus::engine", len=?blocks.len(), first=?blocks.first().map(|b| b.num_hash()), last=?blocks.last().map(|b| b.num_hash()), "Received full block range, buffering");
-                self.range_buffered_blocks
-                    .extend(blocks.into_iter().map(OrderedSealedBlock).map(Reverse));
+                    self.range_buffered_blocks
+                        .extend(blocks.into_iter().map(OrderedSealedBlock).map(Reverse));
             } else {
                 // still pending
                 self.inflight_block_range_requests.push(request);
