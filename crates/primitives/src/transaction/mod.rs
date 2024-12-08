@@ -425,7 +425,7 @@ impl Transaction {
     /// Returns true if the transaction is a Scroll L1 messaging transaction.
     #[cfg(all(feature = "scroll", not(feature = "optimism")))]
     #[inline]
-    pub fn is_l1_message(&self) -> bool {
+    pub const fn is_l1_message(&self) -> bool {
         matches!(self, Self::L1Message(_))
     }
 

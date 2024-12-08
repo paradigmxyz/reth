@@ -233,7 +233,8 @@ pub fn build_block<T: TransactionCompat<Error: FromEthApiError>>(
     //     let storage = hashed_state
     //         .storages
     //         .entry(hashed_address)
-    //         .or_insert_with(|| HashedStorage::new(account.account_state.is_storage_cleared()));
+    //         .or_insert_with(||
+    // HashedStorage::new(account.account_state.is_storage_cleared()));
 
     //     for (slot, value) in &account.storage {
     //         let slot = B256::from(*slot);

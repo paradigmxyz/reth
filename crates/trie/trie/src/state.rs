@@ -13,6 +13,9 @@ use reth_trie_common::KeyHasher;
 use revm::db::{states::CacheAccount, AccountStatus, BundleAccount};
 use std::borrow::Cow;
 
+#[cfg(feature = "scroll")]
+use crate::key::BitsCompatibility;
+
 /// Representation of in-memory hashed state.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
 pub struct HashedPostState {
@@ -118,7 +121,12 @@ impl HashedPostState {
         let mut account_prefix_set = PrefixSetMut::with_capacity(self.accounts.len());
         let mut destroyed_accounts = HashSet::default();
         for (hashed_address, account) in &self.accounts {
-            account_prefix_set.insert(Nibbles::unpack(hashed_address));
+            // TODO(scroll): replace with key abstraction
+            #[cfg(feature = "scroll")]
+            let nibbles = Nibbles::unpack_and_truncate_bits(hashed_address);
+            #[cfg(not(feature = "scroll"))]
+            let nibbles = Nibbles::unpack(hashed_address);
+            account_prefix_set.insert(nibbles);
 
             if account.is_none() {
                 destroyed_accounts.insert(*hashed_address);
@@ -129,7 +137,12 @@ impl HashedPostState {
         let mut storage_prefix_sets =
             HashMap::with_capacity_and_hasher(self.storages.len(), Default::default());
         for (hashed_address, hashed_storage) in &self.storages {
-            account_prefix_set.insert(Nibbles::unpack(hashed_address));
+            // TODO(scroll): replace this with abstraction.
+            #[cfg(feature = "scroll")]
+            let nibbles = Nibbles::unpack_and_truncate_bits(hashed_address);
+            #[cfg(not(feature = "scroll"))]
+            let nibbles = Nibbles::unpack(hashed_address);
+            account_prefix_set.insert(nibbles);
             storage_prefix_sets.insert(*hashed_address, hashed_storage.construct_prefix_set());
         }
 
@@ -253,7 +266,12 @@ impl HashedStorage {
         } else {
             let mut prefix_set = PrefixSetMut::with_capacity(self.storage.len());
             for hashed_slot in self.storage.keys() {
-                prefix_set.insert(Nibbles::unpack(hashed_slot));
+                // TODO(scroll): replace this with key abstraction.
+                #[cfg(feature = "scroll")]
+                let nibbles = Nibbles::unpack_and_truncate_bits(hashed_slot);
+                #[cfg(not(feature = "scroll"))]
+                let nibbles = Nibbles::unpack(hashed_slot);
+                prefix_set.insert(nibbles);
             }
             prefix_set
         }

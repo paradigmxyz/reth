@@ -105,7 +105,7 @@ mod tests {
     use reth_codecs::{test_utils::UnusedBits, validate_bitflag_backwards_compat};
     use reth_primitives_traits::Account;
     use reth_revm::{test_utils::StateProviderTest, Database};
-    use reth_scroll_primitives::{hash_code, AccountExtension};
+    use reth_scroll_primitives::{poseidon::hash_code, AccountExtension};
 
     #[test]
     fn test_ensure_account_backwards_compatibility() {

@@ -166,7 +166,7 @@ impl TryFrom<AnyRpcTransaction> for TransactionSigned {
                             Transaction::L1Message(reth_scroll_primitives::TxL1Message {
                                 queue_index: fields.queue_index,
                                 gas_limit: inner.gas_limit(),
-                                to: inner.to().ok_or(ConversionError::Custom(
+                                to: inner.to().ok_or_else(|| ConversionError::Custom(
                                     "Scroll L1 message transaction do not support create transaction"
                                         .to_string(),
                                 ))?,

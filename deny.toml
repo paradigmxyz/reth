@@ -67,10 +67,10 @@ exceptions = [
     { allow = ["MPL-2.0"], name = "webpki-roots" },
 ]
 
-# Skip the poseidon-bn254 and bn254 crates for license verification. We should at some point publish a license for them.
+# Skip the poseidon-bn254, bn254 and zktrie crates for license verification. We should at some point publish a license for them.
 [licenses.private]
 ignore = true
-ignore-sources = ["https://github.com/scroll-tech/poseidon-bn254", "https://github.com/scroll-tech/bn254"]
+ignore-sources = ["https://github.com/scroll-tech/poseidon-bn254", "https://github.com/scroll-tech/bn254", "https://github.com/scroll-tech/zktrie.git"]
 
 [[licenses.clarify]]
 name = "ring"
@@ -100,5 +100,7 @@ allow-git = [
     "https://github.com/paradigmxyz/revm-inspectors",
     "https://github.com/scroll-tech/bn254",
     "https://github.com/scroll-tech/sp1-intrinsics",
-    "https://github.com/scroll-tech/poseidon-bn254"
+    "https://github.com/scroll-tech/poseidon-bn254",
+    "https://github.com/scroll-tech/zktrie.git",
+    "https://github.com/scroll-tech/gobuild.git"
 ]

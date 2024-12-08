@@ -5,7 +5,7 @@ use crate::{
     },
     ScrollAccountInfo,
 };
-use reth_scroll_primitives::{hash_code, POSEIDON_EMPTY};
+use reth_scroll_primitives::poseidon::{hash_code, POSEIDON_EMPTY};
 use revm::db::{
     states::{reverts::AccountInfoRevert, PlainStateReverts, StateChangeset},
     AccountRevert,

@@ -2,6 +2,9 @@ use crate::{hashed_cursor::HashedCursor, trie_cursor::TrieCursor, walker::TrieWa
 use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
 
+#[cfg(feature = "scroll")]
+use crate::key::BitsCompatibility;
+
 /// Represents a branch node in the trie.
 #[derive(Debug)]
 pub struct TrieBranchNode {
@@ -106,7 +109,13 @@ where
             if let Some((hashed_key, value)) = self.current_hashed_entry.take() {
                 // If the walker's key is less than the unpacked hashed key,
                 // reset the checked status and continue
-                if self.walker.key().is_some_and(|key| key < &Nibbles::unpack(hashed_key)) {
+                if self.walker.key().is_some_and(|key| {
+                    #[cfg(not(feature = "scroll"))]
+                    let cmp = key < &Nibbles::unpack(hashed_key);
+                    #[cfg(feature = "scroll")]
+                    let cmp = key < &Nibbles::unpack_and_truncate_bits(hashed_key);
+                    cmp
+                }) {
                     self.current_walker_key_checked = false;
                     continue
                 }

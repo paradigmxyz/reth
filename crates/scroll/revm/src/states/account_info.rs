@@ -1,4 +1,7 @@
-use reth_scroll_primitives::{hash_code, ScrollPostExecutionContext, POSEIDON_EMPTY};
+use reth_scroll_primitives::{
+    poseidon::{hash_code, POSEIDON_EMPTY},
+    ScrollPostExecutionContext,
+};
 use revm::primitives::{AccountInfo, Bytecode, B256, KECCAK_EMPTY, U256};
 
 /// The Scroll account information. Code copy of [`AccountInfo`]. Provides additional `code_size`

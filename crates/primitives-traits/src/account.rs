@@ -87,6 +87,25 @@ impl Account {
     }
 }
 
+#[cfg(feature = "scroll")]
+impl Account {
+    /// Returns the code size (number of bytes) for the code in this account.
+    /// In case of no bytecode, returns 0.
+    pub fn get_code_size(&self) -> u64 {
+        self.account_extension.as_ref().unwrap().code_size
+    }
+
+    /// Returns the account poseidon code hash.
+    /// In the case of no bytecode returns [`reth_scroll_primitives::poseidon::POSEIDON_EMPTY`]
+    pub fn get_poseidon_code_hash(&self) -> B256 {
+        self.account_extension
+            .as_ref()
+            .unwrap()
+            .poseidon_code_hash
+            .unwrap_or(reth_scroll_primitives::poseidon::POSEIDON_EMPTY)
+    }
+}
+
 /// Bytecode for an account.
 ///
 /// A wrapper around [`revm::primitives::Bytecode`][RevmBytecode] with encoding/decoding support.
@@ -235,7 +254,7 @@ impl From<Account> for AccountInfo {
                 .account_extension
                 .unwrap_or_default()
                 .poseidon_code_hash
-                .unwrap_or(reth_scroll_primitives::POSEIDON_EMPTY),
+                .unwrap_or(reth_scroll_primitives::poseidon::POSEIDON_EMPTY),
         }
     }
 }

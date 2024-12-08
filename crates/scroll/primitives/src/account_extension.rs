@@ -1,4 +1,4 @@
-use crate::{hash_code, POSEIDON_EMPTY};
+use crate::poseidon::{hash_code, POSEIDON_EMPTY};
 use alloy_primitives::B256;
 use serde::{Deserialize, Serialize};
 
@@ -35,6 +35,8 @@ impl AccountExtension {
 
 impl From<(u64, B256)> for AccountExtension {
     fn from(value: (u64, B256)) -> Self {
+        // TODO (scroll): Looks like we can create an [`AccountExtension`] with non-zero
+        // code size with poseidon_code_hash = None
         Self {
             code_size: value.0,
             poseidon_code_hash: (value.1 != POSEIDON_EMPTY).then_some(value.1),

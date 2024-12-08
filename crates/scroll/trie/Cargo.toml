@@ -1,0 +1,28 @@
+[package]
+name = "reth-scroll-trie"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+reth-scroll-primitives.workspace = true
+reth-trie.workspace = true
+alloy-trie = { workspace = true, features = ["serde"] }
+alloy-primitives.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+hex-literal = "0.4"
+proptest-arbitrary-interop.workspace = true
+
+[features]
+scroll = [
+    "reth-trie/scroll"
+]

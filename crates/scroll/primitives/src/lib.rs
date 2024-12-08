@@ -13,5 +13,5 @@ pub use l1_transaction::{
 };
 pub mod l1_transaction;
 
-pub use poseidon::{hash_code, POSEIDON_EMPTY};
-mod poseidon;
+/// Poseidon hashing primitives.
+pub mod poseidon;

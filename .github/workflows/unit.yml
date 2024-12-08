@@ -26,23 +26,27 @@ jobs:
       matrix:
         include:
           - type: ethereum
-            args: --features "asm-keccak ethereum" --locked
+            args: --features "asm-keccak ethereum" --locked --workspace --exclude ef-tests
             partition: 1
             total_partitions: 2
           - type: ethereum
-            args: --features "asm-keccak ethereum" --locked
+            args: --features "asm-keccak ethereum" --locked --workspace --exclude ef-tests
             partition: 2
             total_partitions: 2
           - type: optimism
-            args: --features "asm-keccak optimism" --locked --exclude reth --exclude reth-bench --exclude "example-*" --exclude "reth-ethereum-*" --exclude "*-ethereum"
+            args: --features "asm-keccak optimism" --locked --exclude reth --exclude reth-bench --exclude "example-*" --exclude "reth-ethereum-*" --exclude "*-ethereum" --workspace --exclude ef-tests
             partition: 1
             total_partitions: 2
           - type: optimism
-            args: --features "asm-keccak optimism" --locked --exclude reth --exclude reth-bench --exclude "example-*" --exclude "reth-ethereum-*" --exclude "*-ethereum"
+            args: --features "asm-keccak optimism" --locked --exclude reth --exclude reth-bench --exclude "example-*" --exclude "reth-ethereum-*" --exclude "*-ethereum" --workspace --exclude ef-tests
             partition: 2
             total_partitions: 2
+          - type: scroll
+            args: -p reth-scroll-state-commitment --locked --features "scroll"
+            partition: 1
+            total_partitions: 1
           - type: book
-            args: --manifest-path book/sources/Cargo.toml
+            args: --manifest-path book/sources/Cargo.toml --workspace --exclude ef-tests
             partition: 1
             total_partitions: 1
     timeout-minutes: 30
@@ -62,9 +66,9 @@ jobs:
       - name: Run tests
         run: |
           cargo nextest run \
-            ${{ matrix.args }} --workspace \
-            --exclude ef-tests --no-tests=warn \
-            --partition hash:${{ matrix.partition }}/2 \
+            ${{ matrix.args }} \
+            --no-tests=warn \
+            --partition hash:${{ matrix.partition }}/${{ matrix.total_partitions }} \
             -E "!kind(test)"
 
   state:

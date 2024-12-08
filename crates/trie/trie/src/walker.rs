@@ -9,6 +9,9 @@ use reth_storage_errors::db::DatabaseError;
 #[cfg(feature = "metrics")]
 use crate::metrics::WalkerMetrics;
 
+#[cfg(feature = "scroll")]
+use crate::key::BitsCompatibility;
+
 /// `TrieWalker` is a structure that enables traversal of a Merkle trie.
 /// It allows moving through the trie in a depth-first manner, skipping certain branches
 /// if they have not changed.
@@ -100,9 +103,18 @@ impl<C> TrieWalker<C> {
         self.key()
             .and_then(|key| {
                 if self.can_skip_current_node {
-                    key.increment().map(|inc| inc.pack())
+                    // TODO(scroll): replace this with key abstraction.
+                    #[cfg(not(feature = "scroll"))]
+                    let key = key.increment().map(|inc| inc.pack());
+                    #[cfg(feature = "scroll")]
+                    let key = key.increment_bit().map(|inc| inc.pack_bits());
+                    key
                 } else {
-                    Some(key.pack())
+                    #[cfg(feature = "scroll")]
+                    let key = Some(key.pack_bits());
+                    #[cfg(not(feature = "scroll"))]
+                    let key = Some(key.pack());
+                    key
                 }
             })
             .map(|mut key| {

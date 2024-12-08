@@ -36,6 +36,9 @@ tracing.workspace = true
 rayon.workspace = true
 auto_impl.workspace = true
 itertools.workspace = true
+smallvec = { version = "1.0", default-features = false, features = [
+    "const_new",
+] }
 
 # `metrics` feature
 reth-metrics = { workspace = true, optional = true }
@@ -66,7 +69,8 @@ serde = [
 	"alloy-trie/serde",
 	"revm/serde",
 	"reth-trie-common/serde",
-	"reth-primitives-traits/serde"
+	"reth-primitives-traits/serde",
+	"smallvec/serde"
 ]
 test-utils = [
 	"triehash",
