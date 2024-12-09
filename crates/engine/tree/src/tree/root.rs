@@ -37,7 +37,7 @@ pub(crate) type StateRootResult = Result<(B256, TrieUpdates), ParallelStateRootE
 /// Handle to a spawned state root task.
 #[derive(Debug)]
 #[allow(dead_code)]
-pub(crate) struct StateRootHandle {
+pub struct StateRootHandle {
     /// Channel for receiving the final result.
     rx: mpsc::Receiver<StateRootResult>,
 }
@@ -50,14 +50,14 @@ impl StateRootHandle {
     }
 
     /// Waits for the state root calculation to complete.
-    pub(crate) fn wait_for_result(self) -> StateRootResult {
+    pub fn wait_for_result(self) -> StateRootResult {
         self.rx.recv().expect("state root task was dropped without sending result")
     }
 }
 
 /// Common configuration for state root tasks
 #[derive(Debug)]
-pub(crate) struct StateRootConfig<Factory> {
+pub struct StateRootConfig<Factory> {
     /// View over the state in the database.
     pub consistent_view: ConsistentDbView<Factory>,
     /// Latest trie input.
@@ -67,7 +67,7 @@ pub(crate) struct StateRootConfig<Factory> {
 /// Messages used internally by the state root task
 #[derive(Debug)]
 #[allow(dead_code)]
-pub(crate) enum StateRootMessage {
+pub enum StateRootMessage {
     /// New state update from transaction execution
     StateUpdate(EvmState),
     /// Proof calculation completed for a specific state update
@@ -223,7 +223,7 @@ fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
 /// to the tree.
 /// Then it updates relevant leaves according to the result of the transaction.
 #[derive(Debug)]
-pub(crate) struct StateRootTask<Factory> {
+pub struct StateRootTask<Factory> {
     /// Task configuration.
     config: StateRootConfig<Factory>,
     /// Receiver for state root related messages.
@@ -250,7 +250,7 @@ where
         + 'static,
 {
     /// Creates a new state root task with the unified message channel
-    pub(crate) fn new(config: StateRootConfig<Factory>) -> Self {
+    pub fn new(config: StateRootConfig<Factory>) -> Self {
         let (tx, rx) = channel();
 
         Self {
@@ -264,7 +264,7 @@ where
     }
 
     /// Spawns the state root task and returns a handle to await its result.
-    pub(crate) fn spawn(self) -> StateRootHandle {
+    pub fn spawn(self) -> StateRootHandle {
         let (tx, rx) = mpsc::sync_channel(1);
         std::thread::Builder::new()
             .name("State Root Task".to_string())
@@ -279,7 +279,7 @@ where
     }
 
     /// Returns a state hook to be used to send state updates to this task.
-    pub(crate) fn state_hook(&self) -> impl OnStateHook {
+    pub fn state_hook(&self) -> impl OnStateHook {
         let state_hook = StateHookSender::new(self.tx.clone());
 
         move |state: &EvmState| {
