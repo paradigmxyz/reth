@@ -761,6 +761,7 @@ where
     /// use reth_rpc_builder::RpcModuleBuilder;
     /// use reth_tasks::TokioTaskExecutor;
     /// use reth_transaction_pool::noop::NoopTransactionPool;
+    /// use std::sync::Arc;
     ///
     /// fn init<Evm, Validator>(evm: Evm, validator: Validator)
     /// where
