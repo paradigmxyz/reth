@@ -27,7 +27,7 @@ tokio = { workspace = true, features = ["io-util", "net", "time"] }
 tokio-stream.workspace = true
 
 # trust-dns
-trust-dns-resolver = "0.23"
+hickory-resolver = { version = "0.25.0-alpha.4" }
 
 # misc
 data-encoding = "2"
@@ -58,6 +58,6 @@ serde = [
 	"parking_lot/serde",
 	"rand/serde",
 	"secp256k1/serde",
-	"trust-dns-resolver/serde",
+	"hickory-resolver/serde",
 	"reth-ethereum-forks/serde"
 ]
