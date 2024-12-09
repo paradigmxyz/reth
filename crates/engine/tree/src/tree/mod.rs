@@ -2868,7 +2868,7 @@ mod tests {
     use reth_primitives::{BlockExt, EthPrimitives};
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::{block_to_payload_v1, payload::block_to_payload_v3};
-    use reth_trie::updates::TrieUpdates;
+    use reth_trie::{updates::TrieUpdates, HashedPostState};
     use std::{
         str::FromStr,
         sync::mpsc::{channel, Sender},
