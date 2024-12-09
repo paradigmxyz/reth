@@ -18,15 +18,9 @@ use crate::{
 const UNAVAILABLE_FOR_NOOP: &str = "execution unavailable for noop";
 
 /// A [`BlockExecutorProvider`] implementation that does nothing.
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 #[non_exhaustive]
 pub struct NoopBlockExecutorProvider<P>(std::marker::PhantomData<P>);
-
-impl<P> Default for NoopBlockExecutorProvider<P> {
-    fn default() -> Self {
-        Self(std::marker::PhantomData)
-    }
-}
 
 impl<P: NodePrimitives> BlockExecutorProvider for NoopBlockExecutorProvider<P> {
     type Primitives = P;
