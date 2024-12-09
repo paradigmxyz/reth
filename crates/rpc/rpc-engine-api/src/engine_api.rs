@@ -25,7 +25,7 @@ use reth_payload_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, PayloadBuilderAttributes,
     PayloadOrAttributes,
 };
-use reth_primitives::{Block, EthereumHardfork};
+use reth_primitives::EthereumHardfork;
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types_compat::engine::payload::{
     convert_payload_input_v2_to_payload, convert_to_payload_body_v1,
@@ -80,11 +80,7 @@ struct EngineApiInner<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec
 impl<Provider, EngineT, Pool, Validator, ChainSpec>
     EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
-    Provider: HeaderProvider
-        + BlockReader<Block = reth_primitives::Block>
-        + StateProviderFactory
-        + EvmEnvProvider
-        + 'static,
+    Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
     EngineT: EngineTypes,
     Pool: TransactionPool + 'static,
     Validator: EngineValidator<EngineT>,
@@ -573,7 +569,7 @@ where
         f: F,
     ) -> EngineApiResult<Vec<Option<R>>>
     where
-        F: Fn(Block) -> R + Send + 'static,
+        F: Fn(Provider::Block) -> R + Send + 'static,
         R: Send + 'static,
     {
         let len = hashes.len() as u64;
@@ -748,11 +744,7 @@ where
 impl<Provider, EngineT, Pool, Validator, ChainSpec> EngineApiServer<EngineT>
     for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
-    Provider: HeaderProvider
-        + BlockReader<Block = reth_primitives::Block>
-        + StateProviderFactory
-        + EvmEnvProvider
-        + 'static,
+    Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
     EngineT: EngineTypes,
     Pool: TransactionPool + 'static,
     Validator: EngineValidator<EngineT>,
@@ -1045,7 +1037,7 @@ mod tests {
     use reth_engine_primitives::BeaconEngineMessage;
     use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
     use reth_payload_builder::test_utils::spawn_test_payload_service;
-    use reth_primitives::SealedBlock;
+    use reth_primitives::{Block, SealedBlock};
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::payload::execution_payload_from_sealed_block;
     use reth_tasks::TokioTaskExecutor;
@@ -1171,7 +1163,7 @@ mod tests {
             let expected = blocks
                 .iter()
                 .cloned()
-                .map(|b| Some(convert_to_payload_body_v1(b.unseal())))
+                .map(|b| Some(convert_to_payload_body_v1(b.unseal::<Block>())))
                 .collect::<Vec<_>>();
 
             let res = api.get_payload_bodies_by_range_v1(start, count).await.unwrap();
@@ -1213,7 +1205,7 @@ mod tests {
                     if first_missing_range.contains(&b.number) {
                         None
                     } else {
-                        Some(convert_to_payload_body_v1(b.unseal()))
+                        Some(convert_to_payload_body_v1(b.unseal::<Block>()))
                     }
                 })
                 .collect::<Vec<_>>();
@@ -1232,7 +1224,7 @@ mod tests {
                     {
                         None
                     } else {
-                        Some(convert_to_payload_body_v1(b.unseal()))
+                        Some(convert_to_payload_body_v1(b.unseal::<Block>()))
                     }
                 })
                 .collect::<Vec<_>>();

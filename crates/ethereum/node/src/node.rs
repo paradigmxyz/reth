@@ -6,14 +6,13 @@ use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGenera
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
 use reth_ethereum_engine_primitives::{
-    EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes, EthereumEngineValidator,
+    EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
 use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_evm_ethereum::execute::EthExecutionStrategyFactory;
 use reth_network::{NetworkHandle, PeersInfo};
 use reth_node_api::{
-    AddOnsContext, ConfigureEvm, EngineValidator, FullNodeComponents, HeaderTy, NodeTypesWithDB,
-    TxTy,
+    AddOnsContext, ConfigureEvm, FullNodeComponents, HeaderTy, NodeTypesWithDB, TxTy,
 };
 use reth_node_builder::{
     components::{
@@ -36,6 +35,8 @@ use reth_transaction_pool::{
 use reth_trie_db::MerklePatriciaTrie;
 
 use crate::{EthEngineTypes, EthEvmConfig};
+
+pub use reth_ethereum_engine_primitives::EthereumEngineValidator;
 
 /// Type configuration for a regular Ethereum node.
 #[derive(Debug, Default, Clone, Copy)]
@@ -353,9 +354,12 @@ pub struct EthereumEngineValidatorBuilder;
 
 impl<Node, Types> EngineValidatorBuilder<Node> for EthereumEngineValidatorBuilder
 where
-    Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
+    Types: NodeTypesWithEngine<
+        ChainSpec = ChainSpec,
+        Engine = EthEngineTypes,
+        Primitives = EthPrimitives,
+    >,
     Node: FullNodeComponents<Types = Types>,
-    EthereumEngineValidator: EngineValidator<Types::Engine>,
 {
     type Validator = EthereumEngineValidator;
 
