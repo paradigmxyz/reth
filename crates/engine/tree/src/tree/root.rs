@@ -36,13 +36,11 @@ pub(crate) type StateRootResult = Result<(B256, TrieUpdates), ParallelStateRootE
 
 /// Handle to a spawned state root task.
 #[derive(Debug)]
-#[allow(dead_code)]
 pub(crate) struct StateRootHandle {
     /// Channel for receiving the final result.
     rx: mpsc::Receiver<StateRootResult>,
 }
 
-#[allow(dead_code)]
 impl StateRootHandle {
     /// Creates a new handle from a receiver.
     pub(crate) const fn new(rx: mpsc::Receiver<StateRootResult>) -> Self {
@@ -66,7 +64,6 @@ pub(crate) struct StateRootConfig<Factory> {
 
 /// Messages used internally by the state root task
 #[derive(Debug)]
-#[allow(dead_code)]
 pub(crate) enum StateRootMessage {
     /// New state update from transaction execution
     StateUpdate(EvmState),
