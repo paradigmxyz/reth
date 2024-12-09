@@ -11,9 +11,12 @@ use crate::{
     EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig,
     TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
-use alloy_consensus::constants::{
-    EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
-    LEGACY_TX_TYPE_ID,
+use alloy_consensus::{
+    constants::{
+        EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
+        LEGACY_TX_TYPE_ID,
+    },
+    BlockHeader,
 };
 use alloy_eips::eip4844::MAX_BLOBS_PER_BLOCK;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
@@ -102,7 +105,7 @@ where
     }
 
     fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
-        self.inner.on_new_head_block(new_tip_block)
+        self.inner.on_new_head_block(new_tip_block.header())
     }
 }
 
@@ -469,17 +472,17 @@ where
         }
     }
 
-    fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
+    fn on_new_head_block<T: BlockHeader>(&self, new_tip_block: &T) {
         // update all forks
-        if self.chain_spec.is_cancun_active_at_timestamp(new_tip_block.timestamp) {
+        if self.chain_spec.is_cancun_active_at_timestamp(new_tip_block.timestamp()) {
             self.fork_tracker.cancun.store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
-        if self.chain_spec.is_shanghai_active_at_timestamp(new_tip_block.timestamp) {
+        if self.chain_spec.is_shanghai_active_at_timestamp(new_tip_block.timestamp()) {
             self.fork_tracker.shanghai.store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
-        if self.chain_spec.is_prague_active_at_timestamp(new_tip_block.timestamp) {
+        if self.chain_spec.is_prague_active_at_timestamp(new_tip_block.timestamp()) {
             self.fork_tracker.prague.store(true, std::sync::atomic::Ordering::Relaxed);
         }
     }
