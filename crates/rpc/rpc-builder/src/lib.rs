@@ -201,7 +201,7 @@ use jsonrpsee::{
 };
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::FullConsensus;
-use reth_engine_primitives::EngineTypes;
+use reth_engine_primitives::{EngineTypes, PayloadValidator};
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_primitives::NodePrimitives;
@@ -274,6 +274,7 @@ pub async fn launch<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi, B
     eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi>,
     block_executor: BlockExecutor,
     consensus: Arc<dyn FullConsensus<BlockExecutor::Primitives>>,
+    payload_validator: Arc<dyn PayloadValidator<Block = Provider::Block>>,
 ) -> Result<RpcServerHandle, RpcError>
 where
     Provider: FullRpcProvider<
@@ -318,7 +319,7 @@ where
                 block_executor,
                 consensus,
             )
-            .build(module_config, eth),
+            .build(module_config, eth, payload_validator),
         )
         .await
 }
@@ -681,6 +682,7 @@ where
         module_config: TransportRpcModuleConfig,
         engine: EngineApi,
         eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi>,
+        payload_validator: Arc<dyn PayloadValidator<Block = Provider::Block>>,
     ) -> (
         TransportRpcModules,
         AuthRpcModule,
@@ -721,6 +723,7 @@ where
             evm_config,
             eth,
             block_executor,
+            payload_validator,
         );
 
         let modules = registry.create_transport_rpc_modules(module_config);
@@ -771,6 +774,7 @@ where
         self,
         config: RpcModuleConfig,
         eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi>,
+        payload_validator: Arc<dyn PayloadValidator<Block = Provider::Block>>,
     ) -> RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
     where
         EthApi: EthApiTypes + 'static,
@@ -796,6 +800,7 @@ where
             evm_config,
             eth,
             block_executor,
+            payload_validator,
         )
     }
 
@@ -805,6 +810,7 @@ where
         self,
         module_config: TransportRpcModuleConfig,
         eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi>,
+        payload_validator: Arc<dyn PayloadValidator<Block = Provider::Block>>,
     ) -> TransportRpcModules<()>
     where
         EthApi: FullEthApiServer<
@@ -843,6 +849,7 @@ where
                 evm_config,
                 eth,
                 block_executor,
+                payload_validator,
             );
 
             modules.config = module_config;
@@ -957,6 +964,7 @@ pub struct RpcRegistryInner<
     events: Events,
     block_executor: BlockExecutor,
     consensus: Consensus,
+    payload_validator: Arc<dyn PayloadValidator<Block = Provider::Block>>,
     /// Holds the configuration for the RPC modules
     config: RpcModuleConfig,
     /// Holds a all `eth_` namespace handlers
@@ -1008,6 +1016,7 @@ where
             EthApi,
         >,
         block_executor: BlockExecutor,
+        payload_validator: Arc<dyn PayloadValidator<Block = Provider::Block>>,
     ) -> Self
     where
         EvmConfig: ConfigureEvm<Header = Header>,
@@ -1037,6 +1046,7 @@ where
             blocking_pool_guard,
             events,
             block_executor,
+            payload_validator,
         }
     }
 }
@@ -1317,9 +1327,10 @@ where
     }
 
     /// Instantiates `ValidationApi`
-    pub fn validation_api(&self) -> ValidationApi<Provider, BlockExecutor, EthEngineTypes, EthereumEngineValidator>
+    pub fn validation_api(&self) -> ValidationApi<Provider, BlockExecutor>
     where
         Consensus: reth_consensus::FullConsensus<BlockExecutor::Primitives> + Clone + 'static,
+        Provider: BlockReader<Block = <BlockExecutor::Primitives as NodePrimitives>::Block>,
     {
         ValidationApi::new(
             self.provider.clone(),
@@ -1327,7 +1338,7 @@ where
             self.block_executor.clone(),
             self.config.flashbots.clone(),
             Box::new(self.executor.clone()),
-            EthereumEngineValidator::new(self.chain_spec.clone()),
+            self.payload_validator.clone(),
         )
     }
 }
@@ -1335,7 +1346,9 @@ where
 impl<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
     RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
 where
-    Provider: FullRpcProvider + AccountReader + ChangeSetReader,
+    Provider: FullRpcProvider<Block = <BlockExecutor::Primitives as NodePrimitives>::Block>
+        + AccountReader
+        + ChangeSetReader,
     Pool: TransactionPool + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
@@ -1501,7 +1514,7 @@ where
                             self.block_executor.clone(),
                             self.config.flashbots.clone(),
                             Box::new(self.executor.clone()),
-                            EthereumEngineValidator::new(self.chain_spec.clone()),
+                            self.payload_validator.clone(),
                         )
                         .into_rpc()
                         .into(),

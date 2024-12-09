@@ -14,7 +14,7 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::{Consensus, FullConsensus, PostExecutionInput};
-use reth_engine_primitives::{EngineTypes, EngineValidator};
+use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
 use reth_ethereum_consensus::GAS_LIMIT_BOUND_DIVISOR;
 use reth_evm::execute::{BlockExecutorProvider, Executor};
@@ -34,16 +34,14 @@ use tokio::sync::{oneshot, RwLock};
 
 /// The type that implements the `validation` rpc namespace trait
 #[derive(Clone, Debug, derive_more::Deref)]
-pub struct ValidationApi<Provider, E: BlockExecutorProvider, EngineT, EV> {
+pub struct ValidationApi<Provider, E: BlockExecutorProvider> {
     #[deref]
-    inner: Arc<ValidationApiInner<Provider, E, EngineT, EV>>,
+    inner: Arc<ValidationApiInner<Provider, E>>,
 }
 
-impl<Provider, E, EngineT, EV> ValidationApi<Provider, E, EngineT, EV>
+impl<Provider, E> ValidationApi<Provider, E>
 where
     E: BlockExecutorProvider,
-    EngineT: EngineTypes,
-    EV: EngineValidator<EngineT>,
 {
     /// Create a new instance of the [`ValidationApi`]
     pub fn new(
@@ -52,7 +50,9 @@ where
         executor_provider: E,
         config: ValidationApiConfig,
         task_spawner: Box<dyn TaskSpawner>,
-        payload_validator: EV,
+        payload_validator: Arc<
+            dyn PayloadValidator<Block = <E::Primitives as NodePrimitives>::Block>,
+        >,
     ) -> Self {
         let ValidationApiConfig { disallow } = config;
 
@@ -64,7 +64,6 @@ where
             disallow,
             cached_state: Default::default(),
             task_spawner,
-            engine_types: Default::default(),
         });
 
         Self { inner }
@@ -91,15 +90,13 @@ where
     }
 }
 
-impl<Provider, E, EngineT, EV> ValidationApi<Provider, E, EngineT, EV>
+impl<Provider, E> ValidationApi<Provider, E>
 where
     Provider: BlockReaderIdExt<Header = <E::Primitives as NodePrimitives>::BlockHeader>
         + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + StateProviderFactory
         + 'static,
     E: BlockExecutorProvider,
-    EngineT: EngineTypes,
-    EV: EngineValidator<EngineT, Block = <E::Primitives as NodePrimitives>::Block>,
 {
     /// Validates the given block and a [`BidTrace`] against it.
     pub async fn validate_message_against_block(
@@ -406,8 +403,7 @@ where
 }
 
 #[async_trait]
-impl<Provider, E, EngineT, EV> BlockSubmissionValidationApiServer
-    for ValidationApi<Provider, E, EngineT, EV>
+impl<Provider, E> BlockSubmissionValidationApiServer for ValidationApi<Provider, E>
 where
     Provider: BlockReaderIdExt<Header = <E::Primitives as NodePrimitives>::BlockHeader>
         + ChainSpecProvider<ChainSpec: EthereumHardforks>
@@ -415,8 +411,6 @@ where
         + Clone
         + 'static,
     E: BlockExecutorProvider,
-    EngineT: EngineTypes,
-    EV: EngineValidator<EngineT, Block = <E::Primitives as NodePrimitives>::Block>,
 {
     async fn validate_builder_submission_v1(
         &self,
@@ -470,13 +464,13 @@ where
 }
 
 #[derive(Debug)]
-pub struct ValidationApiInner<Provider, E: BlockExecutorProvider, EngineT, EV> {
+pub struct ValidationApiInner<Provider, E: BlockExecutorProvider> {
     /// The provider that can interact with the chain.
     provider: Provider,
     /// Consensus implementation.
     consensus: Arc<dyn FullConsensus<E::Primitives>>,
     /// Execution payload validator.
-    payload_validator: EV,
+    payload_validator: Arc<dyn PayloadValidator<Block = <E::Primitives as NodePrimitives>::Block>>,
     /// Block executor factory.
     executor_provider: E,
     /// Set of disallowed addresses
@@ -488,8 +482,6 @@ pub struct ValidationApiInner<Provider, E: BlockExecutorProvider, EngineT, EV> {
     cached_state: RwLock<(B256, CachedReads)>,
     /// Task spawner for blocking operations
     task_spawner: Box<dyn TaskSpawner>,
-    /// Engine types
-    engine_types: std::marker::PhantomData<EngineT>,
 }
 
 /// Configuration for validation API.
