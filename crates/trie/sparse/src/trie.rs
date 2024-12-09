@@ -1,7 +1,7 @@
 use crate::blinded::{BlindedProvider, DefaultBlindedProvider};
 use alloy_primitives::{
     hex, keccak256,
-    map::{HashMap, HashSet},
+    map::{Entry, HashMap, HashSet},
     B256,
 };
 use alloy_rlp::Decodable;
@@ -13,7 +13,7 @@ use reth_trie_common::{
     TrieNode, CHILD_INDEX_RANGE, EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
-use std::{borrow::Cow, collections::hash_map::Entry, fmt};
+use std::{borrow::Cow, fmt};
 
 /// Inner representation of the sparse trie.
 /// Sparse trie is blind by default until nodes are revealed.
