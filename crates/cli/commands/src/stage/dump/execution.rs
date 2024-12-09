@@ -142,8 +142,6 @@ fn import_tables_with_range<N: NodeTypesWithDB>(
 fn unwind_and_copy<
     N: ProviderNodeTypes<
         Primitives: NodePrimitives<
-            Block = reth_primitives::Block,
-            Receipt = reth_primitives::Receipt,
             BlockHeader = reth_primitives::Header,
         >,
     >,
@@ -155,7 +153,8 @@ fn unwind_and_copy<
 ) -> eyre::Result<()> {
     let provider = db_tool.provider_factory.database_provider_rw()?;
 
-    let mut exec_stage = ExecutionStage::new_with_executor(NoopBlockExecutorProvider::default());
+    let mut exec_stage =
+        ExecutionStage::new_with_executor(NoopBlockExecutorProvider::<N::Primitives>::default());
 
     exec_stage.unwind(
         &provider,
