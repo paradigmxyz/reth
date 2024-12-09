@@ -263,12 +263,6 @@ impl<H, B> SealedBlock<H, B> {
 }
 
 impl SealedBlock {
-    /// Returns an iterator over all blob transactions of the block
-    #[inline]
-    pub fn blob_transactions_iter(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
-        self.body.blob_transactions_iter()
-    }
-
     /// Returns whether or not the block contains any blob transactions.
     #[inline]
     pub fn has_blob_transactions(&self) -> bool {
@@ -280,19 +274,16 @@ impl SealedBlock {
     pub fn has_eip7702_transactions(&self) -> bool {
         self.body.has_eip7702_transactions()
     }
+}
 
-    /// Returns only the blob transactions, if any, from the block body.
-    #[inline]
-    pub fn blob_transactions(&self) -> Vec<&TransactionSigned> {
-        self.blob_transactions_iter().collect()
-    }
-
+impl<H, B> SealedBlock<H, B>
+where
+    B: reth_primitives_traits::BlockBody,
+{
     /// Returns an iterator over all blob versioned hashes from the block body.
     #[inline]
     pub fn blob_versioned_hashes_iter(&self) -> impl Iterator<Item = &B256> + '_ {
-        self.blob_transactions_iter()
-            .filter_map(|tx| tx.as_eip4844().map(|blob_tx| &blob_tx.blob_versioned_hashes))
-            .flatten()
+        self.body.blob_versioned_hashes_iter()
     }
 }
 
