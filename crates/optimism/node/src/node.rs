@@ -37,7 +37,7 @@ use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::{BlockBody, PooledTransactionsElement, TransactionSigned};
 use reth_provider::{
     providers::ChainStorage, BlockBodyReader, BlockBodyWriter, CanonStateSubscriptions,
-    ChainSpecProvider, DBProvider, EthStorage, ProviderResult, ReadBodyInput, StorageRootProvider,
+    ChainSpecProvider, DBProvider, EthStorage, ProviderResult, ReadBodyInput,
 };
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
@@ -151,6 +151,7 @@ impl OpNode {
                 ChainSpec = OpChainSpec,
                 Primitives = OpPrimitives,
             >,
+            Provider: fmt::Debug,
         >,
     {
         let RollupArgs { disable_txpool_gossip, compute_pending_block, discovery_v4, .. } = args;
@@ -176,7 +177,7 @@ where
             Primitives = OpPrimitives,
             Storage = OpStorage,
         >,
-        Provider: StorageRootProvider + fmt::Debug,
+        Provider: fmt::Debug,
     >,
 {
     type ComponentsBuilder = ComponentsBuilder<
@@ -662,7 +663,7 @@ impl<Node> ConsensusBuilder<Node> for OpConsensusBuilder
 where
     Node: FullNodeTypes<
         Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>,
-        Provider: StorageRootProvider + fmt::Debug,
+        Provider: fmt::Debug,
     >,
 {
     type Consensus = Arc<OpBeaconConsensus<Node::Provider>>;
