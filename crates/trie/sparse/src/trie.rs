@@ -385,16 +385,18 @@ impl<P> RevealedSparseTrie<P> {
     fn reveal_node_or_hash(&mut self, path: Nibbles, child: &[u8]) -> SparseTrieResult<()> {
         if child.len() == B256::len_bytes() + 1 {
             let hash = B256::from_slice(&child[1..]);
-            match self.nodes.get(&path) {
+            match self.nodes.entry(path) {
                 // Hash node with a different hash can't be handled.
-                Some(node @ SparseNode::Hash(previous_hash)) if previous_hash != &hash => {
-                    return Err(SparseTrieError::Reveal { path, node: Box::new(node.clone()) })
+                Entry::Occupied(entry) if entry.get().as_hash() != Some(hash) => {
+                    return Err(SparseTrieError::Reveal {
+                        path: entry.key().clone(),
+                        node: Box::new(SparseNode::Hash(hash)),
+                    })
                 }
-                None => {
-                    self.nodes.insert(path, SparseNode::Hash(hash));
+                Entry::Vacant(entry) => {
+                    entry.insert(SparseNode::Hash(hash));
                 }
-                // All other node types mean that it has already been revealed.
-                Some(_) => {}
+                _ => {}
             }
             return Ok(())
         }
@@ -1216,6 +1218,13 @@ impl SparseNode {
     /// Returns `true` if the node is a hash node.
     pub const fn is_hash(&self) -> bool {
         matches!(self, Self::Hash(_))
+    }
+
+    pub const fn as_hash(&self) -> Option<B256> {
+        match self {
+            Self::Hash(hash) => Some(*hash),
+            _ => None,
+        }
     }
 }
 
