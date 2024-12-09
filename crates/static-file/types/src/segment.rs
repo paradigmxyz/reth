@@ -58,8 +58,7 @@ impl StaticFileSegment {
     /// Returns the number of columns for the segment
     pub const fn columns(&self) -> usize {
         match self {
-            Self::Headers => 3,
-            Self::BlockMeta => 3,
+            Self::Headers | Self::BlockMeta => 3,
             Self::Transactions | Self::Receipts => 1,
         }
     }
@@ -261,14 +260,12 @@ impl SegmentHeader {
                     range.end = range.end.saturating_sub(num);
                 }
             };
-        } else {
-            if let Some(range) = &mut self.tx_range {
-                if num > range.end - range.start {
-                    self.tx_range = None;
-                } else {
-                    range.end = range.end.saturating_sub(num);
-                }
-            };
+        } else if let Some(range) = &mut self.tx_range {
+            if num > range.end - range.start {
+                self.tx_range = None;
+            } else {
+                range.end = range.end.saturating_sub(num);
+            }
         }
     }
 
