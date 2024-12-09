@@ -322,10 +322,20 @@ impl<P> RevealedSparseTrie<P> {
                     }
                 }
 
-                match self.nodes.get(&path) {
+                let node = self.nodes.get(&path);
+                match node {
                     // Blinded and non-existent nodes can be replaced.
                     Some(SparseNode::Hash(_)) | None => {
-                        self.nodes.insert(path.clone(), SparseNode::new_branch(branch.state_mask));
+                        self.nodes.insert(
+                            path.clone(),
+                            SparseNode::Branch {
+                                state_mask: branch.state_mask,
+                                // If the previous node was a hash, memoize the hash in a new branch
+                                // node.
+                                hash: node.map(SparseNode::as_hash).unwrap_or_default(),
+                                store_in_db_trie: None,
+                            },
+                        );
                     }
                     // Branch node already exists, or an extension node was placed where a
                     // branch node was before.
@@ -336,37 +346,56 @@ impl<P> RevealedSparseTrie<P> {
                     }
                 }
             }
-            TrieNode::Extension(ext) => match self.nodes.get(&path) {
-                Some(SparseNode::Hash(_)) | None => {
-                    let mut child_path = path.clone();
-                    child_path.extend_from_slice_unchecked(&ext.key);
-                    self.reveal_node_or_hash(child_path, &ext.child)?;
-                    self.nodes.insert(path.clone(), SparseNode::new_ext(ext.key));
+            TrieNode::Extension(ext) => {
+                let node = self.nodes.get(&path);
+                match node {
+                    Some(SparseNode::Hash(_)) | None => {
+                        // If the previous node was a hash, memoize the hash in a new extension
+                        // node.
+                        let hash = node.map(SparseNode::as_hash).unwrap_or_default();
+
+                        let mut child_path = path.clone();
+                        child_path.extend_from_slice_unchecked(&ext.key);
+                        self.reveal_node_or_hash(child_path, &ext.child)?;
+                        self.nodes
+                            .insert(path.clone(), SparseNode::Extension { key: ext.key, hash });
+                    }
+                    // Extension node already exists, or an extension node was placed where a branch
+                    // node was before.
+                    Some(SparseNode::Extension { .. } | SparseNode::Branch { .. }) => {}
+                    // All other node types can't be handled.
+                    Some(node @ (SparseNode::Empty | SparseNode::Leaf { .. })) => {
+                        return Err(SparseTrieError::Reveal { path, node: Box::new(node.clone()) })
+                    }
                 }
-                // Extension node already exists, or an extension node was placed where a branch
-                // node was before.
-                Some(SparseNode::Extension { .. } | SparseNode::Branch { .. }) => {}
-                // All other node types can't be handled.
-                Some(node @ (SparseNode::Empty | SparseNode::Leaf { .. })) => {
-                    return Err(SparseTrieError::Reveal { path, node: Box::new(node.clone()) })
+            }
+            TrieNode::Leaf(leaf) => {
+                let node = self.nodes.get(&path);
+                match node {
+                    Some(SparseNode::Hash(_)) | None => {
+                        let mut full = path.clone();
+                        full.extend_from_slice_unchecked(&leaf.key);
+                        self.values.insert(full, leaf.value);
+                        self.nodes.insert(
+                            path.clone(),
+                            SparseNode::Leaf {
+                                key: leaf.key,
+                                // If the previous node was a hash, memoize the hash in a new leaf
+                                // node.
+                                hash: node.map(SparseNode::as_hash).unwrap_or_default(),
+                            },
+                        );
+                    }
+                    // Left node already exists.
+                    Some(SparseNode::Leaf { .. }) => {}
+                    // All other node types can't be handled.
+                    Some(
+                        node @ (SparseNode::Empty |
+                        SparseNode::Extension { .. } |
+                        SparseNode::Branch { .. }),
+                    ) => return Err(SparseTrieError::Reveal { path, node: Box::new(node.clone()) }),
                 }
-            },
-            TrieNode::Leaf(leaf) => match self.nodes.get(&path) {
-                Some(SparseNode::Hash(_)) | None => {
-                    let mut full = path.clone();
-                    full.extend_from_slice_unchecked(&leaf.key);
-                    self.values.insert(full, leaf.value);
-                    self.nodes.insert(path.clone(), SparseNode::new_leaf(leaf.key));
-                }
-                // Left node already exists.
-                Some(SparseNode::Leaf { .. }) => {}
-                // All other node types can't be handled.
-                Some(
-                    node @ (SparseNode::Empty |
-                    SparseNode::Extension { .. } |
-                    SparseNode::Branch { .. }),
-                ) => return Err(SparseTrieError::Reveal { path, node: Box::new(node.clone()) }),
-            },
+            }
         }
 
         self.revealed_nodes.insert(path);
@@ -1230,6 +1259,14 @@ impl SparseNode {
     /// Returns `true` if the node is a hash node.
     pub const fn is_hash(&self) -> bool {
         matches!(self, Self::Hash(_))
+    }
+
+    /// Returns the hash of the node if it is a hash node.
+    pub const fn as_hash(&self) -> Option<B256> {
+        match self {
+            Self::Hash(hash) => Some(*hash),
+            _ => None,
+        }
     }
 }
 
