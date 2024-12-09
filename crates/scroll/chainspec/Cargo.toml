@@ -1,0 +1,59 @@
+[package]
+name = "reth-scroll-chainspec"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "EVM chain spec implementation for scroll."
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-chainspec.workspace = true
+reth-ethereum-forks.workspace = true
+reth-primitives-traits.workspace = true
+reth-network-peers.workspace = true
+
+# scroll-reth
+reth-scroll-forks.workspace = true
+
+# ethereum
+alloy-chains.workspace = true
+alloy-genesis.workspace = true
+alloy-primitives.workspace = true
+alloy-consensus.workspace = true
+alloy-eips.workspace = true
+alloy-serde.workspace = true
+
+# io
+serde_json.workspace = true
+serde = { workspace = true, features = ["derive"] }
+
+# misc
+derive_more.workspace = true
+once_cell.workspace = true
+
+[dev-dependencies]
+reth-chainspec = { workspace = true, features = ["test-utils"] }
+alloy-genesis.workspace = true
+
+[features]
+default = ["std"]
+std = [
+    "alloy-chains/std",
+    "alloy-genesis/std",
+    "alloy-primitives/std",
+    "alloy-eips/std",
+    "alloy-serde/std",
+    "reth-chainspec/std",
+    "reth-ethereum-forks/std",
+    "reth-primitives-traits/std",
+    "reth-scroll-forks/std",
+    "alloy-consensus/std",
+    "once_cell/std",
+    "serde/std"
+]

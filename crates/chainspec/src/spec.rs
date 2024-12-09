@@ -24,7 +24,7 @@ use reth_ethereum_forks::{
 };
 use reth_network_peers::{
     base_nodes, base_testnet_nodes, holesky_nodes, mainnet_nodes, op_nodes, op_testnet_nodes,
-    sepolia_nodes, NodeRecord,
+    scroll_nodes, scroll_sepolia_nodes, sepolia_nodes, NodeRecord,
 };
 use reth_primitives_traits::SealedHeader;
 use reth_trie_common::root::state_root_ref_unhashed;
@@ -317,6 +317,13 @@ impl ChainSpec {
 
     /// Get the initial base fee of the genesis block.
     pub fn initial_base_fee(&self) -> Option<u64> {
+        // TODO(scroll): migrate to Chain::scroll() (introduced in https://github.com/alloy-rs/chains/pull/112) when alloy-chains is bumped to version 0.1.48
+        if self.chain == Chain::from_named(NamedChain::Scroll) ||
+            self.chain == Chain::from_named(NamedChain::ScrollSepolia)
+        {
+            return None
+        }
+
         // If the base fee is set in the genesis block, we use that instead of the default.
         let genesis_base_fee =
             self.genesis.base_fee_per_gas.map(|fee| fee as u64).unwrap_or(INITIAL_BASE_FEE);
@@ -571,8 +578,10 @@ impl ChainSpec {
             C::Holesky => Some(holesky_nodes()),
             C::Base => Some(base_nodes()),
             C::Optimism => Some(op_nodes()),
+            C::Scroll => Some(scroll_nodes()),
             C::BaseGoerli | C::BaseSepolia => Some(base_testnet_nodes()),
             C::OptimismSepolia | C::OptimismGoerli | C::OptimismKovan => Some(op_testnet_nodes()),
+            C::ScrollSepolia => Some(scroll_sepolia_nodes()),
             _ => None,
         }
     }

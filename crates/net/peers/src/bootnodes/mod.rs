@@ -8,6 +8,9 @@ pub use ethereum::*;
 mod optimism;
 pub use optimism::*;
 
+mod scroll;
+pub use scroll::*;
+
 /// Returns parsed mainnet nodes
 pub fn mainnet_nodes() -> Vec<NodeRecord> {
     parse_nodes(&MAINNET_BOOTNODES[..])
@@ -41,6 +44,16 @@ pub fn base_nodes() -> Vec<NodeRecord> {
 /// Returns parsed op-stack base testnet nodes
 pub fn base_testnet_nodes() -> Vec<NodeRecord> {
     parse_nodes(OP_TESTNET_BOOTNODES)
+}
+
+/// Returns parsed scroll mainnet nodes
+pub fn scroll_nodes() -> Vec<NodeRecord> {
+    parse_nodes(SCROLL_BOOTNODES)
+}
+
+/// Returns parsed scroll seplo nodes
+pub fn scroll_sepolia_nodes() -> Vec<NodeRecord> {
+    parse_nodes(SCROLL_SEPOLIA_BOOTNODES)
 }
 
 /// Parses all the nodes

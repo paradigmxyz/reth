@@ -100,7 +100,9 @@ members = [
     "crates/rpc/rpc-testing-util/",
     "crates/rpc/rpc-types-compat/",
     "crates/rpc/rpc/",
+    "crates/scroll/chainspec",
     "crates/scroll/execution",
+    "crates/scroll/hardforks",
     "crates/scroll/primitives",
     "crates/scroll/revm",
     "crates/scroll/storage",
@@ -415,6 +417,7 @@ reth-scroll-state-commitment = { path = "crates/scroll/state-commitment" }
 reth-scroll-trie = { path = "crates/scroll/trie" }
 reth-scroll-revm = { path = "crates/scroll/revm" }
 reth-scroll-storage = { path = "crates/scroll/storage" }
+reth-scroll-forks = { path = "crates/scroll/hardforks" }
 reth-stages = { path = "crates/stages/stages" }
 reth-stages-api = { path = "crates/stages/api" }
 reth-stages-types = { path = "crates/stages/types" }
