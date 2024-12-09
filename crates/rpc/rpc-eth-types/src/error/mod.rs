@@ -676,6 +676,9 @@ impl From<RpcPoolError> for jsonrpsee_types::error::ErrorObject<'static> {
     fn from(error: RpcPoolError) -> Self {
         match error {
             RpcPoolError::Invalid(err) => err.into(),
+            RpcPoolError::TxPoolOverflow => {
+                rpc_error_with_code(EthRpcErrorCode::TransactionRejected.code(), error.to_string())
+            }
             error => internal_rpc_err(error.to_string()),
         }
     }
