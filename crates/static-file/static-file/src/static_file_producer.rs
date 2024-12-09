@@ -337,7 +337,7 @@ mod tests {
             StaticFileTargets {
                 headers: Some(0..=1),
                 receipts: Some(0..=1),
-                transactions: Some(0..=1)
+                transactions: Some(0..=1),
                 block_meta: Some(0..=1)
             }
         );
@@ -360,7 +360,8 @@ mod tests {
             StaticFileTargets {
                 headers: Some(2..=3),
                 receipts: Some(2..=3),
-                transactions: Some(2..=3)
+                transactions: Some(2..=3),
+                block_meta: Some(2..=3)
             }
         );
         assert_matches!(static_file_producer.run(targets), Ok(_));
@@ -382,7 +383,7 @@ mod tests {
             StaticFileTargets {
                 headers: Some(4..=4),
                 receipts: Some(4..=4),
-                transactions: Some(4..=4)
+                transactions: Some(4..=4),
                 block_meta: Some(4..=4)
             }
         );
@@ -420,6 +421,7 @@ mod tests {
                         headers: Some(1),
                         receipts: Some(1),
                         transactions: Some(1),
+                        block_meta: Some(1),
                     })
                     .expect("get static file targets");
                 assert_matches!(locked_producer.run(targets.clone()), Ok(_));
