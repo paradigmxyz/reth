@@ -9,7 +9,11 @@ use crate::{
 use alloy_consensus::Header;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
-use reth_db::transaction::{DbTx, DbTxMut};
+use reth_db::{
+    table::TableInfo,
+    transaction::{DbTx, DbTxMut},
+    TableSet, Tables,
+};
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, PeersInfo};
 use reth_node_api::{AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, TxTy};
@@ -102,6 +106,12 @@ impl ChainStorage<OpPrimitives> for OpStorage {
         Types: NodeTypes<Primitives = OpPrimitives>,
     {
         self
+    }
+}
+
+impl TableSet for OpStorage {
+    fn tables() -> Box<dyn Iterator<Item = Box<dyn TableInfo>>> {
+        Tables::tables()
     }
 }
 

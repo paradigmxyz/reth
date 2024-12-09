@@ -4,9 +4,10 @@ use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     models::{StoredBlockOmmers, StoredBlockWithdrawals},
+    table::TableInfo,
     tables,
     transaction::{DbTx, DbTxMut},
-    DbTxUnwindExt,
+    DbTxUnwindExt, TableSet, Tables,
 };
 use reth_primitives_traits::{Block, BlockBody, FullNodePrimitives};
 use reth_storage_errors::provider::ProviderResult;
@@ -165,5 +166,11 @@ where
         }
 
         Ok(bodies)
+    }
+}
+
+impl TableSet for EthStorage {
+    fn tables() -> Box<dyn Iterator<Item = Box<dyn TableInfo>>> {
+        Tables::tables()
     }
 }
