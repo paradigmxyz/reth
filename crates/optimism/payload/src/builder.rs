@@ -338,13 +338,16 @@ where
         // and 4788 contract call
         state.merge_transitions(BundleRetention::Reverts);
 
-        let storage_root_msg_passer = state
-            .database
-            .as_ref()
-            .storage_root(ADDRESS_L2_TO_L1_MESSAGE_PASSER, Default::default())?;
-
         // withdrawals root field in block header is used for storage root of L2 predeploy
-        let payload = ExecutedPayload { info, withdrawals_root: Some(storage_root_msg_passer) };
+        // `l2tol1-message-passer`
+        let withdrawals_root = ctx.is_isthmus_active().then_some({
+            state
+                .database
+                .as_ref()
+                .storage_root(ADDRESS_L2_TO_L1_MESSAGE_PASSER, Default::default())?
+        });
+
+        let payload = ExecutedPayload { info, withdrawals_root };
 
         Ok(BuildOutcomeKind::Better { payload })
     }
@@ -674,6 +677,11 @@ impl<EvmConfig> OpPayloadBuilderCtx<EvmConfig> {
     /// Returns true if holocene is active for the payload.
     pub fn is_holocene_active(&self) -> bool {
         self.chain_spec.is_holocene_active_at_timestamp(self.attributes().timestamp())
+    }
+
+    /// Returns true if isthmus is active for the payload.
+    pub fn is_isthmus_active(&self) -> bool {
+        self.chain_spec.is_isthmus_active_at_timestamp(self.attributes().timestamp())
     }
 
     /// Returns true if the fees are higher than the previous payload.
