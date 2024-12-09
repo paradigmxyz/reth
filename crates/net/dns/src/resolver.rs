@@ -33,7 +33,7 @@ impl<P: ConnectionProvider> Resolver for hickory_resolver::Resolver<P> {
 
 /// An asynchronous DNS resolver
 ///
-/// See also [`TokioAsyncResolver`]
+/// See also [`TokioResolver`]
 ///
 /// ```
 /// # fn t() {
@@ -43,7 +43,7 @@ impl<P: ConnectionProvider> Resolver for hickory_resolver::Resolver<P> {
 /// ```
 ///
 /// Note: This [Resolver] can send multiple lookup attempts, See also
-/// [`ResolverOpts`](trust_dns_resolver::config::ResolverOpts) which configures 2 attempts (1 retry)
+/// [`ResolverOpts`](hickory_resolver::config::ResolverOpts) which configures 2 attempts (1 retry)
 /// by default.
 #[derive(Clone, Debug)]
 pub struct DnsResolver(TokioResolver);
@@ -51,7 +51,7 @@ pub struct DnsResolver(TokioResolver);
 // === impl DnsResolver ===
 
 impl DnsResolver {
-    /// Create a new resolver by wrapping the given [`AsyncResolver`]
+    /// Create a new resolver by wrapping the given [`TokioResolver`].
     pub const fn new(resolver: TokioResolver) -> Self {
         Self(resolver)
     }
