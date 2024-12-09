@@ -1,7 +1,7 @@
 //! Block body abstraction.
 
 use crate::{
-    FullSignedTx, InMemorySize, MaybeArbitrary, MaybeSerde, MaybeSerdeBincodeCompat,
+    BlockHeader, FullSignedTx, InMemorySize, MaybeArbitrary, MaybeSerde, MaybeSerdeBincodeCompat,
     SignedTransaction,
 };
 use alloc::{fmt, vec::Vec};
@@ -36,7 +36,7 @@ pub trait BlockBody:
     type Transaction: SignedTransaction;
 
     /// Ommer header type.
-    type OmmerHeader;
+    type OmmerHeader: BlockHeader;
 
     /// Returns reference to transactions in block.
     fn transactions(&self) -> &[Self::Transaction];
@@ -52,8 +52,24 @@ pub trait BlockBody:
     /// Returns block withdrawals if any.
     fn withdrawals(&self) -> Option<&Withdrawals>;
 
+    /// Calculate the withdrawals root for the block body.
+    ///
+    /// Returns `None` if there are no withdrawals in the block.
+    fn calculate_withdrawals_root(&self) -> Option<B256> {
+        self.withdrawals().map(|withdrawals| {
+            alloy_consensus::proofs::calculate_withdrawals_root(withdrawals.as_slice())
+        })
+    }
+
     /// Returns block ommers if any.
     fn ommers(&self) -> Option<&[Self::OmmerHeader]>;
+
+    /// Calculate the ommers root for the block body.
+    ///
+    /// Returns `None` if there are no ommers in the block.
+    fn calculate_ommers_root(&self) -> Option<B256> {
+        self.ommers().map(alloy_consensus::proofs::calculate_ommers_root)
+    }
 
     /// Calculates the total blob gas used by _all_ EIP-4844 transactions in the block.
     fn blob_gas_used(&self) -> u64 {
