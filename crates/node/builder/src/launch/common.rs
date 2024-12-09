@@ -450,9 +450,7 @@ where
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<ChainSpec>, ProviderFactory<N>>>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
-        N::Primitives: FullNodePrimitives<
-            BlockHeader = reth_primitives::Header,
-        >,
+        N::Primitives: FullNodePrimitives<BlockHeader = reth_primitives::Header>,
     {
         let factory = self.create_provider_factory().await?;
         let ctx = LaunchContextWith {

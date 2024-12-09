@@ -140,11 +140,7 @@ fn import_tables_with_range<N: NodeTypesWithDB>(
 /// `PlainAccountState` safely. There might be some state dependency from an address
 /// which hasn't been changed in the given range.
 fn unwind_and_copy<
-    N: ProviderNodeTypes<
-        Primitives: NodePrimitives<
-            BlockHeader = reth_primitives::Header,
-        >,
-    >,
+    N: ProviderNodeTypes<Primitives: NodePrimitives<BlockHeader = reth_primitives::Header>>,
 >(
     db_tool: &DbTool<N>,
     from: u64,
