@@ -9,7 +9,8 @@ use crate::{
 };
 use alloy_primitives::bytes::Bytes;
 use derive_more::{Deref, DerefMut};
-use reth_eth_wire_types::{EthMessage, EthNetworkPrimitives, NetworkPrimitives};
+use reth_eth_wire_types::{EthMessage, EthNetworkPrimitives};
+use reth_primitives_traits::NetworkPrimitives;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{

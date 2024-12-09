@@ -9,10 +9,11 @@ use crate::{
 use futures::Stream;
 use reth_eth_wire::{
     capability::CapabilityMessage, errors::EthStreamError, Capabilities, DisconnectReason,
-    EthNetworkPrimitives, EthVersion, NetworkPrimitives, Status,
+    EthNetworkPrimitives, EthVersion, Status,
 };
 use reth_network_api::{PeerRequest, PeerRequestSender};
 use reth_network_peers::PeerId;
+use reth_primitives_traits::NetworkPrimitives;
 use std::{
     io,
     net::SocketAddr,

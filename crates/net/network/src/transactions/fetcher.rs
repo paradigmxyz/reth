@@ -45,12 +45,12 @@ use reth_eth_wire::{
     DedupPayload, EthVersion, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
     PartiallyValidData, RequestTxHashes, ValidAnnouncementData,
 };
-use reth_eth_wire_types::{EthNetworkPrimitives, NetworkPrimitives};
+use reth_eth_wire_types::EthNetworkPrimitives;
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::{RequestError, RequestResult};
 use reth_network_peers::PeerId;
 use reth_primitives::PooledTransactionsElement;
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{NetworkPrimitives, SignedTransaction};
 use schnellru::ByLength;
 #[cfg(debug_assertions)]
 use smallvec::{smallvec, SmallVec};

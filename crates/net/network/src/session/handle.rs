@@ -8,11 +8,12 @@ use crate::{
 use reth_ecies::ECIESError;
 use reth_eth_wire::{
     capability::CapabilityMessage, errors::EthStreamError, Capabilities, DisconnectReason,
-    EthVersion, NetworkPrimitives, Status,
+    EthVersion, Status,
 };
 use reth_network_api::PeerInfo;
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::PeerKind;
+use reth_primitives_traits::NetworkPrimitives;
 use std::{io, net::SocketAddr, sync::Arc, time::Instant};
 use tokio::sync::{
     mpsc::{self, error::SendError},

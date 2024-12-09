@@ -26,14 +26,14 @@ use reth_eth_wire::{
     capability::RawCapabilityMessage,
     errors::{EthHandshakeError, EthStreamError, P2PStreamError},
     message::{EthBroadcastMessage, RequestPair},
-    Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives,
+    Capabilities, DisconnectP2P, DisconnectReason, EthMessage,
 };
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::RequestError;
 use reth_network_peers::PeerId;
 use reth_network_types::session::config::INITIAL_REQUEST_TIMEOUT;
-use reth_primitives_traits::Block;
+use reth_primitives_traits::{Block, NetworkPrimitives};
 use rustc_hash::FxHashMap;
 use tokio::{
     sync::{mpsc::error::TrySendError, oneshot},

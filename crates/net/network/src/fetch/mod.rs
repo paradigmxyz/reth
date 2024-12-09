@@ -7,7 +7,7 @@ pub use client::FetchClient;
 use crate::message::BlockRequest;
 use alloy_primitives::B256;
 use futures::StreamExt;
-use reth_eth_wire::{EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, NetworkPrimitives};
+use reth_eth_wire::{EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders};
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::{
     error::{EthResponseValidator, PeerRequestResult, RequestError, RequestResult},
@@ -16,6 +16,7 @@ use reth_network_p2p::{
 };
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
+use reth_primitives_traits::NetworkPrimitives;
 use std::{
     collections::{HashMap, VecDeque},
     sync::{
