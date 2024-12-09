@@ -14,6 +14,7 @@ Arguments:
           - headers:      Static File segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTerminalDifficulties` tables
           - transactions: Static File segment responsible for the `Transactions` table
           - receipts:     Static File segment responsible for the `Receipts` table
+          - block-meta:   Static File segment responsible for the `BlockBodyIndices`, `BlockOmmers`, `BlockWithdrawals` tables
 
 Options:
       --instance <INSTANCE>
