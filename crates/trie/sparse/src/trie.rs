@@ -386,17 +386,19 @@ impl<P> RevealedSparseTrie<P> {
         if child.len() == B256::len_bytes() + 1 {
             let hash = B256::from_slice(&child[1..]);
             match self.nodes.entry(path) {
-                // Hash node with a different hash can't be handled.
-                Entry::Occupied(entry) if entry.get().as_hash() != Some(hash) => {
-                    return Err(SparseTrieError::Reveal {
-                        path: entry.key().clone(),
-                        node: Box::new(SparseNode::Hash(hash)),
-                    })
-                }
+                Entry::Occupied(entry) => match entry.get() {
+                    // Hash node with a different hash can't be handled.
+                    SparseNode::Hash(previous_hash) if previous_hash != &hash => {
+                        return Err(SparseTrieError::Reveal {
+                            path: entry.key().clone(),
+                            node: Box::new(SparseNode::Hash(hash)),
+                        })
+                    }
+                    _ => {}
+                },
                 Entry::Vacant(entry) => {
                     entry.insert(SparseNode::Hash(hash));
                 }
-                _ => {}
             }
             return Ok(())
         }
@@ -1218,13 +1220,6 @@ impl SparseNode {
     /// Returns `true` if the node is a hash node.
     pub const fn is_hash(&self) -> bool {
         matches!(self, Self::Hash(_))
-    }
-
-    pub const fn as_hash(&self) -> Option<B256> {
-        match self {
-            Self::Hash(hash) => Some(*hash),
-            _ => None,
-        }
     }
 }
 
