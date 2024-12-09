@@ -52,8 +52,7 @@ use reth_trie::{
     Nibbles, TrieInput,
 };
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use revm_primitives::EvmState;
-use root::{StateHookSender, StateRootConfig, StateRootMessage, StateRootTask};
+use root::{StateRootConfig, StateRootTask};
 use std::{
     cmp::Ordering,
     collections::{btree_map, hash_map, BTreeMap, VecDeque},
@@ -2228,21 +2227,15 @@ where
 
         let exec_time = Instant::now();
 
-        let (state_root_tx, state_root_rx) = std::sync::mpsc::channel();
-
         let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
 
         let input = self
             .compute_trie_input(consistent_view.clone(), block.parent_hash)
             .map_err(|e| InsertBlockErrorKindTwo::Other(Box::new(e)))?;
         let state_root_config = StateRootConfig { consistent_view, input: Arc::new(input) };
-        let state_root_task =
-            StateRootTask::new(state_root_config, state_root_tx.clone(), state_root_rx);
+        let state_root_task = StateRootTask::new(state_root_config);
+        let state_hook = state_root_task.state_hook();
         let state_root_handle = state_root_task.spawn();
-        let state_hook_sender = StateHookSender::new(state_root_tx);
-        let state_hook = move |state: &EvmState| {
-            let _ = state_hook_sender.send(StateRootMessage::StateUpdate(state.clone()));
-        };
 
         let output = self.metrics.executor.execute_metered(
             executor,
