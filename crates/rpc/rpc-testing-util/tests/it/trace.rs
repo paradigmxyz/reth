@@ -126,3 +126,47 @@ async fn debug_trace_block_entire_chain() {
     }
     println!("Traced all blocks in {:?}", now.elapsed());
 }
+
+/// This is intended to be run locally against a running node. This traces all blocks for a given
+/// chain.
+///
+/// This is a noop of env var `RETH_RPC_TEST_NODE_URL` is not set.
+#[tokio::test(flavor = "multi_thread")]
+async fn debug_trace_block_opcodes_entire_chain() {
+    let opcodes7702 = ["EXTCODESIZE", "EXTCODECOPY", "EXTCODEHASH"];
+    let url = parse_env_url("RETH_RPC_TEST_NODE_URL");
+    if url.is_err() {
+        return
+    }
+    let url = url.unwrap();
+
+    let client = HttpClientBuilder::default().build(url).unwrap();
+    let current_block: u64 =
+        <HttpClient as EthApiClient<Transaction, Block, Receipt, Header>>::block_number(&client)
+            .await
+            .unwrap()
+            .try_into()
+            .unwrap();
+    let range = 0..=current_block;
+    println!("Tracing blocks {range:?} for opcodes");
+    let mut stream = client.trace_block_opcode_gas_unordered(range, 2).enumerate();
+    let now = Instant::now();
+    while let Some((num, next)) = stream.next().await {
+        match next {
+            Ok((block_opcodes, block)) => {
+                for opcode in opcodes7702 {
+                    if block_opcodes.contains(opcode) {
+                        eprintln!("Found opcode {opcode}: in {block}");
+                    }
+                }
+            }
+            Err((err, block)) => {
+                eprintln!("Error tracing block {block:?}: {err}");
+            }
+        };
+        if num % 10000 == 0 {
+            println!("Traced {num} blocks");
+        }
+    }
+    println!("Traced all blocks in {:?}", now.elapsed());
+}
