@@ -5,7 +5,7 @@ use crate::{
     error::OpPayloadBuilderError,
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
 };
-use alloy_consensus::{Header, Transaction, EMPTY_OMMER_ROOT_HASH};
+use alloy_consensus::{constants::EMPTY_WITHDRAWALS, Header, Transaction, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{eip4895::Withdrawals, merge::BEACON_NONCE};
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
@@ -340,11 +340,13 @@ where
 
         // withdrawals root field in block header is used for storage root of L2 predeploy
         // `l2tol1-message-passer`
-        let withdrawals_root = ctx.is_isthmus_active().then_some({
+        let withdrawals_root = Some(if ctx.is_isthmus_active() {
             state
                 .database
                 .as_ref()
                 .storage_root(ADDRESS_L2_TO_L1_MESSAGE_PASSER, Default::default())?
+        } else {
+            EMPTY_WITHDRAWALS
         });
 
         let payload = ExecutedPayload { info, withdrawals_root };
