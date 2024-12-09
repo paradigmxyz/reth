@@ -2365,11 +2365,11 @@ where
                         //     storage_tries_with_differences =
                         // ?diff.storage_tries_with_differences,     "Found
                         // differences in TrieUpdates" );
+                        (regular_state_root, regular_trie_updates)
                     } else {
                         debug!(target: "engine::tree", block=?sealed_block.num_hash(), "TrieUpdates match exactly");
+                        (task_state_root, task_trie_updates)
                     }
-
-                    (task_state_root, task_trie_updates)
                 }
                 (Err(e), _) => {
                     info!(target: "engine::tree", error=?e, "on state root task wait_for_result");
