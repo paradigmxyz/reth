@@ -832,15 +832,21 @@ where
                         let common = current.common_prefix_length(&path);
                         *key = current.slice(current.len() - key.len()..common);
 
-                        // Check if the extension node child is a hash that needs to be revealed
-                        if self.nodes.get(&current).unwrap().is_hash() {
-                            if let Some(node) = self.provider.blinded_node(current.clone())? {
-                                let decoded = TrieNode::decode(&mut &node[..])?;
-                                trace!(target: "trie::sparse", ?current, ?decoded, "Revealing extension node child");
-                                // We'll never have to update the revealed child node, only remove
-                                // or do nothing, so we can safely ignore the hash mask here and
-                                // pass `None`.
-                                self.reveal_node(current.clone(), decoded, None)?;
+                        // If branch node updates retention is enabled, we need to query the
+                        // extension node child to later set the hash mask for a parent branch node
+                        // correctly.
+                        if self.updates.is_some() {
+                            // Check if the extension node child is a hash that needs to be revealed
+                            if self.nodes.get(&current).unwrap().is_hash() {
+                                if let Some(node) = self.provider.blinded_node(current.clone())? {
+                                    let decoded = TrieNode::decode(&mut &node[..])?;
+                                    trace!(target: "trie::sparse", ?current, ?decoded, "Revealing extension node child");
+                                    // We'll never have to update the revealed child node, only
+                                    // remove or do nothing, so
+                                    // we can safely ignore the hash mask here and
+                                    // pass `None`.
+                                    self.reveal_node(current.clone(), decoded, None)?;
+                                }
                             }
                         }
 
