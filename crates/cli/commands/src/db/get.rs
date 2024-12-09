@@ -72,6 +72,7 @@ impl Command {
                     StaticFileSegment::Receipts => {
                         (table_key::<tables::Receipts>(&key)?, <ReceiptMask<ReceiptTy<N>>>::MASK)
                     }
+                    StaticFileSegment::BlockMeta => todo!() // TODO(joshie),
                 };
 
                 let content = tool.provider_factory.static_file_provider().find_static_file(
@@ -113,6 +114,9 @@ impl Command {
                                     )?;
                                     println!("{}", serde_json::to_string_pretty(&receipt)?);
                                 }
+                                StaticFileSegment::BlockMeta => {
+                                    todo!() // TODO(joshie)
+                                },
                             }
                         }
                     }

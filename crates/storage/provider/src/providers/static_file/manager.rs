@@ -781,6 +781,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     highest_tx,
                     highest_block,
                 )?,
+                StaticFileSegment::BlockMeta => {
+                    todo!(); // TODO(joshie)
+                }
             } {
                 update_unwind_target(unwind);
             }
@@ -866,6 +869,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 StaticFileSegment::Headers => StageId::Headers,
                 StaticFileSegment::Transactions => StageId::Bodies,
                 StaticFileSegment::Receipts => StageId::Execution,
+                StaticFileSegment::BlockMeta => StageId::Bodies,
             })?
             .unwrap_or_default()
             .block_number;
@@ -895,6 +899,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             );
             let mut writer = self.latest_writer(segment)?;
             if segment.is_headers() {
+                // TODO(joshie): is_block_meta
                 writer.prune_headers(highest_static_file_block - checkpoint_block_number)?;
             } else if let Some(block) = provider.block_body_indices(checkpoint_block_number)? {
                 let number = highest_static_file_entry - block.last_tx_num();
@@ -933,6 +938,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             headers: self.get_highest_static_file_block(StaticFileSegment::Headers),
             receipts: self.get_highest_static_file_block(StaticFileSegment::Receipts),
             transactions: self.get_highest_static_file_block(StaticFileSegment::Transactions),
+            block_meta: self.get_highest_static_file_block(StaticFileSegment::BlockMeta),
         }
     }
 
@@ -975,11 +981,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         F: FnMut(&mut StaticFileCursor<'_>, u64) -> ProviderResult<Option<T>>,
         P: FnMut(&T) -> bool,
     {
-        let get_provider = |start: u64| match segment {
-            StaticFileSegment::Headers => {
+        let get_provider = |start: u64| {
+            if segment.is_block_based() {
                 self.get_segment_provider_from_block(segment, start, None)
-            }
-            StaticFileSegment::Transactions | StaticFileSegment::Receipts => {
+            } else {
                 self.get_segment_provider_from_transaction(segment, start, None)
             }
         };
@@ -1051,11 +1056,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         F: Fn(&mut StaticFileCursor<'_>, u64) -> ProviderResult<Option<T>> + 'a,
         T: std::fmt::Debug,
     {
-        let get_provider = move |start: u64| match segment {
-            StaticFileSegment::Headers => {
+        let get_provider = move |start: u64| {
+            if segment.is_block_based() {
                 self.get_segment_provider_from_block(segment, start, None)
-            }
-            StaticFileSegment::Transactions | StaticFileSegment::Receipts => {
+            } else {
                 self.get_segment_provider_from_transaction(segment, start, None)
             }
         };
@@ -1103,11 +1107,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         FD: Fn() -> ProviderResult<Option<T>>,
     {
         // If there is, check the maximum block or transaction number of the segment.
-        let static_file_upper_bound = match segment {
-            StaticFileSegment::Headers => self.get_highest_static_file_block(segment),
-            StaticFileSegment::Transactions | StaticFileSegment::Receipts => {
-                self.get_highest_static_file_tx(segment)
-            }
+        let static_file_upper_bound = if segment.is_block_based() {
+            self.get_highest_static_file_block(segment)
+        } else {
+            self.get_highest_static_file_tx(segment)
         };
 
         if static_file_upper_bound
@@ -1145,11 +1148,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let mut data = Vec::new();
 
         // If there is, check the maximum block or transaction number of the segment.
-        if let Some(static_file_upper_bound) = match segment {
-            StaticFileSegment::Headers => self.get_highest_static_file_block(segment),
-            StaticFileSegment::Transactions | StaticFileSegment::Receipts => {
-                self.get_highest_static_file_tx(segment)
-            }
+        if let Some(static_file_upper_bound) = if segment.is_block_based() {
+            self.get_highest_static_file_block(segment)
+        } else {
+            self.get_highest_static_file_tx(segment)
         } {
             if block_or_tx_range.start <= static_file_upper_bound {
                 let end = block_or_tx_range.end.min(static_file_upper_bound + 1);
