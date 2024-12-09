@@ -34,6 +34,9 @@ pub enum StaticFileSegment {
     #[strum(serialize = "receipts")]
     /// Static File segment responsible for the `Receipts` table.
     Receipts,
+    #[strum(serialize = "block_meta")]
+    /// Static File segment responsible for the `Receipts` table.
+    BlockMeta,
 }
 
 impl StaticFileSegment {
@@ -43,6 +46,7 @@ impl StaticFileSegment {
             Self::Headers => "headers",
             Self::Transactions => "transactions",
             Self::Receipts => "receipts",
+            Self::BlockMeta => "blockmeta",
         }
     }
 
@@ -55,6 +59,7 @@ impl StaticFileSegment {
     pub const fn columns(&self) -> usize {
         match self {
             Self::Headers => 3,
+            Self::BlockMeta => 3,
             Self::Transactions | Self::Receipts => 1,
         }
     }
@@ -118,15 +123,24 @@ impl StaticFileSegment {
         matches!(self, Self::Headers)
     }
 
+    /// Returns `true` if the segment is `StaticFileSegment::BlockMeta`.
+    pub const fn is_block_meta(&self) -> bool {
+        matches!(self, Self::BlockMeta)
+    }
+
     /// Returns `true` if the segment is `StaticFileSegment::Receipts`.
     pub const fn is_receipts(&self) -> bool {
         matches!(self, Self::Receipts)
     }
 
-    /// Returns `true` if the segment is `StaticFileSegment::Receipts` or
-    /// `StaticFileSegment::Transactions`.
+    /// Returns `true` if a segment row is linked to a transaction.
     pub const fn is_tx_based(&self) -> bool {
         matches!(self, Self::Receipts | Self::Transactions)
+    }
+
+    /// Returns `true` if a segment row is linked to a block.
+    pub const fn is_block_based(&self) -> bool {
+        matches!(self, Self::Headers | Self::BlockMeta)
     }
 }
 
@@ -228,40 +242,34 @@ impl SegmentHeader {
 
     /// Increments tx end range depending on segment
     pub fn increment_tx(&mut self) {
-        match self.segment {
-            StaticFileSegment::Headers => (),
-            StaticFileSegment::Transactions | StaticFileSegment::Receipts => {
-                if let Some(tx_range) = &mut self.tx_range {
-                    tx_range.end += 1;
-                } else {
-                    self.tx_range = Some(SegmentRangeInclusive::new(0, 0));
-                }
+        if self.segment.is_tx_based() {
+            if let Some(tx_range) = &mut self.tx_range {
+                tx_range.end += 1;
+            } else {
+                self.tx_range = Some(SegmentRangeInclusive::new(0, 0));
             }
         }
     }
 
     /// Removes `num` elements from end of tx or block range.
     pub fn prune(&mut self, num: u64) {
-        match self.segment {
-            StaticFileSegment::Headers => {
-                if let Some(range) = &mut self.block_range {
-                    if num > range.end - range.start {
-                        self.block_range = None;
-                    } else {
-                        range.end = range.end.saturating_sub(num);
-                    }
-                };
-            }
-            StaticFileSegment::Transactions | StaticFileSegment::Receipts => {
-                if let Some(range) = &mut self.tx_range {
-                    if num > range.end - range.start {
-                        self.tx_range = None;
-                    } else {
-                        range.end = range.end.saturating_sub(num);
-                    }
-                };
-            }
-        };
+        if self.segment.is_block_based() {
+            if let Some(range) = &mut self.block_range {
+                if num > range.end - range.start {
+                    self.block_range = None;
+                } else {
+                    range.end = range.end.saturating_sub(num);
+                }
+            };
+        } else {
+            if let Some(range) = &mut self.tx_range {
+                if num > range.end - range.start {
+                    self.tx_range = None;
+                } else {
+                    range.end = range.end.saturating_sub(num);
+                }
+            };
+        }
     }
 
     /// Sets a new `block_range`.
@@ -286,10 +294,10 @@ impl SegmentHeader {
 
     /// Returns the row offset which depends on whether the segment is block or transaction based.
     pub fn start(&self) -> Option<u64> {
-        match self.segment {
-            StaticFileSegment::Headers => self.block_start(),
-            StaticFileSegment::Transactions | StaticFileSegment::Receipts => self.tx_start(),
+        if self.segment.is_block_based() {
+            return self.block_start()
         }
+        self.tx_start()
     }
 }
 

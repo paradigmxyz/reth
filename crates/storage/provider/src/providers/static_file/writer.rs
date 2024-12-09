@@ -54,6 +54,7 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
             StaticFileSegment::Headers => self.headers.write(),
             StaticFileSegment::Transactions => self.transactions.write(),
             StaticFileSegment::Receipts => self.receipts.write(),
+            StaticFileSegment::BlockMeta => todo!(), // TODO(joshie),
         };
 
         if write_guard.is_none() {
@@ -230,6 +231,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 StaticFileSegment::Receipts => {
                     self.prune_receipt_data(to_delete, last_block_number.expect("should exist"))?
                 }
+                StaticFileSegment::BlockMeta => todo!(), // TODO(joshie),
             }
         }
 
@@ -393,13 +395,10 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         let mut remaining_rows = num_rows;
         let segment = self.writer.user_header().segment();
         while remaining_rows > 0 {
-            let len = match segment {
-                StaticFileSegment::Headers => {
-                    self.writer.user_header().block_len().unwrap_or_default()
-                }
-                StaticFileSegment::Transactions | StaticFileSegment::Receipts => {
-                    self.writer.user_header().tx_len().unwrap_or_default()
-                }
+            let len = if segment.is_block_based() {
+                self.writer.user_header().block_len().unwrap_or_default()
+            } else {
+                self.writer.user_header().tx_len().unwrap_or_default()
             };
 
             if remaining_rows >= len {

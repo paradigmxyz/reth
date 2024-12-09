@@ -33,6 +33,9 @@ pub struct HighestStaticFiles {
     /// Highest static file block of transactions, inclusive.
     /// If [`None`], no static file is available.
     pub transactions: Option<BlockNumber>,
+    /// Highest static file block of transactions, inclusive.
+    /// If [`None`], no static file is available.
+    pub block_meta: Option<BlockNumber>,
 }
 
 impl HighestStaticFiles {
@@ -42,6 +45,7 @@ impl HighestStaticFiles {
             StaticFileSegment::Headers => self.headers,
             StaticFileSegment::Transactions => self.transactions,
             StaticFileSegment::Receipts => self.receipts,
+            StaticFileSegment::BlockMeta => self.block_meta,
         }
     }
 
@@ -51,17 +55,24 @@ impl HighestStaticFiles {
             StaticFileSegment::Headers => &mut self.headers,
             StaticFileSegment::Transactions => &mut self.transactions,
             StaticFileSegment::Receipts => &mut self.receipts,
+            StaticFileSegment::BlockMeta => &mut self.block_meta,
         }
     }
 
     /// Returns the minimum block of all segments.
     pub fn min_block_num(&self) -> Option<u64> {
-        [self.headers, self.transactions, self.receipts].iter().filter_map(|&option| option).min()
+        [self.headers, self.transactions, self.receipts, self.block_meta]
+            .iter()
+            .filter_map(|&option| option)
+            .min()
     }
 
     /// Returns the maximum block of all segments.
     pub fn max_block_num(&self) -> Option<u64> {
-        [self.headers, self.transactions, self.receipts].iter().filter_map(|&option| option).max()
+        [self.headers, self.transactions, self.receipts, self.block_meta]
+            .iter()
+            .filter_map(|&option| option)
+            .max()
     }
 }
 
