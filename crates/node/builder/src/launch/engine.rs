@@ -18,7 +18,7 @@ use reth_exex::ExExManagerHandle;
 use reth_network::{NetworkSyncUpdater, SyncState};
 use reth_network_api::BlockDownloaderProvider;
 use reth_node_api::{
-    BlockTy, BuiltPayload, EngineValidator, FullNodeTypes, NodePrimitives, NodeTypesWithEngine,
+    BlockTy, BuiltPayload, EngineValidator, FullNodeTypes, NodeTypesWithEngine,
     PayloadAttributesBuilder, PayloadBuilder, PayloadTypes,
 };
 use reth_node_core::{
@@ -28,7 +28,7 @@ use reth_node_core::{
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_primitives::EthereumHardforks;
-use reth_provider::providers::{BlockchainProvider2, ProviderNodeTypes};
+use reth_provider::providers::BlockchainProvider2;
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info};
@@ -69,8 +69,7 @@ impl EngineNodeLauncher {
 
 impl<Types, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
 where
-    Types: ProviderNodeTypes<Primitives: NodePrimitives<BlockHeader = alloy_consensus::Header>>
-        + EngineNodeTypes,
+    Types: EngineNodeTypes,
     T: FullNodeTypes<Types = Types, Provider = BlockchainProvider2<Types>>,
     CB: NodeComponentsBuilder<T>,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
