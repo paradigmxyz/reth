@@ -493,19 +493,6 @@ impl<N: ProviderNodeTypes> StageCheckpointReader for BlockchainProvider2<N> {
 }
 
 impl<N: ProviderNodeTypes> EvmEnvProvider<HeaderTy<N>> for BlockchainProvider2<N> {
-    fn fill_env_at<EvmConfig>(
-        &self,
-        cfg: &mut CfgEnvWithHandlerCfg,
-        block_env: &mut BlockEnv,
-        at: BlockHashOrNumber,
-        evm_config: EvmConfig,
-    ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
-    {
-        self.consistent_provider()?.fill_env_at(cfg, block_env, at, evm_config)
-    }
-
     fn fill_env_with_header<EvmConfig>(
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,

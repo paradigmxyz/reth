@@ -61,7 +61,8 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     type Network: FullNetwork;
 
     /// Builds new blocks.
-    type PayloadBuilder: PayloadBuilder + Clone;
+    type PayloadBuilder: PayloadBuilder<PayloadType = <Self::Types as NodeTypesWithEngine>::Engine>
+        + Clone;
 
     /// Returns the transaction pool of the node.
     fn pool(&self) -> &Self::Pool;

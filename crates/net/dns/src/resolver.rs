@@ -1,10 +1,10 @@
 //! Perform DNS lookups
 
+use hickory_resolver::name_server::ConnectionProvider;
+pub use hickory_resolver::{ResolveError, TokioResolver};
 use parking_lot::RwLock;
 use std::{collections::HashMap, future::Future};
 use tracing::trace;
-pub use trust_dns_resolver::{error::ResolveError, TokioAsyncResolver};
-use trust_dns_resolver::{name_server::ConnectionProvider, AsyncResolver};
 
 /// A type that can lookup DNS entries
 pub trait Resolver: Send + Sync + Unpin + 'static {
@@ -12,7 +12,7 @@ pub trait Resolver: Send + Sync + Unpin + 'static {
     fn lookup_txt(&self, query: &str) -> impl Future<Output = Option<String>> + Send;
 }
 
-impl<P: ConnectionProvider> Resolver for AsyncResolver<P> {
+impl<P: ConnectionProvider> Resolver for hickory_resolver::Resolver<P> {
     async fn lookup_txt(&self, query: &str) -> Option<String> {
         // See: [AsyncResolver::txt_lookup]
         // > *hint* queries that end with a '.' are fully qualified names and are cheaper lookups
@@ -33,7 +33,7 @@ impl<P: ConnectionProvider> Resolver for AsyncResolver<P> {
 
 /// An asynchronous DNS resolver
 ///
-/// See also [`TokioAsyncResolver`]
+/// See also [`TokioResolver`]
 ///
 /// ```
 /// # fn t() {
@@ -43,16 +43,16 @@ impl<P: ConnectionProvider> Resolver for AsyncResolver<P> {
 /// ```
 ///
 /// Note: This [Resolver] can send multiple lookup attempts, See also
-/// [`ResolverOpts`](trust_dns_resolver::config::ResolverOpts) which configures 2 attempts (1 retry)
+/// [`ResolverOpts`](hickory_resolver::config::ResolverOpts) which configures 2 attempts (1 retry)
 /// by default.
 #[derive(Clone, Debug)]
-pub struct DnsResolver(TokioAsyncResolver);
+pub struct DnsResolver(TokioResolver);
 
 // === impl DnsResolver ===
 
 impl DnsResolver {
-    /// Create a new resolver by wrapping the given [`AsyncResolver`]
-    pub const fn new(resolver: TokioAsyncResolver) -> Self {
+    /// Create a new resolver by wrapping the given [`TokioResolver`].
+    pub const fn new(resolver: TokioResolver) -> Self {
         Self(resolver)
     }
 
@@ -60,7 +60,7 @@ impl DnsResolver {
     ///
     /// This will use `/etc/resolv.conf` on Unix OSes and the registry on Windows.
     pub fn from_system_conf() -> Result<Self, ResolveError> {
-        TokioAsyncResolver::tokio_from_system_conf().map(Self::new)
+        TokioResolver::tokio_from_system_conf().map(Self::new)
     }
 }
 

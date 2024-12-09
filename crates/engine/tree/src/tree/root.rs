@@ -1,6 +1,7 @@
 //! State root task related functionality.
 
 use alloy_primitives::map::{HashMap, HashSet};
+use reth_evm::system_calls::OnStateHook;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
     StateCommitmentProvider,
@@ -24,7 +25,7 @@ use std::{
     collections::BTreeMap,
     ops::Deref,
     sync::{
-        mpsc::{self, Receiver, Sender},
+        mpsc::{self, channel, Receiver, Sender},
         Arc,
     },
     time::{Duration, Instant},
@@ -69,12 +70,7 @@ pub(crate) struct StateRootConfig<Factory> {
 #[derive(Debug)]
 pub(crate) enum StateRootMessage {
     /// New state update from transaction execution
-    StateUpdate {
-        /// The state changes
-        state: EvmState,
-        /// Whether this is from final post-execution changes
-        is_final: bool,
-    },
+    StateUpdate(EvmState),
     /// Proof calculation completed for a specific state update
     ProofCalculated {
         /// The calculated proof
@@ -187,6 +183,42 @@ impl Drop for StateHookSender {
     }
 }
 
+fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
+    let mut hashed_state = HashedPostState::default();
+
+    for (address, account) in update {
+        if account.is_touched() {
+            let hashed_address = keccak256(address);
+            trace!(target: "engine::root", ?address, ?hashed_address, "Adding account to state update");
+
+            let destroyed = account.is_selfdestructed();
+            let info = if destroyed { None } else { Some(account.info.into()) };
+            hashed_state.accounts.insert(hashed_address, info);
+
+            let mut changed_storage_iter = account
+                .storage
+                .into_iter()
+                .filter_map(|(slot, value)| {
+                    value.is_changed().then(|| {
+                                let hashed_slot = keccak256(B256::from(slot));
+                                trace!(target: "engine::root", ?address, ?hashed_address, ?slot, ?hashed_slot, "Adding storage to state update");
+                                (hashed_slot, value.present_value)
+                    })
+                })
+                .peekable();
+
+            if destroyed || changed_storage_iter.peek().is_some() {
+                hashed_state.storages.insert(
+                    hashed_address,
+                    HashedStorage::from_iter(destroyed, changed_storage_iter),
+                );
+            }
+        }
+    }
+
+    hashed_state
+}
+
 /// Standalone task that receives a transaction state stream and updates relevant
 /// data structures to calculate state root.
 ///
@@ -223,11 +255,9 @@ where
         + 'static,
 {
     /// Creates a new state root task with the unified message channel
-    pub(crate) fn new(
-        config: StateRootConfig<Factory>,
-        tx: Sender<StateRootMessage>,
-        rx: Receiver<StateRootMessage>,
-    ) -> Self {
+    pub(crate) fn new(config: StateRootConfig<Factory>) -> Self {
+        let (tx, rx) = channel();
+
         Self {
             config,
             rx,
@@ -253,6 +283,15 @@ where
         StateRootHandle::new(rx)
     }
 
+    /// Returns a state hook to be used to send state updates to this task.
+    pub(crate) fn state_hook(&self) -> impl OnStateHook {
+        let state_hook = StateHookSender::new(self.tx.clone());
+
+        move |state: &EvmState| {
+            let _ = state_hook.send(StateRootMessage::StateUpdate(state.clone()));
+        }
+    }
+
     /// Handles state updates.
     ///
     /// Returns proof targets derived from the state update.
@@ -264,38 +303,7 @@ where
         proof_sequence_number: u64,
         state_root_message_sender: Sender<StateRootMessage>,
     ) {
-        let mut hashed_state_update = HashedPostState::default();
-        for (address, account) in update {
-            let hashed_address = keccak256(address);
-            trace!(target: "engine::root", ?address, ?hashed_address, info = ?account.info, status = ?account.status, "Adding account to state update");
-
-            if account.is_touched() {
-                let destroyed = account.is_selfdestructed();
-                let info =
-                    if account.is_empty() || destroyed { None } else { Some(account.info.into()) };
-                hashed_state_update.accounts.insert(hashed_address, info);
-
-                let mut changed_storage_iter = account
-                    .storage
-                    .into_iter()
-                    .filter_map(|(slot, value)| {
-                        value
-                            .is_changed()
-                            .then(|| {
-                                let hashed_slot = keccak256(B256::from(slot));
-                                trace!(target: "engine::root", ?address, ?hashed_address, ?slot, ?hashed_slot, "Adding storage to state update");
-                                (hashed_slot, value.present_value)
-                            })
-                    })
-                    .peekable();
-                if destroyed || changed_storage_iter.peek().is_some() {
-                    hashed_state_update.storages.insert(
-                        hashed_address,
-                        HashedStorage::from_iter(destroyed, changed_storage_iter),
-                    );
-                }
-            }
-        }
+        let hashed_state_update = evm_state_to_hashed_post_state(update);
 
         let proof_targets = get_proof_targets(&hashed_state_update, fetched_proof_targets);
         for (address, slots) in &proof_targets {
@@ -423,9 +431,8 @@ where
         loop {
             match self.rx.recv() {
                 Ok(message) => match message {
-                    StateRootMessage::StateUpdate { state, is_final } => {
+                    StateRootMessage::StateUpdate(state) => {
                         updates_received += 1;
-                        updates_finished = is_final;
                         trace!(
                             target: "engine::root",
                             len = state.len(),
@@ -763,7 +770,6 @@ mod tests {
         reth_tracing::init_test_tracing();
 
         let factory = create_test_provider_factory();
-        let (tx, rx) = std::sync::mpsc::channel();
 
         let state_updates = create_mock_state_updates(10, 10);
         let mut hashed_state = HashedPostState::default();
@@ -795,34 +801,9 @@ mod tests {
         }
 
         for update in &state_updates {
+            hashed_state.extend(evm_state_to_hashed_post_state(update.clone()));
+
             for (address, account) in update {
-                let hashed_address = keccak256(*address);
-
-                if account.is_touched() {
-                    let destroyed = account.is_selfdestructed();
-                    hashed_state.accounts.insert(
-                        hashed_address,
-                        if destroyed || account.is_empty() {
-                            None
-                        } else {
-                            Some(account.info.clone().into())
-                        },
-                    );
-
-                    if destroyed || !account.storage.is_empty() {
-                        let storage = account
-                            .storage
-                            .iter()
-                            .filter(|&(_slot, value)| (!destroyed && value.is_changed()))
-                            .map(|(slot, value)| {
-                                (keccak256(B256::from(*slot)), value.present_value)
-                            });
-                        hashed_state
-                            .storages
-                            .insert(hashed_address, HashedStorage::from_iter(destroyed, storage));
-                    }
-                }
-
                 let storage: HashMap<B256, U256> = account
                     .storage
                     .iter()
@@ -839,16 +820,14 @@ mod tests {
             consistent_view: ConsistentDbView::new(factory, None),
             input: Arc::new(TrieInput::from_state(hashed_state)),
         };
-        let task = StateRootTask::new(config, tx.clone(), rx);
+        let task = StateRootTask::new(config);
+        let mut state_hook = task.state_hook();
         let handle = task.spawn();
 
-        let state_hook_sender = StateHookSender::new(tx);
         for update in state_updates {
-            state_hook_sender
-                .send(StateRootMessage::StateUpdate(update))
-                .expect("failed to send state");
+            state_hook.on_state(&update);
         }
-        drop(state_hook_sender);
+        drop(state_hook);
 
         let (root_from_task, _) = handle.wait_for_result().0.expect("task failed");
         let root_from_base = state_root(accumulated_state);

@@ -1,6 +1,6 @@
 use alloy_consensus::Header;
 use reth_evm::ConfigureEvm;
-use reth_primitives::EthPrimitives;
+use reth_primitives::NodePrimitives;
 use reth_provider::{BlockReader, CanonStateSubscriptions, EvmEnvProvider, StateProviderFactory};
 use reth_rpc::{EthFilter, EthPubSub};
 use reth_rpc_eth_api::EthApiTypes;
@@ -15,38 +15,35 @@ pub type DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, Eth
 
 /// Handlers for core, filter and pubsub `eth` namespace APIs.
 #[derive(Debug, Clone)]
-pub struct EthHandlers<Provider: BlockReader, Pool, Network, Events, EthApi: EthApiTypes> {
+pub struct EthHandlers<Provider: BlockReader, Events, EthApi: EthApiTypes> {
     /// Main `eth_` request handler
     pub api: EthApi,
     /// The async caching layer used by the eth handlers
     pub cache: EthStateCache<Provider::Block, Provider::Receipt>,
     /// Polling based filter handler available on all transports
-    pub filter: EthFilter<Provider, Pool, EthApi>,
+    pub filter: EthFilter<EthApi>,
     /// Handler for subscriptions only available for transports that support it (ws, ipc)
-    pub pubsub: EthPubSub<Provider, Pool, Events, Network, EthApi::TransactionCompat>,
+    pub pubsub: EthPubSub<EthApi, Events>,
 }
 
-impl<Provider, Pool, Network, Events, EthApi> EthHandlers<Provider, Pool, Network, Events, EthApi>
+impl<Provider, Events, EthApi> EthHandlers<Provider, Events, EthApi>
 where
     Provider: StateProviderFactory
         + BlockReader<
-            Block = reth_primitives::Block,
-            Receipt = reth_primitives::Receipt,
-            Header = reth_primitives::Header,
+            Block = <Events::Primitives as NodePrimitives>::Block,
+            Receipt = <Events::Primitives as NodePrimitives>::Receipt,
         > + EvmEnvProvider
         + Clone
         + Unpin
         + 'static,
-    Pool: Send + Sync + Clone + 'static,
-    Network: Clone + 'static,
-    Events: CanonStateSubscriptions<Primitives = EthPrimitives> + Clone + 'static,
+    Events: CanonStateSubscriptions + Clone + 'static,
     EthApi: EthApiTypes + 'static,
 {
     /// Returns a new instance with handlers for `eth` namespace.
     ///
     /// This will spawn all necessary tasks for the handlers.
     #[allow(clippy::too_many_arguments)]
-    pub fn bootstrap<EvmConfig, Tasks>(
+    pub fn bootstrap<EvmConfig, Tasks, Pool, Network>(
         provider: Provider,
         pool: Pool,
         network: Network,
@@ -92,22 +89,13 @@ where
 
         let api = eth_api_builder(&ctx);
 
-        let filter = EthFilter::new(
-            ctx.provider.clone(),
-            ctx.pool.clone(),
-            ctx.cache.clone(),
-            ctx.config.filter_config(),
-            Box::new(ctx.executor.clone()),
-            api.tx_resp_builder().clone(),
-        );
+        let filter =
+            EthFilter::new(api.clone(), ctx.config.filter_config(), Box::new(ctx.executor.clone()));
 
         let pubsub = EthPubSub::with_spawner(
-            ctx.provider.clone(),
-            ctx.pool.clone(),
+            api.clone(),
             ctx.events.clone(),
-            ctx.network.clone(),
             Box::new(ctx.executor.clone()),
-            api.tx_resp_builder().clone(),
         );
 
         Self { api, cache: ctx.cache, filter, pubsub }

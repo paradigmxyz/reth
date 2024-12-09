@@ -27,6 +27,12 @@ pub trait OpHardforks: EthereumHardforks {
         self.fork(OpHardfork::Bedrock).active_at_block(block_number)
     }
 
+    /// Returns `true` if [`Regolith`](OpHardfork::Regolith) is active at given block
+    /// timestamp.
+    fn is_regolith_active_at_timestamp(&self, timestamp: u64) -> bool {
+        self.fork(OpHardfork::Regolith).active_at_timestamp(timestamp)
+    }
+
     /// Returns `true` if [`Canyon`](OpHardfork::Canyon) is active at given block timestamp.
     fn is_canyon_active_at_timestamp(&self, timestamp: u64) -> bool {
         self.fork(OpHardfork::Canyon).active_at_timestamp(timestamp)
@@ -53,9 +59,9 @@ pub trait OpHardforks: EthereumHardforks {
         self.fork(OpHardfork::Holocene).active_at_timestamp(timestamp)
     }
 
-    /// Returns `true` if [`Regolith`](OpHardfork::Regolith) is active at given block
+    /// Returns `true` if [`Isthmus`](OpHardfork::Isthmus) is active at given block
     /// timestamp.
-    fn is_regolith_active_at_timestamp(&self, timestamp: u64) -> bool {
-        self.fork(OpHardfork::Regolith).active_at_timestamp(timestamp)
+    fn is_isthmus_active_at_timestamp(&self, timestamp: u64) -> bool {
+        self.fork(OpHardfork::Isthmus).active_at_timestamp(timestamp)
     }
 }

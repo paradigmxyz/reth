@@ -18,7 +18,7 @@ struct MeteredStateHook {
 }
 
 impl OnStateHook for MeteredStateHook {
-    fn on_state(&mut self, state: &EvmState, is_final: bool) {
+    fn on_state(&mut self, state: &EvmState) {
         // Update the metrics for the number of accounts, storage slots and bytecodes loaded
         let accounts = state.keys().len();
         let storage_slots = state.values().map(|account| account.storage.len()).sum::<usize>();
@@ -33,7 +33,7 @@ impl OnStateHook for MeteredStateHook {
         self.metrics.bytecodes_loaded_histogram.record(bytecodes as f64);
 
         // Call the original state hook
-        self.inner_hook.on_state(state, is_final);
+        self.inner_hook.on_state(state);
     }
 }
 
@@ -203,7 +203,7 @@ mod tests {
             F: OnStateHook + 'static,
         {
             // Call hook with our mock state
-            hook.on_state(&self.state, false);
+            hook.on_state(&self.state);
 
             Ok(BlockExecutionOutput {
                 state: BundleState::default(),
@@ -220,7 +220,7 @@ mod tests {
     }
 
     impl OnStateHook for ChannelStateHook {
-        fn on_state(&mut self, _state: &EvmState, _is_final: bool) {
+        fn on_state(&mut self, _state: &EvmState) {
             let _ = self.sender.send(self.output);
         }
     }

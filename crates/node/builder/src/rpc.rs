@@ -10,8 +10,8 @@ use std::{
 use alloy_rpc_types::engine::ClientVersionV1;
 use futures::TryFutureExt;
 use reth_node_api::{
-    AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, NodeTypes, NodeTypesWithEngine,
-    PayloadBuilder,
+    AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, NodePrimitives, NodeTypes,
+    NodeTypesWithEngine,
 };
 use reth_node_core::{
     node_config::NodeConfig,
@@ -33,7 +33,6 @@ use reth_rpc_builder::{
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
-use reth_transaction_pool::TransactionPool;
 
 use crate::EthApiBuilderCtx;
 
@@ -404,11 +403,19 @@ where
 impl<N, EthApi, EV> RpcAddOns<N, EthApi, EV>
 where
     N: FullNodeComponents<
-        Types: ProviderNodeTypes<Primitives = EthPrimitives>,
-        PayloadBuilder: PayloadBuilder<PayloadType = <N::Types as NodeTypesWithEngine>::Engine>,
-        Pool: TransactionPool<Transaction = <EthApi::Pool as TransactionPool>::Transaction>,
+        Types: ProviderNodeTypes<
+            Primitives: NodePrimitives<
+                Block = reth_primitives::Block,
+                BlockHeader = reth_primitives::Header,
+                BlockBody = reth_primitives::BlockBody,
+            >,
+        >,
     >,
-    EthApi: EthApiTypes + FullEthApiServer + AddDevSigners + Unpin + 'static,
+    EthApi: EthApiTypes
+        + FullEthApiServer<Provider = N::Provider, Pool = N::Pool, Network = N::Network>
+        + AddDevSigners
+        + Unpin
+        + 'static,
     EV: EngineValidatorBuilder<N>,
 {
     /// Launches the RPC servers with the given context and an additional hook for extending
@@ -526,12 +533,12 @@ where
 
 impl<N, EthApi, EV> NodeAddOns<N> for RpcAddOns<N, EthApi, EV>
 where
-    N: FullNodeComponents<
-        Types: ProviderNodeTypes<Primitives = EthPrimitives>,
-        PayloadBuilder: PayloadBuilder<PayloadType = <N::Types as NodeTypesWithEngine>::Engine>,
-        Pool: TransactionPool<Transaction = <EthApi::Pool as TransactionPool>::Transaction>,
-    >,
-    EthApi: EthApiTypes + FullEthApiServer + AddDevSigners + Unpin + 'static,
+    N: FullNodeComponents<Types: ProviderNodeTypes<Primitives = EthPrimitives>>,
+    EthApi: EthApiTypes
+        + FullEthApiServer<Provider = N::Provider, Pool = N::Pool, Network = N::Network>
+        + AddDevSigners
+        + Unpin
+        + 'static,
     EV: EngineValidatorBuilder<N>,
 {
     type Handle = RpcHandle<N, EthApi>;

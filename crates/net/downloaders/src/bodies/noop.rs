@@ -21,7 +21,7 @@ impl BodyDownloader for NoopBodiesDownloader {
 }
 
 impl Stream for NoopBodiesDownloader {
-    type Item = Result<Vec<BlockResponse<BlockBody>>, DownloadError>;
+    type Item = Result<Vec<BlockResponse<alloy_consensus::Header, BlockBody>>, DownloadError>;
 
     fn poll_next(
         self: std::pin::Pin<&mut Self>,

@@ -1,9 +1,9 @@
 use super::OpNodeCore;
 use crate::{OpEthApi, OpEthApiError};
-use alloy_consensus::Header;
 use alloy_primitives::{Bytes, TxKind, U256};
 use alloy_rpc_types_eth::transaction::TransactionRequest;
 use reth_evm::ConfigureEvm;
+use reth_provider::ProviderHeader;
 use reth_rpc_eth_api::{
     helpers::{estimate::EstimateCall, Call, EthCall, LoadPendingBlock, LoadState, SpawnBlocking},
     FromEthApiError, IntoEthApiError,
@@ -28,7 +28,7 @@ where
 
 impl<N> Call for OpEthApi<N>
 where
-    Self: LoadState<Evm: ConfigureEvm<Header = Header>> + SpawnBlocking,
+    Self: LoadState<Evm: ConfigureEvm<Header = ProviderHeader<Self::Provider>>> + SpawnBlocking,
     Self::Error: From<OpEthApiError>,
     N: OpNodeCore,
 {

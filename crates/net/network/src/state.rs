@@ -556,22 +556,6 @@ pub(crate) enum StateAction<N: NetworkPrimitives> {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        future::poll_fn,
-        sync::{atomic::AtomicU64, Arc},
-    };
-
-    use alloy_consensus::Header;
-    use alloy_primitives::B256;
-    use reth_eth_wire::{BlockBodies, Capabilities, Capability, EthNetworkPrimitives, EthVersion};
-    use reth_network_api::PeerRequestSender;
-    use reth_network_p2p::{bodies::client::BodiesClient, error::RequestError};
-    use reth_network_peers::PeerId;
-    use reth_primitives::BlockBody;
-    use reth_provider::test_utils::NoopProvider;
-    use tokio::sync::mpsc;
-    use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-
     use crate::{
         discovery::Discovery,
         fetch::StateFetcher,
@@ -579,6 +563,20 @@ mod tests {
         state::{BlockNumReader, NetworkState},
         PeerRequest,
     };
+    use alloy_consensus::Header;
+    use alloy_primitives::B256;
+    use reth_eth_wire::{BlockBodies, Capabilities, Capability, EthNetworkPrimitives, EthVersion};
+    use reth_network_api::PeerRequestSender;
+    use reth_network_p2p::{bodies::client::BodiesClient, error::RequestError};
+    use reth_network_peers::PeerId;
+    use reth_primitives::BlockBody;
+    use reth_storage_api::noop::NoopProvider;
+    use std::{
+        future::poll_fn,
+        sync::{atomic::AtomicU64, Arc},
+    };
+    use tokio::sync::mpsc;
+    use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
     /// Returns a testing instance of the [`NetworkState`].
     fn state() -> NetworkState<EthNetworkPrimitives> {

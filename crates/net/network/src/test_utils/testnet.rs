@@ -10,7 +10,7 @@ use crate::{
 };
 use futures::{FutureExt, StreamExt};
 use pin_project::pin_project;
-use reth_chainspec::{Hardforks, MAINNET};
+use reth_chainspec::{ChainSpecProvider, Hardforks, MAINNET};
 use reth_eth_wire::{
     protocol::Protocol, DisconnectReason, EthNetworkPrimitives, HelloMessageWithProtocols,
 };
@@ -21,8 +21,9 @@ use reth_network_api::{
 };
 use reth_network_peers::PeerId;
 use reth_primitives::{PooledTransactionsElement, TransactionSigned};
-use reth_provider::{test_utils::NoopProvider, ChainSpecProvider};
-use reth_storage_api::{BlockReader, BlockReaderIdExt, HeaderProvider, StateProviderFactory};
+use reth_storage_api::{
+    noop::NoopProvider, BlockReader, BlockReaderIdExt, HeaderProvider, StateProviderFactory,
+};
 use reth_tasks::TokioTaskExecutor;
 use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
@@ -192,6 +193,27 @@ where
                 blob_store,
                 Default::default(),
             ))
+        })
+    }
+
+    /// Installs an eth pool on each peer with custom transaction manager config
+    pub fn with_eth_pool_config(
+        self,
+        tx_manager_config: TransactionsManagerConfig,
+    ) -> Testnet<C, EthTransactionPool<C, InMemoryBlobStore>> {
+        self.map_pool(|peer| {
+            let blob_store = InMemoryBlobStore::default();
+            let pool = TransactionValidationTaskExecutor::eth(
+                peer.client.clone(),
+                MAINNET.clone(),
+                blob_store.clone(),
+                TokioTaskExecutor::default(),
+            );
+
+            peer.map_transactions_manager_with_config(
+                EthTransactionPool::eth_pool(pool, blob_store, Default::default()),
+                tx_manager_config.clone(),
+            )
         })
     }
 }
@@ -463,6 +485,36 @@ where
             secret_key,
         }
     }
+
+    /// Map transactions manager with custom config
+    pub fn map_transactions_manager_with_config<P>(
+        self,
+        pool: P,
+        config: TransactionsManagerConfig,
+    ) -> Peer<C, P>
+    where
+        P: TransactionPool,
+    {
+        let Self { mut network, request_handler, client, secret_key, .. } = self;
+        let (tx, rx) = unbounded_channel();
+        network.set_transactions(tx);
+
+        let transactions_manager = TransactionsManager::new(
+            network.handle().clone(),
+            pool.clone(),
+            rx,
+            config, // Use provided config
+        );
+
+        Peer {
+            network,
+            request_handler,
+            transactions_manager: Some(transactions_manager),
+            pool: Some(pool),
+            client,
+            secret_key,
+        }
+    }
 }
 
 impl<C> Peer<C>
@@ -682,7 +734,7 @@ impl NetworkEventStream {
     /// Awaits the next `num` events for an established session
     pub async fn take_session_established(&mut self, mut num: usize) -> Vec<PeerId> {
         if num == 0 {
-            return Vec::new()
+            return Vec::new();
         }
         let mut peers = Vec::with_capacity(num);
         while let Some(ev) = self.inner.next().await {
@@ -691,7 +743,7 @@ impl NetworkEventStream {
                     peers.push(peer_id);
                     num -= 1;
                     if num == 0 {
-                        return peers
+                        return peers;
                     }
                 }
                 _ => continue,

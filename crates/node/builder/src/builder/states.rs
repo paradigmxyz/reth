@@ -13,9 +13,7 @@ use crate::{
     AddOns, FullNode,
 };
 use reth_exex::ExExContext;
-use reth_node_api::{
-    FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes, NodeTypesWithDB, PayloadBuilder,
-};
+use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes, NodeTypesWithDB};
 use reth_node_core::node_config::NodeConfig;
 use reth_tasks::TaskExecutor;
 use std::{fmt, future::Future};
@@ -88,10 +86,7 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeTypes for NodeAdapter<T, C>
     type Provider = T::Provider;
 }
 
-impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<T, C>
-where
-    C::PayloadBuilder: PayloadBuilder,
-{
+impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<T, C> {
     type Pool = C::Pool;
     type Evm = C::Evm;
     type Executor = C::Executor;

@@ -36,7 +36,7 @@ use reth_chainspec::{
 };
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 use reth_network_peers::NodeRecord;
-use reth_optimism_forks::OpHardforks;
+use reth_optimism_forks::{OpHardfork, OpHardforks};
 #[cfg(feature = "std")]
 pub(crate) use std::sync::LazyLock;
 
@@ -163,6 +163,13 @@ impl OpChainSpecBuilder {
         self.inner = self
             .inner
             .with_fork(reth_optimism_forks::OpHardfork::Holocene, ForkCondition::Timestamp(0));
+        self
+    }
+
+    /// Enable Isthmus at genesis
+    pub fn isthmus_activated(mut self) -> Self {
+        self = self.holocene_activated();
+        self.inner = self.inner.with_fork(OpHardfork::Isthmus, ForkCondition::Timestamp(0));
         self
     }
 
@@ -414,6 +421,7 @@ impl From<Genesis> for OpChainSpec {
             (OpHardfork::Fjord.boxed(), genesis_info.fjord_time),
             (OpHardfork::Granite.boxed(), genesis_info.granite_time),
             (OpHardfork::Holocene.boxed(), genesis_info.holocene_time),
+            (OpHardfork::Isthmus.boxed(), genesis_info.isthmus_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts
@@ -1030,6 +1038,7 @@ mod tests {
             OpHardfork::Fjord.boxed(),
             OpHardfork::Granite.boxed(),
             OpHardfork::Holocene.boxed(),
+            // OpHardfork::Isthmus.boxed(),
         ];
 
         assert!(expected_hardforks

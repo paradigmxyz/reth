@@ -80,7 +80,7 @@ impl<B> Stream for BodiesRequestQueue<B>
 where
     B: BodiesClient<Body: InMemorySize> + 'static,
 {
-    type Item = DownloadResult<Vec<BlockResponse<B::Body>>>;
+    type Item = DownloadResult<Vec<BlockResponse<alloy_consensus::Header, B::Body>>>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.get_mut().inner.poll_next_unpin(cx)

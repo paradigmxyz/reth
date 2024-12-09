@@ -460,12 +460,14 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// Updates the transactions for the changed senders.
     pub(crate) fn update_accounts(
         &mut self,
-        changed_senders: HashMap<SenderId, SenderInfo>,
+        changed_senders: FxHashMap<SenderId, SenderInfo>,
     ) -> UpdateOutcome<T::Transaction> {
-        // track changed accounts
-        self.sender_info.extend(changed_senders.clone());
         // Apply the state changes to the total set of transactions which triggers sub-pool updates.
-        let updates = self.all_transactions.update(changed_senders);
+        let updates = self.all_transactions.update(&changed_senders);
+
+        // track changed accounts
+        self.sender_info.extend(changed_senders);
+
         // Process the sub-pool updates
         let update = self.process_updates(updates);
         // update the metrics after the update
@@ -481,7 +483,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         &mut self,
         block_info: BlockInfo,
         mined_transactions: Vec<TxHash>,
-        changed_senders: HashMap<SenderId, SenderInfo>,
+        changed_senders: FxHashMap<SenderId, SenderInfo>,
         update_kind: PoolUpdateKind,
     ) -> OnNewCanonicalStateOutcome<T::Transaction> {
         // update block info
@@ -489,12 +491,15 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.all_transactions.set_block_info(block_info);
 
         // Remove all transaction that were included in the block
+        let mut removed_txs_count = 0;
         for tx_hash in &mined_transactions {
             if self.prune_transaction_by_hash(tx_hash).is_some() {
-                // Update removed transactions metric
-                self.metrics.removed_transactions.increment(1);
+                removed_txs_count += 1;
             }
         }
+
+        // Update removed transactions metric
+        self.metrics.removed_transactions.increment(removed_txs_count);
 
         let UpdateOutcome { promoted, discarded } = self.update_accounts(changed_senders);
 
@@ -1095,11 +1100,11 @@ impl<T: PoolTransaction> AllTransactions<T> {
         self.by_hash.keys().copied()
     }
 
-    /// Returns an iterator over all _unique_ hashes in the pool
+    /// Returns an iterator over all transactions in the pool
     pub(crate) fn transactions_iter(
         &self,
-    ) -> impl Iterator<Item = Arc<ValidPoolTransaction<T>>> + '_ {
-        self.by_hash.values().cloned()
+    ) -> impl Iterator<Item = &Arc<ValidPoolTransaction<T>>> + '_ {
+        self.by_hash.values()
     }
 
     /// Returns if the transaction for the given hash is already included in this pool
@@ -1180,7 +1185,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// that got transaction included in the block.
     pub(crate) fn update(
         &mut self,
-        changed_accounts: HashMap<SenderId, SenderInfo>,
+        changed_accounts: &FxHashMap<SenderId, SenderInfo>,
     ) -> Vec<PoolUpdate> {
         // pre-allocate a few updates
         let mut updates = Vec::with_capacity(64);
@@ -1237,7 +1242,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                     }
                 }
 
-                changed_balance = Some(info.balance);
+                changed_balance = Some(&info.balance);
             }
 
             // If there's a nonce gap, we can shortcircuit, because there's nothing to update yet.
@@ -1288,7 +1293,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
                 // If the account changed in the block, check the balance.
                 if let Some(changed_balance) = changed_balance {
-                    if cumulative_cost > changed_balance {
+                    if &cumulative_cost > changed_balance {
                         // sender lacks sufficient funds to pay for this transaction
                         tx.state.remove(TxState::ENOUGH_BALANCE);
                     } else {

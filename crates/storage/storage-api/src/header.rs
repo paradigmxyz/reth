@@ -5,6 +5,9 @@ use reth_primitives_traits::BlockHeader;
 use reth_storage_errors::provider::ProviderResult;
 use std::ops::RangeBounds;
 
+/// A helper type alias to access [`HeaderProvider::Header`].
+pub type ProviderHeader<P> = <P as HeaderProvider>::Header;
+
 /// Client trait for fetching `Header` related data.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait HeaderProvider: Send + Sync {
