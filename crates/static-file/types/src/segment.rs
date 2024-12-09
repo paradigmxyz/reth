@@ -35,7 +35,8 @@ pub enum StaticFileSegment {
     /// Static File segment responsible for the `Receipts` table.
     Receipts,
     #[strum(serialize = "block_meta")]
-    /// Static File segment responsible for the `Receipts` table.
+    /// Static File segment responsible for the `BlockBodyIndices`, `BlockOmmers`,
+    /// `BlockWithdrawals` tables.
     BlockMeta,
 }
 
