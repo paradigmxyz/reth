@@ -25,9 +25,7 @@ use reth_rpc_types_compat::transaction::{from_recovered, from_recovered_with_blo
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 use std::sync::Arc;
 
-use super::{
-    EthApiSpec, EthSigner, LoadBlock, LoadPendingBlock, LoadReceipt, LoadState, SpawnBlocking,
-};
+use super::{EthApiSpec, EthSigner, LoadBlock, LoadReceipt, LoadState, SpawnBlocking};
 use crate::{
     helpers::estimate::EstimateCall, FromEthApiError, FullEthApiTypes, IntoEthApiError,
     RpcNodeCore, RpcNodeCoreExt, RpcReceipt, RpcTransaction,
@@ -365,7 +363,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         mut request: TransactionRequest,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send
     where
-        Self: EthApiSpec + LoadBlock + LoadPendingBlock + EstimateCall,
+        Self: EthApiSpec + LoadBlock + EstimateCall,
     {
         async move {
             let from = match request.from {
