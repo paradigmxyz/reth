@@ -10,8 +10,8 @@ use std::{
 use alloy_rpc_types::engine::ClientVersionV1;
 use futures::TryFutureExt;
 use reth_node_api::{
-    AddOnsContext, BlockTy, EngineValidator, FullNodeComponents, NodeAddOns, NodePrimitives,
-    NodeTypes, NodeTypesWithEngine,
+    AddOnsContext, BlockTy, EngineValidator, FullNodeComponents, NodeAddOns, NodeTypes,
+    NodeTypesWithEngine,
 };
 use reth_node_core::{
     node_config::NodeConfig,
@@ -403,15 +403,7 @@ where
 
 impl<N, EthApi, EV> RpcAddOns<N, EthApi, EV>
 where
-    N: FullNodeComponents<
-        Types: ProviderNodeTypes<
-            Primitives: NodePrimitives<
-                Block = reth_primitives::Block,
-                BlockHeader = reth_primitives::Header,
-                BlockBody = reth_primitives::BlockBody,
-            >,
-        >,
-    >,
+    N: FullNodeComponents,
     EthApi: EthApiTypes
         + FullEthApiServer<Provider = N::Provider, Pool = N::Pool, Network = N::Network>
         + AddDevSigners

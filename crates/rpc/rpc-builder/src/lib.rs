@@ -187,7 +187,6 @@ use std::{
 };
 
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
-use alloy_consensus::Header;
 use error::{ConflictingModules, RpcError, ServerKind};
 use eth::DynEthApiBuilder;
 use http::{header::AUTHORIZATION, HeaderMap};
@@ -298,12 +297,7 @@ where
             Header = <BlockExecutor::Primitives as NodePrimitives>::BlockHeader,
         >,
     >,
-    BlockExecutor: BlockExecutorProvider<
-        Primitives: NodePrimitives<
-            BlockHeader = reth_primitives::Header,
-            BlockBody = reth_primitives::BlockBody,
-        >,
-    >,
+    BlockExecutor: BlockExecutorProvider,
 {
     let module_config = module_config.into();
     server_config
@@ -652,6 +646,7 @@ where
     Provider: FullRpcProvider<
             Block = <Events::Primitives as NodePrimitives>::Block,
             Receipt = <Events::Primitives as NodePrimitives>::Receipt,
+            Header = <Events::Primitives as NodePrimitives>::BlockHeader,
         > + AccountReader
         + ChangeSetReader,
     Pool: TransactionPool + 'static,
@@ -662,12 +657,7 @@ where
         Header = <BlockExecutor::Primitives as NodePrimitives>::BlockHeader,
         Transaction = <BlockExecutor::Primitives as NodePrimitives>::SignedTx,
     >,
-    BlockExecutor: BlockExecutorProvider<
-        Primitives: NodePrimitives<
-            BlockHeader = reth_primitives::Header,
-            BlockBody = reth_primitives::BlockBody,
-        >,
-    >,
+    BlockExecutor: BlockExecutorProvider,
     Consensus: reth_consensus::FullConsensus<BlockExecutor::Primitives> + Clone + 'static,
 {
     /// Configures all [`RpcModule`]s specific to the given [`TransportRpcModuleConfig`] which can
@@ -1019,7 +1009,7 @@ where
         payload_validator: Arc<dyn PayloadValidator<Block = Provider::Block>>,
     ) -> Self
     where
-        EvmConfig: ConfigureEvm<Header = Header>,
+        EvmConfig: ConfigureEvm<Header = Provider::Header>,
     {
         let blocking_pool_guard = BlockingTaskGuard::new(config.eth.max_tracing_requests);
 
@@ -1360,12 +1350,7 @@ where
             Header = <BlockExecutor::Primitives as NodePrimitives>::BlockHeader,
         >,
     >,
-    BlockExecutor: BlockExecutorProvider<
-        Primitives: NodePrimitives<
-            BlockHeader = reth_primitives::Header,
-            BlockBody = reth_primitives::BlockBody,
-        >,
-    >,
+    BlockExecutor: BlockExecutorProvider,
     Consensus: reth_consensus::FullConsensus<BlockExecutor::Primitives> + Clone + 'static,
 {
     /// Configures the auth module that includes the
