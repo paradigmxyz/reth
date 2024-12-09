@@ -365,7 +365,7 @@ mod test {
 
         // Test insert_and_get_evicted with existing entry
         let (is_new, evicted) = cache.insert_and_get_evicted("second");
-        assert!(is_new); // should not be new
+        assert!(!is_new); // should not be new
         assert_eq!(evicted, None); // should not evict anything
     }
 }
