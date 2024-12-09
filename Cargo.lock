@@ -8939,6 +8939,7 @@ dependencies = [
  "reth-chainspec",
  "reth-consensus",
  "reth-consensus-common",
+ "reth-engine-primitives",
  "reth-errors",
  "reth-ethereum-consensus",
  "reth-evm",

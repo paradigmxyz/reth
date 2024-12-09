@@ -1317,7 +1317,7 @@ where
     }
 
     /// Instantiates `ValidationApi`
-    pub fn validation_api(&self) -> ValidationApi<Provider, BlockExecutor>
+    pub fn validation_api(&self) -> ValidationApi<Provider, BlockExecutor, EthEngineTypes, EthereumEngineValidator>
     where
         Consensus: reth_consensus::FullConsensus<BlockExecutor::Primitives> + Clone + 'static,
     {
@@ -1327,6 +1327,7 @@ where
             self.block_executor.clone(),
             self.config.flashbots.clone(),
             Box::new(self.executor.clone()),
+            EthereumEngineValidator::new(self.chain_spec.clone()),
         )
     }
 }
@@ -1500,6 +1501,7 @@ where
                             self.block_executor.clone(),
                             self.config.flashbots.clone(),
                             Box::new(self.executor.clone()),
+                            EthereumEngineValidator::new(self.chain_spec.clone()),
                         )
                         .into_rpc()
                         .into(),

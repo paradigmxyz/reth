@@ -14,10 +14,10 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::{Consensus, FullConsensus, PostExecutionInput};
+use reth_engine_primitives::{EngineTypes, EngineValidator};
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
 use reth_ethereum_consensus::GAS_LIMIT_BOUND_DIVISOR;
 use reth_evm::execute::{BlockExecutorProvider, Executor};
-use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{GotExpected, NodePrimitives, SealedBlockWithSenders, SealedHeader};
 use reth_primitives_traits::{Block as _, BlockBody};
 use reth_provider::{
@@ -34,15 +34,16 @@ use tokio::sync::{oneshot, RwLock};
 
 /// The type that implements the `validation` rpc namespace trait
 #[derive(Clone, Debug, derive_more::Deref)]
-pub struct ValidationApi<Provider: ChainSpecProvider, E: BlockExecutorProvider> {
+pub struct ValidationApi<Provider, E: BlockExecutorProvider, EngineT, EV> {
     #[deref]
-    inner: Arc<ValidationApiInner<Provider, E>>,
+    inner: Arc<ValidationApiInner<Provider, E, EngineT, EV>>,
 }
 
-impl<Provider, E> ValidationApi<Provider, E>
+impl<Provider, E, EngineT, EV> ValidationApi<Provider, E, EngineT, EV>
 where
-    Provider: ChainSpecProvider,
     E: BlockExecutorProvider,
+    EngineT: EngineTypes,
+    EV: EngineValidator<EngineT>,
 {
     /// Create a new instance of the [`ValidationApi`]
     pub fn new(
@@ -51,10 +52,10 @@ where
         executor_provider: E,
         config: ValidationApiConfig,
         task_spawner: Box<dyn TaskSpawner>,
+        payload_validator: EV,
     ) -> Self {
         let ValidationApiConfig { disallow } = config;
 
-        let payload_validator = ExecutionPayloadValidator::new(provider.chain_spec());
         let inner = Arc::new(ValidationApiInner {
             provider,
             consensus,
@@ -63,6 +64,7 @@ where
             disallow,
             cached_state: Default::default(),
             task_spawner,
+            engine_types: Default::default(),
         });
 
         Self { inner }
@@ -89,18 +91,15 @@ where
     }
 }
 
-impl<Provider, E> ValidationApi<Provider, E>
+impl<Provider, E, EngineT, EV> ValidationApi<Provider, E, EngineT, EV>
 where
-    Provider: BlockReaderIdExt<Header = reth_primitives::Header>
+    Provider: BlockReaderIdExt<Header = <E::Primitives as NodePrimitives>::BlockHeader>
         + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + StateProviderFactory
         + 'static,
-    E: BlockExecutorProvider<
-        Primitives: NodePrimitives<
-            BlockHeader = Provider::Header,
-            BlockBody = reth_primitives::BlockBody,
-        >,
-    >,
+    E: BlockExecutorProvider,
+    EngineT: EngineTypes,
+    EV: EngineValidator<EngineT, Block = <E::Primitives as NodePrimitives>::Block>,
 {
     /// Validates the given block and a [`BidTrace`] against it.
     pub async fn validate_message_against_block(
@@ -116,8 +115,8 @@ where
         self.consensus.validate_block_pre_execution(&block)?;
 
         if !self.disallow.is_empty() {
-            if self.disallow.contains(&block.beneficiary) {
-                return Err(ValidationApiError::Blacklist(block.beneficiary))
+            if self.disallow.contains(&block.beneficiary()) {
+                return Err(ValidationApiError::Blacklist(block.beneficiary()))
             }
             if self.disallow.contains(&message.proposer_fee_recipient) {
                 return Err(ValidationApiError::Blacklist(message.proposer_fee_recipient))
@@ -137,9 +136,9 @@ where
         let latest_header =
             self.provider.latest_header()?.ok_or_else(|| ValidationApiError::MissingLatestBlock)?;
 
-        if latest_header.hash() != block.header.parent_hash {
+        if latest_header.hash() != block.header.parent_hash() {
             return Err(ConsensusError::ParentHashMismatch(
-                GotExpected { got: block.header.parent_hash, expected: latest_header.hash() }
+                GotExpected { got: block.header.parent_hash(), expected: latest_header.hash() }
                     .into(),
             )
             .into())
@@ -200,7 +199,7 @@ where
     /// Ensures that fields of [`BidTrace`] match the fields of the [`SealedHeader`].
     fn validate_message_against_header(
         &self,
-        header: &SealedHeader,
+        header: &SealedHeader<<E::Primitives as NodePrimitives>::BlockHeader>,
         message: &BidTrace,
     ) -> Result<(), ValidationApiError> {
         if header.hash() != message.block_hash {
@@ -208,20 +207,20 @@ where
                 got: message.block_hash,
                 expected: header.hash(),
             }))
-        } else if header.parent_hash != message.parent_hash {
+        } else if header.parent_hash() != message.parent_hash {
             Err(ValidationApiError::ParentHashMismatch(GotExpected {
                 got: message.parent_hash,
-                expected: header.parent_hash,
+                expected: header.parent_hash(),
             }))
-        } else if header.gas_limit != message.gas_limit {
+        } else if header.gas_limit() != message.gas_limit {
             Err(ValidationApiError::GasLimitMismatch(GotExpected {
                 got: message.gas_limit,
-                expected: header.gas_limit,
+                expected: header.gas_limit(),
             }))
-        } else if header.gas_used != message.gas_used {
+        } else if header.gas_used() != message.gas_used {
             return Err(ValidationApiError::GasUsedMismatch(GotExpected {
                 got: message.gas_used,
-                expected: header.gas_used,
+                expected: header.gas_used(),
             }))
         } else {
             Ok(())
@@ -235,20 +234,20 @@ where
     fn validate_gas_limit(
         &self,
         registered_gas_limit: u64,
-        parent_header: &SealedHeader,
-        header: &SealedHeader,
+        parent_header: &SealedHeader<<E::Primitives as NodePrimitives>::BlockHeader>,
+        header: &SealedHeader<<E::Primitives as NodePrimitives>::BlockHeader>,
     ) -> Result<(), ValidationApiError> {
         let max_gas_limit =
-            parent_header.gas_limit + parent_header.gas_limit / GAS_LIMIT_BOUND_DIVISOR - 1;
+            parent_header.gas_limit() + parent_header.gas_limit() / GAS_LIMIT_BOUND_DIVISOR - 1;
         let min_gas_limit =
-            parent_header.gas_limit - parent_header.gas_limit / GAS_LIMIT_BOUND_DIVISOR + 1;
+            parent_header.gas_limit() - parent_header.gas_limit() / GAS_LIMIT_BOUND_DIVISOR + 1;
 
         let best_gas_limit =
             std::cmp::max(min_gas_limit, std::cmp::min(max_gas_limit, registered_gas_limit));
 
-        if best_gas_limit != header.gas_limit {
+        if best_gas_limit != header.gas_limit() {
             return Err(ValidationApiError::GasLimitMismatch(GotExpected {
-                got: header.gas_limit,
+                got: header.gas_limit(),
                 expected: best_gas_limit,
             }))
         }
@@ -407,19 +406,17 @@ where
 }
 
 #[async_trait]
-impl<Provider, E> BlockSubmissionValidationApiServer for ValidationApi<Provider, E>
+impl<Provider, E, EngineT, EV> BlockSubmissionValidationApiServer
+    for ValidationApi<Provider, E, EngineT, EV>
 where
-    Provider: BlockReaderIdExt<Header = reth_primitives::Header>
+    Provider: BlockReaderIdExt<Header = <E::Primitives as NodePrimitives>::BlockHeader>
         + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + StateProviderFactory
         + Clone
         + 'static,
-    E: BlockExecutorProvider<
-        Primitives: NodePrimitives<
-            BlockHeader = Provider::Header,
-            BlockBody = reth_primitives::BlockBody,
-        >,
-    >,
+    E: BlockExecutorProvider,
+    EngineT: EngineTypes,
+    EV: EngineValidator<EngineT, Block = <E::Primitives as NodePrimitives>::Block>,
 {
     async fn validate_builder_submission_v1(
         &self,
@@ -473,13 +470,13 @@ where
 }
 
 #[derive(Debug)]
-pub struct ValidationApiInner<Provider: ChainSpecProvider, E: BlockExecutorProvider> {
+pub struct ValidationApiInner<Provider, E: BlockExecutorProvider, EngineT, EV> {
     /// The provider that can interact with the chain.
     provider: Provider,
     /// Consensus implementation.
     consensus: Arc<dyn FullConsensus<E::Primitives>>,
     /// Execution payload validator.
-    payload_validator: ExecutionPayloadValidator<Provider::ChainSpec>,
+    payload_validator: EV,
     /// Block executor factory.
     executor_provider: E,
     /// Set of disallowed addresses
@@ -491,6 +488,8 @@ pub struct ValidationApiInner<Provider: ChainSpecProvider, E: BlockExecutorProvi
     cached_state: RwLock<(B256, CachedReads)>,
     /// Task spawner for blocking operations
     task_spawner: Box<dyn TaskSpawner>,
+    /// Engine types
+    engine_types: std::marker::PhantomData<EngineT>,
 }
 
 /// Configuration for validation API.
