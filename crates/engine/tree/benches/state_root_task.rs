@@ -4,7 +4,8 @@
 #![allow(missing_docs)]
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use reth_engine_tree::tree::root::{StateRootConfig, StateRootMessage, StateRootTask};
+use reth_engine_tree::tree::root::{StateRootConfig, StateRootTask};
+use reth_evm::system_calls::OnStateHook;
 use reth_primitives::{Account as RethAccount, StorageEntry};
 use reth_provider::{
     providers::ConsistentDbView,
@@ -132,7 +133,6 @@ fn bench_state_root(c: &mut Criterion) {
                         let state_updates = create_bench_state_updates(params);
                         setup_provider(&factory, &state_updates).expect("failed to setup provider");
 
-                        let (tx, rx) = std::sync::mpsc::channel();
                         let trie_input = Arc::new(TrieInput::from_state(Default::default()));
 
                         let config = StateRootConfig {
@@ -140,18 +140,17 @@ fn bench_state_root(c: &mut Criterion) {
                             input: trie_input,
                         };
 
-                        (tx, rx, config, state_updates)
+                        (config, state_updates)
                     },
-                    |(tx, rx, config, state_updates)| {
-                        let task = StateRootTask::new(config, tx.clone(), rx);
+                    |(config, state_updates)| {
+                        let task = StateRootTask::new(config);
+                        let mut hook = task.state_hook();
                         let handle = task.spawn();
 
                         for update in state_updates {
-                            tx.send(StateRootMessage::StateUpdate(update))
-                                .expect("failed to send state");
+                            hook.on_state(&update)
                         }
-                        tx.send(StateRootMessage::FinishedStateUpdates)
-                            .expect("failed to send finish signal");
+                        drop(hook);
 
                         black_box(handle.wait_for_result().expect("task failed"));
                     },

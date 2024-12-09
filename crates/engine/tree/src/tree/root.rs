@@ -250,7 +250,7 @@ where
         + 'static,
 {
     /// Creates a new state root task with the unified message channel
-    pub(crate) fn new(config: StateRootConfig<Factory>) -> Self {
+    pub fn new(config: StateRootConfig<Factory>) -> Self {
         let (tx, rx) = channel();
 
         Self {
@@ -279,7 +279,7 @@ where
     }
 
     /// Returns a state hook to be used to send state updates to this task.
-    pub(crate) fn state_hook(&self) -> impl OnStateHook {
+    pub fn state_hook(&self) -> impl OnStateHook {
         let state_hook = StateHookSender::new(self.tx.clone());
 
         move |state: &EvmState| {
