@@ -1,14 +1,14 @@
 //! Collection of methods for block validation.
 
-use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, BlockHeader};
+use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, BlockHeader, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{
     calc_next_block_base_fee,
     eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
 };
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_consensus::ConsensusError;
-use reth_primitives::{BlockBody, EthereumHardfork, GotExpected, SealedBlock, SealedHeader};
-use reth_primitives_traits::BlockBody as _;
+use reth_primitives::SealedBlock;
+use reth_primitives_traits::{BlockBody, GotExpected, SealedHeader};
 use revm_primitives::calc_excess_blob_gas;
 
 /// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
@@ -43,11 +43,11 @@ pub fn validate_header_base_fee<H: BlockHeader, ChainSpec: EthereumHardforks>(
 ///
 /// [EIP-4895]: https://eips.ethereum.org/EIPS/eip-4895
 #[inline]
-pub fn validate_shanghai_withdrawals<H: BlockHeader, B: reth_primitives_traits::BlockBody>(
+pub fn validate_shanghai_withdrawals<H: BlockHeader, B: BlockBody>(
     block: &SealedBlock<H, B>,
 ) -> Result<(), ConsensusError> {
     let withdrawals = block.body.withdrawals().ok_or(ConsensusError::BodyWithdrawalsMissing)?;
-    let withdrawals_root = reth_primitives::proofs::calculate_withdrawals_root(withdrawals);
+    let withdrawals_root = alloy_consensus::proofs::calculate_withdrawals_root(withdrawals);
     let header_withdrawals_root =
         block.withdrawals_root().ok_or(ConsensusError::WithdrawalsRootMissing)?;
     if withdrawals_root != *header_withdrawals_root {
@@ -64,7 +64,7 @@ pub fn validate_shanghai_withdrawals<H: BlockHeader, B: reth_primitives_traits::
 ///
 /// [EIP-4844]: https://eips.ethereum.org/EIPS/eip-4844
 #[inline]
-pub fn validate_cancun_gas<H: BlockHeader, B: reth_primitives_traits::BlockBody>(
+pub fn validate_cancun_gas<H: BlockHeader, B: BlockBody>(
     block: &SealedBlock<H, B>,
 ) -> Result<(), ConsensusError> {
     // Check that the blob gas used in the header matches the sum of the blob gas used by each
@@ -87,28 +87,31 @@ pub fn validate_cancun_gas<H: BlockHeader, B: reth_primitives_traits::BlockBody>
 ///   - ommer hash
 ///   - transaction root
 ///   - withdrawals root
-pub fn validate_body_against_header(
-    body: &BlockBody,
-    header: &SealedHeader,
-) -> Result<(), ConsensusError> {
+pub fn validate_body_against_header<B, H>(body: &B, header: &H) -> Result<(), ConsensusError>
+where
+    B: BlockBody,
+    H: BlockHeader,
+{
     let ommers_hash = body.calculate_ommers_root();
-    if header.ommers_hash != ommers_hash {
+    if Some(header.ommers_hash()) != ommers_hash {
         return Err(ConsensusError::BodyOmmersHashDiff(
-            GotExpected { got: ommers_hash, expected: header.ommers_hash }.into(),
+            GotExpected {
+                got: ommers_hash.unwrap_or(EMPTY_OMMER_ROOT_HASH),
+                expected: header.ommers_hash(),
+            }
+            .into(),
         ))
     }
 
     let tx_root = body.calculate_tx_root();
-    if header.transactions_root != tx_root {
+    if header.transactions_root() != tx_root {
         return Err(ConsensusError::BodyTransactionRootDiff(
-            GotExpected { got: tx_root, expected: header.transactions_root }.into(),
+            GotExpected { got: tx_root, expected: header.transactions_root() }.into(),
         ))
     }
 
-    match (header.withdrawals_root, &body.withdrawals) {
-        (Some(header_withdrawals_root), Some(withdrawals)) => {
-            let withdrawals = withdrawals.as_slice();
-            let withdrawals_root = reth_primitives::proofs::calculate_withdrawals_root(withdrawals);
+    match (header.withdrawals_root(), body.calculate_withdrawals_root()) {
+        (Some(header_withdrawals_root), Some(withdrawals_root)) => {
             if withdrawals_root != header_withdrawals_root {
                 return Err(ConsensusError::BodyWithdrawalsRootDiff(
                     GotExpected { got: withdrawals_root, expected: header_withdrawals_root }.into(),
@@ -130,15 +133,24 @@ pub fn validate_body_against_header(
 /// - Compares the transactions root in the block header to the block body
 /// - Pre-execution transaction validation
 /// - (Optionally) Compares the receipts root in the block header to the block body
-pub fn validate_block_pre_execution<ChainSpec: EthereumHardforks>(
-    block: &SealedBlock,
+pub fn validate_block_pre_execution<H, B, ChainSpec>(
+    block: &SealedBlock<H, B>,
     chain_spec: &ChainSpec,
-) -> Result<(), ConsensusError> {
+) -> Result<(), ConsensusError>
+where
+    H: BlockHeader,
+    B: BlockBody,
+    ChainSpec: EthereumHardforks,
+{
     // Check ommers hash
     let ommers_hash = block.body.calculate_ommers_root();
-    if block.header.ommers_hash != ommers_hash {
+    if Some(block.header.ommers_hash()) != ommers_hash {
         return Err(ConsensusError::BodyOmmersHashDiff(
-            GotExpected { got: ommers_hash, expected: block.header.ommers_hash }.into(),
+            GotExpected {
+                got: ommers_hash.unwrap_or(EMPTY_OMMER_ROOT_HASH),
+                expected: block.header.ommers_hash(),
+            }
+            .into(),
         ))
     }
 
@@ -148,11 +160,11 @@ pub fn validate_block_pre_execution<ChainSpec: EthereumHardforks>(
     }
 
     // EIP-4895: Beacon chain push withdrawals as operations
-    if chain_spec.is_shanghai_active_at_timestamp(block.timestamp) {
+    if chain_spec.is_shanghai_active_at_timestamp(block.timestamp()) {
         validate_shanghai_withdrawals(block)?;
     }
 
-    if chain_spec.is_cancun_active_at_timestamp(block.timestamp) {
+    if chain_spec.is_cancun_active_at_timestamp(block.timestamp()) {
         validate_cancun_gas(block)?;
     }
 
@@ -222,12 +234,12 @@ pub fn validate_header_extradata<H: BlockHeader>(header: &H) -> Result<(), Conse
 #[inline]
 pub fn validate_against_parent_hash_number<H: BlockHeader>(
     header: &H,
-    parent: &SealedHeader,
+    parent: &SealedHeader<H>,
 ) -> Result<(), ConsensusError> {
     // Parent number is consistent.
-    if parent.number + 1 != header.number() {
+    if parent.number() + 1 != header.number() {
         return Err(ConsensusError::ParentBlockNumberMismatch {
-            parent_block_number: parent.number,
+            parent_block_number: parent.number(),
             block_number: header.number(),
         })
     }
