@@ -13,8 +13,8 @@ workspace = true
 [dependencies]
 # reth
 reth-chainspec.workspace = true
-reth-primitives.workspace = true
 reth-consensus.workspace = true
+reth-primitives.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
@@ -24,8 +24,8 @@ alloy-consensus.workspace = true
 alloy-eips.workspace = true
 
 [dev-dependencies]
+alloy-consensus.workspace = true
 reth-storage-api.workspace = true
 rand.workspace = true
 mockall = "0.13"
 
-alloy-consensus.workspace = true
