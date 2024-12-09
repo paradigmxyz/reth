@@ -8939,6 +8939,7 @@ dependencies = [
  "reth-chainspec",
  "reth-consensus",
  "reth-consensus-common",
+ "reth-engine-primitives",
  "reth-errors",
  "reth-ethereum-consensus",
  "reth-evm",
@@ -8946,7 +8947,6 @@ dependencies = [
  "reth-network-api",
  "reth-network-peers",
  "reth-network-types",
- "reth-payload-validator",
  "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",
@@ -9020,7 +9020,6 @@ dependencies = [
 name = "reth-rpc-builder"
 version = "1.1.2"
 dependencies = [
- "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-engine",

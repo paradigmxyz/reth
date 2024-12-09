@@ -18,6 +18,7 @@ reth-primitives = { workspace = true, features = ["secp256k1"] }
 reth-primitives-traits.workspace = true
 reth-rpc-api.workspace = true
 reth-rpc-eth-api.workspace = true
+reth-engine-primitives.workspace = true
 reth-errors.workspace = true
 reth-ethereum-consensus.workspace = true
 reth-provider.workspace = true
@@ -35,7 +36,6 @@ reth-rpc-eth-types.workspace = true
 reth-rpc-server-types.workspace = true
 reth-network-types.workspace = true
 reth-consensus.workspace = true
-reth-payload-validator.workspace = true
 
 # ethereum
 alloy-consensus.workspace = true
