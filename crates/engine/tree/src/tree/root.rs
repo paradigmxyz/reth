@@ -3,15 +3,12 @@
 use alloy_primitives::map::{HashMap, HashSet};
 use reth_evm::system_calls::OnStateHook;
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
-    StateCommitmentProvider,
+    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateCommitmentProvider,
 };
 use reth_trie::{
-    proof::Proof, updates::TrieUpdates, HashedPostState, HashedStorage, MultiProof, Nibbles,
-    TrieInput,
+    updates::TrieUpdates, HashedPostState, HashedStorage, MultiProof, Nibbles, TrieInput,
 };
-use reth_trie_db::DatabaseProof;
-use reth_trie_parallel::root::ParallelStateRootError;
+use reth_trie_parallel::{proof::ParallelProof, root::ParallelStateRootError};
 use reth_trie_sparse::{
     errors::{SparseStateTrieResult, SparseTrieError},
     SparseStateTrie,
@@ -309,21 +306,8 @@ where
 
         // Dispatch proof gathering for this state update
         rayon::spawn(move || {
-            let provider = match view.provider_ro() {
-                Ok(provider) => provider,
-                Err(error) => {
-                    error!(target: "engine::root", ?error, "Could not get provider");
-                    return;
-                }
-            };
+            let result = ParallelProof::new(view, input.clone()).multiproof(proof_targets);
 
-            // TODO: replace with parallel proof
-            let result = Proof::overlay_multiproof(
-                provider.tx_ref(),
-                // TODO(alexey): this clone can be expensive, we should avoid it
-                input.as_ref().clone(),
-                proof_targets,
-            );
             match result {
                 Ok(proof) => {
                     let _ = state_root_message_sender.send(StateRootMessage::ProofCalculated {
