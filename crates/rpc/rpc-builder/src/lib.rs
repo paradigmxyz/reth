@@ -16,10 +16,10 @@
 //! Configure only an http server with a selection of [`RethRpcModule`]s
 //!
 //! ```
-//! use alloy_consensus::Header;
+//! use reth_engine_primitives::PayloadValidator;
 //! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_primitives::TransactionSigned;
+//! use reth_primitives::{Header, TransactionSigned};
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
 //! use reth_rpc::EthApi;
 //! use reth_rpc_builder::{
@@ -27,8 +27,18 @@
 //! };
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::{PoolTransaction, TransactionPool};
+//! use std::sync::Arc;
 //!
-//! pub async fn launch<Provider, Pool, Network, Events, EvmConfig, BlockExecutor, Consensus>(
+//! pub async fn launch<
+//!     Provider,
+//!     Pool,
+//!     Network,
+//!     Events,
+//!     EvmConfig,
+//!     BlockExecutor,
+//!     Consensus,
+//!     Validator,
+//! >(
 //!     provider: Provider,
 //!     pool: Pool,
 //!     network: Network,
@@ -36,6 +46,7 @@
 //!     evm_config: EvmConfig,
 //!     block_executor: BlockExecutor,
 //!     consensus: Consensus,
+//!     validator: Validator,
 //! ) where
 //!     Provider: FullRpcProvider<
 //!             Transaction = TransactionSigned,
@@ -53,6 +64,7 @@
 //!     EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
 //!     BlockExecutor: BlockExecutorProvider<Primitives = Events::Primitives>,
 //!     Consensus: reth_consensus::FullConsensus + Clone + 'static,
+//!     Validator: PayloadValidator<Block = reth_primitives::Block>,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -71,7 +83,7 @@
 //!         block_executor,
 //!         consensus,
 //!     )
-//!     .build(transports, Box::new(EthApi::with_spawner));
+//!     .build(transports, Box::new(EthApi::with_spawner), Arc::new(validator));
 //!     let handle = RpcServerConfig::default()
 //!         .with_http(ServerBuilder::default())
 //!         .start(&transport_modules)
@@ -83,11 +95,10 @@
 //!
 //!
 //! ```
-//! use alloy_consensus::Header;
-//! use reth_engine_primitives::EngineTypes;
+//! use reth_engine_primitives::{EngineTypes, PayloadValidator};
 //! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_primitives::TransactionSigned;
+//! use reth_primitives::{Header, TransactionSigned};
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
 //! use reth_rpc::EthApi;
 //! use reth_rpc_api::EngineApiServer;
@@ -98,6 +109,7 @@
 //! use reth_rpc_layer::JwtSecret;
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::{PoolTransaction, TransactionPool};
+//! use std::sync::Arc;
 //! use tokio::try_join;
 //!
 //! pub async fn launch<
@@ -110,6 +122,7 @@
 //!     EvmConfig,
 //!     BlockExecutor,
 //!     Consensus,
+//!     Validator,
 //! >(
 //!     provider: Provider,
 //!     pool: Pool,
@@ -119,6 +132,7 @@
 //!     evm_config: EvmConfig,
 //!     block_executor: BlockExecutor,
 //!     consensus: Consensus,
+//!     validator: Validator,
 //! ) where
 //!     Provider: FullRpcProvider<
 //!             Transaction = TransactionSigned,
@@ -138,6 +152,7 @@
 //!     EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
 //!     BlockExecutor: BlockExecutorProvider<Primitives = Events::Primitives>,
 //!     Consensus: reth_consensus::FullConsensus + Clone + 'static,
+//!     Validator: PayloadValidator<Block = reth_primitives::Block>,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -158,8 +173,12 @@
 //!     );
 //!
 //!     // configure the server modules
-//!     let (modules, auth_module, _registry) =
-//!         builder.build_with_auth_server(transports, engine_api, Box::new(EthApi::with_spawner));
+//!     let (modules, auth_module, _registry) = builder.build_with_auth_server(
+//!         transports,
+//!         engine_api,
+//!         Box::new(EthApi::with_spawner),
+//!         Arc::new(validator),
+//!     );
 //!
 //!     // start the servers
 //!     let auth_config = AuthServerConfig::builder(JwtSecret::random()).build();
@@ -731,21 +750,23 @@ where
     /// # Example
     ///
     /// ```no_run
-    /// use alloy_consensus::Header;
     /// use reth_consensus::noop::NoopConsensus;
+    /// use reth_engine_primitives::PayloadValidator;
     /// use reth_evm::ConfigureEvm;
     /// use reth_evm_ethereum::execute::EthExecutorProvider;
     /// use reth_network_api::noop::NoopNetwork;
-    /// use reth_primitives::TransactionSigned;
+    /// use reth_primitives::{Header, TransactionSigned};
     /// use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
     /// use reth_rpc::EthApi;
     /// use reth_rpc_builder::RpcModuleBuilder;
     /// use reth_tasks::TokioTaskExecutor;
     /// use reth_transaction_pool::noop::NoopTransactionPool;
     ///
-    /// fn init<Evm: ConfigureEvm<Header = Header, Transaction = TransactionSigned> + 'static>(
-    ///     evm: Evm,
-    /// ) {
+    /// fn init<Evm, Validator>(evm: Evm, validator: Validator)
+    /// where
+    ///     Evm: ConfigureEvm<Header = Header, Transaction = TransactionSigned> + 'static,
+    ///     Validator: PayloadValidator<Block = reth_primitives::Block> + 'static,
+    /// {
     ///     let mut registry = RpcModuleBuilder::default()
     ///         .with_provider(NoopProvider::default())
     ///         .with_pool(NoopTransactionPool::default())
@@ -755,7 +776,7 @@ where
     ///         .with_evm_config(evm)
     ///         .with_block_executor(EthExecutorProvider::mainnet())
     ///         .with_consensus(NoopConsensus::default())
-    ///         .into_registry(Default::default(), Box::new(EthApi::with_spawner));
+    ///         .into_registry(Default::default(), Box::new(EthApi::with_spawner), Arc::new(validator));
     ///
     ///     let eth_api = registry.eth_api();
     /// }
