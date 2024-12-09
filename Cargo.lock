@@ -8743,6 +8743,7 @@ dependencies = [
  "reth-static-file-types",
  "reth-testing-utils",
  "reth-trie-common",
+ "reth-zstd-compressors",
  "revm-primitives",
  "rstest",
  "secp256k1",
@@ -8750,7 +8751,6 @@ dependencies = [
  "serde_json",
  "serde_with",
  "test-fuzz",
- "zstd",
 ]
 
 [[package]]
@@ -9644,6 +9644,13 @@ dependencies = [
  "reth-trie-common",
  "smallvec",
  "thiserror 2.0.5",
+]
+
+[[package]]
+name = "reth-zstd-compressors"
+version = "1.1.2"
+dependencies = [
+ "zstd",
 ]
 
 [[package]]
