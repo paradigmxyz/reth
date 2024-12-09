@@ -18,7 +18,7 @@ const INVALID_HEADER_HIT_EVICTION_THRESHOLD: u8 = 128;
 #[derive(Debug)]
 pub struct InvalidHeaderCache {
     /// This maps a header hash to a reference to its invalid ancestor.
-    headers: LruMap<B256, HeaderEntry<BlockWithParent>>,
+    headers: LruMap<B256, HeaderEntry>,
     /// Metrics for the cache.
     metrics: InvalidHeaderCacheMetrics,
 }
@@ -80,11 +80,11 @@ impl InvalidHeaderCache {
     }
 }
 
-struct HeaderEntry<H> {
+struct HeaderEntry {
     /// Keeps track how many times this header has been hit.
     hit_count: u8,
     /// The actual header entry
-    header: Arc<H>,
+    header: Arc<BlockWithParent>,
 }
 
 /// Metrics for the invalid headers cache.
