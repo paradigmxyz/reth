@@ -118,6 +118,7 @@ members = [
     "crates/storage/nippy-jar/",
     "crates/storage/provider/",
     "crates/storage/storage-api/",
+    "crates/storage/zstd-compressors/",
     "crates/tasks/",
     "crates/tokio-util/",
     "crates/tracing/",
@@ -422,6 +423,7 @@ reth-trie-common = { path = "crates/trie/common" }
 reth-trie-db = { path = "crates/trie/db" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
 reth-trie-sparse = { path = "crates/trie/sparse" }
+reth-zstd-compressors = { path = "crates/storage/zstd-compressors", default-features = false }
 
 # revm
 revm = { version = "18.0.0", features = ["std"], default-features = false }
