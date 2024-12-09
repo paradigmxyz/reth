@@ -46,7 +46,7 @@ impl ToRpcError for EthSimulateError {
 }
 
 /// Goes over the list of [`TransactionRequest`]s and populates missing fields trying to resolve
-/// them into [`TransactionSigned`].
+/// them into primitive transactions.
 ///
 /// If validation is enabled, the function will return error if any of the transactions can't be
 /// built right away.
