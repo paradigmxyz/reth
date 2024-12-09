@@ -1,10 +1,11 @@
 use crate::blinded::{BlindedProvider, DefaultBlindedProvider};
 use alloy_primitives::{
     hex, keccak256,
-    map::{HashMap, HashSet},
+    map::{Entry, HashMap, HashSet},
     Bytes, B256,
 };
 use alloy_rlp::Decodable;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reth_execution_errors::{SparseTrieError, SparseTrieResult};
 use reth_tracing::tracing::trace;
 use reth_trie_common::{
@@ -13,7 +14,7 @@ use reth_trie_common::{
     TrieNode, CHILD_INDEX_RANGE, EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
-use std::{borrow::Cow, fmt};
+use std::{borrow::Cow, fmt, sync::mpsc};
 
 /// Inner representation of the sparse trie.
 /// Sparse trie is blind by default until nodes are revealed.
@@ -115,16 +116,11 @@ impl<P> SparseTrie<P> {
     pub fn root(&mut self) -> Option<B256> {
         Some(self.as_revealed_mut()?.root())
     }
-
-    /// Calculates the hashes of the nodes below the provided level.
-    pub fn calculate_below_level(&mut self, level: usize) {
-        self.as_revealed_mut().unwrap().update_rlp_node_level(level);
-    }
 }
 
 impl<P> SparseTrie<P>
 where
-    P: BlindedProvider,
+    P: BlindedProvider + Send + Sync,
     SparseTrieError: From<P::Error>,
 {
     /// Update the leaf node.
@@ -148,6 +144,11 @@ where
         let revealed = self.as_revealed_mut().ok_or(SparseTrieError::Blind)?;
         revealed.remove_leaf(path, fetch_node)?;
         Ok(())
+    }
+
+    /// Calculates the hashes of the nodes below the provided level.
+    pub fn calculate_below_level(&mut self, level: usize) {
+        self.as_revealed_mut().unwrap().update_rlp_node_level(level);
     }
 }
 
@@ -406,16 +407,20 @@ impl<P> RevealedSparseTrie<P> {
     fn reveal_node_or_hash(&mut self, path: Nibbles, child: &[u8]) -> SparseTrieResult<()> {
         if child.len() == B256::len_bytes() + 1 {
             let hash = B256::from_slice(&child[1..]);
-            match self.nodes.get(&path) {
-                // Hash node with a different hash can't be handled.
-                Some(node @ SparseNode::Hash(previous_hash)) if previous_hash != &hash => {
-                    return Err(SparseTrieError::Reveal { path, node: Box::new(node.clone()) })
+            match self.nodes.entry(path) {
+                Entry::Occupied(entry) => match entry.get() {
+                    // Hash node with a different hash can't be handled.
+                    SparseNode::Hash(previous_hash) if previous_hash != &hash => {
+                        return Err(SparseTrieError::Reveal {
+                            path: entry.key().clone(),
+                            node: Box::new(SparseNode::Hash(hash)),
+                        })
+                    }
+                    _ => {}
+                },
+                Entry::Vacant(entry) => {
+                    entry.insert(SparseNode::Hash(hash));
                 }
-                None => {
-                    self.nodes.insert(path, SparseNode::Hash(hash));
-                }
-                // All other node types mean that it has already been revealed.
-                Some(_) => {}
             }
             return Ok(())
         }
@@ -536,19 +541,6 @@ impl<P> RevealedSparseTrie<P> {
         }
     }
 
-    /// Update hashes of the nodes that are located at a level deeper than or equal to the provided
-    /// depth. Root node has a level of 0.
-    pub fn update_rlp_node_level(&mut self, depth: usize) {
-        let mut prefix_set = self.prefix_set.clone().freeze();
-        let mut buffers = RlpNodeBuffers::default();
-
-        let targets = self.get_changed_nodes_at_depth(&mut prefix_set, depth);
-        for target in targets {
-            buffers.path_stack.push((target, Some(true)));
-            self.rlp_node(&mut prefix_set, &mut buffers);
-        }
-    }
-
     /// Returns a list of paths to the nodes that were changed according to the prefix set and are
     /// located at the provided depth when counting from the root node. If there's a leaf at a
     /// depth less than the provided depth, it will be included in the result.
@@ -603,10 +595,25 @@ impl<P> RevealedSparseTrie<P> {
 
     fn rlp_node_allocate(&mut self, path: Nibbles, prefix_set: &mut PrefixSet) -> RlpNode {
         let mut buffers = RlpNodeBuffers::new_with_path(path);
-        self.rlp_node(prefix_set, &mut buffers)
+        let (root, node_updates, trie_updates) =
+            self.rlp_node(prefix_set, &mut buffers, &mut Vec::new());
+        self.apply_updates(node_updates, trie_updates);
+        root
     }
 
-    fn rlp_node(&mut self, prefix_set: &mut PrefixSet, buffers: &mut RlpNodeBuffers) -> RlpNode {
+    fn rlp_node(
+        &self,
+        prefix_set: &mut PrefixSet,
+        buffers: &mut RlpNodeBuffers,
+        rlp_buf: &mut Vec<u8>,
+    ) -> (
+        RlpNode,
+        HashMap<Nibbles, (Option<B256>, Option<bool>)>,
+        HashMap<Nibbles, BranchNodeCompact>,
+    ) {
+        let mut node_updates = HashMap::default();
+        let mut trie_updates = HashMap::default();
+
         'main: while let Some((path, mut is_in_prefix_set)) = buffers.path_stack.pop() {
             // Check if the path is in the prefix set.
             // First, check the cached value. If it's `None`, then check the prefix set, and update
@@ -614,21 +621,21 @@ impl<P> RevealedSparseTrie<P> {
             let mut prefix_set_contains =
                 |path: &Nibbles| *is_in_prefix_set.get_or_insert_with(|| prefix_set.contains(path));
 
-            let (rlp_node, calculated, node_type) = match self.nodes.get_mut(&path).unwrap() {
+            let (rlp_node, calculated, node_type) = match self.nodes.get(&path).unwrap() {
                 SparseNode::Empty => {
                     (RlpNode::word_rlp(&EMPTY_ROOT_HASH), false, SparseNodeType::Empty)
                 }
                 SparseNode::Hash(hash) => (RlpNode::word_rlp(hash), false, SparseNodeType::Hash),
                 SparseNode::Leaf { key, hash } => {
-                    self.rlp_buf.clear();
+                    rlp_buf.clear();
                     let mut path = path.clone();
                     path.extend_from_slice_unchecked(key);
                     if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path)) {
                         (RlpNode::word_rlp(&hash), false, SparseNodeType::Leaf)
                     } else {
                         let value = self.values.get(&path).unwrap();
-                        let rlp_node = LeafNodeRef { key, value }.rlp(&mut self.rlp_buf);
-                        *hash = rlp_node.as_hash();
+                        let rlp_node = LeafNodeRef { key, value }.rlp(rlp_buf);
+                        node_updates.insert(path.clone(), (rlp_node.as_hash(), None));
                         (rlp_node, true, SparseNodeType::Leaf)
                     }
                 }
@@ -643,9 +650,9 @@ impl<P> RevealedSparseTrie<P> {
                         )
                     } else if buffers.rlp_node_stack.last().is_some_and(|e| e.0 == child_path) {
                         let (_, child, _, node_type) = buffers.rlp_node_stack.pop().unwrap();
-                        self.rlp_buf.clear();
-                        let rlp_node = ExtensionNodeRef::new(key, &child).rlp(&mut self.rlp_buf);
-                        *hash = rlp_node.as_hash();
+                        rlp_buf.clear();
+                        let rlp_node = ExtensionNodeRef::new(key, &child).rlp(rlp_buf);
+                        node_updates.insert(path.clone(), (rlp_node.as_hash(), None));
 
                         (
                             rlp_node,
@@ -767,17 +774,14 @@ impl<P> RevealedSparseTrie<P> {
                         }
                     }
 
-                    self.rlp_buf.clear();
+                    rlp_buf.clear();
                     let branch_node_ref =
                         BranchNodeRef::new(&buffers.branch_value_stack_buf, *state_mask);
-                    let rlp_node = branch_node_ref.rlp(&mut self.rlp_buf);
-                    *hash = rlp_node.as_hash();
+                    let rlp_node = branch_node_ref.rlp(rlp_buf);
 
                     // Save a branch node update only if it's not a root node, and we need to
                     // persist updates.
-                    let store_in_db_trie_value = if let Some(updates) =
-                        self.updates.as_mut().filter(|_| retain_updates && !path.is_empty())
-                    {
+                    let store_in_db_trie_value = if retain_updates && !path.is_empty() {
                         let mut tree_mask_values = tree_mask_values.into_iter().rev();
                         let mut hash_mask_values = hash_mask_values.into_iter().rev();
                         let mut tree_mask = TrieMask::default();
@@ -805,14 +809,16 @@ impl<P> RevealedSparseTrie<P> {
                                 hashes,
                                 hash.filter(|_| path.len() == 0),
                             );
-                            updates.updated_nodes.insert(path.clone(), branch_node);
+                            trie_updates.insert(path.clone(), branch_node);
                         }
 
                         store_in_db_trie
                     } else {
                         false
                     };
-                    *store_in_db_trie = Some(store_in_db_trie_value);
+
+                    node_updates
+                        .insert(path.clone(), (rlp_node.as_hash(), Some(store_in_db_trie_value)));
 
                     (
                         rlp_node,
@@ -825,13 +831,40 @@ impl<P> RevealedSparseTrie<P> {
         }
 
         debug_assert_eq!(buffers.rlp_node_stack.len(), 1);
-        buffers.rlp_node_stack.pop().unwrap().1
+        (buffers.rlp_node_stack.pop().unwrap().1, node_updates, trie_updates)
+    }
+
+    fn apply_updates(
+        &mut self,
+        node_updates: HashMap<Nibbles, (Option<B256>, Option<bool>)>,
+        trie_updates: HashMap<Nibbles, BranchNodeCompact>,
+    ) {
+        for (path, (new_hash, new_store_in_db_trie)) in node_updates {
+            if let Some(node) = self.nodes.get_mut(&path) {
+                match node {
+                    SparseNode::Leaf { hash, .. } | SparseNode::Extension { hash, .. } => {
+                        *hash = new_hash
+                    }
+                    SparseNode::Branch { hash, store_in_db_trie, .. } => {
+                        *hash = new_hash;
+                        *store_in_db_trie = new_store_in_db_trie
+                    }
+                    SparseNode::Empty | SparseNode::Hash(_) => unreachable!(),
+                }
+            }
+        }
+
+        if let Some(updates) = self.updates.as_mut() {
+            for (path, branch_node) in trie_updates {
+                updates.updated_nodes.insert(path, branch_node);
+            }
+        }
     }
 }
 
 impl<P> RevealedSparseTrie<P>
 where
-    P: BlindedProvider,
+    P: BlindedProvider + Send + Sync,
     SparseTrieError: From<P::Error>,
 {
     /// Update the leaf node with provided value.
@@ -1144,6 +1177,37 @@ where
         }
 
         Ok(())
+    }
+
+    /// Update hashes of the nodes that are located at a level deeper than or equal to the provided
+    /// depth. Root node has a level of 0.
+    pub fn update_rlp_node_level(&mut self, depth: usize) {
+        let mut prefix_set = self.prefix_set.clone().freeze();
+
+        let targets = self.get_changed_nodes_at_depth(&mut prefix_set, depth);
+        let (tx, rx) = mpsc::channel();
+        targets
+            .into_par_iter()
+            .map_init(
+                || (prefix_set.clone(), RlpNodeBuffers::default(), Vec::new()),
+                |(prefix_set, buffers, rlp_node), target| {
+                    buffers.path_stack.push((target, Some(true)));
+                    let (_, node_updates, trie_updates) =
+                        self.rlp_node(prefix_set, buffers, rlp_node);
+                    (node_updates, trie_updates)
+                },
+            )
+            .for_each_init(
+                || tx.clone(),
+                |tx, (node_updates, trie_updates)| {
+                    tx.send((node_updates, trie_updates)).unwrap();
+                },
+            );
+        drop(tx);
+
+        for (node_updates, trie_updates) in rx {
+            self.apply_updates(node_updates, trie_updates);
+        }
     }
 }
 

@@ -81,6 +81,11 @@ pub trait BlockBody:
             .sum()
     }
 
+    /// Returns an iterator over all blob versioned hashes in the block body.
+    fn blob_versioned_hashes_iter(&self) -> impl Iterator<Item = &B256> + '_ {
+        self.transactions().iter().filter_map(|tx| tx.blob_versioned_hashes()).flatten()
+    }
+
     /// Returns an iterator over the encoded 2718 transactions.
     ///
     /// This is also known as `raw transactions`.

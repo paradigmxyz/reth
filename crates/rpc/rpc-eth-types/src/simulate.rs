@@ -1,21 +1,18 @@
 //! Utilities for serving `eth_simulateV1`
 
-use alloy_consensus::{Transaction as _, TxType};
-use alloy_primitives::PrimitiveSignature as Signature;
+use alloy_consensus::{BlockHeader, Transaction as _, TxType};
 use alloy_rpc_types_eth::{
     simulate::{SimCallResult, SimulateError, SimulatedBlock},
     transaction::TransactionRequest,
-    Block, BlockTransactionsKind,
+    Block, BlockTransactionsKind, Header,
 };
 use jsonrpsee_types::ErrorObject;
-use reth_primitives::{
-    proofs::{calculate_receipt_root, calculate_transaction_root},
-    BlockBody, BlockWithSenders, Receipt, TransactionSigned,
-};
+use reth_primitives::BlockWithSenders;
+use reth_primitives_traits::{block::BlockTx, BlockBody as _, SignedTransaction};
 use reth_rpc_server_types::result::rpc_err;
 use reth_rpc_types_compat::{block::from_block, TransactionCompat};
 use revm::Database;
-use revm_primitives::{Address, BlockEnv, Bytes, ExecutionResult, TxKind, B256, U256};
+use revm_primitives::{Address, Bytes, ExecutionResult, TxKind, U256};
 
 use crate::{
     error::{api::FromEthApiError, ToRpcError},
@@ -49,17 +46,18 @@ impl ToRpcError for EthSimulateError {
 }
 
 /// Goes over the list of [`TransactionRequest`]s and populates missing fields trying to resolve
-/// them into [`TransactionSigned`].
+/// them into primitive transactions.
 ///
 /// If validation is enabled, the function will return error if any of the transactions can't be
 /// built right away.
-pub fn resolve_transactions<DB: Database>(
+pub fn resolve_transactions<DB: Database, Tx, T: TransactionCompat<Tx>>(
     txs: &mut [TransactionRequest],
     validation: bool,
     block_gas_limit: u64,
     chain_id: u64,
     db: &mut DB,
-) -> Result<Vec<TransactionSigned>, EthApiError>
+    tx_resp_builder: &T,
+) -> Result<Vec<Tx>, EthApiError>
 where
     EthApiError: From<DB::Error>,
 {
@@ -125,49 +123,44 @@ where
             }
         }
 
-        let Ok(tx) = tx.clone().build_typed_tx() else {
-            return Err(EthApiError::TransactionConversionError)
-        };
-
-        // Create an empty signature for the transaction.
-        let signature = Signature::new(Default::default(), Default::default(), false);
-        let tx = TransactionSigned::new_unhashed(tx.into(), signature);
-        transactions.push(tx);
+        transactions.push(
+            tx_resp_builder
+                .build_simulate_v1_transaction(tx.clone())
+                .map_err(|e| EthApiError::other(e.into()))?,
+        );
     }
 
     Ok(transactions)
 }
 
 /// Handles outputs of the calls execution and builds a [`SimulatedBlock`].
-pub fn build_block<T: TransactionCompat<Error: FromEthApiError>>(
-    results: Vec<(Address, ExecutionResult)>,
-    transactions: Vec<TransactionSigned>,
-    block_env: &BlockEnv,
-    parent_hash: B256,
+#[expect(clippy::type_complexity)]
+pub fn build_simulated_block<T, B>(
+    senders: Vec<Address>,
+    results: Vec<ExecutionResult>,
     total_difficulty: U256,
     full_transactions: bool,
     tx_resp_builder: &T,
-) -> Result<SimulatedBlock<Block<T::Transaction>>, T::Error> {
+    block: B,
+) -> Result<SimulatedBlock<Block<T::Transaction, Header<B::Header>>>, T::Error>
+where
+    T: TransactionCompat<BlockTx<B>, Error: FromEthApiError>,
+    B: reth_primitives_traits::Block,
+{
     let mut calls: Vec<SimCallResult> = Vec::with_capacity(results.len());
-    let mut senders = Vec::with_capacity(results.len());
-    let mut receipts = Vec::with_capacity(results.len());
 
     let mut log_index = 0;
-    for (transaction_index, ((sender, result), tx)) in
-        results.into_iter().zip(transactions.iter()).enumerate()
-    {
-        senders.push(sender);
-
+    for (index, (result, tx)) in results.iter().zip(block.body().transactions()).enumerate() {
         let call = match result {
             ExecutionResult::Halt { reason, gas_used } => {
-                let error = RpcInvalidTransactionError::halt(reason, tx.gas_limit());
+                let error = RpcInvalidTransactionError::halt(*reason, tx.gas_limit());
                 SimCallResult {
                     return_data: Bytes::new(),
                     error: Some(SimulateError {
                         code: error.error_code(),
                         message: error.to_string(),
                     }),
-                    gas_used,
+                    gas_used: *gas_used,
                     logs: Vec::new(),
                     status: false,
                 }
@@ -175,31 +168,31 @@ pub fn build_block<T: TransactionCompat<Error: FromEthApiError>>(
             ExecutionResult::Revert { output, gas_used } => {
                 let error = RevertError::new(output.clone());
                 SimCallResult {
-                    return_data: output,
+                    return_data: output.clone(),
                     error: Some(SimulateError {
                         code: error.error_code(),
                         message: error.to_string(),
                     }),
-                    gas_used,
+                    gas_used: *gas_used,
                     status: false,
                     logs: Vec::new(),
                 }
             }
             ExecutionResult::Success { output, gas_used, logs, .. } => SimCallResult {
-                return_data: output.into_data(),
+                return_data: output.clone().into_data(),
                 error: None,
-                gas_used,
+                gas_used: *gas_used,
                 logs: logs
-                    .into_iter()
+                    .iter()
                     .map(|log| {
                         log_index += 1;
                         alloy_rpc_types_eth::Log {
-                            inner: log,
+                            inner: log.clone(),
                             log_index: Some(log_index - 1),
-                            transaction_index: Some(transaction_index as u64),
-                            transaction_hash: Some(tx.hash()),
-                            block_number: Some(block_env.number.to()),
-                            block_timestamp: Some(block_env.timestamp.to()),
+                            transaction_index: Some(index as u64),
+                            transaction_hash: Some(*tx.tx_hash()),
+                            block_number: Some(block.header().number()),
+                            block_timestamp: Some(block.header().timestamp()),
                             ..Default::default()
                         }
                     })
@@ -208,70 +201,10 @@ pub fn build_block<T: TransactionCompat<Error: FromEthApiError>>(
             },
         };
 
-        receipts.push(
-            #[allow(clippy::needless_update)]
-            Receipt {
-                tx_type: tx.tx_type(),
-                success: call.status,
-                cumulative_gas_used: call.gas_used + calls.iter().map(|c| c.gas_used).sum::<u64>(),
-                logs: call.logs.iter().map(|log| &log.inner).cloned().collect(),
-                ..Default::default()
-            }
-            .with_bloom(),
-        );
-
         calls.push(call);
     }
 
-    // TODO: uncomment once performance cost is acceptable
-    //
-    // let mut hashed_state = HashedPostState::default();
-    // for (address, account) in &db.accounts {
-    //     let hashed_address = keccak256(address);
-    //     hashed_state.accounts.insert(hashed_address, Some(account.info.clone().into()));
-
-    //     let storage = hashed_state
-    //         .storages
-    //         .entry(hashed_address)
-    //         .or_insert_with(|| HashedStorage::new(account.account_state.is_storage_cleared()));
-
-    //     for (slot, value) in &account.storage {
-    //         let slot = B256::from(*slot);
-    //         let hashed_slot = keccak256(slot);
-    //         storage.storage.insert(hashed_slot, *value);
-    //     }
-    // }
-
-    // let state_root = db.db.state_root(hashed_state).map_err(T::Error::from_eth_err)?;
-    let state_root = B256::ZERO;
-
-    let header = alloy_consensus::Header {
-        beneficiary: block_env.coinbase,
-        difficulty: block_env.difficulty,
-        number: block_env.number.to(),
-        timestamp: block_env.timestamp.to(),
-        base_fee_per_gas: Some(block_env.basefee.to()),
-        gas_limit: block_env.gas_limit.to(),
-        gas_used: calls.iter().map(|c| c.gas_used).sum(),
-        blob_gas_used: Some(0),
-        parent_hash,
-        receipts_root: calculate_receipt_root(&receipts),
-        transactions_root: calculate_transaction_root(&transactions),
-        state_root,
-        logs_bloom: alloy_primitives::logs_bloom(
-            receipts.iter().flat_map(|r| r.receipt.logs.iter()),
-        ),
-        mix_hash: block_env.prevrandao.unwrap_or_default(),
-        ..Default::default()
-    };
-
-    let block = BlockWithSenders {
-        block: reth_primitives::Block {
-            header,
-            body: BlockBody { transactions, ..Default::default() },
-        },
-        senders,
-    };
+    let block = BlockWithSenders { block, senders };
 
     let txs_kind =
         if full_transactions { BlockTransactionsKind::Full } else { BlockTransactionsKind::Hashes };
