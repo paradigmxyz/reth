@@ -1,7 +1,7 @@
 //! Loads and formats OP transaction RPC response.
 
 use alloy_consensus::{Signed, Transaction as _};
-use alloy_primitives::{Bytes, Sealable, Sealed, B256};
+use alloy_primitives::{Bytes, PrimitiveSignature as Signature, Sealable, Sealed, B256};
 use alloy_rpc_types_eth::TransactionInfo;
 use op_alloy_consensus::OpTxEnvelope;
 use op_alloy_rpc_types::Transaction;
@@ -14,7 +14,7 @@ use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
     FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt, TransactionCompat,
 };
-use reth_rpc_eth_types::utils::recover_raw_transaction;
+use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
 use crate::{eth::OpNodeCore, OpEthApi, OpEthApiError, SequencerClient};
@@ -149,6 +149,19 @@ where
             deposit_nonce,
             deposit_receipt_version,
         })
+    }
+
+    fn build_simulate_v1_transaction(
+        &self,
+        request: alloy_rpc_types_eth::TransactionRequest,
+    ) -> Result<TransactionSigned, Self::Error> {
+        let Ok(tx) = request.build_typed_tx() else {
+            return Err(OpEthApiError::Eth(EthApiError::TransactionConversionError))
+        };
+
+        // Create an empty signature for the transaction.
+        let signature = Signature::new(Default::default(), Default::default(), false);
+        Ok(TransactionSigned::new_unhashed(tx.into(), signature))
     }
 
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
