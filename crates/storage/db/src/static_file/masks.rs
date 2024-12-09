@@ -1,7 +1,7 @@
 use crate::{
     add_static_file_mask,
     static_file::mask::{ColumnSelectorOne, ColumnSelectorTwo},
-    HeaderTerminalDifficulties,
+    BlockBodyIndices, BlockOmmers, BlockWithdrawals, HeaderTerminalDifficulties,
 };
 use alloy_primitives::BlockHash;
 use reth_db_api::table::Table;
@@ -41,4 +41,18 @@ add_static_file_mask! {
 add_static_file_mask! {
     #[doc = "Mask for selecting a single transaction from Transactions static file segment"]
     TransactionMask<T>, T, 0b1
+}
+
+// BLOCK_META MASKS
+add_static_file_mask! {
+    #[doc = "Mask for a `StoredBlockBodyIndices` from BlockMeta static file segment"]
+    BodyIndiceMask, <BlockBodyIndices as Table>::Value, 0b001
+}
+add_static_file_mask! {
+    #[doc = "Mask for a `StoredBlockWithdrawals` from BlockMeta static file segment"]
+    OmmerMask, <BlockOmmers as Table>::Value, 0b010
+}
+add_static_file_mask! {
+    #[doc = "Mask for a `StoredBlockWithdrawals` from BlockMeta static file segment"]
+    WithdrawalMask, <BlockWithdrawals as Table>::Value, 0b100
 }
