@@ -32,8 +32,7 @@ impl<T: Hash + Eq + fmt::Debug> LruCache<T> {
     /// If the set did not have this value present, true is returned.
     /// If the set did have this value present, false is returned.
     pub fn insert(&mut self, entry: T) -> bool {
-        let (new_entry, _evicted_val) = self.insert_and_get_evicted(entry);
-        new_entry
+        self.inner.get_or_insert(entry, || ()).is_none()
     }
 
     /// Same as [`insert`](Self::insert) but returns a tuple, where the second index is the evicted
