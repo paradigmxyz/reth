@@ -867,9 +867,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let checkpoint_block_number = provider
             .get_stage_checkpoint(match segment {
                 StaticFileSegment::Headers => StageId::Headers,
-                StaticFileSegment::Transactions => StageId::Bodies,
+                StaticFileSegment::Transactions | StaticFileSegment::BlockMeta => StageId::Bodies,
                 StaticFileSegment::Receipts => StageId::Execution,
-                StaticFileSegment::BlockMeta => StageId::Bodies,
             })?
             .unwrap_or_default()
             .block_number;

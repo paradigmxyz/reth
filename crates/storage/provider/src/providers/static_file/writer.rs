@@ -54,7 +54,7 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
             StaticFileSegment::Headers => self.headers.write(),
             StaticFileSegment::Transactions => self.transactions.write(),
             StaticFileSegment::Receipts => self.receipts.write(),
-            StaticFileSegment::BlockMeta => todo!() // TODO(joshie),
+            StaticFileSegment::BlockMeta => todo!(), // TODO(joshie),
         };
 
         if write_guard.is_none() {
@@ -231,7 +231,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 StaticFileSegment::Receipts => {
                     self.prune_receipt_data(to_delete, last_block_number.expect("should exist"))?
                 }
-                StaticFileSegment::BlockMeta => todo!() // TODO(joshie),
+                StaticFileSegment::BlockMeta => todo!(), // TODO(joshie),
             }
         }
 
