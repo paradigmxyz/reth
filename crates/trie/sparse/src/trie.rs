@@ -674,6 +674,7 @@ impl<P> RevealedSparseTrie<P> {
                         ));
                         continue
                     }
+                    let retain_updates = self.updates.is_some() && prefix_set_contains(&path);
 
                     buffers.branch_child_buf.clear();
                     // Walk children in a reverse order from `f` to `0`, so we pop the `0` first
@@ -693,6 +694,7 @@ impl<P> RevealedSparseTrie<P> {
                         target: "trie::sparse",
                         ?path,
                         ?state_mask,
+                        ?retain_updates,
                         children = ?buffers.branch_child_buf,
                         "Calculated branch node children"
                     );
@@ -708,7 +710,7 @@ impl<P> RevealedSparseTrie<P> {
                                 buffers.rlp_node_stack.pop().unwrap();
 
                             // Update the masks only if we need to retain trie updates
-                            if self.updates.is_some() {
+                            if retain_updates {
                                 // Set the trie mask
                                 let tree_mask_value = if node_type.store_in_db_trie() {
                                     // A branch or an extension node explicitly set the
@@ -774,7 +776,7 @@ impl<P> RevealedSparseTrie<P> {
                     // Save a branch node update only if it's not a root node, and we need to
                     // persist updates.
                     let store_in_db_trie_value = if let Some(updates) =
-                        self.updates.as_mut().filter(|_| !path.is_empty())
+                        self.updates.as_mut().filter(|_| retain_updates && !path.is_empty())
                     {
                         let mut tree_mask_values = tree_mask_values.into_iter().rev();
                         let mut hash_mask_values = hash_mask_values.into_iter().rev();
