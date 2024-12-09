@@ -5,11 +5,12 @@ use alloy_eips::{
     calc_next_block_base_fee,
     eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
 };
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_consensus::ConsensusError;
-use reth_primitives::{BlockBody, EthereumHardfork, GotExpected, SealedBlock, SealedHeader};
-use reth_primitives_traits::BlockBody as _;
+// use reth_primitives::{BlockBody, EthereumHardfork, GotExpected, SealedBlock, SealedHeader};
+use reth_primitives_traits::{BlockBody as _, BlockBody, GotExpected};
 use revm_primitives::calc_excess_blob_gas;
+use reth_primitives::SealedBlock;
 
 /// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
 #[inline]
@@ -47,7 +48,7 @@ pub fn validate_shanghai_withdrawals<H: BlockHeader, B: reth_primitives_traits::
     block: &SealedBlock<H, B>,
 ) -> Result<(), ConsensusError> {
     let withdrawals = block.body.withdrawals().ok_or(ConsensusError::BodyWithdrawalsMissing)?;
-    let withdrawals_root = reth_primitives::proofs::calculate_withdrawals_root(withdrawals);
+    let withdrawals_root = alloy_consensus::proofs::calculate_withdrawals_root(withdrawals);
     let header_withdrawals_root =
         block.withdrawals_root().ok_or(ConsensusError::WithdrawalsRootMissing)?;
     if withdrawals_root != *header_withdrawals_root {
@@ -87,10 +88,13 @@ pub fn validate_cancun_gas<H: BlockHeader, B: reth_primitives_traits::BlockBody>
 ///   - ommer hash
 ///   - transaction root
 ///   - withdrawals root
-pub fn validate_body_against_header(
+pub fn validate_body_against_header<B, H>(
     body: &BlockBody,
     header: &SealedHeader,
-) -> Result<(), ConsensusError> {
+) -> Result<(), ConsensusError>
+where B: BlockBody,
+      H: BlockHeader
+{
     let ommers_hash = body.calculate_ommers_root();
     if header.ommers_hash != ommers_hash {
         return Err(ConsensusError::BodyOmmersHashDiff(
@@ -108,7 +112,7 @@ pub fn validate_body_against_header(
     match (header.withdrawals_root, &body.withdrawals) {
         (Some(header_withdrawals_root), Some(withdrawals)) => {
             let withdrawals = withdrawals.as_slice();
-            let withdrawals_root = reth_primitives::proofs::calculate_withdrawals_root(withdrawals);
+            let withdrawals_root = alloy_consensus::proofs::calculate_withdrawals_root(withdrawals);
             if withdrawals_root != header_withdrawals_root {
                 return Err(ConsensusError::BodyWithdrawalsRootDiff(
                     GotExpected { got: withdrawals_root, expected: header_withdrawals_root }.into(),
