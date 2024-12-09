@@ -27,8 +27,6 @@ pub use traits::*;
 #[cfg(feature = "alloy-compat")]
 mod alloy_compat;
 mod block;
-#[cfg(feature = "reth-codec")]
-mod compression;
 pub mod proofs;
 mod receipt;
 pub use reth_static_file_types as static_file;
@@ -38,8 +36,6 @@ pub use block::{generate_valid_header, valid_header_strategy};
 pub use block::{
     Block, BlockBody, BlockWithSenders, SealedBlock, SealedBlockFor, SealedBlockWithSenders,
 };
-#[cfg(feature = "reth-codec")]
-pub use compression::*;
 pub use receipt::{gas_spent_by_transactions, Receipt, Receipts};
 pub use reth_primitives_traits::{
     logs_bloom, Account, Bytecode, GotExpected, GotExpectedBoxed, Header, HeaderError, Log,
