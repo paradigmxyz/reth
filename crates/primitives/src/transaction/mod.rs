@@ -1365,14 +1365,14 @@ impl reth_codecs::Compact for TransactionSigned {
         let tx_bits = if zstd_bit {
             let mut tmp = Vec::with_capacity(256);
             if cfg!(feature = "std") {
-                crate::compression::TRANSACTION_COMPRESSOR.with(|compressor| {
+                reth_zstd_compressors::TRANSACTION_COMPRESSOR.with(|compressor| {
                     let mut compressor = compressor.borrow_mut();
                     let tx_bits = self.transaction.to_compact(&mut tmp);
                     buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
                     tx_bits as u8
                 })
             } else {
-                let mut compressor = crate::compression::create_tx_compressor();
+                let mut compressor = reth_zstd_compressors::create_tx_compressor();
                 let tx_bits = self.transaction.to_compact(&mut tmp);
                 buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
                 tx_bits as u8
@@ -1399,7 +1399,7 @@ impl reth_codecs::Compact for TransactionSigned {
         let zstd_bit = bitflags >> 3;
         let (transaction, buf) = if zstd_bit != 0 {
             if cfg!(feature = "std") {
-                crate::compression::TRANSACTION_DECOMPRESSOR.with(|decompressor| {
+                reth_zstd_compressors::TRANSACTION_DECOMPRESSOR.with(|decompressor| {
                     let mut decompressor = decompressor.borrow_mut();
 
                     // TODO: enforce that zstd is only present at a "top" level type
@@ -1411,7 +1411,7 @@ impl reth_codecs::Compact for TransactionSigned {
                     (transaction, buf)
                 })
             } else {
-                let mut decompressor = crate::compression::create_tx_decompressor();
+                let mut decompressor = reth_zstd_compressors::create_tx_decompressor();
                 let transaction_type = (bitflags & 0b110) >> 1;
                 let (transaction, _) =
                     Transaction::from_compact(decompressor.decompress(buf), transaction_type);
