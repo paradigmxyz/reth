@@ -3,7 +3,10 @@ use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use clap::Parser;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
-use reth_db::{init_db, mdbx::DatabaseArguments, tables, DatabaseEnv};
+use reth_db::{
+    mdbx::{init_db_for, DatabaseArguments},
+    tables, DatabaseEnv,
+};
 use reth_db_api::{
     cursor::DbCursorRO, database::Database, models::ClientVersion, table::TableImporter,
     transaction::DbTx,
@@ -125,7 +128,8 @@ pub(crate) fn setup<N: NodeTypesWithDB>(
 
     info!(target: "reth::cli", ?output_db, "Creating separate db");
 
-    let output_datadir = init_db(output_db, DatabaseArguments::new(ClientVersion::default()))?;
+    let output_datadir =
+        init_db_for::<_, N::Storage>(output_db, DatabaseArguments::new(ClientVersion::default()))?;
 
     output_datadir.update(|tx| {
         tx.import_table_with_range::<tables::BlockBodyIndices, _>(

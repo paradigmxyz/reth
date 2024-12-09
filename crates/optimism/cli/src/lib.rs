@@ -147,7 +147,7 @@ where
         let runner = CliRunner::default();
         match self.command {
             Commands::Node(command) => {
-                runner.run_command_until_exit(|ctx| command.execute(ctx, launcher))
+                runner.run_command_until_exit(|ctx| command.execute::<OpNode, _, _>(ctx, launcher))
             }
             Commands::Init(command) => {
                 runner.run_blocking_until_ctrl_c(command.execute::<OpNode>())
