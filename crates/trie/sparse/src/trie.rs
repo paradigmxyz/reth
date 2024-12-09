@@ -870,6 +870,7 @@ where
                         // extension node child to later set the hash mask for a parent branch node
                         // correctly.
                         if self.updates.is_some() {
+                            // Check if the extension node child is a hash that needs to be revealed
                             if self.nodes.get(&current).unwrap().is_hash() {
                                 // if let Some(node) =
                                 // self.provider.blinded_node(child_path.clone())? {
@@ -888,16 +889,20 @@ where
                         // create state mask for new branch node
                         // NOTE: this might overwrite the current extension node
                         let branch = SparseNode::new_split_branch(current[common], path[common]);
+                        trace!(target: "trie::sparse", path = ?current.slice(..common), ?branch, "Extension node: inserting split branch");
                         self.nodes.insert(current.slice(..common), branch);
 
                         // create new leaf
                         let new_leaf = SparseNode::new_leaf(path.slice(common + 1..));
+                        trace!(target: "trie::sparse", path = ?path.slice(..=common), ?new_leaf, "Extension node: inserting leaf");
                         self.nodes.insert(path.slice(..=common), new_leaf);
 
                         // recreate extension to previous child if needed
                         let key = current.slice(common + 1..);
                         if !key.is_empty() {
-                            self.nodes.insert(current.slice(..=common), SparseNode::new_ext(key));
+                            let ext = SparseNode::new_ext(key);
+                            trace!(target: "trie::sparse", path = ?current.slice(..=common), ?ext, "Extension node: inserting extension");
+                            self.nodes.insert(current.slice(..=common), ext);
                         }
 
                         break;
