@@ -233,7 +233,7 @@ mod test {
 
     #[test]
     fn test_cache_should_remove_oldest_element_when_exceeding_limit() {
-        let mut cache = LruCache::new(2); // LruCache limit will be 2, check LruCache::new
+        let mut cache = LruCache::new(1); // LruCache limit will be 2, check LruCache::new
         let old_entry = "old_entry";
         let new_entry = "new_entry";
         cache.insert(old_entry);
