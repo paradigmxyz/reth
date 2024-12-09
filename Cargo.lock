@@ -9129,7 +9129,6 @@ dependencies = [
  "reth-chainspec",
  "reth-errors",
  "reth-evm",
- "reth-execution-types",
  "reth-network-api",
  "reth-node-api",
  "reth-primitives",

@@ -2,6 +2,8 @@
 
 use alloy_consensus::{Signed, Transaction as _, TxEip4844Variant, TxEnvelope};
 use alloy_network::{Ethereum, Network};
+use alloy_primitives::PrimitiveSignature as Signature;
+use alloy_rpc_types::TransactionRequest;
 use alloy_rpc_types_eth::{Transaction, TransactionInfo};
 use reth_primitives::{RecoveredTx, TransactionSigned};
 use reth_rpc_eth_api::EthApiTypes;
@@ -82,6 +84,19 @@ where
             from,
             effective_gas_price: Some(effective_gas_price),
         })
+    }
+
+    fn build_simulate_v1_transaction(
+        &self,
+        request: TransactionRequest,
+    ) -> Result<TransactionSigned, Self::Error> {
+        let Ok(tx) = request.build_typed_tx() else {
+            return Err(EthApiError::TransactionConversionError)
+        };
+
+        // Create an empty signature for the transaction.
+        let signature = Signature::new(Default::default(), Default::default(), false);
+        Ok(TransactionSigned::new_unhashed(tx.into(), signature))
     }
 
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
