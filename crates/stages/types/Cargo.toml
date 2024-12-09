@@ -38,6 +38,7 @@ reth-codec = [
 	"dep:reth-codecs",
 	"dep:bytes",
 	"dep:modular-bitfield",
+	"reth-trie-common/reth-codec"
 ]
 test-utils = [
 	"dep:arbitrary",

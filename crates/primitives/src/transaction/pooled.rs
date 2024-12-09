@@ -46,34 +46,6 @@ pub enum PooledTransactionsElement {
 }
 
 impl PooledTransactionsElement {
-    /// Tries to convert a [`TransactionSigned`] into a [`PooledTransactionsElement`].
-    ///
-    /// This function used as a helper to convert from a decoded p2p broadcast message to
-    /// [`PooledTransactionsElement`]. Since [`BlobTransaction`] is disallowed to be broadcasted on
-    /// p2p, return an err if `tx` is [`Transaction::Eip4844`].
-    pub fn try_from_broadcast(tx: TransactionSigned) -> Result<Self, TransactionSigned> {
-        let hash = tx.hash();
-        match tx {
-            TransactionSigned { transaction: Transaction::Legacy(tx), signature, .. } => {
-                Ok(Self::Legacy(Signed::new_unchecked(tx, signature, hash)))
-            }
-            TransactionSigned { transaction: Transaction::Eip2930(tx), signature, .. } => {
-                Ok(Self::Eip2930(Signed::new_unchecked(tx, signature, hash)))
-            }
-            TransactionSigned { transaction: Transaction::Eip1559(tx), signature, .. } => {
-                Ok(Self::Eip1559(Signed::new_unchecked(tx, signature, hash)))
-            }
-            TransactionSigned { transaction: Transaction::Eip7702(tx), signature, .. } => {
-                Ok(Self::Eip7702(Signed::new_unchecked(tx, signature, hash)))
-            }
-            // Not supported because missing blob sidecar
-            tx @ TransactionSigned { transaction: Transaction::Eip4844(_), .. } => Err(tx),
-            #[cfg(feature = "optimism")]
-            // Not supported because deposit transactions are never pooled
-            tx @ TransactionSigned { transaction: Transaction::Deposit(_), .. } => Err(tx),
-        }
-    }
-
     /// Converts from an EIP-4844 [`RecoveredTx`] to a
     /// [`PooledTransactionsElementEcRecovered`] with the given sidecar.
     ///
@@ -650,7 +622,7 @@ impl TryFrom<TransactionSigned> for PooledTransactionsElement {
     type Error = TransactionConversionError;
 
     fn try_from(tx: TransactionSigned) -> Result<Self, Self::Error> {
-        Self::try_from_broadcast(tx).map_err(|_| TransactionConversionError::UnsupportedForP2P)
+        tx.try_into_pooled().map_err(|_| TransactionConversionError::UnsupportedForP2P)
     }
 }
 
@@ -679,7 +651,7 @@ impl<'a> arbitrary::Arbitrary<'a> for PooledTransactionsElement {
         // Attempt to create a `TransactionSigned` with arbitrary data.
         let tx_signed = TransactionSigned::arbitrary(u)?;
         // Attempt to create a `PooledTransactionsElement` with arbitrary data, handling the Result.
-        match Self::try_from_broadcast(tx_signed) {
+        match tx_signed.try_into_pooled() {
             Ok(tx) => Ok(tx),
             Err(tx) => {
                 let (tx, sig, hash) = tx.into_parts();

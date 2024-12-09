@@ -1,5 +1,4 @@
 use super::{BranchNodeCompact, StoredNibblesSubKey};
-use reth_codecs::Compact;
 
 /// Account storage trie node.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -14,7 +13,8 @@ pub struct StorageTrieEntry {
 // NOTE: Removing reth_codec and manually encode subkey
 // and compress second part of the value. If we have compression
 // over whole value (Even SubKey) that would mess up fetching of values with seek_by_key_subkey
-impl Compact for StorageTrieEntry {
+#[cfg(any(test, feature = "reth-codec"))]
+impl reth_codecs::Compact for StorageTrieEntry {
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,

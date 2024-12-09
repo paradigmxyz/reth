@@ -1,7 +1,4 @@
-use bytes::Buf;
 use derive_more::Deref;
-use reth_codecs::Compact;
-
 pub use nybbles::Nibbles;
 
 /// The representation of nibbles of the merkle trie stored in the database.
@@ -45,7 +42,8 @@ impl core::borrow::Borrow<[u8]> for StoredNibbles {
     }
 }
 
-impl Compact for StoredNibbles {
+#[cfg(any(test, feature = "reth-codec"))]
+impl reth_codecs::Compact for StoredNibbles {
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
@@ -55,6 +53,8 @@ impl Compact for StoredNibbles {
     }
 
     fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
+        use bytes::Buf;
+
         let nibbles = &buf[..len];
         buf.advance(len);
         (Self(Nibbles::from_nibbles_unchecked(nibbles)), buf)
@@ -88,7 +88,8 @@ impl From<StoredNibblesSubKey> for Nibbles {
     }
 }
 
-impl Compact for StoredNibblesSubKey {
+#[cfg(any(test, feature = "reth-codec"))]
+impl reth_codecs::Compact for StoredNibblesSubKey {
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
@@ -114,6 +115,7 @@ impl Compact for StoredNibblesSubKey {
 mod tests {
     use super::*;
     use bytes::BytesMut;
+    use reth_codecs::Compact;
 
     #[test]
     fn test_stored_nibbles_from_nibbles() {
