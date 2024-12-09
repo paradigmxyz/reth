@@ -3,7 +3,7 @@
 ## 1. Tree Structure
 
 <figure>
-<img src="arch.png" alt="zkTrie Structure" style="width:80%">
+<img src="https://raw.githubusercontent.com/scroll-tech/reth/refs/heads/scroll/crates/scroll/trie/assets/arch.png" alt="zkTrie Structure" style="width:80%">
 <figcaption align = "center"><b>Figure 1. zkTrie Structure</b></figcaption>
 </figure>
 
@@ -161,7 +161,7 @@ valueHash = h(storageValue[0:16], storageValue[16:32])
 ### 4.1 Insertion
 
 <figure>
-<img src="insertion.png" alt="zkTrie Structure" style="width:80%">
+<img src="https://raw.githubusercontent.com/scroll-tech/reth/refs/heads/scroll/crates/scroll/trie/assets/insertion.png" alt="zkTrie Structure" style="width:80%">
 <figcaption align = "center"><b>Figure 2. Insert a new leaf node to zkTrie</b></figcaption>
 </figure>
 
@@ -173,7 +173,7 @@ When we insert a new leaf node to the existing zkTrie, there could be two cases 
 ### 4.2 Deletion
 
 <figure>
-<img src="deletion.png" alt="zkTrie Structure" style="width:80%">
+<img src="https://raw.githubusercontent.com/scroll-tech/reth/refs/heads/scroll/crates/scroll/trie/assets/deletion.png" alt="zkTrie Structure" style="width:80%">
 <figcaption align = "center"><b>Figure 3. Delete a leaf node from the zkTrie</b></figcaption>
 </figure>
 

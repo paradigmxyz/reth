@@ -1,4 +1,7 @@
-#![doc = include_str!("../README.md")]
+//! Fast binary Merkle-Patricia Trie (zktrie) state root calculator and proof generator for
+//! prefix-sorted bits.
+
+#![cfg_attr(not(doctest), doc = include_str!("../assets/zktrie.md"))]
 
 #[macro_use]
 #[allow(unused_imports)]

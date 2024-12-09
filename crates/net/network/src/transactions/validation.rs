@@ -3,7 +3,7 @@
 //! announcements. Validation and filtering of announcements is network dependent.
 
 use crate::metrics::{AnnouncedTxTypesMetrics, TxTypesCounter};
-use alloy_primitives::{Signature, TxHash};
+use alloy_primitives::{PrimitiveSignature, TxHash};
 use derive_more::{Deref, DerefMut};
 use reth_eth_wire::{
     DedupPayload, Eth68TxMetadata, HandleMempoolData, PartiallyValidData, ValidAnnouncementData,
@@ -14,7 +14,7 @@ use std::{fmt, fmt::Display, mem};
 use tracing::trace;
 
 /// The size of a decoded signature in bytes.
-pub const SIGNATURE_DECODED_SIZE_BYTES: usize = mem::size_of::<Signature>();
+pub const SIGNATURE_DECODED_SIZE_BYTES: usize = mem::size_of::<PrimitiveSignature>();
 
 /// Interface for validating a `(ty, size, hash)` tuple from a
 /// [`NewPooledTransactionHashes68`](reth_eth_wire::NewPooledTransactionHashes68)..
