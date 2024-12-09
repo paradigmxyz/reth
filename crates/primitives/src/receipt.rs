@@ -24,6 +24,10 @@ pub use reth_primitives_traits::receipt::gas_spent_by_transactions;
     Clone, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable, Serialize, Deserialize,
 )]
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::CompactZstd))]
+#[cfg_attr(
+    any(test, feature = "reth-codec"),
+    reth_codecs(compressor = "crate::compression::RECEIPT_COMPRESSOR")
+)]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests)]
 #[rlp(trailing)]
 pub struct Receipt {
