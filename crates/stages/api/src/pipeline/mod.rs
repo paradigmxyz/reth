@@ -223,7 +223,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                 }
                 ControlFlow::Continue { block_number } => self.progress.update(block_number),
                 ControlFlow::Unwind { target, bad_block } => {
-                    self.unwind(target, Some(bad_block.number))?;
+                    self.unwind(target, Some(bad_block.block.number))?;
                     return Ok(ControlFlow::Unwind { target, bad_block })
                 }
             }
@@ -367,7 +367,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                     Err(err) => {
                         self.event_sender.notify(PipelineEvent::Error { stage_id });
 
-                        return Err(PipelineError::Stage(Box::new(StageError::Fatal(Box::new(err)))))
+                        return Err(PipelineError::Stage(StageError::Fatal(Box::new(err))))
                     }
                 }
             }
@@ -598,13 +598,12 @@ mod tests {
 
     use super::*;
     use crate::{test_utils::TestStage, UnwindOutput};
-    use alloy_eips::{eip1898::BlockWithParent, NumHash};
     use assert_matches::assert_matches;
     use reth_consensus::ConsensusError;
     use reth_errors::ProviderError;
     use reth_provider::test_utils::{create_test_provider_factory, MockNodeTypesWithDB};
     use reth_prune::PruneModes;
-    use reth_testing_utils::generators::{self, random_block_with_parent, random_header};
+    use reth_testing_utils::generators::{self, random_block_with_parent};
     use tokio_stream::StreamExt;
 
     #[test]
@@ -1112,6 +1111,11 @@ mod tests {
                 StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
             );
         let result = pipeline.run().await;
-        assert_matches!(result, Err(PipelineError::Stage(..)));
+        assert_matches!(
+            result,
+            Err(PipelineError::Stage(StageError::DatabaseIntegrity(
+                ProviderError::BlockBodyIndicesNotFound(5)
+            )))
+        );
     }
 }

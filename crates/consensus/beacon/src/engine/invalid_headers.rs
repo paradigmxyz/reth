@@ -1,10 +1,9 @@
-use alloy_consensus::Header;
+use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::B256;
 use reth_metrics::{
     metrics::{Counter, Gauge},
     Metrics,
 };
-use reth_primitives::SealedHeader;
 use schnellru::{ByLength, LruMap};
 use std::{fmt::Debug, sync::Arc};
 use tracing::warn;
@@ -17,20 +16,20 @@ const INVALID_HEADER_HIT_EVICTION_THRESHOLD: u8 = 128;
 
 /// Keeps track of invalid headers.
 #[derive(Debug)]
-pub struct InvalidHeaderCache<H = Header> {
+pub struct InvalidHeaderCache {
     /// This maps a header hash to a reference to its invalid ancestor.
-    headers: LruMap<B256, HeaderEntry<H>>,
+    headers: LruMap<B256, HeaderEntry<BlockWithParent>>,
     /// Metrics for the cache.
     metrics: InvalidHeaderCacheMetrics,
 }
 
-impl<H: Debug> InvalidHeaderCache<H> {
+impl InvalidHeaderCache {
     /// Invalid header cache constructor.
     pub fn new(max_length: u32) -> Self {
         Self { headers: LruMap::new(ByLength::new(max_length)), metrics: Default::default() }
     }
 
-    fn insert_entry(&mut self, hash: B256, header: Arc<H>) {
+    fn insert_entry(&mut self, hash: B256, header: Arc<BlockWithParent>) {
         self.headers.insert(hash, HeaderEntry { header, hit_count: 0 });
     }
 
@@ -38,7 +37,7 @@ impl<H: Debug> InvalidHeaderCache<H> {
     ///
     /// If this is called, the hit count for the entry is incremented.
     /// If the hit count exceeds the threshold, the entry is evicted and `None` is returned.
-    pub fn get(&mut self, hash: &B256) -> Option<Arc<H>> {
+    pub fn get(&mut self, hash: &B256) -> Option<Arc<BlockWithParent>> {
         {
             let entry = self.headers.get(hash)?;
             entry.hit_count += 1;
@@ -53,7 +52,11 @@ impl<H: Debug> InvalidHeaderCache<H> {
     }
 
     /// Inserts an invalid block into the cache, with a given invalid ancestor.
-    pub fn insert_with_invalid_ancestor(&mut self, header_hash: B256, invalid_ancestor: Arc<H>) {
+    pub fn insert_with_invalid_ancestor(
+        &mut self,
+        header_hash: B256,
+        invalid_ancestor: Arc<BlockWithParent>,
+    ) {
         if self.get(&header_hash).is_none() {
             warn!(target: "consensus::engine", hash=?header_hash, ?invalid_ancestor, "Bad block with existing invalid ancestor");
             self.insert_entry(header_hash, invalid_ancestor);
@@ -65,12 +68,10 @@ impl<H: Debug> InvalidHeaderCache<H> {
     }
 
     /// Inserts an invalid ancestor into the map.
-    pub fn insert(&mut self, invalid_ancestor: SealedHeader<H>) {
-        if self.get(&invalid_ancestor.hash()).is_none() {
-            let hash = invalid_ancestor.hash();
-            let header = invalid_ancestor.unseal();
-            warn!(target: "consensus::engine", ?hash, ?header, "Bad block with hash");
-            self.insert_entry(hash, Arc::new(header));
+    pub fn insert(&mut self, invalid_ancestor: BlockWithParent) {
+        if self.get(&invalid_ancestor.block.hash).is_none() {
+            warn!(target: "consensus::engine", ?invalid_ancestor, "Bad block with hash");
+            self.insert_entry(invalid_ancestor.block.hash, Arc::new(invalid_ancestor));
 
             // update metrics
             self.metrics.unique_inserts.increment(1);
@@ -103,13 +104,15 @@ struct InvalidHeaderCacheMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::Header;
+    use reth_primitives::SealedHeader;
 
     #[test]
     fn test_hit_eviction() {
         let mut cache = InvalidHeaderCache::new(10);
         let header = Header::default();
         let header = SealedHeader::seal(header);
-        cache.insert(header.clone());
+        cache.insert(header.block_with_parent());
         assert_eq!(cache.headers.get(&header.hash()).unwrap().hit_count, 0);
 
         for hit in 1..INVALID_HEADER_HIT_EVICTION_THRESHOLD {

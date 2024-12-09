@@ -3,7 +3,6 @@ use alloy_eips::eip1898::BlockWithParent;
 use reth_consensus::ConsensusError;
 use reth_errors::{BlockExecutionError, DatabaseError, RethError};
 use reth_network_p2p::error::DownloadError;
-use reth_primitives_traits::SealedHeader;
 use reth_provider::ProviderError;
 use reth_prune::{PruneSegment, PruneSegmentError, PrunerError};
 use reth_static_file_types::StaticFileSegment;
@@ -56,9 +55,9 @@ pub enum StageError {
     )]
     DetachedHead {
         /// The local head we attempted to attach to.
-        local_head: BlockWithParent,
+        local_head: Box<BlockWithParent>,
         /// The header we attempted to attach.
-        header: BlockWithParent,
+        header: Box<BlockWithParent>,
         /// The error that occurred when attempting to attach the header.
         #[source]
         error: Box<ConsensusError>,

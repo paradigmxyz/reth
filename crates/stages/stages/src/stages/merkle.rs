@@ -357,7 +357,7 @@ fn validate_state_root(
             error: BlockErrorKind::Validation(ConsensusError::BodyStateRootDiff(
                 GotExpected { got, expected: expected.state_root }.into(),
             )),
-            block: Box::new(expected),
+            block: Box::new(expected.block_with_parent()),
         })
     }
 }
