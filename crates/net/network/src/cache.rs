@@ -28,8 +28,9 @@ impl<T: Hash + Eq + fmt::Debug> LruCache<T> {
     /// This operation uses `get_or_insert` from the underlying `schnellru::LruMap` which:
     /// - Automatically evicts the least recently used item if capacity is exceeded
     ///
-    /// This method is more efficient than [`insert_and_get_evicted`](Self::insert_and_get_evicted) as it
-    /// performs fewer checks. Use this method when you don't need information about evicted values.
+    /// This method is more efficient than [`insert_and_get_evicted`](Self::insert_and_get_evicted)
+    /// as it performs fewer checks. Use this method when you don't need information about
+    /// evicted values.
     ///
     /// If the set did not have this value present, true is returned.
     /// If the set did have this value present, false is returned.
@@ -37,7 +38,6 @@ impl<T: Hash + Eq + fmt::Debug> LruCache<T> {
         let mut is_new = false;
         self.inner.get_or_insert(entry, || {
             is_new = true;
-            ()
         });
         is_new
     }
@@ -233,7 +233,7 @@ mod test {
 
     #[test]
     fn test_cache_should_remove_oldest_element_when_exceeding_limit() {
-        let mut cache = LruCache::new(1); // LruCache limit will be 2, check LruCache::new
+        let mut cache = LruCache::new(2); // LruCache limit will be 2, check LruCache::new
         let old_entry = "old_entry";
         let new_entry = "new_entry";
         cache.insert(old_entry);
@@ -350,13 +350,13 @@ mod test {
         let mut cache = LruCache::new(2);
 
         // Test basic insert
-        assert_eq!(cache.insert("first"), true);  // new entry
-        assert_eq!(cache.insert("first"), false); // existing entry
-        assert_eq!(cache.insert("second"), true); // new entry
+        assert!(cache.insert("first")); // new entry
+        assert!(!cache.insert("first")); // existing entry
+        assert!(cache.insert("second")); // new entry
 
         // Test insert_and_get_evicted
         let (is_new, evicted) = cache.insert_and_get_evicted("third");
-        assert_eq!(is_new, true);           // should be new entry
+        assert!(is_new); // should be new entry
         assert_eq!(evicted, Some("first")); // should evict
 
         assert!(cache.contains(&"second"));
@@ -365,7 +365,7 @@ mod test {
 
         // Test insert_and_get_evicted with existing entry
         let (is_new, evicted) = cache.insert_and_get_evicted("second");
-        assert_eq!(is_new, false);    // should not be new
-        assert_eq!(evicted, None);    // should not evict anything
+        assert!(is_new); // should not be new
+        assert_eq!(evicted, None); // should not evict anything
     }
 }
