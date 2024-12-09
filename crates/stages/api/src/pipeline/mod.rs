@@ -256,7 +256,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
     pub fn move_to_static_files(&self) -> RethResult<()> {
         // Copies data from database to static files
         let lowest_static_file_height =
-            self.static_file_producer.lock().copy_to_static_files()?.min();
+            self.static_file_producer.lock().copy_to_static_files()?.min_block_num();
 
         // Deletes data which has been copied to static files.
         if let Some(prune_tip) = lowest_static_file_height {
