@@ -14,7 +14,7 @@ pub fn generate_from_to(
 ) -> TokenStream2 {
     let flags = format_ident!("{ident}Flags");
 
-    let to_compact = generate_to_compact(fields, ident, is_zstd);
+    let to_compact = generate_to_compact(fields, attrs, ident, is_zstd);
     let from_compact = generate_from_compact(fields, ident, is_zstd);
 
     let snake_case_ident = ident.to_string().to_case(Case::Snake);
@@ -176,7 +176,12 @@ fn generate_from_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> To
 }
 
 /// Generates code to implement the `Compact` trait method `from_compact`.
-fn generate_to_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> Vec<TokenStream2> {
+fn generate_to_compact(
+    fields: &FieldList,
+    attrs: &[Attribute],
+    ident: &Ident,
+    is_zstd: bool,
+) -> Vec<TokenStream2> {
     let mut lines = vec![quote! {
         let mut buffer = bytes::BytesMut::new();
     }];
@@ -215,7 +220,7 @@ fn generate_to_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> Vec<
     });
 
     if is_zstd {
-        let compressor = format_ident!("{}_COMPRESSOR", ident.to_string().to_uppercase());
+        let compressor = get_zstd_compressor_path(ident, attrs).unwrap();
 
         lines.push(quote! {
             if zstd {
@@ -240,7 +245,6 @@ fn generate_to_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> Vec<
 
 /// Function to extract the crate path from `reth_codecs(crate = "...")` attribute.
 pub(crate) fn parse_reth_codecs_path(attrs: &[Attribute]) -> syn::Result<syn::Path> {
-    // let default_crate_path: syn::Path = syn::parse_str("reth-codecs").unwrap();
     let mut reth_codecs_path: syn::Path = syn::parse_quote!(reth_codecs);
     for attr in attrs {
         if attr.path().is_ident("reth_codecs") {
@@ -249,10 +253,32 @@ pub(crate) fn parse_reth_codecs_path(attrs: &[Attribute]) -> syn::Result<syn::Pa
                     let value = meta.value()?;
                     let lit: LitStr = value.parse()?;
                     reth_codecs_path = syn::parse_str(&lit.value())?;
-                    Ok(())
-                } else {
-                    Err(meta.error("unsupported attribute"))
                 }
+                Ok(())
+            })?;
+        }
+    }
+
+    Ok(reth_codecs_path)
+}
+
+/// Function to extract the path for the ZSTD compressor path
+pub(crate) fn get_zstd_compressor_path(
+    ident: &Ident,
+    attrs: &[Attribute],
+) -> syn::Result<syn::Path> {
+    let mut reth_codecs_path =
+        syn::Path::from(format_ident!("{}_COMPRESSOR", ident.to_string().to_uppercase()));
+
+    for attr in attrs {
+        if attr.path().is_ident("reth_codecs") {
+            attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("compressor") {
+                    let value = meta.value()?;
+                    let lit: LitStr = value.parse()?;
+                    reth_codecs_path = syn::parse_str(&lit.value()).unwrap();
+                }
+                Ok(())
             })?;
         }
     }
