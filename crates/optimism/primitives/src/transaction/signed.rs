@@ -4,6 +4,7 @@ use crate::{OpTransaction, OpTxType};
 use alloc::vec::Vec;
 use alloy_consensus::{
     transaction::RlpEcdsaTx, SignableTransaction, Transaction, TxEip1559, TxEip2930, TxEip7702,
+    Typed2718,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
@@ -228,7 +229,7 @@ impl alloy_rlp::Encodable for OpTransactionSigned {
 
     fn length(&self) -> usize {
         let mut payload_length = self.encode_2718_len();
-        if !self.is_legacy() {
+        if !Encodable2718::is_legacy(self) {
             payload_length += Header { list: false, payload_length }.length();
         }
 
@@ -377,10 +378,6 @@ impl Transaction for OpTransactionSigned {
         self.deref().input()
     }
 
-    fn ty(&self) -> u8 {
-        self.deref().ty()
-    }
-
     fn access_list(&self) -> Option<&AccessList> {
         self.deref().access_list()
     }
@@ -403,6 +400,12 @@ impl Transaction for OpTransactionSigned {
 
     fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
         self.deref().effective_tip_per_gas(base_fee)
+    }
+}
+
+impl Typed2718 for OpTransactionSigned {
+    fn ty(&self) -> u8 {
+        self.deref().ty()
     }
 }
 
