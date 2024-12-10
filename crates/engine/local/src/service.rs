@@ -27,7 +27,7 @@ use reth_engine_tree::{
         EngineApiKind, EngineApiRequest, EngineApiRequestHandler, EngineRequestHandler, FromEngine,
         RequestHandlerEvent,
     },
-    persistence::{PersistenceHandle, PersistenceNodeTypes},
+    persistence::PersistenceHandle,
     tree::{EngineApiTreeHandler, InvalidBlockHook, TreeConfig},
 };
 use reth_evm::execute::BlockExecutorProvider;
@@ -52,14 +52,14 @@ where
     /// Processes requests.
     ///
     /// This type is responsible for processing incoming requests.
-    handler: EngineApiRequestHandler<EngineApiRequest<N::Engine>>,
+    handler: EngineApiRequestHandler<EngineApiRequest<N::Engine, N::Primitives>, N::Primitives>,
     /// Receiver for incoming requests (from the engine API endpoint) that need to be processed.
     incoming_requests: EngineMessageStream<N::Engine>,
 }
 
 impl<N> LocalEngineService<N>
 where
-    N: EngineNodeTypes + PersistenceNodeTypes,
+    N: EngineNodeTypes,
 {
     /// Constructor for [`LocalEngineService`].
     #[allow(clippy::too_many_arguments)]

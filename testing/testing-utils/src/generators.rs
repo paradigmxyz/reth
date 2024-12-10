@@ -1,7 +1,11 @@
 //! Generators for different data structures like block headers, block bodies and ranges of those.
 
 use alloy_consensus::{Header, Transaction as _, TxLegacy};
-use alloy_eips::eip4895::{Withdrawal, Withdrawals};
+use alloy_eips::{
+    eip1898::BlockWithParent,
+    eip4895::{Withdrawal, Withdrawals},
+    NumHash,
+};
 use alloy_primitives::{Address, BlockNumber, Bytes, TxKind, B256, U256};
 pub use rand::Rng;
 use rand::{
@@ -93,6 +97,15 @@ pub fn random_header_range<R: Rng>(
         ));
     }
     headers
+}
+
+/// Generate a random [`BlockWithParent`].
+pub fn random_block_with_parent<R: Rng>(
+    rng: &mut R,
+    number: u64,
+    parent: Option<B256>,
+) -> BlockWithParent {
+    BlockWithParent { parent: parent.unwrap_or_default(), block: NumHash::new(number, rng.gen()) }
 }
 
 /// Generate a random [`SealedHeader`].

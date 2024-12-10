@@ -5,6 +5,8 @@ use jsonrpsee::{
     types::Request,
     MethodResponse,
 };
+use reth_chainspec::MAINNET;
+use reth_ethereum_engine_primitives::EthereumEngineValidator;
 use reth_rpc::EthApi;
 use reth_rpc_builder::{RpcServerConfig, TransportRpcModuleConfig};
 use reth_rpc_eth_api::EthApiClient;
@@ -63,6 +65,7 @@ async fn test_rpc_middleware() {
     let modules = builder.build(
         TransportRpcModuleConfig::set_http(RpcModuleSelection::All),
         Box::new(EthApi::with_spawner),
+        Arc::new(EthereumEngineValidator::new(MAINNET.clone())),
     );
 
     let mylayer = MyMiddlewareLayer::default();

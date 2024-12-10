@@ -121,7 +121,7 @@ impl<ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug> Consensu
         body: &BlockBody,
         header: &SealedHeader,
     ) -> Result<(), ConsensusError> {
-        validate_body_against_header(body, header)
+        validate_body_against_header(body, header.header())
     }
 
     fn validate_block_pre_execution(&self, block: &SealedBlock) -> Result<(), ConsensusError> {

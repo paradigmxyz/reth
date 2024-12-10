@@ -248,7 +248,12 @@ impl<N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>> OpAddOn
 impl<N> NodeAddOns<N> for OpAddOns<N>
 where
     N: FullNodeComponents<
-        Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives, Storage = OpStorage>,
+        Types: NodeTypesWithEngine<
+            ChainSpec = OpChainSpec,
+            Primitives = OpPrimitives,
+            Storage = OpStorage,
+            Engine = OpEngineTypes,
+        >,
     >,
     OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
 {
@@ -293,7 +298,12 @@ where
 impl<N> RethRpcAddOns<N> for OpAddOns<N>
 where
     N: FullNodeComponents<
-        Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives, Storage = OpStorage>,
+        Types: NodeTypesWithEngine<
+            ChainSpec = OpChainSpec,
+            Primitives = OpPrimitives,
+            Storage = OpStorage,
+            Engine = OpEngineTypes,
+        >,
     >,
     OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
 {
@@ -306,8 +316,13 @@ where
 
 impl<N> EngineValidatorAddOn<N> for OpAddOns<N>
 where
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>,
-    OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
+    N: FullNodeComponents<
+        Types: NodeTypesWithEngine<
+            ChainSpec = OpChainSpec,
+            Primitives = OpPrimitives,
+            Engine = OpEngineTypes,
+        >,
+    >,
 {
     type Validator = OpEngineValidator;
 
@@ -684,9 +699,12 @@ pub struct OpEngineValidatorBuilder;
 
 impl<Node, Types> EngineValidatorBuilder<Node> for OpEngineValidatorBuilder
 where
-    Types: NodeTypesWithEngine<ChainSpec = OpChainSpec>,
+    Types: NodeTypesWithEngine<
+        ChainSpec = OpChainSpec,
+        Primitives = OpPrimitives,
+        Engine = OpEngineTypes,
+    >,
     Node: FullNodeComponents<Types = Types>,
-    OpEngineValidator: EngineValidator<Types::Engine>,
 {
     type Validator = OpEngineValidator;
 
