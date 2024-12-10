@@ -11,6 +11,7 @@ use reth_beacon_consensus::BeaconConsensusEngineEvent;
 use reth_chain_state::ExecutedBlock;
 use reth_engine_primitives::{BeaconEngineMessage, EngineTypes};
 use reth_primitives::{NodePrimitives, SealedBlockWithSenders};
+use reth_primitives_traits::Block;
 use std::{
     collections::HashSet,
     fmt::Display,
@@ -66,7 +67,7 @@ impl<T, S, D> EngineHandler<T, S, D> {
 
 impl<T, S, D> ChainHandler for EngineHandler<T, S, D>
 where
-    T: EngineRequestHandler,
+    T: EngineRequestHandler<Block = reth_primitives::Block>,
     S: Stream + Send + Sync + Unpin + 'static,
     <S as Stream>::Item: Into<T::Request>,
     D: BlockDownloader,
@@ -139,9 +140,11 @@ pub trait EngineRequestHandler: Send + Sync {
     type Event: Send;
     /// The request type this handler can process.
     type Request;
+    /// Type of the block sent in [`FromEngine::DownloadedBlocks`] variant.
+    type Block: Block;
 
     /// Informs the handler about an event from the [`EngineHandler`].
-    fn on_event(&mut self, event: FromEngine<Self::Request>);
+    fn on_event(&mut self, event: FromEngine<Self::Request, Self::Block>);
 
     /// Advances the handler.
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<RequestHandlerEvent<Self::Event>>;
@@ -167,31 +170,32 @@ pub trait EngineRequestHandler: Send + Sync {
 /// In case required blocks are missing, the handler will request them from the network, by emitting
 /// a download request upstream.
 #[derive(Debug)]
-pub struct EngineApiRequestHandler<Request> {
+pub struct EngineApiRequestHandler<Request, N: NodePrimitives> {
     /// channel to send messages to the tree to execute the payload.
-    to_tree: Sender<FromEngine<Request>>,
+    to_tree: Sender<FromEngine<Request, N::Block>>,
     /// channel to receive messages from the tree.
-    from_tree: UnboundedReceiver<EngineApiEvent>,
+    from_tree: UnboundedReceiver<EngineApiEvent<N>>,
 }
 
-impl<Request> EngineApiRequestHandler<Request> {
+impl<Request, N: NodePrimitives> EngineApiRequestHandler<Request, N> {
     /// Creates a new `EngineApiRequestHandler`.
     pub const fn new(
-        to_tree: Sender<FromEngine<Request>>,
-        from_tree: UnboundedReceiver<EngineApiEvent>,
+        to_tree: Sender<FromEngine<Request, N::Block>>,
+        from_tree: UnboundedReceiver<EngineApiEvent<N>>,
     ) -> Self {
         Self { to_tree, from_tree }
     }
 }
 
-impl<Request> EngineRequestHandler for EngineApiRequestHandler<Request>
+impl<Request, N: NodePrimitives> EngineRequestHandler for EngineApiRequestHandler<Request, N>
 where
     Request: Send,
 {
-    type Event = BeaconConsensusEngineEvent;
+    type Event = BeaconConsensusEngineEvent<N>;
     type Request = Request;
+    type Block = N::Block;
 
-    fn on_event(&mut self, event: FromEngine<Self::Request>) {
+    fn on_event(&mut self, event: FromEngine<Self::Request, Self::Block>) {
         // delegate to the tree
         let _ = self.to_tree.send(event);
     }
@@ -263,7 +267,7 @@ impl<T: EngineTypes, N: NodePrimitives> From<BeaconEngineMessage<T>> for EngineA
 }
 
 impl<T: EngineTypes, N: NodePrimitives> From<EngineApiRequest<T, N>>
-    for FromEngine<EngineApiRequest<T, N>>
+    for FromEngine<EngineApiRequest<T, N>, N::Block>
 {
     fn from(req: EngineApiRequest<T, N>) -> Self {
         Self::Request(req)
@@ -297,16 +301,16 @@ impl<N: NodePrimitives> From<BeaconConsensusEngineEvent<N>> for EngineApiEvent<N
 
 /// Events received from the engine.
 #[derive(Debug)]
-pub enum FromEngine<Req> {
+pub enum FromEngine<Req, B: Block> {
     /// Event from the top level orchestrator.
     Event(FromOrchestrator),
     /// Request from the engine.
     Request(Req),
     /// Downloaded blocks from the network.
-    DownloadedBlocks(Vec<SealedBlockWithSenders>),
+    DownloadedBlocks(Vec<SealedBlockWithSenders<B>>),
 }
 
-impl<Req: Display> Display for FromEngine<Req> {
+impl<Req: Display, B: Block> Display for FromEngine<Req, B> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Event(ev) => write!(f, "Event({ev:?})"),
@@ -318,7 +322,7 @@ impl<Req: Display> Display for FromEngine<Req> {
     }
 }
 
-impl<Req> From<FromOrchestrator> for FromEngine<Req> {
+impl<Req, B: Block> From<FromOrchestrator> for FromEngine<Req, B> {
     fn from(event: FromOrchestrator) -> Self {
         Self::Event(event)
     }

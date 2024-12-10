@@ -39,6 +39,7 @@ type EngineServiceType<N, Client> = ChainOrchestrator<
     EngineHandler<
         EngineApiRequestHandler<
             EngineApiRequest<<N as NodeTypesWithEngine>::Engine, <N as NodeTypes>::Primitives>,
+            <N as NodeTypes>::Primitives,
         >,
         EngineMessageStream<<N as NodeTypesWithEngine>::Engine>,
         BasicBlockDownloader<Client>,
