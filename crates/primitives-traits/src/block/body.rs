@@ -6,7 +6,7 @@ use crate::{
 };
 use alloc::{fmt, vec::Vec};
 use alloy_consensus::Transaction;
-use alloy_eips::{eip2718::Encodable2718, eip4844::DATA_GAS_PER_BLOB, eip4895::Withdrawals};
+use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
 use alloy_primitives::{Bytes, B256};
 
 /// Helper trait that unifies all behaviour required by transaction to support full node operations.
@@ -73,12 +73,7 @@ pub trait BlockBody:
 
     /// Calculates the total blob gas used by _all_ EIP-4844 transactions in the block.
     fn blob_gas_used(&self) -> u64 {
-        // TODO(mattss): simplify after <https://github.com/alloy-rs/alloy/pull/1704>
-        self.transactions()
-            .iter()
-            .filter_map(|tx| tx.blob_versioned_hashes())
-            .map(|hashes| hashes.len() as u64 * DATA_GAS_PER_BLOB)
-            .sum()
+        self.transactions().iter().filter_map(|tx| tx.blob_gas_used()).sum()
     }
 
     /// Returns an iterator over all blob versioned hashes in the block body.
