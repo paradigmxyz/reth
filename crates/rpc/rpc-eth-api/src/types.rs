@@ -7,7 +7,6 @@ use std::{
 
 use alloy_network::Network;
 use alloy_rpc_types_eth::Block;
-use reth_primitives::TransactionSigned;
 use reth_provider::{ProviderTx, ReceiptProvider, TransactionsProvider};
 use reth_rpc_types_compat::TransactionCompat;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
@@ -25,7 +24,7 @@ pub trait EthApiTypes: Send + Sync + Clone {
         + Send
         + Sync;
     /// Blockchain primitive types, specific to network, e.g. block and transaction.
-    type NetworkTypes: Network<HeaderResponse = alloy_rpc_types_eth::Header>;
+    type NetworkTypes: Network;
     /// Conversion methods for transaction RPC type.
     type TransactionCompat: Send + Sync + Clone + fmt::Debug;
 
@@ -42,6 +41,9 @@ pub type RpcBlock<T> = Block<RpcTransaction<T>, <T as Network>::HeaderResponse>;
 /// Adapter for network specific receipt type.
 pub type RpcReceipt<T> = <T as Network>::ReceiptResponse;
 
+/// Adapter for network specific header type.
+pub type RpcHeader<T> = <T as Network>::HeaderResponse;
+
 /// Adapter for network specific error type.
 pub type RpcError<T> = <T as EthApiTypes>::Error;
 
@@ -49,8 +51,7 @@ pub type RpcError<T> = <T as EthApiTypes>::Error;
 pub trait FullEthApiTypes
 where
     Self: RpcNodeCore<
-            Provider: TransactionsProvider<Transaction = TransactionSigned>
-                          + ReceiptProvider<Receipt = reth_primitives::Receipt>,
+            Provider: TransactionsProvider + ReceiptProvider,
             Pool: TransactionPool<
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
             >,
@@ -66,8 +67,7 @@ where
 
 impl<T> FullEthApiTypes for T where
     T: RpcNodeCore<
-            Provider: TransactionsProvider<Transaction = TransactionSigned>
-                          + ReceiptProvider<Receipt = reth_primitives::Receipt>,
+            Provider: TransactionsProvider + ReceiptProvider,
             Pool: TransactionPool<
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
             >,

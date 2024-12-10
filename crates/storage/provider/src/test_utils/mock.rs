@@ -717,19 +717,6 @@ impl StateProvider for MockEthProvider {
 }
 
 impl EvmEnvProvider for MockEthProvider {
-    fn fill_env_at<EvmConfig>(
-        &self,
-        _cfg: &mut CfgEnvWithHandlerCfg,
-        _block_env: &mut BlockEnv,
-        _at: BlockHashOrNumber,
-        _evm_config: EvmConfig,
-    ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = Header>,
-    {
-        Ok(())
-    }
-
     fn fill_env_with_header<EvmConfig>(
         &self,
         _cfg: &mut CfgEnvWithHandlerCfg,

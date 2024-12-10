@@ -39,17 +39,6 @@ impl BlobTransaction {
         }
     }
 
-    /// Verifies that the transaction's blob data, commitments, and proofs are all valid.
-    ///
-    /// See also [`alloy_consensus::TxEip4844::validate_blob`]
-    #[cfg(feature = "c-kzg")]
-    pub fn validate(
-        &self,
-        proof_settings: &c_kzg::KzgSettings,
-    ) -> Result<(), alloy_eips::eip4844::BlobTransactionValidationError> {
-        self.tx().validate_blob(proof_settings)
-    }
-
     /// Splits the [`BlobTransaction`] into its [`TransactionSigned`] and [`BlobTransactionSidecar`]
     /// components.
     pub fn into_parts(self) -> (TransactionSigned, BlobTransactionSidecar) {

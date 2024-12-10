@@ -23,7 +23,7 @@ use std::{
 pub struct RawCapabilityMessage {
     /// Identifier of the message.
     pub id: usize,
-    /// Actual payload
+    /// Actual __encoded__ payload
     pub payload: Bytes,
 }
 

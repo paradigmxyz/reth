@@ -192,7 +192,7 @@ where
                                 })?;
 
                             Err(StageError::Block {
-                                block: Box::new(sealed_header),
+                                block: Box::new(sealed_header.block_with_parent()),
                                 error: BlockErrorKind::Validation(
                                     ConsensusError::TransactionSignerRecoveryError,
                                 ),

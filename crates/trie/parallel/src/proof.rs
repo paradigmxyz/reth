@@ -35,6 +35,8 @@ pub struct ParallelProof<Factory> {
     view: ConsistentDbView<Factory>,
     /// Trie input.
     input: Arc<TrieInput>,
+    /// Flag indicating whether to include branch node hash masks in the proof.
+    collect_branch_node_hash_masks: bool,
     /// Parallel state root metrics.
     #[cfg(feature = "metrics")]
     metrics: ParallelStateRootMetrics,
@@ -46,9 +48,16 @@ impl<Factory> ParallelProof<Factory> {
         Self {
             view,
             input,
+            collect_branch_node_hash_masks: false,
             #[cfg(feature = "metrics")]
             metrics: ParallelStateRootMetrics::default(),
         }
+    }
+
+    /// Set the flag indicating whether to include branch node hash masks in the proof.
+    pub const fn with_branch_node_hash_masks(mut self, branch_node_hash_masks: bool) -> Self {
+        self.collect_branch_node_hash_masks = branch_node_hash_masks;
+        self
     }
 }
 
@@ -125,6 +134,7 @@ where
                         hashed_address,
                     )
                     .with_prefix_set_mut(PrefixSetMut::from(prefix_set.iter().cloned()))
+                    .with_branch_node_hash_masks(self.collect_branch_node_hash_masks)
                     .storage_multiproof(target_slots)
                     .map_err(|e| {
                         ParallelStateRootError::StorageRoot(StorageRootError::Database(
@@ -158,7 +168,9 @@ where
 
         // Create a hash builder to rebuild the root node since it is not available in the database.
         let retainer: ProofRetainer = targets.keys().map(Nibbles::unpack).collect();
-        let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
+        let mut hash_builder = HashBuilder::default()
+            .with_proof_retainer(retainer)
+            .with_updates(self.collect_branch_node_hash_masks);
 
         let mut storages = HashMap::default();
         let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
@@ -222,7 +234,19 @@ where
         #[cfg(feature = "metrics")]
         self.metrics.record_state_trie(tracker.finish());
 
-        Ok(MultiProof { account_subtree: hash_builder.take_proof_nodes(), storages })
+        let account_subtree = hash_builder.take_proof_nodes();
+        let branch_node_hash_masks = if self.collect_branch_node_hash_masks {
+            hash_builder
+                .updated_branch_nodes
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(path, node)| (path, node.hash_mask))
+                .collect()
+        } else {
+            HashMap::default()
+        };
+
+        Ok(MultiProof { account_subtree, branch_node_hash_masks, storages })
     }
 }
 

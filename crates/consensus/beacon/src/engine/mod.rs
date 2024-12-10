@@ -760,14 +760,14 @@ where
         // iterate over ancestors in the invalid cache
         // until we encounter the first valid ancestor
         let mut current_hash = parent_hash;
-        let mut current_header = self.invalid_headers.get(&current_hash);
-        while let Some(header) = current_header {
-            current_hash = header.parent_hash;
-            current_header = self.invalid_headers.get(&current_hash);
+        let mut current_block = self.invalid_headers.get(&current_hash);
+        while let Some(block) = current_block {
+            current_hash = block.parent;
+            current_block = self.invalid_headers.get(&current_hash);
 
             // If current_header is None, then the current_hash does not have an invalid
             // ancestor in the cache, check its presence in blockchain tree
-            if current_header.is_none() &&
+            if current_block.is_none() &&
                 self.blockchain.find_block_by_hash(current_hash, BlockSource::Any)?.is_some()
             {
                 return Ok(Some(current_hash))
@@ -806,13 +806,13 @@ where
         head: B256,
     ) -> ProviderResult<Option<PayloadStatus>> {
         // check if the check hash was previously marked as invalid
-        let Some(header) = self.invalid_headers.get(&check) else { return Ok(None) };
+        let Some(block) = self.invalid_headers.get(&check) else { return Ok(None) };
 
         // populate the latest valid hash field
-        let status = self.prepare_invalid_response(header.parent_hash)?;
+        let status = self.prepare_invalid_response(block.parent)?;
 
         // insert the head block into the invalid header cache
-        self.invalid_headers.insert_with_invalid_ancestor(head, header);
+        self.invalid_headers.insert_with_invalid_ancestor(head, block);
 
         Ok(Some(status))
     }
@@ -821,10 +821,10 @@ where
     /// to a forkchoice update.
     fn check_invalid_ancestor(&mut self, head: B256) -> ProviderResult<Option<PayloadStatus>> {
         // check if the head was previously marked as invalid
-        let Some(header) = self.invalid_headers.get(&head) else { return Ok(None) };
+        let Some(block) = self.invalid_headers.get(&head) else { return Ok(None) };
 
         // populate the latest valid hash field
-        Ok(Some(self.prepare_invalid_response(header.parent_hash)?))
+        Ok(Some(self.prepare_invalid_response(block.parent)?))
     }
 
     /// Record latency metrics for one call to make a block canonical
@@ -1454,7 +1454,7 @@ where
     fn on_pipeline_outcome(&mut self, ctrl: ControlFlow) -> RethResult<()> {
         // Pipeline unwound, memorize the invalid block and wait for CL for next sync target.
         if let ControlFlow::Unwind { bad_block, .. } = ctrl {
-            warn!(target: "consensus::engine", invalid_hash=?bad_block.hash(), invalid_number=?bad_block.number, "Bad block detected in unwind");
+            warn!(target: "consensus::engine", invalid_num_hash=?bad_block.block, "Bad block detected in unwind");
             // update the `invalid_headers` cache with the new invalid header
             self.invalid_headers.insert(*bad_block);
             return Ok(())
@@ -1673,7 +1673,7 @@ where
                             self.latest_valid_hash_for_invalid_payload(block.parent_hash)?
                         };
                         // keep track of the invalid header
-                        self.invalid_headers.insert(block.header);
+                        self.invalid_headers.insert(block.header.block_with_parent());
                         PayloadStatus::new(
                             PayloadStatusEnum::Invalid { validation_error: error.to_string() },
                             latest_valid_hash,
@@ -1782,7 +1782,7 @@ where
                             let (block, err) = err.split();
                             warn!(target: "consensus::engine", invalid_number=?block.number, invalid_hash=?block.hash(), %err, "Marking block as invalid");
 
-                            self.invalid_headers.insert(block.header);
+                            self.invalid_headers.insert(block.header.block_with_parent());
                         }
                     }
                 }
@@ -2035,7 +2035,7 @@ mod tests {
             .await;
         assert_matches!(
             res.await,
-            Ok(Err(BeaconConsensusEngineError::Pipeline(n))) if matches!(*n.as_ref(),PipelineError::Stage(StageError::ChannelClosed))
+            Ok(Err(BeaconConsensusEngineError::Pipeline(n))) if matches!(*n.as_ref(), PipelineError::Stage(StageError::ChannelClosed))
         );
     }
 
@@ -2141,7 +2141,7 @@ mod tests {
 
         assert_matches!(
             rx.await,
-            Ok(Err(BeaconConsensusEngineError::Pipeline(n)))  if matches!(*n.as_ref(),PipelineError::Stage(StageError::ChannelClosed))
+            Ok(Err(BeaconConsensusEngineError::Pipeline(n)))  if matches!(*n.as_ref(), PipelineError::Stage(StageError::ChannelClosed))
         );
     }
 

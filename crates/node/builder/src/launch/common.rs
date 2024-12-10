@@ -10,11 +10,11 @@ use crate::{
 use alloy_primitives::{BlockNumber, B256};
 use eyre::{Context, OptionExt};
 use rayon::ThreadPoolBuilder;
-use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::{Chain, EthChainSpec, EthereumHardforks};
 use reth_config::{config::EtlConfig, PruneConfig};
+use reth_consensus::noop::NoopConsensus;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
-use reth_db_common::init::{init_genesis, InitDatabaseError};
+use reth_db_common::init::{init_genesis, InitStorageError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_engine_local::MiningMode;
 use reth_engine_tree::tree::{InvalidBlockHook, InvalidBlockHooks, NoopInvalidBlockHook};
@@ -383,12 +383,7 @@ where
     pub async fn create_provider_factory<N>(&self) -> eyre::Result<ProviderFactory<N>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
-        N::Primitives: FullNodePrimitives<
-            Block = reth_primitives::Block,
-            BlockBody = reth_primitives::BlockBody,
-            Receipt = reth_primitives::Receipt,
-            BlockHeader = reth_primitives::Header,
-        >,
+        N::Primitives: FullNodePrimitives<BlockHeader = reth_primitives::Header>,
     {
         let factory = ProviderFactory::new(
             self.right().clone(),
@@ -420,10 +415,10 @@ where
                 .add_stages(DefaultStages::new(
                     factory.clone(),
                     tip_rx,
-                    Arc::new(EthBeaconConsensus::new(self.chain_spec())),
+                    Arc::new(NoopConsensus::default()),
                     NoopHeaderDownloader::default(),
                     NoopBodiesDownloader::default(),
-                    NoopBlockExecutorProvider::default(),
+                    NoopBlockExecutorProvider::<N::Primitives>::default(),
                     self.toml_config().stages.clone(),
                     self.prune_modes(),
                 ))
@@ -455,12 +450,7 @@ where
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<ChainSpec>, ProviderFactory<N>>>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
-        N::Primitives: FullNodePrimitives<
-            Block = reth_primitives::Block,
-            BlockBody = reth_primitives::BlockBody,
-            Receipt = reth_primitives::Receipt,
-            BlockHeader = reth_primitives::Header,
-        >,
+        N::Primitives: FullNodePrimitives<BlockHeader = reth_primitives::Header>,
     {
         let factory = self.create_provider_factory().await?;
         let ctx = LaunchContextWith {
@@ -542,13 +532,13 @@ where
     }
 
     /// Convenience function to [`Self::init_genesis`]
-    pub fn with_genesis(self) -> Result<Self, InitDatabaseError> {
+    pub fn with_genesis(self) -> Result<Self, InitStorageError> {
         init_genesis(self.provider_factory())?;
         Ok(self)
     }
 
     /// Write the genesis block and state if it has not already been written
-    pub fn init_genesis(&self) -> Result<B256, InitDatabaseError> {
+    pub fn init_genesis(&self) -> Result<B256, InitStorageError> {
         init_genesis(self.provider_factory())
     }
 
@@ -927,6 +917,7 @@ where
                         alloy_rpc_types::Transaction,
                         alloy_rpc_types::Block,
                         alloy_rpc_types::Receipt,
+                        alloy_rpc_types::Header,
                     >::chain_id(&client)
                     .await
                 })?

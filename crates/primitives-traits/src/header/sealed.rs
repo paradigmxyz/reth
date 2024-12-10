@@ -1,7 +1,7 @@
 use crate::InMemorySize;
 pub use alloy_consensus::Header;
 use alloy_consensus::Sealed;
-use alloy_eips::BlockNumHash;
+use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
 use alloy_primitives::{keccak256, BlockHash, Sealable};
 use alloy_rlp::{Decodable, Encodable};
 use bytes::BufMut;
@@ -65,9 +65,14 @@ impl<H: alloy_consensus::BlockHeader> SealedHeader<H> {
     pub fn num_hash(&self) -> BlockNumHash {
         BlockNumHash::new(self.number(), self.hash)
     }
+
+    /// Return a [`BlockWithParent`] for this header.
+    pub fn block_with_parent(&self) -> BlockWithParent {
+        BlockWithParent { parent: self.parent_hash(), block: self.num_hash() }
+    }
 }
 
-impl InMemorySize for SealedHeader {
+impl<H: InMemorySize> InMemorySize for SealedHeader<H> {
     /// Calculates a heuristic for the in-memory size of the [`SealedHeader`].
     #[inline]
     fn size(&self) -> usize {

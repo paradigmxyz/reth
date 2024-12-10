@@ -8,11 +8,11 @@ mod call;
 mod pending_block;
 
 pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
+use reth_node_api::NodePrimitives;
 use reth_optimism_primitives::OpPrimitives;
 
 use std::{fmt, sync::Arc};
 
-use alloy_consensus::Header;
 use alloy_primitives::U256;
 use op_alloy_network::Optimism;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
@@ -21,7 +21,8 @@ use reth_network_api::NetworkInfo;
 use reth_node_builder::EthApiBuilderCtx;
 use reth_provider::{
     BlockNumReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
-    EvmEnvProvider, StageCheckpointReader, StateProviderFactory,
+    EvmEnvProvider, NodePrimitivesProvider, ProviderBlock, ProviderHeader, ProviderReceipt,
+    ProviderTx, StageCheckpointReader, StateProviderFactory,
 };
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
@@ -48,6 +49,10 @@ pub type EthApiNodeBackend<N> = EthApiInner<
     <N as RpcNodeCore>::Evm,
 >;
 
+/// A helper trait with requirements for [`RpcNodeCore`] to be used in [`OpEthApi`].
+pub trait OpNodeCore: RpcNodeCore<Provider: BlockReader> {}
+impl<T> OpNodeCore for T where T: RpcNodeCore<Provider: BlockReader> {}
+
 /// OP-Reth `Eth` API implementation.
 ///
 /// This type provides the functionality for handling `eth_` related requests.
@@ -59,14 +64,14 @@ pub type EthApiNodeBackend<N> = EthApiInner<
 /// This type implements the [`FullEthApi`](reth_rpc_eth_api::helpers::FullEthApi) by implemented
 /// all the `Eth` helper traits and prerequisite traits.
 #[derive(Clone)]
-pub struct OpEthApi<N: RpcNodeCore> {
+pub struct OpEthApi<N: OpNodeCore> {
     /// Gateway to node's core components.
     inner: Arc<OpEthApiInner<N>>,
 }
 
 impl<N> OpEthApi<N>
 where
-    N: RpcNodeCore<
+    N: OpNodeCore<
         Provider: BlockReaderIdExt
                       + ChainSpecProvider
                       + CanonStateSubscriptions<Primitives = OpPrimitives>
@@ -83,7 +88,7 @@ where
 impl<N> EthApiTypes for OpEthApi<N>
 where
     Self: Send + Sync,
-    N: RpcNodeCore,
+    N: OpNodeCore,
 {
     type Error = OpEthApiError;
     type NetworkTypes = Optimism;
@@ -96,7 +101,7 @@ where
 
 impl<N> RpcNodeCore for OpEthApi<N>
 where
-    N: RpcNodeCore,
+    N: OpNodeCore,
 {
     type Provider = N::Provider;
     type Pool = N::Pool;
@@ -132,30 +137,32 @@ where
 
 impl<N> RpcNodeCoreExt for OpEthApi<N>
 where
-    N: RpcNodeCore,
+    N: OpNodeCore,
 {
     #[inline]
-    fn cache(&self) -> &EthStateCache {
+    fn cache(&self) -> &EthStateCache<ProviderBlock<N::Provider>, ProviderReceipt<N::Provider>> {
         self.inner.eth_api.cache()
     }
 }
 
 impl<N> EthApiSpec for OpEthApi<N>
 where
-    N: RpcNodeCore<
+    N: OpNodeCore<
         Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>
                       + BlockNumReader
                       + StageCheckpointReader,
         Network: NetworkInfo,
     >,
 {
+    type Transaction = ProviderTx<Self::Provider>;
+
     #[inline]
     fn starting_block(&self) -> U256 {
         self.inner.eth_api.starting_block()
     }
 
     #[inline]
-    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
+    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>>>>> {
         self.inner.eth_api.signers()
     }
 }
@@ -163,7 +170,7 @@ where
 impl<N> SpawnBlocking for OpEthApi<N>
 where
     Self: Send + Sync + Clone + 'static,
-    N: RpcNodeCore,
+    N: OpNodeCore,
 {
     #[inline]
     fn io_task_spawner(&self) -> impl TaskSpawner {
@@ -184,7 +191,7 @@ where
 impl<N> LoadFee for OpEthApi<N>
 where
     Self: LoadBlock<Provider = N::Provider>,
-    N: RpcNodeCore<
+    N: OpNodeCore<
         Provider: BlockReaderIdExt
                       + EvmEnvProvider
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
@@ -203,7 +210,7 @@ where
 }
 
 impl<N> LoadState for OpEthApi<N> where
-    N: RpcNodeCore<
+    N: OpNodeCore<
         Provider: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks>,
         Pool: TransactionPool,
     >
@@ -213,7 +220,7 @@ impl<N> LoadState for OpEthApi<N> where
 impl<N> EthState for OpEthApi<N>
 where
     Self: LoadState + SpawnBlocking,
-    N: RpcNodeCore,
+    N: OpNodeCore,
 {
     #[inline]
     fn max_proof_window(&self) -> u64 {
@@ -224,27 +231,33 @@ where
 impl<N> EthFees for OpEthApi<N>
 where
     Self: LoadFee,
-    N: RpcNodeCore,
+    N: OpNodeCore,
 {
 }
 
 impl<N> Trace for OpEthApi<N>
 where
-    Self: RpcNodeCore<Provider: BlockReader> + LoadState<Evm: ConfigureEvm<Header = Header>>,
-    N: RpcNodeCore,
+    Self: RpcNodeCore<Provider: BlockReader>
+        + LoadState<
+            Evm: ConfigureEvm<
+                Header = ProviderHeader<Self::Provider>,
+                Transaction = ProviderTx<Self::Provider>,
+            >,
+        >,
+    N: OpNodeCore,
 {
 }
 
 impl<N> AddDevSigners for OpEthApi<N>
 where
-    N: RpcNodeCore,
+    N: OpNodeCore,
 {
     fn with_dev_accounts(&self) {
         *self.inner.eth_api.signers().write() = DevSigner::random_signers(20)
     }
 }
 
-impl<N: RpcNodeCore> fmt::Debug for OpEthApi<N> {
+impl<N: OpNodeCore> fmt::Debug for OpEthApi<N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OpEthApi").finish_non_exhaustive()
     }
@@ -252,7 +265,7 @@ impl<N: RpcNodeCore> fmt::Debug for OpEthApi<N> {
 
 /// Container type `OpEthApi`
 #[allow(missing_debug_implementations)]
-struct OpEthApiInner<N: RpcNodeCore> {
+struct OpEthApiInner<N: OpNodeCore> {
     /// Gateway to node's core components.
     eth_api: EthApiNodeBackend<N>,
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
@@ -285,10 +298,12 @@ impl OpEthApiBuilder {
     /// Builds an instance of [`OpEthApi`]
     pub fn build<N>(self, ctx: &EthApiBuilderCtx<N>) -> OpEthApi<N>
     where
-        N: RpcNodeCore<
-            Provider: BlockReaderIdExt
-                          + ChainSpecProvider
-                          + CanonStateSubscriptions<Primitives = OpPrimitives>
+        N: OpNodeCore<
+            Provider: BlockReaderIdExt<
+                Block = <<N::Provider as NodePrimitivesProvider>::Primitives as NodePrimitives>::Block,
+                Receipt = <<N::Provider as NodePrimitivesProvider>::Primitives as NodePrimitives>::Receipt,
+            > + ChainSpecProvider
+                          + CanonStateSubscriptions
                           + Clone
                           + 'static,
         >,

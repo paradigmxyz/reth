@@ -1,6 +1,6 @@
 //! Bindings for [MDBX](https://libmdbx.dqdkfa.ru/).
 
-use crate::is_database_empty;
+use crate::{is_database_empty, TableSet, Tables};
 use eyre::Context;
 use std::path::Path;
 
@@ -28,12 +28,21 @@ pub fn create_db<P: AsRef<Path>>(path: P, args: DatabaseArguments) -> eyre::Resu
     Ok(DatabaseEnv::open(rpath, DatabaseEnvKind::RW, args)?)
 }
 
-/// Opens up an existing database or creates a new one at the specified path. Creates tables if
-/// necessary. Read/Write mode.
+/// Opens up an existing database or creates a new one at the specified path. Creates tables defined
+/// in [`Tables`] if necessary. Read/Write mode.
 pub fn init_db<P: AsRef<Path>>(path: P, args: DatabaseArguments) -> eyre::Result<DatabaseEnv> {
+    init_db_for::<P, Tables>(path, args)
+}
+
+/// Opens up an existing database or creates a new one at the specified path. Creates tables defined
+/// in the given [`TableSet`] if necessary. Read/Write mode.
+pub fn init_db_for<P: AsRef<Path>, TS: TableSet>(
+    path: P,
+    args: DatabaseArguments,
+) -> eyre::Result<DatabaseEnv> {
     let client_version = args.client_version().clone();
     let db = create_db(path, args)?;
-    db.create_tables()?;
+    db.create_tables_for::<TS>()?;
     db.record_client_version(client_version)?;
     Ok(db)
 }

@@ -48,7 +48,7 @@ pub fn derive(input: TokenStream, is_zstd: bool) -> TokenStream {
     let has_lifetime = has_lifetime(&generics);
 
     let fields = get_fields(&data);
-    output.extend(generate_flag_struct(&ident, has_lifetime, &fields, is_zstd));
+    output.extend(generate_flag_struct(&ident, &attrs, has_lifetime, &fields, is_zstd));
     output.extend(generate_from_to(&ident, &attrs, has_lifetime, &fields, is_zstd));
     output.into()
 }
@@ -235,7 +235,7 @@ mod tests {
         let mut output = quote! {};
         let DeriveInput { ident, data, attrs, .. } = parse2(f_struct).unwrap();
         let fields = get_fields(&data);
-        output.extend(generate_flag_struct(&ident, false, &fields, false));
+        output.extend(generate_flag_struct(&ident, &attrs, false, &fields, false));
         output.extend(generate_from_to(&ident, &attrs, false, &fields, false));
 
         // Expected output in a TokenStream format. Commas matter!
@@ -255,8 +255,9 @@ mod tests {
 
             #[allow(non_snake_case)]
             mod TestStruct_flags {
-                use bytes::Buf;
-                use modular_bitfield::prelude::*;
+                use reth_codecs::__private::Buf;
+                use reth_codecs::__private::modular_bitfield;
+                use reth_codecs::__private::modular_bitfield::prelude::*;
                 #[doc = "Fieldset that facilitates compacting the parent type. Used bytes: 2 | Unused bits: 1"]
                 #[bitfield]
                 #[derive(Clone, Copy, Debug, Default)]

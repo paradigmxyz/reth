@@ -1,3 +1,4 @@
+use alloy_consensus::{proofs::calculate_receipt_root, TxReceipt};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{Bloom, B256};
 use reth_chainspec::EthereumHardforks;
@@ -62,10 +63,10 @@ fn verify_receipts(
 ) -> Result<(), ConsensusError> {
     // Calculate receipts root.
     let receipts_with_bloom = receipts.iter().map(Receipt::with_bloom_ref).collect::<Vec<_>>();
-    let receipts_root = reth_primitives::proofs::calculate_receipt_root_ref(&receipts_with_bloom);
+    let receipts_root = calculate_receipt_root(&receipts_with_bloom);
 
     // Calculate header logs bloom.
-    let logs_bloom = receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom);
+    let logs_bloom = receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom());
 
     compare_receipts_root_and_logs_bloom(
         receipts_root,

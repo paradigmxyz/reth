@@ -6,14 +6,13 @@ use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGenera
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
 use reth_ethereum_engine_primitives::{
-    EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes, EthereumEngineValidator,
+    EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
 use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_evm_ethereum::execute::EthExecutionStrategyFactory;
 use reth_network::{NetworkHandle, PeersInfo};
 use reth_node_api::{
-    AddOnsContext, ConfigureEvm, EngineValidator, FullNodeComponents, HeaderTy, NodeTypesWithDB,
-    TxTy,
+    AddOnsContext, ConfigureEvm, FullNodeComponents, HeaderTy, NodeTypesWithDB, TxTy,
 };
 use reth_node_builder::{
     components::{
@@ -25,7 +24,7 @@ use reth_node_builder::{
     BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig, PayloadTypes,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::EthPrimitives;
+use reth_primitives::{EthPrimitives, PooledTransactionsElement};
 use reth_provider::{CanonStateSubscriptions, EthStorage};
 use reth_rpc::EthApi;
 use reth_tracing::tracing::{debug, info};
@@ -36,6 +35,8 @@ use reth_transaction_pool::{
 use reth_trie_db::MerklePatriciaTrie;
 
 use crate::{EthEngineTypes, EthEvmConfig};
+
+pub use reth_ethereum_engine_primitives::EthereumEngineValidator;
 
 /// Type configuration for a regular Ethereum node.
 #[derive(Debug, Default, Clone, Copy)]
@@ -309,8 +310,12 @@ pub struct EthereumNetworkBuilder {
 impl<Node, Pool> NetworkBuilder<Node, Pool> for EthereumNetworkBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
-    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
-        + Unpin
+    Pool: TransactionPool<
+            Transaction: PoolTransaction<
+                Consensus = TxTy<Node::Types>,
+                Pooled = PooledTransactionsElement,
+            >,
+        > + Unpin
         + 'static,
 {
     async fn build_network(
@@ -349,9 +354,12 @@ pub struct EthereumEngineValidatorBuilder;
 
 impl<Node, Types> EngineValidatorBuilder<Node> for EthereumEngineValidatorBuilder
 where
-    Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
+    Types: NodeTypesWithEngine<
+        ChainSpec = ChainSpec,
+        Engine = EthEngineTypes,
+        Primitives = EthPrimitives,
+    >,
     Node: FullNodeComponents<Types = Types>,
-    EthereumEngineValidator: EngineValidator<Types::Engine>,
 {
     type Validator = EthereumEngineValidator;
 

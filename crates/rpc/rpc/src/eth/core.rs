@@ -9,7 +9,10 @@ use alloy_network::Ethereum;
 use alloy_primitives::U256;
 use derive_more::Deref;
 use reth_primitives::NodePrimitives;
-use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider};
+use reth_provider::{
+    BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ProviderBlock,
+    ProviderReceipt,
+};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},
     node::RpcNodeCoreExt,
@@ -37,7 +40,7 @@ use crate::eth::EthTxBuilder;
 /// This way [`EthApi`] is not limited to [`jsonrpsee`] and can be used standalone or in other
 /// network handlers (for example ipc).
 #[derive(Deref)]
-pub struct EthApi<Provider, Pool, Network, EvmConfig> {
+pub struct EthApi<Provider: BlockReader, Pool, Network, EvmConfig> {
     /// All nested fields bundled together.
     #[deref]
     pub(super) inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
@@ -45,7 +48,10 @@ pub struct EthApi<Provider, Pool, Network, EvmConfig> {
     pub tx_resp_builder: EthTxBuilder,
 }
 
-impl<Provider, Pool, Network, EvmConfig> Clone for EthApi<Provider, Pool, Network, EvmConfig> {
+impl<Provider, Pool, Network, EvmConfig> Clone for EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Provider: BlockReader,
+{
     fn clone(&self) -> Self {
         Self { inner: self.inner.clone(), tx_resp_builder: EthTxBuilder }
     }
@@ -61,7 +67,7 @@ where
         provider: Provider,
         pool: Pool,
         network: Network,
-        eth_cache: EthStateCache,
+        eth_cache: EthStateCache<Provider::Block, Provider::Receipt>,
         gas_oracle: GasPriceOracle<Provider>,
         gas_cap: impl Into<GasCap>,
         max_simulate_blocks: u64,
@@ -106,8 +112,8 @@ where
         Tasks: TaskSpawner + Clone + 'static,
         Events: CanonStateSubscriptions<
             Primitives: NodePrimitives<
-                Block = reth_primitives::Block,
-                Receipt = reth_primitives::Receipt,
+                Block = ProviderBlock<Provider>,
+                Receipt = ProviderReceipt<Provider>,
             >,
         >,
     {
@@ -137,6 +143,7 @@ where
 impl<Provider, Pool, Network, EvmConfig> EthApiTypes for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Self: Send + Sync,
+    Provider: BlockReader,
 {
     type Error = EthApiError;
     type NetworkTypes = Ethereum;
@@ -149,7 +156,7 @@ where
 
 impl<Provider, Pool, Network, EvmConfig> RpcNodeCore for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Provider: Send + Sync + Clone + Unpin,
+    Provider: BlockReader + Send + Sync + Clone + Unpin,
     Pool: Send + Sync + Clone + Unpin,
     Network: Send + Sync + Clone,
     EvmConfig: Send + Sync + Clone + Unpin,
@@ -184,16 +191,21 @@ where
 impl<Provider, Pool, Network, EvmConfig> RpcNodeCoreExt
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: RpcNodeCore,
+    Provider: BlockReader + Send + Sync + Clone + Unpin,
+    Pool: Send + Sync + Clone + Unpin,
+    Network: Send + Sync + Clone,
+    EvmConfig: Send + Sync + Clone + Unpin,
 {
     #[inline]
-    fn cache(&self) -> &EthStateCache {
+    fn cache(&self) -> &EthStateCache<ProviderBlock<Provider>, ProviderReceipt<Provider>> {
         self.inner.cache()
     }
 }
 
 impl<Provider, Pool, Network, EvmConfig> std::fmt::Debug
     for EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Provider: BlockReader,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EthApi").finish_non_exhaustive()
@@ -204,6 +216,7 @@ impl<Provider, Pool, Network, EvmConfig> SpawnBlocking
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Self: Clone + Send + Sync + 'static,
+    Provider: BlockReader,
 {
     #[inline]
     fn io_task_spawner(&self) -> impl TaskSpawner {
@@ -223,7 +236,7 @@ where
 
 /// Container type `EthApi`
 #[allow(missing_debug_implementations)]
-pub struct EthApiInner<Provider, Pool, Network, EvmConfig> {
+pub struct EthApiInner<Provider: BlockReader, Pool, Network, EvmConfig> {
     /// The transaction pool.
     pool: Pool,
     /// The provider that can interact with the chain.
@@ -231,9 +244,9 @@ pub struct EthApiInner<Provider, Pool, Network, EvmConfig> {
     /// An interface to interact with the network
     network: Network,
     /// All configured Signers
-    signers: parking_lot::RwLock<Vec<Box<dyn EthSigner>>>,
+    signers: parking_lot::RwLock<Vec<Box<dyn EthSigner<Provider::Transaction>>>>,
     /// The async cache frontend for eth related data
-    eth_cache: EthStateCache,
+    eth_cache: EthStateCache<Provider::Block, Provider::Receipt>,
     /// The async gas oracle frontend for gas price suggestions
     gas_oracle: GasPriceOracle<Provider>,
     /// Maximum gas limit for `eth_call` and call tracing RPC methods.
@@ -247,7 +260,7 @@ pub struct EthApiInner<Provider, Pool, Network, EvmConfig> {
     /// The type that can spawn tasks which would otherwise block.
     task_spawner: Box<dyn TaskSpawner>,
     /// Cached pending block if any
-    pending_block: Mutex<Option<PendingBlock>>,
+    pending_block: Mutex<Option<PendingBlock<Provider::Block, Provider::Receipt>>>,
     /// A pool dedicated to CPU heavy blocking tasks.
     blocking_task_pool: BlockingTaskPool,
     /// Cache for block fees history
@@ -269,7 +282,7 @@ where
         provider: Provider,
         pool: Pool,
         network: Network,
-        eth_cache: EthStateCache,
+        eth_cache: EthStateCache<Provider::Block, Provider::Receipt>,
         gas_oracle: GasPriceOracle<Provider>,
         gas_cap: impl Into<GasCap>,
         max_simulate_blocks: u64,
@@ -312,7 +325,10 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, EvmConfig> {
+impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, EvmConfig>
+where
+    Provider: BlockReader,
+{
     /// Returns a handle to data on disk.
     #[inline]
     pub const fn provider(&self) -> &Provider {
@@ -321,13 +337,15 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
 
     /// Returns a handle to data in memory.
     #[inline]
-    pub const fn cache(&self) -> &EthStateCache {
+    pub const fn cache(&self) -> &EthStateCache<Provider::Block, Provider::Receipt> {
         &self.eth_cache
     }
 
     /// Returns a handle to the pending block.
     #[inline]
-    pub const fn pending_block(&self) -> &Mutex<Option<PendingBlock>> {
+    pub const fn pending_block(
+        &self,
+    ) -> &Mutex<Option<PendingBlock<Provider::Block, Provider::Receipt>>> {
         &self.pending_block
     }
 
@@ -381,7 +399,9 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
 
     /// Returns a handle to the signers.
     #[inline]
-    pub const fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
+    pub const fn signers(
+        &self,
+    ) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<Provider::Transaction>>>> {
         &self.signers
     }
 
@@ -455,8 +475,7 @@ mod tests {
     ) -> EthApi<P, TestPool, NoopNetwork, EthEvmConfig> {
         let evm_config = EthEvmConfig::new(provider.chain_spec());
         let cache = EthStateCache::spawn(provider.clone(), Default::default());
-        let fee_history_cache =
-            FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default());
+        let fee_history_cache = FeeHistoryCache::new(FeeHistoryCacheConfig::default());
 
         let gas_cap = provider.chain_spec().max_gas_limit();
         EthApi::new(
@@ -564,7 +583,7 @@ mod tests {
     /// Invalid block range
     #[tokio::test]
     async fn test_fee_history_empty() {
-        let response = <EthApi<_, _, _, _> as EthApiServer<_, _, _>>::fee_history(
+        let response = <EthApi<_, _, _, _> as EthApiServer<_, _, _, _>>::fee_history(
             &build_test_eth_api(NoopProvider::default()),
             U64::from(1),
             BlockNumberOrTag::Latest,
@@ -586,7 +605,7 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response = <EthApi<_, _, _, _> as EthApiServer<_, _, _>>::fee_history(
+        let response = <EthApi<_, _, _, _> as EthApiServer<_, _, _, _>>::fee_history(
             &eth_api,
             U64::from(newest_block + 1),
             newest_block.into(),
@@ -609,7 +628,7 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response = <EthApi<_, _, _, _> as EthApiServer<_, _, _>>::fee_history(
+        let response = <EthApi<_, _, _, _> as EthApiServer<_, _, _, _>>::fee_history(
             &eth_api,
             U64::from(1),
             (newest_block + 1000).into(),
@@ -632,7 +651,7 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response = <EthApi<_, _, _, _> as EthApiServer<_, _, _>>::fee_history(
+        let response = <EthApi<_, _, _, _> as EthApiServer<_, _, _, _>>::fee_history(
             &eth_api,
             U64::from(0),
             newest_block.into(),

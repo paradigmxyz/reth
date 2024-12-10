@@ -97,7 +97,9 @@ where
     where
         Engine::ExecutionPayloadEnvelopeV3: From<Engine::BuiltPayload> + PayloadEnvelopeExt,
         Engine::ExecutionPayloadEnvelopeV4: From<Engine::BuiltPayload> + PayloadEnvelopeExt,
-        AddOns::EthApi: EthApiSpec + EthTransactions + TraceExt,
+        AddOns::EthApi: EthApiSpec<Provider: BlockReader<Block = reth_primitives::Block>>
+            + EthTransactions
+            + TraceExt,
     {
         let mut chain = Vec::with_capacity(length as usize);
         for i in 0..length {

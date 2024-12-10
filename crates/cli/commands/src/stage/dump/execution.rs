@@ -140,13 +140,7 @@ fn import_tables_with_range<N: NodeTypesWithDB>(
 /// `PlainAccountState` safely. There might be some state dependency from an address
 /// which hasn't been changed in the given range.
 fn unwind_and_copy<
-    N: ProviderNodeTypes<
-        Primitives: NodePrimitives<
-            Block = reth_primitives::Block,
-            Receipt = reth_primitives::Receipt,
-            BlockHeader = reth_primitives::Header,
-        >,
-    >,
+    N: ProviderNodeTypes<Primitives: NodePrimitives<BlockHeader = reth_primitives::Header>>,
 >(
     db_tool: &DbTool<N>,
     from: u64,
@@ -155,7 +149,8 @@ fn unwind_and_copy<
 ) -> eyre::Result<()> {
     let provider = db_tool.provider_factory.database_provider_rw()?;
 
-    let mut exec_stage = ExecutionStage::new_with_executor(NoopBlockExecutorProvider::default());
+    let mut exec_stage =
+        ExecutionStage::new_with_executor(NoopBlockExecutorProvider::<N::Primitives>::default());
 
     exec_stage.unwind(
         &provider,

@@ -1,6 +1,9 @@
-use alloy_consensus::constants::{
-    EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
-    LEGACY_TX_TYPE_ID,
+use alloy_consensus::{
+    constants::{
+        EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
+        LEGACY_TX_TYPE_ID,
+    },
+    Typed2718,
 };
 use alloy_primitives::{U64, U8};
 use alloy_rlp::{Decodable, Encodable};
@@ -29,7 +32,7 @@ pub const COMPACT_EXTENDED_IDENTIFIER_FLAG: usize = 3;
 /// Transaction Type
 ///
 /// Currently being used as 2-bit type when encoding it to `reth_codecs::Compact` on
-/// [`crate::TransactionSignedNoHash`]. Adding more transaction types will break the codec and
+/// [`crate::TransactionSigned`]. Adding more transaction types will break the codec and
 /// database format.
 ///
 /// Other required changes when adding a new type can be seen on [PR#3953](https://github.com/paradigmxyz/reth/pull/3953/files).
@@ -88,32 +91,13 @@ impl TxType {
     }
 }
 
-impl reth_primitives_traits::TxType for TxType {
-    #[inline]
-    fn is_legacy(&self) -> bool {
-        matches!(self, Self::Legacy)
-    }
-
-    #[inline]
-    fn is_eip2930(&self) -> bool {
-        matches!(self, Self::Eip2930)
-    }
-
-    #[inline]
-    fn is_eip1559(&self) -> bool {
-        matches!(self, Self::Eip1559)
-    }
-
-    #[inline]
-    fn is_eip4844(&self) -> bool {
-        matches!(self, Self::Eip4844)
-    }
-
-    #[inline]
-    fn is_eip7702(&self) -> bool {
-        matches!(self, Self::Eip7702)
+impl Typed2718 for TxType {
+    fn ty(&self) -> u8 {
+        (*self).into()
     }
 }
+
+impl reth_primitives_traits::TxType for TxType {}
 
 impl InMemorySize for TxType {
     /// Calculates a heuristic for the in-memory size of the [`TxType`].

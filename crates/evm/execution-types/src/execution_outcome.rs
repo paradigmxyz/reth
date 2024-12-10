@@ -147,7 +147,7 @@ impl<T> ExecutionOutcome<T> {
 
     /// Get account if account is known.
     pub fn account(&self, address: &Address) -> Option<Option<Account>> {
-        self.bundle.account(address).map(|a| a.info.clone().map(Into::into))
+        self.bundle.account(address).map(|a| a.info.as_ref().map(Into::into))
     }
 
     /// Get storage if value is known.

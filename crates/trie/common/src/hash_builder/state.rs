@@ -1,8 +1,6 @@
 use crate::TrieMask;
 use alloy_trie::{hash_builder::HashBuilderValue, nodes::RlpNode, HashBuilder};
-use bytes::Buf;
 use nybbles::Nibbles;
-use reth_codecs::Compact;
 
 /// The hash builder state for storing in the database.
 /// Check the `reth-trie` crate for more info on hash builder.
@@ -63,7 +61,8 @@ impl From<HashBuilder> for HashBuilderState {
     }
 }
 
-impl Compact for HashBuilderState {
+#[cfg(any(test, feature = "reth-codec"))]
+impl reth_codecs::Compact for HashBuilderState {
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
@@ -106,6 +105,8 @@ impl Compact for HashBuilderState {
     }
 
     fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
+        use bytes::Buf;
+
         let (key, mut buf) = Vec::from_compact(buf, 0);
 
         let stack_len = buf.get_u16() as usize;
@@ -150,6 +151,7 @@ impl Compact for HashBuilderState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_codecs::Compact;
 
     #[test]
     fn hash_builder_state_regression() {

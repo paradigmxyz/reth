@@ -3,14 +3,15 @@
 use std::{fmt::Display, sync::Arc};
 
 use crate::{FromEvmError, RpcNodeCore};
-use alloy_consensus::Header;
+use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::{BlockId, TransactionInfo};
 use futures::Future;
 use reth_chainspec::ChainSpecProvider;
 use reth_evm::{system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::SealedBlockWithSenders;
-use reth_provider::BlockReader;
+use reth_primitives_traits::{BlockBody, SignedTransaction};
+use reth_provider::{BlockReader, ProviderBlock, ProviderHeader, ProviderTx};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDb, StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
@@ -25,7 +26,15 @@ use revm_primitives::{
 use super::{Call, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction};
 
 /// Executes CPU heavy tasks.
-pub trait Trace: LoadState<Provider: BlockReader, Evm: ConfigureEvm<Header = Header>> {
+pub trait Trace:
+    LoadState<
+    Provider: BlockReader,
+    Evm: ConfigureEvm<
+        Header = ProviderHeader<Self::Provider>,
+        Transaction = ProviderTx<Self::Provider>,
+    >,
+>
+{
     /// Executes the [`EnvWithHandlerCfg`] against the given [Database] without committing state
     /// changes.
     fn inspect<DB, I>(
@@ -190,7 +199,7 @@ pub trait Trace: LoadState<Provider: BlockReader, Evm: ConfigureEvm<Header = Hea
 
             // we need to get the state of the parent block because we're essentially replaying the
             // block the transaction is included in
-            let parent_block = block.parent_hash;
+            let parent_block = block.parent_hash();
 
             let this = self.clone();
             self.spawn_with_state_at_block(parent_block.into(), move |state| {
@@ -205,7 +214,7 @@ pub trait Trace: LoadState<Provider: BlockReader, Evm: ConfigureEvm<Header = Hea
                     cfg.clone(),
                     block_env.clone(),
                     block_txs,
-                    tx.hash(),
+                    *tx.tx_hash(),
                 )?;
 
                 let env = EnvWithHandlerCfg::new_with_cfg_env(
@@ -231,7 +240,7 @@ pub trait Trace: LoadState<Provider: BlockReader, Evm: ConfigureEvm<Header = Hea
     fn trace_block_until<F, R>(
         &self,
         block_id: BlockId,
-        block: Option<Arc<SealedBlockWithSenders<<Self::Provider as BlockReader>::Block>>>,
+        block: Option<Arc<SealedBlockWithSenders<ProviderBlock<Self::Provider>>>>,
         highest_index: Option<u64>,
         config: TracingInspectorConfig,
         f: F,
@@ -271,7 +280,7 @@ pub trait Trace: LoadState<Provider: BlockReader, Evm: ConfigureEvm<Header = Hea
     fn trace_block_until_with_inspector<Setup, Insp, F, R>(
         &self,
         block_id: BlockId,
-        block: Option<Arc<SealedBlockWithSenders>>,
+        block: Option<Arc<SealedBlockWithSenders<ProviderBlock<Self::Provider>>>>,
         highest_index: Option<u64>,
         mut inspector_setup: Setup,
         f: F,
@@ -304,7 +313,7 @@ pub trait Trace: LoadState<Provider: BlockReader, Evm: ConfigureEvm<Header = Hea
 
             let Some(block) = block else { return Ok(None) };
 
-            if block.body.transactions.is_empty() {
+            if block.body.transactions().is_empty() {
                 // nothing to trace
                 return Ok(Some(Vec::new()))
             }
@@ -313,7 +322,7 @@ pub trait Trace: LoadState<Provider: BlockReader, Evm: ConfigureEvm<Header = Hea
             self.spawn_tracing(move |this| {
                 // we need to get the state of the parent block because we're replaying this block
                 // on top of its parent block's state
-                let state_at = block.parent_hash;
+                let state_at = block.parent_hash();
                 let block_hash = block.hash();
 
                 let block_number = block_env.number.saturating_to::<u64>();
@@ -329,7 +338,7 @@ pub trait Trace: LoadState<Provider: BlockReader, Evm: ConfigureEvm<Header = Hea
                 // prepare transactions, we do everything upfront to reduce time spent with open
                 // state
                 let max_transactions =
-                    highest_index.map_or(block.body.transactions.len(), |highest| {
+                    highest_index.map_or(block.body.transactions().len(), |highest| {
                         // we need + 1 because the index is 0-based
                         highest as usize + 1
                     });
@@ -341,7 +350,7 @@ pub trait Trace: LoadState<Provider: BlockReader, Evm: ConfigureEvm<Header = Hea
                     .enumerate()
                     .map(|(idx, (signer, tx))| {
                         let tx_info = TransactionInfo {
-                            hash: Some(tx.hash()),
+                            hash: Some(*tx.tx_hash()),
                             index: Some(idx as u64),
                             block_hash: Some(block_hash),
                             block_number: Some(block_number),
@@ -389,7 +398,7 @@ pub trait Trace: LoadState<Provider: BlockReader, Evm: ConfigureEvm<Header = Hea
     fn trace_block_with<F, R>(
         &self,
         block_id: BlockId,
-        block: Option<Arc<SealedBlockWithSenders>>,
+        block: Option<Arc<SealedBlockWithSenders<ProviderBlock<Self::Provider>>>>,
         config: TracingInspectorConfig,
         f: F,
     ) -> impl Future<Output = Result<Option<Vec<R>>, Self::Error>> + Send
@@ -428,7 +437,7 @@ pub trait Trace: LoadState<Provider: BlockReader, Evm: ConfigureEvm<Header = Hea
     fn trace_block_inspector<Setup, Insp, F, R>(
         &self,
         block_id: BlockId,
-        block: Option<Arc<SealedBlockWithSenders>>,
+        block: Option<Arc<SealedBlockWithSenders<ProviderBlock<Self::Provider>>>>,
         insp_setup: Setup,
         f: F,
     ) -> impl Future<Output = Result<Option<Vec<R>>, Self::Error>> + Send
@@ -459,7 +468,7 @@ pub trait Trace: LoadState<Provider: BlockReader, Evm: ConfigureEvm<Header = Hea
     /// already applied.
     fn apply_pre_execution_changes<DB: Send + Database<Error: Display> + DatabaseCommit>(
         &self,
-        block: &SealedBlockWithSenders,
+        block: &SealedBlockWithSenders<ProviderBlock<Self::Provider>>,
         db: &mut DB,
         cfg: &CfgEnvWithHandlerCfg,
         block_env: &BlockEnv,
@@ -472,12 +481,12 @@ pub trait Trace: LoadState<Provider: BlockReader, Evm: ConfigureEvm<Header = Hea
                 db,
                 cfg,
                 block_env,
-                block.header.parent_beacon_block_root,
+                block.header.parent_beacon_block_root(),
             )
             .map_err(|_| EthApiError::EvmCustom("failed to apply 4788 system call".to_string()))?;
 
         system_caller
-            .pre_block_blockhashes_contract_call(db, cfg, block_env, block.header.parent_hash)
+            .pre_block_blockhashes_contract_call(db, cfg, block_env, block.header.parent_hash())
             .map_err(|_| {
                 EthApiError::EvmCustom("failed to apply blockhashes system call".to_string())
             })?;

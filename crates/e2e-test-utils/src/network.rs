@@ -1,6 +1,7 @@
 use futures_util::StreamExt;
 use reth_network_api::{
-    test_utils::PeersHandleProvider, NetworkEvent, NetworkEventListenerProvider, PeersInfo,
+    events::PeerEvent, test_utils::PeersHandleProvider, NetworkEvent, NetworkEventListenerProvider,
+    PeersInfo,
 };
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_tokio_util::EventStream;
@@ -28,7 +29,7 @@ where
         self.network.peers_handle().add_peer(node_record.id, node_record.tcp_addr());
 
         match self.network_events.next().await {
-            Some(NetworkEvent::PeerAdded(_)) => (),
+            Some(NetworkEvent::Peer(PeerEvent::PeerAdded(_))) => (),
             ev => panic!("Expected a peer added event, got: {ev:?}"),
         }
     }
@@ -42,7 +43,9 @@ where
     pub async fn next_session_established(&mut self) -> Option<PeerId> {
         while let Some(ev) = self.network_events.next().await {
             match ev {
-                NetworkEvent::SessionEstablished { peer_id, .. } => {
+                NetworkEvent::ActivePeerSession { info, .. } |
+                NetworkEvent::Peer(PeerEvent::SessionEstablished(info)) => {
+                    let peer_id = info.peer_id;
                     info!("Session established with peer: {:?}", peer_id);
                     return Some(peer_id)
                 }

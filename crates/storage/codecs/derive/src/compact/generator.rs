@@ -239,7 +239,7 @@ fn generate_to_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> Vec<
 }
 
 /// Function to extract the crate path from `reth_codecs(crate = "...")` attribute.
-fn parse_reth_codecs_path(attrs: &[Attribute]) -> syn::Result<syn::Path> {
+pub(crate) fn parse_reth_codecs_path(attrs: &[Attribute]) -> syn::Result<syn::Path> {
     // let default_crate_path: syn::Path = syn::parse_str("reth-codecs").unwrap();
     let mut reth_codecs_path: syn::Path = syn::parse_quote!(reth_codecs);
     for attr in attrs {

@@ -1,17 +1,11 @@
-use std::{
-    cmp::Ordering,
-    task::{ready, Context, Poll},
-};
-
+use super::missing_static_data_error;
 use futures_util::TryStreamExt;
 use reth_codecs::Compact;
-use reth_primitives_traits::{Block, BlockBody};
-use tracing::*;
-
 use reth_db::{tables, transaction::DbTx};
 use reth_db_api::{cursor::DbCursorRO, transaction::DbTxMut};
 use reth_network_p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
 use reth_primitives::StaticFileSegment;
+use reth_primitives_traits::{Block, BlockBody, BlockHeader};
 use reth_provider::{
     providers::StaticFileWriter, BlockReader, BlockWriter, DBProvider, ProviderError,
     StaticFileProviderFactory, StatsReader, StorageLocation,
@@ -21,8 +15,11 @@ use reth_stages_api::{
     UnwindInput, UnwindOutput,
 };
 use reth_storage_errors::provider::ProviderResult;
-
-use super::missing_static_data_error;
+use std::{
+    cmp::Ordering,
+    task::{ready, Context, Poll},
+};
+use tracing::*;
 
 /// The body stage downloads block bodies.
 ///
@@ -59,7 +56,7 @@ pub struct BodyStage<D: BodyDownloader> {
     /// The body downloader.
     downloader: D,
     /// Block response buffer.
-    buffer: Option<Vec<BlockResponse<D::Body>>>,
+    buffer: Option<Vec<BlockResponse<D::Header, D::Body>>>,
 }
 
 impl<D: BodyDownloader> BodyStage<D> {
@@ -75,9 +72,7 @@ impl<D: BodyDownloader> BodyStage<D> {
         unwind_block: Option<u64>,
     ) -> Result<(), StageError>
     where
-        Provider: DBProvider<Tx: DbTxMut>
-            + BlockReader<Header = reth_primitives::Header>
-            + StaticFileProviderFactory,
+        Provider: DBProvider<Tx: DbTxMut> + BlockReader + StaticFileProviderFactory,
     {
         // Get id for the next tx_num of zero if there are no transactions.
         let next_tx_num = provider
@@ -154,9 +149,9 @@ where
     Provider: DBProvider<Tx: DbTxMut>
         + StaticFileProviderFactory
         + StatsReader
-        + BlockReader<Header = reth_primitives::Header>
-        + BlockWriter<Block: Block<Body = D::Body>>,
-    D: BodyDownloader<Body: BlockBody<Transaction: Compact>>,
+        + BlockReader
+        + BlockWriter<Block: Block<Header = D::Header, Body = D::Body>>,
+    D: BodyDownloader<Header: BlockHeader, Body: BlockBody<Transaction: Compact>>,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -264,17 +259,14 @@ where
 
 #[cfg(test)]
 mod tests {
-    use assert_matches::assert_matches;
-
-    use reth_provider::StaticFileProviderFactory;
-    use reth_stages_api::StageUnitCheckpoint;
-    use test_utils::*;
-
+    use super::*;
     use crate::test_utils::{
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
     };
-
-    use super::*;
+    use assert_matches::assert_matches;
+    use reth_provider::StaticFileProviderFactory;
+    use reth_stages_api::StageUnitCheckpoint;
+    use test_utils::*;
 
     stage_test_suite_ext!(BodyTestRunner, body);
 
@@ -490,7 +482,7 @@ mod tests {
                 UnwindStageTestRunner,
             },
         };
-        use alloy_consensus::Header;
+        use alloy_consensus::{BlockHeader, Header};
         use alloy_primitives::{BlockNumber, TxNumber, B256};
         use futures_util::Stream;
         use reth_db::{static_file::HeaderWithHashMask, tables};
@@ -770,6 +762,7 @@ mod tests {
         }
 
         impl BodyDownloader for TestBodyDownloader {
+            type Header = Header;
             type Body = BlockBody;
 
             fn set_download_range(
@@ -792,7 +785,7 @@ mod tests {
         }
 
         impl Stream for TestBodyDownloader {
-            type Item = BodyDownloaderResult<BlockBody>;
+            type Item = BodyDownloaderResult<Header, BlockBody>;
             fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
                 let this = self.get_mut();
 

@@ -94,7 +94,7 @@ impl<N: NetworkPrimitives> NetworkConfig<(), N> {
     }
 
     /// Convenience method for creating the corresponding builder type with a random secret key.
-    pub fn builder_with_rng_secret_key() -> NetworkConfigBuilder {
+    pub fn builder_with_rng_secret_key() -> NetworkConfigBuilder<N> {
         NetworkConfigBuilder::with_rng_secret_key()
     }
 }
@@ -145,19 +145,17 @@ where
     }
 }
 
-impl<C> NetworkConfig<C>
+impl<C, N> NetworkConfig<C, N>
 where
-    C: BlockReader<
-            Block = reth_primitives::Block,
-            Receipt = reth_primitives::Receipt,
-            Header = reth_primitives::Header,
-        > + HeaderProvider
+    N: NetworkPrimitives,
+    C: BlockReader<Block = N::Block, Receipt = reth_primitives::Receipt, Header = N::BlockHeader>
+        + HeaderProvider
         + Clone
         + Unpin
         + 'static,
 {
     /// Starts the networking stack given a [`NetworkConfig`] and returns a handle to the network.
-    pub async fn start_network(self) -> Result<NetworkHandle, NetworkError> {
+    pub async fn start_network(self) -> Result<NetworkHandle<N>, NetworkError> {
         let client = self.client.clone();
         let (handle, network, _txpool, eth) = NetworkManager::builder::<C>(self)
             .await?
@@ -644,7 +642,7 @@ mod tests {
     use reth_chainspec::{Chain, MAINNET};
     use reth_dns_discovery::tree::LinkEntry;
     use reth_primitives::ForkHash;
-    use reth_provider::test_utils::NoopProvider;
+    use reth_storage_api::noop::NoopProvider;
     use std::sync::Arc;
 
     fn builder() -> NetworkConfigBuilder {
