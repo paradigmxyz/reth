@@ -64,7 +64,7 @@ where
     /// Constructor for [`LocalEngineService`].
     #[allow(clippy::too_many_arguments)]
     pub fn new<B, V>(
-        consensus: Arc<dyn FullConsensus>,
+        consensus: Arc<dyn FullConsensus<N::Primitives>>,
         executor_factory: impl BlockExecutorProvider<Primitives = N::Primitives>,
         provider: ProviderFactory<N>,
         blockchain_db: BlockchainProvider2<N>,
@@ -122,7 +122,7 @@ impl<N> Stream for LocalEngineService<N>
 where
     N: EngineNodeTypes,
 {
-    type Item = ChainEvent<BeaconConsensusEngineEvent>;
+    type Item = ChainEvent<BeaconConsensusEngineEvent<N::Primitives>>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
