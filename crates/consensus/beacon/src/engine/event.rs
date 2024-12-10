@@ -2,7 +2,7 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_engine_primitives::ForkchoiceStatus;
-use reth_primitives::{EthPrimitives, NodePrimitives, SealedBlock, SealedHeader};
+use reth_primitives::{EthPrimitives, NodePrimitives, SealedBlockFor, SealedHeader};
 use std::{
     fmt::{Display, Formatter, Result},
     sync::Arc,
@@ -15,9 +15,9 @@ pub enum BeaconConsensusEngineEvent<N: NodePrimitives = EthPrimitives> {
     /// The fork choice state was updated, and the current fork choice status
     ForkchoiceUpdated(ForkchoiceState, ForkchoiceStatus),
     /// A block was added to the fork chain.
-    ForkBlockAdded(Arc<SealedBlock<N::BlockHeader, N::BlockBody>>, Duration),
+    ForkBlockAdded(Arc<SealedBlockFor<N::Block>>, Duration),
     /// A block was added to the canonical chain, and the elapsed time validating the block
-    CanonicalBlockAdded(Arc<SealedBlock<N::BlockHeader, N::BlockBody>>, Duration),
+    CanonicalBlockAdded(Arc<SealedBlockFor<N::Block>>, Duration),
     /// A canonical chain was committed, and the elapsed time committing the data
     CanonicalChainCommitted(Box<SealedHeader<N::BlockHeader>>, Duration),
     /// The consensus engine is involved in live sync, and has specific progress
