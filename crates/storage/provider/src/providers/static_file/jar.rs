@@ -17,8 +17,8 @@ use reth_chainspec::ChainInfo;
 use reth_db::{
     models::StoredBlockBodyIndices,
     static_file::{
-        BlockHashMask, BodyIndiceMask, HeaderMask, HeaderWithHashMask, OmmerMask, ReceiptMask,
-        StaticFileCursor, TDWithHashMask, TotalDifficultyMask, TransactionMask, WithdrawalMask,
+        BlockHashMask, BodyIndicesMask, HeaderMask, HeaderWithHashMask, OmmersMask, ReceiptMask,
+        StaticFileCursor, TDWithHashMask, TotalDifficultyMask, TransactionMask, WithdrawalsMask,
     },
     table::{Decompress, Value},
 };
@@ -366,9 +366,9 @@ impl<N: NodePrimitives> WithdrawalsProvider for StaticFileJarProvider<'_, N> {
         _: u64,
     ) -> ProviderResult<Option<Withdrawals>> {
         if let Some(num) = id.as_number() {
-            return Ok(self.cursor()?.get_one::<WithdrawalMask>(num.into())?.map(|s| s.withdrawals))
+            return Ok(self.cursor()?.get_one::<WithdrawalsMask>(num.into())?.map(|s| s.withdrawals))
         }
-        // Only accepts block number quries
+        // Only accepts block number queries
         Err(ProviderError::UnsupportedProvider)
     }
 
@@ -381,15 +381,18 @@ impl<N: NodePrimitives> WithdrawalsProvider for StaticFileJarProvider<'_, N> {
 impl<N: FullNodePrimitives<BlockHeader: Value>> OmmersProvider for StaticFileJarProvider<'_, N> {
     fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
         if let Some(num) = id.as_number() {
-            return Ok(self.cursor()?.get_one::<OmmerMask>(num.into())?.map(|s| s.ommers))
+            return Ok(self
+                .cursor()?
+                .get_one::<OmmersMask<Self::Header>>(num.into())?
+                .map(|s| s.ommers))
         }
-        // Only accepts block number quries
+        // Only accepts block number queries
         Err(ProviderError::UnsupportedProvider)
     }
 }
 
 impl<N: NodePrimitives> BlockBodyIndicesProvider for StaticFileJarProvider<'_, N> {
     fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        self.cursor()?.get_one::<BodyIndiceMask>(num.into())
+        self.cursor()?.get_one::<BodyIndicesMask>(num.into())
     }
 }
