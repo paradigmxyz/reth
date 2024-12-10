@@ -19,7 +19,7 @@
 //! use reth_engine_primitives::PayloadValidator;
 //! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_primitives::{Header, TransactionSigned};
+//! use reth_primitives::{Header, TransactionSigned, PooledTransactionsElement};
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
 //! use reth_rpc::EthApi;
 //! use reth_rpc_builder::{
@@ -55,7 +55,7 @@
 //!             Header = reth_primitives::Header,
 //!         > + AccountReader
 //!         + ChangeSetReader,
-//!     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>
+//!     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned, Pooled = PooledTransactionsElement>>
 //!         + Unpin
 //!         + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
@@ -98,7 +98,7 @@
 //! use reth_engine_primitives::{EngineTypes, PayloadValidator};
 //! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_primitives::{Header, TransactionSigned};
+//! use reth_primitives::{Header, TransactionSigned, PooledTransactionsElement};
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
 //! use reth_rpc::EthApi;
 //! use reth_rpc_api::EngineApiServer;
@@ -141,7 +141,7 @@
 //!             Header = reth_primitives::Header,
 //!         > + AccountReader
 //!         + ChangeSetReader,
-//!     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>
+//!     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned, Pooled = PooledTransactionsElement>>
 //!         + Unpin
 //!         + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
