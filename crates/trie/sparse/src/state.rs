@@ -102,6 +102,21 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         self.storages.get_mut(account).and_then(|e| e.as_revealed_mut())
     }
 
+    pub fn take_storage_trie(
+        &mut self,
+        account: &B256,
+    ) -> Option<SparseTrie<F::StorageNodeProvider>> {
+        self.storages.remove(account)
+    }
+
+    pub fn insert_storage_trie(
+        &mut self,
+        account: B256,
+        storage_trie: SparseTrie<F::StorageNodeProvider>,
+    ) {
+        self.storages.insert(account, storage_trie);
+    }
+
     /// Reveal unknown trie paths from provided leaf path and its proof for the account.
     ///
     /// Panics if trie updates retention is enabled.
