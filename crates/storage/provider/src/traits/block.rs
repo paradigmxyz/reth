@@ -3,32 +3,9 @@ use reth_db_api::models::StoredBlockBodyIndices;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_node_types::NodePrimitives;
 use reth_primitives::SealedBlockWithSenders;
-use reth_storage_api::NodePrimitivesProvider;
+use reth_storage_api::{NodePrimitivesProvider, StorageLocation};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{updates::TrieUpdates, HashedPostStateSorted};
-
-/// An enum that represents the storage location for a piece of data.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum StorageLocation {
-    /// Write only to static files.
-    StaticFiles,
-    /// Write only to the database.
-    Database,
-    /// Write to both the database and static files.
-    Both,
-}
-
-impl StorageLocation {
-    /// Returns true if the storage location includes static files.
-    pub const fn static_files(&self) -> bool {
-        matches!(self, Self::StaticFiles | Self::Both)
-    }
-
-    /// Returns true if the storage location includes the database.
-    pub const fn database(&self) -> bool {
-        matches!(self, Self::Database | Self::Both)
-    }
-}
 
 /// `BlockExecution` Writer
 pub trait BlockExecutionWriter:
@@ -120,7 +97,7 @@ pub trait BlockWriter: Send + Sync {
     fn append_block_bodies(
         &self,
         bodies: Vec<(BlockNumber, Option<<Self::Block as reth_primitives_traits::Block>::Body>)>,
-        write_transactions_to: StorageLocation,
+        write_to: StorageLocation,
     ) -> ProviderResult<()>;
 
     /// Removes all blocks above the given block number from the database.
@@ -129,14 +106,14 @@ pub trait BlockWriter: Send + Sync {
     fn remove_blocks_above(
         &self,
         block: BlockNumber,
-        remove_transactions_from: StorageLocation,
+        remove_from: StorageLocation,
     ) -> ProviderResult<()>;
 
     /// Removes all block bodies above the given block number from the database.
     fn remove_bodies_above(
         &self,
         block: BlockNumber,
-        remove_transactions_from: StorageLocation,
+        remove_from: StorageLocation,
     ) -> ProviderResult<()>;
 
     /// Appends a batch of sealed blocks to the blockchain, including sender information, and
