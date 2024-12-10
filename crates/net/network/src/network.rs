@@ -205,8 +205,10 @@ impl<N: NetworkPrimitives> NetworkPeersEvents for NetworkHandle<N> {
     }
 }
 
-impl<N: NetworkPrimitives> NetworkEventListenerProvider<PeerRequest<N>> for NetworkHandle<N> {
-    fn event_listener(&self) -> EventStream<NetworkEvent<PeerRequest<N>>> {
+impl<N: NetworkPrimitives> NetworkEventListenerProvider for NetworkHandle<N> {
+    type Primitives = N;
+
+    fn event_listener(&self) -> EventStream<NetworkEvent<PeerRequest<Self::Primitives>>> {
         self.inner.event_sender.new_listener()
     }
 

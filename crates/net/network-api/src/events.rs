@@ -133,9 +133,12 @@ pub trait NetworkPeersEvents: Send + Sync {
 
 /// Provides event subscription for the network.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait NetworkEventListenerProvider<R = PeerRequest>: NetworkPeersEvents {
+pub trait NetworkEventListenerProvider: NetworkPeersEvents {
+    /// The primitive types to use in the `PeerRequest` used in the stream.
+    type Primitives: NetworkPrimitives;
+
     /// Creates a new [`NetworkEvent`] listener channel.
-    fn event_listener(&self) -> EventStream<NetworkEvent<R>>;
+    fn event_listener(&self) -> EventStream<NetworkEvent<PeerRequest<Self::Primitives>>>;
     /// Returns a new [`DiscoveryEvent`] stream.
     ///
     /// This stream yields [`DiscoveryEvent`]s for each peer that is discovered.
