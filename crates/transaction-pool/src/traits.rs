@@ -1179,9 +1179,9 @@ pub trait EthPoolTransaction: PoolTransaction {
 /// This type is essentially a wrapper around [`RecoveredTx`] with additional
 /// fields derived from the transaction that are frequently used by the pools for ordering.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EthPooledTransaction<T = RecoveredTx> {
+pub struct EthPooledTransaction<T = TransactionSigned> {
     /// `EcRecovered` transaction, the consensus format.
-    pub(crate) transaction: T,
+    pub(crate) transaction: RecoveredTx<T>,
 
     /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
@@ -1197,16 +1197,16 @@ pub struct EthPooledTransaction<T = RecoveredTx> {
     pub(crate) blob_sidecar: EthBlobTransactionSidecar,
 }
 
-impl EthPooledTransaction {
+impl<T: SignedTransaction> EthPooledTransaction<T> {
     /// Create new instance of [Self].
     ///
     /// Caution: In case of blob transactions, this does marks the blob sidecar as
     /// [`EthBlobTransactionSidecar::Missing`]
-    pub fn new(transaction: RecoveredTx, encoded_length: usize) -> Self {
+    pub fn new(transaction: RecoveredTx<T>, encoded_length: usize) -> Self {
         let mut blob_sidecar = EthBlobTransactionSidecar::None;
 
-        let gas_cost = U256::from(transaction.transaction.max_fee_per_gas())
-            .saturating_mul(U256::from(transaction.transaction.gas_limit()));
+        let gas_cost = U256::from(transaction.max_fee_per_gas())
+            .saturating_mul(U256::from(transaction.gas_limit()));
 
         let mut cost = gas_cost.saturating_add(transaction.value());
 
