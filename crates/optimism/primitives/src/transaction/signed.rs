@@ -405,7 +405,7 @@ impl Transaction for OpTransactionSigned {
 
 impl Typed2718 for OpTransactionSigned {
     fn ty(&self) -> u8 {
-        self.tx_type() as u8
+        self.deref().ty()
     }
 }
 
