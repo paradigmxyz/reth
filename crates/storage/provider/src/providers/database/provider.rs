@@ -1638,51 +1638,18 @@ impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> Withdrawals
 impl<TX: DbTx + 'static, N: NodeTypesForProvider> EvmEnvProvider<HeaderTy<N>>
     for DatabaseProvider<TX, N>
 {
-    fn fill_env_with_header<EvmConfig>(
+    fn env_with_header<EvmConfig>(
         &self,
-        cfg: &mut CfgEnvWithHandlerCfg,
-        block_env: &mut BlockEnv,
         header: &HeaderTy<N>,
         evm_config: EvmConfig,
-    ) -> ProviderResult<()>
+    ) -> ProviderResult<(CfgEnvWithHandlerCfg, BlockEnv)>
     where
         EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
     {
         let total_difficulty = self
             .header_td_by_number(header.number())?
             .ok_or_else(|| ProviderError::HeaderNotFound(header.number().into()))?;
-        evm_config.fill_cfg_and_block_env(cfg, block_env, header, total_difficulty);
-        Ok(())
-    }
-
-    fn fill_cfg_env_at<EvmConfig>(
-        &self,
-        cfg: &mut CfgEnvWithHandlerCfg,
-        at: BlockHashOrNumber,
-        evm_config: EvmConfig,
-    ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
-    {
-        let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
-        let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
-        self.fill_cfg_env_with_header(cfg, &header, evm_config)
-    }
-
-    fn fill_cfg_env_with_header<EvmConfig>(
-        &self,
-        cfg: &mut CfgEnvWithHandlerCfg,
-        header: &HeaderTy<N>,
-        evm_config: EvmConfig,
-    ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
-    {
-        let total_difficulty = self
-            .header_td_by_number(header.number())?
-            .ok_or_else(|| ProviderError::HeaderNotFound(header.number().into()))?;
-        evm_config.fill_cfg_env(cfg, header, total_difficulty);
-        Ok(())
+        Ok(evm_config.cfg_and_block_env(header, total_difficulty))
     }
 }
 
