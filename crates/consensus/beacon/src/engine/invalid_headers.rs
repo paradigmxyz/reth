@@ -5,7 +5,7 @@ use reth_metrics::{
     Metrics,
 };
 use schnellru::{ByLength, LruMap};
-use std::{fmt::Debug, sync::Arc};
+use std::fmt::Debug;
 use tracing::warn;
 
 /// The max hit counter for invalid headers in the cache before it is forcefully evicted.
@@ -29,7 +29,7 @@ impl InvalidHeaderCache {
         Self { headers: LruMap::new(ByLength::new(max_length)), metrics: Default::default() }
     }
 
-    fn insert_entry(&mut self, hash: B256, header: Arc<BlockWithParent>) {
+    fn insert_entry(&mut self, hash: B256, header: BlockWithParent) {
         self.headers.insert(hash, HeaderEntry { header, hit_count: 0 });
     }
 
@@ -37,7 +37,7 @@ impl InvalidHeaderCache {
     ///
     /// If this is called, the hit count for the entry is incremented.
     /// If the hit count exceeds the threshold, the entry is evicted and `None` is returned.
-    pub fn get(&mut self, hash: &B256) -> Option<Arc<BlockWithParent>> {
+    pub fn get(&mut self, hash: &B256) -> Option<BlockWithParent> {
         {
             let entry = self.headers.get(hash)?;
             entry.hit_count += 1;
@@ -55,7 +55,7 @@ impl InvalidHeaderCache {
     pub fn insert_with_invalid_ancestor(
         &mut self,
         header_hash: B256,
-        invalid_ancestor: Arc<BlockWithParent>,
+        invalid_ancestor: BlockWithParent,
     ) {
         if self.get(&header_hash).is_none() {
             warn!(target: "consensus::engine", hash=?header_hash, ?invalid_ancestor, "Bad block with existing invalid ancestor");
@@ -71,7 +71,7 @@ impl InvalidHeaderCache {
     pub fn insert(&mut self, invalid_ancestor: BlockWithParent) {
         if self.get(&invalid_ancestor.block.hash).is_none() {
             warn!(target: "consensus::engine", ?invalid_ancestor, "Bad block with hash");
-            self.insert_entry(invalid_ancestor.block.hash, Arc::new(invalid_ancestor));
+            self.insert_entry(invalid_ancestor.block.hash, invalid_ancestor);
 
             // update metrics
             self.metrics.unique_inserts.increment(1);
@@ -84,7 +84,7 @@ struct HeaderEntry {
     /// Keeps track how many times this header has been hit.
     hit_count: u8,
     /// The actual header entry
-    header: Arc<BlockWithParent>,
+    header: BlockWithParent,
 }
 
 /// Metrics for the invalid headers cache.
