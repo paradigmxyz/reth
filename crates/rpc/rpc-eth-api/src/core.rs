@@ -13,6 +13,7 @@ use alloy_rpc_types_eth::{
 };
 use alloy_serde::JsonStorageKey;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use reth_provider::BlockReader;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use tracing::trace;
 
@@ -371,7 +372,12 @@ impl<T>
         RpcHeader<T::NetworkTypes>,
     > for T
 where
-    T: FullEthApi,
+    T: FullEthApi<
+        Provider: BlockReader<
+            Header = alloy_consensus::Header,
+            Transaction = reth_primitives::TransactionSigned,
+        >,
+    >,
     jsonrpsee_types::error::ErrorObject<'static>: From<T::Error>,
 {
     /// Handler for: `eth_protocolVersion`

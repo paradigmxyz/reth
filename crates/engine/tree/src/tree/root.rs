@@ -59,7 +59,7 @@ impl StateRootHandle {
 
 /// Common configuration for state root tasks
 #[derive(Debug)]
-pub struct StateRootConfig<Factory> {
+pub(crate) struct StateRootConfig<Factory> {
     /// View over the state in the database.
     pub consistent_view: ConsistentDbView<Factory>,
     /// Latest trie input.
@@ -228,7 +228,7 @@ fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
 /// to the tree.
 /// Then it updates relevant leaves according to the result of the transaction.
 #[derive(Debug)]
-pub struct StateRootTask<Factory> {
+pub(crate) struct StateRootTask<Factory> {
     /// Task configuration.
     config: StateRootConfig<Factory>,
     /// Receiver for state root related messages.
@@ -255,7 +255,7 @@ where
         + 'static,
 {
     /// Creates a new state root task with the unified message channel
-    pub fn new(config: StateRootConfig<Factory>) -> Self {
+    pub(crate) fn new(config: StateRootConfig<Factory>) -> Self {
         let (tx, rx) = channel();
 
         Self {
@@ -269,7 +269,7 @@ where
     }
 
     /// Spawns the state root task and returns a handle to await its result.
-    pub fn spawn(self) -> StateRootHandle {
+    pub(crate) fn spawn(self) -> StateRootHandle {
         let (tx, rx) = mpsc::sync_channel(1);
         std::thread::Builder::new()
             .name("State Root Task".to_string())
@@ -284,7 +284,7 @@ where
     }
 
     /// Returns a state hook to be used to send state updates to this task.
-    pub fn state_hook(&self) -> impl OnStateHook {
+    pub(crate) fn state_hook(&self) -> impl OnStateHook {
         let state_hook = StateHookSender::new(self.tx.clone());
 
         move |state: &EvmState| {

@@ -33,8 +33,8 @@ impl<T, H> ProofBlindedProviderFactory<T, H> {
 
 impl<T, H> BlindedProviderFactory for ProofBlindedProviderFactory<T, H>
 where
-    T: TrieCursorFactory + Clone + Send + Sync,
-    H: HashedCursorFactory + Clone + Send + Sync,
+    T: TrieCursorFactory + Clone,
+    H: HashedCursorFactory + Clone,
 {
     type AccountNodeProvider = ProofBlindedAccountProvider<T, H>;
     type StorageNodeProvider = ProofBlindedStorageProvider<T, H>;

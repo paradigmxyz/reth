@@ -263,6 +263,12 @@ impl<H, B> SealedBlock<H, B> {
 }
 
 impl SealedBlock {
+    /// Returns an iterator over all blob transactions of the block
+    #[inline]
+    pub fn blob_transactions_iter(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
+        self.body.blob_transactions_iter()
+    }
+
     /// Returns whether or not the block contains any blob transactions.
     #[inline]
     pub fn has_blob_transactions(&self) -> bool {
@@ -274,50 +280,19 @@ impl SealedBlock {
     pub fn has_eip7702_transactions(&self) -> bool {
         self.body.has_eip7702_transactions()
     }
-}
 
-impl<H, B> SealedBlock<H, B>
-where
-    B: reth_primitives_traits::BlockBody,
-{
+    /// Returns only the blob transactions, if any, from the block body.
+    #[inline]
+    pub fn blob_transactions(&self) -> Vec<&TransactionSigned> {
+        self.blob_transactions_iter().collect()
+    }
+
     /// Returns an iterator over all blob versioned hashes from the block body.
     #[inline]
     pub fn blob_versioned_hashes_iter(&self) -> impl Iterator<Item = &B256> + '_ {
-        self.body.blob_versioned_hashes_iter()
-    }
-}
-
-impl<H, B> SealedBlock<H, B>
-where
-    H: alloy_consensus::BlockHeader,
-    B: reth_primitives_traits::BlockBody,
-{
-    /// Ensures that the transaction root in the block header is valid.
-    ///
-    /// The transaction root is the Keccak 256-bit hash of the root node of the trie structure
-    /// populated with each transaction in the transactions list portion of the block.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` if the calculated transaction root matches the one stored in the header,
-    /// indicating that the transactions in the block are correctly represented in the trie.
-    ///
-    /// Returns `Err(error)` if the transaction root validation fails, providing a `GotExpected`
-    /// error containing the calculated and expected roots.
-    pub fn ensure_transaction_root_valid(&self) -> Result<(), GotExpected<B256>>
-    where
-        B::Transaction: Encodable2718,
-    {
-        let calculated_root = self.body.calculate_tx_root();
-
-        if self.header.transactions_root() != calculated_root {
-            return Err(GotExpected {
-                got: calculated_root,
-                expected: self.header.transactions_root(),
-            })
-        }
-
-        Ok(())
+        self.blob_transactions_iter()
+            .filter_map(|tx| tx.as_eip4844().map(|blob_tx| &blob_tx.blob_versioned_hashes))
+            .flatten()
     }
 }
 
@@ -408,6 +383,34 @@ where
         Block: reth_primitives_traits::Block<Header = H, Body = B>,
     {
         Block::new(self.header.unseal(), self.body)
+    }
+
+    /// Ensures that the transaction root in the block header is valid.
+    ///
+    /// The transaction root is the Keccak 256-bit hash of the root node of the trie structure
+    /// populated with each transaction in the transactions list portion of the block.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the calculated transaction root matches the one stored in the header,
+    /// indicating that the transactions in the block are correctly represented in the trie.
+    ///
+    /// Returns `Err(error)` if the transaction root validation fails, providing a `GotExpected`
+    /// error containing the calculated and expected roots.
+    pub fn ensure_transaction_root_valid(&self) -> Result<(), GotExpected<B256>>
+    where
+        B::Transaction: Encodable2718,
+    {
+        let calculated_root = self.body.calculate_tx_root();
+
+        if self.header.transactions_root() != calculated_root {
+            return Err(GotExpected {
+                got: calculated_root,
+                expected: self.header.transactions_root(),
+            })
+        }
+
+        Ok(())
     }
 
     /// Returns a vector of encoded 2718 transactions.
