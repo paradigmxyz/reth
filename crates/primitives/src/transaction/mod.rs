@@ -3,7 +3,7 @@
 use alloc::vec::Vec;
 use alloy_consensus::{
     transaction::RlpEcdsaTx, SignableTransaction, Signed, Transaction as _, TxEip1559, TxEip2930,
-    TxEip4844, TxEip4844Variant, TxEip7702, TxLegacy, TypedTransaction,
+    TxEip4844, TxEip4844Variant, TxEip7702, TxLegacy, Typed2718, TypedTransaction,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
@@ -189,6 +189,20 @@ impl<'a> arbitrary::Arbitrary<'a> for Transaction {
         }
 
         Ok(tx)
+    }
+}
+
+impl Typed2718 for Transaction {
+    fn ty(&self) -> u8 {
+        match self {
+            Self::Legacy(tx) => tx.ty(),
+            Self::Eip2930(tx) => tx.ty(),
+            Self::Eip1559(tx) => tx.ty(),
+            Self::Eip4844(tx) => tx.ty(),
+            Self::Eip7702(tx) => tx.ty(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.ty(),
+        }
     }
 }
 
@@ -710,18 +724,6 @@ impl alloy_consensus::Transaction for Transaction {
         }
     }
 
-    fn ty(&self) -> u8 {
-        match self {
-            Self::Legacy(tx) => tx.ty(),
-            Self::Eip2930(tx) => tx.ty(),
-            Self::Eip1559(tx) => tx.ty(),
-            Self::Eip4844(tx) => tx.ty(),
-            Self::Eip7702(tx) => tx.ty(),
-            #[cfg(feature = "optimism")]
-            Self::Deposit(tx) => tx.ty(),
-        }
-    }
-
     fn access_list(&self) -> Option<&AccessList> {
         match self {
             Self::Legacy(tx) => tx.access_list(),
@@ -823,6 +825,12 @@ impl PartialEq for TransactionSigned {
         self.signature == other.signature &&
             self.transaction == other.transaction &&
             self.tx_hash() == other.tx_hash()
+    }
+}
+
+impl Typed2718 for TransactionSigned {
+    fn ty(&self) -> u8 {
+        self.deref().ty()
     }
 }
 
@@ -1202,10 +1210,6 @@ impl alloy_consensus::Transaction for TransactionSigned {
         self.deref().input()
     }
 
-    fn ty(&self) -> u8 {
-        self.deref().ty()
-    }
-
     fn access_list(&self) -> Option<&AccessList> {
         self.deref().access_list()
     }
@@ -1240,7 +1244,7 @@ impl Encodable for TransactionSigned {
 
     fn length(&self) -> usize {
         let mut payload_length = self.encode_2718_len();
-        if !self.is_legacy() {
+        if !Encodable2718::is_legacy(self) {
             payload_length += Header { list: false, payload_length }.length();
         }
 
