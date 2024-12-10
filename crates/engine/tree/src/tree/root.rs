@@ -1,6 +1,7 @@
 //! State root task related functionality.
 
 use alloy_primitives::map::{HashMap, HashSet};
+use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_evm::system_calls::OnStateHook;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
@@ -590,17 +591,23 @@ fn update_sparse_trie<Factory: DatabaseProviderFactory>(
     trie.reveal_multiproof(targets, multiproof)?;
 
     // Update storage slots with new values and calculate storage roots.
-    for (address, storage) in state.storages {
-        trace!(target: "engine::root::sparse", ?address, "Updating storage");
-        let storage_trie = trie.storage_trie_mut(&address).ok_or(SparseTrieError::Blind)?;
+    let (tx, rx) = mpsc::channel();
+    state
+        .storages
+        .into_iter()
+        .map(|(address, storage)| (address, storage, trie.take_storage_trie(&address)))
+        .par_bridge()
+        .map(|(address, storage, storage_trie)| {
+            trace!(target: "engine::root::sparse", ?address, "Updating storage");
+            let mut storage_trie = storage_trie.ok_or(SparseTrieError::Blind)?;
 
-        if storage.wiped {
-            trace!(target: "engine::root::sparse", ?address, "Wiping storage");
-            storage_trie.wipe();
-        } else {
+            if storage.wiped {
+                trace!(target: "engine::root::sparse", ?address, "Wiping storage");
+                storage_trie.wipe()?;
+            }
+
             for (slot, value) in storage.storage {
                 let slot_nibbles = Nibbles::unpack(slot);
-
                 let fetch_node = |path: Nibbles| {
                     // Right pad the target with 0s.
                     let mut padded_key = path.pack();
@@ -628,23 +635,28 @@ fn update_sparse_trie<Factory: DatabaseProviderFactory>(
                     // The subtree only contains the proof for a single target.
                     proof.subtree.get(&path).cloned()
                 };
-
                 if value.is_zero() {
                     trace!(target: "engine::root::sparse", ?address, ?slot, "Removing storage slot");
 
                     storage_trie.remove_leaf(&slot_nibbles, fetch_node)?;
                 } else {
                     trace!(target: "engine::root::sparse", ?address, ?slot, "Updating storage slot");
-                    storage_trie.update_leaf(
-                        slot_nibbles,
-                        alloy_rlp::encode_fixed_size(&value).to_vec(),
-                        fetch_node,
-                    )?;
+                    storage_trie
+                        .update_leaf(slot_nibbles, alloy_rlp::encode_fixed_size(&value).to_vec(), fetch_node)?;
                 }
             }
-        }
 
-        storage_trie.root();
+            storage_trie.root();
+
+            SparseStateTrieResult::Ok((address, storage_trie))
+        })
+        .for_each_init(|| tx.clone(), |tx, result| {
+            tx.send(result).unwrap()
+        });
+    drop(tx);
+    for result in rx {
+        let (address, storage_trie) = result?;
+        trie.insert_storage_trie(address, storage_trie);
     }
 
     // Update accounts with new values
