@@ -47,7 +47,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
-use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
+use reth_trie::{updates::TrieUpdates, TrieInput};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::EvmState;
 use std::{
@@ -2224,15 +2224,27 @@ where
 
         let exec_time = Instant::now();
 
-        // TODO: create StateRootTask with the receiving end of a channel and
-        // pass the sending end of the channel to the state hook.
-        let noop_state_hook = |_state: &EvmState| {};
+        let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
+        let mut input = self
+            .compute_trie_input(consistent_view.clone(), block.header().parent_hash())
+            .map_err(|e| InsertBlockErrorKindTwo::Other(Box::new(e)))?;
+
+        // TODO: uncomment to use StateRootTask
+
+        // let state_root_config = StateRootConfig {
+        //     consistent_view: consistent_view.clone(),
+        //     input: Arc::new(input.clone()),
+        // };
+        // let state_root_task = StateRootTask::new(state_root_config);
+        let state_hook = |_state: &EvmState| {};
+        // let state_hook = state_root_task.state_hook();
+        // let state_root_handle = state_root_task.spawn();
+
         let output = self.metrics.executor.execute_metered(
             executor,
             (&block, U256::MAX).into(),
-            Box::new(noop_state_hook),
+            Box::new(state_hook),
         )?;
-
         trace!(target: "engine::tree", elapsed=?exec_time.elapsed(), ?block_number, "Executed block");
 
         if let Err(err) = self.consensus.validate_block_post_execution(
@@ -2264,8 +2276,11 @@ where
         // per thread and it might end up with a different view of the database.
         let persistence_in_progress = self.persistence_state.in_progress();
         if !persistence_in_progress {
-            state_root_result = match self
-                .compute_state_root_parallel(block.header().parent_hash(), &hashed_state)
+            // Extend with block we are validating root for.
+            input.append_ref(&hashed_state);
+
+            state_root_result = match ParallelStateRoot::new(consistent_view, input)
+                .incremental_root_with_updates()
             {
                 Ok((state_root, trie_output)) => Some((state_root, trie_output)),
                 Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(error))) => {
@@ -2277,6 +2292,23 @@ where
         }
 
         let (state_root, trie_output) = if let Some(result) = state_root_result {
+            // match state_root_handle.wait_for_result() {
+            //     Ok((task_state_root, task_trie_updates)) => {
+            //         let regular_state_root = result.0;
+            //         info!(
+            //             target: "engine::tree",
+            //             block = ?sealed_block.num_hash(),
+            //             ?task_state_root,
+            //             ?regular_state_root,
+            //             "match" = ?task_state_root == regular_state_root,
+            //             "State root task finished"
+            //         );
+            //     }
+            //     Err(error) => {
+            //         info!(target: "engine::tree", ?error, "Failed to wait for state root task
+            // result");     }
+            // }
+
             result
         } else {
             debug!(target: "engine::tree", block=?sealed_block.num_hash(), persistence_in_progress, "Failed to compute state root in parallel");
@@ -2331,27 +2363,16 @@ where
         Ok(InsertPayloadOk2::Inserted(BlockStatus2::Valid))
     }
 
-    /// Compute state root for the given hashed post state in parallel.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(_)` if computed successfully.
-    /// Returns `Err(_)` if error was encountered during computation.
-    /// `Err(ProviderError::ConsistentView(_))` can be safely ignored and fallback computation
-    /// should be used instead.
-    fn compute_state_root_parallel(
+    /// Computes the trie input at the provided parent hash.
+    fn compute_trie_input(
         &self,
+        consistent_view: ConsistentDbView<P>,
         parent_hash: B256,
-        hashed_state: &HashedPostState,
-    ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
-        // TODO: when we switch to calculate state root using `StateRootTask` this
-        // method can be still useful to calculate the required `TrieInput` to
-        // create the task.
-        let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
+    ) -> Result<TrieInput, ParallelStateRootError> {
         let mut input = TrieInput::default();
 
         if let Some((historical, blocks)) = self.state.tree_state.blocks_by_hash(parent_hash) {
-            debug!(target: "engine::tree", %parent_hash, %historical, "Calculating state root in parallel, parent found in memory");
+            debug!(target: "engine::tree", %parent_hash, %historical, "Parent found in memory");
             // Retrieve revert state for historical block.
             let revert_state = consistent_view.revert_state(historical)?;
             input.append(revert_state);
@@ -2362,15 +2383,12 @@ where
             }
         } else {
             // The block attaches to canonical persisted parent.
-            debug!(target: "engine::tree", %parent_hash, "Calculating state root in parallel, parent found in disk");
+            debug!(target: "engine::tree", %parent_hash, "Parent found on disk");
             let revert_state = consistent_view.revert_state(parent_hash)?;
             input.append(revert_state);
         }
 
-        // Extend with block we are validating root for.
-        input.append_ref(hashed_state);
-
-        ParallelStateRoot::new(consistent_view, input).incremental_root_with_updates()
+        Ok(input)
     }
 
     /// Handles an error that occurred while inserting a block.
@@ -2648,7 +2666,7 @@ mod tests {
     use reth_primitives::{Block, BlockExt, EthPrimitives};
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::{block_to_payload_v1, payload::block_to_payload_v3};
-    use reth_trie::updates::TrieUpdates;
+    use reth_trie::{updates::TrieUpdates, HashedPostState};
     use std::{
         str::FromStr,
         sync::mpsc::{channel, Sender},
