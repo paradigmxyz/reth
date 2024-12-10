@@ -1,4 +1,5 @@
 use alloy_consensus::BlockHeader;
+use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
 use futures_util::StreamExt;
 use reth_config::config::EtlConfig;
@@ -143,7 +144,10 @@ where
             // Header validation
             self.consensus.validate_header_with_total_difficulty(&header, td).map_err(|error| {
                 StageError::Block {
-                    block: Box::new(SealedHeader::new(header.clone(), header_hash)),
+                    block: Box::new(BlockWithParent::new(
+                        header.parent_hash,
+                        NumHash::new(header.number, header_hash),
+                    )),
                     error: BlockErrorKind::Validation(error),
                 }
             })?;
@@ -272,7 +276,11 @@ where
                 }
                 Some(Err(HeadersDownloaderError::DetachedHead { local_head, header, error })) => {
                     error!(target: "sync::stages::headers", %error, "Cannot attach header to head");
-                    return Poll::Ready(Err(StageError::DetachedHead { local_head, header, error }))
+                    return Poll::Ready(Err(StageError::DetachedHead {
+                        local_head: Box::new(local_head.block_with_parent()),
+                        header: Box::new(header.block_with_parent()),
+                        error,
+                    }))
                 }
                 None => return Poll::Ready(Err(StageError::ChannelClosed)),
             }

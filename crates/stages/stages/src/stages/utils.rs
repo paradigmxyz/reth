@@ -279,5 +279,8 @@ where
 
     let missing_block = Box::new(provider.sealed_header(last_block + 1)?.unwrap_or_default());
 
-    Ok(StageError::MissingStaticFileData { block: missing_block, segment })
+    Ok(StageError::MissingStaticFileData {
+        block: Box::new(missing_block.block_with_parent()),
+        segment,
+    })
 }
