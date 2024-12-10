@@ -162,7 +162,7 @@ where
         let env = self.evm_env_for_block(&block.header, total_difficulty);
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
 
-        self.system_caller.apply_pre_execution_changes(block.block(), &mut evm)?;
+        self.system_caller.apply_pre_execution_changes(&block.block, &mut evm)?;
 
         Ok(())
     }
@@ -186,7 +186,7 @@ where
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                .into());
+                .into())
             }
 
             self.evm_config.fill_tx_env(evm.tx_mut(), transaction, *sender);
@@ -257,7 +257,7 @@ where
         drop(evm);
 
         let mut balance_increments =
-            post_block_balance_increments(&self.chain_spec, block.block(), total_difficulty);
+            post_block_balance_increments(&self.chain_spec, &block.block, total_difficulty);
 
         // Irregular state change at Ethereum DAO hardfork
         if self.chain_spec.fork(EthereumHardfork::Dao).transitions_at_block(block.number) {

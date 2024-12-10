@@ -56,7 +56,7 @@ where
     from_block_with_transactions(
         block.length(),
         block_hash,
-        block.block(),
+        block.block,
         total_difficulty,
         BlockTransactions::Hashes(transactions),
     )
@@ -78,20 +78,20 @@ where
     T: TransactionCompat<<<B as BlockTrait>::Body as BlockBody>::Transaction>,
     B: BlockTrait,
 {
-    let block_hash = block_hash.unwrap_or_else(|| block.block().header().hash_slow());
-    let block_number = block.block().header().number();
-    let base_fee_per_gas = block.block().header().base_fee_per_gas();
+    let block_hash = block_hash.unwrap_or_else(|| block.block.header().hash_slow());
+    let block_number = block.block.header().number();
+    let base_fee_per_gas = block.block.header().base_fee_per_gas();
 
     // NOTE: we can safely remove the body here because not needed to finalize the `Block` in
     // `from_block_with_transactions`, however we need to compute the length before
-    let block_length = block.block().length();
-    let transactions = block.block().body().transactions().to_vec();
-    let transactions_with_senders = transactions.into_iter().zip(block.senders());
+    let block_length = block.block.length();
+    let transactions = block.block.body().transactions().to_vec();
+    let transactions_with_senders = transactions.into_iter().zip(block.senders);
     let transactions = transactions_with_senders
         .enumerate()
         .map(|(idx, (tx, sender))| {
             let tx_hash = *tx.tx_hash();
-            let signed_tx_ec_recovered = tx.with_signer(*sender);
+            let signed_tx_ec_recovered = tx.with_signer(sender);
             let tx_info = TransactionInfo {
                 hash: Some(tx_hash),
                 block_hash: Some(block_hash),
@@ -111,7 +111,7 @@ where
     Ok(from_block_with_transactions(
         block_length,
         block_hash,
-        block.block(),
+        block.block,
         total_difficulty,
         BlockTransactions::Full(transactions),
     ))
@@ -121,7 +121,7 @@ where
 fn from_block_with_transactions<T, B: BlockTrait>(
     block_length: usize,
     block_hash: B256,
-    block: &B,
+    block: B,
     total_difficulty: U256,
     transactions: BlockTransactions<T>,
 ) -> Block<T, Header<B::Header>> {
@@ -137,7 +137,7 @@ fn from_block_with_transactions<T, B: BlockTrait>(
         .ommers()
         .map(|o| o.iter().map(|h| h.hash_slow()).collect())
         .unwrap_or_default();
-    let (header, _) = block.clone().split();
+    let (header, _) = block.split();
     let header = Header::from_consensus(
         Sealed::new_unchecked(header, block_hash),
         Some(total_difficulty),
