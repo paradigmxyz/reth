@@ -2,7 +2,7 @@
 
 use crate::{Block, BlockBody, Transaction, TransactionSigned};
 use alloc::{string::ToString, vec::Vec};
-use alloy_consensus::{constants::EMPTY_TRANSACTIONS, Header, TxEnvelope, Typed2718};
+use alloy_consensus::{constants::EMPTY_TRANSACTIONS, Header, TxEnvelope};
 use alloy_network::{AnyHeader, AnyRpcBlock, AnyRpcTransaction, AnyTxEnvelope};
 use alloy_serde::WithOtherFields;
 use op_alloy_rpc_types as _;
@@ -127,7 +127,7 @@ impl TryFrom<AnyRpcTransaction> for TransactionSigned {
             }
             #[cfg(feature = "optimism")]
             AnyTxEnvelope::Unknown(alloy_network::UnknownTxEnvelope { hash, inner }) => {
-                use alloy_consensus::Transaction as _;
+                use alloy_consensus::{Transaction as _, Typed2718};
 
                 if inner.ty() == crate::TxType::Deposit {
                     let fields: op_alloy_rpc_types::OpTransactionFields = inner

@@ -624,7 +624,7 @@ impl<T: Transaction> BlockBody<T> {
     /// Returns an iterator over all blob transactions of the block
     #[inline]
     pub fn blob_transactions_iter(&self) -> impl Iterator<Item = &T> + '_ {
-        self.transactions.iter().filter(|tx| Typed2718::is_eip4844(tx))
+        self.transactions.iter().filter(Typed2718::is_eip4844)
     }
 
     /// Returns only the blob transactions, if any, from the block body.
