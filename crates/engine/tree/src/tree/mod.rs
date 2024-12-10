@@ -1328,7 +1328,7 @@ where
 
         // Pipeline unwound, memorize the invalid block and wait for CL for next sync target.
         if let ControlFlow::Unwind { bad_block, .. } = ctrl {
-            warn!(target: "engine::tree", invalid_hash=?bad_block.hash(), invalid_number=?bad_block.number, "Bad block detected in unwind");
+            warn!(target: "engine::tree", invalid_block=?bad_block, "Bad block detected in unwind");
             // update the `invalid_headers` cache with the new invalid header
             self.state.invalid_headers.insert(*bad_block);
             return Ok(())
@@ -1678,14 +1678,14 @@ where
         // iterate over ancestors in the invalid cache
         // until we encounter the first valid ancestor
         let mut current_hash = parent_hash;
-        let mut current_header = self.state.invalid_headers.get(&current_hash);
-        while let Some(header) = current_header {
-            current_hash = header.parent_hash;
-            current_header = self.state.invalid_headers.get(&current_hash);
+        let mut current_block = self.state.invalid_headers.get(&current_hash);
+        while let Some(block_with_parent) = current_block {
+            current_hash = block_with_parent.parent;
+            current_block = self.state.invalid_headers.get(&current_hash);
 
             // If current_header is None, then the current_hash does not have an invalid
             // ancestor in the cache, check its presence in blockchain tree
-            if current_header.is_none() && self.block_by_hash(current_hash)?.is_some() {
+            if current_block.is_none() && self.block_by_hash(current_hash)?.is_some() {
                 return Ok(Some(current_hash))
             }
         }
@@ -1735,7 +1735,7 @@ where
         let Some(header) = self.state.invalid_headers.get(&check) else { return Ok(None) };
 
         // populate the latest valid hash field
-        let status = self.prepare_invalid_response(header.parent_hash)?;
+        let status = self.prepare_invalid_response(header.parent)?;
 
         // insert the head block into the invalid header cache
         self.state.invalid_headers.insert_with_invalid_ancestor(head, header);
@@ -1749,7 +1749,7 @@ where
         // check if the head was previously marked as invalid
         let Some(header) = self.state.invalid_headers.get(&head) else { return Ok(None) };
         // populate the latest valid hash field
-        Ok(Some(self.prepare_invalid_response(header.parent_hash)?))
+        Ok(Some(self.prepare_invalid_response(header.parent)?))
     }
 
     /// Validate if block is correct and satisfies all the consensus rules that concern the header
@@ -2395,7 +2395,7 @@ where
         };
 
         // keep track of the invalid header
-        self.state.invalid_headers.insert(block.header);
+        self.state.invalid_headers.insert(block.header.block_with_parent());
         Ok(PayloadStatus::new(
             PayloadStatusEnum::Invalid { validation_error: validation_err.to_string() },
             latest_valid_hash,
