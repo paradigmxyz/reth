@@ -1,11 +1,13 @@
 //! Error handling for the blockchain tree
 
+use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockHash, BlockNumber};
 use reth_consensus::ConsensusError;
 use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
 };
-use reth_primitives::SealedBlock;
+use reth_primitives::{SealedBlock, SealedBlockFor};
+use reth_primitives_traits::{Block, BlockBody};
 pub use reth_storage_errors::provider::ProviderError;
 
 /// Various error cases that can occur when a block violates tree assumptions.
@@ -210,48 +212,48 @@ impl InsertBlockErrorData {
     }
 }
 
-struct InsertBlockErrorDataTwo {
-    block: SealedBlock,
+struct InsertBlockErrorDataTwo<B: Block> {
+    block: SealedBlockFor<B>,
     kind: InsertBlockErrorKindTwo,
 }
 
-impl std::fmt::Display for InsertBlockErrorDataTwo {
+impl<B: Block> std::fmt::Display for InsertBlockErrorDataTwo<B> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
             "Failed to insert block (hash={}, number={}, parent_hash={}): {}",
             self.block.hash(),
-            self.block.number,
-            self.block.parent_hash,
+            self.block.number(),
+            self.block.parent_hash(),
             self.kind
         )
     }
 }
 
-impl std::fmt::Debug for InsertBlockErrorDataTwo {
+impl<B: Block> std::fmt::Debug for InsertBlockErrorDataTwo<B> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("InsertBlockError")
             .field("error", &self.kind)
             .field("hash", &self.block.hash())
-            .field("number", &self.block.number)
-            .field("parent_hash", &self.block.parent_hash)
-            .field("num_txs", &self.block.body.transactions.len())
+            .field("number", &self.block.number())
+            .field("parent_hash", &self.block.parent_hash())
+            .field("num_txs", &self.block.body.transactions().len())
             .finish_non_exhaustive()
     }
 }
 
-impl core::error::Error for InsertBlockErrorDataTwo {
+impl<B: Block> core::error::Error for InsertBlockErrorDataTwo<B> {
     fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         Some(&self.kind)
     }
 }
 
-impl InsertBlockErrorDataTwo {
-    const fn new(block: SealedBlock, kind: InsertBlockErrorKindTwo) -> Self {
+impl<B: Block> InsertBlockErrorDataTwo<B> {
+    const fn new(block: SealedBlockFor<B>, kind: InsertBlockErrorKindTwo) -> Self {
         Self { block, kind }
     }
 
-    fn boxed(block: SealedBlock, kind: InsertBlockErrorKindTwo) -> Box<Self> {
+    fn boxed(block: SealedBlockFor<B>, kind: InsertBlockErrorKindTwo) -> Box<Self> {
         Box::new(Self::new(block, kind))
     }
 }
@@ -259,36 +261,36 @@ impl InsertBlockErrorDataTwo {
 /// Error thrown when inserting a block failed because the block is considered invalid.
 #[derive(thiserror::Error)]
 #[error(transparent)]
-pub struct InsertBlockErrorTwo {
-    inner: Box<InsertBlockErrorDataTwo>,
+pub struct InsertBlockErrorTwo<B: Block> {
+    inner: Box<InsertBlockErrorDataTwo<B>>,
 }
 
 // === impl InsertBlockErrorTwo ===
 
-impl InsertBlockErrorTwo {
+impl<B: Block> InsertBlockErrorTwo<B> {
     /// Create a new `InsertInvalidBlockErrorTwo`
-    pub fn new(block: SealedBlock, kind: InsertBlockErrorKindTwo) -> Self {
+    pub fn new(block: SealedBlockFor<B>, kind: InsertBlockErrorKindTwo) -> Self {
         Self { inner: InsertBlockErrorDataTwo::boxed(block, kind) }
     }
 
     /// Create a new `InsertInvalidBlockError` from a consensus error
-    pub fn consensus_error(error: ConsensusError, block: SealedBlock) -> Self {
+    pub fn consensus_error(error: ConsensusError, block: SealedBlockFor<B>) -> Self {
         Self::new(block, InsertBlockErrorKindTwo::Consensus(error))
     }
 
     /// Create a new `InsertInvalidBlockError` from a consensus error
-    pub fn sender_recovery_error(block: SealedBlock) -> Self {
+    pub fn sender_recovery_error(block: SealedBlockFor<B>) -> Self {
         Self::new(block, InsertBlockErrorKindTwo::SenderRecovery)
     }
 
     /// Create a new `InsertInvalidBlockError` from an execution error
-    pub fn execution_error(error: BlockExecutionError, block: SealedBlock) -> Self {
+    pub fn execution_error(error: BlockExecutionError, block: SealedBlockFor<B>) -> Self {
         Self::new(block, InsertBlockErrorKindTwo::Execution(error))
     }
 
     /// Consumes the error and returns the block that resulted in the error
     #[inline]
-    pub fn into_block(self) -> SealedBlock {
+    pub fn into_block(self) -> SealedBlockFor<B> {
         self.inner.block
     }
 
@@ -300,19 +302,19 @@ impl InsertBlockErrorTwo {
 
     /// Returns the block that resulted in the error
     #[inline]
-    pub const fn block(&self) -> &SealedBlock {
+    pub const fn block(&self) -> &SealedBlockFor<B> {
         &self.inner.block
     }
 
     /// Consumes the type and returns the block and error kind.
     #[inline]
-    pub fn split(self) -> (SealedBlock, InsertBlockErrorKindTwo) {
+    pub fn split(self) -> (SealedBlockFor<B>, InsertBlockErrorKindTwo) {
         let inner = *self.inner;
         (inner.block, inner.kind)
     }
 }
 
-impl std::fmt::Debug for InsertBlockErrorTwo {
+impl<B: Block> std::fmt::Debug for InsertBlockErrorTwo<B> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Debug::fmt(&self.inner, f)
     }
