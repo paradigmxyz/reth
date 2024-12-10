@@ -284,7 +284,7 @@ where
 
         move |state: &EvmState| {
             if let Err(error) = state_hook.send(StateRootMessage::StateUpdate(state.clone())) {
-                error!(target: "engine::root", ?error, "Failed to send state updater");
+                error!(target: "engine::root", ?error, "Failed to send state update");
             }
         }
     }
