@@ -9,6 +9,7 @@ use crate::{
     rpc::{RethRpcAddOns, RethRpcServerHandles, RpcContext},
     DefaultNodeLauncher, LaunchNode, Node, NodeHandle,
 };
+use alloy_eips::eip4844::env_settings::EnvKzgSettings;
 use futures::Future;
 use reth_blockchain_tree::externals::NodeTypesForTree;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
@@ -38,7 +39,6 @@ use reth_provider::{
 };
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, PoolTransaction, TransactionPool};
-use revm_primitives::EnvKzgSettings;
 use secp256k1::SecretKey;
 use std::sync::Arc;
 use tracing::{info, trace, warn};

@@ -68,7 +68,7 @@ reth-engine-util.workspace = true
 reth-prune.workspace = true
 
 # crypto
-alloy-eips.workspace = true
+alloy-eips = { workspace = true, features = ["kzg"] }
 alloy-rlp.workspace = true
 alloy-rpc-types = { workspace = true, features = ["engine"] }
 alloy-consensus.workspace = true
