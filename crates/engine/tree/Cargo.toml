@@ -109,6 +109,7 @@ test-utils = [
     "reth-network-p2p/test-utils",
     "reth-payload-builder/test-utils",
     "reth-primitives/test-utils",
+    "reth-primitives-traits/test-utils",
     "reth-provider/test-utils",
     "reth-prune-types",
     "reth-prune-types?/test-utils",
