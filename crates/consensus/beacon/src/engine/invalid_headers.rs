@@ -42,7 +42,7 @@ impl InvalidHeaderCache {
             let entry = self.headers.get(hash)?;
             entry.hit_count += 1;
             if entry.hit_count < INVALID_HEADER_HIT_EVICTION_THRESHOLD {
-                return Some(entry.header.clone())
+                return Some(entry.header)
             }
         }
         // if we get here, the entry has been hit too many times, so we evict it
