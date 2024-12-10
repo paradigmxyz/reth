@@ -107,14 +107,14 @@ pub enum SparseTrieError {
         /// Path to the node.
         path: Nibbles,
         /// Node that was at the path when revealing.
-        node: Box<dyn core::fmt::Debug>,
+        node: Box<dyn core::fmt::Debug + Send>,
     },
     /// RLP error.
     #[error(transparent)]
     Rlp(#[from] alloy_rlp::Error),
     /// Other.
     #[error(transparent)]
-    Other(#[from] Box<dyn core::error::Error>),
+    Other(#[from] Box<dyn core::error::Error + Send>),
 }
 
 /// Trie witness errors.
