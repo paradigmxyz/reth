@@ -588,7 +588,6 @@ fn update_sparse_trie(
                 if value.is_zero() {
                     trace!(target: "engine::root::sparse", ?address, ?slot, "Removing storage slot");
 
-                    // TODO: handle blinded node error
                     storage_trie.remove_leaf(&slot_nibbles)?;
                 } else {
                     trace!(target: "engine::root::sparse", ?address, ?slot, "Updating storage slot");
