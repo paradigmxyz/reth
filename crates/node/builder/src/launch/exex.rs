@@ -10,7 +10,7 @@ use reth_exex::{
     DEFAULT_EXEX_MANAGER_CAPACITY,
 };
 use reth_node_api::{FullNodeComponents, NodeTypes};
-use reth_primitives::{EthPrimitives, Head};
+use reth_primitives::Head;
 use reth_provider::CanonStateSubscriptions;
 use reth_tracing::tracing::{debug, info};
 use tracing::Instrument;
@@ -25,9 +25,7 @@ pub struct ExExLauncher<Node: FullNodeComponents> {
     config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec>,
 }
 
-impl<Node: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>> + Clone>
-    ExExLauncher<Node>
-{
+impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
     /// Create a new `ExExLauncher` with the given extensions.
     pub const fn new(
         head: Head,
@@ -42,7 +40,9 @@ impl<Node: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>> + Cl
     ///
     /// Spawns all extensions and returns the handle to the exex manager if any extensions are
     /// installed.
-    pub async fn launch(self) -> eyre::Result<Option<ExExManagerHandle>> {
+    pub async fn launch(
+        self,
+    ) -> eyre::Result<Option<ExExManagerHandle<<Node::Types as NodeTypes>::Primitives>>> {
         let Self { head, extensions, components, config_container } = self;
 
         if extensions.is_empty() {

@@ -8,7 +8,7 @@ use reth_engine_tree::{
     backfill::PipelineSync,
     download::BasicBlockDownloader,
     engine::{EngineApiKind, EngineApiRequest, EngineApiRequestHandler, EngineHandler},
-    persistence::{PersistenceHandle, PersistenceNodeTypes},
+    persistence::PersistenceHandle,
     tree::{EngineApiTreeHandler, InvalidBlockHook, TreeConfig},
 };
 pub use reth_engine_tree::{
@@ -59,7 +59,7 @@ where
 
 impl<N, Client, E> EngineService<N, Client, E>
 where
-    N: EngineNodeTypes + PersistenceNodeTypes,
+    N: EngineNodeTypes,
     Client: EthBlockClient + 'static,
     E: BlockExecutorProvider<Primitives = N::Primitives> + 'static,
 {
