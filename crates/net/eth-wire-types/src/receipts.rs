@@ -21,9 +21,9 @@ pub struct GetReceipts(
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp)]
-pub struct Receipts(
+pub struct Receipts<T = Receipt>(
     /// Each receipt hash should correspond to a block hash in the request.
-    pub Vec<Vec<ReceiptWithBloom<Receipt>>>,
+    pub Vec<Vec<ReceiptWithBloom<T>>>,
 );
 
 #[cfg(test)]
