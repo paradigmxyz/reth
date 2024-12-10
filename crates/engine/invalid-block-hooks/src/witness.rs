@@ -89,7 +89,7 @@ where
             SystemCaller::new(self.evm_config.clone(), self.provider.chain_spec());
 
         // Apply pre-block system contract calls.
-        system_caller.apply_pre_execution_changes(&block.clone().unseal().block, &mut evm)?;
+        system_caller.apply_pre_execution_changes(block.clone().unseal().block(), &mut evm)?;
 
         // Re-execute all of the transactions in the block to load all touched accounts into
         // the cache DB.
@@ -109,7 +109,7 @@ where
         // NOTE: This is not mut because we are not doing the DAO irregular state change here
         let balance_increments = post_block_balance_increments(
             self.provider.chain_spec().as_ref(),
-            &block.clone().unseal().block,
+            block.clone().unseal().block(),
             U256::MAX,
         );
 
