@@ -1,5 +1,7 @@
 //! Node builder test that customizes priority of transactions in the block.
 
+use core::fmt;
+
 use alloy_consensus::TxEip1559;
 use alloy_genesis::Genesis;
 use alloy_network::TxSignerSync;
@@ -100,6 +102,7 @@ where
             ChainSpec = OpChainSpec,
             Primitives = OpPrimitives,
         >,
+        Provider: fmt::Debug,
     >,
 {
     let RollupArgs { disable_txpool_gossip, compute_pending_block, discovery_v4, .. } =

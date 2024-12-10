@@ -7,6 +7,7 @@ use crate::{
     OpEngineTypes,
 };
 use alloy_consensus::Header;
+use core::fmt;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_db::transaction::{DbTx, DbTxMut};
@@ -150,6 +151,7 @@ impl OpNode {
                 ChainSpec = OpChainSpec,
                 Primitives = OpPrimitives,
             >,
+            Provider: fmt::Debug,
         >,
     {
         let RollupArgs { disable_txpool_gossip, compute_pending_block, discovery_v4, .. } = args;
@@ -175,6 +177,7 @@ where
             Primitives = OpPrimitives,
             Storage = OpStorage,
         >,
+        Provider: fmt::Debug,
     >,
 {
     type ComponentsBuilder = ComponentsBuilder<
@@ -673,12 +676,15 @@ pub struct OpConsensusBuilder;
 
 impl<Node> ConsensusBuilder<Node> for OpConsensusBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
+    Node: FullNodeTypes<
+        Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>,
+        Provider: fmt::Debug,
+    >,
 {
-    type Consensus = Arc<OpBeaconConsensus>;
+    type Consensus = Arc<OpBeaconConsensus<Node::Provider>>;
 
     async fn build_consensus(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
-        Ok(Arc::new(OpBeaconConsensus::new(ctx.chain_spec())))
+        Ok(Arc::new(OpBeaconConsensus::new(ctx.chain_spec(), ctx.provider().clone())))
     }
 }
 
