@@ -16,7 +16,7 @@ pub type BodiesFut<B = reth_primitives::BlockBody> =
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait BodiesClient: DownloadClient {
     /// The body type this client fetches.
-    type Body: BlockBody + Send + Sync + Unpin + 'static;
+    type Body: BlockBody;
     /// The output of the request future for querying block bodies.
     type Output: Future<Output = PeerRequestResult<Vec<Self::Body>>> + Sync + Send + Unpin;
 

@@ -54,13 +54,6 @@ where
         self.inner.clear();
         self.last_requested_block_number.take();
     }
-}
-
-impl<H, B> BodiesRequestQueue<H, B>
-where
-    H: BlockHeader,
-    B: BodiesClient + 'static,
-{
     /// Add new request to the queue.
     /// Expects a sorted list of headers.
     pub(crate) fn push_new_request(

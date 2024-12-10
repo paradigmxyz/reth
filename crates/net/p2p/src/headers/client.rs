@@ -58,7 +58,7 @@ pub type HeadersFut<H = Header> =
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait HeadersClient: DownloadClient {
     /// The header type this client fetches.
-    type Header: BlockHeader + Send + Sync + Unpin;
+    type Header: BlockHeader;
     /// The headers future type
     type Output: Future<Output = PeerRequestResult<Vec<Self::Header>>> + Sync + Send + Unpin;
 
