@@ -9,18 +9,24 @@ use std::{fmt::Debug, ops::RangeInclusive};
 /// A [`BodyDownloader`] implementation that does nothing.
 #[derive(Debug, Default)]
 #[non_exhaustive]
-pub struct NoopBodiesDownloader<B>(std::marker::PhantomData<B>);
+pub struct NoopBodiesDownloader<H, B> {
+    _header: std::marker::PhantomData<H>,
+    _body: std::marker::PhantomData<B>,
+}
 
-impl<B: Debug + Send + Sync + Unpin + 'static> BodyDownloader for NoopBodiesDownloader<B> {
+impl<H: Debug + Send + Sync + Unpin + 'static, B: Debug + Send + Sync + Unpin + 'static>
+    BodyDownloader for NoopBodiesDownloader<H, B>
+{
     type Body = B;
+    type Header = H;
 
     fn set_download_range(&mut self, _: RangeInclusive<BlockNumber>) -> DownloadResult<()> {
         Ok(())
     }
 }
 
-impl<B> Stream for NoopBodiesDownloader<B> {
-    type Item = Result<Vec<BlockResponse<alloy_consensus::Header, B>>, DownloadError>;
+impl<H, B> Stream for NoopBodiesDownloader<H, B> {
+    type Item = Result<Vec<BlockResponse<H, B>>, DownloadError>;
 
     fn poll_next(
         self: std::pin::Pin<&mut Self>,
