@@ -18,7 +18,7 @@ use reth_node_core::{
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_payload_builder::PayloadStore;
-use reth_primitives::EthPrimitives;
+use reth_primitives::{EthPrimitives, PooledTransactionsElement};
 use reth_provider::providers::ProviderNodeTypes;
 use reth_rpc::{
     eth::{EthApiTypes, FullEthApiServer},
@@ -33,6 +33,7 @@ use reth_rpc_builder::{
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
+use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::sync::Arc;
 
 use crate::EthApiBuilderCtx;
@@ -403,7 +404,9 @@ where
 
 impl<N, EthApi, EV> RpcAddOns<N, EthApi, EV>
 where
-    N: FullNodeComponents,
+    N: FullNodeComponents<
+        Pool: TransactionPool<Transaction: PoolTransaction<Pooled = PooledTransactionsElement>>,
+    >,
     EthApi: EthApiTypes
         + FullEthApiServer<Provider = N::Provider, Pool = N::Pool, Network = N::Network>
         + AddDevSigners
@@ -531,7 +534,10 @@ where
 
 impl<N, EthApi, EV> NodeAddOns<N> for RpcAddOns<N, EthApi, EV>
 where
-    N: FullNodeComponents<Types: ProviderNodeTypes<Primitives = EthPrimitives>>,
+    N: FullNodeComponents<
+        Types: ProviderNodeTypes<Primitives = EthPrimitives>,
+        Pool: TransactionPool<Transaction: PoolTransaction<Pooled = PooledTransactionsElement>>,
+    >,
     EthApi: EthApiTypes
         + FullEthApiServer<Provider = N::Provider, Pool = N::Pool, Network = N::Network>
         + AddDevSigners
