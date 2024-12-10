@@ -1670,10 +1670,22 @@ impl<N: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>>
 impl<N: NodePrimitives> WithdrawalsProvider for StaticFileProvider<N> {
     fn withdrawals_by_block(
         &self,
-        _id: BlockHashOrNumber,
-        _timestamp: u64,
+        id: BlockHashOrNumber,
+        _: u64,
     ) -> ProviderResult<Option<Withdrawals>> {
-        // Required data not present in static_files
+        if let Some(num) = id.as_number() {
+            return self
+                .get_segment_provider_from_block(StaticFileSegment::BlockMeta, num, None)
+                .and_then(|provider| provider.withdrawals_by_block(num))
+                .or_else(|err| {
+                    if let ProviderError::MissingStaticFileBlock(_, _) = err {
+                        Ok(None)
+                    } else {
+                        Err(err)
+                    }
+                })
+        }
+        // Only accepts block number quries
         Err(ProviderError::UnsupportedProvider)
     }
 
@@ -1684,16 +1696,35 @@ impl<N: NodePrimitives> WithdrawalsProvider for StaticFileProvider<N> {
 }
 
 impl<N: FullNodePrimitives<BlockHeader: Value>> OmmersProvider for StaticFileProvider<N> {
-    fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
-        // Required data not present in static_files
+    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
+        if let Some(num) = id.as_number() {
+            return self
+                .get_segment_provider_from_block(StaticFileSegment::BlockMeta, num, None)
+                .and_then(|provider| provider.ommers(id))
+                .or_else(|err| {
+                    if let ProviderError::MissingStaticFileBlock(_, _) = err {
+                        Ok(None)
+                    } else {
+                        Err(err)
+                    }
+                })
+        }
+        // Only accepts block number quries
         Err(ProviderError::UnsupportedProvider)
     }
 }
 
-impl<N: Send + Sync> BlockBodyIndicesProvider for StaticFileProvider<N> {
-    fn block_body_indices(&self, _num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        // Required data not present in static_files
-        Err(ProviderError::UnsupportedProvider)
+impl<N: NodePrimitives> BlockBodyIndicesProvider for StaticFileProvider<N> {
+    fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
+        self.get_segment_provider_from_block(StaticFileSegment::BlockMeta, num, None)
+            .and_then(|provider| provider.block_body_indices(num))
+            .or_else(|err| {
+                if let ProviderError::MissingStaticFileBlock(_, _) = err {
+                    Ok(None)
+                } else {
+                    Err(err)
+                }
+            })
     }
 }
 

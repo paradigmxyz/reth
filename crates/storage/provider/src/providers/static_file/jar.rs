@@ -6,19 +6,27 @@ use crate::{
     to_range, BlockHashReader, BlockNumReader, HeaderProvider, ReceiptProvider,
     TransactionsProvider,
 };
-use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
+use alloy_eips::{
+    eip2718::Encodable2718,
+    eip4895::{Withdrawal, Withdrawals},
+    BlockHashOrNumber,
+};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use reth_chainspec::ChainInfo;
 use reth_db::{
+    models::StoredBlockBodyIndices,
     static_file::{
-        BlockHashMask, HeaderMask, HeaderWithHashMask, ReceiptMask, StaticFileCursor,
-        TDWithHashMask, TotalDifficultyMask, TransactionMask,
+        BlockHashMask, BodyIndiceMask, HeaderMask, HeaderWithHashMask, OmmerMask, ReceiptMask,
+        StaticFileCursor, TDWithHashMask, TotalDifficultyMask, TransactionMask, WithdrawalMask,
     },
     table::{Decompress, Value},
 };
-use reth_node_types::NodePrimitives;
+use reth_node_types::{FullNodePrimitives, NodePrimitives};
 use reth_primitives::{transaction::recover_signers, SealedHeader, TransactionMeta};
 use reth_primitives_traits::SignedTransaction;
+use reth_storage_api::{
+    BlockBodyIndicesProvider, BlockReader, OmmersProvider, WithdrawalsProvider,
+};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     fmt::Debug,
@@ -348,5 +356,43 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction, Receipt: Decomp
             }
         }
         Ok(receipts)
+    }
+}
+
+impl<N: NodePrimitives> WithdrawalsProvider for StaticFileJarProvider<'_, N> {
+    fn withdrawals_by_block(
+        &self,
+        id: BlockHashOrNumber,
+        _: u64,
+    ) -> ProviderResult<Option<Withdrawals>> {
+        if let Some(num) = id.as_number() {
+            return Ok(self.cursor()?.get_one::<WithdrawalMask>(num.into())?.map(|s| s.withdrawals))
+        }
+        // Only accepts block number quries
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
+        // Required data not present in static_files
+        Err(ProviderError::UnsupportedProvider)
+    }
+}
+
+impl<N: FullNodePrimitives<BlockHeader: Value>> OmmersProvider for StaticFileJarProvider<'_, N> {
+    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
+        if let Some(num) = id.as_number() {
+            return Ok(self
+                .cursor()?
+                .get_one::<OmmerMask<Self::Header>>(num.into())?
+                .map(|s| s.ommers))
+        }
+        // Only accepts block number quries
+        Err(ProviderError::UnsupportedProvider)
+    }
+}
+
+impl<N: NodePrimitives> BlockBodyIndicesProvider for StaticFileJarProvider<'_, N> {
+    fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
+        self.cursor()?.get_one::<BodyIndiceMask>(num.into())
     }
 }
