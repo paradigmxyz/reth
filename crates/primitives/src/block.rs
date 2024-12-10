@@ -638,12 +638,11 @@ impl<T: InMemorySize> InMemorySize for BlockBody<T> {
     /// Calculates a heuristic for the in-memory size of the [`BlockBody`].
     #[inline]
     fn size(&self) -> usize {
-        self.transactions.iter().map(T::size).sum::<usize>()
-            + self.transactions.capacity() * core::mem::size_of::<T>()
-            + self.ommers.iter().map(Header::size).sum::<usize>()
-            + self.ommers.capacity() * core::mem::size_of::<Header>()
-            + self
-                .withdrawals
+        self.transactions.iter().map(T::size).sum::<usize>() +
+            self.transactions.capacity() * core::mem::size_of::<T>() +
+            self.ommers.iter().map(Header::size).sum::<usize>() +
+            self.ommers.capacity() * core::mem::size_of::<Header>() +
+            self.withdrawals
                 .as_ref()
                 .map_or(core::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
     }

@@ -16,22 +16,23 @@ impl TryFrom<AnyRpcBlock> for Block {
         let block = block.inner;
 
         let transactions = {
-            let transactions: Result<Vec<TransactionSigned>, ConversionError> =
-                match block.transactions {
-                    alloy_rpc_types::BlockTransactions::Full(transactions) => {
-                        transactions.into_iter().map(|tx| tx.try_into()).collect()
+            let transactions: Result<Vec<TransactionSigned>, ConversionError> = match block
+                .transactions
+            {
+                alloy_rpc_types::BlockTransactions::Full(transactions) => {
+                    transactions.into_iter().map(|tx| tx.try_into()).collect()
+                }
+                alloy_rpc_types::BlockTransactions::Hashes(_) |
+                alloy_rpc_types::BlockTransactions::Uncle => {
+                    // alloy deserializes empty blocks into `BlockTransactions::Hashes`, if the tx
+                    // root is the empty root then we can just return an empty vec.
+                    if block.header.transactions_root == EMPTY_TRANSACTIONS {
+                        Ok(Vec::new())
+                    } else {
+                        Err(ConversionError::Custom("missing transactions".to_string()))
                     }
-                    alloy_rpc_types::BlockTransactions::Hashes(_)
-                    | alloy_rpc_types::BlockTransactions::Uncle => {
-                        // alloy deserializes empty blocks into `BlockTransactions::Hashes`, if the tx
-                        // root is the empty root then we can just return an empty vec.
-                        if block.header.transactions_root == EMPTY_TRANSACTIONS {
-                            Ok(Vec::new())
-                        } else {
-                            Err(ConversionError::Custom("missing transactions".to_string()))
-                        }
-                    }
-                };
+                }
+            };
             transactions?
         };
 

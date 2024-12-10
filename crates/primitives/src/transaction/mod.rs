@@ -227,10 +227,10 @@ impl Transaction {
     pub fn set_chain_id(&mut self, chain_id: u64) {
         match self {
             Self::Legacy(TxLegacy { chain_id: ref mut c, .. }) => *c = Some(chain_id),
-            Self::Eip2930(TxEip2930 { chain_id: ref mut c, .. })
-            | Self::Eip1559(TxEip1559 { chain_id: ref mut c, .. })
-            | Self::Eip4844(TxEip4844 { chain_id: ref mut c, .. })
-            | Self::Eip7702(TxEip7702 { chain_id: ref mut c, .. }) => *c = chain_id,
+            Self::Eip2930(TxEip2930 { chain_id: ref mut c, .. }) |
+            Self::Eip1559(TxEip1559 { chain_id: ref mut c, .. }) |
+            Self::Eip4844(TxEip4844 { chain_id: ref mut c, .. }) |
+            Self::Eip7702(TxEip7702 { chain_id: ref mut c, .. }) => *c = chain_id,
             #[cfg(feature = "optimism")]
             Self::Deposit(_) => { /* noop */ }
         }
@@ -822,9 +822,9 @@ impl Hash for TransactionSigned {
 
 impl PartialEq for TransactionSigned {
     fn eq(&self, other: &Self) -> bool {
-        self.signature == other.signature
-            && self.transaction == other.transaction
-            && self.tx_hash() == other.tx_hash()
+        self.signature == other.signature &&
+            self.transaction == other.transaction &&
+            self.tx_hash() == other.tx_hash()
     }
 }
 
