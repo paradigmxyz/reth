@@ -2893,12 +2893,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     fn append_block_bodies(
         &self,
         bodies: Vec<(BlockNumber, Option<BodyTy<N>>)>,
-        write_transactions_to: StorageLocation,
+        write_to: StorageLocation,
     ) -> ProviderResult<()> {
         let Some(from_block) = bodies.first().map(|(block, _)| *block) else { return Ok(()) };
 
         // Initialize writer if we will be writing transactions to staticfiles
-        let mut tx_static_writer = write_transactions_to
+        let mut tx_static_writer = write_to
             .static_files()
             .then(|| {
                 self.static_file_provider.get_writer(from_block, StaticFileSegment::Transactions)
@@ -2909,7 +2909,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         let mut tx_block_cursor = self.tx.cursor_write::<tables::TransactionBlocks>()?;
 
         // Initialize cursor if we will be writing transactions to database
-        let mut tx_cursor = write_transactions_to
+        let mut tx_cursor = write_to
             .database()
             .then(|| self.tx.cursor_write::<tables::Transactions<TxTy<N>>>())
             .transpose()?;
@@ -2962,7 +2962,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             );
         }
 
-        self.storage.writer().write_block_bodies(self, bodies)?;
+        self.storage.writer().write_block_bodies(self, bodies, write_to)?;
 
         Ok(())
     }
@@ -2970,7 +2970,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     fn remove_blocks_above(
         &self,
         block: BlockNumber,
-        remove_transactions_from: StorageLocation,
+        remove_from: StorageLocation,
     ) -> ProviderResult<()> {
         let mut canonical_headers_cursor = self.tx.cursor_write::<tables::CanonicalHeaders>()?;
         let mut rev_headers = canonical_headers_cursor.walk_back(None)?;
@@ -3010,7 +3010,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
 
         self.remove::<tables::TransactionSenders>(unwind_tx_from..)?;
 
-        self.remove_bodies_above(block, remove_transactions_from)?;
+        self.remove_bodies_above(block, remove_from)?;
 
         Ok(())
     }
@@ -3018,9 +3018,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     fn remove_bodies_above(
         &self,
         block: BlockNumber,
-        remove_transactions_from: StorageLocation,
+        remove_from: StorageLocation,
     ) -> ProviderResult<()> {
-        self.storage.writer().remove_block_bodies_above(self, block)?;
+        self.storage.writer().remove_block_bodies_above(self, block, remove_from)?;
 
         // First transaction to be removed
         let unwind_tx_from = self
@@ -3032,11 +3032,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         self.remove::<tables::BlockBodyIndices>(block + 1..)?;
         self.remove::<tables::TransactionBlocks>(unwind_tx_from..)?;
 
-        if remove_transactions_from.database() {
+        if remove_from.database() {
             self.remove::<tables::Transactions<TxTy<N>>>(unwind_tx_from..)?;
         }
 
-        if remove_transactions_from.static_files() {
+        if remove_from.static_files() {
             let static_file_tx_num = self
                 .static_file_provider
                 .get_highest_static_file_tx(StaticFileSegment::Transactions);
