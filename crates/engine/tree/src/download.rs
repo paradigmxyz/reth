@@ -38,9 +38,9 @@ pub enum DownloadAction {
 
 /// Outcome of downloaded blocks.
 #[derive(Debug)]
-pub enum DownloadOutcome {
+pub enum DownloadOutcome<B = SealedBlockWithSenders> {
     /// Downloaded blocks.
-    Blocks(Vec<SealedBlockWithSenders>),
+    Blocks(Vec<B>),
     /// New download started.
     NewDownloadStarted {
         /// How many blocks are pending in this download.
