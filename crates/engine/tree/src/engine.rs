@@ -238,14 +238,14 @@ impl EngineApiKind {
 
 /// The request variants that the engine API handler can receive.
 #[derive(Debug)]
-pub enum EngineApiRequest<T: EngineTypes> {
+pub enum EngineApiRequest<T: EngineTypes, N: NodePrimitives> {
     /// A request received from the consensus engine.
     Beacon(BeaconEngineMessage<T>),
     /// Request to insert an already executed block, e.g. via payload building.
-    InsertExecutedBlock(ExecutedBlock),
+    InsertExecutedBlock(ExecutedBlock<N>),
 }
 
-impl<T: EngineTypes> Display for EngineApiRequest<T> {
+impl<T: EngineTypes, N: NodePrimitives> Display for EngineApiRequest<T, N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Beacon(msg) => msg.fmt(f),
@@ -256,14 +256,16 @@ impl<T: EngineTypes> Display for EngineApiRequest<T> {
     }
 }
 
-impl<T: EngineTypes> From<BeaconEngineMessage<T>> for EngineApiRequest<T> {
+impl<T: EngineTypes, N: NodePrimitives> From<BeaconEngineMessage<T>> for EngineApiRequest<T, N> {
     fn from(msg: BeaconEngineMessage<T>) -> Self {
         Self::Beacon(msg)
     }
 }
 
-impl<T: EngineTypes> From<EngineApiRequest<T>> for FromEngine<EngineApiRequest<T>> {
-    fn from(req: EngineApiRequest<T>) -> Self {
+impl<T: EngineTypes, N: NodePrimitives> From<EngineApiRequest<T, N>>
+    for FromEngine<EngineApiRequest<T, N>>
+{
+    fn from(req: EngineApiRequest<T, N>) -> Self {
         Self::Request(req)
     }
 }

@@ -17,7 +17,7 @@ pub use reth_engine_tree::{
 };
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network_p2p::EthBlockClient;
-use reth_node_types::{BlockTy, NodeTypesWithEngine};
+use reth_node_types::{BlockTy, NodeTypes, NodeTypesWithEngine};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives::EthPrimitives;
 use reth_provider::{providers::BlockchainProvider2, ProviderFactory};
@@ -37,7 +37,9 @@ pub type EngineMessageStream<T> = Pin<Box<dyn Stream<Item = BeaconEngineMessage<
 /// Alias for chain orchestrator.
 type EngineServiceType<N, Client> = ChainOrchestrator<
     EngineHandler<
-        EngineApiRequestHandler<EngineApiRequest<<N as NodeTypesWithEngine>::Engine>>,
+        EngineApiRequestHandler<
+            EngineApiRequest<<N as NodeTypesWithEngine>::Engine, <N as NodeTypes>::Primitives>,
+        >,
         EngineMessageStream<<N as NodeTypesWithEngine>::Engine>,
         BasicBlockDownloader<Client>,
     >,
