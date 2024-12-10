@@ -14,8 +14,8 @@ use reth_trie::{
     updates::{TrieUpdates, TrieUpdatesSorted},
     HashedPostState, HashedPostStateSorted, HashedStorage, MultiProof, Nibbles, TrieInput,
 };
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseProof, DatabaseTrieCursorFactory};
-use reth_trie_parallel::root::ParallelStateRootError;
+use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
+use reth_trie_parallel::{proof::ParallelProof, root::ParallelStateRootError};
 use reth_trie_sparse::{
     errors::{SparseStateTrieResult, SparseTrieError},
     SparseStateTrie,
@@ -288,7 +288,9 @@ where
         let state_hook = StateHookSender::new(self.tx.clone());
 
         move |state: &EvmState| {
-            let _ = state_hook.send(StateRootMessage::StateUpdate(state.clone()));
+            if let Err(error) = state_hook.send(StateRootMessage::StateUpdate(state.clone())) {
+                error!(target: "engine::root", ?error, "Failed to send state update");
+            }
         }
     }
 
@@ -318,21 +320,8 @@ where
             "Spawning proof task"
         );
         rayon::spawn(move || {
-            let provider = match view.provider_ro() {
-                Ok(provider) => provider,
-                Err(error) => {
-                    error!(target: "engine::root", ?error, "Could not get provider");
-                    return;
-                }
-            };
+            let result = ParallelProof::new(view, input.clone()).multiproof(proof_targets);
 
-            // TODO: replace with parallel proof
-            let result = Proof::overlay_multiproof(
-                provider.tx_ref(),
-                // TODO(alexey): this clone can be expensive, we should avoid it
-                input.as_ref().clone(),
-                proof_targets,
-            );
             match result {
                 Ok(proof) => {
                     let _ = state_root_message_sender.send(StateRootMessage::ProofCalculated {

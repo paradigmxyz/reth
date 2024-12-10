@@ -120,7 +120,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
 
         // Unwinding does not require a valid executor
-        let executor = NoopBlockExecutorProvider::default();
+        let executor = NoopBlockExecutorProvider::<N::Primitives>::default();
 
         let builder = if self.offline {
             Pipeline::<N>::builder().add_stages(

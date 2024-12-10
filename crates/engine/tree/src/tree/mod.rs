@@ -36,8 +36,8 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_primitives::{
-    Block, EthPrimitives, GotExpected, NodePrimitives, SealedBlock, SealedBlockWithSenders,
-    SealedHeader,
+    EthPrimitives, GotExpected, NodePrimitives, SealedBlock, SealedBlockFor,
+    SealedBlockWithSenders, SealedHeader,
 };
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, ExecutionOutcome,
@@ -56,7 +56,6 @@ use std::{
     cmp::Ordering,
     collections::{btree_map, hash_map, BTreeMap, VecDeque},
     fmt::Debug,
-    marker::PhantomData,
     ops::Bound,
     sync::{
         mpsc::{Receiver, RecvError, RecvTimeoutError, Sender},
@@ -132,7 +131,7 @@ impl<N: NodePrimitives> TreeState<N> {
     }
 
     /// Returns the block by hash.
-    fn block_by_hash(&self, hash: B256) -> Option<Arc<SealedBlock<N::BlockHeader, N::BlockBody>>> {
+    fn block_by_hash(&self, hash: B256) -> Option<Arc<SealedBlockFor<N::Block>>> {
         self.blocks_by_hash.get(&hash).map(|b| b.block.clone())
     }
 
@@ -389,19 +388,19 @@ impl<N: NodePrimitives> TreeState<N> {
 ///
 /// This type is not shareable.
 #[derive(Debug)]
-pub struct EngineApiTreeState {
+pub struct EngineApiTreeState<N: NodePrimitives> {
     /// Tracks the state of the blockchain tree.
-    tree_state: TreeState,
+    tree_state: TreeState<N>,
     /// Tracks the forkchoice state updates received by the CL.
     forkchoice_state_tracker: ForkchoiceStateTracker,
     /// Buffer of detached blocks.
-    buffer: BlockBuffer,
+    buffer: BlockBuffer<N::Block>,
     /// Tracks the header of invalid payloads that were rejected by the engine because they're
     /// invalid.
     invalid_headers: InvalidHeaderCache,
 }
 
-impl EngineApiTreeState {
+impl<N: NodePrimitives> EngineApiTreeState<N> {
     fn new(
         block_buffer_limit: u32,
         max_invalid_header_cache_length: u32,
@@ -477,10 +476,10 @@ where
 {
     provider: P,
     executor_provider: E,
-    consensus: Arc<dyn FullConsensus>,
+    consensus: Arc<dyn FullConsensus<N>>,
     payload_validator: V,
     /// Keeps track of internals such as executed and buffered blocks.
-    state: EngineApiTreeState,
+    state: EngineApiTreeState<N>,
     /// The half for sending messages to the engine.
     ///
     /// This is kept so that we can queue in messages to ourself that we can process later, for
@@ -489,20 +488,20 @@ where
     /// them one by one so that we can handle incoming engine API in between and don't become
     /// unresponsive. This can happen during live sync transition where we're trying to close the
     /// gap (up to 3 epochs of blocks in the worst case).
-    incoming_tx: Sender<FromEngine<EngineApiRequest<T>>>,
+    incoming_tx: Sender<FromEngine<EngineApiRequest<T, N>>>,
     /// Incoming engine API requests.
-    incoming: Receiver<FromEngine<EngineApiRequest<T>>>,
+    incoming: Receiver<FromEngine<EngineApiRequest<T, N>>>,
     /// Outgoing events that are emitted to the handler.
-    outgoing: UnboundedSender<EngineApiEvent>,
+    outgoing: UnboundedSender<EngineApiEvent<N>>,
     /// Channels to the persistence layer.
-    persistence: PersistenceHandle,
+    persistence: PersistenceHandle<N>,
     /// Tracks the state changes of the persistence task.
     persistence_state: PersistenceState,
     /// Flag indicating the state of the node's backfill synchronization process.
     backfill_sync_state: BackfillSyncState,
     /// Keeps track of the state of the canonical chain that isn't persisted yet.
     /// This is intended to be accessed from external sources, such as rpc.
-    canonical_in_memory_state: CanonicalInMemoryState,
+    canonical_in_memory_state: CanonicalInMemoryState<N>,
     /// Handle to the payload builder that will receive payload attributes for valid forkchoice
     /// updates
     payload_builder: PayloadBuilderHandle<T>,
@@ -514,8 +513,6 @@ where
     invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
     /// The engine API variant of this handler
     engine_kind: EngineApiKind,
-    /// Captures the types the engine operates on
-    _primtives: PhantomData<N>,
 }
 
 impl<N, P: Debug, E: Debug, T: EngineTypes + Debug, V: Debug> std::fmt::Debug
@@ -549,6 +546,7 @@ where
     N: NodePrimitives<
         Block = reth_primitives::Block,
         BlockHeader = reth_primitives::Header,
+        BlockBody = reth_primitives::BlockBody,
         Receipt = reth_primitives::Receipt,
     >,
     P: DatabaseProviderFactory
@@ -565,16 +563,16 @@ where
     V: EngineValidator<T, Block = reth_primitives::Block>,
 {
     /// Creates a new [`EngineApiTreeHandler`].
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         provider: P,
         executor_provider: E,
-        consensus: Arc<dyn FullConsensus>,
+        consensus: Arc<dyn FullConsensus<N>>,
         payload_validator: V,
-        outgoing: UnboundedSender<EngineApiEvent>,
-        state: EngineApiTreeState,
-        canonical_in_memory_state: CanonicalInMemoryState,
-        persistence: PersistenceHandle,
+        outgoing: UnboundedSender<EngineApiEvent<N>>,
+        state: EngineApiTreeState<N>,
+        canonical_in_memory_state: CanonicalInMemoryState<N>,
+        persistence: PersistenceHandle<N>,
         persistence_state: PersistenceState,
         payload_builder: PayloadBuilderHandle<T>,
         config: TreeConfig,
@@ -600,7 +598,6 @@ where
             incoming_tx,
             invalid_block_hook: Box::new(NoopInvalidBlockHook),
             engine_kind,
-            _primtives: Default::default(),
         }
     }
 
@@ -614,19 +611,19 @@ where
     ///
     /// Returns the sender through which incoming requests can be sent to the task and the receiver
     /// end of a [`EngineApiEvent`] unbounded channel to receive events from the engine.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::complexity)]
     pub fn spawn_new(
         provider: P,
         executor_provider: E,
-        consensus: Arc<dyn FullConsensus>,
+        consensus: Arc<dyn FullConsensus<N>>,
         payload_validator: V,
-        persistence: PersistenceHandle,
+        persistence: PersistenceHandle<N>,
         payload_builder: PayloadBuilderHandle<T>,
-        canonical_in_memory_state: CanonicalInMemoryState,
+        canonical_in_memory_state: CanonicalInMemoryState<N>,
         config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
         kind: EngineApiKind,
-    ) -> (Sender<FromEngine<EngineApiRequest<T>>>, UnboundedReceiver<EngineApiEvent>) {
+    ) -> (Sender<FromEngine<EngineApiRequest<T, N>>>, UnboundedReceiver<EngineApiEvent<N>>) {
         let best_block_number = provider.best_block_number().unwrap_or(0);
         let header = provider.sealed_header(best_block_number).ok().flatten().unwrap_or_default();
 
@@ -664,7 +661,7 @@ where
     }
 
     /// Returns a new [`Sender`] to send messages to this type.
-    pub fn sender(&self) -> Sender<FromEngine<EngineApiRequest<T>>> {
+    pub fn sender(&self) -> Sender<FromEngine<EngineApiRequest<T, N>>> {
         self.incoming_tx.clone()
     }
 
@@ -862,7 +859,7 @@ where
     ///
     /// Note: This does not update the tracked state and instead returns the new chain based on the
     /// given head.
-    fn on_new_head(&self, new_head: B256) -> ProviderResult<Option<NewCanonicalChain>> {
+    fn on_new_head(&self, new_head: B256) -> ProviderResult<Option<NewCanonicalChain<N>>> {
         // get the executed new head block
         let Some(new_head_block) = self.state.tree_state.blocks_by_hash.get(&new_head) else {
             return Ok(None)
@@ -1136,7 +1133,7 @@ where
     /// Returns an error if the engine channel is disconnected.
     fn try_recv_engine_message(
         &self,
-    ) -> Result<Option<FromEngine<EngineApiRequest<T>>>, RecvError> {
+    ) -> Result<Option<FromEngine<EngineApiRequest<T, N>>>, RecvError> {
         if self.persistence_state.in_progress() {
             // try to receive the next request with a timeout to not block indefinitely
             match self.incoming.recv_timeout(std::time::Duration::from_millis(500)) {
@@ -1214,7 +1211,7 @@ where
     /// Handles a message from the engine.
     fn on_engine_message(
         &mut self,
-        msg: FromEngine<EngineApiRequest<T>>,
+        msg: FromEngine<EngineApiRequest<T, N>>,
     ) -> Result<(), InsertBlockFatalError> {
         match msg {
             FromEngine::Event(event) => match event {
@@ -1331,7 +1328,7 @@ where
 
         // Pipeline unwound, memorize the invalid block and wait for CL for next sync target.
         if let ControlFlow::Unwind { bad_block, .. } = ctrl {
-            warn!(target: "engine::tree", invalid_hash=?bad_block.hash(), invalid_number=?bad_block.number, "Bad block detected in unwind");
+            warn!(target: "engine::tree", invalid_block=?bad_block, "Bad block detected in unwind");
             // update the `invalid_headers` cache with the new invalid header
             self.state.invalid_headers.insert(*bad_block);
             return Ok(())
@@ -1455,7 +1452,7 @@ where
     }
 
     /// Emits an outgoing event to the engine.
-    fn emit_event(&mut self, event: impl Into<EngineApiEvent>) {
+    fn emit_event(&mut self, event: impl Into<EngineApiEvent<N>>) {
         let event = event.into();
 
         if event.is_backfill_action() {
@@ -1499,7 +1496,7 @@ where
     /// Returns a batch of consecutive canonical blocks to persist in the range
     /// `(last_persisted_number .. canonical_head - threshold]` . The expected
     /// order is oldest -> newest.
-    fn get_canonical_blocks_to_persist(&self) -> Vec<ExecutedBlock> {
+    fn get_canonical_blocks_to_persist(&self) -> Vec<ExecutedBlock<N>> {
         let mut blocks_to_persist = Vec::new();
         let mut current_hash = self.state.tree_state.canonical_block_hash();
         let last_persisted_number = self.persistence_state.last_persisted_block.number;
@@ -1552,7 +1549,7 @@ where
     /// has in memory.
     ///
     /// For finalized blocks, this will return `None`.
-    fn executed_block_by_hash(&self, hash: B256) -> ProviderResult<Option<ExecutedBlock>> {
+    fn executed_block_by_hash(&self, hash: B256) -> ProviderResult<Option<ExecutedBlock<N>>> {
         trace!(target: "engine::tree", ?hash, "Fetching executed block by hash");
         // check memory first
         let block = self.state.tree_state.executed_block_by_hash(hash).cloned();
@@ -1598,7 +1595,7 @@ where
     }
 
     /// Return block from database or in-memory state by hash.
-    fn block_by_hash(&self, hash: B256) -> ProviderResult<Option<Block>> {
+    fn block_by_hash(&self, hash: B256) -> ProviderResult<Option<N::Block>> {
         // check database first
         let mut block = self.provider.block_by_hash(hash)?;
         if block.is_none() {
@@ -1681,14 +1678,14 @@ where
         // iterate over ancestors in the invalid cache
         // until we encounter the first valid ancestor
         let mut current_hash = parent_hash;
-        let mut current_header = self.state.invalid_headers.get(&current_hash);
-        while let Some(header) = current_header {
-            current_hash = header.parent_hash;
-            current_header = self.state.invalid_headers.get(&current_hash);
+        let mut current_block = self.state.invalid_headers.get(&current_hash);
+        while let Some(block_with_parent) = current_block {
+            current_hash = block_with_parent.parent;
+            current_block = self.state.invalid_headers.get(&current_hash);
 
             // If current_header is None, then the current_hash does not have an invalid
             // ancestor in the cache, check its presence in blockchain tree
-            if current_header.is_none() && self.block_by_hash(current_hash)?.is_some() {
+            if current_block.is_none() && self.block_by_hash(current_hash)?.is_some() {
                 return Ok(Some(current_hash))
             }
         }
@@ -1738,7 +1735,7 @@ where
         let Some(header) = self.state.invalid_headers.get(&check) else { return Ok(None) };
 
         // populate the latest valid hash field
-        let status = self.prepare_invalid_response(header.parent_hash)?;
+        let status = self.prepare_invalid_response(header.parent)?;
 
         // insert the head block into the invalid header cache
         self.state.invalid_headers.insert_with_invalid_ancestor(head, header);
@@ -1752,12 +1749,15 @@ where
         // check if the head was previously marked as invalid
         let Some(header) = self.state.invalid_headers.get(&head) else { return Ok(None) };
         // populate the latest valid hash field
-        Ok(Some(self.prepare_invalid_response(header.parent_hash)?))
+        Ok(Some(self.prepare_invalid_response(header.parent)?))
     }
 
     /// Validate if block is correct and satisfies all the consensus rules that concern the header
     /// and block body itself.
-    fn validate_block(&self, block: &SealedBlockWithSenders) -> Result<(), ConsensusError> {
+    fn validate_block(
+        &self,
+        block: &SealedBlockWithSenders<N::Block>,
+    ) -> Result<(), ConsensusError> {
         if let Err(e) = self.consensus.validate_header_with_total_difficulty(block, U256::MAX) {
             error!(
                 target: "engine::tree",
@@ -1954,7 +1954,7 @@ where
     /// If either of these are true, then this returns the height of the first block. Otherwise,
     /// this returns [`None`]. This should be used to check whether or not we should be sending a
     /// remove command to the persistence task.
-    fn find_disk_reorg(&self, chain_update: &NewCanonicalChain) -> Option<u64> {
+    fn find_disk_reorg(&self, chain_update: &NewCanonicalChain<N>) -> Option<u64> {
         let NewCanonicalChain::Reorg { new, old: _ } = chain_update else { return None };
 
         let BlockNumHash { number: new_num, hash: new_hash } =
@@ -1981,7 +1981,7 @@ where
     /// Invoked when we the canonical chain has been updated.
     ///
     /// This is invoked on a valid forkchoice update, or if we can make the target block canonical.
-    fn on_canonical_chain_update(&mut self, chain_update: NewCanonicalChain) {
+    fn on_canonical_chain_update(&mut self, chain_update: NewCanonicalChain<N>) {
         trace!(target: "engine::tree", new_blocks = %chain_update.new_block_count(), reorged_blocks =  %chain_update.reorged_block_count(), "applying new chain update");
         let start = Instant::now();
 
@@ -2033,7 +2033,7 @@ where
     }
 
     /// This reinserts any blocks in the new chain that do not already exist in the tree
-    fn reinsert_reorged_blocks(&mut self, new_chain: Vec<ExecutedBlock>) {
+    fn reinsert_reorged_blocks(&mut self, new_chain: Vec<ExecutedBlock<N>>) {
         for block in new_chain {
             if self.state.tree_state.executed_block_by_hash(block.block.hash()).is_none() {
                 trace!(target: "engine::tree", num=?block.block.number, hash=?block.block.hash(), "Reinserting block into tree state");
@@ -2388,7 +2388,7 @@ where
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
         debug!(target: "engine::tree", ?root_elapsed, block=?sealed_block.num_hash(), "Calculated state root");
 
-        let executed: ExecutedBlock = ExecutedBlock {
+        let executed: ExecutedBlock<N> = ExecutedBlock {
             block: sealed_block.clone(),
             senders: Arc::new(block.senders),
             execution_output: Arc::new(ExecutionOutcome::from((output, block_number))),
@@ -2488,7 +2488,7 @@ where
         };
 
         // keep track of the invalid header
-        self.state.invalid_headers.insert(block.header);
+        self.state.invalid_headers.insert(block.header.block_with_parent());
         Ok(PayloadStatus::new(
             PayloadStatusEnum::Invalid { validation_error: validation_err.to_string() },
             latest_valid_hash,
@@ -2865,7 +2865,7 @@ mod tests {
     use reth_engine_primitives::ForkchoiceStatus;
     use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
     use reth_evm::test_utils::MockExecutorProvider;
-    use reth_primitives::{BlockExt, EthPrimitives};
+    use reth_primitives::{Block, BlockExt, EthPrimitives};
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::{block_to_payload_v1, payload::block_to_payload_v3};
     use reth_trie::{updates::TrieUpdates, HashedPostState};
@@ -2937,7 +2937,7 @@ mod tests {
             EthEngineTypes,
             EthereumEngineValidator,
         >,
-        to_tree_tx: Sender<FromEngine<EngineApiRequest<EthEngineTypes>>>,
+        to_tree_tx: Sender<FromEngine<EngineApiRequest<EthEngineTypes, EthPrimitives>>>,
         from_tree_rx: UnboundedReceiver<EngineApiEvent>,
         blocks: Vec<ExecutedBlock>,
         action_rx: Receiver<PersistenceAction>,

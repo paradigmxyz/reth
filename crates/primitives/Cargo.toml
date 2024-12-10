@@ -18,6 +18,7 @@ reth-ethereum-forks.workspace = true
 reth-static-file-types.workspace = true
 revm-primitives = { workspace = true, features = ["serde"] }
 reth-codecs = { workspace = true, optional = true }
+reth-zstd-compressors = { workspace = true, optional = true }
 
 # ethereum
 alloy-consensus.workspace = true
@@ -55,7 +56,6 @@ rand = { workspace = true, optional = true }
 rayon.workspace = true
 serde.workspace = true
 serde_with = { workspace = true, optional = true }
-zstd = { workspace = true, features = ["experimental"], optional = true }
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
@@ -108,11 +108,12 @@ std = [
 	"alloy-rlp/std",
 	"reth-ethereum-forks/std",
 	"bytes/std",
-	"derive_more/std"
+	"derive_more/std",
+	"reth-zstd-compressors?/std"
 ]
 reth-codec = [
 	"dep:reth-codecs",
-	"dep:zstd",
+	"dep:reth-zstd-compressors",
 	"dep:modular-bitfield", "std",
 	"reth-primitives-traits/reth-codec",
 ]

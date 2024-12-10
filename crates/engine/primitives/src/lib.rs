@@ -10,6 +10,8 @@
 
 mod error;
 
+use core::fmt;
+
 use alloy_consensus::BlockHeader;
 use alloy_rpc_types_engine::{ExecutionPayload, ExecutionPayloadSidecar, PayloadError};
 pub use error::BeaconOnNewPayloadError;
@@ -80,25 +82,10 @@ pub trait EngineTypes:
         + 'static;
 }
 
-/// Type that validates the payloads processed by the engine.
-pub trait EngineValidator<Types: EngineTypes>: Clone + Send + Sync + Unpin + 'static {
+/// Type that validates an [`ExecutionPayload`].
+pub trait PayloadValidator: fmt::Debug + Send + Sync + Unpin + 'static {
     /// The block type used by the engine.
     type Block: Block;
-
-    /// Validates the presence or exclusion of fork-specific fields based on the payload attributes
-    /// and the message version.
-    fn validate_version_specific_fields(
-        &self,
-        version: EngineApiMessageVersion,
-        payload_or_attrs: PayloadOrAttributes<'_, <Types as PayloadTypes>::PayloadAttributes>,
-    ) -> Result<(), EngineObjectValidationError>;
-
-    /// Ensures that the payload attributes are valid for the given [`EngineApiMessageVersion`].
-    fn ensure_well_formed_attributes(
-        &self,
-        version: EngineApiMessageVersion,
-        attributes: &<Types as PayloadTypes>::PayloadAttributes,
-    ) -> Result<(), EngineObjectValidationError>;
 
     /// Ensures that the given payload does not violate any consensus rules that concern the block's
     /// layout.
@@ -113,6 +100,24 @@ pub trait EngineValidator<Types: EngineTypes>: Clone + Send + Sync + Unpin + 'st
         payload: ExecutionPayload,
         sidecar: ExecutionPayloadSidecar,
     ) -> Result<SealedBlockFor<Self::Block>, PayloadError>;
+}
+
+/// Type that validates the payloads processed by the engine.
+pub trait EngineValidator<Types: EngineTypes>: PayloadValidator {
+    /// Validates the presence or exclusion of fork-specific fields based on the payload attributes
+    /// and the message version.
+    fn validate_version_specific_fields(
+        &self,
+        version: EngineApiMessageVersion,
+        payload_or_attrs: PayloadOrAttributes<'_, <Types as PayloadTypes>::PayloadAttributes>,
+    ) -> Result<(), EngineObjectValidationError>;
+
+    /// Ensures that the payload attributes are valid for the given [`EngineApiMessageVersion`].
+    fn ensure_well_formed_attributes(
+        &self,
+        version: EngineApiMessageVersion,
+        attributes: &<Types as PayloadTypes>::PayloadAttributes,
+    ) -> Result<(), EngineObjectValidationError>;
 
     /// Validates the payload attributes with respect to the header.
     ///

@@ -1,4 +1,3 @@
-use alloy_consensus::Header;
 use reth_evm::ConfigureEvm;
 use reth_primitives::NodePrimitives;
 use reth_provider::{BlockReader, CanonStateSubscriptions, EvmEnvProvider, StateProviderFactory};
@@ -62,7 +61,7 @@ where
         >,
     ) -> Self
     where
-        EvmConfig: ConfigureEvm<Header = Header>,
+        EvmConfig: ConfigureEvm<Header = Provider::Header>,
         Tasks: TaskSpawner + Clone + 'static,
     {
         let cache = EthStateCache::spawn_with(provider.clone(), config.cache, executor.clone());
