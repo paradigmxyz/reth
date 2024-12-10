@@ -7,7 +7,7 @@ use crate::{
 };
 use alloy_primitives::{
     keccak256,
-    map::{Entry, HashMap, HashSet},
+    map::{B256HashMap, B256HashSet, Entry, HashMap},
     Bytes, B256,
 };
 use itertools::Itertools;
@@ -32,7 +32,7 @@ pub struct TrieWitness<T, H> {
     /// A set of prefix sets that have changes.
     prefix_sets: TriePrefixSetsMut,
     /// Recorded witness.
-    witness: HashMap<B256, Bytes>,
+    witness: B256HashMap<Bytes>,
 }
 
 impl<T, H> TrieWitness<T, H> {
@@ -87,7 +87,7 @@ where
     pub fn compute(
         mut self,
         state: HashedPostState,
-    ) -> Result<HashMap<B256, Bytes>, TrieWitnessError> {
+    ) -> Result<B256HashMap<Bytes>, TrieWitnessError> {
         if state.is_empty() {
             return Ok(self.witness)
         }
@@ -171,13 +171,13 @@ where
     fn get_proof_targets(
         &self,
         state: &HashedPostState,
-    ) -> Result<HashMap<B256, HashSet<B256>>, StateProofError> {
-        let mut proof_targets = HashMap::default();
+    ) -> Result<B256HashMap<B256HashSet>, StateProofError> {
+        let mut proof_targets = B256HashMap::default();
         for hashed_address in state.accounts.keys() {
-            proof_targets.insert(*hashed_address, HashSet::default());
+            proof_targets.insert(*hashed_address, B256HashSet::default());
         }
         for (hashed_address, storage) in &state.storages {
-            let mut storage_keys = storage.storage.keys().copied().collect::<HashSet<_>>();
+            let mut storage_keys = storage.storage.keys().copied().collect::<B256HashSet>();
             if storage.wiped {
                 // storage for this account was destroyed, gather all slots from the current state
                 let mut storage_cursor =

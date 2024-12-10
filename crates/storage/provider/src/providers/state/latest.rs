@@ -3,8 +3,7 @@ use crate::{
     HashedPostStateProvider, StateProvider, StateRootProvider,
 };
 use alloy_primitives::{
-    map::{HashMap, HashSet},
-    Address, BlockNumber, Bytes, StorageKey, StorageValue, B256,
+    map::B256HashMap, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256,
 };
 use reth_db::tables;
 use reth_db_api::{cursor::DbDupCursorRO, transaction::DbTx};
@@ -17,8 +16,8 @@ use reth_trie::{
     proof::{Proof, StorageProof},
     updates::TrieUpdates,
     witness::TrieWitness,
-    AccountProof, HashedPostState, HashedStorage, MultiProof, StateRoot, StorageMultiProof,
-    StorageRoot, TrieInput,
+    AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StateRoot,
+    StorageMultiProof, StorageRoot, TrieInput,
 };
 use reth_trie_db::{
     DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,
@@ -143,7 +142,7 @@ impl<Provider: DBProvider + StateCommitmentProvider> StateProofProvider
     fn multiproof(
         &self,
         input: TrieInput,
-        targets: HashMap<B256, HashSet<B256>>,
+        targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
         Proof::overlay_multiproof(self.tx(), input, targets).map_err(Into::<ProviderError>::into)
     }
@@ -152,7 +151,7 @@ impl<Provider: DBProvider + StateCommitmentProvider> StateProofProvider
         &self,
         input: TrieInput,
         target: HashedPostState,
-    ) -> ProviderResult<HashMap<B256, Bytes>> {
+    ) -> ProviderResult<B256HashMap<Bytes>> {
         TrieWitness::overlay_witness(self.tx(), input, target).map_err(Into::<ProviderError>::into)
     }
 }

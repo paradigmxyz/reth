@@ -1,12 +1,12 @@
 use alloy_primitives::{
-    map::{HashMap, HashSet},
+    map::{B256HashMap, HashMap},
     Address, Bytes, B256,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     updates::{StorageTrieUpdates, TrieUpdates},
-    AccountProof, HashedPostState, HashedStorage, MultiProof, StorageMultiProof, StorageProof,
-    TrieInput,
+    AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
+    StorageProof, TrieInput,
 };
 
 /// A type that can compute the state root of a given post state.
@@ -84,7 +84,7 @@ pub trait StateProofProvider: Send + Sync {
     fn multiproof(
         &self,
         input: TrieInput,
-        targets: HashMap<B256, HashSet<B256>>,
+        targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof>;
 
     /// Get trie witness for provided state.
@@ -92,7 +92,7 @@ pub trait StateProofProvider: Send + Sync {
         &self,
         input: TrieInput,
         target: HashedPostState,
-    ) -> ProviderResult<HashMap<B256, Bytes>>;
+    ) -> ProviderResult<B256HashMap<Bytes>>;
 }
 
 /// Trie Writer

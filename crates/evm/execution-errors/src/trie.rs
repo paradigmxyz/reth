@@ -87,7 +87,7 @@ impl From<SparseTrieError> for SparseStateTrieErrorKind {
 impl SparseStateTrieError {
     /// Returns the error kind.
     pub const fn kind(&self) -> &SparseStateTrieErrorKind {
-        &*self.0
+        &self.0
     }
 
     /// Consumes the error and returns the error kind.

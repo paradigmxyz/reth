@@ -4,7 +4,7 @@ use crate::{
 };
 use alloy_primitives::{
     hex,
-    map::{HashMap, HashSet},
+    map::{B256HashMap, B256HashSet, HashMap, HashSet},
     Bytes, B256,
 };
 use alloy_rlp::{Decodable, Encodable};
@@ -206,7 +206,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     /// NOTE: This method does not extensively validate the proof.
     pub fn reveal_multiproof(
         &mut self,
-        targets: HashMap<B256, HashSet<B256>>,
+        targets: B256HashMap<B256HashSet>,
         multiproof: MultiProof,
     ) -> SparseStateTrieResult<()> {
         let account_subtree = multiproof.account_subtree.into_nodes_sorted();
