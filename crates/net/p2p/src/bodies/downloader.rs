@@ -5,7 +5,7 @@ use futures::Stream;
 use std::{fmt::Debug, ops::RangeInclusive};
 
 /// Body downloader return type.
-pub type BodyDownloaderResult<B> = DownloadResult<Vec<BlockResponse<alloy_consensus::Header, B>>>;
+pub type BodyDownloaderResult<H, B> = DownloadResult<Vec<BlockResponse<H, B>>>;
 
 /// A downloader capable of fetching and yielding block bodies from block headers.
 ///
@@ -13,8 +13,11 @@ pub type BodyDownloaderResult<B> = DownloadResult<Vec<BlockResponse<alloy_consen
 /// while a [`BodiesClient`][crate::bodies::client::BodiesClient] represents a client capable of
 /// fulfilling these requests.
 pub trait BodyDownloader:
-    Send + Sync + Stream<Item = BodyDownloaderResult<Self::Body>> + Unpin
+    Send + Sync + Stream<Item = BodyDownloaderResult<Self::Header, Self::Body>> + Unpin
 {
+    /// The type of header that can be returned in a blck
+    type Header: Debug + Send + Sync + Unpin + 'static;
+
     /// The type of the body that is being downloaded.
     type Body: Debug + Send + Sync + Unpin + 'static;
 
