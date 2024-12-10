@@ -26,7 +26,8 @@ use reth_db::table::Value;
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_node_types::{
-    BlockTy, FullNodePrimitives, HeaderTy, NodeTypes, NodeTypesWithDB, ReceiptTy, TxTy,
+    BlockTy, FullNodePrimitives, HeaderTy, NodeTypes, NodeTypesWithDB, NodeTypesWithEngine,
+    ReceiptTy, TxTy,
 };
 use reth_primitives::{
     Account, BlockWithSenders, EthPrimitives, Receipt, SealedBlock, SealedBlockFor,
@@ -104,8 +105,14 @@ impl<T> ProviderNodeTypes for T where T: NodeTypesForProvider + NodeTypesWithDB 
 
 /// A helper trait with requirements for [`NodeTypesForProvider`] to be used within legacy
 /// blockchain tree.
-pub trait NodeTypesForTree: NodeTypesForProvider<Primitives = EthPrimitives> {}
-impl<T> NodeTypesForTree for T where T: NodeTypesForProvider<Primitives = EthPrimitives> {}
+pub trait NodeTypesForTree:
+    NodeTypesForProvider<Primitives = EthPrimitives> + NodeTypesWithEngine
+{
+}
+impl<T> NodeTypesForTree for T where
+    T: NodeTypesForProvider<Primitives = EthPrimitives> + NodeTypesWithEngine
+{
+}
 
 /// Helper trait with requirements for [`ProviderNodeTypes`] to be used within legacy blockchain
 /// tree.
