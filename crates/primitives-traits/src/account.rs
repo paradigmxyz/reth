@@ -265,7 +265,15 @@ impl From<Account> for revm_primitives::shared::AccountInfo {
         Self {
             balance: reth_acc.balance,
             nonce: reth_acc.nonce,
+            code_size: reth_acc
+                .account_extension
+                .map(|acc| acc.code_size as usize)
+                .unwrap_or_default(),
             code_hash: reth_acc.bytecode_hash.unwrap_or(KECCAK_EMPTY),
+            poseidon_code_hash: reth_acc
+                .account_extension
+                .and_then(|acc| acc.poseidon_code_hash)
+                .unwrap_or(reth_scroll_primitives::poseidon::POSEIDON_EMPTY),
             code: None,
         }
     }

@@ -55,7 +55,7 @@ pub fn validate_block_post_execution<ChainSpec: EthereumHardforks>(
 
 /// Calculate the receipts root, and compare it against against the expected receipts root and logs
 /// bloom.
-fn verify_receipts(
+pub fn verify_receipts(
     expected_receipts_root: B256,
     expected_logs_bloom: Bloom,
     receipts: &[Receipt],

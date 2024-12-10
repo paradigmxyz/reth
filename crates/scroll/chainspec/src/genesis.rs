@@ -1,5 +1,8 @@
 //! Scroll types for genesis data.
 
+use crate::constants::{
+    SCROLL_FEE_VAULT_ADDRESS, SCROLL_MAINNET_L1_CONFIG, SCROLL_SEPOLIA_L1_CONFIG,
+};
 use alloy_primitives::Address;
 use alloy_serde::OtherFields;
 use serde::de::Error;
@@ -80,15 +83,9 @@ pub struct L1Config {
     pub l1_chain_id: u64,
     /// The L1 contract address of the contract that handles the message queue targeting the Scroll
     /// rollup.
-    ///
-    /// Scroll mainnet l1 message queue address: <https://etherscan.io/address/0x0d7E906BD9cAFa154b048cFa766Cc1E54E39AF9B>.
-    /// Scroll sepolia l1 message queue address: <https://sepolia.etherscan.io/address/0xF0B2293F5D834eAe920c6974D50957A1732de763>.
     pub l1_message_queue_address: Address,
     /// The L1 contract address of the proxy contract which is responsible for Scroll rollup
     /// settlement.
-    ///
-    /// Scroll mainnet l1 chain proxy address: <https://etherscan.io/address/0xa13BAF47339d63B743e7Da8741db5456DAc1E556>.
-    /// Scroll sepolia l1 chain proxy address: <https://sepolia.etherscan.io/address/0x2D567EcE699Eabe5afCd141eDB7A4f2D0D6ce8a0>
     pub scroll_chain_address: Address,
     /// The maximum number of L1 messages to be consumed per L2 rollup block.
     pub num_l1_messages_per_block: u64,
@@ -114,6 +111,21 @@ impl ScrollChainConfig {
     /// parsed from a genesis file.
     pub fn extract_from(others: &OtherFields) -> Option<Self> {
         Self::try_from(others).ok()
+    }
+
+    /// Returns the [`ScrollChainConfig`] for Scroll Mainnet.
+    pub const fn mainnet() -> Self {
+        Self {
+            fee_vault_address: Some(SCROLL_FEE_VAULT_ADDRESS),
+            l1_config: SCROLL_MAINNET_L1_CONFIG,
+        }
+    }
+    /// Returns the [`ScrollChainConfig`] for Scroll Sepolia.
+    pub const fn sepolia() -> Self {
+        Self {
+            fee_vault_address: Some(SCROLL_FEE_VAULT_ADDRESS),
+            l1_config: SCROLL_SEPOLIA_L1_CONFIG,
+        }
     }
 }
 

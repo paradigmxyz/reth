@@ -7,7 +7,7 @@ pub mod states;
 #[cfg(feature = "test-utils")]
 mod test_utils;
 
-#[cfg(feature = "optimism")]
+#[cfg(all(feature = "optimism", not(feature = "scroll")))]
 pub use revm::{primitives::OptimismFields, L1BlockInfo, L1_BLOCK_CONTRACT};
 
 pub use revm::{

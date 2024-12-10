@@ -63,3 +63,7 @@ test-utils = [
 	"reth-primitives-traits/test-utils",
 	"reth-trie-common/test-utils"
 ]
+scroll = [
+	"reth-trie-common/scroll",
+	"reth-primitives-traits/scroll"
+]

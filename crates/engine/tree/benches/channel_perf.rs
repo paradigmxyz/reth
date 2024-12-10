@@ -1,6 +1,7 @@
 //! Benchmark comparing `std::sync::mpsc` and `crossbeam` channels for `StateRootTask`.
 
 #![allow(missing_docs)]
+#![allow(clippy::needless_update)]
 
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use revm_primitives::{
@@ -23,6 +24,7 @@ fn create_bench_state(num_accounts: usize) -> EvmState {
                 nonce: 10,
                 code_hash: B256::random(),
                 code: Default::default(),
+                ..Default::default()
             },
             storage,
             status: AccountStatus::Loaded,

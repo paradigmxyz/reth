@@ -1,5 +1,5 @@
 [package]
-name = "reth-scroll-execution"
+name = "reth-scroll-consensus"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,15 +12,11 @@ exclude.workspace = true
 workspace = true
 
 [dependencies]
-# reth
-reth-revm.workspace = true
+# revm
+revm.workspace = true
 
-# scroll
-reth-scroll-storage = { workspace = true, optional = true }
+[dev-dependencies]
+eyre.workspace = true
 
 [features]
-scroll = [
-	"reth-scroll-storage/scroll",
-	"reth-revm/scroll"
-]
-test-utils = ["reth-revm/test-utils"]
+scroll = ["revm/scroll"]

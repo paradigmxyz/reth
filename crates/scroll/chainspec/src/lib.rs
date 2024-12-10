@@ -29,11 +29,19 @@ use std::sync::LazyLock;
 
 extern crate alloc;
 
+mod constants;
+pub use constants::{
+    SCROLL_FEE_VAULT_ADDRESS, SCROLL_MAINNET_L1_CONFIG, SCROLL_MAINNET_L1_MESSAGE_QUEUE_ADDRESS,
+    SCROLL_MAINNET_L1_PROXY_ADDRESS, SCROLL_MAINNET_MAX_L1_MESSAGES, SCROLL_SEPOLIA_L1_CONFIG,
+    SCROLL_SEPOLIA_L1_MESSAGE_QUEUE_ADDRESS, SCROLL_SEPOLIA_L1_PROXY_ADDRESS,
+    SCROLL_SEPOLIA_MAX_L1_MESSAGES,
+};
+
 mod dev;
 pub use dev::SCROLL_DEV;
 
 mod genesis;
-pub use genesis::ScrollChainInfo;
+pub use genesis::{ScrollChainConfig, ScrollChainInfo};
 
 mod scroll;
 pub use scroll::SCROLL_MAINNET;

@@ -26,7 +26,7 @@ use std::{fmt::Debug, sync::Arc, time::SystemTime};
 pub const GAS_LIMIT_BOUND_DIVISOR: u64 = 1024;
 
 mod validation;
-pub use validation::validate_block_post_execution;
+pub use validation::{validate_block_post_execution, verify_receipts};
 
 /// Ethereum beacon consensus
 ///

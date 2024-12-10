@@ -382,6 +382,7 @@ impl HashedStorageSorted {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::needless_update)]
     use super::*;
     use alloy_primitives::{keccak256, Address, Bytes};
     use reth_trie_common::KeccakKeyHasher;
@@ -527,6 +528,7 @@ mod tests {
             nonce: 5,
             code_hash: B256::random(),
             code: None,
+            ..Default::default()
         };
 
         let mut storage = PlainStorage::default();

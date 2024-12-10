@@ -143,6 +143,7 @@ impl ExecutorMetrics {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::needless_update)]
     use super::*;
     use alloy_eips::eip7685::Requests;
     use metrics_util::debugging::{DebugValue, DebuggingRecorder, Snapshotter};
@@ -261,6 +262,7 @@ mod tests {
                             nonce: 10,
                             code_hash: B256::random(),
                             code: Default::default(),
+                            ..Default::default()
                         },
                         storage,
                         status: AccountStatus::Loaded,

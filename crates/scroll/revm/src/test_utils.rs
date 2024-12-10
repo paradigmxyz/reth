@@ -92,6 +92,10 @@ impl From<ScrollAccountInfo> for AccountInfo {
             nonce: info.nonce,
             code_hash: info.code_hash,
             code: info.code,
+            #[cfg(feature = "scroll")]
+            code_size: info.code_size as usize,
+            #[cfg(feature = "scroll")]
+            poseidon_code_hash: info.poseidon_code_hash,
         }
     }
 }

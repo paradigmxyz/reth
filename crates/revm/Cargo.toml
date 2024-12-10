@@ -68,5 +68,5 @@ serde = [
 scroll = [
     "reth-scroll-primitives",
     "reth-primitives-traits/scroll",
-    "reth-trie/scroll"
+    "reth-trie?/scroll"
 ]

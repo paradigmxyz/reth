@@ -158,7 +158,7 @@ jobs:
           cargo udeps --workspace --lib --examples --tests --benches --all-features --locked \
             --exclude "reth-optimism-*" --exclude op-reth --exclude "example-*" --exclude reth \
             --exclude reth-e2e-test-utils --exclude reth-ethereum-payload-builder --exclude reth-exex-test-utils \
-            --exclude reth-node-ethereum
+            --exclude reth-node-ethereum --exclude reth-scroll-evm
 
   book:
     name: book

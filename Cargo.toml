@@ -101,6 +101,8 @@ members = [
     "crates/rpc/rpc-types-compat/",
     "crates/rpc/rpc/",
     "crates/scroll/chainspec",
+    "crates/scroll/consensus",
+    "crates/scroll/evm",
     "crates/scroll/execution",
     "crates/scroll/hardforks",
     "crates/scroll/primitives",
@@ -411,6 +413,9 @@ reth-rpc-eth-types = { path = "crates/rpc/rpc-eth-types", default-features = fal
 reth-rpc-layer = { path = "crates/rpc/rpc-layer" }
 reth-rpc-server-types = { path = "crates/rpc/rpc-server-types" }
 reth-rpc-types-compat = { path = "crates/rpc/rpc-types-compat" }
+reth-scroll-chainspec = { path = "crates/scroll/chainspec" }
+reth-scroll-consensus = { path = "crates/scroll/consensus" }
+reth-scroll-evm = { path = "crates/scroll/evm" }
 reth-scroll-execution = { path = "crates/scroll/execution" }
 reth-scroll-primitives = { path = "crates/scroll/primitives" }
 reth-scroll-state-commitment = { path = "crates/scroll/state-commitment" }
@@ -663,3 +668,11 @@ tracy-client = "0.17.3"
 #op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", rev = "6a042e7681b1" }
 #op-alloy-rpc-types = { git = "https://github.com/alloy-rs/op-alloy", rev = "6a042e7681b1" }
 #op-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/op-alloy", rev = "6a042e7681b1" }
+
+[patch.crates-io]
+revm = { git = "https://github.com/scroll-tech/revm.git", branch = "scroll-evm-executor/reth/v50" }
+revm-primitives = { git = "https://github.com/scroll-tech/revm.git", branch = "scroll-evm-executor/reth/v50" }
+
+ff = { git = "https://github.com/scroll-tech/ff", branch = "feat/sp1" }
+
+alloy-eip2930 = { git = "https://github.com/scroll-tech/alloy-eips", branch = "v0.3.2" }

@@ -36,7 +36,7 @@ serde = [
 	"serde/std",
 	"reth-scroll-primitives/serde"
 ]
-scroll = []
+scroll = ["revm/scroll-poseidon-codehash"]
 test-utils = ["revm/test-utils"]
 std = [
 	"revm/std",
