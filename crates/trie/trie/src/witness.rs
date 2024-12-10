@@ -12,7 +12,8 @@ use alloy_primitives::{
 };
 use itertools::Itertools;
 use reth_execution_errors::{
-    SparseStateTrieError, SparseTrieError, StateProofError, TrieWitnessError,
+    SparseStateTrieError, SparseStateTrieErrorKind, SparseTrieError, SparseTrieErrorKind,
+    StateProofError, TrieWitnessError,
 };
 use reth_trie_common::Nibbles;
 use reth_trie_sparse::{
@@ -127,7 +128,7 @@ where
             let storage = state.storages.get(&hashed_address);
             let storage_trie = sparse_trie
                 .storage_trie_mut(&hashed_address)
-                .ok_or(SparseStateTrieError::Sparse(SparseTrieError::Blind))?;
+                .ok_or(SparseStateTrieErrorKind::Sparse(SparseTrieErrorKind::Blind))?;
             for hashed_slot in hashed_slots.into_iter().sorted_unstable() {
                 let storage_nibbles = Nibbles::unpack(hashed_slot);
                 let maybe_leaf_value = storage
@@ -138,11 +139,11 @@ where
                 if let Some(value) = maybe_leaf_value {
                     storage_trie
                         .update_leaf(storage_nibbles, value)
-                        .map_err(SparseStateTrieError::Sparse)?;
+                        .map_err(SparseStateTrieError::from)?;
                 } else {
                     storage_trie
                         .remove_leaf(&storage_nibbles)
-                        .map_err(SparseStateTrieError::Sparse)?;
+                        .map_err(SparseStateTrieError::from)?;
                 }
             }
 
@@ -251,7 +252,9 @@ where
     fn blinded_node(&mut self, path: Nibbles) -> Result<Option<Bytes>, Self::Error> {
         let maybe_node = self.provider.blinded_node(path)?;
         if let Some(node) = &maybe_node {
-            self.tx.send(node.clone()).map_err(|error| SparseTrieError::Other(Box::new(error)))?;
+            self.tx
+                .send(node.clone())
+                .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
         }
         Ok(maybe_node)
     }

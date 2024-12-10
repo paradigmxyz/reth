@@ -146,9 +146,9 @@ impl PrefixSetMut {
         if self.all {
             PrefixSet { index: 0, all: true, keys: Arc::new(Vec::new()) }
         } else {
-            self.keys.sort();
+            self.keys.sort_unstable();
             self.keys.dedup();
-            // we need to shrink in both the sorted and non-sorted cases because deduping may have
+            // We need to shrink in both the sorted and non-sorted cases because deduping may have
             // occurred either on `freeze`, or during `contains`.
             self.keys.shrink_to_fit();
             PrefixSet { index: 0, all: false, keys: Arc::new(self.keys) }

@@ -14,7 +14,7 @@ use reth_trie::{
 use reth_trie_db::DatabaseProof;
 use reth_trie_parallel::root::ParallelStateRootError;
 use reth_trie_sparse::{
-    errors::{SparseStateTrieResult, SparseTrieError},
+    errors::{SparseStateTrieResult, SparseTrieErrorKind},
     SparseStateTrie,
 };
 use revm_primitives::{keccak256, EvmState, B256};
@@ -576,7 +576,7 @@ fn update_sparse_trie(
         .par_bridge()
         .map(|(address, storage, storage_trie)| {
             trace!(target: "engine::root::sparse", ?address, "Updating storage");
-            let mut storage_trie = storage_trie.ok_or(SparseTrieError::Blind)?;
+            let mut storage_trie = storage_trie.ok_or(SparseTrieErrorKind::Blind)?;
 
             if storage.wiped {
                 trace!(target: "engine::root::sparse", ?address, "Wiping storage");
