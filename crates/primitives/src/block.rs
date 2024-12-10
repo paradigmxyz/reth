@@ -156,9 +156,9 @@ pub struct BlockWithSenders<B = Block> {
     /// Block
     #[deref]
     #[deref_mut]
-    pub block: B,
+    block: B,
     /// List of senders that match the transactions in the block
-    pub senders: Vec<Address>,
+    senders: Vec<Address>,
 }
 
 impl<B: reth_primitives_traits::Block> BlockWithSenders<B> {
@@ -170,6 +170,16 @@ impl<B: reth_primitives_traits::Block> BlockWithSenders<B> {
     /// New block with senders. Return none if len of tx and senders does not match
     pub fn new(block: B, senders: Vec<Address>) -> Option<Self> {
         (block.body().transactions().len() == senders.len()).then_some(Self { block, senders })
+    }
+
+    /// Returns a reference to the `block` field of the `BlockWithSenders` struct.
+    pub fn block(&self) -> &B {
+        &self.block
+    }
+
+    /// Returns a reference to the `senders` field of the `BlockWithSenders` struct.
+    pub fn senders(&self) -> &Vec<Address> {
+        &self.senders
     }
 
     /// Seal the block with a known hash.

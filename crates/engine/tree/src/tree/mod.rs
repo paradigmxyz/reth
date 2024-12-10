@@ -2298,7 +2298,7 @@ where
 
         let executed: ExecutedBlock = ExecutedBlock {
             block: sealed_block.clone(),
-            senders: Arc::new(block.senders),
+            senders: Arc::new(block.senders().to_vec()),
             execution_output: Arc::new(ExecutionOutcome::from((output, block_number))),
             hashed_state: Arc::new(hashed_state),
             trie: Arc::new(trie_output),
@@ -2991,7 +2991,7 @@ mod tests {
 
             for block in &blocks {
                 let unsealed_block = block.clone().unseal();
-                block_data.push((block.hash(), unsealed_block.clone().block));
+                block_data.push((block.hash(), unsealed_block.block().clone()));
                 headers_data.push((block.hash(), unsealed_block.header.clone()));
             }
 
