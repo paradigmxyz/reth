@@ -314,7 +314,7 @@ where
             return Err(GotExpected {
                 got: calculated_root,
                 expected: self.header.transactions_root(),
-            });
+            })
         }
 
         Ok(())

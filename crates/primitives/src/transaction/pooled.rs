@@ -255,7 +255,7 @@ impl Decodable for PooledTransactionsElement {
         //
         // First, we check whether or not the transaction is a legacy transaction.
         if buf.is_empty() {
-            return Err(RlpError::InputTooShort);
+            return Err(RlpError::InputTooShort)
         }
 
         // keep the original buf around for legacy decoding
@@ -288,7 +288,7 @@ impl Decodable for PooledTransactionsElement {
             // check that the bytes consumed match the payload length
             let bytes_consumed = remaining_len - buf.len();
             if bytes_consumed != header.payload_length {
-                return Err(RlpError::UnexpectedLength);
+                return Err(RlpError::UnexpectedLength)
             }
 
             Ok(tx)
