@@ -1,5 +1,5 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD;
-use alloy_consensus::{BlockHeader, Header};
+use alloy_consensus::{BlockHeader, Header, Sealable};
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_primitives::BlockNumber;
 use num_traits::Zero;
@@ -194,10 +194,7 @@ where
         unwind_to: Option<u64>,
     ) -> Result<(), StageError>
     where
-        Provider: StaticFileProviderFactory
-            + DBProvider
-            + BlockReader
-            + HeaderProvider<Header = reth_primitives::Header>,
+        Provider: StaticFileProviderFactory + DBProvider + BlockReader + HeaderProvider,
     {
         // If thre's any receipts pruning configured, receipts are written directly to database and
         // inconsistencies are expected.
@@ -267,7 +264,7 @@ where
 
 impl<E, Provider> Stage<Provider> for ExecutionStage<E>
 where
-    E: BlockExecutorProvider<Primitives: NodePrimitives<BlockHeader = alloy_consensus::Header>>,
+    E: BlockExecutorProvider,
     Provider: DBProvider
         + BlockReader<
             Block = <E::Primitives as NodePrimitives>::Block,

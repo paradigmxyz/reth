@@ -11,7 +11,7 @@ use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGenera
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_db::transaction::{DbTx, DbTxMut};
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
-use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, PeersInfo};
+use reth_network::{EthNetworkPrimitives, NetworkConfig, NetworkHandle, NetworkManager, PeersInfo};
 use reth_node_api::{AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, TxTy};
 use reth_node_builder::{
     components::{
@@ -656,6 +656,8 @@ where
         > + Unpin
         + 'static,
 {
+    type Primitives = EthNetworkPrimitives;
+
     async fn build_network(
         self,
         ctx: &BuilderContext<Node>,
