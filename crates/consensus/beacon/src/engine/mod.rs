@@ -761,8 +761,8 @@ where
         // until we encounter the first valid ancestor
         let mut current_hash = parent_hash;
         let mut current_block = self.invalid_headers.get(&current_hash);
-        while let Some(block_with_parent) = current_block {
-            current_hash = block_with_parent.parent;
+        while let Some(block) = current_block {
+            current_hash = block.parent;
             current_block = self.invalid_headers.get(&current_hash);
 
             // If current_header is None, then the current_hash does not have an invalid
@@ -806,13 +806,13 @@ where
         head: B256,
     ) -> ProviderResult<Option<PayloadStatus>> {
         // check if the check hash was previously marked as invalid
-        let Some(block_with_parent) = self.invalid_headers.get(&check) else { return Ok(None) };
+        let Some(block) = self.invalid_headers.get(&check) else { return Ok(None) };
 
         // populate the latest valid hash field
-        let status = self.prepare_invalid_response(block_with_parent.parent)?;
+        let status = self.prepare_invalid_response(block.parent)?;
 
         // insert the head block into the invalid header cache
-        self.invalid_headers.insert_with_invalid_ancestor(head, block_with_parent);
+        self.invalid_headers.insert_with_invalid_ancestor(head, block);
 
         Ok(Some(status))
     }
@@ -821,10 +821,10 @@ where
     /// to a forkchoice update.
     fn check_invalid_ancestor(&mut self, head: B256) -> ProviderResult<Option<PayloadStatus>> {
         // check if the head was previously marked as invalid
-        let Some(block_with_parent) = self.invalid_headers.get(&head) else { return Ok(None) };
+        let Some(block) = self.invalid_headers.get(&head) else { return Ok(None) };
 
         // populate the latest valid hash field
-        Ok(Some(self.prepare_invalid_response(block_with_parent.parent)?))
+        Ok(Some(self.prepare_invalid_response(block.parent)?))
     }
 
     /// Record latency metrics for one call to make a block canonical
