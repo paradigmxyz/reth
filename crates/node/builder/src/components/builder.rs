@@ -296,7 +296,14 @@ impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB> NodeComponentsBuilder<Node>
     for ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB>
 where
     Node: FullNodeTypes,
-    PoolB: PoolBuilder<Node>,
+    PoolB: PoolBuilder<
+        Node,
+        Pool: TransactionPool<
+            Transaction: PoolTransaction<
+                Pooled = <NetworkB::Primitives as NetworkPrimitives>::PooledTransaction,
+            >,
+        >,
+    >,
     NetworkB: NetworkBuilder<
         Node,
         PoolB::Pool,
