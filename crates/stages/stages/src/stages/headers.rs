@@ -4,7 +4,7 @@ use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
 use futures_util::StreamExt;
 use reth_config::config::EtlConfig;
 use reth_consensus::HeaderValidator;
-use reth_db::{tables, transaction::DbTx, RawKey, RawTable, RawValue};
+use reth_db::{table::Value, tables, transaction::DbTx, RawKey, RawTable, RawValue};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     transaction::DbTxMut,
@@ -13,7 +13,7 @@ use reth_db_api::{
 use reth_etl::Collector;
 use reth_network_p2p::headers::{downloader::HeaderDownloader, error::HeadersDownloaderError};
 use reth_primitives::{NodePrimitives, SealedHeader, StaticFileSegment};
-use reth_primitives_traits::serde_bincode_compat;
+use reth_primitives_traits::{serde_bincode_compat, FullBlockHeader};
 use reth_provider::{
     providers::StaticFileWriter, BlockHashReader, DBProvider, HeaderProvider, HeaderSyncGap,
     HeaderSyncGapProvider, StaticFileProviderFactory,
@@ -93,11 +93,9 @@ where
     /// database table.
     fn write_headers<P>(&mut self, provider: &P) -> Result<BlockNumber, StageError>
     where
-        P: DBProvider<Tx: DbTxMut>
-            + StaticFileProviderFactory<
-                Primitives: NodePrimitives<BlockHeader = reth_primitives::Header>,
-            >,
+        P: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory,
         Downloader: HeaderDownloader<Header = <P::Primitives as NodePrimitives>::BlockHeader>,
+        <P::Primitives as NodePrimitives>::BlockHeader: Value + FullBlockHeader,
     {
         let total_headers = self.header_collector.len();
 
@@ -145,8 +143,8 @@ where
             self.consensus.validate_header_with_total_difficulty(&header, td).map_err(|error| {
                 StageError::Block {
                     block: Box::new(BlockWithParent::new(
-                        header.parent_hash,
-                        NumHash::new(header.number, header_hash),
+                        header.parent_hash(),
+                        NumHash::new(header.number(), header_hash),
                     )),
                     error: BlockErrorKind::Validation(error),
                 }
@@ -203,9 +201,9 @@ where
 impl<Provider, P, D> Stage<Provider> for HeaderStage<P, D>
 where
     Provider: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory,
-    Provider::Primitives: NodePrimitives<BlockHeader = reth_primitives::Header>,
     P: HeaderSyncGapProvider<Header = <Provider::Primitives as NodePrimitives>::BlockHeader>,
     D: HeaderDownloader<Header = <Provider::Primitives as NodePrimitives>::BlockHeader>,
+    <Provider::Primitives as NodePrimitives>::BlockHeader: FullBlockHeader + Value,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
