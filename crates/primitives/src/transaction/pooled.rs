@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 use alloy_consensus::{
     constants::EIP4844_TX_TYPE_ID,
     transaction::{TxEip1559, TxEip2930, TxEip4844, TxLegacy},
-    SignableTransaction, Signed, TxEip4844WithSidecar,
+    SignableTransaction, Signed, TxEip4844WithSidecar, Typed2718,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Result, Encodable2718},
@@ -230,7 +230,7 @@ impl Encodable for PooledTransactionsElement {
 
     fn length(&self) -> usize {
         let mut payload_length = self.encode_2718_len();
-        if !self.is_legacy() {
+        if !Encodable2718::is_legacy(self) {
             payload_length += Header { list: false, payload_length }.length();
         }
 
@@ -255,7 +255,7 @@ impl Decodable for PooledTransactionsElement {
         //
         // First, we check whether or not the transaction is a legacy transaction.
         if buf.is_empty() {
-            return Err(RlpError::InputTooShort)
+            return Err(RlpError::InputTooShort);
         }
 
         // keep the original buf around for legacy decoding
@@ -288,7 +288,7 @@ impl Decodable for PooledTransactionsElement {
             // check that the bytes consumed match the payload length
             let bytes_consumed = remaining_len - buf.len();
             if bytes_consumed != header.payload_length {
-                return Err(RlpError::UnexpectedLength)
+                return Err(RlpError::UnexpectedLength);
             }
 
             Ok(tx)
@@ -380,6 +380,18 @@ impl Decodable2718 for PooledTransactionsElement {
             TransactionSigned::decode_rlp_legacy_transaction_tuple(buf)?;
 
         Ok(Self::Legacy(Signed::new_unchecked(transaction, signature, hash)))
+    }
+}
+
+impl Typed2718 for PooledTransactionsElement {
+    fn ty(&self) -> u8 {
+        match self {
+            Self::Legacy(tx) => tx.tx().ty(),
+            Self::Eip2930(tx) => tx.tx().ty(),
+            Self::Eip1559(tx) => tx.tx().ty(),
+            Self::BlobTransaction(tx) => tx.tx().ty(),
+            Self::Eip7702(tx) => tx.tx().ty(),
+        }
     }
 }
 
@@ -521,16 +533,6 @@ impl alloy_consensus::Transaction for PooledTransactionsElement {
             Self::Eip1559(tx) => tx.tx().input(),
             Self::Eip7702(tx) => tx.tx().input(),
             Self::BlobTransaction(tx) => tx.tx().input(),
-        }
-    }
-
-    fn ty(&self) -> u8 {
-        match self {
-            Self::Legacy(tx) => tx.tx().ty(),
-            Self::Eip2930(tx) => tx.tx().ty(),
-            Self::Eip1559(tx) => tx.tx().ty(),
-            Self::Eip7702(tx) => tx.tx().ty(),
-            Self::BlobTransaction(tx) => tx.tx().ty(),
         }
     }
 

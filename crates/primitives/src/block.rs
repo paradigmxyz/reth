@@ -3,7 +3,7 @@ use crate::{
     RecoveredTx, SealedHeader, TransactionSigned,
 };
 use alloc::vec::Vec;
-use alloy_consensus::Header;
+use alloy_consensus::{Header, Typed2718};
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
 use alloy_primitives::{Address, Bytes, B256};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
@@ -314,7 +314,7 @@ where
             return Err(GotExpected {
                 got: calculated_root,
                 expected: self.header.transactions_root(),
-            })
+            });
         }
 
         Ok(())
@@ -612,19 +612,19 @@ impl<T: Transaction> BlockBody<T> {
     /// Returns whether or not the block body contains any blob transactions.
     #[inline]
     pub fn has_blob_transactions(&self) -> bool {
-        self.transactions.iter().any(|tx| tx.is_eip4844())
+        self.transactions.iter().any(|tx| Typed2718::is_eip4844(tx))
     }
 
     /// Returns whether or not the block body contains any EIP-7702 transactions.
     #[inline]
     pub fn has_eip7702_transactions(&self) -> bool {
-        self.transactions.iter().any(|tx| tx.is_eip7702())
+        self.transactions.iter().any(|tx| Typed2718::is_eip7702(tx))
     }
 
     /// Returns an iterator over all blob transactions of the block
     #[inline]
     pub fn blob_transactions_iter(&self) -> impl Iterator<Item = &T> + '_ {
-        self.transactions.iter().filter(|tx| tx.is_eip4844())
+        self.transactions.iter().filter(|tx| Typed2718::is_eip4844(tx))
     }
 
     /// Returns only the blob transactions, if any, from the block body.
@@ -638,11 +638,12 @@ impl<T: InMemorySize> InMemorySize for BlockBody<T> {
     /// Calculates a heuristic for the in-memory size of the [`BlockBody`].
     #[inline]
     fn size(&self) -> usize {
-        self.transactions.iter().map(T::size).sum::<usize>() +
-            self.transactions.capacity() * core::mem::size_of::<T>() +
-            self.ommers.iter().map(Header::size).sum::<usize>() +
-            self.ommers.capacity() * core::mem::size_of::<Header>() +
-            self.withdrawals
+        self.transactions.iter().map(T::size).sum::<usize>()
+            + self.transactions.capacity() * core::mem::size_of::<T>()
+            + self.ommers.iter().map(Header::size).sum::<usize>()
+            + self.ommers.capacity() * core::mem::size_of::<Header>()
+            + self
+                .withdrawals
                 .as_ref()
                 .map_or(core::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
     }

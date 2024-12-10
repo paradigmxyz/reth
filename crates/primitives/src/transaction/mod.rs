@@ -3,7 +3,7 @@
 use alloc::vec::Vec;
 use alloy_consensus::{
     transaction::RlpEcdsaTx, SignableTransaction, Signed, Transaction as _, TxEip1559, TxEip2930,
-    TxEip4844, TxEip4844Variant, TxEip7702, TxLegacy, TypedTransaction,
+    TxEip4844, TxEip4844Variant, TxEip7702, TxLegacy, Typed2718, TypedTransaction,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
@@ -192,6 +192,20 @@ impl<'a> arbitrary::Arbitrary<'a> for Transaction {
     }
 }
 
+impl Typed2718 for Transaction {
+    fn ty(&self) -> u8 {
+        match self {
+            Self::Legacy(tx) => tx.ty(),
+            Self::Eip2930(tx) => tx.ty(),
+            Self::Eip1559(tx) => tx.ty(),
+            Self::Eip4844(tx) => tx.ty(),
+            Self::Eip7702(tx) => tx.ty(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.ty(),
+        }
+    }
+}
+
 // === impl Transaction ===
 
 impl Transaction {
@@ -213,10 +227,10 @@ impl Transaction {
     pub fn set_chain_id(&mut self, chain_id: u64) {
         match self {
             Self::Legacy(TxLegacy { chain_id: ref mut c, .. }) => *c = Some(chain_id),
-            Self::Eip2930(TxEip2930 { chain_id: ref mut c, .. }) |
-            Self::Eip1559(TxEip1559 { chain_id: ref mut c, .. }) |
-            Self::Eip4844(TxEip4844 { chain_id: ref mut c, .. }) |
-            Self::Eip7702(TxEip7702 { chain_id: ref mut c, .. }) => *c = chain_id,
+            Self::Eip2930(TxEip2930 { chain_id: ref mut c, .. })
+            | Self::Eip1559(TxEip1559 { chain_id: ref mut c, .. })
+            | Self::Eip4844(TxEip4844 { chain_id: ref mut c, .. })
+            | Self::Eip7702(TxEip7702 { chain_id: ref mut c, .. }) => *c = chain_id,
             #[cfg(feature = "optimism")]
             Self::Deposit(_) => { /* noop */ }
         }
@@ -261,7 +275,7 @@ impl Transaction {
 
         // Check if max_fee_per_gas is less than base_fee
         if max_fee_per_gas < base_fee {
-            return None
+            return None;
         }
 
         // Calculate the difference between max_fee_per_gas and base_fee
@@ -710,18 +724,6 @@ impl alloy_consensus::Transaction for Transaction {
         }
     }
 
-    fn ty(&self) -> u8 {
-        match self {
-            Self::Legacy(tx) => tx.ty(),
-            Self::Eip2930(tx) => tx.ty(),
-            Self::Eip1559(tx) => tx.ty(),
-            Self::Eip4844(tx) => tx.ty(),
-            Self::Eip7702(tx) => tx.ty(),
-            #[cfg(feature = "optimism")]
-            Self::Deposit(tx) => tx.ty(),
-        }
-    }
-
     fn access_list(&self) -> Option<&AccessList> {
         match self {
             Self::Legacy(tx) => tx.access_list(),
@@ -820,9 +822,15 @@ impl Hash for TransactionSigned {
 
 impl PartialEq for TransactionSigned {
     fn eq(&self, other: &Self) -> bool {
-        self.signature == other.signature &&
-            self.transaction == other.transaction &&
-            self.tx_hash() == other.tx_hash()
+        self.signature == other.signature
+            && self.transaction == other.transaction
+            && self.tx_hash() == other.tx_hash()
+    }
+}
+
+impl Typed2718 for TransactionSigned {
+    fn ty(&self) -> u8 {
+        self.deref().ty()
     }
 }
 
@@ -976,7 +984,7 @@ impl TransactionSigned {
         let transaction_payload_len = header.payload_length;
 
         if transaction_payload_len > remaining_len {
-            return Err(RlpError::InputTooShort)
+            return Err(RlpError::InputTooShort);
         }
 
         let mut transaction = TxLegacy {
@@ -994,7 +1002,7 @@ impl TransactionSigned {
         // check the new length, compared to the original length and the header length
         let decoded = remaining_len - data.len();
         if decoded != transaction_payload_len {
-            return Err(RlpError::UnexpectedLength)
+            return Err(RlpError::UnexpectedLength);
         }
 
         let tx_length = header.payload_length + header.length();
@@ -1037,7 +1045,7 @@ impl SignedTransaction for TransactionSigned {
         // `from` address.
         #[cfg(feature = "optimism")]
         if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from)
+            return Some(from);
         }
         let signature_hash = self.signature_hash();
         recover_signer(&self.signature, signature_hash)
@@ -1048,7 +1056,7 @@ impl SignedTransaction for TransactionSigned {
         // `from` address.
         #[cfg(feature = "optimism")]
         if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from)
+            return Some(from);
         }
         self.encode_for_signing(buf);
         let signature_hash = keccak256(buf);
@@ -1202,10 +1210,6 @@ impl alloy_consensus::Transaction for TransactionSigned {
         self.deref().input()
     }
 
-    fn ty(&self) -> u8 {
-        self.deref().ty()
-    }
-
     fn access_list(&self) -> Option<&AccessList> {
         self.deref().access_list()
     }
@@ -1240,7 +1244,7 @@ impl Encodable for TransactionSigned {
 
     fn length(&self) -> usize {
         let mut payload_length = self.encode_2718_len();
-        if !self.is_legacy() {
+        if !Encodable2718::is_legacy(self) {
             payload_length += Header { list: false, payload_length }.length();
         }
 

@@ -7,7 +7,7 @@ use alloy_primitives::{bytes, Bytes, TxKind, Uint, B256};
 
 #[cfg(any(test, feature = "reth-codec"))]
 use alloy_consensus::constants::EIP7702_TX_TYPE_ID;
-use alloy_consensus::{SignableTransaction, TxLegacy};
+use alloy_consensus::{SignableTransaction, TxLegacy, Typed2718};
 use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization};
 use derive_more::{Constructor, Deref, From};
 use op_alloy_consensus::OpTypedTransaction;
@@ -157,10 +157,6 @@ impl alloy_consensus::Transaction for OpTransaction {
         self.0.input()
     }
 
-    fn ty(&self) -> u8 {
-        self.0.ty()
-    }
-
     fn access_list(&self) -> Option<&AccessList> {
         self.0.access_list()
     }
@@ -195,5 +191,11 @@ impl InMemorySize for OpTransaction {
             OpTypedTransaction::Eip7702(tx) => tx.size(),
             OpTypedTransaction::Deposit(tx) => tx.size(),
         }
+    }
+}
+
+impl Typed2718 for OpTransaction {
+    fn ty(&self) -> u8 {
+        self.0.ty()
     }
 }

@@ -8,7 +8,7 @@ use alloy_rlp::{
 use derive_more::{Constructor, Deref, DerefMut, From, IntoIterator};
 use reth_codecs_derive::{add_arbitrary_tests, generate_tests};
 use reth_primitives::TransactionSigned;
-use reth_primitives_traits::{SignedTransaction, Transaction};
+use reth_primitives_traits::SignedTransaction;
 use std::{
     collections::{HashMap, HashSet},
     mem,
@@ -38,7 +38,7 @@ impl NewBlockHashes {
     pub fn latest(&self) -> Option<&BlockHashNumber> {
         self.0.iter().fold(None, |latest, block| {
             if let Some(latest) = latest {
-                return if latest.number > block.number { Some(latest) } else { Some(block) }
+                return if latest.number > block.number { Some(latest) } else { Some(block) };
             }
             Some(block)
         })
@@ -432,13 +432,13 @@ impl Decodable for NewPooledTransactionHashes68 {
             return Err(alloy_rlp::Error::ListLengthMismatch {
                 expected: msg.hashes.len(),
                 got: msg.types.len(),
-            })
+            });
         }
         if msg.hashes.len() != msg.sizes.len() {
             return Err(alloy_rlp::Error::ListLengthMismatch {
                 expected: msg.hashes.len(),
                 got: msg.sizes.len(),
-            })
+            });
         }
 
         Ok(msg)
@@ -711,7 +711,7 @@ impl RequestTxHashes {
     pub fn retain_count(&mut self, count: usize) -> Self {
         let rest_capacity = self.hashes.len().saturating_sub(count);
         if rest_capacity == 0 {
-            return Self::empty()
+            return Self::empty();
         }
         let mut rest = Self::with_capacity(rest_capacity);
 
@@ -719,7 +719,7 @@ impl RequestTxHashes {
         self.hashes.retain(|hash| {
             if i >= count {
                 rest.insert(*hash);
-                return false
+                return false;
             }
             i += 1;
 

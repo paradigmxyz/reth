@@ -2,7 +2,7 @@
 
 use crate::{Block, BlockBody, Transaction, TransactionSigned};
 use alloc::{string::ToString, vec::Vec};
-use alloy_consensus::{constants::EMPTY_TRANSACTIONS, Header, TxEnvelope};
+use alloy_consensus::{constants::EMPTY_TRANSACTIONS, Header, TxEnvelope, Typed2718};
 use alloy_network::{AnyHeader, AnyRpcBlock, AnyRpcTransaction, AnyTxEnvelope};
 use alloy_serde::WithOtherFields;
 use op_alloy_rpc_types as _;
@@ -16,23 +16,22 @@ impl TryFrom<AnyRpcBlock> for Block {
         let block = block.inner;
 
         let transactions = {
-            let transactions: Result<Vec<TransactionSigned>, ConversionError> = match block
-                .transactions
-            {
-                alloy_rpc_types::BlockTransactions::Full(transactions) => {
-                    transactions.into_iter().map(|tx| tx.try_into()).collect()
-                }
-                alloy_rpc_types::BlockTransactions::Hashes(_) |
-                alloy_rpc_types::BlockTransactions::Uncle => {
-                    // alloy deserializes empty blocks into `BlockTransactions::Hashes`, if the tx
-                    // root is the empty root then we can just return an empty vec.
-                    if block.header.transactions_root == EMPTY_TRANSACTIONS {
-                        Ok(Vec::new())
-                    } else {
-                        Err(ConversionError::Custom("missing transactions".to_string()))
+            let transactions: Result<Vec<TransactionSigned>, ConversionError> =
+                match block.transactions {
+                    alloy_rpc_types::BlockTransactions::Full(transactions) => {
+                        transactions.into_iter().map(|tx| tx.try_into()).collect()
                     }
-                }
-            };
+                    alloy_rpc_types::BlockTransactions::Hashes(_)
+                    | alloy_rpc_types::BlockTransactions::Uncle => {
+                        // alloy deserializes empty blocks into `BlockTransactions::Hashes`, if the tx
+                        // root is the empty root then we can just return an empty vec.
+                        if block.header.transactions_root == EMPTY_TRANSACTIONS {
+                            Ok(Vec::new())
+                        } else {
+                            Err(ConversionError::Custom("missing transactions".to_string()))
+                        }
+                    }
+                };
             transactions?
         };
 
@@ -152,7 +151,7 @@ impl TryFrom<AnyRpcTransaction> for TransactionSigned {
                         hash,
                     )
                 } else {
-                    return Err(ConversionError::Custom("unknown transaction type".to_string()))
+                    return Err(ConversionError::Custom("unknown transaction type".to_string()));
                 }
             }
             _ => return Err(ConversionError::Custom("unknown transaction type".to_string())),

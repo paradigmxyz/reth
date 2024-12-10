@@ -1,4 +1,4 @@
-use alloy_consensus::{BlockHeader, Transaction};
+use alloy_consensus::{BlockHeader, Transaction, Typed2718};
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_network::{ReceiptResponse, TransactionResponse};
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
@@ -224,7 +224,7 @@ where
         if tx_len != receipts.len() {
             return Err(internal_rpc_err(
                 "the number of transactions does not match the number of receipts",
-            ))
+            ));
         }
 
         // make sure the block is full
@@ -252,7 +252,7 @@ where
         let timestamp = Some(block.header.timestamp());
         let receipts = receipts
             .drain(page_start..page_end)
-            .zip(transactions.iter().map(Transaction::ty))
+            .zip(transactions.iter().map(Typed2718::ty))
             .map(|(receipt, tx_ty)| {
                 let inner = OtsReceipt {
                     status: receipt.status(),
