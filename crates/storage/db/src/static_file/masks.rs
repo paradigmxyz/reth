@@ -50,7 +50,7 @@ add_static_file_mask! {
 }
 add_static_file_mask! {
     #[doc = "Mask for a `StoredBlockWithdrawals` from BlockMeta static file segment"]
-    OmmerMask, <BlockOmmers as Table>::Value, 0b010
+    OmmerMask<H>, H, 0b010
 }
 add_static_file_mask! {
     #[doc = "Mask for a `StoredBlockWithdrawals` from BlockMeta static file segment"]
