@@ -3,7 +3,7 @@
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, StaticFileHook},
-    BeaconConsensusEngineHandle,
+    BeaconConsensusEngineHandle, EngineNodeTypes,
 };
 use reth_chainspec::EthChainSpec;
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider};
@@ -11,7 +11,6 @@ use reth_engine_local::{LocalEngineService, LocalPayloadAttributesBuilder};
 use reth_engine_service::service::{ChainEvent, EngineService};
 use reth_engine_tree::{
     engine::{EngineApiRequest, EngineRequestHandler},
-    persistence::PersistenceNodeTypes,
     tree::TreeConfig,
 };
 use reth_engine_util::EngineMessageStreamExt;
@@ -28,8 +27,8 @@ use reth_node_core::{
     primitives::Head,
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
-use reth_primitives::{EthPrimitives, EthereumHardforks};
-use reth_provider::providers::{BlockchainProvider2, ProviderNodeTypes};
+use reth_primitives::EthereumHardforks;
+use reth_provider::providers::BlockchainProvider2;
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info};
@@ -70,17 +69,13 @@ impl EngineNodeLauncher {
 
 impl<Types, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
 where
-    Types:
-        ProviderNodeTypes<Primitives = EthPrimitives> + NodeTypesWithEngine + PersistenceNodeTypes,
+    Types: EngineNodeTypes,
     T: FullNodeTypes<Types = Types, Provider = BlockchainProvider2<Types>>,
     CB: NodeComponentsBuilder<T>,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
         + EngineValidatorAddOn<
             NodeAdapter<T, CB::Components>,
-            Validator: EngineValidator<
-                <Types as NodeTypesWithEngine>::Engine,
-                Block = BlockTy<Types>,
-            >,
+            Validator: EngineValidator<Types::Engine, Block = BlockTy<Types>>,
         >,
 
     LocalPayloadAttributesBuilder<Types::ChainSpec>: PayloadAttributesBuilder<
