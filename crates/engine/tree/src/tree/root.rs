@@ -283,7 +283,9 @@ where
         let state_hook = StateHookSender::new(self.tx.clone());
 
         move |state: &EvmState| {
-            let _ = state_hook.send(StateRootMessage::StateUpdate(state.clone()));
+            if let Err(error) = state_hook.send(StateRootMessage::StateUpdate(state.clone())) {
+                error!(target: "engine::root", ?error, "Failed to send state update");
+            }
         }
     }
 
