@@ -1,3 +1,3 @@
 pub use modular_bitfield;
 
-pub use bytes::Buf;
+pub use bytes::{self, Buf};

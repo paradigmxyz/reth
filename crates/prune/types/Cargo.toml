@@ -15,7 +15,6 @@ workspace = true
 reth-codecs.workspace = true
 
 alloy-primitives.workspace = true
-bytes.workspace = true
 derive_more.workspace = true
 modular-bitfield.workspace = true
 serde.workspace = true

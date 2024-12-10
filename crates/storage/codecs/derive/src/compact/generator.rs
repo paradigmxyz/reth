@@ -1,6 +1,7 @@
 //! Code generator for the `Compact` trait.
 
 use super::*;
+use crate::ZstdConfig;
 use convert_case::{Case, Casing};
 use syn::{Attribute, LitStr};
 
@@ -10,19 +11,19 @@ pub fn generate_from_to(
     attrs: &[Attribute],
     has_lifetime: bool,
     fields: &FieldList,
-    is_zstd: bool,
+    zstd: Option<ZstdConfig>,
 ) -> TokenStream2 {
     let flags = format_ident!("{ident}Flags");
 
-    let to_compact = generate_to_compact(fields, ident, is_zstd);
-    let from_compact = generate_from_compact(fields, ident, is_zstd);
+    let reth_codecs = parse_reth_codecs_path(attrs).unwrap();
+
+    let to_compact = generate_to_compact(fields, ident, zstd.clone(), &reth_codecs);
+    let from_compact = generate_from_compact(fields, ident, zstd);
 
     let snake_case_ident = ident.to_string().to_case(Case::Snake);
 
     let fuzz = format_ident!("fuzz_test_{snake_case_ident}");
     let test = format_ident!("fuzz_{snake_case_ident}");
-
-    let reth_codecs = parse_reth_codecs_path(attrs).unwrap();
 
     let lifetime = if has_lifetime {
         quote! { 'a }
@@ -77,7 +78,7 @@ pub fn generate_from_to(
         #fuzz_tests
 
         #impl_compact {
-            fn to_compact<B>(&self, buf: &mut B) -> usize where B: bytes::BufMut + AsMut<[u8]> {
+            fn to_compact<B>(&self, buf: &mut B) -> usize where B: #reth_codecs::__private::bytes::BufMut + AsMut<[u8]> {
                 let mut flags = #flags::default();
                 let mut total_length = 0;
                 #(#to_compact)*
@@ -92,7 +93,11 @@ pub fn generate_from_to(
 }
 
 /// Generates code to implement the `Compact` trait method `to_compact`.
-fn generate_from_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> TokenStream2 {
+fn generate_from_compact(
+    fields: &FieldList,
+    ident: &Ident,
+    zstd: Option<ZstdConfig>,
+) -> TokenStream2 {
     let mut lines = vec![];
     let mut known_types =
         vec!["B256", "Address", "Bloom", "Vec", "TxHash", "BlockHash", "FixedBytes"];
@@ -147,38 +152,41 @@ fn generate_from_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> To
     // If the type has compression support, then check the `__zstd` flag. Otherwise, use the default
     // code branch. However, even if it's a type with compression support, not all values are
     // to be compressed (thus the zstd flag). Ideally only the bigger ones.
-    is_zstd
-        .then(|| {
-            let decompressor = format_ident!("{}_DECOMPRESSOR", ident.to_string().to_uppercase());
-            quote! {
-                if flags.__zstd() != 0 {
-                    #decompressor.with(|decompressor| {
-                        let decompressor = &mut decompressor.borrow_mut();
-                        let decompressed = decompressor.decompress(buf);
-                        let mut original_buf = buf;
+    if let Some(zstd) = zstd {
+        let decompressor = zstd.decompressor;
+        quote! {
+            if flags.__zstd() != 0 {
+                #decompressor.with(|decompressor| {
+                    let decompressor = &mut decompressor.borrow_mut();
+                    let decompressed = decompressor.decompress(buf);
+                    let mut original_buf = buf;
 
-                        let mut buf: &[u8] = decompressed;
-                        #(#lines)*
-                        (obj, original_buf)
-                    })
-                } else {
+                    let mut buf: &[u8] = decompressed;
                     #(#lines)*
-                    (obj, buf)
-                }
-            }
-        })
-        .unwrap_or_else(|| {
-            quote! {
+                    (obj, original_buf)
+                })
+            } else {
                 #(#lines)*
                 (obj, buf)
             }
-        })
+        }
+    } else {
+        quote! {
+            #(#lines)*
+            (obj, buf)
+        }
+    }
 }
 
 /// Generates code to implement the `Compact` trait method `from_compact`.
-fn generate_to_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> Vec<TokenStream2> {
+fn generate_to_compact(
+    fields: &FieldList,
+    ident: &Ident,
+    zstd: Option<ZstdConfig>,
+    reth_codecs: &syn::Path,
+) -> Vec<TokenStream2> {
     let mut lines = vec![quote! {
-        let mut buffer = bytes::BytesMut::new();
+        let mut buffer = #reth_codecs::__private::bytes::BytesMut::new();
     }];
 
     let is_enum = fields.iter().any(|field| matches!(field, FieldTypes::EnumVariant(_)));
@@ -198,7 +206,7 @@ fn generate_to_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> Vec<
     // Just because a type supports compression, doesn't mean all its values are to be compressed.
     // We skip the smaller ones, and thus require a flag` __zstd` to specify if this value is
     // compressed or not.
-    if is_zstd {
+    if zstd.is_some() {
         lines.push(quote! {
             let mut zstd = buffer.len() > 7;
             if zstd {
@@ -214,9 +222,8 @@ fn generate_to_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> Vec<
         buf.put_slice(&flags);
     });
 
-    if is_zstd {
-        let compressor = format_ident!("{}_COMPRESSOR", ident.to_string().to_uppercase());
-
+    if let Some(zstd) = zstd {
+        let compressor = zstd.compressor;
         lines.push(quote! {
             if zstd {
                 #compressor.with(|compressor| {
