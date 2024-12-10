@@ -782,7 +782,12 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     highest_block,
                 )?,
                 StaticFileSegment::BlockMeta => {
-                    todo!(); // TODO(joshie)
+                    self.ensure_invariants::<_, tables::BlockBodyIndices>(
+                        provider,
+                        segment,
+                        highest_tx,
+                        highest_block,
+                    )?
                 }
             } {
                 update_unwind_target(unwind);
@@ -1671,12 +1676,12 @@ impl<N: NodePrimitives> WithdrawalsProvider for StaticFileProvider<N> {
     fn withdrawals_by_block(
         &self,
         id: BlockHashOrNumber,
-        _: u64,
+        timestamp: u64,
     ) -> ProviderResult<Option<Withdrawals>> {
         if let Some(num) = id.as_number() {
             return self
                 .get_segment_provider_from_block(StaticFileSegment::BlockMeta, num, None)
-                .and_then(|provider| provider.withdrawals_by_block(num))
+                .and_then(|provider| provider.withdrawals_by_block(id, timestamp))
                 .or_else(|err| {
                     if let ProviderError::MissingStaticFileBlock(_, _) = err {
                         Ok(None)
@@ -1685,7 +1690,7 @@ impl<N: NodePrimitives> WithdrawalsProvider for StaticFileProvider<N> {
                     }
                 })
         }
-        // Only accepts block number quries
+        // Only accepts block number queries
         Err(ProviderError::UnsupportedProvider)
     }
 
@@ -1709,7 +1714,7 @@ impl<N: FullNodePrimitives<BlockHeader: Value>> OmmersProvider for StaticFilePro
                     }
                 })
         }
-        // Only accepts block number quries
+        // Only accepts block number queries
         Err(ProviderError::UnsupportedProvider)
     }
 }

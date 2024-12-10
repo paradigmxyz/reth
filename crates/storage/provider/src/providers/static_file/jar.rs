@@ -16,17 +16,15 @@ use reth_chainspec::ChainInfo;
 use reth_db::{
     models::StoredBlockBodyIndices,
     static_file::{
-        BlockHashMask, BodyIndiceMask, HeaderMask, HeaderWithHashMask, OmmerMask, ReceiptMask,
-        StaticFileCursor, TDWithHashMask, TotalDifficultyMask, TransactionMask, WithdrawalMask,
+        BlockHashMask, BodyIndicesMask, HeaderMask, HeaderWithHashMask, OmmersMask, ReceiptMask,
+        StaticFileCursor, TDWithHashMask, TotalDifficultyMask, TransactionMask, WithdrawalsMask,
     },
     table::{Decompress, Value},
 };
 use reth_node_types::{FullNodePrimitives, NodePrimitives};
 use reth_primitives::{transaction::recover_signers, SealedHeader, TransactionMeta};
 use reth_primitives_traits::SignedTransaction;
-use reth_storage_api::{
-    BlockBodyIndicesProvider, BlockReader, OmmersProvider, WithdrawalsProvider,
-};
+use reth_storage_api::{BlockBodyIndicesProvider, OmmersProvider, WithdrawalsProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     fmt::Debug,
@@ -366,9 +364,9 @@ impl<N: NodePrimitives> WithdrawalsProvider for StaticFileJarProvider<'_, N> {
         _: u64,
     ) -> ProviderResult<Option<Withdrawals>> {
         if let Some(num) = id.as_number() {
-            return Ok(self.cursor()?.get_one::<WithdrawalMask>(num.into())?.map(|s| s.withdrawals))
+            return Ok(self.cursor()?.get_one::<WithdrawalsMask>(num.into())?.map(|s| s.withdrawals))
         }
-        // Only accepts block number quries
+        // Only accepts block number queries
         Err(ProviderError::UnsupportedProvider)
     }
 
@@ -383,16 +381,16 @@ impl<N: FullNodePrimitives<BlockHeader: Value>> OmmersProvider for StaticFileJar
         if let Some(num) = id.as_number() {
             return Ok(self
                 .cursor()?
-                .get_one::<OmmerMask<Self::Header>>(num.into())?
+                .get_one::<OmmersMask<Self::Header>>(num.into())?
                 .map(|s| s.ommers))
         }
-        // Only accepts block number quries
+        // Only accepts block number queries
         Err(ProviderError::UnsupportedProvider)
     }
 }
 
 impl<N: NodePrimitives> BlockBodyIndicesProvider for StaticFileJarProvider<'_, N> {
     fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        self.cursor()?.get_one::<BodyIndiceMask>(num.into())
+        self.cursor()?.get_one::<BodyIndicesMask>(num.into())
     }
 }
