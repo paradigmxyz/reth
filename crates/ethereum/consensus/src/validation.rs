@@ -17,7 +17,7 @@ pub fn validate_block_post_execution<B, ChainSpec>(
     requests: &Requests,
 ) -> Result<(), ConsensusError>
 where
-    B: Block<Header: BlockHeader>,
+    B: Block,
     ChainSpec: EthereumHardforks,
 {
     // Check if gas used matches the value set in header.
