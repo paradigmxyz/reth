@@ -93,7 +93,7 @@ where
     /// database table.
     fn write_headers<P>(&mut self, provider: &P) -> Result<BlockNumber, StageError>
     where
-        P: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory<Primitives: NodePrimitives>,
+        P: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory,
         Downloader: HeaderDownloader<Header = <P::Primitives as NodePrimitives>::BlockHeader>,
         <P::Primitives as NodePrimitives>::BlockHeader: Value + FullBlockHeader,
     {
@@ -201,7 +201,6 @@ where
 impl<Provider, P, D> Stage<Provider> for HeaderStage<P, D>
 where
     Provider: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory,
-    Provider::Primitives: NodePrimitives,
     P: HeaderSyncGapProvider<Header = <Provider::Primitives as NodePrimitives>::BlockHeader>,
     D: HeaderDownloader<Header = <Provider::Primitives as NodePrimitives>::BlockHeader>,
     <Provider::Primitives as NodePrimitives>::BlockHeader: FullBlockHeader + Value,
