@@ -26,7 +26,7 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{EthPrimitives, Head, SealedBlock, SealedHeader};
+use reth_primitives::{EthPrimitives, Head, SealedBlock, SealedHeader, SealedBlockFor};
 use reth_provider::{
     providers::ProviderNodeTypes, BlockIdReader, BlockReader, BlockSource, CanonChainTracker,
     ChainSpecProvider, ProviderError, StageCheckpointReader,
@@ -1225,7 +1225,8 @@ where
     #[instrument(level = "trace", skip_all, target = "consensus::engine", ret)]
     fn try_buffer_payload(
         &mut self,
-        block: SealedBlock<HeaderTy<N>, BodyTy<N>>,
+        // block: SealedBlock<HeaderTy<N>, BodyTy<N>>,
+        block: SealedBlockFor<reth_primitives::Block>,
     ) -> Result<PayloadStatus, InsertBlockError> {
         self.blockchain.buffer_block_without_senders(block)?;
         Ok(PayloadStatus::from_status(PayloadStatusEnum::Syncing))
