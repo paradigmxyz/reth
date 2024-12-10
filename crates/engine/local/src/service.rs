@@ -52,7 +52,7 @@ where
     /// Processes requests.
     ///
     /// This type is responsible for processing incoming requests.
-    handler: EngineApiRequestHandler<EngineApiRequest<N::Engine>>,
+    handler: EngineApiRequestHandler<EngineApiRequest<N::Engine, N::Primitives>>,
     /// Receiver for incoming requests (from the engine API endpoint) that need to be processed.
     incoming_requests: EngineMessageStream<N::Engine>,
 }
