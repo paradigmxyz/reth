@@ -612,19 +612,19 @@ impl<T: Transaction> BlockBody<T> {
     /// Returns whether or not the block body contains any blob transactions.
     #[inline]
     pub fn has_blob_transactions(&self) -> bool {
-        self.transactions.iter().any(|tx| Typed2718::is_eip4844(tx))
+        self.transactions.iter().any(|tx| tx.is_eip4844())
     }
 
     /// Returns whether or not the block body contains any EIP-7702 transactions.
     #[inline]
     pub fn has_eip7702_transactions(&self) -> bool {
-        self.transactions.iter().any(|tx| Typed2718::is_eip7702(tx))
+        self.transactions.iter().any(|tx| tx.is_eip7702())
     }
 
     /// Returns an iterator over all blob transactions of the block
     #[inline]
     pub fn blob_transactions_iter(&self) -> impl Iterator<Item = &T> + '_ {
-        self.transactions.iter().filter(Typed2718::is_eip4844)
+        self.transactions.iter().filter(|tx| tx.is_eip4844())
     }
 
     /// Returns only the blob transactions, if any, from the block body.
