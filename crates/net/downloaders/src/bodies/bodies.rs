@@ -464,7 +464,10 @@ impl<H, B> OrderedBodiesResponse<H, B> {
     }
 }
 
-impl<H: BlockHeader, B> OrderedBodiesResponse<H, B> {
+impl<H, B> OrderedBodiesResponse<H, B>
+where
+    H: BlockHeader,
+{
     /// Returns the block number of the first element
     ///
     /// # Panics
