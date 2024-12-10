@@ -15,6 +15,8 @@ use flags::*;
 mod structs;
 use structs::*;
 
+use crate::ZstdConfig;
+
 // Helper Alias type
 type IsCompact = bool;
 // Helper Alias type
@@ -40,7 +42,7 @@ pub enum FieldTypes {
 }
 
 /// Derives the `Compact` trait and its from/to implementations.
-pub fn derive(input: TokenStream, is_zstd: bool) -> TokenStream {
+pub fn derive(input: TokenStream, zstd: Option<ZstdConfig>) -> TokenStream {
     let mut output = quote! {};
 
     let DeriveInput { ident, data, generics, attrs, .. } = parse_macro_input!(input);
@@ -48,8 +50,8 @@ pub fn derive(input: TokenStream, is_zstd: bool) -> TokenStream {
     let has_lifetime = has_lifetime(&generics);
 
     let fields = get_fields(&data);
-    output.extend(generate_flag_struct(&ident, &attrs, has_lifetime, &fields, is_zstd));
-    output.extend(generate_from_to(&ident, &attrs, has_lifetime, &fields, is_zstd));
+    output.extend(generate_flag_struct(&ident, &attrs, has_lifetime, &fields, zstd.is_some()));
+    output.extend(generate_from_to(&ident, &attrs, has_lifetime, &fields, zstd));
     output.into()
 }
 
@@ -236,7 +238,7 @@ mod tests {
         let DeriveInput { ident, data, attrs, .. } = parse2(f_struct).unwrap();
         let fields = get_fields(&data);
         output.extend(generate_flag_struct(&ident, &attrs, false, &fields, false));
-        output.extend(generate_from_to(&ident, &attrs, false, &fields, false));
+        output.extend(generate_from_to(&ident, &attrs, false, &fields, None));
 
         // Expected output in a TokenStream format. Commas matter!
         let should_output = quote! {
