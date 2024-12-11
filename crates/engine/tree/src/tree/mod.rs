@@ -2230,7 +2230,7 @@ where
         let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
 
         let input = self
-            .compute_trie_input(consistent_view.clone(), block.parent_hash)
+            .compute_trie_input(consistent_view.clone(), block.header().parent_hash())
             .map_err(|e| InsertBlockErrorKindTwo::Other(Box::new(e)))?;
         let state_root_config = StateRootConfig { consistent_view, input: Arc::new(input) };
         let state_root_task = StateRootTask::new(state_root_config);
@@ -2274,7 +2274,7 @@ where
         if !persistence_in_progress {
             let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
             let mut input = self
-                .compute_trie_input(consistent_view.clone(), block.parent_hash)
+                .compute_trie_input(consistent_view.clone(), block.header().parent_hash())
                 .map_err(|e| InsertBlockErrorKindTwo::Other(Box::new(e)))?;
             // Extend with block we are validating root for.
             input.append_ref(&hashed_state);
