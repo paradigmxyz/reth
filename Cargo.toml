@@ -433,7 +433,9 @@ revm-primitives = { version = "14.0.0", default-features = false }
 # eth
 alloy-chains = { version = "0.1.32", default-features = false }
 alloy-dyn-abi = "0.8.15"
-alloy-primitives = { version = "0.8.15", default-features = false }
+alloy-primitives = { version = "0.8.15", default-features = false, features = [
+    "map-foldhash",
+] }
 alloy-rlp = { version = "0.3.10", default-features = false }
 alloy-sol-types = "0.8.15"
 alloy-trie = { version = "0.7", default-features = false }
@@ -562,7 +564,6 @@ reqwest = { version = "0.12", default-features = false }
 tracing-futures = "0.2"
 tower = "0.4"
 tower-http = "0.6"
-
 
 # p2p
 discv5 = "0.8.0"
