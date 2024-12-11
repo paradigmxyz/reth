@@ -1,6 +1,6 @@
 //! API of a signed transaction.
 
-use crate::{FillTxEnv, InMemorySize, MaybeArbitrary, MaybeCompact, MaybeSerde};
+use crate::{FillTxEnv, InMemorySize, MaybeCompact, MaybeSerde};
 use alloc::{fmt, vec::Vec};
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
 use alloy_primitives::{keccak256, Address, PrimitiveSignature, TxHash, B256};
@@ -28,7 +28,6 @@ pub trait SignedTransaction:
     + Decodable2718
     + alloy_consensus::Transaction
     + MaybeSerde
-    + MaybeArbitrary
     + InMemorySize
 {
     /// Returns reference to transaction hash.
