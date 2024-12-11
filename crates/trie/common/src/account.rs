@@ -92,13 +92,10 @@ mod tests {
         assert_eq!(trie_account.code_hash, KECCAK_EMPTY);
 
         // Check that the default Account converts to the same TrieAccount
-        assert_eq!(Into::<TrieAccount>::into((Account::default(), EMPTY_ROOT_HASH)), trie_account);
+        assert_eq!(TrieAccount::from((Account::default(), EMPTY_ROOT_HASH)), trie_account);
 
         // Check that the default AccountInfo converts to the same TrieAccount
-        assert_eq!(
-            Into::<TrieAccount>::into((AccountInfo::default(), EMPTY_ROOT_HASH)),
-            trie_account
-        );
+        assert_eq!(TrieAccount::from((AccountInfo::default(), EMPTY_ROOT_HASH)), trie_account);
     }
 
     #[test]
@@ -131,7 +128,7 @@ mod tests {
 
         // Check that the Account converts to the same TrieAccount
         assert_eq!(
-            Into::<TrieAccount>::into((
+            TrieAccount::from((
                 Account {
                     nonce: 10,
                     balance: U256::from(1000),
@@ -144,7 +141,7 @@ mod tests {
 
         // Check that the AccountInfo converts to the same TrieAccount
         assert_eq!(
-            Into::<TrieAccount>::into((
+            TrieAccount::from((
                 AccountInfo {
                     nonce: 10,
                     balance: U256::from(1000),

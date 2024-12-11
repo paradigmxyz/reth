@@ -56,8 +56,8 @@ pub(crate) struct BodiesRequestFuture<H, B: BodiesClient> {
 
 impl<H, B> BodiesRequestFuture<H, B>
 where
-    B: BodiesClient + 'static,
     H: BlockHeader,
+    B: BodiesClient + 'static,
 {
     /// Returns an empty future. Use [`BodiesRequestFuture::with_headers`] to set the request.
     pub(crate) fn new(

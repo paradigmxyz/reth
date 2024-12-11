@@ -41,20 +41,15 @@ use reth_primitives::{
 };
 use reth_primitives_traits::Block;
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
-    ExecutionOutcome, HashedPostStateProvider, ProviderError, StateCommitmentProvider,
-    StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
+    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, ExecutionOutcome,
+    HashedPostStateProvider, ProviderError, StateCommitmentProvider, StateProviderBox,
+    StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
-use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory, proof::ProofBlindedProviderFactory,
-    trie_cursor::InMemoryTrieCursorFactory, updates::TrieUpdates, TrieInput,
-};
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
+use reth_trie::{updates::TrieUpdates, TrieInput};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::EvmState;
-use root::{StateRootConfig, StateRootTask};
 use std::{
     cmp::Ordering,
     collections::{btree_map, hash_map, BTreeMap, VecDeque},
@@ -2236,27 +2231,27 @@ where
 
         // TODO: uncomment to use StateRootTask
 
-        let trie_updates = Arc::new(input.nodes.clone().into_sorted());
-        let hashed_post_state = Arc::new(input.state.clone().into_sorted());
-        let state_root_config = StateRootConfig {
-            consistent_view: consistent_view.clone(),
-            trie_updates: trie_updates.clone(),
-            hashed_post_state: hashed_post_state.clone(),
-            prefix_sets: Arc::new(input.prefix_sets.clone()),
-        };
-        let provider_ro = consistent_view.provider_ro()?;
-        let blinded_provider_factory = ProofBlindedProviderFactory::new(
-            InMemoryTrieCursorFactory::new(
-                DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
-                &trie_updates,
-            ),
-            HashedPostStateCursorFactory::new(
-                DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
-                &hashed_post_state,
-            ),
-            Arc::new(input.prefix_sets.clone()),
-        );
-        let state_root_task = StateRootTask::new(state_root_config, blinded_provider_factory);
+        // let trie_updates = Arc::new(input.nodes.clone().into_sorted());
+        // let hashed_post_state = Arc::new(input.state.clone().into_sorted());
+        // let state_root_config = StateRootConfig {
+        //     consistent_view: consistent_view.clone(),
+        //     nodes_sorted: trie_updates.clone(),
+        //     state_sorted: hashed_post_state.clone(),
+        //     prefix_sets: Arc::new(input.prefix_sets.clone()),
+        // };
+        // let provider_ro = consistent_view.provider_ro()?;
+        // let blinded_provider_factory = ProofBlindedProviderFactory::new(
+        //     InMemoryTrieCursorFactory::new(
+        //         DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
+        //         &trie_updates,
+        //     ),
+        //     HashedPostStateCursorFactory::new(
+        //         DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
+        //         &hashed_post_state,
+        //     ),
+        //     Arc::new(input.prefix_sets.clone()),
+        // );
+        // let state_root_task = StateRootTask::new(state_root_config, blinded_provider_factory);
         let state_hook = |_state: &EvmState| {};
         // let state_hook = state_root_task.state_hook();
         // let state_root_handle = state_root_task.spawn();

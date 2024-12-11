@@ -136,7 +136,7 @@ where
     Provider: DBProvider<Tx: DbTxMut>
         + TrieWriter
         + StatsReader
-        + HeaderProvider<Header = alloy_consensus::Header>
+        + HeaderProvider
         + StageCheckpointReader
         + StageCheckpointWriter,
 {
@@ -344,18 +344,18 @@ where
 
 /// Check that the computed state root matches the root in the expected header.
 #[inline]
-fn validate_state_root(
+fn validate_state_root<H: BlockHeader + Debug>(
     got: B256,
-    expected: SealedHeader,
+    expected: SealedHeader<H>,
     target_block: BlockNumber,
 ) -> Result<(), StageError> {
-    if got == expected.state_root {
+    if got == expected.state_root() {
         Ok(())
     } else {
         error!(target: "sync::stages::merkle", ?target_block, ?got, ?expected, "Failed to verify block state root! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
         Err(StageError::Block {
             error: BlockErrorKind::Validation(ConsensusError::BodyStateRootDiff(
-                GotExpected { got, expected: expected.state_root }.into(),
+                GotExpected { got, expected: expected.state_root() }.into(),
             )),
             block: Box::new(expected.block_with_parent()),
         })

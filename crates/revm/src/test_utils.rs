@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use alloy_primitives::{
     keccak256,
-    map::{HashMap, HashSet},
+    map::{B256HashMap, HashMap},
     Address, BlockNumber, Bytes, StorageKey, B256, U256,
 };
 use reth_primitives::{Account, Bytecode};
@@ -12,7 +12,7 @@ use reth_storage_api::{
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, KeccakKeyHasher,
-    MultiProof, StorageMultiProof, StorageProof, TrieInput,
+    MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 
 /// Mock state for testing
@@ -136,7 +136,7 @@ impl StateProofProvider for StateProviderTest {
     fn multiproof(
         &self,
         _input: TrieInput,
-        _targets: HashMap<B256, HashSet<B256>>,
+        _targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
         unimplemented!("proof generation is not supported")
     }
@@ -145,7 +145,7 @@ impl StateProofProvider for StateProviderTest {
         &self,
         _input: TrieInput,
         _target: HashedPostState,
-    ) -> ProviderResult<HashMap<B256, Bytes>> {
+    ) -> ProviderResult<B256HashMap<Bytes>> {
         unimplemented!("witness generation is not supported")
     }
 }
