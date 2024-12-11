@@ -1,10 +1,10 @@
 //! API of a signed transaction.
 
-use crate::{FillTxEnv, InMemorySize, MaybeArbitrary, MaybeCompact, MaybeSerde, TxType};
+use crate::{FillTxEnv, InMemorySize, MaybeArbitrary, MaybeCompact, MaybeSerde};
 use alloc::{fmt, vec::Vec};
 use alloy_consensus::transaction::PooledTransaction;
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
-use alloy_primitives::{keccak256, Address, PrimitiveSignature, TxHash, B256};
+use alloy_primitives::{keccak256, Address, PrimitiveSignature as Signature, TxHash, B256};
 use core::hash::Hash;
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
@@ -32,19 +32,21 @@ pub trait SignedTransaction:
     + MaybeArbitrary
     + InMemorySize
 {
-    /// Transaction envelope type ID.
-    type Type: TxType;
-
-    /// Returns the transaction type.
-    fn tx_type(&self) -> Self::Type {
-        Self::Type::try_from(self.ty()).expect("should decode tx type id")
-    }
-
     /// Returns reference to transaction hash.
     fn tx_hash(&self) -> &TxHash;
 
     /// Returns reference to signature.
-    fn signature(&self) -> &PrimitiveSignature;
+    fn signature(&self) -> &Signature;
+
+    /// Returns whether this transaction type can be __broadcasted__ as full transaction over the
+    /// network.
+    ///
+    /// Some transactions are not broadcastable as objects and only allowed to be broadcasted as
+    /// hashes, e.g. because they missing context (e.g. blob sidecar).
+    fn is_broadcastable_in_full(&self) -> bool {
+        // EIP-4844 transactions are not broadcastable in full, only hashes are allowed.
+        !self.is_eip4844()
+    }
 
     /// Recover signer from signature and hash.
     ///
@@ -78,8 +80,6 @@ pub trait SignedTransaction:
 }
 
 impl SignedTransaction for PooledTransaction {
-    type Type = TxType;
-
     fn tx_hash(&self) -> &TxHash {
         match self {
             Self::Legacy(tx) => tx.hash(),
@@ -96,18 +96,15 @@ impl SignedTransaction for PooledTransaction {
             Self::Eip2930(tx) => tx.signature(),
             Self::Eip1559(tx) => tx.signature(),
             Self::Eip7702(tx) => tx.signature(),
-            Self::BlobTransaction(tx) => tx.signature(),
+            Self::Eip4844(tx) => tx.signature(),
         }
     }
 
     fn recover_signer(&self) -> Option<Address> {
-        let signature_hash = self.signature_hash();
-        recover_signer(self.signature(), signature_hash)
+        todo!()
     }
 
     fn recover_signer_unchecked_with_buf(&self, buf: &mut Vec<u8>) -> Option<Address> {
-        self.encode_for_signing(buf);
-        let signature_hash = keccak256(buf);
-        recover_signer_unchecked(self.signature(), signature_hash)
+        todo!()
     }
 }

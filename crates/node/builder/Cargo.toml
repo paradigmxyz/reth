@@ -61,7 +61,7 @@ reth-transaction-pool.workspace = true
 ## ethereum
 alloy-primitives.workspace = true
 alloy-rpc-types = { workspace = true, features = ["engine"] }
-revm-primitives.workspace = true
+alloy-eips = { workspace = true, features = ["kzg"] }
 
 ## async
 futures.workspace = true

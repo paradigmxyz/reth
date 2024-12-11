@@ -408,7 +408,7 @@ where
         vec![requests.clone().unwrap_or_default()],
     );
     let receipts_root =
-        execution_outcome.receipts_root_slow(block_number).expect("Number is in range");
+        execution_outcome.ethereum_receipts_root(block_number).expect("Number is in range");
     let logs_bloom = execution_outcome.block_logs_bloom(block_number).expect("Number is in range");
 
     // calculate the state root

@@ -878,7 +878,7 @@ where
                         if self.updates.is_some() {
                             // Check if the extension node child is a hash that needs to be revealed
                             if self.nodes.get(&current).unwrap().is_hash() {
-                                if let Some(node) = self.provider.blinded_node(current.clone())? {
+                                if let Some(node) = self.provider.blinded_node(&current)? {
                                     let decoded = TrieNode::decode(&mut &node[..])?;
                                     trace!(target: "trie::sparse", ?current, ?decoded, "Revealing extension node child");
                                     // We'll never have to update the revealed child node, only
@@ -1031,7 +1031,7 @@ where
 
                         if self.nodes.get(&child_path).unwrap().is_hash() {
                             trace!(target: "trie::sparse", ?child_path, "Retrieving remaining blinded branch child");
-                            if let Some(node) = self.provider.blinded_node(child_path.clone())? {
+                            if let Some(node) = self.provider.blinded_node(&child_path)? {
                                 let decoded = TrieNode::decode(&mut &node[..])?;
                                 trace!(target: "trie::sparse", ?child_path, ?decoded, "Revealing remaining blinded branch child");
                                 // We'll never have to update the revealed branch node, only remove
