@@ -1,6 +1,5 @@
 use crate::job::EmptyBlockPayloadJob;
 use alloy_eips::BlockNumberOrTag;
-use alloy_primitives::Bytes;
 use reth::{
     providers::{BlockReaderIdExt, BlockSource, StateProviderFactory},
     tasks::TaskSpawner,
