@@ -14,6 +14,7 @@ use reth_trie::{
     trie_cursor::InMemoryTrieCursorFactory,
     updates::{TrieUpdates, TrieUpdatesSorted},
     HashedPostState, HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets, Nibbles,
+    TrieInput,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseProof, DatabaseTrieCursorFactory};
 use reth_trie_parallel::root::ParallelStateRootError;
@@ -76,6 +77,18 @@ pub struct StateRootConfig<Factory> {
     /// invalidate the in-memory nodes, not all keys from `state_sorted` might be present here,
     /// if we have cached nodes for them.
     pub prefix_sets: Arc<TriePrefixSetsMut>,
+}
+
+impl<Factory> StateRootConfig<Factory> {
+    /// Creates a new state root config from the consistent view and the trie input.
+    pub fn new_from_input(consistent_view: ConsistentDbView<Factory>, input: TrieInput) -> Self {
+        Self {
+            consistent_view,
+            nodes_sorted: Arc::new(input.nodes.into_sorted()),
+            state_sorted: Arc::new(input.state.into_sorted()),
+            prefix_sets: Arc::new(input.prefix_sets),
+        }
+    }
 }
 
 /// Messages used internally by the state root task

@@ -22,7 +22,6 @@ use revm_primitives::{
     Account as RevmAccount, AccountInfo, AccountStatus, Address, EvmState, EvmStorageSlot, HashMap,
     B256, KECCAK_EMPTY, U256,
 };
-use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 struct BenchParams {
@@ -137,16 +136,15 @@ fn bench_state_root(c: &mut Criterion) {
                         let state_updates = create_bench_state_updates(params);
                         setup_provider(&factory, &state_updates).expect("failed to setup provider");
 
-                        let trie_input = Arc::new(TrieInput::from_state(Default::default()));
-
-                        let config = StateRootConfig {
-                            consistent_view: ConsistentDbView::new(factory, None),
-                            input: trie_input,
-                        };
+                        let trie_input = TrieInput::from_state(Default::default());
+                        let config = StateRootConfig::new_from_input(
+                            ConsistentDbView::new(factory, None),
+                            trie_input,
+                        );
                         let provider = config.consistent_view.provider_ro().unwrap();
-                        let nodes_sorted = config.input.nodes.clone().into_sorted();
-                        let state_sorted = config.input.state.clone().into_sorted();
-                        let prefix_sets = Arc::new(config.input.prefix_sets.clone());
+                        let nodes_sorted = config.nodes_sorted.clone();
+                        let state_sorted = config.state_sorted.clone();
+                        let prefix_sets = config.prefix_sets.clone();
 
                         (config, state_updates, provider, nodes_sorted, state_sorted, prefix_sets)
                     },
