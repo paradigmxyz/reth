@@ -18,16 +18,12 @@ use alloy_consensus::{
     },
     BlockHeader,
 };
-use alloy_eips::eip4844::MAX_BLOBS_PER_BLOCK;
+use alloy_eips::eip4844::{env_settings::EnvKzgSettings, MAX_BLOBS_PER_BLOCK};
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_primitives::{InvalidTransactionError, SealedBlock};
 use reth_primitives_traits::GotExpected;
 use reth_storage_api::{AccountReader, StateProviderFactory};
 use reth_tasks::TaskSpawner;
-use revm::{
-    interpreter::gas::validate_initial_tx_gas,
-    primitives::{EnvKzgSettings, SpecId},
-};
 use std::{
     marker::PhantomData,
     sync::{atomic::AtomicBool, Arc},
@@ -807,6 +803,7 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
     transaction: &T,
     fork_tracker: &ForkTracker,
 ) -> Result<(), InvalidPoolTransactionError> {
+    use revm_primitives::SpecId;
     let spec_id = if fork_tracker.is_prague_activated() {
         SpecId::PRAGUE
     } else if fork_tracker.is_shanghai_activated() {
@@ -815,7 +812,7 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
         SpecId::MERGE
     };
 
-    let gas_after_merge = validate_initial_tx_gas(
+    let gas_after_merge = revm_interpreter::gas::validate_initial_tx_gas(
         spec_id,
         transaction.input(),
         transaction.is_create(),

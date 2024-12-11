@@ -58,7 +58,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         let highest_static_file_block = provider_factory
             .static_file_provider()
             .get_highest_static_files()
-            .max()
+            .max_block_num()
             .filter(|highest_static_file_block| *highest_static_file_block > target);
 
         // Execute a pipeline unwind if the start of the range overlaps the existing static
@@ -120,7 +120,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
 
         // Unwinding does not require a valid executor
-        let executor = NoopBlockExecutorProvider::default();
+        let executor = NoopBlockExecutorProvider::<N::Primitives>::default();
 
         let builder = if self.offline {
             Pipeline::<N>::builder().add_stages(

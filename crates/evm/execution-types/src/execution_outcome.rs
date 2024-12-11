@@ -2,7 +2,7 @@ use crate::BlockExecutionOutput;
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{logs_bloom, Address, BlockNumber, Bloom, Log, B256, U256};
 use reth_primitives::Receipts;
-use reth_primitives_traits::{receipt::ReceiptExt, Account, Bytecode, Receipt, StorageEntry};
+use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
 use reth_trie::{HashedPostState, KeyHasher};
 use revm::{
     db::{states::BundleState, BundleAccount},
@@ -32,7 +32,7 @@ impl ChangedAccount {
 ///
 /// The `ExecutionOutcome` structure aggregates the state changes over an arbitrary number of
 /// blocks, capturing the resulting state, receipts, and requests following the execution.
-#[derive(Default, Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ExecutionOutcome<T = reth_primitives::Receipt> {
     /// Bundle state with reverts.
@@ -52,6 +52,17 @@ pub struct ExecutionOutcome<T = reth_primitives::Receipt> {
     /// A transaction may have zero or more requests, so the length of the inner vector is not
     /// guaranteed to be the same as the number of transactions.
     pub requests: Vec<Requests>,
+}
+
+impl<T> Default for ExecutionOutcome<T> {
+    fn default() -> Self {
+        Self {
+            bundle: Default::default(),
+            receipts: Default::default(),
+            first_block: Default::default(),
+            requests: Default::default(),
+        }
+    }
 }
 
 /// Type used to initialize revms bundle state.
@@ -343,18 +354,17 @@ impl<T: Receipt<Log = Log>> ExecutionOutcome<T> {
     pub fn block_logs_bloom(&self, block_number: BlockNumber) -> Option<Bloom> {
         Some(logs_bloom(self.logs(block_number)?))
     }
+}
 
-    /// Returns the receipt root for all recorded receipts.
+impl ExecutionOutcome {
+    /// Returns the ethereum receipt root for all recorded receipts.
+    ///
     /// Note: this function calculated Bloom filters for every receipt and created merkle trees
     /// of receipt. This is a expensive operation.
-    pub fn receipts_root_slow(&self, _block_number: BlockNumber) -> Option<B256>
-    where
-        T: ReceiptExt,
-    {
-        #[cfg(feature = "optimism")]
-        panic!("This should not be called in optimism mode. Use `optimism_receipts_root_slow` instead.");
-        #[cfg(not(feature = "optimism"))]
-        self.receipts.root_slow(self.block_number_to_index(_block_number)?, T::receipts_root)
+    pub fn ethereum_receipts_root(&self, _block_number: BlockNumber) -> Option<B256> {
+        self.receipts.root_slow(self.block_number_to_index(_block_number)?, |receipts| {
+            reth_primitives::proofs::calculate_receipt_root_no_memo(receipts)
+        })
     }
 }
 

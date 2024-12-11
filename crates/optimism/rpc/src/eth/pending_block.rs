@@ -21,7 +21,7 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg, ExecutionResult, SpecId};
+use revm::primitives::{BlockEnv, ExecutionResult};
 
 impl<N> LoadPendingBlock for OpEthApi<N>
 where
@@ -82,23 +82,26 @@ where
 
     fn assemble_block(
         &self,
-        cfg: CfgEnvWithHandlerCfg,
-        block_env: BlockEnv,
+        block_env: &BlockEnv,
         parent_hash: B256,
         state_root: B256,
         transactions: Vec<ProviderTx<Self::Provider>>,
         receipts: &[ProviderReceipt<Self::Provider>],
     ) -> reth_provider::ProviderBlock<Self::Provider> {
         let chain_spec = self.provider().chain_spec();
+        let timestamp = block_env.timestamp.to::<u64>();
 
         let transactions_root = calculate_transaction_root(&transactions);
         let receipts_root = calculate_receipt_root_no_memo_optimism(
             &receipts.iter().collect::<Vec<_>>(),
             &chain_spec,
-            block_env.timestamp.to::<u64>(),
+            timestamp,
         );
 
         let logs_bloom = logs_bloom(receipts.iter().flat_map(|r| &r.logs));
+        let is_cancun = chain_spec.is_cancun_active_at_timestamp(timestamp);
+        let is_prague = chain_spec.is_prague_active_at_timestamp(timestamp);
+        let is_shanghai = chain_spec.is_shanghai_active_at_timestamp(timestamp);
 
         let header = Header {
             parent_hash,
@@ -107,10 +110,9 @@ where
             state_root,
             transactions_root,
             receipts_root,
-            withdrawals_root: (cfg.handler_cfg.spec_id >= SpecId::SHANGHAI)
-                .then_some(EMPTY_WITHDRAWALS),
+            withdrawals_root: (is_shanghai).then_some(EMPTY_WITHDRAWALS),
             logs_bloom,
-            timestamp: block_env.timestamp.to::<u64>(),
+            timestamp,
             mix_hash: block_env.prevrandao.unwrap_or_default(),
             nonce: BEACON_NONCE.into(),
             base_fee_per_gas: Some(block_env.basefee.to::<u64>()),
@@ -118,15 +120,13 @@ where
             gas_limit: block_env.gas_limit.to::<u64>(),
             difficulty: U256::ZERO,
             gas_used: receipts.last().map(|r| r.cumulative_gas_used).unwrap_or_default(),
-            blob_gas_used: (cfg.handler_cfg.spec_id >= SpecId::CANCUN).then(|| {
+            blob_gas_used: is_cancun.then(|| {
                 transactions.iter().map(|tx| tx.blob_gas_used().unwrap_or_default()).sum::<u64>()
             }),
             excess_blob_gas: block_env.get_blob_excess_gas().map(Into::into),
             extra_data: Default::default(),
-            parent_beacon_block_root: (cfg.handler_cfg.spec_id >= SpecId::CANCUN)
-                .then_some(B256::ZERO),
-            requests_hash: (cfg.handler_cfg.spec_id >= SpecId::PRAGUE)
-                .then_some(EMPTY_REQUESTS_HASH),
+            parent_beacon_block_root: is_cancun.then_some(B256::ZERO),
+            requests_hash: is_prague.then_some(EMPTY_REQUESTS_HASH),
             target_blobs_per_block: None,
         };
 
@@ -139,7 +139,7 @@ where
 
     fn assemble_receipt(
         &self,
-        tx: &reth_primitives::RecoveredTx<ProviderTx<Self::Provider>>,
+        tx: &ProviderTx<Self::Provider>,
         result: ExecutionResult,
         cumulative_gas_used: u64,
     ) -> reth_provider::ProviderReceipt<Self::Provider> {

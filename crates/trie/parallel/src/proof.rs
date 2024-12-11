@@ -1,6 +1,6 @@
 use crate::{root::ParallelStateRootError, stats::ParallelTrieTracker, StorageRootTargets};
 use alloy_primitives::{
-    map::{HashMap, HashSet},
+    map::{B256HashMap, HashMap},
     B256,
 };
 use alloy_rlp::{BufMut, Encodable};
@@ -18,7 +18,8 @@ use reth_trie::{
     proof::StorageProof,
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     walker::TrieWalker,
-    HashBuilder, MultiProof, Nibbles, TrieAccount, TrieInput, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    HashBuilder, MultiProof, MultiProofTargets, Nibbles, StorageMultiProof, TrieAccount, TrieInput,
+    TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::proof::ProofRetainer;
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
@@ -73,7 +74,7 @@ where
     /// Generate a state multiproof according to specified targets.
     pub fn multiproof(
         self,
-        targets: HashMap<B256, HashSet<B256>>,
+        targets: MultiProofTargets,
     ) -> Result<MultiProof, ParallelStateRootError> {
         let mut tracker = ParallelTrieTracker::default();
 
@@ -103,13 +104,13 @@ where
         // Pre-calculate storage roots for accounts which were changed.
         tracker.set_precomputed_storage_roots(storage_root_targets.len() as u64);
         debug!(target: "trie::parallel_state_root", len = storage_root_targets.len(), "pre-generating storage proofs");
-        let mut storage_proofs = HashMap::with_capacity(storage_root_targets.len());
+        let mut storage_proofs =
+            B256HashMap::with_capacity_and_hasher(storage_root_targets.len(), Default::default());
         for (hashed_address, prefix_set) in
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
         {
             let view = self.view.clone();
-            let target_slots: HashSet<B256> =
-                targets.get(&hashed_address).cloned().unwrap_or_default();
+            let target_slots = targets.get(&hashed_address).cloned().unwrap_or_default();
 
             let trie_nodes_sorted = trie_nodes_sorted.clone();
             let hashed_state_sorted = hashed_state_sorted.clone();
@@ -136,11 +137,7 @@ where
                     .with_prefix_set_mut(PrefixSetMut::from(prefix_set.iter().cloned()))
                     .with_branch_node_hash_masks(self.collect_branch_node_hash_masks)
                     .storage_multiproof(target_slots)
-                    .map_err(|e| {
-                        ParallelStateRootError::StorageRoot(StorageRootError::Database(
-                            DatabaseError::Other(e.to_string()),
-                        ))
-                    })
+                    .map_err(|e| ParallelStateRootError::Other(e.to_string()))
                 })();
                 if let Err(err) = tx.send(result) {
                     error!(target: "trie::parallel", ?hashed_address, err_content = ?err.0,  "Failed to send proof result");
@@ -172,7 +169,10 @@ where
             .with_proof_retainer(retainer)
             .with_updates(self.collect_branch_node_hash_masks);
 
-        let mut storages = HashMap::default();
+        // Initialize all storage multiproofs as empty.
+        // Storage multiproofs for non empty tries will be overwritten if necessary.
+        let mut storages: B256HashMap<_> =
+            targets.keys().map(|key| (*key, StorageMultiProof::empty())).collect();
         let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
         let mut account_node_iter = TrieNodeIter::new(
             walker,
@@ -253,7 +253,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{keccak256, map::DefaultHashBuilder, Address, U256};
+    use alloy_primitives::{
+        keccak256,
+        map::{B256HashSet, DefaultHashBuilder},
+        Address, U256,
+    };
     use rand::Rng;
     use reth_primitives::{Account, StorageEntry};
     use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
@@ -304,11 +308,10 @@ mod tests {
             provider_rw.commit().unwrap();
         }
 
-        let mut targets =
-            HashMap::<B256, HashSet<B256, DefaultHashBuilder>, DefaultHashBuilder>::default();
+        let mut targets = MultiProofTargets::default();
         for (address, (_, storage)) in state.iter().take(10) {
             let hashed_address = keccak256(*address);
-            let mut target_slots = HashSet::<B256, DefaultHashBuilder>::default();
+            let mut target_slots = B256HashSet::default();
 
             for (slot, _) in storage.iter().take(5) {
                 target_slots.insert(*slot);

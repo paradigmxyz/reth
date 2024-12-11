@@ -1,6 +1,6 @@
 use crate::{BranchNodeCompact, HashBuilder, Nibbles};
 use alloy_primitives::{
-    map::{HashMap, HashSet},
+    map::{B256HashMap, B256HashSet, HashMap, HashSet},
     B256,
 };
 
@@ -15,7 +15,7 @@ pub struct TrieUpdates {
     #[cfg_attr(any(test, feature = "serde"), serde(with = "serde_nibbles_set"))]
     pub removed_nodes: HashSet<Nibbles>,
     /// Collection of updated storage tries indexed by the hashed address.
-    pub storage_tries: HashMap<B256, StorageTrieUpdates>,
+    pub storage_tries: B256HashMap<StorageTrieUpdates>,
 }
 
 impl TrieUpdates {
@@ -37,7 +37,7 @@ impl TrieUpdates {
     }
 
     /// Returns a reference to updated storage tries.
-    pub const fn storage_tries_ref(&self) -> &HashMap<B256, StorageTrieUpdates> {
+    pub const fn storage_tries_ref(&self) -> &B256HashMap<StorageTrieUpdates> {
         &self.storage_tries
     }
 
@@ -84,7 +84,7 @@ impl TrieUpdates {
         &mut self,
         hash_builder: HashBuilder,
         removed_keys: HashSet<Nibbles>,
-        destroyed_accounts: HashSet<B256>,
+        destroyed_accounts: B256HashSet,
     ) {
         // Retrieve updated nodes from hash builder.
         let (_, updated_nodes) = hash_builder.split();
@@ -347,7 +347,7 @@ pub struct TrieUpdatesSorted {
     pub removed_nodes: HashSet<Nibbles>,
     /// Storage tries storage stored by hashed address of the account
     /// the trie belongs to.
-    pub storage_tries: HashMap<B256, StorageTrieUpdatesSorted>,
+    pub storage_tries: B256HashMap<StorageTrieUpdatesSorted>,
 }
 
 impl TrieUpdatesSorted {
@@ -362,7 +362,7 @@ impl TrieUpdatesSorted {
     }
 
     /// Returns reference to updated storage tries.
-    pub const fn storage_tries_ref(&self) -> &HashMap<B256, StorageTrieUpdatesSorted> {
+    pub const fn storage_tries_ref(&self) -> &B256HashMap<StorageTrieUpdatesSorted> {
         &self.storage_tries
     }
 }
@@ -411,10 +411,7 @@ fn exclude_empty_from_pair<V>(
 #[cfg(feature = "serde-bincode-compat")]
 pub mod serde_bincode_compat {
     use crate::{BranchNodeCompact, Nibbles};
-    use alloy_primitives::{
-        map::{HashMap, HashSet},
-        B256,
-    };
+    use alloy_primitives::map::{B256HashMap, HashMap, HashSet};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
     use std::borrow::Cow;
@@ -438,7 +435,7 @@ pub mod serde_bincode_compat {
     pub struct TrieUpdates<'a> {
         account_nodes: Cow<'a, HashMap<Nibbles, BranchNodeCompact>>,
         removed_nodes: Cow<'a, HashSet<Nibbles>>,
-        storage_tries: HashMap<B256, StorageTrieUpdates<'a>>,
+        storage_tries: B256HashMap<StorageTrieUpdates<'a>>,
     }
 
     impl<'a> From<&'a super::TrieUpdates> for TrieUpdates<'a> {

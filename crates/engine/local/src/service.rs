@@ -27,7 +27,7 @@ use reth_engine_tree::{
         EngineApiKind, EngineApiRequest, EngineApiRequestHandler, EngineRequestHandler, FromEngine,
         RequestHandlerEvent,
     },
-    persistence::{PersistenceHandle, PersistenceNodeTypes},
+    persistence::PersistenceHandle,
     tree::{EngineApiTreeHandler, InvalidBlockHook, TreeConfig},
 };
 use reth_evm::execute::BlockExecutorProvider;
@@ -52,19 +52,19 @@ where
     /// Processes requests.
     ///
     /// This type is responsible for processing incoming requests.
-    handler: EngineApiRequestHandler<EngineApiRequest<N::Engine>>,
+    handler: EngineApiRequestHandler<EngineApiRequest<N::Engine, N::Primitives>, N::Primitives>,
     /// Receiver for incoming requests (from the engine API endpoint) that need to be processed.
     incoming_requests: EngineMessageStream<N::Engine>,
 }
 
 impl<N> LocalEngineService<N>
 where
-    N: EngineNodeTypes + PersistenceNodeTypes,
+    N: EngineNodeTypes,
 {
     /// Constructor for [`LocalEngineService`].
     #[allow(clippy::too_many_arguments)]
     pub fn new<B, V>(
-        consensus: Arc<dyn FullConsensus>,
+        consensus: Arc<dyn FullConsensus<N::Primitives>>,
         executor_factory: impl BlockExecutorProvider<Primitives = N::Primitives>,
         provider: ProviderFactory<N>,
         blockchain_db: BlockchainProvider2<N>,
@@ -122,7 +122,7 @@ impl<N> Stream for LocalEngineService<N>
 where
     N: EngineNodeTypes,
 {
-    type Item = ChainEvent<BeaconConsensusEngineEvent>;
+    type Item = ChainEvent<BeaconConsensusEngineEvent<N::Primitives>>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();

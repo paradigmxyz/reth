@@ -16,6 +16,7 @@ use reth_primitives::{
     proofs::{self},
     Block, BlockBody, BlockExt, SealedBlock, TransactionSigned,
 };
+use reth_primitives_traits::BlockBody as _;
 
 /// Converts [`ExecutionPayloadV1`] to [`Block`]
 pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, PayloadError> {
@@ -320,15 +321,13 @@ pub fn validate_block_hash(
 }
 
 /// Converts [`Block`] to [`ExecutionPayloadBodyV1`]
-pub fn convert_to_payload_body_v1(value: Block) -> ExecutionPayloadBodyV1 {
-    let transactions = value.body.transactions.into_iter().map(|tx| {
-        let mut out = Vec::new();
-        tx.encode_2718(&mut out);
-        out.into()
-    });
+pub fn convert_to_payload_body_v1(
+    value: impl reth_primitives_traits::Block,
+) -> ExecutionPayloadBodyV1 {
+    let transactions = value.body().transactions().iter().map(|tx| tx.encoded_2718().into());
     ExecutionPayloadBodyV1 {
         transactions: transactions.collect(),
-        withdrawals: value.body.withdrawals.map(Withdrawals::into_inner),
+        withdrawals: value.body().withdrawals().cloned().map(Withdrawals::into_inner),
     }
 }
 

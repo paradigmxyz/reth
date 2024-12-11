@@ -9,6 +9,7 @@ use crate::{
     rpc::{RethRpcAddOns, RethRpcServerHandles, RpcContext},
     DefaultNodeLauncher, LaunchNode, Node, NodeHandle,
 };
+use alloy_eips::eip4844::env_settings::EnvKzgSettings;
 use futures::Future;
 use reth_blockchain_tree::externals::NodeTypesForTree;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
@@ -20,7 +21,7 @@ use reth_db_api::{
 use reth_exex::ExExContext;
 use reth_network::{
     transactions::TransactionsManagerConfig, NetworkBuilder, NetworkConfig, NetworkConfigBuilder,
-    NetworkHandle, NetworkManager,
+    NetworkHandle, NetworkManager, NetworkPrimitives,
 };
 use reth_node_api::{
     FullNodePrimitives, FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes,
@@ -38,7 +39,6 @@ use reth_provider::{
 };
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, PoolTransaction, TransactionPool};
-use revm_primitives::EnvKzgSettings;
 use secp256k1::SecretKey;
 use std::sync::Arc;
 use tracing::{info, trace, warn};
@@ -648,19 +648,24 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     ///
     /// Spawns the configured network and associated tasks and returns the [`NetworkHandle`]
     /// connected to that network.
-    pub fn start_network<Pool>(&self, builder: NetworkBuilder<(), ()>, pool: Pool) -> NetworkHandle
+    pub fn start_network<N, Pool>(
+        &self,
+        builder: NetworkBuilder<(), (), N>,
+        pool: Pool,
+    ) -> NetworkHandle<N>
     where
+        N: NetworkPrimitives,
         Pool: TransactionPool<
                 Transaction: PoolTransaction<
-                    Consensus = reth_primitives::TransactionSigned,
-                    Pooled = reth_primitives::PooledTransactionsElement,
+                    Consensus = N::BroadcastedTransaction,
+                    Pooled = N::PooledTransaction,
                 >,
             > + Unpin
             + 'static,
         Node::Provider: BlockReader<
-            Block = reth_primitives::Block,
             Receipt = reth_primitives::Receipt,
-            Header = reth_primitives::Header,
+            Block = N::Block,
+            Header = N::BlockHeader,
         >,
     {
         self.start_network_with(builder, pool, Default::default())
@@ -672,24 +677,25 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     ///
     /// Spawns the configured network and associated tasks and returns the [`NetworkHandle`]
     /// connected to that network.
-    pub fn start_network_with<Pool>(
+    pub fn start_network_with<Pool, N>(
         &self,
-        builder: NetworkBuilder<(), ()>,
+        builder: NetworkBuilder<(), (), N>,
         pool: Pool,
         tx_config: TransactionsManagerConfig,
-    ) -> NetworkHandle
+    ) -> NetworkHandle<N>
     where
+        N: NetworkPrimitives,
         Pool: TransactionPool<
                 Transaction: PoolTransaction<
-                    Consensus = reth_primitives::TransactionSigned,
-                    Pooled = reth_primitives::PooledTransactionsElement,
+                    Consensus = N::BroadcastedTransaction,
+                    Pooled = N::PooledTransaction,
                 >,
             > + Unpin
             + 'static,
         Node::Provider: BlockReader<
-            Block = reth_primitives::Block,
             Receipt = reth_primitives::Receipt,
-            Header = reth_primitives::Header,
+            Block = N::Block,
+            Header = N::BlockHeader,
         >,
     {
         let (handle, network, txpool, eth) = builder
