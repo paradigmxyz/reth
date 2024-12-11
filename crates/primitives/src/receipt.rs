@@ -9,7 +9,6 @@ use alloy_primitives::{Bloom, Log, B256};
 use alloy_rlp::{Decodable, Encodable, Header, RlpDecodable, RlpEncodable};
 use bytes::BufMut;
 use derive_more::{DerefMut, From, IntoIterator};
-use reth_primitives_traits::receipt::ReceiptExt;
 use serde::{Deserialize, Serialize};
 
 use crate::TxType;
@@ -268,15 +267,6 @@ impl Typed2718 for Receipt {
 }
 
 impl reth_primitives_traits::Receipt for Receipt {}
-
-impl ReceiptExt for Receipt {
-    fn receipts_root(_receipts: &[&Self]) -> B256 {
-        #[cfg(feature = "optimism")]
-        panic!("This should not be called in optimism mode. Use `optimism_receipts_root_slow` instead.");
-        #[cfg(not(feature = "optimism"))]
-        crate::proofs::calculate_receipt_root_no_memo(_receipts)
-    }
-}
 
 impl InMemorySize for Receipt {
     /// Calculates a heuristic for the in-memory size of the [Receipt].

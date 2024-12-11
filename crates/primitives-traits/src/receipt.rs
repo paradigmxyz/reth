@@ -1,19 +1,16 @@
 //! Receipt abstraction
 
+use crate::{InMemorySize, MaybeArbitrary, MaybeCompact, MaybeSerde};
 use alloc::vec::Vec;
-use core::fmt;
-
 use alloy_consensus::{
     Eip2718EncodableReceipt, RlpDecodableReceipt, RlpEncodableReceipt, TxReceipt, Typed2718,
 };
-use alloy_primitives::B256;
-
-use crate::{InMemorySize, MaybeArbitrary, MaybeCompact, MaybeSerde};
+use core::fmt;
 
 /// Helper trait that unifies all behaviour required by receipt to support full node operations.
 pub trait FullReceipt: Receipt + MaybeCompact {}
 
-impl<T> FullReceipt for T where T: ReceiptExt + MaybeCompact {}
+impl<T> FullReceipt for T where T: Receipt + MaybeCompact {}
 
 /// Abstraction of a receipt.
 #[auto_impl::auto_impl(&, Arc)]
@@ -33,12 +30,6 @@ pub trait Receipt:
     + InMemorySize
     + MaybeArbitrary
 {
-}
-
-/// Extension if [`Receipt`] used in block execution.
-pub trait ReceiptExt: Receipt {
-    /// Calculates the receipts root of the given receipts.
-    fn receipts_root(receipts: &[&Self]) -> B256;
 }
 
 /// Retrieves gas spent by transactions as a vector of tuples (transaction index, gas used).
