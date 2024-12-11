@@ -28,6 +28,7 @@ struct BenchParams {
     num_accounts: usize,
     updates_per_account: usize,
     storage_slots_per_account: usize,
+    selfdestructs_per_update: usize,
 }
 
 fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
@@ -35,7 +36,7 @@ fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
     let all_addresses: Vec<Address> = (0..params.num_accounts).map(|_| rng.gen()).collect();
     let mut updates = Vec::new();
 
-    for _ in 0..params.updates_per_account {
+    for update_idx in 0..params.updates_per_account {
         let num_accounts_in_update = rng.gen_range(1..=params.num_accounts);
         let mut state_update = EvmState::default();
 
@@ -65,21 +66,49 @@ fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
             state_update.insert(address, account);
         }
 
+        // add self-destructs if this isn't the first update,
+        // we do this to ensure accounts exist before being self-destructed
+        if update_idx > 0 && params.selfdestructs_per_update > 0 {
+            let num_selfdestructs = params.selfdestructs_per_update.min(num_accounts_in_update);
+            let selfdestruct_addresses =
+                &all_addresses[num_accounts_in_update - num_selfdestructs..num_accounts_in_update];
+
+            for &address in selfdestruct_addresses {
+                let account = RevmAccount {
+                    info: AccountInfo {
+                        balance: U256::ZERO,
+                        nonce: 0,
+                        code_hash: KECCAK_EMPTY,
+                        code: Some(Default::default()),
+                    },
+                    storage: HashMap::default(),
+                    status: AccountStatus::SelfDestructed,
+                };
+
+                state_update.insert(address, account);
+            }
+        }
+
         updates.push(state_update);
     }
 
     updates
 }
 
-fn convert_revm_to_reth_account(revm_account: &RevmAccount) -> RethAccount {
-    RethAccount {
-        balance: revm_account.info.balance,
-        nonce: revm_account.info.nonce,
-        bytecode_hash: if revm_account.info.code_hash == KECCAK_EMPTY {
-            None
-        } else {
-            Some(revm_account.info.code_hash)
-        },
+fn convert_revm_to_reth_account(revm_account: &RevmAccount) -> Option<RethAccount> {
+    // if the account is self-destructed, return None to indicate deletion
+    if revm_account.status == AccountStatus::SelfDestructed {
+        None
+    } else {
+        Some(RethAccount {
+            balance: revm_account.info.balance,
+            nonce: revm_account.info.nonce,
+            bytecode_hash: if revm_account.info.code_hash == KECCAK_EMPTY {
+                None
+            } else {
+                Some(revm_account.info.code_hash)
+            },
+        })
     }
 }
 
@@ -92,16 +121,20 @@ fn setup_provider(
     for update in state_updates {
         let account_updates = update
             .iter()
-            .map(|(address, account)| (*address, Some(convert_revm_to_reth_account(account))));
+            .map(|(address, account)| (*address, convert_revm_to_reth_account(account)));
         provider_rw.insert_account_for_hashing(account_updates)?;
 
-        let storage_updates = update.iter().map(|(address, account)| {
-            let storage_entries = account.storage.iter().map(|(slot, value)| StorageEntry {
-                key: B256::from(*slot),
-                value: value.present_value,
+        // only insert storage for non-self-destructed accounts
+        let storage_updates = update
+            .iter()
+            .filter(|&(_, account)| account.status != AccountStatus::SelfDestructed)
+            .map(|(address, account)| {
+                let storage_entries = account.storage.iter().map(|(slot, value)| StorageEntry {
+                    key: B256::from(*slot),
+                    value: value.present_value,
+                });
+                (*address, storage_entries)
             });
-            (*address, storage_entries)
-        });
         provider_rw.insert_storage_for_hashing(storage_updates)?;
     }
 
@@ -113,8 +146,24 @@ fn bench_state_root(c: &mut Criterion) {
     let mut group = c.benchmark_group("state_root");
 
     let scenarios = vec![
-        BenchParams { num_accounts: 100, updates_per_account: 5, storage_slots_per_account: 10 },
-        BenchParams { num_accounts: 1000, updates_per_account: 10, storage_slots_per_account: 20 },
+        BenchParams {
+            num_accounts: 100,
+            updates_per_account: 5,
+            storage_slots_per_account: 10,
+            selfdestructs_per_update: 2,
+        },
+        BenchParams {
+            num_accounts: 1000,
+            updates_per_account: 10,
+            storage_slots_per_account: 20,
+            selfdestructs_per_update: 5,
+        },
+        BenchParams {
+            num_accounts: 500,
+            updates_per_account: 8,
+            storage_slots_per_account: 15,
+            selfdestructs_per_update: 20,
+        },
     ];
 
     for params in scenarios {
@@ -122,10 +171,11 @@ fn bench_state_root(c: &mut Criterion) {
             BenchmarkId::new(
                 "state_root_task",
                 format!(
-                    "accounts_{}_updates_{}_slots_{}",
+                    "accounts_{}_updates_{}_slots_{}_selfdestructs_{}",
                     params.num_accounts,
                     params.updates_per_account,
-                    params.storage_slots_per_account
+                    params.storage_slots_per_account,
+                    params.selfdestructs_per_update
                 ),
             ),
             &params,
