@@ -421,8 +421,8 @@ mod tests {
         let err = executor
             .execute_and_verify_one(
                 (
-                    &BlockWithSenders {
-                        block: Block {
+                    &BlockWithSenders::new_unchecked(
+                        Block {
                             header: header.clone(),
                             body: BlockBody {
                                 transactions: vec![],
@@ -430,8 +430,8 @@ mod tests {
                                 withdrawals: None,
                             },
                         },
-                        senders: vec![],
-                    },
+                        vec![],
+                    ),
                     U256::ZERO,
                 )
                     .into(),
@@ -452,8 +452,8 @@ mod tests {
         executor
             .execute_and_verify_one(
                 (
-                    &BlockWithSenders {
-                        block: Block {
+                    &BlockWithSenders::new_unchecked(
+                        Block {
                             header: header.clone(),
                             body: BlockBody {
                                 transactions: vec![],
@@ -461,8 +461,8 @@ mod tests {
                                 withdrawals: None,
                             },
                         },
-                        senders: vec![],
-                    },
+                        vec![],
+                    ),
                     U256::ZERO,
                 )
                     .into(),
@@ -522,8 +522,8 @@ mod tests {
             .batch_executor(StateProviderDatabase::new(&db))
             .execute_and_verify_one(
                 (
-                    &BlockWithSenders {
-                        block: Block {
+                    &BlockWithSenders::new_unchecked(
+                        Block {
                             header,
                             body: BlockBody {
                                 transactions: vec![],
@@ -531,8 +531,8 @@ mod tests {
                                 withdrawals: None,
                             },
                         },
-                        senders: vec![],
-                    },
+                        vec![],
+                    ),
                     U256::ZERO,
                 )
                     .into(),
@@ -576,8 +576,8 @@ mod tests {
         executor
             .execute_and_verify_one(
                 (
-                    &BlockWithSenders {
-                        block: Block {
+                    &BlockWithSenders::new_unchecked(
+                        Block {
                             header,
                             body: BlockBody {
                                 transactions: vec![],
@@ -585,8 +585,8 @@ mod tests {
                                 withdrawals: None,
                             },
                         },
-                        senders: vec![],
-                    },
+                        vec![],
+                    ),
                     U256::ZERO,
                 )
                     .into(),
@@ -622,10 +622,10 @@ mod tests {
         let _err = executor
             .execute_and_verify_one(
                 (
-                    &BlockWithSenders {
-                        block: Block { header: header.clone(), body: Default::default() },
-                        senders: vec![],
-                    },
+                    &BlockWithSenders::new_unchecked(
+                        Block { header: header.clone(), body: Default::default() },
+                        vec![],
+                    ),
                     U256::ZERO,
                 )
                     .into(),
@@ -643,10 +643,10 @@ mod tests {
         executor
             .execute_and_verify_one(
                 (
-                    &BlockWithSenders {
-                        block: Block { header, body: Default::default() },
-                        senders: vec![],
-                    },
+                    &BlockWithSenders::new_unchecked(
+                        Block { header, body: Default::default() },
+                        vec![],
+                    ),
                     U256::ZERO,
                 )
                     .into(),
@@ -697,10 +697,10 @@ mod tests {
         executor
             .execute_and_verify_one(
                 (
-                    &BlockWithSenders {
-                        block: Block { header: header.clone(), body: Default::default() },
-                        senders: vec![],
-                    },
+                    &BlockWithSenders::new_unchecked(
+                        Block { header: header.clone(), body: Default::default() },
+                        vec![],
+                    ),
                     U256::ZERO,
                 )
                     .into(),
@@ -773,10 +773,10 @@ mod tests {
         executor
             .execute_and_verify_one(
                 (
-                    &BlockWithSenders {
-                        block: Block { header, body: Default::default() },
-                        senders: vec![],
-                    },
+                    &BlockWithSenders::new_unchecked(
+                        Block { header, body: Default::default() },
+                        vec![],
+                    ),
                     U256::ZERO,
                 )
                     .into(),
@@ -816,10 +816,10 @@ mod tests {
         executor
             .execute_and_verify_one(
                 (
-                    &BlockWithSenders {
-                        block: Block { header, body: Default::default() },
-                        senders: vec![],
-                    },
+                    &BlockWithSenders::new_unchecked(
+                        Block { header, body: Default::default() },
+                        vec![],
+                    ),
                     U256::ZERO,
                 )
                     .into(),
@@ -866,10 +866,10 @@ mod tests {
         executor
             .execute_and_verify_one(
                 (
-                    &BlockWithSenders {
-                        block: Block { header, body: Default::default() },
-                        senders: vec![],
-                    },
+                    &BlockWithSenders::new_unchecked(
+                        Block { header, body: Default::default() },
+                        vec![],
+                    ),
                     U256::ZERO,
                 )
                     .into(),
@@ -922,10 +922,10 @@ mod tests {
         executor
             .execute_and_verify_one(
                 (
-                    &BlockWithSenders {
-                        block: Block { header, body: Default::default() },
-                        senders: vec![],
-                    },
+                    &BlockWithSenders::new_unchecked(
+                        Block { header, body: Default::default() },
+                        vec![],
+                    ),
                     U256::ZERO,
                 )
                     .into(),
@@ -970,10 +970,10 @@ mod tests {
         executor
             .execute_and_verify_one(
                 (
-                    &BlockWithSenders {
-                        block: Block { header, body: Default::default() },
-                        senders: vec![],
-                    },
+                    &BlockWithSenders::new_unchecked(
+                        Block { header, body: Default::default() },
+                        vec![],
+                    ),
                     U256::ZERO,
                 )
                     .into(),
@@ -1005,10 +1005,10 @@ mod tests {
         executor
             .execute_and_verify_one(
                 (
-                    &BlockWithSenders {
-                        block: Block { header, body: Default::default() },
-                        senders: vec![],
-                    },
+                    &BlockWithSenders::new_unchecked(
+                        Block { header, body: Default::default() },
+                        vec![],
+                    ),
                     U256::ZERO,
                 )
                     .into(),
@@ -1043,10 +1043,10 @@ mod tests {
         executor
             .execute_and_verify_one(
                 (
-                    &BlockWithSenders {
-                        block: Block { header, body: Default::default() },
-                        senders: vec![],
-                    },
+                    &BlockWithSenders::new_unchecked(
+                        Block { header, body: Default::default() },
+                        vec![],
+                    ),
                     U256::ZERO,
                 )
                     .into(),
@@ -1261,8 +1261,8 @@ mod tests {
 
         let header = Header { timestamp: 1, number: 1, ..Header::default() };
 
-        let block = BlockWithSenders {
-            block: Block {
+        let block = &BlockWithSenders::new_unchecked(
+            Block {
                 header,
                 body: BlockBody {
                     transactions: vec![],
@@ -1270,8 +1270,8 @@ mod tests {
                     withdrawals: Some(vec![withdrawal].into()),
                 },
             },
-            senders: vec![],
-        };
+            vec![],
+        );
 
         let provider = executor_provider(chain_spec);
         let executor = provider.executor(StateProviderDatabase::new(&db));
@@ -1280,7 +1280,7 @@ mod tests {
         let tx_clone = tx.clone();
 
         let _output = executor
-            .execute_with_state_hook((&block, U256::ZERO).into(), move |state: &EvmState| {
+            .execute_with_state_hook((block, U256::ZERO).into(), move |state: &EvmState| {
                 if let Some(account) = state.get(&withdrawal_recipient) {
                     let _ = tx_clone.send(account.info.balance);
                 }
