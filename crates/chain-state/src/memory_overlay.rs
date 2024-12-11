@@ -1,9 +1,7 @@
 use super::ExecutedBlock;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{
-    keccak256,
-    map::{HashMap, HashSet},
-    Address, BlockNumber, Bytes, StorageKey, StorageValue, B256,
+    keccak256, map::B256HashMap, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256,
 };
 use reth_errors::ProviderResult;
 use reth_primitives::{Account, Bytecode, NodePrimitives};
@@ -13,7 +11,7 @@ use reth_storage_api::{
 };
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    StorageMultiProof, TrieInput,
+    MultiProofTargets, StorageMultiProof, TrieInput,
 };
 use revm::db::BundleState;
 use std::sync::OnceLock;
@@ -225,7 +223,6 @@ impl<'a, N: NodePrimitives> StateProvider for MemoryOverlayStateProviderRef<'a, 
 
         self.historical.storage(address, storage_key)
     }
-
 
     fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
         for block in &self.in_memory {
