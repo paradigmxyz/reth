@@ -143,6 +143,8 @@ fn setup_provider(
 }
 
 fn bench_state_root(c: &mut Criterion) {
+    reth_tracing::init_test_tracing();
+
     let mut group = c.benchmark_group("state_root");
 
     let scenarios = vec![
